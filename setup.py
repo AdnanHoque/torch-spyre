@@ -99,6 +99,10 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
     RUNTIME_DIR = Path(os.environ["RUNTIME_INSTALL_DIR"])
     SENLIB_DIR = Path(os.environ["SENLIB_INSTALL_DIR"])
     DEEPTOOLS_DIR = Path(os.environ["DEEPTOOLS_INSTALL_DIR"])
+    LIBAIUPTI_DIR = Path(
+        os.environ["LIBAIUPTI_DIR"]
+    )  # /opt/ibm/spyre/runtime/include/libaiupti/
+    INCLUDE_DIRS += [LIBAIUPTI_DIR]
     INCLUDE_DIRS += [
         RUNTIME_DIR / "include",
     ]
@@ -200,7 +204,7 @@ if __name__ == "__main__":
 
         OUTPUT_CODEGEN_DIR = run_codegen()
 
-        sources = list(CSRC_DIR.glob("*.cpp"))
+        sources = list(CSRC_DIR.rglob("*.cpp"))
         if OUTPUT_CODEGEN_DIR:
             sources += list(OUTPUT_CODEGEN_DIR.glob("*.cpp"))
 
@@ -219,7 +223,7 @@ if __name__ == "__main__":
             CppExtension(
                 name=f"{PACKAGE_NAME}._C",
                 sources=core_src_paths,
-                include_dirs=[str(p) for p in INCLUDE_DIRS],
+                _dirs=[str(p) for p in INCLUDE_DIRS],
                 library_dirs=[str(p) for p in LIBRARY_DIRS],
                 libraries=LIBRARIES,
                 extra_compile_args={"cxx": EXTRA_CXX_FLAGS},
@@ -230,6 +234,7 @@ if __name__ == "__main__":
                     ("SPYRE_DOWNCAST_ENV", '"TORCH_SPYRE_DOWNCAST_WARN"'),
                     ("EAGER_MODE_ENV", '"EAGER_MODE"'),
                     ("BOOST_ALL_DYN_LINK", None),  # avoid static link to boost
+                    ("HAS_AIUPTI", None),  # TODO kavya: add a flag to enable profiling
                 ],
             ),
             CppExtension(
