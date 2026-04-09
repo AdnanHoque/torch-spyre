@@ -1,6 +1,6 @@
 test_suite_config:
   files:
-    - path: ${PYTORCH}/test/test_modules.py
+    - path: ${TORCH_ROOT}/test/test_modules.py
       unlisted_test_mode: skip
       tests:
         - names:
@@ -15,7 +15,43 @@ test_suite_config:
                 - name: torch.nn.Linear
                   description: Linear causes OOM on this test
 
-    - path: ${PYTORCH}/test/test_view_ops.py
+    - path: ${TORCH_ROOT}/test/test_binary_ufuncs.py
+      unlisted_test_mode: skip
+      tests:
+        - names:
+            - TestBinaryUfuncs::test_scalar_support
+            - TestBinaryUfuncs::test_contig_vs_transposed
+          mode: xfail
+          tags:
+            - model_1
+            - model_2
+          edits:
+            ops:
+              include:
+                - name: add
+                  description: inject add — binary_ufuncs_with_references excludes it if ref is None
+              exclude:
+                - name: gcd
+                  description: gcd causes buffer alignment errors for this test
+            dtypes:
+              include:
+                - name: float32
+              exclude:
+                - name: bfloat16
+                  description: bfloat16 unsupported on Spyre for this test
+
+        # Single test — name as a list with one entry (or plain string, both accepted)
+        - names:
+            - TestBinaryUfuncs::test_add
+          mode: mandatory_success
+          tags:
+            - tag_for_add
+
+    - path: ${TORCH_DEVICE_ROOT}/tests/test_regex.py
+      unlisted_test_mode: skip
+      tests: []
+
+    - path: ${TORCH_ROOT}/test/test_view_ops.py
       unlisted_test_mode: mandatory_success
       tests:
         - names: # Tests that pass with no special config needed
