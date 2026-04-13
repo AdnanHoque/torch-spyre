@@ -99,10 +99,9 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
     RUNTIME_DIR = Path(os.environ["RUNTIME_INSTALL_DIR"])
     SENLIB_DIR = Path(os.environ["SENLIB_INSTALL_DIR"])
     DEEPTOOLS_DIR = Path(os.environ["DEEPTOOLS_INSTALL_DIR"])
-    LIBAIUPTI_DIR = Path(
-        os.environ["LIBAIUPTI_DIR"]
-    )  # /opt/ibm/spyre/runtime/include/libaiupti/
-    INCLUDE_DIRS += [LIBAIUPTI_DIR]
+    # LIBAIUPTI_DIR = Path(
+    #     os.environ["LIBAIUPTI_DIR"]
+    # )  # /opt/ibm/spyre/runtime/include/libaiupti/
     INCLUDE_DIRS += [
         RUNTIME_DIR / "include",
     ]
@@ -115,11 +114,16 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
     INCLUDE_DIRS += [
         DEEPTOOLS_DIR / "include",
     ]
+    # INCLUDE_DIRS += [LIBAIUPTI_DIR]
     LIBRARY_DIRS += [RUNTIME_DIR / "lib"]
+
+    # lib_path = LIBAIUPTI_DIR / "lib64" # /opt/ibm/spyre/runtime/lib
+    # LIBRARY_DIRS += [lib_path]
 
 INCLUDE_DIRS += [os.environ["SEN_COMMON_HEADERS"]]
 
 LIBRARIES = ["sendnn", "sendnn_interface", "flex"]
+# LIBRARIES += ["aiupti", "kineto"]
 
 # FIXME: added no-deprecated as this fails in sentensor_shape.hpp
 # - we need to fix there
@@ -227,7 +231,7 @@ if __name__ == "__main__":
             CppExtension(
                 name=f"{PACKAGE_NAME}._C",
                 sources=core_src_paths,
-                _dirs=[str(p) for p in INCLUDE_DIRS],
+                include_dirs=[str(p) for p in INCLUDE_DIRS],
                 library_dirs=[str(p) for p in LIBRARY_DIRS],
                 libraries=LIBRARIES,
                 extra_compile_args={"cxx": EXTRA_CXX_FLAGS},
