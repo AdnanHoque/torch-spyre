@@ -99,9 +99,12 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
     RUNTIME_DIR = Path(os.environ["RUNTIME_INSTALL_DIR"])
     SENLIB_DIR = Path(os.environ["SENLIB_INSTALL_DIR"])
     DEEPTOOLS_DIR = Path(os.environ["DEEPTOOLS_INSTALL_DIR"])
-    # LIBAIUPTI_DIR = Path(
-    #     os.environ["LIBAIUPTI_DIR"]
-    # )  # /opt/ibm/spyre/runtime/include/libaiupti/
+    import torch
+
+    KINETO_INCLUDE_DIR = Path(torch.__path__[0]) / "include" / "kineto"
+    COMMON_INCLUDE_DIR = Path(os.environ["SEN_COMMON_HEADERS"])
+    # LIBAIUPTI_DIR = Path(os.environ["LIBAIUPTI_INSTALL_DIR"])
+
     INCLUDE_DIRS += [
         RUNTIME_DIR / "include",
     ]
@@ -114,16 +117,16 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
     INCLUDE_DIRS += [
         DEEPTOOLS_DIR / "include",
     ]
-    # INCLUDE_DIRS += [LIBAIUPTI_DIR]
+    INCLUDE_DIRS += [
+        KINETO_INCLUDE_DIR,
+        COMMON_INCLUDE_DIR / "libaiupti",
+    ]
+    # LIBRARY_DIRS += [LIBAIUPTI_DIR / "lib"]
     LIBRARY_DIRS += [RUNTIME_DIR / "lib"]
-
-    # lib_path = LIBAIUPTI_DIR / "lib64" # /opt/ibm/spyre/runtime/lib
-    # LIBRARY_DIRS += [lib_path]
 
 INCLUDE_DIRS += [os.environ["SEN_COMMON_HEADERS"]]
 
-LIBRARIES = ["sendnn", "sendnn_interface", "flex"]
-# LIBRARIES += ["aiupti", "kineto"]
+LIBRARIES = ["sendnn", "sendnn_interface", "aiupti", "flex"]
 
 # FIXME: added no-deprecated as this fails in sentensor_shape.hpp
 # - we need to fix there
@@ -235,6 +238,7 @@ if __name__ == "__main__":
                 library_dirs=[str(p) for p in LIBRARY_DIRS],
                 libraries=LIBRARIES,
                 extra_compile_args={"cxx": EXTRA_CXX_FLAGS},
+                extra_link_args=["-Wl,--no-as-needed"],
                 define_macros=[
                     ("PACKAGE_NAME", f'"{PACKAGE_NAME}"'),
                     ("MODULE_NAME", f'"{PACKAGE_NAME}._C"'),
@@ -243,6 +247,8 @@ if __name__ == "__main__":
                     ("EAGER_MODE_ENV", '"EAGER_MODE"'),
                     ("BOOST_ALL_DYN_LINK", None),  # avoid static link to boost
                     ("HAS_AIUPTI", None),  # TODO kavya: add a flag to enable profiling
+                    ("USE_KINETO", None),
+                    ("FMT_HEADER_ONLY", None),
                 ],
             ),
             CppExtension(
