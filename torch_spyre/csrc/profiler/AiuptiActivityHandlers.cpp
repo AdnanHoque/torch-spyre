@@ -18,8 +18,8 @@
 #include <aiupti_runtime_cbid.h>
 
 #include <string>
-#include <utility>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "AiuptiActivityProfiler.h"
