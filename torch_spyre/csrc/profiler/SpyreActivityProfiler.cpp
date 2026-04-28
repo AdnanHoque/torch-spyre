@@ -22,9 +22,4 @@
 namespace KINETO_NAMESPACE {
 REGISTER_PRIVATEUSE1_PROFILER(AIUActivityProfiler);
 }
-/*
-//using AIUActivityProfilerType = KINETO_NAMESPACE::AIUActivityProfiler;
-REGISTER_PRIVATEUSE1_PROFILER(AiuptiActivityProfilerSession);
-}
-*/
 #endif
