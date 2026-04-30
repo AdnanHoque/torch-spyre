@@ -519,6 +519,38 @@ at::Tensor& spyre_set_storage(at::Tensor& result, at::Storage storage,
  */
 at::Tensor spyre_copy_from(const at::Tensor& self, const at::Tensor& dst,
                            bool non_blocking) {
+  // D2H of a broadcast/expand source (any dim with size>1 and stride==0): the
+  // DMA path uses dma_sizes/dma_strides and silently drops broadcast dims,
+  // leaving the CPU destination underfilled. Materialize on the CPU side: DMA
+  // the underlying allocation as a contiguous view, then realize self's
+  // logical sizes/strides on top of the staging buffer and copy into dst.
+  // Other non-contiguous layouts (transpose, column-major, sliced) are left to
+  // the existing path, which handles them correctly.
+  if (self.is_privateuseone() && dst.is_cpu()) {
+    bool has_broadcast_dim = false;
+    for (int64_t i = 0; i < self.dim(); ++i) {
+      if (self.size(i) > 1 && self.stride(i) == 0) {
+        has_broadcast_dim = true;
+        break;
+      }
+    }
+    if (has_broadcast_dim) {
+      auto* spyre_impl =
+          static_cast<SpyreTensorImpl*>(self.unsafeGetTensorImpl());
+      c10::IntArrayRef alloc_sizes(spyre_impl->dma_sizes);
+      c10::IntArrayRef alloc_strides(spyre_impl->dma_strides);
+
+      at::Tensor alloc_view = at::as_strided(self, alloc_sizes, alloc_strides,
+                                             /*storage_offset=*/0);
+      at::Tensor cpu_alloc = at::empty(alloc_sizes, dst.options());
+      spyre_copy_from(alloc_view, cpu_alloc, /*non_blocking=*/false);
+
+      at::Tensor cpu_view = cpu_alloc.as_strided(self.sizes(), self.strides(),
+                                                 self.storage_offset());
+      dst.copy_(cpu_view);
+      return dst;
+    }
+  }
   SpyreStream stream;
   if (dst.is_privateuseone()) {
     stream = getCurrentStream(dst.device());
