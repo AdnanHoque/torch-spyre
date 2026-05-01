@@ -13,6 +13,8 @@
 # limitations under the License.
 
 
+import os
+
 from torch_spyre.constants import DEVICE_NAME
 
 from typing import Optional
@@ -21,10 +23,77 @@ from torch_spyre._C import (
     empty_with_layout,
     spyre_empty_with_layout,
     copy_tensor,
+    get_dma_layout,
 )
 
 from torch._dynamo.guards import GuardBuilder
 from torch_spyre._C import SpyreTensorLayout
+
+
+# Opt-in performance optimization: when copying a Spyre tensor with a stride-0
+# (broadcast / expand) dim back to CPU via .cpu() / .to('cpu'), return a CPU
+# tensor that views a small staging buffer (sized to the underlying allocation)
+# rather than materializing the broadcast into a fresh full-sized contiguous
+# tensor. Materialization is deferred until something requires contiguous bytes
+# (.numpy(), .contiguous(), pickle, etc.). Avoids the big destination
+# allocation and the broadcast fan-out CPU work for inspection-only workflows.
+# Default off; enable with TORCH_SPYRE_LAZY_BROADCAST_CPU=1.
+_LAZY_BROADCAST_CPU_ENV = "TORCH_SPYRE_LAZY_BROADCAST_CPU"
+
+
+def _lazy_broadcast_cpu_enabled() -> bool:
+    return os.environ.get(_LAZY_BROADCAST_CPU_ENV, "0") not in ("0", "", "false", "False")
+
+
+def _has_broadcast_dim(t):
+    """True iff t has any dim with size>1 and stride==0 (i.e. a broadcast view)."""
+    return any(t.size(i) > 1 and t.stride(i) == 0 for i in range(t.dim()))
+
+
+def _is_simple_to_cpu(self, args, kwargs):
+    """True iff this .to(*args, **kwargs) call is the simple Spyre→CPU device
+    move with no dtype change / non_blocking / copy / memory_format kwargs.
+    Restricting to the simple case keeps the lazy path's invariants tight; any
+    fancier .to() call falls through to the original implementation."""
+    import torch as _torch
+    for k in ("dtype", "non_blocking", "copy", "memory_format"):
+        if k in kwargs:
+            return False
+    if "device" in kwargs:
+        if len(kwargs) != 1 or args:
+            return False
+        try:
+            return _torch.device(kwargs["device"]).type == "cpu"
+        except (TypeError, RuntimeError):
+            return False
+    if not args or len(args) > 1:
+        return False
+    arg = args[0]
+    if isinstance(arg, _torch.Tensor):
+        return arg.device.type == "cpu" and arg.dtype == self.dtype
+    if isinstance(arg, _torch.device):
+        return arg.type == "cpu"
+    if isinstance(arg, str):
+        try:
+            return _torch.device(arg).type == "cpu"
+        except (TypeError, RuntimeError):
+            return False
+    return False
+
+
+def _spyre_to_cpu_lazy(self):
+    """DMA the underlying allocation into a small CPU staging buffer and
+    return a strided CPU view that reproduces self's broadcast layout. Caller
+    is responsible for ensuring self has a broadcast dim (otherwise the small
+    optimization isn't worth it; just go through orig_to)."""
+    import torch as _torch
+    dma_sizes, dma_strides = get_dma_layout(self)
+    alloc_view = self.as_strided(dma_sizes, dma_strides, 0)
+    cpu_alloc = _torch.empty(dma_sizes, dtype=self.dtype, device="cpu")
+    copy_tensor(alloc_view, cpu_alloc, non_blocking=False)
+    return cpu_alloc.as_strided(
+        self.size(), self.stride(), self.storage_offset()
+    )
 
 
 def _patch_tensor_for_spyre():
@@ -35,6 +104,7 @@ def _patch_tensor_for_spyre():
 
     orig_repr = torch.Tensor.__repr__
     orig_to = torch.Tensor.to
+    orig_cpu = torch.Tensor.cpu
     orig_empty = torch.empty
 
     def spyre_aware_repr(self):
@@ -72,6 +142,15 @@ def _patch_tensor_for_spyre():
         if (
             device_layout is None
         ):  # use original implementation if no layout is provided
+            # Opt-in lazy-view fast path for D2H of a broadcast tensor. See the
+            # _LAZY_BROADCAST_CPU_ENV docstring above for the rationale.
+            if (
+                _lazy_broadcast_cpu_enabled()
+                and self.device.type == DEVICE_NAME
+                and _is_simple_to_cpu(self, args, kwargs)
+                and _has_broadcast_dim(self)
+            ):
+                return _spyre_to_cpu_lazy(self)
             return orig_to(self, *args, **kwargs)
         else:
             # Check if copy kwarg is explicitly set
@@ -152,10 +231,20 @@ def _patch_tensor_for_spyre():
                 *args, device_layout, dtype, device, pin_memory, memory_format
             )
 
+    def spyre_cpu(self, *args, **kwargs):
+        # Tensor.cpu is a C-level method_descriptor that doesn't dispatch
+        # through Python's Tensor.to. Route Spyre tensors via the patched
+        # .to('cpu') so the lazy-broadcast optimization (and any future
+        # .to-side hooks) can engage uniformly.
+        if self.device.type == DEVICE_NAME:
+            return self.to("cpu", *args, **kwargs)
+        return orig_cpu(self, *args, **kwargs)
+
     torch.Tensor.__repr__ = spyre_aware_repr
     torch.Tensor.device_tensor_layout = device_tensor_layout
     torch.Tensor._spyre_tensor_patched = True
     torch.Tensor.to = spyre_to
+    torch.Tensor.cpu = spyre_cpu
     torch.empty = spyre_empty
 
     # ── SpyreTensorLayout Guard Extension ────────────

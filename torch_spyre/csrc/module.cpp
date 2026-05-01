@@ -351,6 +351,18 @@ PYBIND11_MODULE(_C, m) {
 
   m.def("get_spyre_tensor_layout", &spyre::get_spyre_tensor_layout);
   m.def("set_spyre_tensor_layout", &spyre::set_spyre_tensor_layout);
+  m.def(
+      "get_dma_layout",
+      [](const at::Tensor &t)
+          -> std::pair<std::vector<int64_t>, std::vector<int64_t>> {
+        TORCH_CHECK(t.is_privateuseone(),
+                    "get_dma_layout: tensor must be on Spyre");
+        auto *impl =
+            static_cast<spyre::SpyreTensorImpl *>(t.unsafeGetTensorImpl());
+        return {impl->dma_sizes, impl->dma_strides};
+      },
+      "Return (dma_sizes, dma_strides) describing the tensor's underlying "
+      "device-side allocation.");
   m.def("get_downcast_warning", &spyre::get_downcast_warn_enabled,
         "Return whether downcast warnings are enabled.");
   m.def("set_downcast_warning", &spyre::set_downcast_warn_enabled,
