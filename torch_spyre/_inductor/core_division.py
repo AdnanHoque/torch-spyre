@@ -396,19 +396,88 @@ def must_split_vars(
     return accumulated_splits
 
 
+def _k_split_heuristic_should_fire(
+    remaining_output: list[tuple[Symbol, Expr]],
+    reduction_dims: list[tuple[Symbol, Expr]],
+    output_coord_vars: set[Symbol],
+    min_split_vars: set[Symbol],
+    num_cores: int,
+) -> bool:
+    """Phase 2 K-split heuristic. Pure function, easy to unit-test.
+
+    Returns True iff the planner should rotate reduction dims to the front of
+    priority for this op, so cores are allocated to K before output dims.
+
+    All conditions must hold:
+
+      1. config.k_split_heuristic is enabled (opt-in)
+      2. there is at least one reduction dim AND at least one output dim
+      3. NO output coord var was forced into min_splits by the per-core
+         span limit. When span pressure pre-splits an output dim, the
+         heuristic empirically loses (e.g. L3-70B MLP-down has B=470MB which
+         forces N-split, and combining that with K-priority is much slower
+         than default's mixed M/N split).
+      4. product of output-dim sizes < config.k_split_max_output_iter_units
+         (sizes in iteration-space units: stick counts for stick dims,
+         element counts otherwise) — bounds the cross-core partial-sum
+         reduction overhead.
+      5. max reduction-dim size >= config.k_split_min_k_iter_units
+         — ensures K-parallelism gain is non-trivial.
+      6. max reduction-dim size is divisible by num_cores
+         — required for a clean num_cores-way stick-aligned K-split.
+
+    Defaults are calibrated for fp16 matmul from Phase 1 measurements; see
+    tests/splitk_phase1_findings.md.
+    """
+    if not config.k_split_heuristic:
+        return False
+    if not reduction_dims or not remaining_output:
+        return False
+
+    if any(s in output_coord_vars for s in min_split_vars):
+        return False
+
+    output_iter_size = math.prod(
+        concretize_expr(e) for _, e in remaining_output
+    )
+    if output_iter_size >= config.k_split_max_output_iter_units:
+        return False
+
+    reduction_iter_size = max(
+        concretize_expr(e) for _, e in reduction_dims
+    )
+    if reduction_iter_size < config.k_split_min_k_iter_units:
+        return False
+    if reduction_iter_size % num_cores != 0:
+        return False
+
+    return True
+
+
 def prioritize_dimensions(
     output: TensorDep,
     it_space_adjusted: dict[Symbol, Expr],
     exclude_reduction: bool = False,
+    min_splits: dict[Symbol, int] | None = None,
 ) -> list[Symbol]:
     """Return iteration variables in priority order for core division.
 
     Variables already committed as min_splits should be filtered out of
     it_space_adjusted before calling this function.
 
-    Priority tiers:
+    Priority tiers (default):
       1. Output dims (present in output device coords), by decreasing size.
       2. Reduction dims (absent from output coords), by decreasing size.
+
+    Phase 2 K-split heuristic (opt-in via `config.k_split_heuristic`):
+      For matmul iteration spaces matching `_k_split_heuristic_should_fire`,
+      reduction dims are rotated ahead of output dims. See
+      tests/splitk_phase1_findings.md for the empirical justification.
+
+    Args:
+      min_splits: variables already span-pre-split by `must_split_vars`.
+        Used by the K-split heuristic to detect span pressure on output
+        dims. Optional; defaults to empty (no span pressure).
     """
     coord_vars = {v for e in output.device_coords[:-1] for v in e.free_symbols}
 
@@ -427,6 +496,16 @@ def prioritize_dimensions(
     # TODO(issue#1372): Symbolic core division will keep this symbolic.
     remaining_output.sort(key=lambda t: concretize_expr(t[1]), reverse=True)
     reduction_dims.sort(key=lambda t: concretize_expr(t[1]), reverse=True)
+
+    min_split_vars = set(min_splits) if min_splits else set()
+    if not exclude_reduction and _k_split_heuristic_should_fire(
+        remaining_output,
+        reduction_dims,
+        coord_vars,
+        min_split_vars,
+        config.sencores,
+    ):
+        return [t[0] for t in reduction_dims] + [t[0] for t in remaining_output]
 
     priority = [t[0] for t in remaining_output]
     if not exclude_reduction:
@@ -475,7 +554,10 @@ def plan_splits(
         s: e for s, e in it_space_adjusted.items() if s not in min_splits
     }
     priorities = prioritize_dimensions(
-        output_td, it_space_remaining, exclude_reduction=exclude_reduction
+        output_td,
+        it_space_remaining,
+        exclude_reduction=exclude_reduction,
+        min_splits=min_splits,
     )
 
     # 3. Assign cores: satisfy min_splits first, then fill by priority.
