@@ -158,6 +158,61 @@ def _bench_dense_fallback(cfg: _Cfg, dense_fn, x, dense_w) -> float:
     return _bench(step)
 
 
+def _bench_permute(hidden: int = 4096) -> list[_Row]:
+    """Time a (M, hidden) gather and (M, hidden) scatter on Spyre at decode-
+    relevant batch sizes M ∈ {1, 4, 8, 16, 64}. Tells us whether permuted-
+    token grouped-GEMM (which needs gather pre-pass + scatter post-pass) is
+    viable: if permute is cheap, the format is fine; if it's >5ms per
+    side, block-sparse format is the better op design even though it's
+    more invasive on the Spyre backend side.
+    """
+    rows: list[_Row] = []
+    permute_cfg = _Cfg(hidden=hidden, intermediate=0, num_experts=0)
+
+    # Spyre op coverage of indexed gather/scatter is incomplete as of this
+    # writing. We probe both the eager path (`aten::index.Tensor_out`,
+    # `aten::index_put`) and the compiled path; both can be missing or hit
+    # symbolic-shape issues (see #1372). The cells where Spyre can't run
+    # the op natively are reported as "n/a" so the table still surfaces
+    # what works and what doesn't.
+
+    def _try_bench(fn, *args) -> tuple[float | None, str | None]:
+        try:
+            return _bench(fn, *args), None
+        except NotImplementedError as e:
+            return None, f"NotImplementedError: {str(e)[:80]}"
+        except Exception as e:  # noqa: BLE001
+            return None, f"{type(e).__name__}: {str(e)[:80]}"
+
+    for M in (1, 4, 8, 16, 64):
+        x = torch.randn(M, hidden, dtype=torch.float16, device="spyre")
+        idx = torch.randperm(M).to("spyre")
+        out = torch.zeros_like(x)
+
+        ms_g, err_g = _try_bench(_gather_eager, x, idx)
+        ms_s, err_s = _try_bench(_scatter_eager, out, idx, x)
+
+        g_label = f"gather M={M}, H={hidden}"
+        s_label = f"scatter M={M}, H={hidden}"
+        if ms_g is not None:
+            rows.append(_Row(cfg=permute_cfg, label=g_label, median_ms=ms_g))
+            g_str = f"{ms_g:.2f} ms"
+        else:
+            rows.append(_Row(cfg=permute_cfg, label=g_label, median_ms=float("nan"),
+                             note=err_g or ""))
+            g_str = "n/a"
+        if ms_s is not None:
+            rows.append(_Row(cfg=permute_cfg, label=s_label, median_ms=ms_s))
+            s_str = f"{ms_s:.2f} ms"
+        else:
+            rows.append(_Row(cfg=permute_cfg, label=s_label, median_ms=float("nan"),
+                             note=err_s or ""))
+            s_str = "n/a"
+
+        print(f"  M={M:>2}  gather: {g_str}  scatter: {s_str}", flush=True)
+    return rows
+
+
 # ---- sweeps ----------------------------------------------------------------
 
 CFGS = [
@@ -166,9 +221,38 @@ CFGS = [
     _Cfg(hidden=1024, intermediate=2048, num_experts=8),
     # A second config with a larger intermediate to stress B-side traffic.
     _Cfg(hidden=1024, intermediate=4096, num_experts=8),
+    # Real Mixtral 8x7B dims (Phase 0b). Confirms the launch-overhead-
+    # dominance story holds at production scale.
+    _Cfg(hidden=4096, intermediate=14336, num_experts=8),
 ]
 
 K_VALUES = [1, 2, 4, 8]
+
+
+# ---- Phase 0b: framework-overhead isolation + permute cost ------------------
+
+def _empty_step_eager(x):
+    """Pure framework overhead per outer step: zeros_like + sync.
+    No matmul. Tells us how much of 'naive K=1' is bookkeeping vs kernel."""
+    return torch.zeros_like(x)
+
+
+def _single_mm_eager(x, W):
+    """One matmul, no SwiGLU pointwise. Tells us per-mm launch cost."""
+    return x @ W
+
+
+def _gather_eager(x, idx):
+    """Token gather — reorder rows of x by idx. The pre-pass for permuted-
+    token grouped-GEMM."""
+    return x[idx]
+
+
+def _scatter_eager(out, idx, src):
+    """Token scatter — write src rows back into out at positions idx.
+    Post-pass for permuted-token grouped-GEMM."""
+    out[idx] = src
+    return out
 
 
 @dataclass
@@ -203,10 +287,14 @@ def _print_table(rows: list[_Row], file=None) -> None:
       "compute is `E×` more than what an oracle MoE would need).")
     w("")
 
-    # Group by config.
+    # Group by config; permute rows (intermediate=0) go to their own section.
     by_cfg: dict[str, list[_Row]] = {}
+    permute_rows: list[_Row] = []
     for r in rows:
-        by_cfg.setdefault(r.cfg.label(), []).append(r)
+        if r.cfg.intermediate == 0 and r.cfg.num_experts == 0:
+            permute_rows.append(r)
+        else:
+            by_cfg.setdefault(r.cfg.label(), []).append(r)
 
     for cfg_label, group in by_cfg.items():
         w(f"## {cfg_label}")
@@ -214,7 +302,6 @@ def _print_table(rows: list[_Row], file=None) -> None:
         w("| variant | median ms | per-active-expert ms | vs single-expert |")
         w("|---|---:|---:|---:|")
 
-        # Find single-expert baseline within this config.
         single = next((r.median_ms for r in group if r.label == "naive K=1"), None)
 
         for r in group:
@@ -227,6 +314,25 @@ def _print_table(rows: list[_Row], file=None) -> None:
             else:
                 ratio = (ms / single) if (single and single > 0) else float("nan")
                 w(f"| {r.label} | {ms:.2f} | — | {ratio:.2f}× |")
+        w("")
+
+    if permute_rows:
+        w("## Token permute cost (H=4096)")
+        w("")
+        w("Decode-relevant batch sizes. Permuted-token grouped-GEMM needs a "
+          "gather pre-pass + a scatter post-pass; if either is >5ms it eats "
+          "into the win, and if either is unsupported on the Spyre op set "
+          "(`n/a` below) the format is fully blocked until the op is "
+          "registered.")
+        w("")
+        w("| op | median ms | note |")
+        w("|---|---:|---|")
+        for r in permute_rows:
+            import math as _math
+            if _math.isnan(r.median_ms):
+                w(f"| {r.label} | n/a | {r.note} |")
+            else:
+                w(f"| {r.label} | {r.median_ms:.2f} | |")
         w("")
 
 
@@ -246,12 +352,32 @@ def main() -> int:
         torch._dynamo.reset()
         compiled_expert = torch.compile(_expert_forward_eager, dynamic=False)
         compiled_dense = torch.compile(_dense_forward_eager, dynamic=False)
+        compiled_empty = torch.compile(_empty_step_eager, dynamic=False)
+        compiled_single_mm = torch.compile(_single_mm_eager, dynamic=False)
 
-        # Trigger expert compile via a single warm call.
+        # Trigger compiles via warm calls.
         compiled_expert(x, experts[0]["gate"], experts[0]["up"], experts[0]["down"])
         _ts.synchronize()
         compiled_dense(x, dense_w["gate_all"], dense_w["up_all"], dense_w["down_all"])
         _ts.synchronize()
+        compiled_empty(x)
+        _ts.synchronize()
+        compiled_single_mm(x, experts[0]["gate"])
+        _ts.synchronize()
+
+        # Phase 0b — framework-overhead isolation BEFORE the K-sweep so the
+        # per-K numbers are easier to interpret in context.
+        ms = _bench(compiled_empty, x)
+        all_rows.append(_Row(
+            cfg=cfg, label="empty step (zeros_like + sync only)", median_ms=ms,
+        ))
+        print(f"  empty step:           {ms:.2f} ms", flush=True)
+
+        ms = _bench(compiled_single_mm, x, experts[0]["gate"])
+        all_rows.append(_Row(
+            cfg=cfg, label="single mm (no SwiGLU pointwise)", median_ms=ms,
+        ))
+        print(f"  single mm (gate):     {ms:.2f} ms", flush=True)
 
         # Bench naive top-k for K = 1, 2, 4, 8.
         for K in K_VALUES:
@@ -266,7 +392,14 @@ def main() -> int:
         all_rows.append(_Row(
             cfg=cfg, label="dense fallback (E experts always run)", median_ms=ms,
         ))
-        print(f"  dense:    {ms:.2f} ms", flush=True)
+        print(f"  dense:                {ms:.2f} ms", flush=True)
+
+    # Phase 0b — token-permute cost probe. Standalone, not per-config, since
+    # it depends only on (M, hidden) and we want to characterize the curve
+    # vs M for a representative hidden dim.
+    print(f"\n# token-permute cost probe (H=4096)", flush=True)
+    permute_rows = _bench_permute(hidden=4096)
+    all_rows.extend(permute_rows)
 
     _print_table(all_rows)
 

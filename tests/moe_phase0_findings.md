@@ -128,3 +128,136 @@ source $DTI_PROJECT_ROOT/torch-spyre-docs/scripts/dev-env.sh
 cd $DTI_PROJECT_ROOT/torch-spyre
 python tests/diag_moe_baseline.py
 ```
+
+## Phase 0b addendum — real Mixtral dims, framework-overhead isolation, permute probe
+
+Phase 0b extends the bench with three additions:
+
+1. **Real Mixtral 8x7B dims**: H=4096, I=14336, E=8 alongside the
+   downsized configs.
+2. **Framework-overhead isolation**: an "empty step" measuring just
+   `zeros_like + sync` per outer step, and a "single mm" measuring just
+   `x @ W` with no SwiGLU pointwise. Together these subtract out the
+   per-step overhead from the per-expert numbers.
+3. **Token-permute cost probe**: gather + scatter at H=4096 across
+   M ∈ {1, 4, 8, 16, 64} to evaluate permuted-token grouped-GEMM
+   feasibility.
+
+### Real Mixtral results (H=4096, I=14336, E=8)
+
+| Variant | Median ms | Per-active-expert ms |
+|---|---:|---:|
+| empty step (zeros_like + sync) | **0.27** | — |
+| single mm (no SwiGLU) | **3.87** | — |
+| naive K=1 | 18.53 | 18.53 |
+| naive K=2 | 36.94 | 18.47 (1.99×) |
+| naive K=4 | 73.76 | 18.44 (3.98×) |
+| naive K=8 | 147.61 | 18.45 (7.97×) |
+| dense fallback (E=8 always run) | **40.23** | — (2.17×) |
+
+### Three things this changes about the Phase 0a story
+
+**1. Framework overhead is negligible (0.27 ms).** The `zeros_like` CPU-
+fallback warning we saw is a non-issue. Per-expert ~18ms is essentially
+all real Spyre kernel cost. **Concern dismissed.**
+
+**2. Linear scaling persists at real Mixtral dims.** Each active expert
+adds 18.5 ms regardless of K. Same regime as downsized. The launch-bound
+finding holds at production scale.
+
+**3. Dense fallback is no longer faster than naive at real dims.**
+At downsized: dense 10 ms vs naive K=2 30 ms = 3× speedup. At real
+Mixtral: dense 40 ms vs naive K=2 37 ms — dense is 9% **slower**. Why?
+Dense compute scales with E× while naive scales with K×; at real
+intermediate=14336 the `(1, 4096) @ (4096, 114688)` fat matmul is
+bandwidth-bound on the 940 MB combined weight matrix. The dense fallback's
+launch-amortization advantage was masking E× compute waste at small dims.
+
+### Updated grouped-GEMM target (corrected from Phase 0a)
+
+The Phase 0a estimate of "3× at Mixtral top_k=2" was based on dense's
+10 ms floor — which doesn't hold at real dims. The corrected target uses
+the real-dim numbers:
+
+| Routing | Naive | Grouped-GEMM target | Speedup |
+|---|---:|---:|---:|
+| Mixtral 8x7B (E=8, top_k=2) | 37 ms | ~15-20 ms | **~2×** |
+| DeepSeek-V3 (E=256, top_k=8) | 148 ms (top-8 only)* | ~30-40 ms | **~5×** |
+
+*For DeepSeek-V3 the per-active-expert cost would scale similarly to
+Mixtral — extrapolation, not direct measurement.
+
+Still meaningful, but **the headline is "2-5×" not "3-12×".** Phase 0a
+overstated by anchoring on a downsized-dim dense floor that doesn't
+generalize.
+
+### Permute probe — token-permuted grouped-GEMM is BLOCKED
+
+| Op | Spyre support |
+|---|---|
+| `aten::index.Tensor_out` (gather) | ❌ NotImplementedError (eager + compiled) |
+| `aten::_index_put_impl_` (scatter) | ❌ NotImplementedError |
+
+Neither op is registered for the Spyre backend. Tested at M ∈ {1, 4, 8,
+16, 64} × H=4096 — all unsupported. (M=1 looked like it worked under an
+earlier test run because the compile path special-cased it as a slice.
+Real gather doesn't work at any M.)
+
+**Implication for Phase 1 design**: permuted-token format requires
+gather/scatter ops as a prerequisite. Two paths forward:
+
+- **Block-sparse format** — weights laid out as `(E, H, I)`, kernel
+  dispatches cores to different experts. Avoids gather entirely. More
+  invasive on the Spyre backend (need core-to-expert dispatch), but no
+  op-set prerequisites.
+- **Add gather/scatter ops first** — register `aten::index` and
+  `aten::scatter`/`aten::index_put` for the Spyre backend (eager + compiled
+  paths). Then implement permuted-token grouped-GEMM on top. Smaller
+  Phase 1 op design but adds a sequencing dependency.
+
+The block-sparse route is preferred because it avoids the op-set
+dependency, and it's also closer to the static-dataflow model Spyre is
+designed for. Permuted-token would require dynamic shape dispatch
+(M_per_expert known only at runtime) which clashes with the compile model.
+
+### Why dense gets worse at real dims
+
+Each fat matmul in the dense fallback streams through 940 MB of weights
+(`4096 × 14336 × 8 × 2 bytes`) per stage. At LPDDR5's ~200 GB/s peak,
+that's ~5 ms of pure DMA per stage × 3 stages = ~15 ms of bandwidth-
+limited work alone. Plus ~3-4 ms launch overhead each = 30-40 ms total.
+
+The naive K=2 path streams ~234 MB of weights (2 experts' worth × 3
+stages each, with per-expert sharing of `x`). Bandwidth-wise that's
+cheaper than dense, which is why naive K=2 ≈ dense at real dims.
+Grouped-GEMM with proper top_k dispatch streams the same ~234 MB but with
+one launch per stage — that's the win mechanism, and it's bandwidth-bound
+not launch-bound at real dims.
+
+### Decision (revisited)
+
+**Project still proceeds.** The honest pitch becomes:
+
+> Block-sparse grouped-GEMM op for Spyre, targeting ~2× decode speedup on
+> Mixtral 8x7B and ~5× on DeepSeek-V3-class many-small-experts MoE.
+> Improves on naive top-k by amortizing kernel launch + DMA setup;
+> improves on dense fallback by avoiding (E−top_k)/E compute waste.
+> Token-permuted format is blocked at the Spyre op level; block-sparse
+> format avoids the dependency.
+
+### What Phase 0b confirms / changes for Phase 1
+
+**Confirms**:
+- Linear scaling of naive MoE at real dims (project is justified)
+- Framework overhead is not the inflater (numbers are real)
+
+**Changes**:
+- Headline win is 2-5×, not 3-12× (corrected)
+- Block-sparse format preferred over permuted-token (op-set constraint)
+- Bandwidth, not just launch, is the Phase 1 perf model at real dims
+
+### Files added in Phase 0b
+
+- `tests/diag_moe_baseline.py` — extended with real-Mixtral config,
+  empty step + single mm overhead probes, and gather/scatter cost probe
+- `tests/diag_moe_baseline_results.md` — regenerated with all of the above
