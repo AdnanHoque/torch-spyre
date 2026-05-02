@@ -92,6 +92,18 @@ PER_CORE_TFLOPS: float = 0.5  # initial guess; will be calibrated
 # value; v2 may model split-dependent sharing factors.
 EFFECTIVE_DDR_BW_GBS: float = 200.0  # initial — refine via calibration
 
+# Cross-core operand sharing factor in [0, 1]. v1 used naive accounting
+# (alpha = 0): A is read n times when n N-bands' cores each pull a copy.
+# Phase 0 DDR-traffic showed eff BW exceeds peak by 1.4-3.4× on (m,1,1)
+# splits, meaning Spyre cores partly share B operands via the interconnect
+# rather than each pulling from DDR. alpha = 1 means perfect sharing
+# (operand goes to DDR once and is broadcast). Phase 1.3 calibrates this.
+#
+# Effective bytes loaded for A: |A| * (n - alpha * (n - 1))
+# Effective bytes loaded for B: |B| * (m - alpha * (m - 1))
+# C_store and C_reduce don't share: every core has unique partial outputs.
+SHARING_FACTOR: float = 0.0  # initial = naive v1 behavior
+
 NUM_CORES_DEFAULT: int = 32
 DTYPE_BYTES_DEFAULT: int = 2  # fp16
 
@@ -128,27 +140,29 @@ def per_core_compute_flops(M: int, N: int, K: int, m: int, n: int, k: int) -> in
 def cross_core_traffic_bytes(
     M: int, N: int, K: int, m: int, n: int, k: int,
     dtype_bytes: int = DTYPE_BYTES_DEFAULT,
-) -> tuple[int, int, int, int]:
-    """Total bytes loaded/stored across all cores, NAIVE accounting (no
-    sharing). DDR-traffic Phase 0 derived these formulas:
+) -> tuple[float, float, int, int]:
+    """Total bytes loaded/stored across all cores. The A/B loads are
+    interpolated between naive and shared via SHARING_FACTOR:
 
-        A_load   = n × |A|       (each N-band's cores collectively read A)
-        B_load   = m × |B|       (each M-band's cores collectively read B)
+        A_load   = |A| * (n - alpha * (n - 1))   (alpha=0 → n·|A|, =1 → |A|)
+        B_load   = |B| * (m - alpha * (m - 1))
         C_store  = k × |C|       (k partial outputs per element when k > 1)
         C_reduce = (k-1) × |C|   (read back partials for final reduce; 0 when k=1)
 
-    Spyre's cross-core sharing absorbs SOME of this redundancy in practice
-    (eff BW > peak on (32, 1, 1) splits). v1 ignores the sharing — it
-    treats every byte in this aggregate as a real DDR transit. v2 may
-    introduce a split-dependent sharing factor.
+    Phase 0 DDR-traffic measurements showed eff BW exceeds LPDDR5 peak by
+    1.4-3.4× on (m, 1, 1) splits — Spyre partly shares operands across
+    cores via the interconnect rather than redundant DDR reads. The
+    SHARING_FACTOR knob is the calibration target for this effect.
 
     Returns (A_load, B_load, C_store, C_reduce) in bytes.
     """
     A = M * K * dtype_bytes
     B = K * N * dtype_bytes
     C = M * N * dtype_bytes
+    a_load = A * (n - SHARING_FACTOR * (n - 1))
+    b_load = B * (m - SHARING_FACTOR * (m - 1))
     c_reduce = (k - 1) * C if k > 1 else 0
-    return n * A, m * B, k * C, c_reduce
+    return a_load, b_load, k * C, c_reduce
 
 
 def predict_wall_ms(

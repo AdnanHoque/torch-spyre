@@ -102,11 +102,18 @@ def _parse_phase1_results(path: str) -> list[_Sample]:
 
 # ---- error metrics ------------------------------------------------------
 
-def _mape(samples: list[_Sample], per_core_tflops: float, ddr_bw_gbs: float) -> float:
-    """Mean absolute percentage error across all rows, given the model
-    constants. Mutates the cost_model_v1 module-level constants."""
+def _set_constants(per_core_tflops: float, ddr_bw_gbs: float, alpha: float) -> None:
     cm.PER_CORE_TFLOPS = per_core_tflops
     cm.EFFECTIVE_DDR_BW_GBS = ddr_bw_gbs
+    cm.SHARING_FACTOR = alpha
+
+
+def _mape(
+    samples: list[_Sample], per_core_tflops: float, ddr_bw_gbs: float,
+    alpha: float,
+) -> float:
+    """Mean absolute percentage error across all rows."""
+    _set_constants(per_core_tflops, ddr_bw_gbs, alpha)
     abs_errs: list[float] = []
     for s in samples:
         pred = cm.predict_wall_ms(s.M, s.N, s.K, s.m, s.n, s.k)
@@ -118,13 +125,13 @@ def _top_k_accuracy(
     samples: list[_Sample],
     per_core_tflops: float,
     ddr_bw_gbs: float,
+    alpha: float,
     k: int = 1,
 ) -> tuple[float, list[tuple[str, int, int]]]:
     """For each shape, find the empirical-best (m,n,k) and check whether
     the cost model ranks it within its top-k predictions. Returns
     (accuracy, per_shape_diagnostics)."""
-    cm.PER_CORE_TFLOPS = per_core_tflops
-    cm.EFFECTIVE_DDR_BW_GBS = ddr_bw_gbs
+    _set_constants(per_core_tflops, ddr_bw_gbs, alpha)
 
     by_shape: dict[tuple[str, int, int, int], list[_Sample]] = {}
     for s in samples:
@@ -157,15 +164,25 @@ def _calibrate(
     samples: list[_Sample],
     tflops_grid: list[float],
     bw_grid: list[float],
-) -> tuple[float, float, float]:
-    """Grid search over (TFLOPS, BW). Returns (best_tflops, best_bw,
-    best_mape)."""
-    best = (None, None, float("inf"))
+    alpha_grid: list[float],
+    objective: str = "mape",
+) -> tuple[float, float, float, float]:
+    """Grid search over (TFLOPS, BW, alpha). `objective` ∈ {"mape",
+    "regret"}: mape minimizes wall-time MAPE; regret minimizes the mean
+    regret-ratio (planner-relevant). Returns (best_tflops, best_bw,
+    best_alpha, best_objective_value)."""
+    best = (None, None, None, float("inf"))
     for t in tflops_grid:
         for b in bw_grid:
-            mape = _mape(samples, t, b)
-            if mape < best[2]:
-                best = (t, b, mape)
+            for a in alpha_grid:
+                if objective == "mape":
+                    val = _mape(samples, t, b, a)
+                elif objective == "regret":
+                    val, _ = _regret_ratio(samples, t, b, a)
+                else:
+                    raise ValueError(f"unknown objective {objective!r}")
+                if val < best[3]:
+                    best = (t, b, a, val)
     return best  # type: ignore[return-value]
 
 
@@ -173,14 +190,14 @@ def _calibrate(
 
 def _regret_ratio(
     samples: list[_Sample], per_core_tflops: float, ddr_bw_gbs: float,
+    alpha: float,
 ) -> tuple[float, float]:
     """For each shape, compute `wall_at_model_pick / wall_at_empirical_best`.
     A ratio of 1.0 means the model picked something with the same measured
     wall time as the optimum (might or might not be the literal best split).
     A ratio of 1.5 means the model's pick is 50% slower. Returns
     (mean_regret, max_regret)."""
-    cm.PER_CORE_TFLOPS = per_core_tflops
-    cm.EFFECTIVE_DDR_BW_GBS = ddr_bw_gbs
+    _set_constants(per_core_tflops, ddr_bw_gbs, alpha)
     by_shape: dict[tuple[str, int, int, int], list[_Sample]] = {}
     for s in samples:
         by_shape.setdefault((s.label, s.M, s.N, s.K), []).append(s)
@@ -200,9 +217,9 @@ def _print_per_shape_breakdown(
     samples: list[_Sample],
     per_core_tflops: float,
     ddr_bw_gbs: float,
+    alpha: float,
 ) -> None:
-    cm.PER_CORE_TFLOPS = per_core_tflops
-    cm.EFFECTIVE_DDR_BW_GBS = ddr_bw_gbs
+    _set_constants(per_core_tflops, ddr_bw_gbs, alpha)
 
     by_shape: dict[tuple[str, int, int, int], list[_Sample]] = {}
     for s in samples:
@@ -236,6 +253,31 @@ def _print_per_shape_breakdown(
               f"{regret:.2f}× | {rank}/{len(rows)} | {shape_mape:.1f}% |")
 
 
+def _emit_calibration_block(
+    samples: list[_Sample],
+    t: float, b: float, a: float, mape: float,
+    default_mape: float, default_t: float, default_b: float, default_a: float,
+    regret_mean_d: float, regret_max_d: float,
+    top1_default: float, top3_default: float, top5_default: float,
+) -> None:
+    print(f"  PER_CORE_TFLOPS  = {t}")
+    print(f"  EFFECTIVE_DDR_BW = {b} GB/s")
+    print(f"  SHARING_FACTOR   = {a}")
+    top1_cal, _ = _top_k_accuracy(samples, t, b, a, k=1)
+    top3_cal, _ = _top_k_accuracy(samples, t, b, a, k=3)
+    top5_cal, _ = _top_k_accuracy(samples, t, b, a, k=5)
+    regret_mean_c, regret_max_c = _regret_ratio(samples, t, b, a)
+    print(f"\n  Wall-time MAPE   : {mape:.1f}%  "
+          f"(default {default_mape:.1f}%)")
+    print(f"  Top-1 best-split : {top1_cal:.1f}%  (default {top1_default:.1f}%)")
+    print(f"  Top-3 best-split : {top3_cal:.1f}%  (default {top3_default:.1f}%)")
+    print(f"  Top-5 best-split : {top5_cal:.1f}%  (default {top5_default:.1f}%)")
+    print(f"  Mean regret      : {regret_mean_c:.3f}×  "
+          f"(default {regret_mean_d:.3f}×)")
+    print(f"  Max regret       : {regret_max_c:.3f}×  "
+          f"(default {regret_max_d:.3f}×)")
+
+
 def main() -> int:
     samples = _parse_phase1_results(PHASE1_RESULTS)
     print(f"Loaded {len(samples)} (shape, split) samples from "
@@ -249,15 +291,18 @@ def main() -> int:
     # --- Section 1: default constants ---
     default_t = cm.PER_CORE_TFLOPS
     default_b = cm.EFFECTIVE_DDR_BW_GBS
-    default_mape = _mape(samples, default_t, default_b)
-    top1_default, _ = _top_k_accuracy(samples, default_t, default_b, k=1)
-    top3_default, _ = _top_k_accuracy(samples, default_t, default_b, k=3)
-    top5_default, _ = _top_k_accuracy(samples, default_t, default_b, k=5)
-    regret_mean_d, regret_max_d = _regret_ratio(samples, default_t, default_b)
+    default_a = cm.SHARING_FACTOR
+    default_mape = _mape(samples, default_t, default_b, default_a)
+    top1_default, _ = _top_k_accuracy(samples, default_t, default_b, default_a, k=1)
+    top3_default, _ = _top_k_accuracy(samples, default_t, default_b, default_a, k=3)
+    top5_default, _ = _top_k_accuracy(samples, default_t, default_b, default_a, k=5)
+    regret_mean_d, regret_max_d = _regret_ratio(
+        samples, default_t, default_b, default_a)
 
     print("## Default constants (initial guesses)\n")
     print(f"  PER_CORE_TFLOPS    = {default_t}")
     print(f"  EFFECTIVE_DDR_BW   = {default_b} GB/s")
+    print(f"  SHARING_FACTOR     = {default_a}")
     print(f"  LAUNCH_FLOOR_MS    = {cm.LAUNCH_FLOOR_MS}")
     print(f"\n  Wall-time MAPE   : {default_mape:.1f}%")
     print(f"  Top-1 best-split : {top1_default:.1f}% ({n_shapes} shapes)")
@@ -267,33 +312,40 @@ def main() -> int:
     print(f"  Max regret       : {regret_max_d:.3f}×")
 
     # --- Section 2: calibration grid ---
-    # Coarse grid; we widen later if MAPE doesn't drop.
     tflops_grid = [0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0]
     bw_grid     = [50.0, 100.0, 150.0, 200.0, 300.0, 500.0, 800.0, 1200.0, 2000.0]
-    best_t, best_b, best_mape = _calibrate(samples, tflops_grid, bw_grid)
+    alpha_grid  = [0.0, 0.25, 0.5, 0.7, 0.85, 0.95, 1.0]
 
-    print("\n## Calibrated constants (grid search)\n")
-    print(f"  Grid:  TFLOPS ∈ {tflops_grid}")
-    print(f"         BW     ∈ {bw_grid} GB/s")
-    print(f"\n  Best PER_CORE_TFLOPS = {best_t}")
-    print(f"  Best EFFECTIVE_DDR_BW = {best_b} GB/s")
+    # Calibrate with two different objectives — MAPE is wall-time accuracy,
+    # regret is "how good are the splits the model would pick". They can
+    # land on different points.
+    print("\n## Calibrated for wall-time MAPE\n")
+    best_t, best_b, best_a, best_mape = _calibrate(
+        samples, tflops_grid, bw_grid, alpha_grid, objective="mape")
+    _emit_calibration_block(
+        samples, best_t, best_b, best_a, best_mape,
+        default_mape, default_t, default_b, default_a,
+        regret_mean_d, regret_max_d,
+        top1_default, top3_default, top5_default,
+    )
 
-    top1_cal, _ = _top_k_accuracy(samples, best_t, best_b, k=1)
-    top3_cal, _ = _top_k_accuracy(samples, best_t, best_b, k=3)
-    top5_cal, _ = _top_k_accuracy(samples, best_t, best_b, k=5)
-    regret_mean_c, regret_max_c = _regret_ratio(samples, best_t, best_b)
-    print(f"\n  Wall-time MAPE   : {best_mape:.1f}%  "
-          f"(default {default_mape:.1f}%)")
-    print(f"  Top-1 best-split : {top1_cal:.1f}%  (default {top1_default:.1f}%)")
-    print(f"  Top-3 best-split : {top3_cal:.1f}%  (default {top3_default:.1f}%)")
-    print(f"  Top-5 best-split : {top5_cal:.1f}%  (default {top5_default:.1f}%)")
-    print(f"  Mean regret      : {regret_mean_c:.3f}×  "
-          f"(default {regret_mean_d:.3f}×)")
-    print(f"  Max regret       : {regret_max_c:.3f}×  "
-          f"(default {regret_max_d:.3f}×)")
+    print("\n## Calibrated for mean regret (planner-relevant)\n")
+    best_t_r, best_b_r, best_a_r, best_regret = _calibrate(
+        samples, tflops_grid, bw_grid, alpha_grid, objective="regret")
+    mape_r = _mape(samples, best_t_r, best_b_r, best_a_r)
+    _emit_calibration_block(
+        samples, best_t_r, best_b_r, best_a_r, mape_r,
+        default_mape, default_t, default_b, default_a,
+        regret_mean_d, regret_max_d,
+        top1_default, top3_default, top5_default,
+    )
 
-    # --- Section 3: per-shape failure analysis (with calibrated constants) ---
-    _print_per_shape_breakdown(samples, best_t, best_b)
+    # --- Section 3: per-shape failure analysis with regret-min constants ---
+    _print_per_shape_breakdown(samples, best_t_r, best_b_r, best_a_r)
+    top1_cal, _ = _top_k_accuracy(samples, best_t_r, best_b_r, best_a_r, k=1)
+    top3_cal, _ = _top_k_accuracy(samples, best_t_r, best_b_r, best_a_r, k=3)
+    regret_mean_c, regret_max_c = _regret_ratio(
+        samples, best_t_r, best_b_r, best_a_r)
 
     # --- Verdict ---
     print("\n## Verdict\n")
