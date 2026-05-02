@@ -33,26 +33,32 @@ Design principles for v1:
   that could plausibly predict wall-time, validate it, then add
   complexity only where validation shows the simple model fails.
 
-The v1 model has three components:
+The v1 model has these phases:
 
-  T_predicted(M, N, K, m, n, k) = max(
-      T_launch_floor,                  # constant ~3 ms (Phase 0b)
-      max(T_compute, T_dma)            # whichever bottleneck dominates
+  T_predicted = max(
+      T_launch_floor,                          # constant ~3 ms (Phase 0b)
+      max(T_compute, T_load + T_store)         # pipelined kernel phase
+        + T_reduce                             # sequential reduce when k > 1
   )
 
-T_compute  = per-core compute work / effective per-core throughput
-T_dma      = per-core DDR traffic / effective DDR bandwidth
+  T_compute  = per-core compute work / effective per-core throughput
+  T_load     = per-core (A + B) DDR traffic / effective DDR bandwidth
+  T_store    = per-core C DDR traffic / effective DDR bandwidth
+  T_reduce   = per-core readback of (k-1) partials / effective DDR bw
+               (only when k > 1)
 
-The "max(launch_floor, max(...))" reflects two empirical facts:
+The "max(launch_floor, ...)" reflects two empirical facts:
 
 1. Phase 0b: wall time has a ~3 ms floor regardless of work size.
 2. Phase 0a: at large shapes, wall time scales with the slower of
    compute or DDR — pipelined load/compute/store overlap appears to
-   happen on Spyre (else the floor would be `launch + load + compute
-   + store`, not max).
+   happen on Spyre.
 
-Whether (2) is correct is part of what Phase 1.2 (predict-vs-measure
-validation) will tell us.
+The `T_reduce` term was added after Phase 1.2 found that v1 (without
+it) systematically picked `(1,1,32)` because writes of k partials and
+reads-back-to-reduce were under-counted. The model charges `(k-1)·|C|`
+extra DDR bytes for the reduce pass, parallelized across cores. See
+`cost_model_v1_validate_results.md` for measured impact.
 
 CALIBRATION STATUS: constants below are initial guesses from earlier
 phases. Phase 1.2 will refine them by fitting against measured data.
@@ -98,6 +104,7 @@ class CostBreakdown:
     t_compute: float
     t_load: float
     t_store: float
+    t_reduce: float
     t_total: float
 
     def __repr__(self) -> str:
@@ -105,6 +112,7 @@ class CostBreakdown:
             f"CostBreakdown(launch={self.t_launch:.2f} ms, "
             f"compute={self.t_compute:.2f}, "
             f"load={self.t_load:.2f}, store={self.t_store:.2f}, "
+            f"reduce={self.t_reduce:.2f}, "
             f"total={self.t_total:.2f})"
         )
 
@@ -120,25 +128,27 @@ def per_core_compute_flops(M: int, N: int, K: int, m: int, n: int, k: int) -> in
 def cross_core_traffic_bytes(
     M: int, N: int, K: int, m: int, n: int, k: int,
     dtype_bytes: int = DTYPE_BYTES_DEFAULT,
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, int]:
     """Total bytes loaded/stored across all cores, NAIVE accounting (no
     sharing). DDR-traffic Phase 0 derived these formulas:
 
-        A_load  = n × |A|   (each N-band's cores collectively read full A)
-        B_load  = m × |B|   (each M-band's cores collectively read full B)
-        C_store = k × |C|   (k partial outputs per element when k > 1)
+        A_load   = n × |A|       (each N-band's cores collectively read A)
+        B_load   = m × |B|       (each M-band's cores collectively read B)
+        C_store  = k × |C|       (k partial outputs per element when k > 1)
+        C_reduce = (k-1) × |C|   (read back partials for final reduce; 0 when k=1)
 
     Spyre's cross-core sharing absorbs SOME of this redundancy in practice
     (eff BW > peak on (32, 1, 1) splits). v1 ignores the sharing — it
     treats every byte in this aggregate as a real DDR transit. v2 may
     introduce a split-dependent sharing factor.
 
-    Returns (A_load, B_load, C_store) in bytes.
+    Returns (A_load, B_load, C_store, C_reduce) in bytes.
     """
     A = M * K * dtype_bytes
     B = K * N * dtype_bytes
     C = M * N * dtype_bytes
-    return n * A, m * B, k * C
+    c_reduce = (k - 1) * C if k > 1 else 0
+    return n * A, m * B, k * C, c_reduce
 
 
 def predict_wall_ms(
@@ -165,17 +175,21 @@ def predict_wall_ms(
     # Per-core DDR-transit time in ms. Total cross-core traffic divided by
     # num_cores gives the average per-core figure, then divided by per-core
     # effective bandwidth. v1 model assumes uniform bandwidth across cores.
-    a_load, b_load, c_store = cross_core_traffic_bytes(M, N, K, m, n, k, dtype_bytes)
+    a_load, b_load, c_store, c_reduce = cross_core_traffic_bytes(
+        M, N, K, m, n, k, dtype_bytes
+    )
     per_core_load_bytes = (a_load + b_load) / num_cores
     per_core_store_bytes = c_store / num_cores
+    per_core_reduce_bytes = c_reduce / num_cores
     per_core_bw = (EFFECTIVE_DDR_BW_GBS * 1e9) / num_cores  # bytes/sec/core
     t_load = per_core_load_bytes / per_core_bw * 1e3
     t_store = per_core_store_bytes / per_core_bw * 1e3
+    t_reduce = per_core_reduce_bytes / per_core_bw * 1e3
 
-    # Combination rule v1: assume pipelined — load/compute/store overlap
-    # so the bottleneck is the slowest of (load+store, compute). Floor by
-    # launch overhead.
-    t_kernel_work = max(t_compute, t_load + t_store)
+    # Combination rule: pipelined load/compute/store within the kernel
+    # phase, then a sequential reduce phase when k > 1. Floor by launch.
+    t_kernel = max(t_compute, t_load + t_store)
+    t_kernel_work = t_kernel + t_reduce
     t_total = max(LAUNCH_FLOOR_MS, t_kernel_work)
 
     if return_breakdown:
@@ -184,6 +198,7 @@ def predict_wall_ms(
             t_compute=t_compute,
             t_load=t_load,
             t_store=t_store,
+            t_reduce=t_reduce,
             t_total=t_total,
         )
     return t_total

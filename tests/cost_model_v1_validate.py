@@ -171,6 +171,31 @@ def _calibrate(
 
 # ---- report --------------------------------------------------------------
 
+def _regret_ratio(
+    samples: list[_Sample], per_core_tflops: float, ddr_bw_gbs: float,
+) -> tuple[float, float]:
+    """For each shape, compute `wall_at_model_pick / wall_at_empirical_best`.
+    A ratio of 1.0 means the model picked something with the same measured
+    wall time as the optimum (might or might not be the literal best split).
+    A ratio of 1.5 means the model's pick is 50% slower. Returns
+    (mean_regret, max_regret)."""
+    cm.PER_CORE_TFLOPS = per_core_tflops
+    cm.EFFECTIVE_DDR_BW_GBS = ddr_bw_gbs
+    by_shape: dict[tuple[str, int, int, int], list[_Sample]] = {}
+    for s in samples:
+        by_shape.setdefault((s.label, s.M, s.N, s.K), []).append(s)
+
+    ratios: list[float] = []
+    for rows in by_shape.values():
+        best_meas = min(rows, key=lambda r: r.measured_ms)
+        model_pick = min(
+            rows,
+            key=lambda r: cm.predict_wall_ms(r.M, r.N, r.K, r.m, r.n, r.k),
+        )
+        ratios.append(model_pick.measured_ms / best_meas.measured_ms)
+    return statistics.mean(ratios), max(ratios)
+
+
 def _print_per_shape_breakdown(
     samples: list[_Sample],
     per_core_tflops: float,
@@ -184,9 +209,8 @@ def _print_per_shape_breakdown(
         by_shape.setdefault((s.label, s.M, s.N, s.K), []).append(s)
 
     print("\n## Per-shape breakdown\n")
-    print("| shape | best measured | best predicted | rank of best meas | "
-          "shape MAPE |")
-    print("|---|---|---|---:|---:|")
+    print("| shape | best measured | model picks | regret | rank | shape MAPE |")
+    print("|---|---|---|---:|---:|---:|")
     for (label, M, N, K), rows in by_shape.items():
         best_meas = min(rows, key=lambda r: r.measured_ms)
         ranked_pred = sorted(
@@ -198,6 +222,7 @@ def _print_per_shape_breakdown(
             i for i, r in enumerate(ranked_pred)
             if (r.m, r.n, r.k) == (best_meas.m, best_meas.n, best_meas.k)
         ) + 1
+        regret = best_pred.measured_ms / best_meas.measured_ms
         shape_mape = statistics.mean(
             abs(cm.predict_wall_ms(r.M, r.N, r.K, r.m, r.n, r.k) - r.measured_ms)
             / r.measured_ms
@@ -206,8 +231,9 @@ def _print_per_shape_breakdown(
         print(f"| {label} | "
               f"({best_meas.m},{best_meas.n},{best_meas.k}) "
               f"@ {best_meas.measured_ms:.2f}ms | "
-              f"({best_pred.m},{best_pred.n},{best_pred.k}) | "
-              f"{rank}/{len(rows)} | {shape_mape:.1f}% |")
+              f"({best_pred.m},{best_pred.n},{best_pred.k}) "
+              f"@ {best_pred.measured_ms:.2f}ms | "
+              f"{regret:.2f}× | {rank}/{len(rows)} | {shape_mape:.1f}% |")
 
 
 def main() -> int:
@@ -227,6 +253,7 @@ def main() -> int:
     top1_default, _ = _top_k_accuracy(samples, default_t, default_b, k=1)
     top3_default, _ = _top_k_accuracy(samples, default_t, default_b, k=3)
     top5_default, _ = _top_k_accuracy(samples, default_t, default_b, k=5)
+    regret_mean_d, regret_max_d = _regret_ratio(samples, default_t, default_b)
 
     print("## Default constants (initial guesses)\n")
     print(f"  PER_CORE_TFLOPS    = {default_t}")
@@ -236,6 +263,8 @@ def main() -> int:
     print(f"  Top-1 best-split : {top1_default:.1f}% ({n_shapes} shapes)")
     print(f"  Top-3 best-split : {top3_default:.1f}%")
     print(f"  Top-5 best-split : {top5_default:.1f}%")
+    print(f"  Mean regret      : {regret_mean_d:.3f}×  (1.0 = optimal pick)")
+    print(f"  Max regret       : {regret_max_d:.3f}×")
 
     # --- Section 2: calibration grid ---
     # Coarse grid; we widen later if MAPE doesn't drop.
@@ -252,27 +281,37 @@ def main() -> int:
     top1_cal, _ = _top_k_accuracy(samples, best_t, best_b, k=1)
     top3_cal, _ = _top_k_accuracy(samples, best_t, best_b, k=3)
     top5_cal, _ = _top_k_accuracy(samples, best_t, best_b, k=5)
+    regret_mean_c, regret_max_c = _regret_ratio(samples, best_t, best_b)
     print(f"\n  Wall-time MAPE   : {best_mape:.1f}%  "
           f"(default {default_mape:.1f}%)")
     print(f"  Top-1 best-split : {top1_cal:.1f}%  (default {top1_default:.1f}%)")
     print(f"  Top-3 best-split : {top3_cal:.1f}%  (default {top3_default:.1f}%)")
     print(f"  Top-5 best-split : {top5_cal:.1f}%  (default {top5_default:.1f}%)")
+    print(f"  Mean regret      : {regret_mean_c:.3f}×  "
+          f"(default {regret_mean_d:.3f}×)")
+    print(f"  Max regret       : {regret_max_c:.3f}×  "
+          f"(default {regret_max_d:.3f}×)")
 
     # --- Section 3: per-shape failure analysis (with calibrated constants) ---
     _print_per_shape_breakdown(samples, best_t, best_b)
 
     # --- Verdict ---
     print("\n## Verdict\n")
-    if top1_cal >= 60.0:
-        print(f"  v1 picks the empirical-best split for {top1_cal:.0f}% of "
-              "shapes. Reasonable — proceed to Phase 2 (planner integration).")
-    elif top3_cal >= 60.0:
-        print(f"  v1 picks the empirical-best in its top-3 for {top3_cal:.0f}% "
-              "of shapes. Consider top-3 + tiebreaker, or refine model to v2.")
+    print(f"  Top-1: {top1_cal:.0f}%   Top-3: {top3_cal:.0f}%   "
+          f"Mean regret: {regret_mean_c:.2f}×   "
+          f"Max regret: {regret_max_c:.2f}×")
+    print()
+    if regret_mean_c <= 1.05 and regret_max_c <= 1.15:
+        print("  Mean regret ≤ 5%, max ≤ 15% — model is planner-usable. "
+              "Proceed to Phase 2 (planner integration).")
+    elif regret_mean_c <= 1.10:
+        print("  Mean regret ≤ 10%. Useful as a tiebreaker on top of the "
+              "current planner, but not yet good enough to replace it. "
+              "Consider Phase 1.3 (refine missing terms).")
     else:
-        print(f"  v1 top-1 = {top1_cal:.0f}%, top-3 = {top3_cal:.0f}%. Model "
-              "is too coarse — Phase 1.3 should add missing terms (e.g. "
-              "split-dependent BW, output-reduction cost for k>1).")
+        print(f"  Mean regret = {regret_mean_c:.2f}× — model picks "
+              "splits that lose meaningful wall time. Phase 1.3 should "
+              "investigate why (split-dependent BW, sync cost, etc.).")
 
     return 0
 
