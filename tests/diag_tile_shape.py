@@ -49,7 +49,8 @@ _icfg.worker_start_method = "fork"
 _icfg.fx_graph_cache = False
 _icfg.fx_graph_remote_cache = False
 
-import torch_spyre  # noqa: F401
+import torch_spyre
+torch_spyre._autoload()  # ensure spyre device is registered
 from torch_spyre import streams as _ts
 from torch_spyre._inductor import core_division as _core_div
 
