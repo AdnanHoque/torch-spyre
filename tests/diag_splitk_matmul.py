@@ -187,23 +187,37 @@ def _wrapped_plan_splits_no_ksplit(*args, **kwargs):
 _orig_prioritize_dimensions = _core_div.prioritize_dimensions
 
 
-def _wrapped_prioritize_default(output_td, it_space_remaining, exclude_reduction=False):
+def _wrapped_prioritize_default(
+    output_td,
+    it_space_remaining,
+    exclude_reduction=False,
+    min_splits=None,
+):
     """Default-mode passthrough — increments prioritize counter only."""
     _counters["prioritize_dims"] += 1
     return _orig_prioritize_dimensions(
-        output_td, it_space_remaining, exclude_reduction=exclude_reduction
+        output_td,
+        it_space_remaining,
+        exclude_reduction=exclude_reduction,
+        min_splits=min_splits,
     )
 
 
 def _wrapped_prioritize_force_k(
-    output_td, it_space_remaining, exclude_reduction=False
+    output_td,
+    it_space_remaining,
+    exclude_reduction=False,
+    min_splits=None,
 ):
     """forceK mode — call original, then rotate reduction dims to the front
     so the planner consumes cores along K before M/N."""
     _counters["prioritize_dims"] += 1
     _counters["force_k_active"] += 1
     orig = _orig_prioritize_dimensions(
-        output_td, it_space_remaining, exclude_reduction=exclude_reduction
+        output_td,
+        it_space_remaining,
+        exclude_reduction=exclude_reduction,
+        min_splits=min_splits,
     )
     if exclude_reduction:
         # Reduction dims are excluded — nothing to rotate.

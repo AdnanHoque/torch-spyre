@@ -3,6 +3,7 @@
 PyTorch:        2.10.0+cpu
 torch_spyre:    (editable)
 SENCORES:       32 (default)
+K-split heuristic: OFF  (`config.k_split_heuristic` / `TORCH_SPYRE_K_SPLIT_HEURISTIC=1`)
 warmup iters:   5
 measure iters:  20
 

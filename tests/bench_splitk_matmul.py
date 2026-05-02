@@ -121,9 +121,17 @@ _superdsc.parse_op_spec = _wrapped_parse_op_spec  # type: ignore[assignment]
 _orig_prioritize_dimensions = _core_div.prioritize_dimensions
 
 
-def _force_k_prioritize(output_td, it_space_remaining, exclude_reduction=False):
+def _force_k_prioritize(
+    output_td,
+    it_space_remaining,
+    exclude_reduction=False,
+    min_splits=None,
+):
     orig = _orig_prioritize_dimensions(
-        output_td, it_space_remaining, exclude_reduction=exclude_reduction
+        output_td,
+        it_space_remaining,
+        exclude_reduction=exclude_reduction,
+        min_splits=min_splits,
     )
     if exclude_reduction:
         return orig
@@ -319,11 +327,16 @@ def _print_header(file=None) -> None:
     def w(s: str) -> None:
         print(s, file=file)
 
+    from torch_spyre._inductor import config as _ts_cfg
+    heuristic_state = "ON" if _ts_cfg.k_split_heuristic else "OFF"
+
     w("# SplitK matmul perf + accuracy bench — Phase 1")
     w("")
     w(f"PyTorch:        {torch.__version__}")
     w(f"torch_spyre:    {getattr(torch_spyre, '__version__', '(editable)')}")
     w(f"SENCORES:       {os.environ.get('SENCORES', '32 (default)')}")
+    w(f"K-split heuristic: {heuristic_state}  "
+      "(`config.k_split_heuristic` / `TORCH_SPYRE_K_SPLIT_HEURISTIC=1`)")
     w(f"warmup iters:   {WARMUP}")
     w(f"measure iters:  {ITERS}")
     w("")
@@ -366,9 +379,14 @@ def main() -> int:
     for name, rows in sections:
         _emit_tables(None, name, rows)
 
+    # Auto-suffix the results filename when the heuristic is on so a single
+    # run with TORCH_SPYRE_K_SPLIT_HEURISTIC=1 doesn't clobber the
+    # heuristic-off baseline checked into the repo.
+    from torch_spyre._inductor import config as _ts_cfg
+    suffix = "_heuristic_on" if _ts_cfg.k_split_heuristic else ""
     results_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
-        "bench_splitk_matmul_results.md",
+        f"bench_splitk_matmul_results{suffix}.md",
     )
     with open(results_path, "w") as f:
         _print_header(file=f)
