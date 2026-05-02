@@ -71,6 +71,7 @@ def heuristic_on(monkeypatch):
     """Enable the heuristic at default thresholds for the test."""
     monkeypatch.setattr(config, "k_split_heuristic", True)
     monkeypatch.setattr(config, "k_split_max_output_iter_units", 32768)
+    monkeypatch.setattr(config, "k_split_max_output_dim_iter_units", 256)
     monkeypatch.setattr(config, "k_split_min_k_iter_units", 64)
 
 
@@ -98,8 +99,15 @@ def heuristic_on(monkeypatch):
         # improves 7-15%. Acceptable trade for an opt-in heuristic.
         ("Decode-skinny large K",     1, 4096, 16384,   True),   # 0.96x
 
-        # Boundary: M*N just at the threshold should not fire.
-        ("M*N at threshold (32K iter)", 256, 8192, 8192, False),
+        # Boundary: max output-dim at threshold should not fire (strict <).
+        ("max output-dim at thresh (256)", 256, 8192, 8192, False),
+
+        # v2 — Phase 1 measured 10-22% regressions on these. v1 fired here
+        # because M*N_iter (= M * N/64) was small; v2's max-output-dim gate
+        # filters them out.
+        ("Balanced-square 1024 K=4K",  1024, 1024, 4096,  False),  # 0.91x
+        ("Balanced-square 1024 K=8K",  1024, 1024, 8192,  False),  # 0.88x
+        ("Balanced-square 1024 K=16K", 1024, 1024, 16384, False),  # 0.80x
     ],
 )
 def test_canonical_phase1_shapes(
@@ -163,6 +171,23 @@ def test_large_output_does_not_fire(heuristic_on):
     M=2048, N=4096 elems → M_iter * N_iter = 2048 * 64 = 131072 > 32768."""
     out, red = _iter_space_pair(2048, 64, 128)
     assert _fire(out, red) is False
+
+
+def test_v2_max_output_dim_gate(heuristic_on):
+    """v2 — even when M·N_iter is small (because N is a stick dim and divides
+    by 64), a single output dim that is large means default's M-split gives
+    well-sized per-core work and K-priority would regress.
+
+    (1024, 1024, 8192): M_iter=1024, N_iter=16, K_iter=128.
+    M·N_iter = 16384 (passes the product gate at 32K)
+    max output dim = 1024 (FAILS the per-dim gate at 256)
+    Phase 1 measured this shape at 0.88× — this filter restores correctness.
+    """
+    out, red = _iter_space_pair(1024, 16, 128)
+    assert _fire(out, red) is False
+    # Same shape but with M small enough to pass the per-dim gate fires.
+    out, red = _iter_space_pair(128, 16, 128)
+    assert _fire(out, red) is True
 
 
 def test_threshold_tunable_via_config(monkeypatch):

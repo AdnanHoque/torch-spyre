@@ -421,9 +421,16 @@ def _k_split_heuristic_should_fire(
          (sizes in iteration-space units: stick counts for stick dims,
          element counts otherwise) — bounds the cross-core partial-sum
          reduction overhead.
-      5. max reduction-dim size >= config.k_split_min_k_iter_units
+      5. max single output-dim size < config.k_split_max_output_dim_iter_units
+         — v2 gate that filters out balanced-square shapes like
+         (1024, 1024, K) where the M·N product is small in iter-space
+         units (because N is a stick dim and divides by 64) but a single
+         output dim is large enough that the default M-split already gives
+         well-sized per-core work. Phase 1 measured 10-22% perf regressions
+         on these shapes when K-priority fires.
+      6. max reduction-dim size >= config.k_split_min_k_iter_units
          — ensures K-parallelism gain is non-trivial.
-      6. max reduction-dim size is divisible by num_cores
+      7. max reduction-dim size is divisible by num_cores
          — required for a clean num_cores-way stick-aligned K-split.
 
     Defaults are calibrated for fp16 matmul from Phase 1 measurements; see
@@ -437,10 +444,10 @@ def _k_split_heuristic_should_fire(
     if any(s in output_coord_vars for s in min_split_vars):
         return False
 
-    output_iter_size = math.prod(
-        concretize_expr(e) for _, e in remaining_output
-    )
-    if output_iter_size >= config.k_split_max_output_iter_units:
+    output_sizes = [concretize_expr(e) for _, e in remaining_output]
+    if math.prod(output_sizes) >= config.k_split_max_output_iter_units:
+        return False
+    if max(output_sizes) >= config.k_split_max_output_dim_iter_units:
         return False
 
     reduction_iter_size = max(

@@ -43,6 +43,16 @@ k_split_heuristic: bool = (
 k_split_max_output_iter_units: int = int(
     os.environ.get("TORCH_SPYRE_K_SPLIT_MAX_OUTPUT_ITER", "32768")
 )
+# v2: max single-output-dim iter size. Empirically, the heuristic loses on
+# balanced shapes like (1024, 1024, K>=4096) where one output dim alone is
+# already large enough to give M-split well-sized per-core work. For Spyre
+# at SENCORES=32 with fp16 stick=64, the win regime is roughly M_iter <= 128
+# (= M_elems / 32 cores <= 4 rows per core); the loss regime starts around
+# M_iter = 1024. 256 is conservative center between win (128) and loss
+# (1024).
+k_split_max_output_dim_iter_units: int = int(
+    os.environ.get("TORCH_SPYRE_K_SPLIT_MAX_OUTPUT_DIM_ITER", "256")
+)
 k_split_min_k_iter_units: int = int(
     os.environ.get("TORCH_SPYRE_K_SPLIT_MIN_K_ITER", "64")
 )
