@@ -1,0 +1,76 @@
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=28 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=28 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=20 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=20 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=28 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=28 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+# Permutation REPLICATION — strong signals + crash reproducibility
+
+# warmup=5 iters=30, fp16, SENCORES=32
+
+### L3-70B q_proj prefill (K-split)  M=128 N=8192 K=8192  split=(4, 1, 8)
+
+  trial1 (order: ['identity', 'stride2', 'reversed', 'antipodal', 'random_42', 'block_cyclic', 'bit_reverse']):
+    identity      : 4.375 ms
+    stride2       : 4.223 ms
+    reversed      : ERR InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused_mm
+    antipodal     : ERR InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused_mm
+    random_42     : ERR InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused_mm
+    block_cyclic  : 5.090 ms
+    bit_reverse   : 6.111 ms
+
+  trial2 (order: ['bit_reverse', 'block_cyclic', 'random_42', 'antipodal', 'reversed', 'stride2', 'identity']):
+    bit_reverse   : 6.115 ms
+    block_cyclic  : 5.100 ms
+    random_42     : ERR InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused_mm
+    antipodal     : ERR InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused_mm
+    reversed      : ERR InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused_mm
+    stride2       : 4.219 ms
+    identity      : 4.373 ms
+
+### L3-70B MLP down prefill (output)  M=128 N=8192 K=28672  split=(16, 2, 1)
+
+  trial1 (order: ['identity', 'random_42', 'stride2', 'block_cyclic', 'bit_reverse']):
+    identity      : 7.912 ms
+    random_42     : 7.853 ms
+    stride2       : 7.831 ms
+    block_cyclic  : 7.788 ms
+    bit_reverse   : 7.809 ms
+
+  trial2 (order: ['bit_reverse', 'block_cyclic', 'stride2', 'random_42', 'identity']):
+    bit_reverse   : 7.808 ms
+    block_cyclic  : 7.772 ms
+    stride2       : 7.781 ms
+    random_42     : 7.821 ms
+    identity      : 7.903 ms
+
+
+## Replication summary
+
+|shape | perm | trial1 ms | trial2 ms | trial1 sp vs id | trial2 sp vs id | mean sp | consistent? |
+|---|---|---:|---:|---:|---:|---:|---|
+| L3-70B q_proj prefill (K-split) | stride2 | 4.223 | 4.219 | 1.036x | 1.037x | 1.036x | ✓ same direction |
+| L3-70B q_proj prefill (K-split) | reversed | ERR | ERR | — | — | — | ✓ both crashed |
+| L3-70B q_proj prefill (K-split) | antipodal | ERR | ERR | — | — | — | ✓ both crashed |
+| L3-70B q_proj prefill (K-split) | random_42 | ERR | ERR | — | — | — | ✓ both crashed |
+| L3-70B q_proj prefill (K-split) | block_cyclic | 5.090 | 5.100 | 0.860x | 0.858x | 0.859x | ✓ same direction |
+| L3-70B q_proj prefill (K-split) | bit_reverse | 6.111 | 6.115 | 0.716x | 0.715x | 0.716x | ✓ same direction |
+| L3-70B MLP down prefill (output) | random_42 | 7.853 | 7.821 | 1.007x | 1.010x | 1.009x | ✓ same direction |
+| L3-70B MLP down prefill (output) | stride2 | 7.831 | 7.781 | 1.010x | 1.016x | 1.013x | ✓ same direction |
+| L3-70B MLP down prefill (output) | block_cyclic | 7.788 | 7.772 | 1.016x | 1.017x | 1.016x | ✓ same direction |
+| L3-70B MLP down prefill (output) | bit_reverse | 7.809 | 7.808 | 1.013x | 1.012x | 1.013x | ✓ same direction |
+
+## Verdict
+
+  Confirmed wins (>=2% on both trials): 1
+    - L3-70B q_proj prefill (K-split): perm=stride2, mean speedup 1.036x
+  Reproducible crashes: 3
+    - L3-70B q_proj prefill (K-split): perm=reversed
+    - L3-70B q_proj prefill (K-split): perm=antipodal
+    - L3-70B q_proj prefill (K-split): perm=random_42
