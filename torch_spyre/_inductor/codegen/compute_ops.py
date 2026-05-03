@@ -16,6 +16,60 @@
 from torch_spyre._C import encode_constant, DataFormats
 from sympy import Symbol
 
+from torch_spyre._inductor import config as _spyre_config
+
+
+def _get_core_id_permutation(num_cores: int) -> list[int]:
+    """Return a permutation of physical core IDs based on config.core_id_permutation.
+
+    Physical core c executes the slice that the unpermuted emitter would
+    have assigned to core perm[c]. Identity preserves current behaviour.
+    Other permutations exist to test whether sequential ring placement is
+    empirically optimal — see tests/diag_core_permutation_probe.py.
+    """
+    name = _spyre_config.core_id_permutation
+    if name == "identity":
+        return list(range(num_cores))
+    if name == "reversed":
+        return list(range(num_cores - 1, -1, -1))
+    if name == "stride2":
+        # [0, 2, 4, ..., 30, 1, 3, ..., 31] — interleaves two half-rings
+        return list(range(0, num_cores, 2)) + list(range(1, num_cores, 2))
+    if name == "block_cyclic":
+        # [0, N/2, 1, N/2+1, ...] — adjacent physical cores hop to opposite halves
+        half = num_cores // 2
+        out: list[int] = []
+        for i in range(half):
+            out.append(i)
+            out.append(half + i)
+        return out
+    if name == "antipodal":
+        # Swap halves: [N/2, N/2+1, ..., N-1, 0, 1, ..., N/2-1]
+        half = num_cores // 2
+        return list(range(half, num_cores)) + list(range(half))
+    if name == "bit_reverse":
+        n_bits = (num_cores - 1).bit_length()
+        out = []
+        for c in range(num_cores):
+            r = 0
+            for b in range(n_bits):
+                if c & (1 << b):
+                    r |= 1 << (n_bits - 1 - b)
+            out.append(r)
+        return out
+    if name.startswith("random_"):
+        seed = int(name.split("_", 1)[1])
+        import random as _random
+        rng = _random.Random(seed)
+        out = list(range(num_cores))
+        rng.shuffle(out)
+        return out
+    raise ValueError(
+        f"unknown CORE_ID_PERMUTATION: {name!r}. "
+        "Valid: identity, reversed, stride2, block_cyclic, antipodal, "
+        "bit_reverse, random_<seed>."
+    )
+
 
 def core_idx_to_slice_offset(
     arg,
@@ -207,9 +261,10 @@ def gen_coord_info_value(
 
 def generate_sdsc(sdsc_spec):
     out_idx = len(sdsc_spec.args) - 1
+    perm = _get_core_id_permutation(sdsc_spec.num_cores)
     core_id_to_wk_slice = {
         str(c): {
-            str(dim): int(expr.subs({Symbol("core_id"): c}))
+            str(dim): int(expr.subs({Symbol("core_id"): perm[c]}))
             for dim, expr in sdsc_spec.core_id_to_work_slice.items()
         }
         for c in range(sdsc_spec.num_cores)

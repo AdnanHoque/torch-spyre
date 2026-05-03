@@ -50,4 +50,13 @@ core_emission_reverse: bool = (
     os.environ.get("CORE_EMISSION_REVERSE", "0") == "1"
 )
 
+# Permutation applied to physical core IDs at the SDSC core_id_to_work_slice
+# materialization site. Physical core c is assigned the work that the
+# unpermuted emitter would have given to core perm(c). Default `identity`
+# preserves current behaviour. Used to test whether sequential core
+# placement is actually optimal for the ring topology, or whether some
+# scattering / non-contiguous mapping is empirically better. Probe-only
+# infrastructure — see tests/diag_core_permutation_probe.py.
+core_id_permutation: str = os.environ.get("CORE_ID_PERMUTATION", "identity")
+
 install_config_module(sys.modules[__name__])
