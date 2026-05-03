@@ -19,13 +19,17 @@ from sympy import Symbol
 from torch_spyre._inductor import config as _spyre_config
 
 
-def _get_core_id_permutation(num_cores: int) -> list[int]:
+def _get_core_id_permutation(num_cores: int, work_slices=None) -> list[int]:
     """Return a permutation of physical core IDs based on config.core_id_permutation.
 
     Physical core c executes the slice that the unpermuted emitter would
     have assigned to core perm[c]. Identity preserves current behaviour.
     Other permutations exist to test whether sequential ring placement is
     empirically optimal — see tests/diag_core_permutation_probe.py.
+
+    The optional `work_slices` arg enables the `k_fast` perm: a
+    generalized "pack K-collaborators contiguously" permutation that
+    adapts to whatever split shape the planner picked.
     """
     name = _spyre_config.core_id_permutation
     if name == "identity":
@@ -64,10 +68,49 @@ def _get_core_id_permutation(num_cores: int) -> list[int]:
         out = list(range(num_cores))
         rng.shuffle(out)
         return out
+    if name == "k_fast":
+        # Generalized "pack K-collaborators contiguously" permutation.
+        # For matmul iteration_space [M, N, K], the K dim is iterated
+        # last in the unpermuted emitter, so logical core_ids that
+        # differ by m*n in the unpermuted ordering are K-collaborators.
+        # We map them to consecutive physical positions:
+        #   perm[c] = (c mod k) * (m*n) + (c // k)
+        # Falls back to identity if work_slices is unavailable or k=1.
+        if work_slices is None:
+            return list(range(num_cores))
+        dim_list = list(work_slices.keys())
+        if len(dim_list) < 1:
+            return list(range(num_cores))
+        k = int(work_slices[dim_list[-1]])
+        if k <= 1:
+            return list(range(num_cores))
+        mn = num_cores // k
+        return [(c % k) * mn + (c // k) for c in range(num_cores)]
+    if name.startswith("ring_pair_d"):
+        # Probe-specific permutations for the (1, 16, 2) shape only.
+        # Construct a permutation that puts every K-pair (logical i,
+        # logical i+16) at exactly d ring positions apart.
+        # Valid d: 1, 2, 4, 8, 16. Only valid for num_cores=32.
+        d = int(name[len("ring_pair_d"):])
+        assert num_cores == 32, "ring_pair_d perms assume 32 cores"
+        assert d in (1, 2, 4, 8, 16), f"d must be in {{1,2,4,8,16}}, got {d}"
+        # Each "block" of 2d consecutive physical positions holds d pairs
+        # at distance d apart: positions {0..d-1, d..2d-1} hold pairs
+        # (0,d), (1,d+1), ..., (d-1,2d-1).
+        block = 2 * d
+        n_blocks = num_cores // block
+        out = [0] * num_cores
+        pair_idx = 0
+        for b in range(n_blocks):
+            for i in range(d):
+                out[b * block + i] = pair_idx               # k=0 slot
+                out[b * block + i + d] = pair_idx + 16      # k=1 slot
+                pair_idx += 1
+        return out
     raise ValueError(
         f"unknown CORE_ID_PERMUTATION: {name!r}. "
         "Valid: identity, reversed, stride2, block_cyclic, antipodal, "
-        "bit_reverse, random_<seed>."
+        "bit_reverse, k_fast, ring_pair_d<1,2,4,8,16>, random_<seed>."
     )
 
 
@@ -261,7 +304,7 @@ def gen_coord_info_value(
 
 def generate_sdsc(sdsc_spec):
     out_idx = len(sdsc_spec.args) - 1
-    perm = _get_core_id_permutation(sdsc_spec.num_cores)
+    perm = _get_core_id_permutation(sdsc_spec.num_cores, sdsc_spec.work_slices)
     core_id_to_wk_slice = {
         str(c): {
             str(dim): int(expr.subs({Symbol("core_id"): perm[c]}))
