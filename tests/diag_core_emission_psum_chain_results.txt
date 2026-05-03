@@ -1,0 +1,138 @@
+# Core-emission reorder probe — K-split PSUM + M↔N output
+
+# warmup=3 iters=15, fp16, SENCORES=32
+
+## Hypothesis recap
+
+- For (m, 1, k>1): default M-fast scatters K-chain across the
+  ring (cores {0, m, 2m, ...}); reverse K-fast packs K-chain
+  contiguously (cores {0..k-1}). Predicted hop reduction
+  scales with `m*n - 1` per chain step → reverse should win
+  iff PSUM is on the critical path.
+- For (m, n, 1): no PSUM chain. Default vs reverse swaps which
+  output dim is the fast-changing core-ID dim. Earlier probes
+  showed null result; we re-confirm on focused shapes.
+
+## Part A — K-split PSUM-chain reorder
+
+### L3-8B MLP down prefill (K-heavy)  (M=128, N=4096, K=14336)
+
+#### split=(1, 1, 32)  (pure-K (reverse is no-op, sanity))
+  Predicted ring-chain hops: K default=31 reverse=31  | N default=0 reverse=0
+  default:  4.947 ms
+  reverse:  4.941 ms
+  delta:    +0.006 ms  (speedup 1.001x)
+
+#### split=(2, 1, 16)  (mixed K — chain 30→15 hops predicted (~2x))
+  Predicted ring-chain hops: K default=30 reverse=15  | N default=0 reverse=0
+  default:  4.194 ms
+  reverse:  4.174 ms
+  delta:    +0.021 ms  (speedup 1.005x)
+
+#### split=(4, 1, 8)  (mixed K — chain 28→7 hops predicted (~4x))
+  Predicted ring-chain hops: K default=28 reverse=7  | N default=0 reverse=0
+  default:  4.459 ms
+  reverse:  4.476 ms
+  delta:    -0.017 ms  (speedup 0.996x)
+
+#### split=(8, 1, 4)  (mixed K — chain 24→3 hops predicted (~8x))
+  Predicted ring-chain hops: K default=24 reverse=3  | N default=0 reverse=0
+  default:  4.770 ms
+  reverse:  4.707 ms
+  delta:    +0.062 ms  (speedup 1.013x)
+
+### L3-70B q_proj prefill (square)  (M=128, N=8192, K=8192)
+
+#### split=(2, 1, 16)  (mixed K — chain 30→15 hops predicted (~2x))
+  Predicted ring-chain hops: K default=30 reverse=15  | N default=0 reverse=0
+  default:  4.296 ms
+  reverse:  4.256 ms
+  delta:    +0.040 ms  (speedup 1.009x)
+
+#### split=(4, 1, 8)  (mixed K — chain 28→7 hops predicted (~4x))
+  Predicted ring-chain hops: K default=28 reverse=7  | N default=0 reverse=0
+  default:  4.452 ms
+  reverse:  4.290 ms
+  delta:    +0.162 ms  (speedup 1.038x)
+
+### Synthetic K-extreme (small N, big K)  (M=128, N=512, K=32768)
+
+#### split=(1, 1, 32)  (pure-K (reverse is no-op))
+  Predicted ring-chain hops: K default=31 reverse=31  | N default=0 reverse=0
+  default:  3.394 ms
+  reverse:  3.389 ms
+  delta:    +0.005 ms  (speedup 1.001x)
+
+#### split=(2, 1, 16)  (mixed K)
+  Predicted ring-chain hops: K default=30 reverse=15  | N default=0 reverse=0
+  default:  3.320 ms
+  reverse:  3.312 ms
+  delta:    +0.008 ms  (speedup 1.002x)
+
+#### split=(4, 1, 8)  (mixed K)
+  Predicted ring-chain hops: K default=28 reverse=7  | N default=0 reverse=0
+  default:  3.395 ms
+  reverse:  3.377 ms
+  delta:    +0.018 ms  (speedup 1.005x)
+
+## Part B — Pure M↔N output reorder (k=1, focused)
+
+### L3-8B q_proj prefill  (M=128, N=4096, K=4096)
+
+#### split=(4, 8, 1)  (moderate mixed)
+  Predicted ring-chain hops: K default=0 reverse=0  | N default=28 reverse=7
+  default:  3.235 ms
+  reverse:  3.270 ms
+  delta:    -0.035 ms  (speedup 0.989x)
+
+#### split=(16, 2, 1)  (extreme M-fast)
+  Predicted ring-chain hops: K default=0 reverse=0  | N default=16 reverse=1
+  default:  3.406 ms
+  reverse:  3.411 ms
+  delta:    -0.005 ms  (speedup 0.998x)
+
+#### split=(2, 16, 1)  (extreme N-fast)
+  Predicted ring-chain hops: K default=0 reverse=0  | N default=30 reverse=15
+  default:  3.289 ms
+  reverse:  3.304 ms
+  delta:    -0.015 ms  (speedup 0.996x)
+
+### L3-70B MLP down prefill  (M=128, N=8192, K=28672)
+
+#### split=(16, 2, 1)  (extreme M-fast (Phase 1.0 best))
+  Predicted ring-chain hops: K default=0 reverse=0  | N default=16 reverse=1
+  default:  8.002 ms
+  reverse:  7.862 ms
+  delta:    +0.140 ms  (speedup 1.018x)
+
+#### split=(2, 16, 1)  (extreme N-fast)
+  Predicted ring-chain hops: K default=0 reverse=0  | N default=30 reverse=15
+  default:  9.287 ms
+  reverse:  9.035 ms
+  delta:    +0.252 ms  (speedup 1.028x)
+
+## Summary — all valid (def, rev) measurements
+
+| section | shape | split | def ms | rev ms | delta | speedup | K-chain (def→rev) |
+|---|---|---|---:|---:|---:|---:|---:|
+| A | L3-8B MLP down prefill (K-heavy) | (1, 1, 32) | 4.947 | 4.941 | +0.006 | 1.001x | 31→31 |
+| A | L3-8B MLP down prefill (K-heavy) | (2, 1, 16) | 4.194 | 4.174 | +0.021 | 1.005x | 30→15 |
+| A | L3-8B MLP down prefill (K-heavy) | (4, 1, 8) | 4.459 | 4.476 | -0.017 | 0.996x | 28→7 |
+| A | L3-8B MLP down prefill (K-heavy) | (8, 1, 4) | 4.770 | 4.707 | +0.062 | 1.013x | 24→3 |
+| A | L3-70B q_proj prefill (square) | (2, 1, 16) | 4.296 | 4.256 | +0.040 | 1.009x | 30→15 |
+| A | L3-70B q_proj prefill (square) | (4, 1, 8) | 4.452 | 4.290 | +0.162 | 1.038x | 28→7 |
+| A | Synthetic K-extreme (small N, big K) | (1, 1, 32) | 3.394 | 3.389 | +0.005 | 1.001x | 31→31 |
+| A | Synthetic K-extreme (small N, big K) | (2, 1, 16) | 3.320 | 3.312 | +0.008 | 1.002x | 30→15 |
+| A | Synthetic K-extreme (small N, big K) | (4, 1, 8) | 3.395 | 3.377 | +0.018 | 1.005x | 28→7 |
+| B | L3-8B q_proj prefill | (4, 8, 1) | 3.235 | 3.270 | -0.035 | 0.989x | (k=1, no PSUM) |
+| B | L3-8B q_proj prefill | (16, 2, 1) | 3.406 | 3.411 | -0.005 | 0.998x | (k=1, no PSUM) |
+| B | L3-8B q_proj prefill | (2, 16, 1) | 3.289 | 3.304 | -0.015 | 0.996x | (k=1, no PSUM) |
+| B | L3-70B MLP down prefill | (16, 2, 1) | 8.002 | 7.862 | +0.140 | 1.018x | (k=1, no PSUM) |
+| B | L3-70B MLP down prefill | (2, 16, 1) | 9.287 | 9.035 | +0.252 | 1.028x | (k=1, no PSUM) |
+
+## Verdict
+
+  Part A (K-split): max speedup 1.038x, median 1.005x
+  Part B (output reorder): max speedup 1.028x, median 0.998x
+
+  Marginal (2-5%) movement. Worth one more replication.

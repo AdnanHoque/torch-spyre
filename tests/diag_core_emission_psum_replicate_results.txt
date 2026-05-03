@@ -1,0 +1,68 @@
+# K-split / output reorder REPLICATION
+
+# warmup=5 iters=30, fp16, SENCORES=32, fp16
+
+## Method: each config runs as TWO trials, def-first then rev-first, to control for in-process warm state.
+
+### L3-70B q_proj prefill (M=128, N=8192, K=8192)  split=(4, 1, 8)
+
+  Trial 1 (default-first):
+    def:  median=4.343  iqr=0.016  min=4.318  ms
+    rev:  median=4.195  iqr=0.018  min=4.161  ms
+  Trial 2 (reverse-first):
+    rev:  median=4.213  iqr=0.016  min=4.183  ms
+    def:  median=4.368  iqr=0.019  min=4.342  ms
+  Trial 1 speedup (def/rev): 1.035x → reverse wins
+  Trial 2 speedup (def/rev): 1.037x → reverse wins
+  Mean speedup (avg of trials): 1.036x
+
+### L3-70B MLP down prefill (M=128, N=8192, K=28672)  split=(2, 16, 1)
+
+  Trial 1 (default-first):
+    def:  median=9.253  iqr=0.025  min=9.208  ms
+    rev:  median=9.093  iqr=0.093  min=8.981  ms
+  Trial 2 (reverse-first):
+    rev:  median=9.169  iqr=0.110  min=9.062  ms
+    def:  median=9.202  iqr=0.069  min=9.080  ms
+  Trial 1 speedup (def/rev): 1.018x → reverse wins
+  Trial 2 speedup (def/rev): 1.004x → reverse wins
+  Mean speedup (avg of trials): 1.011x
+
+### L3-70B MLP down prefill (M=128, N=8192, K=28672)  split=(16, 2, 1)
+
+  Trial 1 (default-first):
+    def:  median=7.941  iqr=0.042  min=7.902  ms
+    rev:  median=7.779  iqr=0.035  min=7.741  ms
+  Trial 2 (reverse-first):
+    rev:  median=7.784  iqr=0.029  min=7.747  ms
+    def:  median=7.943  iqr=0.021  min=7.891  ms
+  Trial 1 speedup (def/rev): 1.021x → reverse wins
+  Trial 2 speedup (def/rev): 1.021x → reverse wins
+  Mean speedup (avg of trials): 1.021x
+
+### L3-8B  MLP down prefill (M=128, N=4096, K=14336)  split=(8, 1, 4)
+
+  Trial 1 (default-first):
+    def:  median=4.661  iqr=0.030  min=4.627  ms
+    rev:  median=4.696  iqr=0.015  min=4.677  ms
+  Trial 2 (reverse-first):
+    rev:  median=4.643  iqr=0.025  min=4.607  ms
+    def:  median=4.662  iqr=0.016  min=4.633  ms
+  Trial 1 speedup (def/rev): 0.993x → default wins
+  Trial 2 speedup (def/rev): 1.004x → reverse wins
+  Mean speedup (avg of trials): 0.998x
+
+## Replication summary
+
+| shape | split | trial1 def | trial1 rev | trial1 sp | trial2 def | trial2 rev | trial2 sp | mean sp | consistent? |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| L3-70B q_proj prefill | (4, 1, 8) | 4.343 | 4.195 | 1.035x | 4.368 | 4.213 | 1.037x | 1.036x | ✓ same direction |
+| L3-70B MLP down prefill | (2, 16, 1) | 9.253 | 9.093 | 1.018x | 9.202 | 9.169 | 1.004x | 1.011x | ✓ same direction |
+| L3-70B MLP down prefill | (16, 2, 1) | 7.941 | 7.779 | 1.021x | 7.943 | 7.784 | 1.021x | 1.021x | ✓ same direction |
+| L3-8B  MLP down prefill | (8, 1, 4) | 4.661 | 4.696 | 0.993x | 4.662 | 4.643 | 1.004x | 0.998x | ✗ flipped |
+
+## Verdict
+
+  2 of 4 configs show consistent ≥2% reorder effect across both trial orders. Signal is real, not noise.
+    - L3-70B q_proj prefill (4, 1, 8): mean speedup 1.036x (reverse wins)
+    - L3-70B MLP down prefill (16, 2, 1): mean speedup 1.021x (reverse wins)
