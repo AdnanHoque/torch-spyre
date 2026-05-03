@@ -1,0 +1,107 @@
+# DeepSeek V3 + cross-model k_fast validation
+
+# warmup=3 iters=15, fp16, SENCORES=32
+
+# Each (shape, perm) runs in BOTH trial orders.
+
+### [ref] L3-70B kv_proj M=2048
+      shape: M=2048, N=1024 (16st), K=8192 (128st), split=(1, 16, 2)
+  trial1 (order: ['identity', 'k_fast']):
+    identity      : 10.911 ms
+    k_fast        : 3.965 ms
+
+  trial2 (order: ['k_fast', 'identity']):
+    k_fast        : 3.943 ms
+    identity      : 10.894 ms
+
+### [cross] Mixtral 8x7B kv_proj M=2048
+      shape: M=2048, N=1024 (16st), K=4096 (64st), split=(1, 16, 2)
+  trial1 (order: ['identity', 'k_fast']):
+    identity      : 6.899 ms
+    k_fast        : 3.440 ms
+
+  trial2 (order: ['k_fast', 'identity']):
+    k_fast        : 3.441 ms
+    identity      : 6.898 ms
+
+### [dsv3] DSv3 o_proj M=2048
+      shape: M=2048, N=7168 (112st), K=16384 (256st), split=(1, 16, 2)
+  trial1 (order: ['identity', 'k_fast']):
+    identity      : 116.017 ms
+    k_fast        : 31.043 ms
+
+  trial2 (order: ['k_fast', 'identity']):
+    k_fast        : 31.400 ms
+    identity      : 116.146 ms
+
+### [dsv3] DSv3 down_proj M=2048 (dense)
+      shape: M=2048, N=7168 (112st), K=2048 (32st), split=(1, 16, 2)
+  trial1 (order: ['identity', 'k_fast']):
+    identity      : 17.044 ms
+    k_fast        : 6.865 ms
+
+  trial2 (order: ['k_fast', 'identity']):
+    k_fast        : 6.845 ms
+    identity      : 17.022 ms
+
+### [dsv3-moe] DSv3 down_proj per-expert M=64
+      shape: M=64, N=7168 (112st), K=2048 (32st), split=(1, 16, 2)
+  trial1 (order: ['identity', 'k_fast']):
+    identity      : 3.160 ms
+    k_fast        : 3.131 ms
+
+  trial2 (order: ['k_fast', 'identity']):
+    k_fast        : 3.123 ms
+    identity      : 3.170 ms
+
+### [dsv3] DSv3 q_a_proj M=2048
+      shape: M=2048, N=1536 (24st), K=7168 (112st), split=(1, 8, 4)
+  trial1 (order: ['identity', 'k_fast']):
+    identity      : 8.368 ms
+    k_fast        : 5.222 ms
+
+  trial2 (order: ['k_fast', 'identity']):
+    k_fast        : 5.206 ms
+    identity      : 8.366 ms
+
+### [dsv3-ctrl] DSv3 kv_a_proj M=2048 (pure-K)
+      shape: M=2048, N=576 (9st), K=7168 (112st), split=(1, 1, 32)
+  trial1 (order: ['identity', 'k_fast']):
+    identity      : ERR InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/tmp/tor
+    k_fast        : ERR InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/tmp/tor
+
+  trial2 (order: ['k_fast', 'identity']):
+    k_fast        : ERR InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/tmp/tor
+    identity      : ERR InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/tmp/tor
+
+### [dsv3-ctrl] DSv3 kv_b_proj M=2048 (pure-N)
+      shape: M=2048, N=32768 (512st), K=512 (8st), split=(1, 32, 1)
+  trial1 (order: ['identity', 'k_fast']):
+    identity      : 20.993 ms
+    k_fast        : 20.990 ms
+
+  trial2 (order: ['k_fast', 'identity']):
+    k_fast        : 21.107 ms
+    identity      : 21.066 ms
+
+
+## Summary — k_fast vs identity (mean of two trial orders)
+
+| regime | shape | split | identity ms | k_fast ms | mean sp | consistent? |
+|---|---|---|---:|---:|---:|---|
+| ref | L3-70B kv_proj M=2048 | (1, 16, 2) | 10.902 | 3.954 | **2.757x** 🚀 | ✓ |
+| cross | Mixtral 8x7B kv_proj M=2048 | (1, 16, 2) | 6.898 | 3.440 | **2.005x** 🚀 | ✓ |
+| dsv3 | DSv3 o_proj M=2048 | (1, 16, 2) | 116.081 | 31.222 | **3.718x** 🚀 | ✓ |
+| dsv3 | DSv3 down_proj M=2048 (dense) | (1, 16, 2) | 17.033 | 6.855 | **2.485x** 🚀 | ✓ |
+| dsv3-moe | DSv3 down_proj per-expert M=64 | (1, 16, 2) | 3.165 | 3.127 | **1.012x** | ✓ |
+| dsv3 | DSv3 q_a_proj M=2048 | (1, 8, 4) | 8.367 | 5.214 | **1.605x** 🚀 | ✓ |
+| dsv3-ctrl | DSv3 kv_a_proj M=2048 (pure-K) | (1, 1, 32) | ERR | ERR | — | — |
+| dsv3-ctrl | DSv3 kv_b_proj M=2048 (pure-N) | (1, 32, 1) | 21.029 | 21.049 | **0.999x** | ~ flipped |
+
+## Confirmed big wins (≥1.5x mean, consistent direction)
+
+  L3-70B kv_proj M=2048                              split=(1, 16, 2)  identity 10.90ms -> k_fast 3.95ms  (2.757x)
+  Mixtral 8x7B kv_proj M=2048                        split=(1, 16, 2)  identity 6.90ms -> k_fast 3.44ms  (2.005x)
+  DSv3 o_proj M=2048                                 split=(1, 16, 2)  identity 116.08ms -> k_fast 31.22ms  (3.718x)
+  DSv3 down_proj M=2048 (dense)                      split=(1, 16, 2)  identity 17.03ms -> k_fast 6.85ms  (2.485x)
+  DSv3 q_a_proj M=2048                               split=(1, 8, 4)  identity 8.37ms -> k_fast 5.21ms  (1.605x)

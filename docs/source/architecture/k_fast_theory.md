@@ -85,6 +85,112 @@ K-collaborators are also `m·n` apart on the physical ring.
 For `(1, 16, 2)`, K-collaborators are 16 apart. Half a ring trip per
 chain hop.
 
+### Toy example — work it out by hand
+
+Pretend the chip has only **8 cores** and the planner picked
+`(m=1, n=4, k=2)`. That's 4 N-slices × 2 K-slices = 8 cores; one per
+`(n_slice, k_slice)` cell. Each N-slice has two K-collaborators that
+must PSUM together.
+
+**Identity emission** uses the formula `core_id = n_slice + 4·k_slice`:
+
+| n_slice | k_slice | core_id |
+|---:|---:|---:|
+| 0 | 0 | 0 |
+| 1 | 0 | 1 |
+| 2 | 0 | 2 |
+| 3 | 0 | 3 |
+| 0 | 1 | **4** |
+| 1 | 1 | 5 |
+| 2 | 1 | 6 |
+| 3 | 1 | 7 |
+
+Physical ring positions 0..3 hold the k=0 workers; positions 4..7
+hold the k=1 workers. **The K-pair for n_slice 0 sits at physical
+positions 0 and 4** — that's 4 ring hops apart.
+
+```mermaid
+flowchart LR
+    subgraph identity_toy["IDENTITY: K-pair for each n is 4 hops apart"]
+        direction LR
+        I0[Pos 0<br/>n=0,k=0]:::k0
+        I1[Pos 1<br/>n=1,k=0]:::k0
+        I2[Pos 2<br/>n=2,k=0]:::k0
+        I3[Pos 3<br/>n=3,k=0]:::k0
+        I4[Pos 4<br/>n=0,k=1]:::k1
+        I5[Pos 5<br/>n=1,k=1]:::k1
+        I6[Pos 6<br/>n=2,k=1]:::k1
+        I7[Pos 7<br/>n=3,k=1]:::k1
+        I0 --- I1 --- I2 --- I3 --- I4 --- I5 --- I6 --- I7
+        I7 -.- I0
+        I0 ==>|PSUM<br/>4 hops| I4
+        I1 ==>|4 hops| I5
+        I2 ==>|4 hops| I6
+        I3 ==>|4 hops| I7
+    end
+    classDef k0 fill:#fdd
+    classDef k1 fill:#fdb
+```
+
+4 chains × 4 hops = **16 total ring hops** for PSUM.
+
+**k_fast emission** uses the formula `perm[c] = (c mod 2)·4 + (c // 2)`:
+
+| physical c | c mod 2 | c // 2 | perm[c] | (n_slice, k_slice) |
+|---:|---:|---:|---:|---|
+| 0 | 0 | 0 | 0 | (n=0, k=0) |
+| 1 | 1 | 0 | **4** | **(n=0, k=1)** ← K-pair partner of pos 0 |
+| 2 | 0 | 1 | 1 | (n=1, k=0) |
+| 3 | 1 | 1 | 5 | (n=1, k=1) |
+| 4 | 0 | 2 | 2 | (n=2, k=0) |
+| 5 | 1 | 2 | 6 | (n=2, k=1) |
+| 6 | 0 | 3 | 3 | (n=3, k=0) |
+| 7 | 1 | 3 | 7 | (n=3, k=1) |
+
+Now **K-pairs sit at adjacent physical positions** — (0,1), (2,3),
+(4,5), (6,7). 1 hop each.
+
+```mermaid
+flowchart LR
+    subgraph kfast_toy["k_fast: K-pair for each n is 1 hop apart"]
+        direction LR
+        Q0[Pos 0<br/>n=0,k=0]:::k0
+        Q1[Pos 1<br/>n=0,k=1]:::k1
+        Q2[Pos 2<br/>n=1,k=0]:::k0
+        Q3[Pos 3<br/>n=1,k=1]:::k1
+        Q4[Pos 4<br/>n=2,k=0]:::k0
+        Q5[Pos 5<br/>n=2,k=1]:::k1
+        Q6[Pos 6<br/>n=3,k=0]:::k0
+        Q7[Pos 7<br/>n=3,k=1]:::k1
+        Q0 --- Q1 --- Q2 --- Q3 --- Q4 --- Q5 --- Q6 --- Q7
+        Q7 -.- Q0
+        Q0 ==>|1 hop| Q1
+        Q2 ==>|1 hop| Q3
+        Q4 ==>|1 hop| Q5
+        Q6 ==>|1 hop| Q7
+    end
+    classDef k0 fill:#dfd
+    classDef k1 fill:#bfb
+```
+
+4 chains × 1 hop = **4 total ring hops**. **4× reduction** in PSUM
+ring traffic.
+
+The intuition you can carry forward: **identity tiles N-slices first
+(filling positions 0..3), then comes back around to do the K=1 layer
+(positions 4..7).** That natural ordering puts K-partners as far apart
+as possible. k_fast does the reverse: **iterate over K within each
+N-slice before moving to the next N-slice**, so K-partners always end
+up adjacent.
+
+The general formula `perm[c] = (c mod k)·(m·n) + (c // k)` is just
+"fast-cycle through k positions, then advance by 1 within the m·n
+block." On a ring, this packs every K-cluster into a contiguous
+length-k block of physical cores.
+
+Everything else in this doc is just this same trick applied to bigger
+splits: same algebra, same packing, larger numbers.
+
 ```mermaid
 flowchart LR
     subgraph identity["IDENTITY: K-pair for n=0 sits at distance 16"]
@@ -325,7 +431,7 @@ optimization that targets PSUM, ring traffic, or compute. The lever
 for decode is **per-call overhead amortization** — preload (Phase 3
 investigation), op fusion, or speculative-decoding-style batching.
 
-## Part 6: Other models — where else does this fire?
+## Part 6: Other models — measured wins
 
 The triggering condition: planner picks `(1, n, k)` with `k ≥ 2` AND
 PSUM is a substantial fraction of wall time.
@@ -336,25 +442,39 @@ N has to be too narrow for pure-N: N < 32 sticks = N < 2048 fp16.
 The second part is determined by M and `m·n·payload`, which means
 prefill of medium-to-long contexts.
 
-Modern GQA architectures with `num_kv_heads · head_dim ≤ 1024`:
+### Measured speedups across model families
 
-| model | hidden_dim | num_kv_heads | head_dim | kv_proj N | predicted speedup at M=2048 prefill |
-|---|---:|---:|---:|---:|---:|
-| **Llama-3 70B** | 8192 | 8 | 128 | 1024 | **2.7× (measured)** |
-| **Mixtral 8×7B** | 4096 | 8 | 128 | 1024 | **predicted ~2.7×** (same shape) |
-| **Mixtral 8×22B** | 6144 | 8 | 128 | 1024 | **predicted ~2.7×** |
-| **Qwen2.5-72B** | 8192 | 8 | 128 | 1024 | **predicted ~2.7×** |
-| **Granite-34B** | 8192 | 8 | 128 | 1024 | **predicted ~2.7×** |
-| Llama-3 8B | 4096 | 8 | 128 | 1024 | predicted ~2.5× (smaller compute) |
-| Qwen2.5-7B | 3584 | 4 | 128 | 512 | smaller; (1, 8, 4) split, 8× reduction but smaller PSUM |
-| Mistral-7B | 4096 | 8 | 128 | 1024 | predicted ~2.5× |
-| GPT-OSS 20B (estimated) | 6144 | 8 | 128 | 1024 | predicted ~2.7× (if our estimate correct) |
-| **DeepSeek-V3 / V2** | 7168 | n/a (MLA) | 128 | uses MLA — different shape | needs separate analysis |
+| model & matmul | shape | split | identity ms | k_fast ms | **speedup** |
+|---|---|---|---:|---:|---:|
+| **Llama-3 70B kv_proj** | (2048, 1024, 8192) | (1, 16, 2) | 10.90 | 3.95 | **2.76×** |
+| **Mixtral 8×7B kv_proj** | (2048, 1024, 4096) | (1, 16, 2) | 6.90 | 3.44 | **2.01×** |
+| **DSv3 o_proj** (attention out) | (2048, 7168, 16384) | (1, 16, 2) | **116.08** | **31.22** | **🚀 3.72×** |
+| **DSv3 down_proj** (FFN) | (2048, 7168, 2048) | (1, 16, 2) | 17.03 | 6.85 | **2.49×** |
+| **DSv3 q_a_proj** (Q-Lora down) | (2048, 1536, 7168) | (1, 8, 4) | 8.37 | 5.21 | **1.61×** |
+
+All measured on real hardware, both trial orders match to <0.1 ms.
+
+The DeepSeek V3 o_proj is the largest single-matmul speedup we've
+seen in the entire project — **85 ms saved on one matmul**. DSv3 has
+multiple distinct matmul shapes per layer that all hit `(1, 16, 2)`
+trigger (o_proj, down_proj per layer in MoE, dense down_proj in non-
+MoE layers), so the per-layer speedup compounds.
+
+### Predicted speedups for shapes we haven't measured yet
+
+| model & matmul | shape | trigger? | predicted speedup |
+|---|---|---|---:|
+| Llama-3 8B kv_proj | (M, 1024, 4096) | yes — same N as Mixtral 8×7B | ~2.0× |
+| Mixtral 8×22B kv_proj | (M, 1024, 6144) | yes — same N=1024 | ~2.5× |
+| Qwen2.5-72B kv_proj | (M, 1024, 8192) | yes — identical to L3-70B | ~2.7× |
+| Granite-34B kv_proj | (M, 1024, 8192) | yes | ~2.7× |
+| Mistral-7B kv_proj | (M, 1024, 4096) | yes — same as Mixtral 8×7B | ~2.0× |
+| GPT-OSS family with GQA | varies | yes if N ≤ 1024 | 2-3× |
 
 The pattern: **almost every modern GQA model with 8 KV heads and
-head_dim=128 has the exact (1, 16, 2) trigger geometry on kv_proj
-prefill.** Same architecture choices → same kv_proj N → same K-split
-fallback → same opportunity for k_fast.
+head_dim=128 has the (1, 16, 2) trigger geometry on kv_proj prefill.**
+Same architecture choices → same kv_proj N → same K-split fallback →
+same opportunity for k_fast.
 
 ```mermaid
 flowchart TB
@@ -372,29 +492,42 @@ flowchart TB
     cond --> who
 ```
 
-### MoE models specifically
+### MoE models specifically — measured
 
-MoE FFN matmuls (gate_proj / up_proj / down_proj per expert):
+The story splits cleanly between dense and per-expert matmuls:
 
-- **Mixtral 8×7B**: intermediate=14336, hidden=4096
-  - gate/up: (M, 14336, 4096) — N=14336=224 sticks, plenty for pure-N. **No K-split, no benefit.**
-  - down: (M, 4096, 14336) — N=4096=64 sticks, pure-N gives 2 sticks/core. **No K-split, no benefit.**
-- **Mixtral 8×22B**: intermediate=16384, hidden=6144
-  - Similar story; MoE FFN matmuls don't trigger K-split.
+**Mixtral-style MoE FFN (gate_proj / up_proj / down_proj per expert)**:
+- Mixtral 8×7B: intermediate=14336, hidden=4096
+  - gate/up: (M, 14336, 4096) — N=14336=224 sticks, plenty for pure-N. No K-split, no benefit.
+  - down: (M, 4096, 14336) — N=4096=64 sticks, pure-N gives 2 sticks/core. No K-split, no benefit.
+- Mixtral 8×22B: similar story.
 
-So the MoE FFN matmuls **don't benefit** from k_fast. But Mixtral's
-*attention* kv_proj is shared across all experts (computed once per
-batch), and that *does* benefit. So Mixtral end-to-end inference will
-see a partial gain on attention but flat on the MoE part.
+**DeepSeek V3 MoE FFN**: hidden=7168 (the non-power-of-2 dim) is the
+N for down_proj, and 7168 = 112 sticks doesn't divide 32 cleanly.
+**Forced into K-split.** Measured down_proj at M=2048 dense:
+- identity: 17.03 ms → k_fast: 6.85 ms → **2.49×**
 
-For DeepSeek V2/V3 with MLA (Multi-head Latent Attention), the
-projection structure is more complex:
-- KV is compressed to a latent dim (~512 in V2)
-- Then projected back out per head
-- The compressed projection has narrow N → likely benefits
-- Per-head projection has small N → strongly benefits
+But per-expert M is much smaller. With 256 routed experts and top-8
+routing, average per-expert M ≈ M_total / 32. Measured at M=64:
+- identity: 3.17 ms → k_fast: 3.13 ms → **1.012×** (no meaningful benefit)
 
-Worth a separate empirical pass on these once we have shapes.
+The per-expert workload is launch-floor-bound — PSUM is too small a
+fraction of wall time for k_fast to move the needle. DSv3's MoE FFN
+benefit only kicks in for the dense layers (first few layers + shared
+expert) where M is the full sequence length.
+
+**DSv3 attention (MLA)**: hidden=7168 also makes o_proj N=7168 hit
+the trigger. Measured: 3.72× speedup at M=2048. **This is the largest
+single-matmul speedup we've seen.**
+
+So the comprehensive MoE story:
+- Mixtral MoE FFN: no benefit (pure-N splits everywhere)
+- DSv3 MoE FFN per-expert (M=64): no meaningful benefit (launch-floor-bound)
+- DSv3 dense MoE FFN (first layers, shared expert): 2-2.5× benefit
+- All MoE attention layers (kv_proj for Mixtral, o_proj/q_a_proj for DSv3): 2-3.7× benefit
+
+For DeepSeek V2 (similar MLA architecture): not yet measured, but the
+projection structure is similar. Likely sees similar wins.
 
 ### GPT-OSS family
 
