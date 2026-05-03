@@ -23,9 +23,19 @@ Spyre's on-chip interconnect:
   `core_id → slice` mapping does walk the ring linearly.
 
 Implication: **the 67 GB/s per-link figure measured below is a combined
-ring-share + DRAM-streaming-on-the-same-ring cost.** Pure ring-share
-(no DRAM contention) is likely faster — a follow-up probe with
-LX-resident operands is needed to isolate it.
+ring-share + DRAM-streaming-on-the-same-ring cost.** A follow-up probe
+with LX-resident operands (`diag_broadcast_lx_resident.py`) measured
+the pure ring-share cost separately:
+
+| metric | combined (DRAM-bound) | pure ring (LX-fit) | delta |
+|---|---:|---:|---:|
+| per-hop per MB | 15.1 μs/MB | 11.5 μs/MB | −24% |
+| effective per-link BW | 66 GB/s | **88 GB/s** | +31% |
+
+So **HMI contention contributes about 24% of the original observed
+cost** — real but secondary. The dominant share is pure ring transit.
+For cost-model purposes: use 88 GB/s as the per-link bandwidth and
+model HMI traffic as a separate competing load on the same ring.
 
 ## Question
 
