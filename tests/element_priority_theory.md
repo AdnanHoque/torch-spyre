@@ -46,33 +46,38 @@ explained by it.
 
 ## Why the speedup is larger than naive DDR predicts
 
-The naive count assumes every byte transits DDR independently. Spyre
-has **cross-core operand sharing**: Phase 0 measurements showed
+The naive count assumes every byte transits HMI (the on-chip DRAM
+interface) independently per core. In practice, Spyre's HMI sits on
+the on-chip ring, so cross-core operand sharing and DRAM streaming
+**compete for the same ring bandwidth**. Phase 0 measurements showed
 effective bandwidth exceeding LPDDR5 peak by 1.4–3.4× on certain
-splits. That can only happen if cores share rather than re-fetch.
+splits — that can only happen if cores share operands across the ring
+rather than each pulling separately from HMI.
 
-Sharing isn't symmetric across axes. In Spyre's row-major core
-emission ([superdsc.py:131-149](torch_spyre/_inductor/codegen/superdsc.py#L131-L149)),
-core IDs are mapped as:
+The dominant first-order story is therefore: **pure-N reduces the
+total bytes that have to go through the HMI-ring path.** With pure-N,
+the small input A (a few MB) is the redundantly-needed operand; with
+pure-M, the large weight B (hundreds of MB) is. Pushing fewer total
+bytes through HMI lets per-core compute proceed without stalling on
+DRAM, regardless of whether those bytes are eventually fanned out via
+ring-share or streamed per-core.
 
-- cores `[0..n-1]` cover one M-band, varying along N
-- core ID `m·n` jumps to the next M-band
+The per-axis analysis we ran on Phase 1.0 data showed pure-N
+empirically beats pure-M by ~30% at fixed split count
+(`(1,n,1)/(m,1,1) = 0.70× median` across big shapes). That gap is
+mostly explained by the operand-size argument above. There is also
+likely a topology component — adjacent core IDs are adjacent on the
+ring (16×2 core layout, ring wrapped through HMI/QGI), so neighbor
+sharing is contiguous along whichever axis is fast-changing in the
+core-ID emission — but we couldn't isolate the topology effect from
+the operand-size effect with the measurements we have, and the
+core-ordering reorder sweep we ran later showed the topology lever is
+flat for production-sized shapes (HMI dominates).
 
-So **N-axis cores are physically adjacent**: they all need the same A
-row, broadcast cheaply across the interconnect. **M-axis cores are
-spaced `n` apart**: they each need full B, which would need to
-broadcast across the whole topology. The per-axis analysis we did on
-Phase 1.0 data confirmed this — the median ratio
-`(1,n,1)/(m,1,1) = 0.70×` across big shapes.
-
-So the speedup decomposes as:
-1. **Naive DDR** (~80% of the win): N-split puts the 32× redundancy on
-   the small tensor A instead of the big tensor B.
-2. **Sharing topology** (~20%): N-axis sharing is contiguous and
-   efficient; M-axis sharing is non-contiguous and degrades.
-
-Both effects point the same way, which is why pure-N consistently
-beats pure-M in the measured table.
+So the speedup is best understood as a single mechanism:
+**operand-size asymmetry on the HMI-bottlenecked ring.** Pure-N is
+the natural way to put the 32× redundancy on the small operand. Pure-M
+would put it on the large operand, saturating HMI for much longer.
 
 ## Why mixed splits emerge for some shapes
 
@@ -93,12 +98,41 @@ Six of 13 shapes show 1.00× speedup. These fall into three buckets:
    `N_iter > M_iter` even after stick adjustment, default ranking
    already prefers N. Heuristic is a no-op.
 3. **Span-pre-split forces the choice** (L3-70B MLP down): N's per-core
-   span exceeds 256 MB, so `must_split_vars` forces n≥2 before priority
-   runs. The pre-split N is filtered out of `it_space_remaining`
-   upstream, leaving only M as a remaining output dim — so the
-   heuristic's "≥2 output dims" guard fails and it doesn't fire. The
-   default planner's pick stands, which is also the empirical best
-   for this shape.
+   span exceeds the 256 MB hardware limit, so `must_split_vars`
+   forces n≥2 before priority runs. The pre-split N is filtered out
+   of `it_space_remaining` upstream, leaving only M as a remaining
+   output dim — so the heuristic's "≥2 output dims" guard fails and
+   it doesn't fire. The default planner's pick stands, which is also
+   the empirical best for this shape.
 
 These bucketings are what give the heuristic **zero regressions across
 the production shape catalog**.
+
+## Why core-ordering tweaks don't add anything on top
+
+A natural follow-up was: with the operand-size win already captured,
+could reordering the `core_id → slice` mapping squeeze out more by
+putting neighbor-shared operands on physically adjacent ring cores?
+We tested this with a `core_emission_reverse` flag on a separate
+branch and saw flat (±1%) wall-time across 13 production shapes plus
+12 forced mixed splits.
+
+Two architectural facts explain the flat result:
+
+1. **HMI is on the ring.** For all the production shapes, weights are
+   far larger than per-core scratchpad and must stream from DRAM
+   through HMI. The same bytes go through HMI regardless of which
+   cores end up sharing what — reordering doesn't change total HMI
+   traffic, so it doesn't change wall time.
+2. **Overlapped input fetch is built into the kernel templates.** The
+   weight-stationary dataflow already issues cross-core operand
+   fetches in chunks concurrently with PT compute, with soft-syncs
+   that don't gate compute on the fetch completing. Whatever ring
+   topology effect a manual reorder might have had is already being
+   hidden by this overlap.
+
+Net: at production scale, the lever exists but the wall-time floor
+underneath it is set by HMI bandwidth and template-level overlap, not
+by sharing topology. Reordering would only matter for shapes that fit
+entirely in LX (no HMI streaming) AND have a mixed split where the
+shared operand is small enough for ring-broadcast to actually fire.

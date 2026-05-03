@@ -4,6 +4,29 @@ A Phase 0 measurement of how cross-core operand sharing scales with the
 number of cores receiving the same operand, using only one external
 behaviour: per-call wall time.
 
+## Architecture context
+
+Spyre's on-chip interconnect:
+
+- **Two counter-rotating data rings** (CW + CCW), each **128 B wide**.
+  Total cross-core data-path width is `2 × 128 B = 256 B / cycle`.
+- **A separate SFP ring at 32 B width** carries psum reduction, isolated
+  from the data rings. Cross-core operand sharing uses the data rings;
+  partial-sum reduction across psum-collaborating cores uses SFP.
+- **HMI (DRAM interface) is a node on the data rings.** This is the
+  single most important fact for interpreting these measurements:
+  cores fetching operands from DRAM use the same ring infrastructure
+  that carries cross-core sharing.
+- **Cores are arranged 16×2** (two columns of 16, with the rings
+  wrapping the perimeter through HMI/QGI at the top). Adjacent core IDs
+  are physically adjacent on the ring, so our row-major
+  `core_id → slice` mapping does walk the ring linearly.
+
+Implication: **the 67 GB/s per-link figure measured below is a combined
+ring-share + DRAM-streaming-on-the-same-ring cost.** Pure ring-share
+(no DRAM contention) is likely faster — a follow-up probe with
+LX-resident operands is needed to isolate it.
+
 ## Question
 
 When N cores all need the same operand, hardware can deliver it via
@@ -15,9 +38,11 @@ several broadcast patterns:
 | Tree | `log₂(N)·t_hop` | up to log₂(N) |
 | Bus / crossbar | constant up to saturation | shared / many |
 
-We didn't know which Spyre uses. The `output_element_priority`
-analysis used hand-wavy "neighbor sharing" arguments without evidence;
-this probe was meant to ground them.
+The probe was designed to discriminate ring vs tree vs bus from wall
+time alone. The dual-ring topology described above means a ring fit
+should map to the per-direction cost of one of the two rings — if both
+directions are exploited concurrently, effective bandwidth could be 2×
+what we measured.
 
 ## Probe design
 
@@ -60,55 +85,63 @@ Ring fit beats tree fit by 2.4× on residual error.
 ## Interpretation
 
 **Spyre's cross-core operand sharing behaves as a ring (or linear
-chain).** Each additional core receiving the broadcast adds ~30 μs of
-wall time when fanning out a 2 MB operand. That implies a per-link
-effective bandwidth of `2 MB / 30 μs ≈ 67 GB/s`.
+chain), as expected from the dual-ring topology.** Each additional core
+receiving the broadcast adds ~30 μs of wall time when fanning out a
+2 MB operand. That implies a *combined* per-link effective bandwidth of
+`2 MB / 30 μs ≈ 67 GB/s` — combined because the same ring is also
+carrying per-core unique B from HMI during this probe (4 MB per core ×
+32 cores = 128 MB through DRAM concurrent with the A broadcast).
 
 For `n ≤ 4` the wall time is essentially flat (~3 ms) because:
 
 - 3 ms is the per-launch floor measured in Phase 0b
 - The broadcast cost for ≤ 4 cores is < 100 μs, which is fully hidden
-  by the floor or by overlap with per-core compute (~2.7 ms)
+  by the floor, by overlap with per-core compute (~2.7 ms), or by the
+  built-in chunk-based overlapped input fetch in the WS dataflow
 
 The linear growth becomes visible from `n=8` onwards. By `n=32` the
-broadcast cost is `31 · 30 μs ≈ 0.93 ms`, comparable to half of
-per-core compute time.
+combined broadcast + DRAM-streaming cost is `31 · 30 μs ≈ 0.93 ms`,
+comparable to half of per-core compute time.
 
 ## Implications for the cost model and the planner
 
-1. **The `output_element_priority` heuristic still wins for the right
-   reason.** Pure-N broadcasts a small A (cheap on a ring, ~1 ms
-   per-call). Pure-M would broadcast a large B (which on a ring at
-   67 GB/s would take ~64× longer for the same `n`, i.e. seconds).
-   Operand-size asymmetry remains the dominant first-order story; ring
-   topology amplifies it because broadcast cost scales with both `n`
-   and operand size.
-2. **The 32-core saturation regime now has a concrete cost.** For any
-   matmul where all 32 cores share an A or B operand, expect ~30 μs
-   per MB of broadcast operand at 67 GB/s. A future cost-model term
-   for sharing should look like `t_share ≈ (n - 1) · |op| / 67 GB/s`,
-   not a single global `α` factor.
-3. **Mixed splits like `(2, 16, 1)` get a topology benefit** that
-   `(1, 32, 1)` doesn't. With `m=2, n=16` only 16 cores share each
-   A-row instead of 32, halving the chain length. Per-axis sharing is
-   real and asymmetric in core-count, even if both axes use the same
-   physical ring.
+1. **The `output_element_priority` heuristic wins by relieving HMI
+   pressure.** Pure-N puts the 32× redundancy on the small input A
+   (~MB scale), so total bytes through HMI on the ring stay small.
+   Pure-M would put 32× on the large weight B (~hundreds of MB), which
+   would saturate HMI for much longer. Since HMI sits on the same ring
+   as cross-core sharing, both effects collapse into a single
+   "bytes through the HMI-ring path" cost — and that's what the
+   element-priority heuristic minimizes.
+2. **A cost-model sharing term should distinguish ring-share from
+   HMI-stream.** This probe couldn't separate them. Once we do
+   (re-measurement #1: pure ring-share probe with LX-resident
+   operands), the two costs should be modeled as competing for the
+   same ring bandwidth budget.
+3. **Mixed splits like `(2, 16, 1)` get a sharing benefit** that
+   `(1, 32, 1)` doesn't only when the shared operand fits the
+   ring-share envelope (small enough to actually broadcast across
+   neighbors instead of streaming per-core from HMI). For large
+   operands (B = hundreds of MB), the operand has to come from HMI
+   per-core anyway, so reorder + ring-share doesn't change wall time —
+   confirmed empirically by our flat reorder sweep results.
 
-## What we still don't know
+## Open follow-ups
 
-- **Where on the ring core 0 lives, and whether it's the sole DDR
-  ingress point.** The `30 μs/MB` per-hop figure assumes the operand
-  enters at one end and propagates. If multiple cores can pull from
-  DDR concurrently, the effective topology is more complex.
-- **Whether broadcasts overlap with compute as we'd hope.** The flat
-  region at `n ≤ 4` suggests yes (broadcast hides under launch floor /
-  compute), but past 8 cores the broadcast appears on the critical
-  path. We didn't decompose how much overlap happens.
-- **Whether N-axis and M-axis broadcasts use the same physical ring.**
-  Per-axis analysis suggested asymmetry but this probe only measured
-  N-axis (A-broadcast). A symmetric M-axis probe (varying `m` with
-  `(m, 1, 1)` splits) would confirm.
-
-These are good follow-ups but not blockers — the ring finding alone is
-enough to inform v2 of the cost model and any future planner heuristic
-that needs to predict broadcast cost.
+- **Pure ring-share probe with LX-resident operands.** Pre-load A and
+  B before benching. If the per-hop cost shrinks dramatically vs the
+  67 GB/s combined number measured here, that confirms the
+  HMI-on-ring contention model and gives us the *true* ring-only cost
+  for the cost model.
+- **Bidirectional ring exploitation.** The doc says CW + CCW are
+  independent. Force two simultaneous broadcasts in opposite
+  directions and compare to one at twice the volume. If we see ~2×
+  bandwidth, dual-ring is exploitable in codegen.
+- **SFP-ring-only psum probe.** Slide 30 of the doc says cross-core
+  partial sum reduction uses the dedicated 32 B SFP ring, isolated
+  from data ring traffic. That ring's per-hop cost has not been
+  measured. Could matter for shapes where K-split is competitive with
+  N-split.
+- **N-axis vs M-axis symmetry.** This probe only measured N-axis
+  broadcast (A across N-band cores). A symmetric M-axis probe would
+  confirm whether the dual-ring topology treats both axes equally.
