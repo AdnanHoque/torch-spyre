@@ -29,6 +29,7 @@ from torch_spyre._inductor.constants import (
     MATMUL_LAYOUT_LABELS,
     SEGMENT_OFFSETS,
 )
+from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.op_spec import TensorArg
@@ -131,12 +132,31 @@ class SDSCSpec:
 def _get_core_to_slice_mapping(
     iteration_space, dim_splits: dict[Symbol, int], num_cores: int
 ) -> dict[Symbol, Expr]:
+    """Build per-dim sympy expressions giving each core's slice index.
+
+    Walks the iteration-space dims in order and assigns each non-trivial
+    split a "stride" in the linear core_id space — the first dim that
+    has split>1 becomes the fast-changing dim (cores 0, 1, 2, ... walk
+    through its slices first).
+
+    When `config.core_emission_reverse` is True, iteration order is
+    reversed so the rightmost dim becomes the fast-changing one. For
+    matmul iteration order [M, N, K]:
+      - default → M is fast (adjacent ring cores share an N-band)
+      - reversed → N is fast (adjacent ring cores share an M-band)
+
+    For pure splits (only one dim has split>1) the flag is a no-op.
+    """
     core_id_sym = Symbol("core_id")
 
     dim_to_expr: dict[str, object] = {}
     inner_product = Integer(1)
 
-    for dim in iteration_space:
+    dims = list(iteration_space)
+    if config.core_emission_reverse:
+        dims = list(reversed(dims))
+
+    for dim in dims:
         if dim_splits[dim] == 1:
             expr = Integer(0)
         elif inner_product == Integer(1):
