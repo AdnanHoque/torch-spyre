@@ -1,0 +1,161 @@
+# Long-M generalization probe — does block_cyclic help broadly?
+
+# warmup=3 iters=15, fp16, SENCORES=32
+
+# Each (shape, perm) runs in BOTH trial orders. A real win
+# requires (a) consistent direction across orders, (b) mean ≥2%.
+
+### [trend] L3-70B q_proj M=4096  M=4096 N=8192 K=8192  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic', 'bit_reverse']):
+    identity      : 21.999 ms
+    block_cyclic  : 21.483 ms
+    bit_reverse   : 22.347 ms
+
+  trial2 (order: ['bit_reverse', 'block_cyclic', 'identity']):
+    bit_reverse   : 22.329 ms
+    block_cyclic  : 21.460 ms
+    identity      : 22.066 ms
+
+### [l3-70B] L3-70B kv_proj M=2048  M=2048 N=1024 K=8192  split=(1, 16, 2)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 10.872 ms
+    block_cyclic  : 3.933 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 3.938 ms
+    identity      : 10.877 ms
+
+### [l3-70B] L3-70B o_proj M=2048  M=2048 N=8192 K=8192  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 12.253 ms
+    block_cyclic  : 12.144 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 12.138 ms
+    identity      : 12.262 ms
+
+### [l3-70B] L3-70B o_proj M=4096  M=4096 N=8192 K=8192  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 21.894 ms
+    block_cyclic  : 21.512 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 21.319 ms
+    identity      : 21.901 ms
+
+### [l3-70B] L3-70B mlp_gate M=2048  M=2048 N=28672 K=8192  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 258.589 ms
+    block_cyclic  : 258.119 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 258.232 ms
+    identity      : 259.901 ms
+
+### [l3-70B] L3-70B mlp_down M=2048  M=2048 N=8192 K=28672  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 70.156 ms
+    block_cyclic  : 70.212 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 70.211 ms
+    identity      : 70.329 ms
+
+### [l3-70B] L3-70B mlp_down M=4096  M=4096 N=8192 K=28672  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 138.071 ms
+    block_cyclic  : 137.706 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 138.011 ms
+    identity      : 138.561 ms
+
+### [l3-8B] L3-8B q_proj M=2048  M=2048 N=4096 K=4096  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 5.385 ms
+    block_cyclic  : 5.394 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 5.383 ms
+    identity      : 5.343 ms
+
+### [l3-8B] L3-8B q_proj M=4096  M=4096 N=4096 K=4096  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 7.820 ms
+    block_cyclic  : 7.826 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 7.834 ms
+    identity      : 7.816 ms
+
+### [l3-8B] L3-8B mlp_down M=2048  M=2048 N=4096 K=14336  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 18.122 ms
+    block_cyclic  : 18.174 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 18.161 ms
+    identity      : 18.109 ms
+
+### [l3-8B] L3-8B mlp_down M=4096  M=4096 N=4096 K=14336  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 33.353 ms
+    block_cyclic  : 32.846 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 33.158 ms
+    identity      : 32.916 ms
+
+### [kmix] L3-70B q_proj K-split (4,1,8)  M=128 N=8192 K=8192  split=(4, 1, 8)
+  trial1 (order: ['identity', 'stride2']):
+    identity      : 4.387 ms
+    stride2       : 4.227 ms
+
+  trial2 (order: ['stride2', 'identity']):
+    stride2       : 4.202 ms
+    identity      : 4.373 ms
+
+
+## Summary — block_cyclic vs identity (mean of two trial orders)
+
+| regime | shape | split | identity | block_cyclic | mean sp | consistent? |
+|---|---|---|---:|---:|---:|---|
+| trend | L3-70B q_proj M=4096 | (1, 32, 1) | 22.033 | 21.471 | 1.026x | ✓ |
+| l3-70B | L3-70B kv_proj M=2048 | (1, 16, 2) | 10.875 | 3.936 | 2.763x | ✓ |
+| l3-70B | L3-70B o_proj M=2048 | (1, 32, 1) | 12.257 | 12.141 | 1.010x | ✓ |
+| l3-70B | L3-70B o_proj M=4096 | (1, 32, 1) | 21.898 | 21.415 | 1.023x | ✓ |
+| l3-70B | L3-70B mlp_gate M=2048 | (1, 32, 1) | 259.245 | 258.175 | 1.004x | ✓ |
+| l3-70B | L3-70B mlp_down M=2048 | (1, 32, 1) | 70.243 | 70.211 | 1.000x | ~ flipped |
+| l3-70B | L3-70B mlp_down M=4096 | (1, 32, 1) | 138.316 | 137.859 | 1.003x | ✓ |
+| l3-8B | L3-8B q_proj M=2048 | (1, 32, 1) | 5.364 | 5.388 | 0.995x | ✓ |
+| l3-8B | L3-8B q_proj M=4096 | (1, 32, 1) | 7.818 | 7.830 | 0.998x | ✓ |
+| l3-8B | L3-8B mlp_down M=2048 | (1, 32, 1) | 18.115 | 18.167 | 0.997x | ✓ |
+| l3-8B | L3-8B mlp_down M=4096 | (1, 32, 1) | 33.134 | 33.002 | 1.004x | ~ flipped |
+
+## Confirmed wins (≥2% mean AND consistent direction)
+
+  [trend] L3-70B q_proj M=4096  perm=block_cyclic  mean speedup 1.026x
+  [l3-70B] L3-70B kv_proj M=2048  perm=block_cyclic  mean speedup 2.763x
+  [l3-70B] L3-70B o_proj M=4096  perm=block_cyclic  mean speedup 1.023x
+  [kmix] L3-70B q_proj K-split (4,1,8)  perm=stride2  mean speedup 1.039x
+
+## Output-size scaling check
+
+Hypothesis: block_cyclic speedup correlates with output bytes
+(M·N·dtype). If true, a scatter plot of (output_bytes, speedup)
+should show monotonic positive correlation.
+
+| shape | M*N (KB output) | mean speedup |
+|---|---:|---:|
+| L3-70B q_proj M=4096 | 65536 | 1.026x |
+| L3-70B kv_proj M=2048 | 4096 | 2.763x |
+| L3-70B o_proj M=2048 | 32768 | 1.010x |
+| L3-70B o_proj M=4096 | 65536 | 1.023x |
+| L3-70B mlp_gate M=2048 | 114688 | 1.004x |
+| L3-70B mlp_down M=2048 | 32768 | 1.000x |
+| L3-70B mlp_down M=4096 | 65536 | 1.003x |
+| L3-8B q_proj M=2048 | 16384 | 0.995x |
+| L3-8B q_proj M=4096 | 32768 | 0.998x |
+| L3-8B mlp_down M=2048 | 16384 | 0.997x |
+| L3-8B mlp_down M=4096 | 32768 | 1.004x |
+
