@@ -1,0 +1,165 @@
+# Broad permutation sweep — prefill / training / MoE / attention
+
+# warmup=3 iters=12, fp16, SENCORES=32
+
+# Permutations tested: ['identity', 'stride2', 'block_cyclic', 'bit_reverse']
+
+### [prefill] L3-8B q_proj M=128  M=128 N=4096 K=4096  split=(1, 32, 1)
+  identity      : 3.160 ms  rel=1.000x  (baseline)
+  stride2       : 3.169 ms  rel=0.997x  ~ tie
+  block_cyclic  : 3.174 ms  rel=0.996x  ~ tie
+  bit_reverse   : 3.169 ms  rel=0.997x  ~ tie
+
+### [prefill] L3-8B q_proj M=512  M=512 N=4096 K=4096  split=(1, 32, 1)
+  identity      : 3.492 ms  rel=1.000x  (baseline)
+  stride2       : 3.488 ms  rel=1.001x  ~ tie
+  block_cyclic  : 3.508 ms  rel=0.995x  ~ tie
+  bit_reverse   : 3.510 ms  rel=0.995x  ~ tie
+
+### [prefill] L3-8B q_proj M=2048  M=2048 N=4096 K=4096  split=(1, 32, 1)
+  identity      : 5.365 ms  rel=1.000x  (baseline)
+  stride2       : 5.350 ms  rel=1.003x  ~ tie
+  block_cyclic  : 5.408 ms  rel=0.992x  ~ tie
+  bit_reverse   : 5.386 ms  rel=0.996x  ~ tie
+
+### [prefill] L3-70B q_proj M=128  M=128 N=8192 K=8192  split=(1, 32, 1)
+  identity      : 3.977 ms  rel=1.000x  (baseline)
+  stride2       : 4.038 ms  rel=0.985x  ~ tie
+  block_cyclic  : 3.995 ms  rel=0.995x  ~ tie
+  bit_reverse   : 3.999 ms  rel=0.994x  ~ tie
+
+### [prefill] L3-70B q_proj M=512  M=512 N=8192 K=8192  split=(1, 32, 1)
+  identity      : 5.281 ms  rel=1.000x  (baseline)
+  stride2       : 5.334 ms  rel=0.990x  ~ tie
+  block_cyclic  : 5.164 ms  rel=1.023x  ✓ FASTER
+  bit_reverse   : 5.295 ms  rel=0.997x  ~ tie
+
+### [training] L3-8B q_proj M=4096  M=4096 N=4096 K=4096  split=(1, 32, 1)
+  identity      : 7.936 ms  rel=1.000x  (baseline)
+  stride2       : 7.860 ms  rel=1.010x  ~ tie
+  block_cyclic  : 7.935 ms  rel=1.000x  ~ tie
+  bit_reverse   : 7.908 ms  rel=1.004x  ~ tie
+
+### [training] L3-70B q_proj M=2048  M=2048 N=8192 K=8192  split=(1, 32, 1)
+  identity      : 12.329 ms  rel=1.000x  (baseline)
+  stride2       : 12.762 ms  rel=0.966x  ✗ SLOWER
+  block_cyclic  : 12.162 ms  rel=1.014x  ~ tie
+  bit_reverse   : 12.456 ms  rel=0.990x  ~ tie
+
+### [moe] Mixtral expert down M=128  M=128 N=4096 K=14336  split=(1, 32, 1)
+  identity      : 4.606 ms  rel=1.000x  (baseline)
+  stride2       : 4.651 ms  rel=0.990x  ~ tie
+  block_cyclic  : 4.613 ms  rel=0.998x  ~ tie
+  bit_reverse   : 4.590 ms  rel=1.003x  ~ tie
+
+### [moe] MoE expert down M=512  M=512 N=4096 K=14336  split=(1, 32, 1)
+  identity      : 6.626 ms  rel=1.000x  (baseline)
+  stride2       : 6.655 ms  rel=0.996x  ~ tie
+  block_cyclic  : 6.648 ms  rel=0.997x  ~ tie
+  bit_reverse   : 6.696 ms  rel=0.990x  ~ tie
+
+### [attn] QK^T seq=512 hd=128  M=512 N=512 K=128  split=(4, 8, 1)
+  identity      : 2.945 ms  rel=1.000x  (baseline)
+  stride2       : 2.960 ms  rel=0.995x  ~ tie
+  block_cyclic  : 2.962 ms  rel=0.994x  ~ tie
+  bit_reverse   : 2.951 ms  rel=0.998x  ~ tie
+
+### [attn] QK^T seq=2048 hd=128  M=2048 N=2048 K=128  split=(1, 32, 1)
+  identity      : 2.990 ms  rel=1.000x  (baseline)
+  stride2       : 2.984 ms  rel=1.002x  ~ tie
+  block_cyclic  : 2.990 ms  rel=1.000x  ~ tie
+  bit_reverse   : 2.978 ms  rel=1.004x  ~ tie
+
+### [attn] QK^T seq=4096 hd=128  M=4096 N=4096 K=128  split=(1, 32, 1)
+  identity      : 3.308 ms  rel=1.000x  (baseline)
+  stride2       : 3.306 ms  rel=1.001x  ~ tie
+  block_cyclic  : 3.320 ms  rel=0.996x  ~ tie
+  bit_reverse   : 3.313 ms  rel=0.999x  ~ tie
+
+### [attn] AV seq=512 hd=128  M=512 N=128 K=512  split=(16, 2, 1)
+  identity      : 2.964 ms  rel=1.000x  (baseline)
+  stride2       : 2.968 ms  rel=0.999x  ~ tie
+  block_cyclic  : 2.959 ms  rel=1.002x  ~ tie
+  bit_reverse   : 2.967 ms  rel=0.999x  ~ tie
+
+### [attn] AV seq=2048 hd=128  M=2048 N=128 K=2048  split=(1, 2, 16)
+  identity      : 3.086 ms  rel=1.000x  (baseline)
+  stride2       : 3.083 ms  rel=1.001x  ~ tie
+  block_cyclic  : 3.096 ms  rel=0.997x  ~ tie
+  bit_reverse   : 3.229 ms  rel=0.956x  ✗ SLOWER
+
+### [attn] AV seq=4096 hd=128  M=4096 N=128 K=4096  split=(1, 2, 16)
+  identity      : 3.283 ms  rel=1.000x  (baseline)
+  stride2       : 3.289 ms  rel=0.998x  ~ tie
+  block_cyclic  : 3.346 ms  rel=0.981x  ~ tie
+  bit_reverse   : 3.886 ms  rel=0.845x  ✗ SLOWER
+
+### [kmix] L3-70B q_proj K-split (4,1,8)  M=128 N=8192 K=8192  split=(4, 1, 8)
+  identity      : 4.408 ms  rel=1.000x  (baseline)
+  stride2       : 4.258 ms  rel=1.035x  ✓ FASTER
+  block_cyclic  : 5.124 ms  rel=0.860x  ✗ SLOWER
+  bit_reverse   : 6.149 ms  rel=0.717x  ✗ SLOWER
+
+### [kmix] L3-8B MLP down K-split (4,1,8)  M=128 N=4096 K=14336  split=(4, 1, 8)
+  identity      : 4.468 ms  rel=1.000x  (baseline)
+  stride2       : 4.437 ms  rel=1.007x  ~ tie
+  block_cyclic  : 4.927 ms  rel=0.907x  ✗ SLOWER
+  bit_reverse   : 5.759 ms  rel=0.776x  ✗ SLOWER
+
+
+## Summary — speedup vs identity
+
+### PREFILL
+
+| shape | split | identity | stride2 | block_cyclic | bit_reverse |
+|---|---|---:|---:|---:|---:|
+| L3-8B q_proj M=128 | (1, 32, 1) | 1.000x | 0.997x | 0.996x | 0.997x |
+| L3-8B q_proj M=512 | (1, 32, 1) | 1.000x | 1.001x | 0.995x | 0.995x |
+| L3-8B q_proj M=2048 | (1, 32, 1) | 1.000x | 1.003x | 0.992x | 0.996x |
+| L3-70B q_proj M=128 | (1, 32, 1) | 1.000x | 0.985x | 0.995x | 0.994x |
+| L3-70B q_proj M=512 | (1, 32, 1) | 1.000x | 0.990x | 1.023x | 0.997x |
+
+### TRAINING
+
+| shape | split | identity | stride2 | block_cyclic | bit_reverse |
+|---|---|---:|---:|---:|---:|
+| L3-8B q_proj M=4096 | (1, 32, 1) | 1.000x | 1.010x | 1.000x | 1.004x |
+| L3-70B q_proj M=2048 | (1, 32, 1) | 1.000x | 0.966x | 1.014x | 0.990x |
+
+### MOE
+
+| shape | split | identity | stride2 | block_cyclic | bit_reverse |
+|---|---|---:|---:|---:|---:|
+| Mixtral expert down M=128 | (1, 32, 1) | 1.000x | 0.990x | 0.998x | 1.003x |
+| MoE expert down M=512 | (1, 32, 1) | 1.000x | 0.996x | 0.997x | 0.990x |
+
+### ATTN
+
+| shape | split | identity | stride2 | block_cyclic | bit_reverse |
+|---|---|---:|---:|---:|---:|
+| QK^T seq=512 hd=128 | (4, 8, 1) | 1.000x | 0.995x | 0.994x | 0.998x |
+| QK^T seq=2048 hd=128 | (1, 32, 1) | 1.000x | 1.002x | 1.000x | 1.004x |
+| QK^T seq=4096 hd=128 | (1, 32, 1) | 1.000x | 1.001x | 0.996x | 0.999x |
+| AV seq=512 hd=128 | (16, 2, 1) | 1.000x | 0.999x | 1.002x | 0.999x |
+| AV seq=2048 hd=128 | (1, 2, 16) | 1.000x | 1.001x | 0.997x | 0.956x |
+| AV seq=4096 hd=128 | (1, 2, 16) | 1.000x | 0.998x | 0.981x | 0.845x |
+
+### KMIX
+
+| shape | split | identity | stride2 | block_cyclic | bit_reverse |
+|---|---|---:|---:|---:|---:|
+| L3-70B q_proj K-split (4,1,8) | (4, 1, 8) | 1.000x | 1.035x | 0.860x | 0.717x |
+| L3-8B MLP down K-split (4,1,8) | (4, 1, 8) | 1.000x | 1.007x | 0.907x | 0.776x |
+
+## Candidates worth replicating (≥2% over identity)
+
+  [prefill] L3-70B q_proj M=512 (1, 32, 1)  perm=block_cyclic  rel=1.023x
+  [kmix] L3-70B q_proj K-split (4,1,8) (4, 1, 8)  perm=stride2  rel=1.035x
+
+## Regressions (≤0.95) for negative-result archive
+
+  [attn] AV seq=4096 hd=128 (1, 2, 16)  perm=bit_reverse  rel=0.845x
+  [kmix] L3-70B q_proj K-split (4,1,8) (4, 1, 8)  perm=block_cyclic  rel=0.860x
+  [kmix] L3-70B q_proj K-split (4,1,8) (4, 1, 8)  perm=bit_reverse  rel=0.717x
+  [kmix] L3-8B MLP down K-split (4,1,8) (4, 1, 8)  perm=block_cyclic  rel=0.907x
+  [kmix] L3-8B MLP down K-split (4,1,8) (4, 1, 8)  perm=bit_reverse  rel=0.776x

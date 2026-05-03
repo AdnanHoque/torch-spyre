@@ -1,0 +1,74 @@
+# Broad-sweep replication — confirm M=512 block_cyclic & K-split stride2
+
+# warmup=5 iters=25, fp16, SENCORES=32
+
+### L3-70B q_proj M=512 prefill  M=512 N=8192 K=8192  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic', 'stride2', 'bit_reverse']):
+    identity      : 5.221 ms
+    block_cyclic  : 5.157 ms
+    stride2       : 5.308 ms
+    bit_reverse   : 5.247 ms
+
+  trial2 (order: ['bit_reverse', 'stride2', 'block_cyclic', 'identity']):
+    bit_reverse   : 5.271 ms
+    stride2       : 5.278 ms
+    block_cyclic  : 5.173 ms
+    identity      : 5.214 ms
+
+### L3-70B q_proj K-split (4,1,8)  M=128 N=8192 K=8192  split=(4, 1, 8)
+  trial1 (order: ['identity', 'stride2', 'block_cyclic']):
+    identity      : 4.380 ms
+    stride2       : 4.231 ms
+    block_cyclic  : 5.082 ms
+
+  trial2 (order: ['block_cyclic', 'stride2', 'identity']):
+    block_cyclic  : 5.093 ms
+    stride2       : 4.182 ms
+    identity      : 4.358 ms
+
+### L3-70B q_proj M=256  M=256 N=8192 K=8192  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 4.047 ms
+    block_cyclic  : 3.971 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 3.976 ms
+    identity      : 4.022 ms
+
+### L3-70B q_proj M=1024  M=1024 N=8192 K=8192  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 7.626 ms
+    block_cyclic  : 7.514 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 7.458 ms
+    identity      : 7.590 ms
+
+### L3-70B q_proj M=2048  M=2048 N=8192 K=8192  split=(1, 32, 1)
+  trial1 (order: ['identity', 'block_cyclic']):
+    identity      : 12.442 ms
+    block_cyclic  : 12.140 ms
+
+  trial2 (order: ['block_cyclic', 'identity']):
+    block_cyclic  : 12.045 ms
+    identity      : 12.312 ms
+
+
+## Replication summary
+
+| shape | perm | trial1 ms | trial2 ms | t1 sp vs id | t2 sp vs id | mean sp | consistent? |
+|---|---|---:|---:|---:|---:|---:|---|
+| L3-70B q_proj M=512 prefill | block_cyclic | 5.157 | 5.173 | 1.012x | 1.008x | 1.010x | ✓ same dir |
+| L3-70B q_proj M=512 prefill | stride2 | 5.308 | 5.278 | 0.983x | 0.988x | 0.986x | ✓ same dir |
+| L3-70B q_proj M=512 prefill | bit_reverse | 5.247 | 5.271 | 0.995x | 0.989x | 0.992x | ✓ same dir |
+| L3-70B q_proj K-split (4,1,8) | stride2 | 4.231 | 4.182 | 1.035x | 1.042x | 1.039x | ✓ same dir |
+| L3-70B q_proj K-split (4,1,8) | block_cyclic | 5.082 | 5.093 | 0.862x | 0.856x | 0.859x | ✓ same dir |
+| L3-70B q_proj M=256 | block_cyclic | 3.971 | 3.976 | 1.019x | 1.011x | 1.015x | ✓ same dir |
+| L3-70B q_proj M=1024 | block_cyclic | 7.514 | 7.458 | 1.015x | 1.018x | 1.016x | ✓ same dir |
+| L3-70B q_proj M=2048 | block_cyclic | 12.140 | 12.045 | 1.025x | 1.022x | 1.024x | ✓ same dir |
+
+## Verdict
+
+  Confirmed wins (≥2% AND consistent across both orders):
+    - L3-70B q_proj K-split (4,1,8): perm=stride2, mean speedup 1.039x
+    - L3-70B q_proj M=2048: perm=block_cyclic, mean speedup 1.024x
