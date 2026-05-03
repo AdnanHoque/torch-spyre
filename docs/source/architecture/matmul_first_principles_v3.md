@@ -67,6 +67,24 @@ around it in deep learning models), the AIU is dense, predictable,
 and efficient. When the work is unpredictable or doesn't match,
 there's no caching mechanism to bail you out.
 
+> **Toy example.** Imagine baking 1,000 identical cookies.
+>
+> - **Cache-driven (CPU/GPU)**: you start the recipe, walk to the
+>   pantry for flour, walk back, walk to the fridge for butter, walk
+>   back, etc. The first batch is slow because the kitchen "learns"
+>   what you need (caches it on the counter). Batches 2–N are fast
+>   because the ingredients are already nearby.
+> - **Dataflow (AIU)**: before you start, the manager stages flour,
+>   butter, sugar at exactly the right station, in exactly the order
+>   they're consumed, on a conveyor belt. There is *no learning
+>   phase*. Batch 1 runs at the same speed as batch 1,000, but only
+>   if you're baking exactly the cookies the manager planned for.
+>   Switch to muffins mid-shift and the conveyor delivers nothing
+>   useful.
+>
+> A GPU is forgiving and adaptive; the AIU is rigid and dense. The
+> rest of this document is, mostly, the manager's playbook.
+
 ### Why this matters for everything below
 
 Because the dataflow is exposed:
@@ -152,6 +170,23 @@ A stick is 128 bytes, period. All memory transfers between LX,
 ring, and HMI happen in stick units. Tensor inner dimensions get
 padded to stick boundaries. We'll explain why the chip is built
 around this concept in §3.
+
+> **Toy example — reading the at-a-glance card.** Suppose you have
+> a `(M=128, N=4096, K=4096)` matmul in fp16.
+>
+> - **Stick math**: an N row is 4096 fp16 elements ÷ 64 = 64 sticks.
+>   Total weight tensor B is K×N = 4096×4096×2 B = 32 MB → 32 MB ÷
+>   128 B = 262,144 sticks.
+> - **Per-corelet compute time** if 1 corelet does it alone: total
+>   FLOPs = 2·M·N·K ≈ 4.3 GFLOPS. At 1 TFLOPS/corelet that's ~4.3 ms
+>   of compute. So a single corelet is bandwidth-equivalent to about
+>   1.4× the launch floor — meaningful but not huge.
+> - **HMI vs ring**: B is 32 MB. Per-direction ring at ~88 GB/s
+>   could move it in ~360 μs *if* it all fit on chip. Each core has
+>   2 MB of LX, chip-wide that's 64 MB, so the whole 32 MB *can*
+>   fit — this is a ring-bound, not HMI-bound, shape.
+>
+> Every later section will refer back to this kind of arithmetic.
 
 ---
 
@@ -253,6 +288,21 @@ would be smaller, because cross-core sharing wouldn't be relieving
 ring congestion. The architecture's choice of HMI placement is
 why a planner-priority bug fix produced such a large speedup.
 
+> **Toy example — ring traffic for a 4-core matmul.** Picture a
+> mini-AIU with just 4 cores arranged in a ring (`C0–C1–C2–C3–C0`).
+> A `(M=4, N=4096, K=4096)` matmul, fp16, B is 32 MB.
+>
+> - **Pure-M split** `(4, 1, 1)` — every core needs full B (32 MB).
+>   Total HMI traffic: 4 × 32 MB = **128 MB** through the gateway.
+> - **Pure-N split** `(1, 4, 1)` — each core needs ¼ of B (8 MB).
+>   Total HMI traffic: 4 × 8 MB = **32 MB** through the gateway.
+>
+> A 4× swing in HMI bytes from a single planner choice. Scale this
+> to 32 cores and you get the 32× swing that makes
+> `output_element_priority` a 1.6× win. The ring's HMI placement
+> turned a "which dim should we split first" question into the
+> dominant performance lever.
+
 ---
 
 ## Part 3: The "stick" — why a 128-byte container is the answer to many questions
@@ -348,6 +398,21 @@ statements about stick counts.
   power-of-2 stick counts more gracefully than non-power-of-2
   values. See pitfalls section.
 
+> **Toy example — counting sticks for three real shapes.**
+>
+> | tensor | dtype | inner-dim elements | sticks | padded? |
+> |---|---|---|---|---|
+> | `[128, 4096]` (LLM activation) | fp16 | 4096 | 4096/64 = **64** | no |
+> | `[1, 4097]` (oddball) | fp16 | 4097 | ceil(4097/64) = **65** | yes — 1 element of pad |
+> | `[1, 14336]` (Llama-3 MLP gate) | fp16 | 14336 | 14336/64 = **224** | no, but 224 = 32×7 |
+>
+> The third row is exactly the non-power-of-2 trap: 224 sticks
+> divides cleanly across 32 cores → 7 sticks per core, which is
+> *also* odd. So the per-core slice is a non-power-of-2 stick count
+> and trips the slow path. Solving this isn't about making the
+> tensor "fit"; it already fits. It's about which factorizations the
+> downstream stack handles well.
+
 ---
 
 ## Part 4: Building the compute hierarchy
@@ -420,6 +485,28 @@ from matmul. The "outer product" structure of matmul (an M×K input
 times a K×N weight produces M×N output) maps cleanly: spread output
 columns across the PT row, share input as broadcast.
 
+> **Toy example — one PT row computing C[0, 0:64] += A[0, 0:8] @ B[0:8, 0:64].**
+>
+> Suppose row `i=0` of A is `[a0, a1, ..., a7]` (8 input channels)
+> and B's first 64 output columns are pre-loaded across the row's
+> 8 PT units' XRFs (each PT unit holds B for 8 output cols).
+>
+> ```
+> cycle 0:  a0 enters PT0  → multiplies its 8 XRF cols → 8 partials
+> cycle 1:  a0 forwarded to PT1, a1 enters PT0
+>           PT1: a0 × its B cols → 8 partials
+>           PT0: a1 × its B cols → 8 partials
+> ...
+> cycle 7:  a0 reaches PT7, a7 enters PT0
+> cycle 8:  a1 reaches PT7, etc.
+> ```
+>
+> After the pipeline fills, every cycle produces 64 partial-sum
+> updates (8 PT units × 8 SIMD lanes), and the *same* `ai` is
+> shared across all 8 columns. That west-to-east "broadcast" is why
+> input bandwidth from L0 is just 16 B/cycle (one cycle's input
+> stream), even though the row touches 64 output values per cycle.
+
 ### PT array — adding reduction along a second dimension
 
 8 PT rows stacked vertically. Each row works on a different group
@@ -451,6 +538,23 @@ In one cycle, a PT array produces:
 - 64 output channels × 8 input channels parallel work
 - = 512 multiply-accumulate operations
 - = ~1 TFLOPS at 1 GHz, fp16
+
+> **Toy example — full PT array for `C[0, 0:64] += A[0, 0:64] @ B[0:64, 0:64]`.**
+>
+> Now we use all 8 rows. A's 64 input channels are split into 8
+> groups of 8: row 0 gets `a0–a7`, row 1 gets `a8–a15`, …, row 7
+> gets `a56–a63`. Each row holds its own slice of B (an 8×64 chunk)
+> in XRF.
+>
+> Each cycle (after pipeline fill):
+> - Row 0 produces 64 partial sums for `C[0, 0:64]` from `a0–a7`.
+> - Row 1 receives row 0's partial sums via north-to-south flow,
+>   *adds* its own contribution from `a8–a15`, and forwards south.
+> - ... by row 7, the column has accumulated all 64 input channels.
+>
+> One cycle of steady-state = 64 outputs × 8 input-channel
+> contributions = 512 MAC. After 64 cycles of streaming through one
+> 64-K block, you've finished `C[0, 0:64]` for one M row.
 
 ### Corelet — the smallest "useful" compute unit
 
@@ -544,6 +648,15 @@ For perspective: an NVIDIA H100 hits ~990 TFLOPs/s at fp16 with
 sparsity. The AIU is roughly 1/15th of an H100 in absolute compute,
 but at a fraction of the area and power budget — it's a denser
 design per silicon area for the matmul-heavy workloads it targets.
+
+> **Toy example — what does "per-corelet 1 TFLOPS" actually look
+> like?** A small Llama-3 q-projection matmul `(M=128, N=4096,
+> K=4096)` is 4.3 GFLOPS. On a single corelet at 1 TFLOPS that's
+> ~4.3 ms of compute. On all 32 active corelets (1 per core) it's
+> ~135 μs — well below the 3 ms launch floor. So this shape is
+> *launch-floor-bound*: the chip finishes computing before the
+> launch overhead even unwinds. Knowing this stops you wasting time
+> tuning splits for shapes that can't possibly improve.
 
 ---
 
@@ -650,6 +763,24 @@ Notice that XRF and LRF "stationary" data never goes back to LX
 during the inner loops — that's the whole point of "stationary."
 The compiler ensures the kernel block is sized so that it can do
 many useful cycles of compute on each block-load.
+
+> **Toy example — where does each piece of a tiny matmul live?**
+>
+> Take `C[0:64, 0:64] += A[0:64, 0:64] @ B[0:64, 0:64]` running on
+> one corelet. Trace where each operand lives over the kernel's life:
+>
+> | data | size | level | duration |
+> |---|---|---|---|
+> | full B (a 64×64 tile) | 8 KB | XRF (per PT unit, 1 KB × 8 cols × 8 rows) | for the *entire* kernel — block-loaded once |
+> | A row chunk (8 input chans × stick) | 128 B | L0 slice | 1 chunk-time, then refilled |
+> | A's full row | 128 B/row × 64 rows = 8 KB | LX | for the kernel's life |
+> | C partial sums | per-PT-unit, ~tens of B | LRF (during accumulate) | until written back |
+> | C final tile | 64×64×2 B = 8 KB | LX → DDR | written at the end |
+>
+> Notice the asymmetry: B (the "stationary" weight) sits in XRF and
+> is *never* re-read from LX during inner loops. A streams. C
+> trickles out. This is the point of "weight stationary": pay the
+> XRF block-load cost *once* and amortize it over many MACs.
 
 ---
 
@@ -773,6 +904,24 @@ expensive even on the dedicated ring. The mixed split `(2, 1, 16)`
 beats pure-K because it halves both factors — half the chain × half
 the partial = ¼ the cost. See
 [`psum_split_findings.md`](../../tests/psum_split_findings.md).
+
+> **Toy example — counting ring cycles for a 1 MB transfer.** A
+> 1 MB tensor is 1,048,576 B ÷ 128 B/stick = **8,192 sticks**.
+>
+> - On the **data ring** (128 B/cycle): 8,192 cycles to traverse
+>   one hop. At 1 GHz that's 8.2 μs per hop, or ~12 μs/hop measured
+>   (overhead from cycle alignment).
+> - On the **SFP ring** (32 B/cycle): the same payload is 1,048,576
+>   B ÷ 32 B = 32,768 cycles per hop ≈ 33 μs/hop. PSUM is moving 4×
+>   *less* per cycle than the data ring.
+>
+> Now apply this to PSUM cost. With `(1, 1, 32)`, each core's
+> partial is `M × N × 4 B` (PSUM is fp32). For `M=128, N=8192`,
+> that's 4 MB per core. PSUM chain length = 31 hops × 4 MB ÷
+> 32 B/cycle ≈ 4 ms — which would dominate the entire kernel. With
+> `(2, 1, 16)`, partial is 2 MB and chain is 15 hops → ~960 μs.
+> The 4× PSUM-cost ratio you read in `psum_split_findings.md` falls
+> right out of this arithmetic.
 
 ---
 
@@ -964,6 +1113,26 @@ For decode `(M=1, N=4096, K=4096)`, compute and transit are tiny
 is why decode shapes don't benefit from any work-division
 optimization — there's no slack to save.
 
+> **Toy example — replaying the sequence diagram on a tiny shape.**
+> Walk through `(M=4, N=128, K=128)` fp16 on 4 cores, split `(1, 4, 1)`:
+>
+> | phase | per-core work | rough time |
+> |---|---|---|
+> | 1. Setup | DMA programs primed | 3 ms (fixed) |
+> | 2. HMI fetch | weight slice = 128×32×2 B = 8 KB | <1 μs (fits in one HMI burst) |
+> | 3. Block-load LX→XRF | 8 KB → XRF | ~64 cycles ≈ 64 ns |
+> | 4. Compute | 4×32×128 = 16K MACs | <1 μs |
+> | 5. PSUM | k=1, none | 0 |
+> | 6. Writeback | 4×32×2 B = 256 B per core | <1 μs |
+>
+> **Total**: phases 2–6 finish in <10 μs. Phase 1 (the launch
+> floor) dominates by 300×. *This shape can never be sped up by
+> better splits or sharing* — the chip spends ~99.7% of its time
+> waiting for the per-call overhead to clear. The lesson: before
+> reaching for any optimization, do this back-of-envelope math. If
+> the compute+transit total is under the launch floor, only fusion
+> or batching can help.
+
 ---
 
 ## Part 8: The two dataflow templates
@@ -1046,6 +1215,21 @@ j]` is `sum over k of A[i, k] * B[k, j]`:
 If you flipped any of these, you'd break the mapping and need
 extra cycles to unscramble. The directions aren't arbitrary; they
 encode the algebra of matmul into the chip's geometry.
+
+> **Toy example — when WS wins, when OS wins.** Compare two real
+> matmul shapes:
+>
+> | shape | K | input channels per row | PT-row utilization with WS | template |
+> |---|---|---|---|---|
+> | LLM Q-proj `(128, 4096, 4096)` | 4096 | 4096/8 = 512 row-blocks | 100% (8 rows always full) | **WS** |
+> | First conv `(1, 56·56, 3, 7×7)` (3 RGB chans, 7×7 kernel) | 3 | 3/8 = 0.375 row-blocks | ~37% (5 of 8 rows idle) | **OS** |
+>
+> The first-conv case has K=3 in-channels — fewer than the 8 PT
+> rows can absorb. WS would leave 5/8 of every PT array idle. OS
+> swaps the mapping so that *output spatial pixels* (j) populate
+> the rows instead of K, restoring full utilization. For
+> transformer matmul, K is always huge, so WS always wins. The OS
+> template exists almost entirely for the first layer of CNNs.
 
 ---
 
@@ -1151,6 +1335,30 @@ achieves high utilization given the chip's latencies and
 bandwidths. Less elegant than a single matmul loop in CUDA, but
 the cycle-by-cycle utilization is dramatic.
 
+> **Toy example — what fires in 32 cycles of inner loop.** Walk
+> through 32 cycles of a steady-state WS-fp16 inner loop, focusing
+> on a single PT row producing 4 output groups (`Tj=4`):
+>
+> ```
+> cycle 0:  L0 → input a0 enters PT0 of row r=0 → MAC for output group 0
+> cycle 1:  a0 forwarded to PT1, a1 enters PT0 → MAC for output group 1
+> cycle 2:  ...                                  → MAC for output group 2
+> cycle 3:  ...                                  → MAC for output group 3
+> cycle 4:  result for output group 0 ready (4-cycle latency satisfied)
+>           PT0 starts MAC for next K-iteration of group 0
+> cycle 5-7: same pattern, groups 1-3 next K-iter
+> cycle 8-15: LoopPtw=2 second accumulation per group
+> cycle 16:  PE absorbs row r=0 sub-chunk; row r=1 starts feeding
+> ...
+> cycle 31: 8 rows done with this 8-K slice
+> ```
+>
+> Every cycle has a useful MAC happening. The `Tj=4` interleaving
+> means the 4-cycle MAC latency is *fully hidden* — by cycle 4,
+> when group 0's first MAC finishes, group 0's second MAC is ready
+> to issue. Remove `Tj=4` and PT idles 3 cycles out of every 4 →
+> 25% utilization. Each loop layer is a similar stall-killer.
+
 ---
 
 ## Part 10: Cross-core data movement
@@ -1217,6 +1425,23 @@ For production prefill matmul, weights are usually in the second
 regime (HMI-bound). For activations and small operands, the first
 regime applies (ring-bound). Knowing which regime you're in tells
 you what the bottleneck is.
+
+> **Toy example — same shape, two regimes.** Compare the same logical
+> matmul `(M=128, N=8192, K=8192)` with two different splits:
+>
+> - **Pure-N split** `(1, 32, 1)`: each core sees A in full (2 MB,
+>   fits in LX) and ¼·MB of B per stream. The A operand is small
+>   enough to be **broadcast via the ring** — sharing fires.
+>   Effective bandwidth ≈ 88 GB/s (pure ring).
+> - **Pure-M split** `(32, 1, 1)`: each core needs 1/32 of A
+>   (small) and *all* of B (128 MB). 128 MB ≫ 2 MB LX, so B can't
+>   stage — each core must HMI-stream its own copy.
+>   Effective bandwidth drops to ~67 GB/s, contended at HMI, with
+>   32× more total bytes.
+>
+> Same algebra, different regime, ~1.6× wall-time difference. The
+> regime is set by *which operand fits in LX given the split*, not
+> by absolute tensor sizes.
 
 ### Partial-sum reduction (PSUM) on the SFP ring
 
@@ -1289,6 +1514,24 @@ flowchart LR
 If you're optimizing AIU matmul performance, you're almost always
 optimizing HMI bandwidth utilization, even when you don't realize
 it.
+
+> **Toy example — HMI as the gate every byte passes through.** For
+> a `(M=128, N=8192, K=8192)` matmul, B is 128 MB. With 32 cores
+> all wanting weights:
+>
+> - **Pure-M `(32, 1, 1)`**: 32 × 128 MB = **4 GB** of HMI traffic.
+> - **Pure-N `(1, 32, 1)`**: 1 × 128 MB = **128 MB** of HMI traffic.
+> - Either way, the ring after HMI redistributes those bytes.
+>
+> If HMI sustains ~67 GB/s combined with cross-core sharing, the
+> *floors* on data-transit time are:
+> - Pure-M: 4 GB ÷ 67 GB/s ≈ **60 ms**
+> - Pure-N: 128 MB ÷ 67 GB/s ≈ **1.9 ms**
+>
+> 31× wall-time floor difference, all from HMI traffic — even
+> before considering ring contention or compute. This is why every
+> shipped optimization (`output_element_priority`, the LX budget
+> tuning, the preload investigation) targets HMI bytes first.
 
 ---
 
@@ -1410,6 +1653,29 @@ Patterns we've measured, with mechanism and mitigation.
 See [`session_summary.md`](../../tests/session_summary.md) for the
 full investigation history.
 
+> **Toy examples — what each pitfall looks like in the wild.**
+>
+> 1. **Element priority.** `(M=128, N=8192, K=8192)` defaulted to
+>    `(32, 1, 1)` and ran in 6.5 ms. With `OUTPUT_ELEMENT_PRIORITY=1`
+>    it picked `(1, 32, 1)` and ran in 4.05 ms. Same code, same
+>    weights, different planner ranking — 1.6× speedup.
+>
+> 2. **Pure K-split.** `(M=4, N=1024, K=32768)` looks K-heavy, so
+>    you'd expect `(1, 1, 32)` to win. Measured: pure-K 11.2 ms,
+>    mixed `(2, 1, 16)` 7.8 ms. The 32-hop PSUM chain on the SFP
+>    ring costs more than the 2× compute parallelism gains.
+>
+> 3. **Non-power-of-2 sticks.** `(M=128, N=14336, K=4096)` (Llama-3
+>    MLP gate) regresses with the otherwise-helpful
+>    `DXP_LX_FRAC_AVAIL=0.8`. N=14336 fp16 = 224 sticks, divides
+>    cleanly into 32 cores as 7 sticks/core — and 7 is exactly the
+>    bad number.
+>
+> 4. **3 ms launch floor.** `(M=1, N=4096, K=4096)` decode runs in
+>    3.0 ms regardless of split. 4 GFLOPS of compute could finish
+>    in 130 μs at chip peak; the per-call overhead is the entire
+>    wall time.
+
 ---
 
 ## Part 13: Comparison with NVIDIA Hopper / Blackwell
@@ -1528,6 +1794,27 @@ software-managed.
 For tiny matmul (decode), the AIU's high launch floor makes per-op
 latency much worse than GPU's. The right answer is op fusion to
 amortize, the same answer as on GPU but more urgent.
+
+> **Toy example — same matmul, GPU sequence vs AIU sequence.**
+> A `(M=128, N=8192, K=8192)` matmul:
+>
+> | step | NVIDIA Hopper | IBM AIU |
+> |---|---|---|
+> | Launch | ~10 μs | ~3 ms |
+> | Tile assignment | grid of CTAs auto-scheduled | planner picks `(m,n,k)` ahead of time |
+> | Move weights → on-chip | TMA: HBM → SMEM (cluster-wide) | HMI → LX (per core) |
+> | Reuse weights | sit in SMEM during inner loop | block-load LX → XRF, sit there |
+> | Stream activations | TMA HBM → SMEM, async pipeline | LX-LU LX → L0, async pipeline |
+> | Inner MMA | WGMMA `m64n128k16` instruction | PT array 8×8×8 systolic |
+> | Cross-block reduction | global memory + atomic / barrier | dedicated SFP ring (PSUM) |
+> | Wall time (this shape, fp16) | ~0.5 ms achievable | 4.05 ms achievable |
+>
+> The H100 is ~8× faster on this shape, mostly compute-density
+> driven (990 TFLOPS sparsity vs 32 TFLOPS). For shapes where AIU's
+> launch floor dominates (decode), the gap widens further. For
+> shapes where the chip is matched to the work and weights live
+> on-chip, the gap narrows. AIU is more competitive *per watt*
+> than the absolute numbers suggest.
 
 ---
 
