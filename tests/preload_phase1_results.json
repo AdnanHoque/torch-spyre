@@ -1,0 +1,92 @@
+{
+  "shape": {
+    "M": 128,
+    "N": 4096,
+    "K": 4096,
+    "dtype": "fp16"
+  },
+  "bundles_created": 1,
+  "per_bundle": [
+    {
+      "bundle_dir": "/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused_mm_0_k4ko21vq",
+      "files": [
+        {
+          "path": "/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused_mm_0_k4ko21vq/execute_dsg.txt",
+          "byte_size": 116,
+          "line_count": 6,
+          "node_count": 2,
+          "edge_count": 1,
+          "attr_count": 0,
+          "is_skeleton_empty": false,
+          "first_lines": [
+            "N 0 SenPreparedOp sdsc_fused_mm_0_k4ko21vq",
+            "E 0 1",
+            "N 1 SenProgAddrGenerate sdsc_fused_mm_0_k4ko21vq",
+            "I { }",
+            "O { }",
+            "T { }"
+          ]
+        },
+        {
+          "path": "/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused_mm_0_k4ko21vq/loadmodel_to_device_dsg.txt",
+          "byte_size": 18,
+          "line_count": 3,
+          "node_count": 0,
+          "edge_count": 0,
+          "attr_count": 0,
+          "is_skeleton_empty": true,
+          "first_lines": [
+            "I { }",
+            "O { }",
+            "T { }"
+          ]
+        },
+        {
+          "path": "/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused_mm_0_k4ko21vq/loadmodel_to_spad_dsg.txt",
+          "byte_size": 18,
+          "line_count": 3,
+          "node_count": 0,
+          "edge_count": 0,
+          "attr_count": 0,
+          "is_skeleton_empty": true,
+          "first_lines": [
+            "I { }",
+            "O { }",
+            "T { }"
+          ]
+        },
+        {
+          "path": "/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused_mm_0_k4ko21vq/loadprogram_to_device_dsg.txt",
+          "byte_size": 111,
+          "line_count": 6,
+          "node_count": 1,
+          "edge_count": 0,
+          "attr_count": 2,
+          "is_skeleton_empty": false,
+          "first_lines": [
+            "N 0 SenProgSend sdsc_fused_mm_0_k4ko21vq-SenProgSend",
+            "A dev_ptr 6 120259084288",
+            "A size 6 11776",
+            "I { }",
+            "O { }",
+            "T { }"
+          ]
+        },
+        {
+          "path": "/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused_mm_0_k4ko21vq/loadprogram_to_spad_dsg.txt",
+          "byte_size": 18,
+          "line_count": 3,
+          "node_count": 0,
+          "edge_count": 0,
+          "attr_count": 0,
+          "is_skeleton_empty": true,
+          "first_lines": [
+            "I { }",
+            "O { }",
+            "T { }"
+          ]
+        }
+      ]
+    }
+  ]
+}
