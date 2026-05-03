@@ -49,6 +49,7 @@ class SDSCArgs:
     allocation: dict[str, Any]
     start_address: int | Symbol
     backGap: dict[Symbol, int]
+    is_static: bool = False
 
     def __str__(self) -> str:
         scales = ", ".join(f"{k}={v}" for k, v in self.scales.items())
@@ -333,6 +334,7 @@ def _create_sdsc_tensors(
                 allocation=arg.allocation,
                 start_address=addr if not arg.allocation else arg.allocation["lx"],
                 backGap=backGap,
+                is_static=arg.is_static,
             )
         )
 

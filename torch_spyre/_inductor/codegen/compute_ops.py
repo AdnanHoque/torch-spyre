@@ -383,6 +383,7 @@ def generate_sdsc(sdsc_spec):
                                 ],
                                 "wordLength": num_bytes(tensor.data_format),
                                 "dataFormat_": tensor.data_format.name,
+                                "isStatic_": int(tensor.is_static),
                                 "memOrg_": {
                                     "hbm": {"isPresent": 1},
                                     "lx": {"isPresent": 1},

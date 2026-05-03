@@ -47,9 +47,37 @@ from .pass_utils import (
 from .views import compute_coordinates, align_tensors
 from .logging_utils import get_inductor_logger
 from .op_spec import OpSpec, TensorArg
+from . import config as _spyre_config
 import logging
 
 logger = get_inductor_logger("spyre_kernel")
+
+
+def _is_static_graph_input(name: str) -> bool:
+    """Return True if `name` is a graph input that looks like an nn.Parameter.
+
+    Heuristic: the placeholder for `name` in V.graph.orig_gm has
+    tensor_meta.requires_grad == True. nn.Parameter defaults requires_grad
+    to True, and inference user inputs default to False, so this cleanly
+    separates weights from activations in the typical inference graph.
+
+    Returns False if SPYRE_PRELOAD_STATIC is off, if the buffer is not a
+    graph input, or if any of the metadata lookups miss. False is the
+    safe default — it preserves the pre-knob behavior.
+    """
+    if not _spyre_config.preload_static:
+        return False
+    g = V.graph
+    if name not in getattr(g, "graph_input_names", ()):
+        return False
+    orig_gm = getattr(g, "orig_gm", None)
+    if orig_gm is None:
+        return False
+    for node in orig_gm.graph.nodes:
+        if node.op == "placeholder" and node.name == name:
+            tm = node.meta.get("tensor_meta")
+            return bool(tm is not None and getattr(tm, "requires_grad", False))
+    return False
 
 
 class RValue(ABC):
@@ -377,6 +405,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             it_space,
             index,
         )
+        is_static = is_input and _is_static_graph_input(name)
         tensor_arg = TensorArg(
             is_input,
             -1,
@@ -384,6 +413,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             tensor.layout.device_layout.device_size,
             device_coords,
             tensor.layout.allocation,
+            is_static=is_static,
         )
         if not tensor.layout.allocation:
             self.spyre_kernel_args.append((name, tensor_arg))
@@ -646,6 +676,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                                         + "],"
                                     )
                                     buf.writeline(f"allocation={arg.allocation!r},")
+                                    buf.writeline(f"is_static={arg.is_static},")
                                 buf.writeline("),")
                         buf.writeline("]")
                     buf.writeline("),")

@@ -33,6 +33,10 @@ class TensorArg:
         device_coordinates: The sympy Exprs that describe how elements in the Tensor are accessed.
                 Free variables in device_coordinates refer to entries in the OpSpec's iteration_space.
         allocation: If present, the offset in scratchpad memory assigned to the Tensor.
+        is_static: True if the tensor's contents do not change across kernel
+                calls (e.g. an nn.Parameter). Surfaces as labeledDs_.isStatic_
+                in the SDSC JSON, which DSM uses to split static-ancestor ops
+                into the loadmodel_to_spad preload dsengraph.
     """
 
     is_input: bool
@@ -41,6 +45,7 @@ class TensorArg:
     device_size: list[int]
     device_coordinates: list[Expr]
     allocation: Any
+    is_static: bool = False
 
 
 @dataclasses.dataclass

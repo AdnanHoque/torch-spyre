@@ -23,4 +23,11 @@ dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
 
+# When enabled, mark graph-input tensors that look like nn.Parameters
+# (placeholder tensor_meta.requires_grad=True) as static via the SDSC
+# JSON `labeledDs_.isStatic_` field. This is the codegen half of the
+# cross-call weight preload pipeline; runtime separation is a separate
+# concern. Off by default — Phase 3 diagnostic spike, not production.
+preload_static: bool = os.environ.get("SPYRE_PRELOAD_STATIC", "0") == "1"
+
 install_config_module(sys.modules[__name__])
