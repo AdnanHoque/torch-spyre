@@ -396,19 +396,63 @@ def must_split_vars(
     return accumulated_splits
 
 
+def _output_element_priority_should_fire(
+    remaining_output: list[tuple[Symbol, Expr]],
+) -> bool:
+    """Phase 2.0 element-priority heuristic. Pure function, easy to unit-test.
+
+    Returns True iff output-dim priority for this op should rank by element
+    count instead of iteration-space (stick-adjusted) units.
+
+    Conditions for firing:
+      1. config.output_element_priority is enabled (opt-in).
+      2. There are at least two remaining output dims (otherwise priority
+         order is degenerate).
+
+    Span-pre-split output dims are excluded from `remaining_output` upstream
+    in `plan_splits`, so this check implicitly skips shapes whose output
+    side is already constrained by HW span pressure.
+
+    Default ranking by stick-adjusted size deflates stick-dim N (e.g. 4096
+    elements → 64 sticks for fp16) below non-stick M (128 elements). Phase 1.0
+    measurements showed the resulting (m=32, n=1, k=1) pick is 15-40% slower
+    than (m=1, n=32, k=1) on most prefill matmul shapes — see
+    tests/diag_split_gap_results.md.
+    """
+    if not config.output_element_priority:
+        return False
+    if len(remaining_output) < 2:
+        return False
+    return True
+
+
 def prioritize_dimensions(
     output: TensorDep,
     it_space_adjusted: dict[Symbol, Expr],
     exclude_reduction: bool = False,
+    stick_vars: dict[Symbol, int] | None = None,
 ) -> list[Symbol]:
     """Return iteration variables in priority order for core division.
 
     Variables already committed as min_splits should be filtered out of
     it_space_adjusted before calling this function.
 
-    Priority tiers:
+    Priority tiers (default):
       1. Output dims (present in output device coords), by decreasing size.
       2. Reduction dims (absent from output coords), by decreasing size.
+
+    Phase 2.0 element-priority heuristic (opt-in via
+    `config.output_element_priority`):
+      Output dims are ranked by element count instead of stick-adjusted
+      iteration-space units. See `_output_element_priority_should_fire` for
+      the rationale and tests/diag_split_gap_results.md for empirical
+      justification.
+
+    Args:
+      stick_vars: per-stick-variable max elems_per_stick map (from
+        adjust_it_space_for_sticks). Used by the element-priority heuristic
+        to recover element counts from the stick-adjusted iteration space.
+        Optional; required only when the heuristic is enabled.
     """
     coord_vars = {v for e in output.device_coords[:-1] for v in e.free_symbols}
 
@@ -425,7 +469,14 @@ def prioritize_dimensions(
     # The priority order is a structural decision (largest dim first) that
     # needs a concrete numeric ordering.
     # TODO(issue#1372): Symbolic core division will keep this symbolic.
-    remaining_output.sort(key=lambda t: concretize_expr(t[1]), reverse=True)
+    if _output_element_priority_should_fire(remaining_output):
+        sv = stick_vars or {}
+        remaining_output.sort(
+            key=lambda t: concretize_expr(t[1]) * sv.get(t[0], 1),
+            reverse=True,
+        )
+    else:
+        remaining_output.sort(key=lambda t: concretize_expr(t[1]), reverse=True)
     reduction_dims.sort(key=lambda t: concretize_expr(t[1]), reverse=True)
 
     priority = [t[0] for t in remaining_output]
@@ -475,7 +526,10 @@ def plan_splits(
         s: e for s, e in it_space_adjusted.items() if s not in min_splits
     }
     priorities = prioritize_dimensions(
-        output_td, it_space_remaining, exclude_reduction=exclude_reduction
+        output_td,
+        it_space_remaining,
+        exclude_reduction=exclude_reduction,
+        stick_vars=stick_vars,
     )
 
     # 3. Assign cores: satisfy min_splits first, then fill by priority.
