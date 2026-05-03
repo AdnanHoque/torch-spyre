@@ -1,0 +1,68 @@
+# k_fast validation — does the generalized perm win as predicted?
+
+# warmup=5 iters=25, fp16, SENCORES=32
+
+### kv_proj K-split (1,16,2)  M=2048 N=1024 K=8192  split=(1, 16, 2)
+  trial1 (order: ['identity', 'k_fast', 'block_cyclic']):
+    identity      : 10.941 ms
+    k_fast        : 3.984 ms
+    block_cyclic  : 3.987 ms
+
+  trial2 (order: ['block_cyclic', 'k_fast', 'identity']):
+    block_cyclic  : 3.992 ms
+    k_fast        : 3.993 ms
+    identity      : 10.944 ms
+
+### q_proj K-split (4,1,8)  M=128 N=8192 K=8192  split=(4, 1, 8)
+  trial1 (order: ['identity', 'k_fast', 'stride2']):
+    identity      : 4.443 ms
+    k_fast        : 4.295 ms
+    stride2       : 4.274 ms
+
+  trial2 (order: ['stride2', 'k_fast', 'identity']):
+    stride2       : 4.283 ms
+    k_fast        : 4.273 ms
+    identity      : 4.430 ms
+
+### L3-8B MLP down K (4,1,8)  M=128 N=4096 K=14336  split=(4, 1, 8)
+  trial1 (order: ['identity', 'k_fast', 'stride2']):
+    identity      : 4.495 ms
+    k_fast        : 4.411 ms
+    stride2       : 4.490 ms
+
+  trial2 (order: ['stride2', 'k_fast', 'identity']):
+    stride2       : 4.508 ms
+    k_fast        : 4.418 ms
+    identity      : 4.484 ms
+
+### Mixed (2,4,4) synthetic  M=128 N=2048 K=8192  split=(2, 4, 4)
+  trial1 (order: ['identity', 'k_fast', 'stride2']):
+    identity      : 3.539 ms
+    k_fast        : 3.308 ms
+    stride2       : 3.323 ms
+
+  trial2 (order: ['stride2', 'k_fast', 'identity']):
+    stride2       : 3.322 ms
+    k_fast        : 3.322 ms
+    identity      : 3.553 ms
+
+### L3-70B q_proj pure-N  M=128 N=8192 K=8192  split=(1, 32, 1)
+  trial1 (order: ['identity', 'k_fast']):
+    identity      : 4.058 ms
+    k_fast        : 4.060 ms
+
+  trial2 (order: ['k_fast', 'identity']):
+    k_fast        : 4.047 ms
+    identity      : 4.055 ms
+
+
+## Summary
+
+Re-run the same configs to summarize speedups (re-bench):
+| shape | split | identity ms | k_fast ms | reference ms | k_fast sp | reference sp |
+|---|---|---:|---:|---:|---:|---:|
+| kv_proj K-split (1,16,2) | (1, 16, 2) | 10.962 | 4.020 | 4.059 (block_cyclic) | **2.727x** | 2.701x |
+| q_proj K-split (4,1,8) | (4, 1, 8) | 4.493 | 4.350 | 4.322 (stride2) | **1.033x** | 1.040x |
+| L3-8B MLP down K (4,1,8) | (4, 1, 8) | 4.543 | 4.508 | 4.475 (stride2) | **1.008x** | 1.015x |
+| Mixed (2,4,4) synthetic | (2, 4, 4) | 3.591 | 3.345 | 3.345 (stride2) | **1.074x** | 1.074x |
+| L3-70B q_proj pure-N | (1, 32, 1) | 4.080 | 4.093 | 4.080 (identity) | **0.997x** | 1.000x |

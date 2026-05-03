@@ -1,0 +1,45 @@
+# Pairwise-distance probe — wall time vs K-pair ring distance d
+
+# shape: M=2048 N=1024 K=8192  split=(1, 16, 2)  fp16  SENCORES=32
+# warmup=5 iters=30
+
+## trial1 (order: d=[1, 2, 4, 8, 16])
+
+  d= 1: median=3.958  iqr=0.058  min=3.915  ms
+  d= 2: median=3.994  iqr=0.056  min=3.960  ms
+  d= 4: median=5.000  iqr=0.074  min=4.959  ms
+  d= 8: median=6.969  iqr=0.047  min=6.931  ms
+  d=16: median=10.884  iqr=0.011  min=10.861  ms
+
+## trial2 (order: d=[16, 8, 4, 2, 1])
+
+  d=16: median=10.889  iqr=0.028  min=10.869  ms
+  d= 8: median=6.988  iqr=0.025  min=6.961  ms
+  d= 4: median=5.021  iqr=0.026  min=5.005  ms
+  d= 2: median=4.008  iqr=0.022  min=3.991  ms
+  d= 1: median=3.977  iqr=0.023  min=3.958  ms
+
+
+## Summary — wall time vs K-pair ring distance
+
+| d | trial1 median | trial2 median | mean median | trial1 min | trial2 min |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 3.958 | 3.977 | **3.967** | 3.915 | 3.958 |
+| 2 | 3.994 | 4.008 | **4.001** | 3.960 | 3.991 |
+| 4 | 5.000 | 5.021 | **5.010** | 4.959 | 5.005 |
+| 8 | 6.969 | 6.988 | **6.979** | 6.931 | 6.961 |
+| 16 | 10.884 | 10.889 | **10.886** | 10.861 | 10.869 |
+
+## Linearity check — fit y = a + b·d to mean medians
+
+  Linear fit: wall_ms ≈ 3.219 + 0.4757 · d
+  RMSE: 0.1554 ms over 5 points
+
+  Per-point residuals:
+    d= 1: actual=3.967  predicted=3.695  residual=+0.273
+    d= 2: actual=4.001  predicted=4.171  residual=-0.170
+    d= 4: actual=5.010  predicted=5.122  residual=-0.112
+    d= 8: actual=6.979  predicted=7.025  residual=-0.046
+    d=16: actual=10.886  predicted=10.831  residual=+0.055
+
+  VERDICT: Approximately linear (max residual <0.5 ms). Linear ring-distance model is a good first-order description; small deviations may come from per-hop fixed costs or other secondary effects.
