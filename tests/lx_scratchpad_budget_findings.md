@@ -7,9 +7,12 @@ production configuration defaults.
 ## Headline
 
 Increasing `DXP_LX_FRAC_AVAIL` from the current default of `0.2` to
-`0.8` (with `LX_PLANNING=1`) cuts wall time by **up to 20%** on
-Llama-70B q-projection prefill. The default is meaningfully
-under-tuned for transformer prefill workloads.
+`0.8` (with `LX_PLANNING=1`) cuts wall time by **up to 21%** on
+Llama-70B q-projection prefill. **Compound with `output_element_priority`
+gives 1.63× on the same shape.** But one production shape regresses
+16% at high frac, so a global default change isn't safe without a
+more targeted heuristic — see "Catalog sweep" and "Regression
+investigation" below.
 
 ## Probe design
 
@@ -127,24 +130,113 @@ below), but the mechanisms suggest they should stack cleanly.
    launch-floor (decode, small GQA) won't move. Large-weight prefill
    matmul moves the most.
 
-## Open questions for the next phase
+## Catalog sweep — 13 shapes × 5 frac values + compound
 
-These three measurements raise questions worth answering before
-shipping anything as a production default:
+The full Phase 1.0 catalog re-run with `LX_PLANNING=1` and
+`DXP_LX_FRAC_AVAIL ∈ {0.2, 0.4, 0.6, 0.8, 0.95}`, plus a compound
+config (`OUTPUT_ELEMENT_PRIORITY=1` + `frac=0.8`).
 
-1. **Is `frac=0.8` ever a regression?** We tested 3 shapes; the full
-   13-shape Phase 1.0 catalog should be re-run. If any shape gets
-   slower at high frac, the default needs to be more nuanced.
+### Wins (speedup vs control at `frac=0.95`, sorted)
 
-2. **Does the gain stack cleanly with `output_element_priority`?**
-   Predicted yes (different mechanisms), but needs direct
-   measurement on the L3-70B q_proj case where both have headroom.
+| shape | speedup |
+|---|---:|
+| L3-70B q_proj prefill | **1.211×** |
+| Mixtral down per-expert | **1.182×** |
+| L3-8B MLP down prefill | **1.178×** |
+| L3-8B q_proj prefill | 1.077× |
 
-3. **What about MoE per-expert?** Mixtral / Qwen-MoE / DeepSeek-MoE
-   matmul has smaller per-expert M but identical weight pattern.
-   Should benefit similarly. Worth confirming.
+Best frac varies by shape — `0.95` is best for the biggest wins,
+but some shapes peak earlier (`0.6` or `0.8`).
 
-4. **Is there a frac-too-high regime?** At very high frac, less LX is
-   left for activations. For workloads where activations are large
-   (e.g. long-context prefill with M >> 128), this could regress.
-   Need to test shapes outside the M=128 regime.
+### Regression — L3-8B MLP gate/up prefill
+
+| frac | speedup vs control |
+|---|---:|
+| 0.2 (default) | 1.024× |
+| 0.4 | **0.857×** ✗ |
+| 0.6 | **0.855×** ✗ |
+| 0.8 | **0.839×** ✗ |
+| 0.95 | **0.831×** ✗ |
+
+**16-17% slower at any frac > 0.2.** This single regression blocks
+a global default change.
+
+### Compound stack (`output_element_priority` + `frac=0.8` vs control)
+
+| shape | speedup |
+|---|---:|
+| **L3-70B q_proj prefill** | **1.634×** |
+| L3-8B MLP down prefill | 1.309× |
+| Mixtral down per-expert | 1.294× |
+| L3-8B q_proj prefill | 1.193× |
+| L3-70B GQA kv_proj prefill | 1.092× |
+| DeepSeek-MoE gate | 1.067× |
+| L3-8B GQA kv_proj prefill | 1.055× |
+| **L3-8B MLP gate/up prefill** | **0.840× ✗** (still regresses) |
+
+The two levers are complementary but **sub-multiplicative** — naive
+prediction was 1.61 × 1.20 ≈ 1.93× on L3-70B q_proj, measured 1.63×.
+This is consistent with the levers touching the same data path
+(element-priority chooses what bytes go through HMI; LX-budget
+controls how those bytes are staged) so saturation effects matter.
+
+## Regression investigation — over-commit hypothesis rejected
+
+**Initial hypothesis**: at high `frac` the LX planner over-commits
+weight-buffer space, starving activation/output staging on shapes
+where per-core operands exceed the 2 MB scratchpad.
+
+**Test**: held `M=128, K=4096`, forced `(1, 32, 1)` split, varied N
+so per-core operand total swept across the 2 MB threshold.
+
+| N | per-core total | fits | speedup at frac=0.8 |
+|---|---:|---|---:|
+| 2048 | 1.55 MB | ✓ | 1.009× |
+| 4096 | 2.08 MB | ✗ (just over) | 1.001× |
+| 8192 | 3.13 MB | ✗ | **1.024×** |
+| 14336 | 4.72 MB | ✗ | **0.816×** |
+
+**Hypothesis rejected**: N=8192 is over the LX limit and shows a
+slight benefit (1.024×). Only N=14336 cliffs to 0.816×. The
+regression is N=14336-specific, not size-driven.
+
+**Likely cause**: N=14336 = 2¹¹ × 7 — a non-power-of-2. Per-core
+columns at `(1, 32, 1)` is `448 = 7 × 64` sticks per core, the only
+non-power-of-2 stick count in the test. The other N values
+(2048, 4096, 8192) all give power-of-2 stick counts (1, 2, 4).
+
+This rhymes with the L3-70B MLP down outlier (K=28672 = 7 × 4096)
+we identified earlier in the cost-model project. **Non-power-of-2
+stick counts are a recurring AIU stack pain point** that surfaces
+under different conditions. Not ours to fix from torch_spyre, but
+useful context — and explains why the LX-budget regression is
+narrower than the catalog sweep alone suggested.
+
+## Recommendation
+
+The default-bump approach isn't safe given the L3-8B MLP gate/up
+regression. Three options for how the project ships:
+
+| option | mechanism | risk | wins captured |
+|---|---|---|---|
+| A | conservative gate (frac=0.8 only when stick-counts are power-of-2) | low | most |
+| B | per-op `frac` annotation | low | depends on opt-in |
+| C | document only, leave default at 0.2 | none | none until users opt in |
+
+For now: **C** is the holding pattern. A and B both want a real fix
+to the underlying non-power-of-2 issue (which is upstream of
+torch_spyre). If or when the AIU stack improves non-power-of-2
+handling, A becomes the right ship.
+
+## Open questions (deferred to future work)
+
+1. **Does LX_PLANNING help on shapes with very different M?** Our
+   catalog is M=128 / decode M=1. Long-context prefill (M=2K-8K) was
+   not tested. May change the optimum frac.
+2. **What's the actual mechanism of the regression?** The non-power-
+   of-2 correlation is a hypothesis; a deeper investigation
+   (compiler instrumentation, per-iteration timing breakdown) would
+   confirm.
+3. **Does the existing `k_split_heuristic` (in the splitk-matmul
+   branch) interact with LX-budget?** Project A will test this
+   alongside the SFP-ring story.
