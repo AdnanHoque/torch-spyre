@@ -345,24 +345,190 @@ of k_fast — re-route the *placement* without touching the *work*.
 
 ## Part 2: How emission order determines K-chain topology
 
-The default emitter walks the leftmost `iteration_space` dim with
-`split > 1` fastest. For matmul, the iteration order is `[M, N, K]`,
-so the formula is:
+### Where the identity formula comes from
+
+The identity formula isn't pulled out of thin air — it's literally
+what the SDSC emitter computes today. From
+[`torch_spyre/_inductor/codegen/superdsc.py:_get_core_to_slice_mapping`](../../torch_spyre/_inductor/codegen/superdsc.py):
+
+```python
+inner_product = Integer(1)
+for dim in iteration_space:                  # iterate dims in [M, N, K] order
+    if dim_splits[dim] == 1:
+        expr = Integer(0)
+    elif inner_product == Integer(1):
+        expr = Mod(core_id_sym, Integer(dim_splits[dim]))
+    else:
+        expr = Mod(floor(core_id_sym / inner_product),
+                   Integer(dim_splits[dim]))
+    dim_to_expr[str(dim)] = expr
+    inner_product = inner_product * Integer(dim_splits[dim])
+```
+
+For matmul iteration order `[M, N, K]` with splits `(m, n, k)`, the
+loop produces three expressions:
+
+| dim | inner_product before | expression for slice |
+|---|:---:|---|
+| M | 1 | `m_slice = core_id mod m` |
+| N | m | `n_slice = (core_id // m) mod n` |
+| K | m·n | `k_slice = (core_id // (m·n)) mod k` |
+
+These three formulas together let you **decode** any core_id into a
+(m_slice, n_slice, k_slice) triple. The reverse — **encoding** a
+triple back into a core_id — is:
 
 ```
-core_id = m_slice + m·n_slice + m·n·k_slice
+core_id = m_slice  +  m · n_slice  +  m·n · k_slice
 ```
 
-This means **K-collaborators (cores that share `m_slice` and
-`n_slice` but differ in `k_slice`) are spaced `m·n` apart in core_id**.
+### This is just mixed-radix counting
+
+The encoding above is base-`(m, n, k)` mixed-radix counting. Same
+structure as base-10:
+
+```
+base-10:        235  =  5·1   +  3·10  +  2·100
+                            ^         ^
+                       ones digit   tens digit
+                       (varies fastest)
+```
+
+```
+base-(m, n, k): core_id = m_slice·1 + n_slice·m + k_slice·m·n
+                              ^             ^
+                         "ones digit"  "tens digit"
+                         (varies fastest with core_id)
+```
+
+**The first dim (M) plays the role of "ones digit"**: as core_id
+counts up by 1, m_slice ticks up by 1; only when m_slice wraps from
+m−1 to 0 does n_slice tick up. Only when n_slice wraps does k_slice
+tick up. Same as decimal: the ones digit cycles through 0..9 every
+single step; the tens digit only ticks once every 10 steps.
+
+That's what "M is the fast-changing dim" means under identity
+emission. It's a direct consequence of the loop walking dims in
+`[M, N, K]` order with `inner_product` accumulating left-to-right.
+
+### Why mixed-radix counting puts K-collaborators far apart
+
+K-collaborators are cores that share `(m_slice, n_slice)` but differ
+in `k_slice`. In base-10 terms: same ones digit, same tens digit,
+different hundreds digit.
+
+Numbers that share their first two digits and differ only in the third
+are **100 apart**: 235 and 335 differ by 100. Same with our
+mixed-radix encoding: K-collaborators differ only in `k_slice`, which
+has place value `m·n`. So **K-collaborators are exactly `m·n` apart
+in core_id**.
 
 Since core_id 0..31 corresponds approximately to physical ring
 positions 0..31 (we directly verified this with the
 [pairwise-distance probe](../../tests/diag_core_pairwise_distance.py)),
 K-collaborators are also `m·n` apart on the physical ring.
 
-For `(1, 16, 2)`, K-collaborators are 16 apart. Half a ring trip per
-chain hop.
+For `(1, 16, 2)`: m·n = 16 → K-pair distance = **16 ring hops** under
+identity. Half a ring trip per chain.
+
+### What k_fast does — swap which digit is "fastest"
+
+Identity makes M the fastest-changing digit. We want K to be fastest
+instead, so consecutive physical cores share m and n (which is fixed
+at 0 for matmul anyway since m=1 in our shapes) but differ in k.
+That makes K-collaborators sit at consecutive physical positions.
+
+We can't change what physical core_ids exist — they're hardware
+addresses 0..31. What we can change is **which logical (m, n, k)
+cell each physical core executes**. Define a permutation `perm[c]`
+such that physical core c does the work the unpermuted emitter
+would have given to logical core `perm[c]`.
+
+For K-collaborators to land at consecutive physical positions, we
+need: as physical c counts up by 1, the logical core `perm[c]` it
+executes should change in `k_slice` (and only k_slice).
+
+That means we want the logical core_id to advance by `m·n` each time
+physical c advances by 1. After k of those steps, k_slice has
+cycled through 0..k−1 and we've covered one full K-cluster, so the
+next step should advance n_slice by 1 (which is +1 in logical
+core_id). We can write this exact behaviour as:
+
+```
+perm[c] = (c mod k) · (m·n) + (c // k)
+                ^                    ^
+          "k_slice digit         "everything else
+            of physical c"        (n then m)"
+            promoted to            comes next
+            slowest position
+```
+
+Read that as the same mixed-radix encoding as identity, but with the
+**bases reordered**: identity uses bases (m, n, k) with m fastest;
+k_fast uses bases (k, n, m) with k fastest. Same algebra; different
+choice of which dim cycles first.
+
+### Verifying the formula packs K-collaborators
+
+For consecutive physical cores `c = 0, 1, …, k−1`:
+
+| c | c mod k | c // k | perm[c] | decoded (m, n, k) |
+|---:|:---:|:---:|---:|:---:|
+| 0 | 0 | 0 | `0·(m·n) + 0 = 0` | (0, 0, 0) |
+| 1 | 1 | 0 | `1·(m·n) + 0 = m·n` | (0, 0, 1) |
+| 2 | 2 | 0 | `2·(m·n) + 0 = 2·m·n` | (0, 0, 2) |
+| ⋮ | | | | ⋮ |
+| k−1 | k−1 | 0 | `(k−1)·(m·n)` | (0, 0, k−1) |
+
+Decoding `c·(m·n)` with the identity formula:
+- `m_slice = c·(m·n) mod m = 0` (since m·n is a multiple of m)
+- `n_slice = (c·(m·n) // m) mod n = (c·n) mod n = 0`
+- `k_slice = (c·(m·n) // (m·n)) mod k = c`
+
+So physical positions 0..k−1 all hold logical cores with
+`m_slice=0, n_slice=0`, varying only in `k_slice`. **They are exactly
+the K-cluster for the (0, 0) cell, packed at consecutive physical
+positions.**
+
+For c = k, the next K-cluster starts:
+- `perm[k] = (k mod k)·(m·n) + (k // k) = 0 + 1 = 1`
+- Decoded: m_slice=1 mod m, n_slice=(1//m) mod n, k_slice=0
+
+For our matmul splits where m=1, this is (m=0, n=1, k=0) — start of
+the next K-cluster. Cores k..2k−1 then form the K-cluster for (m=0,
+n=1), and so on.
+
+### Spatial locality is guaranteed by the algebra
+
+Notice we didn't have to *check* that K-collaborators end up adjacent
+— it falls out of the formula by construction. Promoting `k_slice` to
+the fastest-changing digit means **consecutive physical core_ids
+necessarily walk through k_slice values first**, before any other
+slice changes. K-collaborators (different k_slice, same everything
+else) are precisely the cores adjacent to each other under k_fast.
+
+This is also why k_fast is a **safe** transformation: it can never
+make K-pairs farther apart than under identity, only closer (or
+equal, when k=1 and the formula degenerates to perm[c] = c). The
+worst case is identity-like, the best case is 1-hop.
+
+### The trade-off — what gets pushed far apart
+
+Permutations conserve total ring "distance" — if K-collaborators
+become close, *something* else becomes far. Under k_fast,
+**N-collaborators** (cores sharing m and k but differing in n) move
+from being adjacent (under identity, distance 1) to being k apart.
+
+Why doesn't this hurt? **Because N-collaborators don't communicate.**
+They each compute disjoint output columns; there's no equivalent of
+PSUM between them. Identity wastes its locality on a relationship
+that doesn't need ring traffic; k_fast spends locality on
+K-collaborators, who do.
+
+That's the whole insight in one sentence: **the AIU's only required
+inter-core PSUM communication is along the K dim, so place K-cores
+adjacent and let the no-communication N-cores pay the distance
+cost.**
 
 ### Toy example — work it out by hand
 
