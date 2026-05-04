@@ -1,0 +1,226 @@
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+# Search for shapes where (1,16,2)+k_fast beats the planner
+
+# warmup=3 iters=12, fp16, SENCORES=32
+
+Configs per shape:
+  A. natural-pick
+  B. pure-M (32, 1, 1)  [skip if invalid]
+  C. pure-N (1, 32, 1)  [skip if invalid; often is]
+  D. (1, 16, 2) + k_fast [skip if invalid]
+
+### kv N=1024 M=8  M=8 N=1024(16st) K=8192(128st)
+  A:natural         : 3.009 ms
+  B:pure-M          : 3.166 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 3.052 ms
+
+### kv N=1024 M=32  M=32 N=1024(16st) K=8192(128st)
+  A:natural         : 3.314 ms
+  B:pure-M          : 3.310 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 3.104 ms
+
+### kv N=1024 M=64  M=64 N=1024(16st) K=8192(128st)
+  A:natural         : 3.346 ms
+  B:pure-M          : 3.325 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 3.075 ms
+
+### kv N=1024 M=128  M=128 N=1024(16st) K=8192(128st)
+  A:natural         : 3.367 ms
+  B:pure-M          : 3.370 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 3.082 ms
+
+### kv N=1024 M=256  M=256 N=1024(16st) K=8192(128st)
+  A:natural         : 3.355 ms
+  B:pure-M          : 3.360 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 3.110 ms
+
+### kv N=1024 M=512  M=512 N=1024(16st) K=8192(128st)
+  A:natural         : 3.364 ms
+  B:pure-M          : 3.367 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 3.169 ms
+
+### kv N=1024 M=1024  M=1024 N=1024(16st) K=8192(128st)
+  A:natural         : 3.439 ms
+  B:pure-M          : 3.438 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 3.413 ms
+
+### kv N=1024 M=2048  M=2048 N=1024(16st) K=8192(128st)
+  A:natural         : 3.655 ms
+  B:pure-M          : 3.629 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 3.931 ms
+
+### MQA N=128 M=128  M=128 N=128(2st) K=8192(128st)
+  A:natural         : 2.905 ms
+  B:pure-M          : 2.896 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : ERR
+
+### MQA N=256 M=128  M=128 N=256(4st) K=8192(128st)
+  A:natural         : 3.001 ms
+  B:pure-M          : 3.010 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : ERR
+
+### MQA N=512 M=128  M=128 N=512(8st) K=8192(128st)
+  A:natural         : 3.148 ms
+  B:pure-M          : 3.151 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : ERR
+
+### MQA N=128 M=2048  M=2048 N=128(2st) K=8192(128st)
+  A:natural         : 3.155 ms
+  B:pure-M          : 3.157 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : ERR
+
+### MQA N=512 M=2048  M=2048 N=512(8st) K=8192(128st)
+  A:natural         : 3.509 ms
+  B:pure-M          : 3.515 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : ERR
+
+### kv wide-K M=128 K=16384  M=128 N=1024(16st) K=16384(256st)
+  A:natural         : 3.816 ms
+  B:pure-M          : 3.817 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 3.241 ms
+
+### kv wide-K M=128 K=32768  M=128 N=1024(16st) K=32768(512st)
+  A:natural         : 4.669 ms
+  B:pure-M          : 4.673 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 3.519 ms
+
+### kv wide-K M=2048 K=16384  M=2048 N=1024(16st) K=16384(256st)
+  A:natural         : 4.375 ms
+  B:pure-M          : 4.377 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 4.970 ms
+
+### FFN narrow M=128  M=128 N=1024(16st) K=14336(224st)
+  A:natural         : 3.689 ms
+  B:pure-M          : 3.693 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 3.372 ms
+
+### FFN narrow M=512  M=512 N=1024(16st) K=14336(224st)
+  A:natural         : 3.592 ms
+  B:pure-M          : 3.583 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 3.500 ms
+
+### FFN narrow M=2048  M=2048 N=1024(16st) K=14336(224st)
+  A:natural         : 4.122 ms
+  B:pure-M          : 4.118 ms
+  C:pure-N          : ERR
+  D:(1,16,2)+kf     : 5.216 ms
+
+
+## Summary — wall time (ms) per config
+
+| shape | M | N | K | A:natural | B:pure-M | C:pure-N | D:K-split+kf | best | D vs best |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---|
+| kv N=1024 M=8 | 8 | 1024 | 8192 | 3.009 | 3.166 | err | 3.052 | A:natural (3.009) | 1.014x best |
+| kv N=1024 M=32 | 32 | 1024 | 8192 | 3.314 | 3.310 | err | 3.104 | D:(1,16,2)+kf (3.104) | BEST |
+| kv N=1024 M=64 | 64 | 1024 | 8192 | 3.346 | 3.325 | err | 3.075 | D:(1,16,2)+kf (3.075) | BEST |
+| kv N=1024 M=128 | 128 | 1024 | 8192 | 3.367 | 3.370 | err | 3.082 | D:(1,16,2)+kf (3.082) | BEST |
+| kv N=1024 M=256 | 256 | 1024 | 8192 | 3.355 | 3.360 | err | 3.110 | D:(1,16,2)+kf (3.110) | BEST |
+| kv N=1024 M=512 | 512 | 1024 | 8192 | 3.364 | 3.367 | err | 3.169 | D:(1,16,2)+kf (3.169) | BEST |
+| kv N=1024 M=1024 | 1024 | 1024 | 8192 | 3.439 | 3.438 | err | 3.413 | D:(1,16,2)+kf (3.413) | BEST |
+| kv N=1024 M=2048 | 2048 | 1024 | 8192 | 3.655 | 3.629 | err | 3.931 | B:pure-M (3.629) | 1.083x best |
+| MQA N=128 M=128 | 128 | 128 | 8192 | 2.905 | 2.896 | err | err | B:pure-M (2.896) | — |
+| MQA N=256 M=128 | 128 | 256 | 8192 | 3.001 | 3.010 | err | err | A:natural (3.001) | — |
+| MQA N=512 M=128 | 128 | 512 | 8192 | 3.148 | 3.151 | err | err | A:natural (3.148) | — |
+| MQA N=128 M=2048 | 2048 | 128 | 8192 | 3.155 | 3.157 | err | err | A:natural (3.155) | — |
+| MQA N=512 M=2048 | 2048 | 512 | 8192 | 3.509 | 3.515 | err | err | A:natural (3.509) | — |
+| kv wide-K M=128 K=16384 | 128 | 1024 | 16384 | 3.816 | 3.817 | err | 3.241 | D:(1,16,2)+kf (3.241) | BEST |
+| kv wide-K M=128 K=32768 | 128 | 1024 | 32768 | 4.669 | 4.673 | err | 3.519 | D:(1,16,2)+kf (3.519) | BEST |
+| kv wide-K M=2048 K=16384 | 2048 | 1024 | 16384 | 4.375 | 4.377 | err | 4.970 | A:natural (4.375) | 1.136x best |
+| FFN narrow M=128 | 128 | 1024 | 14336 | 3.689 | 3.693 | err | 3.372 | D:(1,16,2)+kf (3.372) | BEST |
+| FFN narrow M=512 | 512 | 1024 | 14336 | 3.592 | 3.583 | err | 3.500 | D:(1,16,2)+kf (3.500) | BEST |
+| FFN narrow M=2048 | 2048 | 1024 | 14336 | 4.122 | 4.118 | err | 5.216 | B:pure-M (4.118) | 1.267x best |
+
+## K-split wins (D beats A AND D is the global best)
+
+  kv N=1024 M=32 M=32 N=1024 K=8192: natural=3.314  D=3.104  speedup 1.068x (and D is global best)
+  kv N=1024 M=64 M=64 N=1024 K=8192: natural=3.346  D=3.075  speedup 1.088x (and D is global best)
+  kv N=1024 M=128 M=128 N=1024 K=8192: natural=3.367  D=3.082  speedup 1.093x (and D is global best)
+  kv N=1024 M=256 M=256 N=1024 K=8192: natural=3.355  D=3.110  speedup 1.079x (and D is global best)
+  kv N=1024 M=512 M=512 N=1024 K=8192: natural=3.364  D=3.169  speedup 1.062x (and D is global best)
+  kv N=1024 M=1024 M=1024 N=1024 K=8192: natural=3.439  D=3.413  speedup 1.008x (and D is global best)
+  kv wide-K M=128 K=16384 M=128 N=1024 K=16384: natural=3.816  D=3.241  speedup 1.177x (and D is global best)
+  kv wide-K M=128 K=32768 M=128 N=1024 K=32768: natural=4.669  D=3.519  speedup 1.327x (and D is global best)
+  FFN narrow M=128 M=128 N=1024 K=14336: natural=3.689  D=3.372  speedup 1.094x (and D is global best)
+  FFN narrow M=512 M=512 N=1024 K=14336: natural=3.592  D=3.500  speedup 1.026x (and D is global best)
+
+## D-vs-pure-M comparison on shapes where pure-M is valid
+
+  kv N=1024 M=8: pure-M=3.166ms, D=3.052ms, D/B=0.964x ← D WINS
+  kv N=1024 M=32: pure-M=3.310ms, D=3.104ms, D/B=0.938x ← D WINS
+  kv N=1024 M=64: pure-M=3.325ms, D=3.075ms, D/B=0.925x ← D WINS
+  kv N=1024 M=128: pure-M=3.370ms, D=3.082ms, D/B=0.914x ← D WINS
+  kv N=1024 M=256: pure-M=3.360ms, D=3.110ms, D/B=0.926x ← D WINS
+  kv N=1024 M=512: pure-M=3.367ms, D=3.169ms, D/B=0.941x ← D WINS
+  kv N=1024 M=1024: pure-M=3.438ms, D=3.413ms, D/B=0.993x
+  kv N=1024 M=2048: pure-M=3.629ms, D=3.931ms, D/B=1.083x
+  kv wide-K M=128 K=16384: pure-M=3.817ms, D=3.241ms, D/B=0.849x ← D WINS
+  kv wide-K M=128 K=32768: pure-M=4.673ms, D=3.519ms, D/B=0.753x ← D WINS
+  kv wide-K M=2048 K=16384: pure-M=4.377ms, D=4.970ms, D/B=1.135x
+  FFN narrow M=128: pure-M=3.693ms, D=3.372ms, D/B=0.913x ← D WINS
+  FFN narrow M=512: pure-M=3.583ms, D=3.500ms, D/B=0.977x ← D WINS
+  FFN narrow M=2048: pure-M=4.118ms, D=5.216ms, D/B=1.267x

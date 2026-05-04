@@ -1,0 +1,62 @@
+# Planner natural-pick verification — does k_fast compose with production?
+
+Each row compares (a) the split we FORCED in earlier wall-time
+measurements vs (b) the split the planner picks NATURALLY for
+the same shape. Match → measured win composes with production.
+Differs → measured win is contingent on a separate planner change.
+
+
+## Mode: OUTPUT_ELEMENT_PRIORITY = 0 (production default)  (output_element_priority=False)
+
+| shape | M | N | K | forced split | natural pick | match? |
+|---|---:|---:|---:|---|---|---|
+| L3-70B kv_proj M=2048 | 2048 | 1024 | 8192 | (1, 16, 2) | (32, 1, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+| Mixtral 8x7B kv_proj M=2048 | 2048 | 1024 | 4096 | (1, 16, 2) | (32, 1, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+| DSv3 o_proj M=2048 | 2048 | 7168 | 16384 | (1, 16, 2) | (32, 1, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+| DSv3 down_proj M=2048 (dense) | 2048 | 7168 | 2048 | (1, 16, 2) | (32, 1, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+| DSv3 q_a_proj M=2048 | 2048 | 1536 | 7168 | (1, 8, 4) | (32, 1, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+| L3-70B q_proj M=128 | 128 | 8192 | 8192 | (4, 1, 8) | (32, 1, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+| L3-8B  MLP down M=128 | 128 | 4096 | 14336 | (4, 1, 8) | (32, 1, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+
+## Mode: OUTPUT_ELEMENT_PRIORITY = 1 (shipped opt-in)  (output_element_priority=True)
+
+| shape | M | N | K | forced split | natural pick | match? |
+|---|---:|---:|---:|---|---|---|
+| L3-70B kv_proj M=2048 | 2048 | 1024 | 8192 | (1, 16, 2) | (32, 1, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+| Mixtral 8x7B kv_proj M=2048 | 2048 | 1024 | 4096 | (1, 16, 2) | (32, 1, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+| DSv3 o_proj M=2048 | 2048 | 7168 | 16384 | (1, 16, 2) | (1, 28, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+| DSv3 down_proj M=2048 (dense) | 2048 | 7168 | 2048 | (1, 16, 2) | (1, 28, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+| DSv3 q_a_proj M=2048 | 2048 | 1536 | 7168 | (1, 8, 4) | (32, 1, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+| L3-70B q_proj M=128 | 128 | 8192 | 8192 | (4, 1, 8) | (1, 32, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+| L3-8B  MLP down M=128 | 128 | 4096 | 14336 | (4, 1, 8) | (1, 32, 1) (k=1, k_fast=identity) | ✗ DIFFERS |
+
+## Verdict per shape
+
+
+  L3-70B kv_proj M=2048  (forced was (1, 16, 2)):
+    OUTPUT_ELEMENT_PRIORITY=0 (production today):  natural=(32, 1, 1)  matches_forced=False  k_fast_helps=False
+    OUTPUT_ELEMENT_PRIORITY=1:  natural=(32, 1, 1)  matches_forced=False  k_fast_helps=False
+
+  Mixtral 8x7B kv_proj M=2048  (forced was (1, 16, 2)):
+    OUTPUT_ELEMENT_PRIORITY=0 (production today):  natural=(32, 1, 1)  matches_forced=False  k_fast_helps=False
+    OUTPUT_ELEMENT_PRIORITY=1:  natural=(32, 1, 1)  matches_forced=False  k_fast_helps=False
+
+  DSv3 o_proj M=2048  (forced was (1, 16, 2)):
+    OUTPUT_ELEMENT_PRIORITY=0 (production today):  natural=(32, 1, 1)  matches_forced=False  k_fast_helps=False
+    OUTPUT_ELEMENT_PRIORITY=1:  natural=(1, 28, 1)  matches_forced=False  k_fast_helps=False
+
+  DSv3 down_proj M=2048 (dense)  (forced was (1, 16, 2)):
+    OUTPUT_ELEMENT_PRIORITY=0 (production today):  natural=(32, 1, 1)  matches_forced=False  k_fast_helps=False
+    OUTPUT_ELEMENT_PRIORITY=1:  natural=(1, 28, 1)  matches_forced=False  k_fast_helps=False
+
+  DSv3 q_a_proj M=2048  (forced was (1, 8, 4)):
+    OUTPUT_ELEMENT_PRIORITY=0 (production today):  natural=(32, 1, 1)  matches_forced=False  k_fast_helps=False
+    OUTPUT_ELEMENT_PRIORITY=1:  natural=(32, 1, 1)  matches_forced=False  k_fast_helps=False
+
+  L3-70B q_proj M=128  (forced was (4, 1, 8)):
+    OUTPUT_ELEMENT_PRIORITY=0 (production today):  natural=(32, 1, 1)  matches_forced=False  k_fast_helps=False
+    OUTPUT_ELEMENT_PRIORITY=1:  natural=(1, 32, 1)  matches_forced=False  k_fast_helps=False
+
+  L3-8B  MLP down M=128  (forced was (4, 1, 8)):
+    OUTPUT_ELEMENT_PRIORITY=0 (production today):  natural=(32, 1, 1)  matches_forced=False  k_fast_helps=False
+    OUTPUT_ELEMENT_PRIORITY=1:  natural=(1, 32, 1)  matches_forced=False  k_fast_helps=False

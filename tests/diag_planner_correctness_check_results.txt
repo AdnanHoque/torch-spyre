@@ -1,0 +1,82 @@
+# Is (1, 16, 2)+k_fast actually faster than the planner's pure-M pick?
+
+# warmup=5 iters=25, fp16, SENCORES=32
+
+Three configs per shape:
+  A. natural+identity   (planner picks; today's production)
+  B. (1, 16, 2)+identity (our original forced measurement)
+  C. (1, 16, 2)+k_fast   (k_fast at its best)
+
+If C < A: pair k_fast with a planner change (Option C in writeup).
+If C >= A: planner is right; k_fast wins are unreachable in prod.
+
+### L3-70B kv_proj M=2048  (M=2048, N=1024, K=8192)
+
+  trial1 (order: ['A: natural+identity', 'B: (1,16,2)+identity', 'C: (1,16,2)+k_fast']):
+    A: natural+identity      : 3.681 ms
+    B: (1,16,2)+identity     : 10.909 ms
+    C: (1,16,2)+k_fast       : 3.961 ms
+
+  trial2 (order: ['C: (1,16,2)+k_fast', 'B: (1,16,2)+identity', 'A: natural+identity']):
+    C: (1,16,2)+k_fast       : 3.975 ms
+    B: (1,16,2)+identity     : 10.950 ms
+    A: natural+identity      : 3.680 ms
+
+### Mixtral 8x7B kv_proj M=2048  (M=2048, N=1024, K=4096)
+
+  trial1 (order: ['A: natural+identity', 'B: (1,16,2)+identity', 'C: (1,16,2)+k_fast']):
+    A: natural+identity      : 3.310 ms
+    B: (1,16,2)+identity     : 6.945 ms
+    C: (1,16,2)+k_fast       : 3.495 ms
+
+  trial2 (order: ['C: (1,16,2)+k_fast', 'B: (1,16,2)+identity', 'A: natural+identity']):
+    C: (1,16,2)+k_fast       : 3.484 ms
+    B: (1,16,2)+identity     : 6.942 ms
+    A: natural+identity      : 3.327 ms
+
+### DSv3 o_proj M=2048  (M=2048, N=7168, K=16384)
+
+  trial1 (order: ['A: natural+identity', 'B: (1,16,2)+identity', 'C: (1,16,2)+k_fast']):
+    A: natural+identity      : 13.429 ms
+    B: (1,16,2)+identity     : 116.117 ms
+    C: (1,16,2)+k_fast       : 31.210 ms
+
+  trial2 (order: ['C: (1,16,2)+k_fast', 'B: (1,16,2)+identity', 'A: natural+identity']):
+    C: (1,16,2)+k_fast       : 31.291 ms
+    B: (1,16,2)+identity     : 116.114 ms
+    A: natural+identity      : 13.402 ms
+
+### DSv3 down_proj M=2048 (dense)  (M=2048, N=7168, K=2048)
+
+  trial1 (order: ['A: natural+identity', 'B: (1,16,2)+identity', 'C: (1,16,2)+k_fast']):
+    A: natural+identity      : 4.475 ms
+    B: (1,16,2)+identity     : 17.078 ms
+    C: (1,16,2)+k_fast       : 6.934 ms
+
+  trial2 (order: ['C: (1,16,2)+k_fast', 'B: (1,16,2)+identity', 'A: natural+identity']):
+    C: (1,16,2)+k_fast       : 6.915 ms
+    B: (1,16,2)+identity     : 17.055 ms
+    A: natural+identity      : 4.467 ms
+
+
+## Summary — does (1,16,2)+k_fast beat planner-natural pure-M?
+
+| shape | A: pure-M | B: (1,16,2)+id | C: (1,16,2)+k_fast | C/A speedup | C beats A? |
+|---|---:|---:|---:|---:|---|
+| L3-70B kv_proj M=2048 | 3.680 | 10.930 | 3.968 | 0.927x | ✗ NO |
+| Mixtral 8x7B kv_proj M=2048 | 3.318 | 6.943 | 3.490 | 0.951x | ✗ NO |
+| DSv3 o_proj M=2048 | 13.415 | 116.116 | 31.251 | 0.429x | ✗ NO |
+| DSv3 down_proj M=2048 (dense) | 4.471 | 17.066 | 6.924 | 0.646x | ✗ NO |
+
+## Verdict
+
+
+  4 of 4 shapes: pure-M BEATS (1,16,2)+k_fast:
+    - L3-70B kv_proj M=2048: pure-M 3.68ms vs k_fast 3.97ms (planner wins by 1.078x)
+    - Mixtral 8x7B kv_proj M=2048: pure-M 3.32ms vs k_fast 3.49ms (planner wins by 1.052x)
+    - DSv3 o_proj M=2048: pure-M 13.42ms vs k_fast 31.25ms (planner wins by 2.329x)
+    - DSv3 down_proj M=2048 (dense): pure-M 4.47ms vs k_fast 6.92ms (planner wins by 1.549x)
+
+  → For these shapes, the planner is right. (1,16,2)+k_fast
+    cannot beat pure-M even at its best. Don't pursue planner
+    change for these.

@@ -1,0 +1,97 @@
+# k_fast win-band sweep across real-world LLM workloads
+
+# warmup=3 iters=12, fp16, SENCORES=32
+
+## L3-70B kv_proj  (N=1024, K=8192, K-split tested = (1, 16, 2))
+
+| M | A:natural | B:pure-M | D:K-split+k_fast | D vs A | D vs best |
+|---:|---:|---:|---:|---:|---|
+| 32 | 3.307 | 3.320 | 3.112 | 1.063x | **WINS** (1.063x) |
+| 128 | 3.371 | 3.367 | 3.089 | 1.091x | **WINS** (1.090x) |
+| 512 | 3.357 | 3.374 | 3.174 | 1.058x | **WINS** (1.058x) |
+| 1024 | 3.433 | 3.434 | 3.433 | 1.000x | 1.000x |
+| 2048 | 3.666 | 3.637 | 3.939 | 0.931x | 0.923x |
+
+## Mixtral 8x7B kv_proj  (N=1024, K=4096, K-split tested = (1, 16, 2))
+
+| M | A:natural | B:pure-M | D:K-split+k_fast | D vs A | D vs best |
+|---:|---:|---:|---:|---:|---|
+| 32 | 3.106 | 3.100 | 3.018 | 1.029x | **WINS** (1.027x) |
+| 128 | 3.136 | 3.153 | 3.009 | 1.042x | **WINS** (1.042x) |
+| 512 | 3.136 | 3.125 | 3.037 | 1.033x | **WINS** (1.029x) |
+| 1024 | 3.144 | 3.151 | 3.162 | 0.994x | 0.994x |
+| 2048 | 3.274 | 3.280 | 3.442 | 0.951x | 0.951x |
+
+## DSv3 o_proj  (N=7168, K=16384, K-split tested = (1, 16, 2))
+
+| M | A:natural | B:pure-M | D:K-split+k_fast | D vs A | D vs best |
+|---:|---:|---:|---:|---:|---|
+| 32 | 4.839 | 8.797 | 4.692 | 1.031x | **WINS** (1.031x) |
+| 128 | 9.135 | 9.152 | 4.691 | 1.947x | **WINS** (1.947x) |
+| 512 | 8.473 | 8.584 | 9.984 | 0.849x | 0.849x |
+| 1024 | 8.905 | 8.869 | 16.982 | 0.524x | 0.522x |
+| 2048 | 13.278 | 13.357 | 31.227 | 0.425x | 0.425x |
+
+## DSv3 down_proj  (N=7168, K=2048, K-split tested = (1, 16, 2))
+
+| M | A:natural | B:pure-M | D:K-split+k_fast | D vs A | D vs best |
+|---:|---:|---:|---:|---:|---|
+| 32 | 3.167 | 3.697 | 3.234 | 0.979x | 0.979x |
+| 128 | 3.726 | 3.727 | 3.156 | 1.181x | **WINS** (1.181x) |
+| 512 | 3.699 | 3.703 | 3.952 | 0.936x | 0.936x |
+| 1024 | 3.789 | 3.777 | 4.918 | 0.770x | 0.768x |
+| 2048 | 4.437 | 4.440 | 6.870 | 0.646x | 0.646x |
+
+## DSv3 q_a_proj  (N=1536, K=7168, K-split tested = (1, 8, 4))
+
+| M | A:natural | B:pure-M | D:K-split+k_fast | D vs A | D vs best |
+|---:|---:|---:|---:|---:|---|
+| 32 | 3.467 | 3.473 | 3.185 | 1.088x | **WINS** (1.088x) |
+| 128 | 3.516 | 3.521 | 3.224 | 1.090x | **WINS** (1.090x) |
+| 512 | 3.442 | 3.445 | 3.540 | 0.972x | 0.972x |
+| 1024 | 3.559 | 3.568 | 4.101 | 0.868x | 0.868x |
+| 2048 | 4.055 | 4.052 | 5.213 | 0.778x | 0.777x |
+
+
+## Where does k_fast WIN over the planner?
+
+Reporting (shape, M) where D < A by ≥2%:
+
+| shape | N | K | M | natural ms | k_fast ms | wins by |
+|---|---:|---:|---:|---:|---:|---:|
+| L3-70B kv_proj | 1024 | 8192 | 32 | 3.307 | 3.112 | 5.9% |
+| L3-70B kv_proj | 1024 | 8192 | 128 | 3.371 | 3.089 | 8.4% |
+| L3-70B kv_proj | 1024 | 8192 | 512 | 3.357 | 3.174 | 5.5% |
+| Mixtral 8x7B kv_proj | 1024 | 4096 | 32 | 3.106 | 3.018 | 2.8% |
+| Mixtral 8x7B kv_proj | 1024 | 4096 | 128 | 3.136 | 3.009 | 4.0% |
+| Mixtral 8x7B kv_proj | 1024 | 4096 | 512 | 3.136 | 3.037 | 3.2% |
+| DSv3 o_proj | 7168 | 16384 | 32 | 4.839 | 4.692 | 3.0% |
+| DSv3 o_proj | 7168 | 16384 | 128 | 9.135 | 4.691 | 48.7% |
+| DSv3 down_proj | 7168 | 2048 | 128 | 3.726 | 3.156 | 15.3% |
+| DSv3 q_a_proj | 1536 | 7168 | 32 | 3.467 | 3.185 | 8.1% |
+| DSv3 q_a_proj | 1536 | 7168 | 128 | 3.516 | 3.224 | 8.3% |
+
+
+## Per-shape M-band where k_fast helps
+
+  L3-70B kv_proj: M ∈ {32, 128, 512} (K-split tested = (1, 16, 2))
+    M=   32  natural=3.307  k_fast=3.112  (5.9% saved)
+    M=  128  natural=3.371  k_fast=3.089  (8.4% saved)
+    M=  512  natural=3.357  k_fast=3.174  (5.5% saved)
+
+  Mixtral 8x7B kv_proj: M ∈ {32, 128, 512} (K-split tested = (1, 16, 2))
+    M=   32  natural=3.106  k_fast=3.018  (2.8% saved)
+    M=  128  natural=3.136  k_fast=3.009  (4.0% saved)
+    M=  512  natural=3.136  k_fast=3.037  (3.2% saved)
+
+  DSv3 o_proj: M ∈ {32, 128} (K-split tested = (1, 16, 2))
+    M=   32  natural=4.839  k_fast=4.692  (3.0% saved)
+    M=  128  natural=9.135  k_fast=4.691  (48.7% saved)
+
+  DSv3 down_proj: M ∈ {128} (K-split tested = (1, 16, 2))
+    M=  128  natural=3.726  k_fast=3.156  (15.3% saved)
+
+  DSv3 q_a_proj: M ∈ {32, 128} (K-split tested = (1, 8, 4))
+    M=   32  natural=3.467  k_fast=3.185  (8.1% saved)
+    M=  128  natural=3.516  k_fast=3.224  (8.3% saved)
+
