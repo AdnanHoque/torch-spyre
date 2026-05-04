@@ -28,6 +28,70 @@ large simultaneously, and we get a 2.76× wall-time reduction.
 
 ## Part 1: PSUM and the SFP ring — what's actually happening
 
+### Definitions
+
+Three terms are load-bearing throughout this doc; pinning them down
+once:
+
+- **K-collaborator**: a core that holds a partial output for the same
+  `(m_slice, n_slice)` cell as some other core, but a different
+  `k_slice`. K-collaborators must add their partial sums together to
+  produce the final output. If the planner picks split `(m, n, k)`,
+  each `(m, n)` cell has exactly **k K-collaborators**.
+
+- **K-chain (or just "chain")**: the sequence of K-collaborators for
+  one `(m, n)` cell, traversed in core_id order. There are `m·n`
+  chains running concurrently, each consisting of `k` cores. Within
+  a chain, PSUM is reduced by `k − 1` *sends* (the first core sends
+  its partial to the second, the second adds and sends to the third,
+  etc.).
+
+- **Hop**: one transit of a PSUM packet from a physical ring core to
+  its physical-ring-*adjacent* neighbor (one ring position). When a
+  chain's two consecutive members are physically adjacent, the send
+  between them is **1 hop**. When they're 16 ring positions apart,
+  the send is **16 hops**.
+
+  The number of hops a *send* costs equals the physical-ring distance
+  between its two endpoints. The total *chain hops* is the sum of
+  those per-send distances across all `k − 1` sends:
+
+  ```
+  chain_hops = Σ |physical_position(c_{i+1}) − physical_position(c_i)|
+              for i = 0 .. k−2
+  ```
+
+  For a chain whose members sit at evenly-spaced physical positions
+  `p_0 < p_1 < … < p_{k-1}` (the case for every permutation we
+  consider here), this simplifies to `chain_hops = p_{k-1} − p_0`.
+
+  **Per-hop time** = (chain payload bytes) / (SFP ring bandwidth).
+  Each hop carries the full chain payload across one ring position
+  at the SFP ring's 32 B/cycle.
+
+So **"hops" is the wall-time-relevant quantity** (ring positions
+traversed), and **"chain length k" is the number of cores** in the
+reduction. They're equal only when chain members sit at consecutive
+ring positions — exactly what `k_fast` arranges.
+
+### Example to anchor the definitions
+
+Split `(1, 4, 2)`. There are `m·n = 4` chains. Each chain has
+`k = 2` cores. Under identity emission, the chain for n_slice=0
+consists of cores at physical positions 0 and 4 — so this 2-core
+chain traverses **4 hops** (because 4 is the physical ring distance
+between its two members).
+
+Under `k_fast` emission, the same chain consists of cores at
+physical positions 0 and 1 — same 2 cores logically, but **1 hop**
+of physical distance.
+
+Same number of K-collaborators (2). Same chain length (2). Different
+hop count (4 vs 1). The wall-time difference comes from hop count,
+not chain length.
+
+### Why hops cost time
+
 When the planner splits a matmul along the K (reduction) dim, each
 core computes a partial output. Those partials must be summed. The
 AIU has a dedicated **SFP ring** (32 B/cycle, separate from the data
@@ -46,9 +110,14 @@ flowchart LR
 
 **Each chain's wall time = chain_hops × per_hop_time.**
 
-- `chain_hops` = number of physical ring positions traversed by the
-  PSUM packet
-- `per_hop_time` = (chain payload bytes) / (SFP ring bandwidth)
+- `chain_hops` = total physical ring positions the PSUM packet
+  traverses to visit every core in the chain in core_id order. For a
+  chain whose k members sit at physical positions `p_0 < p_1 < … <
+  p_{k-1}`, `chain_hops = p_{k-1} − p_0`. (Chain order follows core_id,
+  which approximately corresponds to physical-ring order.)
+- `per_hop_time` = (chain payload bytes) / (SFP ring bandwidth).
+  Payload is `M · (N/n) · sizeof(fp32)` per chain — fp32 because
+  partials are accumulated at higher precision.
 
 Multiple chains operate concurrently, but they share the SFP ring's
 bandwidth. So total PSUM wall time scales as
