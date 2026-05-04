@@ -133,6 +133,216 @@ bandwidth. So total PSUM wall time scales as
 >   total = 4 × 1 = 4 hops. 64 KB × 4 = 256 KB on the SFP ring.
 > - **4× less ring traffic** → 4× less PSUM time.
 
+## Part 1.5: A tiny matmul, end to end — what each core actually reads
+
+Let's make this concrete with numbers you can verify by hand. We'll
+compute a 2×4 matmul on **4 cores**, split `(m=1, n=2, k=2)`, and
+trace exactly which slice of A and B each core reads, what partial
+output it produces, and how the PSUM gets sent.
+
+### The matmul
+
+```
+A (M=2, K=4):                  B (K=4, N=4):
+
+  ┌─────────────┐                ┌──────────────────┐
+  │ 1  2  3  4  │                │ 1   2   3   4    │
+  │ 5  6  7  8  │                │ 5   6   7   8    │
+  └─────────────┘                │ 9  10  11  12    │
+                                 │ 13  14  15  16   │
+                                 └──────────────────┘
+```
+
+C = A @ B is a 2×4 matrix. Hand-computed answer (we'll verify the
+parallel version reaches it):
+
+```
+C (M=2, N=4):
+
+  ┌──────────────────────────────┐
+  │  90  100  110  120           │
+  │ 202  228  254  280           │
+  └──────────────────────────────┘
+```
+
+For example `C[0,0] = 1·1 + 2·5 + 3·9 + 4·13 = 1 + 10 + 27 + 52 = 90`.
+
+### The split: `(1, 2, 2)` carves the work into 4 pieces
+
+- **m=1**: don't split M. Every core sees both rows of A.
+- **n=2**: split N into 2 halves: cols `[0:2]` and `[2:4]`.
+- **k=2**: split K into 2 halves: cols `[0:2]` of A, paired with rows
+  `[0:2]` of B; cols `[2:4]` of A paired with rows `[2:4]` of B.
+
+So 4 cores, one per `(n_slice, k_slice)` cell:
+
+| logical core | n_slice | k_slice | reads A slice | reads B slice | computes partial |
+|---:|:---:|:---:|---|---|---|
+| 0 | 0 | 0 | `A[:, 0:2]` (both rows) | `B[0:2, 0:2]` | `C[:, 0:2]` from K=0..1 |
+| 1 | 1 | 0 | `A[:, 0:2]` (same) | `B[0:2, 2:4]` | `C[:, 2:4]` from K=0..1 |
+| 2 | 0 | 1 | `A[:, 2:4]` | `B[2:4, 0:2]` | `C[:, 0:2]` from K=2..3 |
+| 3 | 1 | 1 | `A[:, 2:4]` | `B[2:4, 2:4]` | `C[:, 2:4]` from K=2..3 |
+
+Visually, the partition of A and B:
+
+```
+  A partition (split along K, 2 halves):
+
+    cols 0..1    cols 2..3
+   ┌─────────┬─────────┐
+   │ 1   2   │ 3   4   │
+   │ 5   6   │ 7   8   │
+   └─────────┴─────────┘
+    A_left      A_right
+    (k=0)       (k=1)
+
+
+  B partition (split along K vertically, then N horizontally):
+
+    cols 0..1    cols 2..3       (split N)
+   ┌─────────┬─────────┐
+   │ 1   2   │ 3   4   │  rows 0..1 (k=0)
+   │ 5   6   │ 7   8   │
+   ├─────────┼─────────┤
+   │ 9  10   │ 11  12  │  rows 2..3 (k=1)
+   │ 13 14   │ 15  16  │
+   └─────────┴─────────┘
+   B[K=0,N=0] B[K=0,N=1]
+   B[K=1,N=0] B[K=1,N=1]
+```
+
+### Each core computes a partial sum
+
+Plugging in:
+
+**Core (n=0, k=0)** computes `A_left @ B[K=0, N=0]`:
+```
+[1, 2]   [1, 2]      [1·1+2·5,  1·2+2·6 ]   [11, 14]
+[5, 6] @ [5, 6]   =  [5·1+6·5,  5·2+6·6 ] = [35, 46]
+```
+
+**Core (n=0, k=1)** computes `A_right @ B[K=1, N=0]`:
+```
+[3, 4]   [9,  10]    [3·9+4·13,  3·10+4·14]   [79,  86]
+[7, 8] @ [13, 14] =  [7·9+8·13,  7·10+8·14] = [167, 182]
+```
+
+**Core (n=1, k=0)** computes `A_left @ B[K=0, N=1]`:
+```
+[1, 2]   [3, 4]      [1·3+2·7,  1·4+2·8 ]   [17, 20]
+[5, 6] @ [7, 8]   =  [5·3+6·7,  5·4+6·8 ] = [57, 68]
+```
+
+**Core (n=1, k=1)** computes `A_right @ B[K=1, N=1]`:
+```
+[3, 4]   [11, 12]    [3·11+4·15,  3·12+4·16]   [93,  108]
+[7, 8] @ [15, 16] =  [7·11+8·15,  7·12+8·16] = [197, 212]
+```
+
+### PSUM: K-collaborators add their partials
+
+For final `C[:, 0:2]` we need the PSUM of cores (n=0, k=0) and
+(n=0, k=1):
+
+```
+[11, 14]   [79,  86]    [90,  100]
+[35, 46] + [167, 182] = [202, 228]   ✓ matches our hand answer
+```
+
+For final `C[:, 2:4]`, PSUM of cores (n=1, k=0) and (n=1, k=1):
+
+```
+[17, 20]   [93,  108]   [110, 120]
+[57, 68] + [197, 212] = [254, 280]   ✓ matches
+```
+
+Each chain has **k = 2 cores** doing **k − 1 = 1 send** of a
+2×2-element partial sum.
+
+### Identity vs k_fast — the same 4 cores, different physical placement
+
+Here's where emission order matters. The **logical** core assignments
+above are the same in both modes; what changes is **which physical
+ring core executes each logical core's work**.
+
+**Identity emission**: `core_id = n_slice + 2·k_slice`. So:
+
+```
+physical position:    0          1          2          3
+logical core:        (n=0,k=0)  (n=1,k=0)  (n=0,k=1)  (n=1,k=1)
+```
+
+```mermaid
+flowchart LR
+    subgraph identity_walk["IDENTITY: K-pairs sit 2 hops apart"]
+        direction LR
+        IP0["Pos 0<br/>n=0,k=0<br/>partial: [11,14;35,46]"]:::cell00
+        IP1["Pos 1<br/>n=1,k=0<br/>partial: [17,20;57,68]"]:::cell10
+        IP2["Pos 2<br/>n=0,k=1<br/>partial: [79,86;167,182]"]:::cell01
+        IP3["Pos 3<br/>n=1,k=1<br/>partial: [93,108;197,212]"]:::cell11
+        IP0 --- IP1 --- IP2 --- IP3
+        IP3 -.- IP0
+        IP0 ==>|"PSUM payload<br/>2×2 partial<br/>2 hops via SFP"| IP2
+        IP1 ==>|"2 hops via SFP"| IP3
+    end
+    classDef cell00 fill:#fdd
+    classDef cell10 fill:#fdb
+    classDef cell01 fill:#dfd
+    classDef cell11 fill:#bfb
+```
+
+The K-pair for n=0 is positions 0 → 2: PSUM packet has to traverse
+positions 1 (which holds an unrelated n=1 worker) just to reach the
+partner. **Each chain is 2 hops** even though it's only 2 cores.
+
+**k_fast emission**: `perm[c] = (c mod 2)·2 + (c // 2)`. So:
+
+```
+physical position:    0          1          2          3
+logical core:        (n=0,k=0)  (n=0,k=1)  (n=1,k=0)  (n=1,k=1)
+```
+
+```mermaid
+flowchart LR
+    subgraph kfast_walk["k_fast: K-pairs are adjacent, 1 hop"]
+        direction LR
+        KP0["Pos 0<br/>n=0,k=0<br/>partial: [11,14;35,46]"]:::cell00
+        KP1["Pos 1<br/>n=0,k=1<br/>partial: [79,86;167,182]"]:::cell01
+        KP2["Pos 2<br/>n=1,k=0<br/>partial: [17,20;57,68]"]:::cell10
+        KP3["Pos 3<br/>n=1,k=1<br/>partial: [93,108;197,212]"]:::cell11
+        KP0 --- KP1 --- KP2 --- KP3
+        KP3 -.- KP0
+        KP0 ==>|"1 hop"| KP1
+        KP2 ==>|"1 hop"| KP3
+    end
+    classDef cell00 fill:#fdd
+    classDef cell10 fill:#fdb
+    classDef cell01 fill:#dfd
+    classDef cell11 fill:#bfb
+```
+
+Same partial sums sitting in the same logical workers; same final
+PSUM result. But **K-pair partners are now physical neighbors** — the
+PSUM packet for n=0 only has to cross 1 ring position to reach its
+partner. 1 hop instead of 2.
+
+### What changed and what didn't
+
+Same in both modes:
+- Which slices of A and B each core reads
+- The numerical values of the partial sums
+- The final PSUM result (90, 100, 202, 228, 110, 120, 254, 280)
+- Total compute work
+
+Different:
+- Which physical core executes which logical (n_slice, k_slice)
+- Number of ring hops between K-pair members (2 vs 1)
+- Wall time for the PSUM step
+
+**Compute, memory access, and arithmetic are identical. Only the ring
+geography of where partners sit changes.** That's the entire mechanism
+of k_fast — re-route the *placement* without touching the *work*.
+
 ## Part 2: How emission order determines K-chain topology
 
 The default emitter walks the leftmost `iteration_space` dim with
