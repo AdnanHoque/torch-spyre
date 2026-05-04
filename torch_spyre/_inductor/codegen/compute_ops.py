@@ -16,6 +16,32 @@
 from torch_spyre._C import encode_constant, DataFormats
 from sympy import Symbol
 
+from torch_spyre._inductor import config as _spyre_config
+
+
+def _k_fast_core_id_permutation(num_cores: int, work_slices) -> list[int]:
+    """Permute physical core IDs so K-collaborators sit on adjacent ring cores.
+
+    perm[c] = (c % k) * (m * n) + (c // k), where (m, n, k) is the planner's
+    matmul split. Physical core c executes the slice that the unpermuted
+    emitter would have given to logical core perm[c]. Degenerates to
+    identity when k=1 or when the feature flag is off.
+    """
+    if not _spyre_config.core_id_k_fast_emission:
+        return list(range(num_cores))
+    if not work_slices:
+        return list(range(num_cores))
+    dim_list = list(work_slices.keys())
+    # For matmul iteration_space [M, N, K], the last dim in work_slices
+    # is the K (reduction) dim by convention. For non-matmul ops with
+    # k = 1 the formula collapses to identity, so this is a no-op for
+    # those cases.
+    k = int(work_slices[dim_list[-1]])
+    if k <= 1:
+        return list(range(num_cores))
+    mn = num_cores // k
+    return [(c % k) * mn + (c // k) for c in range(num_cores)]
+
 
 def core_idx_to_slice_offset(
     arg,
@@ -207,9 +233,10 @@ def gen_coord_info_value(
 
 def generate_sdsc(sdsc_spec):
     out_idx = len(sdsc_spec.args) - 1
+    perm = _k_fast_core_id_permutation(sdsc_spec.num_cores, sdsc_spec.work_slices)
     core_id_to_wk_slice = {
         str(c): {
-            str(dim): int(expr.subs({Symbol("core_id"): c}))
+            str(dim): int(expr.subs({Symbol("core_id"): perm[c]}))
             for dim, expr in sdsc_spec.core_id_to_work_slice.items()
         }
         for c in range(sdsc_spec.num_cores)
