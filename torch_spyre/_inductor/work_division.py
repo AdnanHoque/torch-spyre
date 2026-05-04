@@ -595,6 +595,15 @@ def work_distribution_pass(
     splits = multi_dim_iteration_space_split(
         it_space_adjusted, max_cores, priorities, committed_splits
     )
+
+    # k_fast override: for narrow-N small-M matmul shapes, prefer
+    # (1, n, k>1) over the planner's pure-M pick. Returns None for
+    # non-matmul ops, so this is safe to call unconditionally.
+    forced = _try_k_fast_split(splits, it_space, output_td, committed_splits, max_cores)
+    if forced is not None:
+        logger.debug(f"k_fast override for {op.get_name()}: {splits} -> {forced}")
+        splits = forced
+
     apply_splits(
         op,
         splits,
@@ -606,6 +615,88 @@ def work_distribution_pass(
         kind="work_distribution",
     )
     warn_if_per_core_overflow(all_tds, it_space, splits, op.get_name())
+
+
+def _try_k_fast_split(
+    current_splits: dict[Symbol, int],
+    it_space: dict[Symbol, Expr],
+    output_td: TensorDep,
+    min_splits: dict[Symbol, int] | None,
+    max_cores: int,
+) -> dict[Symbol, int] | None:
+    """Propose (1, n, k>1) split for narrow-N small-M matmul shapes.
+
+    Returns None to defer to the default planner. Conditions to fire:
+      - feature flag on, max_cores == 32
+      - 3D iteration space (matmul mm)
+      - planner did not already choose a K-split
+      - M in [32, 512]
+      - N stick-count < 32, K stick-count >= 32
+      - no min_splits constraint on M or K
+
+    Picks the largest valid n so k = max_cores/n is minimised (shorter
+    PSUM chain on the SFP ring under the k_fast core-id permutation).
+
+    Safe to call from any work-distribution context: returns None for
+    non-matmul shapes (iter-space != 3D or reduction-dim count != 1).
+    """
+    if not config.core_id_k_fast_emission:
+        return None
+    if max_cores != 32:
+        return None
+    if len(it_space) != 3:
+        return None
+
+    dims = list(it_space.keys())
+    output_coord_vars = {v for e in output_td.device_coords for v in e.free_symbols}
+    reduction_dims = [d for d in dims if d not in output_coord_vars]
+    output_dims = [d for d in dims if d in output_coord_vars]
+    if len(reduction_dims) != 1 or len(output_dims) != 2:
+        return None
+    k_dim = reduction_dims[0]
+    m_dim, n_dim = output_dims
+
+    # Don't override planner picks that already include K-split.
+    if current_splits.get(k_dim, 1) > 1:
+        return None
+
+    M = concretize_expr(it_space[m_dim])
+    N = concretize_expr(it_space[n_dim])
+    K = concretize_expr(it_space[k_dim])
+
+    # Use the output tensor's stick width as the dtype reference. For matmul
+    # the output is the reduction result, so its dtype matches the matmul
+    # accumulation dtype (typically fp16 with 64 elems/stick).
+    elems_per_stick = output_td.layout.device_layout.device_dtype.elems_per_stick()
+    n_sticks = N // elems_per_stick
+    k_sticks = K // elems_per_stick
+
+    # Empirical win-band: M and stick-count thresholds derived from cross-model
+    # measurements of pure-M vs (1, n, k>1) + k_fast.
+    if M < 32 or M > 512:
+        return None
+    if n_sticks >= 32:  # pure-N (1, max_cores, 1) already valid; planner's choice
+        return None
+    if k_sticks < 32:  # K too narrow; PSUM cost dominates the saving
+        return None
+
+    # Hardware-driven min_splits constraints take precedence: never override
+    # them. We only override pure-M / non-K-split planner picks where M and K
+    # are unconstrained.
+    if min_splits and (m_dim in min_splits or k_dim in min_splits):
+        return None
+
+    # Pick the largest valid n. n must divide both n_sticks and max_cores;
+    # k = max_cores / n must divide k_sticks.
+    for n in (16, 8, 4, 2):
+        if max_cores % n != 0 or n_sticks % n != 0:
+            continue
+        k = max_cores // n
+        if k_sticks < k or k_sticks % k != 0:
+            continue
+        return {m_dim: 1, n_dim: n, k_dim: k}
+
+    return None
 
 
 def divide_pointwise_op(

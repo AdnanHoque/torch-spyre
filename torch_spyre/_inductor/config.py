@@ -27,9 +27,14 @@ dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
 
-# Pack K-collaborators on adjacent ring cores so PSUM chain hops are
-# minimised. Degenerates to identity emission when k=1. Set "0" to
-# disable.
+# k_fast: a two-layer optimisation for K-split matmul work-divisions.
+#   Layer 1 (planner, core_division.py): picks (1, n, k>1) over pure-M
+#     for narrow-N small-M matmul shapes that would otherwise leave the
+#     PT array under-utilised.
+#   Layer 2 (SDSC emitter, codegen/compute_ops.py): permutes physical
+#     core IDs so K-collaborators land on adjacent ring positions,
+#     reducing PSUM chain hops from m*n to 1.
+# Set SPYRE_CORE_ID_K_FAST_EMISSION=0 to disable both layers.
 core_id_k_fast_emission: bool = (
     os.environ.get("SPYRE_CORE_ID_K_FAST_EMISSION", "1") == "1"
 )
