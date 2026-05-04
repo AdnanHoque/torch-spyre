@@ -530,6 +530,156 @@ inter-core PSUM communication is along the K dim, so place K-cores
 adjacent and let the no-communication N-cores pay the distance
 cost.**
 
+### Worked formulas — six splits, side by side
+
+The clearest way to see what the formulas do is to plug them in for a
+few concrete splits. All examples below use 32 cores. The tables show,
+for each physical core c, the (m, n, k) cell it executes under each
+emission. **K-collaborators** for the (m=0, n=0) cell are highlighted
+in bold so you can see them packing together as the formula changes.
+
+#### Split `(1, 32, 1)` — pure-N, no K-split
+
+- Identity: `core_id = 0 + 1·n + 1·32·0 = n`. So core c → (0, c, 0).
+- k_fast: `perm[c] = (c mod 1)·32 + (c // 1) = c`. **Same as identity.**
+
+| physical c | identity (m,n,k) | k_fast (m,n,k) |
+|---:|:---:|:---:|
+| 0 | (0, 0, 0) | (0, 0, 0) |
+| 1 | (0, 1, 0) | (0, 1, 0) |
+| 2 | (0, 2, 0) | (0, 2, 0) |
+| ⋮ | ⋮ | ⋮ |
+| 31 | (0, 31, 0) | (0, 31, 0) |
+
+K-cluster size is 1 (no PSUM). k_fast degenerates safely. **No change.**
+
+#### Split `(1, 16, 2)` — kv_proj prefill (the big-win case)
+
+- Identity: `m=0, n = c mod 16, k = (c // 16) mod 2`.
+- k_fast: `perm[c] = (c mod 2)·16 + (c // 2)`. Decode the perm result
+  back through identity to get the (m, n, k) the physical core executes.
+
+| physical c | identity (m,n,k) | k_fast: perm[c] | k_fast (m,n,k) |
+|---:|:---:|:---:|:---:|
+| 0 | **(0, 0, 0)** | 0 | **(0, 0, 0)** |
+| 1 | (0, 1, 0) | 16 | **(0, 0, 1)** ← K-pair partner of c=0 |
+| 2 | (0, 2, 0) | 1 | (0, 1, 0) |
+| 3 | (0, 3, 0) | 17 | (0, 1, 1) |
+| ⋮ | ⋮ | ⋮ | ⋮ |
+| 15 | (0, 15, 0) | 23 | (0, 7, 1) |
+| **16** | **(0, 0, 1)** ← K-pair partner of c=0 | 8 | (0, 4, 0) |
+| 17 | (0, 1, 1) | 24 | (0, 8, 1) |
+| ⋮ | ⋮ | ⋮ | ⋮ |
+| 31 | (0, 15, 1) | 31 | (0, 15, 1) |
+
+**K-pair distance:** identity = **16 hops** (c=0 ↔ c=16). k_fast = **1 hop** (c=0 ↔ c=1). 16× reduction.
+
+#### Split `(1, 8, 4)` — q_a_proj-style (k=4)
+
+- Identity: `m=0, n = c mod 8, k = (c // 8) mod 4`.
+- k_fast: `perm[c] = (c mod 4)·8 + (c // 4)`.
+
+| physical c | identity (m,n,k) | k_fast (m,n,k) |
+|---:|:---:|:---:|
+| 0 | **(0, 0, 0)** | **(0, 0, 0)** |
+| 1 | (0, 1, 0) | **(0, 0, 1)** |
+| 2 | (0, 2, 0) | **(0, 0, 2)** |
+| 3 | (0, 3, 0) | **(0, 0, 3)** ← all four K-collaborators packed at c=0..3 |
+| 4 | (0, 4, 0) | (0, 1, 0) |
+| 5 | (0, 5, 0) | (0, 1, 1) |
+| 6 | (0, 6, 0) | (0, 1, 2) |
+| 7 | (0, 7, 0) | (0, 1, 3) |
+| **8** | **(0, 0, 1)** | (0, 2, 0) |
+| ⋮ | ⋮ | ⋮ |
+| **16** | **(0, 0, 2)** | (0, 4, 0) |
+| ⋮ | ⋮ | ⋮ |
+| **24** | **(0, 0, 3)** | (0, 6, 0) |
+
+**K-cluster (4 cores) physical positions:** identity = `{0, 8, 16, 24}` → spans **24 hops**. k_fast = `{0, 1, 2, 3}` → spans **3 hops**. 8× reduction.
+
+#### Split `(1, 4, 8)` — heavier K-split (k=8)
+
+- Identity: `m=0, n = c mod 4, k = (c // 4) mod 8`.
+- k_fast: `perm[c] = (c mod 8)·4 + (c // 8)`.
+
+| physical c | identity (m,n,k) | k_fast (m,n,k) |
+|---:|:---:|:---:|
+| 0 | **(0, 0, 0)** | **(0, 0, 0)** |
+| 1 | (0, 1, 0) | **(0, 0, 1)** |
+| 2 | (0, 2, 0) | **(0, 0, 2)** |
+| ⋮ | ⋮ | ⋮ |
+| 7 | (0, 3, 1) | **(0, 0, 7)** ← K-cluster of 8 packed at c=0..7 |
+| 8 | (0, 0, 2) | (0, 1, 0) |
+| ⋮ | ⋮ | ⋮ |
+| **28** | **(0, 0, 7)** | (0, 3, 4) |
+
+**K-cluster (8 cores) physical positions:** identity = `{0, 4, 8, 12, 16, 20, 24, 28}` → spans **28 hops**. k_fast = `{0..7}` → **7 hops**. 4× reduction.
+
+#### Split `(4, 1, 8)` — q_proj K-split (m=4, n=1)
+
+- Identity: `m = c mod 4, n=0, k = (c // 4) mod 8`.
+- k_fast: `perm[c] = (c mod 8)·4 + (c // 8)`. (Same numerical perm as `(1, 4, 8)` because `m·n = 4` either way.)
+
+| physical c | identity (m,n,k) | k_fast (m,n,k) |
+|---:|:---:|:---:|
+| 0 | **(0, 0, 0)** | **(0, 0, 0)** |
+| 1 | (1, 0, 0) | (0, 0, 1) |
+| 2 | (2, 0, 0) | (0, 0, 2) |
+| 3 | (3, 0, 0) | (0, 0, 3) |
+| 4 | **(0, 0, 1)** | (0, 0, 4) |
+| 5 | (1, 0, 1) | (0, 0, 5) |
+| 6 | (2, 0, 1) | (0, 0, 6) |
+| 7 | (3, 0, 1) | **(0, 0, 7)** ← K-cluster for m=0 packed at c=0..7 |
+| 8 | (0, 0, 2) | (1, 0, 0) |
+
+**K-cluster (8 cores) for the m=0 cell:** identity = `{0, 4, 8, …, 28}` → 28 hops. k_fast = `{0..7}` → 7 hops. Same 4× reduction.
+
+(Note: identity here puts M-collaborators adjacent — cores 0,1,2,3 are all m=0,1,2,3 with n=k=0. M-collaborators don't communicate either, so this is also wasted locality.)
+
+#### Split `(2, 4, 4)` — fully mixed (m, n, k all > 1)
+
+- Identity: `m = c mod 2, n = (c // 2) mod 4, k = (c // 8) mod 4`.
+- k_fast: `perm[c] = (c mod 4)·8 + (c // 4)`.
+
+| physical c | identity (m,n,k) | k_fast (m,n,k) |
+|---:|:---:|:---:|
+| 0 | **(0, 0, 0)** | **(0, 0, 0)** |
+| 1 | (1, 0, 0) | **(0, 0, 1)** |
+| 2 | (0, 1, 0) | **(0, 0, 2)** |
+| 3 | (1, 1, 0) | **(0, 0, 3)** ← K-cluster (m=0,n=0) at c=0..3 |
+| 4 | (0, 2, 0) | (1, 0, 0) |
+| 5 | (1, 2, 0) | (1, 0, 1) |
+| ⋮ | ⋮ | ⋮ |
+| **8** | **(0, 0, 1)** | (0, 1, 0) |
+| ⋮ | ⋮ | ⋮ |
+| **16** | **(0, 0, 2)** | (0, 2, 0) |
+| ⋮ | ⋮ | ⋮ |
+| **24** | **(0, 0, 3)** | (0, 3, 0) |
+
+**K-cluster (4 cores) for (m=0, n=0):** identity = `{0, 8, 16, 24}` → 24 hops. k_fast = `{0..3}` → 3 hops. 8× reduction.
+
+### Summary table — what the algebra predicts
+
+| split (m, n, k) | identity K-spacing | identity K-cluster span | k_fast K-cluster span | reduction | measured wall-time win |
+|---|:---:|:---:|:---:|:---:|:---:|
+| (1, 32, 1) | n/a (k=1) | n/a | n/a | none | ≈1.00× |
+| (1, 16, 2) | 16 | 16 hops | 1 hop | 16× | **2.7×** (kv_proj), **3.7×** (DSv3 o_proj) |
+| (1, 8, 4) | 8 | 24 hops | 3 hops | 8× | 1.6× (DSv3 q_a_proj) |
+| (1, 4, 8) | 4 | 28 hops | 7 hops | 4× | not directly measured |
+| (4, 1, 8) | 4 | 28 hops | 7 hops | 4× | 1.04× (q_proj K-split) |
+| (2, 4, 4) | 8 | 24 hops | 3 hops | 8× | 1.07× (synthetic) |
+
+Notice the pattern in the leftmost K-spacing column: **K-collaborators
+are always exactly `m·n` apart in identity** (because `m·n` is k_slice's
+place value in mixed-radix encoding). k_fast collapses that to `1`
+regardless of split. The reduction factor is `m·n`, capped where
+relevant by chain length k.
+
+The wall-time gain depends on PSUM's fraction of total work — a 16×
+chain reduction is huge for kv_proj (where PSUM dominates) and
+modest for q_proj K-split (where compute dominates). Same algebra,
+different shape-specific impact.
+
 ### Toy example — work it out by hand
 
 Pretend the chip has only **8 cores** and the planner picked
