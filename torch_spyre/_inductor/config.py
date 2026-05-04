@@ -27,4 +27,11 @@ dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
 
+# Pack K-collaborators on adjacent ring cores so PSUM chain hops are
+# minimised. Degenerates to identity emission when k=1. Set "0" to
+# disable.
+core_id_k_fast_emission: bool = (
+    os.environ.get("SPYRE_CORE_ID_K_FAST_EMISSION", "1") == "1"
+)
+
 install_config_module(sys.modules[__name__])
