@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#include <torch/csrc/profiler/standalone/privateuse1_profiler.h>
-
 #include "AiuptiActivityProfiler.h"
 
 #if defined(HAS_AIUPTI) && defined(USE_KINETO)
+#include <torch/csrc/profiler/standalone/privateuse1_profiler.h>
+
 namespace KINETO_NAMESPACE {
 REGISTER_PRIVATEUSE1_PROFILER(AIUActivityProfiler);
 }
