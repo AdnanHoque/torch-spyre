@@ -1,0 +1,67 @@
+# K-split HMI bytes + PSUM cost probe
+
+# warmup=3 iters=12, fp16, SENCORES=32, HMI_BW=40.0 GB/s
+
+| shape | config | wall ms | pred-full ms | pred-cluster ms |
+|---|---|---:|---:|---:|
+| DSv3 o_proj M=128 | pure-M | 9.122 | 9.023 | 9.023 |
+| DSv3 o_proj M=128 | (1,16,2)kf | 4.695 | 9.137 | 6.149 |
+| DSv3 o_proj M=128 | (1,16,2)id | 9.972 | 10.858 | 7.869 |
+| DSv3 o_proj M=128 | (1,8,4)kf | 10.545 | 9.367 | 4.884 |
+| DSv3 o_proj M=128 | (1,8,4)id | 10.653 | 11.775 | 7.293 |
+| DSv3 o_proj M=2048 | pure-M | 13.339 | 15.032 | 15.032 |
+| DSv3 o_proj M=2048 | (1,16,2)kf | 31.250 | 16.867 | 16.867 |
+| DSv3 o_proj M=2048 | (1,16,2)id | 115.866 | 44.393 | 44.393 |
+| DSv3 o_proj M=2048 | (1,8,4)kf | 124.332 | 20.537 | 20.537 |
+| DSv3 o_proj M=2048 | (1,8,4)id | 126.187 | 59.073 | 59.073 |
+| DSv3 down_proj M=2048 | pure-M | 4.396 | 4.678 | 4.678 |
+| DSv3 down_proj M=2048 | (1,16,2)kf | 6.852 | 6.513 | 6.041 |
+| DSv3 down_proj M=2048 | (1,16,2)id | 16.992 | 34.038 | 33.566 |
+| DSv3 down_proj M=2048 | (1,8,4)kf | 18.631 | 10.183 | 9.475 |
+| DSv3 down_proj M=2048 | (1,8,4)id | 18.499 | 48.718 | 48.010 |
+| L3-70B kv_proj M=2048 | pure-M | 3.635 | 4.363 | 4.363 |
+| L3-70B kv_proj M=2048 | (1,16,2)kf | 3.933 | 4.625 | 3.996 |
+| L3-70B kv_proj M=2048 | (1,16,2)id | 10.878 | 8.557 | 7.928 |
+| L3-70B kv_proj M=2048 | (1,8,4)kf | 4.271 | 5.150 | 4.206 |
+| L3-70B kv_proj M=2048 | (1,8,4)id | 5.377 | 10.655 | 9.711 |
+
+## Per-shape PSUM cost (id − kf at fixed split)
+
+Subtracting kf wall from id wall isolates the m·n-hop PSUM cost:
+
+| shape | split | id ms | kf ms | id − kf | model PSUM (kf=1hop) | model PSUM (id=mn hops) |
+|---|---|---:|---:|---:|---:|---:|
+| DSv3 o_proj M=128 | (1,16,2) | 9.97 | 4.70 | +5.28 | 0.11 | 1.84 |
+| DSv3 o_proj M=128 | (1,8,4) | 10.65 | 10.55 | +0.11 | 0.34 | 2.75 |
+| DSv3 o_proj M=2048 | (1,16,2) | 115.87 | 31.25 | +84.62 | 1.84 | 29.36 |
+| DSv3 o_proj M=2048 | (1,8,4) | 126.19 | 124.33 | +1.85 | 5.51 | 44.04 |
+| DSv3 down_proj M=2048 | (1,16,2) | 16.99 | 6.85 | +10.14 | 1.84 | 29.36 |
+| DSv3 down_proj M=2048 | (1,8,4) | 18.50 | 18.63 | -0.13 | 5.51 | 44.04 |
+| L3-70B kv_proj M=2048 | (1,16,2) | 10.88 | 3.93 | +6.94 | 0.26 | 4.19 |
+| L3-70B kv_proj M=2048 | (1,8,4) | 5.38 | 4.27 | +1.11 | 0.79 | 6.29 |
+
+## Per-shape HMI delta (kf − pure-M, with PSUM subtracted)
+
+kf − pure-M wall is dominated by HMI byte change (PSUM is small under kf).
+If per-cluster model is right, kf wall ≈ pure-M wall − (k−1)/k × bytes/BW.
+
+| shape | split | pure-M ms | kf ms | pred-full kf ms | pred-cluster kf ms | best fit |
+|---|---|---:|---:|---:|---:|---|
+| DSv3 o_proj M=128 | (1,16,2) | 9.12 | 4.70 | 9.14 (95%) | 6.15 (31%) | cluster |
+| DSv3 o_proj M=128 | (1,8,4) | 9.12 | 10.55 | 9.37 (11%) | 4.88 (54%) | full |
+| DSv3 o_proj M=2048 | (1,16,2) | 13.34 | 31.25 | 16.87 (46%) | 16.87 (46%) | full |
+| DSv3 o_proj M=2048 | (1,8,4) | 13.34 | 124.33 | 20.54 (83%) | 20.54 (83%) | full |
+| DSv3 down_proj M=2048 | (1,16,2) | 4.40 | 6.85 | 6.51 (5%) | 6.04 (12%) | full |
+| DSv3 down_proj M=2048 | (1,8,4) | 4.40 | 18.63 | 10.18 (45%) | 9.47 (49%) | full |
+| L3-70B kv_proj M=2048 | (1,16,2) | 3.64 | 3.93 | 4.63 (18%) | 4.00 (2%) | cluster |
+| L3-70B kv_proj M=2048 | (1,8,4) | 3.64 | 4.27 | 5.15 (21%) | 4.21 (2%) | cluster |
+
+## Reading guide
+
+  - HMI bytes model: which of full-broadcast vs per-cluster
+    matches kf walls more closely. If per-cluster wins, the cost
+    model needs `bytes /= k` for k>1.
+  - PSUM cost: id − kf gives empirical PSUM ms. Compare to model's
+    1-hop and m·n-hop predictions. If empirical lies between, the
+    hops formula is wrong; if either matches, refine that branch.
+

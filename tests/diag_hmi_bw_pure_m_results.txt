@@ -1,0 +1,57 @@
+# Effective HMI bandwidth under pure-M
+
+# warmup=3 iters=12, fp16, SENCORES=32, split=(32,1,1)
+
+# B (broadcast model) = M*K + K*N + M*N bytes
+# B (replicated model) = M*K + 32*K*N + M*N bytes
+
+| shape | M | N | K | B_bcast (MB) | wall ms | compute ms | (wall - max(LF, compute)) ms | eff BW (GB/s, bcast) | eff BW (GB/s, repl) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| B=8MB  M=64 | 64 | 1024 | 4096 | 9 | 3.079 | 0.067 | +0.079 | 114.4 | 3402.7 |
+| B=8MB  M=512 | 512 | 1024 | 4096 | 14 | 3.095 | 0.134 | +0.095 | 143.1 | 2872.6 |
+| B=32MB M=64 | 64 | 4096 | 4096 | 35 | 3.719 | 0.268 | +0.719 | 48.1 | 1494.6 |
+| B=32MB M=512 | 512 | 4096 | 4096 | 42 | 3.704 | 0.537 | +0.704 | 59.6 | 1536.7 |
+| B=128MB M=64 | 64 | 8192 | 8192 | 136 | 6.302 | 1.074 | +3.302 | 41.3 | 1301.2 |
+| B=128MB M=512 | 512 | 8192 | 8192 | 151 | 6.379 | 2.147 | +3.379 | 44.7 | 1276.0 |
+| B=235MB M=64 | 64 | 7168 | 16384 | 238 | 8.931 | 1.879 | +5.931 | 40.1 | 1267.8 |
+| B=235MB M=512 | 512 | 7168 | 16384 | 259 | 8.585 | 3.758 | +4.827 | 53.7 | 1562.0 |
+| B=256MB M=64 | 64 | 8192 | 16384 | 272 | 9.815 | 2.147 | +6.815 | 39.9 | 1260.9 |
+| B=256MB M=512 | 512 | 8192 | 16384 | 294 | 9.375 | 4.295 | +5.080 | 57.8 | 1695.8 |
+| B=512MB M=64 | 64 | 16384 | 16384 | — | EAR overflow | — | — | — | — |
+| B=512MB M=512 | 512 | 16384 | 16384 | — | EAR overflow | — | — | — | — |
+
+## Effective HMI BW (subtracted method)
+
+  Broadcast-model effective BW: median=50.9 GB/s, min=39.9, max=143.1
+  Replicated-model effective BW: median=1515.6 GB/s, min=1260.9, max=3402.7
+
+## Re-derived BW assuming wall = LF + bytes/BW (HMI fully serial w/ launch floor)
+
+For HMI-dominated rows where wall ≫ LF and wall > compute, the cleanest
+read is hmi_ms = wall - LF (compute overlaps HMI; no second subtraction):
+
+| shape | wall - LF (ms) | bytes (MB) | implied BW (GB/s) |
+|---|---:|---:|---:|
+| B=128MB M=64  | 3.30 | 136 | 41 |
+| B=128MB M=512 | 3.38 | 151 | 45 |
+| B=235MB M=64  | 5.93 | 238 | 40 |
+| B=235MB M=512 | 5.59 | 259 | 46 |
+| B=256MB M=64  | 6.82 | 272 | 40 |
+| B=256MB M=512 | 6.38 | 294 | 46 |
+
+M=64 rows give 40 GB/s consistently.
+M=512 rows give 45-46 GB/s — slightly higher because compute (2-4 ms)
+overlaps part of HMI, leaving smaller hmi_ms in the denominator.
+
+## Verdicts
+
+  - Broadcast model is correct: replicated-model BW is ~1500 GB/s
+    (absurd), so B is NOT 32x replicated under pure-M.
+  - Effective BW under broadcast accounting: **~40 GB/s**, not 67.
+    The 67 GB/s spec figure is the chip's HMI port nameplate; under
+    matmul-template ring-broadcast the achieved BW asymptotes lower.
+  - Wall formula: **wall ≈ LF + max(compute, hmi)** for HMI-bound,
+    where LF (3 ms) and HMI run serially but compute overlaps both.
+  - The two B=512MB rows trip per-core EAR overflow (256 MB hardware
+    limit) — needs k-split or n-split to fit, so pure-M can't probe
+    that regime directly.

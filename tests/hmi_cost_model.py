@@ -39,7 +39,11 @@ from dataclasses import dataclass
 # ---- hardware constants (32-core AIU, fp16 measurements) --------------
 
 LAUNCH_FLOOR_MS = 3.0       # per-call overhead floor
-HMI_BW_GBS = 67.0           # combined ring+HMI; 88.0 for pure-ring regime
+# Effective HMI BW measured under pure-M with broadcast B accounting
+# (diag_hmi_bw_pure_m.py): wall ≈ LF + bytes/40 GB/s for B in 128–272 MB.
+# 67 GB/s is the spec headline; achieved under matmul kernel templates
+# with cross-core ring sharing is ~40 GB/s.
+HMI_BW_GBS = 40.0
 SFP_BW_GBS = 32.0           # dedicated PSUM ring
 PT_PEAK_TFLOPS_PER_CORE = 1.0
 ACHIEVED_FRAC = 1.0         # achieved-fraction at peak PT utilisation
@@ -181,7 +185,13 @@ def predict(
     psum_bytes = _total_psum_ring_bytes(M, N, split, k_fast=k_fast)
     t_psum_ms = psum_bytes / (SFP_BW_GBS * 1e9) * 1e3
 
-    t_wall_ms = max(launch_floor_ms, max(t_compute_ms, t_hmi_ms) + t_psum_ms)
+    # Launch floor stacks on top of HMI but overlaps with compute.
+    # Probe diag_hmi_bw_pure_m.py: HMI-bound pure-M wall ≈ LF + bytes/BW
+    # exactly — LF and HMI are serial (LF likely IS HMI activity for
+    # binary/descriptor fetch). Compute, by contrast, runs concurrently
+    # with both LF and HMI: compute-bound shapes measure compute alone,
+    # not LF + compute.
+    t_wall_ms = max(t_compute_ms, t_hmi_ms + launch_floor_ms) + t_psum_ms
 
     return CostBreakdown(
         t_compute_ms=t_compute_ms,
@@ -200,9 +210,14 @@ def is_compute_bound(breakdown: CostBreakdown) -> bool:
 
 
 def is_launch_floor_bound(breakdown: CostBreakdown) -> bool:
-    return breakdown.t_launch_floor_ms >= max(
-        breakdown.t_compute_ms, breakdown.t_hmi_ms
-    ) + breakdown.t_psum_ms
+    """Launch-floor-bound when the LF term exceeds the work term.
+
+    With the additive wall formula (wall = LF + max(compute, hmi) + psum),
+    a shape is LF-bound when the work portion is small relative to LF —
+    we use 50% as the cutoff for classification purposes only.
+    """
+    work = max(breakdown.t_compute_ms, breakdown.t_hmi_ms) + breakdown.t_psum_ms
+    return work < breakdown.t_launch_floor_ms * 0.5
 
 
 def label(breakdown: CostBreakdown) -> str:
