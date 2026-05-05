@@ -1,0 +1,64 @@
+# HMI cost-model calibration
+
+| shape                                      | mode     | measured ms |  pred ms |     err |    rel | class              |
+|--------------------------------------------|----------|-------------|----------|---------|--------|--------------------|
+| L3-70B kv_proj M=32                        | natural  |      3.307  |   3.000  | -0.307  |  9.3% | launch-floor-bound ✓ |
+| L3-70B kv_proj M=128                       | natural  |      3.371  |   3.000  | -0.371  | 11.0% | launch-floor-bound ✗ |
+| L3-70B kv_proj M=512                       | natural  |      3.357  |   3.000  | -0.357  | 10.6% | launch-floor-bound ✗ |
+| L3-70B kv_proj M=1024                      | natural  |      3.433  |   3.000  | -0.433  | 12.6% | launch-floor-bound ✗ |
+| L3-70B kv_proj M=2048                      | natural  |      3.666  |   3.000  | -0.666  | 18.2% | launch-floor-bound ✗ |
+| L3-70B kv_proj M=128 (1,16,2)+kf           | kf       |      3.089  |   3.000  | -0.089  |  2.9% | launch-floor-bound ✓ |
+| L3-70B kv_proj M=512 (1,16,2)+kf           | kf       |      3.174  |   3.000  | -0.174  |  5.5% | launch-floor-bound ✓ |
+| L3-70B kv_proj M=2048 (1,16,2)+kf          | kf       |      3.939  |   3.000  | -0.939  | 23.8% | launch-floor-bound ✗ |
+| Mixtral kv_proj M=32                       | natural  |      3.106  |   3.000  | -0.106  |  3.4% | launch-floor-bound ✓ |
+| Mixtral kv_proj M=128                      | natural  |      3.136  |   3.000  | -0.136  |  4.3% | launch-floor-bound ✓ |
+| Mixtral kv_proj M=2048                     | natural  |      3.274  |   3.000  | -0.274  |  8.4% | launch-floor-bound ✓ |
+| Mixtral kv_proj M=128 +kf                  | kf       |      3.009  |   3.000  | -0.009  |  0.3% | launch-floor-bound ✓ |
+| DSv3 o_proj M=32                           | natural  |      4.839  |   3.528  | -1.311  | 27.1% | HMI-bound        ✗ |
+| DSv3 o_proj M=128                          | natural  |      9.135  |   3.596  | -5.539  | 60.6% | HMI-bound        ✗ |
+| DSv3 o_proj M=512                          | natural  |      8.473  |   3.866  | -4.607  | 54.4% | HMI-bound        ✗ |
+| DSv3 o_proj M=2048                         | natural  |     13.278  |  15.032  | +1.754  | 13.2% | compute-bound    ✗ |
+| DSv3 o_proj M=128 +kf                      | kf       |      4.691  |   3.710  | -0.981  | 20.9% | HMI-bound        ✗ |
+| DSv3 o_proj M=2048 +kf                     | kf       |     31.227  |  16.867  | -14.360  | 46.0% | compute-bound    ✗ |
+| DSv3 down_proj M=32                        | natural  |      3.167  |   3.000  | -0.167  |  5.3% | launch-floor-bound ✓ |
+| DSv3 down_proj M=128                       | natural  |      3.726  |   3.000  | -0.726  | 19.5% | launch-floor-bound ✗ |
+| DSv3 down_proj M=2048                      | natural  |      4.437  |   3.000  | -1.437  | 32.4% | launch-floor-bound ✗ |
+| DSv3 down_proj M=128 +kf                   | kf       |      3.156  |   3.000  | -0.156  |  4.9% | launch-floor-bound ✓ |
+| DSv3 q_a_proj M=32                         | natural  |      3.467  |   3.000  | -0.467  | 13.5% | launch-floor-bound ✗ |
+| DSv3 q_a_proj M=128                        | natural  |      3.516  |   3.000  | -0.516  | 14.7% | launch-floor-bound ✗ |
+| DSv3 q_a_proj M=2048                       | natural  |      4.055  |   3.000  | -1.055  | 26.0% | launch-floor-bound ✗ |
+| DSv3 q_a_proj M=128 +kf                    | kf       |      3.224  |   3.000  | -0.224  |  6.9% | launch-floor-bound ✓ |
+| L3-70B kv_proj M=2048 (1,16,2)+id          | id       |     10.930  |   5.268  | -5.662  | 51.8% | compute-bound    ✗ |
+| Mixtral kv_proj M=2048 (1,16,2)+id         | id       |      6.943  |   4.731  | -2.212  | 31.9% | compute-bound    ✗ |
+| DSv3 o_proj M=2048 (1,16,2)+id             | id       |    116.116  |  44.393  | -71.723  | 61.8% | compute-bound    ✗ |
+| DSv3 down_proj M=2048 (1,16,2)+id          | id       |     17.066  |  31.239  | +14.173  | 83.0% | compute-bound    ✗ |
+
+## Aggregate fit
+
+  rows in validation set:  30
+  rows over 10% rel error:  20 (67%)
+  median rel error:        14.1%
+  mean rel error:          22.8%
+  max rel error:           83.0%
+  signed mean abs error:   -3.303 ms
+
+## Worst rows
+
+  DSv3 down_proj M=2048 (1,16,2)+id           measured=17.07 pred=31.24  rel=83.0%  (compute-bound)
+     compute=1.88  hmi=1.00  psum=29.36  pt_util=1.00  hops=16
+  DSv3 o_proj M=2048 (1,16,2)+id              measured=116.12 pred=44.39  rel=61.8%  (compute-bound)
+     compute=15.03  hmi=4.95  psum=29.36  pt_util=1.00  hops=16
+  DSv3 o_proj M=128                           measured=9.13 pred=3.60  rel=60.6%  (HMI-bound)
+     compute=1.88  hmi=3.60  psum=0.00  pt_util=0.50  hops=0
+  DSv3 o_proj M=512                           measured=8.47 pred=3.87  rel=54.4%  (HMI-bound)
+     compute=3.76  hmi=3.87  psum=0.00  pt_util=1.00  hops=0
+  L3-70B kv_proj M=2048 (1,16,2)+id           measured=10.93 pred=5.27  rel=51.8%  (compute-bound)
+     compute=1.07  hmi=0.81  psum=4.19  pt_util=1.00  hops=16
+  DSv3 o_proj M=2048 +kf                      measured=31.23 pred=16.87  rel=46.0%  (compute-bound)
+     compute=15.03  hmi=4.95  psum=1.84  pt_util=1.00  hops=1
+  DSv3 down_proj M=2048                       measured=4.44 pred=3.00  rel=32.4%  (launch-floor-bound)
+     compute=1.88  hmi=1.00  psum=0.00  pt_util=1.00  hops=0
+  Mixtral kv_proj M=2048 (1,16,2)+id          measured=6.94 pred=4.73  rel=31.9%  (compute-bound)
+     compute=0.54  hmi=0.44  psum=4.19  pt_util=1.00  hops=16
+
+VERDICT: 20/30 rows outside 10% bound. Cost model needs structural changes before Phase 1.
