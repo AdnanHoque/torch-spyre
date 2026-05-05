@@ -33,9 +33,9 @@ class AiuptiActivityProfilerSession
     : public libkineto::IActivityProfilerSession {
  public:
   AiuptiActivityProfilerSession() = delete;
-  AiuptiActivityProfilerSession(AiuptiActivityApi& api,
-                                const libkineto::Config& config,
-                                const std::set<ActivityType>& activity_types);
+  AiuptiActivityProfilerSession(
+      AiuptiActivityApi& api, const libkineto::Config& config,
+      const std::set<libkineto::ActivityType>& activity_types);
   AiuptiActivityProfilerSession(const AiuptiActivityProfilerSession&) = delete;
   AiuptiActivityProfilerSession& operator=(
       const AiuptiActivityProfilerSession&) = delete;
@@ -47,8 +47,8 @@ class AiuptiActivityProfilerSession
   std::vector<std::string> errors() override {
     return errors_;
   };
-  void processTrace(ActivityLogger& logger) override;
-  void processTrace(ActivityLogger& logger,
+  void processTrace(libkineto::ActivityLogger& logger) override;
+  void processTrace(libkineto::ActivityLogger& logger,
                     libkineto::getLinkedActivityCallback get_linked_activity,
                     int64_t captureWindowStartTime,
                     int64_t captureWindowEndTime) override;
@@ -62,24 +62,25 @@ class AiuptiActivityProfilerSession
   void popUserCorrelationId() override;
 
  private:
-  void checkTimestampOrder(const ITraceActivity* act1);
-  void removeCorrelatedPtiActivities(const ITraceActivity* act1);
-  bool outOfRange(const ITraceActivity& act);
+  void checkTimestampOrder(const libkineto::ITraceActivity* act1);
+  void removeCorrelatedPtiActivities(const libkineto::ITraceActivity* act1);
+  bool outOfRange(const libkineto::ITraceActivity& act);
   int64_t getMappedQueueId(uint64_t sycl_queue_id);
-  const ITraceActivity* linkedActivity(
+  const libkineto::ITraceActivity* linkedActivity(
       int32_t correlationId,
       const std::unordered_map<int64_t, int64_t>& correlationMap);
   void handleRuntimeActivity(const AIUpti_ActivityAPI* activity,
-                             ActivityLogger* logger);
+                             libkineto::ActivityLogger* logger);
   void handleKernelActivity(const AIUpti_ActivityCompute* activity,
-                            ActivityLogger* logger);
+                            libkineto::ActivityLogger* logger);
   void handleMemcpyActivity(const AIUpti_ActivityMemcpy* activity,
-                            ActivityLogger* logger);
+                            libkineto::ActivityLogger* logger);
   void handleMemsetActivity(const AIUpti_ActivityMemset* activity,
-                            ActivityLogger* logger);
+                            libkineto::ActivityLogger* logger);
   void handleMemoryActivity(const AIUpti_ActivityMemory* activity,
-                            ActivityLogger* logger);
-  void handlePtiActivity(const AIUpti_Activity* record, ActivityLogger* logger);
+                            libkineto::ActivityLogger* logger);
+  void handlePtiActivity(const AIUpti_Activity* record,
+                         libkineto::ActivityLogger* logger);
 
   template <class memory_activity_type>
   uint32_t getResourceId(memory_activity_type* activity);
@@ -94,7 +95,8 @@ class AiuptiActivityProfilerSession
   int64_t profilerEndTs_{0};
   std::unordered_map<int64_t, int64_t> cpuCorrelationMap_;
   std::unordered_map<int64_t, int64_t> userCorrelationMap_;
-  std::unordered_map<int64_t, const ITraceActivity*> correlatedPtiActivities_;
+  std::unordered_map<int64_t, const libkineto::ITraceActivity*>
+      correlatedPtiActivities_;
   std::map<std::pair<int64_t, int64_t>, std::vector<int64_t>> activeThreadMap_;
   std::vector<std::string> errors_;
 
@@ -104,12 +106,12 @@ class AiuptiActivityProfilerSession
   libkineto::CpuTraceBuffer traceBuffer_;
   std::vector<uint64_t> sycl_queue_pool_;
   std::unique_ptr<const libkineto::Config> config_{nullptr};
-  const std::set<ActivityType>& activity_types_;
+  const std::set<libkineto::ActivityType>& activity_types_;
 
   // Ensures control block streams come after memory activities
   uint32_t kExceedMaxTid = 1000;
 
-  std::map<std::pair<int64_t, int64_t>, ResourceInfo> resourceInfo_;
+  std::map<std::pair<int64_t, int64_t>, libkineto::ResourceInfo> resourceInfo_;
   bool hasDeviceResource(uint32_t device, uint32_t id);
   void recordStream(uint32_t device, uint32_t id);
   void recordMemoryStream(uint32_t device, uint32_t id, std::string kind);
@@ -124,13 +126,13 @@ class AIUActivityProfiler : public libkineto::IActivityProfiler {
   AIUActivityProfiler& operator=(const AIUActivityProfiler&) = delete;
 
   const std::string& name() const override;
-  const std::set<ActivityType>& availableActivities() const override;
+  const std::set<libkineto::ActivityType>& availableActivities() const override;
   std::unique_ptr<libkineto::IActivityProfilerSession> configure(
-      const std::set<ActivityType>& activity_types,
+      const std::set<libkineto::ActivityType>& activity_types,
       const libkineto::Config& config) override;
   std::unique_ptr<libkineto::IActivityProfilerSession> configure(
       int64_t ts_ms, int64_t duration_ms,
-      const std::set<ActivityType>& activity_types,
+      const std::set<libkineto::ActivityType>& activity_types,
       const libkineto::Config& config) override;
 
  private:

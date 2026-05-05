@@ -38,7 +38,7 @@ std::vector<std::string> AiuptiActivityProfilerSession::correlateRuntimeOps_ = {
 // =========== Session Constructor ============= //
 AiuptiActivityProfilerSession::AiuptiActivityProfilerSession(
     AiuptiActivityApi& api, const libkineto::Config& config,
-    const std::set<ActivityType>& activity_types)
+    const std::set<libkineto::ActivityType>& activity_types)
     : api_(api), config_(config.clone()), activity_types_(activity_types) {
   api_.setMaxBufferSize(config_->activitiesMaxGpuBufferSize());
 }
@@ -61,7 +61,8 @@ void AiuptiActivityProfilerSession::stop() {
   api_.disablePtiActivities(activity_types_);
 }
 
-void AiuptiActivityProfilerSession::processTrace(ActivityLogger& logger) {
+void AiuptiActivityProfilerSession::processTrace(
+    libkineto::ActivityLogger& logger) {
   traceBuffer_.span = libkineto::TraceSpan(profilerStartTs_, profilerEndTs_,
                                            "__aiu_profiler__");
   traceBuffer_.span.iteration = iterationCount_++;
@@ -75,7 +76,7 @@ void AiuptiActivityProfilerSession::processTrace(ActivityLogger& logger) {
 }
 
 void AiuptiActivityProfilerSession::processTrace(
-    ActivityLogger& logger,
+    libkineto::ActivityLogger& logger,
     libkineto::getLinkedActivityCallback get_linked_activity,
     int64_t captureWindowStartTime, int64_t captureWindowEndTime) {
   captureWindowStartTime_ = captureWindowStartTime;
@@ -87,11 +88,12 @@ void AiuptiActivityProfilerSession::processTrace(
 // TODO(mcalman): support multi-AIU
 std::unique_ptr<libkineto::DeviceInfo>
 AiuptiActivityProfilerSession::getDeviceInfo() {
-  int32_t pid = processId();
-  std::string process_name = processName(pid);
+  int32_t pid = libkineto::processId();
+  std::string process_name = libkineto::processName(pid);
   int aiu = 0;
-  return std::make_unique<DeviceInfo>(aiu, aiu + kExceedMaxPid, process_name,
-                                      fmt::format("AIU {}", 0));
+  return std::make_unique<libkineto::DeviceInfo>(
+      aiu, aiu + libkineto::kExceedMaxPid, process_name,
+      fmt::format("AIU {}", 0));
 }
 
 std::vector<libkineto::ResourceInfo>
@@ -110,9 +112,10 @@ bool AiuptiActivityProfilerSession::hasDeviceResource(uint32_t device,
 
 void AiuptiActivityProfilerSession::recordStream(uint32_t device, uint32_t id) {
   if (!hasDeviceResource(device, id)) {
-    resourceInfo_.emplace(std::make_pair(device, id),
-                          ResourceInfo(device, id, kExceedMaxTid + id,
-                                       fmt::format("Stream {}", id)));
+    resourceInfo_.emplace(
+        std::make_pair(device, id),
+        libkineto::ResourceInfo(device, id, kExceedMaxTid + id,
+                                fmt::format("Stream {}", id)));
   }
 }
 
@@ -121,7 +124,7 @@ void AiuptiActivityProfilerSession::recordMemoryStream(uint32_t device,
                                                        std::string name) {
   if (!hasDeviceResource(device, id)) {
     resourceInfo_.emplace(std::make_pair(device, id),
-                          ResourceInfo(device, id, id, name));
+                          libkineto::ResourceInfo(device, id, id, name));
   }
 }
 
@@ -147,18 +150,19 @@ void AiuptiActivityProfilerSession::popUserCorrelationId() {
 }
 
 // =========== ActivityProfiler Public Methods ============= //
-const std::set<ActivityType> kAiuTypes{
-    ActivityType::GPU_MEMCPY,
-    ActivityType::GPU_MEMSET,
-    ActivityType::CONCURRENT_KERNEL,
-    ActivityType::PRIVATEUSE1_RUNTIME,
+const std::set<libkineto::ActivityType> kAiuTypes{
+    libkineto::ActivityType::GPU_MEMCPY,
+    libkineto::ActivityType::GPU_MEMSET,
+    libkineto::ActivityType::CONCURRENT_KERNEL,
+    libkineto::ActivityType::PRIVATEUSE1_RUNTIME,
 };
 
 const std::string& AIUActivityProfiler::name() const {
   return name_;
 }
 
-const std::set<ActivityType>& AIUActivityProfiler::availableActivities() const {
+const std::set<libkineto::ActivityType>&
+AIUActivityProfiler::availableActivities() const {
   throw std::runtime_error(
       "The availableActivities is legacy method and should not be called by "
       "kineto");
@@ -166,16 +170,18 @@ const std::set<ActivityType>& AIUActivityProfiler::availableActivities() const {
 }
 
 std::unique_ptr<libkineto::IActivityProfilerSession>
-AIUActivityProfiler::configure(const std::set<ActivityType>& activity_types,
-                               const libkineto::Config& config) {
+AIUActivityProfiler::configure(
+    const std::set<libkineto::ActivityType>& activity_types,
+    const libkineto::Config& config) {
   return std::make_unique<AiuptiActivityProfilerSession>(
       AiuptiActivityApi::singleton(), config, activity_types);
 }
 
 std::unique_ptr<libkineto::IActivityProfilerSession>
-AIUActivityProfiler::configure(int64_t ts_ms, int64_t duration_ms,
-                               const std::set<ActivityType>& activity_types,
-                               const libkineto::Config& config) {
+AIUActivityProfiler::configure(
+    int64_t ts_ms, int64_t duration_ms,
+    const std::set<libkineto::ActivityType>& activity_types,
+    const libkineto::Config& config) {
   AsyncProfileStartTime_ = ts_ms;
   AsyncProfileEndTime_ = ts_ms + duration_ms;
   return configure(activity_types, config);

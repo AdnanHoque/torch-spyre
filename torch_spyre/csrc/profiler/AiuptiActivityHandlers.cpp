@@ -28,7 +28,7 @@ namespace KINETO_NAMESPACE {
 
 // =========== Session Private Methods ============= //
 void AiuptiActivityProfilerSession::removeCorrelatedPtiActivities(
-    const ITraceActivity* act1) {
+    const libkineto::ITraceActivity* act1) {
   const auto key = act1->correlationId();
   const auto& it = correlatedPtiActivities_.find(key);
   if (it != correlatedPtiActivities_.end()) correlatedPtiActivities_.erase(key);
@@ -36,15 +36,16 @@ void AiuptiActivityProfilerSession::removeCorrelatedPtiActivities(
 }
 
 void AiuptiActivityProfilerSession::checkTimestampOrder(
-    const ITraceActivity* act1) {
+    const libkineto::ITraceActivity* act1) {
   const auto& it = correlatedPtiActivities_.find(act1->correlationId());
   if (it == correlatedPtiActivities_.end()) {
     correlatedPtiActivities_.insert({act1->correlationId(), act1});
     return;
   }
 
-  const ITraceActivity* act2 = it->second;
-  if (act2->type() == ActivityType::PRIVATEUSE1_RUNTIME) std::swap(act1, act2);
+  const libkineto::ITraceActivity* act2 = it->second;
+  if (act2->type() == libkineto::ActivityType::PRIVATEUSE1_RUNTIME)
+    std::swap(act1, act2);
   if (act1->timestamp() > act2->timestamp()) {
     std::string err_msg;
     err_msg += "AIU op timestamp (" + std::to_string(act2->timestamp());
@@ -58,7 +59,7 @@ void AiuptiActivityProfilerSession::checkTimestampOrder(
 }
 
 inline bool AiuptiActivityProfilerSession::outOfRange(
-    const ITraceActivity& act) {
+    const libkineto::ITraceActivity& act) {
   bool out_of_range =
       act.timestamp() < captureWindowStartTime_ ||
       (act.timestamp() + act.duration()) > captureWindowEndTime_;
@@ -74,7 +75,7 @@ inline bool AiuptiActivityProfilerSession::outOfRange(
   return out_of_range;
 }
 
-const ITraceActivity* AiuptiActivityProfilerSession::linkedActivity(
+const libkineto::ITraceActivity* AiuptiActivityProfilerSession::linkedActivity(
     int32_t correlationId,
     const std::unordered_map<int64_t, int64_t>& correlationMap) {
   const auto& it = correlationMap.find(correlationId);
@@ -172,23 +173,24 @@ inline std::string runtimeCbidName(AIUpti_runtime_api_trace_cbid cbid) {
 }
 
 void AiuptiActivityProfilerSession::handleRuntimeActivity(
-    const AIUpti_ActivityAPI* activity, ActivityLogger* logger) {
+    const AIUpti_ActivityAPI* activity, libkineto::ActivityLogger* logger) {
   traceBuffer_.span.opCount += 1;
   traceBuffer_.gpuOpCount += 1;
   cpuCorrelationMap_[activity->correlation_id] = 0;  // fake add correlation
-  const ITraceActivity* linked =
+  const libkineto::ITraceActivity* linked =
       linkedActivity(activity->correlation_id, cpuCorrelationMap_);
   auto cbIDName =
       runtimeCbidName((AIUpti_runtime_api_trace_cbid)activity->cbid);
   traceBuffer_.emplace_activity(traceBuffer_.span,
-                                ActivityType::PRIVATEUSE1_RUNTIME, cbIDName);
+                                libkineto::ActivityType::PRIVATEUSE1_RUNTIME,
+                                cbIDName);
   auto& runtime_activity = traceBuffer_.activities.back();
   runtime_activity->startTime = activity->start;
   runtime_activity->endTime = activity->end;
   runtime_activity->id = activity->correlation_id;
   runtime_activity->device = activity->process_id;
-  runtime_activity->resource = systemThreadId();
-  runtime_activity->threadId = threadId();
+  runtime_activity->resource = libkineto::systemThreadId();
+  runtime_activity->threadId = libkineto::threadId();
   // only enable outgoing flow for launch control block runtime activities
   if (activity->cbid == AIUPTI_RUNTIME_TRACE_CBID_LAUNCH_CB_CMPT) {
     runtime_activity->flow.id = activity->correlation_id;
@@ -235,14 +237,15 @@ void AiuptiActivityProfilerSession::handleRuntimeActivity(
 }
 
 void AiuptiActivityProfilerSession::handleKernelActivity(
-    const AIUpti_ActivityCompute* activity, ActivityLogger* logger) {
+    const AIUpti_ActivityCompute* activity, libkineto::ActivityLogger* logger) {
   traceBuffer_.span.opCount += 1;
   traceBuffer_.gpuOpCount += 1;
   cpuCorrelationMap_[activity->correlation_id] = 0;  // fake add correlation
-  const ITraceActivity* linked =
+  const libkineto::ITraceActivity* linked =
       linkedActivity(activity->correlation_id, cpuCorrelationMap_);
-  traceBuffer_.emplace_activity(
-      traceBuffer_.span, ActivityType::CONCURRENT_KERNEL, activity->name);
+  traceBuffer_.emplace_activity(traceBuffer_.span,
+                                libkineto::ActivityType::CONCURRENT_KERNEL,
+                                activity->name);
   auto& kernel_activity = traceBuffer_.activities.back();
   kernel_activity->startTime = activity->start;
   kernel_activity->endTime = activity->end;
@@ -346,14 +349,14 @@ template uint32_t AiuptiActivityProfilerSession::getResourceId<
     AIUpti_ActivityMemset>(AIUpti_ActivityMemset* activity);
 
 void AiuptiActivityProfilerSession::handleMemcpyActivity(
-    const AIUpti_ActivityMemcpy* activity, ActivityLogger* logger) {
+    const AIUpti_ActivityMemcpy* activity, libkineto::ActivityLogger* logger) {
   traceBuffer_.span.opCount += 1;
   traceBuffer_.gpuOpCount += 1;
   cpuCorrelationMap_[activity->correlation_id] = 0;  // fake add correlation
-  const ITraceActivity* linked =
+  const libkineto::ITraceActivity* linked =
       linkedActivity(activity->correlation_id, cpuCorrelationMap_);
   traceBuffer_.emplace_activity(
-      traceBuffer_.span, ActivityType::GPU_MEMCPY,
+      traceBuffer_.span, libkineto::ActivityType::GPU_MEMCPY,
       fmt::format("Memcpy ({})", memoryCopyOperationName(activity->copy_kind)));
   auto& memcpy_activity = traceBuffer_.activities.back();
   memcpy_activity->startTime = activity->start;
@@ -408,16 +411,16 @@ inline std::string memoryOperationName(uint8_t kind) {
 }
 
 void AiuptiActivityProfilerSession::handleMemoryActivity(
-    const AIUpti_ActivityMemory* activity, ActivityLogger* logger) {
+    const AIUpti_ActivityMemory* activity, libkineto::ActivityLogger* logger) {
   // do not track memory allocation events because they are the same as memset
   if (activity->memory_operation_type ==
       (uint8_t)AIUPTI_ACTIVITY_MEMORY_OPERATION_TYPE_RELEASE) {
     traceBuffer_.span.opCount += 1;
     traceBuffer_.gpuOpCount += 1;
-    const ITraceActivity* linked =
+    const libkineto::ITraceActivity* linked =
         linkedActivity(activity->correlation_id, cpuCorrelationMap_);
     traceBuffer_.emplace_activity(
-        traceBuffer_.span, ActivityType::PRIVATEUSE1_DRIVER,
+        traceBuffer_.span, libkineto::ActivityType::PRIVATEUSE1_DRIVER,
         fmt::format("Memory ({})",
                     memoryOperationName(activity->memory_operation_type)));
     // memcpyName(
@@ -464,7 +467,8 @@ void AiuptiActivityProfilerSession::handleMemoryActivity(
   // Create event for AIU memory view
   traceBuffer_.span.opCount += 1;
   traceBuffer_.emplace_activity(traceBuffer_.span,
-                                ActivityType::CPU_INSTANT_EVENT, "[memory]");
+                                libkineto::ActivityType::CPU_INSTANT_EVENT,
+                                "[memory]");
   auto& memory_event = traceBuffer_.activities.back();
 
   memory_event->startTime = activity->start;
@@ -472,8 +476,8 @@ void AiuptiActivityProfilerSession::handleMemoryActivity(
   // Following convention where all memory events are put on the
   // CPU thread. "Device Type" will denote CPU vs. AIU memory events
   // 0 (CPU), 1 (AIU)
-  memory_event->device = systemThreadId();
-  memory_event->resource = systemThreadId();
+  memory_event->device = libkineto::systemThreadId();
+  memory_event->resource = libkineto::systemThreadId();
 
   int64_t bytes = static_cast<int64_t>(activity->bytes);
   if (activity->memory_operation_type ==
@@ -492,14 +496,15 @@ void AiuptiActivityProfilerSession::handleMemoryActivity(
 }
 
 void AiuptiActivityProfilerSession::handleMemsetActivity(
-    const AIUpti_ActivityMemset* activity, ActivityLogger* logger) {
+    const AIUpti_ActivityMemset* activity, libkineto::ActivityLogger* logger) {
   traceBuffer_.span.opCount += 1;
   traceBuffer_.gpuOpCount += 1;
   // TODO(mamaral): implement the libaiupti to add external correlation ID
   cpuCorrelationMap_[activity->correlation_id] = 0;  // fake add correlation
-  const ITraceActivity* linked =
+  const libkineto::ITraceActivity* linked =
       linkedActivity(activity->correlation_id, cpuCorrelationMap_);
-  traceBuffer_.emplace_activity(traceBuffer_.span, ActivityType::GPU_MEMSET,
+  traceBuffer_.emplace_activity(traceBuffer_.span,
+                                libkineto::ActivityType::GPU_MEMSET,
                                 "Memset (Device)");
   auto& memset_activity = traceBuffer_.activities.back();
   memset_activity->startTime = activity->start;
@@ -542,7 +547,7 @@ void AiuptiActivityProfilerSession::handleMemsetActivity(
 }
 
 void AiuptiActivityProfilerSession::handlePtiActivity(
-    const AIUpti_Activity* record, ActivityLogger* logger) {
+    const AIUpti_Activity* record, libkineto::ActivityLogger* logger) {
   switch (record->kind) {
     case (uint8_t)AIUPTI_ACTIVITY_KIND_RUNTIME:
       handleRuntimeActivity(reinterpret_cast<const AIUpti_ActivityAPI*>(record),

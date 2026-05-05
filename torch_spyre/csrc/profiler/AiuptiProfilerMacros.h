@@ -24,8 +24,6 @@
 
 #include <string>
 
-using namespace libkineto;
-
 namespace KINETO_NAMESPACE {
 
 #define AIUPTI_CALL(returnCode)                                               \

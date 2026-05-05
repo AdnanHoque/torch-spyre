@@ -222,34 +222,34 @@ void AiuptiActivityApi::bufferCompleted(uint8_t* buffer, size_t size,
 #endif
 
 void AiuptiActivityApi::enableAiuptiActivities(
-    const std::set<ActivityType>& selected_activities) {
+    const std::set<libkineto::ActivityType>& selected_activities) {
 #ifdef HAS_AIUPTI
   AIUPTI_CALL(aiuptiActivityRegisterCallbacks(bufferRequestedTrampoline,
                                               bufferCompletedTrampoline));
   bool activityEnabled = false;
   externalCorrelationEnabled_ = false;
   for (const auto& activity : selected_activities) {
-    if (activity == ActivityType::GPU_MEMCPY) {
+    if (activity == libkineto::ActivityType::GPU_MEMCPY) {
       AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_MEMCPY));
       AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_MEMCPY2));
       AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_SYNCHRONIZATION));
       activityEnabled = true;
     }
-    if (activity == ActivityType::GPU_MEMSET) {
+    if (activity == libkineto::ActivityType::GPU_MEMSET) {
       // memset requires memory be also enabled
       AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_MEMORY));
       AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_MEMSET));
       activityEnabled = true;
     }
-    if (activity == ActivityType::CONCURRENT_KERNEL) {
+    if (activity == libkineto::ActivityType::CONCURRENT_KERNEL) {
       AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_CMPT));
       activityEnabled = true;
     }
-    if (activity == ActivityType::PRIVATEUSE1_RUNTIME) {
+    if (activity == libkineto::ActivityType::PRIVATEUSE1_RUNTIME) {
       AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_RUNTIME));
       activityEnabled = true;
     }
-    if (activity == ActivityType::PRIVATEUSE1_DRIVER) {
+    if (activity == libkineto::ActivityType::PRIVATEUSE1_DRIVER) {
       AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_DRIVER));
       activityEnabled = true;
     }
@@ -279,30 +279,30 @@ void AiuptiActivityApi::enableAiuptiActivities(
 }
 
 void AiuptiActivityApi::disablePtiActivities(
-    const std::set<ActivityType>& selected_activities) {
+    const std::set<libkineto::ActivityType>& selected_activities) {
 #ifdef HAS_AIUPTI
   bool activityDisabled = false;
   for (const auto& activity : selected_activities) {
-    if (activity == ActivityType::GPU_MEMCPY) {
+    if (activity == libkineto::ActivityType::GPU_MEMCPY) {
       AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_MEMCPY));
       AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_MEMCPY2));
       AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_SYNCHRONIZATION));
       activityDisabled = true;
     }
-    if (activity == ActivityType::GPU_MEMSET) {
+    if (activity == libkineto::ActivityType::GPU_MEMSET) {
       AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_MEMORY));
       AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_MEMSET));
       activityDisabled = true;
     }
-    if (activity == ActivityType::CONCURRENT_KERNEL) {
+    if (activity == libkineto::ActivityType::CONCURRENT_KERNEL) {
       AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_CMPT));
       activityDisabled = true;
     }
-    if (activity == ActivityType::PRIVATEUSE1_RUNTIME) {
+    if (activity == libkineto::ActivityType::PRIVATEUSE1_RUNTIME) {
       AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_RUNTIME));
       activityDisabled = true;
     }
-    if (activity == ActivityType::PRIVATEUSE1_DRIVER) {
+    if (activity == libkineto::ActivityType::PRIVATEUSE1_DRIVER) {
       AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_DRIVER));
       activityDisabled = true;
     }

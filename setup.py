@@ -94,6 +94,8 @@ cmake_library_path = os.environ.get("CMAKE_LIBRARY_PATH", "")
 extra_library_dirs = cmake_library_path.split(":") if cmake_library_path else []
 LIBRARY_DIRS += [Path(p) for p in extra_library_dirs if p]
 
+COMPILE_AIUPTI = True
+
 if "RUNTIME_INSTALL_DIR" in os.environ:
     # take lower precedence than CMAKE_LIBRARY_PATH and CMAKE_INCLUDE_PATH
     RUNTIME_DIR = Path(os.environ["RUNTIME_INSTALL_DIR"])
@@ -103,7 +105,6 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
 
     KINETO_INCLUDE_DIR = Path(torch.__path__[0]) / "include" / "kineto"
     COMMON_INCLUDE_DIR = Path(os.environ["SEN_COMMON_HEADERS"])
-    LIBAIUPTI_DIR = Path(os.environ["LIBAIUPTI_INSTALL_DIR"])
 
     INCLUDE_DIRS += [
         RUNTIME_DIR / "include",
@@ -121,9 +122,11 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
         KINETO_INCLUDE_DIR,
         COMMON_INCLUDE_DIR / "libaiupti",
     ]
-    LIBRARY_DIRS += [RUNTIME_DIR / "lib"]
-    LIBRARY_DIRS += [LIBAIUPTI_DIR / "lib"]
+    if os.environ.get("LIBAIUPTI_INSTALL_DIR"):
+        LIBAIUPTI_DIR = Path(os.environ["LIBAIUPTI_INSTALL_DIR"])
+        LIBRARY_DIRS += [LIBAIUPTI_DIR / "lib"]
 
+    LIBRARY_DIRS += [RUNTIME_DIR / "lib"]
 
 INCLUDE_DIRS += [os.environ["SEN_COMMON_HEADERS"]]
 
@@ -248,7 +251,7 @@ if __name__ == "__main__":
                     ("BOOST_ALL_DYN_LINK", None),  # avoid static link to boost
                     *(
                         [("HAS_AIUPTI", None)]
-                        if os.environ["USE_SPYRE_PROFILER"]
+                        if os.environ.get("USE_SPYRE_PROFILER")
                         else []
                     ),
                     *([("USE_KINETO", None)] if KINETO_INCLUDE_DIR.is_dir() else []),

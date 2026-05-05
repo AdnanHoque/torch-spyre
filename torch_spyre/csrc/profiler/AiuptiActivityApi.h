@@ -47,8 +47,9 @@ class AiuptiActivityApi {
   static void popCorrelationID(CorrelationFlowType type);
 
   void enableAiuptiActivities(
-      const std::set<ActivityType>& selected_activities);
-  void disablePtiActivities(const std::set<ActivityType>& selected_activities);
+      const std::set<libkineto::ActivityType>& selected_activities);
+  void disablePtiActivities(
+      const std::set<libkineto::ActivityType>& selected_activities);
   void clearActivities();
 
   virtual std::unique_ptr<AiuptiActivityBufferDeque> activityBuffers();
