@@ -1,0 +1,109 @@
+# Joint SWP+WS — long-context FA-2 demonstration
+
+# n_heads = 8, head_dim = 128, k_tile = 128
+
+## M = 1024
+
+  K-tiles per attention compute: 8
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+  reference attention wall: 17.88 ms (measured)
+[WARNING] [stickify] Injecting restickify on batchmatmul y input to move stick to generated_dim
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+  per-op walls (ms):
+    pt_qk=6.32  sfp_amax=2.83  sfp_where=3.05
+    sfp_exp_p=3.09  sfp_exp_r=3.07  pt_pv=2.93
+    sfp_acc_o=3.19  sfp_sumexp=2.79  sfp_acc_l=3.06
+  unfused serial:   196.47 ms
+  unfused joint:    174.63 ms
+  fused serial:     122.40 ms
+  fused joint:      77.42 ms  ← best FA-tiled prediction
+  reference vs FA:  17.88 vs 77.42 → ref wins (0.23×)
+
+## M = 2048
+
+  K-tiles per attention compute: 16
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+  reference attention wall: 27.41 ms (measured)
+[WARNING] [stickify] Injecting restickify on batchmatmul y input to move stick to generated_dim
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+  per-op walls (ms):
+    pt_qk=6.31  sfp_amax=2.81  sfp_where=3.13
+    sfp_exp_p=3.23  sfp_exp_r=3.09  pt_pv=2.95
+    sfp_acc_o=3.35  sfp_sumexp=2.85  sfp_acc_l=3.11
+  unfused serial:   394.87 ms
+  unfused joint:    350.62 ms
+  fused serial:     252.80 ms
+  fused joint:      151.98 ms  ← best FA-tiled prediction
+  reference vs FA:  27.41 vs 151.98 → ref wins (0.18×)
+
+## M = 4096
+
+  K-tiles per attention compute: 32
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+  reference attention wall: 66.76 ms (measured)
+[WARNING] [stickify] Injecting restickify on batchmatmul y input to move stick to generated_dim
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+  per-op walls (ms):
+    pt_qk=6.45  sfp_amax=2.85  sfp_where=3.29
+    sfp_exp_p=3.40  sfp_exp_r=3.20  pt_pv=3.02
+    sfp_acc_o=3.57  sfp_sumexp=2.86  sfp_acc_l=3.24
+  unfused serial:   811.89 ms
+  unfused joint:    722.92 ms
+  fused serial:     539.20 ms
+  fused joint:      307.59 ms  ← best FA-tiled prediction
+  reference vs FA:  66.76 vs 307.59 → ref wins (0.22×)
+
+## M = 8192
+
+  K-tiles per attention compute: 64
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+  reference attention wall: 225.05 ms (measured)
+[WARNING] [stickify] Injecting restickify on batchmatmul y input to move stick to generated_dim
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+/home/adnan/dt-inductor/torch-spyre/torch_spyre/_inductor/customops.py:167: FallbackWarning: torch.ops.spyre.full is falling back to cpu
+  warn_fallback("torch.ops.spyre.full")
+  per-op walls (ms):
+    pt_qk=6.80  sfp_amax=3.00  sfp_where=3.62
+    sfp_exp_p=3.80  sfp_exp_r=3.44  pt_pv=3.17
+    sfp_acc_o=4.05  sfp_sumexp=3.01  sfp_acc_l=3.67
+  unfused serial:   1753.17 ms
+  unfused joint:    1579.92 ms
+  fused serial:     1251.84 ms
+  fused joint:      646.05 ms  ← best FA-tiled prediction
+  reference vs FA:  225.05 vs 646.05 → ref wins (0.35×)
+
+## Summary table
+
+| M | ref ms | unfused serial | unfused joint | fused serial | fused joint | ref vs fused-joint |
+|---:|---:|---:|---:|---:|---:|---|
+| 1024 | 17.88 | 196.47 | 174.63 | 122.40 | 77.42 | ref 4.33× faster |
+| 2048 | 27.41 | 394.87 | 350.62 | 252.80 | 151.98 | ref 5.54× faster |
+| 4096 | 66.76 | 811.89 | 722.92 | 539.20 | 307.59 | ref 4.61× faster |
+| 8192 | 225.05 | 1753.17 | 1579.92 | 1251.84 | 646.05 | ref 2.87× faster |
+
+## Crossover analysis
+
+  No crossover within tested range — reference still wins at M=8192.
+  FA tiling on AIU may need M ≥ 16K to break even.
