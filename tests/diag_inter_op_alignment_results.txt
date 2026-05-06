@@ -1,0 +1,37 @@
+# Inter-op core_id alignment — Phase 0
+
+# warmup=2 iters=5, fp16, SENCORES=32
+
+| case | op2 split | T_solo1 | T_solo2 | T_chain | T_chain - T_solo1 - T_solo2 |
+|---|---|---:|---:|---:|---:|
+| M=128, kv→o-style | (8,1,4) [matched] | 3.11 | 3.07 | 3.86 | -2.31 |
+| M=128, kv→o-style | (8,4,1) [partial] | 3.11 | 3.02 | 3.86 | -2.27 |
+| M=128, kv→o-style | (4,8,1) [mismatched] | 3.11 | 3.00 | 3.87 | -2.24 |
+| M=128, kv→o-style | (1,32,1) [pure-N] | 3.11 | 2.96 | 3.87 | -2.20 |
+| M=128, kv→o-style | (32,1,1) [pure-M] | 3.11 | 3.09 | 3.87 | -2.33 |
+|  |  |  |  |  |  |
+| M=128, o→kv-style | (8,1,4) [matched] | 3.44 | 3.17 | 5.42 | -1.19 |
+| M=128, o→kv-style | (8,4,1) [partial] | 3.44 | 3.10 | 5.44 | -1.11 |
+| M=128, o→kv-style | (4,8,1) [mismatched] | 3.44 | 3.10 | 5.46 | -1.08 |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+| M=128, o→kv-style | (1,32,1) [pure-N] | 3.44 | 0.00 | 5.45 | ERR: InductorError: CalledProcessError: Command '['dxp_standalone', '- |
+| M=128, o→kv-style | (32,1,1) [pure-M] | 3.44 | 3.36 | 5.46 | -1.34 |
+|  |  |  |  |  |  |
+| M=256, o→kv-style | (8,1,4) [matched] | 3.49 | 3.57 | 5.29 | -1.77 |
+| M=256, o→kv-style | (8,4,1) [partial] | 3.49 | 3.13 | 5.28 | -1.34 |
+| M=256, o→kv-style | (4,8,1) [mismatched] | 3.49 | 3.12 | 5.28 | -1.32 |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+| M=256, o→kv-style | (1,32,1) [pure-N] | 3.49 | 0.00 | 5.24 | ERR: InductorError: CalledProcessError: Command '['dxp_standalone', '- |
+| M=256, o→kv-style | (32,1,1) [pure-M] | 3.49 | 3.34 | 5.24 | -1.59 |
+|  |  |  |  |  |  |
+
+## Reading guide
+
+  - 'Extra' = chained wall minus solo walls. Captures inter-op cost.
+  - If extra is roughly constant across op2 splits: alignment doesn't matter.
+  - If extra is much LOWER for matched (8,1,4): alignment is a lever.
+  - 'extra' may be negative if chained pipelines (overlap of op1 and op2)
+    — that's fine, what matters is variance across splits.
+
