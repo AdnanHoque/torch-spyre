@@ -1,0 +1,17 @@
+# Hardware calibration of FA prototype — AIU measurements
+
+# Measured at: 2026-05-06
+# Form: bmm + softmax + bmm vs torch.nn.functional.scaled_dot_product_attention
+# Branch: AdnanHoque/hmi-cost-model-simulator (compile path works there;
+# this branch's parent main commit ba9274d "Compute nograph" breaks the
+# kernel deserializer on this machine, so calibration was run on the
+# cost-model branch and copied back).
+
+| n_heads | M | head_dim | bmm-form ms | SDPA-form ms | ratio (bmm/SDPA) |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 256 | 128 | 9.928 | 14.905 | 0.67× |
+| 8 | 512 | 128 | 10.540 | 15.706 | 0.67× |
+| 8 | 1024 | 128 | 12.465 | 17.040 | 0.73× |
+| 32 | 512 | 128 | 13.172 | 18.854 | 0.70× |
+| 32 | 1024 | 128 | 21.409 | 27.947 | 0.77× |
+| 64 | 1024 | 128 | 32.513 | 45.877 | 0.71× |
