@@ -1,0 +1,108 @@
+# Joint SWP+WS — FlashAttention prototype results
+
+## Single configs
+
+### SFP=1500 (cheap exp, 4 cyc/element)
+# Joint SWP+WS — FlashAttention prototype
+
+## Constants (per tile)
+
+  HMI K+V fetch:   1700 cycles
+  PT Q·K^T:        4096 cycles
+  PT (P·V):        4096 cycles
+  SFP softmax:     varies (probe arg)
+  SFP update:      300 cycles
+
+## Single config: SFP softmax = 1500 cycles, iters = 16
+
+  PT total per iter:  8192 cycles
+  SFP total per iter: 1800 cycles
+  PT/SFP balance:     4.55× (PT-dominant)
+
+  serial     wall = 187072 cycles, solve = 0.010 s
+  decoupled  wall = 157072 cycles, solve = 0.024 s
+  joint      wall = 133372 cycles, solve = 0.013 s
+
+## Speedups
+
+  joint vs serial:    1.40×
+  joint vs decoupled: 1.18×
+  decoupled vs serial: 1.19×
+
+### SFP=3000 (medium)
+# Joint SWP+WS — FlashAttention prototype
+
+## Constants (per tile)
+
+  HMI K+V fetch:   1700 cycles
+  PT Q·K^T:        4096 cycles
+  PT (P·V):        4096 cycles
+  SFP softmax:     varies (probe arg)
+  SFP update:      300 cycles
+
+## Single config: SFP softmax = 3000 cycles, iters = 16
+
+  PT total per iter:  8192 cycles
+  SFP total per iter: 3300 cycles
+  PT/SFP balance:     2.48× (PT-dominant)
+
+  serial     wall = 211072 cycles, solve = 0.010 s
+  decoupled  wall = 181072 cycles, solve = 0.045 s
+  joint      wall = 133372 cycles, solve = 0.016 s
+
+## Speedups
+
+  joint vs serial:    1.58×
+  joint vs decoupled: 1.36×
+  decoupled vs serial: 1.17×
+
+### SFP=5000 (expensive exp, 16 cyc/element)
+# Joint SWP+WS — FlashAttention prototype
+
+## Constants (per tile)
+
+  HMI K+V fetch:   1700 cycles
+  PT Q·K^T:        4096 cycles
+  PT (P·V):        4096 cycles
+  SFP softmax:     varies (probe arg)
+  SFP update:      300 cycles
+
+## Single config: SFP softmax = 5000 cycles, iters = 16
+
+  PT total per iter:  8192 cycles
+  SFP total per iter: 5300 cycles
+  PT/SFP balance:     1.55× (PT-dominant)
+
+  serial     wall = 243072 cycles, solve = 0.010 s
+  decoupled  wall = 213072 cycles, solve = 0.029 s
+  joint      wall = 134576 cycles, solve = 0.030 s
+
+## Speedups
+
+  joint vs serial:    1.81×
+  joint vs decoupled: 1.58×
+  decoupled vs serial: 1.14×
+
+## Sweep over SFP cost (iters=16)
+
+## Sweep over SFP softmax cost (iters=16)
+
+| SFP softmax | PT/SFP ratio | serial | decoupled | joint | joint solve s | dec→joint speedup | ser→dec speedup |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 500 | 10.24× | 171072 | 141072 | 133372 | 0.01 | 1.06× | 1.21× |
+| 1500 | 4.55× | 187072 | 157072 | 133372 | 0.01 | 1.18× | 1.19× |
+| 3000 | 2.48× | 211072 | 181072 | 133372 | 0.01 | 1.36× | 1.17× |
+| 5000 | 1.55× | 243072 | 213072 | 134576 | 0.03 | 1.58× | 1.14× |
+| 8000 | 0.99× | 291072 | 261072 | 142692 | 0.04 | 1.83× | 1.11× |
+
+## Sweep at iters=64 (closer to Llama 70B prefill scale)
+
+## Sweep over SFP softmax cost (iters=64)
+
+| SFP softmax | PT/SFP ratio | serial | decoupled | joint | joint solve s | dec→joint speedup | ser→dec speedup |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 500 | 10.24× | 684288 | 558288 | 526588 | 0.21 | 1.06× | 1.23× |
+| 1500 | 4.55× | 748288 | 622288 | 526588 | 0.19 | 1.18× | 1.20× |
+| 3000 | 2.48× | 844288 | 718288 | 526588 | 0.15 | 1.36× | 1.18× |
+| 5000 | 1.55× | 972288 | 846288 | 527792 | 0.30 | 1.60× | 1.15× |
+| 8000 | 0.99× | 1164288 | 1038288 | 541092 | 0.24 | 1.92× | 1.12× |
