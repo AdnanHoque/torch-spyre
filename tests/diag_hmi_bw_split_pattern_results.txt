@@ -1,0 +1,57 @@
+# HMI BW gap — does access pattern move the 40 GB/s number?
+
+# warmup=3 iters=12, fp16, SENCORES=32
+
+# Implied BW = bytes / (wall - max(LF, compute))
+# Total HMI bytes = M*K + K*N + M*N (broadcast model, same for all splits)
+
+| shape | (M, N, K) | bytes (MB) | split | wall ms | compute ms | hmi ms | implied BW (GB/s) |
+|---|---|---:|---|---:|---:|---:|---:|
+| wide-B M=128 | (128,8192,8192) | 138 | pure-M | 6.516 | 1.074 | +3.516 | 39.4 |
+| wide-B M=128 | (128,8192,8192) | 138 | pure-N | 4.028 | 0.537 | +1.028 | 134.7 |
+| wide-B M=128 | (128,8192,8192) | 138 | pure-K | 5.154 | 0.537 | +2.154 | 64.2 |
+| wide-B M=128 | (128,8192,8192) | 138 | (1,16,2) | 7.024 | 0.537 | +4.024 | 34.4 |
+| wide-B M=128 | (128,8192,8192) | 138 | (1,8,4) | 7.561 | 0.537 | +4.561 | 30.3 |
+| wide-B M=128 | (128,8192,8192) | 138 | (2,16,1) | 3.979 | 0.537 | +0.979 | 141.4 |
+| wide-B M=128 | (128,8192,8192) | 138 | (8,4,1) | 4.036 | 0.537 | +1.036 | 133.6 |
+| wide-B M=128 | (128,8192,8192) | 138 | (16,2,1) | 4.555 | 0.537 | +1.555 | 89.0 |
+| wide-B M=256 | (256,8192,8192) | 143 | pure-M | 6.246 | 1.074 | +3.246 | 43.9 |
+| wide-B M=256 | (256,8192,8192) | 143 | pure-N | 4.096 | 1.074 | +1.096 | 130.2 |
+| wide-B M=256 | (256,8192,8192) | 143 | pure-K | 7.322 | 1.074 | +4.322 | 33.0 |
+| wide-B M=256 | (256,8192,8192) | 143 | (1,16,2) | 11.070 | 1.074 | +8.070 | 17.7 |
+| wide-B M=256 | (256,8192,8192) | 143 | (1,8,4) | 12.099 | 1.074 | +9.099 | 15.7 |
+| wide-B M=256 | (256,8192,8192) | 143 | (2,16,1) | 4.996 | 1.074 | +1.996 | 71.4 |
+| wide-B M=256 | (256,8192,8192) | 143 | (8,4,1) | 4.077 | 1.074 | +1.077 | 132.5 |
+| wide-B M=256 | (256,8192,8192) | 143 | (16,2,1) | 4.662 | 1.074 | +1.662 | 85.8 |
+| narrow-B M=128 | (128,4096,4096) | 36 | pure-M | 3.896 | 0.268 | +0.896 | 39.8 |
+| narrow-B M=128 | (128,4096,4096) | 36 | pure-N | 3.243 | 0.134 | +0.243 | 146.6 |
+| narrow-B M=128 | (128,4096,4096) | 36 | pure-K | 3.544 | 0.134 | +0.544 | 65.5 |
+| narrow-B M=128 | (128,4096,4096) | 36 | (1,16,2) | 3.575 | 0.134 | +0.575 | 62.0 |
+| narrow-B M=128 | (128,4096,4096) | 36 | (1,8,4) | 3.517 | 0.134 | +0.517 | 69.0 |
+| narrow-B M=128 | (128,4096,4096) | 36 | (2,16,1) | 3.310 | 0.134 | +0.310 | 115.0 |
+| narrow-B M=128 | (128,4096,4096) | 36 | (8,4,1) | 3.304 | 0.134 | +0.304 | 117.2 |
+| narrow-B M=128 | (128,4096,4096) | 36 | (16,2,1) | 3.420 | 0.134 | +0.420 | 84.9 |
+
+## Per-shape best/worst split for BW
+
+  wide-B M=128: best = (2,16,1) (141.4 GB/s), worst = (1,8,4) (30.3 GB/s), spread = 111.0 GB/s
+  wide-B M=256: best = (8,4,1) (132.5 GB/s), worst = (1,8,4) (15.7 GB/s), spread = 116.8 GB/s
+  narrow-B M=128: best = pure-N (146.6 GB/s), worst = pure-M (39.8 GB/s), spread = 106.8 GB/s
+
+## Aggregate stats
+
+  rows: 24
+  median BW: 70.2 GB/s
+  range:     15.7 – 146.6 GB/s
+  spread:    130.9 GB/s
+
+## Reading guide
+
+  - If BW spread per shape is < 5 GB/s: access pattern doesn't matter.
+    The 40 GB/s ceiling lives in the kernel template / runtime.
+    No torch_spyre lever to close the gap.
+  - If BW spread > 10 GB/s: access pattern matters. The planner could
+    bias toward higher-BW splits. torch_spyre lever exists.
+  - If pure-K consistently wins big: K-split shrinks per-core HMI demand
+    in a way the broadcast model under-counts.
+
