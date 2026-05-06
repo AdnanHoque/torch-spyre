@@ -1,0 +1,54 @@
+=== k_tile=256 ===
+## AIU bench (n_heads=8, M=256, head_dim=128, k_tile=256)
+  reference (full M×M):   15.525 ms
+  FA-tiled (k_tile=256):  24.666 ms
+  speedup: 0.63×
+## AIU bench (n_heads=8, M=512, head_dim=128, k_tile=256)
+  reference (full M×M):   16.032 ms
+  FA-tiled (k_tile=256):  55.699 ms
+  speedup: 0.29×
+## AIU bench (n_heads=8, M=1024, head_dim=128, k_tile=256)
+  reference (full M×M):   16.808 ms
+  FA-tiled (k_tile=256):  108.691 ms
+  speedup: 0.15×
+## AIU bench (n_heads=32, M=1024, head_dim=128, k_tile=256)
+  reference (full M×M):   28.348 ms
+  FA-tiled (k_tile=256):  122.595 ms
+  speedup: 0.23×
+
+=== k_tile=512 ===
+## AIU bench (n_heads=8, M=256, head_dim=128, k_tile=512)
+  reference (full M×M):   15.237 ms
+  FA-tiled (k_tile=512):  24.178 ms
+  speedup: 0.63×
+## AIU bench (n_heads=8, M=512, head_dim=128, k_tile=512)
+  reference (full M×M):   15.830 ms
+  FA-tiled (k_tile=512):  24.774 ms
+  speedup: 0.64×
+## AIU bench (n_heads=8, M=1024, head_dim=128, k_tile=512)
+  reference (full M×M):   18.249 ms
+  FA-tiled (k_tile=512):  57.585 ms
+  speedup: 0.32×
+## AIU bench (n_heads=32, M=1024, head_dim=128, k_tile=512)
+  reference (full M×M):   26.986 ms
+  FA-tiled (k_tile=512):  68.316 ms
+  speedup: 0.40×
+
+=== k_tile=1024 ===
+## AIU bench (n_heads=8, M=256, head_dim=128, k_tile=1024)
+  reference (full M×M):   14.881 ms
+  FA-tiled (k_tile=1024):  23.486 ms
+  speedup: 0.63×
+## AIU bench (n_heads=8, M=512, head_dim=128, k_tile=1024)
+  reference (full M×M):   15.511 ms
+  FA-tiled (k_tile=1024):  24.784 ms
+  speedup: 0.63×
+## AIU bench (n_heads=8, M=1024, head_dim=128, k_tile=1024)
+  reference (full M×M):   17.822 ms
+  FA-tiled (k_tile=1024):  26.578 ms
+  speedup: 0.67×
+## AIU bench (n_heads=32, M=1024, head_dim=128, k_tile=1024)
+  reference (full M×M):   28.168 ms
+  FA-tiled (k_tile=1024):  35.748 ms
+  speedup: 0.79×
+
