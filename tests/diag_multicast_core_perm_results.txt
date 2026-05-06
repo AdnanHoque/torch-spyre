@@ -1,0 +1,64 @@
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+# Multicast core_id permutation probe — Phase 0
+
+# warmup=3 iters=8, fp16, SENCORES=32
+
+| shape | B/A ratio | split | permutation | wall ms |
+|---|---|---|---|---:|
+| wide-B  M=128 (LLM-standard, B>>A) | 32× | (8,4,1) | identity | 3.957 |
+| wide-B  M=128 (LLM-standard, B>>A) | 32× | (8,4,1) | m_adj | 3.949 |
+| wide-B  M=128 (LLM-standard, B>>A) | 32× | (8,4,1) | reversed | 3.962 |
+| wide-B  M=128 (LLM-standard, B>>A) | 32× | (8,4,1) | random | 3.961 |
+| wide-B  M=128 (LLM-standard, B>>A) | 32× | (4,8,1) | identity | 4.021 |
+| wide-B  M=128 (LLM-standard, B>>A) | 32× | (4,8,1) | m_adj | 4.057 |
+| wide-B  M=128 (LLM-standard, B>>A) | 32× | (4,8,1) | reversed | 4.019 |
+| wide-B  M=128 (LLM-standard, B>>A) | 32× | (4,8,1) | random | 4.046 |
+| wide-B  M=256 | 16× | (8,4,1) | identity | 4.026 |
+| wide-B  M=256 | 16× | (8,4,1) | m_adj | 4.041 |
+| wide-B  M=256 | 16× | (8,4,1) | reversed | 4.021 |
+| wide-B  M=256 | 16× | (8,4,1) | random | 4.024 |
+| wide-B  M=256 | 16× | (4,8,1) | identity | 5.049 |
+| wide-B  M=256 | 16× | (4,8,1) | m_adj | 5.104 |
+| wide-B  M=256 | 16× | (4,8,1) | reversed | 5.107 |
+| wide-B  M=256 | 16× | (4,8,1) | random | 5.038 |
+| square M=1024 (A≈B) | 1× | (8,4,1) | identity | 3.110 |
+| square M=1024 (A≈B) | 1× | (8,4,1) | m_adj | 3.113 |
+| square M=1024 (A≈B) | 1× | (8,4,1) | reversed | 3.154 |
+| square M=1024 (A≈B) | 1× | (8,4,1) | random | 3.120 |
+| square M=1024 (A≈B) | 1× | (4,8,1) | identity | 3.134 |
+| square M=1024 (A≈B) | 1× | (4,8,1) | m_adj | 3.142 |
+| square M=1024 (A≈B) | 1× | (4,8,1) | reversed | 3.134 |
+| square M=1024 (A≈B) | 1× | (4,8,1) | random | 3.125 |
+| wide-A M=4096 (A>>B, atypical) | 0.06× | (8,4,1) | identity | 3.244 |
+| wide-A M=4096 (A>>B, atypical) | 0.06× | (8,4,1) | m_adj | 3.245 |
+| wide-A M=4096 (A>>B, atypical) | 0.06× | (8,4,1) | reversed | 3.250 |
+| wide-A M=4096 (A>>B, atypical) | 0.06× | (8,4,1) | random | 4.128 |
+| wide-A M=4096 (A>>B, atypical) | 0.06× | (4,8,1) | identity | ERR: InductorError: CalledProcessError: Comma |
+| wide-A M=4096 (A>>B, atypical) | 0.06× | (4,8,1) | m_adj | ERR: InductorError: CalledProcessError: Comma |
+| wide-A M=4096 (A>>B, atypical) | 0.06× | (4,8,1) | reversed | ERR: InductorError: CalledProcessError: Comma |
+| wide-A M=4096 (A>>B, atypical) | 0.06× | (4,8,1) | random | ERR: InductorError: CalledProcessError: Comma |
+
+## Per-shape best/worst permutation
+
+  wide-B  M=128 (LLM-standard, B>>A) (8,4,1): best = m_adj (3.95 ms), worst = reversed (3.96 ms), spread = 0.3%
+  wide-B  M=128 (LLM-standard, B>>A) (4,8,1): best = reversed (4.02 ms), worst = m_adj (4.06 ms), spread = 0.9%
+  wide-B  M=256 (8,4,1): best = reversed (4.02 ms), worst = m_adj (4.04 ms), spread = 0.5%
+  wide-B  M=256 (4,8,1): best = random (5.04 ms), worst = reversed (5.11 ms), spread = 1.4%
+  square M=1024 (A≈B) (8,4,1): best = identity (3.11 ms), worst = reversed (3.15 ms), spread = 1.4%
+  square M=1024 (A≈B) (4,8,1): best = random (3.13 ms), worst = m_adj (3.14 ms), spread = 0.5%
+  wide-A M=4096 (A>>B, atypical) (8,4,1): best = identity (3.24 ms), worst = random (4.13 ms), spread = 27.3%
+
+## Reading guide
+
+  - Spread > 10%: permutation matters → torch_spyre lever exists.
+  - Spread < 5%: ring placement doesn't significantly affect wall.
+  - Identity wins on wide-B: default is optimal for LLM matmuls.
+  - m_adj wins on wide-A: A-broadcast is the bottleneck for those shapes.
+
