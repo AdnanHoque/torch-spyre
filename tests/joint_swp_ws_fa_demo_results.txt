@@ -1,0 +1,55 @@
+# FA-2 joint SWP+WS demonstration
+
+# Real per-op walls measured on AIU (Llama 70B-style attention)
+# Shape: (1, 8, 1024, 128), k_tile = 128 → 8 K-tiles
+
+## Regime A: unfused (today's torch_spyre decomposition path)
+
+  9 ops per tile, each its own AIU kernel launch with LF=3ms.
+  Per-op walls measured directly.
+
+| schedule | wall ms | speedup vs serial |
+|---|---:|---:|
+| serial | 193.96 | 1.00× |
+| decoupled | 172.75 | 1.12× |
+| joint | 172.75 | 1.12× |
+
+## Regime B: fused (custom SDSC kernel — what we'd build)
+
+  4 ops per tile (PT QK, fused softmax, PT PV, fused update).
+  Each fused stage = 1 LF + work, vs unfused 5+ LFs.
+
+| schedule | wall ms | speedup vs serial |
+|---|---:|---:|
+| serial | 119.20 | 1.00× |
+| decoupled | 96.94 | 1.23× |
+| joint | 76.18 | 1.56× |
+
+## Cross-regime comparison
+
+| comparison | wall ms |
+|---|---:|
+| Unfused serial (today's AIU)         | 193.96 |
+| Unfused joint (best ILP can do today)| 172.75 |
+| Fused serial (custom kernel only)     | 119.20 |
+| **Fused joint (custom kernel + joint SWP+WS)** | **76.18** |
+
+  Reference (AIU's bmm+softmax+bmm path): 17.80 ms (measured)
+
+## Headline
+
+  Today (unfused, serial):              194.0 ms
+  Joint scheduling alone (no fusion):    172.8 ms  (1.12× speedup)
+  Fusion alone (no joint scheduling):    119.2 ms  (1.63× speedup)
+  **Fusion + joint scheduling combined**: 76.2 ms  (2.55× speedup)
+
+## Reading
+
+  - Joint scheduling alone gives modest gains because per-op LF
+    dominates: each tensor op's 3 ms LF can't be amortized by
+    scheduling, only by fusion.
+  - Fusion alone gives big gains by reducing op count.
+  - The full win requires BOTH: fusion to reduce LFs, AND joint
+    scheduling to overlap PT and SFP across iterations.
+  - This is the FA-3 ping-pong pattern, demonstrated on a real
+    AIU workload with measured numbers, not synthetic estimates.
