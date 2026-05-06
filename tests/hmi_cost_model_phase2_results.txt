@@ -1,0 +1,96 @@
+# Phase 2 sweep — scheduling headroom across (model, M)
+
+| model | M | serial ms | concurrent ms | saved ms | saved % | verdict |
+|---|---:|---:|---:|---:|---:|---|
+| Llama 3.1 8B | 32 | 46.98 | 46.98 | 0.00 | 0.0% | close |
+| Llama 3.1 8B | 128 | 47.83 | 47.83 | 0.00 | 0.0% | close |
+| Llama 3.1 8B | 512 | 51.23 | 51.23 | 0.00 | 0.0% | close |
+| Llama 3.1 8B | 2048 | 64.84 | 64.84 | 0.00 | 0.0% | close |
+| Llama 3.1 70B | 32 | 78.93 | 78.93 | 0.00 | 0.0% | close |
+| Llama 3.1 70B | 128 | 80.62 | 80.62 | 0.00 | 0.0% | close |
+| Llama 3.1 70B | 512 | 87.41 | 87.41 | 0.00 | 0.0% | close |
+| Llama 3.1 70B | 2048 | 150.29 | 149.73 | 0.56 | 0.4% | close |
+| Llama 3.1 405B | 32 | 195.63 | 195.63 | 0.00 | 0.0% | close |
+| Llama 3.1 405B | 128 | 198.90 | 198.90 | 0.00 | 0.0% | close |
+| Llama 3.1 405B | 512 | 211.98 | 211.98 | 0.00 | 0.0% | close |
+| Llama 3.1 405B | 2048 | 467.19 | 463.72 | 3.47 | 0.7% | close |
+| Mixtral 8x7B | 32 | 46.98 | 46.98 | 0.00 | 0.0% | close |
+| Mixtral 8x7B | 128 | 47.83 | 47.83 | 0.00 | 0.0% | close |
+| Mixtral 8x7B | 512 | 51.23 | 51.23 | 0.00 | 0.0% | close |
+| Mixtral 8x7B | 2048 | 64.84 | 64.84 | 0.00 | 0.0% | close |
+| DeepSeek V3 | 32 | 62.00 | 62.00 | 0.00 | 0.0% | close |
+| DeepSeek V3 | 128 | 63.47 | 63.47 | 0.00 | 0.0% | close |
+| DeepSeek V3 | 512 | 69.36 | 69.36 | 0.00 | 0.0% | close |
+| DeepSeek V3 | 2048 | 106.96 | 106.96 | 0.00 | 0.0% | close |
+
+=== Llama 70B M=128 verbose trace ===
+# Phase 2 concurrent simulator: Llama 3.1 70B block at M=128
+
+## Block-level wall
+
+  serial:          80.62 ms
+  concurrent:      80.62 ms
+  saved:            0.00 ms (0.0%)
+
+## Resource utilization (concurrent mode)
+
+  Σ HMI claim time:      80.62 ms  (100% of wall)
+  Σ compute time:        13.57 ms  (17% of wall)
+  HMI lower bound:       80.62 ms  (no scheduler can do better than max)
+
+## Per-op trace (concurrent mode)
+
+| op | hmi start | hmi end | compute start | compute end | done |
+|---|---:|---:|---:|---:|---:|
+| input_rmsnorm |   0.00 |   3.10 |   0.00 |   0.00 |   3.10 |
+| q_proj |   3.10 |   9.57 |   3.10 |   4.18 |   9.57 |
+| kv_proj |   9.57 |  13.04 |   9.57 |   9.70 |  13.04 |
+| attn_qkt_softmax_v |  13.04 |  16.25 |  13.04 |  13.06 |  16.25 |
+| o_proj |  16.25 |  22.71 |  16.25 |  17.33 |  22.71 |
+| post_attn_residual |  22.71 |  25.87 |  22.71 |  22.71 |  25.87 |
+| post_attn_rmsnorm |  25.87 |  28.98 |  25.87 |  25.87 |  28.98 |
+| gate_proj |  28.98 |  43.96 |  28.98 |  32.73 |  43.96 |
+| up_proj |  43.96 |  58.94 |  43.96 |  47.71 |  58.94 |
+| silu_mul |  58.94 |  62.49 |  58.94 |  58.94 |  62.49 |
+| down_proj |  62.49 |  77.47 |  62.49 |  66.24 |  77.47 |
+| post_mlp_residual |  77.47 |  80.62 |  77.47 |  77.47 |  80.62 |
+
+## Verdict
+
+  0.0% saving → < 5% — HMI is essentially fully utilized. Project B closes.
+
+=== Llama 70B M=2048 (compute-bound) ===
+# Phase 2 concurrent simulator: Llama 3.1 70B block at M=2048
+
+## Block-level wall
+
+  serial:         150.29 ms
+  concurrent:     149.73 ms
+  saved:            0.56 ms (0.4%)
+
+## Resource utilization (concurrent mode)
+
+  Σ HMI claim time:     114.54 ms  (76% of wall)
+  Σ compute time:       112.74 ms  (75% of wall)
+  HMI lower bound:      114.54 ms  (no scheduler can do better than max)
+
+## Per-op trace (concurrent mode)
+
+| op | hmi start | hmi end | compute start | compute end | done |
+|---|---:|---:|---:|---:|---:|
+| input_rmsnorm |   0.00 |   4.68 |   0.00 |   0.00 |   4.68 |
+| q_proj |   4.68 |  12.71 |   4.68 |  13.27 |  13.27 |
+| kv_proj |  12.71 |  17.07 |  13.27 |  14.34 |  17.07 |
+| attn_qkt_softmax_v |  17.07 |  23.43 |  17.07 |  21.37 |  23.43 |
+| o_proj |  23.43 |  31.46 |  23.43 |  32.02 |  32.02 |
+| post_attn_residual |  32.02 |  37.54 |  32.02 |  32.02 |  37.54 |
+| post_attn_rmsnorm |  37.54 |  42.21 |  37.54 |  37.54 |  42.21 |
+| gate_proj |  42.21 |  60.73 |  42.21 |  72.28 |  72.28 |
+| up_proj |  60.73 |  79.25 |  72.28 | 102.34 | 102.34 |
+| silu_mul | 102.34 | 114.15 | 102.34 | 102.34 | 114.15 |
+| down_proj | 114.15 | 132.67 | 114.15 | 144.22 | 144.22 |
+| post_mlp_residual | 144.22 | 149.73 | 144.22 | 144.22 | 149.73 |
+
+## Verdict
+
+  0.4% saving → < 5% — HMI is essentially fully utilized. Project B closes.

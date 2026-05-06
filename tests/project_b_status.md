@@ -1,11 +1,31 @@
-# Project B — status after Phase 0
+# Project B — status after Phase 2 (CLOSED)
 
-Companion to `project_b_hmi_simulator_scope.md` (original plan) and
-`hmi_cost_model_phase0_findings.md` (Phase 0 detail). This doc states
-where the project stands, what we now know empirically, and the path
-forward.
+Companion to `project_b_hmi_simulator_scope.md` (original plan),
+`hmi_cost_model_phase0_findings.md` (Phase 0 detail), and
+`hmi_cost_model_phase2_findings.md` (Phase 2 verdict).
 
-## Where we are
+## Verdict: project closes
+
+Phase 2 ran the concurrent simulator across 5 models × 4 M values and
+measured **0–0.7% scheduling headroom** across the board — well below
+the scope doc's < 5% close threshold. Project B's central question —
+"is there scheduling headroom?" — is answered no.
+
+Mechanism: HMI is the binding constraint and already runs at 100%
+utilization under the planner's sequential dispatch. The cross-op
+HMI prefetch that "concurrent scheduling" would enable doesn't help
+because there's no idle HMI to schedule into. Phase 1's 28% upper
+bound was over-stated — it under-counted the HMI claim of
+non-HMI-bound ops (norms, residuals, attention compute), which still
+total ~22 ms / block on Llama 70B M=128.
+
+See `hmi_cost_model_phase2_findings.md` for the detailed analysis,
+including what was ruled out, what the simulator assumes, and one
+follow-up question worth raising independently (LF / kernel-binary
+prefetch is potentially a 45% saving, but that's a different problem
+from operand HMI scheduling).
+
+## Where we landed (Phase 0 retained for reference)
 
 Phase 0 (per-op cost model + calibration) is **partially complete**.
 
