@@ -1,0 +1,66 @@
+# End-to-end joint SWP+WS results
+
+## Llama 70B M=2048 SFP=3000
+# End-to-end: joint SWP+WS on attention → block wall
+
+## Setup
+
+  model:  Llama 3.1 70B
+  M:      2048
+  SFP softmax: 3000 cycles/tile
+
+## Attention op wall under each mode (single op, all 32 cores)
+
+  attention serial    :    6.75 ms
+  attention decoupled :    5.79 ms
+  attention joint     :    4.27 ms
+
+  joint vs decoupled per-op: 1.36×
+
+## Block-level wall (under serial-runtime, today's path)
+
+| attention mode | attention ms | block serial ms | block concurrent ms | block savings vs decoupled |
+|---|---:|---:|---:|---:|
+| serial | 6.75 | 150.69 | 150.13 | -0.6% |
+| decoupled | 5.79 | 149.73 | 149.17 | +0.0% |
+| joint | 4.27 | 148.20 | 147.65 | +1.0% |
+
+## Block-wall savings
+
+  joint vs decoupled (serial runtime):  +1.53 ms (1.0%)
+  joint vs serial (per-op + serial):    +2.49 ms (1.7%)
+
+## Llama 70B M=128 (decode, HMI-bound)
+
+  joint vs decoupled per-op: 1.00×
+
+## Block-level wall (under serial-runtime, today's path)
+
+| attention mode | attention ms | block serial ms | block concurrent ms | block savings vs decoupled |
+|---|---:|---:|---:|---:|
+| serial | 0.03 | 80.41 | 80.41 | +0.0% |
+| decoupled | 0.03 | 80.41 | 80.41 | +0.0% |
+| joint | 0.03 | 80.41 | 80.41 | +0.0% |
+
+## Block-wall savings
+
+  joint vs decoupled (serial runtime):  +0.00 ms (0.0%)
+  joint vs serial (per-op + serial):    +0.00 ms (0.0%)
+
+## Full sweep
+# Sweep — joint SWP+WS attention savings flowed to block wall
+
+| model | M | SFP | attn dec ms | attn joint ms | block dec ms | block joint ms | block savings | block savings % |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Llama 3.1 70B | 128 | 1500 | 0.02 | 0.02 | 80.41 | 80.41 | 0.00 ms | 0.0% |
+| Llama 3.1 70B | 128 | 3000 | 0.03 | 0.03 | 80.41 | 80.41 | 0.00 ms | 0.0% |
+| Llama 3.1 70B | 128 | 5000 | 0.03 | 0.03 | 80.41 | 80.41 | 0.00 ms | 0.0% |
+| Llama 3.1 70B | 2048 | 1500 | 5.03 | 4.27 | 148.96 | 148.20 | 0.76 ms | 0.5% |
+| Llama 3.1 70B | 2048 | 3000 | 5.79 | 4.27 | 149.73 | 148.20 | 1.53 ms | 1.0% |
+| Llama 3.1 70B | 2048 | 5000 | 6.82 | 4.31 | 150.75 | 148.24 | 2.51 ms | 1.7% |
+| DeepSeek V3 | 128 | 1500 | 0.05 | 0.05 | 63.05 | 63.05 | 0.00 ms | 0.0% |
+| DeepSeek V3 | 128 | 3000 | 0.05 | 0.05 | 63.05 | 63.05 | 0.00 ms | 0.0% |
+| DeepSeek V3 | 128 | 5000 | 0.06 | 0.06 | 63.05 | 63.05 | 0.00 ms | 0.0% |
+| DeepSeek V3 | 2048 | 1500 | 10.05 | 8.54 | 107.31 | 105.79 | 1.52 ms | 1.4% |
+| DeepSeek V3 | 2048 | 3000 | 11.59 | 8.54 | 108.84 | 105.79 | 3.05 ms | 2.8% |
+| DeepSeek V3 | 2048 | 5000 | 13.64 | 8.61 | 110.89 | 105.87 | 5.02 ms | 4.5% |
