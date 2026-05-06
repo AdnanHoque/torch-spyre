@@ -1,0 +1,116 @@
+# Joint SWP+WS ILP prototype — Phase 0 results
+
+## HMI-dominant profile (decode regime, no WS choice)
+
+# Profile: hmi_dominant
+
+# Joint SWP+WS ILP prototype
+
+Stages (per K-tile iteration):
+  hmi_fetch_b    → HMI   duration = 10 cycles
+  lx_stage       → LX    duration = 2 cycles
+  pt_compute     → PT    duration = 8 cycles
+  sfp_post       → SFP   duration = 3 cycles
+
+## Scaling sweep — does ILP solve in reasonable time?
+
+| iters | serial wall | decoupled wall | joint wall | joint solve s | speedup vs serial | speedup vs decoupled |
+|---:|---:|---:|---:|---:|---:|---:|
+| 4 | 92 | 53 | 53 | 0.004 | 1.74× | 1.00× |
+| 8 | 184 | 93 | 93 | 0.005 | 1.98× | 1.00× |
+| 16 | 368 | 173 | 173 | 0.008 | 2.13× | 1.00× |
+| 32 | 736 | 333 | 333 | 0.022 | 2.21× | 1.00× |
+| 64 | 1472 | 653 | 653 | 0.100 | 2.25× | 1.00× |
+| 128 | 2944 | 1293 | 1293 | 0.277 | 2.28× | 1.00× |
+
+## HMI-dominant profile WITH WS choice
+
+## Scaling sweep — does ILP solve in reasonable time?
+
+| iters | serial wall | decoupled wall | joint wall | joint solve s | speedup vs serial | speedup vs decoupled |
+|---:|---:|---:|---:|---:|---:|---:|
+| 4 | 108 | 57 | 57 | 0.005 | 1.89× | 1.00× |
+| 8 | 216 | 97 | 97 | 0.006 | 2.23× | 1.00× |
+| 16 | 432 | 177 | 177 | 0.011 | 2.44× | 1.00× |
+| 32 | 864 | 337 | 337 | 0.040 | 2.56× | 1.00× |
+| 64 | 1728 | 657 | 657 | 0.176 | 2.63× | 1.00× |
+| 128 | 3456 | 1297 | 1297 | 0.604 | 2.66× | 1.00× |
+
+## Compute-balanced profile (prefill regime, no WS choice)
+
+## Scaling sweep — does ILP solve in reasonable time?
+
+| iters | serial wall | decoupled wall | joint wall | joint solve s | speedup vs serial | speedup vs decoupled |
+|---:|---:|---:|---:|---:|---:|---:|
+| 4 | 92 | 53 | 53 | 0.003 | 1.74× | 1.00× |
+| 8 | 184 | 93 | 93 | 0.004 | 1.98× | 1.00× |
+| 16 | 368 | 173 | 173 | 0.007 | 2.13× | 1.00× |
+| 32 | 736 | 333 | 333 | 0.019 | 2.21× | 1.00× |
+| 64 | 1472 | 653 | 653 | 0.096 | 2.25× | 1.00× |
+| 128 | 2944 | 1293 | 1293 | 0.227 | 2.28× | 1.00× |
+
+## Compute-balanced profile WITH WS choice — joint advantage emerges
+
+## Scaling sweep — does ILP solve in reasonable time?
+
+| iters | serial wall | decoupled wall | joint wall | joint solve s | speedup vs serial | speedup vs decoupled |
+|---:|---:|---:|---:|---:|---:|---:|
+| 4 | 108 | 63 | 59 | 0.005 | 1.83× | 1.07× |
+| 8 | 216 | 111 | 103 | 0.011 | 2.10× | 1.08× |
+| 16 | 432 | 207 | 191 | 0.148 | 2.26× | 1.08× |
+| 32 | 864 | 399 | 367 | 30.209 | 2.35× | 1.09× |
+| 64 | 1728 | 783 | 719 | 30.240 | 2.40× | 1.09× |
+| 128 | 3456 | 1551 | 1435 | 30.401 | 2.41× | 1.08× |
+
+## Verbose Gantt — compute-balanced + ws-choice, iters=16
+
+# Profile: compute_balanced
+
+# Joint SWP+WS ILP prototype
+
+Stages (per K-tile iteration):
+  hmi_fetch_b    → HMI   duration = 4 cycles
+  lx_stage       → LX    duration = 1 cycles
+  pt_compute     → PT    duration = 10 cycles
+  sfp_post       → SFP   duration = 8 cycles
+
+## Schedule comparison (iters=16, ws_choice=True)
+
+  serial     wall =   432 cycles, solve = 0.036 s
+  decoupled  wall =   207 cycles, solve = 0.016 s
+  joint      wall =   191 cycles, solve = 0.168 s
+
+## Speedup of joint vs other schedules
+
+  joint vs serial: 2.26×
+  joint vs decoupled: 1.08×
+
+## serial schedule
+
+  wall = 432 cycles, scale ~ 0.19 chars/cycle
+  HMI   |H    H    H    H    H    H    H    H    H    H    H    H    H    H    H    H     |
+  LX    |L    L    L    L    L    L    L    L    L    L    L    L    L    L    L    L     |
+  PT    |PP   PP   PP   PP   PP   PP   PP   PP   PP   PP   PP   PP   PP   PP   PP   PP    |
+  SFP   |   SS   SS   SS   SS   SS   SS   SS   SS   SS   SS   SS   SS   SS   SS   SS   SS |
+
+## decoupled schedule
+
+  wall = 207 cycles, scale ~ 0.39 chars/cycle
+  HMI   |HHHHHHHHHHHHHHHHHHHHHHHH                                                         |
+  LX    | L LL LL LL LL L LL LL LL                                                        |
+  PT    | PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP                  |
+  SFP   |       SSS SSSS SSS  SSS SSS  SSS  SSS SSS  SSS  SSS SSS  SSS SSSS SSS  SSS SSSS |
+
+## joint schedule
+
+  wall = 191 cycles, scale ~ 0.42 chars/cycle
+  HMI   |HHHHHHHHHHHHHHHHHHHHHHHHHH                                                       |
+  LX    | L L LL L LL L LL L LL L LL                                                      |
+  PT    |  PPPPPPPPPPPPPPPP  PPPPPPPPPPPPPPPPPPPPP  PPPPPPPPPPPPPPPPPPPPPPPPP PPPPP       |
+  SFP   |       SSSS SSSS  SSSSSS  SSS  SSS  SSS  SSSSSSS SSSS SSSS SSSS   SSSSSSSSSSSSSS |
+
+## Phase 0 readout
+
+  ILP solve time at iters=16: 0.168 s
+  joint speedup vs decoupled (today's compiler approx): 1.08×
+  → SCALING OK, GAP IS SMALL: project may close — verify with realistic durations.
