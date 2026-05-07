@@ -1,0 +1,33 @@
+# Probe 1 — chain-LX scaling under +kf
+
+WARMUP=3, ITERS=12, dtype=fp16, LX=2 MB/core
+
+Hypothesis (M1): wall flat once chain_LX > A_per (chain-cooperative residency absorbs overflow).
+
+## DSv3 o_proj M=2048  shape=(2048, 7168, 16384)
+
+| split | A_per (MB) | chain_LX (MB) | overage | kf wall (ms) | id wall (ms) | id − kf |
+|---|---:|---:|---:|---:|---:|---:|
+| (32, 1, 1) | 2.00 | 2 | 1.00× | 14.113 | — | — |
+| (1, 16, 2) | 32.00 | 4 | 8.00× | 31.121 | 116.916 | +85.795 |
+| (1, 8, 4) | 16.00 | 8 | 2.00× | 126.779 | 129.004 | +2.225 |
+| (1, 4, 8) | 8.00 | 16 | 0.50× | 128.453 | 127.410 | -1.043 |
+| (1, 2, 16) | 4.00 | 32 | 0.12× | 132.477 | 131.989 | -0.488 |
+| (1, 1, 32) | 2.00 | 64 | 0.03× | 29.926 | 30.021 | +0.094 |
+
+## Reading guide
+
+M1 (chain-coop LX) signature:
+  - wall(kf) approximately FLAT across k once overage < 1.0
+  - wall(kf) climbs ABOVE that line where overage > 1.0
+  - the inflection point predicts k-threshold for chain-LX
+
+M2 (kernel fast path) signature:
+  - wall(kf) FLAT across all k regardless of overage
+  - id − kf gap is the *only* mode-dependent term
+
+M3 (PSUM forward-pipeline) signature:
+  - wall(kf) INCREASES at high k due to growing PSUM payload
+  - id − kf gap GROWS with k (more hops × larger payload)
+
+Mixed: probe 2 (permutation discriminator) needed.
