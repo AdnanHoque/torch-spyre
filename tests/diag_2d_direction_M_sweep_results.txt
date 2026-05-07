@@ -1,0 +1,25 @@
+# 2D direction + production-vs-baseline M sweep
+
+## Forced (1,16,2): direction probe across M (cold cache per variant)
+
+| M | default | k_fast (1-hop row) | col_dir (1-hop col) | hop-count win | direction win |
+|---:|---:|---:|---:|---:|---:|
+| 128 | 3.078 | 3.073 | 3.087 | 1.00x | 1.00x |
+| 256 | 3.262 | 3.080 | 3.094 | 1.06x | 1.00x |
+| 512 | 3.508 | 3.296 | 3.283 | 1.06x | 1.00x |
+| 1024 | 4.050 | 3.701 | 3.610 | 1.09x | 1.03x |
+| 2048 | 5.177 | 4.284 | 4.322 | 1.21x | 0.99x |
+
+Key: direction win is consistently within ~3% (1.03x at best).
+Hop-count win grows with M from 1.00x at M=128 to 1.21x at M=2048.
+
+## Production comparison: pure-M (planner's pick) vs forced (1,16,2)+k_fast
+
+| M | pure-M | forced (1,16,2)+k_fast | heuristic win |
+|---:|---:|---:|---:|
+| 128 | 3.356 | 3.073 | 1.09x |
+| 256 | 3.331 | 3.073 | 1.08x |
+| 512 | 3.356 | 3.361 | 1.00x |
+
+Reproduces original validation set's claim (M=128: 1.09x; M=512: 1.00x).
+PR 1933's heuristic delivers its claimed win.
