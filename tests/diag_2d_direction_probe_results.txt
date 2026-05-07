@@ -1,0 +1,30 @@
+# 2D-direction probe — does SFP ring care about row vs column?
+
+# warmup=3 iters=8, fp16, SENCORES=32, split=(1,16,2)
+
+## Permutation sanity check
+
+  default: logical 0 at physical (0,0), logical 16 at physical (2,0) — |Δrow|=2, |Δcol|=0
+  k_fast: logical 0 at physical (0,0), logical 16 at physical (0,1) — |Δrow|=0, |Δcol|=1
+  col_dir: logical 0 at physical (0,0), logical 16 at physical (1,0) — |Δrow|=1, |Δcol|=0
+
+## Wall measurements
+
+| shape | default ms | k_fast ms | col_dir ms | col vs k_fast | k_fast vs default |
+|---|---:|---:|---:|---:|---:|
+| L3-70B kv_proj M=128 | 3.078 | 3.089 | 3.078 | -0.4% | +0.4% |
+| L3-70B kv_proj M=512 | 4.902 | 4.901 | 4.926 | +0.5% | -0.0% |
+| L3-70B kv_proj M=2048 | 10.912 | 10.918 | 10.928 | +0.1% | +0.1% |
+| Mixtral kv_proj M=128 | 3.023 | 3.039 | 3.036 | -0.1% | +0.5% |
+
+## Aggregate
+
+  k_fast vs default (median): +0.2%
+  col_dir vs default (median): +0.3%
+  col_dir vs k_fast (median): -0.0%
+
+## Verdict
+
+  HOP COUNT IS ALL THAT MATTERS: col_dir and k_fast within 3% of
+  each other. SFP ring is direction-symmetric on the 8×4 layout.
+  k_fast captures the win; no new direction-aware lever needed.
