@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Small-M decode-regime spread analysis — Llama + DeepSeek linear layers.
+"""Small-M decode-regime spread analysis — Llama + DeepSeek + Granite linear layers.
 
-Sweeps every linear layer (q/kv/o/gate/up/down + DSv3 MLA variants)
-in Llama 3.1/3.2 and DeepSeek V3 at decode batch sizes
-(M ∈ {1, 32, 128}). Deduplicates by (M, N, K). For each unique shape,
+Sweeps every linear layer (q/kv/o/gate/up/down + DSv3 MLA variants
++ Granite 3.x) in Llama 3.1/3.2, DeepSeek V3, and Granite 3.x at
+decode batch sizes (M ∈ {1, 32, 128}). Deduplicates by (M, N, K).
+For each unique shape,
 runs the same 4-category focused probe as
 diag_kfast_essential_driver.py:
 
@@ -94,6 +95,11 @@ LLAMA_MODELS = [
     StdConfig("Llama 3.2 3B",   3072, 8192,  24, 8, 128),
 ]
 
+GRANITE_MODELS = [
+    StdConfig("Granite 3 2B", 2048, 8192,  32, 8, 64),
+    StdConfig("Granite 3 8B", 4096, 12800, 32, 8, 128),
+]
+
 DSV3 = DSV3Config()
 
 
@@ -130,7 +136,7 @@ def build_unique_shapes() -> list[tuple]:
     """Return a list of (label, M, N, K) for unique shapes."""
     seen: dict[tuple[int, int, int], tuple] = {}
     for M in M_VALUES:
-        for cfg in LLAMA_MODELS:
+        for cfg in LLAMA_MODELS + GRANITE_MODELS:
             for entry in llama_ops(cfg, M):
                 _, op, m, n, k = entry
                 key = (m, n, k)
@@ -205,15 +211,29 @@ def _best_in_category(M, N, K, splits, kfast):
 
 
 def main() -> int:
+    # Optional filter: --m=1 / --m=32 / --m=128 to shard by M.
+    m_filter = None
+    for arg in sys.argv[1:]:
+        if arg.startswith("--m="):
+            m_filter = int(arg.split("=", 1)[1])
+
     shapes = build_unique_shapes()
+    if m_filter is not None:
+        shapes = [s for s in shapes if s[1] == m_filter]
+
     print(f"# Small-M decode-regime spread analysis\n")
-    print(f"Unique shapes: {len(shapes)}  (Llama 3.1/3.2 + DeepSeek V3, M ∈ {M_VALUES})\n")
+    suite_desc = f"Llama 3.1/3.2 + DeepSeek V3 + Granite 3.x, M ∈ {M_VALUES}"
+    if m_filter is not None:
+        suite_desc += f" (filtered to M={m_filter})"
+    print(f"Unique shapes: {len(shapes)}  ({suite_desc})\n")
     print(f"Subprocess timeout {TIMEOUT_S}s.\n")
 
     print("| label | (M, N, K) | pure-M | best k=1 | best k>1+id | best k>1+kf | winner | speedup |")
     print("|---|---|---:|---:|---:|---:|---|---:|")
 
     summary = []
+    consec_err = 0
+    BAIL_AFTER_CONSEC_ERR = 8
     for (label, M, N, K) in shapes:
         pm = _measure(M, N, K, (32, 1, 1), False)
         k1 = _best_in_category(M, N, K, K1_CANDIDATES, False)
@@ -228,7 +248,13 @@ def main() -> int:
 
         if not cands:
             print(f"| {label} | ({M},{N},{K}) | — | — | — | — | ERR | — |")
+            consec_err += 1
+            if consec_err >= BAIL_AFTER_CONSEC_ERR:
+                print(f"\n# BAILING: {consec_err} consecutive shape failures — "
+                      f"device runtime is likely stuck. Re-run later.")
+                break
             continue
+        consec_err = 0
 
         winner_cat, winner_ms, winner_split = min(cands, key=lambda c: c[1])
         baseline = pm if pm is not None else max(c[1] for c in cands)
