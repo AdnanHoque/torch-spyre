@@ -1,0 +1,12 @@
+# Pure-N comparison probe — wide-N shapes from 3-way suite
+
+WARMUP=3, ITERS=12, dtype=fp16
+
+| shape | (M, N, K) | pure-M ms | pure-N ms | K-split+kf ms | pure-N vs pure-M | pure-N vs K-split+kf | best |
+|---|---|---:|---:|---:|---:|---:|---|
+| L3-70B q_proj M=32 | (32,8192,8192) | 3.43 | 0.97 | 1.04 | 3.54× | 1.07× | pure-N |
+| DSv3 gate_proj M=32 | (32,18432,7168) | 6.62 | 3.55 | 3.62 | 1.87× | 1.02× | pure-N |
+| L3-70B q_proj M=128 | (128,8192,8192) | 3.62 | 1.13 | 1.27 | 3.20× | 1.12× | pure-N |
+| L3-70B q_proj M=512 | (512,8192,8192) | 3.51 | 4.39 | — | 0.80× | — | pure-M |
+| DSv3 down_proj M=128 | (128,7168,18432) | — | invalid | — | — | — | — |
+| DSv3 down_proj M=512 | (512,7168,18432) | — | invalid | — | — | — | — |
