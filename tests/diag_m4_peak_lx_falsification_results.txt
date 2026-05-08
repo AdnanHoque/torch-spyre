@@ -1,0 +1,78 @@
+# M4 falsification probe — peak LX occupancy on transformer blocks
+
+LX hard cap: 2.00 MB/core
+LX usable:   1.60 MB/core (after DXP_LX_FRAC_AVAIL=0.2 backend reserve)
+
+Policies:
+  Model A (current): softmax outputs LX-eligible (approximates max/sum/clone behaviour)
+  Model B (M4 hypothetical): matmul outputs ALSO LX-eligible
+
+Per-core sizes assume planner pure-M (32, 1, 1).
+
+## Per-(model, M, policy) peak LX usage
+
+| model | M | policy | peak LX/core | % of 1.6 MB cap | peak op | total resident bytes/core |
+|---|---:|---|---:|---:|---|---:|
+| Llama 3.1 8B | 32 | A | 8 KB | 0% | attn_qkt_softmax_v | 8 KB |
+| Llama 3.1 8B | 32 | B | 56 KB | 3% | up_proj | 90 KB |
+| Llama 3.1 8B | 128 | A | 32 KB | 2% | attn_qkt_softmax_v | 32 KB |
+| Llama 3.1 8B | 128 | B | 224 KB | 14% | up_proj | 360 KB |
+| Llama 3.1 8B | 512 | A | 128 KB | 8% | attn_qkt_softmax_v | 128 KB |
+| Llama 3.1 8B | 512 | B | 896 KB | 55% | up_proj | 1.41 MB |
+| Llama 3.1 8B | 2048 | A | 512 KB | 31% | attn_qkt_softmax_v | 512 KB |
+| Llama 3.1 8B | 2048 | B | 3.50 MB | 219% | up_proj | 5.62 MB |
+| Llama 3.1 70B | 32 | A | 16 KB | 1% | attn_qkt_softmax_v | 16 KB |
+| Llama 3.1 70B | 32 | B | 112 KB | 7% | up_proj | 178 KB |
+| Llama 3.1 70B | 128 | A | 64 KB | 4% | attn_qkt_softmax_v | 64 KB |
+| Llama 3.1 70B | 128 | B | 448 KB | 27% | up_proj | 712 KB |
+| Llama 3.1 70B | 512 | A | 256 KB | 16% | attn_qkt_softmax_v | 256 KB |
+| Llama 3.1 70B | 512 | B | 1.75 MB | 109% | up_proj | 2.78 MB |
+| Llama 3.1 70B | 2048 | A | 1.00 MB | 63% | attn_qkt_softmax_v | 1.00 MB |
+| Llama 3.1 70B | 2048 | B | 7.00 MB | 438% | up_proj | 11.12 MB |
+| Llama 3.1 405B | 32 | A | 32 KB | 2% | attn_qkt_softmax_v | 32 KB |
+| Llama 3.1 405B | 32 | B | 208 KB | 13% | up_proj | 338 KB |
+| Llama 3.1 405B | 128 | A | 128 KB | 8% | attn_qkt_softmax_v | 128 KB |
+| Llama 3.1 405B | 128 | B | 832 KB | 51% | up_proj | 1.32 MB |
+| Llama 3.1 405B | 512 | A | 512 KB | 31% | attn_qkt_softmax_v | 512 KB |
+| Llama 3.1 405B | 512 | B | 3.25 MB | 203% | up_proj | 5.28 MB |
+| Llama 3.1 405B | 2048 | A | 2.00 MB | 125% | attn_qkt_softmax_v | 2.00 MB |
+| Llama 3.1 405B | 2048 | B | 13.00 MB | 813% | up_proj | 21.12 MB |
+| Mixtral 8x7B | 32 | A | 8 KB | 0% | attn_qkt_softmax_v | 8 KB |
+| Mixtral 8x7B | 32 | B | 56 KB | 3% | up_proj | 90 KB |
+| Mixtral 8x7B | 128 | A | 32 KB | 2% | attn_qkt_softmax_v | 32 KB |
+| Mixtral 8x7B | 128 | B | 224 KB | 14% | up_proj | 360 KB |
+| Mixtral 8x7B | 512 | A | 128 KB | 8% | attn_qkt_softmax_v | 128 KB |
+| Mixtral 8x7B | 512 | B | 896 KB | 55% | up_proj | 1.41 MB |
+| Mixtral 8x7B | 2048 | A | 512 KB | 31% | attn_qkt_softmax_v | 512 KB |
+| Mixtral 8x7B | 2048 | B | 3.50 MB | 219% | up_proj | 5.62 MB |
+| DeepSeek V3 | 32 | A | 14 KB | 1% | attn_qkt_softmax_v | 14 KB |
+| DeepSeek V3 | 32 | B | 72 KB | 4% | up_proj | 131 KB |
+| DeepSeek V3 | 128 | A | 56 KB | 3% | attn_qkt_softmax_v | 56 KB |
+| DeepSeek V3 | 128 | B | 288 KB | 18% | up_proj | 524 KB |
+| DeepSeek V3 | 512 | A | 224 KB | 14% | attn_qkt_softmax_v | 224 KB |
+| DeepSeek V3 | 512 | B | 1.12 MB | 70% | up_proj | 2.05 MB |
+| DeepSeek V3 | 2048 | A | 896 KB | 55% | attn_qkt_softmax_v | 896 KB |
+| DeepSeek V3 | 2048 | B | 4.50 MB | 281% | up_proj | 8.19 MB |
+
+## Verdict
+
+Model A (current behaviour): max peak LX/core = 2.00 MB on Llama 3.1 405B M=2048
+Model B (expanded matmul):   max peak LX/core = 13.00 MB on Llama 3.1 405B M=2048
+
+  Under expanded matmul-residency (B): peak 13.00 MB approaches/exceeds the cap.
+  M4 has a real target IF the OP_OUTPUT_GOOD_FOR_LX_REUSE set is expanded. The current narrow set provides no target.
+
+  VERDICT: M4 is conditionally viable. Sequence: first expand the eligible-op set (separate project), then reordering.
+
+## Caveats
+
+- Per-core peak under pure-M (32, 1, 1) divides total tensor by 32.
+  Other splits (e.g., (1, 16, 2)) put more bytes on each core.
+- Liveness model is approximate: tensors are assumed consumed by
+  the very next op, missing residual-connection long-range liveness.
+  This UNDER-estimates peak LX. Real peak could be ~2× this.
+- Static analysis doesn't account for the LX allocator's
+  fragmentation behaviour, which can effectively reduce usable bytes.
+- Softmax intermediate handling is approximated as one resident
+  output; the actual max/sum tensors are MUCH smaller. So Model A is
+  an OVER-estimate of current peak LX.
