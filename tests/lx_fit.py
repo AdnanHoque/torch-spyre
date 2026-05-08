@@ -15,28 +15,30 @@
 """LX scratchpad fit predicate for the AIU 1.0 work-division planner.
 
 Each AIU corelet has a 2 MB LX scratchpad — no hardware cache, so any
-operand byte the kernel touches must be explicitly resident before
-the PT array reads it.
+byte the kernel touches must be explicitly resident before use.
 
-Under the AIU matmul kernel template, A is the *stationary* operand
-(held resident across the N-tile loop) and B *streams* through the
-data ring chunk-by-chunk. The LX residency constraint is therefore
-governed by A_per_core, not by total A+B bytes:
+The binding LX residency constraint identified by Probe 3 in
+`tests/diag_emission_aware_lx_p3_midk_n_sweep.py` is the **PSUM
+accumulator**, not operand A. The accumulator must remain LX-resident
+across the K-iteration loop because partial products accumulate into
+it; A and B can be tile-streamed, but C cannot:
 
-    A_per_core = (M / m) * (K / k) * dtype_bytes
+    C_psum_per_core = (M / m) * (N / n) * dtype_psum_bytes  (default fp32)
 
-When A_per_core exceeds LX, the kernel must re-fetch A across the
-N-tile loop, multiplying effective HMI traffic. Project B Phase 0
-measured this as the dominant residual in the cost model:
-DSv3 o_proj M=2048 under (1, 8, 4)+kf is 124 ms measured vs. 21 ms
-predicted — a ~6× factor consistent with an estimated 14× A re-fetch
-multiplier.
+Probe 3 found a clean inflection at exactly C_psum = LX. Above the
+threshold, walls grow ~17 ms per LX overage factor on DSv3 o_proj at
+(1, 8, 4)+kf — the catastrophe regime is unmistakable.
 
-The breakdown helper also reports B_per_core for diagnostic use, but
-the headline `lx_fits()` predicate gates on A only. A conservative
-A+B form is exposed as `lx_fits_conservative()` for callers that want
-to also rule out splits where B-side residency could matter (e.g.,
-templates where B is stationary instead).
+Earlier versions of this file gated on operand-A residency
+(`A_per = M_per × K_per × dtype_bytes`) following Project B Phase 0's
+hypothesis. The hardware probe data refutes that mechanism — A
+residency is not the binding constraint. See
+`tests/diag_emission_aware_lx_phase0_findings_v2.md` for the full
+narrative.
+
+Operand A and B per-core bytes are still reported on the breakdown
+for diagnostic use, but the headline `lx_fits()` predicate now gates
+on PSUM accumulator size.
 """
 
 from __future__ import annotations
@@ -54,54 +56,52 @@ _DTYPE_BYTES = {"fp16": 2, "bf16": 2, "fp32": 4, "fp8": 1, "int8": 1}
 class LXBreakdown:
     """Per-core LX residency breakdown for one (shape, split, dtype).
 
-    `a_bytes` is the stationary-operand footprint that drives the
-    headline `fits` field. `b_bytes` is reported for diagnostic use
-    (templates where B is stationary, or callers that want a
-    conservative A+B check).
+    `c_psum_bytes` is the binding constraint: PSUM accumulator must
+    stay resident across the K-loop. `a_bytes` and `b_bytes` are
+    reported for context but don't gate.
     """
 
-    a_bytes: int                # M_per × K_per × dtype_bytes (stationary)
-    b_bytes: int                # K_per × N_per × dtype_bytes (streaming)
+    a_bytes: int                # M_per × K_per × dtype_bytes (operand A)
+    b_bytes: int                # K_per × N_per × dtype_bytes (operand B)
+    c_psum_bytes: int           # M_per × N_per × dtype_psum_bytes (accumulator)
     lx_bytes: int               # capacity (default 2 MB)
-    fits: bool                  # a_bytes <= lx_bytes
-    fits_conservative: bool     # a_bytes + b_bytes <= lx_bytes
-    overage_bytes: int          # max(0, a_bytes - lx_bytes)
-    overage_factor: float       # a_bytes / lx_bytes (≥1 means overflow)
+    fits: bool                  # c_psum_bytes <= lx_bytes
+    overage_bytes: int          # max(0, c_psum_bytes - lx_bytes)
+    overage_factor: float       # c_psum_bytes / lx_bytes (≥1 means overflow)
 
 
 def lx_fits(
     shape: tuple[int, int, int],
     split: tuple[int, int, int],
     dtype: str = "fp16",
+    psum_dtype: str = "fp32",
     lx_bytes: int = LX_BYTES_PER_CORE,
 ) -> bool:
-    """Return True iff stationary-operand (A) footprint fits in LX.
+    """Return True iff per-core PSUM accumulator fits in LX.
 
-    This is the predicate that matches measured AIU behaviour: under
-    the matmul kernel template, A is stationary and B streams, so LX
-    overflow happens when A_per_core > LX.
+    Probe 3 (May 2026) measured a clean inflection at
+    M_per × N_per × dtype_psum = LX_BYTES_PER_CORE; above this point
+    wall time grows ~17 ms per overage factor, with no detectable
+    overhead below. This is the predicate the work-division planner
+    needs to stay out of the catastrophic regime.
+
+    The `dtype` argument is retained on the signature for backwards
+    compatibility with callers that pass it; only `psum_dtype` and
+    the (m, n) factors of `split` actually affect the predicate's
+    answer (the K factor is irrelevant since C_psum doesn't depend
+    on K).
     """
-    return lx_breakdown(shape, split, dtype, lx_bytes).fits
-
-
-def lx_fits_conservative(
-    shape: tuple[int, int, int],
-    split: tuple[int, int, int],
-    dtype: str = "fp16",
-    lx_bytes: int = LX_BYTES_PER_CORE,
-) -> bool:
-    """Return True iff A_per_core + B_per_core fits in LX.
-
-    Use this if you want to rule out splits where B-side residency
-    could matter (alternative kernel templates, or as a safety margin).
-    """
-    return lx_breakdown(shape, split, dtype, lx_bytes).fits_conservative
+    return lx_breakdown(
+        shape, split, dtype=dtype, psum_dtype=psum_dtype,
+        lx_bytes=lx_bytes,
+    ).fits
 
 
 def lx_breakdown(
     shape: tuple[int, int, int],
     split: tuple[int, int, int],
     dtype: str = "fp16",
+    psum_dtype: str = "fp32",
     lx_bytes: int = LX_BYTES_PER_CORE,
 ) -> LXBreakdown:
     """Compute the per-core LX residency breakdown."""
@@ -119,15 +119,18 @@ def lx_breakdown(
         K_per = K // k
 
     db = _DTYPE_BYTES[dtype]
+    db_psum = _DTYPE_BYTES[psum_dtype]
+
     a = M_per * K_per * db
     b = K_per * N_per * db
-    fits = a <= lx_bytes
-    fits_cons = (a + b) <= lx_bytes
-    over = max(0, a - lx_bytes)
+    c = M_per * N_per * db_psum
+
+    fits = c <= lx_bytes
+    over = max(0, c - lx_bytes)
     return LXBreakdown(
-        a_bytes=a, b_bytes=b,
+        a_bytes=a, b_bytes=b, c_psum_bytes=c,
         lx_bytes=lx_bytes,
-        fits=fits, fits_conservative=fits_cons,
+        fits=fits,
         overage_bytes=over,
-        overage_factor=a / lx_bytes,
+        overage_factor=c / lx_bytes,
     )
