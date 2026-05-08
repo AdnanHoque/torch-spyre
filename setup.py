@@ -93,7 +93,7 @@ cmake_library_path = os.environ.get("CMAKE_LIBRARY_PATH", "")
 extra_library_dirs = cmake_library_path.split(":") if cmake_library_path else []
 LIBRARY_DIRS += [Path(p) for p in extra_library_dirs if p]
 
-COMPILE_AIUPTI = True
+COMPILE_AIUPTI = False
 
 if "RUNTIME_INSTALL_DIR" in os.environ:
     # take lower precedence than CMAKE_LIBRARY_PATH and CMAKE_INCLUDE_PATH
@@ -124,12 +124,17 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
     if os.environ.get("LIBAIUPTI_INSTALL_DIR"):
         LIBAIUPTI_DIR = Path(os.environ["LIBAIUPTI_INSTALL_DIR"])
         LIBRARY_DIRS += [LIBAIUPTI_DIR / "lib"]
+        _aiupti_lib = Path(os.environ["LIBAIUPTI_INSTALL_DIR"]) / "lib" / "libaiupti.so"
+        COMPILE_AIUPTI = _aiupti_lib.exists()
 
     LIBRARY_DIRS += [RUNTIME_DIR / "lib"]
 
 INCLUDE_DIRS += [os.environ["SEN_COMMON_HEADERS"]]
 
-LIBRARIES = ["sendnn", "sendnn_interface", "aiupti", "flex"]
+if COMPILE_AIUPTI:
+    LIBRARIES = ["sendnn", "sendnn_interface", "aiupti", "flex"]
+else:
+    LIBRARIES = ["sendnn", "sendnn_interface", "flex"]
 
 # FIXME: added no-deprecated as this fails in sentensor_shape.hpp
 # - we need to fix there
