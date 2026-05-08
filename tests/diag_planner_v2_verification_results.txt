@@ -1,0 +1,27 @@
+# Planner v2 prototype — hardware verification
+
+WARMUP=3, ITERS=12, dtype=fp16
+
+Validation rule: v2 pick validates if measured v2 < measured pure-M
+                 AND |cost-model error| ≤ 15%.
+
+| row | shape | v2 split | pure-M ms | v2 ms | pred v2 ms | err | speedup | result |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| L3-70B kv_proj M=2048   sanity | (2048,1024,8192) | (1, 16, 2) | 3.65 | 3.95 | 4.00 | +1.3% | 0.92× | FAIL (slower) |
+| DSv3 q_a_proj M=128     sanity | (128,1536,7168) | (1, 8, 4) | 3.50 | 3.22 | 3.23 | +0.3% | 1.09× | VALIDATE |
+| L3-70B q_proj M=32      big-spd | (32,8192,8192) | (1, 4, 8) | 6.27 | 4.20 | 3.66 | -12.8% | 1.49× | VALIDATE |
+| DSv3 gate_proj M=32     big-spd | (32,18432,7168) | (1, 4, 8) | 9.51 | 5.41 | 4.37 | -19.3% | 1.76× | PARTIAL (faster but pred off) |
+| L3-70B q_proj M=128     mid-spd | (128,8192,8192) | (1, 8, 4) | 6.47 | 7.58 | 4.30 | -43.3% | 0.85× | FAIL (slower) |
+| L3-70B q_proj M=512     mid-spd | (512,8192,8192) | (1, 16, 2) | 6.46 | 11.04 | 5.52 | -50.0% | 0.59× | FAIL (slower) |
+| DSv3 down_proj M=128    wide-K | (128,7168,18432) | (1, 4, 8) | 9.70 | 11.16 | 3.86 | -65.4% | 0.87× | FAIL (slower) |
+| DSv3 down_proj M=512    wide-K | (512,7168,18432) | (1, 8, 4) | 9.24 | 35.49 | 4.72 | -86.7% | 0.26× | FAIL (slower) |
+
+## Summary
+
+  rows considered: 8
+  VALIDATE  (v2 faster, pred ≤ ±15%): 2
+  PARTIAL   (v2 faster, pred off):    1
+  FAIL      (v2 not faster):          5
+
+Preliminary verdict: v2 picks regress on hardware. Investigate
+residuals before any planner change.
