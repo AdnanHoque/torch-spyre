@@ -1,0 +1,57 @@
+# Granite 3-way measurement campaign
+
+WARMUP=3, ITERS=12, dtype=fp16, SENCORES=32
+
+All wall times normalized to A (A = 1.00). Speedup ratios > 1× = improvement.
+
+Shape suite: 40 shapes across 2 models × 4 M values.
+
+| shape | (M, N, K) | h-split | A→B | B→C | A→C | combined |
+|---|---|---|---:|---:|---:|---|
+| Granite 3 2B kv_proj M=32 | (32,1024,2048) | (1,16,2) | 2.19× | 1.00× | 2.19× | win 2.19× |
+| Granite 3 2B q_proj M=32 | (32,2048,2048) | (1,16,2) | 2.32× | 1.09× | 2.54× | win 2.54× |
+| Granite 3 2B o_proj M=32 | (32,2048,2048) | (1,16,2) | 2.43× | 1.00× | 2.43× | win 2.43× |
+| Granite 3 2B gate_proj M=32 | (32,8192,2048) | (1,16,2) | 2.94× | 0.99× | 2.93× | win 2.93× |
+| Granite 3 2B down_proj M=32 | (32,2048,8192) | (1,16,2) | 2.69× | 1.03× | 2.77× | win 2.77× |
+| Granite 3 2B kv_proj M=128 | (128,1024,2048) | (1,16,2) | 1.83× | 1.02× | 1.87× | win 1.87× |
+| Granite 3 2B q_proj M=128 | (128,2048,2048) | (1,16,2) | 2.15× | 1.05× | 2.25× | win 2.25× |
+| Granite 3 2B o_proj M=128 | (128,2048,2048) | (1,16,2) | 2.11× | 1.06× | 2.24× | win 2.24× |
+| Granite 3 2B gate_proj M=128 | (128,8192,2048) | (1,16,2) | 1.51× | 1.76× | 2.65× | win 2.65× |
+| Granite 3 2B down_proj M=128 | (128,2048,8192) | (1,16,2) | 2.73× | 0.97× | 2.65× | win 2.65× |
+| Granite 3 2B kv_proj M=512 | (512,1024,2048) | (1,16,2) | 0.83× | 1.38× | 1.15× | win 1.15× |
+| Granite 3 2B q_proj M=512 | (512,2048,2048) | — | — | — | — | (skipped, correct) |
+| Granite 3 2B o_proj M=512 | (512,2048,2048) | — | — | — | — | (skipped, correct) |
+| Granite 3 2B gate_proj M=512 | (512,8192,2048) | — | — | — | — | (skipped, correct) |
+| Granite 3 2B down_proj M=512 | (512,2048,8192) | — | — | — | — | (skipped, correct) |
+| Granite 3 2B kv_proj M=2048 | (2048,1024,2048) | — | — | — | — | (skipped, correct) |
+| Granite 3 2B q_proj M=2048 | (2048,2048,2048) | — | — | — | — | (skipped, correct) |
+| Granite 3 2B o_proj M=2048 | (2048,2048,2048) | — | — | — | — | (skipped, correct) |
+| Granite 3 2B gate_proj M=2048 | (2048,8192,2048) | — | — | — | — | (skipped, correct) |
+| Granite 3 2B down_proj M=2048 | (2048,2048,8192) | — | — | — | — | (skipped, correct) |
+| Granite 3 8B kv_proj M=32 | (32,2048,4096) | (1,16,2) | 2.45× | 1.04× | 2.55× | win 2.55× |
+| Granite 3 8B q_proj M=32 | (32,4096,4096) | (1,16,2) | 3.11× | 1.00× | 3.11× | win 3.11× |
+| Granite 3 8B o_proj M=32 | (32,4096,4096) | (1,16,2) | 3.15× | 1.00× | 3.15× | win 3.15× |
+| Granite 3 8B gate_proj M=32 | (32,12800,4096) | (1,8,4) | 3.36× | 1.00× | 3.37× | win 3.37× |
+| Granite 3 8B down_proj M=32 | (32,4096,12800) | (1,16,2) | 2.94× | 1.04× | 3.05× | win 3.05× |
+| Granite 3 8B kv_proj M=128 | (128,2048,4096) | (1,16,2) | 2.36× | 1.04× | 2.46× | win 2.46× |
+| Granite 3 8B q_proj M=128 | (128,4096,4096) | (1,16,2) | 1.48× | 1.83× | 2.70× | win 2.70× |
+| Granite 3 8B o_proj M=128 | (128,4096,4096) | (1,16,2) | 1.47× | 1.83× | 2.69× | win 2.69× |
+| Granite 3 8B gate_proj M=128 | (128,12800,4096) | (1,8,4) | 2.64× | 1.07× | 2.84× | win 2.84× |
+| Granite 3 8B down_proj M=128 | (128,4096,12800) | (1,16,2) | 1.48× | 1.95× | 2.88× | win 2.88× |
+| Granite 3 8B kv_proj M=512 | (512,2048,4096) | — | — | — | — | (skipped, correct) |
+| Granite 3 8B q_proj M=512 | (512,4096,4096) | — | — | — | — | (skipped, correct) |
+| Granite 3 8B o_proj M=512 | (512,4096,4096) | — | — | — | — | (skipped, correct) |
+| Granite 3 8B gate_proj M=512 | (512,12800,4096) | — | — | — | — | (skipped, correct) |
+| Granite 3 8B down_proj M=512 | (512,4096,12800) | — | — | — | — | (skipped, correct) |
+| Granite 3 8B kv_proj M=2048 | (2048,2048,4096) | — | — | — | — | (skipped, correct) |
+| Granite 3 8B q_proj M=2048 | (2048,4096,4096) | — | — | — | — | (skipped, correct) |
+| Granite 3 8B o_proj M=2048 | (2048,4096,4096) | — | — | — | — | (skipped, correct) |
+| Granite 3 8B gate_proj M=2048 | (2048,12800,4096) | — | — | — | — | (skipped, correct) |
+| Granite 3 8B down_proj M=2048 | (2048,4096,12800) | — | — | — | — | (skipped, correct) |
+
+## Aggregate
+
+  shapes in suite: 40
+  PR 1933 heuristic fires on: 21/40
+  combined PR (A→C): 21 wins, 0 regressions
+  geomean A→C on shapes where PR fires: 2.82×
