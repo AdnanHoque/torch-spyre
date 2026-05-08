@@ -673,9 +673,21 @@ def _try_k_fast_split(
 
     # Empirical win-band: M and stick-count thresholds derived from cross-model
     # measurements of pure-M vs (1, n, k>1) + k_fast.
+    #
+    # M band: 32 ≤ M ≤ 512. Below 32 the per-core compute is too small;
+    # above 512, K-split walls measured 0.59-0.92× pure-M on wide-N
+    # production shapes (L3-70B q_proj M=512 N=8192, L3-70B kv_proj M=2048).
+    #
+    # n_sticks gate: at M > 128, wide-N shapes (n_sticks ≥ 32) regress
+    # under K-split because PT util is already high under pure-M and
+    # the K-split adds PSUM overhead with no compensating PT gain. At
+    # M ≤ 128, pure-M's M_per ≤ 4 leaves the PT array under-utilised,
+    # and K-split's full-M-per-core gives 1.31-1.99× wins even on
+    # wide-N (verified on L3-70B q_proj M=32/128, DSv3 down_proj M=128,
+    # DSv3 gate_proj M=32).
     if M < 32 or M > 512:
         return None
-    if n_sticks >= 32:  # pure-N (1, max_cores, 1) already valid; planner's choice
+    if M > 128 and n_sticks >= 32:
         return None
     if k_sticks < 32:  # K too narrow; PSUM cost dominates the saving
         return None
