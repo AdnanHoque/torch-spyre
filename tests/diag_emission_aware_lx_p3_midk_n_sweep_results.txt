@@ -1,0 +1,22 @@
+# Probe 3 — N-axis sweep at fixed (1, 8, 4)+kf and (32,1,1)+id
+
+WARMUP=3, ITERS=12, dtype=fp16, M=2048, K=8192
+
+Goal: pin down the N threshold where (1,8,4)+kf wall departs
+from the (32,1,1) baseline — locating the mid-k catastrophe
+regime by N rather than by k.
+
+| N | N_per @ k=4 | (32,1,1) ms | (1,8,4)+kf ms | ratio | compute-bound est ms |
+|---:|---:|---:|---:|---:|---:|
+| 512 | 64 | 3.515 | 3.471 | 0.99× | 0.54 |
+| 1024 | 128 | 3.669 | 4.337 | 1.18× | 1.07 |
+| 2048 | 256 | 4.466 | 5.390 | 1.21× | 2.15 |
+| 4096 | 512 | 6.029 | 19.638 | 3.26× | 4.29 |
+| 6144 | 768 | 7.577 | 57.301 | 7.56× | 6.44 |
+| 8192 | 1024 | 9.078 | 76.367 | 8.41× | 8.59 |
+
+## Reading guide
+
+If walls track each other: no catastrophe in this regime
+If kf wall has a knee at some N: that's the kernel-template inflection point
+If kf wall grows linearly with N while (32,1,1) sublinear: per-N_per overhead in K-split kernel template

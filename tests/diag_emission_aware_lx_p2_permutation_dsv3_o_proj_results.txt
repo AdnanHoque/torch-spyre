@@ -1,0 +1,36 @@
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=16 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=16 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=2 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=15 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+# Probe 2 — permutation discriminator at (1, 16, 2)
+
+WARMUP=3, ITERS=12, dtype=fp16, split=(1, 16, 2) (m=1, n=16, k=2)
+
+## DSv3 o_proj M=2048  shape=(2048, 7168, 16384)
+
+| permutation | avg K-collab distance | wall (ms) |
+|---|---:|---:|
+| identity | 16.0 | 115.770 |
+| reversed | 16.0 | ERR (InductorError: CalledProcessEr) |
+| stride2 | 8.0 | 61.543 |
+| antipodal | 16.0 | ERR (InductorError: CalledProcessEr) |
+| bit_reverse | 1.0 | 30.844 |
+| block_cyclic | 1.0 | 31.000 |
+| k_fast | 1.0 | 31.026 |
+| random_42 | 6.9 | ERR (InductorError: CalledProcessEr) |
+| random_7 | 8.5 | ERR (InductorError: CalledProcessEr) |
+
+## Reading guide
+
+If +id penalty is purely K-collab-distance-driven:
+  identity, reversed, stride2, antipodal walls ≈ each other (all 16 hops)
+  k_fast, block_cyclic walls fastest (1 hop)
+  random walls scale with avg distance
+
+If cohort arrangement matters too:
+  identity, reversed, stride2, antipodal differ despite same K-collab distance
+  some non-obvious permutation might be even faster than k_fast
