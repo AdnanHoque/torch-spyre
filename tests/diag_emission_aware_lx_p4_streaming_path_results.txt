@@ -1,0 +1,25 @@
+# Probe 4 — characterise the (1, 1, 32) streaming-output fast path
+
+WARMUP=3, ITERS=12, dtype=fp16, shape=DSv3 o_proj (2048, 7168, 16384)
+
+Testing the (m, 1, k) family to discriminate:
+  H1: only (1, 1, 32) is fast (single chain triggers streaming)
+  H2: every n=1 split is fast (n=1 column triggers streaming)
+
+| split | description | C_psum/core | overage(LX) | perm | wall ms |
+|---|---|---:|---:|---|---:|
+| (32, 1, 1) | n=1, no chain (pure-M baseline) | 1.75 MB | 0.88× | identity | 13.288 |
+| (16, 1, 2) | n=1, chain=2 | 3.50 MB | 1.75× | k_fast | 18.570 |
+| (8, 1, 4) | n=1, chain=4 | 7.00 MB | 3.50× | k_fast | 18.142 |
+| (4, 1, 8) | n=1, chain=8 | 14.00 MB | 7.00× | k_fast | 56.927 |
+| (2, 1, 16) | n=1, chain=16 | 28.00 MB | 14.00× | k_fast | 59.074 |
+| (1, 1, 32) | n=1, chain=32 (pure-K, single-chain — known fast) | 56.00 MB | 28.00× | k_fast | 30.381 |
+| (1, 8, 4) | n>1 control (chain=4, 8 cells — known catastrophic) | 7.00 MB | 3.50× | k_fast | 125.035 |
+
+## Reading guide
+
+  H1 (single-chain) confirmed if: only (1, 1, 32) is < 60 ms
+                                  and (m, 1, k) for m>1 are catastrophic
+  H2 (n=1 trigger)  confirmed if: all (m, 1, k) walls are < 60 ms
+                                  and only the n>1 control is catastrophic
+  Mixed: kernel template behaviour depends on more than n alone
