@@ -76,27 +76,18 @@ def _hmi_bytes(M: int, N: int, K: int, split: tuple[int, int, int],
                dtype: str) -> int:
     """First-order HMI byte count for one matmul invocation.
 
-    Accounts for ring sharing: cores that need the same tensor slice
-    can broadcast through the data ring after a single HMI fetch, so
-    HMI sees each unique chunk once. The total HMI byte count then
-    equals the sum of all unique slice bytes across all (m, n, k)
-    cells.
+    Under K-split (k > 1), each K-cluster fetches only its K-slice
+    of A and B, so the per-cluster bytes formula
 
-    For matmul (M, N, K) with split (m, n, k):
-      - A unique chunks: indexed by (m_slice, k_slice) → m·k chunks
-        of size (M/m)·(K/k). Total A bytes = M·K (always full).
-      - B unique chunks: indexed by (n_slice, k_slice) → n·k chunks
-        of size (K/k)·(N/n). Total B bytes = K·N (always full).
-      - C unique chunks: indexed by (m_slice, n_slice) → m·n chunks
-        of size (M/m)·(N/n). Total C bytes = M·N (always full).
+        (M·K + K·N) / k + M·N
 
-    So HMI bytes per call = (M·K + K·N + M·N) · dtype_bytes,
-    independent of split — assuming ring share fires for the
-    operand-sharing patterns. The split affects per-core *latency*
-    via PT utilisation, not total HMI traffic.
+    matches measurement (Project B Phase 0, Track 2 Phase 0). For
+    k = 1 (pure-M or pure-N), this reduces to the broadcast form
+    M·K + K·N + M·N.
     """
     db = _dtype_bytes(dtype)
-    return (M * K + K * N + M * N) * db
+    _, _, k = split
+    return ((M * K + K * N) // k + M * N) * db
 
 
 def _total_psum_ring_bytes(M: int, N: int, split: tuple[int, int, int],
@@ -127,6 +118,93 @@ def _chain_hops(split: tuple[int, int, int], k_fast: bool) -> int:
     if k <= 1:
         return 0
     return (k - 1) * (1 if k_fast else m * n)
+
+
+# ---- LX overflow / streaming regime model -----------------------------
+# Probe 3 (May 2026, DSv3 o_proj M=2048 (1, 8, 4)+kf): wall grows
+# linearly with per-core PSUM accumulator overage past LX. Slope
+# ~17 ms per overage factor (overage = c_psum / LX_BYTES_PER_CORE).
+# Probe 6 (May 2026, three shapes): within the n=1 streaming-output
+# fast path, three regimes by chain length. The chain=4 → chain=8
+# boundary is universal across shapes.
+#
+# Calibration constants are a single-shape fit and need broader
+# coverage for production use; the *form* (regime-routed, n=1 vs n>1
+# distinguished) is empirically robust.
+
+LX_BYTES_PER_CORE = 2 * 1024 * 1024
+PSUM_OVERFLOW_MS_PER_FACTOR = 17.0          # Probe 3 calibration
+
+# n=1 streaming-output regime additive costs (Probe 6 calibration)
+N1_PIPELINE_REGIME_COST_MS = 3.0     # chain ≤ 4
+N1_ALLREDUCE_REGIME_COST_MS = 14.0   # chain == 32
+
+
+def _psum_dtype_bytes() -> int:
+    return _dtype_bytes("fp32")
+
+
+def _c_psum_per_core(M: int, N: int, split: tuple[int, int, int]) -> int:
+    """PSUM accumulator residency per core in bytes (fp32)."""
+    m, n, _ = split
+    return (M // m) * (N // n) * _psum_dtype_bytes()
+
+
+def _n1_sync_regime_cost_ms(M: int, N: int, split: tuple[int, int, int]) -> float:
+    """Sync-regime cost for n=1 streaming path with 4 < k < 32.
+
+    Probe 6 calibration on three shapes: cost ≈ 1.5 × payload_MB + 5,
+    where payload_MB = M_per × N × dtype_psum_bytes / 1MB. This is a
+    rough fit (3 shapes × 2 chain lengths each) and likely understates
+    cost on shapes with bigger payload-per-head — needs more data.
+    """
+    m, _, _ = split
+    payload_mb = (M // m) * N * _psum_dtype_bytes() / (1024 * 1024)
+    return 1.5 * payload_mb + 5.0
+
+
+def _psum_regime_cost_ms(
+    M: int, N: int, K: int,
+    split: tuple[int, int, int],
+    k_fast: bool,
+    psum_pipe_ms: float,
+) -> float:
+    """Total PSUM-related cost (ms) under the regime-routed model.
+
+    This is the single source for what was historically just
+    `t_psum_ms`. It returns the additive PSUM cost on the wall
+    critical path: the SFP ring traversal time plus, separately, the
+    LX-overflow / streaming-regime additive penalties measured by
+    Probes 3-6.
+    """
+    m, n, k = split
+    if k <= 1:
+        return 0.0
+
+    if n == 1:
+        # n=1 streaming-output fast path (Probe 4-6).
+        # PSUM ring time is small under kf; the dominant cost is
+        # the regime-specific overhead identified in Probe 6.
+        if k <= 4:
+            return psum_pipe_ms + N1_PIPELINE_REGIME_COST_MS
+        if k == 32:
+            return psum_pipe_ms + N1_ALLREDUCE_REGIME_COST_MS
+        # 4 < k < 32 — sync regime
+        return psum_pipe_ms + _n1_sync_regime_cost_ms(M, N, split)
+
+    # n > 1: the ring-traversal pipe term, plus a PSUM-overflow penalty
+    # when the per-core accumulator exceeds LX *and* k_fast emission is
+    # in use. The 17 ms/factor calibration is from Probe 3, which ran
+    # at (1, 8, 4)+kf — the catastrophic A-re-fetch-per-N-tile mechanism
+    # there is k_fast-conditional. Under identity emission with the same
+    # overage, observed wall is K-dependent in a way the current model
+    # doesn't capture; we don't apply the penalty there to avoid
+    # over-predicting on small-K +id rows.
+    c_psum = _c_psum_per_core(M, N, split)
+    if k_fast and c_psum > LX_BYTES_PER_CORE:
+        overage_factor = c_psum / LX_BYTES_PER_CORE
+        return psum_pipe_ms + PSUM_OVERFLOW_MS_PER_FACTOR * (overage_factor - 1.0)
+    return psum_pipe_ms
 
 
 # ---- main API ---------------------------------------------------------
@@ -180,10 +258,13 @@ def predict(
     hmi_bytes = _hmi_bytes(M, N, K, split, dtype)
     t_hmi_ms = hmi_bytes / (hmi_bw_gbs * 1e9) * 1e3
 
-    # PSUM
+    # PSUM — regime-routed (see _psum_regime_cost_ms).
     chain_hops = _chain_hops(split, k_fast=k_fast)
     psum_bytes = _total_psum_ring_bytes(M, N, split, k_fast=k_fast)
-    t_psum_ms = psum_bytes / (SFP_BW_GBS * 1e9) * 1e3
+    psum_pipe_ms = psum_bytes / (SFP_BW_GBS * 1e9) * 1e3
+    t_psum_ms = _psum_regime_cost_ms(
+        M, N, K, split, k_fast=k_fast, psum_pipe_ms=psum_pipe_ms,
+    )
 
     # Launch floor stacks on top of HMI but overlaps with compute.
     # Probe diag_hmi_bw_pure_m.py: HMI-bound pure-M wall ≈ LF + bytes/BW
