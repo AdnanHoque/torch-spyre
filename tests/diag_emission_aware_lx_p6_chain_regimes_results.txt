@@ -1,0 +1,55 @@
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+# Probe 6 — chain-length regime structure within (m, 1, k)+kf
+
+WARMUP=3, ITERS=12, dtype=fp16
+
+Decomposition: 'predicted base' = max(compute, hmi+LF) using per-cluster bytes. 'regime cost' = wall − base.
+
+## DSv3 o_proj M=2048  shape=(2048, 7168, 16384)
+
+| split | desc | wall ms | compute | hmi | base (max(c, hmi+LF)) | regime cost | regime |
+|---|---|---:|---:|---:|---:|---:|---|
+| (32, 1, 1) | pure-M | 13.33 | 15.03 | 8.28 | 15.03 | -1.70 | pipeline |
+| (16, 1, 2) | chain=2 | 18.21 | 15.03 | 4.51 | 15.03 | +3.18 | pipeline |
+| (8, 1, 4) | chain=4 | 17.84 | 15.03 | 2.62 | 15.03 | +2.81 | pipeline |
+| (4, 1, 8) | chain=8 | 56.90 | 15.03 | 1.68 | 15.03 | +41.87 | sync |
+| (2, 1, 16) | chain=16 | 59.00 | 15.03 | 1.21 | 15.03 | +43.97 | sync |
+| (1, 1, 32) | chain=32 | 29.98 | 15.03 | 0.97 | 15.03 | +14.95 | allreduce/edge |
+| (1, 8, 4) | n=8 control | 124.67 | 15.03 | 2.62 | 15.03 | +109.63 | catastrophic |
+
+## DSv3 gate_proj M=2048  shape=(2048, 18432, 7168)
+
+| split | desc | wall ms | compute | hmi | base (max(c, hmi+LF)) | regime cost | regime |
+|---|---|---:|---:|---:|---:|---:|---|
+| (32, 1, 1) | pure-M | 14.31 | 16.91 | 9.23 | 16.91 | -2.60 | pipeline |
+| (16, 1, 2) | chain=2 | 20.58 | 16.91 | 5.56 | 16.91 | +3.67 | pipeline |
+| (8, 1, 4) | chain=4 | 20.43 | 16.91 | 3.72 | 16.91 | +3.52 | pipeline |
+| (4, 1, 8) | chain=8 | 67.06 | 16.91 | 2.80 | 16.91 | +50.15 | sync |
+| (2, 1, 16) | chain=16 | 72.16 | 16.91 | 2.35 | 16.91 | +55.25 | sync |
+| (1, 1, 32) | chain=32 | ERR (InductorError: CalledProc) | — | — | — | — | — |
+| (1, 8, 4) | n=8 control | 201.28 | 16.91 | 3.72 | 16.91 | +184.37 | catastrophic |
+
+## Mixtral gate_proj M=2048  shape=(2048, 14336, 4096)
+
+| split | desc | wall ms | compute | hmi | base (max(c, hmi+LF)) | regime cost | regime |
+|---|---|---:|---:|---:|---:|---:|---|
+| (32, 1, 1) | pure-M | 8.56 | 7.52 | 4.82 | 7.82 | +0.74 | pipeline |
+| (16, 1, 2) | chain=2 | 10.76 | 7.52 | 3.15 | 7.52 | +3.24 | pipeline |
+| (8, 1, 4) | chain=4 | 10.99 | 7.52 | 2.31 | 7.52 | +3.47 | pipeline |
+| (4, 1, 8) | chain=8 | 31.00 | 7.52 | 1.89 | 7.52 | +23.48 | sync |
+| (2, 1, 16) | chain=16 | 32.19 | 7.52 | 1.68 | 7.52 | +24.67 | sync |
+| (1, 1, 32) | chain=32 | 21.41 | 7.52 | 1.57 | 7.52 | +13.89 | sync |
+| (1, 8, 4) | n=8 control | 60.87 | 7.52 | 2.31 | 7.52 | +53.35 | sync |
+
+## Reading guide
+
+Compare the regime cost across chain lengths within each shape.
+If the (chain ≤ 4) → (chain 8, 16) jump is consistent across
+shapes, the regime boundary is universal.
+If different shapes have different boundaries, the trigger
+depends on something shape-specific (M_per × N? K_per? both?).
+
+If chain=32 'allreduce' regime cost is smaller than chain=8/16:
+  the kernel template uses a different reduction primitive at
+  chain length = max_cores. Worth understanding architecturally.
