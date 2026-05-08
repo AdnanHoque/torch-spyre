@@ -1,0 +1,30 @@
+# k_fast combined PR (1932 + 1933) — 3-way measurement campaign
+
+WARMUP=3, ITERS=12, dtype=fp16, SENCORES=32
+
+Configurations:
+  A — main baseline:  pure-M (32, 1, 1), identity emission
+  B — K-split + id:   heuristic split, identity emission
+  C — K-split + kf:   heuristic split, k_fast emission
+
+| shape | (M, N, K) | h-split | A ms | B ms | C ms | A→B | B→C | A→C | combined PR | %% from kf |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| L3-70B kv_proj M=32 | (32,1024,8192) | (1,16,2) | 3.30 | 3.09 | 3.10 | 1.07× | 1.00× | 1.06× | WIN 1.06× | -7% |
+| L3-70B kv_proj M=128 | (128,1024,8192) | (1,16,2) | 3.35 | 3.08 | 3.09 | 1.09× | 1.00× | 1.08× | WIN 1.08× | -3% |
+| L3-70B kv_proj M=512 | (512,1024,8192) | (1,16,2) | 3.36 | 4.91 | 3.18 | 0.68× | 1.54× | 1.06× | WIN 1.06× | 958% |
+| Mixtral kv_proj M=128 | (128,1024,4096) | (1,16,2) | 3.15 | 3.02 | 3.00 | 1.04× | 1.01× | 1.05× | neutral | 16% |
+| DSv3 kv_proj M=128 | (128,1536,7168) | (1,8,4) | 3.49 | 3.25 | 3.19 | 1.07× | 1.02× | 1.09× | WIN 1.09× | 21% |
+| DSv3 q_a_proj M=128 | (128,1536,7168) | (1,8,4) | 3.49 | 3.24 | 3.20 | 1.08× | 1.01× | 1.09× | WIN 1.09× | 14% |
+| L3-70B q_proj M=32 | (32,8192,8192) | — | 6.26 | — | — | — | — | — | n/a (heuristic skip) | — |
+| DSv3 gate_proj M=32 | (32,18432,7168) | — | 9.48 | — | — | — | — | — | n/a (heuristic skip) | — |
+| L3-70B q_proj M=128 | (128,8192,8192) | — | 6.46 | — | — | — | — | — | n/a (heuristic skip) | — |
+| L3-70B q_proj M=512 | (512,8192,8192) | — | 6.40 | — | — | — | — | — | n/a (heuristic skip) | — |
+| DSv3 down_proj M=128 | (128,7168,18432) | — | 9.71 | — | — | — | — | — | n/a (heuristic skip) | — |
+| L3-70B kv_proj M=2048 | (2048,1024,8192) | — | 3.65 | — | — | — | — | — | n/a (heuristic skip) | — |
+
+## Aggregate
+
+  shapes in suite: 12
+  PR 1933 heuristic fires on: 6/12
+  combined PR (A→C): 5 wins, 0 regressions
+  total A→C wall change on shapes where PR fires: 1.07× (saved 1.4 ms total)
