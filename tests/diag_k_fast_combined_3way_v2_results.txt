@@ -1,0 +1,30 @@
+# k_fast combined PR (1932 + 1933) — 3-way measurement campaign
+
+WARMUP=3, ITERS=12, dtype=fp16, SENCORES=32
+
+Configurations:
+  A — main baseline:  pure-M (32, 1, 1), identity emission
+  B — K-split + id:   heuristic split, identity emission
+  C — K-split + kf:   heuristic split, k_fast emission
+
+| shape | (M, N, K) | h-split | A ms | B ms | C ms | A→B | B→C | A→C | combined PR | %% from kf |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| L3-70B kv_proj M=32 | (32,1024,8192) | (1,16,2) | 3.38 | 3.11 | 3.11 | 1.09× | 1.00× | 1.09× | WIN 1.09× | -3% |
+| L3-70B kv_proj M=128 | (128,1024,8192) | (1,16,2) | 3.37 | 3.10 | 3.10 | 1.09× | 1.00× | 1.09× | WIN 1.09× | 1% |
+| L3-70B kv_proj M=512 | (512,1024,8192) | (1,16,2) | 3.38 | 4.91 | 3.20 | 0.69× | 1.54× | 1.06× | WIN 1.06× | 965% |
+| Mixtral kv_proj M=128 | (128,1024,4096) | (1,16,2) | 3.18 | 3.07 | 3.04 | 1.04× | 1.01× | 1.05× | neutral | 17% |
+| DSv3 kv_proj M=128 | (128,1536,7168) | (1,8,4) | 3.51 | 3.28 | 3.23 | 1.07× | 1.02× | 1.09× | WIN 1.09× | 20% |
+| DSv3 q_a_proj M=128 | (128,1536,7168) | (1,8,4) | 3.50 | 3.26 | 3.21 | 1.08× | 1.02× | 1.09× | WIN 1.09× | 17% |
+| L3-70B q_proj M=32 | (32,8192,8192) | (1,16,2) | 6.31 | 4.03 | 3.99 | 1.57× | 1.01× | 1.58× | WIN 1.58× | 2% |
+| DSv3 gate_proj M=32 | (32,18432,7168) | (1,16,2) | 9.50 | 6.65 | 6.63 | 1.43× | 1.00× | 1.43× | WIN 1.43× | 1% |
+| L3-70B q_proj M=128 | (128,8192,8192) | (1,16,2) | 6.50 | 6.99 | 4.93 | 0.93× | 1.42× | 1.32× | WIN 1.32× | 131% |
+| L3-70B q_proj M=512 | (512,8192,8192) | — | 6.40 | — | — | — | — | — | n/a (heuristic skip) | — |
+| DSv3 down_proj M=128 | (128,7168,18432) | (1,16,2) | 9.72 | 10.95 | 4.86 | 0.89× | 2.25× | 2.00× | WIN 2.00× | 125% |
+| L3-70B kv_proj M=2048 | (2048,1024,8192) | — | 3.67 | — | — | — | — | — | n/a (heuristic skip) | — |
+
+## Aggregate
+
+  shapes in suite: 12
+  PR 1933 heuristic fires on: 10/12
+  combined PR (A→C): 9 wins, 0 regressions
+  total A→C wall change on shapes where PR fires: 1.33× (saved 13.1 ms total)

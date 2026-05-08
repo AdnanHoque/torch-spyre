@@ -114,14 +114,20 @@ SHAPES: list[Shape] = [
 # to a code change.
 
 def heuristic_split_pr1933(M, N, K, max_cores=32):
-    """The exact PR 1933 logic. Returns None if it doesn't fire."""
+    """Mirror of the combined-branch _try_k_fast_split heuristic.
+
+    Matches torch_spyre._inductor.core_division._try_k_fast_split as of
+    the n_sticks-gate-relaxation extension: at M ≤ 128 the n_sticks ≥ 32
+    skip is dropped to capture wins on small-M wide-N shapes.
+    """
     if max_cores != 32:
         return None
     if M < 32 or M > 512:
         return None
     n_sticks = N // ELEMS_PER_STICK
     k_sticks = K // ELEMS_PER_STICK
-    if n_sticks >= 32:
+    # Extended gate: n_sticks ≥ 32 only skips when M > 128.
+    if M > 128 and n_sticks >= 32:
         return None
     if k_sticks < 32:
         return None

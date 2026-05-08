@@ -89,17 +89,21 @@ class TestKFastPlannerOverride(unittest.TestCase):
         self.assertEqual(result[n], 16)
         self.assertEqual(result[k], 2)
 
-    def test_dsv3_o_proj_M128(self):
+    def test_dsv3_o_proj_M128_wide_N(self):
         """DSv3 o_proj at M=128: N=7168 (112 sticks), K=16384 (256 sticks).
-        n_sticks=112 ≥ 32 → pure-N IS valid. Heuristic should NOT fire even
-        though we measured this combo as a big win — pure-N is the right
-        target for a different planner change. Heuristic returns None here."""
+        n_sticks=112 ≥ 32 but M=128 ≤ 128 — under-utilised PT array under
+        pure-M (M_per=4, util ≤ 0.5). Heuristic fires for the small-M
+        wide-N regime. Largest valid n is picked: 112 % 16 = 0, k = 2.
+        Verified production win at 1.95× (validation set + 3-way campaign)."""
         it_space, m, n, k = _it_space(128, 7168, 16384)
         out_td = _stub_output_td(m, n)
         result = _try_k_fast_split(
             _pure_m_split(m, n, k), it_space, out_td, None, max_cores=32
         )
-        self.assertIsNone(result)
+        self.assertIsNotNone(result)
+        self.assertEqual(result[m], 1)
+        self.assertEqual(result[n], 16)
+        self.assertEqual(result[k], 2)
 
     def test_phi3_medium_kv_proj_M128(self):
         """Phi-3 medium kv_proj: N=1280 (20 sticks), K=5120 (80 sticks).
@@ -147,15 +151,43 @@ class TestKFastPlannerOverride(unittest.TestCase):
         )
         self.assertIsNone(result)
 
-    def test_N_too_wide(self):
-        """N=4096 (64 sticks) ≥ 32 → pure-N already valid; heuristic falls
-        through to default planner."""
+    def test_N_wide_at_small_M_fires(self):
+        """N=4096 (64 sticks) ≥ 32 BUT M=128 ≤ 128 → heuristic fires anyway.
+        The small-M PT-util loss under pure-M dominates the wide-N concern."""
         it_space, m, n, k = _it_space(128, 4096, 8192)
         out_td = _stub_output_td(m, n)
         result = _try_k_fast_split(
             _pure_m_split(m, n, k), it_space, out_td, None, max_cores=32
         )
+        self.assertIsNotNone(result)
+        self.assertEqual(result[m], 1)
+        # 64 % 16 = 0 → picks n=16, k=2
+        self.assertEqual(result[n], 16)
+        self.assertEqual(result[k], 2)
+
+    def test_N_too_wide_at_M_512_skips(self):
+        """At M=512 with wide N (n_sticks=128 ≥ 32), the heuristic skips:
+        K-split measured 0.59× pure-M on L3-70B q_proj M=512 N=8192. The
+        n_sticks gate kicks back in for M > 128."""
+        it_space, m, n, k = _it_space(512, 8192, 8192)
+        out_td = _stub_output_td(m, n)
+        result = _try_k_fast_split(
+            _pure_m_split(m, n, k), it_space, out_td, None, max_cores=32
+        )
         self.assertIsNone(result)
+
+    def test_N_wide_at_M_32_fires(self):
+        """At M=32 with wide N (n_sticks=128) — verified L3-70B q_proj M=32
+        win at 1.58× under (1, 16, 2)+kf vs pure-M. Heuristic must fire."""
+        it_space, m, n, k = _it_space(32, 8192, 8192)
+        out_td = _stub_output_td(m, n)
+        result = _try_k_fast_split(
+            _pure_m_split(m, n, k), it_space, out_td, None, max_cores=32
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result[m], 1)
+        self.assertEqual(result[n], 16)
+        self.assertEqual(result[k], 2)
 
     def test_K_too_narrow(self):
         """K=1024 (16 sticks) < 32 → PSUM cost dominates, no benefit."""

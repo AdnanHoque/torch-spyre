@@ -1,0 +1,21 @@
+# Phase 3 extension candidates — heuristic-skipped shapes
+
+WARMUP=3, ITERS=12, dtype=fp16, k_fast emission ON
+
+| shape | (M,N,K) | pure-M | (1,16,2) | (1,8,4) | (1,4,8) | winner | speedup |
+|---|---|---:|---:|---:|---:|---|---:|
+| L3-70B q_proj M=32 | (32,8192,8192) | 6.24 | 3.95 | 4.20 | 4.17 | (1,16,2)+kf | 1.58× |
+| DSv3 gate_proj M=32 | (32,18432,7168) | 9.41 | 6.41 | 6.07 | 5.40 | (1,4,8)+kf | 1.74× |
+| L3-70B q_proj M=128 | (128,8192,8192) | 6.44 | 4.90 | 7.55 | 7.47 | (1,16,2)+kf | 1.31× |
+| L3-70B q_proj M=512 | (512,8192,8192) | 6.41 | 10.92 | 21.39 | 21.18 | pure-M | — |
+| DSv3 down_proj M=128 | (128,7168,18432) | 9.67 | 4.85 | 10.95 | 11.10 | (1,16,2)+kf | 1.99× |
+| L3-70B kv_proj M=2048 | (2048,1024,8192) | 3.64 | 3.95 | 4.31 | 4.22 | pure-M | — |
+
+## Decision summary
+
+  4/6 skipped shapes have a winning candidate.
+  Winning splits by family:
+    (1,16,2)+kf: 3 shape(s)
+    (1,4,8)+kf: 1 shape(s)
+
+  → Multiple winning families. Heuristic needs a richer rule (possibly per-(M, N, K)-regime selection of n).
