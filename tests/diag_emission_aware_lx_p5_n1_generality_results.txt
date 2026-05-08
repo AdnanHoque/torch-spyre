@@ -1,0 +1,84 @@
+[CRITICAL] [core_division] buf0: per-core tensor span 448.00 MB (shape=[8192, 28672], dtype=torch.float16, device_size=[448, 8192, 64], splits={d0: 32, d1: 1, d2: 1}) exceeds hardware limit of 256.00 MB
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: EAR overflow detected, file /home/adnan/dt-inductor/deeptools/dcc/src/Transform/Dataflow/MutableAddrSplitting.cpp line 780
+[CRITICAL] [core_division] buf0: per-core tensor span 448.00 MB (shape=[8192, 28672], dtype=torch.float16, device_size=[448, 8192, 64], splits={d0: 16, d1: 1, d2: 2}) exceeds hardware limit of 256.00 MB
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: EAR overflow detected, file /home/adnan/dt-inductor/deeptools/dcc/src/Transform/Dataflow/MutableAddrSplitting.cpp line 780
+[CRITICAL] [core_division] buf0: per-core tensor span 448.00 MB (shape=[8192, 28672], dtype=torch.float16, device_size=[448, 8192, 64], splits={d0: 8, d1: 1, d2: 4}) exceeds hardware limit of 256.00 MB
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: EAR overflow detected, file /home/adnan/dt-inductor/deeptools/dcc/src/Transform/Dataflow/MutableAddrSplitting.cpp line 780
+[CRITICAL] [core_division] buf0: per-core tensor span 448.00 MB (shape=[8192, 28672], dtype=torch.float16, device_size=[448, 8192, 64], splits={d0: 1, d1: 1, d2: 32}) exceeds hardware limit of 256.00 MB
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: EAR overflow detected, file /home/adnan/dt-inductor/deeptools/dcc/src/Transform/Dataflow/MutableAddrSplitting.cpp line 780
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1058
+[CRITICAL] [core_division] buf0: per-core tensor span 448.00 MB (shape=[28672, 8192], dtype=torch.float16, device_size=[128, 28672, 64], splits={d0: 32, d1: 1, d2: 1}) exceeds hardware limit of 256.00 MB
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: EAR overflow detected, file /home/adnan/dt-inductor/deeptools/dcc/src/Transform/Dataflow/MutableAddrSplitting.cpp line 780
+[CRITICAL] [core_division] buf0: per-core tensor span 448.00 MB (shape=[28672, 8192], dtype=torch.float16, device_size=[128, 28672, 64], splits={d0: 16, d1: 1, d2: 2}) exceeds hardware limit of 256.00 MB
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: EAR overflow detected, file /home/adnan/dt-inductor/deeptools/dcc/src/Transform/Dataflow/MutableAddrSplitting.cpp line 780
+[CRITICAL] [core_division] buf0: per-core tensor span 448.00 MB (shape=[28672, 8192], dtype=torch.float16, device_size=[128, 28672, 64], splits={d0: 8, d1: 1, d2: 4}) exceeds hardware limit of 256.00 MB
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: EAR overflow detected, file /home/adnan/dt-inductor/deeptools/dcc/src/Transform/Dataflow/MutableAddrSplitting.cpp line 780
+[CRITICAL] [core_division] buf0: per-core tensor span 448.00 MB (shape=[28672, 8192], dtype=torch.float16, device_size=[128, 28672, 64], splits={d0: 1, d1: 1, d2: 32}) exceeds hardware limit of 256.00 MB
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: EAR overflow detected, file /home/adnan/dt-inductor/deeptools/dcc/src/Transform/Dataflow/MutableAddrSplitting.cpp line 780
+# Probe 5 — generality of the n=1 streaming-output fast path
+
+WARMUP=3, ITERS=12, dtype=fp16
+
+Hypothesis: (m, 1, k)+kf walls << (1, n>1, k)+kf walls for any wide-N shape with C_psum overage.
+
+## L3-70B gate_proj M=2048  shape=(2048, 28672, 8192)
+
+| split | description | C_psum/core | overage | wall ms |
+|---|---|---:|---:|---:|
+| (32, 1, 1) | pure-M | 7.00 MB | 3.50× | ERR (InductorError: CalledProcessEr) |
+| (16, 1, 2) | n=1 chain=2 (pipeline) | 14.00 MB | 7.00× | ERR (InductorError: CalledProcessEr) |
+| (8, 1, 4) | n=1 chain=4 (pipeline) | 28.00 MB | 14.00× | ERR (InductorError: CalledProcessEr) |
+| (1, 1, 32) | pure-K (allreduce) | 224.00 MB | 112.00× | ERR (InductorError: CalledProcessEr) |
+| (1, 8, 4) | n>1 catastrophic control | 28.00 MB | 14.00× | 255.955 |
+
+## DSv3 gate_proj M=2048  shape=(2048, 18432, 7168)
+
+| split | description | C_psum/core | overage | wall ms |
+|---|---|---:|---:|---:|
+| (32, 1, 1) | pure-M | 4.50 MB | 2.25× | 14.350 |
+| (16, 1, 2) | n=1 chain=2 (pipeline) | 9.00 MB | 4.50× | 20.662 |
+| (8, 1, 4) | n=1 chain=4 (pipeline) | 18.00 MB | 9.00× | 20.413 |
+| (1, 1, 32) | pure-K (allreduce) | 144.00 MB | 72.00× | ERR (InductorError: CalledProcessEr) |
+| (1, 8, 4) | n>1 catastrophic control | 18.00 MB | 9.00× | 200.190 |
+
+## Mixtral gate_proj M=2048  shape=(2048, 14336, 4096)
+
+| split | description | C_psum/core | overage | wall ms |
+|---|---|---:|---:|---:|
+| (32, 1, 1) | pure-M | 3.50 MB | 1.75× | 8.631 |
+| (16, 1, 2) | n=1 chain=2 (pipeline) | 7.00 MB | 3.50× | 10.819 |
+| (8, 1, 4) | n=1 chain=4 (pipeline) | 14.00 MB | 7.00× | 11.046 |
+| (1, 1, 32) | pure-K (allreduce) | 112.00 MB | 56.00× | 21.161 |
+| (1, 8, 4) | n>1 catastrophic control | 14.00 MB | 7.00× | 60.670 |
+
+## L3-70B down_proj M=2048  shape=(2048, 8192, 28672)
+
+| split | description | C_psum/core | overage | wall ms |
+|---|---|---:|---:|---:|
+| (32, 1, 1) | pure-M | 2.00 MB | 1.00× | ERR (InductorError: CalledProcessEr) |
+| (16, 1, 2) | n=1 chain=2 (pipeline) | 4.00 MB | 2.00× | ERR (InductorError: CalledProcessEr) |
+| (8, 1, 4) | n=1 chain=4 (pipeline) | 8.00 MB | 4.00× | ERR (InductorError: CalledProcessEr) |
+| (1, 1, 32) | pure-K (allreduce) | 64.00 MB | 32.00× | ERR (InductorError: CalledProcessEr) |
+| (1, 8, 4) | n>1 catastrophic control | 8.00 MB | 4.00× | 502.866 |
+
+## Reading guide
+
+Per-shape pattern to look for:
+  pure-M wall ≈ HMI/compute baseline
+  (16, 1, 2)+kf and (8, 1, 4)+kf walls ≤ ~2× pure-M  →  fast path active
+  (1, 1, 32)+kf wall ≈ allreduce regime
+  (1, 8, 4)+kf wall >> 2× pure-M (catastrophic)  →  confirms n>1 penalty
+
+Generality verdict:
+  All 4 shapes show pattern  →  n=1 fast path is general
+  Pattern only on o_proj-like shapes  →  shape-specific
+  Mixed  →  characterise the trigger condition
