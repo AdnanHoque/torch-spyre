@@ -14,9 +14,15 @@
 
 import subprocess
 import sys
+from pathlib import Path
+
+# Force line-buffered stdout so progress is visible during long runs
+# (default block buffering hides intermediate measurements until the
+# script exits, making the probe look like it's hanging).
+sys.stdout.reconfigure(line_buffering=True)
 
 ELEMS_PER_STICK = 64
-MEASURE_SCRIPT = "/tmp/kfast_essential_measure.py"
+MEASURE_SCRIPT = str(Path(__file__).resolve().parent / "diag_kfast_essential_measure.py")
 TIMEOUT_S = 90
 
 # Sampled shapes from diag_vllm_shape_catalog.py --sample 20.

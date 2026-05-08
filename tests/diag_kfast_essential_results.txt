@@ -1,0 +1,211 @@
+# Focused k_fast-essential probe — 20 vLLM-sampled shapes
+
+Subprocess timeout 90s per measurement.
+
+Measuring 4 categories per shape:
+  pure-M  : (32, 1, 1) identity (planner default)
+  best k=1: best of [(32,1,1), (1,32,1), (16,2,1), (8,4,1), (4,8,1), (2,16,1)]
+  best k>1+id: best of (m,n,k>1) family with identity emission
+  best k>1+kf: best of (m,n,k>1) family with k_fast emission
+
+
+## Llama 3.2 1B gate_proj (32, 8192, 2048)
+  pure-M baseline:           0.878 ms
+  best k=1 (no K-split):     0.267 ms  (4, 8, 1)
+  best k>1 + identity:       0.273 ms  (2, 8, 2)
+  best k>1 + k_fast:         0.279 ms  (4, 4, 2)
+  → WINNER: k=1 (mixed M+N) at 0.267 ms
+  k_fast contribution: 1.00× over id at (4, 4, 2)
+
+## DeepSeek V3 q_b_proj (512, 24576, 1536)
+  pure-M baseline:           2.004 ms
+  best k=1 (no K-split):     1.047 ms  (8, 4, 1)
+  best k>1 + identity:       2.274 ms  (4, 1, 8)
+  best k>1 + k_fast:         1.339 ms  (4, 4, 2)
+  → WINNER: k=1 (mixed M+N) at 1.047 ms
+  k_fast contribution: 3.49× over id at (4, 4, 2)
+
+## Llama 3.1 8B q_proj (32, 4096, 4096)
+  pure-M baseline:           0.860 ms
+  best k=1 (no K-split):     0.258 ms  (4, 8, 1)
+  best k>1 + identity:       0.271 ms  (4, 4, 2)
+  best k>1 + k_fast:         0.272 ms  (2, 8, 2)
+  → WINNER: k=1 (mixed M+N) at 0.258 ms
+  k_fast contribution: 1.05× over id at (2, 8, 2)
+
+## Gemma 2 9B o_proj (1, 3584, 4096)
+  pure-M baseline:           0.273 ms
+  best k=1: no valid candidate
+  best k>1 + identity:       0.272 ms  (1, 1, 32)
+  best k>1 + k_fast:         0.274 ms  (1, 2, 16)
+  → WINNER: k>1 + id at 0.272 ms
+  k_fast contribution: 1.04× over id at (1, 2, 16)
+
+## Qwen 2.5 7B q_proj (1, 3584, 3584)
+  pure-M baseline:           0.310 ms
+  best k=1: no valid candidate
+  best k>1 + identity:       0.299 ms  (1, 4, 8)
+  best k>1 + k_fast:         0.291 ms  (1, 1, 32)
+  → WINNER: k>1 + kf at 0.291 ms
+  k_fast contribution: 1.01× over id at (1, 1, 32)
+
+## Llama 3.2 3B gate_proj (128, 8192, 3072)
+  pure-M baseline:           1.361 ms
+  best k=1 (no K-split):     0.417 ms  (4, 8, 1)
+  best k>1 + identity:       0.466 ms  (2, 4, 4)
+  best k>1 + k_fast:         0.429 ms  (4, 4, 2)
+  → WINNER: k=1 (mixed M+N) at 0.417 ms
+  k_fast contribution: 2.01× over id at (4, 4, 2)
+
+## DeepSeek V3 kv_a_proj (1024, 576, 7168)
+  pure-M baseline:           0.352 ms
+  best k=1 (no K-split):     0.351 ms  (32, 1, 1)
+  best k>1 + identity:       0.585 ms  (16, 1, 2)
+  best k>1 + k_fast:         0.378 ms  (8, 1, 4)
+  → WINNER: k=1 (mixed M+N) at 0.351 ms
+  k_fast contribution: 1.55× over id at (8, 1, 4)
+
+## Mixtral 8x22B gate_proj (1024, 16384, 6144)
+  pure-M baseline:           6.584 ms
+  best k=1 (no K-split):     3.504 ms  (8, 4, 1)
+  best k>1 + identity:       8.980 ms  (2, 2, 8)
+  best k>1 + k_fast:         6.264 ms  (4, 4, 2)
+  → WINNER: k=1 (mixed M+N) at 3.504 ms
+  k_fast contribution: 3.90× over id at (4, 4, 2)
+
+## Qwen 2.5 32B gate_proj (1, 27648, 5120)
+  pure-M baseline:           2.349 ms
+  best k=1: no valid candidate
+  best k>1 + identity:       2.326 ms  (1, 1, 32)
+  best k>1 + k_fast:         2.330 ms  (1, 16, 2)
+  → WINNER: k>1 + id at 2.326 ms
+  k_fast contribution: 1.00× over id at (1, 16, 2)
+
+## Mixtral 8x22B q_proj (512, 6144, 6144)
+  pure-M baseline:           1.979 ms
+  best k=1 (no K-split):     0.805 ms  (8, 4, 1)
+  best k>1 + identity:       1.755 ms  (2, 2, 8)
+  best k>1 + k_fast:         1.240 ms  (4, 4, 2)
+  → WINNER: k=1 (mixed M+N) at 0.805 ms
+  k_fast contribution: 3.77× over id at (4, 4, 2)
+
+## Qwen 2.5 14B kv_proj (2048, 2048, 5120)
+  pure-M baseline:           1.537 ms
+  best k=1 (no K-split):     0.854 ms  (8, 4, 1)
+  best k>1 + identity:       1.992 ms  (2, 2, 8)
+  best k>1 + k_fast:         1.351 ms  (4, 4, 2)
+  → WINNER: k=1 (mixed M+N) at 0.854 ms
+  k_fast contribution: 3.79× over id at (4, 4, 2)
+
+## Mixtral 8x22B kv_proj (2048, 2048, 6144)
+  pure-M baseline:           1.822 ms
+  best k=1 (no K-split):     1.001 ms  (8, 4, 1)
+  best k>1 + identity:       2.273 ms  (2, 2, 8)
+  best k>1 + k_fast:         1.599 ms  (4, 4, 2)
+  → WINNER: k=1 (mixed M+N) at 1.001 ms
+  k_fast contribution: 3.85× over id at (4, 4, 2)
+
+## Gemma 2 9B down_proj (1024, 3584, 14336)
+  pure-M baseline:           2.952 ms
+  best k=1 (no K-split):     2.293 ms  (16, 2, 1)
+  best k>1 + identity:       5.244 ms  (2, 2, 8)
+  best k>1 + k_fast:         3.172 ms  (4, 4, 2)
+  → WINNER: k=1 (mixed M+N) at 2.293 ms
+  k_fast contribution: 3.95× over id at (4, 4, 2)
+
+## Phi 3 medium down_proj (128, 5120, 17920)
+  pure-M baseline:           4.683 ms
+  best k=1 (no K-split):     2.034 ms  (2, 16, 1)
+  best k>1 + identity:       1.567 ms  (2, 2, 8)
+  best k>1 + k_fast:         1.427 ms  (2, 4, 4)
+  → WINNER: k>1 + kf at 1.427 ms
+  k_fast contribution: 1.14× over id at (2, 4, 4)
+
+## Llama 3.1 70B down_proj (512, 8192, 28672)
+  pure-M: ERR (InductorError: CalledProcessError: Command '['dxp_)
+  best k=1 (no K-split):     5.984 ms  (16, 2, 1)
+  best k>1 + identity:       13.665 ms  (2, 2, 8)
+  best k>1 + k_fast:         7.386 ms  (4, 4, 2)
+  → WINNER: k=1 (mixed M+N) at 5.984 ms
+  k_fast contribution: 3.90× over id at (4, 4, 2)
+
+## Llama 3.1 405B down_proj (512, 16384, 53248)
+  pure-M: ERR (InductorError: CalledProcessError: Command '['dxp_)
+  best k=1 (no K-split):     14.723 ms  (4, 8, 1)
+  best k>1 + identity:       64.285 ms  (1, 8, 4)
+  best k>1 + k_fast:         27.186 ms  (2, 8, 2)
+  → WINNER: k=1 (mixed M+N) at 14.723 ms
+  k_fast contribution: 3.92× over id at (2, 8, 2)
+
+## Llama 3.1 405B q_proj (2048, 16384, 16384)
+  pure-M: ERR (InductorError: CalledProcessError: Command '['dxp_)
+  best k=1 (no K-split):     18.910 ms  (8, 4, 1)
+  best k>1 + identity:       46.004 ms  (2, 2, 8)
+  best k>1 + k_fast:         32.534 ms  (4, 4, 2)
+  → WINNER: k=1 (mixed M+N) at 18.910 ms
+  k_fast contribution: 3.98× over id at (4, 4, 2)
+
+## Llama 3.1 405B down_proj (128, 16384, 53248)
+  pure-M: ERR (InductorError: CalledProcessError: Command '['dxp_)
+  best k=1 (no K-split):     12.324 ms  (4, 8, 1)
+  best k>1 + identity:       16.190 ms  (1, 8, 4)
+  best k>1 + k_fast:         12.394 ms  (2, 8, 2)
+  → WINNER: k=1 (mixed M+N) at 12.324 ms
+  k_fast contribution: 1.29× over id at (2, 8, 2)
+
+## DeepSeek V3 down_proj (1024, 7168, 18432)
+  pure-M baseline:           7.825 ms
+  best k=1 (no K-split):     4.296 ms  (8, 4, 1)
+  best k>1 + identity:       12.440 ms  (2, 2, 8)
+  best k>1 + k_fast:         8.061 ms  (4, 4, 2)
+  → WINNER: k=1 (mixed M+N) at 4.296 ms
+  k_fast contribution: 3.96× over id at (4, 4, 2)
+
+## Llama 3.1 8B down_proj (512, 4096, 14336)
+  pure-M baseline:           2.574 ms
+  best k=1 (no K-split):     1.537 ms  (16, 2, 1)
+  best k>1 + identity:       2.968 ms  (8, 1, 4)
+  best k>1 + k_fast:         1.889 ms  (4, 4, 2)
+  → WINNER: k=1 (mixed M+N) at 1.537 ms
+  k_fast contribution: 3.82× over id at (4, 4, 2)
+
+
+# Summary
+
+| shape | (M, N, K) | pure-M | best k=1 | best k>1+id | best k>1+kf | winner |
+|---|---|---:|---:|---:|---:|---|
+| Llama 3.2 1B gate_proj | (32,8192,2048) | 0.88 | 0.27 | 0.27 | 0.28 | k=1 (mixed M+N) |
+| DeepSeek V3 q_b_proj | (512,24576,1536) | 2.00 | 1.05 | 2.27 | 1.34 | k=1 (mixed M+N) |
+| Llama 3.1 8B q_proj | (32,4096,4096) | 0.86 | 0.26 | 0.27 | 0.27 | k=1 (mixed M+N) |
+| Gemma 2 9B o_proj | (1,3584,4096) | 0.27 | — | 0.27 | 0.27 | k>1 + id |
+| Qwen 2.5 7B q_proj | (1,3584,3584) | 0.31 | — | 0.30 | 0.29 | k>1 + kf |
+| Llama 3.2 3B gate_proj | (128,8192,3072) | 1.36 | 0.42 | 0.47 | 0.43 | k=1 (mixed M+N) |
+| DeepSeek V3 kv_a_proj | (1024,576,7168) | 0.35 | 0.35 | 0.59 | 0.38 | k=1 (mixed M+N) |
+| Mixtral 8x22B gate_proj | (1024,16384,6144) | 6.58 | 3.50 | 8.98 | 6.26 | k=1 (mixed M+N) |
+| Qwen 2.5 32B gate_proj | (1,27648,5120) | 2.35 | — | 2.33 | 2.33 | k>1 + id |
+| Mixtral 8x22B q_proj | (512,6144,6144) | 1.98 | 0.81 | 1.75 | 1.24 | k=1 (mixed M+N) |
+| Qwen 2.5 14B kv_proj | (2048,2048,5120) | 1.54 | 0.85 | 1.99 | 1.35 | k=1 (mixed M+N) |
+| Mixtral 8x22B kv_proj | (2048,2048,6144) | 1.82 | 1.00 | 2.27 | 1.60 | k=1 (mixed M+N) |
+| Gemma 2 9B down_proj | (1024,3584,14336) | 2.95 | 2.29 | 5.24 | 3.17 | k=1 (mixed M+N) |
+| Phi 3 medium down_proj | (128,5120,17920) | 4.68 | 2.03 | 1.57 | 1.43 | k>1 + kf |
+| Llama 3.1 70B down_proj | (512,8192,28672) | — | 5.98 | 13.66 | 7.39 | k=1 (mixed M+N) |
+| Llama 3.1 405B down_proj | (512,16384,53248) | — | 14.72 | 64.29 | 27.19 | k=1 (mixed M+N) |
+| Llama 3.1 405B q_proj | (2048,16384,16384) | — | 18.91 | 46.00 | 32.53 | k=1 (mixed M+N) |
+| Llama 3.1 405B down_proj | (128,16384,53248) | — | 12.32 | 16.19 | 12.39 | k=1 (mixed M+N) |
+| DeepSeek V3 down_proj | (1024,7168,18432) | 7.83 | 4.30 | 12.44 | 8.06 | k=1 (mixed M+N) |
+| Llama 3.1 8B down_proj | (512,4096,14336) | 2.57 | 1.54 | 2.97 | 1.89 | k=1 (mixed M+N) |
+
+## Category-winner counts
+
+  pure-M              : 0 / 20
+  k=1 (mixed M+N)     : 16 / 20
+  k>1 + id            : 2 / 20
+  k>1 + kf            : 2 / 20
+
+## Where is k_fast emission STRICTLY essential?
+
+(k>1+kf is the global winner AND kf > id at the same split family)
+
+  Phi 3 medium down_proj (128,5120,17920): kf 1.43 ms vs id 1.57 ms (1.10×)
+
+k_fast emission is essential on 1/20 sampled shapes.
