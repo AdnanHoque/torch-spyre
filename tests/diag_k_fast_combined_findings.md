@@ -12,17 +12,27 @@ Combines:
 
 ## TL;DR
 
-The combined PR with the small-M extension delivers **9/12 production
+The combined PR with the small-M extension delivers **10/12 production
 wins, 0 regressions** on the 3-way measurement campaign. Total wall
-saved across the 12-shape suite is **13.1 ms** (vs 1.4 ms for PR 1933
-alone). Geomean speedup is **1.33×** on shapes where the heuristic
-fires.
+saved across the suite is **12.0 ms**. Geomean speedup is **2.06×**
+on shapes where the heuristic fires.
 
 The critical empirical finding: **PR 1932 (k_fast emission) is
-load-bearing**, not a polish. Three rows in the suite measure
-A→B < 1.0× (K-split alone regresses) and B→C > 1.4× (k_fast emission
-rescues them). Without PR 1932, the heuristic would ship a regression
-on these rows. The two PRs must land together.
+load-bearing for at least one row**, not a polish. L3-70B kv_proj
+M=512 measures A→B = 0.79× (K-split alone regresses) and B→C = 1.61×
+(k_fast rescues to a 1.28× win). Without PR 1932, the heuristic would
+ship a measured regression on this row. PR 1932 also contributes
+incrementally on most other fired rows (B→C ratios of 1.0-1.85×).
+The two PRs must land together.
+
+> **Note on measurement.** Numbers below are from a fresh build
+> (May 8, 2026) on the rebased PR branch (against current upstream
+> main with the work_division refactor). An earlier "v2" run of the
+> same probe under an older build showed smaller speedups (1.33×
+> geomean) because a ~3 ms host-side launch floor was diluting
+> sub-millisecond kernel improvements; the underlying decisions are
+> the same in both. See `diag_k_fast_combined_v3_postrebase_findings.md`
+> for the v2-vs-v3 delta.
 
 ## 3-way measurement design
 
@@ -45,23 +55,23 @@ positive means k_fast is rescuing a regression.
 
 ## Per-shape data — extended heuristic
 
+All times in ms. Bold cells highlight the row where K-split alone
+regresses (A→B < 1) and k_fast emission rescues to a real win.
+
 | shape | (M, N, K) | h-split | A | B | C | A→B | B→C | A→C | combined |
 |---|---|---|---:|---:|---:|---:|---:|---:|---|
-| L3-70B kv_proj M=32 | (32, 1024, 8192) | (1,16,2) | 3.38 | 3.11 | 3.11 | 1.09× | 1.00× | **1.09×** | win |
-| L3-70B kv_proj M=128 | (128, 1024, 8192) | (1,16,2) | 3.37 | 3.10 | 3.10 | 1.09× | 1.00× | **1.09×** | win |
-| L3-70B kv_proj M=512 | (512, 1024, 8192) | (1,16,2) | 3.38 | **4.91** | 3.20 | **0.69×** | **1.54×** | 1.06× | win (kf rescue) |
-| Mixtral kv_proj M=128 | (128, 1024, 4096) | (1,16,2) | 3.18 | 3.07 | 3.04 | 1.04× | 1.01× | 1.05× | neutral |
-| DSv3 kv_proj M=128 | (128, 1536, 7168) | (1,8,4) | 3.51 | 3.28 | 3.23 | 1.07× | 1.02× | **1.09×** | win |
-| DSv3 q_a_proj M=128 | (128, 1536, 7168) | (1,8,4) | 3.50 | 3.26 | 3.21 | 1.08× | 1.02× | **1.09×** | win |
-| L3-70B q_proj M=32 | (32, 8192, 8192) | (1,16,2) | 6.31 | 4.03 | 3.99 | 1.57× | 1.01× | **1.58×** | new win |
-| DSv3 gate_proj M=32 | (32, 18432, 7168) | (1,16,2) | 9.50 | 6.65 | 6.63 | 1.43× | 1.00× | **1.43×** | new win |
-| L3-70B q_proj M=128 | (128, 8192, 8192) | (1,16,2) | 6.50 | **6.99** | 4.93 | **0.93×** | **1.42×** | **1.32×** | new win (kf rescue) |
-| L3-70B q_proj M=512 | (512, 8192, 8192) | — | 6.40 | — | — | — | — | — | (skipped, correct) |
-| DSv3 down_proj M=128 | (128, 7168, 18432) | (1,16,2) | 9.72 | **10.95** | 4.86 | **0.89×** | **2.25×** | **2.00×** | new win (kf rescue) |
-| L3-70B kv_proj M=2048 | (2048, 1024, 8192) | — | 3.65 | — | — | — | — | — | (skipped, correct) |
-
-Bold cells highlight the rows where K-split alone regresses (A→B < 1)
-and k_fast emission rescues to a real win (B→C > 1).
+| L3-70B kv_proj M=32 | (32, 1024, 8192) | (1,16,2) | 0.46 | 0.18 | 0.18 | 2.49× | 1.03× | **2.57×** | win |
+| L3-70B kv_proj M=128 | (128, 1024, 8192) | (1,16,2) | 0.48 | 0.19 | 0.20 | 2.48× | 0.98× | **2.43×** | win |
+| L3-70B kv_proj M=512 | (512, 1024, 8192) | (1,16,2) | 0.47 | **0.60** | 0.37 | **0.79×** | **1.61×** | **1.28×** | win (kf rescue) |
+| Mixtral kv_proj M=128 | (128, 1024, 4096) | (1,16,2) | 0.25 | 0.11 | 0.11 | 2.26× | 1.04× | **2.35×** | win |
+| DSv3 kv_proj M=128 | (128, 1536, 7168) | (1,8,4) | 0.61 | 0.34 | 0.29 | 1.77× | 1.17× | **2.07×** | win |
+| DSv3 q_a_proj M=128 | (128, 1536, 7168) | (1,8,4) | 0.62 | 0.35 | 0.30 | 1.77× | 1.17× | **2.08×** | win |
+| L3-70B q_proj M=32 | (32, 8192, 8192) | (1,16,2) | 3.40 | 1.06 | 1.04 | 3.22× | 1.02× | **3.28×** | new win |
+| DSv3 gate_proj M=32 | (32, 18432, 7168) | (1,16,2) | 6.59 | 3.71 | 3.67 | 1.77× | 1.01× | **1.79×** | new win |
+| L3-70B q_proj M=128 | (128, 8192, 8192) | (1,16,2) | 3.60 | 2.36 | 1.28 | 1.53× | 1.85× | **2.82×** | new win |
+| L3-70B q_proj M=512 | (512, 8192, 8192) | — | 3.46 | — | — | — | — | — | (skipped, correct) |
+| DSv3 down_proj M=128 | (128, 7168, 18432) | (1,16,2) | 6.83 | 4.25 | 3.86 | 1.61× | 1.10× | **1.77×** | new win |
+| L3-70B kv_proj M=2048 | (2048, 1024, 8192) | — | 1.21 | — | — | — | — | — | (skipped, correct) |
 
 ## What the extension changes
 
@@ -83,19 +93,18 @@ K-split), which is preserved at M > 128.
 
 ## Why PR 1932 is load-bearing
 
-Three rows where K-split alone (B) measures slower than pure-M (A):
+L3-70B kv_proj M=512 is the smoking gun — the row where K-split alone
+(B) measures slower than pure-M (A):
 
 | row | A | B (k-split + id) | C (k-split + kf) | rescue magnitude |
 |---|---:|---:|---:|---:|
-| L3-70B kv_proj M=512 | 3.38 | **4.91** (0.69×) | 3.20 | kf gives 1.54× over id |
-| L3-70B q_proj M=128 | 6.50 | **6.99** (0.93×) | 4.93 | kf gives 1.42× over id |
-| DSv3 down_proj M=128 | 9.72 | **10.95** (0.89×) | 4.86 | kf gives 2.25× over id |
+| L3-70B kv_proj M=512 | 0.47 | **0.60** (0.79×) | 0.37 | kf gives 1.61× over id |
 
-On these rows, the planner picks K-split because it has good PT util
+On this row, the planner picks K-split because it has good PT util
 and HMI-byte properties — but the SFP-ring chain cost under identity
 emission (m·n hops per send) eats the gain. The k_fast permutation
 collapses chain hops to 1, recovering the wall and turning a
-measured regression into a measured win.
+measured regression into a measured 1.28× win.
 
 This empirically confirms the design rationale of PR 1932:
 
@@ -103,25 +112,42 @@ This empirically confirms the design rationale of PR 1932:
 >  shapes would traverse m·n ring hops per PSUM chain instead of 1,
 >  running slower than the planner's pure-M default."
 
-The campaign quantifies "harmful" as 0.69-0.93× on 3 rows. Without
-PR 1932, PR 1933 would ship measured regressions.
+PR 1932's contribution doesn't end there: on every other fired row
+its B→C ratio is 1.0-1.85×, contributing incremental speedup on top
+of the K-split's primary gain. But the strict requirement comes from
+this single regression-rescue case — without PR 1932 in flight,
+PR 1933 would land a measured regression on L3-70B kv_proj M=512.
+
+(Note: under the older v2 build, two additional rows — L3-70B q_proj
+M=128 and DSv3 down_proj M=128 — also showed K-split-alone
+regressions that k_fast rescued. Under the cleaner v3 build, those
+two rows show K-split alone winning outright; k_fast still
+contributes incremental speedup but isn't strictly necessary on
+those specific rows. The L3-70B kv_proj M=512 case is reproducible
+across both builds and is the load-bearing example.)
 
 ## Where the gains come from per shape
 
-| where the win comes from | rows |
-|---|---|
-| K-split contributes most (>50% of wall delta) | L3-70B kv_proj M=32, M=128; Mixtral kv_proj M=128; DSv3 kv_proj M=128; DSv3 q_a_proj M=128; L3-70B q_proj M=32; DSv3 gate_proj M=32 |
-| k_fast emission contributes most | L3-70B kv_proj M=512; L3-70B q_proj M=128; DSv3 down_proj M=128 |
-| Roughly even | (none in this suite) |
+Decomposing each row's A→C gain into the K-split component (A→B)
+and the k_fast emission component (B→C):
 
-The K-split-dominant rows are where pure-M had poor PT utilization
-(small M_per ⇒ <50% PT array fill). The k_fast-dominant rows are
-where K-split's planner-direct benefit (PT util / HMI bytes) was
-small but k_fast removed a chain-hop penalty.
+| primary contributor | rows |
+|---|---|
+| K-split dominates (A→B ≥ 1.4×, B→C ≤ 1.2×) | L3-70B kv_proj M=32, M=128; Mixtral kv_proj M=128; DSv3 kv_proj M=128; DSv3 q_a_proj M=128; L3-70B q_proj M=32; DSv3 gate_proj M=32; DSv3 down_proj M=128 |
+| Roughly balanced (both layers contribute meaningfully) | L3-70B q_proj M=128 (A→B 1.53×, B→C 1.85×) |
+| k_fast emission essential (A→B < 1, B→C > 1.4×) | L3-70B kv_proj M=512 |
+
+On most rows, the K-split decision itself is doing the heavy lifting
+(better PT utilization at small M_per, fewer per-cluster HMI bytes
+under K-split). PR 1932 contributes 0-85% additional speedup on top
+of the K-split benefit — useful but not required for those rows.
+
+The L3-70B kv_proj M=512 row is the load-bearing case where PR 1932
+is strictly required to avoid a regression.
 
 ## What the heuristic still skips (correctly)
 
-| shape | reason | measured outcome if forced |
+| shape | reason | measured outcome if forced (v2 build) |
 |---|---|---|
 | L3-70B q_proj M=512 (8192) | M > 128, n_sticks ≥ 32 | (1,16,2)+kf is 10.92 vs pure-M 6.41 — 0.59× regression |
 | L3-70B kv_proj M=2048 | M > 512 | (1,16,2)+kf is 3.95 vs pure-M 3.65 — 0.92× regression |
@@ -131,37 +157,56 @@ campaign's "n/a (heuristic skip)" rows on these are *successful*
 rejection: the heuristic correctly identifies that K-split would
 hurt here.
 
+(The forced-K-split numbers in the right column are from v2
+measurements; we didn't reproduce them under the v3 build since the
+heuristic correctly skips these shapes and the campaign reports
+pure-M only. The v3 pure-M walls are 3.46 ms and 1.21 ms
+respectively — same shape, same skip decision, just lower base
+overhead in the new build.)
+
 ## DSv3 gate_proj M=32 — a sub-optimal but still-winning pick
 
-The extension probe found `(1, 4, 8)+kf` runs at 5.40 ms on this shape
-versus `(1, 16, 2)+kf` at 6.41 ms (the heuristic's pick). Both beat
-pure-M (9.41 ms) at 1.74× and 1.47× respectively.
+The extension probe (v2 build) found `(1, 4, 8)+kf` runs at 5.40 ms
+on this shape versus `(1, 16, 2)+kf` at 6.41 ms (the heuristic's
+pick). Both beat pure-M (9.41 ms) at 1.74× and 1.47× respectively.
+Under the v3 build, the heuristic's `(1, 16, 2)+kf` pick measures
+3.67 ms vs pure-M at 6.59 ms — a **1.79×** win.
 
 The heuristic picks `(1, 16, 2)+kf` because the loop iterates `n` in
 `(16, 8, 4, 2)` and returns the first match. For DSv3 gate_proj
 M=32 N=18432 K=7168, n=16 divides cleanly so it's selected.
 
-Switching to `(1, 4, 8)+kf` would require an extra ~17% on this
-shape, but on the other small-M wide-N rows (L3-70B q_proj M=32,
-M=128) `(1, 16, 2)+kf` is already optimal (or close). A more
-sophisticated pick logic that distinguishes these cases is left for
-future work — the simple `n_sticks` gate relaxation captures the
-bulk of the wins (1.43-2.00× across all extended-heuristic rows).
+Switching to `(1, 4, 8)+kf` would yield a small additional speedup
+on this specific shape, but on the other small-M wide-N rows
+(L3-70B q_proj M=32, M=128) `(1, 16, 2)+kf` is already the right
+answer. A more sophisticated pick logic that distinguishes these
+cases is left for future work — the simple `n_sticks` gate
+relaxation captures the bulk of the wins (1.79-3.28× on the four
+new shapes the extension enables).
 
 ## Aggregate
 
 | | PR 1933 as-shipped | Combined + extension |
 |---|---:|---:|
 | Heuristic fires on | 6/12 | 10/12 |
-| Wins | 5 | 9 |
+| Wins | 5 | 10 |
 | Regressions | 0 | 0 |
-| Total wall saved | 1.4 ms | 13.1 ms |
-| Geomean speedup (A→C) | 1.07× | 1.33× |
+| Total wall saved | 1.4 ms (v2 build) | 12.0 ms (v3 build) |
+| Geomean speedup (A→C) | 1.07× | **2.06×** |
 
-The extension is a ~10× lift in measured production benefit with no
-new regressions. The combined branch is hardware-validated against
-the same shapes that exercise the original PRs plus four new
-shapes that the original heuristic skipped.
+The extension is a substantial lift in measured production benefit
+with no new regressions. The combined branch is hardware-validated
+against the same shapes that exercise the original PRs plus four
+new shapes that the original heuristic skipped.
+
+The "PR 1933 as-shipped" column above is from v2 measurements (the
+original PR's evidence base); the "Combined + extension" column is
+from v3 (post-rebase, fresh build). Direct apples-to-apples
+comparison between the two columns isn't strictly possible because
+the build environments differ — but the structural conclusion holds
+under either build: PR 1933 alone fires on 6/12 shapes; the
+extension adds 4 more correctly-firing shapes; geomean speedup
+roughly doubles.
 
 ## Files on the branch
 
@@ -178,7 +223,12 @@ shapes that the original heuristic skipped.
 - `tests/diag_k_fast_combined_3way.py` — 3-way measurement probe
 - `tests/diag_k_fast_combined_3way_results.txt` — initial run
   (PR 1933 as-shipped)
-- `tests/diag_k_fast_combined_3way_v2_results.txt` — extended-heuristic run
+- `tests/diag_k_fast_combined_3way_v2_results.txt` — extended-heuristic run, v2 build
+- `tests/diag_k_fast_combined_3way_v3_postrebase_results.txt` —
+  extended-heuristic run on rebased PR + fresh v3 build (numbers in
+  the per-shape table above)
+- `tests/diag_k_fast_combined_v3_postrebase_findings.md` — v2-vs-v3
+  delta analysis
 - `tests/diag_k_fast_extension_candidates.py` — Phase 3 probe that
   identified which split to pick
 - `tests/diag_k_fast_extension_candidates_results.txt` — Phase 3 raw output
@@ -199,8 +249,10 @@ For a clean merge:
 3. Open as a single PR with the campaign findings doc as the PR
    description's evidence base
 
-The 0.59× and 0.69× regression rows we measured at L3-70B q_proj
-M=512 and kv_proj M=2048 are not in any tier the heuristic fires
-on, so the merge can ship without further mitigation. They're
-useful as documented "known regression regimes the heuristic
-correctly avoids."
+The 0.59× (L3-70B q_proj M=512) and 0.92× (L3-70B kv_proj M=2048)
+regression rows from forced K-split runs (v2 build) are not in any
+tier the heuristic fires on, so the merge can ship without further
+mitigation. They're useful as documented "known regression regimes
+the heuristic correctly avoids." On the v3 build, the heuristic
+correctly skips these shapes (pure-M is the chosen and measured
+output).
