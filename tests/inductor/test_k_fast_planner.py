@@ -14,7 +14,7 @@
 
 """Hardware-free unit tests for the k_fast planner override.
 
-Exercises core_division._try_k_fast_split() directly with synthetic
+Exercises work_division._try_k_fast_split() directly with synthetic
 iteration spaces and a stub output TensorDep. No torch.compile, no
 Spyre device required.
 """
@@ -26,7 +26,7 @@ import sympy
 from sympy import Integer
 
 from torch_spyre._inductor import config
-from torch_spyre._inductor.core_division import _try_k_fast_split
+from torch_spyre._inductor.work_division import _try_k_fast_split
 
 
 def _stub_output_td(m_sym, n_sym, elems_per_stick=64):
