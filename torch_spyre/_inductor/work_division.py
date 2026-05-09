@@ -506,6 +506,7 @@ def span_reduction_pass(
     args: list[SchedNodeArg],
     max_cores: int,
     exclude_reduction: bool,
+    is_matmul: bool = False,
 ) -> None:
     """Mandatory per-op pass: compute minimum splits to satisfy the 256MB span limit.
 
