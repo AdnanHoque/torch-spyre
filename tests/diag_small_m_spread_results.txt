@@ -1,0 +1,209 @@
+===== LAUNCHER START 04:53:05 - 30s drain pause first =====
+===== SHARD M=1 start 04:53:35 =====
+# Small-M decode-regime spread analysis
+
+Unique shapes: 28  (Llama 3.1/3.2 + DeepSeek V3 + Granite 3.x, M ∈ (1, 32, 128) (filtered to M=1))
+
+Subprocess timeout 90s.
+
+| label | (M, N, K) | pure-M | best k=1 | best k>1+id | best k>1+kf | winner | speedup |
+|---|---|---:|---:|---:|---:|---|---:|
+# warmup pause 5.0s before first shape
+| Llama 3.1 8B q_proj/o_proj | (1,4096,4096) | 0.28 | 0.28 | 0.28 | 0.28 | pure-M (32, 1, 1) | 1.00× |
+| Llama 3.1 8B kv_proj | (1,2048,4096) | 0.16 | 0.16 | 0.16 | 0.16 | k>1+kf (1, 4, 8) | 1.01× |
+| Llama 3.1 8B gate/up_proj | (1,14336,4096) | 1.03 | 1.03 | 1.02 | 1.02 | k>1+id (1, 2, 16) | 1.01× |
+| Llama 3.1 8B down_proj | (1,4096,14336) | 1.31 | 1.33 | 1.30 | 1.26 | k>1+kf (1, 8, 4) | 1.04× |
+| Llama 3.1 70B q_proj/o_proj | (1,8192,8192) | 1.00 | 1.00 | 1.00 | 1.00 | k>1+kf (1, 16, 2) | 1.00× |
+| Llama 3.1 70B kv_proj | (1,2048,8192) | 0.28 | 0.28 | 0.28 | 0.28 | k>1+kf (1, 8, 4) | 1.02× |
+| Llama 3.1 70B gate/up_proj | (1,28672,8192) | 3.53 | 3.50 | 3.51 | 3.53 | k=1 mixed (1, 32, 1) | 1.01× |
+| Llama 3.1 70B down_proj | (1,8192,28672) | 4.47 | 4.52 | 4.45 | 4.48 | k>1+id (1, 2, 16) | 1.01× |
+| Llama 3.1 405B q_proj/o_proj | (1,16384,16384) | 4.11 | 4.12 | 4.10 | 4.03 | k>1+kf (1, 4, 8) | 1.02× |
+| Llama 3.1 405B kv_proj | (1,2048,16384) | 0.51 | 0.51 | 0.50 | 0.51 | k>1+id (1, 1, 32) | 1.02× |
+| Llama 3.1 405B gate/up_proj | (1,53248,16384) | 13.26 | 13.18 | 13.03 | 13.04 | k>1+id (1, 1, 32) | 1.02× |
+| Llama 3.1 405B down_proj | (1,16384,53248) | 12.79 | 12.84 | 12.70 | 12.84 | k>1+id (1, 8, 4) | 1.01× |
+| Llama 3.2 1B q_proj/o_proj | (1,2048,2048) | 0.11 | 0.10 | 0.10 | 0.10 | k>1+id (1, 8, 4) | 1.09× |
+| Llama 3.2 1B kv_proj | (1,1024,2048) | 0.08 | — | 0.07 | 0.07 | k>1+id (1, 8, 4) | 1.09× |
+| Llama 3.2 1B gate/up_proj | (1,8192,2048) | 0.28 | 0.28 | 0.28 | 0.28 | pure-M (32, 1, 1) | 1.00× |
+| Llama 3.2 3B q_proj/o_proj | (1,3072,3072) | 0.21 | — | 0.21 | 0.21 | k>1+id (1, 4, 8) | 1.03× |
+| Llama 3.2 3B kv_proj | (1,2048,3072) | 0.14 | 0.13 | 0.13 | 0.13 | k>1+id (1, 2, 16) | 1.13× |
+| Llama 3.2 3B gate/up_proj | (1,8192,3072) | 0.40 | 0.40 | 0.39 | 0.40 | k>1+id (1, 8, 4) | 1.00× |
+| Llama 3.2 3B down_proj | (1,3072,8192) | 0.48 | — | 0.47 | 0.47 | k>1+id (1, 8, 4) | 1.02× |
+| Granite 3 8B gate/up_proj | (1,12800,4096) | 0.93 | — | 0.93 | 0.93 | k>1+id (1, 4, 8) | 1.00× |
+| Granite 3 8B down_proj | (1,4096,12800) | 0.78 | 0.79 | 0.77 | 0.77 | k>1+id (1, 2, 16) | 1.01× |
+| DeepSeek V3 q_a_proj | (1,1536,7168) | 0.27 | — | 0.26 | 0.26 | k>1+kf (1, 4, 8) | 1.06× |
+| DeepSeek V3 q_b_proj | (1,24576,1536) | 0.60 | 0.60 | 0.60 | 0.60 | k>1+id (1, 16, 2) | 1.00× |
+| DeepSeek V3 kv_a_proj | (1,576,7168) | 0.15 | — | 0.14 | 0.14 | k>1+kf (1, 1, 32) | 1.07× |
+| DeepSeek V3 kv_b_proj | (1,32768,512) | 0.29 | 0.29 | 0.29 | 0.28 | k>1+kf (1, 16, 2) | 1.02× |
+| DeepSeek V3 o_proj | (1,7168,16384) | 1.92 | — | 1.90 | 1.90 | k>1+kf (1, 4, 8) | 1.01× |
+| DeepSeek V3 gate/up | (1,18432,7168) | 3.81 | 3.75 | 3.69 | 3.66 | k>1+kf (1, 4, 8) | 1.04× |
+| DeepSeek V3 down_proj | (1,7168,18432) | 2.16 | — | 2.16 | 2.15 | k>1+kf (1, 16, 2) | 1.00× |
+
+## Winner category histogram
+
+  pure-M      :   2 / 28  ##
+  k=1 mixed   :   1 / 28  #
+  k>1+id      :  14 / 28  ##############
+  k>1+kf      :  11 / 28  ###########
+
+## Speedup spread (winner vs pure-M baseline)
+
+  shapes: 28
+  min:     1.00×
+  median:  1.02×
+  geomean: 1.03×
+  max:     1.13×
+
+  histogram:
+    [1.0× – 1.5×):  28  ############################
+    [1.5× – 2.0×):   0  
+    [2.0× – 3.0×):   0  
+    [3.0× – 5.0×):   0  
+    [5.0× – 100×):   0  
+
+## Where is k_fast STRICTLY essential?
+
+  (none)
+
+  k_fast strictly essential on 0/28 shapes.
+===== SHARD M=1 end   06:02:32 rc=0 =====
+===== SHARD M=32 start 06:03:02 =====
+# Small-M decode-regime spread analysis
+
+Unique shapes: 28  (Llama 3.1/3.2 + DeepSeek V3 + Granite 3.x, M ∈ (1, 32, 128) (filtered to M=32))
+
+Subprocess timeout 90s.
+
+| label | (M, N, K) | pure-M | best k=1 | best k>1+id | best k>1+kf | winner | speedup |
+|---|---|---:|---:|---:|---:|---|---:|
+# warmup pause 5.0s before first shape
+| Llama 3.1 8B q_proj/o_proj | (32,4096,4096) | 0.87 | 0.26 | 0.27 | 0.26 | k=1 mixed (4, 8, 1) | 3.38× |
+| Llama 3.1 8B kv_proj | (32,2048,4096) | 0.45 | 0.16 | 0.15 | 0.15 | k>1+id (4, 4, 2) | 2.96× |
+| Llama 3.1 8B gate/up_proj | (32,14336,4096) | 2.96 | 0.98 | 0.89 | 0.87 | k>1+kf (4, 4, 2) | 3.38× |
+| Llama 3.1 8B down_proj | (32,4096,14336) | 2.96 | 1.14 | 0.98 | 0.98 | k>1+id (1, 2, 16) | 3.02× |
+| Llama 3.1 70B q_proj/o_proj | (32,8192,8192) | 3.40 | 0.95 | 0.94 | 0.96 | k>1+id (4, 4, 2) | 3.61× |
+| Llama 3.1 70B kv_proj | (32,2048,8192) | 0.88 | 0.26 | 0.26 | 0.26 | k>1+kf (4, 4, 2) | 3.41× |
+| Llama 3.1 70B gate/up_proj | (32,28672,8192) | — | 3.63 | 3.47 | 3.33 | k>1+kf (4, 4, 2) | 1.09× |
+| Llama 3.1 70B down_proj | (32,8192,28672) | — | 4.37 | 4.50 | 4.48 | k=1 mixed (4, 8, 1) | 1.03× |
+| Llama 3.1 405B q_proj/o_proj | (32,16384,16384) | — | 3.68 | 3.59 | 3.70 | k>1+id (4, 4, 2) | 1.03× |
+| Llama 3.1 405B kv_proj | (32,2048,16384) | 1.72 | 0.48 | 0.48 | 0.49 | k=1 mixed (4, 8, 1) | 3.56× |
+| Llama 3.1 405B gate/up_proj | (32,53248,16384) | — | 11.42 | 12.61 | 12.01 | k=1 mixed (4, 8, 1) | 1.10× |
+| Llama 3.1 405B down_proj | (32,16384,53248) | — | 11.69 | 12.71 | 12.10 | k=1 mixed (4, 8, 1) | 1.09× |
+| Llama 3.2 1B q_proj/o_proj | (32,2048,2048) | 0.26 | 0.10 | 0.10 | 0.10 | k=1 mixed (4, 8, 1) | 2.62× |
+| Llama 3.2 1B kv_proj | (32,1024,2048) | 0.14 | 0.07 | 0.07 | 0.07 | k=1 mixed (4, 8, 1) | 2.12× |
+| Llama 3.2 1B gate/up_proj | (32,8192,2048) | 0.88 | 0.27 | 0.27 | 0.27 | k=1 mixed (4, 8, 1) | 3.29× |
+| Llama 3.2 3B q_proj/o_proj | (32,3072,3072) | 0.50 | 0.17 | 0.17 | 0.17 | k=1 mixed (4, 8, 1) | 2.99× |
+| Llama 3.2 3B kv_proj | (32,2048,3072) | 0.35 | 0.13 | 0.13 | 0.13 | k=1 mixed (4, 8, 1) | 2.75× |
+| Llama 3.2 3B gate/up_proj | (32,8192,3072) | 1.27 | 0.39 | 0.38 | 0.39 | k>1+id (4, 4, 2) | 3.30× |
+| Llama 3.2 3B down_proj | (32,3072,8192) | 1.31 | 0.39 | 0.38 | 0.38 | k>1+kf (1, 16, 2) | 3.45× |
+| Granite 3 8B gate/up_proj | (32,12800,4096) | 2.64 | 0.72 | 0.73 | 0.74 | k=1 mixed (4, 8, 1) | 3.65× |
+| Granite 3 8B down_proj | (32,4096,12800) | 2.57 | 0.76 | 0.73 | 0.75 | k>1+id (4, 4, 2) | 3.50× |
+| DeepSeek V3 q_a_proj | (32,1536,7168) | 0.59 | 0.25 | 0.22 | 0.21 | k>1+kf (4, 2, 4) | 2.76× |
+| DeepSeek V3 q_b_proj | (32,24576,1536) | 1.90 | 0.56 | 0.58 | 0.58 | k=1 mixed (4, 8, 1) | 3.39× |
+| DeepSeek V3 kv_a_proj | (32,576,7168) | 0.32 | 0.32 | 0.11 | 0.11 | k>1+id (4, 1, 8) | 2.89× |
+| DeepSeek V3 kv_b_proj | (32,32768,512) | 0.88 | 0.30 | 0.29 | 0.29 | k>1+kf (2, 4, 4) | 3.00× |
+| DeepSeek V3 o_proj | (32,7168,16384) | 5.94 | 1.97 | 1.71 | 1.68 | k>1+kf (4, 2, 4) | 3.54× |
+| DeepSeek V3 gate/up | (32,18432,7168) | 6.59 | 2.63 | 2.11 | 2.15 | k>1+id (1, 4, 8) | 3.12× |
+| DeepSeek V3 down_proj | (32,7168,18432) | 6.46 | 2.49 | 1.93 | 1.87 | k>1+kf (4, 2, 4) | 3.45× |
+
+## Winner category histogram
+
+  pure-M      :   0 / 28  
+  k=1 mixed   :  12 / 28  ############
+  k>1+id      :   8 / 28  ########
+  k>1+kf      :   8 / 28  ########
+
+## Speedup spread (winner vs pure-M baseline)
+
+  shapes: 28
+  min:     1.03×
+  median:  3.12×
+  geomean: 2.60×
+  max:     3.65×
+
+  histogram:
+    [1.0× – 1.5×):   5  #####
+    [1.5× – 2.0×):   0  
+    [2.0× – 3.0×):   7  #######
+    [3.0× – 5.0×):  16  ################
+    [5.0× – 100×):   0  
+
+## Where is k_fast STRICTLY essential?
+
+  (none)
+
+  k_fast strictly essential on 0/28 shapes.
+===== SHARD M=32 end   09:43:22 rc=0 =====
+===== SHARD M=128 start 09:43:52 =====
+# Small-M decode-regime spread analysis
+
+Unique shapes: 28  (Llama 3.1/3.2 + DeepSeek V3 + Granite 3.x, M ∈ (1, 32, 128) (filtered to M=128))
+
+Subprocess timeout 90s.
+
+| label | (M, N, K) | pure-M | best k=1 | best k>1+id | best k>1+kf | winner | speedup |
+|---|---|---:|---:|---:|---:|---|---:|
+# warmup pause 5.0s before first shape
+| Llama 3.1 8B q_proj/o_proj | (128,4096,4096) | 0.92 | 0.27 | 0.33 | 0.28 | k=1 mixed (4, 8, 1) | 3.44× |
+| Llama 3.1 8B kv_proj | (128,2048,4096) | 0.48 | 0.16 | 0.17 | 0.17 | k=1 mixed (4, 8, 1) | 2.93× |
+| Llama 3.1 8B gate/up_proj | (128,14336,4096) | 3.11 | 0.98 | 1.02 | 0.93 | k>1+kf (4, 4, 2) | 3.33× |
+| Llama 3.1 8B down_proj | (128,4096,14336) | 3.08 | 1.25 | 1.27 | 1.15 | k>1+kf (1, 2, 16) | 2.69× |
+| Llama 3.1 70B q_proj/o_proj | (128,8192,8192) | 3.59 | 0.99 | 1.05 | 1.02 | k=1 mixed (4, 8, 1) | 3.64× |
+| Llama 3.1 70B kv_proj | (128,2048,8192) | 0.92 | 0.27 | 0.32 | 0.27 | k=1 mixed (4, 8, 1) | 3.42× |
+| Llama 3.1 70B gate/up_proj | (128,28672,8192) | — | 3.78 | 3.92 | 3.56 | k>1+kf (2, 4, 4) | 1.10× |
+| Llama 3.1 70B down_proj | (128,8192,28672) | — | 5.00 | 5.82 | 5.40 | k=1 mixed (16, 2, 1) | 1.16× |
+| Llama 3.1 405B q_proj/o_proj | (128,16384,16384) | — | 3.96 | 4.02 | 3.93 | k>1+kf (4, 4, 2) | 1.02× |
+| Llama 3.1 405B kv_proj | (128,2048,16384) | 1.81 | 0.51 | 0.55 | 0.53 | k=1 mixed (4, 8, 1) | 3.54× |
+| Llama 3.1 405B gate/up_proj | (128,53248,16384) | — | 12.03 | 16.22 | 12.43 | k=1 mixed (4, 8, 1) | 1.35× |
+| Llama 3.1 405B down_proj | (128,16384,53248) | — | 12.35 | 16.15 | 12.29 | k>1+kf (2, 8, 2) | 1.31× |
+| Llama 3.2 1B q_proj/o_proj | (128,2048,2048) | 0.26 | 0.10 | 0.12 | 0.10 | k=1 mixed (4, 8, 1) | 2.55× |
+| Llama 3.2 1B kv_proj | (128,1024,2048) | 0.15 | 0.07 | 0.08 | 0.07 | k=1 mixed (4, 8, 1) | 2.05× |
+| Llama 3.2 1B gate/up_proj | (128,8192,2048) | 0.93 | 0.29 | 0.34 | 0.30 | k=1 mixed (4, 8, 1) | 3.21× |
+| Llama 3.2 3B q_proj/o_proj | (128,3072,3072) | 0.53 | 0.17 | 0.20 | 0.18 | k=1 mixed (4, 8, 1) | 3.10× |
+| Llama 3.2 3B kv_proj | (128,2048,3072) | 0.37 | 0.13 | 0.15 | 0.14 | k=1 mixed (4, 8, 1) | 2.88× |
+| Llama 3.2 3B gate/up_proj | (128,8192,3072) | 1.35 | 0.41 | 0.45 | 0.43 | k=1 mixed (4, 8, 1) | 3.27× |
+| Llama 3.2 3B down_proj | (128,3072,8192) | 1.37 | 0.40 | 0.45 | 0.39 | k>1+kf (2, 8, 2) | 3.47× |
+| Granite 3 8B gate/up_proj | (128,12800,4096) | 2.80 | 0.79 | 0.93 | 0.81 | k=1 mixed (4, 8, 1) | 3.55× |
+| Granite 3 8B down_proj | (128,4096,12800) | 2.72 | 0.75 | 0.91 | 0.79 | k=1 mixed (4, 8, 1) | 3.64× |
+| DeepSeek V3 q_a_proj | (128,1536,7168) | 0.60 | 0.27 | 0.23 | 0.23 | k>1+id (2, 2, 8) | 2.64× |
+| DeepSeek V3 q_b_proj | (128,24576,1536) | 2.06 | 0.63 | 0.75 | 0.65 | k=1 mixed (4, 8, 1) | 3.29× |
+| DeepSeek V3 kv_a_proj | (128,576,7168) | 0.22 | 0.22 | 0.12 | 0.12 | k>1+kf (2, 1, 16) | 1.91× |
+| DeepSeek V3 kv_b_proj | (128,32768,512) | 0.95 | 0.37 | 0.42 | 0.40 | k=1 mixed (4, 8, 1) | 2.57× |
+| DeepSeek V3 o_proj | (128,7168,16384) | 6.27 | 1.99 | 1.87 | 1.76 | k>1+kf (4, 4, 2) | 3.57× |
+| DeepSeek V3 gate/up | (128,18432,7168) | 6.94 | 2.89 | 2.24 | 2.27 | k>1+id (2, 2, 8) | 3.09× |
+| DeepSeek V3 down_proj | (128,7168,18432) | 6.80 | 2.25 | 2.12 | 1.95 | k>1+kf (4, 4, 2) | 3.49× |
+
+## Winner category histogram
+
+  pure-M      :   0 / 28  
+  k=1 mixed   :  17 / 28  #################
+  k>1+id      :   2 / 28  ##
+  k>1+kf      :   9 / 28  #########
+
+## Speedup spread (winner vs pure-M baseline)
+
+  shapes: 28
+  min:     1.02×
+  median:  3.10×
+  geomean: 2.58×
+  max:     3.64×
+
+  histogram:
+    [1.0× – 1.5×):   5  #####
+    [1.5× – 2.0×):   1  #
+    [2.0× – 3.0×):   7  #######
+    [3.0× – 5.0×):  15  ###############
+    [5.0× – 100×):   0  
+
+## Where is k_fast STRICTLY essential?
+
+  Llama 3.1 8B gate/up_proj (128,14336,4096): kf 0.93ms vs id 1.02ms (1.09×)
+  Llama 3.1 8B down_proj (128,4096,14336): kf 1.15ms vs id 1.27ms (1.11×)
+  Llama 3.1 70B gate/up_proj (128,28672,8192): kf 3.56ms vs id 3.92ms (1.10×)
+  Llama 3.1 405B down_proj (128,16384,53248): kf 12.29ms vs id 16.15ms (1.31×)
+  Llama 3.2 3B down_proj (128,3072,8192): kf 0.39ms vs id 0.45ms (1.14×)
+  DeepSeek V3 o_proj (128,7168,16384): kf 1.76ms vs id 1.87ms (1.07×)
+  DeepSeek V3 down_proj (128,7168,18432): kf 1.95ms vs id 2.12ms (1.09×)
+
+  k_fast strictly essential on 7/28 shapes.
+===== SHARD M=128 end   13:18:15 rc=0 =====
+===== ALL SHARDS DONE 13:18:45 =====
