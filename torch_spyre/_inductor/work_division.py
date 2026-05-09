@@ -712,9 +712,7 @@ def divide_reduction_op(
     # FIXME: For non-matmul reduction, excluding reduction dimensions from work
     #        division candidates temporarily till known backend issue is fixed
     #        https://github.com/torch-spyre/torch-spyre/issues/1304
-    pass_fn(
-        op, args, max_cores, exclude_reduction=not is_matmul, is_matmul=is_matmul
-    )
+    pass_fn(op, args, max_cores, exclude_reduction=not is_matmul, is_matmul=is_matmul)
 
 
 def _validate_max_cores() -> int:
