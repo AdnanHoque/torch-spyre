@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,6 +51,13 @@ sys.stdout.reconfigure(line_buffering=True)
 ELEMS_PER_STICK = 64
 MEASURE_SCRIPT = str(Path(__file__).resolve().parent / "diag_kfast_essential_measure.py")
 TIMEOUT_S = 90
+
+# Cooldown between subprocesses to avoid wedging the device runtime.
+# Without these, the device daemon stalls after a few rapid-fire launches.
+PER_MEASUREMENT_SLEEP_S = 0.5
+POST_ERR_SLEEP_S = 5.0
+PER_SHAPE_SLEEP_S = 2.0
+STARTUP_SLEEP_S = 5.0
 
 # Decode-regime batch sizes.
 M_VALUES = (1, 32, 128)
@@ -182,14 +190,19 @@ def _measure(M, N, K, split, kfast):
             capture_output=True, text=True, timeout=TIMEOUT_S,
         )
     except subprocess.TimeoutExpired:
+        time.sleep(POST_ERR_SLEEP_S)
         return None
+    time.sleep(PER_MEASUREMENT_SLEEP_S)
     if result.returncode != 0:
+        time.sleep(POST_ERR_SLEEP_S)
         return None
     lines = [l for l in result.stdout.strip().splitlines() if l.strip()]
     if not lines:
+        time.sleep(POST_ERR_SLEEP_S)
         return None
     last = lines[-1].strip()
     if last.startswith("ERR:"):
+        time.sleep(POST_ERR_SLEEP_S)
         return None
     try:
         return float(last)
@@ -234,7 +247,13 @@ def main() -> int:
     summary = []
     consec_err = 0
     BAIL_AFTER_CONSEC_ERR = 8
+
+    # Settle the device runtime before kicking off the first measurement.
+    print(f"# warmup pause {STARTUP_SLEEP_S}s before first shape", flush=True)
+    time.sleep(STARTUP_SLEEP_S)
+
     for (label, M, N, K) in shapes:
+        time.sleep(PER_SHAPE_SLEEP_S)
         pm = _measure(M, N, K, (32, 1, 1), False)
         k1 = _best_in_category(M, N, K, K1_CANDIDATES, False)
         kid = _best_in_category(M, N, K, KGT1_CANDIDATES, False)
