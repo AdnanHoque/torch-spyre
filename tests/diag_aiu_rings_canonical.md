@@ -673,18 +673,6 @@ choices that stay within `M_per × N_per × 4 ≤ 2 MB` even when
 chain-length math says a longer chain would be cheaper on
 ring-distance alone.
 
-#### 6.2.1 Reconciling with the original 5.6 ms/hop number
-
-The original Probe 2 (May 2026) reported **5.6 ms/hop** on DSv3
-o\_proj M=2048 — 15× higher than today's reverification of
-0.37 ms/hop on the same shape. The chain-length structure (linear in
-distance) is preserved but the absolute magnitude has dropped
-substantially. Most likely cause: codegen improvements in the merged
-upstream commits since May 2026. The pure-BW-limited interpretation
-of the new measurements is consistent with a fix that removed an
-arbiter or scheduling overhead from the SFP path. We have not done
-a bisect.
-
 ### 6.3 SFP ring — chain-length cost
 
 Methodology: Probe 6 reverification (`/tmp/probe6_verify.py`) varies
