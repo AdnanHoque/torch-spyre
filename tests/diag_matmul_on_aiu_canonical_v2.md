@@ -272,38 +272,33 @@ as follows:
   `(N, K, M)` triple.
 
 - Because PSUM is not PT-resident and is touched per M-inner
-  iteration, an LX-level buffer holds the per-(N-outer-iteration)
-  PSUM working set across the K-middle loop. KG3 sets
-  `tOut = doubleBuf` (PerfAnalysis.cpp:620) — the PSUM buffer is
-  double-buffered between LX and the PE link. **The LX residency
-  requirement therefore lands on this buffer**, and the §4.1
-  predicate is the right size for it: `M_per × N_per × 4` bytes
-  for the per-corelet PSUM working set, which must fit in
-  `LX_per_core` for accumulation to stay on-chip across K.
+  iteration, **an LX-level double buffer holds the per-(N-outer)
+  PSUM working set across the K-middle loop.** KG3 sets
+  `tOut = doubleBuf` with `dtMemId["tOut"] = 1`
+  ([`PerfAnalysis.cpp:620,632`](../../deeptools/dm/PerfAnalysis.cpp#L620-L632))
+  — memId 1 is the LX tier, so PSUM ping-pongs between two LX
+  buffers (one being filled by PE output, one feeding the next
+  K-iter's accumulation step) for the entire K-middle loop's
+  duration.
 
-> **Caveat (under investigation, 2026-05-10).** A previous version
-> of this section described the spill as a chunked PSUM
-> load/process/store loop *inside* an explicit K-outer software
-> loop. That story does not match the actual deeptools loop nest
-> (N-outer / K-middle / M-inner) and has been retracted. The size
-> of the LX residency requirement and the empirical
-> "~17 ms / LX-overage factor" slope are still real (Probe 3); the
-> precise micro-mechanism by which PSUM > LX inflates per-K cost is
-> being re-derived from the .smc template. See §17 for the open
-> investigation.
+The §4.1 fit predicate `M_per × N_per × 4 ≤ LX_per_core` lands on
+this LX buffer. When it doesn't fit, the buffer must spill: PSUM
+is evicted and re-fetched from HBM each K-middle iteration, which
+is what the empirical ~17 ms-per-overage-factor slope in §4.1.1
+captures (one extra HMI round-trip per `ceil(C_psum / LX)` overage).
 
-What remains solid:
+What's verified:
 
 1. **PSUM is the binding LX tenant.** A and B both stream — they
    can be evicted and re-read from HBM. PSUM accumulates across K
    and has no canonical HBM source until the K-loop completes
    (§4.1.1).
 2. **The fit predicate** `M_per × N_per × 4 ≤ LX_per_core` matches
-   the catastrophe boundary observed in Probe 3.
-3. **The catastrophe slope** scales with `ceil(C_psum / LX)`,
-   suggesting per-overage-factor extra HMI round-trips on the PSUM
-   working set inside the K-middle loop. The exact ordering of
-   those round-trips is what's being re-traced.
+   the catastrophe boundary observed in Probe 3 and is grounded in
+   the `tOut = doubleBuf, dtMemId = 1 (LX)` setting.
+3. **The catastrophe slope** scales with `ceil(C_psum / LX)` —
+   one extra HMI round-trip set per overage factor when the LX
+   double-buffer overflows.
 
 #### 4.1.3a OS1 avoids the catastrophe — see §9.1
 
@@ -1522,60 +1517,86 @@ Caveats:
   load instructions plus the PT contract; the actual microcode has
   more pipelining and double-buffering than this sketch shows.
 
-#### 9.1.2 OS1 — output-stationary (PE-level confirmed; loop nest not yet verified)
+#### 9.1.2 OS1 — N-outer, M-middle, K-inner (grounded in deeptools)
 
-What's verified from the code: at the PE link level
-(`deeptools/dm/PerfAnalysis.cpp:652-655`), OS1 sets
-`pOut = blockLoad`, `pInp = streaming`, `pKer = streaming`. PSUM
-sits in the PT-array register file across whatever inner loop
-accumulates over K; A and B both stream past it. That gives OS1
-its mechanical immunity to §4.1.1's cliff: there is no
-M_per × N_per × 4 LX residency requirement because PSUM never lives
-in LX in bulk.
+At the PE link level
+([`PerfAnalysis.cpp:652-655`](../../deeptools/dm/PerfAnalysis.cpp#L652-L655)):
 
-Pseudocode at the conceptual level (the OS1 kernel template's `.smc`
-loop counter order has not yet been read back):
+```cpp
+} else if (params->Pdataflow == "OS1") {
+    params->dtType["pInp"] = "streaming";
+    params->dtType["pOut"] = "blockLoad";   // ← PSUM in PT registers
+    params->dtType["pKer"] = "streaming";
+```
+
+PSUM sits in the PT-array register file; A and B both stream past
+it. That's OS1's mechanical immunity to §4.1.1: no M_per × N_per × 4
+LX residency requirement because the accumulator never lives in LX
+in bulk.
+
+The loop nest is verified for the **conv2d** OS1 fp16 forward path
+in
+[`deeptools/dvs/libtemplates/conv2d_os1_fp16_fwd.smc`](../../deeptools/dvs/libtemplates/conv2d_os1_fp16_fwd.smc).
+LX-unit corelet-level loop counters at lines 33-65, outermost →
+innermost:
+
+```text
+LX_MVLOOPCNT imm=Cout_Tout_cl   // N-OUTER  (line 33)
+LX_MVLOOPCNT imm=Cmb_Tmb        // M-MIDDLE (line 38)
+LX_MVLOOPCNT imm=Ci_Ti_cl       // (conv kernel-i, degenerate to 1 for matmul)
+LX_MVLOOPCNT imm=ceil_Cj_Tj_cl  // (conv kernel-j, degenerate to 1 for matmul)
+LX_MVLOOPCNT imm=Cki_           // K-INNER  (line 49)
+LX_LDSTIU ...consumertag=sfp    // ← streaming A into SFP (line 58)
+LX_MVLOOPCNT imm=Ckj_           // (kernel j inner, degenerate)
+LX_LDSTIU ...consumertag=sfp    // ← streaming B (kernel) into SFP (line 66)
+```
+
+Stripped to the meaningful matmul axes (Ci, Cj, Cki, Ckj kernel
+spatial dims collapse to 1 for matmul): **N-outer, M-middle,
+K-inner**. PSUM is allocated once per `(Cout, Cmb)` pair and
+remains PT-resident across the K-inner loop; A and B both stream
+through SFP into the PT array each K-iteration.
+
+In §9-style syntax:
 
 ```python
-# OS1 — conceptual sketch. Not yet verified against the OS1 .smc.
-# The PE-level invariant — pOut = blockLoad, pKer/pInp = streaming —
-# is what is verified.
-for mb in range(M_per_core // 8):                     # M-OUTER (presumed)
-    for nb in range(N_per_core // 8):                 # N-MIDDLE (presumed)
-        psum = pt.zeros(8, 8)                          # blockLoad'd into PT regs
+# OS1, grounded in conv2d_os1_fp16_fwd.smc:33-65 with conv-only
+# loops collapsed.
+for nb in range(N_per_corelet // 8):                   # N-OUTER (Cout_Tout_cl)
+    for mb in range(M_per_corelet // 8):               # M-MIDDLE (Cmb_Tmb)
+        psum = pt.zeros(8, 8)                           # blockLoad'd into PT regs
 
-        for kb in range(K_per_core // 8):              # K-INNER (presumed)
-            a = lx.load(A_tile[mb, kb])
-            b = lx.load(B_tile[kb, nb])
-            psum = pt.outer_product(a, b, psum)
+        for kb in range(K_per_corelet // 8):            # K-INNER (Cki_)
+            a = lx.stream(A_tile[mb, kb])               # streamed → SFP → PT
+            b = lx.stream(B_tile[kb, nb])               # streamed → SFP → PT
+            psum = pt.outer_product(a, b, psum)         # PSUM stays in PT regs
 
         if k > 1:
             psum = sfp_ring_allreduce(psum, cohort)
 
-        lx.store(C_tile[mb, nb], psum)
+        lx.store(C_tile[mb, nb], psum)                  # one drain per output tile
 ```
 
-Trade-offs vs. KG3 from the PE-level dataflow:
+Trade-offs vs. KG3, now both grounded:
 
 - **PSUM**: PT-resident in OS1 vs. LX double-buffered in KG3 → OS1
   cannot trip §4.1.
-- **B**: streams past the PT array in OS1 vs. blockLoad'd into PT
-  registers in KG3 → KG3 saves one LX→PT transfer per inner-loop
-  step at the cost of the M-N-grid PSUM working set in LX.
-- **Dataflow link** (`pInp/pOut/pKer`) directions also differ
+- **A and B**: both stream in OS1 vs. B blockLoad'd into PT in
+  KG3 → KG3 saves one LX→PT transfer per inner step at the cost of
+  the LX PSUM working set.
+- **Dataflow link directions** (`pInp/pOut/pKer`) differ
   (PerfAnalysis.cpp:677-679 vs. 640-642), which constrains which
   axes can split which dimensions.
 
 Caveats:
 
-- The loop nest above is the textbook OS1 layout, not a verified
-  match to deeptools' OS1 kernel template. The actual `.smc` may
-  differ. Treat it as the ordering implied by `pOut = blockLoad`
-  rather than as a literal transcription.
-- For inference fp16 / fp8 / int8 / int4 dense matmul on AIU, OS1
-  rarely activates (§8.2). The catastrophe regime in §4.1.1
-  represents work the planner could in principle redirect to OS1
-  but currently does not.
+- The verification above is from the **conv2d** OS1 template. There
+  is no `batchmatmul_os1*.smc` in the deeptools tree — matmul
+  doesn't have a dedicated OS1 path. For inference fp16 / fp8 /
+  int8 / int4 dense matmul on AIU, OS1 rarely activates (§8.2);
+  when it does, it's via the conv2d OS1 path.
+- The catastrophe regime in §4.1.1 represents work the planner
+  could in principle redirect to OS1 but currently does not.
 
 #### 9.1.3 Side-by-side trade-off
 
