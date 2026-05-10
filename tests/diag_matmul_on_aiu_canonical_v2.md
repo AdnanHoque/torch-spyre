@@ -1450,20 +1450,24 @@ AIU:
 The §9 nest above is the OS1-style form. Side-by-side in the same
 syntax:
 
-#### 9.1.1 KG3 — K-outer, M-N-inner
+#### 9.1.1 KG3 — K-outer, M-middle, N-inner
+
+The "weight-stationary" aspect lives in the **M-middle** loop: B
+sits in LX across it while A turns over per `mb`.
 
 ```python
 # Per core. The whole PSUM grid is LX-resident across the K-loop.
 psum = zeros(M_per_core // 8, N_per_core // 8, 8, 8)
 
 for kb in range(K_per_core // 8):                     # K-OUTER
-    a_block = lx.load(A_tile[:, kb])                   # M_per × 8
-    b_block = lx.load(B_tile[kb, :])                   # 8 × N_per
+    b_strip = lx.load(B_tile[kb, :])                   # 8 × N_per — loaded ONCE per kb
 
-    for mb in range(M_per_core // 8):                  # M-N-INNER
-        for nb in range(N_per_core // 8):
+    for mb in range(M_per_core // 8):                  # M-MIDDLE — A streams past stationary B
+        a_strip = lx.load(A_tile[mb, kb])              # 8 × 8 — turns over every mb
+
+        for nb in range(N_per_core // 8):              # N-INNER — sweeps b_strip
             psum[mb, nb] = pt.outer_product(
-                a_block[mb], b_block[nb], psum[mb, nb])
+                a_strip, b_strip[nb], psum[mb, nb])
 
 # After the K-loop:
 if k > 1:
@@ -1474,12 +1478,28 @@ for mb in range(M_per_core // 8):                     # one-shot drain
         lx.store(C_tile[mb, nb], psum[mb, nb])
 ```
 
-LX PSUM working set: `M_per × N_per × 4` bytes. Must fit in
-`LX_per_core` or §4.1's catastrophe kicks in. Within one
-K-iteration, `b_block` is reused across all `(mb, nb)` — that's
-where "weight-stationary" earns its keep: each B byte lands in LX
-once and feeds PT `M_per_core / 8` times before being overwritten
-by the next K-block.
+The asymmetry between A and B is now visible in the load counts:
+
+| operand | load granularity        | loads per kernel              | LX residency span                     |
+|---------|-------------------------|-------------------------------|---------------------------------------|
+| B       | `8 × N_per` strip       | `K_per_core / 8`               | one full M-middle loop (`M_per/8` mb) |
+| A       | `8 × 8` tile            | `K_per_core / 8 × M_per_core / 8` | one mb iteration only             |
+
+Total HMI bytes are roughly symmetric (full A once, full B once),
+but B is brought in with **fewer, bigger** loads and stays
+LX-resident `M_per/8` times longer than A. That is what
+"weight-stationary" means at this loop level: each B byte feeds PT
+`M_per/8` times before it is overwritten by the next K-block; each
+A byte feeds PT `N_per/8` times before turning over.
+
+LX residency working set at any instant:
+
+- `psum` grid: `M_per × N_per × 4` bytes ← must fit (§4.1)
+- `b_strip`:   `8 × N_per × 2` bytes
+- `a_strip`:   `8 × 8 × 2 = 128` bytes
+
+The PSUM grid dominates by far, which is why §4.1's fit predicate
+focuses on it.
 
 #### 9.1.2 OS1 — M-N-outer, K-inner
 
