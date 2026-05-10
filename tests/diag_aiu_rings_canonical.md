@@ -376,10 +376,10 @@ instead of 4× on one.
 ```mermaid
 graph TB
     HBM[HBM] --> RIU[RIU BiRing]
-    RIU -- A rows 0-1 multicast<br/>2 listeners --> C0[core 0<br/>(0,0)]
-    RIU -- A rows 0-1 multicast<br/>2 listeners --> C1[core 1<br/>(0,1)]
-    RIU -- A rows 2-3 multicast<br/>2 listeners --> C2[core 2<br/>(1,0)]
-    RIU -- A rows 2-3 multicast<br/>2 listeners --> C3[core 3<br/>(1,1)]
+    RIU -- A rows 0-1 multicast<br/>2 listeners --> C0["core 0<br/>m=0, n=0"]
+    RIU -- A rows 0-1 multicast<br/>2 listeners --> C1["core 1<br/>m=0, n=1"]
+    RIU -- A rows 2-3 multicast<br/>2 listeners --> C2["core 2<br/>m=1, n=0"]
+    RIU -- A rows 2-3 multicast<br/>2 listeners --> C3["core 3<br/>m=1, n=1"]
     RIU -- B cols 0-1 multicast --> C0
     RIU -- B cols 0-1 multicast --> C2
     RIU -- B cols 2-3 multicast --> C1
@@ -724,14 +724,11 @@ Probe 2's 0.37-1.09 ms/hop slopes, accounting for both the changing
 per-cohort payload (shrinks as k grows because M\_per × N\_per shrinks)
 and the changing number of hops (grows linearly with k).
 
-### 6.4 Granite per-hop calibration — distance is a step function, not linear
+### 6.4 Granite per-hop walls — distance sweep at production shapes
 
-The previous Probe 2 reverification on DSv3 o\_proj M=2048 (§6.2) found
-a clean linear-in-distance ring cost. A follow-up Granite probe
-(`tests/diag_ring_granite_perhop_probe.py`) discovered the linearity
-is shape-dependent: on Granite 8B linear layers at split (1, 16, 2),
-distance behaves as a **step function** with the transition between
-distance 8 and distance 16.
+A Granite-family probe (`tests/diag_ring_granite_perhop_probe.py`)
+sweeps emission distance at split (1, 16, 2) across five Granite 8B
+linear-layer shapes.
 
 Per-shape walls:
 
@@ -743,27 +740,18 @@ Per-shape walls:
 | Granite 8B down\_proj M=128 | 128 KB | 1.00 | 0.98 | **1.85** |
 | Granite 8B q\_proj M=2048 | 2 MB | 4.90 | 4.87 | **9.33** |
 
-Distance 1 ≈ distance 8; distance 16 jumps. Naïve linear regression
-averages the step over the (1, 8, 16) range — it gives
-`slope ≈ 8.3 µs + payload × 0.12 ms/MB` and an effective BW of
-8.1 GB/s, but that's an **artifact of fitting a step-function with a
-line**.
+Two factual observations from the table:
 
-Two important observations:
+1. **Payload threshold.** kv\_proj M=128 (64 KB cohort payload)
+   shows essentially no distance dependence; above ~64-128 KB the
+   distance=16 wall jumps. The threshold is localised by Probe K2
+   in §6.7.
+2. **K-iteration scaling.** q\_proj M=128 and down\_proj M=128 have
+   the same 128 KB cohort payload but different K (4096 vs 12800),
+   and down\_proj's distance=16 increment is ~3× q\_proj's. This
+   observation is formalised as the K-multiplier in §6.6.
 
-1. **Payload threshold for any step at all.** kv\_proj M=128 (64 KB
-   cohort payload) shows zero step. Above ~64-128 KB, the step
-   appears and grows with payload. This may correspond to a hardware
-   buffer (64 KB matches XRF capacity per corelet, possibly
-   coincidental) or a backend-side queue depth.
-2. **Step magnitude scales with K-iteration count, not just payload.**
-   q\_proj M=128 and down\_proj M=128 have the same 128 KB cohort
-   payload but down\_proj has K=12800 vs q\_proj's K=4096 — and
-   down\_proj's step (0.85 ms) is 3× q\_proj's (0.28 ms). The step
-   accumulates across (K/8) PT-batches that each drain PSUM through
-   the ring.
-
-### 6.5 Theoretical model: ring-segment contention drives the kf speedup
+### 6.5 Mechanism: ring-segment contention drives the kf speedup
 
 The mechanism producing the step at distance 16 is **ring-segment
 contention** between concurrent K-cohorts.
@@ -798,57 +786,9 @@ graph TB
     style KS3 fill:#a7f3d0
 ```
 
-The first-principles model:
+The closed-form fit for this mechanism is in §6.6.
 
-```
-ring_cost = (cohort_payload × n_cohorts × (k-1) × K_batches × distance)
-            / (effective_ring_BW × contention_factor⁻¹)
-
-where:
-  cohort_payload = M_per × N_per × 4 (fp32 PSUM)
-  n_cohorts      = n_split (parallel cohorts running)
-  k-1            = ring hops per cohort chain
-  K_batches      = K / 8 (PT-batch K-direction count)
-  distance       = K-collaborator ring hop count
-  effective_ring_BW ≈ 70.4 GB/s (two SFP UniRings combined)
-  contention_factor:
-    distance ≤ 8 on 32-core ring: ~1× (segments mostly disjoint)
-    distance = 16:                ~9× (busiest-segment serialization)
-```
-
-### 6.6 Model vs measurement — predicted vs measured kf savings
-
-The original §6.5 contention model captures the right mechanism
-(segment-sharing between K-cohorts) but had two missing terms:
-
-1. **K is a multiplicative factor in the visible step** that the
-   first-principles formula did not isolate. Probe K1 (§6.8) shows
-   step is linearly proportional to K at fixed payload — the
-   `K_batches = K/8` factor in §6.5 captured part of this, but the
-   global magnitude needed re-fitting.
-2. **A payload threshold below ~96 KB** (Probe K2, §6.8) eliminates
-   the step entirely; the step does not scale linearly down to zero
-   payload.
-
-Re-fit on the Granite 8B q\_proj M=128 K-sweep (Probe K1) gives a
-two-parameter form keyed on `K` and a piecewise `payload_factor` —
-see §6.7. The refined model fits 8/9 held-out shapes (Granite +
-Llama 3.1 8B / 70B / 405B linear-layer shapes) to within 30%, and
-7/9 to within 10%, on the validation set in §6.7.
-
-Summary of refined-model accuracy on the 9-shape held-out set
-(Granite + Llama linear layers, full table in §6.7):
-
-- geomean(measured/predicted) = 0.79×
-- range = [0.11× .. 1.06×]
-- 8/9 within 30%; 7/9 within 10%
-- single outlier: L3.1 70B down\_proj M=128 (K=28672), where
-  the kernel is HMI-bound (wall ≈ 8 ms = ~10× compute peak) and
-  ring transit overlaps with HMI loads; ring is no longer the
-  critical path. The model assumes ring is critical, so it
-  over-predicts step by ~9× in this regime.
-
-### 6.7 Calibrated model
+### 6.6 Calibrated model
 
 The refined first-principles model:
 
@@ -860,12 +800,12 @@ where payload_factor(payload) =
     payload / 128 KB     if payload ≥ 96 KB     (linear above)
 ```
 
-Calibrated on Granite 8B q\_proj M=128 K-sweep (Probe K1, §6.8) at
+Calibrated on Granite 8B q\_proj M=128 K-sweep (Probe K1, §6.7) at
 split (1, 16, 2) with bichain emission. The constant `0.068 µs/K`
 is the empirical slope from the K-sweep linear fit; the
 `payload / 128 KB` factor assumes the 128 KB calibration shape as
 the unit and is supported by Probe K2's threshold + above-threshold
-linear behaviour (§6.8).
+linear behaviour (§6.7).
 
 Validation against the held-out set (13 measured shapes, 9 above
 the threshold; the 4 sub-threshold rows collapse to the trivial
@@ -895,7 +835,7 @@ pipeline). When ring transit overlaps with the HMI-load critical
 path, the ring is no longer visible at the kernel boundary and
 the measured step collapses well below the model prediction. The
 refined model assumes ring is the critical path; the regime where
-HMI dominates needs a second-order overlap correction (§11.x).
+HMI dominates needs a second-order overlap correction (§11.11).
 
 This is the first closed-form model on the doc that **predicts kf
 speedup magnitude on a held-out shape from first principles**, and
@@ -904,13 +844,13 @@ it gets within 10% on the typical decode-batched matmul shapes
 at M=128 — the shapes that decide whether the heuristic in
 `work_division.py:601-690` actually wins). The remaining gap is a
 single regime — compute-overlap when HMI dominates the kernel —
-captured as §11.x.
+captured as §11.11.
 
-### 6.8 Probes that informed the refined model
+### 6.7 Probes that informed the refined model
 
-The refined model in §6.7 was built from four targeted probes that
-each isolate one term that §6.5's first-principles formula either
-collapsed or missed.
+The refined model in §6.6 was built from four targeted probes that
+each isolate one term that §6.5's mechanism description left
+qualitative.
 
 - **K1 — kf K-sweep at fixed payload.** Shape family
   `(128, 4096, K)` at split `(1, 16, 2)` with bichain + kf. Six
@@ -919,7 +859,7 @@ collapsed or missed.
   proportional to K**, `step ≈ 1.28 µs + K × 0.068 µs/K` with
   R² ≈ 1.0. The K-independent intercept (~1.28 µs) is small
   relative to the K-scaled term at production K values, so the
-  refined model in §6.7 drops it. Probe and raw output:
+  refined model in §6.6 drops it. Probe and raw output:
   - `tests/diag_ring_kf_k_sweep_probe.py`
   - `tests/diag_ring_kf_k_sweep_results.txt`
 - **K2 — kf N-sweep at fixed M, K.** Shape family
@@ -927,7 +867,7 @@ collapsed or missed.
   cohort\_payload from 32 KB to 256 KB. Result: a sharp threshold
   **between 64 KB and 96 KB** below which the step is essentially
   zero, and above which step grows roughly linearly with payload.
-  This is the basis for the piecewise `payload_factor` in §6.7
+  This is the basis for the piecewise `payload_factor` in §6.6
   and explains why Granite 8B kv\_proj M=128 (64 KB) shows zero
   step while q\_proj M=128 (128 KB) shows the full 0.28 ms step.
   Probe and raw output:
@@ -960,9 +900,9 @@ collapsed or missed.
 
 Together these four probes turned §6.5's qualitative
 "contention drives kf speedup" observation into a closed-form
-predictor that fits 7/9 held-out shapes within 10% (§6.7).
+predictor that fits 7/9 held-out shapes within 10% (§6.6).
 
-### 6.9 What we have not measured directly
+### 6.8 What we have not measured directly
 
 - RIURequest ring at all (control-rate effects).
 - Cross-core LX-LX hop cost separately from operand multicast.
@@ -971,7 +911,7 @@ predictor that fits 7/9 held-out shapes within 10% (§6.7).
   (LX port saturation).
 
 The HBM-bus saturation curve was previously listed here as
-unmeasured; it is now resolved by §6.8's HBM saturation probe and
+unmeasured; it is now resolved by §6.7's HBM saturation probe and
 folded into the operand-A multicast story in §6.5 / §7.4.
 
 The remaining items are listed as open questions in §11.
@@ -1164,175 +1104,33 @@ per hop. Measured 33.1 µs/hop is 2.7× over peak. This is consistent
 with HMI being concurrently active on the ring during the probe —
 the ring isn't dedicated to the broadcast.
 
-## 9. Theoretical k\_fast benefit and why empirical results don't match cleanly
+## 9. Practical guidance for kf in decode regimes
 
-§6.5-§6.7 calibrated a contention model that predicts the kf step
-to within ~2.5×. Cross-family validation (Llama 3.1 8B / 70B / 405B,
-§6.7 note) shows the per-shape ratio actually spans 0.36×-6.18× —
-big enough that the model is qualitatively right but quantitatively
-unreliable. This section unpacks **why**: what the idealised
-benefit would be, where the variance comes from, and what we'd
-need to nail it down.
-
-### 9.1 Idealised theoretical benefit
-
-Under `(1, n_split, k_split)` K-split with k\_fast emission:
-
-- Each K-cohort has `k_split` members.
-- Per-output-tile, the cohort runs a chain of `(k_split − 1)` ring
-  transfers.
-- **Identity emission:** each transfer traverses `n_split` ring
-  segments (cohort members are `n_split` core-IDs apart on the
-  physical ring).
-- **k\_fast emission:** each transfer traverses **1** ring segment
-  (k\_fast permutation places cohort members adjacent).
-
-If ring transit is BW-limited and uncontended, the wall savings is:
-
-```
-T_savings ≈ output_tiles_per_cohort × n_cohorts × (k_split − 1)
-            × per_tile_bytes × (n_split − 1)
-            / SFP_BW
-
-per_tile_bytes = M_PT × N_PT × sizeof(fp32) = 8 × 8 × 4 = 256 B
-SFP_BW         = 70.4 GB/s (CW + CCW under bichain)
-```
-
-Two worked examples:
-
-**Granite 8B q\_proj M=128 at `(1, 16, 2)+kf`:**
-
-```
-output_tiles_per_cohort = (M / M_PT) × (N_per / N_PT) = 16 × 32 = 512
-n_cohorts               = 16
-k_split − 1             = 1
-per_tile_bytes          = 256
-n_split − 1             = 15
-T_savings ≈ 512 × 16 × 1 × 256 × 15 / 70.4 GB/s ≈ 446 µs
-```
-
-Measured kf savings ≈ **280 µs**. Theory is **1.6× higher** than
-observed.
-
-**L3.1 405B down\_proj M=128 at `(1, 16, 2)+kf`:**
-
-```
-output_tiles_per_cohort = (M / M_PT) × (N_per / N_PT) = 16 × 128 = 2048
-n_cohorts               = 16
-k_split − 1             = 1
-per_tile_bytes          = 256
-n_split − 1             = 15
-T_savings ≈ 2048 × 16 × 1 × 256 × 15 / 70.4 GB/s ≈ 1.79 ms
-```
-
-Measured kf savings ≈ **14.7 ms**. Theory is **8× lower** than
-observed.
-
-So the simple BW model is off **in both directions**, by very
-different amounts. The mechanism is real, but its translation into
-wall time is not a single linear function of payload × hops.
-
-### 9.2 Why some shapes get more kf speedup than others
-
-The empirical variance has at least five sources:
-
-1. **Payload threshold (~64 KB cohort payload).** Below this,
-   k\_fast gives essentially zero benefit — likely a hardware
-   buffer absorbs small transfers regardless of distance (§6.4
-   kv\_proj at 64 KB shows zero step). Above the threshold the step
-   appears and grows with payload. Subnotionally this matches the
-   per-corelet XRF capacity (64 KB) but we have not isolated the
-   mechanism.
-
-2. **Ring transit must occupy the critical path.** If compute is
-   long enough to hide ring transit, kf saves nothing measurable.
-   If compute is short or memory-bound, ring transit lands on the
-   critical path and the kf step becomes visible. Compute-rich
-   shapes (large K, modest M·N) tend to hide ring; compute-light
-   shapes expose it.
-
-3. **Cohort count and n\_split structure amplify contention.** At
-   `n_split = 16` with identity distance 16, the busiest ring
-   segment is shared by ~9 cohorts — contention amplifies the
-   per-hop cost beyond pure transit. Lower `n_split` or shorter
-   distance means less contention; the multiplier on kf benefit is
-   nonlinear in `n_split`.
-
-4. **Kernel scheduling.** The kernel template can interleave ring
-   transfers with compute to hide latency. How well it does this
-   varies across shapes (PT-batch count, K-iteration structure,
-   SFP postlude scheduling). Two shapes with identical payload and
-   distance can have different effective overlap.
-
-5. **Multi-pass kernels at huge K or N.** When B exceeds the
-   single-pass capacity (e.g. L3.1 405B down\_proj's 1.7 GB B), the
-   kernel makes multiple passes and each pass has its own PSUM
-   reductions. kf savings multiply with pass count — which is why
-   the 405B down\_proj measured kf savings comes out 8× over the
-   single-pass theoretical estimate.
-
-### 9.3 Why a closed-form predictor stays out of reach
-
-The mechanism is simple: **reduce hop count.** But the impact on
-wall time is a function of:
-
-```
-(payload, n_cohorts, distance, K_batches, output_tiles,
- compute_time, kernel_template_schedule, multi_pass_factor,
- ring_buffer_state)
-```
-
-We only **observe** end-to-end wall time. We don't have:
-
-- Hardware perf counters (HBM BW utilisation, ring queue depth,
-  PSUM stall cycles).
-- A cycle-accurate simulator integrated with our test harness.
-- Per-pass breakdowns within multi-pass kernels.
-
-To pin this down would require one of:
-
-1. **Hardware introspection.** Perf counters that tell us how many
-   cycles were ring-bound vs compute-bound vs HBM-bound. Not
-   available in our test environment today.
-2. **Cycle-accurate simulation.** deeptools' `perfEstimator`
-   framework could in principle provide this; integrating it from
-   the torch-spyre side is non-trivial work and out of scope for
-   PR 1986.
-3. **Extreme controlled experiments.** Vary one factor at a time
-   over a 100+-shape sweep (M, N, K, `n_split`, kernel template).
-   The Granite + Llama probes already done sample ~14 shapes; the
-   resulting variance shows that ≥5 factors are at play.
-
-### 9.4 Practical guidance for decode regimes
-
-Given the model's per-shape uncertainty, what should a planner do?
+The calibrated model in §6.6 predicts the kf step to within 10% on
+7/9 production shapes. For planner-level decisions the following
+guidance applies.
 
 1. **For B≥32 vLLM decode at `(1, 16, 2)+kf`:** empirical mean kf
    savings is **1.0-2.0× wall-time speedup** over identity at the
    same split. Reproducible across Granite + Llama families.
 
-2. **The biggest variability is from compute-overlap effects, not
-   the ring mechanism itself.** Shapes that are HMI-bound (large
-   K) tend to hide ring traffic → smaller visible kf benefit.
-   Compute-light shapes expose ring as critical path → larger kf
-   benefit. This is structural, not a model bug.
+2. **HMI-bound shapes hide ring traffic.** Shapes that are HMI-bound
+   (large K, large B-payload) overlap ring transit with HMI loads,
+   so the visible kf step at the kernel boundary collapses well
+   below what the §6.6 model predicts — see §11.11 for the open
+   compute-overlap correction.
 
 3. **Always-on default.** kf is correctness-preserving and never
    regresses (degenerates to identity at `k = 1`). For any K-split
    candidate the planner picks, enabling kf is free — there is no
    scenario where identity is preferable.
 
-4. **For predictive cost-model planning:** today's models cannot
-   reliably predict kf savings to better than ~2-3× per shape. A
-   measurement-based or runtime-adaptive approach (e.g. cache
-   observed kf wins per-shape) may be more reliable than a
-   closed-form predictor in the planner.
-
-A reader who wants to nail this down further has the verified data
-points in §6, the calibrated model in §6.5-§6.7 with its known
-limitations spelled out, and a clear list of mechanisms in §9.2.
-The door is open for a more sophisticated analytical model — or
-for hardware-counter integration that would make one unnecessary.
+4. **For predictive cost-model planning:** §6.6 provides a working
+   closed-form predictor that fits 7/9 production shapes within
+   10%, with a single known-bad regime (HMI-bound, §11.11). A
+   planner can use the §6.6 form directly and fall back to a
+   conservative estimate (or runtime-cached measurement) when the
+   shape lands in the HMI-bound regime.
 
 ## 10. Ring-aware design principles
 
@@ -1470,7 +1268,7 @@ singleshot to quantify.
 
 ### 11.4 HBM bus saturation curve (n cores → effective BW per core) — **resolved**
 
-Total HBM is 166 GB/s shared across cores. The probe in §6.8
+Total HBM is 166 GB/s shared across cores. The probe in §6.7
 (`tests/diag_ring_hbm_saturation_probe.py`) varies the number of
 cores from 1 to 32 under a pure-N split with per-core HBM load
 held constant. Result: per-core HBM bandwidth saturates around
@@ -1493,7 +1291,7 @@ that cleanly separates the three pressure sources (MNI, PT, SFP).
 
 §6.2's L3-70B numbers are 3× over peak SFP BW, while DSv3 o\_proj
 is at 1× peak. We hypothesised C\_psum > LX overflow inflated the
-per-MB ring cost. The probe in §6.8
+per-MB ring cost. The probe in §6.7
 (`tests/diag_ring_sfp_lx_boundary_probe.py`) sweeps N\_per across
 the 2 MB LX boundary on a single shape family. Result: per-MB
 ring cost does **not** inflate uniformly above LX. Below LX:
@@ -1504,7 +1302,7 @@ PSUM-placement regime (rather than monotone per-MB inflation).
 The §6.2 per-MB difference between L3-70B and DSv3 is therefore
 **not** explained by simple LX overflow; it is more likely a
 combination of dataflow-regime change and HMI-bound critical path
-on the larger shape (see also §11.x).
+on the larger shape (see also §11.11).
 
 ### 11.7 Why 5.6 ms/hop dropped to 0.37 ms/hop
 
@@ -1524,32 +1322,32 @@ have no measurement of per-direction loading. **Action:** instrument
 ring counters if available, or run a probe that varies which ring
 direction carries the dominant traffic.
 
-### 11.9 Why is the contention model 2.5× off? — **resolved (superseded by §6.7)**
+### 11.9 Why is the contention model 2.5× off? — **resolved (superseded by §6.6)**
 
 The original §6.5 contention model under-predicted by ~2.5×. The
-K-sweep probe in §6.8 (K1, `tests/diag_ring_kf_k_sweep_probe.py`)
+K-sweep probe in §6.7 (K1, `tests/diag_ring_kf_k_sweep_probe.py`)
 showed that step is linearly proportional to K at fixed payload —
 the missing global magnitude was the K-multiplier. The refined
-model in §6.7 (`step ≈ 0.068 µs/K × K × payload_factor`) replaces
+model in §6.6 (`step ≈ 0.068 µs/K × K × payload_factor`) replaces
 the §6.5 formulation and fits 7/9 held-out shapes within 10%; the
 2.5× residual is no longer present in the calibrated form.
 
 ### 11.10 Payload threshold below which contention disappears — **resolved**
 
 Granite 8B kv\_proj M=128 (64 KB cohort payload) shows zero step;
-q\_proj at 128 KB shows the full step. The N-sweep probe in §6.8
+q\_proj at 128 KB shows the full step. The N-sweep probe in §6.7
 (K2, `tests/diag_ring_kf_n_sweep_probe.py`) localises the
 threshold to **between 64 KB and 96 KB** of cohort payload. Below
 the threshold the step is essentially zero (no measurable
 contention); above the threshold the step grows roughly linearly
 with payload. This is captured as the piecewise `payload_factor`
-in §6.7. The mechanism (hardware queue, single-shot ring cycle,
+in §6.6. The mechanism (hardware queue, single-shot ring cycle,
 or XRF interaction) is not yet pinned down, but it is no longer a
 gap in the predictive model.
 
 ### 11.11 Compute-overlap factor for HMI-bound shapes
 
-The refined model in §6.7 fits 8/9 validation shapes to within
+The refined model in §6.6 fits 8/9 validation shapes to within
 30%. The single outlier — L3.1 70B down\_proj M=128, K=28672 — is
 heavily HMI-bound: wall ≈ 8 ms ≈ 10× the compute peak. In this
 regime ring transit overlaps with HMI loads of B and the visible
@@ -1567,7 +1365,7 @@ overlap_factor depends on (compute_time + HMI_time) / predicted_step
 
 Calibrating `overlap_factor` requires a probe that varies the
 compute-to-ring ratio while holding payload fixed. Probe K1
-(§6.8) varies K at fixed payload, but at the K values it sweeps
+(§6.7) varies K at fixed payload, but at the K values it sweeps
 (1024 to 32768) the kernel does not enter the HMI-bound regime —
 the K1 shape family has cohort\_payload = 128 KB and the kf
 intercept is small. A targeted probe at large K with large
@@ -1595,18 +1393,18 @@ HMI-bound regime; if so, fit `overlap_factor` against
 - `tests/diag_ring_operand_share_probe.py` — pure ring-share probe
   (RIU per-hop cost).
 - `tests/diag_ring_granite_perhop_probe.py` — Granite per-hop probe
-  (§6.4 step-function discovery, §6.5 contention model).
+  (§6.4 distance sweep, §6.5 contention mechanism).
 - `tests/diag_ring_kf_k_sweep_probe.py` — Probe K1 (kf K-sweep at
-  fixed payload, §6.8). Shows step is linearly proportional to K;
-  basis for the `0.068 µs/K × K` term in the refined §6.7 model.
+  fixed payload, §6.7). Shows step is linearly proportional to K;
+  basis for the `0.068 µs/K × K` term in the refined §6.6 model.
 - `tests/diag_ring_kf_n_sweep_probe.py` — Probe K2 (kf N-sweep at
-  fixed M, K, §6.8). Localises the contention threshold to between
-  64 KB and 96 KB; basis for the piecewise `payload_factor` in §6.7.
+  fixed M, K, §6.7). Localises the contention threshold to between
+  64 KB and 96 KB; basis for the piecewise `payload_factor` in §6.6.
 - `tests/diag_ring_hbm_saturation_probe.py` — HBM saturation curve
-  (§11.4, §6.8). Confirms operand A travels by ring multicast
+  (§11.4, §6.7). Confirms operand A travels by ring multicast
   rather than parallel HBM loads under pure-N / mixed-MN splits.
 - `tests/diag_ring_sfp_lx_boundary_probe.py` — SFP per-MB across
-  the LX boundary (§11.6, §6.8). Rejects the simple LX-overflow
+  the LX boundary (§11.6, §6.7). Rejects the simple LX-overflow
   inflation hypothesis; per-MB ring cost is variable above LX
   rather than monotonically inflated.
 
