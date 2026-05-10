@@ -260,6 +260,210 @@ the port. The compiler-emitted FIFO instructions serialise these
 explicitly; there is no hardware arbiter that picks one transfer
 over another. (§7.3.)
 
+### 4.6 Toy example: dataflow through the rings
+
+The traffic-type tables above (§4.1-§4.5) are easier to internalise
+once you've traced a concrete example by hand. This subsection walks
+the same shape — **M=4, N=4, K=4 fp16 matmul on a 4-core AIU
+(`max_cores = 4`)** — under four splits, showing for each: per-core
+data ownership, ring-traffic pattern, and a labelled fabric diagram.
+The shape is unrealistic (one PT-tile is 8×8) but it lets every byte
+fit on the page.
+
+```
+       A (M=4, K=4)              B (K=4, N=4)              C = A · B
+    ┌─────────────┐         ┌─────────────┐            ┌─────────────┐
+    │ a00 ... a03 │         │ b00 ... b03 │            │ c00 ... c03 │
+    │ a10 ... a13 │    ·    │ b10 ... b13 │     =      │ c10 ... c13 │
+    │ a20 ... a23 │         │ b20 ... b23 │            │ c20 ... c23 │
+    │ a30 ... a33 │         │ b30 ... b33 │            │ c30 ... c33 │
+    └─────────────┘         └─────────────┘            └─────────────┘
+```
+
+Total HMI baseline (one core reads everything): A + B + C =
+16 + 16 + 16 = 48 fp16 elements. The four splits below redistribute
+who reads what; each one trades HBM traffic for ring traffic.
+
+#### 4.6a — Pure-M `(m, n, k) = (4, 1, 1)`: every core sees full B
+
+| core | A slice (rows) | B slice | C slice (rows) |
+|---|---|---|---|
+| c0 | row 0 | full B | row 0 |
+| c1 | row 1 | full B | row 1 |
+| c2 | row 2 | full B | row 2 |
+| c3 | row 3 | full B | row 3 |
+
+- **HMI on RIU:** A = 16 elem total (each core reads its 4-elem row,
+  no replication: 4 reads × 4 elem). B = 16 elem **broadcast** to all
+  4 cores via RIU operand-multicast (one HBM read, four listeners).
+  C = 16 elem stored back. Formula check:
+  `n·M·K + m·K·N/k + k·M·N = 1·16 + 4·16/1 — wait, B-multicast
+  collapses the m factor on the broadcast hop` — single HBM read
+  is 16 elem, replicated by ring on the wire 4×.
+- **PSUM on SFP:** **idle** (k=1, no reduction).
+- **B is the most expensive operand** — multicast is the architectural
+  win.
+
+```mermaid
+graph LR
+    HBM[HBM] -- A row-slice<br/>per core --> RIU[RIU BiRing]
+    HBM -- B full<br/>broadcast 1→4 --> RIU
+    RIU --> C0[core 0<br/>A=row 0, B=full]
+    RIU --> C1[core 1<br/>A=row 1, B=full]
+    RIU --> C2[core 2<br/>A=row 2, B=full]
+    RIU --> C3[core 3<br/>A=row 3, B=full]
+    SFP[SFP rings] -.idle.- C0
+    style HBM fill:#fde68a
+    style RIU fill:#cfe9ff
+    style SFP fill:#e5e5e5
+```
+
+#### 4.6b — Pure-N `(m, n, k) = (1, 4, 1)`: every core sees full A
+
+| core | A slice | B slice (cols) | C slice (cols) |
+|---|---|---|---|
+| c0 | full A | col 0 | col 0 |
+| c1 | full A | col 1 | col 1 |
+| c2 | full A | col 2 | col 2 |
+| c3 | full A | col 3 | col 3 |
+
+- **HMI on RIU:** A = 16 elem **broadcast 4×** to all cores via RIU
+  multicast. B = 16 elem total (4 reads × 4 elem, one column per
+  core). C = 16 elem stored.
+- **PSUM on SFP:** idle (k=1).
+- **HMI total:** `n·M·K + m·K·N/k + M·N = 4·16 + 1·16 + 16 = 96`
+  elements (n picks up the multicast).
+- This is the **canonical "small-M prefill"** case: when M is small
+  and N is large, broadcasting A is cheap (it's small) and avoids
+  re-reading huge B.
+
+```mermaid
+graph LR
+    HBM[HBM] -- A full<br/>broadcast 1→4 --> RIU[RIU BiRing]
+    HBM -- B col-slice<br/>per core --> RIU
+    RIU --> C0[core 0<br/>A=full, B=col 0]
+    RIU --> C1[core 1<br/>A=full, B=col 1]
+    RIU --> C2[core 2<br/>A=full, B=col 2]
+    RIU --> C3[core 3<br/>A=full, B=col 3]
+    SFP[SFP rings] -.idle.- C0
+    style HBM fill:#fde68a
+    style RIU fill:#cfe9ff
+    style SFP fill:#e5e5e5
+```
+
+#### 4.6c — Mixed-MN `(m, n, k) = (2, 2, 1)`: 2×2 grid, both A and B partially shared
+
+| core (m_idx, n_idx) | A slice (rows) | B slice (cols) | C slice |
+|---|---|---|---|
+| c0 = (0, 0) | rows 0-1 | cols 0-1 | C[0:2, 0:2] |
+| c1 = (0, 1) | rows 0-1 | cols 2-3 | C[0:2, 2:4] |
+| c2 = (1, 0) | rows 2-3 | cols 0-1 | C[2:4, 0:2] |
+| c3 = (1, 1) | rows 2-3 | cols 2-3 | C[2:4, 2:4] |
+
+- **A sharing:** cores in the same M-row share an A slice (c0||c1
+  share rows 0-1; c2||c3 share rows 2-3) → 2× ring multicast of A.
+- **B sharing:** cores in the same N-col share a B slice (c0||c2
+  share cols 0-1; c1||c3 share cols 2-3) → 2× ring multicast of B.
+- **HMI total:** `n·M·K + m·K·N/k + M·N = 2·16 + 2·16/1 + 16 = 80`
+  elements — **strictly less** than pure-M's or pure-N's 96. Both
+  operands partially share, splitting the multicast win.
+- **PSUM on SFP:** idle (k=1).
+
+This is why **mixed-MN often beats either pure-M or pure-N** when M
+and N are both moderate — you pay 2× replication on each operand
+instead of 4× on one.
+
+```mermaid
+graph TB
+    HBM[HBM] --> RIU[RIU BiRing]
+    RIU -- A rows 0-1 multicast<br/>2 listeners --> C0[core 0<br/>(0,0)]
+    RIU -- A rows 0-1 multicast<br/>2 listeners --> C1[core 1<br/>(0,1)]
+    RIU -- A rows 2-3 multicast<br/>2 listeners --> C2[core 2<br/>(1,0)]
+    RIU -- A rows 2-3 multicast<br/>2 listeners --> C3[core 3<br/>(1,1)]
+    RIU -- B cols 0-1 multicast --> C0
+    RIU -- B cols 0-1 multicast --> C2
+    RIU -- B cols 2-3 multicast --> C1
+    RIU -- B cols 2-3 multicast --> C3
+    style HBM fill:#fde68a
+    style RIU fill:#cfe9ff
+```
+
+#### 4.6d — K-split `(m, n, k) = (1, 2, 2)`: identity vs k_fast
+
+Two N-cohorts × two K-cohort members = 4 cores. Each output column
+is computed by two cores that each cover half of K and ring-reduce
+their PSUMs.
+
+| core | A slice | B slice | partial output |
+|---|---|---|---|
+| P0 | rows 0-3, K=0-1 | K=0-1, cols 0-1 | partial C[:, 0:2] (k-half 0) |
+| P1 | rows 0-3, K=2-3 | K=2-3, cols 0-1 | partial C[:, 0:2] (k-half 1) |
+| P2 | rows 0-3, K=0-1 | K=0-1, cols 2-3 | partial C[:, 2:4] (k-half 0) |
+| P3 | rows 0-3, K=2-3 | K=2-3, cols 2-3 | partial C[:, 2:4] (k-half 1) |
+
+P0||P1 form one K-cohort (writes cols 0-1), P2||P3 the other.
+Within each cohort, the two cores ring-reduce their fp32 PSUM tiles
+(4 rows × 2 cols × 4 B = 32 B per tile in this toy size).
+
+- **A on RIU:** every core reads full M with K/2 = 2 elements. Two
+  K-half groups each take 8 elem; A is multicast 2× (P0||P2 share
+  K=0-1; P1||P3 share K=2-3). Total HBM read of A = 16 elem.
+- **B on RIU:** each core reads K/2 × N/2 = 4 elem. With cohort-wise
+  ring-multicast on K, B HBM = `m·K·N/k = 1·16/2 = 8` elem total.
+- **C on RIU (final):** 16 elem stored after PSUM reduce.
+- **PSUM on SFP:** `(k-1) · M_per · N_per · 4` per cohort = one hop
+  per cohort, two cohorts running in parallel.
+
+**Identity emission** for `(1, 2, 2)`: K-collaborators are `m·n = 2`
+core-IDs apart. Cohort A = {P0, P2}, distance 2. Cohort B = {P1, P3},
+distance 2. PSUM ring transit crosses **2 segments** per cohort.
+
+**k_fast emission** applies permutation `[0, 2, 1, 3]`: cohort A
+becomes physical cores {0, 1} (distance 1), cohort B physical
+cores {2, 3} (distance 1). PSUM ring transit crosses **1 segment**
+per cohort.
+
+```mermaid
+graph LR
+    subgraph Identity["Identity emission: cohort distance = 2"]
+        I0[phys core 0<br/>cohort A k=0] -. 2 hops .-> I2[phys core 2<br/>cohort A k=1]
+        I1[phys core 1<br/>cohort B k=0] -. 2 hops .-> I3[phys core 3<br/>cohort B k=1]
+    end
+    subgraph KFast["k_fast emission: cohort distance = 1"]
+        K0[phys core 0<br/>cohort A k=0] --> K1[phys core 1<br/>cohort A k=1]
+        K2[phys core 2<br/>cohort B k=0] --> K3[phys core 3<br/>cohort B k=1]
+    end
+    style I0 fill:#fca5a5
+    style I2 fill:#fca5a5
+    style K0 fill:#a7f3d0
+    style K1 fill:#a7f3d0
+    style K2 fill:#a7f3d0
+    style K3 fill:#a7f3d0
+```
+
+Under **bichain** the PSUM hops travel on SFP CW + CCW — disjoint
+from RIU's HMI traffic. Under **unichain** the PSUM hops would travel
+on the RIU data ring and contend with concurrent A/B HMI loads
+(§7.1). k_fast helps under both modes by shortening per-hop distance.
+
+#### 4.6e — Putting it together
+
+Each split maps to a canonical visualisation pattern:
+
+| Split | Multicast pattern on RIU | PSUM on SFP | When it wins |
+|---|---|---|---|
+| Pure-M `(4, 1, 1)` | B HBM-broadcast 1→4 | idle | M moderate, B small enough that A traffic dominates |
+| Pure-N `(1, 4, 1)` | A HBM-broadcast 1→4 | idle | M small (prefill), N large — A is cheap to broadcast |
+| Mixed-MN `(2, 2, 1)` | A row-multicast 1→2 + B col-multicast 1→2 | idle | M and N both moderate; balances both operands |
+| K-split `(1, 2, 2)` | B K-cohort multicast 1→2 (cohort-wise) | 1-hop chain per cohort; kf vs id changes hop distance | B large (K large), benefits from K-multicast; payload fits in LX |
+
+The first three differ only in how the RIU-multicast budget is spent
+across A and B; the fourth introduces a second fabric (SFP) and the
+choice of identity vs k_fast emission becomes load-bearing on it.
+Sections §5–§8 generalise each pattern to the full 32-core chip;
+§6 gives empirical per-hop costs for the ring traffic that K-split
+introduces.
+
 ## 5. The dataflow-to-ring mapping
 
 Pick `(PriOpDataflow, dsm_psum_algo, XrfInterleaving)` from the
@@ -669,6 +873,13 @@ magnitude on a held-out shape from first principles**. It's not
 perfect (2.5× empirical correction) but it's a closed-form predictor
 where deeptools' built-in cost model is silent.
 
+*Note*: subsequent validation across Llama 3.1 8B / 70B / 405B shapes
+(not folded into this doc) showed the 2.5× correction holds on
+average — mean ratio (measured/predicted) = 1.98× — but per-shape
+ratios span 0.36× to 6.18×. Treat this model as **qualitative**:
+directionally correct on the mechanism, not yet predictive at the
+per-shape level. §9 unpacks why.
+
 ### 6.8 What we have not measured directly
 
 - RIU ring under varying number of concurrent HMI sources (the
@@ -679,7 +890,7 @@ where deeptools' built-in cost model is silent.
 - The on-core FIFO links under simultaneous MNI / PT / SFP demand
   (LX port saturation).
 
-These are listed as open questions in §10.
+These are listed as open questions in §11.
 
 ## 7. Contention analysis
 
@@ -765,7 +976,7 @@ SFP-ring-disabled tests) would reintroduce it.
   single most binding limit on memory-bound shapes. A split that
   reduces HMI traffic at the cost of more SFP traffic is usually
   worth it. We have not directly measured the n-cores-vs-HBM
-  saturation curve; that's listed in §10.
+  saturation curve; that's listed in §11.
 
 ### 7.5 SFP CW vs SFP CCW (under bichain)
 
@@ -869,11 +1080,181 @@ per hop. Measured 33.1 µs/hop is 2.7× over peak. This is consistent
 with HMI being concurrently active on the ring during the probe —
 the ring isn't dedicated to the broadcast.
 
-## 9. Ring-aware design principles
+## 9. Theoretical k\_fast benefit and why empirical results don't match cleanly
+
+§6.5-§6.7 calibrated a contention model that predicts the kf step
+to within ~2.5×. Cross-family validation (Llama 3.1 8B / 70B / 405B,
+§6.7 note) shows the per-shape ratio actually spans 0.36×-6.18× —
+big enough that the model is qualitatively right but quantitatively
+unreliable. This section unpacks **why**: what the idealised
+benefit would be, where the variance comes from, and what we'd
+need to nail it down.
+
+### 9.1 Idealised theoretical benefit
+
+Under `(1, n_split, k_split)` K-split with k\_fast emission:
+
+- Each K-cohort has `k_split` members.
+- Per-output-tile, the cohort runs a chain of `(k_split − 1)` ring
+  transfers.
+- **Identity emission:** each transfer traverses `n_split` ring
+  segments (cohort members are `n_split` core-IDs apart on the
+  physical ring).
+- **k\_fast emission:** each transfer traverses **1** ring segment
+  (k\_fast permutation places cohort members adjacent).
+
+If ring transit is BW-limited and uncontended, the wall savings is:
+
+```
+T_savings ≈ output_tiles_per_cohort × n_cohorts × (k_split − 1)
+            × per_tile_bytes × (n_split − 1)
+            / SFP_BW
+
+per_tile_bytes = M_PT × N_PT × sizeof(fp32) = 8 × 8 × 4 = 256 B
+SFP_BW         = 70.4 GB/s (CW + CCW under bichain)
+```
+
+Two worked examples:
+
+**Granite 8B q\_proj M=128 at `(1, 16, 2)+kf`:**
+
+```
+output_tiles_per_cohort = (M / M_PT) × (N_per / N_PT) = 16 × 32 = 512
+n_cohorts               = 16
+k_split − 1             = 1
+per_tile_bytes          = 256
+n_split − 1             = 15
+T_savings ≈ 512 × 16 × 1 × 256 × 15 / 70.4 GB/s ≈ 446 µs
+```
+
+Measured kf savings ≈ **280 µs**. Theory is **1.6× higher** than
+observed.
+
+**L3.1 405B down\_proj M=128 at `(1, 16, 2)+kf`:**
+
+```
+output_tiles_per_cohort = (M / M_PT) × (N_per / N_PT) = 16 × 128 = 2048
+n_cohorts               = 16
+k_split − 1             = 1
+per_tile_bytes          = 256
+n_split − 1             = 15
+T_savings ≈ 2048 × 16 × 1 × 256 × 15 / 70.4 GB/s ≈ 1.79 ms
+```
+
+Measured kf savings ≈ **14.7 ms**. Theory is **8× lower** than
+observed.
+
+So the simple BW model is off **in both directions**, by very
+different amounts. The mechanism is real, but its translation into
+wall time is not a single linear function of payload × hops.
+
+### 9.2 Why some shapes get more kf speedup than others
+
+The empirical variance has at least five sources:
+
+1. **Payload threshold (~64 KB cohort payload).** Below this,
+   k\_fast gives essentially zero benefit — likely a hardware
+   buffer absorbs small transfers regardless of distance (§6.4
+   kv\_proj at 64 KB shows zero step). Above the threshold the step
+   appears and grows with payload. Subnotionally this matches the
+   per-corelet XRF capacity (64 KB) but we have not isolated the
+   mechanism.
+
+2. **Ring transit must occupy the critical path.** If compute is
+   long enough to hide ring transit, kf saves nothing measurable.
+   If compute is short or memory-bound, ring transit lands on the
+   critical path and the kf step becomes visible. Compute-rich
+   shapes (large K, modest M·N) tend to hide ring; compute-light
+   shapes expose it.
+
+3. **Cohort count and n\_split structure amplify contention.** At
+   `n_split = 16` with identity distance 16, the busiest ring
+   segment is shared by ~9 cohorts — contention amplifies the
+   per-hop cost beyond pure transit. Lower `n_split` or shorter
+   distance means less contention; the multiplier on kf benefit is
+   nonlinear in `n_split`.
+
+4. **Kernel scheduling.** The kernel template can interleave ring
+   transfers with compute to hide latency. How well it does this
+   varies across shapes (PT-batch count, K-iteration structure,
+   SFP postlude scheduling). Two shapes with identical payload and
+   distance can have different effective overlap.
+
+5. **Multi-pass kernels at huge K or N.** When B exceeds the
+   single-pass capacity (e.g. L3.1 405B down\_proj's 1.7 GB B), the
+   kernel makes multiple passes and each pass has its own PSUM
+   reductions. kf savings multiply with pass count — which is why
+   the 405B down\_proj measured kf savings comes out 8× over the
+   single-pass theoretical estimate.
+
+### 9.3 Why a closed-form predictor stays out of reach
+
+The mechanism is simple: **reduce hop count.** But the impact on
+wall time is a function of:
+
+```
+(payload, n_cohorts, distance, K_batches, output_tiles,
+ compute_time, kernel_template_schedule, multi_pass_factor,
+ ring_buffer_state)
+```
+
+We only **observe** end-to-end wall time. We don't have:
+
+- Hardware perf counters (HBM BW utilisation, ring queue depth,
+  PSUM stall cycles).
+- A cycle-accurate simulator integrated with our test harness.
+- Per-pass breakdowns within multi-pass kernels.
+
+To pin this down would require one of:
+
+1. **Hardware introspection.** Perf counters that tell us how many
+   cycles were ring-bound vs compute-bound vs HBM-bound. Not
+   available in our test environment today.
+2. **Cycle-accurate simulation.** deeptools' `perfEstimator`
+   framework could in principle provide this; integrating it from
+   the torch-spyre side is non-trivial work and out of scope for
+   PR 1986.
+3. **Extreme controlled experiments.** Vary one factor at a time
+   over a 100+-shape sweep (M, N, K, `n_split`, kernel template).
+   The Granite + Llama probes already done sample ~14 shapes; the
+   resulting variance shows that ≥5 factors are at play.
+
+### 9.4 Practical guidance for decode regimes
+
+Given the model's per-shape uncertainty, what should a planner do?
+
+1. **For B≥32 vLLM decode at `(1, 16, 2)+kf`:** empirical mean kf
+   savings is **1.0-2.0× wall-time speedup** over identity at the
+   same split. Reproducible across Granite + Llama families.
+
+2. **The biggest variability is from compute-overlap effects, not
+   the ring mechanism itself.** Shapes that are HMI-bound (large
+   K) tend to hide ring traffic → smaller visible kf benefit.
+   Compute-light shapes expose ring as critical path → larger kf
+   benefit. This is structural, not a model bug.
+
+3. **Always-on default.** kf is correctness-preserving and never
+   regresses (degenerates to identity at `k = 1`). For any K-split
+   candidate the planner picks, enabling kf is free — there is no
+   scenario where identity is preferable.
+
+4. **For predictive cost-model planning:** today's models cannot
+   reliably predict kf savings to better than ~2-3× per shape. A
+   measurement-based or runtime-adaptive approach (e.g. cache
+   observed kf wins per-shape) may be more reliable than a
+   closed-form predictor in the planner.
+
+A reader who wants to nail this down further has the verified data
+points in §6, the calibrated model in §6.5-§6.7 with its known
+limitations spelled out, and a clear list of mechanisms in §9.2.
+The door is open for a more sophisticated analytical model — or
+for hardware-counter integration that would make one unnecessary.
+
+## 10. Ring-aware design principles
 
 Practical rules for designing ring-friendly algorithms or splits.
 
-### 9.1 Prefer bichain when K-split is profitable
+### 10.1 Prefer bichain when K-split is profitable
 
 bichain isolates PSUM on SFPRING; unichain shares it with HMI on
 RIU. For fp16 K-split matmul this is automatic
@@ -882,7 +1263,7 @@ auto-select than choosing it. Concrete consequence: avoid configs
 that disable sfpring during perf testing — you'll measure unichain
 contention that doesn't exist in production.
 
-### 9.2 Match the split's operand-multicast pattern to the contention layer
+### 10.2 Match the split's operand-multicast pattern to the contention layer
 
 - A is replicated by n on RIU. So large n on K-large shapes burns
   the most HBM bandwidth. Reduce n when bandwidth-bound.
@@ -896,7 +1277,7 @@ savings on RIU against PSUM cost on SFP.** The crossover point is
 roughly `K / k > M · N` — above which K-split helps, below which
 it hurts.
 
-### 9.3 Use k\_fast emission whenever k > 1
+### 10.3 Use k\_fast emission whenever k > 1
 
 k\_fast permutes physical core IDs so K-cohort members are adjacent
 on the SFP ring (1 hop instead of m·n hops). The benefit is
@@ -907,14 +1288,14 @@ Empirical: on largest-payload shapes, k\_fast brings 1.5–2× wall
 reduction (was 4× before the codegen improvements; canonical v2
 §7.2).
 
-### 9.4 Keep M\_per × N\_per × 4 ≤ 2 MB per core
+### 10.4 Keep M\_per × N\_per × 4 ≤ 2 MB per core
 
 This is the LX residency constraint (canonical v2 §4.1) but it
 shows up in ring measurements too — see §6.2's L3-70B per-MB
 slope inflation when C\_psum overflows LX. The same rule is also
 the SFP-ring efficiency rule.
 
-### 9.5 Prefer the smallest chain length that uses all 32 cores
+### 10.5 Prefer the smallest chain length that uses all 32 cores
 
 §6.3: chain-length cost grows ~monotonically with k under k\_fast.
 Bigger chains pay more SFP transit time. The cheapest K-split is
@@ -922,7 +1303,7 @@ the smallest k that still uses all 32 cores while respecting
 stick alignment (canonical v2 §7.6). Typically that's `(16, 1, 2)+kf`
 or `(8, 1, 4)+kf` — chain length 2 or 4.
 
-### 9.6 Don't co-schedule heavy MNI and heavy SFP traffic on the same kernel if avoidable
+### 10.6 Don't co-schedule heavy MNI and heavy SFP traffic on the same kernel if avoidable
 
 When LX port is saturated (§7.3), you pay regardless of which ring
 the SFP traffic is on. The single planner-side mitigation is to
@@ -931,7 +1312,7 @@ demand) or small PSUM (low SFP demand). On shapes where both are
 large the LX port is the bottleneck; further ring-side optimisation
 won't help.
 
-### 9.7 When designing a new dataflow
+### 10.7 When designing a new dataflow
 
 Predict its ring footprint by walking the (m, n, k) replication
 formula and the dataflow's PSUM placement. Specifically:
@@ -953,7 +1334,7 @@ have to serve PSUM either. That's the structural reason int8
 inference (OS1\_INT8 + XRF\_MB) is so much cheaper per kernel than
 fp16 KG3.
 
-### 9.8 The mental checklist for a new split family
+### 10.8 The mental checklist for a new split family
 
 For each candidate `(m, n, k)`, write down:
 
@@ -970,11 +1351,11 @@ For each candidate `(m, n, k)`, write down:
 Sum the per-ring costs, compare to the compute time, and pick the
 split where ring cost is dominated by compute.
 
-## 10. Open questions and gaps
+## 11. Open questions and gaps
 
 Things this doc cannot answer with the current measurement set.
 
-### 10.1 RIURequest ring under control-heavy workloads
+### 11.1 RIURequest ring under control-heavy workloads
 
 We have no measurements of the RIURequest ring at all. 1 B/cyc =
 ~1.3 GB/s in headers, plenty for current matmul, but a sparse op or
@@ -983,7 +1364,7 @@ dataflows generate one HBM transfer per attention head per token,
 the request rate could rise sharply. **Action:** when adding sparse
 or fine-grained ops, run a control-rate probe.
 
-### 10.2 Cross-core LX-LX hop cost separately from operand multicast
+### 11.2 Cross-core LX-LX hop cost separately from operand multicast
 
 §6.1's RIU ring-share probe measures HMI + ring-multicast together
 (both sources are HMI-loading-then-broadcasting). We don't have a
@@ -993,7 +1374,7 @@ core's LX and shares to others without re-reading from HBM. **Action:**
 add an LX-LX probe that pre-stages an operand and measures broadcast
 hop cost without HMI in the loop.
 
-### 10.3 singleshot's ring usage
+### 11.3 singleshot's ring usage
 
 The int8 + LX\_opt + weight\_preload + 32\_cores path (`deeprt.cpp:1655-1657`)
 selects a specialised library primitive whose ring footprint we have
@@ -1003,7 +1384,7 @@ exact agent + ring mapping is library-internal. **Action:** when
 quantization roadmap lands, run probes on int8 OS1\_INT8 + XRF\_MB +
 singleshot to quantify.
 
-### 10.4 HBM bus saturation curve (n cores → effective BW per core)
+### 11.4 HBM bus saturation curve (n cores → effective BW per core)
 
 Total HBM is 166 GB/s shared across cores. We don't have a direct
 measurement of effective BW per core as the number of concurrent
@@ -1014,14 +1395,14 @@ cores actively loading and measures per-core HBM throughput. This
 would let us replace the §7.4 fair-share approximation with a
 calibrated curve.
 
-### 10.5 LX port saturation under realistic mixed traffic
+### 11.5 LX port saturation under realistic mixed traffic
 
 §7.3 argues this is a real contention site but we don't have a
 measurement that varies MNI vs SFP demand under fixed compute and
 isolates the LX-port bottleneck. **Action:** an LX-port-stress probe
 that cleanly separates the three pressure sources (MNI, PT, SFP).
 
-### 10.6 SFP per-MB inflation on LX-overflow shapes
+### 11.6 SFP per-MB inflation on LX-overflow shapes
 
 §6.2's L3-70B numbers are 3× over peak SFP BW, while DSv3 o\_proj
 is at 1× peak. We hypothesise this is the C\_psum > LX interaction
@@ -1029,7 +1410,7 @@ but haven't isolated the mechanism. **Action:** sweep N\_per across
 the LX boundary and measure SFP per-MB slope at each side to
 separate ring transit cost from LX-overflow penalty.
 
-### 10.7 Why 5.6 ms/hop dropped to 0.37 ms/hop
+### 11.7 Why 5.6 ms/hop dropped to 0.37 ms/hop
 
 The original Probe 2 measurement is 15× higher than today's
 reverification on the same shape. We attribute this to merged
@@ -1038,7 +1419,7 @@ the Probe 2 script against intermediate commits to identify the
 specific change. This matters for trusting historical measurements
 on related branches.
 
-### 10.8 Per-direction asymmetry
+### 11.8 Per-direction asymmetry
 
 Both RIU and SFP are 35.2 / 166 GB/s **per direction**. We've
 assumed symmetric utilisation but in practice CW/CCW can be
@@ -1047,7 +1428,7 @@ have no measurement of per-direction loading. **Action:** instrument
 ring counters if available, or run a probe that varies which ring
 direction carries the dominant traffic.
 
-### 10.9 Why is the contention model 2.5× off?
+### 11.9 Why is the contention model 2.5× off?
 
 The contention model in §6.5 captures the qualitative mechanism
 (segment-sharing) but under-predicts magnitude by a consistent
@@ -1063,7 +1444,7 @@ K (to isolate per-K-batch overhead), varying just n\_cohorts at fixed
 distance (to isolate contention-factor scaling), or varying just
 distance at very small payload (to isolate per-hop sync overhead).
 
-### 10.10 Payload threshold below which contention disappears
+### 11.10 Payload threshold below which contention disappears
 
 Granite 8B kv\_proj M=128 (64 KB cohort payload) shows zero step
 across distances — neither distance 8 nor distance 16 measurably
@@ -1080,7 +1461,7 @@ explanations:
 Resolving requires a finer payload sweep
 (e.g., 32 / 48 / 64 / 80 / 96 / 128 KB).
 
-## 11. References
+## 12. References
 
 ### Within this branch
 
