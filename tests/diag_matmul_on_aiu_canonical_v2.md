@@ -135,11 +135,14 @@ PT: numCopies = 64,  frequency = 1.1 GHz,
                       2048  (int8)   4096 (int4)
 ```
 
-`numCopies = 64` because there's one PT unit per corelet. For fp16,
-the operational SIMD shape is **8 × 64** — 8 PT-array rows feeding
-a 64-wide SIMD lane each cycle, totalling 512 MACs/cycle/corelet.
-Per-precision the SIMD width scales with bit-shrink: 64 → 128 → 256
-→ 512 lanes for fp16 → fp8 → int8 → int4, at constant 8 PT-rows.
+`numCopies = 64` because there's one PT unit per corelet. The 512
+parallel engines for fp16 factorise as **8 × 8 × 8** —
+`numPTRows × numPTCols × numSimdPerPT` per
+[`deeptools/dsc/sysdef.cpp:193-196`](../../deeptools/dsc/sysdef.cpp#L193-L196)
+— giving one 8×8 outer product with 8-deep K accumulation per
+corelet per cycle. Lower-precision modes scale via
+`numSubSimdPerPT` (sysdef.cpp:200-203): fp8 = 2×, int8 = 4×, int4 =
+8× the fp16 rate at the same 8×8×8 array shape.
 
 Per-AIU compute peak:
 
@@ -156,9 +159,8 @@ int8 = 288 TOPS and int4 = 576 TOPS.)
 
 For everything below, **fp16 peak = 72.1 TFLOPS** is the yardstick.
 
-The 8 PT-rows are the dimension that constrains M-side stride:
-M_per_core ≥ 8 keeps every PT-row busy each cycle; below 8, rows
-do nothing.
+A corelet processes data in **8 × 8 × 8 blocks**. M_per_core ≥ 8
+fills the PT M-rows; below 8, those PE rows do nothing that cycle.
 
 ## 4. Memory hierarchy
 
