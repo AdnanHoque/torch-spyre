@@ -24,6 +24,24 @@ the actual hardware.
 - §16: open-problems updated to reflect what's been verified vs
   still unknown.
 
+**v2 corrections — 2026-05-10 reverification on clean rebuild:**
+
+- §7.1 ring hop cost: re-measured 5.6 → **0.37 ms/hop** on DSv3 o_proj
+  M=2048 (15× reduction; new calibration table for three shapes).
+- §7.6 three-regime structure: **walked back**. The sharp chain=4 →
+  chain=8 boundary does not reproduce; chain-length cost grows
+  roughly monotonically (~3 ms per chain doubling).
+- §10.2 cost model Fix D: invalidated by the §7.6 walk-back; replace
+  with a linear-in-chain-length term. Fix B's +17 ms penalty is also
+  overstated (catastrophic ratio shrank from 7-15× to 2-3×).
+- §16.11 tree-reduction hypothesis: **closed out**. chain=32 has the
+  highest regime cost, not the lowest — no separate primitive.
+- New §7.4: **unichain / bichain / singleshot** PSUM-reduction
+  algorithms documented from deeptools/dsm reading. Selection is
+  graph-global by data format and ring config, not chain-length-
+  conditional. fp16 K-split matmul gets bichain (both corelets in
+  parallel) automatically.
+
 Sources of truth, in priority order:
 
 1. `deeptools/dsc/HardwareArchMapping/sysConfigs2.0/sentient_dd2_sysconfig.json`
@@ -382,26 +400,39 @@ collapses from (k−1) trips of m·n hops each to **(k−1) single
 hops**. Code:
 [`compute_ops.py:_k_fast_core_id_permutation`](torch_spyre/_inductor/codegen/compute_ops.py).
 
-### 7.1 Ring hop cost is calibrated at ~5.6 ms/hop
+### 7.1 Ring hop cost is linear in K-collaborator distance (recalibrated 2026-05-10)
 
 **Probe 2 (May 2026)** ran a permutation discriminator on DSv3
-o_proj at (1, 16, 2), varying ONLY the core-id permutation:
+o_proj at (1, 16, 2), varying ONLY the core-id permutation. Three
+permutations achieving distance=1 gave walls within 0.2 ms of each
+other — there is **no second-order cohort-clustering effect**. The
+benefit of k_fast is purely the 1-hop K-collaborator distance.
 
-| permutation | K-collab distance | wall (ms) |
-|---|---:|---:|
-| identity | 16 | 115.77 |
-| stride2 | 8 | 61.54 |
-| bit_reverse | 1 | 30.84 |
-| block_cyclic | 1 | 31.00 |
-| k_fast | 1 | 31.03 |
+The original calibration measurement (May 2026) of **5.6 ms/hop** on
+DSv3 o_proj M=2048 was re-verified on a clean rebuild and is now
+**0.37 ms/hop on the same shape** — a 15× reduction. The
+linear-in-distance structure is preserved (three different
+distance=1 permutations within 0.12 ms of each other), but the
+absolute magnitude is much smaller. Likely either codegen
+improvements in the merged upstream commits, or the original
+measurement was inflated by contention/jitter.
 
-Linear regression: `wall ≈ 22 ms + 5.6 ms × K_collab_distance` on
-this shape. The slope (5.6 ms/hop) scales with PSUM payload
-(M_per × N_per × 4 bytes); the **linearity** is the generic claim.
+Re-verification probe results (3 shapes × 5 permutations,
+2026-05-10):
 
-Three permutations achieving distance=1 give walls within 0.2 ms of
-each other — there is **no second-order cohort-clustering effect**.
-The benefit of k_fast is purely the 1-hop K-collaborator distance.
+| shape | base ms | slope ms/hop | distance=1 spread |
+|---|---:|---:|---:|
+| L3-70B q_proj M=128 | 1.08 | 0.07 | 0.06 |
+| L3-70B q_proj M=2048 | 16.77 | 1.09 | 1.00 |
+| DSv3 o_proj M=2048 | 52.69 | 0.37 | 0.12 |
+
+The slope still scales with payload (PSUM tile size × ring transit
+count), but the absolute magnitude is much closer to what pure-ring-
+BW math predicts (~210 µs/hop for the DSv3 o_proj M=2048 cohort
+given SFP ring 35 GB/s). The original 5.6 ms/hop was 27× larger
+than ring-BW math; the new 0.37 ms/hop is only 1.8× larger —
+suggesting modest contention but not the order-of-magnitude
+inflation the original measurement implied.
 
 For the cost model:
 
@@ -428,6 +459,62 @@ Ring saving ~28 µs. With kernel total ~940 µs, that's ~3% wall —
 consistent with measured B→C ratios of 1.01-1.05× on most shapes.
 On larger-payload shapes (DSv3 o_proj M=2048) the ring-cost share
 of total time can hit 60-70%, which is why kf gives 4× wins there.
+The B→C kf benefit on the largest-payload shapes (e.g., DSv3 o_proj
+M=2048) was originally calibrated at 4× wins — re-verification on
+the clean rebuild shows the underlying ring cost has dropped, so
+the kf benefit is closer to 1.5-2× on those shapes.
+
+### 7.4 The PSUM ring algorithms — unichain, bichain, singleshot
+
+deeptools/dsm has three named PSUM-reduction algorithms. Selection
+is graph-global based on data format and ring configuration — NOT
+chain-length-conditional.
+
+| algorithm | meaning | what's actually happening |
+|---|---|---|
+| **unichain** | one PSUM chain | One corelet per core handles PSUM; the partner corelet doesn't participate in the K-cohort reduction. PSUM traffic uses one SFPDataIU ring. |
+| **bichain** | two PSUM chains | Both corelets in each core contribute partial sums in parallel. Work is split between the two corelets. PSUM traffic uses both SFPDataIU rings (Corelet 0 CW + Corelet 1 CCW) simultaneously, doubling effective per-core PSUM throughput. |
+| **singleshot** | specialized library primitive | A direct-mapped library primitive for one specific deployment configuration. Has additional kernel-library constraints (e.g., no OUT corelet split when N_per > 128). |
+
+Selector logic (`deeprt/deeprt.cpp:1653-1657`):
+
+```
+default                                          → unichain
+psumRing == "sfpring"                            → bichain
+int8 + LX_opt + weight_preload + 32_cores        → singleshot
+```
+
+For fp16 matmul with K-split (the regime PR 1986 targets),
+`psumRing` is set to `"sfpring"` automatically when there are
+K-split matmul nodes, so **bichain** is selected. This is "the good
+algorithm" — both corelets contributing in parallel.
+
+The cleanest single line of code distinguishing bichain from
+unichain (`dsm/dsm.cpp:8059`): bichain places the PSUM tensor in
+`SenComponents::SFPRING`, while unichain places it in `RING + LX`.
+This is what makes bichain use the SFP rings vs unichain using the
+data ring.
+
+Source files: `deeptools/dsm/dsm.cpp` (lines 82, 5276-5280, 8059,
+21882, 22960), `deeptools/deeprt/deeprt.cpp` (lines 1653-1657),
+`deeptools/dsm/dsmperf.cpp` (lines 6520-6580).
+
+Implications:
+
+1. The two SFP rings in §7's interconnect table aren't decorative —
+   they exist specifically so bichain can run two PSUM chains in
+   parallel without ring contention. The unidirectional-but-opposite
+   (CW + CCW) design means the two chains never conflict on the
+   wire.
+2. PR 1986's K-split matmul wins inherit bichain by default. The
+   ~50% wall-time reduction we saw across the board on the clean
+   rebuild may reflect codegen improvements in bichain since May
+   2026.
+3. singleshot is the int8/quantized-inference path. When the
+   quantization roadmap (§16.6) lands, singleshot becomes the active
+   algorithm and brings new constraints (e.g., the chain-length-
+   conditional logic at parentInSplit ∈ {3, 4} that's only in
+   singleshot).
 
 ### 7.5 The n=1 streaming-output fast path (Probe 4)
 
@@ -457,45 +544,49 @@ and can't stream them out independently.
 C_psum, prefer (m, 1, k>1) splits. They absorb the overage that
 catastrophes (1, n>1, k>1).
 
-### 7.6 Three regimes within the n=1 family (Probe 6)
+### 7.6 Chain-length cost grows monotonically (no sharp regime boundaries)
 
-The (m, 1, k) walls are **not flat** across chain length k. Probe 6
-measured (m, 1, k) sweeps on three production shapes:
+The original Probe 6 (May 2026) found a sharp chain=4 → chain=8
+boundary with a ~10× jump in regime cost — interpreted as
+"pipeline / sync / allreduce" code paths. **Re-verification on the
+clean rebuild (2026-05-10) does not reproduce this structure.**
 
-```
-Pipeline regime  (chain ≤ 4):    +3 ms regardless of shape
-Sync regime      (chain 8-16):   +23-55 ms, jumps from pipeline
-Allreduce regime (chain = 32):   +14-15 ms, drops back
-```
+The new (m, 1, k) sweep shows regime cost growing roughly
+monotonically with chain length, ~3 ms per chain-length doubling on
+these shapes:
 
-Per-shape regime cost (= wall − max(compute, hmi+launch)):
+| split | DSv3 o_proj M=2048 | DSv3 gate_proj M=2048 | Mixtral gate_proj M=2048 |
+|---|---:|---:|---:|
+| chain=2 | -1.05 | +3.55 | -0.45 |
+| chain=4 | +10.80 | +16.28 | +5.61 |
+| chain=8 | +13.82 | +19.45 | +7.23 |
+| chain=16 | +16.68 | +54.92 | +8.91 |
+| chain=32 | +23.44 | err | +11.96 |
 
-| split | chain | DSv3 o_proj M=2048 | DSv3 gate_proj M=2048 | Mixtral gate_proj M=2048 |
-|---|---:|---:|---:|---:|
-| (16, 1, 2)+kf | 2 | +3.18 | +3.67 | +3.24 |
-| (8, 1, 4)+kf | 4 | +2.81 | +3.52 | +3.47 |
-| (4, 1, 8)+kf | 8 | **+41.87** | **+50.15** | **+23.48** |
-| (2, 1, 16)+kf | 16 | **+43.97** | **+55.25** | **+24.67** |
-| (1, 1, 32)+kf | 32 | +14.95 | (EAR err) | +13.89 |
+The chain=32 row is consistently the **most expensive**, not the
+cheapest as the original Probe 6 claimed. There is no special
+"allreduce primitive at chain=32" — chain=32 is just the longest
+K-collaborator chain.
 
-The **chain=4 → chain=8 boundary is sharp and universal** — the same
-~10× regime-cost jump on every shape at exactly chain=8. This is a
-structural property of the kernel template, not shape-dependent
-calibration.
+This is consistent with Probe 2's linear-in-distance finding (§7.1):
+both probes are sampling the same underlying ring-distance cost,
+just along different axes (5 permutations at fixed split vs 5 chain
+lengths at single permutation).
 
-Architectural inference: the kernel template likely has three code
-paths: small-chain pipeline (≤4, fits an SFP buffer), large-chain
-sync (8-16, generic chain reduction with explicit per-hop sync), and
-all-cores allreduce (chain=32, separate primitive — possibly
-tree-based with O(log k) latency).
+**Implication for the planner**: simpler cost model. K-split cost
+grows roughly linearly with chain length under k_fast emission. Pick
+the smallest chain length that uses all cores (i.e., maximize
+n_split, minimize k_split), subject to stick-alignment and
+PT-utilization constraints.
 
 **Planner preference order under the streaming path** (when pure-M
 overflows C_psum):
 
-1. **(16, 1, 2)+kf** or **(8, 1, 4)+kf** — pipeline regime, +3 ms.
-2. **(1, 1, 32)+kf** — allreduce regime, +14-15 ms.
-3. **(4, 1, 8)+kf, (2, 1, 16)+kf** — sync regime, +25-55 ms (avoid).
-4. **Never (1, n>1, k>1) when C_psum > LX** — catastrophic.
+1. Smallest-chain (m, 1, k>1)+kf candidates that use all 32 cores
+   and respect stick alignment — typically (16, 1, 2)+kf or
+   (8, 1, 4)+kf.
+2. Larger chain lengths only if stick-alignment forces it.
+3. **Never (1, n>1, k>1) when C_psum > LX** — catastrophic.
 
 ### 7.7 The 256 MB EAR ceiling blocks the streaming path on largest wide-N
 
@@ -614,7 +705,7 @@ T_ring     = PSUM_tiles · ring_hops · 8 cycles  / 1.1 GHz
 T_launch   ≈ 100 µs (empirical floor)
 ```
 
-### 10.2 Cost model V4 — calibrated additive penalties
+### 10.2 Cost model V4 — calibrated additive penalties (partially walked back)
 
 The naive `max(T_pt_peak, T_hmi)` predictor has a 21.7% mean error
 on the 30-row validation set. **Cost-model V4** adds four
@@ -638,6 +729,27 @@ Result on the 30-row validation set:
 5.6 percentage point improvement on mean error. V4 brings 3 of 8
 K-split+kf rows within ±2% — the rows the planner critically needs.
 DSv3 o_proj M=2048 +kf: -46% off → -5% off.
+
+**2026-05-10 reverification — Fix B and Fix D walk-back:**
+
+Fix D was calibrated against original Probe 6 data and is
+invalidated by re-verification (§7.6). The chain=4→8 boundary it
+encoded does not exist on the clean rebuild; chain-length cost
+grows roughly monotonically. **Replace Fix D with a linear-in-chain-
+length term**: `T_chain ≈ slope_per_hop × (k - 1) × payload_factor`,
+with `slope_per_hop` calibrated per-payload from Probe 2 (0.07-1.09
+ms/hop range observed across our shape mix). The validation set
+residual reduction attributed to V4 in v2 was partially spurious.
+
+Fix B's "+17 ms × overage_factor" PSUM-overflow penalty was
+calibrated on n>1 catastrophic data from the original measurements.
+The catastrophic ratio shrank from 7-15× to 2-3× on the clean
+rebuild (n=8 ctrl is +37 ms vs n=1 chain=4 at +11 ms = ~2× ratio).
+So Fix B's +17 ms is also overstated; the actual penalty is closer
+to **+5-10 ms per overage factor** on the rebuilt environment.
+
+Fix C's "5.6 ms/hop" coefficient is also superseded — see the §7.1
+table for per-shape calibrated slopes (0.07-1.09 ms/hop).
 
 **Remaining V4 residuals:**
 
@@ -732,6 +844,12 @@ This tree captures the 84-shape sweep's winners with ~80% accuracy
 without any measurement.
 
 ### 10.6 Planner V2 hardware verification — 5/8 picks regressed
+
+**Note (2026-05-10):** V4 cost model has since been partially
+invalidated by Probe 2 + Probe 6 reverification (§7.1, §7.6). The
+5/8 regression result holds — the cost model was not accurate
+enough — but the specific calibration constants (Fix D regime
+additives) are now known to be wrong, not just under-validated.
 
 **Important honesty signal.** After cost-model V4 calibrated to
 16.1% mean error on the validation set, the natural next step was
@@ -991,13 +1109,19 @@ characterization gap.)
 
 (Same as v1.)
 
-### 16.11 Compiler-vs-hardware boundary on K-cohort reduction
+### 16.11 Compiler-vs-hardware boundary on K-cohort reduction (closed)
 
-(Same as v1, with one anchor: the chain=32 allreduce regime in
-Probe 6 has +14-15 ms cost vs sync regime's +25-55 ms — suggesting
-a separate primitive that's likely tree-based. Confirmation by
-reading SDSC emitter source would confirm whether O(log k)
-allreduce is exposed.)
+The original Probe 6 found chain=32 cost dropped back below
+chain=8/16, suggesting a separate "allreduce primitive".
+Re-verification (2026-05-10, §7.6) shows chain=32 has the **highest**
+regime cost on every shape — no such primitive exists. The cost is
+consistent with linear ring distance.
+
+The hypothesis is closed: there is no hardware-supported
+tree-reduction primitive accessible on the chain=32 path. The
+unichain/bichain/singleshot algorithm selectors in deeptools (see
+§7.4) are graph-global, not chain-length-conditional, so there's no
+compiler-side "request the tree-reduction" lever either.
 
 ### 16.12 The "bigger M, slimmer M-loops" tension
 
