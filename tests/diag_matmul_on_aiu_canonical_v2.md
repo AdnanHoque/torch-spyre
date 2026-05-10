@@ -1686,23 +1686,71 @@ inside  psum-INNER  auxLoop  (per output tile in (IJ, MB, OUT, ...)):
    SFPRING ─streaming▶ SFP        // receive prev cohort core's partial      (psum_1)
 ```
 
-So per output tile, each cohort core:
+**Putting the two phases together**, per K-cohort core:
 
-1. Reads its local partial PSUM from LX into the SFP unit.
-2. Receives a peer's partial PSUM via the SFP ring into the same SFP unit.
-3. Sums the two in SFP.
-4. Sends the running sum onward via the SFP ring.
+```python
+# Per K-cohort core. With (m, n, k) work split, each core in the
+# K-cohort gets K_per_corelet = K_total / k — only this core's
+# K-slice. rank_in_cohort ∈ [0, k) is this core's position on the
+# SFP-ring chain (e.g. as ordered by k_fast).
 
-The chain repeats `k - 1` times. Only the **last** core in the
-chain ends up holding the fully-summed PSUM and writes it to HBM
-— gated by `isNotLastPsumCore` (see e.g.
-[`batchmatmul_int8_fwd_sparse.cpp:435`](../../deeptools/dvs/setupVariables/batchmatmul_int8_fwd_sparse.cpp#L435)).
+# ─── Phase 1: per-core KG3 nest on this K-slice (same as §9.1.1) ───
+
+for nb in range(N_per_corelet // 8):                    # N-OUTER  (Cout_Sout)
+    for kb in range(K_per_corelet // 8):                # K-MIDDLE (Cin_Sin) — this slice only
+        b_block = pt.blockload(B_tile[kb, nb])           # weight-stationary
+
+        for mb in range(M_per_corelet // 8):            # M-INNER  (Cmb_)
+            a = lx.load(A_tile[mb, kb])
+            psum_partial = lx.load(C_tile[mb, nb])      # LX double-buffered
+            psum_partial = pt.outer_product(a, b_block, psum_partial)
+            lx.store(C_tile[mb, nb], psum_partial)
+
+# At this point: every K-cohort core holds a *partial* PSUM for
+# the same (mb, nb) output tiles, each summing a different K-slice
+# of A·B. Phase 2 reduces those k partials into one final tile.
+
+# ─── Phase 2: SFP-ring chain reduction (psum-INNER auxLoop) ───
+# Sweep order (IJ, MB, OUT, ...) per dm.cpp:4121-4123.
+# Slot names below match the four DT slots in the diagram above.
+
+for nb in range(N_per_corelet // 8):                    # OUT axis
+    for mb in range(M_per_corelet // 8):                # MB axis
+
+        local = lx.stream_to_sfp(C_tile[mb, nb])         # out_5: LX → SFP
+
+        if rank_in_cohort == 0:                           # head — nothing to receive
+            running_sum = local
+        else:
+            peer = sfp.recv_from_sfpring()                # psum_1: SFPRING → SFP
+            running_sum = sfp.add(local, peer)            # in-SFP fma
+
+        if rank_in_cohort < k - 1:                        # forward to next core
+            lx.store_from_sfp(C_tile[mb, nb], running_sum)  # out_6: SFP → LX
+            lx.stream_to_sfpring(C_tile[mb, nb])          # out_7: LX → SFPRING
+        else:                                             # tail — write final to HBM
+            lx.store_from_sfp(C_tile[mb, nb], running_sum)
+            # gated by isNotLastPsumCore = false in setup
+            # (e.g. batchmatmul_int8_fwd_sparse.cpp:435).
+            # The drain to HBM happens via the per-core
+            # output data path, not via SFPRING.
+```
+
+The chain repeats `k - 1` times across the K-cohort; only the tail
+core (`rank_in_cohort == k - 1`) writes to HBM. The rest of the
+chain forwards via SFPRING.
 
 **The reduction algorithm** (`unichain` / `bichain` / `singleshot`)
 is graph-global and selected from the data format and ring config
-(see §7.4 and the memory note on `dsm` PSUM-algo selection). All
-three plug into the same SFP-ring data-transfer slots above; only
-the chain length and direction differ.
+(see §7.4 and the memory note on `dsm` PSUM-algo selection). The
+snippet above is the **unichain** pattern (one linear chain, k-1
+hops). `bichain` splits the cohort into two half-chains traveling
+opposite directions on the bidirectional SFP ring (chain length
+`(k-1)/2` each, halving worst-case hop count).
+`singleshot` collapses the chain into one wide-burst transfer for
+small k. All three plug into the same four DT slots; only the
+ring traversal pattern and the `rank_in_cohort` book-keeping
+differ.
 
 **Cost implications**:
 
