@@ -1615,6 +1615,98 @@ cliff at the cost of `M_per/8` × B re-reads and `N_per/8` × A
 re-reads — a constant-factor penalty trading off against an
 unbounded one. This is one of the open opportunities flagged in §17.
 
+#### 9.1.5 KG3 + split-K (k > 1) — the SFP-ring PSUM reduction layer
+
+Under a work split with `k > 1`, the K-cohort of `k` cores each
+runs the §9.1.1 KG3 nest **on its own K-slice**, producing a
+partial PSUM for the same C-tile as its `k - 1` cohort peers. The
+partials must then be reduced before the C-tile drains to HBM.
+
+deeptools attaches this as an **additional auxiliary loop layer
+around the C-tile drain** — not as a modification to the inner
+KG3 nest. Per-core, N-outer / K-middle / M-inner is unchanged.
+
+**Trigger** ([`deeptools/dm/dm.cpp:964`](../../deeptools/dm/dm.cpp#L964)):
+
+```cpp
+if (dsc->ChipletD_.in_ != -1 &&
+    dsc->ChipletD_.in_ / dsc->CoreD_.in_ > 1) {
+    // ... attach the PSUM SFP-ring data transfers
+}
+```
+
+The cluster's K-dimension `ChipletD.in_` exceeds the per-core K
+`CoreD.in_` ⇒ K is split across multiple cores within the cluster
+⇒ the K-cohort PSUM reduction is wired in.
+
+**Auxiliary loop registration**
+([`dm.cpp:4114-4128`](../../deeptools/dm/dm.cpp#L4114-L4128)).
+A loop named `"psum"` is registered with dimension order
+**(IJ, MB, OUT, [Y, X])** — the output-tile coordinates the
+reduction sweeps over (one iteration per output tile per core).
+The corelet-level split flag fires when SFP-ring PSUM is in use
+and >1 corelet is active:
+
+```cpp
+psumLoopInfo.splitLoopCl_ = (isPsumSfpRing && dsc.numCoreletsUsed_ > 1);
+// dm.cpp:1002, 4132
+```
+
+**Data-transfer pipeline added under the auxLoop**
+([`dm.cpp:4233-4339`](../../deeptools/dm/dm.cpp#L4233-L4339)). For
+each output tile, four data transfers are wired:
+
+```text
+inside  psum-INNER  auxLoop  (per output tile in (IJ, MB, OUT, ...)):
+
+   LX  ──streaming──▶  SFP        // sum local partial into FP unit          (out_5)
+   SFP ──streaming──▶  LX         // write summed partial back to LX         (out_6)
+   LX  ──dblbuf────▶  SFPRING     // send to next K-cohort core              (out_7)
+   SFPRING ─streaming▶ SFP        // receive prev cohort core's partial      (psum_1)
+```
+
+So per output tile, each cohort core:
+
+1. Reads its local partial PSUM from LX into the SFP unit.
+2. Receives a peer's partial PSUM via the SFP ring into the same SFP unit.
+3. Sums the two in SFP.
+4. Sends the running sum onward via the SFP ring.
+
+The chain repeats `k - 1` times. Only the **last** core in the
+chain ends up holding the fully-summed PSUM and writes it to HBM
+— gated by `isNotLastPsumCore` (see e.g.
+[`batchmatmul_int8_fwd_sparse.cpp:435`](../../deeptools/dvs/setupVariables/batchmatmul_int8_fwd_sparse.cpp#L435)).
+
+**The reduction algorithm** (`unichain` / `bichain` / `singleshot`)
+is graph-global and selected from the data format and ring config
+(see §7.4 and the memory note on `dsm` PSUM-algo selection). All
+three plug into the same SFP-ring data-transfer slots above; only
+the chain length and direction differ.
+
+**Cost implications**:
+
+- The K-cohort reduction fires **once per output tile** under the
+  `psum-INNER` auxLoop. Per core that's
+  `(M_per_corelet / 8) × (N_per_corelet / 8)` fires.
+- Each fire traverses the chain of `k - 1` ring hops.
+- Per-hop cost is linear in K-collaborator distance on the SFP
+  ring (§7.1) — which is what `kf` (k_fast) k-cohort ordering
+  optimises for: place the `k` cohort members physically adjacent
+  on the SFP ring so each hop spans 1 collaborator slot rather
+  than ~k.
+
+What's verified vs. inferred:
+
+- **Verified**: the trigger condition (dm.cpp:964), the auxLoop
+  registration and dim order (dm.cpp:4114-4128), the four
+  data-transfer slots and their src/dst/type (dm.cpp:4233-4339),
+  the corelet split flag (dm.cpp:1002, 4132), the
+  last-core-writes-HBM gate.
+- **Inferred**: the per-tile sequence of "read local → receive
+  peer → sum → forward" is the natural reading of the four DT
+  slots; the actual `.smc` SFP unit microcode interleaves these
+  with double-buffer ping-pong that I haven't fully traced.
+
 ## 10. The split-family decision tree
 
 ```mermaid
