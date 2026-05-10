@@ -322,48 +322,16 @@ when PSUMs actually fit; once they don't, you get the worst of both
 worlds — A and B still get reloaded once per K-block, **and** PSUM
 round-trips HMI per K-iteration.
 
-#### 4.1.3a How OS1 (output-stationary) differs
+#### 4.1.3a OS1 avoids the catastrophe — see §9.1
 
-The contrast clarifies what KG3 is buying. **OS1** flips the loop
-order — `(mt, nt)` is outer, K is inner. Only **one** PSUM tile
-lives in LX at a time:
-
-```python
-# OS1, output-stationary
-for mt in range(M_per // 8):                       # M-OUTER
-    for nt in range(N_per // 8):                   # N-MIDDLE
-        PSUM_tile = zeros(8, 8)                     # ONE tile, stays in LX
-        for kb in range(K_per // 8):                # K-INNER
-            load A_strip (8, 8) from HMI into LX    # A[mt block, kb block]
-            load B_strip (8, 8) from HMI into LX    # B[kb block, nt block]
-            PSUM_tile += A_strip @ B_strip
-        store PSUM_tile from LX to HBM              # done with this output tile
-```
-
-The trade-off vs KG3 in one table:
-
-|  | KG3 (K-outer, weight-stationary) | OS1 (output-outer, output-stationary) |
-|--|---|---|
-| LX PSUM working set | `M_per × N_per × 4` (all tiles resident) | one 8×8 tile (256 B) |
-| Catastrophe risk    | yes if PSUM > LX                          | no                  |
-| A bytes loaded      | each byte ~once                           | each byte ~`N_per / 8` times (re-read per N-tile) |
-| B bytes loaded      | each byte ~once                           | each byte ~`M_per / 8` times (re-read per M-tile) |
-| Wins when           | PSUM fits **and** K is large              | PSUM does **not** fit **or** K is small |
-
-OS1 trades **PSUM residency** for **A/B re-fetches**. KG3 wins
-whenever PSUM fits and K is large enough that the once-per-kernel
-A/B pass dominates; OS1 wins when KG3's PSUM working set blows past
-LX, *provided* A and B are small enough that re-fetching them is
-cheaper than the K-iter spill rounds. The catastrophe in §4.1.1's
-table is the regime where the planner picked KG3 but PSUM did not
-fit — picking OS1 there would avoid the cliff at the cost of a
-constant-factor A/B re-read.
-
-(KG3 is the inference default because for typical decoder shapes
-M·N is small relative to the K dimension, so PSUMs fit easily and
-the once-per-K A/B pass is the dominant cost. The catastrophe
-regime appears when N is wide enough at small m to push PSUM over
-LX before K dominates.)
+The catastrophe is specific to KG3's K-outer / M-N-inner ordering:
+holding all PSUM tiles resident is what creates the LX residency
+requirement. The OS1 (output-stationary) family flips the loop
+order so only one 8×8 PSUM tile is resident at a time and never
+spills, at the cost of re-reading A and B inside the outer (M, N)
+loops. **§9.1** walks both pseudocodes side-by-side with a
+trade-off table; in short, OS1 would clip the §4.1.1 cliff at a
+constant-factor A/B re-read penalty.
 
 ### 4.2 DXP_LX_FRAC_AVAIL
 
@@ -1459,6 +1427,124 @@ Three things drive performance:
 4. **(new in v2) PSUM accumulator residency.** Per §4.1: when
    M_per × N_per × 4 > 2 MB, splits with n>1 catastrophe. Splits
    with n=1 absorb via the streaming-output path (§7.5).
+
+### 9.1 First principles: weight-stationary (KG3) vs output-stationary (OS1)
+
+A matmul has three tensors (A, B, C) and one reduction axis (K).
+Any execution schedule must decide: **which tensor stays in fast
+memory while the other two cycle past it?** That choice — encoded
+as the loop-nest order — sets both the LX residency requirement
+and the total HMI traffic. There are two canonical answers used on
+AIU:
+
+- **KG3 (weight-stationary)** — see §8.3. K is the outermost loop;
+  B (and the full grid of PSUM tiles) stays LX-resident inside it.
+  A and B are read **once each per K-block** and reused across the
+  M-N inner loop.
+
+- **OS1 (output-stationary)** — see §8.2. The (M, N) output
+  coordinates are the outermost loops; one 8×8 PSUM tile stays
+  PT-register-resident across an inner K-loop. A and B re-stream
+  through LX for every output tile.
+
+The §9 nest above is the OS1-style form. Side-by-side in the same
+syntax:
+
+#### 9.1.1 KG3 — K-outer, M-N-inner
+
+```python
+# Per core. The whole PSUM grid is LX-resident across the K-loop.
+psum = zeros(M_per_core // 8, N_per_core // 8, 8, 8)
+
+for kb in range(K_per_core // 8):                     # K-OUTER
+    a_block = lx.load(A_tile[:, kb])                   # M_per × 8
+    b_block = lx.load(B_tile[kb, :])                   # 8 × N_per
+
+    for mb in range(M_per_core // 8):                  # M-N-INNER
+        for nb in range(N_per_core // 8):
+            psum[mb, nb] = pt.outer_product(
+                a_block[mb], b_block[nb], psum[mb, nb])
+
+# After the K-loop:
+if k > 1:
+    psum = sfp_ring_allreduce(psum, cohort)            # whole grid
+
+for mb in range(M_per_core // 8):                     # one-shot drain
+    for nb in range(N_per_core // 8):
+        lx.store(C_tile[mb, nb], psum[mb, nb])
+```
+
+LX PSUM working set: `M_per × N_per × 4` bytes. Must fit in
+`LX_per_core` or §4.1's catastrophe kicks in. Within one
+K-iteration, `b_block` is reused across all `(mb, nb)` — that's
+where "weight-stationary" earns its keep: each B byte lands in LX
+once and feeds PT `M_per_core / 8` times before being overwritten
+by the next K-block.
+
+#### 9.1.2 OS1 — M-N-outer, K-inner
+
+```python
+# Per core. ONE 8×8 PSUM tile resident at a time (PT registers).
+for mb in range(M_per_core // 8):                     # M-OUTER
+    for nb in range(N_per_core // 8):                 # N-MIDDLE
+        psum = zeros(8, 8)                             # PT-resident accumulator
+
+        for kb in range(K_per_core // 8):              # K-INNER
+            a = lx.load(A_tile[mb, kb])
+            b = lx.load(B_tile[kb, nb])
+            psum = pt.outer_product(a, b, psum)
+
+        if k > 1:
+            psum = sfp_ring_allreduce(psum, cohort)
+
+        lx.store(C_tile[mb, nb], psum)
+```
+
+(Same shape as §9 — that nest is OS1.)
+
+LX PSUM working set: 256 B (one 8×8 fp32 tile, briefly transiting
+LX between PT registers and HMI). There is **no** way OS1 trips
+§4.1's catastrophe. The cost: A and B are re-read inside the outer
+loops — each A row touched once per N-tile, each B column once per
+M-tile.
+
+#### 9.1.3 Side-by-side trade-off
+
+|                              | KG3 (B-stationary, K-outer)         | OS1 (C-stationary, M-N-outer)        |
+|------------------------------|--------------------------------------|---------------------------------------|
+| Outer loop                   | K                                    | (M, N) — output coordinates           |
+| What stays in LX             | All `M_per × N_per` PSUM tiles       | One 8×8 PSUM tile (PT regs, drained)  |
+| LX PSUM working set          | `M_per × N_per × 4` bytes            | 256 B                                 |
+| §4.1 catastrophe risk        | yes if PSUM > LX                     | no                                    |
+| A bytes loaded per kernel    | each byte ~once                      | each byte ~`N_per / 8` times          |
+| B bytes loaded per kernel    | each byte ~once                      | each byte ~`M_per / 8` times          |
+| Wins when                    | PSUM fits **and** K is large         | PSUM does not fit **or** K is small   |
+
+The decision is a residency-vs-traffic trade. KG3 holds the most
+data in LX so it can sweep A and B once; that pays whenever
+residency is met and K is large enough that the once-per-kernel
+A/B pass dominates. OS1 holds the least so it can never spill;
+that pays when KG3's working set would have blown past LX, or when
+K is small enough that an extra few A/B passes are cheaper than the
+per-K-iteration HMI round-trips of §4.1.3.
+
+#### 9.1.4 Why KG3 is the AIU default — and when OS1 wins
+
+For most inference matmuls (wide K, modest M·N), KG3's PSUM
+residency is comfortably met and its single A/B sweep dominates
+wall time. The planner picks KG3.
+
+OS1 wins (and is selected by §8.5's per-node decision) when:
+
+- The PSUM working set would not fit in LX under any feasible split
+  (large M·N matmuls — classification heads, pre-softmax projections).
+- K is small enough that A/B re-reads stay cheap.
+
+Where the planner picks KG3 in a regime where PSUM does not fit,
+§4.1.1's cliff hits. Switching that regime to OS1 should clip the
+cliff at the cost of `M_per/8` × B re-reads and `N_per/8` × A
+re-reads — a constant-factor penalty trading off against an
+unbounded one. This is one of the open opportunities flagged in §17.
 
 ## 10. The split-family decision tree
 
