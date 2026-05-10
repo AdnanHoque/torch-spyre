@@ -496,6 +496,63 @@ via the RIU BiRing under operand-multicast (§4.1, §5.4). The kernel
 itself doesn't touch HBM; it operates on what the prologue already
 landed in LX.
 
+#### Where the factor of 8 comes from
+
+The 8 in `M_per // 8`, `N_per // 8`, and `K_per // 8` is the **PE
+array dimension**. Each corelet has an 8×8 grid of PE cells, and
+the K-direction SIMD width is also 8. Per corelet per cycle, the
+PT array does:
+
+```
+8 M-rows × 8 N-cols × 8 K-elements = 512 MAC per cycle
+```
+
+This matches `PT.parallelEngines = 512` in `sentient_dd2_sysconfig.json`
+for fp16. The 8×8×8 factorisation is *the* fundamental geometry —
+every loop nest is built around it. Other precisions keep the 8×8
+spatial dimensions but widen the K-direction SIMD:
+
+| precision | parallelEngines | factorisation |
+|---:|---:|---|
+| fp16 | 512 | 8 × 8 × **8** |
+| fp8 | 1024 | 8 × 8 × **16** |
+| int8 | 2048 | 8 × 8 × **32** |
+| int4 | 4096 | 8 × 8 × **64** |
+
+This is also why **`M_per ≥ 8` is the rule for full PT M-row
+utilisation**. `M_per < 8` leaves PE rows idle every cycle.
+
+#### PT mode vs PE mode — same silicon, different microcode
+
+Two things are confusingly named "PE":
+
+1. **PE the silicon** — the 8×8 grid of multiply-accumulate cells per
+   corelet. The physical hardware.
+2. **PE the execution unit** — one of the *modes* of using that
+   silicon, listed in `sysconfig.json` alongside PT.
+
+The same 8×8 PE silicon is driven in two different modes:
+
+| mode | dataflow | parallelEngines/corelet | used by |
+|---|---|---:|---|
+| **PT** | systolic outer-product, 8-deep K-accum | 512 (fp16) | matmul, conv2d, batchmatmul |
+| **PE** | 64 independent SIMD lanes, no cross-cell coop | 64 | add, mul, gelu, exp, sum, max, layernorm, ... |
+
+PT mode treats the grid as a cooperating outer-product engine —
+cells share data via systolic wiring, accumulate K-deep into per-cell
+PSUM registers. PE mode bypasses the systolic wiring and treats each
+cell as an independent ALU — used for elementwise ops and
+reductions where cells don't need to share.
+
+The kernel pseudocode above is **all PT mode** (matmul). PE-mode
+operations show up between matmuls — fused activations, layer
+norms, residual adds — and have very different ring usage (no
+K-cohort, just per-stick element processing).
+
+When this doc says "PT cycles" it means matmul-mode cycles of the
+PE grid. When sysconfig says "PE" it means elementwise-mode cycles
+of the same grid. Same silicon, different control logic.
+
 **Line `for mb in range(M_per // 8):`**
 
 - Memory: no traffic on this line — it's a loop-counter init. The
@@ -1814,15 +1871,23 @@ self-explanatory.
   inference; no PSUM ring traffic.
 - **payload** — In this doc, cohort PSUM tile size = `M_per ×
   N_per × 4` bytes. The argument to `payload_factor` in §6.6.
-- **PE** — Processing Element. One cell of the 8×8 systolic array
-  within a corelet.
+- **PE (silicon)** — Processing Element. One cell of the 8×8
+  multiply-accumulate grid per corelet. The physical hardware.
+- **PE (execution unit)** — One of two ways the 8×8 PE silicon is
+  driven. Treats the grid as 64 independent SIMD lanes (no
+  cross-cell cooperation) for elementwise ops, reductions, and
+  activations: `add`, `mul`, `gelu`, `sum`, `max`, `layernorm`,
+  etc. `parallelEngines = 64` per corelet. See §4.7 sidebar.
 - **PrivateUse1** — PyTorch's hook for out-of-tree backends.
   `"spyre"` is registered through this mechanism.
 - **PSUM** — Partial sum. fp32 accumulator tile produced by
   successive PT outer-products; reduced across K-cohort members
   via the SFP rings under K-split.
-- **PT** — Point execution unit. Drives the 8×8 PE array for
-  matmul. One PT per corelet, two per core.
+- **PT (execution unit)** — Matmul mode of the 8×8 PE silicon.
+  Treats the grid as a cooperating systolic outer-product engine
+  with 8-deep K-direction SIMD. `parallelEngines = 512` (fp16),
+  giving 512 MAC/cycle/corelet. Used by matmul, conv2d, bmm. One
+  PT per corelet, two per core. See §4.7 sidebar.
 - **PT-XRF** — Per-corelet 64 KiB register file on an alternate
   weight path; used by some int8/conv2d kernels and bypasses LX.
 - **RIU BiRing** — 33-node bidirectional data ring carrying
