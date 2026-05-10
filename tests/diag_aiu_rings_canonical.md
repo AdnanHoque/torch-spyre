@@ -464,6 +464,198 @@ Sections §5–§8 generalise each pattern to the full 32-core chip;
 §6 gives empirical per-hop costs for the ring traffic that K-split
 introduces.
 
+### 4.7 Loop-nest walkthrough — what each line does in the hierarchy
+
+§4.6 traced a matmul end-to-end at the *split* level — who reads
+what, who reduces with whom. This section drops one level lower and
+traces the **per-core kernel loop nest**, line by line, showing
+which fabrics each instruction touches. Same target as §4.6 (a
+canonical reader should be able to predict ring traffic for an
+arbitrary split) but from inside one core looking out.
+
+The kernel that one of the 32 cores executes during a fp16 matmul,
+under work-division split `(m, n, k)` with `M_per = M/m`, `N_per =
+N/n`, `K_per = K/k`:
+
+```python
+# Per-core kernel under split (m, n, k):
+for mb in range(M_per // 8):           # outer: M-direction PT batches
+    for nb in range(N_per // 8):       # outer: N-direction PT batches
+        psum = zeros(8, 8)             # accumulator lives in PE registers
+        for kb in range(K_per // 8):   # inner: K-direction PT batches
+            a = lx.load(A_tile[mb, kb])      # 8 × 8 tile from LX
+            b = lx.load(B_tile[kb, nb])      # 8 × 8 tile from LX
+            psum = pt.outer_product(a, b, psum)  # one PT cycle
+        if k > 1:                              # K-cohort reduction
+            psum = sfp_ring_allreduce(psum, cohort)
+        lx.store(C_tile[mb, nb], psum)         # drain accumulated tile
+```
+
+The A and B tiles in LX are *already there* — staged earlier by MNI
+via the RIU BiRing under operand-multicast (§4.1, §5.4). The kernel
+itself doesn't touch HBM; it operates on what the prologue already
+landed in LX.
+
+**Line `for mb in range(M_per // 8):`**
+
+- Memory: no traffic on this line — it's a loop-counter init. The
+  per-core M-extent `M_per` was determined by the work-division
+  split; this loop iterates over PT-tile-sized chunks (8 rows each).
+- Compute: nothing yet. Sets up the address pattern that `lx.load`
+  will use.
+- Rings: none.
+- Performance: each iteration corresponds to one full inner pair
+  `(nb, kb)` traversal, so loop-trip count `M_per // 8` is the
+  outer multiplier on every cost below.
+
+**Line `for nb in range(N_per // 8):`**
+
+- Memory: none — another loop counter. The N-shard is `N_per`
+  bytes wide per core; this iterates 8 columns at a time.
+- Compute: none.
+- Rings: none.
+- Performance: nests inside the M-loop. Combined `(mb, nb)` count
+  is `(M_per // 8) × (N_per // 8)` — that's the number of output
+  tiles this core writes, and is the dominant fan-out for the
+  per-core total work.
+
+**Line `psum = zeros(8, 8):`**
+
+- Memory: PE register file, one fp32 8×8 tile (256 B).
+- Compute: PE-array clear. One cycle of PT execution.
+- Rings: none — purely on-corelet.
+- Performance: cheap. One per output tile. Becomes load-bearing
+  only when chained with the SFP allreduce below — the PSUM tile
+  must hit the right state at the right time.
+
+**Line `for kb in range(K_per // 8):`**
+
+- Memory: none — counter init.
+- Compute: none.
+- Rings: none.
+- Performance: trip count `K_per // 8` is the inner multiplier on
+  per-tile cost. This is **where K interacts with the loop nest** —
+  the linear-in-K scaling of `step` in §6.6 lives in the body of
+  this loop.
+
+**Line `a = lx.load(A_tile[mb, kb]):`**
+
+- Memory: 8 × 8 fp16 tile = 128 B = exactly **one stick** read from
+  LX into PT input register.
+- Compute: PT input-staging unit accepts the tile.
+- Rings: **on-core LX → PT FIFO** (128 B/cyc, §4.5). No cross-core
+  traffic — A is already resident in this core's LX.
+- Performance: one cycle per stick at LX-port peak. Per output tile
+  this fires `K_per / 8` times.
+
+**Line `b = lx.load(B_tile[kb, nb]):`**
+
+- Memory: 8 × 8 fp16 tile = 128 B = one stick from LX into PT.
+- Compute: PT staging.
+- Rings: on-core LX → PT FIFO (same fabric as the A load, in the
+  *same cycle slot* if interleaved). Note that the B-tile got into
+  this core's LX via RIU BiRing multicast from HBM (§4.1, §5.4) —
+  but that traffic happens at a higher pipeline level and isn't
+  represented in this inner loop.
+- Performance: one cycle per stick at LX-port peak. Same firing
+  count as A.
+
+**Line `psum = pt.outer_product(a, b, psum):`**
+
+- Memory: PE register file (psum stays in place; a and b consumed
+  from input registers).
+- Compute: **one PT cycle** — the 8×8 PE array does 64 fp16 MACs in
+  parallel with 8-way SIMD = 512 MAC/cycle.
+- Rings: none — purely intra-corelet PE-array execution.
+- Performance: this is the **dominant useful work** of the kernel.
+  At 1.1 GHz × 512 MAC/cycle × 32 cores × 2 corelets × 2 (FMA) =
+  72.1 TFLOPS fp16 peak. Every cycle this line is *not* firing is
+  a stall.
+
+**Line `if k > 1: psum = sfp_ring_allreduce(psum, cohort):`**
+
+- Memory: PE register PSUM tile (256 B per fp32 8×8 tile) drained
+  to SFP, ring-reduced across `k` cohort partners, result back to
+  PE registers.
+- Compute: SFP unit — vector-add across the cohort's partials.
+  The PT array is idle for the duration.
+- Rings: **SFP UniRing CW (Corelet 0) and CCW (Corelet 1)**. Under
+  bichain both rings carry half the traffic in parallel. Hops per
+  reduction: `(k − 1)` under k\_fast emission (cohort members
+  adjacent), `(k − 1) × m·n` under identity emission (cohort
+  members `m·n` segments apart).
+- Performance: this is **the line whose cost the §6.6 model
+  predicts**. It fires once per output tile (in this naive
+  pseudocode), but as Probe K1 demonstrated, the actual ring
+  pressure scales linearly with K — so the real ring traffic is
+  better thought of as interleaved through the inner K-loop, not
+  as a single drain at the end.
+
+**Line `lx.store(C_tile[mb, nb], psum):`**
+
+- Memory: 8 × 8 fp32 tile = 256 B written from PE registers back to
+  LX. Note: PSUM is fp32; only the final downcast-to-fp16 store
+  to HBM (which happens at the *kernel level*, not in this loop)
+  costs 128 B per tile.
+- Compute: PE drain.
+- Rings: **on-core PE → LX FIFO** (or PT → LX, same physical port).
+- Performance: one cycle per stick. One firing per output tile.
+
+#### 4.7.1 Toy numerical walk
+
+A single core processing M=16, N=16, K=16 fp16 (a degenerate
+"one-core kernel" so we can do the arithmetic by hand):
+
+- Outer-loop iterations: `(M/8) × (N/8) = 2 × 2 = 4` output tiles.
+- Inner-loop iterations per output tile: `K/8 = 2` PT batches.
+- Total PT cycles (the `pt.outer_product` line): `4 × 2 = 8`
+  cycles. At 1.1 GHz that's **7.3 ns of PT time** — orders of
+  magnitude below realistic kernel walls because this toy shape
+  doesn't even fill one corelet.
+- LX loads per output tile: 2 (A) + 2 (B) = 4. Total = 16 loads.
+  Each = 8 × 8 × 2 B = 128 B = exactly **one stick**.
+- LX stores: 4 (one per output tile). Each = 8 × 8 × 2 B = 128 B
+  per fp16 store (fp32 PSUM stays in PE registers and is downcast
+  on drain).
+- Total LX bandwidth used during the kernel: 16 + 4 = 20 sticks =
+  2560 B.
+- PE register PSUM activity: 4 live PSUM tiles, one per output
+  tile, each living through 2 inner-loop iterations.
+
+#### 4.7.2 Per-tile dataflow loop
+
+```mermaid
+graph LR
+    A_LX[A tile in LX] -- LX→PT FIFO --> PT[PT outer-product]
+    B_LX[B tile in LX] -- LX→PT FIFO --> PT
+    PT -- accumulate in PE registers --> PSUM[PSUM 8×8 in PE registers]
+    PSUM -- next K iteration --> PT
+    PSUM -- after K-loop, drain --> C_LX[C tile in LX]
+    PSUM -. if k > 1, SFP allreduce .-> Cohort[cohort partner]
+```
+
+#### 4.7.3 Scaling implications and the link to §6.6
+
+Three connections back to the canonical model:
+
+1. **K-loop is where ring-vs-compute interleaves.** The
+   `sfp_ring_allreduce` line in this pseudocode looks like a single
+   end-of-K drain, but Probe K1's clean K-linearity says the actual
+   PSUM activity is woven through the inner K-loop. The
+   `0.068 µs/K` slope in §6.6 is the per-K-iteration ring cost
+   accumulated over the whole inner loop.
+2. **The (mb, nb) outer loops are what `(m, n)` controls.** The
+   per-core split factors decide `M_per = M/m` and `N_per = N/n`,
+   which set the outer-loop trip count. The K-cohort split factor
+   `k` is what slices `K_per = K/k` for the inner loop, and is also
+   what enables the `sfp_ring_allreduce` line at all (`k = 1` makes
+   it a no-op).
+3. **§8's "per-cluster HMI bytes" maps to the LX prologue.** The
+   `lx.load` lines here read from LX, which was filled by RIU
+   traffic at a higher pipeline level. Per-cluster HMI bytes (§8)
+   counts those higher-level RIU multicasts, summed implicitly
+   over the `(mb, nb, kb)` iteration space.
+
 ## 5. The dataflow-to-ring mapping
 
 Pick `(PriOpDataflow, dsm_psum_algo, XrfInterleaving)` from the
@@ -794,6 +986,76 @@ is the empirical slope from the K-sweep linear fit; the
 `payload / 128 KB` factor assumes the 128 KB calibration shape as
 the unit and is supported by Probe K2's threshold + above-threshold
 linear behaviour (§6.7).
+
+Five paragraphs unpack what the formula is actually claiming, why
+each term has the shape it does, and where the model breaks.
+
+**(a) What "step" measures.** `step` is the wall-clock difference
+between two runs of the *same* kernel under the *same* split:
+`step = wall_with_identity_emission − wall_with_k_fast_emission`.
+Both runs do identical compute, identical HMI traffic, identical
+LX residency, identical output. The only difference is the physical
+core-id permutation that determines which cores cooperate on each
+K-cohort PSUM reduction. Under split `(1, 16, 2)` the cohort size is
+2, and identity emission places the two cohort members 16 cores
+apart on the SFP ring (16 ring segments traversed per PSUM
+transfer); k\_fast places them adjacent (1 segment). Everything
+the model captures is the cost of those extra 15 ring segments
+per cohort, summed across all the times the K-loop drives a PSUM
+hop.
+
+**(b) Why `step` grows linearly with K.** Probe K1 swept K across
+a 32× range at fixed cohort payload (128 KB) and measured `step`
+clean-linear in K, R² ≈ 1.0. A naive PSUM-reduction-only mental
+model would expect transfer count to scale with M·N (one chain per
+output tile), independent of K — so the linearity in K is
+informative. The likely mechanism is that PSUM ring traffic
+**interleaves through the K-loop** rather than draining once at
+the end: per-K-chunk synchronisation, periodic PSUM register
+drains as PE accumulators cycle, or accumulating ring queue
+pressure proportional to the iteration count. The `0.068 µs/K`
+slope is calibrated empirically; the underlying mechanism is not
+committed in this doc (logged as a residual in §11). Treat it as
+clean empirical scaling whose constant is anchored to one probe.
+
+**(c) Why payload scales linearly above 96 KB.** "Payload" in
+this model is the **per-cohort PSUM tile size**, `M_per × N_per × 4`
+bytes. For (1, 16, 2) on `(128, 4096, K)` that's `128 × 256 × 4 =
+128 KB` — the calibration unit. Above ~96 KB the per-K-iteration
+kf saving is roughly proportional to payload bytes, so the model
+factors out the calibration unit as `payload / 128 KB`. The
+linearity above the threshold is what Probe K2 measured directly:
+swept N at fixed (M, K) so payload moved through the threshold,
+and observed step ≈ linear in payload above ~96 KB.
+
+**(d) Why the threshold exists.** Below ~96 KB the kf saving
+collapses to ~zero — Probe K2 measured 0.011 ms at 64 KB vs
+0.206 ms at 96 KB, a step-function not a smooth ramp. The most
+plausible explanation is that a hardware buffer or
+compiler-emitted ring-batch primitive absorbs sub-threshold PSUM
+transfers as a single ring-cycle operation, so distance is
+irrelevant for PSUMs that fit in the buffer. The 64 KB lower edge
+matches the per-corelet PT-XRF capacity (`xrfCapacity = 64 KiB`
+in `deeptools/dsc/sysdef.cpp`), which is suggestive but not
+confirmed. The model takes the threshold as empirical and doesn't
+commit on the mechanism.
+
+**(e) The HMI-bound outlier.** L3.1 70B down\_proj at M=128,
+K=28672 measures 0.43 ms vs the model's 3.9 ms prediction (9× too
+high). The kernel wall is 8 ms — roughly 10× the compute peak —
+so this kernel spends ~90% of its time waiting on HBM weight
+loads of B. Ring transit happens *during* those HMI waits, off
+the critical path. The visible step at the kernel boundary
+collapses because the ring savings are masked behind HMI stalls
+that don't shrink. The model assumes ring is on the critical
+path; in HMI-bound kernels it isn't. This boundary is what
+defines the model's regime of validity: it works when the kernel
+is compute-bound or LX-resident-PSUM-bound, and breaks when HBM
+loading dominates the wall (§11.11).
+
+In short — three numbers in (`K`, `payload`, `is_HMI_bound`), one
+number out, calibrated from one probe, validated on 13 held-out
+shapes spanning Granite 3 8B and Llama 3.1 8B / 70B / 405B.
 
 Validation against the held-out set (13 measured shapes, 9 above
 the threshold; the 4 sub-threshold rows collapse to the trivial
@@ -1363,7 +1625,243 @@ K=32768 and check whether `wall − compute_peak` enters the
 HMI-bound regime; if so, fit `overlap_factor` against
 `(compute + HMI) / predicted_step`.
 
-## 12. References
+## 12. Quick reference for back-of-napkin calculations
+
+Tables and rules of thumb the rest of the doc earned the right to
+state. Use this section to size ring/HMI/PT costs on a new shape
+in under a minute; if the answer disagrees with the rest of the
+doc, the rest of the doc wins.
+
+### 12.1 Hardware constants
+
+| quantity | value | notes |
+|---|---|---|
+| Cores per AIU | 32 | physical cores on a single AIU 1.0 |
+| Corelets per core | 2 | total 64 corelets per AIU |
+| PE array per corelet | 8×8 with 8-way SIMD | 512 MAC/cycle fp16 |
+| LX per core | 2 MiB | 64 MiB aggregate, compiler-managed |
+| PT-XRF per corelet | 64 KiB | 4 MiB aggregate; alternate weight path |
+| Per-core EAR limit | 256 MiB | hard hardware cap on per-core HBM addressable bytes |
+| LPDDR5 per AIU | 128 GiB | off-chip device memory |
+| Stick (fp16) | 128 B = 64 elements | atomic data unit |
+
+### 12.2 Bandwidths
+
+| fabric | spec | direction | notes |
+|---|---|---|---|
+| HBM bus | 128 B/cyc × 1.3 GHz = 166 GB/s | unidirectional | the binding HMI bottleneck |
+| RIU BiRing | 128 B/cyc/dir × 1.3 GHz = 166 GB/s/dir | bidirectional | aggregate 333 GB/s |
+| SFP UniRing CW (Corelet 0) | 32 B/cyc × 1.1 GHz = 35.2 GB/s | unidirectional | |
+| SFP UniRing CCW (Corelet 1) | 32 B/cyc × 1.1 GHz = 35.2 GB/s | unidirectional | |
+| SFP aggregate (under bichain) | 70.4 GB/s | both rings in parallel | CW + CCW are physically disjoint |
+| LX (per core) | 128 B/cyc × 1.1 GHz = 140 GB/s | shared port | 4.5 TB/s aggregate across 32 cores |
+| On-core FIFO (LX↔PT, etc.) | 128 B/cyc × 1.1 GHz = 140 GB/s | per link | shares the 128 B/cyc LX port |
+
+### 12.3 PT compute peak by precision
+
+| precision | parallelEngines/corelet | per-AIU peak |
+|---|---:|---:|
+| fp16 | 512 | 72.1 TFLOPS |
+| fp8 | 1024 | 144 TFLOPS |
+| int8 | 2048 | 144 TOPS |
+| int4 | 4096 | 288 TOPS |
+
+### 12.4 k\_fast canonical model (for quick reuse)
+
+```
+step ≈ 0.068 µs/K × K × payload_factor
+
+# payload     = M/m × N/n × 4 bytes      (cohort PSUM tile size)
+# payload_factor = 0                     if payload < 96 KB
+#                = payload / 128 KB      if payload ≥ 96 KB
+```
+
+Calibrated at split (1, 16, 2)+kf bichain on Granite 8B q\_proj
+K-sweep. Works to within 10% on most decode-batched matmuls;
+breaks (~10× too high) on HMI-bound shapes (§11.11). See §6.6 for
+the first-principles derivation.
+
+### 12.5 Bottleneck-determination cheatsheet
+
+For matmul `(M, N, K)` at fp16 under split `(m, n, k)`:
+
+```
+# Compute lower bound: PT peak utilisation
+T_compute = 2 · M · N · K / 72.1e12   # seconds
+
+# HMI lower bound: per-cluster bytes / HBM peak
+HMI_bytes ≈ n · M · K · 2 + m/k · K · N · 2 + k · M · N · 2
+T_HMI     = HMI_bytes / 166e9         # seconds
+
+# LX residency check
+C_psum_per_core = M/m · N/n · 4 bytes
+LX_fits         = C_psum_per_core ≤ 2 MiB
+
+# Ring cost (only matters when k > 1)
+T_ring ≈ 0.068 µs/K · K · payload_factor   # microseconds
+
+Wall_lower_bound ≈ max(T_compute, T_HMI, T_LX_overhead, T_ring)
+```
+
+Decision tree to assign a single dominant bottleneck:
+
+- If `T_HMI > 2 × T_compute`: kernel is **HMI-bound**. kf savings
+  hide behind HMI waits — the §6.6 model will overestimate by ~10×
+  (§11.11).
+- If `T_compute > T_HMI`: kernel is **PT-bound**. kf savings show
+  up cleanly. Check PT-array fill: `M_per ≥ 8` means full PT
+  M-rows; below 8 wastes PE cells.
+- If `C_psum_per_core > 2 MiB` and `n > 1`: **catastrophic
+  LX-overflow regime**. PSUM accumulator spills to HMI per
+  K-iteration. Avoid this split (canonical v2 §4.1).
+- If `T_ring > 0.5 × max(T_compute, T_HMI)`: **ring-bound**. kf is
+  essential. (Rare in practice; ring is usually a small fraction
+  of the wall.)
+
+### 12.6 Worked numerical example
+
+Granite 8B q\_proj at M=128, shape `(128, 4096, 4096)`, split
+`(1, 16, 2)+kf`:
+
+```
+# Compute
+T_compute = 2 · 128 · 4096 · 4096 / 72.1e12 = 0.119 ms
+
+# HMI bytes under (1, 16, 2)+kf:
+# A: 16 · 128 · 4096 · 2          = 16 MB
+# B: (1/2) · 4096 · 4096 · 2      = 16 MB    (k=2 multicast halves B)
+# C: 2 · 128 · 4096 · 2           =  2 MB
+# Total                           = 34 MB
+T_HMI = 34e6 / 166e9 = 0.205 ms
+
+# LX residency
+C_psum_per_core = 128 · 256 · 4 = 128 KB ≪ 2 MB ✓
+
+# Ring
+T_ring = 0.068 · 4096 · 1.0 / 1000 = 0.279 ms
+
+Wall_lower ≈ max(0.119, 0.205, 0.279) = 0.279 ms
+```
+
+Measured kf wall = 0.34 ms — within 22% of the lower bound. Ring
+is the active bottleneck on this shape. The 0.279 ms ring cost is
+also exactly the kf-vs-id step the §6.6 model predicts and the
+held-out validation table confirmed (§6.6 row "Granite 8B q\_proj
+M=128").
+
+## 13. Glossary
+
+Single alphabetised list of every term used in the doc that isn't
+self-explanatory.
+
+- **AIU 1.0** — IBM Spyre AI Card. The hardware target throughout.
+- **bichain** — PSUM ring algorithm using both SFP UniRings (one
+  per corelet) in parallel. Default for fp16 K-split matmul; PSUM
+  rides SFPRING and never contends with HMI.
+- **Bichain selector** — `dsm_psum_algo == "bichain"` predicate in
+  `dsm/dsm.cpp:8061-8063` that places PSUM on `SFPRING` instead of
+  `RING + LX`.
+- **C\_psum** — Per-core PSUM accumulator size = `M_per × N_per ×
+  4` bytes. Must fit in 2 MiB LX or the kernel enters the
+  catastrophic LX-overflow regime.
+- **Cohort / K-cohort** — Group of `k` cores that cooperate on a
+  PSUM chain reduction under K-split (`k > 1`).
+- **Core** — One of 32 compute units on the AIU. Each holds 2
+  corelets sharing one LX scratchpad.
+- **Corelet** — Half of a core. Has its own 8×8 PE array, 1D SFP,
+  and access to the shared LX. Corelet 0 attaches to SFP CW;
+  Corelet 1 to SFP CCW.
+- **EAR** — Effective Access Range. 256 MiB hard limit on per-core
+  HBM addressable bytes.
+- **Emission** — The compiler-emitted permutation of physical
+  core IDs that determines which logical cohort member runs on
+  which physical core. "Identity emission" is the default; "k\_fast
+  emission" is the §6 / §10 permutation that places K-cohort
+  members adjacent on the ring.
+- **fp16 / fp32** — Half- and single-precision floating point. fp16
+  is the default operand dtype on Spyre; fp32 is the PSUM
+  accumulator dtype.
+- **HBM** — High-Bandwidth Memory. Used here interchangeably with
+  LPDDR5 — the off-chip device memory pool the AIU loads from.
+- **HMI** — Host Memory Interface. Per-core access path to the
+  off-chip device memory; bottleneck at 166 GB/s aggregate.
+- **identity emission** — Default core-id mapping; under `(1, n,
+  k)` places K-cohort members `n` ring segments apart.
+- **k\_fast emission** — Permutation that places K-cohort members
+  on adjacent ring positions (1 segment).
+  `torch_spyre/_inductor/codegen/compute_ops.py:_k_fast_core_id_permutation`.
+- **KG3** — Default fp16 dataflow algorithm in deeptools
+  (`PriOpDataflows::KG3`). Weight-stationary; A and PSUM live in
+  LX, B streams.
+- **LPDDR5** — Off-chip device memory; 128 GiB per AIU.
+- **LX** — On-core SRAM scratchpad. 2 MiB per core. Compiler-
+  managed, no hardware cache.
+- **LX port** — Single 128 B/cyc shared port through which all
+  on-core agents (MNI, PT, PE, SFP) read and write LX. Frequent
+  contention site (§7.3).
+- **M, N, K** — Matmul dimensions: output rows, output cols,
+  reduction extent.
+- **m, n, k** — Work-division split factors. Required:
+  `m · n · k = max_cores` (= 32 for full AIU).
+- **M\_per, N\_per, K\_per** — Per-core extents = `M/m, N/n, K/k`.
+- **MNI** — Memory-Network Interface. Per-core agent that drives
+  HMI loads / stores between HBM and LX over the RIU BiRing.
+- **n\_cohorts** — Number of parallel K-cohorts running = `n`
+  (the N-split factor). Each computes a different N-slice of the
+  output.
+- **OS1** — Output-stationary dataflow (`PriOpDataflows::OS1`).
+  PSUM stays in PE registers; A and B both stream. Used for int8
+  inference; no PSUM ring traffic.
+- **payload** — In this doc, cohort PSUM tile size = `M_per ×
+  N_per × 4` bytes. The argument to `payload_factor` in §6.6.
+- **PE** — Processing Element. One cell of the 8×8 systolic array
+  within a corelet.
+- **PrivateUse1** — PyTorch's hook for out-of-tree backends.
+  `"spyre"` is registered through this mechanism.
+- **PSUM** — Partial sum. fp32 accumulator tile produced by
+  successive PT outer-products; reduced across K-cohort members
+  via the SFP rings under K-split.
+- **PT** — Point execution unit. Drives the 8×8 PE array for
+  matmul. One PT per corelet, two per core.
+- **PT-XRF** — Per-corelet 64 KiB register file on an alternate
+  weight path; used by some int8/conv2d kernels and bypasses LX.
+- **RIU BiRing** — 33-node bidirectional data ring carrying
+  HBM↔core traffic; 128 B/cyc/dir at 1.3 GHz = 166 GB/s/dir.
+- **RIURequest BiRing** — narrow 33-node bidirectional control
+  ring (1 B/cyc/dir at 1.3 GHz) carrying HBM read/write request
+  headers.
+- **Ring multicast** — Architectural mechanism that lets the RIU
+  broadcast one HBM read to multiple ring listeners on the same
+  hop. Enables the `1/k` factor on B traffic and the "A multicast"
+  pattern on pure-N splits.
+- **Ring-segment contention** — Two or more concurrent transfers
+  using the same physical ring segment. Drives the kf-vs-id step
+  under (1, 16, 2) (§6.5).
+- **SFP** — Special Function Processor. Per-corelet 1D vector unit
+  for non-linear ops; carries cross-core PSUM ring traffic.
+- **SFP UniRing CW / CCW** — Two 32-node unidirectional rings (one
+  per corelet); 32 B/cyc at 1.1 GHz each. CW for Corelet 0, CCW
+  for Corelet 1.
+- **SFPRING** — DSM placement keyword indicating a tensor lives on
+  the SFP rings (vs `RING + LX` for unichain).
+- **singleshot** — Specialised library primitive for `int8 + LX_opt
+  - weight_preload + 32_cores`configurations
+  (`deeprt.cpp:1655-1657`).
+- **stick** — Atomic 128-byte data unit. 64 fp16 elements; the
+  natural granule for LX and ring transfers.
+- **step** — Wall-time savings of k\_fast over identity emission
+  at the same split: `step = wall_id − wall_kf`. The quantity
+  the §6.6 model predicts.
+- **unichain** — Default PSUM ring algorithm when bichain
+  selector conditions aren't met. PSUM rides RIU + LX, contending
+  with HMI traffic on RIU (§7.1).
+- **work division / split** — The `(m, n, k)` factorisation of the
+  32 cores into M-shards, N-shards, and K-cohorts. See
+  `torch_spyre/_inductor/work_division.py`.
+- **XRF\_MB / XRF\_CH** — XrfInterleaving variants that route
+  weights through PT-XRF instead of LX. Used in int8 paths.
+
+## 14. References
 
 ### Within this branch
 
