@@ -1,0 +1,34 @@
+# Probe 2 verification — ring hop cost on clean rebuild
+WARMUP=3, ITERS=8, dtype=fp16, SENCORES=32, split=(1,16,2)
+
+| shape | (M, N, K) | permutation | K-collab dist (avg) | wall ms |
+|---|---|---|---:|---:|
+| L3-70B q_proj M=128 | (128,8192,8192) | identity | 16.0 | 2.34 |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=16 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+| L3-70B q_proj M=128 | (128,8192,8192) | reversed | 16.0 | ERR (InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', ) |
+| L3-70B q_proj M=128 | (128,8192,8192) | stride2 | 8.0 | 1.25 |
+| L3-70B q_proj M=128 | (128,8192,8192) | bit_reverse | 1.0 | 1.22 |
+| L3-70B q_proj M=128 | (128,8192,8192) | k_fast | 1.0 | 1.28 |
+| L3-70B q_proj M=2048 | (2048,8192,8192) | identity | 16.0 | 37.05 |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=16 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+| L3-70B q_proj M=2048 | (2048,8192,8192) | reversed | 16.0 | ERR (InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', ) |
+| L3-70B q_proj M=2048 | (2048,8192,8192) | stride2 | 8.0 | 19.25 |
+| L3-70B q_proj M=2048 | (2048,8192,8192) | bit_reverse | 1.0 | 19.01 |
+| L3-70B q_proj M=2048 | (2048,8192,8192) | k_fast | 1.0 | 20.01 |
+| DSv3 o_proj M=2048 | (2048,7168,16384) | identity | 16.0 | 59.60 |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Workslice information for coreId=16 was not found for node transfer_lds4_src:lxlu_dst:pe., file /home/adnan/dt-inductor/deeptools/ddc/ddc_fold.cpp line 1178
+| DSv3 o_proj M=2048 | (2048,7168,16384) | reversed | 16.0 | ERR (InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', ) |
+| DSv3 o_proj M=2048 | (2048,7168,16384) | stride2 | 8.0 | 53.75 |
+| DSv3 o_proj M=2048 | (2048,7168,16384) | bit_reverse | 1.0 | 53.53 |
+| DSv3 o_proj M=2048 | (2048,7168,16384) | k_fast | 1.0 | 53.65 |
+
+## Per-shape: wall ≈ base + slope · K_collab_distance
+
+| shape | base ms | slope ms/hop | distance=1 spread |
+|---|---:|---:|---:|
+| L3-70B q_proj M=128 | 1.08 | 0.07 | 0.06 ms |
+| L3-70B q_proj M=2048 | 16.77 | 1.09 | 1.00 ms |
+| DSv3 o_proj M=2048 | 52.69 | 0.37 | 0.12 ms |

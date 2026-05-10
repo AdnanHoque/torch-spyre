@@ -1,0 +1,69 @@
+# Granite per-hop cost probe — disentangle BW vs sync vs contention
+WARMUP=3, ITERS=8, dtype=fp16, SENCORES=32, split=(1,16,2)
+
+| shape | (M,N,K) | cohort payload | perm | dist | wall ms |
+|---|---|---:|---|---:|---:|
+| Granite 8B kv_proj M=128 | (128,2048,4096) | 64 KB | identity | 16 | 0.21 |
+| Granite 8B kv_proj M=128 | (128,2048,4096) | 64 KB | stride2 | 8 | 0.20 |
+| Granite 8B kv_proj M=128 | (128,2048,4096) | 64 KB | bit_reverse | 1 | 0.20 |
+| Granite 8B kv_proj M=128 | (128,2048,4096) | 64 KB | k_fast | 1 | 0.20 |
+| Granite 8B q_proj M=128 | (128,4096,4096) | 128 KB | identity | 16 | 0.63 |
+| Granite 8B q_proj M=128 | (128,4096,4096) | 128 KB | stride2 | 8 | 0.35 |
+| Granite 8B q_proj M=128 | (128,4096,4096) | 128 KB | bit_reverse | 1 | 0.35 |
+| Granite 8B q_proj M=128 | (128,4096,4096) | 128 KB | k_fast | 1 | 0.35 |
+| Granite 8B o_proj M=128 | (128,4096,4096) | 128 KB | identity | 16 | 0.63 |
+| Granite 8B o_proj M=128 | (128,4096,4096) | 128 KB | stride2 | 8 | 0.35 |
+| Granite 8B o_proj M=128 | (128,4096,4096) | 128 KB | bit_reverse | 1 | 0.35 |
+| Granite 8B o_proj M=128 | (128,4096,4096) | 128 KB | k_fast | 1 | 0.35 |
+| Granite 8B down_proj M=128 | (128,4096,12800) | 128 KB | identity | 16 | 1.85 |
+| Granite 8B down_proj M=128 | (128,4096,12800) | 128 KB | stride2 | 8 | 0.98 |
+| Granite 8B down_proj M=128 | (128,4096,12800) | 128 KB | bit_reverse | 1 | 0.96 |
+| Granite 8B down_proj M=128 | (128,4096,12800) | 128 KB | k_fast | 1 | 1.00 |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1075
+| Granite 8B gate_proj M=128 | (128,12800,4096) | 400 KB | identity | 16 | ERR (InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', ) |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1075
+| Granite 8B gate_proj M=128 | (128,12800,4096) | 400 KB | stride2 | 8 | ERR (InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', ) |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1075
+| Granite 8B gate_proj M=128 | (128,12800,4096) | 400 KB | bit_reverse | 1 | ERR (InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', ) |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1075
+| Granite 8B gate_proj M=128 | (128,12800,4096) | 400 KB | k_fast | 1 | ERR (InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', ) |
+| Granite 8B q_proj M=2048 | (2048,4096,4096) | 2.00 MB | identity | 16 | 9.33 |
+| Granite 8B q_proj M=2048 | (2048,4096,4096) | 2.00 MB | stride2 | 8 | 4.87 |
+| Granite 8B q_proj M=2048 | (2048,4096,4096) | 2.00 MB | bit_reverse | 1 | 5.16 |
+| Granite 8B q_proj M=2048 | (2048,4096,4096) | 2.00 MB | k_fast | 1 | 4.90 |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1075
+| Granite 8B gate_proj M=2048 | (2048,12800,4096) | 6.25 MB | identity | 16 | ERR (InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', ) |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1075
+| Granite 8B gate_proj M=2048 | (2048,12800,4096) | 6.25 MB | stride2 | 8 | ERR (InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', ) |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1075
+| Granite 8B gate_proj M=2048 | (2048,12800,4096) | 6.25 MB | bit_reverse | 1 | ERR (InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', ) |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1075
+| Granite 8B gate_proj M=2048 | (2048,12800,4096) | 6.25 MB | k_fast | 1 | ERR (InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', ) |
+
+## Per-shape slope
+
+| shape | payload | base ms | slope ms/hop | RMSE | kf vs id wall (saving × ms) |
+|---|---:|---:|---:|---:|---|
+| Granite 8B kv_proj M=128 | 64 KB | 0.20 | 0.0009 | 0.003 | 1.05× (+0.01 ms) |
+| Granite 8B q_proj M=128 | 128 KB | 0.31 | 0.0174 | 0.056 | 1.80× (+0.28 ms) |
+| Granite 8B o_proj M=128 | 128 KB | 0.31 | 0.0173 | 0.058 | 1.80× (+0.28 ms) |
+| Granite 8B down_proj M=128 | 128 KB | 0.85 | 0.0543 | 0.174 | 1.85× (+0.85 ms) |
+| Granite 8B q_proj M=2048 | 2.00 MB | 4.34 | 0.2653 | 0.932 | 1.90× (+4.42 ms) |
+
+## Slope vs payload regression
+
+  slope ≈ 8.26 µs + payload × 0.1228 ms/MB
+  T_sync_per_hop = 8.26 µs/hop
+  effective SFP-ring BW = 8.14 GB/s (vs spec 35.2 GB/s)
+  RMSE = 15.69 µs
+
+  Theoretical SFP ring BW: 32 B/cyc × 1.1 GHz = 35.2 GB/s
+  Measured effective BW = 8.14 GB/s (23% of peak)

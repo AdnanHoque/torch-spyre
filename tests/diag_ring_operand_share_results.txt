@@ -1,0 +1,56 @@
+# Pure ring-share probe — clean rebuild reverification
+
+WARMUP=3, ITERS=8, dtype=fp16
+
+## Phase: DRAM-bound (orig sizing)
+  M=128, K=8192, N_per=256
+  shared A     = 2048 KB
+  per-core B   = 4096 KB
+  per-core C   = 64 KB
+  per-core sum = 6208 KB (scratchpad limit: 2048 KB)
+
+  n=1 (SENCORES=1, N_total=256) ...  0.308 ms
+  n=2 (SENCORES=2, N_total=512) ...  0.296 ms
+  n=4 (SENCORES=4, N_total=1024) ...  0.298 ms
+  n=8 (SENCORES=8, N_total=2048) ...  0.439 ms
+  n=16 (SENCORES=16, N_total=4096) ...  0.830 ms
+  n=32 (SENCORES=32, N_total=8192) ...  1.238 ms
+
+## Phase: LX-fit (small operands)
+  M=128, K=2048, N_per=128
+  shared A     = 512 KB
+  per-core B   = 512 KB
+  per-core C   = 32 KB
+  per-core sum = 1056 KB (scratchpad limit: 2048 KB)
+
+  n=1 (SENCORES=1, N_total=128) ...  0.071 ms
+  n=2 (SENCORES=2, N_total=256) ...  0.069 ms
+  n=4 (SENCORES=4, N_total=512) ...  0.073 ms
+  n=8 (SENCORES=8, N_total=1024) ...  0.098 ms
+  n=16 (SENCORES=16, N_total=2048) ...  0.148 ms
+  n=32 (SENCORES=32, N_total=4096) ...  0.192 ms
+
+
+## Side-by-side comparison
+
+| n | DRAM-bound (orig sizing) | LX-fit (small operands) |
+|---:|---:|---:|
+| 1 | 0.308 | 0.071 |
+| 2 | 0.296 | 0.069 |
+| 4 | 0.298 | 0.073 |
+| 8 | 0.439 | 0.098 |
+| 16 | 0.830 | 0.148 |
+| 32 | 1.238 | 0.192 |
+
+## Per-phase ring-fit (Δ wall vs n=1)
+
+### DRAM-bound (orig sizing)
+  Δ ≈ -0.099 + +0.0331·n ms (RMSE 0.051)
+  Δ ≈ -0.413 + +0.2415·log2(n) ms (RMSE 0.129)
+  per-hop cost = 33.1 us  (shared-A size = 2.00 MB)
+
+### LX-fit (small operands)
+  Δ ≈ -0.008 + +0.0042·n ms (RMSE 0.009)
+  Δ ≈ -0.051 + +0.0320·log2(n) ms (RMSE 0.013)
+  per-hop cost = 4.2 us  (shared-A size = 0.50 MB)
+

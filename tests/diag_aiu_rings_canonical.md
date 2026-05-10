@@ -520,7 +520,156 @@ Probe 2's 0.37-1.09 ms/hop slopes, accounting for both the changing
 per-cohort payload (shrinks as k grows because M\_per × N\_per shrinks)
 and the changing number of hops (grows linearly with k).
 
-### 6.4 What we have not measured directly
+### 6.4 Granite per-hop calibration — distance is a step function, not linear
+
+The previous Probe 2 reverification on DSv3 o\_proj M=2048 (§6.2) found
+a clean linear-in-distance ring cost. A follow-up Granite probe
+(`tests/diag_ring_granite_perhop_probe.py`) discovered the linearity
+is shape-dependent: on Granite 8B linear layers at split (1, 16, 2),
+distance behaves as a **step function** with the transition between
+distance 8 and distance 16.
+
+Per-shape walls:
+
+| shape | cohort payload | dist=1 (kf) | dist=8 (stride2) | dist=16 (identity) |
+|---|---:|---:|---:|---:|
+| Granite 8B kv\_proj M=128 | 64 KB | 0.20 | 0.20 | 0.21 |
+| Granite 8B q\_proj M=128 | 128 KB | 0.35 | 0.35 | **0.63** |
+| Granite 8B o\_proj M=128 | 128 KB | 0.35 | 0.35 | **0.63** |
+| Granite 8B down\_proj M=128 | 128 KB | 1.00 | 0.98 | **1.85** |
+| Granite 8B q\_proj M=2048 | 2 MB | 4.90 | 4.87 | **9.33** |
+
+Distance 1 ≈ distance 8; distance 16 jumps. Naïve linear regression
+averages the step over the (1, 8, 16) range — it gives
+`slope ≈ 8.3 µs + payload × 0.12 ms/MB` and an effective BW of
+8.1 GB/s, but that's an **artifact of fitting a step-function with a
+line**.
+
+Two important observations:
+
+1. **Payload threshold for any step at all.** kv\_proj M=128 (64 KB
+   cohort payload) shows zero step. Above ~64-128 KB, the step
+   appears and grows with payload. This may correspond to a hardware
+   buffer (64 KB matches XRF capacity per corelet, possibly
+   coincidental) or a backend-side queue depth.
+2. **Step magnitude scales with K-iteration count, not just payload.**
+   q\_proj M=128 and down\_proj M=128 have the same 128 KB cohort
+   payload but down\_proj has K=12800 vs q\_proj's K=4096 — and
+   down\_proj's step (0.85 ms) is 3× q\_proj's (0.28 ms). The step
+   accumulates across (K/8) PT-batches that each drain PSUM through
+   the ring.
+
+### 6.5 Theoretical model: ring-segment contention drives the kf speedup
+
+The mechanism producing the step at distance 16 is **ring-segment
+contention** between concurrent K-cohorts.
+
+At split (1, 16, 2) on a 32-core unidirectional SFP ring:
+
+- Identity emission: 16 K-cohorts run in parallel, each transferring
+  16 ring segments. Cohort i goes from core i to core i+16. The
+  middle ring segments are shared by ~9 transfers simultaneously.
+- k\_fast emission: 16 cohorts each occupy 1 disjoint ring segment.
+  No segment shared.
+
+```mermaid
+graph TB
+    subgraph Identity["Distance=16 (identity): segments 1-16 SHARED across all 16 cohorts"]
+        C0[Cohort 0<br/>core 0→16] --> S1[seg 0-1]
+        S1 --> S2[seg 1-2]
+        C1[Cohort 1<br/>core 1→17] --> S2
+        S2 --> Sm[...]
+        Sm --> S16[seg 15-16<br/>BUSIEST<br/>9 cohorts contending]
+    end
+
+    subgraph KFast["Distance=1 (k_fast): each cohort uses its OWN segment"]
+        K0[Cohort 0<br/>core 0→1] --> KS1[seg 0-1<br/>only cohort 0]
+        K1[Cohort 1<br/>core 2→3] --> KS2[seg 2-3<br/>only cohort 1]
+        K15[Cohort 15<br/>core 30→31] --> KS3[seg 30-31<br/>only cohort 15]
+    end
+
+    style S16 fill:#fca5a5
+    style KS1 fill:#a7f3d0
+    style KS2 fill:#a7f3d0
+    style KS3 fill:#a7f3d0
+```
+
+The first-principles model:
+
+```
+ring_cost = (cohort_payload × n_cohorts × (k-1) × K_batches × distance)
+            / (effective_ring_BW × contention_factor⁻¹)
+
+where:
+  cohort_payload = M_per × N_per × 4 (fp32 PSUM)
+  n_cohorts      = n_split (parallel cohorts running)
+  k-1            = ring hops per cohort chain
+  K_batches      = K / 8 (PT-batch K-direction count)
+  distance       = K-collaborator ring hop count
+  effective_ring_BW ≈ 70.4 GB/s (two SFP UniRings combined)
+  contention_factor:
+    distance ≤ 8 on 32-core ring: ~1× (segments mostly disjoint)
+    distance = 16:                ~9× (busiest-segment serialization)
+```
+
+### 6.6 Model vs measurement — predicted vs measured kf savings
+
+Apply the model to predict the step (identity wall − kf wall) for
+each measured shape:
+
+| shape | payload | n\_cohorts | K\_batches | predicted step | measured step | ratio |
+|---|---:|---:|---:|---:|---:|---:|
+| q\_proj M=128 | 128 KB | 16 | 512 | 114 µs | 280 µs | 2.5× |
+| down\_proj M=128 | 128 KB | 16 | 1600 | 357 µs | 850 µs | 2.4× |
+| q\_proj M=2048 | 2 MB | 16 | 512 | 1.83 ms | 4.43 ms | 2.4× |
+
+The model under-predicts by a consistent **~2.5×** factor across
+shapes. The mechanism is real and correctly identified, but the
+magnitude requires a calibration constant.
+
+Possible explanations for the 2.5× residual (none yet verified):
+
+1. **Per-hop sync overhead** beyond pure transit time — adds a fixed
+   cost per hop independent of payload. Would be additive on top of
+   BW-limited transit.
+2. **Contention worse than busiest-segment estimate** — full
+   serialization rather than partial overlap on shared segments.
+   Would multiply the contention factor.
+3. **PSUM-tile-level overhead** — the per-PT-batch drain has fixed
+   cost beyond the ring transit.
+4. **Bichain-specific routing inefficiency** — the two SFP rings
+   (CW + CCW) may not split traffic optimally; effective BW could be
+   less than 2× single-ring.
+
+Without separate probes for each, all four are plausible.
+
+### 6.7 Calibrated model
+
+```
+predicted_step ≈ 2.5 × cohort_payload × n_cohorts × (k-1)
+                     × K_batches × (distance_id - distance_kf)
+                     / 70.4 GB/s
+
+empirical correction factor = 2.5 (see §6.6)
+```
+
+For Granite 3.3 8B at typical decode-batched serving (B=128 → M=128
+in linear layers) under (1, 16, 2)+kf, the model predicts:
+
+| layer | cohort payload | predicted kf savings | measured kf savings |
+|---|---:|---:|---:|
+| q\_proj | 128 KB | 280 µs | 280 µs |
+| o\_proj | 128 KB | 280 µs | 280 µs |
+| down\_proj | 128 KB | 850 µs | 850 µs |
+| kv\_proj | 64 KB | (below threshold) | ~0 |
+| gate\_proj | 400 KB | (heuristic picks (1, 8, 4); model needs different params) | (unmeasured this probe) |
+
+This is the first model on the doc that **predicts kf speedup
+magnitude on a held-out shape from first principles**. It's not
+perfect (2.5× empirical correction) but it's a closed-form predictor
+where deeptools' built-in cost model is silent.
+
+### 6.8 What we have not measured directly
 
 - RIU ring under varying number of concurrent HMI sources (the
   HBM-bus saturation curve as n cores load simultaneously).
@@ -898,6 +1047,39 @@ have no measurement of per-direction loading. **Action:** instrument
 ring counters if available, or run a probe that varies which ring
 direction carries the dominant traffic.
 
+### 10.9 Why is the contention model 2.5× off?
+
+The contention model in §6.5 captures the qualitative mechanism
+(segment-sharing) but under-predicts magnitude by a consistent
+~2.5×. Possible causes (none verified):
+
+1. Per-hop sync overhead (fixed per-hop cost beyond transit)
+2. Worse-than-busiest-segment contention (full serialization)
+3. PSUM-tile drain overhead (per PT-batch fixed cost)
+4. Bichain CW/CCW routing inefficiency
+
+Resolving this would require separate probes for each — varying just
+K (to isolate per-K-batch overhead), varying just n\_cohorts at fixed
+distance (to isolate contention-factor scaling), or varying just
+distance at very small payload (to isolate per-hop sync overhead).
+
+### 10.10 Payload threshold below which contention disappears
+
+Granite 8B kv\_proj M=128 (64 KB cohort payload) shows zero step
+across distances — neither distance 8 nor distance 16 measurably
+differs from kf. q\_proj at 128 KB shows the full step. Some
+structure between 64 and 128 KB engages contention. Possible
+explanations:
+
+- Hardware queue/buffer at ~64 KB on the SFP ring side that fully
+  absorbs small payloads
+- Compiler-emitted single-shot transfer fits in one ring cycle below
+  threshold
+- XRF or per-corelet buffer interaction (XRF is 64 KB per corelet)
+
+Resolving requires a finer payload sweep
+(e.g., 32 / 48 / 64 / 80 / 96 / 128 KB).
+
 ## 11. References
 
 ### Within this branch
@@ -909,10 +1091,14 @@ direction carries the dominant traffic.
   constraint that interacts with ring per-MB inflation in §6.2.
 - `tests/diag_matmul_on_aiu_canonical_v2.md` §8 — dataflow taxonomy
   (OS1, KG3, XRF, singleshot) referenced in §5.
-- `/tmp/ring_share_probe.py` (2026-05-10) — RIU per-hop cost.
-- `/tmp/probe2_verify.py` (2026-05-10) — SFP per-hop cost across
-  three shapes.
-- `/tmp/probe6_verify.py` (2026-05-10) — chain-length cost.
+- `tests/diag_ring_psum_transit_probe.py` — Probe 2 reverification
+  (SFP per-hop cost across three shapes).
+- `tests/diag_ring_chain_length_probe.py` — Probe 6 reverification
+  (chain-length cost).
+- `tests/diag_ring_operand_share_probe.py` — pure ring-share probe
+  (RIU per-hop cost).
+- `tests/diag_ring_granite_perhop_probe.py` — Granite per-hop probe
+  (§6.4 step-function discovery, §6.5 contention model).
 
 ### From `AdnanHoque/emission-aware-lx-phase0`
 

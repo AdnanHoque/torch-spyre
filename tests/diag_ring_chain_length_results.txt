@@ -1,0 +1,55 @@
+# Probe 6 verification — chain-length regime structure on clean rebuild
+WARMUP=3, ITERS=8, dtype=fp16, SENCORES=32
+
+
+## DSv3 o_proj M=2048: (2048, 7168, 16384)
+   compute bound = 6.67 ms
+
+| split | wall ms |
+|---|---:|
+| (32,1,1) identity | 16.07 |
+| (16,1,2)+kf chain=2 | 15.02 |
+| (8,1,4)+kf chain=4 | 26.87 |
+| (4,1,8)+kf chain=8 | 29.88 |
+| (2,1,16)+kf chain=16 | 32.74 |
+| (1,1,32)+kf chain=32 | 39.51 |
+| (1,8,4)+kf n=8 ctrl | 53.45 |
+
+## DSv3 gate_proj M=2048: (2048, 18432, 7168)
+   compute bound = 7.51 ms
+
+| split | wall ms |
+|---|---:|
+| (32,1,1) identity | 13.83 |
+| (16,1,2)+kf chain=2 | 17.38 |
+| (8,1,4)+kf chain=4 | 30.10 |
+| (4,1,8)+kf chain=8 | 33.27 |
+| (2,1,16)+kf chain=16 | 68.74 |
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: There must be at least one valid candidate., file /home/adnan/dt-inductor/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1075
+| (1,1,32)+kf chain=32 | ERR (InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', ) |
+| (1,8,4)+kf n=8 ctrl | 75.40 |
+
+## Mixtral gate_proj M=2048: (2048, 14336, 4096)
+   compute bound = 3.34 ms
+
+| split | wall ms |
+|---|---:|
+| (32,1,1) identity | 8.51 |
+| (16,1,2)+kf chain=2 | 8.07 |
+| (8,1,4)+kf chain=4 | 14.12 |
+| (4,1,8)+kf chain=8 | 15.74 |
+| (2,1,16)+kf chain=16 | 17.42 |
+| (1,1,32)+kf chain=32 | 20.47 |
+| (1,8,4)+kf n=8 ctrl | 28.75 |
+
+
+## Regime cost summary
+
+Regime cost = wall − pure-M baseline. Highlights any regime jump.
+
+| shape | chain=2 | chain=4 | chain=8 | chain=16 | chain=32 | n=8 ctrl |
+|---|---:|---:|---:|---:|---:|---:|
+| DSv3 o_proj M=2048 | -1.05 | +10.80 | +13.82 | +16.68 | +23.44 | +37.39 |
+| DSv3 gate_proj M=2048 | +3.55 | +16.28 | +19.45 | +54.92 | ERR | +61.58 |
+| Mixtral gate_proj M=2048 | -0.45 | +5.61 | +7.23 | +8.91 | +11.96 | +20.24 |
