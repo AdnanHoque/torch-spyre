@@ -135,11 +135,11 @@ PT: numCopies = 64,  frequency = 1.1 GHz,
                       2048  (int8)   4096 (int4)
 ```
 
-`numCopies = 64` because there's one PT unit per corelet.
-`parallelEngines = 512` factorizes for fp16 as **8 PT M-rows × 8 PT
-N-cols × 8 K-direction SIMD depth**. One PT cycle on one corelet
-does an 8 × 8 outer product, with 8-deep K accumulation, into an
-8 × 8 PSUM tile.
+`numCopies = 64` because there's one PT unit per corelet. For fp16,
+the operational SIMD shape is **8 × 64** — 8 PT-array rows feeding
+a 64-wide SIMD lane each cycle, totalling 512 MACs/cycle/corelet.
+Per-precision the SIMD width scales with bit-shrink: 64 → 128 → 256
+→ 512 lanes for fp16 → fp8 → int8 → int4, at constant 8 PT-rows.
 
 Per-AIU compute peak:
 
@@ -150,10 +150,15 @@ Per-AIU compute peak:
 | int8 | 144.2 TOPS |
 | int4 | **288.4 TOPS** (≈ "300 TOPS" headline) |
 
+(fp16/fp8 count FMA as 2 ops; int8/int4 count MAC as 1 op, matching
+the headline "300 TOPS" figure. With consistent 2 ops/MAC,
+int8 = 288 TOPS and int4 = 576 TOPS.)
+
 For everything below, **fp16 peak = 72.1 TFLOPS** is the yardstick.
 
-A corelet processes data in **8 × 8 × 8 blocks**. M_per_core ≥ 8
-fills the PT M-rows; below 8, those PE rows do nothing that cycle.
+The 8 PT-rows are the dimension that constrains M-side stride:
+M_per_core ≥ 8 keeps every PT-row busy each cycle; below 8, rows
+do nothing.
 
 ## 4. Memory hierarchy
 
