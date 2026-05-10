@@ -1,0 +1,1081 @@
+# Matmul on the AIU 1.0 — canonical reference (v2)
+
+The single document a reader (human or AI agent) should be able to
+read end-to-end and emerge able to: predict the optimal work-division
+split for any (M, N, K, dtype); estimate achieved fraction of
+compute-peak within a factor of two; reason about novel split
+families, scheduling strategies, and quantization paths; generate
+new SDSC kernels; and propose patentable optimizations grounded in
+the actual hardware.
+
+**v2 changes vs v1** (`diag_matmul_on_aiu_canonical.md`):
+
+- §4 / §5.4: PSUM accumulator is the binding LX constraint (Probe 3
+  calibration `M_per × N_per × 4 ≤ 2 MB`). Multicast caveat retired —
+  the per-cluster HMI formula is empirically validated.
+- §7: ring hop cost calibrated at ~5.6 ms/hop (Probe 2).
+- New §7.5–§7.7: the n=1 streaming-output fast path (Probe 4),
+  three regimes within n=1 (Probe 6), and the 256 MB EAR ceiling
+  (Probe 5) — major mechanisms missing from v1.
+- §10: cost-model V4 calibrated with four fixes (A/B/C/D), 21.7% →
+  16.1% mean error on validation set.
+- New §10.6: planner V2 hardware-verification result — 5/8 picks
+  regressed, important honesty signal.
+- §16: open-problems updated to reflect what's been verified vs
+  still unknown.
+
+Sources of truth, in priority order:
+
+1. `deeptools/dsc/HardwareArchMapping/sysConfigs2.0/sentient_dd2_sysconfig.json`
+2. `torch_spyre/_inductor/`
+3. `deeptools/dxp/`, `deeptools/dvs/`, `deeptools/dsm/`, `deeptools/dsc/`
+4. `docs/source/`
+5. This branch's measurement campaigns (`diag_*_findings.md`) and
+   the emission-aware-lx-phase0 branch's six-probe investigation.
+
+Numbers without citation are derived from those primary sources.
+
+## 1. Chip geometry
+
+Per AIU card (from `sysconfig.json` `BaseElems` and the published
+spec sheet):
+
+- **32 cores**, TSMC 5 nm, PCIe Gen 5 ×16 package, 75 W TDP.
+- **128 GB LPDDR5** off-chip (called "HBM" in the deeptools sysconfig
+  for historical reasons) at **1.3 GHz, 128 B/cycle = 166.4 GB/s**.
+- Five distinct on-chip interconnects (see §7).
+- Published headline: **>300 TOPS** (the int4 number; fp16 PT
+  compute-peak is **72.1 TFLOPS** — see §3).
+
+Per core:
+
+- **Two corelets** sharing one **2 MB LX scratchpad**.
+- Each corelet has its own **8 × 8 systolic Processing Element (PE)
+  array**, driven by the **PT execution unit** for matrix compute
+  and the **PE execution unit** for elementwise/reduction ops (same
+  silicon, different microcode).
+- Each corelet has a 1D **SFP** (Special Function Processor) for
+  non-linear activations (GELU, softmax). Carries cross-core SFP
+  ring traffic.
+- **256 MB span limit** per core for HMI access (`span_reduction_pass`).
+
+```mermaid
+graph TB
+    subgraph AIU["AIU 1.0 (32 cores, 75W, ~72 TFLOPS fp16)"]
+        subgraph LPDDR["LPDDR5 (128 GB)"]
+            HBM[Memory @ 1.3 GHz, 128 B/cyc = 166 GB/s]
+        end
+        subgraph Ring["RIU BiRing (33 nodes, 1.3 GHz, 128 B/cyc/dir)"]
+            HBM
+            C0[Core 0]
+            C1[Core 1]
+            C31[Core 31]
+        end
+        subgraph C0Detail["Core 0 detail"]
+            CL0[Corelet 0<br/>8×8 PE • PT • PE • SFP]
+            CL1[Corelet 1<br/>8×8 PE • PT • PE • SFP]
+            LX0[2 MB LX scratchpad<br/>1.1 GHz, 128 B/cyc = 140 GB/s]
+            CL0 --- LX0
+            CL1 --- LX0
+        end
+        C0 -.detail.-> C0Detail
+    end
+    style HBM fill:#fde68a
+    style LX0 fill:#fbbf24
+    style CL0 fill:#a7f3d0
+    style CL1 fill:#a7f3d0
+```
+
+## 2. Sticks: the atomic unit of data movement
+
+All on-chip data movement happens in **sticks** — 128-byte chunks.
+At fp16: **64 elements per stick**. `BYTES_IN_STICK = 128`.
+
+For an fp16 matmul A (M × K) × B (K × N):
+
+- A = M·K / 64 sticks, sticked on K (label `in`)
+- B = K·N / 64 sticks, sticked on N (label `out`); K dim padded to
+  full sticks with zeros so they don't perturb the sum
+- C = M·N / 64 sticks, sticked on N
+
+Stick orientation explains why N-split candidates need `n_sticks =
+N/64` divisible by `n_split` — the n-shard must land on a
+whole-stick boundary.
+
+## 3. The PT execution unit
+
+This is THE matmul compute engine. From `sysconfig.json`:
+
+```
+PT: numCopies = 64,  frequency = 1.1 GHz,
+    parallelEngines = 512   (fp16)   1024 (fp8)
+                      2048  (int8)   4096 (int4)
+```
+
+`numCopies = 64` because there's one PT unit per corelet.
+`parallelEngines = 512` factorizes for fp16 as **8 PT M-rows × 8 PT
+N-cols × 8 K-direction SIMD depth**. One PT cycle on one corelet
+does an 8 × 8 outer product, with 8-deep K accumulation, into an
+8 × 8 PSUM tile.
+
+Per-AIU compute peak:
+
+| precision | per-AIU throughput |
+|---|---:|
+| **fp16** | **72.1 TFLOPS** |
+| fp8 | 144.2 TFLOPS |
+| int8 | 144.2 TOPS |
+| int4 | **288.4 TOPS** (≈ "300 TOPS" headline) |
+
+For everything below, **fp16 peak = 72.1 TFLOPS** is the yardstick.
+
+A corelet processes data in **8 × 8 × 8 blocks**. M_per_core ≥ 8
+fills the PT M-rows; below 8, those PE rows do nothing that cycle.
+
+## 4. Memory hierarchy
+
+```mermaid
+graph LR
+    LPDDR[LPDDR5<br/>128 GB<br/>166 GB/s]
+    HMI[HMI<br/>256 MB span/core]
+    LX[LX scratchpad<br/>2 MB/core × 32<br/>140 GB/s/core]
+    PT[PT array<br/>72 TFLOPS fp16]
+
+    LPDDR -- DMA --> HMI
+    HMI -- load --> LX
+    LX -- feed --> PT
+    PT -- PSUM drain --> LX
+    LX -- store --> HMI
+    HMI -- DMA --> LPDDR
+
+    style LPDDR fill:#fef3c7
+    style HMI fill:#fde68a
+    style LX fill:#fbbf24
+    style PT fill:#fcd34d
+```
+
+There is **no hardware cache**. The compiler explicitly schedules
+load/store instructions.
+
+The LX has two consumers:
+
+1. **Operand resident-set**: A and B tiles for the current PT pass.
+2. **Output PSUM accumulators**: per-core M_per × N_per ×
+   `psum_bytes` (typically 4 = fp32 PSUM).
+
+### 4.1 The PSUM accumulator IS the binding LX constraint
+
+**Verified by Probe 3 (May 2026)**, this is the single most important
+fact about LX residency. The N-axis sweep at fixed M=2048, K=8192,
+split (1, 8, 4)+kf on DSv3 o_proj:
+
+| N | C_psum/core | (32,1,1) ms | (1,8,4)+kf ms |
+|---:|---:|---:|---:|
+| 512 | 512 KB | 3.52 | 3.47 |
+| 1024 | 1 MB | 3.67 | 4.34 |
+| **2048** | **2 MB ← LX** | 4.47 | 5.39 |
+| 4096 | 4 MB | 6.03 | **19.64** |
+| 6144 | 6 MB | 7.58 | **57.30** |
+| 8192 | 8 MB | 9.08 | **76.37** |
+
+The catastrophe transition is **at exactly C_psum = LX**. Above the
+threshold the wall grows ~17 ms per LX-overage factor. Mechanism: the
+PSUM accumulator must remain LX-resident across the K-iteration
+loop because partial products accumulate into it; when it exceeds
+LX it spills, and the kernel template fetches it back from HMI per
+K-iteration.
+
+**The correct LX-fit predicate** is therefore:
+
+```
+fits_predicate(m, n, k) = (M/m) × (N/n) × dtype_psum_bytes ≤ LX_per_core
+                       = (M_per × N_per × 4)        ≤ 2 MB     (fp32 PSUM)
+```
+
+Earlier predicates that gated on operand A footprint (the
+"stationary" operand) were wrong on the mechanism. They happened to
+correlate (both A and C grow with M) but the binding constraint is
+the C accumulator.
+
+### 4.2 DXP_LX_FRAC_AVAIL
+
+Splits LX between user code (inductor allocator) and the deeptools
+backend (`Dxp` in `deeptools/dxp/dxp.cpp:260`):
+
+```
+backend reservation = lx_capacity × (1 − DXP_LX_FRAC_AVAIL)
+inductor available  = lx_capacity ×       DXP_LX_FRAC_AVAIL
+```
+
+Default 0.2 → 20% inductor / 80% backend. Setting to 1.0 shrinks all
+the wins (geomean 2.22× → 1.93× on the 15-shape campaign) but
+introduces no regressions.
+
+## 5. The three tensors of matmul
+
+For C = A · B with A ∈ ℝ^{M×K}, B ∈ ℝ^{K×N}, C ∈ ℝ^{M×N}.
+
+```mermaid
+graph LR
+    subgraph LPDDR["LPDDR5"]
+        A_lp[A: M×K<br/>activation]
+        B_lp[B: K×N<br/>weight]
+        C_lp[C: M×N<br/>output]
+    end
+    subgraph LX["LX scratchpad (per core)"]
+        A_lx[A tile<br/>streamed]
+        B_lx[B tile<br/>near-stationary]
+        C_lx[PSUM tile<br/>accumulated]
+    end
+    subgraph PT["PT array"]
+        Compute[8×8 PE array<br/>K-deep accum]
+    end
+
+    A_lp -- streamed --> A_lx
+    B_lp -- block-loaded --> B_lx
+    A_lx --> Compute
+    B_lx --> Compute
+    Compute -- PSUM --> C_lx
+    C_lx -- on K-loop end --> C_lp
+
+    style A_lx fill:#bfdbfe
+    style B_lx fill:#fbbf24
+    style C_lx fill:#fca5a5
+```
+
+**A (activation) — streamed.** Each (m, k) tile loaded into LX, fed
+to PT, dropped.
+
+**B (weight) — block-loaded, near-stationary.** Reused across the M
+loop. **Weight-stationary** pattern — wider K favors K-split (B
+shrinks per cluster); PSUM ring traffic only pays off once K is
+large enough to amortize ring cost.
+
+**C (output) — PE-register-accumulated, drained to LX, then HMI or
+SFP ring.** The 8 × 8 tile of PSUMs lives in PE registers during
+the inner K-loop. After the K-loop, the tile drains to LX. If part
+of a K-cohort, the LX-resident PSUM tile gets ring-summed with peers
+(see §7).
+
+### 5.4 Per-cluster HMI traffic formula (validated)
+
+For work-division `(m, n, k)` with m·n·k = 32, the **per-cluster**
+HMI traffic, with ring multicast on B sharing one HBM read across
+the K-cohort:
+
+```
+HMI_bytes(m, n, k) = n · M · K · sizeof(A_dtype)        # A: replicated by n
+                   + m · K · N · sizeof(B_dtype) / k    # B: shared in K-cohort, replicated by m across cohorts
+                   + k · M · N · sizeof(C_dtype)        # C: k partial PSUMs
+```
+
+The B-replication factor `m / k` (rather than naive `m`) reflects
+ring multicast: K-cohort cores share B via one HBM read, so per-
+cluster B traffic is `K·N`, replicated `m` times across the M-side
+cohorts.
+
+**Track 2 Phase 0 calibration (May 2026)** validated this against
+hardware. The naive sum overcounts by k× under K-split; the
+per-cluster formula matches.
+
+Key derived facts:
+
+- **Pure-M (32, 1, 1)**: A 1×, B 32×, C 1×. B-replication-dominated.
+- **Pure-N (1, 32, 1)**: A 32×, B 1×, C 1×. A-replication-dominated.
+- **(4, 8, 1) mixed-MN**: A 8×, B 4×, C 1×. Both partially shared.
+- **(1, 1, 32) full K-split**: A 1×, B **1×** (multicast), C 32×.
+- **(1, n, k>1) PR-heuristic**: A n×, B **1× / k = 1/k** (multicast +
+  m=1), C k×. Per-cluster B traffic is just K·N — minimal.
+
+For most production shapes (M·N ≪ K·N), the **B-replication term
+dominates** under pure-M, and reducing it via K-split or MN-split is
+the source of the speedup.
+
+## 6. The work-division split
+
+A work-division split is a tuple `(m, n, k)` with `m · n · k =
+max_cores` (= 32 for full-AIU).
+
+```
+M_per_core = M / m       N_per_core = N / n       K_per_core = K / k
+```
+
+Stick alignment: `n` divides `n_sticks`; `k` divides `k_sticks`.
+
+**Number of valid splits with m·n·k = 32: exactly 21.**
+
+```
+m=1:  (1,1,32) (1,2,16) (1,4,8) (1,8,4) (1,16,2) (1,32,1)
+m=2:  (2,1,16) (2,2,8) (2,4,4) (2,8,2) (2,16,1)
+m=4:  (4,1,8) (4,2,4) (4,4,2) (4,8,1)
+m=8:  (8,1,4) (8,2,2) (8,4,1)
+m=16: (16,1,2) (16,2,1)
+m=32: (32,1,1)
+```
+
+The five primary families (v2 splits the original four, separating
+the n=1 streaming family from generic K-split):
+
+| Name | Pattern | Geometric interpretation |
+|---|---|---|
+| **pure-M** | `(32, 1, 1)` | 32-way row-shard of A; full B per core |
+| **pure-N** | `(1, 32, 1)` | 32-way col-shard of B and C; full A per core |
+| **mixed-MN** | `(m, n, 1)` with m, n > 1 | m × n 2D core grid over the output tile |
+| **K-split (n>1)** | `(1, n>1, k>1)` and `(m>1, n>1, k>1)` | K-cohort + N-shard. **Catastrophic if C_psum > LX** |
+| **n=1 streaming K-split** | `(m, 1, k>1)` including (1, 1, 32) | K-cohort with **kernel-template streaming-output fast path**; absorbs C_psum overage |
+
+The split between (n>1) and (n=1) K-split is the most important
+operational distinction — see §7.5.
+
+## 7. The five on-chip interconnects and the K-cohort
+
+`sysconfig.json:connections` defines the chip's interconnect fabric.
+**Five rings/networks** live alongside each other:
+
+| # | Name | Type | Nodes | Freq | BW | Carries |
+|---|---|---|---:|---:|---:|---|
+| 1 | RIU BiRing | data | 33 | 1.3 GHz | 128 B/cyc/dir | HBM ↔ MNI |
+| 2 | RIURequest BiRing | control | 33 | 1.3 GHz | 1 B/cyc/dir | Read/write requests |
+| 3 | SFPDataIU UniRing CW | per Corelet 0 | 32 | 1.1 GHz | 32 B/cyc | Cross-core SFP/PSUM |
+| 4 | SFPDataIU UniRing CCW | per Corelet 1 | 32 | 1.1 GHz | 32 B/cyc | Cross-core SFP/PSUM |
+| 5 | On-core FIFO Links | intra-core | n/a | 1.1 GHz | 128 B/cyc | LX ↔ {MNI, PT, PE, SFP} |
+
+Aggregate ring bandwidths:
+
+- **RIU**: 128 × 1.3 = **166.4 GB/s** per direction (matches HBM
+  bandwidth — HBM is one ring node and its bus IS the bottleneck).
+- **SFPDataIU**: 32 × 1.1 = **35.2 GB/s** per direction per ring.
+
+When `k > 1`, k cores form a **K-cohort**. Each cohort member
+computes a partial PSUM over a different 1/k slice of K. The cohort
+must sum its k partial PSUMs over the corresponding SFP
+unidirectional ring.
+
+```mermaid
+graph LR
+    subgraph Identity["Identity emission: K-collaborators m·n hops apart"]
+        I0[Core 0<br/>k_idx=0] -->|hop| I1[Core 1<br/>k_idx=0]
+        I1 -->|hop| I2[Core ...]
+        I2 -->|...| I15[Core 15<br/>k_idx=0]
+        I15 -->|hop| I16[Core 16<br/>k_idx=1<br/>cohort partner of Core 0]
+    end
+
+    subgraph KFast["k_fast emission: cohort members adjacent (1 hop)"]
+        K0[Core 0<br/>k_idx=0] -->|hop=1| K1[Core 1<br/>k_idx=1<br/>cohort partner of Core 0]
+        K1 -->|next pair| K2[Core 2<br/>k_idx=0]
+        K2 -->|hop=1| K3[Core 3<br/>k_idx=1]
+    end
+
+    style I0 fill:#fca5a5
+    style I16 fill:#fca5a5
+    style K0 fill:#a7f3d0
+    style K1 fill:#a7f3d0
+```
+
+**Identity emission (default):** logical core c → physical core c.
+With work-division `(m, n, k)`, cohort members are at physical
+indices `c, c + m·n, c + 2·m·n, ...` — **m·n hops apart**.
+
+**k_fast emission:** apply permutation `perm[c] = (c % k) · (m · n) +
+(c // k)` so cohort members occupy adjacent ring positions. Cost
+collapses from (k−1) trips of m·n hops each to **(k−1) single
+hops**. Code:
+[`compute_ops.py:_k_fast_core_id_permutation`](torch_spyre/_inductor/codegen/compute_ops.py).
+
+### 7.1 Ring hop cost is calibrated at ~5.6 ms/hop
+
+**Probe 2 (May 2026)** ran a permutation discriminator on DSv3
+o_proj at (1, 16, 2), varying ONLY the core-id permutation:
+
+| permutation | K-collab distance | wall (ms) |
+|---|---:|---:|
+| identity | 16 | 115.77 |
+| stride2 | 8 | 61.54 |
+| bit_reverse | 1 | 30.84 |
+| block_cyclic | 1 | 31.00 |
+| k_fast | 1 | 31.03 |
+
+Linear regression: `wall ≈ 22 ms + 5.6 ms × K_collab_distance` on
+this shape. The slope (5.6 ms/hop) scales with PSUM payload
+(M_per × N_per × 4 bytes); the **linearity** is the generic claim.
+
+Three permutations achieving distance=1 give walls within 0.2 ms of
+each other — there is **no second-order cohort-clustering effect**.
+The benefit of k_fast is purely the 1-hop K-collaborator distance.
+
+For the cost model:
+
+```
+T_psum_ring ≈ payload_per_send × K_collab_distance × (1 / 35 GB/s)
+            × num_sends_per_kernel
+
+K_collab_distance = 1   if k_fast emission
+                   = m·n if identity emission
+                   = avg per-chain hops for arbitrary permutation
+```
+
+### 7.2 Concrete worked example
+
+At `(1, 16, 2)` with N=8192, M=32:
+
+- M_per_core=32 → 4 PT M-batches; N_per_core=512 → 64 PT N-batches.
+- Tiles to reduce per cohort: 4 × 64 = **256 tiles**.
+- PSUM tile = 8 × 8 × 4 = 256 bytes; 256 / 32 = 8 cycles/hop.
+- Identity: 16 hops × 256 × 8 cycles = 32 768 cycles = **30 µs**.
+- k_fast: 1 hop × 256 × 8 = 2 048 cycles = **1.9 µs**.
+
+Ring saving ~28 µs. With kernel total ~940 µs, that's ~3% wall —
+consistent with measured B→C ratios of 1.01-1.05× on most shapes.
+On larger-payload shapes (DSv3 o_proj M=2048) the ring-cost share
+of total time can hit 60-70%, which is why kf gives 4× wins there.
+
+### 7.5 The n=1 streaming-output fast path (Probe 4)
+
+A major mechanism that makes the `(m, 1, k)` family fundamentally
+different from `(m, n>1, k)`: when n=1, the kernel template enters
+a **streaming-output** code path.
+
+Smoking gun (DSv3 o_proj M=2048, same C_psum overage 3.5× LX, same
+chain length 4):
+
+| split | n | C_psum overage | wall ms |
+|---|---:|---:|---:|
+| (8, 1, 4)+kf | **1** | 3.50× | **18.14** |
+| (1, 8, 4)+kf | 8 | 3.50× | **125.04** |
+
+**7× wall difference** from changing n=1 to n=8 at identical C_psum.
+
+Mechanism (best inference): under n=1, the chain-head's output is a
+single column tile of width N. The chain head doesn't need to hold
+the full output resident; it streams accumulated tiles to HMI as the
+chain reduces past it, bypassing the LX residency requirement that
+breaks (1, n>1, k>1) when C_psum > LX. With n>1, the chain head
+holds multiple output tiles interleaved in K-loop iteration order
+and can't stream them out independently.
+
+**Practical consequence for the planner**: when pure-M overflows
+C_psum, prefer (m, 1, k>1) splits. They absorb the overage that
+catastrophes (1, n>1, k>1).
+
+### 7.6 Three regimes within the n=1 family (Probe 6)
+
+The (m, 1, k) walls are **not flat** across chain length k. Probe 6
+measured (m, 1, k) sweeps on three production shapes:
+
+```
+Pipeline regime  (chain ≤ 4):    +3 ms regardless of shape
+Sync regime      (chain 8-16):   +23-55 ms, jumps from pipeline
+Allreduce regime (chain = 32):   +14-15 ms, drops back
+```
+
+Per-shape regime cost (= wall − max(compute, hmi+launch)):
+
+| split | chain | DSv3 o_proj M=2048 | DSv3 gate_proj M=2048 | Mixtral gate_proj M=2048 |
+|---|---:|---:|---:|---:|
+| (16, 1, 2)+kf | 2 | +3.18 | +3.67 | +3.24 |
+| (8, 1, 4)+kf | 4 | +2.81 | +3.52 | +3.47 |
+| (4, 1, 8)+kf | 8 | **+41.87** | **+50.15** | **+23.48** |
+| (2, 1, 16)+kf | 16 | **+43.97** | **+55.25** | **+24.67** |
+| (1, 1, 32)+kf | 32 | +14.95 | (EAR err) | +13.89 |
+
+The **chain=4 → chain=8 boundary is sharp and universal** — the same
+~10× regime-cost jump on every shape at exactly chain=8. This is a
+structural property of the kernel template, not shape-dependent
+calibration.
+
+Architectural inference: the kernel template likely has three code
+paths: small-chain pipeline (≤4, fits an SFP buffer), large-chain
+sync (8-16, generic chain reduction with explicit per-hop sync), and
+all-cores allreduce (chain=32, separate primitive — possibly
+tree-based with O(log k) latency).
+
+**Planner preference order under the streaming path** (when pure-M
+overflows C_psum):
+
+1. **(16, 1, 2)+kf** or **(8, 1, 4)+kf** — pipeline regime, +3 ms.
+2. **(1, 1, 32)+kf** — allreduce regime, +14-15 ms.
+3. **(4, 1, 8)+kf, (2, 1, 16)+kf** — sync regime, +25-55 ms (avoid).
+4. **Never (1, n>1, k>1) when C_psum > LX** — catastrophic.
+
+### 7.7 The 256 MB EAR ceiling blocks the streaming path on largest wide-N
+
+**Probe 5** found the n=1 streaming path is bounded by the per-core
+**256 MB EAR** ceiling. For shapes where operand B exceeds 256 MB
+per core under (m, 1, k), the streaming path can't fit.
+
+Concretely affected: **Llama 70B+ MLP layers at M=2048**. K × N at
+fp16:
+
+- L3-70B gate_proj: 8192 × 28672 × 2 = 470 MB → **blocked**
+- L3-405B gate_proj: 16384 × 53248 × 2 = 1.74 GB → **blocked**
+
+For these shapes the planner has *no good split*:
+
+- Pure-M: overflows C_psum (catastrophic)
+- (m, 1, k): blocked by EAR limit
+- (1, n>1, k>1): catastrophic via PSUM-overflow
+
+This is a **hardware/deeptools constraint**, not a planner fix. It
+warrants surfacing to the deeptools team — possibly an extended EAR
+limit or a tile-streaming-load path at the kernel-template level.
+
+## 8. Loop nest structure
+
+```python
+# Outer loops — sharded across cores per the (m, n, k) split:
+for mb in range(M_per_core // 8):           # PT M-batches
+    for nb in range(N_per_core // 8):        # PT N-batches
+        psum = zeros(8, 8)                   # PT-resident accumulator (fp32)
+
+        # Inner K-loop — sequential per core; possibly cohort-shared:
+        for kb in range(K_per_core // 8):
+            a = lx.load(A_tile[mb, kb])
+            b = lx.load(B_tile[kb, nb])
+            psum = pt.outer_product(a, b, psum)
+
+        # K-cohort reduction (only if k > 1):
+        if k > 1:
+            psum = sfp_ring_allreduce(psum, cohort)
+
+        # Drain to LX → HMI (or stream out under n=1 fast path):
+        lx.store(C_tile[mb, nb], psum)
+```
+
+This matches `deeptools/dvs/setupVariables/batchmatmul_fp16_fwd.cpp`
+(SDSC parameters Dmb, Dout, Din, Cmb, Cout, Cin, coreletDmb, etc.).
+
+Three things drive performance:
+
+1. **B reuse across the M loop.** Bigger M_per_core → more reuse →
+   HMI amortizes. Pure-M with M_per_core ≪ 8 is a disaster: B
+   loaded fresh almost every PT cycle.
+2. **PT array M-row utilization.** M_per_core ≥ 8 fills the array.
+3. **K-cohort reduction frequency.** Allreduce fires once per output
+   tile, scaled by hops (kf) × payload tile size.
+4. **(new in v2) PSUM accumulator residency.** Per §4.1: when
+   M_per × N_per × 4 > 2 MB, splits with n>1 catastrophe. Splits
+   with n=1 absorb via the streaming-output path (§7.5).
+
+## 9. The split-family decision tree
+
+```mermaid
+graph TD
+    Start[Shape M×N×K] --> CPSum{C_psum > LX?<br/>= M_per × N_per × 4 > 2 MB}
+    CPSum -- no --> Q1{M ≥ 16·max_cores?<br/>= M ≥ 512}
+    CPSum -- yes --> N1Q{n=1 streaming<br/>path available?}
+    N1Q -- yes, K·N ≤ 256MB --> Stream[m, 1, k>1 +kf<br/>chain ≤ 4 preferred<br/>→ +3 ms regime cost]
+    N1Q -- no, K·N > 256MB --> Stuck[**No good split**<br/>Hardware/deeptools issue]
+
+    Q1 -- yes --> A[pure-M 32,1,1<br/>PT already saturated]
+    Q1 -- no --> Q2{M ≥ max_cores?<br/>= M ≥ 32}
+    Q2 -- no --> B[K-split 1,n,k>1 +kf<br/>only way to use all cores]
+    Q2 -- yes --> Q3{n_sticks divisible<br/>by some n in 2,4,8?}
+    Q3 -- yes --> C[**Mixed-MN m,n,1**<br/>fills PT, no PSUM cost<br/>often global optimum]
+    Q3 -- no --> D[Triple-mixed m,n,k>1 +kf<br/>m fills PT, k uses leftover]
+
+    style A fill:#fca5a5
+    style B fill:#bfdbfe
+    style C fill:#a7f3d0
+    style D fill:#fbbf24
+    style Stream fill:#fbbf24
+    style Stuck fill:#dc2626,color:#fff
+```
+
+| Regime | M_per_core (under pure-M) | Optimal family | Why |
+|---|---|---|---|
+| C_psum > LX, K·N ≤ 256 MB | any | **(m, 1, k>1) +kf streaming** | Only family that absorbs PSUM overage |
+| C_psum > LX, K·N > 256 MB | any | **(none — broken)** | EAR ceiling blocks streaming; n>1 catastrophic; pure-M overflows |
+| C_psum ≤ LX, M < max_cores | < 1 PT M-batch | (1, n, k>1) +kf | Only way to use all cores |
+| C_psum ≤ LX, max_cores ≤ M ≤ 4·max_cores, narrow N | 1-4 PT M-batches | (1, n, k>1) +kf | K-split + kf saturates |
+| C_psum ≤ LX, max_cores ≤ M ≤ 4·max_cores, wide N | 1-4 PT M-batches | **mixed-MN (4, 8, 1)** | Fills PT AND splits N — no PSUM cost |
+| C_psum ≤ LX, M ≥ 16·max_cores | ≥ 16 PT M-batches | pure-M | PT already saturated |
+
+The PR 1986 heuristic captures the small-M and narrow-N rows. It
+doesn't capture the wide-N mixed-MN row (planner-priority change
+needed) or the C_psum > LX streaming row (cost-model integration
+needed).
+
+## 10. Cost model — wall-time predictor
+
+Closed-form predictor for kernel wall time given `(M, N, K, dtype,
+m, n, k, emission)`. Use it to (a) estimate fraction of compute
+peak, (b) compare candidate splits without running them, (c) identify
+the binding bottleneck.
+
+### 10.1 Three theoretical bounds
+
+```
+T_pt_peak  = total_FLOPs                        / 72.1 TFLOPS
+T_hmi      = HMI_bytes_per_cluster(m, n, k)     / 166 GB/s
+T_lx       = LX_bytes_per_core                  / 140 GB/s
+T_ring     = PSUM_tiles · ring_hops · 8 cycles  / 1.1 GHz
+             where ring_hops = (k-1)   if k_fast
+                             = m·n·(k-1) if identity
+T_launch   ≈ 100 µs (empirical floor)
+```
+
+### 10.2 Cost model V4 — calibrated additive penalties
+
+The naive `max(T_pt_peak, T_hmi)` predictor has a 21.7% mean error
+on the 30-row validation set. **Cost-model V4** adds four
+empirically calibrated penalty terms:
+
+| fix | content | calibration |
+|---|---|---|
+| **A** | LX-fit gate uses PSUM accumulator | `M_per × N_per × 4 ≤ 2 MB` |
+| **B** | PSUM-overflow penalty, n>1 + kf | `+17 ms × (overage_factor − 1)` |
+| **C** | Ring traversal scaled by actual K-collab distance | `5.6 ms/hop × payload_factor` |
+| **D** | n=1 regime-routed additive | pipeline +3, sync +25, allreduce +14 ms |
+
+Result on the 30-row validation set:
+
+| version | mean abs error | rows over 10% error |
+|---|---:|---:|
+| V0 (baseline) | 21.7% | 18/30 |
+| V1 (per-cluster bytes only) | 17.5% | 13/30 |
+| **V4 (all four fixes)** | **16.1%** | **12/30** |
+
+5.6 percentage point improvement on mean error. V4 brings 3 of 8
+K-split+kf rows within ±2% — the rows the planner critically needs.
+DSv3 o_proj M=2048 +kf: -46% off → -5% off.
+
+**Remaining V4 residuals:**
+
+1. **Small-M HMI BW** (5 rows): cost model uses 40 GB/s achieved
+   BW; small-M kf shapes imply 67-128 GB/s (model is too
+   pessimistic).
+2. **+id K-dependent residual** (3 rows): pipe-model PSUM formula
+   gives identical predictions for shapes with same payload but 7×
+   different walls. K_per dependence the model doesn't capture.
+
+### 10.3 Practical predictor (V4 form)
+
+```
+flops_total       = 2 · M · N · K
+hmi_a_bytes       = n · M · K · 2
+hmi_b_bytes       = (m / k) · K · N · 2          # multicast
+hmi_c_bytes       = k · M · N · 2
+hmi_total         = hmi_a + hmi_b + hmi_c
+
+T_pt_peak         = flops_total / 72.1e6                 # µs
+T_hmi             = hmi_total   / 166e3                  # µs
+T_ring            = PSUM_tiles · K_collab_distance · 8 / 1.1e3   # µs
+                    K_collab_distance = 1 if kf else m·n
+
+# Fix B: PSUM overflow penalty (n > 1, kf, C_psum > LX)
+C_psum            = M_per · N_per · 4
+overage_factor    = max(C_psum / LX_per_core, 1)
+T_overflow_n_gt_1 = 17e3 × (overage_factor − 1)          # µs (n>1 only)
+
+# Fix D: n=1 regime cost (only when n = 1 and k > 1)
+T_n1_regime       = 3e3   if k ≤ 4
+                    25e3  if 4 < k < 32
+                    14e3  if k = 32
+                    0     otherwise
+
+T_kernel = T_launch + max(T_pt_peak, α · T_hmi) + T_ring
+           + T_overflow_n_gt_1 + T_n1_regime
+
+α = 0.5  if M_per_core ≥ 16
+    0.8  if 4 ≤ M_per_core < 16
+    1.2  if M_per_core < 4
+```
+
+### 10.4 Worked example
+
+Llama 3.1 70B q_proj M=128, split (4, 8, 1):
+
+```
+flops_total   = 2 · 128 · 8192 · 8192 = 17.18 GFLOPS
+hmi_a         = 8 · 128 · 8192 · 2 = 16.0 MB
+hmi_b         = (4 / 1) · 8192 · 8192 · 2 = 512 MB
+hmi_c         = 1 · 128 · 8192 · 2 = 2 MB
+hmi_total     = 530 MB
+T_pt_peak     = 17.18e9 / 72.1e12 = 238 µs
+T_hmi         = 530e6 / 166e9 = 3194 µs
+M_per_core    = 32 ⇒ α = 0.5
+T_kernel      ≈ 100 + max(238, 0.5 · 3194) + 0 = 1697 µs
+```
+
+Measured: 990 µs. Model overestimates by ~70% on this shape. V4's
+calibration was on a different shape mix; this shape's actual
+sharing factor is higher than the simple model captures.
+
+### 10.5 Decision tree (cheap, no scoring)
+
+```mermaid
+graph TD
+    A[Shape M×N×K, fp16] --> CSum{C_psum > 2 MB?}
+    CSum -- yes --> EAR{K·N > 256 MB?}
+    EAR -- yes --> Stuck[No good split]
+    EAR -- no --> Stream[m,1,k>1 +kf<br/>prefer chain ≤ 4]
+    CSum -- no --> B{M < 32?}
+    B -- yes --> C[K-split 1,n,k>1 +kf<br/>e.g. 1,1,32]
+    B -- no --> D{M > 512?}
+    D -- yes --> E[pure-M 32,1,1]
+    D -- no --> F{n_sticks div by 8?}
+    F -- yes --> G[mixed-MN 4,8,1]
+    F -- no --> H{n_sticks div by 16?}
+    H -- yes --> I[K-split 1,16,2 +kf]
+    H -- no --> J[Triple-mixed 4,4,2 +kf]
+
+    style C fill:#bfdbfe
+    style G fill:#a7f3d0
+    style I fill:#fbbf24
+    style J fill:#fef3c7
+    style E fill:#fca5a5
+    style Stream fill:#fbbf24
+    style Stuck fill:#dc2626,color:#fff
+```
+
+This tree captures the 84-shape sweep's winners with ~80% accuracy
+without any measurement.
+
+### 10.6 Planner V2 hardware verification — 5/8 picks regressed
+
+**Important honesty signal.** After cost-model V4 calibrated to
+16.1% mean error on the validation set, the natural next step was
+to wire it into a planner prototype. `diag_planner_v2_verification.py`
+ran 8 representative Tier-2 picks against pure-M baseline:
+
+| row | shape | v2 split | speedup | result |
+|---|---|---|---:|---|
+| L3-70B kv_proj M=2048 sanity | (2048,1024,8192) | (1,16,2)+kf | 0.92× | **FAIL** |
+| DSv3 q_a_proj M=128 sanity | (128,1536,7168) | (1,8,4)+kf | 1.09× | validate |
+| L3-70B q_proj M=32 big-spd | (32,8192,8192) | (1,4,8)+kf | 1.49× | validate |
+| DSv3 gate_proj M=32 big-spd | (32,18432,7168) | (1,4,8)+kf | 1.76× | partial |
+| L3-70B q_proj M=128 mid-spd | (128,8192,8192) | (1,8,4)+kf | 0.85× | **FAIL** |
+| L3-70B q_proj M=512 mid-spd | (512,8192,8192) | (1,16,2)+kf | 0.59× | **FAIL** |
+| DSv3 down_proj M=128 wide-K | (128,7168,18432) | (1,4,8)+kf | 0.87× | **FAIL** |
+| DSv3 down_proj M=512 wide-K | (512,7168,18432) | (1,8,4)+kf | 0.26× | **FAIL** |
+
+**5 of 8 picks regressed**. Cost-model V4 dramatically underpredicts
+wall on medium-M and wide-K K-split shapes outside the validation
+set:
+
+- DSv3 down_proj M=512 (1,8,4)+kf: predicted 4.7 ms, measured 35.5 ms
+  (-87% off)
+
+What this means:
+
+- **The cost model is a useful screen** ("rule out obviously bad
+  splits", "enumerate candidates with reasonable bounds"), but
+- **It is not yet accurate enough to drive planner picks unsupervised.**
+  Two specific gaps:
+  1. Medium-M K-split penalty: even with C_psum fitting LX (no Fix B
+     trigger) and chain ≤ 4 (Fix D pipeline), measured walls are
+     70-90% higher than predicted on q_proj-style wide-N shapes.
+     Mechanism unknown.
+  2. Catastrophic regime at large K_per under K-split + kf, even
+     with C_psum fitting LX. Trigger is wider than C_psum overflow.
+
+This is the most important practical caveat for cost-model-driven
+planner work. Closed-form predictors must be **broadly validated
+across shape mixes before they become production levers**, not just
+calibrated against a narrow training set.
+
+## 11. Empirical findings — what wins where
+
+From the 84-shape exhaustive sweep at M ∈ {1, 32, 128}
+(`diag_small_m_spread_findings.md`):
+
+```
+                M=1       M=32     M=128    Total
+pure-M           2          0         0       2  (2%)
+k=1 mixed        1         12        17      30 (36%)
+k>1 + id (1,n,k) 14         2         0      16 (19%)
+k>1 + kf (1,n,k) 11         1         1      13 (15%)
+k>1 + kf mixed   0          7         8      15 (18%)
+k>1 + id mixed   0          6         2       8 (10%)
+```
+
+Geomean speedup vs pure-M: M=1 → 1.03×, M=32 → **2.60×**, M=128 →
+**2.58×**.
+
+Two production-relevant headlines:
+
+1. **At M ∈ {32, 128}, mixed-MN `(4, 8, 1)` is the empirical global
+   optimum more than half the time.** Outside the PR 1986 heuristic's
+   candidate set; closing this gap is a planner-priority change.
+2. **k_fast emission strictly correctness-preserving + measurably
+   useful.** Wins 26/84 shapes outright, ties on most rest, never
+   regresses. Free to keep on by default.
+
+For wide-N M=2048 shapes (outside the 84-shape sweep — the
+emission-aware-lx investigation), additional regime structure:
+
+3. **PSUM overflow is the dominant cost** when present. (1, n>1, k>1)
+   splits with C_psum > LX run 7-15× slower than (m, 1, k>1)
+   streaming-path equivalents.
+4. **Streaming path has three internal regimes** (chain ≤ 4 → 8 → 32).
+
+## 12. The compilation pipeline
+
+```mermaid
+graph TB
+    User[user code: torch.matmul A,B] --> Inductor
+    subgraph Inductor["torch_spyre._inductor"]
+        Lower[lowering.py: matmul → Reduction op]
+        Stick[insert_restickify.py: tile to stick layout]
+        Span[work_division.span_reduction_pass<br/>min_splits to fit 256MB span]
+        WD[work_division.work_distribution_pass<br/>fill remaining cores by priority<br/>+ k_fast override _try_k_fast_split]
+        KF[codegen.compute_ops._k_fast_core_id_permutation<br/>perm c = c%k · m·n + c//k]
+        SDSC[codegen.superdsc.py: SDSC JSON]
+    end
+    SDSC --> Dxp
+    subgraph Dxp["deeptools/dxp"]
+        Driver[Dxp::run<br/>reads DXP_LX_FRAC_AVAIL]
+        Ddc[Ddc codegen]
+        Dvs[dvs/setupVariables/batchmatmul_fp16_fwd<br/>fills SDSC params]
+        Dip[Dip instruction pack]
+    end
+    Dip --> Runtime
+    subgraph Runtime["flex/sendnn"]
+        SDSC_blob[SuperDSC blob]
+        Cores[32 cores execute]
+    end
+    Cores --> Output[output tensor]
+
+    style Lower fill:#bfdbfe
+    style WD fill:#fbbf24
+    style KF fill:#a7f3d0
+    style Driver fill:#fde68a
+    style Cores fill:#fcd34d
+```
+
+(Step-by-step description identical to v1 — see §12 of v1.)
+
+## 13. Tensor layouts and SDSC schema (appendix)
+
+(Unchanged from v1 — see §13 of v1 for full Spyre tensor layout
+walkthrough, per-op stick constraints, and SDSC JSON schema with
+example matmul SDSC at split (1, 16, 2).)
+
+## 14. Glossary
+
+(Same as v1, plus three new terms:)
+
+- **Streaming-output fast path** — kernel-template code path
+  activated when n=1 in the (m, 1, k) split. Streams accumulated
+  output tiles to HMI as the K-cohort reduces, bypassing the
+  C-PSUM LX residency requirement. Has three internal regimes by
+  chain length (pipeline / sync / allreduce). Discovered in Probe 4.
+- **C_psum / PSUM accumulator residency** — the LX requirement
+  `M_per × N_per × dtype_psum_bytes`. The binding LX constraint
+  per Probe 3.
+- **Cost model V4** — predictor with four calibrated fixes
+  (A: PSUM gate; B: 17 ms/overage penalty when n>1; C: 5.6 ms/hop
+  ring distance; D: n=1 regime additives). Validation set mean
+  error 16.1%.
+
+(Original glossary terms — Core, Corelet, PE, PT, SFP, LX, HMI,
+EAR, LPDDR5, Stick, RIU, SFPDataIU, PSUM, K-cohort, k_fast, work-
+division split, DXP_LX_FRAC_AVAIL, SDSC, Dxp/Ddc/Dip/Dvs/Dsm/Dsc —
+unchanged from v1.)
+
+## 15. References
+
+(Same as v1, with addition of the emission-aware-lx-phase0 branch
+findings:)
+
+### Within this branch
+- (v1 references: combined / Granite / small-M / theory writeup
+  docs)
+- `diag_matmul_on_aiu_canonical.md` — v1 of this doc.
+
+### From `AdnanHoque/emission-aware-lx-phase0`
+- `tests/emission_aware_lx_consolidated_findings.md` — investigation
+  index (commit 6863134).
+- `tests/diag_emission_aware_lx_phase0_findings_v2.md` — Probes 1-3
+  (commit 87b9aab).
+- `tests/diag_emission_aware_lx_p4_findings.md` — n=1 streaming
+  path (commit d3df115).
+- `tests/diag_emission_aware_lx_p5_findings.md` — generality + EAR
+  ceiling (commit f4b6c40).
+- `tests/diag_emission_aware_lx_p6_findings.md` — three regimes
+  (commit d1261d5).
+- `tests/cost_model_v4_findings.md` — V4 calibration (commit
+  e05c693).
+- `tests/diag_planner_v2_verification_findings.md` — verification
+  cautionary tale (commit f48fe02).
+
+### Codebase + deeptools + papers
+(Unchanged from v1.)
+
+## 16. Open problems and the design space
+
+What's been tried, what hasn't, and where novel contributions could
+land. v2 differs from v1: items that have been **probed and
+characterized** are now anchored in the verified findings; items
+that remain open are flagged as such.
+
+### 16.1 Cost-model design — V4 calibrated, generalisation open
+
+V4 (Fix A/B/C/D) lands the calibration on the 30-row validation
+set at 16.1% mean error. **Planner V2 verification (§10.6) shows
+this is not enough for production planner use** — broader shape
+mix exposes 70-90% prediction errors on rows the cost model
+under-trained on.
+
+**Open questions:**
+
+- Medium-M K-split regression mechanism (cost model says these are
+  faster than pure-M; hardware says slower). Probe 7 proposed in
+  the verification doc would characterize.
+- Wide-K catastrophic regime at K_per >> validation set values.
+  Probe 8 proposed.
+- Small-M HMI BW residual (40 GB/s model vs 67-128 GB/s implied by
+  measurement).
+
+**Novelty avenue:** broader-validated cost model with explicit
+mid-M and wide-K penalty terms; only then a cost-model-driven
+planner. This is **necessary infrastructure for cross-kernel
+scheduling**, not the prize itself.
+
+### 16.2 Mixed-precision PSUM
+
+(Same as v1.) Now anchored: per Probe 3, PSUM accumulator residency
+is the binding LX constraint. fp16/bf16 PSUM would halve the
+binding constraint, making (1, n>1, k>1) splits viable on shapes
+that today catastrophe.
+
+### 16.3 Cross-kernel B residency — caveat updated
+
+(Updated from v1.) B is too large to keep resident for any
+significant model — Granite 8B's gate_proj is 100 MB per matmul,
+and aggregate LX is 64 MB. The realistic cross-kernel optimizations
+are:
+
+- **Activation residency / op fusion**: keep intermediate tensors in
+  LX. Modest gain (~10-20% e2e on Granite decode at B=32).
+- **Pipelined prefetch**: hide layer N+1's weight load behind layer
+  N's compute. Bounded by HMI bandwidth.
+
+These are smaller wins than v1 implied. The biggest lever is
+quantization (§16.6).
+
+### 16.4 Heterogeneous K-cohort sizes
+
+(Same as v1.)
+
+### 16.5 Asymmetric ring placement
+
+(Same as v1, but anchored: per Probe 2, ring distance dominates
+PSUM cost linearly. Asymmetric placement that minimizes weighted
+distance across cohorts could give marginal gains.)
+
+### 16.6 Quantized matmul paths — the biggest single multiplier
+
+(Updated emphasis.) fp8/int8/int4 PT throughputs are 2×, 2×, 4× of
+fp16. This is the **largest available speedup** on Granite serving
+(2× e2e for fp8, 3-4× e2e for int4) — bigger than any work-division
+optimization can deliver. Industry-standard but not yet integrated
+on Spyre.
+
+### 16.7 Activation fusion within matmul
+
+(Same as v1.)
+
+### 16.8 Bmm and conv2d as natural extensions
+
+(Same as v1.)
+
+### 16.9 No-cache scheduling advantages over GPU
+
+(Same as v1, with one verified anchor: `LX_PLANNING=1` exists in
+`scratchpad.py` but is gated off by default. The emission-aware-lx
+investigation didn't enable it for the probes — that's one
+characterization gap.)
+
+### 16.10 The DXP_LX_FRAC_AVAIL semantic gap
+
+(Same as v1.)
+
+### 16.11 Compiler-vs-hardware boundary on K-cohort reduction
+
+(Same as v1, with one anchor: the chain=32 allreduce regime in
+Probe 6 has +14-15 ms cost vs sync regime's +25-55 ms — suggesting
+a separate primitive that's likely tree-based. Confirmation by
+reading SDSC emitter source would confirm whether O(log k)
+allreduce is exposed.)
+
+### 16.12 The "bigger M, slimmer M-loops" tension
+
+(Same as v1.)
+
+### 16.13 Dynamic shapes
+
+(Same as v1.)
+
+### 16.14 (new) Streaming-output fast path generality
+
+Probe 4-6 characterized the n=1 streaming path on three production
+shapes. Open questions:
+
+- Does the streaming path activate for bmm (4D iteration space) and
+  conv2d (6D)? The Probe series only ran mm.
+- Can the path be extended to n>1 with kernel-template support
+  (sequential-write per N-slice)? Would unlock the large-N mixed-N+K
+  family currently blocked by C_psum overflow.
+- What's the chain=4 threshold? Hardware buffer size, code-path
+  selector, or topology constraint? Reading SDSC emitter source
+  would settle.
+
+### 16.15 (new) The "no good split" regime for large wide-N
+
+Probe 5 found Llama 70B+ MLP shapes at M=2048 have *no good split*:
+pure-M overflows C_psum, (m, 1, k) blocked by EAR, (1, n>1, k>1)
+catastrophic. **This is a hardware-level bottleneck.** The
+deeptools team could:
+
+- Extend the 256 MB EAR limit
+- Add a tile-streaming-load path at the kernel-template level
+- Support a hybrid streaming path that handles n>1 with an
+  external accumulator buffer
+
+Patent angle: any of the above is a hardware-software co-design
+that no public auto-scheduler models.
+
+## 17. Quick-reference: predicting the best split for any shape
+
+Given shape `(M, N, K)` at fp16 with max_cores = 32:
+
+```
+1. Compute n_sticks = N // 64, k_sticks = K // 64.
+   For each candidate (m, n, k):
+     C_psum = (M/m) × (N/n) × 4
+     If C_psum > 2 MB and n > 1: skip (catastrophic)
+     If K · N > 256 MB and (m, 1, k>1) candidate: skip (EAR ceiling)
+
+2. Apply the §10.5 decision tree:
+   • C_psum > 2 MB and K·N ≤ 256 MB:
+       (m, 1, k>1) +kf with chain ≤ 4 (pipeline regime)
+   • C_psum > 2 MB and K·N > 256 MB: no good split (hardware issue)
+   • M < 32: K-split (1, 1, 32) +kf
+   • M > 512: pure-M (32, 1, 1)
+   • 32 ≤ M ≤ 512:
+       - if n_sticks % 8 == 0: mixed-MN (4, 8, 1)
+       - elif n_sticks % 16 == 0: K-split (1, 16, 2) +kf
+       - else: triple-mixed (4, 4, 2) +kf
+
+3. To estimate fraction-of-peak achieved:
+   T_pt_peak  = 2·M·N·K / 72.1e12  [s]
+   T_hmi      = HMI_bytes(m, n, k) / 166e9  [s]
+   M_per_core = M / m
+   α          = 0.5 if M_per_core ≥ 16 else 0.8 if ≥ 4 else 1.2
+   T_kernel   ≈ 100 µs + max(T_pt_peak, α · T_hmi) + T_overflow + T_n1_regime
+   fraction_of_peak = T_pt_peak / T_kernel
+
+4. Empirical sanity check: 84 production shapes sweep gives
+   M=1: geomean 1.03×, M=32: 2.60×, M=128: 2.58× over pure-M.
+
+5. **Cost-model caveat**: V4 has 16.1% mean error on the validation
+   set; on shapes outside that mix it can be 70-90% off. Use as a
+   screen, not as a sole production decision-maker. Hardware-verify
+   before any planner change.
+```
+
+This decision tree + estimator gives ≈ 80% accuracy on global
+optimum and ±30% wall-time estimate on the validation set —
+sufficient for ranking candidate optimizations or quickly screening
+shapes.
