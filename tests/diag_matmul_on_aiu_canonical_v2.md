@@ -469,6 +469,108 @@ M=2048) was originally calibrated at 4× wins — re-verification on
 the clean rebuild shows the underlying ring cost has dropped, so
 the kf benefit is closer to 1.5-2× on those shapes.
 
+### 7.3 Ring contention and the bichain design choice
+
+The two on-chip rings — the RIU data ring and the SFP UniRings —
+are **physically independent fabrics**. They share no wires, no
+arbiters, and no buffers. Whether PSUM traffic contends with HMI
+traffic at the ring level is therefore not a runtime property; it
+is decided once, at compile time, by which `dsm_psum_algo` the
+graph compiler picks.
+
+The single line of code that selects the regime is in
+`dsm/dsm.cpp:8059-8064`:
+
+```cpp
+if (dsm_psum_algo == "bichain") {
+    newLds.memOrg_[SenComponents::SFPRING] = newMemOrg;
+} else {
+    newLds.memOrg_[SenComponents::RING] = newMemOrg;
+    newLds.memOrg_[SenComponents::LX] = newMemOrg;
+}
+```
+
+bichain places PSUM on **SFPRING** (the dedicated SFP fabric).
+unichain places PSUM on the **data RING** plus LX — the same wires
+HMI uses to feed weights and activations into the cores.
+
+```mermaid
+graph LR
+  subgraph BICHAIN [bichain — fp16 K-split default]
+    direction TB
+    HBM1[HBM 166 GB/s] -->|HMI loads| RIU1[RIU data ring<br/>166 GB/s]
+    RIU1 --> LX1[LX ports<br/>128 B/cyc/core]
+    PSUM1[PSUM partials] --> SFP1[SFP UniRings<br/>2× 35.2 GB/s = 70.4 GB/s]
+    SFP1 --> LX1
+    style RIU1 fill:#cfe9ff
+    style SFP1 fill:#d4f5d4
+  end
+  subgraph UNICHAIN [unichain — fallback]
+    direction TB
+    HBM2[HBM 166 GB/s] -->|HMI loads| RIU2[RIU data ring<br/>166 GB/s ← shared]
+    PSUM2[PSUM partials] -->|contends with HMI| RIU2
+    RIU2 --> LX2[LX ports<br/>128 B/cyc/core]
+    style RIU2 fill:#ffd6cc
+  end
+```
+
+Architecturally this is the *purpose* of the two SFP UniRings.
+Before bichain, K-cohort PSUM transfers stole bandwidth from HMI
+loads on the RIU, slowing memory-bound matmul during the reduction
+phase. With bichain, PSUM moves to a dedicated 35.2 GB/s fabric per
+ring per direction (corelet 0 CW + corelet 1 CCW = **70.4 GB/s
+aggregate**) and the RIU's 166 GB/s is reserved for HMI alone. The
+chip's two-SFP-ring topology is not decorative; it is deliberate
+contention avoidance.
+
+Three contention layers stack on top of the ring layer, and each
+behaves differently:
+
+1. **Ring level (the fabric question).**
+   - bichain: zero ring-level contention. RIU and SFPRING are
+     physically independent, run in parallel, no shared wires.
+   - unichain: direct contention. PSUM and HMI share RIU bandwidth.
+     Each PSUM transfer steals 128 B/cyc that could have been HMI.
+
+2. **LX port level.**
+   The per-core LX port is 128 bytesPerCycle and is shared across
+   all consumers (MNI + 2× PT + 2× PE + 2× SFP per core = 7
+   connections). Even under bichain, MNI loads (HMI staging) and
+   SFP traffic (PSUM staging) eventually both reach LX. If MNI is
+   at 128 B/cyc and SFP is reading 32 B/cyc, total demand 160 B/cyc
+   exceeds the LX port. The compiler-emitted load/store schedule
+   serializes them via FIFO instructions; there is no automatic
+   overlap. So bichain removes ring contention but does not remove
+   LX-port contention.
+
+3. **HBM bus level.**
+   HBM is 166 GB/s shared across all 32 cores. The dominant pattern
+   here is HMI-vs-HMI contention (32 cores all loading from HBM
+   compete for the same bus), not PSUM-vs-HMI; PSUM partials never
+   touch HBM in the steady state.
+
+**Side note on Phase 0 measurements.** The original Phase 0 work
+measured ring-share cost at ~30 µs/hop with a 2 MB operand at n=32
+sharing pattern (`diag_pure_ring_share` on
+`AdnanHoque/diag-cost-model-planner`). Sanity-checking against the
+RIU spec: 2 MB / 166 GB/s = 12 µs minimum per hop, so 30 µs/hop is
+2.5× over peak — a reasonable contention overhead. **This number
+was measured on an older codegen; it has not yet been re-verified
+on the clean rebuild.** The SFP ring hop cost dropped 15× between
+the May 2026 measurements and the May 2026 reverification (Probe 2:
+5.6 → 0.37 ms/hop), so a similar codegen-improvement effect could
+have shrunk the RIU pure-ring-share number too. The 2.5× over peak
+overhead ratio is structurally plausible regardless of the absolute
+magnitude.
+
+**Practical implication.** For PR 1986's regime — fp16 K-split
+matmul → bichain → SFPRING for PSUM — there is no ring-level
+contention with HMI traffic. This is by design. The remaining
+contention sources are LX port saturation and HBM bus sharing
+across cores, both of which are present regardless of the bichain
+choice and which the K-fast / k_fast planner heuristics already
+account for via the per-core LX bytes-per-cycle accounting.
+
 ### 7.4 The PSUM ring algorithms — unichain, bichain, singleshot
 
 deeptools/dsm has three named PSUM-reduction algorithms. Selection
