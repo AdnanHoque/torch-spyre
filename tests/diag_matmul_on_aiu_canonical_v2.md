@@ -254,31 +254,53 @@ baseline grows merely linearly.
 
 #### 4.1.3 What "spill" means across the K-loop
 
-The kernel template is **K-outer, M-N-inner**: the outermost
-software loop walks the K dimension, and inside each K-iteration
-every output tile assigned to the core gets one round of
-accumulation. So all of that core's PSUM tiles need to be in LX
-**simultaneously**, every K-iteration, for the whole duration of
-the K-loop. They are not consumed and discarded — they are
-incrementally summed into.
+The default matmul dataflow on AIU is **KG3 (weight-stationary)**
+— see §8.3 — whose loop ordering is **K-outer, M-N-inner**: the
+outermost software loop walks K in PT-block steps, and inside each
+K-iteration every PT-sized output tile assigned to the core gets
+one round of accumulation. All of that core's PSUM tiles therefore
+need to be in LX **simultaneously**, every K-iteration, for the
+whole duration of the K-loop. They are not consumed and discarded
+— they are incrementally summed into.
 
-When the working set of PSUMs exceeds LX, the kernel partitions
-them into chunks that each fit, and processes one chunk at a time
-**inside** the K-loop body. Each K-iteration then looks like:
+**KG3, no-spill case (PSUM fits in LX):**
 
+```python
+# Per core. PT array operates on 8×8 tiles.
+PSUM = zeros(M_per // 8, N_per // 8, 8, 8)         # all tiles LX-resident
+for kb in range(K_per // 8):                        # K-OUTER
+    load A_tile (M_per, 8) from HMI into LX         # one K-block of A
+    load B_tile (8, N_per) from HMI into LX         # one K-block of B
+    for mt in range(M_per // 8):                    # M-N-INNER
+        for nt in range(N_per // 8):
+            PSUM[mt, nt] += (
+                A_tile[mt*8:(mt+1)*8, :]
+                @ B_tile[:, nt*8:(nt+1)*8]
+            )
+drain PSUM from LX to HBM
 ```
-for kb in range(K_per // 8):                     # K-outer (kb = K-block)
-    # round 1
-    load PSUM_chunk_1 from HMI into LX
-    process all output tiles in chunk_1 with A[*, kb], B[kb, *]
-    store PSUM_chunk_1 from LX back to HMI
 
-    # round 2
-    load PSUM_chunk_2 from HMI into LX
-    process all output tiles in chunk_2 with A[*, kb], B[kb, *]
-    store PSUM_chunk_2 from LX back to HMI
+PSUM working set in LX = `M_per × N_per × 4` bytes — exactly the
+§4.1 fit predicate. A and B are loaded **once each per K-block**,
+regardless of how many PT tiles they touch.
 
-    # ... overage_factor rounds total
+**KG3, spill case (PSUM > LX):** the kernel partitions the PT tiles
+into chunks that each fit in LX, and walks the chunk-loop **inside**
+the K-loop:
+
+```python
+chunks = partition(PT_tiles, fit=LX_per_core)       # overage_factor chunks
+for kb in range(K_per // 8):                        # K-OUTER (unchanged)
+    load A_tile (M_per, 8) from HMI into LX         # still loaded once per kb
+    load B_tile (8, N_per) from HMI into LX
+    for chunk in chunks:                            # NEW: chunk-loop INSIDE K
+        load PSUM_chunk from HMI into LX            # round 1, round 2, ...
+        for (mt, nt) in chunk:                      # M-N-INNER over this chunk
+            PSUM_chunk[mt, nt] += (
+                A_tile[mt*8:(mt+1)*8, :]
+                @ B_tile[:, nt*8:(nt+1)*8]
+            )
+        store PSUM_chunk from LX back to HMI
 ```
 
 For an `overage_factor = ceil(C_psum / LX)`, each K-iteration now
@@ -287,18 +309,61 @@ instead of zero. That is the "fetches it back from HMI per
 K-iteration" mechanism — it is K times worse than a one-shot reload
 because the spill happens **inside** the K-loop, not around it.
 
-This is also why the wall scales linearly with C_psum / LX above
-the threshold (one extra round-trip set per overage factor) and why
-the per-LX-overage cost (~17 ms in the table) is essentially K ×
+This is why the wall scales linearly with `C_psum / LX` above the
+threshold (one extra round-trip set per overage factor) and why the
+per-LX-overage cost (~17 ms in the table) is essentially K ×
 PSUM-chunk HMI bandwidth — the K factor turns a small overage into
 a giant penalty.
 
 The K-outer / M-N-inner ordering is itself a deliberate trade: it
 keeps PSUMs resident across K (paying for one A and B reload per
-K-iteration) so accumulation stays on-chip. That choice only pays
-off when PSUMs actually fit; once they don't, you get the worst of
-both worlds — A/B still get reloaded, **and** PSUM round-trips
-HMI per K-iteration.
+K-block) so accumulation stays on-chip. That choice only pays off
+when PSUMs actually fit; once they don't, you get the worst of both
+worlds — A and B still get reloaded once per K-block, **and** PSUM
+round-trips HMI per K-iteration.
+
+#### 4.1.3a How OS1 (output-stationary) differs
+
+The contrast clarifies what KG3 is buying. **OS1** flips the loop
+order — `(mt, nt)` is outer, K is inner. Only **one** PSUM tile
+lives in LX at a time:
+
+```python
+# OS1, output-stationary
+for mt in range(M_per // 8):                       # M-OUTER
+    for nt in range(N_per // 8):                   # N-MIDDLE
+        PSUM_tile = zeros(8, 8)                     # ONE tile, stays in LX
+        for kb in range(K_per // 8):                # K-INNER
+            load A_strip (8, 8) from HMI into LX    # A[mt block, kb block]
+            load B_strip (8, 8) from HMI into LX    # B[kb block, nt block]
+            PSUM_tile += A_strip @ B_strip
+        store PSUM_tile from LX to HBM              # done with this output tile
+```
+
+The trade-off vs KG3 in one table:
+
+|  | KG3 (K-outer, weight-stationary) | OS1 (output-outer, output-stationary) |
+|--|---|---|
+| LX PSUM working set | `M_per × N_per × 4` (all tiles resident) | one 8×8 tile (256 B) |
+| Catastrophe risk    | yes if PSUM > LX                          | no                  |
+| A bytes loaded      | each byte ~once                           | each byte ~`N_per / 8` times (re-read per N-tile) |
+| B bytes loaded      | each byte ~once                           | each byte ~`M_per / 8` times (re-read per M-tile) |
+| Wins when           | PSUM fits **and** K is large              | PSUM does **not** fit **or** K is small |
+
+OS1 trades **PSUM residency** for **A/B re-fetches**. KG3 wins
+whenever PSUM fits and K is large enough that the once-per-kernel
+A/B pass dominates; OS1 wins when KG3's PSUM working set blows past
+LX, *provided* A and B are small enough that re-fetching them is
+cheaper than the K-iter spill rounds. The catastrophe in §4.1.1's
+table is the regime where the planner picked KG3 but PSUM did not
+fit — picking OS1 there would avoid the cliff at the cost of a
+constant-factor A/B re-read.
+
+(KG3 is the inference default because for typical decoder shapes
+M·N is small relative to the K dimension, so PSUMs fit easily and
+the once-per-K A/B pass is the dominant cost. The catastrophe
+regime appears when N is wide enough at small m to push PSUM over
+LX before K dominates.)
 
 ### 4.2 DXP_LX_FRAC_AVAIL
 
