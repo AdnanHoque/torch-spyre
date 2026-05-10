@@ -1,0 +1,22 @@
+# Probe K1 — kf K-sweep at fixed M=128, N=4096, split (1,16,2)
+WARMUP=3, ITERS=8, dtype=fp16, SENCORES=32
+
+Shape: (128, 4096, K). cohort_payload = 128 KB (constant).
+Question: does kf step scale with K?
+
+| K | id wall ms | kf wall ms | step ms | step/K (µs/K) |
+|---:|---:|---:|---:|---:|
+| 1024 | 0.197 | 0.125 | 0.072 | 0.0699 |
+| 2048 | 0.335 | 0.199 | 0.135 | 0.0661 |
+| 4096 | 0.621 | 0.340 | 0.281 | 0.0686 |
+| 8192 | 1.190 | 0.606 | 0.584 | 0.0713 |
+| 16384 | 2.336 | 1.250 | 1.086 | 0.0663 |
+| 32768 | 4.641 | 2.401 | 2.240 | 0.0684 |
+
+## Step vs K regression
+
+  step(K) ≈ 1.28 µs + K × 0.0681 µs/K
+  intercept (K-independent component) = 1.28 µs
+  slope (per-K component) = 0.0681 µs/K
+
+  → step is dominated by K (linear-in-K)

@@ -1,0 +1,21 @@
+# Probe §11.6 — SFP per-MB inflation across LX boundary
+WARMUP=3, ITERS=8, dtype=fp16, SENCORES=32
+
+Shape: (2048, N, 8192) at split (1, 16, 2)
+Sweep N to vary C_psum across the 2 MiB LX boundary.
+
+| N | N_per | C_psum/core | id wall ms | kf wall ms | step ms | step/MB |
+|---:|---:|---:|---:|---:|---:|---:|
+| 2048 | 128 | 1.00 MB | 8.471 | 2.519 | 5.951 | 5.95 ms/MB |
+| 3072 | 192 | 1.50 MB | 13.784 | 7.017 | 6.768 | 4.51 ms/MB |
+| 4096 | 256 | 2.00 MB | 18.412 | 9.116 | 9.296 | 4.65 ms/MB |
+| 6144 | 384 | 3.00 MB (>LX) | 25.629 | 22.944 | 2.686 | 0.90 ms/MB |
+| 8192 | 512 | 4.00 MB (>LX) | 37.169 | 19.881 | 17.288 | 4.32 ms/MB |
+
+## LX-boundary inflation analysis
+
+  avg step/MB BELOW LX: 5.04 ms/MB
+  avg step/MB ABOVE LX: 2.61 ms/MB
+  inflation ratio: 0.52× (above/below)
+
+  → LX-overflow REDUCES per-MB ring cost — unexpected. Maybe HMI dominates more above LX boundary.

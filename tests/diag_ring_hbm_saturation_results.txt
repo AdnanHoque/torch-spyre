@@ -1,0 +1,28 @@
+# Probe §11.4 — HBM saturation curve
+WARMUP=3, ITERS=8, dtype=fp16
+
+Shape: pure-N split. M=128, K=8192, N_per=128 fixed per core.
+Vary number of cores. Per-core load constant; total HBM traffic
+scales with n_cores. If HBM is bandwidth-limited at peak, wall
+should grow super-linearly with n_cores once the bus saturates.
+
+| n_cores | N_total | per-core B (KB) | wall ms | Δwall vs n=1 (ms) | per-core BW (GB/s) |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 128 | 2048 | 0.178 | +0.000 | 23.74 |
+| 2 | 256 | 2048 | 0.171 | -0.007 | 24.73 |
+| 4 | 512 | 2048 | 0.174 | -0.004 | 24.35 |
+| 8 | 1024 | 2048 | 0.257 | +0.079 | 16.44 |
+| 16 | 2048 | 2048 | 0.447 | +0.269 | 9.47 |
+| 32 | 4096 | 2048 | 0.599 | +0.421 | 7.05 |
+
+## HBM saturation analysis
+
+  n=1: per-core 23.74 GB/s, aggregate 23.74 GB/s
+  n=2: per-core 24.73 GB/s, aggregate 49.45 GB/s
+  n=4: per-core 24.35 GB/s, aggregate 97.40 GB/s
+  n=8: per-core 16.44 GB/s, aggregate 131.51 GB/s
+  n=16: per-core 9.47 GB/s, aggregate 151.46 GB/s
+  n=32: per-core 7.05 GB/s, aggregate 225.72 GB/s
+
+  Theoretical HBM peak: 166.4 GB/s (1.3 GHz × 128 B/cycle)
+  Max aggregate BW measured: 225.72 GB/s (136% of peak)
