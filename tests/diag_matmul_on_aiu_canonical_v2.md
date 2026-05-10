@@ -17,12 +17,17 @@ the actual hardware.
 - New §7.5–§7.7: the n=1 streaming-output fast path (Probe 4),
   three regimes within n=1 (Probe 6), and the 256 MB EAR ceiling
   (Probe 5) — major mechanisms missing from v1.
-- §10: cost-model V4 calibrated with four fixes (A/B/C/D), 21.7% →
+- §11: cost-model V4 calibrated with four fixes (A/B/C/D), 21.7% →
   16.1% mean error on validation set.
-- New §10.6: planner V2 hardware-verification result — 5/8 picks
+- New §11.6: planner V2 hardware-verification result — 5/8 picks
   regressed, important honesty signal.
-- §16: open-problems updated to reflect what's been verified vs
+- §17: open-problems updated to reflect what's been verified vs
   still unknown.
+- New §8: matmul dataflow algorithm taxonomy — three orthogonal
+  axes (PriOpDataflows, XrfInterleaving, PSUM ring algorithm), the
+  OS1 / KG3 / GEN_KG3 / BMM / SPARSE families, the XRF third-tier
+  weight memory path, and the deeptools work-distribution
+  optimizers (RcuOptimizer + perfEstimator).
 
 **v2 corrections — 2026-05-10 reverification on clean rebuild:**
 
@@ -31,10 +36,10 @@ the actual hardware.
 - §7.6 three-regime structure: **walked back**. The sharp chain=4 →
   chain=8 boundary does not reproduce; chain-length cost grows
   roughly monotonically (~3 ms per chain doubling).
-- §10.2 cost model Fix D: invalidated by the §7.6 walk-back; replace
+- §11.2 cost model Fix D: invalidated by the §7.6 walk-back; replace
   with a linear-in-chain-length term. Fix B's +17 ms penalty is also
   overstated (catastrophic ratio shrank from 7-15× to 2-3×).
-- §16.11 tree-reduction hypothesis: **closed out**. chain=32 has the
+- §17.11 tree-reduction hypothesis: **closed out**. chain=32 has the
   highest regime cost, not the lowest — no separate primitive.
 - New §7.4: **unichain / bichain / singleshot** PSUM-reduction
   algorithms documented from deeptools/dsm reading. Selection is
@@ -511,7 +516,7 @@ Implications:
    rebuild may reflect codegen improvements in bichain since May
    2026.
 3. singleshot is the int8/quantized-inference path. When the
-   quantization roadmap (§16.6) lands, singleshot becomes the active
+   quantization roadmap (§17.6) lands, singleshot becomes the active
    algorithm and brings new constraints (e.g., the chain-length-
    conditional logic at parentInSplit ∈ {3, 4} that's only in
    singleshot).
@@ -610,7 +615,356 @@ This is a **hardware/deeptools constraint**, not a planner fix. It
 warrants surfacing to the deeptools team — possibly an extended EAR
 limit or a tile-streaming-load path at the kernel-template level.
 
-## 8. Loop nest structure
+## 8. The matmul dataflow algorithm taxonomy
+
+Until now we've described matmul on the AIU as if there's one canonical
+kernel: A streams, B is weight-stationary in LX, output accumulates in
+PSUM and ring-reduces. That's the single most common case (KG3
+dataflow, fp16, dense), but **deeptools actually implements 20 distinct
+dataflow algorithms**. Understanding which one runs for a given shape
+is essential to predicting both performance and code-path behavior.
+
+The dataflow choice is **graph-global**, set during graph optimization
+(`dsm/graphOptimizer.cpp`), and orthogonal to both the work-division
+split (§6) and the PSUM ring algorithm (§7.4).
+
+### 8.1 Three orthogonal axes
+
+Three independent decisions determine the kernel that runs for a given
+matmul node:
+
+```mermaid
+graph LR
+    Shape[Op + dtype + shape] --> Axis1
+    Shape --> Axis2
+    Shape --> Axis3
+
+    subgraph Axis1["1. Dataflow family (PriOpDataflows)"]
+        OS1[OS1 / GEN_OS1 / OS1_INT8<br/>Output-stationary]
+        KG3[KG3 / KG3_FP8 / KG3_INT8 / KG3_INT4<br/>Weight-stationary in LX]
+        GENKG3[GEN_KG3*<br/>KG3 with stick-J optimization]
+        BMM[KG3_BMM* / KG3_BMM_MB*<br/>Bmm variants]
+        SPARSE[SPARSE_KG3*<br/>Structured sparsity]
+    end
+
+    subgraph Axis2["2. XRF interleaving (XrfInterleaving)"]
+        NOXRF[NO_XRF<br/>Weights through LX]
+        XRFMB[XRF_MB<br/>Weights in PT-XRF, batch-interleaved]
+        XRFCH[XRF_CH<br/>Weights in PT-XRF, channel-interleaved]
+    end
+
+    subgraph Axis3["3. PSUM ring algorithm (dsm_psum_algo)"]
+        UNI[unichain<br/>one chain]
+        BI[bichain<br/>two chains - both corelets]
+        SS[singleshot<br/>specialized library primitive]
+    end
+```
+
+Axis 1 picks the **kernel template** — which `dvs/setupVariables/*.cpp`
+file fills in the SDSC parameters and which instruction sequence the
+PT array runs.
+
+Axis 2 picks **where weights live** — LX (the standard memory tier)
+versus PT-XRF (a third memory tier closer to the PT array).
+
+Axis 3 picks **how PSUM gets reduced** across the K-cohort under
+K-split — covered in §7.4.
+
+Each axis is set per-node by `graphOptimizer.cpp` based on shape,
+dtype, sparsity, and parent-op characteristics. Once set, the
+work-division planner (§6) operates within the constraints of the
+chosen dataflow.
+
+### 8.2 The OS1 family — output stationary
+
+**Mechanism**: the output (PSUM accumulator) stays in PT registers
+across the entire K-loop. Both A and B flow through; only the
+accumulator is stationary.
+
+```mermaid
+graph LR
+    A_LX[A in LX] -- stream --> PT[PT array<br/>PSUM stays in registers]
+    B_LX[B in LX] -- stream --> PT
+    PT -- drain at end of K-loop --> C_LX[C tile in LX]
+    style PT fill:#fcd34d
+```
+
+**When it activates** (from `graphOptimizer.cpp:4856-4880`): OS1 is
+selected when
+
+- input has small IN dim (`priInpShape[INidx] < 8`),
+- large J dim (`priInpShape[Jidx] >= 64`),
+- parent is a first-incoming op (host boundary) or a Pad / PadV2 /
+  Transpose, and
+- `isParamCompatible` is true for the host's stickJinp ∈ {32, 64}.
+
+**Practical regime**: first-layer convolutions in image models and
+similar narrow-IN large-J shapes. **Not used for transformer matmul**
+(q / k / v / o / gate / up / down) because those don't satisfy the
+small-IN condition — IN is usually `hidden` (= 4096+) for those.
+
+**Why "OS1"**: Output Stationary, version 1. Two related variants
+exist:
+
+- `GEN_OS1` — generalized version with more flexible stick-J handling
+- `OS1_INT8` — int8 quantized variant; auto-pairs with `XRF_MB`
+  interleaving (graphOptimizer.cpp:4905)
+
+**Significance for our regime**: OS1 sidesteps the C_psum > LX
+constraint we identified in §4.1, because the PSUM lives in PT
+registers, not LX. For shapes where it activates, the LX-residency
+catastrophes don't apply. Unfortunately, transformer matmul shapes
+don't activate OS1.
+
+### 8.3 The KG3 family — weight-stationary
+
+**Mechanism**: weights B are staged in LX (or XRF) once per kernel; A
+streams through; PSUM streams out per output tile.
+
+```mermaid
+graph LR
+    A_LX[A streams<br/>in LX] -- per-tile load --> PT[PT array<br/>per-tile compute]
+    B_LX[B near-stationary<br/>in LX] -- reuse across M-loop --> PT
+    PT -- stream PSUM out per tile --> C_LX[C in LX]
+    style B_LX fill:#fbbf24
+```
+
+**When it activates**: default for fp16 / fp8 / int8 / int4 dense
+matmul (`graphOptimizer.cpp:4848-4849`). Also for conv2d when OS1
+conditions aren't met. **This is the dataflow PR 1986 operates on,**
+and the dataflow we measured exclusively in our 84-shape sweep.
+
+**Why "KG3"**: stands for "Kernel Group 3" — the matmul kernel
+template uses a hardware-supported 3-way kernel-coefficient grouping.
+The `kg3` suffix in op names like `batchmatmulsparsekg3` refers to
+this hardware group structure.
+
+**Variants**:
+
+| variant | what's different |
+|---|---|
+| `KG3` | fp16 dense, default |
+| `KG3_FP8` / `KG3_INT8` / `KG3_INT4` | quantized variants — same dataflow, different precision |
+| `GEN_KG3*` | KG3 with optimized stick-J orientation. Chosen when `findStickJinpGenKG3()` returns stickJinp > 1, minimizing stick-padding waste (graphOptimizer.cpp:4910-4920). |
+| `KG3_BMM_*` | bmm-specific variants for explicit batch dimension |
+| `KG3_BMM_MB_*` | bmm with explicit M-batch axis — for cases like attention where the batch is being swept over (graphOptimizer.cpp:4930) |
+| `SPARSE_KG3_*` | structured sparsity — `SparseConv2D` / `SparseBatchMatMulV2` ops route here; kernel skips zero blocks using sparsity metadata |
+
+The KG3 family covers **18 of the 20 enum values** in `PriOpDataflows`
+(`dsmds.h:74-93`). For all practical inference matmul regimes outside
+first-layer-conv-of-image-models, KG3 (in some variant) is what runs.
+
+### 8.4 XRF interleaving — the third memory tier for weights
+
+The discussion of the memory hierarchy in §4 only covered three
+levels: LPDDR5 → HMI → LX → PT. There's actually a **fourth path** —
+weights can bypass LX entirely and go straight from HMI into the PT
+array's own register file (PT-XRF).
+
+```mermaid
+graph LR
+    LPDDR[LPDDR5<br/>128 GB<br/>166 GB/s]
+    HMI[HMI<br/>256 MB span/core]
+    LX[LX scratchpad<br/>2 MB/core × 32]
+    XRF[PT-XRF<br/>per-corelet<br/>weights only]
+    PT[PT array<br/>72 TFLOPS fp16]
+
+    LPDDR -- DMA --> HMI
+    HMI -- load --> LX
+    LX -- weights/A --> PT
+    HMI -- alternate path --> XRF
+    XRF -- weights only --> PT
+    PT -- PSUM --> LX
+    LX -- store --> HMI
+
+    style LX fill:#fbbf24
+    style XRF fill:#a78bfa
+    style PT fill:#fcd34d
+```
+
+PT-XRF appears as a separate hardware component in
+`dsc/dscdefn.h:420` (`SenComponents::PTXRF`). When it's used, weights
+bypass LX:
+
+```cpp
+// dsm/dsm.cpp:6852-6862
+if (isXrf && !isOs1Int8) {
+    newLds.memOrg_.erase(SenComponents::HBM);
+    newLds.memOrg_.erase(SenComponents::LX);
+}
+```
+
+The `XrfInterleaving` enum (`dsm/dsmds.h:74`):
+
+| value | meaning | activated when |
+|---|---|---|
+| `NO_XRF` | Weights flow through LX (default) | KG3 family for most matmul shapes |
+| `XRF_MB` | Weights interleaved across batch dim, held in XRF | Auto-paired with OS1_INT8 (graphOptimizer.cpp:4905) |
+| `XRF_CH` | Weights interleaved across channel dim, held in XRF | Some conv2d variants where channel-major weight layout fits XRF |
+
+**Why this matters**: when weights are in XRF, **they don't compete
+with PSUM for LX capacity**. The C_psum > LX catastrophe we
+documented in §4.1 and §7.5 only happens when weights also need LX.
+Routing through XRF would relieve the LX pressure on shapes where
+the PSUM accumulator overflows.
+
+**Kernel templates with XRF routing exist for fp16**:
+`dvs/setupVariables/xrfbatchmatmul_fp16_fwd.cpp`,
+`xrfchbatchmatmul_fp16_fwd.cpp`, plus fp8 / int4 / int8 variants.
+But the dataflow selector in `graphOptimizer.cpp` does **not
+currently route fp16 transformer matmuls through XRF**. This is a
+deeptools/library lever the inductor planner could in principle
+exploit — adding hint support to request the XRF dataflow is a
+follow-up direction not in the v2 §17 open-problems list.
+
+### 8.5 The dataflow decision (per node)
+
+Putting Axis 1 and Axis 2 together, the per-node dataflow assignment
+in `graphOptimizer.cpp` follows roughly this tree (fp16 branch shown;
+similar trees exist for fp8/int8/int4):
+
+```mermaid
+graph TD
+    Start[primary op node] --> Q1{precision}
+    Q1 -- fp16 --> FP16{Sparse?}
+    Q1 -- fp8 --> FP8[fp8 branch:<br/>KG3_FP8 / GEN_KG3_FP8 /<br/>KG3_BMM_FP8 / SPARSE_KG3_FP8]
+    Q1 -- int8 --> INT8[int8 branch:<br/>KG3_INT8 / GEN_KG3_INT8 /<br/>OS1_INT8 / KG3_BMM_*INT8 /<br/>SPARSE_KG3_INT8]
+    Q1 -- int4 --> INT4[int4 branch:<br/>KG3_INT4 / GEN_KG3_INT4 /<br/>SPARSE_KG3_INT4]
+
+    FP16 -- yes --> SP[SPARSE_KG3]
+    FP16 -- no --> Q2{small IN +<br/>large J +<br/>first-incoming or<br/>pad/transpose parent?}
+    Q2 -- yes --> OS1_DF[OS1<br/>or GEN_OS1]
+    Q2 -- no --> Q3{stickJ optimization<br/>profitable?}
+    Q3 -- yes --> GENKG3[GEN_KG3]
+    Q3 -- no --> Q4{BatchMatMulV2?}
+    Q4 -- yes --> BMM[KG3_BMM<br/>or KG3_BMM_MB]
+    Q4 -- no --> KG3_DF[KG3 default]
+
+    style KG3_DF fill:#fbbf24
+    style OS1_DF fill:#a7f3d0
+    style GENKG3 fill:#fef3c7
+    style BMM fill:#bfdbfe
+    style SP fill:#fca5a5
+```
+
+Then `XrfInterleaving` is set based on the chosen dataflow: `XRF_MB`
+auto-paired with OS1_INT8, otherwise `NO_XRF` for most KG3 variants.
+
+The **default case** for transformer matmul (q / k / v / o / gate /
+up / down at any precision, no sparsity, no first-incoming parent)
+falls through to `KG3` (or `KG3_FP8`, etc.) with `NO_XRF`. This is
+what PR 1986 operates on, and what the 84-shape sweep measured.
+
+### 8.6 Work-distribution optimizers
+
+The work-division split (§6) is decided by one of several optimizers,
+all derived from `BaseOptimizer`
+(`dsm/workOptimizer/baseOptimizer/baseOptimizer.h`):
+
+| optimizer | purpose | source |
+|---|---|---|
+| **BaseOptimizer** | Foundation; reference implementation of split selection | `baseOptimizer/` |
+| **RcuOptimizer** | "Register Cache Unit" optimizer; **decode-iteration-aware** (accepts `decoding_iter_idx` parameter) | `rcuOptimizer/` |
+| **MultiAIUOptimizer** | Cross-card optimization for multi-AIU clusters | `multiAIUOptimizer/` |
+| **2DLyPinner** (experimental) | LX layer pinner; keeps tensors LX-resident across operator boundaries | `experimental/2DLyPinner.cpp` |
+
+**`RcuOptimizer` is the production optimizer for decoding workloads**.
+It takes `decoding_iter_idx` as a parameter and reasons across
+iterations, not just within one kernel. From `rcuOptimizer.h`:
+
+```cpp
+RcuOptimizer(const SentientSystem& sentient_sys,
+             const DesignSpaceConfigGlobal& dscg,
+             PerfDSC& initial_perfDsc,
+             double fracLxStaticDs,
+             const DebugConfig& debug_config,
+             int decoding_iter_idx = 0,
+             int verbosity = 0)
+    : BaseOptimizer(...) {
+    optimizer_ = OptType::RCU_OPT;
+}
+```
+
+This is the cross-iteration-residency primitive that v2 §17.3 was
+speculating about — it already exists in the codebase, gated by
+`LX_PLANNING=1` and the `LxOptMetaData` machinery
+(`baseOptimizer/baseOptimizer.h`).
+
+**`2DLyPinner`** is an experimental subsystem that pins specific
+tensors to LX across operator boundaries — the cross-kernel-residency
+lever for activations / KV cache / weights. Currently in
+`experimental/`, not in production paths.
+
+### 8.7 perfEstimator — the real cost model
+
+The closed-form predictor in §11 is a back-of-envelope tool. The
+**real cost-model engine** in deeptools is `dsm/perfEstimator/`, a
+**scheduler-aware task-graph simulator**:
+
+- `seTaskGraph` — entity / task graph for compute and data-transfer
+  scheduling
+- Entity types: `DATA_TRANSFER`, `COMPUTE`
+- Data-transfer subtypes: `HBM_to_LX`, `LX_to_LX`, `LX_to_HBM`,
+  `OvlInpFetch` (overlapped input fetch)
+- Task-edge types: `functional_streaming`, `functional_blocking`,
+  `functional_overlapped`, `functional_dbl` (double-buffered),
+  `resource`
+
+The estimator simulates task scheduling with overlap and resource
+queueing: it captures pipelined load-compute, double-buffering,
+ring-bandwidth contention, and HMI queue depth. The entry point is
+`perfEstimator::runEstimator(const PerfDSC&)`, which takes a
+PerfDSC (post-work-division kernel descriptor) and returns predicted
+cycles.
+
+This is **substantially more sophisticated** than v2 §11's closed-form
+`T_kernel ≈ T_launch + max(T_pt_peak, α · T_hmi)`. The closed form is
+useful for screening; the actual optimizer (`RcuOptimizer`) calls
+`perfEstimator` to score candidate splits.
+
+**Implication**: any cost-model-based planner work on the inductor
+side should integrate with `perfEstimator` rather than build a
+separate one. The pieces are already wired: optimizer + perfEstimator
+- dataflow selection together form the cost-model-driven planner that
+v2 §11 sketched in closed form.
+
+### 8.8 Implications for our work
+
+1. **PR 1986 operates exclusively on the KG3 + NO_XRF + bichain
+   slice.** Everything we measured was KG3 fp16 dense matmul with
+   weights in LX and PSUM ring-reduced via bichain (both corelets).
+   The other 19 PriOpDataflows variants and the XRF / OS1 paths are
+   unexplored regimes from our side.
+
+2. **XRF is a real third memory tier** that doubles effective LX
+   availability for PSUM by removing weights from LX. Some of v2
+   §7.7's "no good split" pessimism for largest wide-N shapes may be
+   addressable by routing through XRF kernel templates (which exist
+   for fp16) — but requires a graphOptimizer change to route fp16
+   matmul through XRF.
+
+3. **`RcuOptimizer.decoding_iter_idx` is the cross-iteration
+   residency primitive.** The infrastructure for decode-iteration-
+   aware scheduling exists in deeptools. Enabling and characterizing
+   it is high-leverage follow-up work for any decode-throughput
+   improvement.
+
+4. **`perfEstimator` is the real cost model.** The closed-form
+   predictor in §11 is useful for screening, but a real planner-side
+   cost model should integrate with the existing scheduler-aware
+   infrastructure. The RcuOptimizer + perfEstimator pair is already
+   the framework for cost-model-driven planning.
+
+5. **OS1 is a weak alternative for our matmul regime** (transformer
+   projections don't satisfy the small-IN condition), but it's the
+   right answer for first-layer / vision-model integration on Spyre.
+
+6. **Sparsity** (`SPARSE_KG3_*` family) is a fully-implemented
+   dataflow path. If structured sparsity (e.g., 2:4) becomes part of
+   the model deployment story, the SPARSE_KG3 variants are the entry
+   point.
+
+## 9. Loop nest structure
 
 ```python
 # Outer loops — sharded across cores per the (m, n, k) split:
@@ -647,7 +1001,7 @@ Three things drive performance:
    M_per × N_per × 4 > 2 MB, splits with n>1 catastrophe. Splits
    with n=1 absorb via the streaming-output path (§7.5).
 
-## 9. The split-family decision tree
+## 10. The split-family decision tree
 
 ```mermaid
 graph TD
@@ -686,14 +1040,14 @@ doesn't capture the wide-N mixed-MN row (planner-priority change
 needed) or the C_psum > LX streaming row (cost-model integration
 needed).
 
-## 10. Cost model — wall-time predictor
+## 11. Cost model — wall-time predictor
 
 Closed-form predictor for kernel wall time given `(M, N, K, dtype,
 m, n, k, emission)`. Use it to (a) estimate fraction of compute
 peak, (b) compare candidate splits without running them, (c) identify
 the binding bottleneck.
 
-### 10.1 Three theoretical bounds
+### 11.1 Three theoretical bounds
 
 ```
 T_pt_peak  = total_FLOPs                        / 72.1 TFLOPS
@@ -705,7 +1059,7 @@ T_ring     = PSUM_tiles · ring_hops · 8 cycles  / 1.1 GHz
 T_launch   ≈ 100 µs (empirical floor)
 ```
 
-### 10.2 Cost model V4 — calibrated additive penalties (partially walked back)
+### 11.2 Cost model V4 — calibrated additive penalties (partially walked back)
 
 The naive `max(T_pt_peak, T_hmi)` predictor has a 21.7% mean error
 on the 30-row validation set. **Cost-model V4** adds four
@@ -760,7 +1114,7 @@ table for per-shape calibrated slopes (0.07-1.09 ms/hop).
    gives identical predictions for shapes with same payload but 7×
    different walls. K_per dependence the model doesn't capture.
 
-### 10.3 Practical predictor (V4 form)
+### 11.3 Practical predictor (V4 form)
 
 ```
 flops_total       = 2 · M · N · K
@@ -793,7 +1147,7 @@ T_kernel = T_launch + max(T_pt_peak, α · T_hmi) + T_ring
     1.2  if M_per_core < 4
 ```
 
-### 10.4 Worked example
+### 11.4 Worked example
 
 Llama 3.1 70B q_proj M=128, split (4, 8, 1):
 
@@ -813,7 +1167,7 @@ Measured: 990 µs. Model overestimates by ~70% on this shape. V4's
 calibration was on a different shape mix; this shape's actual
 sharing factor is higher than the simple model captures.
 
-### 10.5 Decision tree (cheap, no scoring)
+### 11.5 Decision tree (cheap, no scoring)
 
 ```mermaid
 graph TD
@@ -843,7 +1197,7 @@ graph TD
 This tree captures the 84-shape sweep's winners with ~80% accuracy
 without any measurement.
 
-### 10.6 Planner V2 hardware verification — 5/8 picks regressed
+### 11.6 Planner V2 hardware verification — 5/8 picks regressed
 
 **Note (2026-05-10):** V4 cost model has since been partially
 invalidated by Probe 2 + Probe 6 reverification (§7.1, §7.6). The
@@ -892,7 +1246,7 @@ planner work. Closed-form predictors must be **broadly validated
 across shape mixes before they become production levers**, not just
 calibrated against a narrow training set.
 
-## 11. Empirical findings — what wins where
+## 12. Empirical findings — what wins where
 
 From the 84-shape exhaustive sweep at M ∈ {1, 32, 128}
 (`diag_small_m_spread_findings.md`):
@@ -922,12 +1276,12 @@ Two production-relevant headlines:
 For wide-N M=2048 shapes (outside the 84-shape sweep — the
 emission-aware-lx investigation), additional regime structure:
 
-3. **PSUM overflow is the dominant cost** when present. (1, n>1, k>1)
+1. **PSUM overflow is the dominant cost** when present. (1, n>1, k>1)
    splits with C_psum > LX run 7-15× slower than (m, 1, k>1)
    streaming-path equivalents.
-4. **Streaming path has three internal regimes** (chain ≤ 4 → 8 → 32).
+2. **Streaming path has three internal regimes** (chain ≤ 4 → 8 → 32).
 
-## 12. The compilation pipeline
+## 13. The compilation pipeline
 
 ```mermaid
 graph TB
@@ -963,13 +1317,13 @@ graph TB
 
 (Step-by-step description identical to v1 — see §12 of v1.)
 
-## 13. Tensor layouts and SDSC schema (appendix)
+## 14. Tensor layouts and SDSC schema (appendix)
 
 (Unchanged from v1 — see §13 of v1 for full Spyre tensor layout
 walkthrough, per-op stick constraints, and SDSC JSON schema with
 example matmul SDSC at split (1, 16, 2).)
 
-## 14. Glossary
+## 15. Glossary
 
 (Same as v1, plus three new terms:)
 
@@ -991,7 +1345,7 @@ EAR, LPDDR5, Stick, RIU, SFPDataIU, PSUM, K-cohort, k_fast, work-
 division split, DXP_LX_FRAC_AVAIL, SDSC, Dxp/Ddc/Dip/Dvs/Dsm/Dsc —
 unchanged from v1.)
 
-## 15. References
+## 16. References
 
 (Same as v1, with addition of the emission-aware-lx-phase0 branch
 findings:)
@@ -1020,17 +1374,17 @@ findings:)
 ### Codebase + deeptools + papers
 (Unchanged from v1.)
 
-## 16. Open problems and the design space
+## 17. Open problems and the design space
 
 What's been tried, what hasn't, and where novel contributions could
 land. v2 differs from v1: items that have been **probed and
 characterized** are now anchored in the verified findings; items
 that remain open are flagged as such.
 
-### 16.1 Cost-model design — V4 calibrated, generalisation open
+### 17.1 Cost-model design — V4 calibrated, generalisation open
 
 V4 (Fix A/B/C/D) lands the calibration on the 30-row validation
-set at 16.1% mean error. **Planner V2 verification (§10.6) shows
+set at 16.1% mean error. **Planner V2 verification (§11.6) shows
 this is not enough for production planner use** — broader shape
 mix exposes 70-90% prediction errors on rows the cost model
 under-trained on.
@@ -1050,14 +1404,14 @@ mid-M and wide-K penalty terms; only then a cost-model-driven
 planner. This is **necessary infrastructure for cross-kernel
 scheduling**, not the prize itself.
 
-### 16.2 Mixed-precision PSUM
+### 17.2 Mixed-precision PSUM
 
 (Same as v1.) Now anchored: per Probe 3, PSUM accumulator residency
 is the binding LX constraint. fp16/bf16 PSUM would halve the
 binding constraint, making (1, n>1, k>1) splits viable on shapes
 that today catastrophe.
 
-### 16.3 Cross-kernel B residency — caveat updated
+### 17.3 Cross-kernel B residency — caveat updated
 
 (Updated from v1.) B is too large to keep resident for any
 significant model — Granite 8B's gate_proj is 100 MB per matmul,
@@ -1070,19 +1424,19 @@ are:
   N's compute. Bounded by HMI bandwidth.
 
 These are smaller wins than v1 implied. The biggest lever is
-quantization (§16.6).
+quantization (§17.6).
 
-### 16.4 Heterogeneous K-cohort sizes
+### 17.4 Heterogeneous K-cohort sizes
 
 (Same as v1.)
 
-### 16.5 Asymmetric ring placement
+### 17.5 Asymmetric ring placement
 
 (Same as v1, but anchored: per Probe 2, ring distance dominates
 PSUM cost linearly. Asymmetric placement that minimizes weighted
 distance across cohorts could give marginal gains.)
 
-### 16.6 Quantized matmul paths — the biggest single multiplier
+### 17.6 Quantized matmul paths — the biggest single multiplier
 
 (Updated emphasis.) fp8/int8/int4 PT throughputs are 2×, 2×, 4× of
 fp16. This is the **largest available speedup** on Granite serving
@@ -1090,26 +1444,26 @@ fp16. This is the **largest available speedup** on Granite serving
 optimization can deliver. Industry-standard but not yet integrated
 on Spyre.
 
-### 16.7 Activation fusion within matmul
+### 17.7 Activation fusion within matmul
 
 (Same as v1.)
 
-### 16.8 Bmm and conv2d as natural extensions
+### 17.8 Bmm and conv2d as natural extensions
 
 (Same as v1.)
 
-### 16.9 No-cache scheduling advantages over GPU
+### 17.9 No-cache scheduling advantages over GPU
 
 (Same as v1, with one verified anchor: `LX_PLANNING=1` exists in
 `scratchpad.py` but is gated off by default. The emission-aware-lx
 investigation didn't enable it for the probes — that's one
 characterization gap.)
 
-### 16.10 The DXP_LX_FRAC_AVAIL semantic gap
+### 17.10 The DXP_LX_FRAC_AVAIL semantic gap
 
 (Same as v1.)
 
-### 16.11 Compiler-vs-hardware boundary on K-cohort reduction (closed)
+### 17.11 Compiler-vs-hardware boundary on K-cohort reduction (closed)
 
 The original Probe 6 found chain=32 cost dropped back below
 chain=8/16, suggesting a separate "allreduce primitive".
@@ -1123,15 +1477,15 @@ unichain/bichain/singleshot algorithm selectors in deeptools (see
 §7.4) are graph-global, not chain-length-conditional, so there's no
 compiler-side "request the tree-reduction" lever either.
 
-### 16.12 The "bigger M, slimmer M-loops" tension
+### 17.12 The "bigger M, slimmer M-loops" tension
 
 (Same as v1.)
 
-### 16.13 Dynamic shapes
+### 17.13 Dynamic shapes
 
 (Same as v1.)
 
-### 16.14 (new) Streaming-output fast path generality
+### 17.14 (new) Streaming-output fast path generality
 
 Probe 4-6 characterized the n=1 streaming path on three production
 shapes. Open questions:
@@ -1145,7 +1499,7 @@ shapes. Open questions:
   selector, or topology constraint? Reading SDSC emitter source
   would settle.
 
-### 16.15 (new) The "no good split" regime for large wide-N
+### 17.15 (new) The "no good split" regime for large wide-N
 
 Probe 5 found Llama 70B+ MLP shapes at M=2048 have *no good split*:
 pure-M overflows C_psum, (m, 1, k) blocked by EAR, (1, n>1, k>1)
@@ -1160,7 +1514,7 @@ deeptools team could:
 Patent angle: any of the above is a hardware-software co-design
 that no public auto-scheduler models.
 
-## 17. Quick-reference: predicting the best split for any shape
+## 18. Quick-reference: predicting the best split for any shape
 
 Given shape `(M, N, K)` at fp16 with max_cores = 32:
 
@@ -1171,7 +1525,7 @@ Given shape `(M, N, K)` at fp16 with max_cores = 32:
      If C_psum > 2 MB and n > 1: skip (catastrophic)
      If K · N > 256 MB and (m, 1, k>1) candidate: skip (EAR ceiling)
 
-2. Apply the §10.5 decision tree:
+2. Apply the §11.5 decision tree:
    • C_psum > 2 MB and K·N ≤ 256 MB:
        (m, 1, k>1) +kf with chain ≤ 4 (pipeline regime)
    • C_psum > 2 MB and K·N > 256 MB: no good split (hardware issue)
