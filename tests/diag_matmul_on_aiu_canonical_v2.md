@@ -220,6 +220,86 @@ Earlier predicates that gated on operand A footprint (the
 correlate (both A and C grow with M) but the binding constraint is
 the C accumulator.
 
+#### 4.1.1 Why C, not A or B
+
+A and B are **inputs**: HBM is their canonical source, so if either
+is evicted from LX it can simply be re-read. C is an **accumulator**
+— a transient that does not exist in HBM until the K-loop completes,
+so it has no canonical source to fall back on. Whatever C tile the
+kernel is currently summing into has to stay LX-resident until that
+tile is finished, or the partial sum already accumulated is lost.
+
+That asymmetry is what makes C, not A or B, set the binding LX
+budget. In one line:
+
+> A and B can be re-read from HBM if evicted; C has no canonical
+> source until the K-loop completes, so its residency is the binding
+> constraint.
+
+#### 4.1.2 Why only K-split shows the catastrophe
+
+Probe 3's N-sweep above used split (1, 8, 4) — m=1, so each core
+holds the **full** M dimension (M_per = M / 1 = 2048) and a 1/n
+slice of N. C_psum/core scales as `M × (N/n) × 4` and grows directly
+with N.
+
+Pure-M splits (e.g., (32, 1, 1)) shrink M_per to M/32 = 64, so even
+at N=8192 the per-core C_psum is only 64 × 8192 × 4 ≈ 2 MB — right
+at the LX line, never multiple multiples over it. The catastrophe
+regime is unreachable with pure-M for these shapes. K-splits with
+m=1 (or with small m) are the family that overflows LX as N grows,
+and they are exactly the splits k_fast targets, which is why kf
+walls explode in the lower-right of the table while the (32,1,1)
+baseline grows merely linearly.
+
+#### 4.1.3 What "spill" means across the K-loop
+
+The kernel template is **K-outer, M-N-inner**: the outermost
+software loop walks the K dimension, and inside each K-iteration
+every output tile assigned to the core gets one round of
+accumulation. So all of that core's PSUM tiles need to be in LX
+**simultaneously**, every K-iteration, for the whole duration of
+the K-loop. They are not consumed and discarded — they are
+incrementally summed into.
+
+When the working set of PSUMs exceeds LX, the kernel partitions
+them into chunks that each fit, and processes one chunk at a time
+**inside** the K-loop body. Each K-iteration then looks like:
+
+```
+for kb in range(K_per // 8):                     # K-outer (kb = K-block)
+    # round 1
+    load PSUM_chunk_1 from HMI into LX
+    process all output tiles in chunk_1 with A[*, kb], B[kb, *]
+    store PSUM_chunk_1 from LX back to HMI
+
+    # round 2
+    load PSUM_chunk_2 from HMI into LX
+    process all output tiles in chunk_2 with A[*, kb], B[kb, *]
+    store PSUM_chunk_2 from LX back to HMI
+
+    # ... overage_factor rounds total
+```
+
+For an `overage_factor = ceil(C_psum / LX)`, each K-iteration now
+performs `overage_factor` HMI round-trips on the PSUM working set
+instead of zero. That is the "fetches it back from HMI per
+K-iteration" mechanism — it is K times worse than a one-shot reload
+because the spill happens **inside** the K-loop, not around it.
+
+This is also why the wall scales linearly with C_psum / LX above
+the threshold (one extra round-trip set per overage factor) and why
+the per-LX-overage cost (~17 ms in the table) is essentially K ×
+PSUM-chunk HMI bandwidth — the K factor turns a small overage into
+a giant penalty.
+
+The K-outer / M-N-inner ordering is itself a deliberate trade: it
+keeps PSUMs resident across K (paying for one A and B reload per
+K-iteration) so accumulation stays on-chip. That choice only pays
+off when PSUMs actually fit; once they don't, you get the worst of
+both worlds — A/B still get reloaded, **and** PSUM round-trips
+HMI per K-iteration.
+
 ### 4.2 DXP_LX_FRAC_AVAIL
 
 Splits LX between user code (inductor allocator) and the deeptools
@@ -313,6 +393,167 @@ Key derived facts:
 For most production shapes (M·N ≪ K·N), the **B-replication term
 dominates** under pure-M, and reducing it via K-split or MN-split is
 the source of the speedup.
+
+### 5.5 Where the n / m / k multipliers come from + a tile-lifecycle toy
+
+#### 5.5.1 Derivation: who needs what
+
+Index each core by a triple `(m_idx, n_idx, k_idx)` with
+`m_idx ∈ [0, m)`, `n_idx ∈ [0, n)`, `k_idx ∈ [0, k)`. The core owns
+the C sub-tile
+
+```
+C[m_idx · M_per : (m_idx+1) · M_per,
+  n_idx · N_per : (n_idx+1) · N_per]
+```
+
+and computes its contribution to it from
+
+```
+A_frag(m_idx, k_idx) = A[m_idx · M_per : (m_idx+1) · M_per,
+                         k_idx · K_per : (k_idx+1) · K_per]
+B_frag(k_idx, n_idx) = B[k_idx · K_per : (k_idx+1) · K_per,
+                         n_idx · N_per : (n_idx+1) · N_per]
+```
+
+Read off the indices that **don't appear** in each fragment:
+
+- `A_frag` depends on `(m_idx, k_idx)` but **not on `n_idx`**.
+  All `n` cores in the n-cohort sharing the same `(m_idx, k_idx)`
+  need the *same* `A_frag`. → **A_frag is shared by n cores.**
+- `B_frag` depends on `(k_idx, n_idx)` but **not on `m_idx`**.
+  All `m` cores sharing the same `(k_idx, n_idx)` need the same
+  `B_frag`. → **B_frag is shared by m cores.**
+- The C-tile depends on `(m_idx, n_idx)` but **not on `k_idx`**.
+  All `k` cores sharing `(m_idx, n_idx)` produce a partial sum for
+  the same C-tile, reduced over the SFP PSUM ring (§7). → **The
+  K-cohort has k cores reducing into one C-tile.**
+
+The n / m / k multipliers in the per-cluster HMI formula (§5.4) are
+exactly this count, weighted by whether the deeptools backend
+multicasts the fragment over a ring or independently HBM-reads it
+per cohort member. The current backend multicasts within the
+K-cohort (so B carries a `/k` divisor); A and B across the M- and
+N-cohorts are not multicast — but the data-dependence count above
+is what the multipliers are *counting*.
+
+#### 5.5.2 Toy example: split (2, 2, 1), M = N = 4, K = 16
+
+Pick a tiny matmul: `C = A · B`, `A ∈ R^{4×16}`, `B ∈ R^{16×4}`.
+Split `(m, n, k) = (2, 2, 1)` → four cores. Per-core dimensions:
+
+```
+M_per = 2,   N_per = 2,   K_per = K = 16
+```
+
+The K-loop walks K in steps of 8 (PT SIMD-K depth for fp16) →
+**2 K-iterations** per kernel.
+
+**Core layout** (k_idx = 0 always since k = 1):
+
+```
+                n_idx = 0                  n_idx = 1
+m_idx = 0   core 0: C[0:2, 0:2]        core 1: C[0:2, 2:4]
+m_idx = 1   core 2: C[2:4, 0:2]        core 3: C[2:4, 2:4]
+```
+
+**Operand fragments** and who shares them:
+
+```
+A_frag(0) = A[0:2, :]   ← needed by core 0, core 1   (n = 2 cores)
+A_frag(1) = A[2:4, :]   ← needed by core 2, core 3   (n = 2 cores)
+
+B_frag(0) = B[:, 0:2]   ← needed by core 0, core 2   (m = 2 cores)
+B_frag(1) = B[:, 2:4]   ← needed by core 1, core 3   (m = 2 cores)
+```
+
+The §5.5.1 derivation made concrete: each A_frag has n=2 consumers,
+each B_frag has m=2 consumers.
+
+#### 5.5.3 The K-loop in time — what each core's LX looks like
+
+Per K-iteration each core needs an `(M_per, 8)` slice of A and an
+`(8, N_per)` slice of B (both 16 fp16 elements = 32 bytes). The
+PSUM tile is `(M_per, N_per) = (2, 2)` fp32 = 16 bytes.
+
+**T = 0 — kernel start.** All four cores' LX is empty. PSUM tile in
+LX is zero-initialised.
+
+**T = 1 — K-iter 0 (kb = 0, K-range [0, 8)):**
+
+```
+                core 0              core 1              core 2              core 3
+LX[A-tile]      A[0:2, 0:8]         A[0:2, 0:8]         A[2:4, 0:8]         A[2:4, 0:8]
+                ╰── same bytes ──╯                      ╰── same bytes ──╯
+
+LX[B-tile]      B[0:8, 0:2]         B[0:8, 2:4]         B[0:8, 0:2]         B[0:8, 2:4]
+                ╰── same bytes ──── B[0:8, 0:2] ──╮     ╭── same bytes ──── B[0:8, 2:4] ───╯
+                                                  └─────┘
+
+PT compute      MAC into PSUM       MAC into PSUM       MAC into PSUM       MAC into PSUM
+
+LX[PSUM]        PSUM_0 = A·B        PSUM_1 = A·B        PSUM_2 = A·B        PSUM_3 = A·B
+                (sum over K=0..7)   (sum over K=0..7)   (sum over K=0..7)   (sum over K=0..7)
+```
+
+**T = 2 — K-iter 1 (kb = 1, K-range [8, 16)):**
+
+```
+                core 0              core 1              core 2              core 3
+LX[A-tile]      A[0:2, 8:16]   ←──  overwrites previous A-tile  ──→         A[2:4, 8:16]
+                (same LX address, new bytes — that's "streaming")
+
+LX[B-tile]      B[8:16, 0:2]   ←──  overwrites previous B-tile  ──→         B[8:16, 2:4]
+
+PT compute      MAC accumulates +=                                          MAC accumulates +=
+
+LX[PSUM]        PSUM_0 += A·B       PSUM_1 += A·B       PSUM_2 += A·B       PSUM_3 += A·B
+                (PSUM **not** overwritten — summed into. Lives across both K-iterations.)
+```
+
+**T = 3 — kernel end.** PSUM tile drains; each core writes its
+C-sub-tile to HBM:
+
+```
+core 0 → C[0:2, 0:2]    core 1 → C[0:2, 2:4]
+core 2 → C[2:4, 0:2]    core 3 → C[2:4, 2:4]
+```
+
+**The lifecycle in one picture:**
+
+```
+LX address X (A-tile slot):    [A0..7]   [A8..15]   .          ← overwritten every K-iter
+LX address Y (B-tile slot):    [B0..7]   [B8..15]   .          ← overwritten every K-iter
+LX address Z (PSUM slot):      [zero]    [partial]  [final]    ← summed into, never overwritten
+                                T=0       T=1        T=2  T=3
+                                          K-iter 0   K-iter 1   drain
+```
+
+That is precisely what "streamed" vs "accumulator" mean at the LX
+byte level:
+
+- A and B occupy their LX slots for **exactly one K-iteration** and
+  are then **overwritten** by the next K-block's bytes. Same LX
+  address, fresh content. No write-back needed because A and B are
+  read-only — HBM remains the canonical source.
+- PSUM occupies its LX slot **for the whole K-loop** and is summed
+  into every iteration. It cannot be overwritten because it has no
+  HBM canonical source until the K-loop completes — which is why
+  it, and not A or B, is the binding LX constraint (§4.1).
+
+#### 5.5.4 What changes when k > 1
+
+With `(m, n, k) = (2, 2, 2)`, K_per = K/2 = 8 → only **1
+K-iteration** per core, but two K-cohort peers per (m_idx, n_idx)
+each compute a partial sum for the same C-tile. After the
+(only) K-iter, the K-cohort runs an SFP PSUM ring reduction (§7) to
+sum the partials before the C-tile drains to HBM.
+
+So k > 1 adds a **spatial** reduction step at the end of the K-loop
+on top of the **temporal** accumulation that already happened
+inside it. It does not change the operand-fragment data-dependence
+story; it just shrinks K_per (fewer K-iterations) and introduces a
+PSUM ring traversal at drain time.
 
 ## 6. The work-division split
 
