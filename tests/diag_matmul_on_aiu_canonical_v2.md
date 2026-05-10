@@ -802,20 +802,61 @@ The `XrfInterleaving` enum (`dsm/dsmds.h:74`):
 | `XRF_MB` | Weights interleaved across batch dim, held in XRF | Auto-paired with OS1_INT8 (graphOptimizer.cpp:4905) |
 | `XRF_CH` | Weights interleaved across channel dim, held in XRF | Some conv2d variants where channel-major weight layout fits XRF |
 
-**Why this matters**: when weights are in XRF, **they don't compete
-with PSUM for LX capacity**. The C_psum > LX catastrophe we
-documented in §4.1 and §7.5 only happens when weights also need LX.
-Routing through XRF would relieve the LX pressure on shapes where
-the PSUM accumulator overflows.
+**Capacity** (`deeptools/dsc/sysdef.cpp:183`): `xrfCapacity = 64 * 1024`
+= **64 KiB per corelet**. Aggregate per AIU = 64 corelets × 64 KiB =
+4 MiB. This is **16× smaller aggregate than LX** (64 MiB) and 32×
+smaller per unit. The fit check (`dsm/dsm.cpp:1492`) requires:
 
-**Kernel templates with XRF routing exist for fp16**:
-`dvs/setupVariables/xrfbatchmatmul_fp16_fwd.cpp`,
-`xrfchbatchmatmul_fp16_fwd.cpp`, plus fp8 / int4 / int8 variants.
-But the dataflow selector in `graphOptimizer.cpp` does **not
-currently route fp16 transformer matmuls through XRF**. This is a
-deeptools/library lever the inductor planner could in principle
-exploit — adding hint support to request the XRF dataflow is a
-follow-up direction not in the v2 §17 open-problems list.
+```
+(CoreletD.in × CoreletD.out × CoreletD.x × wordLength) / numPTRows ≤ 8 KiB per row
+```
+
+i.e. per-corelet B tile ≤ 64 KiB.
+
+**Reality check on capacity**: under any (m, n, k) split with
+m·n·k = 32 plus bichain corelet split, the per-corelet B share for
+production transformer matmul is far over 64 KiB:
+
+| shape | total B (fp16) | per corelet at full split |
+|---|---:|---:|
+| Llama 3.2 1B kv_proj | 4 MiB | 64 KiB *— at the limit* |
+| Granite 3 8B kv_proj | 16 MiB | 256 KiB |
+| Granite 3 8B q_proj | 32 MiB | 512 KiB |
+| Granite 3 8B gate_proj | 100 MiB | 1.6 MiB |
+| Llama 3.1 70B q_proj | 128 MiB | 2 MiB |
+
+**For Granite-8B-and-larger fp16 transformer linear layers, XRF
+cannot fit B under any split.** PR 1986's regime is unaffected by
+XRF — there's no XRF-routing lever that helps the shapes we measure.
+
+**Where XRF actually wins**:
+
+- **Conv2D kernels** (3 × 3 × C_in × C_out at small C) — first-layer
+  vision-model layers fit easily.
+- **Tiny matmul** with K, N ≤ ~1024 — per-head attention chunks
+  with split-per-head batching, mini-MLPs.
+- **int4 quantization** — 4× smaller weights stretch XRF's reach 4×;
+  int4 4096×4096 starts becoming viable. Combined with `KG3_INT4` or
+  `OS1_INT8`'s auto-paired `XRF_MB` interleaving, this is the
+  production int8 / int4 inference path.
+- **`OS1_INT8` + `XRF_MB`** is the configuration where everything
+  fits: weights in XRF (small), PSUM in PT registers (output-
+  stationary), neither competes for LX. That's why it's the
+  production int8 inference dataflow.
+
+**Kernel templates with XRF routing**:
+`dvs/setupVariables/xrfbatchmatmul_{fp16,fp8,int4,int8}_fwd.cpp`,
+`xrfchbatchmatmul_*_fwd.cpp`. They exist for all precisions, but
+the dataflow selector in `graphOptimizer.cpp` only routes int8
+through XRF (via OS1_INT8 + XRF_MB). The fp16 XRF templates are
+present in the codebase but rarely activated for our regime
+because the capacity math doesn't work out.
+
+**Implication for our work**: XRF is a **vision / quantized**
+lever, not a transformer-fp16 lever. The "third memory tier"
+framing is structurally accurate but practically narrow. For
+PR 1986's regime (fp16 transformer matmul), XRF capacity is
+insufficient under any split — closing this avenue.
 
 ### 8.5 The dataflow decision (per node)
 
@@ -936,18 +977,28 @@ v2 §11 sketched in closed form.
    The other 19 PriOpDataflows variants and the XRF / OS1 paths are
    unexplored regimes from our side.
 
-2. **XRF is a real third memory tier** that doubles effective LX
-   availability for PSUM by removing weights from LX. Some of v2
-   §7.7's "no good split" pessimism for largest wide-N shapes may be
-   addressable by routing through XRF kernel templates (which exist
-   for fp16) — but requires a graphOptimizer change to route fp16
-   matmul through XRF.
+2. **XRF is a real third memory tier but not a lever for our
+   regime.** With only 64 KiB per corelet (4 MiB aggregate, 16×
+   smaller than LX), XRF cannot fit any Granite-8B-or-larger
+   transformer-fp16 weight tile under any (m, n, k) split. XRF
+   wins on conv2d / tiny-matmul / int4-quantized workloads, not
+   the fp16 transformer linears PR 1986 targets. See §8.4.
 
-3. **`RcuOptimizer.decoding_iter_idx` is the cross-iteration
-   residency primitive.** The infrastructure for decode-iteration-
-   aware scheduling exists in deeptools. Enabling and characterizing
-   it is high-leverage follow-up work for any decode-throughput
-   improvement.
+3. **Decode-iter awareness is fully implemented in deeptools but
+   unreachable from torch-spyre.** `DecoderInfo`, `IterType`,
+   `cMode::OFFLINE_DECODER`, `runDsmProgSharingCheck` (compare anchor
+   vs. test graph), and `maxSharedProgIters = 256` (one compiled
+   program shareable across up to 256 decode iterations) — all
+   exist in `deeptools/deeprt` and `deeptools/dsm/decoderMode.cpp`.
+   Zero references in torch-spyre or torch_sendnn source. The
+   inductor → SDSC path always invokes deeprt in `OFFLINE` mode
+   with iter_idx = 0. Production decoder serving (e.g.,
+   granite_33_8b_paged_fp8_TP4 in `verifyDecoderModels.sh`) goes
+   through a different compilation entry point that uses
+   OFFLINE_DECODER. **The torch-spyre `torch.compile` path cannot
+   currently benefit from program sharing.** Surfacing IterType /
+   max_decoding_iter / anchor_iter as inductor-side hints, plus a
+   multi-iteration AOT compile entry point, would unlock this.
 
 4. **`perfEstimator` is the real cost model.** The closed-form
    predictor in §11 is useful for screening, but a real planner-side
