@@ -1750,14 +1750,85 @@ chain forwards via SFPRING.
 **The reduction algorithm** (`unichain` / `bichain` / `singleshot`)
 is graph-global and selected from the data format and ring config
 (see §7.4 and the memory note on `dsm` PSUM-algo selection). The
-snippet above is the **unichain** pattern (one linear chain, k-1
-hops). `bichain` splits the cohort into two half-chains traveling
-opposite directions on the bidirectional SFP ring (chain length
-`(k-1)/2` each, halving worst-case hop count).
-`singleshot` collapses the chain into one wide-burst transfer for
-small k. All three plug into the same four DT slots; only the
-ring traversal pattern and the `rank_in_cohort` book-keeping
-differ.
+snippet above is the **unichain** pattern.
+
+**Bichain** is the algorithm that uses the bidirectional SFP ring
+to run two half-chains in opposite directions, halving worst-case
+hop count. Key differences from unichain, grounded in the code:
+
+- **Memory organisation** (`dsm.cpp:8059-8066`): under bichain
+  PSUM lives in `SFPRING + SFP` *only*; there is no `RING + LX`
+  intermediate. The 4 DT slots above collapse to ring-direct
+  pieces.
+- **Corelet-internal split** (`dsmperf.cpp:6575-6617`): for cores
+  with 2 corelets, bichain splits K between them — corelet 0 owns
+  the low-half K-slice and corelet 1 owns the high-half. The two
+  corelets exchange their partials via SFPRING.
+- **Selected automatically** for sparse PSUM paths
+  (`dsm.cpp:5276-5280`: `Set psum=sfpring and dsm_psum_algo ==
+  "bichain" if there's any sparse...`).
+
+Sketch in the same syntax:
+
+```python
+# Bichain — k-cohort splits into two half-chains on the
+# bidirectional SFP ring. half_size = ceil(k / 2). Cores with
+# rank < half_size traverse CW; cores with rank ≥ half_size
+# traverse CCW. The two chains meet at rank_in_cohort == half_size - 1,
+# which sums both halves and drains the final PSUM.
+
+half_size = (k + 1) // 2
+meet_rank = half_size - 1
+
+for nb in range(N_per_corelet // 8):
+    for mb in range(M_per_corelet // 8):
+        local = sfp.load_local_partial(C_tile[mb, nb])   # bichain skips LX intermediate
+
+        if rank_in_cohort < half_size:                    # ───── half A: CW chain ─────
+            if rank_in_cohort == 0:
+                running_A = local
+            else:
+                peer = sfp.recv_from_sfpring(direction='cw')
+                running_A = sfp.add(local, peer)
+
+            if rank_in_cohort < meet_rank:                # forward CW to next peer
+                sfp.send_to_sfpring(running_A, direction='cw')
+            else:                                         # rank == meet_rank: converge
+                running_B = sfp.recv_from_sfpring(direction='ccw')
+                final_sum = sfp.add(running_A, running_B)
+                hbm.store_via_lx(C_global[...], final_sum)
+
+        else:                                             # ───── half B: CCW chain ─────
+            if rank_in_cohort == k - 1:
+                running_B = local
+            else:
+                peer = sfp.recv_from_sfpring(direction='ccw')
+                running_B = sfp.add(local, peer)
+
+            sfp.send_to_sfpring(running_B, direction='ccw')  # always forward CCW
+```
+
+The two chains each have at most `half_size - 1` hops, so worst
+case is `(k - 1) / 2` instead of unichain's `k - 1`. The trade is
+that bichain consumes **both** SFP-ring directions simultaneously,
+so it can't be overlapped with another bichain reduction on the
+same chiplet.
+
+**Singleshot** collapses the chain into one wide-burst transfer
+for small k — useful when the chain overhead dominates per-hop
+work. It uses the same SFPRING memory organisation as bichain
+(no LX intermediate).
+
+What's verified vs. inferred for bichain:
+
+- **Verified**: SFPRING-only PSUM `memOrg` under bichain
+  (dsm.cpp:8059-8066); per-corelet K-half split for 2-corelet
+  cores (dsmperf.cpp:6575+); sparse-triggered auto-selection
+  (dsm.cpp:5276-5280).
+- **Inferred**: the exact convergence point (`meet_rank`) and the
+  two-half-chain topology — this is the natural reading of
+  "bichain" given the two SFPRING directions, but I have not
+  fully traced the .smc microcode for the convergence step.
 
 **Cost implications**:
 
