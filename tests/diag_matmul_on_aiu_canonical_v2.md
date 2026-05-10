@@ -252,86 +252,68 @@ and they are exactly the splits k_fast targets, which is why kf
 walls explode in the lower-right of the table while the (32,1,1)
 baseline grows merely linearly.
 
-#### 4.1.3 What "spill" means across the K-loop
+#### 4.1.3 PSUM accumulation across K — the catastrophe predicate
 
-The default matmul dataflow on AIU is **KG3 (weight-stationary)**
-— see §8.3 — whose loop ordering is **K-outer, M-N-inner**: the
-outermost software loop walks K in PT-block steps, and inside each
-K-iteration every PT-sized output tile assigned to the core gets
-one round of accumulation. All of that core's PSUM tiles therefore
-need to be in LX **simultaneously**, every K-iteration, for the
-whole duration of the K-loop. They are not consumed and discarded
-— they are incrementally summed into.
+The catastrophe predicate `M_per × N_per × 4 ≤ LX_per_core` is
+empirically validated by Probe 3 (§4.1.1). The exact mechanism by
+which PSUM accumulation interacts with LX is grounded in deeptools
+as follows:
 
-**KG3, no-spill case (PSUM fits in LX):**
+- **At the PT-array link level** (`deeptools/dm/PerfAnalysis.cpp:615-618`),
+  KG3 sets `pKer = blockLoad`, `pInp = streaming`,
+  `pOut = streaming`. So B is held in the PT-array register file
+  while A and PSUM both stream past it. PSUM is *not* PT-resident.
 
-```python
-# Per core. PT array operates on 8×8 tiles.
-PSUM = zeros(M_per // 8, N_per // 8, 8, 8)         # all tiles LX-resident
-for kb in range(K_per // 8):                        # K-OUTER
-    load A_tile (M_per, 8) from HMI into LX         # one K-block of A
-    load B_tile (8, N_per) from HMI into LX         # one K-block of B
-    for mt in range(M_per // 8):                    # M-N-INNER
-        for nt in range(N_per // 8):
-            PSUM[mt, nt] += (
-                A_tile[mt*8:(mt+1)*8, :]
-                @ B_tile[:, nt*8:(nt+1)*8]
-            )
-drain PSUM from LX to HBM
-```
+- **At the corelet loop level**
+  (`deeptools/dvs/libtemplates/batchmatmul_fp16_fwd.smc:27-38`), the
+  loop counter order is **N-outer / K-middle / M-inner** with B
+  loaded between K-middle and M-inner, and A + PSUM loaded inside
+  the M-inner loop. So PSUM is touched (load-modify-store) once per
+  `(N, K, M)` triple.
 
-PSUM working set in LX = `M_per × N_per × 4` bytes — exactly the
-§4.1 fit predicate. A and B are loaded **once each per K-block**,
-regardless of how many PT tiles they touch.
+- Because PSUM is not PT-resident and is touched per M-inner
+  iteration, an LX-level buffer holds the per-(N-outer-iteration)
+  PSUM working set across the K-middle loop. KG3 sets
+  `tOut = doubleBuf` (PerfAnalysis.cpp:620) — the PSUM buffer is
+  double-buffered between LX and the PE link. **The LX residency
+  requirement therefore lands on this buffer**, and the §4.1
+  predicate is the right size for it: `M_per × N_per × 4` bytes
+  for the per-corelet PSUM working set, which must fit in
+  `LX_per_core` for accumulation to stay on-chip across K.
 
-**KG3, spill case (PSUM > LX):** the kernel partitions the PT tiles
-into chunks that each fit in LX, and walks the chunk-loop **inside**
-the K-loop:
+> **Caveat (under investigation, 2026-05-10).** A previous version
+> of this section described the spill as a chunked PSUM
+> load/process/store loop *inside* an explicit K-outer software
+> loop. That story does not match the actual deeptools loop nest
+> (N-outer / K-middle / M-inner) and has been retracted. The size
+> of the LX residency requirement and the empirical
+> "~17 ms / LX-overage factor" slope are still real (Probe 3); the
+> precise micro-mechanism by which PSUM > LX inflates per-K cost is
+> being re-derived from the .smc template. See §17 for the open
+> investigation.
 
-```python
-chunks = partition(PT_tiles, fit=LX_per_core)       # overage_factor chunks
-for kb in range(K_per // 8):                        # K-OUTER (unchanged)
-    load A_tile (M_per, 8) from HMI into LX         # still loaded once per kb
-    load B_tile (8, N_per) from HMI into LX
-    for chunk in chunks:                            # NEW: chunk-loop INSIDE K
-        load PSUM_chunk from HMI into LX            # round 1, round 2, ...
-        for (mt, nt) in chunk:                      # M-N-INNER over this chunk
-            PSUM_chunk[mt, nt] += (
-                A_tile[mt*8:(mt+1)*8, :]
-                @ B_tile[:, nt*8:(nt+1)*8]
-            )
-        store PSUM_chunk from LX back to HMI
-```
+What remains solid:
 
-For an `overage_factor = ceil(C_psum / LX)`, each K-iteration now
-performs `overage_factor` HMI round-trips on the PSUM working set
-instead of zero. That is the "fetches it back from HMI per
-K-iteration" mechanism — it is K times worse than a one-shot reload
-because the spill happens **inside** the K-loop, not around it.
-
-This is why the wall scales linearly with `C_psum / LX` above the
-threshold (one extra round-trip set per overage factor) and why the
-per-LX-overage cost (~17 ms in the table) is essentially K ×
-PSUM-chunk HMI bandwidth — the K factor turns a small overage into
-a giant penalty.
-
-The K-outer / M-N-inner ordering is itself a deliberate trade: it
-keeps PSUMs resident across K (paying for one A and B reload per
-K-block) so accumulation stays on-chip. That choice only pays off
-when PSUMs actually fit; once they don't, you get the worst of both
-worlds — A and B still get reloaded once per K-block, **and** PSUM
-round-trips HMI per K-iteration.
+1. **PSUM is the binding LX tenant.** A and B both stream — they
+   can be evicted and re-read from HBM. PSUM accumulates across K
+   and has no canonical HBM source until the K-loop completes
+   (§4.1.1).
+2. **The fit predicate** `M_per × N_per × 4 ≤ LX_per_core` matches
+   the catastrophe boundary observed in Probe 3.
+3. **The catastrophe slope** scales with `ceil(C_psum / LX)`,
+   suggesting per-overage-factor extra HMI round-trips on the PSUM
+   working set inside the K-middle loop. The exact ordering of
+   those round-trips is what's being re-traced.
 
 #### 4.1.3a OS1 avoids the catastrophe — see §9.1
 
-The catastrophe is specific to KG3's K-outer / M-N-inner ordering:
-holding all PSUM tiles resident is what creates the LX residency
-requirement. The OS1 (output-stationary) family flips the loop
-order so only one 8×8 PSUM tile is resident at a time and never
-spills, at the cost of re-reading A and B inside the outer (M, N)
-loops. **§9.1** walks both pseudocodes side-by-side with a
-trade-off table; in short, OS1 would clip the §4.1.1 cliff at a
-constant-factor A/B re-read penalty.
+OS1 (output-stationary) sets `pOut = blockLoad` instead of
+`streaming` (`PerfAnalysis.cpp:652-655`) — PSUM lives in the PT
+register file rather than streaming to LX. Only the one 8×8 PSUM
+tile currently being accumulated is in PT; nothing forces an
+M_per × N_per LX working set. So OS1 avoids §4.1.1's cliff
+mechanically, at the cost of the streaming dataflow's other
+trade-offs (see §9.1).
 
 ### 4.2 DXP_LX_FRAC_AVAIL
 
@@ -1393,8 +1375,18 @@ v2 §11 sketched in closed form.
 
 ## 9. Loop nest structure
 
+The block below is a **conceptual** loop nest for matmul on AIU,
+with one PSUM tile in flight per `(mb, nb)`. It is **not** the
+verified KG3 fp16 nest — see §9.1.1 for that, which reads the LX
+loop counters from
+[`deeptools/dvs/libtemplates/batchmatmul_fp16_fwd.smc`](../../deeptools/dvs/libtemplates/batchmatmul_fp16_fwd.smc)
+and finds an N-outer / K-middle / M-inner ordering with B held in
+PT registers. The sketch here matches the OS1 (output-stationary)
+shape rather than KG3.
+
 ```python
-# Outer loops — sharded across cores per the (m, n, k) split:
+# Conceptual sketch — closer to OS1 than to KG3.
+# Sharded across cores per the (m, n, k) split.
 for mb in range(M_per_core // 8):           # PT M-batches
     for nb in range(N_per_core // 8):        # PT N-batches
         psum = zeros(8, 8)                   # PT-resident accumulator (fp32)
@@ -1413,8 +1405,12 @@ for mb in range(M_per_core // 8):           # PT M-batches
         lx.store(C_tile[mb, nb], psum)
 ```
 
-This matches `deeptools/dvs/setupVariables/batchmatmul_fp16_fwd.cpp`
-(SDSC parameters Dmb, Dout, Din, Cmb, Cout, Cin, coreletDmb, etc.).
+The SDSC parameter setup
+(`deeptools/dvs/setupVariables/batchmatmul_fp16_fwd.cpp`) names the
+loop-counter dimensions — Dmb, Dout, Din at the cluster level and
+Cmb, Cout, Cin, coreletDmb, etc. at the corelet level — which the
+.smc kernel template (§9.1.1) consumes to drive the actual loop
+counters. The .cpp is parameter wiring, not the loop nest itself.
 
 Three things drive performance:
 
@@ -1450,66 +1446,105 @@ AIU:
 The §9 nest above is the OS1-style form. Side-by-side in the same
 syntax:
 
-#### 9.1.1 KG3 — K-outer, M-middle, N-inner
+#### 9.1.1 KG3 — N-outer, K-middle, M-inner (grounded in deeptools)
 
-The "weight-stationary" aspect lives in the **M-middle** loop: B
-sits in LX across it while A turns over per `mb`.
+The KG3 fp16 forward kernel is implemented in
+[`deeptools/dvs/libtemplates/batchmatmul_fp16_fwd.smc`](../../deeptools/dvs/libtemplates/batchmatmul_fp16_fwd.smc).
+Reading the LX-unit loop counters at the corelet level (lines 27-38),
+outermost → innermost:
 
-```python
-# Per core. The whole PSUM grid is LX-resident across the K-loop.
-psum = zeros(M_per_core // 8, N_per_core // 8, 8, 8)
-
-for kb in range(K_per_core // 8):                     # K-OUTER
-    b_strip = lx.load(B_tile[kb, :])                   # 8 × N_per — loaded ONCE per kb
-
-    for mb in range(M_per_core // 8):                  # M-MIDDLE — A streams past stationary B
-        a_strip = lx.load(A_tile[mb, kb])              # 8 × 8 — turns over every mb
-
-        for nb in range(N_per_core // 8):              # N-INNER — sweeps b_strip
-            psum[mb, nb] = pt.outer_product(
-                a_strip, b_strip[nb], psum[mb, nb])
-
-# After the K-loop:
-if k > 1:
-    psum = sfp_ring_allreduce(psum, cohort)            # whole grid
-
-for mb in range(M_per_core // 8):                     # one-shot drain
-    for nb in range(N_per_core // 8):
-        lx.store(C_tile[mb, nb], psum[mb, nb])
+```text
+LX_MVLOOPCNT imm=Cx_cl       // Cx-corelet (degenerate for matmul)
+LX_MVLOOPCNT imm=Cout_Sout   // N-corelet
+LX_MVLOOPCNT imm=Cin_Sin     // K-corelet
+LX_MVLOOPCNT imm=Sin_        // K-stick
+LX_LDSTIU ...kinOffset       // ← LOAD B (kernel)        — between K and M
+LX_MVLOOPCNT imm=Cy          // Cy-corelet (degenerate)
+LX_MVLOOPCNT imm=Cmb_        // M-corelet (innermost)
+LX_LDSTU  ...src0=R5...      // ← LOAD A (input)         — inside M-inner
+LX_LDSTU  ...src0=R6...      // ← LOAD/STORE PSUM        — inside M-inner
 ```
 
-The asymmetry between A and B is now visible in the load counts:
+Stripped to the meaningful matmul axes: **N-outer, K-middle,
+M-inner**. B is loaded once per `(N-corelet, K-corelet)` pair
+(reused across the M-inner loop); A and PSUM are loaded inside the
+M-inner loop. At the PT-array link level
+(`deeptools/dm/PerfAnalysis.cpp:615-618`), KG3 sets
+`pKer = blockLoad` (B held in PT registers), `pInp = streaming`,
+`pOut = streaming`.
 
-| operand | load granularity        | loads per kernel              | LX residency span                     |
-|---------|-------------------------|-------------------------------|---------------------------------------|
-| B       | `8 × N_per` strip       | `K_per_core / 8`               | one full M-middle loop (`M_per/8` mb) |
-| A       | `8 × 8` tile            | `K_per_core / 8 × M_per_core / 8` | one mb iteration only             |
-
-Total HMI bytes are roughly symmetric (full A once, full B once),
-but B is brought in with **fewer, bigger** loads and stays
-LX-resident `M_per/8` times longer than A. That is what
-"weight-stationary" means at this loop level: each B byte feeds PT
-`M_per/8` times before it is overwritten by the next K-block; each
-A byte feeds PT `N_per/8` times before turning over.
-
-LX residency working set at any instant:
-
-- `psum` grid: `M_per × N_per × 4` bytes ← must fit (§4.1)
-- `b_strip`:   `8 × N_per × 2` bytes
-- `a_strip`:   `8 × 8 × 2 = 128` bytes
-
-The PSUM grid dominates by far, which is why §4.1's fit predicate
-focuses on it.
-
-#### 9.1.2 OS1 — M-N-outer, K-inner
+In the same syntax as §9 (with corelet-suffixed indices to
+distinguish from the cluster-outer dimensions):
 
 ```python
-# Per core. ONE 8×8 PSUM tile resident at a time (PT registers).
-for mb in range(M_per_core // 8):                     # M-OUTER
-    for nb in range(N_per_core // 8):                 # N-MIDDLE
-        psum = zeros(8, 8)                             # PT-resident accumulator
+# KG3 fp16 forward — corelet-level loop nest, matching
+# batchmatmul_fp16_fwd.smc:27-38.
 
-        for kb in range(K_per_core // 8):              # K-INNER
+for nb in range(N_per_corelet // 8):                  # N-OUTER (Cout_Sout)
+    for kb in range(K_per_corelet // 8):              # K-MIDDLE (Cin_Sin)
+
+        b_block = pt.blockload(B_tile[kb, nb])         # held in PT regs, weight-stationary
+                                                       # reused across the M-inner loop
+
+        for mb in range(M_per_corelet // 8):           # M-INNER (Cmb_)
+            a = lx.load(A_tile[mb, kb])                # streamed in
+            psum_partial = lx.load(C_tile[mb, nb])     # streamed in (prev K-iter's partial)
+            psum_partial = pt.outer_product(a, b_block, psum_partial)
+            lx.store(C_tile[mb, nb], psum_partial)     # streamed out
+```
+
+The asymmetry in load counts:
+
+| operand | load granularity | loads per kernel                                                | level held in              |
+|---------|------------------|------------------------------------------------------------------|----------------------------|
+| B       | `8 × 8` block    | `N_per_corelet/8 × K_per_corelet/8`                              | PT regs (blockLoad)        |
+| A       | `8 × 8` tile     | `N_per_corelet/8 × K_per_corelet/8 × M_per_corelet/8`             | streams through LX → PT    |
+| PSUM    | `8 × 8` fp32     | `N_per_corelet/8 × K_per_corelet/8 × M_per_corelet/8` (load+store) | LX double-buffered (`tOut=doubleBuf`) |
+
+So B is loaded `M_per_corelet/8` × less often than A: that's the
+"weight-stationary" reuse. At the PE level it's even sharper — once
+B is in PT registers, the next M-inner iteration's MAC re-uses it
+without any LX→PT transfer.
+
+PSUM ping-pongs between LX and the PE link inside the M-inner loop
+and persists across the K-middle loop: that's why §4.1's
+`M_per × N_per × 4 ≤ LX` predicate lands on PSUM.
+
+Caveats:
+
+- **Cluster-level vs. corelet-level.** The outer D-loops (`Dx_Cx,
+  Dy_Cy, Dmb_Cmb, Dout_Cout, Din_Cin`) iterate the cluster's slice
+  of M, N, K. The pseudocode above is the per-corelet inner kernel.
+- **What I've verified vs. inferred.** Verified: PE-level dataflow
+  types (PerfAnalysis.cpp:615-618), corelet loop counter order, and
+  load placement (.smc:27-38). Inferred: the explicit
+  load/store/MAC sequence inside M-inner is reconstructed from the
+  load instructions plus the PT contract; the actual microcode has
+  more pipelining and double-buffering than this sketch shows.
+
+#### 9.1.2 OS1 — output-stationary (PE-level confirmed; loop nest not yet verified)
+
+What's verified from the code: at the PE link level
+(`deeptools/dm/PerfAnalysis.cpp:652-655`), OS1 sets
+`pOut = blockLoad`, `pInp = streaming`, `pKer = streaming`. PSUM
+sits in the PT-array register file across whatever inner loop
+accumulates over K; A and B both stream past it. That gives OS1
+its mechanical immunity to §4.1.1's cliff: there is no
+M_per × N_per × 4 LX residency requirement because PSUM never lives
+in LX in bulk.
+
+Pseudocode at the conceptual level (the OS1 kernel template's `.smc`
+loop counter order has not yet been read back):
+
+```python
+# OS1 — conceptual sketch. Not yet verified against the OS1 .smc.
+# The PE-level invariant — pOut = blockLoad, pKer/pInp = streaming —
+# is what is verified.
+for mb in range(M_per_core // 8):                     # M-OUTER (presumed)
+    for nb in range(N_per_core // 8):                 # N-MIDDLE (presumed)
+        psum = pt.zeros(8, 8)                          # blockLoad'd into PT regs
+
+        for kb in range(K_per_core // 8):              # K-INNER (presumed)
             a = lx.load(A_tile[mb, kb])
             b = lx.load(B_tile[kb, nb])
             psum = pt.outer_product(a, b, psum)
@@ -1520,13 +1555,27 @@ for mb in range(M_per_core // 8):                     # M-OUTER
         lx.store(C_tile[mb, nb], psum)
 ```
 
-(Same shape as §9 — that nest is OS1.)
+Trade-offs vs. KG3 from the PE-level dataflow:
 
-LX PSUM working set: 256 B (one 8×8 fp32 tile, briefly transiting
-LX between PT registers and HMI). There is **no** way OS1 trips
-§4.1's catastrophe. The cost: A and B are re-read inside the outer
-loops — each A row touched once per N-tile, each B column once per
-M-tile.
+- **PSUM**: PT-resident in OS1 vs. LX double-buffered in KG3 → OS1
+  cannot trip §4.1.
+- **B**: streams past the PT array in OS1 vs. blockLoad'd into PT
+  registers in KG3 → KG3 saves one LX→PT transfer per inner-loop
+  step at the cost of the M-N-grid PSUM working set in LX.
+- **Dataflow link** (`pInp/pOut/pKer`) directions also differ
+  (PerfAnalysis.cpp:677-679 vs. 640-642), which constrains which
+  axes can split which dimensions.
+
+Caveats:
+
+- The loop nest above is the textbook OS1 layout, not a verified
+  match to deeptools' OS1 kernel template. The actual `.smc` may
+  differ. Treat it as the ordering implied by `pOut = blockLoad`
+  rather than as a literal transcription.
+- For inference fp16 / fp8 / int8 / int4 dense matmul on AIU, OS1
+  rarely activates (§8.2). The catastrophe regime in §4.1.1
+  represents work the planner could in principle redirect to OS1
+  but currently does not.
 
 #### 9.1.3 Side-by-side trade-off
 
