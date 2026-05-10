@@ -1752,83 +1752,64 @@ is graph-global and selected from the data format and ring config
 (see §7.4 and the memory note on `dsm` PSUM-algo selection). The
 snippet above is the **unichain** pattern.
 
-**Bichain** is the algorithm that uses the bidirectional SFP ring
-to run two half-chains in opposite directions, halving worst-case
-hop count. Key differences from unichain, grounded in the code:
+**Bichain** is the algorithm used when PSUM rides the dedicated SFP
+ring fabric rather than the RIU ring. The code-grounded facts:
 
-- **Memory organisation** (`dsm.cpp:8059-8066`): under bichain
-  PSUM lives in `SFPRING + SFP` *only*; there is no `RING + LX`
-  intermediate. The 4 DT slots above collapse to ring-direct
-  pieces.
-- **Corelet-internal split** (`dsmperf.cpp:6575-6617`): for cores
-  with 2 corelets, bichain splits K between them — corelet 0 owns
-  the low-half K-slice and corelet 1 owns the high-half. The two
-  corelets exchange their partials via SFPRING.
-- **Selected automatically** for sparse PSUM paths
-  (`dsm.cpp:5276-5280`: `Set psum=sfpring and dsm_psum_algo ==
-  "bichain" if there's any sparse...`).
+- **Default when `psumRing == "sfpring"`**
+  ([`deeprt.cpp:1652-1659`](../../deeptools/deeprt/deeprt.cpp#L1652-L1659)):
+  if the system is configured to use the SFP-ring fabric for PSUM,
+  `dsm_psum_algo` is set to bichain. (Otherwise the default is
+  unichain — `dsm.cpp:82`.)
+- **Memory organisation**
+  ([`dsm.cpp:8059-8066`](../../deeptools/dsm/dsm.cpp#L8059-L8066)):
+  under bichain, PSUM `memOrg` is `SFPRING + SFP` only — there is no
+  `RING + LX` intermediate. The unichain DT pipeline (LX↔SFP, LX→
+  SFPRING with dblbuf staging) collapses to direct SFPRING transit.
+- **Per-corelet K-half split for 2-corelet cores**
+  ([`dsmperf.cpp:6575-6617`](../../deeptools/dsm/dsmperf.cpp#L6575-L6617)):
+  when bichain is active and the core has 2 corelets, the K
+  dimension is split between them — corelet 0 owns the low-half
+  K-slice, corelet 1 owns the high-half. The two corelets exchange
+  partials via SFPRING (without LX staging).
+- **Sparse PSUM auto-selection**
+  ([`dsm.cpp:5276-5280`](../../deeptools/dsm/dsm.cpp#L5276-L5280)):
+  any sparse-conv layer in the graph forces
+  `psumRing = "sfpring"` and `dsm_psum_algo = "bichain"`, since
+  sparsity support is only enabled on the SFP-ring path.
+- **Hardware ring is bidirectional**: the SFPDataIU has 64 nodes
+  (one per corelet) with 2-in/2-out links per node and asymmetric
+  `ILinkToOLinkConnections: {"0":[0,1], "1":[0]}` (sysconfig
+  `SFPDataIU` block) — input 0 can drive both output directions,
+  input 1 only one. This permits Y-shaped routing at each node.
 
-Sketch in the same syntax:
+**What is NOT verified about bichain in the code I've read:**
 
-```python
-# Bichain — k-cohort splits into two half-chains on the
-# bidirectional SFP ring. half_size = ceil(k / 2). Cores with
-# rank < half_size traverse CW; cores with rank ≥ half_size
-# traverse CCW. The two chains meet at rank_in_cohort == half_size - 1,
-# which sums both halves and drains the final PSUM.
+The actual K-cohort PSUM **ring traversal pattern** (whether
+bichain does "two half-chains converging at a midpoint," or
+bidirectional all-reduce, or two concurrent full chains, or
+something else) is **not visible in the high-level deeptools
+sources**. I previously published a "meet at midpoint"
+pseudocode here; that has been retracted because the code does not
+substantiate it.
 
-half_size = (k + 1) // 2
-meet_rank = half_size - 1
-
-for nb in range(N_per_corelet // 8):
-    for mb in range(M_per_corelet // 8):
-        local = sfp.load_local_partial(C_tile[mb, nb])   # bichain skips LX intermediate
-
-        if rank_in_cohort < half_size:                    # ───── half A: CW chain ─────
-            if rank_in_cohort == 0:
-                running_A = local
-            else:
-                peer = sfp.recv_from_sfpring(direction='cw')
-                running_A = sfp.add(local, peer)
-
-            if rank_in_cohort < meet_rank:                # forward CW to next peer
-                sfp.send_to_sfpring(running_A, direction='cw')
-            else:                                         # rank == meet_rank: converge
-                running_B = sfp.recv_from_sfpring(direction='ccw')
-                final_sum = sfp.add(running_A, running_B)
-                hbm.store_via_lx(C_global[...], final_sum)
-
-        else:                                             # ───── half B: CCW chain ─────
-            if rank_in_cohort == k - 1:
-                running_B = local
-            else:
-                peer = sfp.recv_from_sfpring(direction='ccw')
-                running_B = sfp.add(local, peer)
-
-            sfp.send_to_sfpring(running_B, direction='ccw')  # always forward CCW
-```
-
-The two chains each have at most `half_size - 1` hops, so worst
-case is `(k - 1) / 2` instead of unichain's `k - 1`. The trade is
-that bichain consumes **both** SFP-ring directions simultaneously,
-so it can't be overlapped with another bichain reduction on the
-same chiplet.
+A `RingProtocol::HALF_HALF` enum exists
+([`dscdefn.h:564-569`](../../deeptools/dsc/dscdefn.h#L564-L569)) —
+it implements a "lower half of cores travel CCW, upper half travel
+CW" pattern — but it is **only used by `STCDPOp` (relayout data
+movement) on the RIU ring**
+([`sen_data_ops.cpp:3183`](../../deeptools/dsm/sen_data_ops.cpp#L3183)
+is its single consumer), not by bichain PSUM reduction. The
+HALF_HALF pattern existing for relayout *suggests* bichain might
+use the same shape for PSUM (same hardware ring, similar problem),
+but that's extrapolation. The actual routing decision for bichain
+PSUM appears to live in lower-level SFP-ring scheduling or
+microcode that I have not fully traced.
 
 **Singleshot** collapses the chain into one wide-burst transfer
-for small k — useful when the chain overhead dominates per-hop
-work. It uses the same SFPRING memory organisation as bichain
-(no LX intermediate).
-
-What's verified vs. inferred for bichain:
-
-- **Verified**: SFPRING-only PSUM `memOrg` under bichain
-  (dsm.cpp:8059-8066); per-corelet K-half split for 2-corelet
-  cores (dsmperf.cpp:6575+); sparse-triggered auto-selection
-  (dsm.cpp:5276-5280).
-- **Inferred**: the exact convergence point (`meet_rank`) and the
-  two-half-chain topology — this is the natural reading of
-  "bichain" given the two SFPRING directions, but I have not
-  fully traced the .smc microcode for the convergence step.
+for small k — `deeprt.cpp:1655-1658` shows it's selected for
+int8 + LX-opt + weight-preload at 32 cores. Same SFPRING memOrg
+as bichain (no LX intermediate). The same caveat about traversal
+topology applies.
 
 **Cost implications**:
 
