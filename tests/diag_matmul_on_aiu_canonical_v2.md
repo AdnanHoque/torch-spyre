@@ -11,8 +11,10 @@ the actual hardware.
 **v2 changes vs v1** (`diag_matmul_on_aiu_canonical.md`):
 
 - §4 / §5.4: PSUM accumulator is the binding LX constraint (Probe 3
-  calibration `M_per × N_per × 4 ≤ 2 MB`). Multicast caveat retired —
-  the per-cluster HMI formula is empirically validated.
+  calibration `M_per × N_per × 4 ≤ 2 MB`). Per-cluster HMI formula
+  corrected to a full-multicast model on A and B (constant in m, n;
+  only C scales with k); validated empirically against DSv3 q_b_proj
+  and Llama 3.1 8B q_proj.
 - §7: ring hop cost calibrated at ~5.6 ms/hop (Probe 2).
 - New §7.5–§7.7: the n=1 streaming-output fast path (Probe 4),
   three regimes within n=1 (Probe 6), and the 256 MB EAR ceiling
@@ -380,36 +382,56 @@ of a K-cohort, the LX-resident PSUM tile gets ring-summed with peers
 ### 5.4 Per-cluster HMI traffic formula (validated)
 
 For work-division `(m, n, k)` with m·n·k = 32, the **per-cluster**
-HMI traffic, with ring multicast on B sharing one HBM read across
-the K-cohort:
+HMI traffic, under the observed full-multicast model (A shared
+across the N-cohort, B shared across the M-cohort, C partial PSUMs
+genuinely unique per K-cohort member):
 
 ```
-HMI_bytes(m, n, k) = n · M · K · sizeof(A_dtype)        # A: replicated by n
-                   + m · K · N · sizeof(B_dtype) / k    # B: shared in K-cohort, replicated by m across cohorts
-                   + k · M · N · sizeof(C_dtype)        # C: k partial PSUMs
+HMI_bytes(m, n, k) = M · K · sizeof(A_dtype)        # A: full HBM read shared across N-cohort
+                   + K · N · sizeof(B_dtype)        # B: full HBM read shared across M-cohort
+                   + k · M · N · sizeof(C_dtype)    # C: k partial PSUMs (unique per K-cohort member)
 ```
 
-The B-replication factor `m / k` (rather than naive `m`) reflects
-ring multicast: K-cohort cores share B via one HBM read, so per-
-cluster B traffic is `K·N`, replicated `m` times across the M-side
-cohorts.
+Notice that the A and B coefficients are **independent of (m, n, k)** —
+under multicast, A is read once across the cluster and broadcast to
+every N-cohort listener; B is read once and broadcast across every
+M-cohort listener. Only C still scales with k, because the k
+partial PSUMs really are different data per K-cohort member.
 
-**Track 2 Phase 0 calibration (May 2026)** validated this against
-hardware. The naive sum overcounts by k× under K-split; the
-per-cluster formula matches.
+**Empirical reasoning for the multicast model.** Pure-M `(32, 1, 1)`
+on DSv3 q_b_proj `(M, N, K) = (512, 24576, 1536)` was measured at
+2.004 ms. Under naive accounting (each core reads its own slice
+with no sharing), per-cluster B traffic = `m · K · N · sizeof(B) =
+32 · 1536 · 24576 · 2 ≈ 2.42 GB`. At 166 GB/s that's 14.8 ms just
+to move B through HBM — but observed wall time is 7.4× faster.
+Pure-M's wall time is only consistent with B traffic being clamped
+to `K · N` (full B once across the whole cluster), which is what
+the corrected formula predicts. The mechanism (HBM controller
+coalescing? `doWeiPreload`? runtime DT rewrite?) is not visible in
+the deeptools code we've traced. Empirically confirmed on
+Llama 3.1 8B q_proj `(32, 4096, 4096)` as well.
 
-Key derived facts:
+**Track 2 Phase 0 calibration (May 2026)** validated the formula
+*partially* against hardware. The `/k` denominator and the
+per-cluster `n·M·K` and `m·K·N` numerators that earlier versions
+of this section carried are now known to be wrong: the
+corrected (constant-in-split) formula above matches wall-time
+observations on the two test shapes (DSv3 q_b_proj and Llama 3.1
+8B q_proj) where the naive bound overpredicted by 5-7×.
 
-- **Pure-M (32, 1, 1)**: A 1×, B 32×, C 1×. B-replication-dominated.
-- **Pure-N (1, 32, 1)**: A 32×, B 1×, C 1×. A-replication-dominated.
-- **(4, 8, 1) mixed-MN**: A 8×, B 4×, C 1×. Both partially shared.
-- **(1, 1, 32) full K-split**: A 1×, B **1×** (multicast), C 32×.
-- **(1, n, k>1) PR-heuristic**: A n×, B **1× / k = 1/k** (multicast +
-  m=1), C k×. Per-cluster B traffic is just K·N — minimal.
+Key derived facts (under the multicast model, A and B per-cluster
+traffic are **constant** across splits — only C scales with k):
 
-For most production shapes (M·N ≪ K·N), the **B-replication term
-dominates** under pure-M, and reducing it via K-split or MN-split is
-the source of the speedup.
+- **Pure-M (32, 1, 1)**: A `M·K`, B `K·N`, C `M·N`.
+- **Pure-N (1, 32, 1)**: A `M·K`, B `K·N`, C `M·N`.
+- **(4, 8, 1) mixed-MN**: A `M·K`, B `K·N`, C `M·N`.
+- **(1, 1, 32) full K-split**: A `M·K`, B `K·N`, C `32·M·N`.
+- **(1, n, k>1) PR-heuristic**: A `M·K`, B `K·N`, C `k·M·N`.
+
+For most production shapes (M·N ≪ K·N), the **B term dominates**
+in absolute size; what changes across splits is the C term (scaling
+with k) — which is why K-split's payoff on the C side is bounded
+by the M·N · k product, not by B savings.
 
 ### 5.5 Where the n / m / k multipliers come from + a tile-lifecycle toy
 
@@ -446,13 +468,17 @@ Read off the indices that **don't appear** in each fragment:
   the same C-tile, reduced over the SFP PSUM ring (§7). → **The
   K-cohort has k cores reducing into one C-tile.**
 
-The n / m / k multipliers in the per-cluster HMI formula (§5.4) are
-exactly this count, weighted by whether the deeptools backend
-multicasts the fragment over a ring or independently HBM-reads it
-per cohort member. The current backend multicasts within the
-K-cohort (so B carries a `/k` divisor); A and B across the M- and
-N-cohorts are not multicast — but the data-dependence count above
-is what the multipliers are *counting*.
+These data-dependence counts say "n cores need the same A_frag",
+"m cores need the same B_frag", "k cores partial-reduce one
+C-tile". Under the corrected per-cluster HMI formula (§5.4), the
+data-dependence counts on **A and B collapse to 1** — empirically
+every N-cohort member appears to receive A from a single HBM read,
+and every M-cohort member receives B from a single HBM read. Only
+the C-tile partial-PSUM count survives as a `k` multiplier on HBM
+traffic, because the k partial sums are genuinely different data.
+The mechanism by which A- and B-side multicast is realised is not
+visible in the deeptools code paths we've traced (see §5.4
+empirical-reasoning note and §17 open problem).
 
 #### 5.5.2 Toy example: split (2, 2, 1), M = N = 4, K = 16
 
@@ -1993,9 +2019,9 @@ table for per-shape calibrated slopes (0.07-1.09 ms/hop).
 
 ```
 flops_total       = 2 · M · N · K
-hmi_a_bytes       = n · M · K · 2
-hmi_b_bytes       = (m / k) · K · N · 2          # multicast
-hmi_c_bytes       = k · M · N · 2
+hmi_a_bytes       = M · K · 2                    # A: full multicast across N-cohort
+hmi_b_bytes       = K · N · 2                    # B: full multicast across M-cohort
+hmi_c_bytes       = k · M · N · 2                # C: k partial PSUMs
 hmi_total         = hmi_a + hmi_b + hmi_c
 
 T_pt_peak         = flops_total / 72.1e6                 # µs
@@ -2028,14 +2054,14 @@ Llama 3.1 70B q_proj M=128, split (4, 8, 1):
 
 ```
 flops_total   = 2 · 128 · 8192 · 8192 = 17.18 GFLOPS
-hmi_a         = 8 · 128 · 8192 · 2 = 16.0 MB
-hmi_b         = (4 / 1) · 8192 · 8192 · 2 = 512 MB
+hmi_a         = 128 · 8192 · 2 = 2.0 MB              # full A across N-cohort
+hmi_b         = 8192 · 8192 · 2 = 128 MB             # full B across M-cohort
 hmi_c         = 1 · 128 · 8192 · 2 = 2 MB
-hmi_total     = 530 MB
+hmi_total     = 132 MB
 T_pt_peak     = 17.18e9 / 72.1e12 = 238 µs
-T_hmi         = 530e6 / 166e9 = 3194 µs
+T_hmi         = 132e6 / 166e9 = 795 µs
 M_per_core    = 32 ⇒ α = 0.5
-T_kernel      ≈ 100 + max(238, 0.5 · 3194) + 0 = 1697 µs
+T_kernel      ≈ 100 + max(238, 0.5 · 795) + 0 = 497 µs
 ```
 
 Measured: 990 µs. Model overestimates by ~70% on this shape. V4's
@@ -2388,6 +2414,20 @@ deeptools team could:
 
 Patent angle: any of the above is a hardware-software co-design
 that no public auto-scheduler models.
+
+### 17.16 (new) Where does A- and B-side multicast actually happen?
+
+§5.4's corrected HMI formula clamps per-cluster A traffic to `M·K`
+and per-cluster B traffic to `K·N`, independent of split — the
+multicast IS happening (wall times demand it), but the mechanism is
+not visible in the deeptools code paths we've traced. Candidate
+sites: the HBM controller coalescing concurrent reads of the same
+range, `doWeiPreload` issuing a single HBM read with multiple LX
+destinations, or a runtime DT rewrite that converts per-core HBM
+reads into a single read + RIU broadcast. None of these are
+confirmed; characterizing them via DCT trace or an HBM-perfcounter
+probe is open work and would let the cost model finally reconcile
+small-M HMI BW (§11.2 / §17.1 residual).
 
 ## 18. Quick-reference: predicting the best split for any shape
 
