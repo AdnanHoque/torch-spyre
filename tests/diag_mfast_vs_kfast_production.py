@@ -262,12 +262,12 @@ def main():
 
         # Determine overall winner
         candidates = [(a_best, "A"), (b_best, "B"), (c_best, "C")]
-        winners = [(label, n) for (best, n) in candidates if best is not None]
-        if not winners:
+        valid = [(best, fam) for (best, fam) in candidates if best is not None]
+        if not valid:
             overall = "—"
             a_vs_b_str = "—"
         else:
-            best_overall = min(winners, key=lambda t: t[0][2])
+            best_overall = min(valid, key=lambda t: t[0][2])
             overall = f"{best_overall[1]} ({best_overall[0][2]:.3f})"
 
             if a_best and b_best:
