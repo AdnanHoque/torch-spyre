@@ -634,6 +634,7 @@ def _try_k_fast_split(
     """Propose (1, n_split, k_split>1) for narrow-N small-M matmul shapes.
 
     Caller is responsible for gating on is_matmul + the feature flag.
+    Range thresholds derived from empirical hardware measurements.
 
     Fires on mid-M (max_cores ≤ M ≤ 16·max_cores), wide-K (K ≥ max_cores·elems_per_stick)
     shapes where pure-M underfeeds PT. N is free for M ≤ 4·max_cores (PT starving anyway),
