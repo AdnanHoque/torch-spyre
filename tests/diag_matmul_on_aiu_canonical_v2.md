@@ -1782,34 +1782,75 @@ ring fabric rather than the RIU ring. The code-grounded facts:
   `SFPDataIU` block) — input 0 can drive both output directions,
   input 1 only one. This permits Y-shaped routing at each node.
 
-**What is NOT verified about bichain in the code I've read:**
+**The bichain ring traversal** (verified
+[`deeptools/dsi/dsi.cpp:2200-2333`](../../deeptools/dsi/dsi.cpp#L2200-L2333)):
 
-The actual K-cohort PSUM **ring traversal pattern** (whether
-bichain does "two half-chains converging at a midpoint," or
-bidirectional all-reduce, or two concurrent full chains, or
-something else) is **not visible in the high-level deeptools
-sources**. I previously published a "meet at midpoint"
-pseudocode here; that has been retracted because the code does not
-substantiate it.
+bichain runs **two parallel unidirectional chains, one per
+corelet, traversing the K-cohort in opposite directions**. It is
+NOT "two half-cohorts converging at a midpoint" (a prior version of
+this section speculated that — retracted). The code defines:
 
-A `RingProtocol::HALF_HALF` enum exists
-([`dscdefn.h:564-569`](../../deeptools/dsc/dscdefn.h#L564-L569)) —
-it implements a "lower half of cores travel CCW, upper half travel
-CW" pattern — but it is **only used by `STCDPOp` (relayout data
-movement) on the RIU ring**
-([`sen_data_ops.cpp:3183`](../../deeptools/dsm/sen_data_ops.cpp#L3183)
-is its single consumer), not by bichain PSUM reduction. The
-HALF_HALF pattern existing for relayout *suggests* bichain might
-use the same shape for PSUM (same hardware ring, similar problem),
-but that's extrapolation. The actual routing decision for bichain
-PSUM appears to live in lower-level SFP-ring scheduling or
-microcode that I have not fully traced.
+```cpp
+// dsi.cpp:2200-2208
+//   myLeftCores  = K-cohort head (K-index 0)
+//   myRightCores = K-cohort tail (K-index k-1)
+//   myMiddleCores = everything in between
+```
+
+and then excludes specific `(core, corelet)` pairs from each DT
+slot ([`dsi.cpp:2296-2333`](../../deeptools/dsi/dsi.cpp#L2296-L2333)):
+
+| DT slot       | Excluded `(core, corelet)` pairs |
+|---------------|-----------------------------------|
+| LX↔SFP        | `(head, cl0)` + `(tail, cl1)` — chain heads, no LX needed |
+| SFP→SFPRING   | `(head, cl1)` + `(tail, cl0)` — chain tails, nothing to forward |
+| SFPRING→SFP   | `(head, cl0)` + `(tail, cl1)` — chain heads, nothing to receive |
+
+Decoding these as two chains:
+
+- **Chain A** (corelet 0): `head.cl0 → c₁.cl0 → c₂.cl0 → … → tail.cl0`
+- **Chain B** (corelet 1): `tail.cl1 → c_{k-2}.cl1 → … → c₁.cl1 → head.cl1`
+
+Both chains have **k - 1 hops**. They run **simultaneously** on the
+two SFP ring directions (corelet-0 ring and corelet-1 ring; the
+SFPDataIU stride-2 layout maps each corelet to a separate
+single-direction ring). The corelet-internal K-half split
+(`dsmperf.cpp:6575+`) makes this productive: corelet 0 reduces the
+low-half K-slice via Chain A, corelet 1 reduces the high-half via
+Chain B. The two K-halves come together at writeback — Chain A
+deposits its sum at `tail.cl0`, Chain B at `head.cl1`.
+
+**Implication for hop count**: bichain does **NOT halve the hop
+count** vs. unichain (an earlier version of this doc made that
+claim — retracted). Both algorithms are k - 1 hops along the chain.
+What bichain buys is **2× ring-bandwidth utilisation** — using both
+SFP-ring directions concurrently — and **halved per-direction
+chain payload** (each direction carries one K-half instead of the
+full K). For bandwidth-bound large-payload reductions, that's a
+real speedup; for hop-latency-bound small-payload reductions, the
+two algorithms perform identically.
+
+**Implication for k_fast core-ID placement**: both chains traverse
+the K-cohort contiguously, so the current
+`_k_fast_core_id_permutation` — which places K-cohort members at
+adjacent ring positions — is **optimal under bichain as well as
+unichain**. No bichain-specific permutation is needed; the same
+contiguous layout minimises per-hop physical distance for both
+chains.
 
 **Singleshot** collapses the chain into one wide-burst transfer
 for small k — `deeprt.cpp:1655-1658` shows it's selected for
 int8 + LX-opt + weight-preload at 32 cores. Same SFPRING memOrg
-as bichain (no LX intermediate). The same caveat about traversal
-topology applies.
+as bichain (no LX intermediate). The traversal topology is still
+not directly verified for singleshot — left as an open follow-up.
+
+**Hardware ring is bidirectional**: the SFPDataIU has 64 nodes
+(one per corelet) with 2-in/2-out links per node and asymmetric
+`ILinkToOLinkConnections: {"0":[0,1], "1":[0]}` (sysconfig
+`SFPDataIU` block) — input 0 can drive both output directions,
+input 1 only one. This permits Y-shaped routing at each node, which
+is consistent with the two-corelet-rings-in-opposite-directions
+bichain structure.
 
 **Cost implications**:
 
