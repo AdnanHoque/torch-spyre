@@ -303,15 +303,19 @@ dominates** under pure-M, and reducing it via K-split or MN-split is
 the source of the speedup.
 
 > **Caveat on sharing (superseded — see v2 §5.4).** The naive formula
-> counts every per-core load as a separate HMI access. If hardware
-> ring multicast lets one HBM read serve multiple cores, the actual
-> HMI bandwidth consumed is lower. The v2 empirical confirmation
-> resolves this caveat in favour of a **full** A- and B-multicast
-> model: pure-M wall times on DSv3 q_b_proj come in 7.4× faster
-> than the naive `m · K · N` B-traffic bound, only consistent with
-> B-traffic clamped to `K · N`. The mechanism (HBM controller
-> coalescing? `doWeiPreload`? runtime DT rewrite?) is not visible in
-> the deeptools code paths traced.
+> counts every per-core load as a separate HMI access. The v2
+> empirical confirmation resolves this caveat in favour of a **full**
+> A- and B-multicast model: pure-M wall times on DSv3 q_b_proj come
+> in 7.4× faster than the naive `m · K · N` B-traffic bound, only
+> consistent with B-traffic clamped to `K · N`. The mechanism is
+> **position-dependent ring multicast on the RIU BiRing** (A across
+> the N-cohort, B across the M-cohort; C reduces across the K-cohort
+> on SFP). The earlier "HBM controller coalescing / `doWeiPreload`"
+> hypothesis is wrong: `diag_mn_fast_*` probes show +45–47% wall-time
+> deltas between `m_fast` and identity at fixed split, which is only
+> possible if sharing depends on cohort adjacency on the ring. See
+> v2 §5.4 and §17.16 for the decision rule (compare M-cohort × B-frag
+> against N-cohort × A-frag).
 
 ## 6. The work-division split
 
@@ -942,8 +946,12 @@ the predictor sketched in §10.
 
 - What's the correct sharing factor for B in the HMI formula? Does
   ring multicast actually share HBM reads across the M-cohort?
-  Probe-able with a single-shape, fixed-split measurement varying
-  m while holding n·k constant.
+  **Answered in v2 §5.4 / §17.16**: yes, B is multicast across the
+  M-cohort on the RIU BiRing; per-cluster B clamps to `K · N`
+  independent of `m`. The sharing is **position-dependent** — the
+  `diag_mn_fast_*` probes show +45–47% wall-time deltas between
+  `m_fast` and identity at fixed split, anchoring the mechanism in
+  ring adjacency rather than HBM-controller coalescing.
 - Can `α(M_per_core)` be derived from PT-array depth + LX prefetch
   buffer size rather than empirically fit?
 - Is the `T_launch ≈ 100 µs` floor uniform across shapes, or does
