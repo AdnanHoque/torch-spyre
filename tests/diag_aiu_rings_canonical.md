@@ -199,14 +199,15 @@ core**, plus **any cross-core LX-to-LX transfer that isn't PSUM**.
 
 Traffic types:
 
-- **HMI A-loads** (matmul input). Each cluster reads a slice of A
-  from HBM into LX. Replication factor depends on the split — see
-  §8 for the formula.
-- **HMI B-loads** (matmul weight). Replicated by `m / k` for an
-  `(m, n, k)` split because K-cohort cores share one HBM read of B
-  via ring-multicast.
+- **HMI A-loads** (matmul input). Each cluster reads `M · K` bytes
+  of A from HBM once, multicast to every N-cohort listener via
+  ring-broadcast on RIU — independent of split. See §8.
+- **HMI B-loads** (matmul weight). Each cluster reads `K · N` bytes
+  of B from HBM once, multicast to every M-cohort listener via
+  ring-broadcast on RIU — also independent of split.
 - **HMI C-stores** (matmul output). Each cluster writes its tile of
-  C back to HBM after the kernel.
+  C back to HBM after the kernel; under K-split with k > 1 there
+  are k partial-PSUM writes per output tile.
 - **Cross-core LX-LX broadcasts** for non-PSUM operands (e.g.
   prologue activation reused across cores in a non-K-split kernel,
   if the dataflow chooses to share via ring rather than re-reading
@@ -293,13 +294,13 @@ who reads what; each one trades HBM traffic for ring traffic.
 | c2 | row 2 | full B | row 2 |
 | c3 | row 3 | full B | row 3 |
 
-- **HMI on RIU:** A = 16 elem total (each core reads its 4-elem row,
-  no replication: 4 reads × 4 elem). B = 16 elem **broadcast** to all
-  4 cores via RIU operand-multicast (one HBM read, four listeners).
-  C = 16 elem stored back. Formula check:
-  `n·M·K + m·K·N/k + k·M·N = 1·16 + 4·16/1 — wait, B-multicast
-  collapses the m factor on the broadcast hop` — single HBM read
-  is 16 elem, replicated by ring on the wire 4×.
+- **HMI on RIU:** A = 16 elem total (each core reads its 4-elem
+  row; under the multicast model A is one HBM read = `M·K = 16`).
+  B = 16 elem **broadcast** to all 4 cores via RIU operand-multicast
+  (one HBM read of `K·N = 16`, four listeners). C = 16 elem stored
+  back. Formula check:
+  `M·K + K·N + k·M·N = 16 + 16 + 1·16 = 48` (the multicast model
+  gives the cluster HBM read total).
 - **PSUM on SFP:** **idle** (k=1, no reduction).
 - **B is the most expensive operand** — multicast is the architectural
   win.
@@ -329,10 +330,13 @@ graph LR
 
 - **HMI on RIU:** A = 16 elem **broadcast 4×** to all cores via RIU
   multicast. B = 16 elem total (4 reads × 4 elem, one column per
-  core). C = 16 elem stored.
+  core; under the multicast model B is one HBM read = `K·N = 16`).
+  C = 16 elem stored.
 - **PSUM on SFP:** idle (k=1).
-- **HMI total:** `n·M·K + m·K·N/k + M·N = 4·16 + 1·16 + 16 = 96`
-  elements (n picks up the multicast).
+- **HMI total** (multicast model): `M·K + K·N + k·M·N = 16 + 16 +
+  1·16 = 48` elements. The naive bound `n·M·K + m·K·N + k·M·N =
+  4·16 + 1·16 + 16 = 96` is what the per-core count would yield
+  without multicast.
 - This is the **canonical "small-M prefill"** case: when M is small
   and N is large, broadcasting A is cheap (it's small) and avoids
   re-reading huge B.
@@ -364,9 +368,12 @@ graph LR
   share rows 0-1; c2||c3 share rows 2-3) → 2× ring multicast of A.
 - **B sharing:** cores in the same N-col share a B slice (c0||c2
   share cols 0-1; c1||c3 share cols 2-3) → 2× ring multicast of B.
-- **HMI total:** `n·M·K + m·K·N/k + M·N = 2·16 + 2·16/1 + 16 = 80`
-  elements — **strictly less** than pure-M's or pure-N's 96. Both
-  operands partially share, splitting the multicast win.
+- **HMI total** (multicast model): `M·K + K·N + k·M·N = 16 + 16 +
+  1·16 = 48` elements — identical to pure-M and pure-N under
+  multicast. Per-cluster HBM traffic does not depend on the split
+  (only C does, via k). The naive per-core sum
+  `n·M·K + m·K·N + k·M·N = 2·16 + 2·16 + 16 = 80` is what mixed-MN
+  yields under the no-sharing bound.
 - **PSUM on SFP:** idle (k=1).
 
 This is why **mixed-MN often beats either pure-M or pure-N** when M
@@ -407,10 +414,13 @@ Within each cohort, the two cores ring-reduce their fp32 PSUM tiles
 
 - **A on RIU:** every core reads full M with K/2 = 2 elements. Two
   K-half groups each take 8 elem; A is multicast 2× (P0||P2 share
-  K=0-1; P1||P3 share K=2-3). Total HBM read of A = 16 elem.
-- **B on RIU:** each core reads K/2 × N/2 = 4 elem. With cohort-wise
-  ring-multicast on K, B HBM = `m·K·N/k = 1·16/2 = 8` elem total.
-- **C on RIU (final):** 16 elem stored after PSUM reduce.
+  K=0-1; P1||P3 share K=2-3). Total HBM read of A = `M·K = 16` elem.
+- **B on RIU:** each core reads K/2 × N/2 = 4 elem. Within an
+  N-cohort the same K-slice of B is multicast; across K-halves the
+  slices are disjoint. Total HBM read of B = `K·N = 16` elem.
+- **C on RIU (final):** 16 elem stored after PSUM reduce (k · M · N
+  = 2·16 = 32 elem of partial PSUMs flow on SFP en route to
+  reduction; only the final 16 elem reach HBM).
 - **PSUM on SFP:** `(k-1) · M_per · N_per · 4` per cohort = one hop
   per cohort, two cohorts running in parallel.
 
@@ -729,8 +739,8 @@ matmul.
 
 | traffic | ring | direction | typical volume |
 |---|---|---|---|
-| HMI A-load | RIU | HBM → core | `n · M · K · 2` bytes per cluster |
-| HMI B-load | RIU | HBM → core | `m · K · N · 2 / k` bytes per cluster (ring-multicast on K-cohort) |
+| HMI A-load | RIU | HBM → core | `M · K · 2` bytes per cluster (full multicast across N-cohort) |
+| HMI B-load | RIU | HBM → core | `K · N · 2` bytes per cluster (full multicast across M-cohort) |
 | HMI C-store | RIU | core → HBM | `k · M · N · 2` bytes (after PSUM reduce, k=1 effective) |
 | PSUM partials | SFP CW + SFP CCW | core → core (chain) | `(k − 1) · M_per · N_per · 4` bytes per cohort, halved per ring |
 | Control (req) | RIURequest | bidirectional | one header per HMI transfer |
@@ -1334,26 +1344,38 @@ SFP-ring-disabled tests) would reintroduce it.
 ## 8. Per-cluster HMI traffic — the formula
 
 The HMI traffic on RIU per cluster, for an `(m, n, k)` work-division
-with m · n · k = 32, is:
+with m · n · k = 32, under the full-multicast model (A shared
+across the N-cohort, B shared across the M-cohort; only C partial
+PSUMs are genuinely unique per K-cohort member):
 
 ```
-HMI_bytes(m, n, k) = n · M · K · sizeof(A_dtype)        # A: replicated by n
-                   + m · K · N · sizeof(B_dtype) / k    # B: shared in K-cohort, replicated by m across cohorts
-                   + k · M · N · sizeof(C_dtype)        # C: k partial PSUMs
+HMI_bytes(m, n, k) = M · K · sizeof(A_dtype)        # A: full multicast across N-cohort
+                   + K · N · sizeof(B_dtype)        # B: full multicast across M-cohort
+                   + k · M · N · sizeof(C_dtype)    # C: k partial PSUMs (unique per K-cohort member)
 ```
 
-The B replication factor `m / k` captures **ring multicast** — within
-a K-cohort, all k cores consume the same slice of B and therefore
-share one HBM read of B via ring-broadcast on RIU. Across cohorts (m
-of them, one per M-shard), B is replicated.
+Notice that the A and B coefficients are **independent of (m, n, k)**.
+Under multicast, A is read once from HBM and broadcast to every
+N-cohort listener; B is read once and broadcast to every M-cohort
+listener. Only C still scales with k.
 
-Note: under bichain the C term is paid *only* once (the chain head
-writes the reduced result to HBM). The `k · M · N` factor is the
-ring traffic for the k partial PSUMs *en route* to reduction — but
-those flow on **SFP, not RIU**. So under bichain the RIU C-store
-traffic is only `1 · M · N · sizeof(C_dtype)` (final reduced result),
-and the formula above is the upper bound where the C term goes onto
-the same fabric as A and B (e.g. unichain).
+This is the corrected formula matching empirical wall-time
+observations — see `diag_matmul_on_aiu_canonical_v2.md` §5.4 for the
+empirical reasoning (DSv3 q_b_proj pure-M ran 7.4× faster than the
+naive `m · K · N` B-bound, only consistent with B clamped to
+`K · N`). Earlier versions of this doc carried the naive bound with
+a `/k` B-divisor that captured *some* of the sharing; the full
+multicast model captures all of it and removes the `m` and `n`
+dependence on the A/B terms entirely.
+
+Note: under bichain the C term is paid *only* once on RIU (the
+chain head writes the reduced result to HBM). The `k · M · N`
+factor is the ring traffic for the k partial PSUMs *en route* to
+reduction — but those flow on **SFP, not RIU**. So under bichain
+the RIU C-store traffic is only `1 · M · N · sizeof(C_dtype)`
+(final reduced result), and the formula above is the upper bound
+where the C term goes onto the same fabric as A and B (e.g.
+unichain).
 
 ### 8.1 Worked examples
 
@@ -1362,20 +1384,20 @@ For fp16 (sizeof = 2):
 **Llama 3 8B q\_proj (M=2048, N=4096, K=4096), split (1, 16, 2)+kf:**
 
 ```
-A: 16 · 2048 · 4096 · 2 =  256 MB
-B: 1 · 4096 · 4096 · 2 / 2 = 16 MB
+A: 2048 · 4096 · 2 = 16 MB                    # full A multicast
+B: 4096 · 4096 · 2 = 32 MB                    # full B multicast
 C: 2 · 2048 · 4096 · 2 = 32 MB (SFP under bichain; RIU final = 16 MB)
-RIU total (bichain): 256 + 16 + 16 = 288 MB
+RIU total (bichain): 16 + 32 + 16 = 64 MB
 SFP CW + CCW total: 16 MB (split equally between rings = 8 MB each)
 ```
 
 **DSv3 o\_proj (M=2048, N=7168, K=16384), split (1, 16, 2)+kf:**
 
 ```
-A: 16 · 2048 · 16384 · 2 = 1 GB
-B: 1 · 16384 · 7168 · 2 / 2 = 112 MB
+A: 2048 · 16384 · 2 = 64 MB                   # full A multicast
+B: 16384 · 7168 · 2 = 224 MB                  # full B multicast
 C: 2 · 2048 · 7168 · 2 = 56 MB (SFP); RIU final = 28 MB
-RIU total (bichain): 1024 + 112 + 28 = 1164 MB
+RIU total (bichain): 64 + 224 + 28 = 316 MB
 SFP CW + CCW total: 56 MB → 28 MB each
 ```
 
@@ -1383,24 +1405,28 @@ SFP CW + CCW total: 56 MB → 28 MB each
 
 ```
 (no K-split → no SFP traffic, no PSUM ring at all)
-A: 8 · 2048 · 4096 · 2 = 128 MB
-B: 4 · 4096 · 2048 · 2 / 1 = 128 MB
+A: 2048 · 4096 · 2 = 16 MB                    # full A multicast
+B: 4096 · 2048 · 2 = 16 MB                    # full B multicast
 C: 1 · 2048 · 2048 · 2 = 8 MB
-RIU total: 264 MB
+RIU total: 40 MB
 SFP CW + CCW total: 0
 ```
 
 Three observations:
 
-1. A is by far the dominant term on K-large shapes. n is the
-   single biggest knob on RIU traffic.
-2. B benefits from K-split via the ring-multicast factor `1/k`, and
-   the savings grow with k. This is why K-split helps on shapes
-   where B is large relative to A.
-3. K-split moves traffic off RIU and onto SFP, freeing 166 GB/s of
-   HMI bandwidth in exchange for 70.4 GB/s of PSUM bandwidth. This
-   is favourable when M · N (PSUM payload) is small relative to
-   K · N / k (B saving) — i.e. small-M tall-skinny shapes.
+1. Under the multicast model, A and B per-cluster bytes are
+   constant across splits — they're set entirely by the matrix
+   sizes, not by `(m, n, k)`. The only split-dependent term is C
+   (scales with k).
+2. The earlier "B benefits from K-split via `1/k`" intuition is
+   superseded: per-cluster B is already clamped to `K · N`
+   regardless of K-split. K-split's actual payoff is converting
+   on-chip pipeline structure (K-cohort reduction on SFP, see §7)
+   rather than reducing HBM-side B traffic.
+3. K-split moves PSUM traffic off RIU and onto SFP, freeing
+   166 GB/s of HMI bandwidth in exchange for 70.4 GB/s of PSUM
+   bandwidth. This is favourable when `k · M · N` (PSUM payload)
+   is small relative to the A + B HMI mass.
 
 ### 8.2 Sanity check against §6.1 ring-share probe
 
