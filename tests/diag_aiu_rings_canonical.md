@@ -820,7 +820,9 @@ angles:
   the M-cohort too, so per-cluster B traffic clamps to `K · N`
   independent of split. The "K-cohort multicast" intuition below
   was the v1 partial model; under the full-multicast model B is
-  simply read once across the whole cluster.
+  read once across the whole cluster, but the multicast is
+  **position-dependent** — full collapse only happens when the
+  M-cohort is adjacent on the RIU ring (see decision rule below).
 - **k** also controls SFP ring traffic: chain length = k, payload
   = M\_per × N\_per × 4 bytes (fp32 PSUM) per tile.
 
@@ -828,6 +830,27 @@ The B-multicast factor was originally derived as `1/k` (K-cohort
 sharing only); empirical wall times require additional M-side
 sharing, yielding the full-multicast formula `B = K · N · sz(B)` —
 see v2 §5.4 for the empirical reasoning.
+
+**Identity vs `m_fast` decision (k=1 splits).** All three operands
+are ring-multicast and position-dependent. Identity layout naturally
+places the N-cohort adjacent, capturing A-multicast for free;
+`m_fast` permutation captures B-multicast at the cost of giving up
+A-multicast. Pick by comparing the dominant cohort × fragment
+product:
+
+```
+B-side = m · K · N / n · sizeof(B)   # M-cohort × B-frag
+A-side = n · M · K / m · sizeof(A)   # N-cohort × A-frag
+
+if B-side > A-side: m_fast wins (e.g. ~45% on M=128 decoder shapes)
+else:               identity wins  (the planner's current default)
+```
+
+The `diag_mn_fast_*` and `diag_nfast_prefill_probe` probes anchor
+this: +45–47% wall-time deltas on Llama 3.1 8B q_proj M=128 and
+Llama 3.2 3B gate_proj M=128 (both mixed-MN k=1) when `m_fast` is
+used; ~4% regression at large M `(4, 8, 1)` when identity's
+A-cohort adjacency matters more than M-cohort adjacency.
 
 ```mermaid
 graph LR
@@ -1927,7 +1950,12 @@ self-explanatory.
   broadcast one HBM read to multiple ring listeners on the same
   hop. Empirically (v2 §5.4) extends to full A-multicast across
   N-cohort and full B-multicast across M-cohort, clamping per-
-  cluster A and B traffic to `M·K` and `K·N` respectively.
+  cluster A and B traffic to `M·K` and `K·N` respectively. The
+  multicast is **position-dependent**: full collapse only happens
+  when the cohort sits adjacent on the ring, which is why the
+  identity-vs-`m_fast` permutation choice changes wall time even
+  though formula bytes are identical (see §5.4 decision rule and
+  v2 §17.16).
 - **Ring-segment contention** — Two or more concurrent transfers
   using the same physical ring segment. Drives the kf-vs-id step
   under (1, 16, 2) (§6.5).
