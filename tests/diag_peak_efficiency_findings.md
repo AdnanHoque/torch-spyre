@@ -68,11 +68,19 @@ sides leave similar headroom on the table.
 
 ## Where the 20-30% gap goes
 
+The candidates below are the architectural overheads not folded into
+the simple roofline. The PSUM-ring share is now quantified directly in
+the next section ("PSUM ring cost contribution"): under k_fast it
+contributes ~6% of the remaining gap on median, ~11% on mean. The
+bulk of the gap therefore lives in the non-ring items — launch
+overhead, HBM-below-peak, and PT pipeline fill.
+
 - **Fixed kernel launch / scheduler overhead** that does not scale
   with problem size — most visible on the smallest shapes.
 - **PSUM ring reduction on K-split**: `k-1` ring hops per output
   tile to combine partial PSUMs, not accounted for in the simple
-  HBM roofline.
+  HBM roofline. Quantified in the next section — small residual
+  after k_fast.
 - **PT array pipeline fill latency** — the systolic array spends a
   prefix and suffix of cycles partially populated; the `2·M·N·K`
   count assumes a fully steady-state pipe.
@@ -83,6 +91,88 @@ sides leave similar headroom on the table.
 - **C writeback to HBM for `k>1`** — partial PSUMs have to be
   materialized on chip then merged out; the `k·M·N` term in the HBM
   bound captures the volume but not the serialization.
+
+## PSUM ring cost contribution
+
+Companion probe: `tests/diag_psum_ring_cost_probe.py`. Raw results at
+`/tmp/psum_ring_cost_results.txt`. **PSUM ring under k_fast is ~6% of
+the remaining peak gap on median, ~11% on mean.** The 20-30% gap to
+peak (previous section) is mostly NOT ring — it is launch overhead,
+HBM-below-peak, and PT pipeline fill.
+
+### Methodology
+
+- For each (shape, K-split), measure wall with identity (K-cohort at
+  physical ring distance `mn`) and with k_fast (K-cohort at distance
+  1). `Δ = wall_id − wall_kf` is the ring-cost difference, equal to
+  `(mn − 1) · ring_cost_per_unit_distance`.
+- Residual ring under k_fast is estimated as
+  `kf_ring_est = Δ / (mn − 1)` — the per-hop cost scaled to the
+  single hop k_fast still pays.
+- `gap_to_peak = wall_kf − theoretical_peak_ms` and
+  `ring/gap = kf_ring_est / gap_to_peak × 100` gives the share of
+  the remaining peak gap attributable to PSUM ring under k_fast.
+
+### Per-shape results
+
+| shape | split | mn | id wall ms | kf wall ms | Δ ms | kf ring est | peak ms | gap to peak | ring/gap |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| L3.1-8B q_proj M=32 | (2, 8, 2) | 16 | 0.284 | 0.271 | 0.013 | 0.001 | 0.207 | 0.064 | 1.3% |
+| Granite-8B q_proj M=32 | (2, 8, 2) | 16 | 0.279 | 0.268 | 0.011 | 0.001 | 0.207 | 0.061 | 1.2% |
+| Granite-8B gate M=32 | (2, 8, 2) | 16 | 0.755 | 0.737 | 0.018 | 0.001 | 0.643 | 0.094 | 1.3% |
+| L3.1-8B q_proj M=128 | (2, 8, 2) | 16 | 0.368 | 0.289 | 0.079 | 0.005 | 0.221 | 0.068 | 7.7% |
+| Granite-8B gate M=128 | (2, 8, 2) | 16 | 1.641 | 0.810 | 0.831 | 0.055 | 0.677 | 0.133 | 41.8% |
+| Granite-8B down M=128 | (2, 8, 2) | 16 | 1.016 | 0.801 | 0.215 | 0.014 | 0.664 | 0.137 | 10.5% |
+| L3.2-3B gate M=128 | (4, 4, 2) | 16 | 0.869 | 0.431 | 0.438 | 0.029 | 0.333 | 0.097 | 30.0% |
+| L3.1-8B q_proj M=32 k4 | (1, 8, 4) | 8 | 0.286 | 0.294 | -0.009 | -0.001 | 0.210 | 0.084 | -1.5% |
+| L3.1-8B q_proj M=128 k4 | (1, 8, 4) | 8 | 0.362 | 0.325 | 0.037 | 0.005 | 0.234 | 0.092 | 5.8% |
+
+### Aggregates
+
+| metric | value |
+|---|---:|
+| mean kf ring cost | 12 μs |
+| mean peak gap | 92 μs |
+| mean ring/gap | 10.9% |
+| median ring/gap | 5.8% |
+
+### Interpretation
+
+- k_fast has already absorbed the bulk of ring cost. The Δ column
+  (5 μs to 831 μs) measures the savings k_fast delivers *over*
+  identity placement at the same (m, n, k) — that is the ring cost
+  k_fast has eliminated, not the cost that remains.
+- Residual ring cost under k_fast is tiny in absolute terms — mean
+  12 μs per kernel — and the median ring/gap of 5.8% says that for
+  half of the suite ring is essentially negligible on top of the
+  rest of the gap.
+- **Outlier**: Granite-8B gate M=128 at **41.8%** is the only shape
+  where residual ring is a meaningful fraction of the remaining
+  gap. L3.2-3B gate M=128 at **30.0%** is similar. Both are wide-N
+  gate shapes with many output tiles per core, where the single
+  remaining hop is still amortized over a lot of PSUM traffic.
+- For the other seven shapes, further ring-side optimization (PSUM
+  batching, mkfast-composed variants, more aggressive cohort
+  placement) has diminishing returns — there is simply not much
+  ring time left to recover.
+- This empirically validates the priority of HBM-efficiency and
+  launch-overhead optimizations over additional ring tuning: the
+  big remaining contributors to the 20-30% gap are off the ring.
+
+### Implication for future optimizations
+
+Ring-aware optimizations had a big payoff with k_fast — mean Δ of
+~200 μs saved per kernel, max 831 μs (Granite-8B gate M=128). With
+that win banked, further pure-ring optimizations have small absolute
+upside: a residual mean of 12 μs is the ceiling on what more ring
+tuning can recover on this suite. The 20-30% gap is dominated by HBM
+bandwidth efficiency below catalog peak, kernel launch / scheduling
+overhead, and PT pipeline fill. Next-round optimization candidates
+should attack those: ring-aware activation fusion (eliminates HBM
+round-trips on the activation side), Q/K/V multicast fusion (cuts
+per-kernel launch overhead by collapsing three matmuls into one
+dispatch), or RIU CW/CCW direction separation (raises effective HBM
+bandwidth toward the catalog 166 GB/s/direction figure).
 
 ## Best and worst cases
 
