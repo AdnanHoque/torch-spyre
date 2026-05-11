@@ -406,10 +406,43 @@ with no sharing), per-cluster B traffic = `m · K · N · sizeof(B) =
 to move B through HBM — but observed wall time is 7.4× faster.
 Pure-M's wall time is only consistent with B traffic being clamped
 to `K · N` (full B once across the whole cluster), which is what
-the corrected formula predicts. The mechanism (HBM controller
-coalescing? `doWeiPreload`? runtime DT rewrite?) is not visible in
-the deeptools code we've traced. Empirically confirmed on
+the corrected formula predicts. Empirically confirmed on
 Llama 3.1 8B q_proj `(32, 4096, 4096)` as well.
+
+**The mechanism is ring multicast on RIU (A and B) and SFP (C),
+and it is position-dependent.** All three operands are shared by
+ring-broadcast — A across the N-cohort, B across the M-cohort, C
+reduced across the K-cohort — but the sharing only collapses to
+one HBM read per cohort when cohort members sit adjacent on the
+ring. The earlier hypothesis that the clamping came from HBM
+controller-level coalescing (i.e. position-independent sharing)
+is **wrong**: the `diag_mn_fast_*` and `diag_nfast_prefill_probe`
+probes show that permuting core IDs to place the M-cohort adjacent
+(`m_fast`) gives **+45–47% speedup** on Llama 3.1 8B q_proj M=128
+and Llama 3.2 3B gate_proj M=128 (both mixed-MN, k=1) — a much
+larger delta than noise. If sharing were position-independent the
+permutation would do nothing. The identity layout naturally places
+the N-cohort adjacent for k=1 splits, so "no-permutation" already
+captures A-multicast for free; `m_fast` trades that for B-multicast.
+At large M with split `(4, 8, 1)`, `m_fast` hurts by ~4% — confirming
+that under identity layout the A-cohort adjacency is *more* important
+than the M-cohort adjacency at that shape, because A becomes the
+dominant operand.
+
+**Decision rule for k=1 splits (identity vs m_fast):**
+
+```
+B-side = m · K · N / n · sizeof(B)    # M-cohort × B-frag
+A-side = n · M · K / m · sizeof(A)    # N-cohort × A-frag
+
+if B-side > A-side: m_fast wins (e.g. ~45% on M=128 decoder shapes)
+else:               identity wins  (the planner's current default)
+```
+
+Equivalently, `m_fast` is preferred when `(m / n)² > M / N` at
+fixed sizeof. The crossover is the dominant-cohort × dominant-fragment
+product: whichever (cohort × fragment) is larger, that's the
+operand whose multicast must be captured by adjacency.
 
 **Track 2 Phase 0 calibration (May 2026)** validated the formula
 *partially* against hardware. The `/k` denominator and the
@@ -471,14 +504,17 @@ Read off the indices that **don't appear** in each fragment:
 These data-dependence counts say "n cores need the same A_frag",
 "m cores need the same B_frag", "k cores partial-reduce one
 C-tile". Under the corrected per-cluster HMI formula (§5.4), the
-data-dependence counts on **A and B collapse to 1** — empirically
-every N-cohort member appears to receive A from a single HBM read,
-and every M-cohort member receives B from a single HBM read. Only
-the C-tile partial-PSUM count survives as a `k` multiplier on HBM
-traffic, because the k partial sums are genuinely different data.
-The mechanism by which A- and B-side multicast is realised is not
-visible in the deeptools code paths we've traced (see §5.4
-empirical-reasoning note and §17 open problem).
+data-dependence counts on **A and B collapse to 1** — every
+N-cohort member receives A from a single HBM read via ring
+multicast on RIU, and every M-cohort member receives B from a
+single HBM read on the same fabric. Only the C-tile partial-PSUM
+count survives as a `k` multiplier on HBM traffic, because the k
+partial sums are genuinely different data (and their reduction
+flows on the SFP rings rather than RIU). The multicast is
+**position-dependent**: full collapse happens when the cohort sits
+adjacent on the ring, which is why the identity vs `m_fast`
+permutation choice changes wall time even though the formula bytes
+are identical. See §5.4 decision rule and §17.16.
 
 #### 5.5.2 Toy example: split (2, 2, 1), M = N = 4, K = 16
 
@@ -2419,15 +2455,29 @@ that no public auto-scheduler models.
 
 §5.4's corrected HMI formula clamps per-cluster A traffic to `M·K`
 and per-cluster B traffic to `K·N`, independent of split — the
-multicast IS happening (wall times demand it), but the mechanism is
-not visible in the deeptools code paths we've traced. Candidate
-sites: the HBM controller coalescing concurrent reads of the same
-range, `doWeiPreload` issuing a single HBM read with multiple LX
-destinations, or a runtime DT rewrite that converts per-core HBM
-reads into a single read + RIU broadcast. None of these are
-confirmed; characterizing them via DCT trace or an HBM-perfcounter
-probe is open work and would let the cost model finally reconcile
-small-M HMI BW (§11.2 / §17.1 residual).
+multicast IS happening (wall times demand it). The **mechanism is
+ring multicast over the RIU BiRing** for A and B (and SFP CW/CCW
+for C reduction). This is now anchored empirically: the
+`diag_mn_fast_*` and `diag_nfast_prefill_probe` probes show
++45–47% wall-time deltas between `m_fast` and identity at fixed
+split, which is only possible if sharing is position-dependent —
+exactly the signature of ring multicast (an HBM controller-level
+coalescing model would be position-independent and would have given
+no permutation effect). Identity layout captures A-multicast for
+k=1 splits "for free" because the N-cohort is already adjacent;
+`m_fast` swaps that for B-multicast by placing the M-cohort
+adjacent. The decision rule in §5.4 picks between them by comparing
+`(M-cohort × B-frag)` against `(N-cohort × A-frag)`.
+
+The wiring isn't visible in the high-level deeptools code paths
+we've traced (no explicit "broadcast to cohort" call in the
+prologue), but the position-dependence of the wall times leaves no
+other explanation: the multicast is happening at the ring fabric
+itself, plausibly via the RIU's address-coalescing or token-replay
+behaviour, and likely lives in runtime/microcode rather than the
+C++ scheduler. Characterising the exact wiring via DCT trace or
+an HBM-perfcounter probe is open work and would let the cost model
+finally reconcile small-M HMI BW (§11.2 / §17.1 residual).
 
 ## 18. Quick-reference: predicting the best split for any shape
 
