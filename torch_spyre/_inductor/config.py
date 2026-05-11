@@ -39,4 +39,14 @@ core_id_k_fast_emission: bool = (
     os.environ.get("SPYRE_CORE_ID_K_FAST_EMISSION", "1") == "1"
 )
 
+# m_fast (prototype): codegen-time core-ID permutation that places M-collaborators
+# adjacent on the RIU ring to capture B-multicast. Empirically captures up to ~45%
+# speedup on M=128 mixed-MN k=1 decoder/gate shapes (see tests/diag_mfast_sweep_probe.py).
+# Gated on a regime predicate (k=1, M_per ∈ [8, 64], B-side > 1.5×A-side, not (m=2, n=16))
+# inside _should_use_m_fast in codegen/compute_ops.py — off by default while validating.
+# Set SPYRE_CORE_ID_M_FAST_EMISSION=1 to enable.
+core_id_m_fast_emission: bool = (
+    os.environ.get("SPYRE_CORE_ID_M_FAST_EMISSION", "0") == "1"
+)
+
 install_config_module(sys.modules[__name__])

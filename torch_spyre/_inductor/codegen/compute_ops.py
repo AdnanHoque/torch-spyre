@@ -43,6 +43,96 @@ def _k_fast_core_id_permutation(num_cores: int, work_slices) -> list[int]:
     return [(c % k) * mn + (c // k) for c in range(num_cores)]
 
 
+def _m_fast_core_id_permutation(num_cores: int, work_slices) -> list[int]:
+    """Permute physical core IDs so M-collaborators sit on adjacent ring cores.
+
+    perm[c] = (c % m) * (n * k) + (c // m), where (m, n, k) is the matmul
+    split. M-collaborators are cores that vary in M but share the same
+    (i_n, i_k) — i.e., they share the same B-fragment. Placing them
+    adjacent on the RIU ring captures B-multicast.
+
+    Caller is responsible for the gating decision (see
+    `_should_use_m_fast`). This function only emits the permutation.
+    """
+    if not work_slices:
+        return list(range(num_cores))
+    dim_list = list(work_slices.keys())
+    m = int(work_slices[dim_list[0]])
+    if m <= 1:
+        return list(range(num_cores))
+    nk = num_cores // m
+    return [(c % m) * nk + (c // m) for c in range(num_cores)]
+
+
+def _should_use_m_fast(work_slices, iteration_space) -> bool:
+    """Decide whether m_fast permutation should fire for this op.
+
+    Empirically validated rule (broad sweep in tests/diag_mfast_sweep_probe.py):
+    m_fast wins reliably in a narrow regime. Outside it, identity is
+    equal or better. The gate avoids catastrophic regressions on
+    (m=2, n=16) splits.
+
+    Fires when ALL hold:
+      - m_fast feature flag is on
+      - 3-dim iteration space (matmul)
+      - k = 1 (k_fast handles k>1 cases)
+      - m ≥ 2 AND n ≥ 2 (mixed-MN split)
+      - NOT (n ≥ 16 AND m ≤ 2)         — catastrophic regression case
+      - M_per ∈ [8, 64]                — PT-saturated sweet spot
+      - B-side > 1.5 × A-side          — clear B-multicast win
+    """
+    if not _spyre_config.core_id_m_fast_emission:
+        return False
+    if not work_slices or not iteration_space:
+        return False
+    dim_list = list(work_slices.keys())
+    if len(dim_list) != 3:
+        return False
+
+    m = int(work_slices[dim_list[0]])
+    n = int(work_slices[dim_list[1]])
+    k = int(work_slices[dim_list[2]])
+    if k > 1 or m < 2 or n < 2:
+        return False
+    if n >= 16 and m <= 2:
+        return False
+
+    M = int(iteration_space[dim_list[0]])
+    N = int(iteration_space[dim_list[1]])
+    K = int(iteration_space[dim_list[2]])
+    M_per = M // m
+    if M_per < 8 or M_per > 64:
+        return False
+
+    b_side = m * K * N / n
+    a_side = n * M * K / m
+    if b_side <= 1.5 * a_side:
+        return False
+    return True
+
+
+def _select_core_id_permutation(
+    num_cores: int, work_slices, iteration_space=None
+) -> list[int]:
+    """Pick the right core-ID permutation for the given op.
+
+    Priority:
+      1. k_fast for k>1 (PSUM ring adjacency) — verified optimal
+      2. m_fast for k=1 mixed-MN in the empirical sweet spot — wins
+         up to ~45% on M=128 decoder shapes
+      3. identity — falls back; also captures A-multicast on N-cohort
+         for k=1 splits because logical encoding naturally adjacents N
+    """
+    if not work_slices:
+        return list(range(num_cores))
+    dim_list = list(work_slices.keys())
+    if len(dim_list) == 3:
+        k = int(work_slices[dim_list[-1]])
+        if k <= 1 and _should_use_m_fast(work_slices, iteration_space):
+            return _m_fast_core_id_permutation(num_cores, work_slices)
+    return _k_fast_core_id_permutation(num_cores, work_slices)
+
+
 def core_idx_to_slice_offset(
     arg,
     wk_slice: dict,
@@ -233,7 +323,11 @@ def gen_coord_info_value(
 
 def generate_sdsc(idx, sdsc_spec):
     out_idx = len(sdsc_spec.args) - 1
-    perm = _k_fast_core_id_permutation(sdsc_spec.num_cores, sdsc_spec.work_slices)
+    perm = _select_core_id_permutation(
+        sdsc_spec.num_cores,
+        sdsc_spec.work_slices,
+        getattr(sdsc_spec, "iteration_space", None),
+    )
     core_id_to_wk_slice = {
         str(c): {
             str(dim): int(expr.subs({Symbol("core_id"): perm[c]}))
