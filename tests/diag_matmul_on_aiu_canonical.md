@@ -256,6 +256,15 @@ PSUM tile is sent over the SFP ring to be summed with peers.
 
 ### 5.4 Per-cluster HMI traffic formula
 
+> **Superseded by v2.** This section is left as the original
+> "naive" formula for reference, but two production shapes (DSv3
+> q_b_proj and Llama 3.1 8B q_proj) measured 5-7× faster than this
+> bound predicts under pure-M, and the corrected full-multicast
+> model is documented in `diag_matmul_on_aiu_canonical_v2.md` §5.4.
+> The corrected formula clamps per-cluster A and B traffic to
+> `M·K` and `K·N` respectively (independent of `m`, `n`); only the
+> C term still scales with `k`.
+
 Combining all three, for a work-division `(m, n, k)` with m·n·k =
 32, the **total HMI traffic per kernel** (counting per-core loads
 naively, no sharing) is:
@@ -277,7 +286,8 @@ This formula is the **single most important quantitative tool** for
 reasoning about which split wins. A high-coefficient operand
 dominates HMI traffic.
 
-Key derived facts:
+Key derived facts (naive bound — the actual per-cluster values are
+clamped under the v2 multicast model; see superseding note above):
 
 - Pure-M (32, 1, 1): A replicated 1×, B replicated **32×**, C
   replicated 1×. B-replication-dominated.
@@ -292,14 +302,16 @@ For most production shapes (M·N ≪ K·N), the **B-replication term
 dominates** under pure-M, and reducing it via K-split or MN-split is
 the source of the speedup.
 
-> **Caveat on sharing.** The naive formula counts every per-core load
-> as a separate HMI access. If hardware ring multicast lets one HBM
-> read serve multiple cores, the actual HMI bandwidth consumed is
-> lower. We don't have a confirmed multicast-vs-no-multicast
-> measurement, so the formula gives an *upper bound* on HMI bytes and
-> a *lower bound* on wall time (assuming 166 GB/s HBM peak). Empirical
-> wall times in §11 sometimes come in *under* the naive HMI bound,
-> implying either hardware sharing or better-than-100% pipelining.
+> **Caveat on sharing (superseded — see v2 §5.4).** The naive formula
+> counts every per-core load as a separate HMI access. If hardware
+> ring multicast lets one HBM read serve multiple cores, the actual
+> HMI bandwidth consumed is lower. The v2 empirical confirmation
+> resolves this caveat in favour of a **full** A- and B-multicast
+> model: pure-M wall times on DSv3 q_b_proj come in 7.4× faster
+> than the naive `m · K · N` B-traffic bound, only consistent with
+> B-traffic clamped to `K · N`. The mechanism (HBM controller
+> coalescing? `doWeiPreload`? runtime DT rewrite?) is not visible in
+> the deeptools code paths traced.
 
 ## 6. The work-division split
 
@@ -519,12 +531,19 @@ M_per_core ≤ 4 (memory-bound, prefetch can't hide enough).
 
 ### 10.2 Practical predictor
 
+> **Superseded by v2 §11.3.** The `n · M · K` and `m · K · N`
+> per-cluster bytes below are the naive bound; the v2 multicast
+> model clamps both to `M · K` and `K · N` respectively (constant
+> in m and n). The `sharing_factor ≈ 2` hand-tune in §10.3 is the
+> v1 attempt to fit that observation; v2 replaces it with a full
+> multicast model.
+
 For matmul at fp16:
 
 ```
 flops_total       = 2 · M · N · K
-hmi_a_bytes       = n · M · K · 2
-hmi_b_bytes       = m · K · N · 2
+hmi_a_bytes       = n · M · K · 2          # naive; v2: M · K · 2
+hmi_b_bytes       = m · K · N · 2          # naive; v2: K · N · 2
 hmi_c_bytes       = k · M · N · 2          # k=1 → just M·N
 hmi_total         = hmi_a + hmi_b + hmi_c
 
