@@ -815,18 +815,19 @@ angles:
   for a given M-shard. (Stated more directly: n cores share one M
   slice of A and each needs the full slice, so total A traffic =
   n × M × K bytes per cluster.)
-- **k** controls B sharing on RIU via ring-multicast. K-cohort cores
-  share a single HBM read of B. So B traffic = `m · K · N / k` per
-  cluster (B is replicated by m across cohorts, shared by k within
-  cohort).
+- **k** controls B sharing on RIU via ring-multicast — and, per the
+  v2 empirical correction, the multicast is actually full across
+  the M-cohort too, so per-cluster B traffic clamps to `K · N`
+  independent of split. The "K-cohort multicast" intuition below
+  was the v1 partial model; under the full-multicast model B is
+  simply read once across the whole cluster.
 - **k** also controls SFP ring traffic: chain length = k, payload
   = M\_per × N\_per × 4 bytes (fp32 PSUM) per tile.
 
-The B-multicast factor is the cleanest example of "the ring chooses
-its own bandwidth budget" — without ring multicast, B traffic would
-be `m · K · N · 2` bytes (every core reads its own B). The ring's
-ability to broadcast a value to all listeners on the same hop saves
-a factor of k on HBM bandwidth.
+The B-multicast factor was originally derived as `1/k` (K-cohort
+sharing only); empirical wall times require additional M-side
+sharing, yielding the full-multicast formula `B = K · N · sz(B)` —
+see v2 §5.4 for the empirical reasoning.
 
 ```mermaid
 graph LR
@@ -1309,10 +1310,10 @@ SFP-ring-disabled tests) would reintroduce it.
   ring).
 - **Agents:** all 32 cores' MNIs vs the single HBM agent.
 - **Overhead pattern:** The HBM read can only deliver 166 GB/s
-  combined. Contention is proportional to demand. At the operand-
-  multicast extreme (every K-cohort sharing one B-read), combined
-  demand is `n · M · K + m · K · N / k + k · M · N` bytes per
-  cluster — sometimes well within HBM peak, sometimes way over.
+  combined. Contention is proportional to demand. Under the v2
+  full-multicast model (§8), per-cluster demand is
+  `M · K + K · N + k · M · N` bytes — constant in m and n on the
+  A/B side, scaling only with k on the C side.
 - **Practical floor:** for production fp16 matmul, this is the
   single most binding limit on memory-bound shapes. A split that
   reduces HMI traffic at the cost of more SFP traffic is usually
@@ -1538,10 +1539,11 @@ formula and the dataflow's PSUM placement. Specifically:
 - Where does the weight live? LX (NO\_XRF) → MNI loads on RIU.
   PT-XRF (XRF\_MB / XRF\_CH) → MNI loads bypass LX, go straight to
   PT-XRF, but still on RIU.
-- What's the operand-multicast factor? For each input operand, walk
-  the split: if all k cohort cores read the same slice, you get a
-  1/k factor; if all n N-cores read the same slice, you get a 1/n
-  factor. Only ring-multicast eligible operands get this benefit.
+- What's the operand-multicast factor? Under the v2 full-multicast
+  model (§8), A is shared across the N-cohort and B is shared
+  across the M-cohort, so both clamp to a single HBM read across
+  the cluster (M·K and K·N respectively). Only C scales per
+  K-cohort member.
 
 If your new dataflow has no PSUM-on-LX requirement (e.g. an OS1
 variant), you save the entire SFP traffic and the LX port doesn't
@@ -1555,8 +1557,8 @@ For each candidate `(m, n, k)`, write down:
 
 | Quantity | Formula | Ring |
 |---|---|---|
-| A bytes | `n · M · K · sz(A)` | RIU |
-| B bytes | `m · K · N · sz(B) / k` | RIU |
+| A bytes | `M · K · sz(A)` | RIU |
+| B bytes | `K · N · sz(B)` | RIU |
 | C bytes (final) | `M · N · sz(C)` | RIU |
 | PSUM bytes | `(k − 1) · M_per · N_per · 4` per cohort | SFP CW + CCW |
 | Chain hops | `k − 1` (k\_fast) | SFP |
@@ -1772,8 +1774,8 @@ For matmul `(M, N, K)` at fp16 under split `(m, n, k)`:
 # Compute lower bound: PT peak utilisation
 T_compute = 2 · M · N · K / 72.1e12   # seconds
 
-# HMI lower bound: per-cluster bytes / HBM peak
-HMI_bytes ≈ n · M · K · 2 + m/k · K · N · 2 + k · M · N · 2
+# HMI lower bound: per-cluster bytes / HBM peak (v2 multicast model)
+HMI_bytes ≈ M · K · 2 + K · N · 2 + k · M · N · 2
 T_HMI     = HMI_bytes / 166e9         # seconds
 
 # LX residency check
@@ -1923,8 +1925,9 @@ self-explanatory.
   headers.
 - **Ring multicast** — Architectural mechanism that lets the RIU
   broadcast one HBM read to multiple ring listeners on the same
-  hop. Enables the `1/k` factor on B traffic and the "A multicast"
-  pattern on pure-N splits.
+  hop. Empirically (v2 §5.4) extends to full A-multicast across
+  N-cohort and full B-multicast across M-cohort, clamping per-
+  cluster A and B traffic to `M·K` and `K·N` respectively.
 - **Ring-segment contention** — Two or more concurrent transfers
   using the same physical ring segment. Drives the kf-vs-id step
   under (1, 16, 2) (§6.5).
