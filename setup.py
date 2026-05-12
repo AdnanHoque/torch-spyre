@@ -93,17 +93,13 @@ cmake_library_path = os.environ.get("CMAKE_LIBRARY_PATH", "")
 extra_library_dirs = cmake_library_path.split(":") if cmake_library_path else []
 LIBRARY_DIRS += [Path(p) for p in extra_library_dirs if p]
 
-COMPILE_AIUPTI = False
+COMPILE_AIUPTI = os.environ.get("USE_SPYRE_PROFILER", False)
 
 if "RUNTIME_INSTALL_DIR" in os.environ:
     # take lower precedence than CMAKE_LIBRARY_PATH and CMAKE_INCLUDE_PATH
     RUNTIME_DIR = Path(os.environ["RUNTIME_INSTALL_DIR"])
     SENLIB_DIR = Path(os.environ["SENLIB_INSTALL_DIR"])
     DEEPTOOLS_DIR = Path(os.environ["DEEPTOOLS_INSTALL_DIR"])
-    import torch
-
-    KINETO_INCLUDE_DIR = Path(torch.__path__[0]) / "include" / "kineto"
-    COMMON_INCLUDE_DIR = Path(os.environ["SEN_COMMON_HEADERS"])
 
     INCLUDE_DIRS += [
         RUNTIME_DIR / "include",
@@ -117,19 +113,33 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
     INCLUDE_DIRS += [
         DEEPTOOLS_DIR / "include",
     ]
-    INCLUDE_DIRS += [
-        KINETO_INCLUDE_DIR,
-        COMMON_INCLUDE_DIR / "libaiupti",
-    ]
+
+    if COMPILE_AIUPTI:  # Include kineto
+        import torch
+
+        KINETO_INCLUDE_DIR = Path(torch.__path__[0]) / "include" / "kineto"
+        if (
+            KINETO_INCLUDE_DIR.exists() and KINETO_INCLUDE_DIR.is_dir()
+        ):  # Verify headers exist
+            COMMON_INCLUDE_DIR = Path(os.environ["SEN_COMMON_HEADERS"])
+            INCLUDE_DIRS += [
+                KINETO_INCLUDE_DIR,
+                COMMON_INCLUDE_DIR / "libaiupti",
+            ]
+        else:
+            COMPILE_AIUPTI = False
+
+    INCLUDE_DIRS += [os.environ["SEN_COMMON_HEADERS"]]
+
     if os.environ.get("LIBAIUPTI_INSTALL_DIR"):
         LIBAIUPTI_DIR = Path(os.environ["LIBAIUPTI_INSTALL_DIR"])
-        LIBRARY_DIRS += [LIBAIUPTI_DIR / "lib"]
         _aiupti_lib = Path(os.environ["LIBAIUPTI_INSTALL_DIR"]) / "lib" / "libaiupti.so"
-        COMPILE_AIUPTI = _aiupti_lib.exists()
+        if _aiupti_lib.exists():
+            LIBRARY_DIRS += [LIBAIUPTI_DIR / "lib"]
+        else:
+            COMPILE_AIUPTI = False
 
     LIBRARY_DIRS += [RUNTIME_DIR / "lib"]
-
-INCLUDE_DIRS += [os.environ["SEN_COMMON_HEADERS"]]
 
 if COMPILE_AIUPTI:
     LIBRARIES = ["sendnn", "sendnn_interface", "aiupti", "flex"]
@@ -218,12 +228,8 @@ if __name__ == "__main__":
                     ("SPYRE_DOWNCAST_ENV", '"TORCH_SPYRE_DOWNCAST_WARN"'),
                     ("EAGER_MODE_ENV", '"EAGER_MODE"'),
                     ("BOOST_ALL_DYN_LINK", None),  # avoid static link to boost
-                    *(
-                        [("HAS_AIUPTI", None)]
-                        if os.environ.get("USE_SPYRE_PROFILER")
-                        else []
-                    ),
-                    *([("USE_KINETO", None)] if KINETO_INCLUDE_DIR.is_dir() else []),
+                    *([("HAS_AIUPTI", None)] if COMPILE_AIUPTI else []),
+                    *([("USE_KINETO", None)] if COMPILE_AIUPTI else []),
                     ("FMT_HEADER_ONLY", None),
                 ],
             ),
