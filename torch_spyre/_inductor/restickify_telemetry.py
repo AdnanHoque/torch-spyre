@@ -25,14 +25,24 @@ math comes later once we can confirm the plumbing works end-to-end.
 
 from __future__ import annotations
 
+
 import torch
 from torch._inductor.ir import ComputedBuffer, Operation
 
 from . import config
 from .logging_utils import get_inductor_logger
-from .pass_utils import apply_splits_from_index_coeff, iteration_space_from_op
+from .pass_utils import (
+    apply_splits_from_index_coeff,
+    concretize_expr,
+    iteration_space_from_op,
+)
 
 logger = get_inductor_logger("restickify_telemetry")
+
+# Spyre AIU 1.0 has 32 cores on the RIU ring. On a ring of N cores, the
+# mean signed-distance between a uniformly random pair is ~N/4 hops (the
+# average of min(|i-j|, N-|i-j|) over all i, j).
+NUM_CORES_DEFAULT = 32
 
 
 def _is_restickify(op: ComputedBuffer) -> bool:
@@ -83,6 +93,70 @@ def _decode_splits(op: ComputedBuffer) -> dict[str, int] | None:
         return {"<decode-error>": type(e).__name__}  # type: ignore[dict-item]
 
 
+def _restickify_bytes(op: ComputedBuffer) -> int | None:
+    """Total bytes moved by this restickify (size × dtype itemsize).
+
+    Returns None if we can't resolve a concrete shape/dtype (e.g. symbolic
+    sizes that haven't been concretized).
+    """
+    try:
+        layout = op.get_layout()
+        # Pull the logical size of the output via the layout. The total bytes
+        # moved by a restickify is the size of the output it produces.
+        size = layout.size
+        elems = 1
+        for s in size:
+            elems *= int(concretize_expr(s))
+        return elems * layout.dtype.itemsize
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _mean_random_hops(num_cores: int) -> float:
+    """Average min-ring-distance for a uniformly random pair (i ≠ j).
+
+    There are num_cores * (num_cores - 1) ordered pairs; for each non-zero
+    distance d in {1, ..., num_cores-1}, num_cores pairs are at that
+    distance. So the mean over all i≠j is Σ_{d=1}^{N-1} min(d, N-d) / (N-1).
+
+    For 32 cores: ~8.26. For 16 cores: ~4.27.
+    """
+    total = 0
+    for d in range(1, num_cores):
+        total += min(d, num_cores - d)
+    return total / (num_cores - 1)
+
+
+def _estimate_hops_per_byte(
+    producer_splits: dict | None,
+    self_splits: dict | None,
+    num_cores: int = NUM_CORES_DEFAULT,
+) -> float:
+    """Coarse hop estimate keyed off mapping alignment.
+
+    Phase 0 first-order model. Actual hop math (using
+    _get_core_to_slice_mapping to reconstruct per-stick source/dest cores)
+    is Phase 0 follow-up if the coarse signal warrants it.
+
+    Returns expected min-ring hops per byte traversed.
+    """
+    if producer_splits is None:
+        # Graph input — bytes come from HBM, not from another core's local
+        # store. RIU hops aren't the right model; return 0 so this row
+        # doesn't dominate the "fix this" list.
+        return 0.0
+    if producer_splits == self_splits:
+        # Same dim, same factor → consumer reads its own producer slice.
+        return 0.0
+    common = set(producer_splits or {}) & set(self_splits or {})
+    if not common:
+        # Orthogonal mapping → uniformly random pairing → mean half-ring.
+        return _mean_random_hops(num_cores)
+    # Partial match — approximate as half the orthogonal cost. Refine when
+    # we add the proper _get_core_to_slice_mapping-based computation.
+    return _mean_random_hops(num_cores) / 2
+
+
 def _alignment_status(producer_splits: dict | None, self_splits: dict | None) -> str:
     """Classify producer/consumer mapping alignment.
 
@@ -128,6 +202,8 @@ def restickify_telemetry(operations: list[Operation]) -> None:
             consumers_of.setdefault(dep.name, []).append(op)
 
     restick_count = 0
+    total_ring_byte_hops = 0
+    rows: list[tuple] = []  # (ring_byte_hops, name, status, producer, ...)
     for op in operations:
         if not isinstance(op, ComputedBuffer):
             continue
@@ -147,21 +223,62 @@ def restickify_telemetry(operations: list[Operation]) -> None:
             producer_name = producer.get_name()
             producer_splits = _decode_splits(producer)
         else:
-            # Producer is a graph input (placeholder) or an unmapped op.
             producer_name = producer_names[0] if producer_names else "<no-input>"
             producer_splits = None
         status = _alignment_status(producer_splits, self_splits)
+        bytes_moved = _restickify_bytes(op)
+        hops_per_byte = _estimate_hops_per_byte(producer_splits, self_splits)
+        ring_byte_hops = (
+            int(bytes_moved * hops_per_byte) if bytes_moved is not None else 0
+        )
+        total_ring_byte_hops += ring_byte_hops
 
+        rows.append(
+            (
+                ring_byte_hops,
+                my_name,
+                status,
+                producer_name,
+                producer_splits,
+                [c.get_name() for c in consumers],
+                self_splits,
+                bytes_moved,
+                hops_per_byte,
+            )
+        )
+
+    # Sort by ring cost descending so the worst offenders show first.
+    rows.sort(key=lambda r: r[0], reverse=True)
+    for (
+        ring_byte_hops,
+        my_name,
+        status,
+        producer_name,
+        producer_splits,
+        consumer_names,
+        self_splits,
+        bytes_moved,
+        hops_per_byte,
+    ) in rows:
+        bytes_str = "<unknown>" if bytes_moved is None else f"{bytes_moved}"
         logger.info(
-            "restickify=%s status=%s producer=%s producer_splits=%s "
-            "consumers=%s self_splits=%s",
+            "restickify=%s status=%s ring_byte_hops=%d bytes=%s hops_per_byte=%.2f "
+            "producer=%s producer_splits=%s consumers=%s self_splits=%s",
             my_name,
             status,
+            ring_byte_hops,
+            bytes_str,
+            hops_per_byte,
             producer_name,
             producer_splits if producer_splits is not None else "<none>",
-            [c.get_name() for c in consumers],
+            consumer_names,
             self_splits if self_splits is not None else "<none>",
         )
 
     if restick_count > 0:
-        logger.info("total restickify ops: %d", restick_count)
+        logger.info(
+            "summary: total_restickifies=%d total_ring_byte_hops=%d (%.2f MB-hops)",
+            restick_count,
+            total_ring_byte_hops,
+            total_ring_byte_hops / (1024 * 1024),
+        )
