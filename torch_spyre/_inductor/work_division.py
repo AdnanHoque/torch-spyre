@@ -639,8 +639,8 @@ def _try_k_fast_split(
     # Restrict to 2D matmul for now; revisit with a bmm-aware policy.
     if len(output_dims) != 2:
         return None
-    # Pick the larger of the two output dims as N. Targets narrow-N shapes
-    # where N is the dim worth splitting between cores.
+    # Pick the larger of the two output dims to split across cores; "N" is
+    # convention (for the target shape M < N, max picks the conventional N).
     n_dim = max(output_dims, key=lambda d: concretize_expr(it_space[d]))
     m_dims = [d for d in output_dims if d != n_dim]
 
