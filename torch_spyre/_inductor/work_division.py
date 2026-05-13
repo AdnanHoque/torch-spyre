@@ -506,7 +506,6 @@ def span_reduction_pass(
     args: list[SchedNodeArg],
     max_cores: int,
     exclude_reduction: bool,
-    is_matmul: bool = False,
 ) -> None:
     """Mandatory per-op pass: compute minimum splits to satisfy the 256MB span limit.
 
@@ -550,7 +549,6 @@ def work_distribution_pass(
     args: list[SchedNodeArg],
     max_cores: int,
     exclude_reduction: bool,
-    is_matmul: bool = False,
 ) -> None:
     """Optional per-op pass: distribute remaining cores to maximize parallelism.
 
@@ -598,16 +596,6 @@ def work_distribution_pass(
         it_space_adjusted, max_cores, priorities, committed_splits
     )
 
-    # k_fast override: matmul-only, prefer (1, n_split, k_split>1) over the
-    # planner's pure-M pick on narrow-N small-M shapes.
-    if is_matmul and config.core_id_k_fast_emission:
-        forced = _try_k_fast_split(
-            splits, it_space, output_td, committed_splits, max_cores
-        )
-        if forced is not None:
-            logger.debug(f"k_fast override for {op.get_name()}: {splits} -> {forced}")
-            splits = forced
-
     apply_splits(
         op,
         splits,
@@ -633,8 +621,8 @@ def _try_k_fast_split(
 ) -> dict[Symbol, int] | None:
     """Propose (1, n_split, k_split>1) for narrow-N small-M matmul shapes.
 
-    Caller gates on is_matmul + the feature flag. Range thresholds derived
-    from empirical hardware measurements.
+    Caller (k_fast_override pass) gates on matmul + the feature flag.
+    Range thresholds derived from empirical hardware measurements.
     """
     dims = list(it_space.keys())
     output_coord_vars = {v for e in output_td.device_coords for v in e.free_symbols}
@@ -717,7 +705,7 @@ def divide_pointwise_op(
     max_cores: int,
     pass_fn: Callable,
 ) -> None:
-    pass_fn(op, args, max_cores, exclude_reduction=False, is_matmul=False)
+    pass_fn(op, args, max_cores, exclude_reduction=False)
 
 
 def divide_reduction_op(
@@ -737,7 +725,7 @@ def divide_reduction_op(
     # FIXME: For non-matmul reduction, excluding reduction dimensions from work
     #        division candidates temporarily till known backend issue is fixed
     #        https://github.com/torch-spyre/torch-spyre/issues/1304
-    pass_fn(op, args, max_cores, exclude_reduction=not is_matmul, is_matmul=is_matmul)
+    pass_fn(op, args, max_cores, exclude_reduction=not is_matmul)
 
 
 def _validate_max_cores() -> int:
@@ -792,3 +780,70 @@ def work_distribution(operations: list[Operation]) -> None:
             divide_pointwise_op(op, args, max_cores, work_distribution_pass)
         elif isinstance(op.data, Reduction):
             divide_reduction_op(op, args, max_cores, work_distribution_pass)
+
+
+def _k_fast_override_op(op: ComputedBuffer, max_cores: int) -> None:
+    """Override one matmul op's splits with k_fast when the heuristic fires.
+
+    Reads splits written by work_distribution_pass, calls _try_k_fast_split,
+    and re-applies via apply_splits when the override fires. No-op otherwise.
+    """
+    if not isinstance(op.data, Reduction):
+        return
+    if op.data.reduction_type != BATCH_MATMUL_OP:
+        return
+    if not hasattr(op, "op_it_space_splits"):
+        return  # work_distribution committed nothing (single-core op)
+
+    rw = op.get_read_writes()
+    args = get_mem_deps_from_rw(rw)
+    input_tds, output_td = collect_tensor_deps(op, args)
+    all_tds = input_tds + [output_td]
+
+    it_space = iteration_space_from_op(op)
+    it_space_adjusted, _ = adjust_it_space_for_sticks(it_space, all_tds)
+
+    write_index = next(iter(rw.writes)).index
+    read_index = next((d.index for d in rw.reads), write_index)
+    current_splits = apply_splits_from_index_coeff(
+        op.op_it_space_splits, write_index, read_index, it_space
+    )
+    # After work_distribution, current_splits holds the planner's final per-dim
+    # split (1 for unsplit). Use the >1 subset as min_splits — it conservatively
+    # subsumes span_reduction's commits and any extra parallelism the planner
+    # added on top (which we don't want to walk back).
+    committed = {s: v for s, v in current_splits.items() if v > 1}
+
+    forced = _try_k_fast_split(
+        current_splits, it_space, output_td, committed, max_cores
+    )
+    if forced is None:
+        return
+
+    logger.debug(
+        f"k_fast override for {op.get_name()}: {current_splits} -> {forced}"
+    )
+    apply_splits(
+        op,
+        forced,
+        output_td,
+        it_space,
+        it_space_adjusted,
+        [],
+        committed,
+        kind="k_fast_override",
+    )
+    warn_if_per_core_overflow(all_tds, it_space, forced, op.get_name())
+
+
+def k_fast_override(operations: list[Operation]) -> None:
+    """Pass 3 (optional): override matmul splits with k_fast on narrow-N shapes.
+
+    Runs after work_distribution. Off by default unless the
+    core_id_k_fast_emission flag is set; gated per-op on matmul + heuristic.
+    """
+    if not config.core_id_k_fast_emission:
+        return
+    max_cores = _validate_max_cores()
+    for op in _iter_computed_buffers(operations):
+        _k_fast_override_op(op, max_cores)
