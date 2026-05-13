@@ -649,11 +649,13 @@ def _try_k_fast_split(
     k_dim = reduction_dims[0]
 
     output_dims = [d for d in dims if d in output_coord_vars]
-    if not output_dims:
+    # TODO: bmm support. With 3 output dims (B, M, N) the planner already has a
+    # B-split lever; folding B into m_dims here would force b=m=1 and waste it.
+    # Restrict to 2D matmul for now; revisit with a bmm-aware policy.
+    if len(output_dims) != 2:
         return None
-    # Pick the largest non-reduction dim as N. This targets narrow-N shapes
-    # where N is the dim worth splitting between cores; remaining output
-    # dims fold into m_dims (the M axis, including batch for bmm).
+    # Pick the larger of the two output dims as N. Targets narrow-N shapes
+    # where N is the dim worth splitting between cores.
     n_dim = max(output_dims, key=lambda d: concretize_expr(it_space[d]))
     m_dims = [d for d in output_dims if d != n_dim]
 
