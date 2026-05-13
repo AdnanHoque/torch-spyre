@@ -651,11 +651,16 @@ def _try_k_fast_split(
     output_dims = [d for d in dims if d in output_coord_vars]
     if not output_dims:
         return None
+    # Pick the largest non-reduction dim as N. This targets narrow-N shapes
+    # where N is the dim worth splitting between cores; remaining output
+    # dims fold into m_dims (the M axis, including batch for bmm).
     n_dim = max(output_dims, key=lambda d: concretize_expr(it_space[d]))
     m_dims = [d for d in output_dims if d != n_dim]
 
     if current_splits.get(k_dim, 1) > 1:
         return None
+    # Skip if span_reduction_pass already committed splits on K or any M dim:
+    # those are immutable lower bounds and conflict with our (1, n, k>1) shape.
     if min_splits and (k_dim in min_splits or any(d in min_splits for d in m_dims)):
         return None
 
@@ -664,14 +669,26 @@ def _try_k_fast_split(
     K = concretize_expr(it_space[k_dim])
 
     elems_per_stick = output_td.layout.device_layout.device_dtype.elems_per_stick()
+    # Spyre tensor dims are stick-aligned by the layout system; assert it so
+    # the // below is lossless and the n_split/k_split divisibility checks
+    # downstream operate on the true element counts.
+    assert N % elems_per_stick == 0, f"N={N} not stick-aligned ({elems_per_stick})"
+    assert K % elems_per_stick == 0, f"K={K} not stick-aligned ({elems_per_stick})"
     n_sticks = N // elems_per_stick
     k_sticks = K // elems_per_stick
 
+    # PT block rows = _PT_ROWS per corelet per matmul issue. Gates below pick
+    # shapes where pure-M underfeeds PT but (1, n, k) keeps it busy.
     rows_per_core = M / max_cores
+    # M < max_cores: pure-M can't even give one row/core; skip — different regime.
+    # M > 16·max_cores: PT is already saturated by pure-M, k_fast wins nothing.
     if rows_per_core < 1 or rows_per_core > 2 * _PT_ROWS:
         return None
+    # Moderate M + wide N: pure-M or mixed (m, n) already uses cores well;
+    # only override when N is also narrow enough that PT is genuinely starved.
     if rows_per_core > _PT_ROWS / 2 and n_sticks >= max_cores:
         return None
+    # Need enough K to give every core at least one stick after splitting.
     if k_sticks < max_cores:
         return None
 
