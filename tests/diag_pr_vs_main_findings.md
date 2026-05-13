@@ -36,43 +36,47 @@ subprocess per cell, dtype=fp16, SENCORES=32. Median wall time. Each
 subprocess re-compiles from scratch (`fx_graph_cache=False`,
 `torch._dynamo.reset()`).
 
-## Per-shape table (sorted highest A→C → lowest)
+## Per-shape table — Granite 3.3 8B (sorted highest A→C → lowest)
+
+| shape | (M, N, K) | h-split | A→B | B→C | A→C | combined |
+|---|---|---|---:|---:|---:|---|
+| down_proj M=128 | (128, 4096, 12800) | (1,16,2) | 1.47× | 1.88× | **2.76×** | win |
+| q_proj M=128 | (128, 4096, 4096) | (1,16,2) | 1.48× | 1.85× | **2.75×** | win |
+| o_proj M=128 | (128, 4096, 4096) | (1,16,2) | 1.47× | 1.86× | **2.73×** | win |
+| kv_proj M=32 | (32, 2048, 4096) | (1,16,2) | 2.39× | 1.03× | **2.47×** | win |
+| kv_proj M=128 | (128, 2048, 4096) | (1,16,2) | 2.38× | 1.04× | **2.47×** | win |
+| o_proj M=32 | (32, 4096, 4096) | (1,16,2) | 1.13× | 1.03× | **1.16×** | win |
+| gate_proj M=32 | (32, 12800, 4096) | (1,8,4) | 1.16× | 1.00× | **1.16×** | win |
+| q_proj M=32 | (32, 4096, 4096) | (1,16,2) | 1.12× | 0.99× | **1.11×** | win |
+| gate_proj M=128 | (128, 12800, 4096) | (1,8,4) | 0.97× | 1.07× | **1.04×** | win |
+| down_proj M=32 | (32, 4096, 12800) | (1,16,2) | 0.97× | 1.01× | **0.98×** | regression ⚠ |
+
+## Per-shape table — L3-70B, Mixtral, DSv3 (sorted highest A→C → lowest)
 
 | shape | (M, N, K) | h-split | A→B | B→C | A→C | combined |
 |---|---|---|---:|---:|---:|---|
 | L3-70B q_proj M=128 | (128, 8192, 8192) | (1,16,2) | 1.52× | 1.85× | **2.80×** | win |
-| Granite 3.3 8B down_proj M=128 | (128, 4096, 12800) | (1,16,2) | 1.47× | 1.88× | **2.76×** | win |
-| Granite 3.3 8B q_proj M=128 | (128, 4096, 4096) | (1,16,2) | 1.48× | 1.85× | **2.75×** | win |
-| Granite 3.3 8B o_proj M=128 | (128, 4096, 4096) | (1,16,2) | 1.47× | 1.86× | **2.73×** | win |
 | L3-70B kv_proj M=128 | (128, 1024, 8192) | (1,16,2) | 2.43× | 1.02× | **2.49×** | win |
-| Granite 3.3 8B kv_proj M=32 | (32, 2048, 4096) | (1,16,2) | 2.39× | 1.03× | **2.47×** | win |
-| Granite 3.3 8B kv_proj M=128 | (128, 2048, 4096) | (1,16,2) | 2.38× | 1.04× | **2.47×** | win |
 | L3-70B kv_proj M=32 | (32, 1024, 8192) | (1,16,2) | 2.48× | 0.99× | **2.46×** | win |
 | Mixtral kv_proj M=128 | (128, 1024, 4096) | (1,16,2) | 2.09× | 1.05× | **2.20×** | win |
 | DSv3 kv_proj M=128 | (128, 1536, 7168) | (1,8,4) | 1.77× | 1.16× | **2.04×** | win |
 | DSv3 q_a_proj M=128 | (128, 1536, 7168) | (1,8,4) | 1.74× | 1.12× | **1.95×** | win |
 | DSv3 down_proj M=128 | (128, 7168, 18432) | (1,16,2) | 1.60× | 1.11× | **1.77×** | win |
 | L3-70B kv_proj M=512 | (512, 1024, 8192) | (1,16,2) | 0.79× | 1.60× | **1.27×** | win (kf rescue) |
-| Granite 3.3 8B o_proj M=32 | (32, 4096, 4096) | (1,16,2) | 1.13× | 1.03× | **1.16×** | win |
-| Granite 3.3 8B gate_proj M=32 | (32, 12800, 4096) | (1,8,4) | 1.16× | 1.00× | **1.16×** | win |
-| Granite 3.3 8B q_proj M=32 | (32, 4096, 4096) | (1,16,2) | 1.12× | 0.99× | **1.11×** | win |
-| Granite 3.3 8B gate_proj M=128 | (128, 12800, 4096) | (1,8,4) | 0.97× | 1.07× | **1.04×** | win |
-| Granite 3.3 8B down_proj M=32 | (32, 4096, 12800) | (1,16,2) | 0.97× | 1.01× | **0.98×** | regression ⚠ |
 | DSv3 gate_proj M=32 | (32, 18432, 7168) | (1,16,2) | 0.96× | 1.02× | **0.98×** | regression ⚠ |
 | L3-70B q_proj M=32 | (32, 8192, 8192) | (1,16,2) | 0.90× | 1.01× | **0.91×** | regression ⚠ |
 
 ## Aggregate
 
-| | Combined suite |
-|---|---:|
-| Shapes measured | 20 |
-| Wins (A→C ≥ 1.00×) | 17 |
-| Regressions (A→C < 1.00×) | 3 |
-| Big wins (A→C ≥ 2.0×) | 12 |
-| Modest wins (1.1× – 1.99×) | 4 |
-| Flat (0.95× – 1.05×) | 1 |
-| Geomean A→C | **1.73×** |
-| Geomean A→C on wins only | 1.92× |
+| | Granite 3.3 8B | L3 / Mixtral / DSv3 | Combined |
+|---|---:|---:|---:|
+| Shapes measured | 10 | 10 | 20 |
+| Wins (A→C ≥ 1.00×) | 9 | 8 | 17 |
+| Regressions (A→C < 1.00×) | 1 | 2 | 3 |
+| Big wins (A→C ≥ 2.0×) | 5 | 7 | 12 |
+| Modest wins (1.1× – 1.99×) | 3 | 1 | 4 |
+| Flat (0.95× – 1.05×) | 1 | 0 | 1 |
+| Geomean A→C | **1.69×** | **1.77×** | **1.73×** |
 
 ## Observations
 
