@@ -633,17 +633,14 @@ def _try_k_fast_split(
 ) -> dict[Symbol, int] | None:
     """Propose (1, n_split, k_split>1) for narrow-N small-M matmul shapes.
 
-    Caller is responsible for gating on is_matmul + the feature flag.
-    Range thresholds derived from empirical hardware measurements.
-
-    Fires on mid-M (max_cores ≤ M ≤ 16·max_cores), wide-K (K ≥ max_cores·elems_per_stick)
-    shapes where pure-M underfeeds PT. N is free for M ≤ 4·max_cores (PT starving anyway),
-    else n_sticks < max_cores.
-    For max_cores=32, fp16: 32 ≤ M ≤ 512, K ≥ 2048, N free if M ≤ 128 else N < 2048.
+    Caller gates on is_matmul + the feature flag. Range thresholds derived
+    from empirical hardware measurements.
     """
     dims = list(it_space.keys())
     output_coord_vars = {v for e in output_td.device_coords for v in e.free_symbols}
     reduction_dims = [d for d in dims if d not in output_coord_vars]
+    # Only single-reduction shapes (matmul's K dim). Multi-reduction kernels
+    # don't have a clear analogue to the (m, n, k) split this function emits.
     if len(reduction_dims) != 1:
         return None
     k_dim = reduction_dims[0]
@@ -694,6 +691,9 @@ def _try_k_fast_split(
     if k_sticks < max_cores:
         return None
 
+    # Candidate n_splits are the proper divisors of max_cores so that
+    # k_split = max_cores // n_split is integer. No power-of-2 restriction —
+    # if max_cores were e.g. 24, candidates would be {2, 3, 4, 6, 8, 12}.
     candidates = sorted(
         (int(n) for n in divisors(max_cores) if 1 < n < max_cores), reverse=True
     )
