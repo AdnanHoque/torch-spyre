@@ -27,4 +27,10 @@ dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
 
+# Phase 0 telemetry for ring-aware restickify (RFC draft at
+# docs/source/rfcs/drafts/NNNN-RingAwareRestickify). When True, a
+# diagnostic pass runs after work_distribution and logs each restickify
+# with its producer/consumer split mapping. Read-only; no behavior change.
+restickify_telemetry: bool = os.environ.get("SPYRE_RESTICKIFY_TELEMETRY", "0") == "1"
+
 install_config_module(sys.modules[__name__])
