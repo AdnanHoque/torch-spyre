@@ -42,64 +42,89 @@ force-split monkey-patch, no SDSC flag toggling — pure planner-driven).
 | gate_proj M=128 | (128, 12800, 4096) | 1.028 | 0.985 | 1.04× |
 | down_proj M=32 | (32, 4096, 12800) | 0.840 | 0.844 | 1.00× |
 
+## Per-shape table — L3-70B, Mixtral, DSv3 (sorted highest speedup → lowest)
+
+| Shape | (M, N, K) | main (ms) | PR (ms) | Speedup |
+|---|---|---:|---:|---:|
+| L3-70B q_proj M=128 | (128, 8192, 8192) | 3.576 | 1.282 | **2.79×** |
+| L3-70B kv_proj M=128 | (128, 1024, 8192) | 0.476 | 0.187 | **2.55×** |
+| L3-70B kv_proj M=32 | (32, 1024, 8192) | 0.453 | 0.180 | **2.51×** |
+| Mixtral kv_proj M=128 | (128, 1024, 4096) | 0.257 | 0.110 | **2.33×** |
+| DSv3 kv_proj M=128 | (128, 1536, 7168) | 0.604 | 0.290 | **2.08×** |
+| DSv3 q_a_proj M=128 | (128, 1536, 7168) | 0.602 | 0.296 | **2.03×** |
+| DSv3 down_proj M=128 | (128, 7168, 18432) | 6.784 | 3.827 | **1.77×** |
+| L3-70B kv_proj M=512 | (512, 1024, 8192) | 0.474 | 0.368 | **1.29×** |
+| DSv3 gate_proj M=32 | (32, 18432, 7168) | 3.541 | 3.683 | **0.96×** ⚠ |
+| L3-70B q_proj M=32 | (32, 8192, 8192) | 0.962 | 1.039 | **0.93×** ⚠ |
+
 ## Aggregate
 
-| | Granite 3.3 8B |
-|---|---:|
-| Shapes measured | 10 |
-| Wins (≥ 1.00×) | 10 |
-| Regressions | 0 |
-| Big wins (≥ 2.5×) | 5 |
-| Modest wins (1.1–1.2×) | 3 |
-| Flat (≤ 1.05×) | 2 |
-| Geomean speedup | **1.74×** |
+| | Granite 3.3 8B | L3 / Mixtral / DSv3 | Combined |
+|---|---:|---:|---:|
+| Shapes measured | 10 | 10 | 20 |
+| Wins (≥ 1.00×) | 10 | 8 | 18 |
+| Regressions (< 1.00×) | 0 | 2 | 2 |
+| Big wins (≥ 2.0×) | 5 | 6 | 11 |
+| Modest wins (1.1–1.99×) | 3 | 2 | 5 |
+| Flat (0.95–1.05×) | 2 | 2 | 4 |
+| Geomean speedup | **1.74×** | **1.79×** | **1.77×** |
 
 ## Observations
 
-- **Bimodal outcome**: 5 of 10 shapes hit 2.5–2.8× wins (big), the other
-  5 land between 1.00× and 1.16× (modest to flat). No regressions.
+- **Trimodal outcome**: 11 of 20 shapes hit 2.0–2.8× wins (big),
+  5 land 1.1–1.8× (modest), 4 land in the flat band (0.93×–1.16×). Two
+  of those four are small regressions (5–7% slower).
 
-- **The bimodality comes from what main picks, not from k_fast variability.**
-  Probed with a tap on `apply_splits`:
-  - On the big-win shapes (q/o/kv/down M=128) main picks pure-M
-    `{M: 32}` — 4 rows per core, half-fills the 8-row PT block. The PR
-    override replaces that with a `(1, n, k>1)` split that keeps PT
-    fully fed.
-  - On gate_proj M=128 main picks `{N: 25}` (because
-    `core_split(200_sticks, 32) = 25`, a divisor). 25 cores used, 7
-    idle, no reduce overhead. The PR override goes to `(1, 8, 4)` — 32
-    cores active but pays bichain PSUM. Net: ~1.04×. Utilization gain
-    eaten by reduce overhead.
-  - On down_proj M=32 the planner gates fire and PR picks `(1, n, k>1)`,
-    but main's default is already in a "good" regime for this shape;
-    overhead is a wash. **Net 1.00×, not a regression.**
+- **The shape of the distribution is driven by what main picks, not
+  by k_fast variability.** Probed with a tap on `apply_splits`:
+  - **Big wins** (q/o/kv/down M=128 across all model families): main
+    picks pure-M `{M: 32}` — 4 rows per core, half-fills the 8-row PT
+    block. The PR override replaces that with a `(1, n, k>1)` split
+    that keeps PT fully fed.
+  - **Flat / regression band**: main already picks a balanced N-split
+    using all 32 cores (e.g. `{N: 32}` for L3-70B q_proj M=32, or
+    `{N: 25}` for Granite gate_proj M=128 where `core_split(200, 32)`
+    returns the divisor 25). PR's `(1, n, k>1)` override only adds
+    bichain-PSUM overhead — it can't add core utilization that was
+    already saturated. When the PSUM cost > 0 and there's no
+    counter-balancing utilization gain, the net is slightly negative.
+
+- **Two regressions, both small and explainable**:
+  - **L3-70B q_proj M=32 (32, 8192, 8192) — 0.93×**: main picks `{N: 32}`
+    (pure-N, all cores active, no reduce). PR picks `(1, 16, 2)` — 32
+    cores active + 2-way K-reduce. Reduce cost dominates the (zero)
+    utilization gain.
+  - **DSv3 gate_proj M=32 (32, 18432, 7168) — 0.96×**: same pattern.
+    `core_split(288_sticks, 32) = 32` for main; PR overrides to `(1, 16, 2)`.
 
 - **Why this number is smaller than 2.82× geomean from
   `diag_k_fast_granite_findings.md`.** The earlier report used
-  `A = forced pure-M`, which is *the worst case the heuristic is
-  designed to escape*. End-to-end vs main, the win is bounded by the
-  fraction of shapes where main was *already* on pure-M (5/10 for
-  Granite 3.3 8B). On those, the historical 2.7–2.9× and the
-  measured 2.5–2.8× match closely. On the other 5 shapes, main's
-  default already finds a decent mixed split and the PR's incremental
-  gain is small.
+  `A = forced pure-M`, an isolation experiment that measured upside
+  if main were doing pure-M. End-to-end vs main, the win is bounded
+  by the fraction of shapes where main was *actually* on pure-M
+  (~55% in this suite). On those shapes, the historical 2.7–2.9× and
+  the measured 2.5–2.8× match closely. On the rest, main's default
+  already finds a non-pure-M split and the PR's incremental gain is
+  small or slightly negative.
 
-- **Conclusion.** PR 1986 delivers a real, measurable, no-regression
-  end-to-end speedup on Granite 3.3 8B: **1.74× geomean across 10
-  shapes**, **2.5–2.8× on the half of shapes where main is stuck on
-  pure-M**. The headline framing for the PR description should be the
-  end-to-end number, not the isolation-experiment number.
+- **Conclusion.** PR 1986 delivers a real, measurable end-to-end
+  speedup: **1.77× geomean across 20 shapes**, **2.0–2.8× on the
+  ~half of shapes where main is stuck on pure-M**, with **2 small
+  regressions (0.93×, 0.96×)** on shapes where main already picks
+  a balanced pure-N split. The headline framing for the PR
+  description should be the end-to-end number, not the
+  isolation-experiment number, and should acknowledge the
+  regressions.
 
 ## Caveats & follow-ups
 
-- Only Granite 3.3 8B M ∈ {32, 128} measured here. The
-  `diag_k_fast_combined_findings_normalized.md` shape suite (L3-70B,
-  Mixtral, DSv3) has not been re-run against the new A=main baseline.
-  Based on the bimodal pattern above, those shapes that previously
-  showed 2.0× – 2.5× at forced-pure-M `A` will likely show smaller
-  end-to-end deltas where main's planner finds a decent N-split.
-- The 1.04× and 1.00× rows highlight a cost-model gap: for shapes
-  where main's planner happens to pick a viable N-split, the override
-  trades idle cores for K-reduce overhead. A future cost-model heuristic
-  could close that gap by skipping the override when main's pick is
-  already PT-saturated.
+- **Cost-model gap.** The flat-band and regression shapes share a
+  signature: main picks a balanced pure-N split that already saturates
+  all 32 cores. The PR's override fires anyway and adds reduce
+  overhead. A future cost-model heuristic could close this by *not*
+  firing the override when the current splits already use all
+  `max_cores` on a single non-reduction dim with no PT underfeeding.
+  Cheap predicate: `splits_use_all_cores AND rows_per_core >= _PT_ROWS`.
+- The bmm / multi-output-dim path is still excluded with an explicit
+  guard (`work_division.py:_try_k_fast_split`). Generalizing that is
+  the larger follow-up.
