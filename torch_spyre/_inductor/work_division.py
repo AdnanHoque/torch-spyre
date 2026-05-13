@@ -661,11 +661,11 @@ def _try_k_fast_split(
     K = concretize_expr(it_space[k_dim])
 
     elems_per_stick = output_td.layout.device_layout.device_dtype.elems_per_stick()
-    # Spyre tensor dims are stick-aligned by the layout system; assert it so
-    # the // below is lossless and the n_split/k_split divisibility checks
-    # downstream operate on the true element counts.
-    assert N % elems_per_stick == 0, f"N={N} not stick-aligned ({elems_per_stick})"
-    assert K % elems_per_stick == 0, f"K={K} not stick-aligned ({elems_per_stick})"
+    # iteration_space carries unpadded element counts; for ragged N/K (e.g.
+    # test shapes like N=99) the k_fast splits can't divide cleanly. Bail
+    # out so the planner default handles those.
+    if N % elems_per_stick != 0 or K % elems_per_stick != 0:
+        return None
     n_sticks = N // elems_per_stick
     k_sticks = K // elems_per_stick
 
