@@ -596,6 +596,11 @@ def work_distribution_pass(
         it_space_adjusted, max_cores, priorities, committed_splits
     )
 
+    # Stash span_reduction's commits so k_fast_override_pass can honor them
+    # — apply_splits is about to overwrite op.op_it_space_splits with the
+    # full final splits, erasing the span-only subset.
+    op._k_fast_span_committed = committed_splits
+
     apply_splits(
         op,
         splits,
@@ -808,21 +813,19 @@ def _k_fast_override_op(op: ComputedBuffer, max_cores: int) -> None:
     current_splits = apply_splits_from_index_coeff(
         op.op_it_space_splits, write_index, read_index, it_space
     )
-    # After work_distribution, current_splits holds the planner's final per-dim
-    # split (1 for unsplit). Use the >1 subset as min_splits — it conservatively
-    # subsumes span_reduction's commits and any extra parallelism the planner
-    # added on top (which we don't want to walk back).
-    committed = {s: v for s, v in current_splits.items() if v > 1}
+    # min_splits for _try_k_fast_split is span_reduction's commits — the
+    # immutable lower bounds we must not walk back. Reusing the full
+    # current_splits here would incorrectly block the override whenever the
+    # planner picked any M-axis split (e.g. pure-M).
+    span_committed = getattr(op, "_k_fast_span_committed", {})
 
     forced = _try_k_fast_split(
-        current_splits, it_space, output_td, committed, max_cores
+        current_splits, it_space, output_td, span_committed, max_cores
     )
     if forced is None:
         return
 
-    logger.debug(
-        f"k_fast override for {op.get_name()}: {current_splits} -> {forced}"
-    )
+    logger.debug(f"k_fast override for {op.get_name()}: {current_splits} -> {forced}")
     apply_splits(
         op,
         forced,
@@ -830,7 +833,7 @@ def _k_fast_override_op(op: ComputedBuffer, max_cores: int) -> None:
         it_space,
         it_space_adjusted,
         [],
-        committed,
+        span_committed,
         kind="k_fast_override",
     )
     warn_if_per_core_overflow(all_tds, it_space, forced, op.get_name())
