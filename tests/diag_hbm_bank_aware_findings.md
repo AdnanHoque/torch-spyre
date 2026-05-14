@@ -33,9 +33,10 @@ survive — including one genuinely unexplained effect still worth chasing.
   result, the AIU HMI topology — and **one real, characterized effect**:
   out-split bandwidth swings ~70 vs ~120 GB/s with sticks-per-core,
   predicted by `oddpart(sticks_per_core) ∈ {3,7}`. Measured under identity,
-  uncontaminated, K-independent, 12/12 fit — and it yields a **verified
-  planner optimization (n_fast)**: forcing a fast core count beats the
-  default `out:32` by 1.45–1.71× on affected shapes.
+  uncontaminated, K-independent, 12/12 fit — and it yields **two verified
+  planner optimizations**: **n_fast** (re-pick the out-split core count;
+  implemented, device-verified 1.73×) and a **pure-`mb` → 2D-split** fix
+  (verified 1.8–3.7×, not yet implemented).
 
 ## The artifact — why Measurements 1, 2, and 6 are invalid
 
@@ -241,16 +242,36 @@ lost parallelism. **Planner rule:** after `C = core_split(N/64, 32)`, if
 the `out`-dim core count — K-independent, no permutation, recovers ~1.5×
 on affected shapes.
 
-### A second, unverified lead — pure-`mb` vs 2D split
+**Implemented** behind the `n_fast_out_split` config flag (off by
+default) — `_maybe_n_fast` in `work_division.py`, gated on a pure
+out-split `BATCH_MATMUL_OP` with no span_reduction commitments. The N dim
+is identified structurally (the output coordinate variable that is also a
+stick variable). Device-verified end-to-end: N=14336 goes `out:32` →
+`out:28`, 1.79 ms → 1.04 ms (**1.73×**), output numerically correct.
 
-A side probe found pure `mb:32` (~40–49 GB/s) is itself a slow regime:
-capping the `mb` core count makes the planner refill the freed cores into
-the `out` dim, turning pure `mb:32` into a 2D `mb:8 × out:4` split (still
-32 cores) that ran ~3× faster. Plausible mechanism: 4 concurrent
-multicast streams instead of 1, using more of the broadcast fabric. But
-**numerical correctness was not checked** for these 2D-split runs — treat
-the 3× as unconfirmed until verified. If it holds, a "prefer 2D over
-pure-`mb`" planner rule is a separate, possibly larger win.
+### A second finding — pure-`mb` is slow vs a 2D split (verified)
+
+Pure `mb:32` (~40–57 GB/s) is itself a slow regime. Capping the `mb` core
+count makes the planner refill the freed cores into the `out` dim,
+turning pure `mb:32` into a 2D `mb × out` split (still 32 cores total)
+that runs **1.8–3.7× faster** — numerically correct (max rel err ~0.004,
+matching the pure-`mb:32` default exactly: fp16 rounding, no skipped
+work):
+
+| shape (M,K,N) | pure `mb:32` | best 2D split | speedup |
+|---|---:|---|---:|
+| 128,4096,2048 | 0.439 ms | `mb:4 × out:8` | **3.67×** |
+| 256,4096,2048 | 0.390 ms | `mb:4 × out:8` | **3.00×** |
+| 512,4096,2048 | 0.405 ms | `mb:8 × out:4` | **2.17×** |
+
+Every 2D ratio beats pure `mb:32` (1.8–3.7×). The best ratio shifts with
+M: more `out` splitting wins at small M, shifting toward `mb:8 × out:4`
+at M=512. Plausible mechanism: several concurrent narrower multicast
+streams use the broadcast fabric better than one wide one.
+
+**This is a second, separate planner win** — "prefer a 2D `mb × out`
+split over pure `mb`" — not yet implemented, and possibly larger than
+n_fast. The right `mb:out` ratio as a function of M needs its own sweep.
 
 ## Lessons for the next person
 
