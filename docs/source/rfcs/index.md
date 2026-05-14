@@ -21,6 +21,14 @@ and submit a pull request.
 | [0601](https://github.com/torch-spyre/rfcs/blob/main/0601-SpyreProfilingToolkit/0601-SpyreProfilingToolkitRFC.md) | Spyre Profiling Toolkit | Profiling |
 | [0682](https://github.com/torch-spyre/rfcs/blob/main/0682-KtirSpec/0682-KtirSpecRFC.md) | Kernel Tile Intermediate Representation | Compiler IR |
 
+## Drafts
+
+```{toctree}
+:maxdepth: 1
+
+drafts/NNNN-RestickifyLocality/NNNN-RestickifyLocalityRFC
+```
+
 ## Summaries
 
 ### RFC 0047 — Tensors with Device-Specific Layouts
