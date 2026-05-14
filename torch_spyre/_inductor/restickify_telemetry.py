@@ -26,6 +26,7 @@ math comes later once we can confirm the plumbing works end-to-end.
 from __future__ import annotations
 
 
+import sympy
 import torch
 from torch._inductor.ir import ComputedBuffer, Operation
 
@@ -157,6 +158,98 @@ def _estimate_hops_per_byte(
     return _mean_random_hops(num_cores) / 2
 
 
+def _extract_strides(index_expr, var_names) -> dict[str, int]:
+    """Pull per-symbol stride coefficients out of a linear index expression.
+
+    Inductor's index expressions for buffer accesses are linear sums of
+    iteration symbols weighted by their physical buffer strides
+    (e.g. `2048*d0 + d1` for a (M, N=2048) tensor accessed as buf[d0*2048+d1]).
+    The stride identifies which TENSOR DIM each iteration symbol indexes,
+    which is what we need to match symbols across producer/consumer when
+    the iteration spaces have different symbol names.
+
+    Returns {sym_name: int_stride}. Symbols with zero coefficient are dropped.
+    Strides that don't concretize to ints (symbolic shapes) are also dropped
+    with a logged warning rather than blowing up the pass.
+    """
+    if index_expr is None:
+        return {}
+    out: dict[str, int] = {}
+    for v in var_names:
+        try:
+            coeff = sympy.sympify(index_expr).coeff(v)
+            if coeff == 0:
+                continue
+            out[str(v)] = int(concretize_expr(coeff))
+        except (TypeError, ValueError):
+            # Symbolic stride — skip rather than crash the pass.
+            continue
+    return out
+
+
+def _build_sym_correspondence(
+    producer_strides: dict[str, int],
+    consumer_strides: dict[str, int],
+) -> dict[str, str]:
+    """Match consumer symbols to producer symbols via shared buffer strides.
+
+    Two symbols indexing the buffer with the same stride access the same
+    tensor dim. That's how we detect e.g. `consumer.d1 == producer.d0`
+    after a transpose: both have stride H in the shared buffer's index.
+
+    Returns dict {consumer_sym: producer_sym}. Symbols without a match are
+    not present in the output.
+    """
+    # Invert producer's stride map. If two producer symbols share a stride
+    # (rare but possible with broadcast), pick the first deterministically.
+    producer_sym_by_stride: dict[int, str] = {}
+    for sym, stride in producer_strides.items():
+        producer_sym_by_stride.setdefault(stride, sym)
+
+    matches: dict[str, str] = {}
+    for c_sym, c_stride in consumer_strides.items():
+        if c_stride in producer_sym_by_stride:
+            matches[c_sym] = producer_sym_by_stride[c_stride]
+    return matches
+
+
+def _physical_alignment_status(
+    producer_splits: dict | None,
+    self_splits: dict | None,
+    consumer_to_producer_sym: dict[str, str],
+) -> str:
+    """Classify alignment using the symbol-correspondence map.
+
+    Differs from `_alignment_status` (which only compares symbol names) by
+    first translating consumer symbols to producer's equivalent. This
+    catches transposes and other index-permutation cases where the cores
+    are physically aligned despite different symbol names.
+    """
+    if producer_splits is None:
+        return "no-producer"
+    # Translate consumer splits to producer's symbol space.
+    translated: dict[str, int] = {}
+    untranslatable = []
+    for c_sym, factor in (self_splits or {}).items():
+        p_sym = consumer_to_producer_sym.get(c_sym)
+        if p_sym is None:
+            untranslatable.append(c_sym)
+        else:
+            translated[p_sym] = factor
+
+    if untranslatable:
+        # We couldn't match these — fall back to symbol-only check on the
+        # untranslated portion. Conservative: treat as mismatched.
+        return "mismatched"
+    if translated == producer_splits:
+        return "aligned"
+    common = set(translated) & set(producer_splits or {})
+    if not common:
+        return "mismatched"
+    # Same physical dim split with different factor, or partial overlap.
+    return "partial"
+
+
 def _alignment_status(producer_splits: dict | None, self_splits: dict | None) -> str:
     """Classify producer/consumer mapping alignment.
 
@@ -223,11 +316,46 @@ def restickify_telemetry(operations: list[Operation]) -> None:
             producer_name = producer.get_name()
             producer_splits = _decode_splits(producer)
         else:
+            producer = None
             producer_name = producer_names[0] if producer_names else "<no-input>"
             producer_splits = None
-        status = _alignment_status(producer_splits, self_splits)
+
+        # Symbol-name alignment (the v1 status, kept for comparison logging).
+        status_sym = _alignment_status(producer_splits, self_splits)
+
+        # Physical alignment via stride-matching of iteration symbols across
+        # the producer's write and the restickify's read of the shared buffer.
+        consumer_to_producer_sym: dict[str, str] = {}
+        status_phys = status_sym  # fall-back when stride extraction fails
+        if producer is not None and producer_splits is not None:
+            # producer's write of its output buffer
+            p_writes = list(producer.get_read_writes().writes)
+            # restickify's read of producer's buffer
+            r_reads = [d for d in rw.reads if d.name == producer.get_name()]
+            if p_writes and r_reads:
+                p_dep = p_writes[0]
+                r_dep = r_reads[0]
+                p_strides = _extract_strides(p_dep.index, p_dep.var_names)
+                r_strides = _extract_strides(r_dep.index, r_dep.var_names)
+                consumer_to_producer_sym = _build_sym_correspondence(
+                    p_strides, r_strides
+                )
+                status_phys = _physical_alignment_status(
+                    producer_splits, self_splits, consumer_to_producer_sym
+                )
+
         bytes_moved = _restickify_bytes(op)
-        hops_per_byte = _estimate_hops_per_byte(producer_splits, self_splits)
+        # Hop estimate keyed off the PHYSICAL status, not the symbol status.
+        # Physical-aligned restickifies have ~0 inter-core ring traffic; the
+        # bytes still move on each core but locally.
+        if status_phys == "aligned":
+            hops_per_byte = 0.0
+        elif status_phys == "no-producer":
+            hops_per_byte = 0.0  # bytes come from HBM, not a peer core
+        elif status_phys == "partial":
+            hops_per_byte = _mean_random_hops(NUM_CORES_DEFAULT) / 2
+        else:  # mismatched
+            hops_per_byte = _mean_random_hops(NUM_CORES_DEFAULT)
         ring_byte_hops = (
             int(bytes_moved * hops_per_byte) if bytes_moved is not None else 0
         )
@@ -237,13 +365,15 @@ def restickify_telemetry(operations: list[Operation]) -> None:
             (
                 ring_byte_hops,
                 my_name,
-                status,
+                status_phys,
+                status_sym,
                 producer_name,
                 producer_splits,
                 [c.get_name() for c in consumers],
                 self_splits,
                 bytes_moved,
                 hops_per_byte,
+                consumer_to_producer_sym,
             )
         )
 
@@ -252,20 +382,24 @@ def restickify_telemetry(operations: list[Operation]) -> None:
     for (
         ring_byte_hops,
         my_name,
-        status,
+        status_phys,
+        status_sym,
         producer_name,
         producer_splits,
         consumer_names,
         self_splits,
         bytes_moved,
         hops_per_byte,
+        consumer_to_producer_sym,
     ) in rows:
         bytes_str = "<unknown>" if bytes_moved is None else f"{bytes_moved}"
         logger.info(
-            "restickify=%s status=%s ring_byte_hops=%d bytes=%s hops_per_byte=%.2f "
-            "producer=%s producer_splits=%s consumers=%s self_splits=%s",
+            "restickify=%s status=%s (sym=%s) ring_byte_hops=%d bytes=%s "
+            "hops_per_byte=%.2f producer=%s producer_splits=%s consumers=%s "
+            "self_splits=%s sym_map=%s",
             my_name,
-            status,
+            status_phys,
+            status_sym,
             ring_byte_hops,
             bytes_str,
             hops_per_byte,
@@ -273,6 +407,7 @@ def restickify_telemetry(operations: list[Operation]) -> None:
             producer_splits if producer_splits is not None else "<none>",
             consumer_names,
             self_splits if self_splits is not None else "<none>",
+            consumer_to_producer_sym or "{}",
         )
 
     if restick_count > 0:
