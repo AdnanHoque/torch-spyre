@@ -32,11 +32,12 @@ survive — including one genuinely unexplained effect still worth chasing.
   `% 32` perms happened to be valid there), the forced-K-split-on-decode
   result, the AIU HMI topology — and **one real, characterized effect**:
   out-split bandwidth swings ~70 vs ~120 GB/s with sticks-per-core,
-  predicted by `oddpart(sticks_per_core) ∈ {3,7}`. Measured under identity,
-  uncontaminated, K-independent, 12/12 fit — and it yields **two verified
-  planner optimizations**: **n_fast** (re-pick the out-split core count;
-  implemented, device-verified 1.73×) and a **pure-`mb` → 2D-split** fix
-  (verified 1.8–3.7×, not yet implemented).
+  predicted by `oddpart(sticks_per_core) ∈ {3,7}` **at m=128**. It yields
+  **one solid planner optimization** — a **pure-`m` → 2D `m×n` split** fix
+  (verified 1.8–3.7×, n-independent, clean rule, not yet implemented). A
+  second idea, **n_fast** (re-pick the `n`-split count), works at m≈128
+  but a contention-free M-sweep showed it does not generalize — implemented
+  behind a flag, but should not ship.
 
 ## The artifact — why Measurements 1, 2, and 6 are invalid
 
@@ -221,49 +222,39 @@ per core (per the ISA), or 4 HBM bank/pseudo-channel phases. When
 bands (start offset `core·s·128 B`) land in a conflicting phase pattern
 that serialises at the single shared ring port. Unverified.
 
-### n_fast — verified at m≈128, but M-dependent
+### n_fast — does not generalize; should not ship
 
-`sticks_per_core = (n/64) / n_split`, and the planner *chooses* `n_split`
-(default: the largest divisor of `n/64` that is ≤ 32). Re-picking a
-*smaller* `n_split` that lands `sticks_per_core` on a fast `oddpart` beats
-the default — **at m=128**, verified, numerically correct:
+The idea: `sticks_per_core = (n/64) / n_split`, the planner *chooses*
+`n_split` (default: the largest divisor of `n/64` ≤ 32), so re-pick a
+*smaller* `n_split` that lands `sticks_per_core` on a fast `oddpart`.
+**At m=128 it works** — verified, numerically correct, 1.45–1.72× on
+four slow-n values (`(128,32,1)` → `(128,24,1)` or `(128,28,1)`).
 
-| n | default → n_fast split | sticks/core | speedup |
-|---:|---|---:|---:|
-| 14336 | `(128,32,1)` → `(128,28,1)` | 7 → 8 | **1.71×** |
-| 12288 | `(128,32,1)` → `(128,24,1)` | 6 → 8 | **1.45×** |
-| 28672 | `(128,32,1)` → `(128,28,1)` | 14 → 16 | **1.54×** |
-| 24576 | `(128,32,1)` → `(128,24,1)` | 12 → 16 | **1.50×** |
+**But it does not generalize beyond m≈128.** A contention-free M-sweep
+(34 configs, 3 trials each, all <2.3% spread — clean) settled it:
 
-Fewer cores is a net win *at m=128* because the matmul is HBM-bound — the
-per-core bandwidth gain dwarfs the lost parallelism.
+| n | n_fast helps at | regresses at |
+|---:|---|---|
+| 12288 | m=128 only (1.44×) | m=32/64/96/160 (0.76–0.90×) |
+| 14336 | m≥96 (1.4–1.8×) | m=64 (0.87×) |
+| 28672 | m≤128 (1.5–1.9×) | m≥192 (0.81×) |
 
-**But n_fast is M-dependent and its M-range is not cleanly characterised.**
-The same move at **m=64** (`(64,32,1)` → `(64,28,1)`, n=14336) regressed
-to **0.87×** — corroborated by two independent probes, so the small-m
-regression is real. An M-sweep (38 runs, m=32–384 × three slow-n values,
-all numerically correct) found **no clean regression→win crossover**: the
-result was non-monotonic and n-dependent. But that sweep was confounded —
-it shared the single accelerator with another benchmark, the default
-`(1,32,1)` config's timing went unstable (std/mean ≈ 0.3), and n_fast's
-small signal (~1.5×) was swamped by contention noise. What survives the
-noise: **m=128 wins on all three n** (1.46–1.72×, corroborated by the
-sticks-per-core sweep, the viability probe, and the device test);
-**m=64 regresses**; everything else is inconclusive. n_fast needs a
-contention-controlled re-run (exclusive device) before its M-range can
-be trusted.
+The usable m-range is **n-dependent and flips direction** — n=14336
+wants `m ≥ 96`, n=28672 wants `m ≤ 128`. No single `m ≥ X` gate can
+capture it. The reason: the default `(1,32,1)` config's runtime is itself
+wildly non-monotonic in m (n=12288 default jumps 0.80 → 1.42 → 0.83 ms
+across m=96/128/160) — the "slow oddpart" cost the heuristic targets is
+real but only *intermittently* dominant. The original sticks-per-core
+finding (12/12, K-independent) was measured **only at m=128**, which
+happens to be a point where the slow-oddpart cost reliably bites; it does
+not hold at other m.
 
-**Implemented** behind the `n_fast_out_split` config flag (off by
-default) — `_maybe_n_fast` in `work_division.py`, gated on a pure n-split
-`BATCH_MATMUL_OP` with no span_reduction commitments; the n dim is
-identified structurally (output coord var that is also a stick var).
-Device-verified at m=128. **The flag has no M-gate yet — it would regress
-m=64 shapes — so it is not safe to enable broadly until n_fast's M-range
-is cleanly characterised.**
-
-**Planner rule (within n_fast's valid M-range):** after
-`C = core_split(n/64, 32)`, if `oddpart((n/64)/C) ∈ {3,7}`, drop to the
-largest `C' ≤ 32` dividing `n/64` whose `(n/64)/C'` has `oddpart ∉ {3,7}`.
+**Verdict: do not ship n_fast as a pure sticks-per-core heuristic.** It is
+too coarse — it would need to be conditioned jointly on `(m, n)`, or
+folded into a real cost model. It is currently *implemented* behind the
+`n_fast_out_split` config flag (off by default) — `_maybe_n_fast` in
+`work_division.py`. **That implementation should be reverted**; the flag
+would regress most shapes it fires on.
 
 ### A second finding — pure-`m` is slow vs a 2D `m×n` split (verified)
 
@@ -331,8 +322,8 @@ Head-to-head on the contested shapes:
 
 **Cost-model guidance:** prefer **2D `m×n`** whenever the shape is in the
 `m`-split regime — ahead of k_fast. In the `n`-split regime it is roughly
-a wash; k_fast is the safe pick, n_fast only within its (still being
-characterized) M-range.
+a wash; k_fast is the safe pick. n_fast does not generalize (see above)
+and should not be in the cost model.
 
 ## Lessons for the next person
 
