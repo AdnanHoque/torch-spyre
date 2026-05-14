@@ -33,4 +33,12 @@ sencores: int = int(os.getenv("SENCORES", "32"))
 # with its producer/consumer split mapping. Read-only; no behavior change.
 restickify_telemetry: bool = os.environ.get("SPYRE_RESTICKIFY_TELEMETRY", "0") == "1"
 
+# Phase 1 alignment for ring-aware restickify. When True, work_distribution
+# re-prioritises an op's output_dims so iteration symbols that physically
+# index the same buffer dim as a producer's split symbol come first —
+# biasing the consumer's split to land on the same physical axis as the
+# producer's, which eliminates inter-core ring traffic in the intervening
+# restickify. Off by default while we validate.
+align_consumer_splits: bool = os.environ.get("SPYRE_ALIGN_CONSUMER_SPLITS", "0") == "1"
+
 install_config_module(sys.modules[__name__])

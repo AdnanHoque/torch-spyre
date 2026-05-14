@@ -586,6 +586,18 @@ def work_distribution_pass(
     }
     output_dims, reduction_dims = prioritize_dimensions(output_td, it_space_remaining)
 
+    # Phase 1 ring-aware restickify: re-prioritize output_dims so consumer
+    # splits land on the same physical axis as the producer's, eliminating
+    # inter-core ring traffic in the intervening restickify. Hint only — the
+    # existing logic still owns the final decision (it skips non-divisible
+    # candidates etc.). Off by default; flag-gated for safe rollout.
+    if config.align_consumer_splits and hasattr(op, "_spyre_name_to_op"):
+        from .mapping_alignment import reorder_output_dims_for_producer_alignment
+
+        output_dims = reorder_output_dims_for_producer_alignment(
+            op, output_dims, op._spyre_name_to_op
+        )
+
     # If span_reduction_pass already committed a reduction split, suppress further
     # reduction splitting so the final result never exceeds one reduction dim split.
     coord_vars = {v for e in output_td.device_coords[:-1] for v in e.free_symbols}
@@ -685,10 +697,26 @@ def span_reduction(operations: list[Operation]) -> None:
 def work_distribution(operations: list[Operation]) -> None:
     """Pass 2: distribute remaining cores across ops to maximize parallelism."""
     max_cores = _validate_max_cores()
+    # Phase 1 ring-aware restickify: per-op alignment needs to look up each
+    # consumer's producers by buffer name. Build the map once and stash on
+    # each op (cheap, ephemeral) so work_distribution_pass can read it
+    # without a signature change.
+    name_to_op = None
+    if config.align_consumer_splits:
+        from .mapping_alignment import build_name_to_op_map
+
+        name_to_op = build_name_to_op_map(operations)
+
     for op in _iter_computed_buffers(operations):
         rw = op.get_read_writes()
         args = get_mem_deps_from_rw(rw)
-        if isinstance(op.data, Pointwise):
-            divide_pointwise_op(op, args, max_cores, work_distribution_pass)
-        elif isinstance(op.data, Reduction):
-            divide_reduction_op(op, args, max_cores, work_distribution_pass)
+        if name_to_op is not None:
+            op._spyre_name_to_op = name_to_op
+        try:
+            if isinstance(op.data, Pointwise):
+                divide_pointwise_op(op, args, max_cores, work_distribution_pass)
+            elif isinstance(op.data, Reduction):
+                divide_reduction_op(op, args, max_cores, work_distribution_pass)
+        finally:
+            if name_to_op is not None and hasattr(op, "_spyre_name_to_op"):
+                delattr(op, "_spyre_name_to_op")
