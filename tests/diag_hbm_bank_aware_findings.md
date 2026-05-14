@@ -213,12 +213,67 @@ This explains every grouping:
 
 ### Directional confirmation
 
-The permutations that help (`bit_reverse`, `stride_3`, `stride_7`) all
-maximally *spread* cores; the ones that don't (`reverse`, `pair_swap`)
-preserve local adjacency. k_fast wanted *adjacency* (cohort members
-close, fewer ring hops). This wants *spread* (readers far apart, fewer
-bank collisions). Opposite objective function → contention effect, not
-ring-traversal effect.
+The permutations that help (`bit_reverse`, `stride_3`, `stride_7`,
+`cluster`) all maximally *spread* cores; the ones that don't (`reverse`,
+`pair_swap`) preserve local adjacency. k_fast wanted *adjacency* (cohort
+members close, fewer ring hops). This wants *spread* (readers far apart,
+fewer bank collisions). Opposite objective function → contention effect,
+not ring-traversal effect.
+
+## Measurement 6 — direct HBM bandwidth probe (isolated `out`-split matmul)
+
+Isolated `x(128,4096) @ W(4096,N)`, no surrounding ops. Effective HBM
+bandwidth = bytes-touched / per-call wall time. Sweep N and permutation.
+
+First the **`mb`-split vs `out`-split transition**, root-caused by
+diffing the compiled SDSC for N=8192 vs N=12800:
+
+| N | N/64 sticks | split (verified from SDSC) | regime |
+|---:|---:|---|---|
+| 1536–8192 | 24–128 | `mb`: 32 | M is bigger output dim → M-split |
+| 12800+ | 200+ | `out`: 25/32/… | N-in-sticks > M=128 → N-split |
+
+* **`mb`-split is broadcast-bound (~37 GB/s, flat, permutation-invariant).**
+  Per-call time scales perfectly linearly with weight bytes from N=1536
+  to N=8192. Every core needs the full weight; it goes over the on-chip
+  broadcast fabric whose bandwidth is the ceiling. No per-core slice →
+  no permutation lever.
+* **`out`-split is HBM-bandwidth-bound (~70–145 GB/s, permutation-sensitive).**
+  Each core reads its own distinct weight column-slice straight from HBM.
+  Aggregate bandwidth = bank parallelism = a function of the
+  core→slice→address→bank mapping.
+
+Then the **core-count effect within the `out`-split regime** (all N here
+have N/64 > 128, so all are genuinely `out`-split):
+
+| N | `out`-split | identity | cluster | bit_reverse | headroom |
+|---:|---:|---:|---:|---:|---:|
+| 10240 | **32** | 118.7 | 119.3 | 117.4 | ~0% |
+| 12288 | **32** | 72.3 | 73.6 | 72.3 | ~2% |
+| 16384 | **32** | 124.4 | 124.9 | 121.7 | ~0% |
+| 24576 | **32** | 70.4 | 70.0 | 70.3 | ~0% |
+| 9600 | 30 | 112.8 | 118.4 | 119.5 | **+6%** |
+| 13312 | 26 | 108.5 | 140.7 | 130.5 | **+30%** |
+| 12800 | 25 | 106.9 | 145.6 | 134.3 | **+36%** |
+| 11264 | 22 | 102.0 | 132.3 | 144.0 | **+41%** |
+
+(GB/s effective; "headroom" = best non-identity vs identity.)
+
+**Every `out:32` case is flat. Every non-power-of-2 core count
+(`out:22/25/26`) swings 30–41%.** `out:30` is mildly sensitive (+6%) —
+30 is "close to" 32.
+
+Two further measured details with design implications:
+
+1. **The optimal permutation is core-count-dependent.** `bit_reverse`
+   wins at `out:22` (144 GB/s); `cluster` wins at `out:25` and `out:26`.
+   The fix is not "apply a fixed permutation" — it is "compute the
+   bank-aligned permutation for *this* core count".
+2. **A secondary sticks-per-core effect exists even within `out:32`.**
+   N=12288 (6 sticks/core) and N=24576 (12 sticks/core) sit at ~70 GB/s
+   while N=10240 (5/core) and N=16384 (8/core) reach ~120 GB/s. This is
+   a separate intra-core access-pattern effect, out of scope for the
+   permutation lever but worth noting.
 
 ## What this means
 
@@ -229,40 +284,109 @@ mechanism k_fast uses, but the fabric and the objective are different:
 |---|---|---|
 | Fabric | SFP ring | HBM banks/channels |
 | Objective | minimise ring hops (cohort adjacency) | minimise bank contention (reader spread) |
-| Applies to | K-split matmuls | `out`-split matmuls reading distinct weight slices |
+| Applies to | K-split matmuls | `out`-split matmuls with non-power-of-2 core counts |
 | Mechanism | `core_id_to_work_slice` permutation | same |
 
-Restickify ring optimisation is dead — definitively, on the evidence.
-But "HBM-bank-aware core placement for `out`-split matmuls" is a
-genuine, measured, ~6% wall-clock opportunity on a real Granite-shaped
-workload, with a clean mechanism and a one-knob lever.
+**The lever is now precisely characterised, by measurement:**
+
+* Restickify ring optimisation is dead — RIU is bandwidth-bound, and
+  restickify-bearing bundles are invariant across all permutations and
+  sizes tested.
+* `mb`-split matmuls are broadcast-bound — not a target.
+* **`out`-split matmuls with a power-of-2 core count** already have a
+  near-optimal default mapping — not a target.
+* **`out`-split matmuls with a non-power-of-2 core count** lose **30–41%
+  of HBM bandwidth** to bank misalignment under the default identity
+  mapping. A bank-aware permutation recovers it. **This is the target.**
+
+Trigger condition (cheap to detect at SDSC emission): the op is
+`out`-split AND `numCoresUsed_` is not a power of two.
+
+Scope/impact: `out`-split is the planner's choice whenever N-in-sticks
+exceeds M — i.e. **all of decode** (M=1 → every matmul is N-split) and
+the large-N projections in prefill. The non-power-of-2 core count
+happens whenever N/64 has no divisor of 32 — and **Granite-3.3-8B's
+INTER=12800 lands exactly on the `out:25` bad case** (+36% bandwidth
+left on the table). This is a real production shape, not synthetic.
 
 ## Open questions / next steps
 
-1. **Confirm the HBM mechanism directly.** A synthetic probe: one
-   `out`-split matmul, sweep core→weight-slice mappings, measure
-   aggregate HBM bandwidth (not just wall time). If bandwidth tracks
-   the bank-spread prediction, the mechanism is nailed.
-2. **Model the bank function.** Need Spyre's HBM address → bank mapping
-   (bank stride, number of banks/channels) to derive an *optimal*
-   permutation rather than relying on bit_reverse happening to be good.
-3. **Characterise breadth.** How many real-model matmuls are `out`-split
-   vs `mb`-split? `out`-split is the planner's choice for narrow-N /
-   large-weight shapes; need a shape-catalog sweep to size the
-   opportunity across real models.
+1. ~~**Confirm the HBM mechanism directly.**~~ **DONE — Measurement 6.**
+   Mechanism confirmed: `out`-split matmuls with non-power-of-2 core
+   counts lose 30–41% HBM bandwidth to bank misalignment.
+2. **Model the bank function.** The optimal permutation is core-count-
+   dependent (`bit_reverse` best at `out:22`, `cluster` best at
+   `out:25/26`). Need Spyre's HBM address → bank mapping (bank stride,
+   number of banks/channels) to *derive* the bank-aligned permutation
+   for any core count rather than picking from a fixed menu. This is
+   the key blocker for a principled optimisation.
+3. **Characterise breadth.** How many real-model matmuls hit the bad
+   case (`out`-split AND non-power-of-2 core count)? Need a shape-
+   catalog sweep across production models. Granite-3.3-8B INTER=12800
+   is confirmed bad (`out:25`); need DSv3, Llama, Mixtral dims checked.
 4. **Why does the planner pick `out: 25` (25 cores, 7 idle)?** The
-   `out`-split bundles use only 25 of 32 cores. Worth understanding
-   whether that's a divisibility artefact and whether it interacts with
-   the bank-spread story.
-5. **Interaction with k_fast.** If a future matmul *is* K-split, the
+   `out`-split core count is the largest divisor of N-in-sticks that is
+   ≤ 32. For N/64 with no good divisor near 32, this strands cores AND
+   creates the bank misalignment. Worth asking whether the planner
+   should prefer a *worse* core count that is bank-friendlier — i.e.
+   the bank-alignment objective may belong in core division, not just
+   in core-id emission.
+5. **Secondary sticks-per-core effect.** Even `out:32` shows a 70 vs
+   120 GB/s split by sticks-per-core (6/12 slow, 5/8 fast). Separate
+   from the permutation lever, but a second HBM-access-pattern effect
+   worth its own investigation.
+6. **Interaction with k_fast.** If a future matmul *is* K-split, the
    SFP-cohort-adjacency objective (k_fast) and the HBM-bank-spread
-   objective could conflict. Need a combined cost model.
+   objective could conflict. Need a combined cost model. See
+   "Interaction with the Split-K PR" below.
+
+## Interaction with the Split-K PR (#1986)
+
+k_fast / Split-K and this HBM-bank lever are **non-overlapping today**
+and **complementary, not conflicting, after #1986 merges:**
+
+* **No overlap on the current workload.** Every matmul SDSC in the probe
+  graph is `"in": 1` — nothing is K-split, so k_fast's SFP-cohort lever
+  is inert here. This HBM-bank lever only fires on `out`-split matmuls.
+  An op is either `out`-split or `in`-split for a given dim; the two
+  levers target disjoint kernel populations.
+* **#1986 changes *which* matmuls are K-split, not the bank result.**
+  Once Split-K is the planner's choice for narrow-N shapes, those
+  matmuls move from `out`/`mb`-split into `in`-split and start using the
+  SFP ring. That *shrinks* the population this HBM lever applies to (some
+  shapes that were `out`-split become `in`-split) but does not change
+  the finding for the shapes that stay `out`-split — large-N projections
+  and all of decode.
+* **The shared mechanism is the merge risk.** Both levers are the same
+  `_get_core_to_slice_mapping` / `core_id → work_slice` permutation. If a
+  matmul is *both* K-split (wants SFP cohort adjacency) *and* reads
+  distinct weight slices per cohort (wants HBM bank spread), the two
+  objectives pull the permutation in opposite directions — k_fast wants
+  adjacency, this wants spread. That case does not exist in the current
+  graph, but a combined cost model is needed before both land. Whoever
+  merges second must not blindly overwrite the other's mapping.
+* **Recommended sequencing.** #1986 should merge first (it is further
+  along and has the cost-model scaffolding). The HBM-bank permutation
+  should be built *on top of* #1986's mapping API, as a second term in
+  the same cost model, gated on the `out`-split + non-power-of-2 trigger
+  so it never touches the kernels k_fast owns.
 
 ## Reproduction
 
-Probes (on branch `AdnanHoque/rfc-ring-aware-restickify`, in `/tmp` at
-time of writing — should be moved into the repo):
+Probes (in `/tmp` at time of writing — should be moved into the repo):
 
+* `hbm_bandwidth_probe.py` — isolated `out`-split matmul
+  `x(M,K) @ W(K,N)`, monkey-patches `_get_core_to_slice_mapping` for the
+  permutation and `SpyreSDSCKernelRunner.run` for forced-sync timing;
+  reports effective HBM bandwidth. Env: `PERM`, `PROBE_N/M/K`.
+* `hbm_outsplit_sweep.sh` — drives `hbm_bandwidth_probe.py` over the
+  guaranteed-`out`-split N set × {identity, cluster, bit_reverse};
+  produces the Measurement 6 core-count table.
+* `hbm_corecount_sweep.py` — earlier non-power-of-2 sweep (also covers
+  the `mb`-split sizes that turned out broadcast-bound).
+* `diff_kernels.py` — compiles `x@W` for a given N, dumps
+  `numWkSlicesPerDim_` / `numCoresUsed_` / `coreIdToWkSlice_` /
+  `segment_size.json`; used to root-cause the `mb`→`out` transition.
 * `phase_a_perm_sweep.py` — per-bundle timing under a chosen `PERM`
 * `phase_a_size_sweep.py` — H sweep, identity vs bit_reverse
 * `restickify_kernel_timing.py` — forced-sync per-bundle timing harness
