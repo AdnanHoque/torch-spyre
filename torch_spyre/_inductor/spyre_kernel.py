@@ -46,6 +46,10 @@ from .pass_utils import (
 from .views import compute_coordinates, align_tensors
 from .logging_utils import get_inductor_logger
 from .op_spec import OpSpec, TensorArg
+from .restickify_ring import (
+    CORE_MAPPING_OVERRIDE_ATTR,
+    CORE_MAPPING_OVERRIDE_OP_INFO_KEY,
+)
 import logging
 
 logger = get_inductor_logger("spyre_kernel")
@@ -425,6 +429,10 @@ class SpyreKernel(Kernel[CSEVariable]):
         it_space_extended = {
             k: (v, work_division.get(k, 1)) for k, v in it_space.items()
         }
+        mapping_override = getattr(ir_node, CORE_MAPPING_OVERRIDE_ATTR, None)
+        if mapping_override is not None:
+            op_info = dict(op_info)
+            op_info[CORE_MAPPING_OVERRIDE_OP_INFO_KEY] = mapping_override
 
         return OpSpec(
             op,

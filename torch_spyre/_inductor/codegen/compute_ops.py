@@ -207,13 +207,16 @@ def gen_coord_info_value(
 
 def generate_sdsc(idx, sdsc_spec):
     out_idx = len(sdsc_spec.args) - 1
-    core_id_to_wk_slice = {
-        str(c): {
-            str(dim): int(expr.subs({Symbol("core_id"): c}))
-            for dim, expr in sdsc_spec.core_id_to_work_slice.items()
+    if sdsc_spec.core_id_to_work_slice_override is not None:
+        core_id_to_wk_slice = sdsc_spec.core_id_to_work_slice_override
+    else:
+        core_id_to_wk_slice = {
+            str(c): {
+                str(dim): int(expr.subs({Symbol("core_id"): c}))
+                for dim, expr in sdsc_spec.core_id_to_work_slice.items()
+            }
+            for c in range(sdsc_spec.num_cores)
         }
-        for c in range(sdsc_spec.num_cores)
-    }
     return {
         f"{idx}_{sdsc_spec.opfunc}": {
             "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],

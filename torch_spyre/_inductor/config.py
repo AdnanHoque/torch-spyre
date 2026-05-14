@@ -39,4 +39,11 @@ core_id_k_fast_emission: bool = (
     os.environ.get("SPYRE_CORE_ID_K_FAST_EMISSION", "1") == "1"
 )
 
+# Default-off producer-aligned physical core mapping for compatible
+# compiler-inserted restickify ops. This does not change restickify placement
+# or selected tensor layouts.
+align_restickify_core_mapping: bool = (
+    os.environ.get("SPYRE_ALIGN_RESTICKIFY_CORE_MAPPING", "0") == "1"
+)
+
 install_config_module(sys.modules[__name__])

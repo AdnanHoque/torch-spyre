@@ -170,7 +170,8 @@ movement and stable correctness.
 
 When a restickify has an in-graph producer and compatible logical ownership,
 align the restickify physical core mapping to the producer mapping. This stage
-should be default-off and preserve:
+is gated by `SPYRE_ALIGN_RESTICKIFY_CORE_MAPPING=1`, should stay default-off,
+and should preserve:
 
 - restickify count
 - restickify placement

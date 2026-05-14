@@ -43,6 +43,7 @@ from .propagate_layouts import (
 from .optimize_restickify import optimize_restickify_locations
 from .insert_restickify import insert_restickify, finalize_layouts
 from .work_division import span_reduction, work_distribution, k_fast_division
+from .mapping_alignment import align_restickify_core_mappings
 from .pass_utils import apply_splits_from_index_coeff, iteration_space_from_op
 from .scratchpad import scratchpad_planning
 from .fusion import spyre_fuse_nodes
@@ -233,6 +234,7 @@ class CustomPreSchedulingPasses(CustomGraphPass):
             k_fast_division(operations) if config.core_id_k_fast_emission else []
         )
         work_distribution(operations, k_fast_ops)
+        align_restickify_core_mappings(operations)
         if config.lx_planning:
             scratchpad_planning(operations)
 
@@ -248,6 +250,7 @@ class CustomPreSchedulingPasses(CustomGraphPass):
             inspect.getfile(span_reduction),
             inspect.getfile(work_distribution),
             inspect.getfile(k_fast_division),
+            inspect.getfile(align_restickify_core_mappings),
             inspect.getfile(scratchpad_planning),
         ]
         return get_hash_for_files(tuple(dict.fromkeys(files + [__file__])))

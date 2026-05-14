@@ -34,6 +34,7 @@ from torch_spyre._inductor import config as _spyre_config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.op_spec import TensorArg
+from torch_spyre._inductor.restickify_ring import CORE_MAPPING_OVERRIDE_OP_INFO_KEY
 
 from .compute_ops import generate_sdsc
 
@@ -83,6 +84,7 @@ class SDSCSpec:
     num_cores: int
     work_slices: dict[Symbol, Any]
     core_id_to_work_slice: dict[Symbol, Any]
+    core_id_to_work_slice_override: dict[str, dict[str, int]] | None
     padding: dict[Symbol, Any]
     layouts: dict[int, Any]
     args: list[SDSCArgs]
@@ -191,6 +193,43 @@ def _should_use_k_fast_mapping(
     if len(dim_list) < 3:
         return False
     return dim_splits[dim_list[-1]] > 1
+
+
+def _core_mapping_override_for_sdsc(
+    op_info: dict[str, Any] | None,
+    symbol_mapping: dict[Symbol, Symbol],
+    num_cores: int,
+) -> dict[str, dict[str, int]] | None:
+    if not op_info:
+        return None
+    raw = op_info.get(CORE_MAPPING_OVERRIDE_OP_INFO_KEY)
+    if raw is None:
+        return None
+
+    str_symbol_mapping = {str(src): str(dst) for src, dst in symbol_mapping.items()}
+    mapped_dims = list(str_symbol_mapping.values())
+    override: dict[str, dict[str, int]] = {}
+    for core_id, per_dim in raw.items():
+        core = int(core_id)
+        if core < 0 or core >= num_cores:
+            raise ValueError(
+                f"core mapping override contains core {core} outside {num_cores} cores"
+            )
+        mapped = {dim: 0 for dim in mapped_dims}
+        mapped.update(
+            {
+                str_symbol_mapping[str(dim)]: int(slice_idx)
+                for dim, slice_idx in per_dim.items()
+                if str(dim) in str_symbol_mapping
+            }
+        )
+        override[str(core)] = mapped
+
+    if len(override) != num_cores:
+        raise ValueError(
+            f"core mapping override has {len(override)} cores, expected {num_cores}"
+        )
+    return override
 
 
 def _get_mask_value(op: str) -> float:
@@ -497,7 +536,16 @@ def parse_op_spec(op_spec: OpSpec) -> SDSCSpec:
     if _is_topk(op_spec.op):
         num_inputs = 1  # topk has exactly 1 input tensor and 1 output tensor
 
-    if _should_use_k_fast_mapping(is_matmul, sdsc_iteration_space, dim_splits):
+    core_id_to_work_slice_override = _core_mapping_override_for_sdsc(
+        op_spec.op_info,
+        symbol_mapping,
+        num_cores,
+    )
+    if core_id_to_work_slice_override is not None:
+        core_id_to_work_slice = _get_core_to_slice_mapping(
+            sdsc_iteration_space, dim_splits, num_cores
+        )
+    elif _should_use_k_fast_mapping(is_matmul, sdsc_iteration_space, dim_splits):
         core_id_to_work_slice = _k_fast_core_to_slice_mapping(
             sdsc_iteration_space, dim_splits, num_cores
         )
@@ -517,6 +565,7 @@ def parse_op_spec(op_spec: OpSpec) -> SDSCSpec:
         num_cores=num_cores,
         work_slices=work_slices,
         core_id_to_work_slice=core_id_to_work_slice,
+        core_id_to_work_slice_override=core_id_to_work_slice_override,
         padding=padding,
         layouts=layouts,
         args=args,
