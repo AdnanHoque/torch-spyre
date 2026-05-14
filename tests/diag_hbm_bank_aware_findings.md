@@ -351,12 +351,18 @@ and **complementary, not conflicting, after #1986 merges:**
   An op is either `out`-split or `in`-split for a given dim; the two
   levers target disjoint kernel populations.
 * **#1986 changes *which* matmuls are K-split, not the bank result.**
-  Once Split-K is the planner's choice for narrow-N shapes, those
-  matmuls move from `out`/`mb`-split into `in`-split and start using the
-  SFP ring. That *shrinks* the population this HBM lever applies to (some
-  shapes that were `out`-split become `in`-split) but does not change
-  the finding for the shapes that stay `out`-split — large-N projections
-  and all of decode.
+  k_fast's M-range gate is `1 <= rows_per_core <= 2*_PT_ROWS` (where
+  `rows_per_core = M / max_cores`), and its wide-N gate
+  `rows_per_core > _PT_ROWS/2 and n_sticks >= max_cores` only rejects
+  wide-N when **M > 128**. So for M in roughly `[32, 128]`, k_fast grabs
+  *wide-N* matmuls too and moves them from `out`-split into `in`-split.
+  That removes a substantial chunk of the **M <= 128 prefill** out-split
+  population — not just narrow-N shapes. What it leaves untouched:
+  * **All of decode (M=1):** `rows_per_core = 1/max_cores < 1` → k_fast's
+    first gate rejects it. Decode matmuls stay `out`-split. This is the
+    HBM lever's core territory and #1986 does not contest it.
+  * **M > 128 wide-N prefill:** the wide-N gate rejects it → stays
+    `out`-split.
 * **The shared mechanism is the merge risk.** Both levers are the same
   `_get_core_to_slice_mapping` / `core_id → work_slice` permutation. If a
   matmul is *both* K-split (wants SFP cohort adjacency) *and* reads
