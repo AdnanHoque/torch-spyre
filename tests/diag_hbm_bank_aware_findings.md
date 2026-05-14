@@ -12,10 +12,13 @@ hand-waving.
 
 ## TL;DR
 
-* **Restickify ring cost is bandwidth-bound, not hop-bound.** Six
-  core-id permutations × four tensor sizes = 24 configurations; the two
-  restickify-bearing kernel bundles are invariant in all of them
-  (< 1% spread). No ring-aware optimization can reduce restickify cost.
+* **Restickify cost is bandwidth-bound, not hop-bound — for both
+  activation and weight restickify.** Six core-id permutations × four
+  tensor sizes = 24 configurations; the activation-restickify-bearing
+  bundles are invariant in all of them (< 1% spread). A later probe
+  (Measurement 7) confirmed the same for *weight* restickify, and found
+  the permutation lever structurally cannot even be applied to it. No
+  ring-aware optimization can reduce restickify cost.
 * **But the same lever — permuting physical core IDs at SDSC emission —
   moves wall time 11–20% on a different class of kernels:** matmuls
   split on the `out` (output) dimension.
@@ -275,6 +278,75 @@ Two further measured details with design implications:
    a separate intra-core access-pattern effect, out of scope for the
    permutation lever but worth noting.
 
+## Measurement 7 — weight restickify
+
+Measurements 1–5 covered *activation* restickify (the `ReStickifyOpHBM`
+from the q@k.t() pattern). A separate probe tested *weight* restickify —
+the restickify inserted when a matmul's weight tensor is not already in
+the layout the matmul wants. A maintainer flagged this as a cost that
+"happens during all matmuls", and since it is a large HBM read it was a
+plausible second target for the bank lever.
+
+Workload: `x(M,K) @ W.t()` with `W` shaped `(N,K)` reliably forces a
+weight `ReStickifyOpHBM` on the `(N,K)` weight tensor (~100 MB at
+N=12800).
+
+Findings:
+
+* **Never its own bundle.** The planner always fuses the weight
+  restickify into the consuming matmul's bundle (`ReStickifyOpHBM` +
+  `batchmatmul`). With two consumers of the same weight it is duplicated
+  per consumer, still fused — never hoisted standalone, so it cannot be
+  timed in isolation.
+* **Same non-power-of-2 stranding on paper.** Its SDSC split is
+  `mb:<ncores>, out:1`, with core count = the largest divisor of N/64
+  that is ≤ 32 — the same stranding as `out`-split matmuls. So it looked
+  like a candidate.
+* **But permutation-invariant.** At N=12800 the matmul *alone* swings
+  +86% under `bit_reverse` (~0.83 ms absolute); the fused
+  restickify+matmul bundle swings only +24% (~0.68 ms absolute) — the
+  *same* absolute swing, the percentage just shrinks by dilution. The
+  restickify contributes ~1.8 ms/call of essentially flat time and ~0 ms
+  of additional permutation sensitivity.
+* **The lever structurally cannot be applied.** At non-power-of-2 core
+  counts (`mb:22/25`) every non-identity permutation that isn't closed
+  on `[0,ncores)` maps a core_id outside the used set → bundler SIGABRT
+  (`"Workslice information for coreId=23 was not found"`). The
+  permutation infrastructure assumes a full-32 bijection; restickify
+  ops use sub-32 core sets.
+
+**Conclusion:** weight restickify is bandwidth-bound and
+permutation-invariant, exactly like activation restickify. It is a real,
+sizable HBM cost (~1.8 ms/call for a 100 MB weight, dominating the
+bundle), but it is a large *sequential streaming* read that saturates
+bandwidth regardless of the core → slice mapping. The bank-contention
+lever needs many cores issuing *distinct concurrent* reads whose address
+spread you control — that is the `out`-split matmul pattern, not a
+restickify. Weight restickify should be attacked by *eliminating* it
+(load-time weight pre-formatting, issue #1339; layout-decision
+optimizer, PR #1979), not by core-id permutation.
+
+## Measurement 8 — forced K-split on M=1 decode
+
+The scope/impact claim below rests on decode (M=1) staying `out`-split.
+A probe checked the alternative: force a K-split on the M=1 down_proj
+shape (Granite-3.3-8B, M=1, K=12800, N=4096), bypassing the planner gate
+that normally keeps it `out:32`.
+
+| Forced split | per-call | Δ vs `out:32` baseline (0.737 ms) |
+|---|---:|---:|
+| `out:32, in:1` (baseline) | 0.737 ms | — |
+| `out:16, in:2` | 0.794 ms | **+7.7%** |
+| `out:8, in:4` | 0.785 ms | **+6.5%** |
+| `out:4, in:8` | 0.854 ms | **+15.9%** |
+
+Every forced K-split is *slower*, and latency degrades monotonically
+with reduction depth. At M=1 the per-slice partial product is a single
+PT row — the matmul compute is trivially cheap, so a K-split only adds
+an SFP-ring PSUM reduction with nothing to amortise it against. This
+confirms decode should stay `out`-split: the HBM-bank lever, not
+K-split, is the right tool for the decode regime.
+
 ## What this means
 
 The lever — permuting physical core IDs at SDSC emission — is the same
@@ -291,7 +363,10 @@ mechanism k_fast uses, but the fabric and the objective are different:
 
 * Restickify ring optimisation is dead — RIU is bandwidth-bound, and
   restickify-bearing bundles are invariant across all permutations and
-  sizes tested.
+  sizes tested. This holds for both activation restickify
+  (Measurements 1–5) and weight restickify (Measurement 7); the lever
+  structurally cannot even be applied to restickify SDSCs at
+  non-power-of-2 core counts.
 * `mb`-split matmuls are broadcast-bound — not a target.
 * **`out`-split matmuls with a power-of-2 core count** already have a
   near-optimal default mapping — not a target.
@@ -393,6 +468,11 @@ Probes (in `/tmp` at time of writing — should be moved into the repo):
 * `diff_kernels.py` — compiles `x@W` for a given N, dumps
   `numWkSlicesPerDim_` / `numCoresUsed_` / `coreIdToWkSlice_` /
   `segment_size.json`; used to root-cause the `mb`→`out` transition.
+* `weight_restickify_probe.py` — forces a weight `ReStickifyOpHBM` via
+  `x @ W.t()`, sweeps permutations on the fused bundle; Measurement 7.
+* `down_proj_kfast_probe.py` / `down_proj_kfast_force.py` — Measurement 8:
+  k_fast on/off and forced-K-split sweeps on the M=1 decode down_proj
+  shape.
 * `phase_a_perm_sweep.py` — per-bundle timing under a chosen `PERM`
 * `phase_a_size_sweep.py` — H sweep, identity vs bit_reverse
 * `restickify_kernel_timing.py` — forced-sync per-bundle timing harness
