@@ -30,9 +30,11 @@ survive — including one genuinely unexplained effect still worth chasing.
 * **What survives:** the structural `mb`-split vs `out`-split distinction,
   the restickify measurements (those bundles were power-of-2, so the
   `% 32` perms happened to be valid there), the forced-K-split-on-decode
-  result, the AIU HMI topology — and **one unexplained live effect**:
-  out-split bandwidth varies ~70 vs ~120 GB/s with sticks-per-core,
-  measured under identity so uncontaminated by the artifact.
+  result, the AIU HMI topology — and **one real, characterized effect**:
+  out-split bandwidth swings ~70 vs ~120 GB/s with sticks-per-core,
+  predicted by `oddpart(sticks_per_core) ∈ {3,7}`. Measured under identity,
+  uncontaminated, K-independent, 12/12 fit — and potentially actionable in
+  the planner's core-count selection.
 
 ## The artifact — why Measurements 1, 2, and 6 are invalid
 
@@ -178,24 +180,53 @@ it does give reframes the would-be mechanism:
   the hardware broadcast: "HMI synchronizes ring multicasting enabling all
   32 cores to simultaneously read the same data."
 
-## The one live thread — sticks-per-core bandwidth
+## The real finding — sticks-per-core bandwidth
 
-Measurement 6 also recorded a bandwidth split that tracks
-**sticks-per-core**, measured under *identity* across different N, all
-`out:32`. Identity is always a valid bijection, so this slice of the data
-is **not contaminated** by the artifact:
+The one effect that survives, and the only positive result here. Measured
+under *identity* (no permutation — uncontaminated by the artifact above),
+on isolated `out:32` matmuls, splits confirmed via `diff_kernels.py`.
 
-| N | sticks/core | eff BW (identity) |
-|---:|---:|---:|
-| 10240 | 5 | ~119 GB/s |
-| 12288 | 6 | ~72 GB/s |
-| 16384 | 8 | ~124 GB/s |
-| 24576 | 12 | ~70 GB/s |
+Dense sweep, M=128, K=4096, `sticks_per_core = (N/64)/32`:
 
-A ~1.7× swing with no permutation involved. This is about how the planner
-*sizes* per-core work and how the resulting strided weight read interacts
-with the HMI — not about core placement. It is under active investigation
-(dense sticks-per-core sweep + K/M dependence).
+| sticks/core | eff BW | | sticks/core | eff BW |
+|---:|---:|---|---:|---:|
+| 5  | 117 GB/s | | 11 | 118 GB/s |
+| 6  | 73 GB/s  | | 12 | 71 GB/s  |
+| 7  | 67 GB/s  | | 13 | 120 GB/s |
+| 8  | 124 GB/s | | 14 | 72 GB/s  |
+| 9  | 117 GB/s | | 15 | 123 GB/s |
+| 10 | 124 GB/s | | 16 | 118 GB/s |
+
+**Predictor: `oddpart(sticks_per_core) ∈ {3,7}` → slow (~70 GB/s);
+otherwise fast (~120 GB/s).** 12/12 fit. The slow set `{6,7,12,14}` is
+exactly `{3,7}·2ᵏ` — closed under doubling the band width, so the effect
+depends on a *modular phase* of the band geometry, not its absolute byte
+size. **K-independent**: fast stays ~115–125 and slow ~70–73 across
+K ∈ {2048, 4096, 8192}.
+
+`out:32` only holds for `sticks_per_core` 5–16 (at M=128); below 5 the
+planner picks `mb`-split, at 17+ it picks `mb16/out2`.
+
+Caveat — M-dependence is unproven: at M=256, `s=9` (normally fast) dropped
+to 61 GB/s, but per-call also doubled with weight bytes unchanged, so
+M=256 is a weight-refetch / compute-bound regime, not a clean HMI test.
+
+### Mechanism (hypothesis, not confirmed)
+
+Best guess: a 4-way interleave at the shared HMI — 4 outstanding requests
+per core (per the ISA), or 4 HBM bank/pseudo-channel phases. When
+`oddpart(s)` is small and `≡ 3 (mod 4)`, consecutive cores' contiguous
+bands (start offset `core·s·128 B`) land in a conflicting phase pattern
+that serialises at the single shared ring port. Unverified.
+
+### Why this could be actionable
+
+`sticks_per_core = (N/64) / num_cores`, and the planner *chooses*
+`num_cores`. For N=14336 it picks `out:32` → s=7 → **slow**; `out:28`
+would give s=8 → **fast** — potentially ~1.7× the bandwidth with 4 fewer
+cores. So a planner heuristic could deliberately pick a smaller core
+count to land on a fast `sticks_per_core`. The lever is in core-count
+*selection*, not core-id placement. Viability is under test.
 
 ## Lessons for the next person
 
