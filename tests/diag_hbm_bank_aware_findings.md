@@ -238,20 +238,28 @@ the default — **at m=128**, verified, numerically correct:
 Fewer cores is a net win *at m=128* because the matmul is HBM-bound — the
 per-core bandwidth gain dwarfs the lost parallelism.
 
-**But n_fast is M-dependent and not robust.** A head-to-head probe ran the
-same move (`(64,32,1)` → `(64,28,1)`, n=14336) at **m=64** and it
-**regressed to 0.87×** — at small m the lost parallelism outweighs the
-bandwidth fix. n_fast is verified only at m=128; m=256 was flagged murky;
-m=64 is confirmed harmful. An M-characterization sweep is in progress to
-find its valid M-range.
+**But n_fast is M-dependent and its M-range is not cleanly characterised.**
+The same move at **m=64** (`(64,32,1)` → `(64,28,1)`, n=14336) regressed
+to **0.87×** — corroborated by two independent probes, so the small-m
+regression is real. An M-sweep (38 runs, m=32–384 × three slow-n values,
+all numerically correct) found **no clean regression→win crossover**: the
+result was non-monotonic and n-dependent. But that sweep was confounded —
+it shared the single accelerator with another benchmark, the default
+`(1,32,1)` config's timing went unstable (std/mean ≈ 0.3), and n_fast's
+small signal (~1.5×) was swamped by contention noise. What survives the
+noise: **m=128 wins on all three n** (1.46–1.72×, corroborated by the
+sticks-per-core sweep, the viability probe, and the device test);
+**m=64 regresses**; everything else is inconclusive. n_fast needs a
+contention-controlled re-run (exclusive device) before its M-range can
+be trusted.
 
 **Implemented** behind the `n_fast_out_split` config flag (off by
 default) — `_maybe_n_fast` in `work_division.py`, gated on a pure n-split
 `BATCH_MATMUL_OP` with no span_reduction commitments; the n dim is
 identified structurally (output coord var that is also a stick var).
 Device-verified at m=128. **The flag has no M-gate yet — it would regress
-m=64 shapes — so it is not safe to enable broadly until the M-sweep
-lands.**
+m=64 shapes — so it is not safe to enable broadly until n_fast's M-range
+is cleanly characterised.**
 
 **Planner rule (within n_fast's valid M-range):** after
 `C = core_split(n/64, 32)`, if `oddpart((n/64)/C) ∈ {3,7}`, drop to the
@@ -281,8 +289,22 @@ over pure `m`" — not yet implemented, and the standout result of the
 investigation. In a head-to-head on a contested shape (m=128, n=2048,
 k=4096), the 2D `(4,8,1)` split (3.66×) beat **k_fast**'s `(1,16,2)`
 (2.86×) by 1.28× — i.e. 2D `m×n` wins even on k_fast's own contested
-turf. The optimal `m:n` ratio as a function of m needs its own sweep
-(in progress).
+turf.
+
+A 66-run ratio sweep (n ∈ {1024, 2048}, m ∈ {32…2048}, all numerically
+correct) characterised the optimum. The winner is consistently
+**`n`-heavy** — `(4,8,1)` for m ≤ 256, edging to `(8,4,1)` at large m;
+pure-`m` `(32,1,1)` is always worst and the extreme `(1,32,1)` is also
+poor (an over-split cliff). The optimum is **n-independent** (n=1024 and
+n=2048 rank identically). Speedup is **1.7–3.7×** across the whole regime.
+
+**Planner rule:** replace the pure-`m` fallback (`m > n/64` →
+`(32,1,1)`) with `n_split = min(8, n/64)`, `m_split = 32 // n_split` —
+caps `n`-splitting at 8 (avoiding the over-split cliff), gives the rest
+to `m`, degrades gracefully when `n/64 < 8`. The `(4,8)`-vs-`(8,4)`
+refinement at large m is within noise — not worth a separate rule, and
+no M-gate is needed. Unlike n_fast, this effect (2–3.7×) is large enough
+to be robust to the device contention both sweeps ran under.
 
 ## How the three optimizations interact
 
