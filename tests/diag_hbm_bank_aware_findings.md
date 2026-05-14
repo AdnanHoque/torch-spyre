@@ -33,8 +33,9 @@ survive — including one genuinely unexplained effect still worth chasing.
   result, the AIU HMI topology — and **one real, characterized effect**:
   out-split bandwidth swings ~70 vs ~120 GB/s with sticks-per-core,
   predicted by `oddpart(sticks_per_core) ∈ {3,7}`. Measured under identity,
-  uncontaminated, K-independent, 12/12 fit — and potentially actionable in
-  the planner's core-count selection.
+  uncontaminated, K-independent, 12/12 fit — and it yields a **verified
+  planner optimization (n_fast)**: forcing a fast core count beats the
+  default `out:32` by 1.45–1.71× on affected shapes.
 
 ## The artifact — why Measurements 1, 2, and 6 are invalid
 
@@ -219,14 +220,37 @@ per core (per the ISA), or 4 HBM bank/pseudo-channel phases. When
 bands (start offset `core·s·128 B`) land in a conflicting phase pattern
 that serialises at the single shared ring port. Unverified.
 
-### Why this could be actionable
+### Actionable — n_fast (verified)
 
 `sticks_per_core = (N/64) / num_cores`, and the planner *chooses*
-`num_cores`. For N=14336 it picks `out:32` → s=7 → **slow**; `out:28`
-would give s=8 → **fast** — potentially ~1.7× the bandwidth with 4 fewer
-cores. So a planner heuristic could deliberately pick a smaller core
-count to land on a fast `sticks_per_core`. The lever is in core-count
-*selection*, not core-id placement. Viability is under test.
+`num_cores` (default: largest divisor of `N/64` that is ≤ 32). Forcing a
+*smaller* core count that lands `sticks_per_core` on a fast `oddpart`
+beats the default `out:32` — verified, with numerically correct output:
+
+| N | default `out:32` | forced | forced sticks/core | speedup |
+|---:|---|---:|---:|---:|
+| 14336 | s=7, 1.807 ms | `out:28` | 8 | **1.71×** |
+| 12288 | s=6, 1.439 ms | `out:24` | 8 | **1.45×** |
+| 28672 | s=14, 3.328 ms | `out:28` | 16 | **1.54×** |
+| 24576 | s=12, 2.966 ms | `out:24` | 16 | **1.50×** |
+
+Fewer cores is a clear net win — the per-core bandwidth gain dwarfs the
+lost parallelism. **Planner rule:** after `C = core_split(N/64, 32)`, if
+`oddpart((N/64)/C) ∈ {3,7}`, drop to the largest `C' ≤ 32` dividing
+`N/64` whose `(N/64)/C'` has `oddpart ∉ {3,7}`. Pure post-processing of
+the `out`-dim core count — K-independent, no permutation, recovers ~1.5×
+on affected shapes.
+
+### A second, unverified lead — pure-`mb` vs 2D split
+
+A side probe found pure `mb:32` (~40–49 GB/s) is itself a slow regime:
+capping the `mb` core count makes the planner refill the freed cores into
+the `out` dim, turning pure `mb:32` into a 2D `mb:8 × out:4` split (still
+32 cores) that ran ~3× faster. Plausible mechanism: 4 concurrent
+multicast streams instead of 1, using more of the broadcast fabric. But
+**numerical correctness was not checked** for these 2D-split runs — treat
+the 3× as unconfirmed until verified. If it holds, a "prefer 2D over
+pure-`mb`" planner rule is a separate, possibly larger win.
 
 ## Lessons for the next person
 
