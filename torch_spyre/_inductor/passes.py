@@ -229,9 +229,10 @@ class CustomPreSchedulingPasses(CustomGraphPass):
         finalize_layouts(operations)
         insert_restickify(operations)
         span_reduction(operations)
-        work_distribution(operations)
-        if config.core_id_k_fast_emission:
-            k_fast_division(operations)
+        k_fast_ops = (
+            k_fast_division(operations) if config.core_id_k_fast_emission else set()
+        )
+        work_distribution(operations, k_fast_ops)
         if config.lx_planning:
             scratchpad_planning(operations)
 

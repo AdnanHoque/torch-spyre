@@ -603,11 +603,6 @@ def work_distribution_pass(
         committed_splits,
     )
 
-    # Stash span_reduction's commits so k_fast_division can honor them
-    # — apply_splits is about to overwrite op.op_it_space_splits with the
-    # full final splits, erasing the span-only subset.
-    op._k_fast_span_committed = committed_splits
-
     apply_splits(op, splits, output_td)
 
     if logger.isEnabledFor(logging.DEBUG) and math.prod(splits.values()) > 1:
@@ -625,7 +620,6 @@ _PT_ROWS = 8  # PT block rows per corelet
 
 
 def _try_k_fast_split(
-    current_splits: dict[Symbol, int],
     it_space: dict[Symbol, Expr],
     output_td: TensorDep,
     min_splits: dict[Symbol, int] | None,
@@ -639,16 +633,14 @@ def _try_k_fast_split(
     dims = list(it_space.keys())
     output_coord_vars = {v for e in output_td.device_coords for v in e.free_symbols}
     reduction_dims = [d for d in dims if d not in output_coord_vars]
-    # Only single-reduction shapes (matmul's K dim). Multi-reduction kernels
-    # don't have a clear analogue to the (m, n, k) split this function emits.
+    # k_fast emits an (m, n, k) split — only matmul's single K dim qualifies.
     if len(reduction_dims) != 1:
         return None
     k_dim = reduction_dims[0]
 
     output_dims = [d for d in dims if d in output_coord_vars]
-    # TODO: bmm support. With 3 output dims (B, M, N) the planner already has a
-    # B-split lever; folding B into m_dims here would force b=m=1 and waste it.
-    # Restrict to 2D matmul for now; revisit with a bmm-aware policy.
+    # TODO: 2D matmul only. bmm has a B dim the planner already splits;
+    # folding it into m_dims would waste that lever. Needs a bmm-aware policy.
     if len(output_dims) != 2:
         return None
     # Pick the larger of the two output dims to split across cores; "N" is
@@ -656,10 +648,14 @@ def _try_k_fast_split(
     n_dim = max(output_dims, key=lambda d: concretize_expr(it_space[d]))
     m_dims = [d for d in output_dims if d != n_dim]
 
-    if current_splits.get(k_dim, 1) > 1:
-        return None
-    # Skip if span_reduction_pass already committed splits on K or any M dim:
-    # those are immutable lower bounds and conflict with our (1, n, k>1) shape.
+    # k_fast's (1, n, k>1) shape can't sit on top of a split span_reduction
+    # already committed on K or an M dim — skip those.
+    # TODO: A span_reduction commit on K or an M dim is the minimum split that
+    #       gets the span under the limit, not necessarily the final one, so
+    #       cores may still be free after it. Returning None here hands the
+    #       whole op to the default planner instead of applying k_fast within
+    #       the cores span_reduction leaves available, leaving the k_fast
+    #       speedup on the table for those shapes.
     if min_splits and (k_dim in min_splits or any(d in min_splits for d in m_dims)):
         return None
 
@@ -668,32 +664,30 @@ def _try_k_fast_split(
     K = concretize_expr(it_space[k_dim])
 
     elems_per_stick = output_td.layout.device_layout.device_dtype.elems_per_stick()
-    # iteration_space carries unpadded element counts; for ragged N/K (e.g.
-    # test shapes like N=99) the k_fast splits can't divide cleanly. Bail
-    # out so the planner default handles those.
+    # iteration_space carries unpadded element counts; skip ragged N/K
+    # (e.g. N=99) that the k_fast splits can't divide cleanly.
     if N % elems_per_stick != 0 or K % elems_per_stick != 0:
         return None
     n_sticks = N // elems_per_stick
     k_sticks = K // elems_per_stick
 
-    # PT block rows = _PT_ROWS per corelet per matmul issue. Gates below pick
-    # shapes where pure-M underfeeds PT but (1, n, k) keeps it busy.
+    # The gates below pick shapes where pure-M underfeeds the PT array but
+    # a (1, n, k) split keeps it busy.
     rows_per_core = M / max_cores
-    # M < max_cores: pure-M can't even give one row/core; skip — different regime.
-    # M > 16·max_cores: PT is already saturated by pure-M, k_fast wins nothing.
+    # Skip M too small to give one row per core, and M large enough that
+    # pure-M already saturates PT — k_fast wins nothing either way.
     if rows_per_core < 1 or rows_per_core > 2 * _PT_ROWS:
         return None
-    # Moderate M + wide N: pure-M or mixed (m, n) already uses cores well;
-    # only apply k_fast when N is also narrow enough that PT is genuinely starved.
+    # Moderate M with wide N already uses cores well — only apply k_fast
+    # when N is narrow enough that PT is starved.
     if rows_per_core > _PT_ROWS / 2 and n_sticks >= max_cores:
         return None
     # Need enough K to give every core at least one stick after splitting.
     if k_sticks < max_cores:
         return None
 
-    # Candidate n_splits are the proper divisors of max_cores so that
-    # k_split = max_cores // n_split is integer. No power-of-2 restriction —
-    # if max_cores were e.g. 24, candidates would be {2, 3, 4, 6, 8, 12}.
+    # n_split must divide max_cores so k_split = max_cores // n_split is an
+    # integer. Any divisor works — no power-of-2 restriction.
     candidates = sorted(
         (int(n) for n in divisors(max_cores) if 1 < n < max_cores), reverse=True
     )
@@ -778,10 +772,19 @@ def span_reduction(operations: list[Operation]) -> None:
             divide_reduction_op(op, args, max_cores, span_reduction_pass)
 
 
-def work_distribution(operations: list[Operation]) -> None:
-    """Pass 2: distribute remaining cores across ops to maximize parallelism."""
+def work_distribution(
+    operations: list[Operation], skip: set[str] | None = None
+) -> None:
+    """Pass 3: distribute remaining cores across ops to maximize parallelism.
+
+    Ops named in `skip` were already divided by k_fast_division; they are
+    left untouched so every op is divided by exactly one of the two passes.
+    """
+    skip = skip or set()
     max_cores = _validate_max_cores()
     for op in _iter_computed_buffers(operations):
+        if op.get_name() in skip:
+            continue
         rw = op.get_read_writes()
         args = get_mem_deps_from_rw(rw)
         if isinstance(op.data, Pointwise):
@@ -790,18 +793,18 @@ def work_distribution(operations: list[Operation]) -> None:
             divide_reduction_op(op, args, max_cores, work_distribution_pass)
 
 
-def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> None:
-    """Replace one matmul op's splits with k_fast when the heuristic fires.
+def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> bool:
+    """Divide one matmul op with k_fast when the heuristic fires.
 
-    Reads splits written by work_distribution_pass, calls _try_k_fast_split,
-    and re-applies via apply_splits when the heuristic fires. No-op otherwise.
+    Runs between span_reduction and work_distribution. Reads span_reduction's
+    commits straight from op.op_it_space_splits — work_distribution has not run
+    yet, so it still holds the span-only subset. Returns True when k_fast
+    commits a split, so the caller can exclude the op from work_distribution.
     """
     if not isinstance(op.data, Reduction):
-        return
+        return False
     if op.data.reduction_type != BATCH_MATMUL_OP:
-        return
-    if not hasattr(op, "op_it_space_splits"):
-        return  # work_distribution committed nothing (single-core op)
+        return False
 
     rw = op.get_read_writes()
     args = get_mem_deps_from_rw(rw)
@@ -811,22 +814,22 @@ def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> None:
     it_space = iteration_space_from_op(op)
     it_space_adjusted, _ = adjust_it_space_for_sticks(it_space, all_tds)
 
-    write_index = next(iter(rw.writes)).index
-    read_index = next((d.index for d in rw.reads), write_index)
-    current_splits = apply_splits_from_index_coeff(
-        op.op_it_space_splits, write_index, read_index, it_space
-    )
-    # min_splits for _try_k_fast_split is span_reduction's commits — the
-    # immutable lower bounds we must not walk back. Reusing the full
-    # current_splits here would incorrectly block k_fast whenever the
-    # planner picked any M-axis split (e.g. pure-M).
-    span_committed = getattr(op, "_k_fast_span_committed", {})
+    # op.op_it_space_splits holds span_reduction's commits here: span_reduction
+    # runs before this pass, and work_distribution — which would overwrite it —
+    # runs after and skips the ops k_fast claims.
+    if hasattr(op, "op_it_space_splits"):
+        write_index = next(iter(rw.writes)).index
+        read_index = next((d.index for d in rw.reads), write_index)
+        span_splits = apply_splits_from_index_coeff(
+            op.op_it_space_splits, write_index, read_index, it_space
+        )
+        span_committed = {s: v for s, v in span_splits.items() if v > 1}
+    else:
+        span_committed = {}
 
-    forced = _try_k_fast_split(
-        current_splits, it_space, output_td, span_committed, max_cores
-    )
+    forced = _try_k_fast_split(it_space, output_td, span_committed, max_cores)
     if forced is None:
-        return
+        return False
 
     apply_splits(op, forced, output_td)
     warn_if_per_core_overflow(all_tds, it_space, forced, op.get_name())
@@ -837,18 +840,23 @@ def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> None:
             f"cores={math.prod(forced.values())}, "
             f"iteration_space={it_space}, it_space_adjusted={it_space_adjusted}, "
             f"priorities=[], min_splits={span_committed}, "
-            f"op_it_space_splits={op.op_it_space_splits}, "
-            f"k_fast: {current_splits} -> {forced}"
+            f"op_it_space_splits={op.op_it_space_splits}"
         )
+    return True
 
 
-def k_fast_division(operations: list[Operation]) -> None:
-    """Pass 3 (optional): replace matmul splits with k_fast on narrow-N shapes.
+def k_fast_division(operations: list[Operation]) -> set[str]:
+    """Pass 2 (optional): divide narrow-N small-M matmuls with k_fast.
 
-    Runs after work_distribution. The core_id_k_fast_emission feature-flag
-    gate lives in passes.py; this pass is only called when it is set. Gated
-    per-op on matmul + the _try_k_fast_split heuristic.
+    Runs after span_reduction and before work_distribution. The
+    core_id_k_fast_emission feature-flag gate lives in passes.py; this pass
+    is only called when it is set. Returns the names of the ops it committed
+    a split for so passes.py can exclude them from work_distribution — every
+    op is divided by exactly one of the two passes.
     """
     max_cores = _validate_max_cores()
+    handled: set[str] = set()
     for op in _iter_computed_buffers(operations):
-        _k_fast_divide_op(op, max_cores)
+        if _k_fast_divide_op(op, max_cores):
+            handled.add(op.get_name())
+    return handled
