@@ -28,6 +28,7 @@ index the same buffer dim.
 from __future__ import annotations
 
 import sympy
+import torch
 from sympy import Symbol
 from torch._inductor.ir import ComputedBuffer
 
@@ -97,12 +98,38 @@ def _build_sym_correspondence(
     return out
 
 
+def _is_restickify(op: ComputedBuffer) -> bool:
+    """True if op was inserted by insert_restickify.
+
+    The FX origin's target is torch.ops.spyre.restickify.default. Other op
+    types (matmul, pointwise, reduction) have ATen origins.
+    """
+    origins = getattr(op, "origins", None)
+    if not origins:
+        return False
+    for o in origins:
+        if (
+            isinstance(o, torch.fx.Node)
+            and o.target is torch.ops.spyre.restickify.default
+        ):
+            return True
+    return False
+
+
 def reorder_output_dims_for_producer_alignment(
     op: ComputedBuffer,
     output_dims: list[Symbol],
     name_to_op: dict[str, ComputedBuffer],
 ) -> list[Symbol]:
     """Promote output_dims that match a producer's split to the front.
+
+    SCOPED TO RESTICKIFY OPS ONLY (the data-movement primitive whose ring
+    cost we want to minimise). Applying the hint to compute ops (matmul,
+    reductions, pointwise) caused a 48.7% wall-clock regression in
+    measurement: those ops have PT-utilisation constraints that prefer
+    splits the producer didn't pick, so forcing producer-aligned splits
+    cascades into compute inefficiency. Restickify, being a pure layout
+    converter, doesn't have that constraint.
 
     For each producer of op:
       1. Decode producer's per-symbol splits.
@@ -112,9 +139,13 @@ def reorder_output_dims_for_producer_alignment(
          split > 1, promote it to the front of output_dims.
 
     Producer-aligned symbols come first (in producer-split-factor-descending
-    order); the rest follow in their original priority order. Caller can
-    safely ignore the result when the hint produces no aligned candidates.
+    order); the rest follow in their original priority order. Returns the
+    input unchanged when op is not a restickify or no producer alignment
+    fires.
     """
+    if not _is_restickify(op):
+        return output_dims
+
     rw = op.get_read_writes()
     promote: dict[Symbol, int] = {}  # sym -> producer's split factor
 
