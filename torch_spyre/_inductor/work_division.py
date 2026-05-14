@@ -34,7 +34,7 @@ from torch._inductor.ir import (
 from torch._inductor.dependencies import MemoryDep
 
 from .errors import Unsupported
-from .constants import TOPK_OPS
+from .constants import BATCH_MATMUL_OP, TOPK_OPS
 from .ir import FixedTiledLayout
 from .pass_utils import (
     SchedNodeArg,
@@ -86,6 +86,40 @@ def core_split(size: int, max_cores: int) -> int:
         if size % i == 0:
             return i
     return 1
+
+
+# Out-split matmuls read HBM ~1.7x slower when sticks-per-core has one of
+# these odd parts; see tests/diag_hbm_bank_aware_findings.md.
+_N_FAST_SLOW_ODD_PARTS = frozenset({3, 7})
+
+
+def _odd_part(n: int) -> int:
+    """Return n with all factors of 2 removed."""
+    while n % 2 == 0:
+        n //= 2
+    return n
+
+
+def _n_fast_core_count(out_sticks: int, default_count: int, max_cores: int) -> int:
+    """Pick an out-split core count whose sticks-per-core reads HBM fast.
+
+    The default count (largest divisor of out_sticks <= max_cores) sometimes
+    lands sticks_per_core = out_sticks // count on an odd part in {3, 7},
+    which reads HBM ~1.7x slower. When that happens, return the largest
+    divisor of out_sticks <= max_cores that does not — typically only a few
+    cores fewer, a net win because the per-core bandwidth gain dwarfs the
+    lost parallelism. Returns default_count unchanged when it is already
+    fast or when no better count exists.
+    """
+    if _odd_part(out_sticks // default_count) not in _N_FAST_SLOW_ODD_PARTS:
+        return default_count
+    for count in range(max_cores, 1, -1):
+        if (
+            out_sticks % count == 0
+            and _odd_part(out_sticks // count) not in _N_FAST_SLOW_ODD_PARTS
+        ):
+            return count
+    return default_count
 
 
 def _most_splittable_dim(
@@ -543,6 +577,56 @@ def span_reduction_pass(
         )
 
 
+def _maybe_n_fast(
+    op: ComputedBuffer,
+    splits: dict[Symbol, int],
+    it_space_adjusted: dict[Symbol, Expr],
+    output_td: TensorDep,
+    stick_vars: dict[Symbol, int],
+    committed_splits: dict[Symbol, int],
+    max_cores: int,
+) -> dict[Symbol, int]:
+    """Re-pick the out-split core count for a pure-out-split matmul.
+
+    Only fires on the verified regime: a BATCH_MATMUL_OP with no
+    span_reduction commitments, split solely on its N (out) dim. See
+    _n_fast_core_count and tests/diag_hbm_bank_aware_findings.md.
+    """
+    if not isinstance(op.data, Reduction):
+        return splits
+    if op.data.reduction_type != BATCH_MATMUL_OP:
+        return splits
+    if committed_splits:
+        return splits
+    # The N (out) dim is the output coordinate variable that is also a stick
+    # variable: M is an output coord but never a stick dim, K is a stick dim
+    # but not an output coord. For a 2D matmul this is exactly one symbol.
+    output_coord_vars = {
+        v for e in output_td.device_coords[:-1] for v in e.free_symbols
+    }
+    n_dims = [d for d in output_coord_vars if d in stick_vars]
+    if len(n_dims) != 1:
+        return splits
+    n_dim = n_dims[0]
+    if splits.get(n_dim, 1) <= 1:
+        return splits
+    # verified regime is a *pure* out-split — leave 2D / mb / in splits alone
+    if any(v > 1 for d, v in splits.items() if d is not n_dim):
+        return splits
+    out_sticks = concretize_expr(it_space_adjusted[n_dim])
+    new_count = _n_fast_core_count(out_sticks, splits[n_dim], max_cores)
+    if new_count == splits[n_dim]:
+        return splits
+    logger.debug(
+        f"n_fast work_division {op.get_name()}: out-split "
+        f"{splits[n_dim]} -> {new_count} cores (out_sticks={out_sticks}, "
+        f"sticks/core {out_sticks // splits[n_dim]} -> {out_sticks // new_count})"
+    )
+    splits = dict(splits)
+    splits[n_dim] = new_count
+    return splits
+
+
 def work_distribution_pass(
     op: ComputedBuffer,
     args: list[SchedNodeArg],
@@ -557,7 +641,7 @@ def work_distribution_pass(
     input_tds, output_td = collect_tensor_deps(op, args)
     all_tds = input_tds + [output_td]
 
-    it_space_adjusted, _ = adjust_it_space_for_sticks(it_space, all_tds)
+    it_space_adjusted, stick_vars = adjust_it_space_for_sticks(it_space, all_tds)
 
     # Recover splits committed by span_reduction_pass using the same
     # coeff-keyed encoding that codegen uses — stable across passes.
@@ -602,6 +686,16 @@ def work_distribution_pass(
         reduction_dims,
         committed_splits,
     )
+    if config.n_fast_out_split:
+        splits = _maybe_n_fast(
+            op,
+            splits,
+            it_space_adjusted,
+            output_td,
+            stick_vars,
+            committed_splits,
+            max_cores,
+        )
     apply_splits(op, splits, output_td)
 
     if logger.isEnabledFor(logging.DEBUG) and math.prod(splits.values()) > 1:

@@ -27,4 +27,9 @@ dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
 
+# When set, re-pick the out-split core count for matmuls whose default count
+# lands sticks-per-core on a slow HBM odd part (see
+# tests/diag_hbm_bank_aware_findings.md). Off by default.
+n_fast_out_split: bool = os.environ.get("SPYRE_N_FAST_OUT_SPLIT", "0") == "1"
+
 install_config_module(sys.modules[__name__])
