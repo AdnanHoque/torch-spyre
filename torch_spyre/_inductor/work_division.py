@@ -603,7 +603,7 @@ def work_distribution_pass(
         committed_splits,
     )
 
-    # Stash span_reduction's commits so k_fast_override_pass can honor them
+    # Stash span_reduction's commits so k_fast_division can honor them
     # — apply_splits is about to overwrite op.op_it_space_splits with the
     # full final splits, erasing the span-only subset.
     op._k_fast_span_committed = committed_splits
@@ -633,7 +633,7 @@ def _try_k_fast_split(
 ) -> dict[Symbol, int] | None:
     """Propose (1, n_split, k_split>1) for narrow-N small-M matmul shapes.
 
-    Caller (k_fast_override pass) gates on matmul + the feature flag.
+    Caller (k_fast_division pass) gates on matmul + the feature flag.
     Range thresholds derived from empirical hardware measurements.
     """
     dims = list(it_space.keys())
@@ -684,7 +684,7 @@ def _try_k_fast_split(
     if rows_per_core < 1 or rows_per_core > 2 * _PT_ROWS:
         return None
     # Moderate M + wide N: pure-M or mixed (m, n) already uses cores well;
-    # only override when N is also narrow enough that PT is genuinely starved.
+    # only apply k_fast when N is also narrow enough that PT is genuinely starved.
     if rows_per_core > _PT_ROWS / 2 and n_sticks >= max_cores:
         return None
     # Need enough K to give every core at least one stick after splitting.
@@ -790,11 +790,11 @@ def work_distribution(operations: list[Operation]) -> None:
             divide_reduction_op(op, args, max_cores, work_distribution_pass)
 
 
-def _k_fast_override_op(op: ComputedBuffer, max_cores: int) -> None:
-    """Override one matmul op's splits with k_fast when the heuristic fires.
+def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> None:
+    """Replace one matmul op's splits with k_fast when the heuristic fires.
 
     Reads splits written by work_distribution_pass, calls _try_k_fast_split,
-    and re-applies via apply_splits when the override fires. No-op otherwise.
+    and re-applies via apply_splits when the heuristic fires. No-op otherwise.
     """
     if not isinstance(op.data, Reduction):
         return
@@ -818,7 +818,7 @@ def _k_fast_override_op(op: ComputedBuffer, max_cores: int) -> None:
     )
     # min_splits for _try_k_fast_split is span_reduction's commits — the
     # immutable lower bounds we must not walk back. Reusing the full
-    # current_splits here would incorrectly block the override whenever the
+    # current_splits here would incorrectly block k_fast whenever the
     # planner picked any M-axis split (e.g. pure-M).
     span_committed = getattr(op, "_k_fast_span_committed", {})
 
@@ -828,19 +828,27 @@ def _k_fast_override_op(op: ComputedBuffer, max_cores: int) -> None:
     if forced is None:
         return
 
-    logger.debug(f"k_fast override for {op.get_name()}: {current_splits} -> {forced}")
     apply_splits(op, forced, output_td)
     warn_if_per_core_overflow(all_tds, it_space, forced, op.get_name())
 
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            f"k_fast_division work_division {op.get_name()}: "
+            f"cores={math.prod(forced.values())}, "
+            f"iteration_space={it_space}, it_space_adjusted={it_space_adjusted}, "
+            f"priorities=[], min_splits={span_committed}, "
+            f"op_it_space_splits={op.op_it_space_splits}, "
+            f"k_fast: {current_splits} -> {forced}"
+        )
 
-def k_fast_override(operations: list[Operation]) -> None:
-    """Pass 3 (optional): override matmul splits with k_fast on narrow-N shapes.
 
-    Runs after work_distribution. Off by default unless the
-    core_id_k_fast_emission flag is set; gated per-op on matmul + heuristic.
+def k_fast_division(operations: list[Operation]) -> None:
+    """Pass 3 (optional): replace matmul splits with k_fast on narrow-N shapes.
+
+    Runs after work_distribution. The core_id_k_fast_emission feature-flag
+    gate lives in passes.py; this pass is only called when it is set. Gated
+    per-op on matmul + the _try_k_fast_split heuristic.
     """
-    if not config.core_id_k_fast_emission:
-        return
     max_cores = _validate_max_cores()
     for op in _iter_computed_buffers(operations):
-        _k_fast_override_op(op, max_cores)
+        _k_fast_divide_op(op, max_cores)
