@@ -34,7 +34,7 @@ survive — including one genuinely unexplained effect still worth chasing.
   out-split bandwidth swings ~70 vs ~120 GB/s with sticks-per-core,
   predicted by `oddpart(sticks_per_core) ∈ {3,7}` **at m=128**. It yields
   **one solid planner optimization** — a **pure-`m` → 2D `m×n` split** fix
-  (verified 1.8–3.7×, n-independent, clean rule, not yet implemented). A
+  (verified 1.8–3.7×, n-independent, clean rule, implemented). A
   second idea, **n_fast** (re-pick the `n`-split count), works at m≈128
   but a contention-free M-sweep showed it does not generalize — implemented
   behind a flag, but should not ship.
@@ -276,11 +276,10 @@ m=512. Plausible mechanism: several concurrent narrower multicast streams
 use the broadcast fabric better than one wide one.
 
 **This is a second, separate planner win** — "prefer a 2D `m×n` split
-over pure `m`" — not yet implemented, and the standout result of the
-investigation. In a head-to-head on a contested shape (m=128, n=2048,
-k=4096), the 2D `(4,8,1)` split (3.66×) beat **k_fast**'s `(1,16,2)`
-(2.86×) by 1.28× — i.e. 2D `m×n` wins even on k_fast's own contested
-turf.
+over pure `m`" — and the standout result of the investigation. In a
+head-to-head on a contested shape (m=128, n=2048, k=4096), the 2D
+`(4,8,1)` split (3.66×) beat **k_fast**'s `(1,16,2)` (2.86×) by 1.28× —
+i.e. 2D `m×n` wins even on k_fast's own contested turf.
 
 A 66-run ratio sweep (n ∈ {1024, 2048}, m ∈ {32…2048}, all numerically
 correct) characterised the optimum. The winner is consistently
@@ -296,6 +295,14 @@ to `m`, degrades gracefully when `n/64 < 8`. The `(4,8)`-vs-`(8,4)`
 refinement at large m is within noise — not worth a separate rule, and
 no M-gate is needed. Unlike n_fast, this effect (2–3.7×) is large enough
 to be robust to the device contention both sweeps ran under.
+
+**Implemented** behind the `two_d_mn_split` config flag (off by default)
+— `_maybe_2d_mn_split` in `work_division.py`, using
+`core_split(n_sticks, 8)` and `core_split(m, max_cores // n_split)` so
+the picked splits are always valid divisors. Gated on a pure-`m`-split
+`BATCH_MATMUL_OP` with no span_reduction commitments. Device-verified:
+m=128/k=4096/n=2048 goes `(32,1,1)` → `(4,8,1)`, 0.44 ms → 0.12 ms
+(**3.6×**), output numerically correct.
 
 ## How the three optimizations interact
 
