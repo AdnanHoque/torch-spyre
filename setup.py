@@ -127,6 +127,7 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
                 COMMON_INCLUDE_DIR / "libaiupti",
             ]
         else:
+            print("Compile AIUPTI setting to False in Include")
             COMPILE_AIUPTI = False
 
     INCLUDE_DIRS += [os.environ["SEN_COMMON_HEADERS"]]
@@ -136,8 +137,6 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
         _aiupti_lib = Path(os.environ["LIBAIUPTI_INSTALL_DIR"]) / "lib" / "libaiupti.so"
         if _aiupti_lib.exists():
             LIBRARY_DIRS += [LIBAIUPTI_DIR / "lib"]
-        else:
-            COMPILE_AIUPTI = False
 
     LIBRARY_DIRS += [RUNTIME_DIR / "lib"]
 
@@ -196,7 +195,9 @@ if __name__ == "__main__":
     else:
         from torch.utils.cpp_extension import BuildExtension, CppExtension
 
-        sources = list(CSRC_DIR.rglob("*.cpp"))
+        sources = list(CSRC_DIR.glob("*.cpp"))
+        if COMPILE_AIUPTI:
+            sources += CSRC_DIR.glob("profiler/*.cpp")
 
         # Filenames that belong to the tiny hooks module.
         # "shared" files are compiled into both _hooks.so and _C.so.
@@ -212,6 +213,8 @@ if __name__ == "__main__":
         core_src_paths = [
             p.relative_to(ROOT_DIR).as_posix() for p in sorted(core_src_paths)
         ]
+
+        print("Compile AIUPTI: ", COMPILE_AIUPTI)
 
         ext_modules = [
             CppExtension(
