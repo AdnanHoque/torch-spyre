@@ -175,3 +175,149 @@ def build_name_to_op_map(operations) -> dict[str, ComputedBuffer]:
         if isinstance(op, ComputedBuffer):
             name_to_op[op.get_name()] = op
     return name_to_op
+
+
+# ----------------------------------------------------------------------
+# Precise hop cost: per-core slice enumeration and pairwise overlap.
+# ----------------------------------------------------------------------
+
+
+def _ring_distance(a: int, b: int, num_cores: int) -> int:
+    """Shorter direction on a `num_cores`-bidirectional ring."""
+    d = abs(a - b)
+    return min(d, num_cores - d)
+
+
+def _per_core_slice_indices(
+    dim_order: list[str],
+    splits: dict[str, int],
+    num_cores: int,
+) -> list[dict[str, tuple[int, int]]]:
+    """For each core, return its slice index per split dim.
+
+    Matches `_get_core_to_slice_mapping`'s convention: iteration_space order
+    determines which split dim varies fastest along core_id. Returns a list
+    of length num_cores; entry i is a dict {sym_str: (slice_idx, total_splits)}.
+
+    Unsplit dims (factor 1) are omitted — they contribute the full extent
+    on every core and don't affect overlap computation.
+    """
+    slices: list[dict[str, tuple[int, int]]] = [{} for _ in range(num_cores)]
+    inner = 1
+    for sym in dim_order:
+        factor = splits.get(sym, 1)
+        if factor <= 1:
+            continue
+        for c in range(num_cores):
+            idx = (c // inner) % factor
+            slices[c][sym] = (idx, factor)
+        inner *= factor
+    return slices
+
+
+def compute_precise_hop_cost(
+    producer: ComputedBuffer,
+    consumer: ComputedBuffer,
+    consumer_to_producer_sym: dict[str, str],
+    num_cores: int,
+) -> tuple[int, float] | None:
+    """Compute exact pairwise ring cost for a producer-consumer edge.
+
+    Returns (total_overlap_units, total_unit_hops) — both keyed off the
+    iteration-space "units" (= bytes when scaled by dtype.itemsize and any
+    stick-vs-elem factor; left dimensionless here so the caller can do the
+    scaling). Returns None when the inputs don't permit a precise answer
+    (e.g. producer/consumer split on dims with no stride correspondence).
+
+    Algorithm:
+      1. Compute each producer core's slice index along each split dim.
+      2. Same for consumer, translated into producer's symbol space.
+      3. For each (p_core, c_core) pair, compute overlap factor:
+         product over shared dims of (1 if slice_indices match else 0),
+         and the per-pair unit count = total / (factor product).
+      4. Sum ring_dist(p, c) * overlap_units across all pairs.
+
+    The total_overlap_units returned equals the iteration-space size when
+    the splits perfectly partition (which they do for typical Spyre ops).
+    """
+    p_splits = _decode_op_splits(producer)
+    c_splits = _decode_op_splits(consumer)
+    if not p_splits:
+        return None
+
+    # Translate consumer splits into producer's symbol space via the
+    # correspondence map. Drop splits we can't translate — they contribute
+    # to neither producer's nor consumer's tracked dims.
+    c_splits_in_p: dict[str, int] = {}
+    for c_sym, factor in c_splits.items():
+        p_sym = consumer_to_producer_sym.get(c_sym)
+        if p_sym is not None:
+            c_splits_in_p[p_sym] = factor
+
+    p_it_space = iteration_space_from_op(producer)
+    p_dim_order = [str(s) for s in p_it_space.keys()]
+
+    c_it_space = iteration_space_from_op(consumer)
+    c_dim_order_raw = [str(s) for s in c_it_space.keys()]
+    # Translate consumer dim order to producer's symbols; preserve order so
+    # the slice-index calculation matches what `_get_core_to_slice_mapping`
+    # would produce on the consumer side.
+    c_dim_order_in_p: list[str] = []
+    for c_sym in c_dim_order_raw:
+        p_sym = consumer_to_producer_sym.get(c_sym)
+        if p_sym is not None:
+            c_dim_order_in_p.append(p_sym)
+
+    p_slices = _per_core_slice_indices(p_dim_order, p_splits, num_cores)
+    c_slices = _per_core_slice_indices(c_dim_order_in_p, c_splits_in_p, num_cores)
+
+    # The number of "iteration-space units" produced by the producer is
+    # the product of its extents (we leave element/stick scaling to the
+    # caller). Per-pair overlap = total_units / (cross product of split
+    # factors), since splits partition the unit count.
+    total_units = 1
+    for sym in p_it_space:
+        try:
+            total_units *= int(concretize_expr(p_it_space[sym]))
+        except (TypeError, ValueError):
+            return None  # symbolic extent — can't quantify
+
+    # Cross product of split factors across all dims that appear on either
+    # side (taking max of producer and consumer factor per dim).
+    all_dims = set(p_splits) | set(c_splits_in_p)
+    pair_divisor = 1
+    for sym in all_dims:
+        pair_divisor *= max(p_splits.get(sym, 1), c_splits_in_p.get(sym, 1))
+
+    # When a dim is split on both sides with the same factor, the slice
+    # indices must MATCH for overlap to be non-zero. When split on only one
+    # side, the other side has the full extent → overlap always non-zero.
+    # When split with different factors, partial overlap (handled below).
+
+    total_unit_hops = 0.0
+    total_overlap_units = 0
+    for p_core in range(num_cores):
+        for c_core in range(num_cores):
+            # Compute per-pair overlap as a fraction of the per-pair-divisor.
+            overlap_factor = 1
+            for sym in all_dims:
+                pf = p_splits.get(sym, 1)
+                cf = c_splits_in_p.get(sym, 1)
+                pi = p_slices[p_core].get(sym, (0, 1))[0]
+                ci = c_slices[c_core].get(sym, (0, 1))[0]
+                # Map slice indices to ranges in [0, max_factor) units.
+                max_f = max(pf, cf)
+                p_lo = pi * (max_f // pf)
+                p_hi = p_lo + (max_f // pf)
+                c_lo = ci * (max_f // cf)
+                c_hi = c_lo + (max_f // cf)
+                ov = max(0, min(p_hi, c_hi) - max(p_lo, c_lo))
+                overlap_factor *= ov
+            if overlap_factor == 0:
+                continue
+            overlap_units = (total_units * overlap_factor) // pair_divisor
+            total_overlap_units += overlap_units
+            dist = _ring_distance(p_core, c_core, num_cores)
+            total_unit_hops += dist * overlap_units
+
+    return total_overlap_units, total_unit_hops

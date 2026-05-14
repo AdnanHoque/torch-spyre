@@ -345,20 +345,34 @@ def restickify_telemetry(operations: list[Operation]) -> None:
                 )
 
         bytes_moved = _restickify_bytes(op)
-        # Hop estimate keyed off the PHYSICAL status, not the symbol status.
-        # Physical-aligned restickifies have ~0 inter-core ring traffic; the
-        # bytes still move on each core but locally.
-        if status_phys == "aligned":
-            hops_per_byte = 0.0
-        elif status_phys == "no-producer":
-            hops_per_byte = 0.0  # bytes come from HBM, not a peer core
-        elif status_phys == "partial":
-            hops_per_byte = _mean_random_hops(NUM_CORES_DEFAULT) / 2
-        else:  # mismatched
-            hops_per_byte = _mean_random_hops(NUM_CORES_DEFAULT)
-        ring_byte_hops = (
-            int(bytes_moved * hops_per_byte) if bytes_moved is not None else 0
-        )
+        # Try precise per-stick hop math first (sums dist(p, c) × overlap_bytes
+        # over all (p, c) core pairs from the actual mapping). Fall back to a
+        # status-keyed coarse model when inputs can't be quantified.
+        precise = None
+        if producer is not None and consumer_to_producer_sym and bytes_moved:
+            from .mapping_alignment import compute_precise_hop_cost
+
+            precise = compute_precise_hop_cost(
+                producer, op, consumer_to_producer_sym, NUM_CORES_DEFAULT
+            )
+        if precise is not None and precise[0] > 0:
+            overlap_units, unit_hops = precise
+            hops_per_byte = unit_hops / overlap_units
+            ring_byte_hops = int(bytes_moved * hops_per_byte) if bytes_moved else 0
+            cost_source = "precise"
+        else:
+            if status_phys == "aligned":
+                hops_per_byte = 0.0
+            elif status_phys == "no-producer":
+                hops_per_byte = 0.0
+            elif status_phys == "partial":
+                hops_per_byte = _mean_random_hops(NUM_CORES_DEFAULT) / 2
+            else:
+                hops_per_byte = _mean_random_hops(NUM_CORES_DEFAULT)
+            ring_byte_hops = (
+                int(bytes_moved * hops_per_byte) if bytes_moved is not None else 0
+            )
+            cost_source = "coarse"
         total_ring_byte_hops += ring_byte_hops
 
         rows.append(
@@ -374,6 +388,7 @@ def restickify_telemetry(operations: list[Operation]) -> None:
                 bytes_moved,
                 hops_per_byte,
                 consumer_to_producer_sym,
+                cost_source,
             )
         )
 
@@ -391,18 +406,20 @@ def restickify_telemetry(operations: list[Operation]) -> None:
         bytes_moved,
         hops_per_byte,
         consumer_to_producer_sym,
+        cost_source,
     ) in rows:
         bytes_str = "<unknown>" if bytes_moved is None else f"{bytes_moved}"
         logger.info(
             "restickify=%s status=%s (sym=%s) ring_byte_hops=%d bytes=%s "
-            "hops_per_byte=%.2f producer=%s producer_splits=%s consumers=%s "
-            "self_splits=%s sym_map=%s",
+            "hops_per_byte=%.2f cost=%s producer=%s producer_splits=%s "
+            "consumers=%s self_splits=%s sym_map=%s",
             my_name,
             status_phys,
             status_sym,
             ring_byte_hops,
             bytes_str,
             hops_per_byte,
+            cost_source,
             producer_name,
             producer_splits if producer_splits is not None else "<none>",
             consumer_names,
