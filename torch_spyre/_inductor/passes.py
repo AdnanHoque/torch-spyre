@@ -230,7 +230,7 @@ class CustomPreSchedulingPasses(CustomGraphPass):
         insert_restickify(operations)
         span_reduction(operations)
         k_fast_ops = (
-            k_fast_division(operations) if config.core_id_k_fast_emission else set()
+            k_fast_division(operations) if config.core_id_k_fast_emission else []
         )
         work_distribution(operations, k_fast_ops)
         if config.lx_planning:

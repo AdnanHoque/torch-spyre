@@ -773,17 +773,17 @@ def span_reduction(operations: list[Operation]) -> None:
 
 
 def work_distribution(
-    operations: list[Operation], skip: set[str] | None = None
+    operations: list[Operation], k_fast_ops: list[Operation] | None = None
 ) -> None:
     """Pass 3: distribute remaining cores across ops to maximize parallelism.
 
-    Ops named in `skip` were already divided by k_fast_division; they are
+    Ops in `k_fast_ops` were already divided by k_fast_division; they are
     left untouched so every op is divided by exactly one of the two passes.
     """
-    skip = skip or set()
+    k_fast_ops = k_fast_ops or []
     max_cores = _validate_max_cores()
     for op in _iter_computed_buffers(operations):
-        if op.get_name() in skip:
+        if op in k_fast_ops:
             continue
         rw = op.get_read_writes()
         args = get_mem_deps_from_rw(rw)
@@ -845,18 +845,18 @@ def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> bool:
     return True
 
 
-def k_fast_division(operations: list[Operation]) -> set[str]:
+def k_fast_division(operations: list[Operation]) -> list[Operation]:
     """Pass 2 (optional): divide narrow-N small-M matmuls with k_fast.
 
     Runs after span_reduction and before work_distribution. The
     core_id_k_fast_emission feature-flag gate lives in passes.py; this pass
-    is only called when it is set. Returns the names of the ops it committed
-    a split for so passes.py can exclude them from work_distribution — every
-    op is divided by exactly one of the two passes.
+    is only called when it is set. Returns the ops it committed a split for
+    so passes.py can exclude them from work_distribution — every op is
+    divided by exactly one of the two passes.
     """
     max_cores = _validate_max_cores()
-    handled: set[str] = set()
+    k_fast_ops: list[Operation] = []
     for op in _iter_computed_buffers(operations):
         if _k_fast_divide_op(op, max_cores):
-            handled.add(op.get_name())
-    return handled
+            k_fast_ops.append(op)
+    return k_fast_ops
