@@ -151,6 +151,18 @@ Required probes:
 - MoE-style token dispatch, expert matmul, shared expert join, and combine
 - Mamba-style chunked projection, state/gate join, and output projection
 
+An initial implementation lives in `tools/restickify_scenario_probe.py`. It uses
+the existing `SPYRE_CAPTURE_RESTICKIFY_PLAN` hook, emits JSONL and CSV summaries,
+and continues through unsupported forward-looking cases so operator gaps are
+recorded instead of hidden. A typical first run is:
+
+```sh
+python tools/restickify_scenario_probe.py \
+  --include-forward-looking \
+  --size 128 \
+  --output-dir /tmp/restickify-stage1
+```
+
 Latency measurements should be promoted only for probes with nontrivial byte
 movement and stable correctness.
 
