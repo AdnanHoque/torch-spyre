@@ -543,6 +543,63 @@ def span_reduction_pass(
         )
 
 
+# A pure m-split matmul reads HBM ~2-3.7x slower than a 2D m x n co-split
+# (see tests/diag_hbm_bank_aware_findings.md). Splitting n beyond this many
+# cores hits an over-split cliff, so cap n_split here and give the rest to m.
+_MN_SPLIT_N_CAP = 8
+
+
+def _maybe_2d_mn_split(
+    op: ComputedBuffer,
+    splits: dict[Symbol, int],
+    it_space_adjusted: dict[Symbol, Expr],
+    output_td: TensorDep,
+    stick_vars: dict[Symbol, int],
+    committed_splits: dict[Symbol, int],
+    max_cores: int,
+) -> dict[Symbol, int]:
+    """Replace a matmul's pure-m work-split with a 2D m x n co-split.
+
+    A pure m-split (m split, n and k not) is HBM-slow; co-splitting n
+    instead runs ~2-3.7x faster (verified). Only fires on a pure m-split
+    BATCH_MATMUL_OP with no span_reduction commitments.
+    """
+    if not isinstance(op.data, Reduction):
+        return splits
+    if op.data.reduction_type != BATCH_MATMUL_OP:
+        return splits
+    if committed_splits:
+        return splits
+    # Of the two output coord vars, the n dim is also a stick var; m is not.
+    output_coord_vars = {
+        v for e in output_td.device_coords[:-1] for v in e.free_symbols
+    }
+    n_dims = [d for d in output_coord_vars if d in stick_vars]
+    m_dims = [d for d in output_coord_vars if d not in stick_vars]
+    if len(n_dims) != 1 or len(m_dims) != 1:
+        return splits
+    n_dim, m_dim = n_dims[0], m_dims[0]
+    # verified regime is a *pure* m-split: m split, nothing else
+    if splits.get(m_dim, 1) <= 1:
+        return splits
+    if any(v > 1 for d, v in splits.items() if d is not m_dim):
+        return splits
+    n_sticks = concretize_expr(it_space_adjusted[n_dim])
+    n_split = core_split(n_sticks, min(_MN_SPLIT_N_CAP, max_cores))
+    if n_split <= 1:
+        return splits  # n not splittable — leave the pure-m split
+    m_size = concretize_expr(it_space_adjusted[m_dim])
+    m_split = core_split(m_size, max_cores // n_split)
+    logger.debug(
+        f"2d_mn_split work_division {op.get_name()}: "
+        f"m-split {splits[m_dim]} -> ({m_split}, {n_split}) (m x n)"
+    )
+    splits = dict(splits)
+    splits[m_dim] = m_split
+    splits[n_dim] = n_split
+    return splits
+
+
 def work_distribution_pass(
     op: ComputedBuffer,
     args: list[SchedNodeArg],
@@ -557,7 +614,7 @@ def work_distribution_pass(
     input_tds, output_td = collect_tensor_deps(op, args)
     all_tds = input_tds + [output_td]
 
-    it_space_adjusted, _ = adjust_it_space_for_sticks(it_space, all_tds)
+    it_space_adjusted, stick_vars = adjust_it_space_for_sticks(it_space, all_tds)
 
     # Recover splits committed by span_reduction_pass using the same
     # coeff-keyed encoding that codegen uses — stable across passes.
@@ -602,6 +659,16 @@ def work_distribution_pass(
         reduction_dims,
         committed_splits,
     )
+    if config.two_d_mn_split:
+        splits = _maybe_2d_mn_split(
+            op,
+            splits,
+            it_space_adjusted,
+            output_td,
+            stick_vars,
+            committed_splits,
+            max_cores,
+        )
 
     apply_splits(op, splits, output_td)
 
