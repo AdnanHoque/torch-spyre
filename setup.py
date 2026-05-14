@@ -114,31 +114,30 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
         DEEPTOOLS_DIR / "include",
     ]
 
-    if COMPILE_AIUPTI:  # Include kineto
-        import torch
-
-        KINETO_INCLUDE_DIR = Path(torch.__path__[0]) / "include" / "kineto"
-        if (
-            KINETO_INCLUDE_DIR.exists() and KINETO_INCLUDE_DIR.is_dir()
-        ):  # Verify headers exist
-            COMMON_INCLUDE_DIR = Path(os.environ["SEN_COMMON_HEADERS"])
-            INCLUDE_DIRS += [
-                KINETO_INCLUDE_DIR,
-                COMMON_INCLUDE_DIR / "libaiupti",
-            ]
-        else:
-            print("Compile AIUPTI setting to False in Include")
-            COMPILE_AIUPTI = False
-
-    INCLUDE_DIRS += [os.environ["SEN_COMMON_HEADERS"]]
-
-    if os.environ.get("LIBAIUPTI_INSTALL_DIR"):
-        LIBAIUPTI_DIR = Path(os.environ["LIBAIUPTI_INSTALL_DIR"])
-        _aiupti_lib = Path(os.environ["LIBAIUPTI_INSTALL_DIR"]) / "lib" / "libaiupti.so"
-        if _aiupti_lib.exists():
-            LIBRARY_DIRS += [LIBAIUPTI_DIR / "lib"]
-
     LIBRARY_DIRS += [RUNTIME_DIR / "lib"]
+
+INCLUDE_DIRS += [os.environ["SEN_COMMON_HEADERS"]]
+
+if COMPILE_AIUPTI:  # Include kineto
+    import torch
+
+    KINETO_INCLUDE_DIR = Path(torch.__path__[0]) / "include" / "kineto"
+    if (
+        KINETO_INCLUDE_DIR.exists() and KINETO_INCLUDE_DIR.is_dir()
+    ):  # Verify headers exist
+        COMMON_INCLUDE_DIR = Path(os.environ["SEN_COMMON_HEADERS"])
+        INCLUDE_DIRS += [
+            KINETO_INCLUDE_DIR,
+            COMMON_INCLUDE_DIR / "libaiupti",
+        ]
+    else:
+        COMPILE_AIUPTI = False
+
+if os.environ.get("LIBAIUPTI_INSTALL_DIR"):
+    LIBAIUPTI_DIR = Path(os.environ["LIBAIUPTI_INSTALL_DIR"])
+    _aiupti_lib = Path(os.environ["LIBAIUPTI_INSTALL_DIR"]) / "lib" / "libaiupti.so"
+    if _aiupti_lib.exists():
+        LIBRARY_DIRS += [LIBAIUPTI_DIR / "lib"]
 
 if COMPILE_AIUPTI:
     LIBRARIES = ["sendnn", "sendnn_interface", "aiupti", "flex"]
