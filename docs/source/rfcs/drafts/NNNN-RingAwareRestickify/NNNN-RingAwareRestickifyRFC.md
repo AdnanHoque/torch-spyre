@@ -1,325 +1,333 @@
-# Ring-Aware Restickify
+# Joint Layout-Work-Mapping Coordination for Ring-Aware Restickify
 
 **Authors:**
 
 * @AdnanHoque
 
-**Status:** Draft
+**Status:** Draft (v2 — significant revision)
 
 ## Summary
 
-Make `restickify` placement and core-id mapping aware of the cost of moving
-data on Spyre's **RIU data ring**. Today, the inductor backend chooses each
-op's `core_id_to_work_slice` mapping independently, so producer/consumer pairs
-can end up on opposite sides of the 32-core ring, paying up to half-ring of
-hops per stick of data restickified between them. This RFC proposes a phased
-plan to add ring-locality awareness to the work-division and restickify
-passes, starting with telemetry and an MVP that aligns consumer mappings to
-producer mappings when possible.
-
-This is a follow-up to the k_fast PR ([#1986](https://github.com/torch-spyre/torch-spyre/pull/1986)),
-which added ring-locality awareness for the **SFP ring** (PSUM reduction).
-The same general technique — choosing physical core IDs to minimize ring
-traversal — is applied here to the RIU ring (data movement).
+Restickify is the dominant data-movement primitive in the inductor backend.
+Its cost on the RIU ring is not bounded by any single compiler decision —
+it is the joint product of **layout** (which dim is stick-oriented),
+**work-distribution** (split factors per op), and **core-id mapping**
+(physical core assignment). All three are picked independently today.
+Empirical measurement of single-lever optimization (work-distribution
+alignment) showed either no win (0%) or harmful regressions (−48.7%).
+This RFC proposes a joint cost model spanning all three decisions for
+restickify-bounded producer-consumer chains, validated incrementally
+against an upper-bound telemetry that already exists.
 
 ## Motivation
 
-The Spyre AIU 1.0 has 32 cores connected by three logical ring fabrics:
+### What changed since v1 of this RFC
 
-| Ring | Purpose | Approx. BW |
-|---|---|---:|
-| SFP | PSUM reduction (bichain) | 35.2 GB/s/dir |
-| RIU | Data movement (A/B reads, restickify, broadcast) | 166 GB/s |
-| HBM | Off-chip reads/writes; bank-parallel | shape-dependent |
+The v1 draft proposed "align consumer splits to producer splits" as a
+work_distribution hint. I prototyped that on
+`AdnanHoque/rfc-ring-aware-restickify` and measured the results:
 
-The k_fast work demonstrated that picking a core-id-to-slice mapping that
-places **K-cohort cores adjacent on the SFP ring** delivers a measured
-geomean speedup of 1.73× across 20 Granite / L3-70B / Mixtral / DSv3
-shapes ([diag_pr_vs_main_findings.md](../../../../tests/diag_pr_vs_main_findings.md)
-on branch `AdnanHoque/feat-k-fast-combined`).
+| Scope of alignment hint | Wall-clock delta vs baseline |
+|---|---:|
+| All consumer ops | **−48.7%** (regression) |
+| Restickify-only | **+0.15%** (no-op) |
 
-The same locality argument applies to the **RIU ring** for restickify:
+The regression came from forcing producer-aligned splits onto matmul
+consumers, which have PT-utilization constraints the producer doesn't
+share. The no-op came from the fact that restickify's stick-adjusted
+extent on the aligned dim is too small (2 sticks on M=128/64) to take
+the producer's full split factor — so work_distribution falls back to
+the orthogonal axis for remaining cores.
 
-* `restickify` is the data-movement kernel that converts one stick layout
-  into another. Mechanically, each consumer core loads its required slice
-  from arbitrary source cores via `lower_restickify`
-  ([lowering.py:485-508](../../../../torch_spyre/_inductor/lowering.py)).
-* The bytes physically traverse the RIU ring. Cost ≈
-  `bytes_per_stick × ring_hops(producer_core, consumer_core)`.
-* Today the cost model in `optimize_restickify_locations`
-  ([optimize_restickify.py:495](../../../../torch_spyre/_inductor/optimize_restickify.py))
-  is the **element count moved**. It is ring-blind: a restickify between
-  core 0 and core 31 (~16 hops) costs the same as one between core 0 and
-  core 1 (1 hop).
+Both results invalidate the v1 framing. **Local alignment at the
+work_distribution layer doesn't have enough degrees of freedom to
+reduce restickify ring cost.** What does is documented below.
 
-Why this matters: restickify is one of the dominant data-movement
-primitives in the backend. Most non-trivial models incur multiple
-restickifies per layer (post-matmul transpose, attention reshape,
-elementwise fusions across mixed layouts, etc.). Even modest improvements
-in per-restickify ring traffic should compound across a model.
+### The real constraint chain
 
-The architectural gap is that the existing cost model **cannot** include
-ring hops, because:
-
-* Restickify costs are computed at `optimize_restickify_locations`, which
-  runs **before** `work_distribution`.
-* Core-id-to-slice mappings (the inputs needed to compute ring hops) are
-  finalized at `work_distribution`, **after** restickify placement is fixed.
+For any restickify between producer op A (output buffer T) and consumer
+op B (reading T'), the decisions that determine ring cost are:
 
 ```
-propagate_layouts          attach candidate STLs + restick cost fn
-        ↓
-optimize_restickify_loc    pick committed_stl per op  (cost = elements)
-        ↓
-finalize_layouts           record restickify_plan
-        ↓
-insert_restickify          splice restickify ops into FX
-        ↓
-span_reduction
-        ↓
-work_distribution          ← core mappings finalized here
-        ↓
-k_fast_override
-        ↓
-codegen reads core_id_to_work_slice
+1. Layout decision  — picks stick dim for T and T'
+        ↓ determines
+2. Stick adjustment — converts stick-dim extent from elements to sticks
+        ↓ determines
+3. Split feasibility — which split factors each dim can take
+        ↓ determines
+4. Work distribution — which dim gets split, by how much
+        ↓ determines
+5. Core-id mapping  — which physical core gets which slice
+        ↓ determines
+6. Restickify ring cost
 ```
 
-This RFC proposes closing that gap.
+The work-distribution layer (step 4) is where v1 tried to intervene.
+It is the wrong layer in isolation: it can only choose among the splits
+that step 3 makes feasible, and steps 1-3 are themselves driven by
+constraints the work-distribution layer can't see (consumer's compute
+shape, downstream layout requirements).
+
+**Concrete example from the 4-layer Granite-3.3-8B probe:**
+
+* Producer matmul outputs `k` as `(M=128, H=4096)` with K as stick dim
+  → producer's `d0=M` has extent 128 elements (not stick-adjusted)
+  → producer can choose split `d0=32`. Default compute-optimal pick.
+
+* Restickify takes `k` and produces `k'` in a layout where `M` is the
+  stick dim (because the consumer `q @ k.t()` wants `M` rows contiguous
+  in stick layout)
+  → restickify's `d0=M` has extent **2 sticks** (M=128 / 64 elems/stick)
+  → restickify cannot take `d0=32` even when hinted; max is `d0=2`.
+
+* Consumer matmul `q @ k.t()` would naturally split its `M_q` axis
+  → consumer's split is on a different physical dim than producer's.
+
+The mapping between producer and restickify is fixed-orthogonal
+**because of layout decision in step 1**. The work-distribution lever
+can promote the right dim, but the extent constraint makes the promotion
+ineffective.
+
+### Implication
+
+Real restickify ring-cost reduction requires **joint coordination of
+layout, work-distribution, and (optionally) core-id mapping decisions
+across each producer-restickify-consumer chain**. This RFC proposes
+that joint optimization.
 
 ## Proposed Implementation
 
-The proposal is structured in **four phases**, each gated on evidence from
-the previous one. Phase 0 and Phase 1 are firmly in scope. Phases 2 and 3
-are presented for design discussion but should not be committed to until
-Phase 1 data is in hand.
+The proposal is a four-phase plan. Phase 0 telemetry is already
+prototyped and validated. Phases 1-3 are new and reflect the joint
+framing.
 
-### Phase 0 — Telemetry (~2 days)
+### Phase 0 — Telemetry (done)
 
-Goal: confirm there's signal worth optimizing, and produce a top-K list of
-expensive restickifies on real models.
+Read-only diagnostic pass after work_distribution that reports per-
+restickify:
+* bytes moved
+* precise hops/byte (computed pairwise from per-core slice ownership)
+* physical alignment status via stride-matching
+* whether the cost source is "precise" or "coarse fallback"
 
-Add a **read-only diagnostic pass** that runs after `work_distribution` and
-before codegen. For each restickify op, the pass:
+Implemented in `restickify_telemetry.py` and `mapping_alignment.py` on
+the branch above. Validated on:
+* two-matmul chain probe (probe4): ring cost 4.3 MB-hops, precise math
+  agrees with coarse estimate to 3%.
+* 4-layer Granite probe: 33 MB-hops total across 4 q@k.t() restickifies,
+  all mismatched (stride-matching confirms no false alignment).
 
-1. Resolves the producer's `core_id_to_work_slice` and the consumer's
-   `core_id_to_work_slice`.
-2. Computes an estimated `ring_hop_cost` = `Σ_c bytes_consumer_c ×
-   hops(producer_of_slice_c, c)` where `hops(a, b) = min(|a - b|, 32 - |a - b|)`
-   (signed ring distance).
-3. Logs `restickify_ring_cost(op_name) = total_bytes, total_hops,
-   estimated_ring_us`.
+Telemetry is shippable as a standalone diagnostic regardless of whether
+the optimization phases land.
 
-A second logging point (in `optimize_restickify_locations`) records the
-**element-count cost** used today, so we can compare the two cost models on
-the same data.
+### Phase 1 — Joint cost model & off-line validator (~1 week)
 
-**Deliverables**:
+Goal: prove or disprove that joint coordination can beat the current
+independent-greedy decisions, before any production integration.
 
-* New file: `torch_spyre/_inductor/restickify_telemetry.py` (~150 lines)
-* Hook: `passes.py` schedules the pass after `k_fast_override`.
-* Output: structured log + optional JSONL via `SPYRE_RESTICKIFY_TELEMETRY=path`.
-* Profile run: Granite 3.3 8B forward pass; table of top-10 restickifies by
-  estimated ring cost; estimate `total_restickify_ring_time / total_kernel_time`.
+Build an off-line evaluator that takes a single producer-restickify-
+consumer chain (extracted from the operations list) and:
 
-**Kill criterion**: if total estimated restickify ring time is under 2% of
-total kernel time on production models, descope to telemetry-only and close
-the project.
+1. Enumerates the feasible space of (layout, split-A, split-restickify,
+   split-B) tuples.
+2. Scores each tuple with the cost model below.
+3. Reports the joint optimum and how it compares to the
+   independent-greedy choice that today's pipeline would make.
 
-### Phase 1 — Producer-aligned consumer mappings (~1 week, MVP)
+**Cost model**:
 
-Goal: deliver the smallest behavior change that reduces ring traffic.
-
-Modify `superdsc.py:_get_core_to_slice_mapping` to accept an optional
-`producer_mapping` hint:
-
-```python
-def _get_core_to_slice_mapping(
-    iteration_space: dict[Symbol, Expr],
-    dim_splits: dict[Symbol, int],
-    num_cores: int,
-    producer_mapping: dict[Symbol, Expr] | None = None,  # NEW
-) -> dict[Symbol, Expr]:
-    """If a compatible producer_mapping is provided, align consumer cores
-    to it so restickify between them is on-core (or short-hop). Falls back
-    to the default row-major mapping when alignment is infeasible.
-    """
+```
+total_cost(config) = compute_cost(A, config)
+                   + restickify_ring_cost(config)
+                   + compute_cost(B, config)
 ```
 
-A new pre-codegen pass (`align_consumer_mappings`) walks ops in topological
-order. For each op that is a direct consumer of a producer with a known
-mapping, it checks whether the producer's iteration-space dims are a subset
-of the consumer's. If yes, it passes the producer's mapping as a hint.
+Where:
 
-**Alignment rule (initial, conservative)**:
+* **compute_cost(op, config)** uses the PT-utilization model already
+  baked into k_fast's heuristic: for matmul, rows-per-core relative to
+  `_PT_ROWS`, and HBM bandwidth bound for the per-core read pattern. For
+  reductions and pointwise, simpler models scale with per-core bytes.
 
-* Both ops have the same `iteration_space` keys (allowing extras on the
-  consumer side).
-* The consumer's split factors for shared dims equal the producer's split
-  factors.
-* Producer's `core_id_to_work_slice` is reusable as-is (the consumer's
-  extra dims, if any, become innermost).
+* **restickify_ring_cost(config)** = `Σ_{(p,c)} ring_dist(p, c) ×
+  overlap_bytes(p, c)`, computed exactly using the per-core slice
+  enumeration already in `mapping_alignment.compute_precise_hop_cost`.
 
-When the rule doesn't match, fall back to the default. **No behavior change
-on non-matching ops.**
+* **ring_dist(p, c)** = `min(|p - c|, num_cores - |p - c|)`. Latency
+  proxy; bandwidth model deferred to Phase 2 if needed.
 
-Gate behind a new config flag: `align_restickify_consumer_mappings`,
-defaulting to `False` for initial rollout. Flip to `True` after Phase 1
-benchmarks pass.
+**Feasibility constraints** (encoded in the enumeration):
 
-**Deliverables**:
+* Layout(T') stick dim ∈ {dims of T'}; restricted to dims compatible
+  with consumer's access pattern.
+* Split factor on dim D ≤ stick-adjusted extent of D after layout choice.
+* Product of split factors ≤ `max_cores`.
+* Span-reduction commits respected.
 
-* Modified `superdsc.py` (~30 lines).
-* New pass `align_consumer_mappings` (~80 lines) in `work_division.py` or
-  new file `torch_spyre/_inductor/mapping_alignment.py`.
-* Config flag in `config.py`.
-* Unit tests in `tests/inductor/test_inductor_ops.py` covering at least:
-  * matmul → pointwise → restickify chain (alignment fires)
-  * matmul → reduction (different cohort, alignment skipped)
-  * bmm → matmul (3-vs-4 dim, alignment skipped)
-* Re-run Phase 0 telemetry to confirm reduction in `total_ring_us`.
+**Search size estimate** (per chain, max_cores=32):
+* Layouts to consider: ≤ 4 stick-dim candidates per intermediate tensor.
+* Splits per op: each op has ≤ 8 plausible split tuples (pure dim,
+  mixed, k_fast-style).
+* Per chain: ≤ 4 × 8 × 4 × 8 = ~1000 configurations to evaluate.
+* Per configuration: O(num_cores²) = 1024 pair evaluations for ring
+  cost.
+* Total per chain: ~1M operations. Sub-second in Python.
 
-**Success criterion**: measurable reduction in `total_ring_us` on the top
-restickifies identified in Phase 0, with **zero regressions** on the 20-shape
-end-to-end benchmark from k_fast PR.
+**Phase 1 deliverable**: a `.md` report on the 4-layer Granite probe
+showing, for each of the 4 q@k.t() chains:
+* Current cost (today's independent-greedy decisions).
+* Joint-optimum cost.
+* Delta in milliseconds (using the cost model's wall-clock conversion).
 
-### Phase 2 — Post-pass restickify re-optimization (~2–3 weeks, conditional)
+**Kill criterion**: if the joint optimum reduces total cost by < 5%
+relative to today's choices, the lever isn't worth pursuing further;
+ship Phase 0 telemetry only and close the project.
 
-Goal: re-evaluate **placement** of restickifies given the actual core mappings.
+### Phase 2 — Integration as a constraint provider (~2 weeks, conditional)
 
-This phase is conditional on Phase 1 evidence. If Phase 1's producer
-alignment captures most of the available win, Phase 2 may not be worth the
-complexity.
+Goal: turn Phase 1's joint optimum into a real pipeline override.
 
-Approach: after `work_distribution`, run a second optimization pass that:
+The cleanest integration point is a new pass that runs **before**
+`propagate_layouts`/`optimize_restickify_locations`/`work_distribution`,
+identifying restickify-bounded chains and computing the joint optimum.
+The pass then attaches per-op constraints:
 
-1. Re-costs each restickify with ring hops as the dominant term.
-2. Considers moving restickifies earlier (closer to producer) or later
-   (closer to consumer) if doing so reduces total ring cost.
-3. Considers cancelling redundant restickifies that were inserted under the
-   element-count cost model but turn out to be no-ops under the ring-cost
-   model.
+* `op._spyre_layout_hint` (read by propagate_layouts)
+* `op._spyre_split_hint` (read by work_distribution)
 
-The risk here is interaction with the existing greedy / beam-search
-optimizer ([optimize_restickify.py:281-492](../../../../torch_spyre/_inductor/optimize_restickify.py)).
-Adding ring cost as a fourth search dimension could blow up the K=64 beam.
+Each hint is advisory: downstream passes consult it but may refuse if
+the hint conflicts with hard constraints (span limits, hardware-illegal
+layouts, etc.). Hints come with a fallback path so the pipeline never
+worsens when the override is refused.
 
-**Defer until Phase 0 + 1 data confirms it's needed.**
+Initial scope: matmul-restickify-matmul chains only (the q@k.t() and
+mlp-tail patterns from Granite). Generalize after measurement.
 
-### Phase 3 — Cross-op work-division coordination (out of scope)
+### Phase 3 — Multi-op chains & cost-model refinement (≥3 weeks, deferred)
 
-Goal: the full joint optimization: choose `core_id_to_work_slice` for each
-op such that total ring traffic across the whole graph is minimized.
+Generalizes Phase 2 from 3-op chains (A-restickify-B) to longer chains
+including pointwise ops, reductions, and multi-fanout. Also refines the
+cost model with hardware-measured calibration (ring bandwidth utilization
+under contention, PT compute model under multi-cohort layouts).
 
-This is the architecturally pure answer but a multi-week refactor of the
-work-division pass. It is **explicitly out of scope** for this RFC. If
-Phases 0–2 leave large wins on the table, this is the natural next step.
+Explicit non-goals for v2 of this RFC: Phase 3 is sketched only as a
+direction. Commit will happen only after Phase 2 measured wins.
 
 ## Metrics
 
-Primary metrics:
+Primary:
+* **Joint-optimum cost reduction over independent-greedy** on the
+  4-layer Granite probe, measured by the Phase 1 evaluator (~5% kill
+  threshold; >10% would be a clear win).
+* **End-to-end wall-clock** on the same probe with Phase 2 hints
+  enabled, vs baseline. Target: ≥ Phase 1's predicted delta minus
+  measurement noise (~1%).
 
-* **Total restickify ring time / total kernel time** on Granite 3.3 8B M ∈
-  {32, 128, 512} forward pass. Baseline measured in Phase 0; target 50%+
-  reduction post-Phase 1.
-* **End-to-end matmul + restickify kernel latency** on the 20-shape suite
-  from k_fast PR. Target: zero regressions, at least 5 shapes show ≥ 5%
-  improvement.
+Secondary:
+* Number of restickifies removed entirely (vs reduced in ring cost).
+* Compute-cost-vs-ring-cost ratio across optimized configurations (tells
+  us whether the optimization is biased toward ring savings or compute
+  preservation).
 
-Secondary metrics:
-
-* Number of restickifies inserted, before and after.
-* Average ring hops per restickified stick.
+Diagnostic:
+* Phase 0 telemetry's "before/after" delta across a model forward pass.
 
 ## Drawbacks
 
-* **Adds complexity to the pass pipeline.** A new alignment pass and a new
-  telemetry pass mean two more places that downstream changes have to
-  preserve.
-* **Increases coupling between work_division and restickify.** Today these
-  are separable; Phase 1 introduces a directed dependency from
-  `_get_core_to_slice_mapping` to upstream `producer_mapping`.
-* **Risk of interaction with concurrent layout work.** The scratchpad
-  refactor [#1941](https://github.com/torch-spyre/torch-spyre/pull/1941)
-  just landed; further restickify-area work is in flight. This RFC needs to
-  align with that direction.
-* **Cost model fidelity.** Hops × bytes is a first-order approximation. It
-  ignores ring contention (multiple concurrent restickifies sharing the same
-  ring segment) and the actual ring topology details. May need a calibration
-  probe similar to PSUM ring cost.
+1. **Architectural scope.** This couples three passes (layout, work-
+   distribution, mapping) that are independent today. The team
+   reshaping `propagate_layouts` (#1941) and `work_distribution`
+   (#1989) needs to coordinate; this RFC must not block their work.
+
+2. **Search-space risk.** ~1000 configurations per chain is fine for
+   one-shot compilation; in dynamic-shape scenarios it could be too
+   slow. Mitigation: cache by shape-signature, skip when AOT compile
+   isn't in play.
+
+3. **Cost-model fidelity.** First-order analytic compute model risks
+   over- or under-counting reality. Mitigation: Phase 1 reports both
+   predicted and (if possible) measured cost; Phase 2 only ships if
+   they agree within ~10%.
+
+4. **Negative result is plausible.** If the natural-split compute cost
+   dominates restickify ring cost, the joint optimum is the
+   independent-greedy choice and the project produces only telemetry.
+   This is an acceptable outcome.
 
 ## Alternatives
 
-1. **Pipeline reorder.** Pull `work_distribution` before
-   `optimize_restickify_locations` so the existing optimizer can include
-   ring cost. Rejected as Phase 3 / out-of-scope — too disruptive given the
-   active layout-pass refactoring.
+1. **Layout-pass-only optimization.** Solve the problem upstream by
+   choosing layouts that don't force restickify in the first place.
+   This is what `optimize_restickify_locations` already does (cost =
+   element count). Replacing its cost function with ring-cost is a
+   simpler change than joint optimization but doesn't benefit from the
+   work-distribution lever. Worth considering as a Phase 1.5 if joint
+   optimization is too complex but a single-pass change is feasible.
 
-2. **Pure observability** (Phase 0 only). Ship telemetry, then iteratively
-   patch hot spots by hand. Considered as a fallback if Phase 0 evidence is
-   weak.
+2. **Pure runtime overlap.** If hardware overlaps RIU traffic with PT
+   compute well enough that restickify is fully hidden, the entire
+   project is moot. Phase 0 telemetry estimates an upper bound but does
+   not measure actual on-critical-path time. A profiler-level
+   measurement (deferred Phase 0.5 work) would tell us how much of the
+   1.8 ms predicted is on the critical path vs hidden.
 
-3. **Static mapping templates.** Define a small set of canonical mappings
-   (row-major, K-cohort-adjacent, N-cohort-adjacent, ...) and have the
-   planner pick the best per op. Less flexible than producer-aligned but
-   simpler to reason about. May converge to roughly the same outcomes for
-   matmul-heavy graphs.
-
-4. **Doing nothing.** The cost is real but not catastrophic — k_fast PR's
-   end-to-end measurements include the unoptimized restickify cost and
-   still show 1.73× geomean. The opportunity cost of inaction is bounded
-   by the Phase 0 telemetry.
+3. **Doing nothing.** Restickify ring cost is bounded; today's pipeline
+   already chooses non-pessimal splits via `optimize_restickify_locations`
+   for the element-count metric. The opportunity cost of inaction is
+   bounded by Phase 1's predicted delta.
 
 ## Prior Art
 
-* **k_fast PR ([#1986](https://github.com/torch-spyre/torch-spyre/pull/1986))**:
-  the direct analogue on the SFP ring. Same general technique (choose
-  physical core IDs to minimize ring traversal) applied to PSUM reduction
-  instead of restickify data movement. Provides the methodology for
-  telemetry, A/B/C decomposition, and benchmarking that this RFC reuses.
+* **k_fast PR (#1986).** Same general technique (coordinate physical
+  core IDs with cost model) applied to PSUM ring reduction in matmul.
+  k_fast measured a 1.73× geomean speedup on 20 production shapes by
+  picking a slightly-non-natural split combined with adjacent core IDs.
+  The cost-model approach in this RFC is conceptually identical;
+  difference is that this RFC operates across ops (chain optimization)
+  rather than within a single op.
 
-* **GPU literature on ring-allreduce** (e.g. NCCL): well-established that
-  ring topology matters for collective ops; choosing ranks adjacent on the
-  ring saves bandwidth. Spyre's restickify is structurally similar to a
-  reshape-and-allgather.
+* **TVM AutoTVM and Halide schedules.** Standard joint-search problem
+  in tensor-program optimization. Tractable for small chains because
+  the search space is small.
 
-* **TPU XLA's collective-permute optimization**: when XLA emits a
-  `collective-permute` for transpose-on-mesh, it chooses source/dest pairs
-  to minimize on-mesh distance. Spyre's restickify is the analogous op
-  on the AIU's ring.
+* **GPU compilers' fused-kernel selection.** Choosing a fused kernel
+  variant trades off compute per-op vs interconnect cost; structurally
+  similar tradeoff.
 
 ## How we teach this
 
-The user-facing concept is `core_id_to_work_slice` and the principle that
-**adjacent cores on the ring share data more cheaply than distant cores**.
-This will be added to:
+* **For maintainers:** add `docs/source/compiler/restickify_ring_cost.md`
+  explaining the chain-of-constraints picture and pointing at the
+  telemetry pass. Update `work_division_planning.md` to mention that
+  the join-cost hints exist when Phase 2 lands.
 
-* `docs/source/compiler/work_division_planning.md` — explain the
-  producer-alignment rule and when it fires.
-* `docs/source/getting_started/how_torch_spyre_works.md` — mention ring
-  locality as a backend optimization concern.
-
-A new diagram in the existing `fig4b-sdsc-example.svg` style, showing the
-producer/consumer alignment, will be added.
+* **For users:** invisible; the optimization is automatic.
 
 ## Unresolved questions
 
-* **What's the right alignment policy for ops with mismatched iteration
-  spaces?** Phase 1 picks the conservative "exact match" rule, but the
-  more interesting cases (matmul → transpose → matmul, attention
-  reshape) involve dim permutations. The right rule probably involves
-  computing a per-stick "source core" function and matching that
-  function across producer/consumer.
-* **How does this interact with bmm support?** k_fast currently excludes
-  bmm. Restickify is heavily used in bmm-driven attention; the
-  alignment rule has to define a sensible bmm policy.
-* **Should the alignment pass run before or after `k_fast_override`?**
-  `k_fast_override` changes matmul mappings, so the alignment pass needs
-  to see post-override mappings to align correctly. Order: span_reduction
-  → work_distribution → k_fast_override → align_consumer_mappings.
-* **What's the cost model fidelity ceiling?** First-order hops × bytes
-  may underestimate cost in high-contention scenarios. A calibration
-  probe (one shape, one restickify, varying producer/consumer distance)
-  would establish whether the linear model holds.
+1. **Cost-model calibration.** First-order analytic compute models may
+   not match hardware closely enough. The Phase 1 evaluator's
+   `predicted vs measured` delta will tell us; if delta > 20% on the
+   probe, we'll need a hardware-calibrated lookup table.
+
+2. **Multi-fanout.** If tensor T is consumed by multiple downstream ops
+   with different preferred splits, joint optimization across all
+   consumers becomes constrained. Phase 1 ignores this (picks the
+   single largest consumer); Phase 3 must handle it.
+
+3. **Symbolic shapes.** The precise hop math currently requires
+   concrete extents. Dynamic-shape support would need either symbolic
+   computation or per-shape caching.
+
+4. **Layout-team coordination.** PR #1941 (scratchpad refactor) and
+   #1989 (reduction-split) just landed in the area this RFC touches.
+   Phase 2 design must align with whatever direction the layout team
+   is moving. **Hard prerequisite**: a 30-minute conversation with the
+   layout owners before Phase 2 code lands.
+
+5. **Bmm and multi-output-dim cases.** Excluded from k_fast's scope and
+   should be excluded from this RFC's initial scope. Generalization is
+   future work.
 
 ## Resolution
 
@@ -335,11 +343,10 @@ To be filed.
 
 #### Next Steps
 
-1. Circulate this draft to the layout-team owners (Olivier and the team that
-   landed PRs #1941, #1989) for early feedback on whether Phase 1
-   conflicts with their direction.
-2. If green-lit, implement Phase 0 telemetry and produce the top-10
-   table on Granite 3.3 8B.
-3. Convert this draft into a formal RFC in the
-   [torch-spyre/rfcs](https://github.com/torch-spyre/rfcs) repo with a
-   formal number.
+1. Circulate this v2 draft to Olivier and the layout-team owners (PRs
+   #1941, #1989). The shift from "work-distribution alignment" to
+   "joint layout-work-mapping coordination" needs their early input
+   before Phase 1 code lands.
+2. Build the Phase 1 off-line evaluator on a single chain.
+3. Decide kill/proceed based on the Phase 1 measurement.
+4. If proceed, draft formal RFC at https://github.com/torch-spyre/rfcs.
