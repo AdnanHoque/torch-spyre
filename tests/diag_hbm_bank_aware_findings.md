@@ -221,57 +221,96 @@ per core (per the ISA), or 4 HBM bank/pseudo-channel phases. When
 bands (start offset `core·s·128 B`) land in a conflicting phase pattern
 that serialises at the single shared ring port. Unverified.
 
-### Actionable — n_fast (verified)
+### n_fast — verified at m≈128, but M-dependent
 
-`sticks_per_core = (N/64) / num_cores`, and the planner *chooses*
-`num_cores` (default: largest divisor of `N/64` that is ≤ 32). Forcing a
-*smaller* core count that lands `sticks_per_core` on a fast `oddpart`
-beats the default `out:32` — verified, with numerically correct output:
+`sticks_per_core = (n/64) / n_split`, and the planner *chooses* `n_split`
+(default: the largest divisor of `n/64` that is ≤ 32). Re-picking a
+*smaller* `n_split` that lands `sticks_per_core` on a fast `oddpart` beats
+the default — **at m=128**, verified, numerically correct:
 
-| N | default `out:32` | forced | forced sticks/core | speedup |
-|---:|---|---:|---:|---:|
-| 14336 | s=7, 1.807 ms | `out:28` | 8 | **1.71×** |
-| 12288 | s=6, 1.439 ms | `out:24` | 8 | **1.45×** |
-| 28672 | s=14, 3.328 ms | `out:28` | 16 | **1.54×** |
-| 24576 | s=12, 2.966 ms | `out:24` | 16 | **1.50×** |
+| n | default → n_fast split | sticks/core | speedup |
+|---:|---|---:|---:|
+| 14336 | `(128,32,1)` → `(128,28,1)` | 7 → 8 | **1.71×** |
+| 12288 | `(128,32,1)` → `(128,24,1)` | 6 → 8 | **1.45×** |
+| 28672 | `(128,32,1)` → `(128,28,1)` | 14 → 16 | **1.54×** |
+| 24576 | `(128,32,1)` → `(128,24,1)` | 12 → 16 | **1.50×** |
 
-Fewer cores is a clear net win — the per-core bandwidth gain dwarfs the
-lost parallelism. **Planner rule:** after `C = core_split(N/64, 32)`, if
-`oddpart((N/64)/C) ∈ {3,7}`, drop to the largest `C' ≤ 32` dividing
-`N/64` whose `(N/64)/C'` has `oddpart ∉ {3,7}`. Pure post-processing of
-the `out`-dim core count — K-independent, no permutation, recovers ~1.5×
-on affected shapes.
+Fewer cores is a net win *at m=128* because the matmul is HBM-bound — the
+per-core bandwidth gain dwarfs the lost parallelism.
+
+**But n_fast is M-dependent and not robust.** A head-to-head probe ran the
+same move (`(64,32,1)` → `(64,28,1)`, n=14336) at **m=64** and it
+**regressed to 0.87×** — at small m the lost parallelism outweighs the
+bandwidth fix. n_fast is verified only at m=128; m=256 was flagged murky;
+m=64 is confirmed harmful. An M-characterization sweep is in progress to
+find its valid M-range.
 
 **Implemented** behind the `n_fast_out_split` config flag (off by
-default) — `_maybe_n_fast` in `work_division.py`, gated on a pure
-out-split `BATCH_MATMUL_OP` with no span_reduction commitments. The N dim
-is identified structurally (the output coordinate variable that is also a
-stick variable). Device-verified end-to-end: N=14336 goes `out:32` →
-`out:28`, 1.79 ms → 1.04 ms (**1.73×**), output numerically correct.
+default) — `_maybe_n_fast` in `work_division.py`, gated on a pure n-split
+`BATCH_MATMUL_OP` with no span_reduction commitments; the n dim is
+identified structurally (output coord var that is also a stick var).
+Device-verified at m=128. **The flag has no M-gate yet — it would regress
+m=64 shapes — so it is not safe to enable broadly until the M-sweep
+lands.**
 
-### A second finding — pure-`mb` is slow vs a 2D split (verified)
+**Planner rule (within n_fast's valid M-range):** after
+`C = core_split(n/64, 32)`, if `oddpart((n/64)/C) ∈ {3,7}`, drop to the
+largest `C' ≤ 32` dividing `n/64` whose `(n/64)/C'` has `oddpart ∉ {3,7}`.
 
-Pure `mb:32` (~40–57 GB/s) is itself a slow regime. Capping the `mb` core
-count makes the planner refill the freed cores into the `out` dim,
-turning pure `mb:32` into a 2D `mb × out` split (still 32 cores total)
-that runs **1.8–3.7× faster** — numerically correct (max rel err ~0.004,
-matching the pure-`mb:32` default exactly: fp16 rounding, no skipped
-work):
+### A second finding — pure-`m` is slow vs a 2D `m×n` split (verified)
 
-| shape (M,K,N) | pure `mb:32` | best 2D split | speedup |
+Pure `m`-split `(32,1,1)` (~40–57 GB/s) is itself a slow regime. Capping
+the `m` core count makes the planner refill the freed cores into the `n`
+dim, turning `(32,1,1)` into a 2D `m×n` split (still 32 cores total) that
+runs **1.8–3.7× faster** — numerically correct (max rel err ~0.004,
+matching the pure-`m` default exactly: fp16 rounding, no skipped work):
+
+| shape (m,k,n) | pure `(32,1,1)` | best 2D split | speedup |
 |---|---:|---|---:|
-| 128,4096,2048 | 0.439 ms | `mb:4 × out:8` | **3.67×** |
-| 256,4096,2048 | 0.390 ms | `mb:4 × out:8` | **3.00×** |
-| 512,4096,2048 | 0.405 ms | `mb:8 × out:4` | **2.17×** |
+| 128,4096,2048 | 0.439 ms | `(4,8,1)` | **3.67×** |
+| 256,4096,2048 | 0.390 ms | `(4,8,1)` | **3.00×** |
+| 512,4096,2048 | 0.405 ms | `(8,4,1)` | **2.17×** |
 
-Every 2D ratio beats pure `mb:32` (1.8–3.7×). The best ratio shifts with
-M: more `out` splitting wins at small M, shifting toward `mb:8 × out:4`
-at M=512. Plausible mechanism: several concurrent narrower multicast
-streams use the broadcast fabric better than one wide one.
+Every 2D ratio beats pure `(32,1,1)` (1.8–3.7×). The best ratio shifts
+with m: more `n`-splitting wins at small m, shifting toward `(8,4,1)` at
+m=512. Plausible mechanism: several concurrent narrower multicast streams
+use the broadcast fabric better than one wide one.
 
-**This is a second, separate planner win** — "prefer a 2D `mb × out`
-split over pure `mb`" — not yet implemented, and possibly larger than
-n_fast. The right `mb:out` ratio as a function of M needs its own sweep.
+**This is a second, separate planner win** — "prefer a 2D `m×n` split
+over pure `m`" — not yet implemented, and the standout result of the
+investigation. In a head-to-head on a contested shape (m=128, n=2048,
+k=4096), the 2D `(4,8,1)` split (3.66×) beat **k_fast**'s `(1,16,2)`
+(2.86×) by 1.28× — i.e. 2D `m×n` wins even on k_fast's own contested
+turf. The optimal `m:n` ratio as a function of m needs its own sweep
+(in progress).
+
+## How the three optimizations interact
+
+Three planner levers exist for matmul work-division:
+
+| lever | what it splits | regime |
+|---|---|---|
+| **2D `m×n`** | co-split `m` and `n` | `m`-split regime (`m > n/64`) |
+| **n_fast** | re-pick the `n`-split count | `n`-split regime (`n/64 > m`) |
+| **k_fast** (#1986) | split `k` | overrides small-`m` wide-`k` shapes |
+
+* **n_fast and 2D `m×n` never overlap** — opposite sides of the
+  `m vs n/64` regime boundary.
+* **k_fast overlaps both** — it is an override for small-`m` wide-`k`
+  shapes, which can fall in either regime.
+* **No shape triggers all three** (n_fast and 2D are mutually exclusive).
+
+Head-to-head on the contested shapes:
+
+* **`m`-split regime** (k_fast ∩ 2D): 2D `m×n` wins decisively — 3.66× vs
+  pure-`m`, and 1.28× over k_fast.
+* **`n`-split regime** (k_fast ∩ n_fast): nearly a wash (~15% spread) —
+  k_fast edges ahead (1.03×), n_fast *regresses* (0.87×) at m=64.
+
+**Cost-model guidance:** prefer **2D `m×n`** whenever the shape is in the
+`m`-split regime — ahead of k_fast. In the `n`-split regime it is roughly
+a wash; k_fast is the safe pick, n_fast only within its (still being
+characterized) M-range.
 
 ## Lessons for the next person
 
