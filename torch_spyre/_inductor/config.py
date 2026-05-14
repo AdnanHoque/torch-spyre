@@ -27,4 +27,8 @@ dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
 
+# When set, replace a matmul's pure-m work-split with a 2D m x n co-split
+# (see tests/diag_hbm_bank_aware_findings.md). Off by default.
+two_d_mn_split: bool = os.environ.get("SPYRE_2D_MN_SPLIT", "0") == "1"
+
 install_config_module(sys.modules[__name__])
