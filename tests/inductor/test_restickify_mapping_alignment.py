@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from sympy import Symbol
+from sympy import Integer, Symbol
 
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.compute_ops import generate_sdsc
@@ -34,6 +34,7 @@ from torch_spyre._inductor.restickify_ring import (
     source_kind_from_buffer,
     _stride_map_from_layout,
 )
+from torch_spyre._inductor.pass_utils import stick_compatible
 from torch_spyre._inductor.restickify_telemetry import _estimate_to_json
 
 
@@ -42,6 +43,34 @@ def test_ring_distance_bidirectional():
     assert ring_distance(0, 16, 32) == 16
     assert ring_distance(7, 3, 32) == ring_distance(3, 7, 32)
     assert ring_distance(0, 5, 8) == 3
+
+
+def test_stick_compatible_accepts_same_stick_variable():
+    d0 = Symbol("d0")
+    d1 = Symbol("d1")
+
+    assert stick_compatible([[d0, d1], [d0 + 1, d1]])
+
+
+def test_stick_compatible_accepts_broadcast_stick_when_nonstick_dims_are_safe():
+    d0 = Symbol("d0")
+    d1 = Symbol("d1")
+
+    assert stick_compatible([[d0, d1], [d0, Integer(0)]])
+
+
+def test_stick_compatible_rejects_multiple_stick_variables():
+    d0 = Symbol("d0")
+    d1 = Symbol("d1")
+
+    assert not stick_compatible([[d0, d1], [d1, d0]])
+
+
+def test_stick_compatible_rejects_stick_variable_used_as_nonstick_dimension():
+    d0 = Symbol("d0")
+    d1 = Symbol("d1")
+
+    assert not stick_compatible([[d0, d1], [d1, Integer(0)]])
 
 
 def test_materialize_default_core_mapping_matches_superdsc():

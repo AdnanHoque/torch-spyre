@@ -31,7 +31,7 @@ The current compiler structure already encodes this model:
 
 | Mechanism | Current role |
 |---|---|
-| `compute_restickify_needed` | Compares input and target device stick expressions and computes a target layout when the stick must move. |
+| `compute_restickify_needed` | Tests input and target stick-variable compatibility and computes a target layout when the stick must move. |
 | `EdgeCostMap` | Scores a restickify edge as `0`, element count, or infeasible. |
 | `AllSameNode` | Models pointwise-style joins where inputs and output must be stick-compatible. |
 | `FixedInOutNode` | Models ops such as matmul with fixed input and output stick requirements. |
