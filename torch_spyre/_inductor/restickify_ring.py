@@ -196,6 +196,31 @@ def split_dims_only(splits: Mapping[str, int]) -> dict[str, int]:
     return {sym: split for sym, split in splits.items() if split > 1}
 
 
+def producer_aligned_dim_order(
+    restickify_dims: Sequence[Any],
+    producer_splits: Mapping[str, int],
+    symbol_map: Mapping[str, str],
+) -> tuple[list[Any] | None, str | None]:
+    """Prioritize the restickify dim mapped to the producer's dominant split."""
+    scored_dims: list[tuple[Any, int]] = []
+    for dim in restickify_dims:
+        producer_sym = symbol_map.get(str(dim))
+        split = producer_splits.get(producer_sym, 1) if producer_sym else 1
+        if split > 1:
+            scored_dims.append((dim, split))
+
+    if not scored_dims:
+        return None, "producer-has-no-mapped-split"
+
+    max_split = max(split for _, split in scored_dims)
+    dominant_dims = [dim for dim, split in scored_dims if split == max_split]
+    if len(dominant_dims) != 1:
+        return None, "ambiguous-producer-split"
+
+    dominant = dominant_dims[0]
+    return [dominant, *(dim for dim in restickify_dims if dim != dominant)], None
+
+
 def extract_strides(index_expr, var_names) -> dict[str, int]:
     """Return per-symbol stride coefficients for a linear index expression."""
     if index_expr is None:

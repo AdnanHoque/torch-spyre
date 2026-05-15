@@ -28,6 +28,7 @@ from torch_spyre._inductor.restickify_ring import (
     estimate_byte_hops_from_mappings,
     materialize_default_core_mapping,
     materialize_k_fast_core_mapping,
+    producer_aligned_dim_order,
     ring_distance,
 )
 
@@ -130,6 +131,34 @@ def test_symbol_correspondence_skips_ambiguous_strides():
 
     assert mapping == {}
     assert reason == "ambiguous-producer-stride"
+
+
+def test_producer_aligned_dim_order_prioritizes_mapped_dominant_split():
+    d0 = Symbol("d0")
+    d1 = Symbol("d1")
+
+    prioritized, reason = producer_aligned_dim_order(
+        [d0, d1],
+        {"p0": 1, "p1": 32},
+        {"d0": "p0", "d1": "p1"},
+    )
+
+    assert prioritized == [d1, d0]
+    assert reason is None
+
+
+def test_producer_aligned_dim_order_skips_ambiguous_dominant_split():
+    d0 = Symbol("d0")
+    d1 = Symbol("d1")
+
+    prioritized, reason = producer_aligned_dim_order(
+        [d0, d1],
+        {"p0": 4, "p1": 4},
+        {"d0": "p0", "d1": "p1"},
+    )
+
+    assert prioritized is None
+    assert reason == "ambiguous-producer-split"
 
 
 def test_core_mapping_override_remaps_to_sdsc_symbols_and_fills_missing_dims():

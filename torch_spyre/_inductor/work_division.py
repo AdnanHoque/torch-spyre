@@ -46,6 +46,14 @@ from .pass_utils import (
     apply_splits_from_index_coeff,
 )
 from typing import Callable
+from .restickify_ring import (
+    build_name_to_op_map,
+    decode_op_splits,
+    is_restickify_op,
+    producer_aligned_dim_order,
+    producer_for_restickify,
+    restickify_symbol_map,
+)
 
 from .logging_utils import get_inductor_logger
 from . import config
@@ -547,6 +555,7 @@ def work_distribution_pass(
     op: ComputedBuffer,
     args: list[SchedNodeArg],
     max_cores: int,
+    name_to_op: dict[str, ComputedBuffer] | None = None,
 ) -> None:
     """Optional per-op pass: distribute remaining cores to maximize parallelism.
 
@@ -585,6 +594,14 @@ def work_distribution_pass(
         s: e for s, e in it_space_adjusted.items() if s not in committed_splits
     }
     output_dims, reduction_dims = prioritize_dimensions(output_td, it_space_remaining)
+    output_dims = maybe_prioritize_restickify_output_dims(
+        op,
+        output_dims,
+        it_space_adjusted,
+        max_cores,
+        committed_splits,
+        name_to_op,
+    )
 
     # If span_reduction_pass already committed a reduction split, suppress further
     # reduction splitting so the final result never exceeds one reduction dim split.
@@ -614,6 +631,79 @@ def work_distribution_pass(
         )
 
     warn_if_per_core_overflow(all_tds, it_space, splits, op.get_name())
+
+
+def maybe_prioritize_restickify_output_dims(
+    op: ComputedBuffer,
+    output_dims: list[Symbol],
+    it_space_adjusted: dict[Symbol, Expr],
+    max_cores: int,
+    committed_splits: dict[Symbol, int],
+    name_to_op: dict[str, ComputedBuffer] | None,
+) -> list[Symbol]:
+    """Prefer the producer-corresponding split dim for compatible restickifies."""
+    if not config.align_restickify_work_distribution:
+        return output_dims
+    if not is_restickify_op(op):
+        return output_dims
+    if name_to_op is None:
+        return output_dims
+
+    producer_info, reason = producer_for_restickify(op, name_to_op)
+    if producer_info is None:
+        logger.info(
+            "skip restickify work-distribution alignment for %s: %s",
+            op.get_name(),
+            reason,
+        )
+        return output_dims
+
+    producer, read_dep = producer_info
+    symbol_map, reason = restickify_symbol_map(producer, op, read_dep)
+    if reason is not None:
+        logger.info(
+            "skip restickify work-distribution alignment for %s: %s",
+            op.get_name(),
+            reason,
+        )
+        return output_dims
+
+    prioritized, reason = producer_aligned_dim_order(
+        output_dims,
+        decode_op_splits(producer),
+        symbol_map,
+    )
+    if prioritized is None:
+        logger.info(
+            "skip restickify work-distribution alignment for %s: %s",
+            op.get_name(),
+            reason,
+        )
+        return output_dims
+
+    preferred_dim = prioritized[0]
+    cores_remaining = max_cores // max(math.prod(committed_splits.values()), 1)
+    if (
+        core_split(concretize_expr(it_space_adjusted[preferred_dim]), cores_remaining)
+        <= 1
+    ):
+        logger.info(
+            "skip restickify work-distribution alignment for %s: preferred "
+            "dim %s cannot split with %d remaining cores",
+            op.get_name(),
+            preferred_dim,
+            cores_remaining,
+        )
+        return output_dims
+
+    if prioritized != output_dims:
+        logger.info(
+            "prioritize restickify work-distribution for %s: %s -> %s",
+            op.get_name(),
+            output_dims,
+            prioritized,
+        )
+    return prioritized
 
 
 _PT_ROWS = 8  # PT block rows per corelet
@@ -781,16 +871,29 @@ def work_distribution(
     left untouched so every op is divided by exactly one of the two passes.
     """
     k_fast_ops = k_fast_ops or []
+    name_to_op = (
+        build_name_to_op_map(operations)
+        if config.align_restickify_work_distribution
+        else None
+    )
     max_cores = _validate_max_cores()
+
+    def run_work_distribution_pass(
+        op: ComputedBuffer,
+        args: list[SchedNodeArg],
+        max_cores: int,
+    ) -> None:
+        work_distribution_pass(op, args, max_cores, name_to_op)
+
     for op in _iter_computed_buffers(operations):
         if op in k_fast_ops:
             continue
         rw = op.get_read_writes()
         args = get_mem_deps_from_rw(rw)
         if isinstance(op.data, Pointwise):
-            divide_pointwise_op(op, args, max_cores, work_distribution_pass)
+            divide_pointwise_op(op, args, max_cores, run_work_distribution_pass)
         elif isinstance(op.data, Reduction):
-            divide_reduction_op(op, args, max_cores, work_distribution_pass)
+            divide_reduction_op(op, args, max_cores, run_work_distribution_pass)
 
 
 def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> bool:

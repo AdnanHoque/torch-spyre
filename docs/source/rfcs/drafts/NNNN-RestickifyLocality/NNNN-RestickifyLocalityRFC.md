@@ -211,6 +211,9 @@ physical mapping:
 - evaluate whether layout selection, work distribution, and core mapping need a
   joint optimizer for high-value patterns
 
+Initial work-distribution steering results are recorded in
+[Stage3B-WorkDistributionResults.md](Stage3B-WorkDistributionResults.md).
+
 ## Measurement Principles
 
 Ring-aware restickify should not be justified by a local kernel speedup alone.

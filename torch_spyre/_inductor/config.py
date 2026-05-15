@@ -46,6 +46,13 @@ align_restickify_core_mapping: bool = (
     os.environ.get("SPYRE_ALIGN_RESTICKIFY_CORE_MAPPING", "0") == "1"
 )
 
+# Default-off restickify work-distribution steering. When enabled, restickify
+# ops with an unambiguous in-graph producer prefer the output dimension that
+# corresponds to the producer's dominant split dimension.
+align_restickify_work_distribution: bool = (
+    os.environ.get("SPYRE_ALIGN_RESTICKIFY_WORK_DISTRIBUTION", "0") == "1"
+)
+
 # Default-off exact byte-hop telemetry for compiler-inserted restickify ops.
 restickify_ring_telemetry: bool = (
     os.environ.get("SPYRE_RESTICKIFY_RING_TELEMETRY", "0") == "1"
