@@ -161,6 +161,20 @@ def _mlp_gated_projection_join(x, y, z, w_up, w_gate, w_down, residual):
     return activated @ w_down + residual
 
 
+def _mlp_post_activation_join(x, w_up, post, w_down, residual):
+    activated = torch.nn.functional.gelu(x @ w_up)
+    joined = activated + post.t()
+    return joined @ w_down + residual
+
+
+def _gated_mlp_post_activation_join(x, w_up, w_gate, post, w_down, residual):
+    up = x @ w_up
+    gate = x @ w_gate
+    activated = up * torch.nn.functional.silu(gate)
+    joined = activated + post.t()
+    return joined @ w_down + residual
+
+
 def _attention_prefill_no_softmax(q, k, v, bias):
     scores = q @ k.transpose(-2, -1)
     mixed = scores + bias.transpose(-2, -1)
@@ -173,6 +187,13 @@ def _attention_decode_no_softmax(q, k, v, bias):
     return mixed @ v
 
 
+def _attention_score_join_value_projection(q, k, v, score_bias, score_residual):
+    scale = q.shape[-1] ** -0.5
+    scores = (q @ k.t()) * scale
+    mixed_scores = scores + score_bias.t() + score_residual
+    return mixed_scores @ v
+
+
 def _mamba_chunk_projection_join(x, y, state, w):
     batch, seq, hidden = x.shape
     tokens = batch * seq
@@ -181,11 +202,28 @@ def _mamba_chunk_projection_join(x, y, state, w):
     return (token_view + y.t() + state_view) @ w
 
 
+def _mamba_projection_state_gate_join(x, w_in, state, state_mix, gate_bias, w_out):
+    projected = x @ w_in
+    value, gate = projected.chunk(2, dim=-1)
+    state_join = value + state_mix.t() + state
+    gated = state_join * torch.nn.functional.silu(gate + gate_bias)
+    return gated @ w_out
+
+
 def _moe_two_expert_join(x, dispatch0, dispatch1, shared, expert0, expert1, gate):
     shared_out = x @ shared
     routed0 = (x + dispatch0.t()) @ expert0
     routed1 = (x + dispatch1.t()) @ expert1
     return shared_out + routed0 * gate + routed1 * (1.0 - gate)
+
+
+def _moe_combine_join_projection(x, shared, expert0, expert1, gate0, gate1, combine, w_out):
+    shared_out = x @ shared
+    routed0 = x @ expert0
+    routed1 = x @ expert1
+    combined = shared_out + routed0 * gate0 + routed1 * gate1
+    joined = combined + combine.t()
+    return joined @ w_out
 
 
 def _env_int(name: str, default: int) -> int:
@@ -359,6 +397,44 @@ def _builder_mlp_gated_join(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
     ), f"tokens={tokens},hidden={hidden},intermediate={intermediate}"
 
 
+def _builder_mlp_post_activation_join(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    tokens = n
+    hidden = _env_int("SPYRE_PROBE_HIDDEN", 2048)
+    intermediate = _env_int("SPYRE_PROBE_INTERMEDIATE", hidden)
+    x = _rand((tokens, hidden), dtype)
+    w_up = _rand((hidden, intermediate), dtype)
+    post = _rand((intermediate, tokens), dtype)
+    w_down = _rand((intermediate, hidden), dtype)
+    residual = _rand((tokens, hidden), dtype)
+    return (
+        x,
+        w_up,
+        post,
+        w_down,
+        residual,
+    ), f"tokens={tokens},hidden={hidden},intermediate={intermediate}"
+
+
+def _builder_gated_mlp_post_activation_join(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    tokens = n
+    hidden = _env_int("SPYRE_PROBE_HIDDEN", 2048)
+    intermediate = _env_int("SPYRE_PROBE_INTERMEDIATE", hidden)
+    x = _rand((tokens, hidden), dtype)
+    w_up = _rand((hidden, intermediate), dtype)
+    w_gate = _rand((hidden, intermediate), dtype)
+    post = _rand((intermediate, tokens), dtype)
+    w_down = _rand((intermediate, hidden), dtype)
+    residual = _rand((tokens, hidden), dtype)
+    return (
+        x,
+        w_up,
+        w_gate,
+        post,
+        w_down,
+        residual,
+    ), f"tokens={tokens},hidden={hidden},intermediate={intermediate}"
+
+
 def _builder_attention_prefill_no_softmax(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
     batch = _env_int("SPYRE_PROBE_BATCH", 1)
     heads = _env_int("SPYRE_PROBE_HEADS", 4)
@@ -384,6 +460,23 @@ def _builder_attention_decode_no_softmax(n: int, dtype: Any) -> tuple[tuple[Any,
     return (q, k, v, bias), f"batch={batch},heads={heads},q_seq={q_seq},kv_seq={kv_seq},head_dim={head_dim}"
 
 
+def _builder_attention_score_join_value(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    tokens = n
+    hidden = _env_int("SPYRE_PROBE_HIDDEN", 2048)
+    q = _rand((tokens, hidden), dtype)
+    k = _rand((tokens, hidden), dtype)
+    v = _rand((tokens, hidden), dtype)
+    score_bias = _rand((tokens, tokens), dtype)
+    score_residual = _rand((tokens, tokens), dtype)
+    return (
+        q,
+        k,
+        v,
+        score_bias,
+        score_residual,
+    ), f"tokens={tokens},hidden={hidden}"
+
+
 def _builder_mamba_chunk_projection(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
     batch = _env_int("SPYRE_PROBE_BATCH", 1)
     hidden = _env_int("SPYRE_PROBE_HIDDEN", 512)
@@ -394,6 +487,26 @@ def _builder_mamba_chunk_projection(n: int, dtype: Any) -> tuple[tuple[Any, ...]
     state = _rand((batch, hidden), dtype)
     w = _rand((hidden, hidden), dtype)
     return (x, y, state, w), f"batch={batch},seq={seq},hidden={hidden}"
+
+
+def _builder_mamba_projection_state_gate(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    tokens = n
+    hidden = _env_int("SPYRE_PROBE_HIDDEN", 2048)
+    intermediate = _env_int("SPYRE_PROBE_INTERMEDIATE", hidden)
+    x = _rand((tokens, hidden), dtype)
+    w_in = _rand((hidden, 2 * intermediate), dtype)
+    state = _rand((tokens, intermediate), dtype)
+    state_mix = _rand((intermediate, tokens), dtype)
+    gate_bias = _rand((tokens, intermediate), dtype)
+    w_out = _rand((intermediate, hidden), dtype)
+    return (
+        x,
+        w_in,
+        state,
+        state_mix,
+        gate_bias,
+        w_out,
+    ), f"tokens={tokens},hidden={hidden},intermediate={intermediate}"
 
 
 def _builder_moe_two_expert(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
@@ -415,6 +528,30 @@ def _builder_moe_two_expert(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
         expert1,
         gate,
     ), f"tokens={tokens},hidden={hidden},experts=2"
+
+
+def _builder_moe_combine_join_projection(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    tokens = n
+    hidden = _env_int("SPYRE_PROBE_HIDDEN", 2048)
+    intermediate = _env_int("SPYRE_PROBE_INTERMEDIATE", hidden)
+    x = _rand((tokens, hidden), dtype)
+    shared = _rand((hidden, intermediate), dtype)
+    expert0 = _rand((hidden, intermediate), dtype)
+    expert1 = _rand((hidden, intermediate), dtype)
+    gate0 = torch.sigmoid(_rand((tokens, 1), dtype))
+    gate1 = torch.sigmoid(_rand((tokens, 1), dtype))
+    combine = _rand((intermediate, tokens), dtype)
+    w_out = _rand((intermediate, hidden), dtype)
+    return (
+        x,
+        shared,
+        expert0,
+        expert1,
+        gate0,
+        gate1,
+        combine,
+        w_out,
+    ), f"tokens={tokens},hidden={hidden},intermediate={intermediate},experts=2"
 
 
 CASES: tuple[ProbeCase, ...] = (
@@ -587,6 +724,24 @@ CASES: tuple[ProbeCase, ...] = (
         forward_looking=True,
     ),
     ProbeCase(
+        "mlp_post_activation_join",
+        "mlp_forward_block_stress",
+        "in_graph_producer",
+        "MLP slice with a layout-changing post-activation join before down projection.",
+        _builder_mlp_post_activation_join,
+        _mlp_post_activation_join,
+        forward_looking=True,
+    ),
+    ProbeCase(
+        "gated_mlp_post_activation_join",
+        "mlp_forward_block_stress",
+        "in_graph_producer",
+        "SwiGLU-style MLP slice with a post-activation layout join before down projection.",
+        _builder_gated_mlp_post_activation_join,
+        _gated_mlp_post_activation_join,
+        forward_looking=True,
+    ),
+    ProbeCase(
         "attention_prefill_no_softmax",
         "attention_model_slice",
         "in_graph_producer",
@@ -605,6 +760,15 @@ CASES: tuple[ProbeCase, ...] = (
         forward_looking=True,
     ),
     ProbeCase(
+        "attention_score_join_value_projection",
+        "attention_forward_block_stress",
+        "in_graph_producer",
+        "Attention score/value slice with a layout-changing score join before value projection.",
+        _builder_attention_score_join_value,
+        _attention_score_join_value_projection,
+        forward_looking=True,
+    ),
+    ProbeCase(
         "mamba_chunk_projection_join",
         "mamba_model_slice",
         "in_graph_producer",
@@ -614,12 +778,30 @@ CASES: tuple[ProbeCase, ...] = (
         forward_looking=True,
     ),
     ProbeCase(
+        "mamba_projection_state_gate_join",
+        "mamba_forward_block_stress",
+        "in_graph_producer",
+        "Mamba-style projection/state/gate slice with an in-graph producer join before output projection.",
+        _builder_mamba_projection_state_gate,
+        _mamba_projection_state_gate_join,
+        forward_looking=True,
+    ),
+    ProbeCase(
         "moe_two_expert_join",
         "moe_model_slice",
         "in_graph_producer",
         "MoE-style shared/expert projection and combine.",
         _builder_moe_two_expert,
         _moe_two_expert_join,
+        forward_looking=True,
+    ),
+    ProbeCase(
+        "moe_combine_join_projection",
+        "moe_forward_block_stress",
+        "in_graph_producer",
+        "MoE-style shared/expert/combine slice with an in-graph combine before projection.",
+        _builder_moe_combine_join_projection,
+        _moe_combine_join_projection,
         forward_looking=True,
     ),
 )
@@ -721,6 +903,9 @@ def _read_ring_telemetry(path: Path) -> dict[str, Any]:
             "ring_avg_hops": 0.0,
             "ring_max_hops": 0,
             "ring_skip_reasons": {},
+            "ring_source_kinds": {},
+            "ring_exact_rows": 0,
+            "ring_skipped_rows": 0,
             "ring_entries": [],
         }
 
@@ -729,10 +914,14 @@ def _read_ring_telemetry(path: Path) -> dict[str, Any]:
     total_byte_hops = sum(int(entry.get("byte_hops") or 0) for entry in entries)
     max_hops = max((int(entry.get("max_hops") or 0) for entry in entries), default=0)
     skip_reasons: dict[str, int] = {}
+    source_kinds: dict[str, int] = {}
     for entry in entries:
         reason = entry.get("skip_reason")
         if reason:
             skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+        source_kind = entry.get("source_kind")
+        if source_kind:
+            source_kinds[source_kind] = source_kinds.get(source_kind, 0) + 1
     return {
         "ring_rows": len(entries),
         "ring_total_bytes": total_bytes,
@@ -740,6 +929,9 @@ def _read_ring_telemetry(path: Path) -> dict[str, Any]:
         "ring_avg_hops": total_byte_hops / total_bytes if total_bytes else 0.0,
         "ring_max_hops": max_hops,
         "ring_skip_reasons": skip_reasons,
+        "ring_source_kinds": source_kinds,
+        "ring_exact_rows": sum(1 for entry in entries if not entry.get("skip_reason")),
+        "ring_skipped_rows": sum(1 for entry in entries if entry.get("skip_reason")),
         "ring_entries": entries,
     }
 
@@ -903,6 +1095,9 @@ def _error_row(case: ProbeCase, size: int, dtype: Any, exc: BaseException) -> di
         "ring_avg_hops": 0.0,
         "ring_max_hops": 0,
         "ring_skip_reasons": {},
+        "ring_source_kinds": {},
+        "ring_exact_rows": 0,
+        "ring_skipped_rows": 0,
         "ring_entries": [],
         "error_type": type(exc).__name__,
         "error": str(exc),
@@ -929,6 +1124,9 @@ def _csv_row(row: dict[str, Any]) -> dict[str, Any]:
         "ring_avg_hops": f"{row.get('ring_avg_hops', 0.0):.3f}",
         "ring_max_hops": row.get("ring_max_hops", 0),
         "ring_skip_reasons": json.dumps(row.get("ring_skip_reasons", {}), sort_keys=True),
+        "ring_source_kinds": json.dumps(row.get("ring_source_kinds", {}), sort_keys=True),
+        "ring_exact_rows": row.get("ring_exact_rows", 0),
+        "ring_skipped_rows": row.get("ring_skipped_rows", 0),
         "compile_run_ms": f"{row.get('compile_run_ms', 0.0):.3f}" if row.get("compile_run_ms") is not None else "",
         "median_ms": f"{row.get('median_ms', 0.0):.3f}" if row.get("median_ms") is not None else "",
         "p10_ms": f"{row.get('p10_ms', 0.0):.3f}" if row.get("p10_ms") is not None else "",
