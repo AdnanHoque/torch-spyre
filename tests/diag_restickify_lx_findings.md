@@ -17,7 +17,63 @@ including [dxp.cpp:456-457](../../../../deeptools/dxp/dxp.cpp) and
 [dxp.cpp:274](../../../../deeptools/dxp/dxp.cpp)).
 
 Probe sources: [diag_restickify_lx_trace.py](diag_restickify_lx_trace.py),
-[diag_capture_sc32_bundle.py](diag_capture_sc32_bundle.py).
+[diag_capture_sc32_bundle.py](diag_capture_sc32_bundle.py),
+[diag_granite_profile_fms.py](diag_granite_profile_fms.py) (FMS-based
+end-to-end granite profile — see the *granite end-to-end profile blocker*
+section below).
+
+## Quantifying the win — best available estimate
+
+Across 27 real `sencores=32` torch-spyre-compiled bundles (cache analysis,
+not full granite layer because the end-to-end path is blocked, see below):
+
+| category | HBM share | ring helps? |
+|---|---|---|
+| HBM-LOAD restickify (weight prep) | 52% | No directly; a related "write restickified weight to LX" project would save ~half of this |
+| **FUNDAMENTAL restickify** (post-compute) | **4%** | **Yes — fully** |
+| matmul / pointwise compute | 44% | n/a |
+
+The 4% FUNDAMENTAL share is what the ring optimization directly addresses
+in the cache sample. Sample is biased toward `mm_t` weight-prep kernels —
+a real granite layer's mix could differ. Projected layer-level speedup
+from ring-only on this sample: **1.02-1.07×** depending on ring cost model.
+
+Adding the related "LX-side weight restickify" optimization (write
+restickified weight to LX instead of HBM, saving the write half of
+HBM-LOAD's 2× HBM round trip — same `STCDPOpLx`/data-op machinery):
+**1.36-1.43×** layer-level speedup combined.
+
+## Granite end-to-end profile — blocker
+
+To improve on the cache-sample number, we attempted a real granite-3.3-8B
+end-to-end profile per `docs/source/user_guide/profiling/end_to_end_example.md`
+with `torch.profiler` + kineto-spyre PrivateUse1, both `lx_planning=False`
+(baseline) and `lx_planning=True + allow_all_ops_in_lx_planning=True`
+(future). Setup worked (FMS install, 16 GB checkpoint download, RoPE
+`selected_freqs` kwarg construction matching `fms.utils.generation.generate`),
+but compilation aborted on a torch-spyre own codegen bug at
+[codegen/superdsc.py:306](../torch_spyre/_inductor/codegen/superdsc.py):
+
+```
+torch._inductor.exc.InductorError: IndexError: list index out of range
+  at: dev_dim_size = arg.device_size[-stride_idx - 2]
+  kernel: sdsc_fused__scaled_dot_product_fused_attention_overrideable_mul_split_with_sizes_unsqueeze_view_4
+```
+
+The bug fires on the fused SDPA kernel Inductor produces from granite's
+attention block (`F.scaled_dot_product_attention` + downstream `mul`,
+`split_with_sizes`, `unsqueeze`, `view` fused together). At the outermost
+dim, `stride_idx == len(stride_dim_order) - 1`, so `-stride_idx - 2 ==
+-len - 1` indexes one off the end of `arg.device_size`. The bug is
+shape-independent (reproduces at seq_len=64 and seq_len=128) — a real
+torch-spyre limitation on the fused-SDPA shape it has to consume from
+Inductor, not a layout-config-dependent edge case.
+
+This is the next prerequisite: fix or bypass
+[codegen/superdsc.py:306](../torch_spyre/_inductor/codegen/superdsc.py)
+so the granite SDPA kernel compiles. Then `diag_granite_profile_fms.py`
+will run end-to-end and we can re-measure with real `torch.profiler`
+device-time numbers, replacing the cache-sample estimate.
 
 ## Goal
 
