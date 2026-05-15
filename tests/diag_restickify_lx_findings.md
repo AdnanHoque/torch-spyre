@@ -27,18 +27,18 @@ section below).
 Assuming we hit FUNDAMENTAL restickify in the 1H 2026 workloads (GPT-OSS,
 Granite-4 Hybrid 30B, Mistral, Qwen2.5-VL, Llama-3.1-8B, Ministral 8B/14B),
 we can model the gain from replacing `ReStickifyOpHBM` with the on-chip ring
-shuffle (`STCDPOpLx`) using the spec'd ring bandwidth (35.2 GB/s
-bidirectional per link, 32 cores) and the measured HBM restickify bandwidth
+shuffle (`STCDPOpLx`) using the spec'd ring bandwidth (**166 GB/s per
+direction per link, 32 cores**) and the measured HBM restickify bandwidth
 (107 GB/s effective, single-op). Full model is in
 [diag_ring_speedup_model.py](diag_ring_speedup_model.py). Three cost
-models for the ring; the middle one is the most defensible for a
-transpose-style all-to-all shuffle:
+models for the ring; A and B converge for a transpose-style all-to-all
+shuffle on a uniform bidirectional ring:
 
 | ring cost model | per-FUNDAMENTAL-restickify speedup |
 |---|---|
-| A — bisection-bound (`tensor/2 / (2·link_bw)`) | **2.63×** |
-| B — uniform all-to-all (`tensor·N/4 / (N·link_bw)`) | **2.63×** |
-| C — aggregate parallel (`tensor / (2N·link_bw)`) | 42.1× (best case, unrealistic) |
+| A — bisection-bound (`(tensor/2) / (4·link_bw_per_dir)`) | **24.8×** |
+| B — uniform all-to-all (`(tensor·N/4) / (N·2·link_bw_per_dir)`) | **24.8×** |
+| C — aggregate parallel (`tensor / (2N·link_bw_per_dir)`) | 198.6× (best case, unrealistic) |
 
 Per-op speedup is shape-invariant under each model because both T_hbm and
 T_ring are proportional to tensor_bytes. The layer-level speedup is
@@ -56,29 +56,32 @@ sequence length M while weight reads (HBM-LOAD) stay flat.
 | GPT-OSS 20B | 0.52% | 2.03% | 7.66% | 24.90% |
 
 **Projected per-attention-layer speedup (ring-only, FUNDAMENTAL only,
-model B at 2.63×):**
+model B at 24.8×):**
 
 | Model | M=128 | M=512 | M=2048 | M=8192 |
 |---|---|---|---|---|
-| Llama-3.1-8B | 1.003× | 1.011× | 1.042× | **1.155×** |
-| Granite-4 Hybrid 30B attn | 1.002× | 1.010× | 1.038× | **1.142×** |
-| GPT-OSS 20B | 1.003× | 1.013× | 1.050× | **1.183×** |
+| Llama-3.1-8B | 1.004× | 1.017× | 1.066× | **1.262×** |
+| Ministral 8B | 1.004× | 1.017× | 1.066× | **1.262×** |
+| Mistral-small 24B | 1.002× | 1.008× | 1.033× | **1.132×** |
+| Granite-4 Hybrid 30B attn | 1.004× | 1.015× | 1.060× | **1.238×** |
+| GPT-OSS 20B | 1.005× | 1.020× | 1.079× | **1.314×** |
 
 **Key takeaways:**
 
-- The ring-only FUNDAMENTAL optimization is **meaningful only at long
-  context** (M ≥ 2048): below that, the weight-read mass dominates and
-  the layer-level speedup is < 5%.
-- At long context the per-attention-layer speedup is **1.1-1.2×**, which
-  is real performance the workload can use.
+- The ring-only FUNDAMENTAL optimization grows meaningful past **M ≥ 2048**:
+  below that, the weight-read mass dominates layer HBM and the
+  speedup is small (1.02-1.08×).
+- At long context (M=8192) the per-attention-layer speedup is
+  **1.13-1.31×** — meaningful production-scale wins.
 - **Granite-4 Hybrid is bottlenecked further:** only ~9 of its ~40 layers
-  are attention (the rest are Mamba SSM, which doesn't trip
-  FUNDAMENTAL). So whole-model speedup is roughly
+  are attention (the rest are Mamba SSM, which doesn't trip FUNDAMENTAL).
+  So whole-model speedup is roughly
   `9/40 × (per-attn-layer speedup) + 31/40 × 1` — at M=8192 that's
-  `0.225 × 1.142 + 0.775 × 1.0 = 1.032×` whole-model. The MoE expert
+  `0.225 × 1.238 + 0.775 × 1.0 = 1.054×` whole-model. The MoE expert
   dispatch may add its own FUNDAMENTAL pattern not modeled here.
-- Pure-transformer workloads (Llama, Ministral, GPT-OSS) keep the full
-  per-attention-layer speedup since all layers are attention-bearing.
+- Pure-transformer workloads (Llama-3.1-8B, Ministral 8B, GPT-OSS 20B)
+  keep the full per-attention-layer speedup since all layers are
+  attention-bearing.
 
 ## Proposed experiments to validate
 

@@ -42,10 +42,12 @@ from dataclasses import dataclass
 
 # -- hardware constants ------------------------------------------------------
 
-# AIU RIU bidirectional ring bandwidth per the IBM Spyre spec.
-RING_LINK_BW = 35.2e9  # bytes/s, "bi-directional" per link
+# AIU RIU ring bandwidth per the IBM Spyre spec: 166 GB/s per direction
+# per link (i.e. each bidirectional link carries 166 GB/s in each direction
+# simultaneously, for 332 GB/s aggregate per-link).
+RING_LINK_BW_PER_DIR = 166e9  # bytes/s, one direction
 NUM_CORES = 32
-MAX_HOP = NUM_CORES // 2  # bidirectional, so worst-case distance
+MAX_HOP = NUM_CORES // 2  # bidirectional → worst-case distance N/2
 
 # Measured effective HBM bandwidth for `ReStickifyOpHBM` on torch-spyre
 # (from earlier session probes — single-shot, single-op).
@@ -60,30 +62,38 @@ def hbm_restickify_time(tensor_bytes: float, hbm_bw: float = HBM_EFFECTIVE_BW) -
 
 
 def ring_time_bisection(
-    tensor_bytes: float, link_bw: float = RING_LINK_BW
+    tensor_bytes: float, link_bw_per_dir: float = RING_LINK_BW_PER_DIR
 ) -> float:
-    """Model A: half the data crosses the bisection (two parallel links)."""
-    bisection_bw = 2.0 * link_bw
+    """Model A: half the data crosses the bisection.
+    A ring has 2 links at any cut, each bidirectional → 4 channels at
+    link_bw_per_dir. Bisection capacity = 4 * link_bw_per_dir.
+    """
+    bisection_bw = 4.0 * link_bw_per_dir
     return (tensor_bytes / 2.0) / bisection_bw
 
 
 def ring_time_all_to_all(
     tensor_bytes: float, num_cores: int = NUM_CORES,
-    link_bw: float = RING_LINK_BW,
+    link_bw_per_dir: float = RING_LINK_BW_PER_DIR,
 ) -> float:
-    """Model B: uniform all-to-all on N cores. byte-hops / byte-hops-bw."""
-    # Each core sends tensor/N data to N-1 cores, avg hop N/4 (bidirectional).
-    # Total byte-hops = N * (tensor/N) * N/4 = tensor * N / 4
-    # Aggregate byte-hop bandwidth = N * link_bw (N links, link bidir).
-    return (tensor_bytes * num_cores / 4.0) / (num_cores * link_bw)
+    """Model B: uniform all-to-all. byte-hops / byte-hop-bw.
+    Each core sends tensor/N to N-1 others, avg hop N/4 (bidirectional ring).
+    Total byte-hops = N * (tensor/N) * N/4 = tensor * N / 4.
+    Aggregate byte-hop bw = N links × 2 directions × link_bw_per_dir.
+    """
+    total_byte_hops = tensor_bytes * num_cores / 4.0
+    aggregate_bw = num_cores * 2.0 * link_bw_per_dir
+    return total_byte_hops / aggregate_bw
 
 
 def ring_time_aggregate(
     tensor_bytes: float, num_cores: int = NUM_CORES,
-    link_bw: float = RING_LINK_BW,
+    link_bw_per_dir: float = RING_LINK_BW_PER_DIR,
 ) -> float:
-    """Model C: aggregate ring bandwidth, no hop penalty (best case)."""
-    return tensor_bytes / (2.0 * num_cores * link_bw)
+    """Model C: aggregate ring bandwidth, no hop penalty (best case).
+    All N cores use both directions of their links concurrently.
+    """
+    return tensor_bytes / (num_cores * 2.0 * link_bw_per_dir)
 
 
 def per_op_speedup(tensor_bytes: float) -> dict[str, float]:
@@ -156,8 +166,8 @@ def main():
     print("\n=== Per-op FUNDAMENTAL restickify speedup vs ReStickifyOpHBM ===")
     print(f"  HBM effective bw: {HBM_EFFECTIVE_BW/1e9:.1f} GB/s "
           f"(measured, restickify single-shot)")
-    print(f"  Ring link bw:     {RING_LINK_BW/1e9:.1f} GB/s "
-          f"(spec, bidirectional)")
+    print(f"  Ring link bw:     {RING_LINK_BW_PER_DIR/1e9:.1f} GB/s "
+          f"per direction (spec)")
     print(f"  Ring cores:       {NUM_CORES}\n")
     print(f"  {'tensor size':<14} {'A bisection':>14} {'B all-to-all':>14} "
           f"{'C aggregate':>14}")
