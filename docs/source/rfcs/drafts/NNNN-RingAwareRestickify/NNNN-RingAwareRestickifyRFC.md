@@ -274,9 +274,25 @@ At `HD=4096`, `SENCORES=32`, `LX_PLANNING=1`, sweeping M:
 Cost model: `Δ_pred = 2·|X| / 107 GB/s` (effective HBM bandwidth,
 round-trip). At `M ≥ 512`, `Δ_measured / Δ_pred = 0.85-0.89×`. **The
 HBM round-trip cost model is empirically validated to within ~15%** on
-this lever. Using the validated baseline, the per-op ring speedup
-ceiling — `Δ_ring = |X| / 1328 GB/s` vs `Δ_HBM = 2·|X| / 107 GB/s` — is
-~22× (theoretical ceiling 24.8×).
+this lever.
+
+The per-op ring speedup is a bracket, not a point estimate, because we
+have a *measured* effective HBM bandwidth (107 GB/s) but only a
+*specified* ring bandwidth (1328 GB/s uniform all-to-all). Combining
+the two axes:
+
+|              | HBM-spec (166) | HBM-eff (107) |
+|---|---:|---:|
+| **Ring-spec (1328)**   | 16.0×   | 24.8×   |
+| **Ring-eff @ 64% (850)** | 10.2×   | 15.9×   |
+
+Honest central estimate: **~20× per-op, with a 10-28× bracket**
+depending on whether one trusts spec or empirically-derated numbers
+for the ring fabric. The 24.8× number quoted earlier is the optimistic
+corner. Probe v4 (`tests/diag_restickify_pattern_sweep.py`) gives one
+clean paired-graph data point at this scale -- `(a@b)+c.t()` at
+S=2048, dt=0.167ms for 8.39MB, matches HBM-eff prediction within 6%
+and implies a 17-28× speedup on that lever.
 
 #### The three absorption mechanisms
 
@@ -365,9 +381,10 @@ When deeptools lands the primitive:
    need updating. What is missing today is a CPU-vs-Spyre output
    comparison under gate-on, which would silently fail today and pass
    once the DDL template is real.
-2. Rerun probe v2b with the gate on; expect `Δ_measured / 0.85` ≈
-   ring time. Predicted: `Δ_ring = |X| / 1328 GB/s`, so per-op ring
-   speedup ≈ 22× on the fundamental case-3 portion.
+2. Rerun probes v2b and v4 with the gate on; expect `Δ_measured` on
+   FUNDAMENTAL restickifies to drop into the `|X| / [850-1328] GB/s`
+   range, yielding a 10-28× speedup bracket on the case-3 portion
+   (central estimate ~20×).
 3. Flip `emit_stcdp_oplx` default to True after measurement confirms.
 
 #### Composition with Phase 1's joint coordination
@@ -375,8 +392,10 @@ When deeptools lands the primitive:
 Phase 1.5 and Phase 1 target disjoint cost sources and compose
 cleanly:
 
-* Phase 1.5 reduces case-3 restickify cost from `2·B / 107 GB/s` (HBM
-  round-trip) to `B / 1328 GB/s` (ring) — ~24× on the case-3 portion.
+* Phase 1.5 reduces case-3 restickify cost from `2·B / [107-166] GB/s`
+  (HBM round-trip, effective-to-spec range) to `B / [850-1328] GB/s`
+  (ring, derated-to-spec range) — ~20× on the case-3 portion, with a
+  10-28× bracket.
 * Phase 1's joint coordination reduces case-1 and case-2 cost through
   layout and work-distribution decisions that avoid the relayout
   rather than accelerate it.
