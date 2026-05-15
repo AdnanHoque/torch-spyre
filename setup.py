@@ -93,14 +93,13 @@ cmake_library_path = os.environ.get("CMAKE_LIBRARY_PATH", "")
 extra_library_dirs = cmake_library_path.split(":") if cmake_library_path else []
 LIBRARY_DIRS += [Path(p) for p in extra_library_dirs if p]
 
-COMPILE_AIUPTI = os.environ.get("USE_SPYRE_PROFILER", False)
+COMPILE_AIUPTI = os.environ.get("USE_SPYRE_PROFILER", "0") == "1"
 
 if "RUNTIME_INSTALL_DIR" in os.environ:
     # take lower precedence than CMAKE_LIBRARY_PATH and CMAKE_INCLUDE_PATH
     RUNTIME_DIR = Path(os.environ["RUNTIME_INSTALL_DIR"])
     SENLIB_DIR = Path(os.environ["SENLIB_INSTALL_DIR"])
     DEEPTOOLS_DIR = Path(os.environ["DEEPTOOLS_INSTALL_DIR"])
-
     INCLUDE_DIRS += [
         RUNTIME_DIR / "include",
     ]
@@ -113,18 +112,15 @@ if "RUNTIME_INSTALL_DIR" in os.environ:
     INCLUDE_DIRS += [
         DEEPTOOLS_DIR / "include",
     ]
-
     LIBRARY_DIRS += [RUNTIME_DIR / "lib"]
 
 INCLUDE_DIRS += [os.environ["SEN_COMMON_HEADERS"]]
 
-if COMPILE_AIUPTI:  # Include kineto
+if COMPILE_AIUPTI:  # Include kineto and libaiupti headers
     import torch
 
     KINETO_INCLUDE_DIR = Path(torch.__path__[0]) / "include" / "kineto"
-    if (
-        KINETO_INCLUDE_DIR.exists() and KINETO_INCLUDE_DIR.is_dir()
-    ):  # Verify headers exist
+    if KINETO_INCLUDE_DIR.is_dir():
         COMMON_INCLUDE_DIR = Path(os.environ["SEN_COMMON_HEADERS"])
         INCLUDE_DIRS += [
             KINETO_INCLUDE_DIR,
@@ -133,13 +129,12 @@ if COMPILE_AIUPTI:  # Include kineto
     else:
         COMPILE_AIUPTI = False
 
-if os.environ.get("LIBAIUPTI_INSTALL_DIR"):
-    LIBAIUPTI_DIR = Path(os.environ["LIBAIUPTI_INSTALL_DIR"])
-    _aiupti_lib = Path(os.environ["LIBAIUPTI_INSTALL_DIR"]) / "lib" / "libaiupti.so"
-    if _aiupti_lib.exists():
-        LIBRARY_DIRS += [LIBAIUPTI_DIR / "lib"]
+    if os.environ.get("LIBAIUPTI_INSTALL_DIR"):
+        LIBAIUPTI_DIR = Path(os.environ["LIBAIUPTI_INSTALL_DIR"])
+        _aiupti_lib = Path(os.environ["LIBAIUPTI_INSTALL_DIR"]) / "lib" / "libaiupti.so"
+        if _aiupti_lib.exists():
+            LIBRARY_DIRS += [LIBAIUPTI_DIR / "lib"]
 
-if COMPILE_AIUPTI:
     LIBRARIES = ["sendnn", "sendnn_interface", "aiupti", "flex"]
 else:
     LIBRARIES = ["sendnn", "sendnn_interface", "flex"]
@@ -212,8 +207,6 @@ if __name__ == "__main__":
         core_src_paths = [
             p.relative_to(ROOT_DIR).as_posix() for p in sorted(core_src_paths)
         ]
-
-        print("Compile AIUPTI: ", COMPILE_AIUPTI)
 
         ext_modules = [
             CppExtension(
