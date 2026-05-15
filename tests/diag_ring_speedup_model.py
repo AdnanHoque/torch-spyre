@@ -128,14 +128,24 @@ class TransformerAttn:
         per_layer = 2 * M * self.H * self.dtype_bytes
         return per_layer * self.n_attn_layers
 
-    def layer_total_hbm_bytes(self, M: int) -> int:
-        """Rough total HBM bytes per attention layer (weights + activations)."""
-        # 3 QKV proj (each H*H * dtype) + 1 O proj (H*H) -> 4 H^2 weight reads.
+    def layer_total_hbm_bytes(self, M: int, materialize_scores: bool = False) -> int:
+        """Rough total HBM bytes per attention layer (weights + activations).
+
+        If `materialize_scores` (today's reality without flash attention),
+        adds the round-tripped [B, H, M, M] attention-score tensor traffic,
+        which grows as O(M^2) and dominates at long context.
+        """
+        # 3 QKV proj (H*H each) + 1 O proj (H*H) -> 4 H^2 weight reads.
         # MLP: 3 * H * inter_dim (gate, up, down).
-        # Activations: 2 * M * H (in + out residual) per layer, but dwarfed by weights at M=128.
         weights = (4 * self.H * self.H + 3 * self.H * self.inter_dim) * self.dtype_bytes
+        # Residual stream activations (in + out).
         acts = 2 * M * self.H * self.dtype_bytes
-        return self.n_attn_layers * (weights + acts)
+        # Without flash attention, the Q@K^T scores are materialized:
+        # write once, softmax round-trips (read+write), then attn@V reads.
+        # ~3 round trips of B * H * M * M.
+        scores = (3 * self.num_heads * M * M * self.dtype_bytes
+                  if materialize_scores else 0)
+        return self.n_attn_layers * (weights + acts + scores)
 
 
 # -- representative configs from the 1H 2026 roadmap ------------------------
@@ -157,7 +167,7 @@ WORKLOADS = [
     TransformerAttn("GPT-OSS-20B", H=4096, num_heads=32, head_dim=128,
                     inter_dim=11008, n_layers=40, n_attn_layers=40),
 ]
-SEQ_LENGTHS = [128, 512, 2048, 8192]
+SEQ_LENGTHS = [128, 512, 2048, 8192, 32768, 131072]
 
 
 # -- main --------------------------------------------------------------------
@@ -183,38 +193,40 @@ def main():
         )
     print("  (per-op speedup is shape-invariant under these models)")
 
-    print("\n\n=== Workload-level: FUNDAMENTAL restickify share of layer HBM ===")
-    print(f"  {'Model':<32} " + "  ".join(f"M={M:<6}" for M in SEQ_LENGTHS))
-    for w in WORKLOADS:
-        shares = []
-        for M in SEQ_LENGTHS:
-            fund = w.attn_fundamental_bytes(M)
-            tot = w.layer_total_hbm_bytes(M)
-            shares.append(100 * fund / tot)
-        print(
-            f"  {w.name:<32} "
-            + "  ".join(f"{s:6.2f}%" for s in shares)
-        )
+    per_op = per_op_speedup(1024*1024)["all-to-all (B)"]
 
-    print("\n\n=== Projected layer-level speedup (model B, all-to-all) ===")
-    print(f"  Per-restickify speedup B = "
-          f"{per_op_speedup(1024*1024)['all-to-all (B)']:.2f}x")
-    print(f"  Layer speedup = 1 / (1 - share * (1 - 1/per_op_speedup))\n")
-    print(f"  {'Model':<32} " + "  ".join(f"M={M:<6}" for M in SEQ_LENGTHS))
-    for w in WORKLOADS:
-        speedups = []
-        for M in SEQ_LENGTHS:
-            fund = w.attn_fundamental_bytes(M)
-            tot = w.layer_total_hbm_bytes(M)
-            share = fund / tot
-            per_op = per_op_speedup(1024*1024)["all-to-all (B)"]
-            # layer speedup = 1 / (1 - share*(1 - 1/per_op))
-            layer = 1.0 / (1.0 - share * (1.0 - 1.0 / per_op))
-            speedups.append(layer)
-        print(
-            f"  {w.name:<32} "
-            + "  ".join(f"{s:6.3f}x" for s in speedups)
-        )
+    for materialize, label in [
+        (False, "FLASH ATTENTION (scores NOT in HBM)"),
+        (True, "MATERIALIZED SCORES (no flash, today's torch-spyre)"),
+    ]:
+        print(f"\n\n=== Layer-level share + speedup — {label} ===")
+        print("  share of layer HBM:")
+        print(f"  {'Model':<32} " + "  ".join(f"M={M:<8}" for M in SEQ_LENGTHS))
+        for w in WORKLOADS:
+            shares = []
+            for M in SEQ_LENGTHS:
+                fund = w.attn_fundamental_bytes(M)
+                tot = w.layer_total_hbm_bytes(M, materialize_scores=materialize)
+                shares.append(100 * fund / tot)
+            print(
+                f"  {w.name:<32} "
+                + "  ".join(f"{s:7.2f}%" for s in shares)
+            )
+
+        print(f"\n  per-attention-layer speedup (per_op={per_op:.2f}x):")
+        print(f"  {'Model':<32} " + "  ".join(f"M={M:<8}" for M in SEQ_LENGTHS))
+        for w in WORKLOADS:
+            speedups = []
+            for M in SEQ_LENGTHS:
+                fund = w.attn_fundamental_bytes(M)
+                tot = w.layer_total_hbm_bytes(M, materialize_scores=materialize)
+                share = fund / tot
+                layer = 1.0 / (1.0 - share * (1.0 - 1.0 / per_op))
+                speedups.append(layer)
+            print(
+                f"  {w.name:<32} "
+                + "  ".join(f"{s:8.3f}x" for s in speedups)
+            )
 
     print("\n=== Notes ===")
     print("  - Per-op speedup is shape-invariant under each model because")

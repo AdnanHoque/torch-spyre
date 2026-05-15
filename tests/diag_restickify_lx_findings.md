@@ -45,43 +45,59 @@ T_ring are proportional to tensor_bytes. The layer-level speedup is
 shape-dependent because FUNDAMENTAL restickify bytes scale linearly with
 sequence length M while weight reads (HBM-LOAD) stay flat.
 
-**FUNDAMENTAL share of layer HBM bytes (attention layers, fp16):**
+### Two scenarios because attention-score materialization matters at long M
 
-| Model | M=128 | M=512 | M=2048 | M=8192 |
-|---|---|---|---|---|
-| Llama-3.1-8B | 0.43% | 1.69% | 6.45% | 21.62% |
-| Ministral 8B | 0.43% | 1.69% | 6.45% | 21.62% |
-| Mistral-small 24B | 0.22% | 0.85% | 3.33% | 12.12% |
-| Granite-4 Hybrid 30B (attn layers only) | 0.39% | 1.54% | 5.88% | 20.00% |
-| GPT-OSS 20B | 0.52% | 2.03% | 7.66% | 24.90% |
+Without flash attention, the materialized `Q @ K^T` attention scores
+(shape `[B, num_heads, M, M]`, round-tripped through HBM by softmax and
+the subsequent `attn @ V`) grow as O(M²) and dominate layer HBM at long
+context. Today's torch-spyre falls into this regime — the SDPA fusion
+issues we hit go through the `math` SDPA backend which materializes
+scores. With flash attention (future), scores stay in registers/LX and
+the FUNDAMENTAL share rises monotonically with M.
 
-**Projected per-attention-layer speedup (ring-only, FUNDAMENTAL only,
-model B at 24.8×):**
+#### A. Flash attention (scores not in HBM) — the *target* regime
 
-| Model | M=128 | M=512 | M=2048 | M=8192 |
-|---|---|---|---|---|
-| Llama-3.1-8B | 1.004× | 1.017× | 1.066× | **1.262×** |
-| Ministral 8B | 1.004× | 1.017× | 1.066× | **1.262×** |
-| Mistral-small 24B | 1.002× | 1.008× | 1.033× | **1.132×** |
-| Granite-4 Hybrid 30B attn | 1.004× | 1.015× | 1.060× | **1.238×** |
-| GPT-OSS 20B | 1.005× | 1.020× | 1.079× | **1.314×** |
+| Model | M=128 | M=512 | M=2048 | M=8192 | M=32k | **M=128k** |
+|---|---|---|---|---|---|---|
+| Llama-3.1-8B | 1.004× | 1.017× | 1.066× | 1.262× | 2.014× | **4.596×** |
+| Ministral 8B | 1.004× | 1.017× | 1.066× | 1.262× | 2.014× | **4.596×** |
+| Mistral-small 24B | 1.002× | 1.008× | 1.033× | 1.132× | 1.518× | 2.945× |
+| Granite-4 Hybrid 30B (attn layers) | 1.004× | 1.015× | 1.060× | 1.238× | 1.923× | **4.306×** |
+| GPT-OSS 20B | 1.005× | 1.020× | 1.079× | 1.314× | 2.208× | **5.195×** |
 
-**Key takeaways:**
+#### B. Materialized scores (today's torch-spyre, no flash) — what we'd measure now
 
-- The ring-only FUNDAMENTAL optimization grows meaningful past **M ≥ 2048**:
-  below that, the weight-read mass dominates layer HBM and the
-  speedup is small (1.02-1.08×).
-- At long context (M=8192) the per-attention-layer speedup is
-  **1.13-1.31×** — meaningful production-scale wins.
-- **Granite-4 Hybrid is bottlenecked further:** only ~9 of its ~40 layers
-  are attention (the rest are Mamba SSM, which doesn't trip FUNDAMENTAL).
-  So whole-model speedup is roughly
-  `9/40 × (per-attn-layer speedup) + 31/40 × 1` — at M=8192 that's
-  `0.225 × 1.238 + 0.775 × 1.0 = 1.054×` whole-model. The MoE expert
-  dispatch may add its own FUNDAMENTAL pattern not modeled here.
-- Pure-transformer workloads (Llama-3.1-8B, Ministral 8B, GPT-OSS 20B)
-  keep the full per-attention-layer speedup since all layers are
-  attention-bearing.
+| Model | M=128 | M=512 | M=2048 | M=8192 | M=32k | M=128k |
+|---|---|---|---|---|---|---|
+| Llama-3.1-8B | 1.004× | 1.015× | 1.025× | 1.010× | 1.002× | 1.001× |
+| Ministral 8B | 1.004× | 1.015× | 1.025× | 1.010× | 1.002× | 1.001× |
+| Mistral-small 24B | 1.002× | 1.008× | 1.020× | 1.011× | 1.003× | 1.001× |
+| Granite-4 Hybrid 30B (attn layers) | 1.004× | 1.014× | 1.024× | 1.010× | 1.002× | 1.001× |
+| GPT-OSS 20B | 1.005× | 1.018× | 1.027× | 1.010× | 1.002× | 1.001× |
+
+The scenario-B share **peaks at M=2048 (~2.5%) and decreases** past M=8192
+because the M² score traffic outgrows the linear restickify traffic.
+
+### Key takeaways
+
+- **Per FUNDAMENTAL restickify: 24.8×** under defensible ring cost models
+  (bisection-bound and uniform all-to-all converge here on a uniform
+  bidirectional ring at 166 GB/s/dir, 32 cores).
+- **The ring optimization is a *long-context-with-flash-attention* play.**
+  Without flash attention, materialized M×M scores dominate HBM at long
+  M and cap the layer speedup at ~1.03× (peaks at M=2048).
+- **With flash attention** the per-attention-layer wins at long context
+  are large: **1.13-1.31× at M=8k**, **2-2.2× at M=32k**, **3-5× at M=128k**
+  for pure-transformer workloads.
+- **Granite-4 Hybrid 30B**: only ~9 of ~40 layers are attention (Mamba
+  SSM doesn't trip FUNDAMENTAL). Whole-model speedup is roughly
+  `9/40 × per-attn-layer + 31/40 × 1`. At M=8192 that's
+  `0.225 × 1.238 + 0.775 = 1.054×` whole-model. At M=128k with flash
+  attention it's `0.225 × 4.306 + 0.775 = 1.744×` whole-model — meaningful.
+  MoE expert dispatch may add its own FUNDAMENTAL pattern not modeled here.
+- The ring-restickify project's biggest win is paired with a flash-attention
+  path in torch-spyre — the two compound. Pursuing them in parallel is the
+  highest-leverage long-context strategy.
 
 ## Proposed experiments to validate
 
