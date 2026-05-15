@@ -1,0 +1,5 @@
+mode,status,family,case,boundary_model,classification,shape,size,restickify_count,bytes_moved,byte_hops,avg_hops,max_hops,source_kinds,skip_reasons,compile_run_ms,median_ms,p10_ms,p90_ms,error_type,error,hbm_oneway_us,hbm_roundtrip_us,riu_aggregate_us,riu_one_direction_us,lx_balanced_us,lx_single_core_us
+baseline,error,view_chain_4d,transpose_4d_chain,in_graph_computed,control_no_restickify,,32,0,0,0,0.000,0,{},{},,,,,InductorError,"CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/tmp/torchinductor_1000800000/tmpwk_u0xj3/inductor-spyre/sdsc_fused_add_transpose_0_59z4shjx']' died with <Signals.SIGABRT: 6>.
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS=""+dynamo""
+",0.000,0.000,0.000,0.000,0.000,0.000
