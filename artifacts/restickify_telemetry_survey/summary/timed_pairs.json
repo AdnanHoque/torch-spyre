@@ -1,0 +1,349 @@
+[
+  {
+    "base_byte_hops": 286720,
+    "base_bytes": 65536,
+    "base_ms": 0.08080154657363892,
+    "byte_hop_delta": 0,
+    "case": "adds_then_matmul",
+    "observed_us": -0.17415732145309448,
+    "riu_166_us": 0.0,
+    "riu_333_us": 0.0,
+    "size": 128,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1,
+      "in_graph_computed": 1
+    },
+    "speedup": 0.9978492644944621,
+    "stage3b_byte_hops": 286720,
+    "stage3b_ms": 0.08097570389509201
+  },
+  {
+    "base_byte_hops": 1376256,
+    "base_bytes": 1048576,
+    "base_ms": 0.12870971113443375,
+    "byte_hop_delta": 720896,
+    "case": "adds_then_matmul",
+    "observed_us": -1.4817342162132263,
+    "riu_166_us": 4.342746987951807,
+    "riu_333_us": 2.164852852852853,
+    "size": 512,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1,
+      "in_graph_computed": 1
+    },
+    "speedup": 0.9886188050818359,
+    "stage3b_byte_hops": 655360,
+    "stage3b_ms": 0.13019144535064697
+  },
+  {
+    "base_byte_hops": 67108864,
+    "base_bytes": 16777216,
+    "base_ms": 1.5573371201753616,
+    "byte_hop_delta": 67108864,
+    "case": "adds_then_matmul",
+    "observed_us": 78.13051342964172,
+    "riu_166_us": 404.270265060241,
+    "riu_333_us": 201.52812012012012,
+    "size": 2048,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1,
+      "in_graph_computed": 1
+    },
+    "speedup": 1.0528192025869396,
+    "stage3b_byte_hops": 0,
+    "stage3b_ms": 1.47920660674572
+  },
+  {
+    "base_byte_hops": 0,
+    "base_bytes": 34603008,
+    "base_ms": 3.0116159468889236,
+    "byte_hop_delta": 0,
+    "case": "attention_prefill_no_softmax",
+    "observed_us": -3.3481046557426453,
+    "riu_166_us": 0.0,
+    "riu_333_us": 0.0,
+    "size": 2048,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 2
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 2
+    },
+    "speedup": 0.9988895042864516,
+    "stage3b_byte_hops": 0,
+    "stage3b_ms": 3.0149640515446663
+  },
+  {
+    "base_byte_hops": 0,
+    "base_bytes": 16777216,
+    "base_ms": 2.4005360901355743,
+    "byte_hop_delta": 0,
+    "case": "attention_score_join_value_projection",
+    "observed_us": -0.32782554626464844,
+    "riu_166_us": 0.0,
+    "riu_333_us": 0.0,
+    "size": 2048,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 2
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 2
+    },
+    "speedup": 0.99986345517373,
+    "stage3b_byte_hops": 0,
+    "stage3b_ms": 2.400863915681839
+  },
+  {
+    "base_byte_hops": 1376256,
+    "base_bytes": 1048576,
+    "base_ms": 0.1288820058107376,
+    "byte_hop_delta": 720896,
+    "case": "decode_projection_join",
+    "observed_us": -1.1222437024116516,
+    "riu_166_us": 4.342746987951807,
+    "riu_333_us": 2.164852852852853,
+    "size": 512,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1,
+      "in_graph_computed": 1
+    },
+    "speedup": 0.991367638314791,
+    "stage3b_byte_hops": 655360,
+    "stage3b_ms": 0.13000424951314926
+  },
+  {
+    "base_byte_hops": 16777216,
+    "base_bytes": 4194304,
+    "base_ms": 0.3420170396566391,
+    "byte_hop_delta": 14155776,
+    "case": "decode_projection_join",
+    "observed_us": 7.39656388759613,
+    "riu_166_us": 85.27575903614458,
+    "riu_333_us": 42.50983783783784,
+    "size": 2048,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1,
+      "in_graph_computed": 1
+    },
+    "speedup": 1.0221043373708585,
+    "stage3b_byte_hops": 2621440,
+    "stage3b_ms": 0.33462047576904297
+  },
+  {
+    "base_byte_hops": 0,
+    "base_bytes": 16777216,
+    "base_ms": 1.3603996485471725,
+    "byte_hop_delta": 0,
+    "case": "fanout_diamond",
+    "observed_us": -12.248754501342773,
+    "riu_166_us": 0.0,
+    "riu_333_us": 0.0,
+    "size": 2048,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 2
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 2
+    },
+    "speedup": 0.9910765535630687,
+    "stage3b_byte_hops": 0,
+    "stage3b_ms": 1.3726484030485153
+  },
+  {
+    "base_byte_hops": 0,
+    "base_bytes": 8388608,
+    "base_ms": 0.8541205897927284,
+    "byte_hop_delta": 0,
+    "case": "linear_weight_transposed",
+    "observed_us": 4.698522388935089,
+    "riu_166_us": 0.0,
+    "riu_333_us": 0.0,
+    "size": 2048,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1
+    },
+    "speedup": 1.0055314343354604,
+    "stage3b_byte_hops": 0,
+    "stage3b_ms": 0.8494220674037933
+  },
+  {
+    "base_byte_hops": 0,
+    "base_bytes": 8388608,
+    "base_ms": 0.8534956723451614,
+    "byte_hop_delta": 0,
+    "case": "matmul_lhs_wrong_stick",
+    "observed_us": 2.086162567138672,
+    "riu_166_us": 0.0,
+    "riu_333_us": 0.0,
+    "size": 2048,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1
+    },
+    "speedup": 1.0024502457902809,
+    "stage3b_byte_hops": 0,
+    "stage3b_ms": 0.8514095097780228
+  },
+  {
+    "base_byte_hops": 0,
+    "base_bytes": 8388608,
+    "base_ms": 0.8493904024362564,
+    "byte_hop_delta": 0,
+    "case": "matmul_rhs_wrong_stick",
+    "observed_us": -3.997236490249634,
+    "riu_166_us": 0.0,
+    "riu_333_us": 0.0,
+    "size": 2048,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1
+    },
+    "speedup": 0.9953160365724563,
+    "stage3b_byte_hops": 0,
+    "stage3b_ms": 0.853387638926506
+  },
+  {
+    "base_byte_hops": 0,
+    "base_bytes": 8388608,
+    "base_ms": 1.1127889156341553,
+    "byte_hop_delta": 0,
+    "case": "matmul_then_add",
+    "observed_us": -5.491077899932861,
+    "riu_166_us": 0.0,
+    "riu_333_us": 0.0,
+    "size": 2048,
+    "skip_reasons": {
+      "incomplete-symbol-map": 1
+    },
+    "source_kinds": {
+      "in_graph_computed": 1
+    },
+    "speedup": 0.9950897110458182,
+    "stage3b_byte_hops": 0,
+    "stage3b_ms": 1.1182799935340881
+  },
+  {
+    "base_byte_hops": 0,
+    "base_bytes": 8388608,
+    "base_ms": 0.7277857512235641,
+    "byte_hop_delta": 0,
+    "case": "pointwise_three_mixed",
+    "observed_us": -4.847534000873566,
+    "riu_166_us": 0.0,
+    "riu_333_us": 0.0,
+    "size": 2048,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1
+    },
+    "speedup": 0.993383410092556,
+    "stage3b_byte_hops": 0,
+    "stage3b_ms": 0.7326332852244377
+  },
+  {
+    "base_byte_hops": 0,
+    "base_bytes": 8388608,
+    "base_ms": 0.41390396654605865,
+    "byte_hop_delta": 0,
+    "case": "pointwise_transpose_add",
+    "observed_us": 0.9434297680854797,
+    "riu_166_us": 0.0,
+    "riu_333_us": 0.0,
+    "size": 2048,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1
+    },
+    "speedup": 1.002284551873761,
+    "stage3b_byte_hops": 0,
+    "stage3b_ms": 0.4129605367779732
+  },
+  {
+    "base_byte_hops": 1376256,
+    "base_bytes": 1048576,
+    "base_ms": 0.1340676099061966,
+    "byte_hop_delta": 720896,
+    "case": "prefill_projection_join",
+    "observed_us": 5.892477929592133,
+    "riu_166_us": 4.342746987951807,
+    "riu_333_us": 2.164852852852853,
+    "size": 512,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1,
+      "in_graph_computed": 1
+    },
+    "speedup": 1.0459720839660822,
+    "stage3b_byte_hops": 655360,
+    "stage3b_ms": 0.12817513197660446
+  },
+  {
+    "base_byte_hops": 16777216,
+    "base_bytes": 4194304,
+    "base_ms": 0.33769942820072174,
+    "byte_hop_delta": 14155776,
+    "case": "prefill_projection_join",
+    "observed_us": 6.512738764286041,
+    "riu_166_us": 85.27575903614458,
+    "riu_333_us": 42.50983783783784,
+    "size": 2048,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1,
+      "in_graph_computed": 1
+    },
+    "speedup": 1.0196648566262383,
+    "stage3b_byte_hops": 2621440,
+    "stage3b_ms": 0.3311866894364357
+  },
+  {
+    "base_byte_hops": 0,
+    "base_bytes": 8388608,
+    "base_ms": 0.6893109530210495,
+    "byte_hop_delta": 0,
+    "case": "transpose_chain",
+    "observed_us": 4.451721906661987,
+    "riu_166_us": 0.0,
+    "riu_333_us": 0.0,
+    "size": 2048,
+    "skip_reasons": {
+      "graph-input-or-missing-producer": 1
+    },
+    "source_kinds": {
+      "graph_input_or_weight": 1
+    },
+    "speedup": 1.006500199901545,
+    "stage3b_byte_hops": 0,
+    "stage3b_ms": 0.6848592311143875
+  }
+]

@@ -1,0 +1,369 @@
+ {
+    "schemaVersion": 1,
+    "deviceProperties": [],
+    
+      "trace_id": "ABDC6A2C50DF4326BC94F86980E578F3",
+      "profile_memory": 1,
+      "record_shapes": 1,
+      "host_name": "adnan-cdx-spyre-dev-pf",
+    "displayTimeUnit": "ms",
+    "baseTimeNanoseconds": 1775078550000000000,
+    "traceEvents": [
+    
+  {
+    "ph": "M",
+    "name": "process_name",
+    "ts": 3767955371219.652,
+    "pid": 0,
+    "tid": 0,
+    "args": {
+      "name": "python"
+    }
+  },
+  {
+    "ph": "M",
+    "name": "process_labels",
+    "ts": 3767955371219.652,
+    "pid": 0,
+    "tid": 0,
+    "args": {
+      "labels": "AIU 0"
+    }
+  },
+  {
+    "ph": "M",
+    "name": "process_sort_index",
+    "ts": 3767955371219.652,
+    "pid": 0,
+    "tid": 0,
+    "args": {
+      "sort_index": 5000000
+    }
+  },
+  {
+    "ph": "M",
+    "name": "process_name",
+    "ts": 3767955371219.652,
+    "pid": 80177,
+    "tid": 0,
+    "args": {
+      "name": "python"
+    }
+  },
+  {
+    "ph": "M",
+    "name": "process_labels",
+    "ts": 3767955371219.652,
+    "pid": 80177,
+    "tid": 0,
+    "args": {
+      "labels": "CPU"
+    }
+  },
+  {
+    "ph": "M",
+    "name": "process_sort_index",
+    "ts": 3767955371219.652,
+    "pid": 80177,
+    "tid": 0,
+    "args": {
+      "sort_index": 80177
+    }
+  },
+  {
+    "ph": "M",
+    "name": "thread_name",
+    "ts": 3767955371219.652,
+    "pid": 80177,
+    "tid": 80177,
+    "args": {
+      "name": "thread 80177 (python)"
+    }
+  },
+  {
+    "ph": "M",
+    "name": "thread_sort_index",
+    "ts": 3767955371219.652,
+    "pid": 80177,
+    "tid": 80177,
+    "args": {
+      "sort_index": 80177
+    }
+  },
+  {
+    "ph": "M",
+    "name": "thread_name",
+    "ts": 3767955371219.652,
+    "pid": 80177,
+    "tid": 80177,
+    "args": {
+      "name": "thread 80177 (python)"
+    }
+  },
+  {
+    "ph": "M",
+    "name": "thread_sort_index",
+    "ts": 3767955371219.652,
+    "pid": 80177,
+    "tid": 80177,
+    "args": {
+      "sort_index": 80177
+    }
+  },
+  {
+    "ph": "M",
+    "name": "thread_name",
+    "ts": 3767955371219.652,
+    "pid": 0,
+    "tid": 400,
+    "args": {
+      "name": "Memory management:"
+    }
+  },
+  {
+    "ph": "M",
+    "name": "thread_sort_index",
+    "ts": 3767955371219.652,
+    "pid": 0,
+    "tid": 400,
+    "args": {
+      "sort_index": 400
+    }
+  },
+  {
+    "ph": "X",
+    "cat": "cpu_op",
+    "name": "aten::empty",
+    "pid": 80177,
+    "tid": 80177,
+    "ts": 3767961060094.133,
+    "dur": 43.114
+    ,
+    "args": {
+      "External id": 1,"Record function id": 0, "Concrete Inputs": ["[1024, 1024]", "5", "", "", "False", ""], "Input type": ["ScalarList", "Scalar", "", "", "Scalar", ""], "Input Strides": [[], [], [], [], [], []], "Input Dims": [[], [], [], [], [], []], "Ev Idx": 0
+    }
+  },
+  {
+    "ph": "X",
+    "cat": "cpu_op",
+    "name": "aten::empty",
+    "pid": 80177,
+    "tid": 80177,
+    "ts": 3767961060167.728,
+    "dur": 5.344
+    ,
+    "args": {
+      "External id": 2,"Record function id": 0, "Concrete Inputs": ["[1024, 1024]", "5", "0", "", "False", "0"], "Input type": ["ScalarList", "Scalar", "Scalar", "", "Scalar", "Scalar"], "Input Strides": [[], [], [], [], [], []], "Input Dims": [[], [], [], [], [], []], "Ev Idx": 1
+    }
+  },
+  {
+    "ph": "i",
+    
+    "cat": "cpu_instant_event",
+    "s": "t",
+    "name": "[memory]",
+    "pid": 80177,
+    "tid": 80177,
+    "ts": 3767961060129.359
+    ,
+    "args": {
+      "Total Reserved": 2097152, "Total Allocated": 2097152, "Bytes": 2097152, "Device Id": 0, "Device Type": 20, "Addr": 94731123984464, "finished": false, "Ev Idx": 2
+    }
+  },
+  {
+    "ph": "i",
+    
+    "cat": "cpu_instant_event",
+    "s": "t",
+    "name": "[memory]",
+    "pid": 80177,
+    "tid": 80177,
+    "ts": 3767961060172.699
+    ,
+    "args": {
+      "Total Reserved": 4194304, "Total Allocated": 4194304, "Bytes": 2097152, "Device Id": 0, "Device Type": 20, "Addr": 94731123976128, "finished": false, "Ev Idx": 3
+    }
+  },
+  {
+    "ph": "i",
+    
+    "cat": "cpu_instant_event",
+    "s": "t",
+    "name": "[memory]",
+    "pid": 80177,
+    "tid": 80177,
+    "ts": 3767961060181.031
+    ,
+    "args": {
+      "Total Reserved": 2097152, "Total Allocated": 2097152, "Bytes": -2097152, "Device Id": 0, "Device Type": 20, "Addr": 94731123976128, "finished": false, "Ev Idx": 4
+    }
+  },
+  {
+    "ph": "X",
+    "cat": "gpu_memset",
+    "name": "Memset (Device)",
+    "pid": 0,
+    "tid": 400,
+    "ts": 3767961029984.060,
+    "dur": 15.032
+    ,
+    "args": {
+      "memory bandwidth (GB/s)": 1142886.4544970728, "bytes": 17179869184, "context": "0", "correlation": 0, "device": 0, "call": "Memset"
+    }
+  },
+  {
+    "ph": "X",
+    "cat": "gpu_memset",
+    "name": "Memset (Device)",
+    "pid": 0,
+    "tid": 400,
+    "ts": 3767961030016.996,
+    "dur": 1.669
+    ,
+    "args": {
+      "memory bandwidth (GB/s)": 10293510.595566208, "bytes": 17179869184, "context": "0", "correlation": 0, "device": 0, "call": "Memset"
+    }
+  },
+  {
+    "ph": "X",
+    "cat": "gpu_memset",
+    "name": "Memset (Device)",
+    "pid": 0,
+    "tid": 400,
+    "ts": 3767961030019.196,
+    "dur": 1.432
+    ,
+    "args": {
+      "memory bandwidth (GB/s)": 11997115.351955308, "bytes": 17179869184, "context": "0", "correlation": 0, "device": 0, "call": "Memset"
+    }
+  },
+  {
+    "ph": "X",
+    "cat": "gpu_memset",
+    "name": "Memset (Device)",
+    "pid": 0,
+    "tid": 400,
+    "ts": 3767961030021.026,
+    "dur": 1.443
+    ,
+    "args": {
+      "memory bandwidth (GB/s)": 11905661.25017325, "bytes": 17179869184, "context": "0", "correlation": 0, "device": 0, "call": "Memset"
+    }
+  },
+  {
+    "ph": "X",
+    "cat": "gpu_memset",
+    "name": "Memset (Device)",
+    "pid": 0,
+    "tid": 400,
+    "ts": 3767961030022.882,
+    "dur": 1.416
+    ,
+    "args": {
+      "memory bandwidth (GB/s)": 12132675.97740113, "bytes": 17179869184, "context": "0", "correlation": 0, "device": 0, "call": "Memset"
+    }
+  },
+  {
+    "ph": "X",
+    "cat": "gpu_memset",
+    "name": "Memset (Device)",
+    "pid": 0,
+    "tid": 400,
+    "ts": 3767961030024.758,
+    "dur": 1.439
+    ,
+    "args": {
+      "memory bandwidth (GB/s)": 11938755.513551077, "bytes": 17179869184, "context": "0", "correlation": 0, "device": 0, "call": "Memset"
+    }
+  },
+  {
+    "ph": "X",
+    "cat": "gpu_memset",
+    "name": "Memset (Device)",
+    "pid": 0,
+    "tid": 400,
+    "ts": 3767961030026.555,
+    "dur": 1.435
+    ,
+    "args": {
+      "memory bandwidth (GB/s)": 11972034.27456446, "bytes": 17179869184, "context": "0", "correlation": 0, "device": 0, "call": "Memset"
+    }
+  },
+  {
+    "ph": "X",
+    "cat": "Trace",
+    "name": "PyTorch Profiler (0)",
+    "pid": "Spans",
+    "tid": "PyTorch Profiler",
+    "ts": 3767955371169.550,
+    "dur": 5690081.086
+    ,
+    "args": {
+      "Op count": 0
+    }
+  },
+  {
+    "ph": "M",
+    "name": "process_sort_index",
+    "ts": 3767955371169.550,
+    "pid": "Spans",
+    "tid": 0,
+    "args": {
+      "sort_index": 536870912
+    }
+  },
+  {
+    "ph": "i",
+    
+    "s": "g",
+    "name": "Iteration Start: PyTorch Profiler",
+    "pid": "Traces",
+    "tid": "Trace PyTorch Profiler",
+    "ts": 3767955371169.550
+    
+  },
+  {
+    "ph": "X",
+    "cat": "Trace",
+    "name": "__aiu_profiler__ (0)",
+    "pid": "Spans",
+    "tid": "__aiu_profiler__",
+    "ts": 3767955371220.696,
+    "dur": 5690146.488
+    ,
+    "args": {
+      "Op count": 7
+    }
+  },
+  {
+    "ph": "M",
+    "name": "process_sort_index",
+    "ts": 3767955371220.696,
+    "pid": "Spans",
+    "tid": 0,
+    "args": {
+      "sort_index": 536870912
+    }
+  },
+  {
+    "ph": "i",
+    
+    "s": "g",
+    "name": "Iteration Start: __aiu_profiler__",
+    "pid": "Traces",
+    "tid": "Trace __aiu_profiler__",
+    "ts": 3767955371220.696
+    
+  },
+  {
+    "ph": "i",
+    
+    "s": "g",
+    "name": "Record Window End",
+    "pid": "",
+    "tid": "",
+    "ts": 3767961061366.326
+    
+  }
+  ],
+      "ERROR": ["ERROR:2026-05-15 12:01:51 80177:80177 DeviceProperties.cpp:50] gpuGetDeviceCount failed with code 35"],"traceName": "/home/adnan-cdx/dt-inductor-profiler/profiler-smoke-alloc.trace.json" }

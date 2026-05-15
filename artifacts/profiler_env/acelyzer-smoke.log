@@ -1,0 +1,20 @@
+2026-05-15T12:02:05.767913     INFO Starting Test parser 
+2026-05-15T12:02:05.775728     INFO Reading files: ['/home/adnan-cdx/dt-inductor-profiler/profiler-smoke-alloc.trace.json'] 
+2026-05-15T12:02:05.775738     INFO Ingesting 1 files. 
+Traceback (most recent call last):
+  File "/home/adnan-cdx/dt-inductor/.venv/bin/acelyzer", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/acelyzer/acelyzer.py", line 37, in main
+    acelyzer.run()
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/aiu_trace_analyzer/core/acelyzer.py", line 153, in run
+    importer = ingest.MultifileIngest(
+               ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/aiu_trace_analyzer/ingest/ingestion.py", line 514, in __init__
+    self.add_ingester(ingest)
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/aiu_trace_analyzer/ingest/ingestion.py", line 537, in add_ingester
+    self.combine_metadata(self.ingesters[-1].other_metadata)
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/aiu_trace_analyzer/ingest/ingestion.py", line 119, in combine_metadata
+    assert len(additional_dev_properties) == 1, \
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: Combining incoming metadata with multiple deviceProperties is not supported []

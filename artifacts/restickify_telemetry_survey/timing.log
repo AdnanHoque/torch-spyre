@@ -1,0 +1,274 @@
+=== timed base core adds_then_matmul size=128 reason=in_graph_hops 2026-05-15T11:51:59+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=128   case=adds_then_matmul             restickifies=2   bytes=65536 byte_hops=286720
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/adds_then_matmul_128/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/adds_then_matmul_128/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b core adds_then_matmul size=128 reason=in_graph_hops 2026-05-15T11:52:13+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=128   case=adds_then_matmul             restickifies=2   bytes=65536 byte_hops=286720
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/adds_then_matmul_128/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/adds_then_matmul_128/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base core adds_then_matmul size=512 reason=in_graph_hops 2026-05-15T11:52:25+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=512   case=adds_then_matmul             restickifies=2   bytes=1048576 byte_hops=1376256
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/adds_then_matmul_512/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/adds_then_matmul_512/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b core adds_then_matmul size=512 reason=in_graph_hops 2026-05-15T11:52:37+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=512   case=adds_then_matmul             restickifies=2   bytes=1048576 byte_hops=655360
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/adds_then_matmul_512/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/adds_then_matmul_512/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base core pointwise_transpose_add size=2048 reason=large_graph_input 2026-05-15T11:52:50+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=pointwise_transpose_add      restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/pointwise_transpose_add_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/pointwise_transpose_add_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b core pointwise_transpose_add size=2048 reason=large_graph_input 2026-05-15T11:53:02+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=pointwise_transpose_add      restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/pointwise_transpose_add_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/pointwise_transpose_add_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base core pointwise_three_mixed size=2048 reason=large_graph_input 2026-05-15T11:53:16+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=pointwise_three_mixed        restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/pointwise_three_mixed_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/pointwise_three_mixed_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b core pointwise_three_mixed size=2048 reason=large_graph_input 2026-05-15T11:53:28+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=pointwise_three_mixed        restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/pointwise_three_mixed_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/pointwise_three_mixed_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base core matmul_lhs_wrong_stick size=2048 reason=large_graph_input 2026-05-15T11:53:41+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=matmul_lhs_wrong_stick       restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/matmul_lhs_wrong_stick_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/matmul_lhs_wrong_stick_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b core matmul_lhs_wrong_stick size=2048 reason=large_graph_input 2026-05-15T11:53:54+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=matmul_lhs_wrong_stick       restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/matmul_lhs_wrong_stick_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/matmul_lhs_wrong_stick_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base core matmul_rhs_wrong_stick size=2048 reason=large_graph_input 2026-05-15T11:54:06+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=matmul_rhs_wrong_stick       restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/matmul_rhs_wrong_stick_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/matmul_rhs_wrong_stick_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b core matmul_rhs_wrong_stick size=2048 reason=large_graph_input 2026-05-15T11:54:19+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=matmul_rhs_wrong_stick       restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/matmul_rhs_wrong_stick_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/matmul_rhs_wrong_stick_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base core adds_then_matmul size=2048 reason=in_graph_hops 2026-05-15T11:54:31+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=adds_then_matmul             restickifies=2   bytes=16777216 byte_hops=67108864
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/adds_then_matmul_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/adds_then_matmul_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b core adds_then_matmul size=2048 reason=in_graph_hops 2026-05-15T11:54:44+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=adds_then_matmul             restickifies=2   bytes=16777216 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/adds_then_matmul_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/adds_then_matmul_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base core matmul_then_add size=2048 reason=large_graph_input 2026-05-15T11:54:57+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=matmul_then_add              restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/matmul_then_add_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/matmul_then_add_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b core matmul_then_add size=2048 reason=large_graph_input 2026-05-15T11:55:10+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=matmul_then_add              restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/matmul_then_add_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/matmul_then_add_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base core transpose_chain size=2048 reason=large_graph_input 2026-05-15T11:55:22+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=transpose_chain              restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/transpose_chain_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/transpose_chain_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b core transpose_chain size=2048 reason=large_graph_input 2026-05-15T11:55:34+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=transpose_chain              restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/transpose_chain_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/transpose_chain_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base core fanout_diamond size=2048 reason=large_graph_input 2026-05-15T11:55:46+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=fanout_diamond               restickifies=2   bytes=16777216 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/fanout_diamond_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/fanout_diamond_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b core fanout_diamond size=2048 reason=large_graph_input 2026-05-15T11:55:58+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=fanout_diamond               restickifies=2   bytes=16777216 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/fanout_diamond_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/fanout_diamond_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base core linear_weight_transposed size=2048 reason=large_graph_input 2026-05-15T11:56:11+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=linear_weight_transposed     restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/linear_weight_transposed_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/linear_weight_transposed_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b core linear_weight_transposed size=2048 reason=large_graph_input 2026-05-15T11:56:23+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=linear_weight_transposed     restickifies=1   bytes=8388608 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/linear_weight_transposed_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/linear_weight_transposed_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base model prefill_projection_join size=512 reason=in_graph_hops 2026-05-15T11:56:35+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=512   case=prefill_projection_join      restickifies=2   bytes=1048576 byte_hops=1376256
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/prefill_projection_join_512/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/prefill_projection_join_512/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b model prefill_projection_join size=512 reason=in_graph_hops 2026-05-15T11:56:48+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=512   case=prefill_projection_join      restickifies=2   bytes=1048576 byte_hops=655360
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/prefill_projection_join_512/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/prefill_projection_join_512/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base model decode_projection_join size=512 reason=in_graph_hops 2026-05-15T11:57:00+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=512   case=decode_projection_join       restickifies=2   bytes=1048576 byte_hops=1376256
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/decode_projection_join_512/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/decode_projection_join_512/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b model decode_projection_join size=512 reason=in_graph_hops 2026-05-15T11:57:12+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=512   case=decode_projection_join       restickifies=2   bytes=1048576 byte_hops=655360
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/decode_projection_join_512/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/decode_projection_join_512/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base model prefill_projection_join size=2048 reason=in_graph_hops 2026-05-15T11:57:24+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=prefill_projection_join      restickifies=2   bytes=4194304 byte_hops=16777216
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/prefill_projection_join_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/prefill_projection_join_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b model prefill_projection_join size=2048 reason=in_graph_hops 2026-05-15T11:57:37+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=prefill_projection_join      restickifies=2   bytes=4194304 byte_hops=2621440
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/prefill_projection_join_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/prefill_projection_join_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base model decode_projection_join size=2048 reason=in_graph_hops 2026-05-15T11:57:49+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=decode_projection_join       restickifies=2   bytes=4194304 byte_hops=16777216
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/decode_projection_join_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/decode_projection_join_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b model decode_projection_join size=2048 reason=in_graph_hops 2026-05-15T11:58:02+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=decode_projection_join       restickifies=2   bytes=4194304 byte_hops=2621440
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/decode_projection_join_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/decode_projection_join_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base model attention_prefill_no_softmax size=2048 reason=large_graph_input 2026-05-15T11:58:15+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=attention_prefill_no_softmax restickifies=2   bytes=34603008 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/attention_prefill_no_softmax_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/attention_prefill_no_softmax_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b model attention_prefill_no_softmax size=2048 reason=large_graph_input 2026-05-15T11:58:29+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=attention_prefill_no_softmax restickifies=2   bytes=34603008 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/attention_prefill_no_softmax_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/attention_prefill_no_softmax_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed base model attention_score_join_value_projection size=2048 reason=large_graph_input 2026-05-15T11:58:43+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=attention_score_join_value_projection restickifies=2   bytes=16777216 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-base/attention_score_join_value_projection_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-base/attention_score_join_value_projection_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+=== timed stage3b model attention_score_join_value_projection size=2048 reason=large_graph_input 2026-05-15T11:58:57+00:00 ===
+/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/pgo.py:538: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+ok    size=2048  case=attention_score_join_value_projection restickifies=2   bytes=16777216 byte_hops=0
+
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/attention_score_join_value_projection_2048/restickify_scenarios.jsonl
+Wrote /tmp/restickify-telemetry-survey/timed-stage3b/attention_score_join_value_projection_2048/restickify_scenarios.csv
+Completed 1 rows with 0 errors
+wrote summary rows 124 pairs 0
+=== restickify timing done 2026-05-15T11:59:11+00:00 ===

@@ -1,0 +1,27 @@
+Collecting numpy
+  Using cached numpy-2.4.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+Collecting psutil
+  Using cached psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl.metadata (22 kB)
+Using cached numpy-2.4.4-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (16.6 MB)
+Using cached psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl (155 kB)
+Installing collected packages: psutil, numpy
+
+Successfully installed numpy-2.4.4 psutil-7.2.2
+before build torch 2.12.0+cu130
+Obtaining file:///home/adnan-cdx/dt-inductor-profiler/torch-spyre-pr1856
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: torch_spyre
+  Building editable for torch_spyre (pyproject.toml): started
+  Building editable for torch_spyre (pyproject.toml): finished with status 'done'
+  Created wheel for torch_spyre: filename=torch_spyre-0.0.1-0.editable-cp312-cp312-linux_x86_64.whl size=8061 sha256=dbfb1182b81bbb892e2d29a25696b647906d51caa00e25353bfa07963d660b70
+  Stored in directory: /tmp/pip-ephem-wheel-cache-_ehtkkae/wheels/a5/23/80/cee0d9e0cedbbf3242867a5d77f41c1c6ac9a8551bdff74b56
+Successfully built torch_spyre
+Installing collected packages: torch_spyre
+Successfully installed torch_spyre-0.0.1
+after build torch 2.12.0+cu130
+privateuse1 activity ProfilerActivity.PrivateUse1
+torch_spyre /home/adnan-cdx/dt-inductor-profiler/torch-spyre-pr1856/torch_spyre/__init__.py
+=== profiler no-deps retry done 2026-05-15T12:00:05+00:00 ===
