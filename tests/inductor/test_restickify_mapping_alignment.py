@@ -25,7 +25,9 @@ from torch_spyre._inductor.codegen.superdsc import (
 from torch_spyre._inductor.restickify_ring import (
     CORE_MAPPING_OVERRIDE_OP_INFO_KEY,
     build_symbol_correspondence,
+    estimate_byte_hops_from_mappings,
     materialize_default_core_mapping,
+    materialize_k_fast_core_mapping,
     ring_distance,
 )
 
@@ -58,6 +60,66 @@ def test_materialize_default_core_mapping_matches_superdsc():
     }
 
     assert materialize_default_core_mapping(dim_order, dim_splits, 8) == expected
+
+
+def test_materialize_k_fast_core_mapping_moves_reduction_dim_innermost():
+    default = materialize_default_core_mapping(
+        ["m", "n", "k"],
+        {"m": 2, "n": 2, "k": 2},
+        8,
+    )
+    k_fast = materialize_k_fast_core_mapping(
+        {"m": 4, "n": 4, "k": 4},
+        {"m": 2, "n": 2, "k": 2},
+        8,
+    )
+
+    assert default["1"] == {"m": 1, "n": 0, "k": 0}
+    assert k_fast["1"] == {"k": 1, "m": 0, "n": 0}
+
+
+def test_estimate_byte_hops_zero_for_aligned_and_positive_for_shifted():
+    sizes = {"d0": 4}
+    splits = {"d0": 4}
+    aligned_mapping = materialize_default_core_mapping(["d0"], splits, 4)
+    shifted_mapping = {
+        "0": {"d0": 1},
+        "1": {"d0": 2},
+        "2": {"d0": 3},
+        "3": {"d0": 0},
+    }
+
+    bytes_moved, byte_hops, max_hops = estimate_byte_hops_from_mappings(
+        sizes,
+        sizes,
+        splits,
+        splits,
+        aligned_mapping,
+        aligned_mapping,
+        {"d0": "d0"},
+        elem_size_bytes=2,
+        ring_size=4,
+    )
+
+    assert bytes_moved == 8
+    assert byte_hops == 0
+    assert max_hops == 0
+
+    bytes_moved, byte_hops, max_hops = estimate_byte_hops_from_mappings(
+        sizes,
+        sizes,
+        splits,
+        splits,
+        aligned_mapping,
+        shifted_mapping,
+        {"d0": "d0"},
+        elem_size_bytes=2,
+        ring_size=4,
+    )
+
+    assert bytes_moved == 8
+    assert byte_hops == 8
+    assert max_hops == 1
 
 
 def test_symbol_correspondence_skips_ambiguous_strides():

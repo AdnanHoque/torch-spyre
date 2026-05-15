@@ -118,7 +118,9 @@ prepacking, or persistent-cache strategies.
 ### Stage 0: Scenario Telemetry and Attribution
 
 Add default-off telemetry that records every restickify with enough context to
-classify it into the taxonomy:
+classify it into the taxonomy. The initial flags are
+`SPYRE_RESTICKIFY_RING_TELEMETRY=1` and
+`SPYRE_RESTICKIFY_RING_TELEMETRY_JSONL=/path/to/file.jsonl`.
 
 - producer, restickify op, and consumer names when available
 - whether the source is graph input, parameter, in-graph producer, mutation, or
@@ -162,6 +164,21 @@ python tools/restickify_scenario_probe.py \
   --size 128 \
   --output-dir /tmp/restickify-stage1
 ```
+
+After Stage 0 telemetry exists, the same probe can collect byte-hop estimates:
+
+```sh
+python tools/restickify_scenario_probe.py \
+  --case adds_then_matmul \
+  --size 512 \
+  --size 2048 \
+  --ring-telemetry \
+  --skip-correctness \
+  --output-dir /tmp/restickify-stage3a
+```
+
+Initial Stage 3A findings are recorded in
+[Stage3A-TelemetryResults.md](Stage3A-TelemetryResults.md).
 
 Latency measurements should be promoted only for probes with nontrivial byte
 movement and stable correctness.

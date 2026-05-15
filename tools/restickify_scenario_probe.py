@@ -15,15 +15,14 @@
 
 """Synthetic restickify scenario survey.
 
-This is a Stage 1 probe tool for the Restickify Locality RFC. It runs a taxonomy
+This is a Stage 1/3A probe tool for the Restickify Locality RFC. It runs a taxonomy
 of small Torch programs under torch.compile on Spyre, captures the existing
 compiler restickify plan, and writes one JSONL row plus one CSV summary row per
 case and size.
 
-The tool intentionally uses the current SPYRE_CAPTURE_RESTICKIFY_PLAN hook
-instead of adding new compiler telemetry. That makes it useful as a first pass:
-which scenarios compile, which ones emit restickifies, and how much element or
-byte movement the current element-count cost model reports.
+With --ring-telemetry, it also captures the compiler's restickify byte-hop JSONL
+for each case and summarizes total byte-hops, average hops, max hops, and skip
+reasons.
 """
 
 from __future__ import annotations
@@ -466,6 +465,38 @@ def _summarize_plan(plan: dict[str, list[dict[str, Any]]]) -> tuple[list[dict[st
     return entries, total_elements, total_bytes
 
 
+def _read_ring_telemetry(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {
+            "ring_rows": 0,
+            "ring_total_bytes": 0,
+            "ring_total_byte_hops": 0,
+            "ring_avg_hops": 0.0,
+            "ring_max_hops": 0,
+            "ring_skip_reasons": {},
+            "ring_entries": [],
+        }
+
+    entries = [json.loads(line) for line in path.read_text().splitlines() if line]
+    total_bytes = sum(int(entry.get("bytes_moved") or 0) for entry in entries)
+    total_byte_hops = sum(int(entry.get("byte_hops") or 0) for entry in entries)
+    max_hops = max((int(entry.get("max_hops") or 0) for entry in entries), default=0)
+    skip_reasons: dict[str, int] = {}
+    for entry in entries:
+        reason = entry.get("skip_reason")
+        if reason:
+            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+    return {
+        "ring_rows": len(entries),
+        "ring_total_bytes": total_bytes,
+        "ring_total_byte_hops": total_byte_hops,
+        "ring_avg_hops": total_byte_hops / total_bytes if total_bytes else 0.0,
+        "ring_max_hops": max_hops,
+        "ring_skip_reasons": skip_reasons,
+        "ring_entries": entries,
+    }
+
+
 def _assert_close(actual: Any, expected: Any, atol: float, rtol: float) -> None:
     if isinstance(actual, tuple):
         assert isinstance(expected, tuple) and len(actual) == len(expected)
@@ -514,6 +545,7 @@ def _run_case(
     iters: int,
     atol: float,
     rtol: float,
+    ring_telemetry_path: Path | None,
 ) -> dict[str, Any]:
     args, shape_label = case.input_builder(size, dtype)
     dev_args = tuple(arg.to(device) if hasattr(arg, "to") else arg for arg in args)
@@ -522,7 +554,27 @@ def _run_case(
 
     insert_restickify.restickify_plan = {}
     previous_capture = os.environ.get("SPYRE_CAPTURE_RESTICKIFY_PLAN")
+    previous_ring = os.environ.get("SPYRE_RESTICKIFY_RING_TELEMETRY")
+    previous_ring_jsonl = os.environ.get("SPYRE_RESTICKIFY_RING_TELEMETRY_JSONL")
+    spyre_config = None
+    previous_config_ring = None
+    previous_config_ring_jsonl = None
     os.environ["SPYRE_CAPTURE_RESTICKIFY_PLAN"] = "1"
+    if ring_telemetry_path is not None:
+        ring_telemetry_path.parent.mkdir(parents=True, exist_ok=True)
+        ring_telemetry_path.unlink(missing_ok=True)
+        os.environ["SPYRE_RESTICKIFY_RING_TELEMETRY"] = "1"
+        os.environ["SPYRE_RESTICKIFY_RING_TELEMETRY_JSONL"] = str(ring_telemetry_path)
+        try:
+            import torch_spyre._inductor.config as spyre_config_module
+
+            spyre_config = spyre_config_module
+            previous_config_ring = spyre_config.restickify_ring_telemetry
+            previous_config_ring_jsonl = spyre_config.restickify_ring_telemetry_jsonl
+            spyre_config.restickify_ring_telemetry = True
+            spyre_config.restickify_ring_telemetry_jsonl = str(ring_telemetry_path)
+        except Exception:
+            spyre_config = None
 
     try:
         _reset_compile_caches()
@@ -534,6 +586,11 @@ def _run_case(
 
         plan = dict(insert_restickify.restickify_plan)
         entries, total_elements, total_bytes = _summarize_plan(plan)
+        ring_summary = (
+            _read_ring_telemetry(ring_telemetry_path)
+            if ring_telemetry_path is not None
+            else {}
+        )
 
         timing = {}
         if do_timing:
@@ -559,6 +616,7 @@ def _run_case(
             "total_elements": total_elements,
             "total_bytes": total_bytes,
             "entries": entries,
+            **ring_summary,
             **timing,
         }
     finally:
@@ -566,6 +624,17 @@ def _run_case(
             os.environ.pop("SPYRE_CAPTURE_RESTICKIFY_PLAN", None)
         else:
             os.environ["SPYRE_CAPTURE_RESTICKIFY_PLAN"] = previous_capture
+        if previous_ring is None:
+            os.environ.pop("SPYRE_RESTICKIFY_RING_TELEMETRY", None)
+        else:
+            os.environ["SPYRE_RESTICKIFY_RING_TELEMETRY"] = previous_ring
+        if previous_ring_jsonl is None:
+            os.environ.pop("SPYRE_RESTICKIFY_RING_TELEMETRY_JSONL", None)
+        else:
+            os.environ["SPYRE_RESTICKIFY_RING_TELEMETRY_JSONL"] = previous_ring_jsonl
+        if spyre_config is not None:
+            spyre_config.restickify_ring_telemetry = previous_config_ring
+            spyre_config.restickify_ring_telemetry_jsonl = previous_config_ring_jsonl
 
 
 def _error_row(case: ProbeCase, size: int, dtype: Any, exc: BaseException) -> dict[str, Any]:
@@ -581,6 +650,13 @@ def _error_row(case: ProbeCase, size: int, dtype: Any, exc: BaseException) -> di
         "restickify_count": 0,
         "total_elements": 0,
         "total_bytes": 0,
+        "ring_rows": 0,
+        "ring_total_bytes": 0,
+        "ring_total_byte_hops": 0,
+        "ring_avg_hops": 0.0,
+        "ring_max_hops": 0,
+        "ring_skip_reasons": {},
+        "ring_entries": [],
         "error_type": type(exc).__name__,
         "error": str(exc),
         "traceback": traceback.format_exc(),
@@ -600,6 +676,12 @@ def _csv_row(row: dict[str, Any]) -> dict[str, Any]:
         "restickify_count": row.get("restickify_count", 0),
         "total_elements": row.get("total_elements", 0),
         "total_bytes": row.get("total_bytes", 0),
+        "ring_rows": row.get("ring_rows", 0),
+        "ring_total_bytes": row.get("ring_total_bytes", 0),
+        "ring_total_byte_hops": row.get("ring_total_byte_hops", 0),
+        "ring_avg_hops": f"{row.get('ring_avg_hops', 0.0):.3f}",
+        "ring_max_hops": row.get("ring_max_hops", 0),
+        "ring_skip_reasons": json.dumps(row.get("ring_skip_reasons", {}), sort_keys=True),
         "compile_run_ms": f"{row.get('compile_run_ms', 0.0):.3f}" if row.get("compile_run_ms") is not None else "",
         "median_ms": f"{row.get('median_ms', 0.0):.3f}" if row.get("median_ms") is not None else "",
         "p10_ms": f"{row.get('p10_ms', 0.0):.3f}" if row.get("p10_ms") is not None else "",
@@ -642,6 +724,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--jsonl-name", default="restickify_scenarios.jsonl", help="JSONL output file name.")
     parser.add_argument("--csv-name", default="restickify_scenarios.csv", help="CSV summary file name.")
     parser.add_argument("--skip-correctness", action="store_true", help="Skip CPU correctness comparison.")
+    parser.add_argument("--ring-telemetry", action="store_true", help="Capture restickify byte-hop telemetry per case.")
     parser.add_argument("--time", action="store_true", help="Run warmup/timed iterations after compile.")
     parser.add_argument("--warmup", type=int, default=3, help="Warmup iterations for --time.")
     parser.add_argument("--iters", type=int, default=20, help="Timed iterations for --time.")
@@ -680,6 +763,11 @@ def main() -> int:
     with jsonl_path.open("w", encoding="utf-8") as jsonl:
         for size in sizes:
             for case in selected:
+                telemetry_path = (
+                    output_dir / "ring_telemetry" / f"{case.name}_{size}.jsonl"
+                    if args.ring_telemetry
+                    else None
+                )
                 try:
                     row = _run_case(
                         case=case,
@@ -693,6 +781,7 @@ def main() -> int:
                         iters=args.iters,
                         atol=args.atol,
                         rtol=args.rtol,
+                        ring_telemetry_path=telemetry_path,
                     )
                 except Exception as exc:
                     row = _error_row(case, size, dtype, exc)
@@ -702,7 +791,12 @@ def main() -> int:
                 status = row["status"]
                 count = row.get("restickify_count", 0)
                 bytes_moved = row.get("total_bytes", 0)
-                print(f"{status:5} size={size:<5} case={case.name:<28} restickifies={count:<3} bytes={bytes_moved}")
+                byte_hops = row.get("ring_total_byte_hops", 0)
+                print(
+                    f"{status:5} size={size:<5} case={case.name:<28} "
+                    f"restickifies={count:<3} bytes={bytes_moved} "
+                    f"byte_hops={byte_hops}"
+                )
 
     fieldnames = list(_csv_row(rows[0]).keys())
     with csv_path.open("w", encoding="utf-8", newline="") as csv_file:

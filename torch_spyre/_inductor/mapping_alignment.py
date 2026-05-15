@@ -30,7 +30,10 @@ from .restickify_ring import (
 logger = get_inductor_logger("mapping_alignment")
 
 
-def align_restickify_core_mappings(operations: list[Operation]) -> None:
+def align_restickify_core_mappings(
+    operations: list[Operation],
+    k_fast_ops: list[Operation] | None = None,
+) -> None:
     """Attach producer-aligned core mapping overrides to compatible restickifies."""
     if not config.align_restickify_core_mapping:
         return
@@ -39,7 +42,11 @@ def align_restickify_core_mappings(operations: list[Operation]) -> None:
     for op in operations:
         if not isinstance(op, ComputedBuffer) or not is_restickify_op(op):
             continue
-        override, reason = build_restickify_core_mapping_override(op, name_to_op)
+        override, reason = build_restickify_core_mapping_override(
+            op,
+            name_to_op,
+            k_fast_ops,
+        )
         if override is None:
             logger.info(
                 "skip restickify core mapping alignment for %s: %s",

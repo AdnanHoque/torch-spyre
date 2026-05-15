@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from collections import Counter
 from collections.abc import Mapping, Sequence
@@ -34,6 +35,21 @@ from .pass_utils import (
 
 CORE_MAPPING_OVERRIDE_ATTR = "_spyre_core_id_to_work_slice_override"
 CORE_MAPPING_OVERRIDE_OP_INFO_KEY = "core_id_to_work_slice_override"
+
+
+@dataclasses.dataclass(frozen=True)
+class RestickifyRingEstimate:
+    restickify_name: str
+    producer_name: str
+    consumer_names: list[str]
+    bytes_moved: int
+    byte_hops: int
+    avg_hops: float
+    max_hops: int
+    producer_splits: dict[str, int]
+    restickify_splits: dict[str, int]
+    symbol_map: dict[str, str]
+    skip_reason: str | None = None
 
 
 def ring_distance(src_core: int, dst_core: int, ring_size: int) -> int:
@@ -77,6 +93,22 @@ def materialize_default_core_mapping(
     return core_mapping
 
 
+def materialize_k_fast_core_mapping(
+    iteration_sizes: Mapping[str, int],
+    dim_splits: Mapping[str, int],
+    num_cores: int | None = None,
+) -> dict[str, dict[str, int]]:
+    """Materialize SuperDSC's k-fast core mapping for matmul producers."""
+    dims = list(iteration_sizes.keys())
+    if len(dims) < 3:
+        return materialize_default_core_mapping(dims, dim_splits, num_cores)
+    return materialize_default_core_mapping(
+        [dims[-1], *dims[:-1]],
+        dim_splits,
+        num_cores,
+    )
+
+
 def normalize_core_mapping(
     raw: Mapping[Any, Mapping[Any, Any]],
 ) -> dict[str, dict[str, int]]:
@@ -103,6 +135,17 @@ def build_name_to_op_map(operations) -> dict[str, ComputedBuffer]:
     return {
         op.get_name(): op for op in operations if isinstance(op, ComputedBuffer)
     }
+
+
+def build_consumers_of(operations) -> dict[str, list[ComputedBuffer]]:
+    consumers: dict[str, list[ComputedBuffer]] = {}
+    for op in operations:
+        if not isinstance(op, ComputedBuffer):
+            continue
+        for dep in op.get_read_writes().reads:
+            if isinstance(dep, MemoryDep):
+                consumers.setdefault(dep.name, []).append(op)
+    return consumers
 
 
 def producer_for_restickify(
@@ -147,6 +190,10 @@ def decode_op_splits(op: ComputedBuffer) -> dict[str, int]:
             encoded, write_index, read_index, it_space
         )
     return {str(sym): int(splits.get(sym, 1)) for sym in it_space}
+
+
+def split_dims_only(splits: Mapping[str, int]) -> dict[str, int]:
+    return {sym: split for sym, split in splits.items() if split > 1}
 
 
 def extract_strides(index_expr, var_names) -> dict[str, int]:
@@ -237,10 +284,22 @@ def _mapping_for_op(
     op: ComputedBuffer,
     iteration_sizes: Mapping[str, int],
     split_factors: Mapping[str, int],
+    k_fast_ops: Sequence[Any] | None = None,
 ) -> dict[str, dict[str, int]]:
     override = getattr(op, CORE_MAPPING_OVERRIDE_ATTR, None)
     if override is not None:
         return normalize_core_mapping(override)
+    if (
+        k_fast_ops is not None
+        and op in k_fast_ops
+        and len(iteration_sizes) >= 3
+        and split_factors.get(list(iteration_sizes)[-1], 1) > 1
+    ):
+        return materialize_k_fast_core_mapping(
+            iteration_sizes,
+            split_factors,
+            math.prod(split_factors.values()),
+        )
     return materialize_default_core_mapping(
         list(iteration_sizes.keys()),
         split_factors,
@@ -248,9 +307,213 @@ def _mapping_for_op(
     )
 
 
+def _core_rectangles(
+    iteration_sizes: Mapping[str, int],
+    split_factors: Mapping[str, int],
+    core_mapping: Mapping[str, Mapping[str, int]],
+) -> dict[int, dict[str, tuple[int, int]]]:
+    rectangles: dict[int, dict[str, tuple[int, int]]] = {}
+    for core_id_str, per_dim in core_mapping.items():
+        core_id = int(core_id_str)
+        rect: dict[str, tuple[int, int]] = {}
+        for sym, size in iteration_sizes.items():
+            split = int(split_factors.get(sym, 1))
+            if split <= 0:
+                raise ValueError(f"split for {sym} must be positive, got {split}")
+            if size % split != 0:
+                raise ValueError(
+                    f"size for {sym} ({size}) is not divisible by split {split}"
+                )
+            slice_idx = int(per_dim.get(sym, 0))
+            if slice_idx < 0 or slice_idx >= split:
+                raise ValueError(
+                    f"slice {slice_idx} for {sym} outside split factor {split}"
+                )
+            chunk = size // split
+            rect[sym] = (slice_idx * chunk, (slice_idx + 1) * chunk)
+        rectangles[core_id] = rect
+    return rectangles
+
+
+def _intersection_volume(
+    producer_rect: Mapping[str, tuple[int, int]],
+    restickify_rect: Mapping[str, tuple[int, int]],
+    restickify_to_producer: Mapping[str, str],
+) -> int:
+    volume = 1
+    for restickify_sym, (rest_start, rest_end) in restickify_rect.items():
+        producer_sym = restickify_to_producer.get(restickify_sym)
+        if producer_sym is None:
+            continue
+        prod_start, prod_end = producer_rect[producer_sym]
+        overlap = max(0, min(prod_end, rest_end) - max(prod_start, rest_start))
+        if overlap == 0:
+            return 0
+        volume *= overlap
+    return volume
+
+
+def _element_size_bytes(op: ComputedBuffer) -> int:
+    dtype = op.get_layout().dtype
+    itemsize = getattr(dtype, "itemsize", None)
+    if itemsize is not None:
+        return int(itemsize)
+    return int(torch.tensor([], dtype=dtype).element_size())
+
+
+def _total_elements(iteration_sizes: Mapping[str, int]) -> int:
+    return math.prod(iteration_sizes.values())
+
+
+def _bytes_moved_or_zero(op: ComputedBuffer) -> int:
+    try:
+        return _total_elements(op_iteration_sizes(op)) * _element_size_bytes(op)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def estimate_byte_hops_from_mappings(
+    producer_sizes: Mapping[str, int],
+    restickify_sizes: Mapping[str, int],
+    producer_splits: Mapping[str, int],
+    restickify_splits: Mapping[str, int],
+    producer_mapping: Mapping[str, Mapping[str, int]],
+    restickify_mapping: Mapping[str, Mapping[str, int]],
+    symbol_map: Mapping[str, str],
+    elem_size_bytes: int,
+    ring_size: int,
+) -> tuple[int, int, int]:
+    """Return ``(bytes_moved, byte_hops, max_hops)`` for two core mappings."""
+    producer_rects = _core_rectangles(
+        producer_sizes, producer_splits, normalize_core_mapping(producer_mapping)
+    )
+    restickify_rects = _core_rectangles(
+        restickify_sizes,
+        restickify_splits,
+        normalize_core_mapping(restickify_mapping),
+    )
+
+    bytes_moved = _total_elements(restickify_sizes) * elem_size_bytes
+    byte_hops = 0
+    max_hops = 0
+    for producer_core, producer_rect in producer_rects.items():
+        for restickify_core, restickify_rect in restickify_rects.items():
+            overlap_elements = _intersection_volume(
+                producer_rect, restickify_rect, symbol_map
+            )
+            if overlap_elements == 0:
+                continue
+            hops = ring_distance(producer_core, restickify_core, ring_size)
+            max_hops = max(max_hops, hops)
+            byte_hops += overlap_elements * elem_size_bytes * hops
+    return bytes_moved, byte_hops, max_hops
+
+
+def estimate_restickify_ring_cost(
+    restickify_op: ComputedBuffer,
+    name_to_op: Mapping[str, ComputedBuffer],
+    consumers_of: Mapping[str, list[ComputedBuffer]],
+    ring_size: int,
+    k_fast_ops: Sequence[Any] | None = None,
+) -> RestickifyRingEstimate:
+    restickify_name = restickify_op.get_name()
+    consumer_names = [op.get_name() for op in consumers_of.get(restickify_name, [])]
+    producer_info, reason = producer_for_restickify(restickify_op, name_to_op)
+    bytes_moved = _bytes_moved_or_zero(restickify_op)
+    if producer_info is None:
+        return RestickifyRingEstimate(
+            restickify_name=restickify_name,
+            producer_name="<none>",
+            consumer_names=consumer_names,
+            bytes_moved=bytes_moved,
+            byte_hops=0,
+            avg_hops=0.0,
+            max_hops=0,
+            producer_splits={},
+            restickify_splits={},
+            symbol_map={},
+            skip_reason=reason,
+        )
+
+    producer, read_dep = producer_info
+    producer_name = producer.get_name()
+    producer_splits = decode_op_splits(producer)
+    restickify_splits = decode_op_splits(restickify_op)
+    symbol_map, reason = restickify_symbol_map(producer, restickify_op, read_dep)
+    if reason is not None:
+        return RestickifyRingEstimate(
+            restickify_name=restickify_name,
+            producer_name=producer_name,
+            consumer_names=consumer_names,
+            bytes_moved=bytes_moved,
+            byte_hops=0,
+            avg_hops=0.0,
+            max_hops=0,
+            producer_splits=split_dims_only(producer_splits),
+            restickify_splits=split_dims_only(restickify_splits),
+            symbol_map={},
+            skip_reason=reason,
+        )
+
+    try:
+        producer_sizes = op_iteration_sizes(producer)
+        restickify_sizes = op_iteration_sizes(restickify_op)
+        elem_size = _element_size_bytes(restickify_op)
+        producer_mapping = _mapping_for_op(
+            producer,
+            producer_sizes,
+            producer_splits,
+            k_fast_ops,
+        )
+        restickify_mapping = _mapping_for_op(
+            restickify_op, restickify_sizes, restickify_splits
+        )
+        bytes_moved, byte_hops, max_hops = estimate_byte_hops_from_mappings(
+            producer_sizes,
+            restickify_sizes,
+            producer_splits,
+            restickify_splits,
+            producer_mapping,
+            restickify_mapping,
+            symbol_map,
+            elem_size,
+            ring_size,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return RestickifyRingEstimate(
+            restickify_name=restickify_name,
+            producer_name=producer_name,
+            consumer_names=consumer_names,
+            bytes_moved=bytes_moved,
+            byte_hops=0,
+            avg_hops=0.0,
+            max_hops=0,
+            producer_splits=split_dims_only(producer_splits),
+            restickify_splits=split_dims_only(restickify_splits),
+            symbol_map=symbol_map,
+            skip_reason=type(exc).__name__,
+        )
+
+    avg_hops = byte_hops / bytes_moved if bytes_moved else 0.0
+    return RestickifyRingEstimate(
+        restickify_name=restickify_name,
+        producer_name=producer_name,
+        consumer_names=consumer_names,
+        bytes_moved=bytes_moved,
+        byte_hops=byte_hops,
+        avg_hops=avg_hops,
+        max_hops=max_hops,
+        producer_splits=split_dims_only(producer_splits),
+        restickify_splits=split_dims_only(restickify_splits),
+        symbol_map=symbol_map,
+        skip_reason=None,
+    )
+
+
 def build_restickify_core_mapping_override(
     restickify_op: ComputedBuffer,
     name_to_op: Mapping[str, ComputedBuffer],
+    k_fast_ops: Sequence[Any] | None = None,
 ) -> tuple[dict[str, dict[str, int]] | None, str | None]:
     """Build a producer-aligned core mapping for a restickify op if exact."""
     producer_info, reason = producer_for_restickify(restickify_op, name_to_op)
@@ -286,7 +549,12 @@ def build_restickify_core_mapping_override(
 
     producer_sizes = op_iteration_sizes(producer)
     restickify_sizes = op_iteration_sizes(restickify_op)
-    producer_mapping = _mapping_for_op(producer, producer_sizes, producer_splits)
+    producer_mapping = _mapping_for_op(
+        producer,
+        producer_sizes,
+        producer_splits,
+        k_fast_ops,
+    )
 
     override: dict[str, dict[str, int]] = {}
     for core_id, producer_slices in producer_mapping.items():

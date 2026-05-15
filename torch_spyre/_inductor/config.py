@@ -46,4 +46,14 @@ align_restickify_core_mapping: bool = (
     os.environ.get("SPYRE_ALIGN_RESTICKIFY_CORE_MAPPING", "0") == "1"
 )
 
+# Default-off exact byte-hop telemetry for compiler-inserted restickify ops.
+restickify_ring_telemetry: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_RING_TELEMETRY", "0") == "1"
+)
+
+restickify_ring_telemetry_jsonl: str = os.environ.get(
+    "SPYRE_RESTICKIFY_RING_TELEMETRY_JSONL",
+    "",
+)
+
 install_config_module(sys.modules[__name__])
