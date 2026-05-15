@@ -146,6 +146,21 @@ def _decode_projection_join(x, y, z, w):
     return (x + y.t() + z.t()) @ w
 
 
+def _mlp_gated_projection(x, w_up, w_gate, w_down, residual):
+    up = x @ w_up
+    gate = x @ w_gate
+    activated = up * torch.nn.functional.silu(gate)
+    return activated @ w_down + residual
+
+
+def _mlp_gated_projection_join(x, y, z, w_up, w_gate, w_down, residual):
+    joined = x + y.t() + z.t()
+    up = joined @ w_up
+    gate = joined @ w_gate
+    activated = up * torch.nn.functional.silu(gate)
+    return activated @ w_down + residual
+
+
 def _attention_prefill_no_softmax(q, k, v, bias):
     scores = q @ k.transpose(-2, -1)
     mixed = scores + bias.transpose(-2, -1)
@@ -302,6 +317,46 @@ def _builder_decode_projection(n: int, dtype: Any) -> tuple[tuple[Any, ...], str
     z = _rand((hidden, tokens), dtype)
     w = _rand((hidden, hidden), dtype)
     return (x, y, z, w), f"active_tokens={tokens},hidden={hidden}"
+
+
+def _builder_mlp_gated(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    tokens = n
+    hidden = _env_int("SPYRE_PROBE_HIDDEN", 512)
+    intermediate = _env_int("SPYRE_PROBE_INTERMEDIATE", hidden)
+    x = _rand((tokens, hidden), dtype)
+    w_up = _rand((hidden, intermediate), dtype)
+    w_gate = _rand((hidden, intermediate), dtype)
+    w_down = _rand((intermediate, hidden), dtype)
+    residual = _rand((tokens, hidden), dtype)
+    return (
+        x,
+        w_up,
+        w_gate,
+        w_down,
+        residual,
+    ), f"tokens={tokens},hidden={hidden},intermediate={intermediate}"
+
+
+def _builder_mlp_gated_join(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    tokens = n
+    hidden = _env_int("SPYRE_PROBE_HIDDEN", 512)
+    intermediate = _env_int("SPYRE_PROBE_INTERMEDIATE", hidden)
+    x = _rand((tokens, hidden), dtype)
+    y = _rand((hidden, tokens), dtype)
+    z = _rand((hidden, tokens), dtype)
+    w_up = _rand((hidden, intermediate), dtype)
+    w_gate = _rand((hidden, intermediate), dtype)
+    w_down = _rand((intermediate, hidden), dtype)
+    residual = _rand((tokens, hidden), dtype)
+    return (
+        x,
+        y,
+        z,
+        w_up,
+        w_gate,
+        w_down,
+        residual,
+    ), f"tokens={tokens},hidden={hidden},intermediate={intermediate}"
 
 
 def _builder_attention_prefill_no_softmax(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
@@ -511,6 +566,24 @@ CASES: tuple[ProbeCase, ...] = (
         "Decode/batched-decode token projection with transposed joins before matmul.",
         _builder_decode_projection,
         _decode_projection_join,
+        forward_looking=True,
+    ),
+    ProbeCase(
+        "mlp_gated_projection",
+        "mlp_model_slice",
+        "in_graph_producer",
+        "SwiGLU-style MLP projection, activation, down projection, and residual.",
+        _builder_mlp_gated,
+        _mlp_gated_projection,
+        forward_looking=True,
+    ),
+    ProbeCase(
+        "mlp_gated_projection_join",
+        "mlp_model_slice",
+        "in_graph_producer",
+        "SwiGLU-style MLP with a transposed pointwise join before projection.",
+        _builder_mlp_gated_join,
+        _mlp_gated_projection_join,
         forward_looking=True,
     ),
     ProbeCase(
