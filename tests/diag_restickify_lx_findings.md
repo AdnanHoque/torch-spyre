@@ -22,6 +22,93 @@ Probe sources: [diag_restickify_lx_trace.py](diag_restickify_lx_trace.py),
 end-to-end granite profile — see the *granite end-to-end profile blocker*
 section below).
 
+## Theoretical projection for FUNDAMENTAL restickify on AIU RIU ring
+
+Assuming we hit FUNDAMENTAL restickify in the 1H 2026 workloads (GPT-OSS,
+Granite-4 Hybrid 30B, Mistral, Qwen2.5-VL, Llama-3.1-8B, Ministral 8B/14B),
+we can model the gain from replacing `ReStickifyOpHBM` with the on-chip ring
+shuffle (`STCDPOpLx`) using the spec'd ring bandwidth (35.2 GB/s
+bidirectional per link, 32 cores) and the measured HBM restickify bandwidth
+(107 GB/s effective, single-op). Full model is in
+[diag_ring_speedup_model.py](diag_ring_speedup_model.py). Three cost
+models for the ring; the middle one is the most defensible for a
+transpose-style all-to-all shuffle:
+
+| ring cost model | per-FUNDAMENTAL-restickify speedup |
+|---|---|
+| A — bisection-bound (`tensor/2 / (2·link_bw)`) | **2.63×** |
+| B — uniform all-to-all (`tensor·N/4 / (N·link_bw)`) | **2.63×** |
+| C — aggregate parallel (`tensor / (2N·link_bw)`) | 42.1× (best case, unrealistic) |
+
+Per-op speedup is shape-invariant under each model because both T_hbm and
+T_ring are proportional to tensor_bytes. The layer-level speedup is
+shape-dependent because FUNDAMENTAL restickify bytes scale linearly with
+sequence length M while weight reads (HBM-LOAD) stay flat.
+
+**FUNDAMENTAL share of layer HBM bytes (attention layers, fp16):**
+
+| Model | M=128 | M=512 | M=2048 | M=8192 |
+|---|---|---|---|---|
+| Llama-3.1-8B | 0.43% | 1.69% | 6.45% | 21.62% |
+| Ministral 8B | 0.43% | 1.69% | 6.45% | 21.62% |
+| Mistral-small 24B | 0.22% | 0.85% | 3.33% | 12.12% |
+| Granite-4 Hybrid 30B (attn layers only) | 0.39% | 1.54% | 5.88% | 20.00% |
+| GPT-OSS 20B | 0.52% | 2.03% | 7.66% | 24.90% |
+
+**Projected per-attention-layer speedup (ring-only, FUNDAMENTAL only,
+model B at 2.63×):**
+
+| Model | M=128 | M=512 | M=2048 | M=8192 |
+|---|---|---|---|---|
+| Llama-3.1-8B | 1.003× | 1.011× | 1.042× | **1.155×** |
+| Granite-4 Hybrid 30B attn | 1.002× | 1.010× | 1.038× | **1.142×** |
+| GPT-OSS 20B | 1.003× | 1.013× | 1.050× | **1.183×** |
+
+**Key takeaways:**
+
+- The ring-only FUNDAMENTAL optimization is **meaningful only at long
+  context** (M ≥ 2048): below that, the weight-read mass dominates and
+  the layer-level speedup is < 5%.
+- At long context the per-attention-layer speedup is **1.1-1.2×**, which
+  is real performance the workload can use.
+- **Granite-4 Hybrid is bottlenecked further:** only ~9 of its ~40 layers
+  are attention (the rest are Mamba SSM, which doesn't trip
+  FUNDAMENTAL). So whole-model speedup is roughly
+  `9/40 × (per-attn-layer speedup) + 31/40 × 1` — at M=8192 that's
+  `0.225 × 1.142 + 0.775 × 1.0 = 1.032×` whole-model. The MoE expert
+  dispatch may add its own FUNDAMENTAL pattern not modeled here.
+- Pure-transformer workloads (Llama, Ministral, GPT-OSS) keep the full
+  per-attention-layer speedup since all layers are attention-bearing.
+
+## Proposed experiments to validate
+
+The model leans on two numbers: (1) measured HBM restickify effective bw
+≈ 107 GB/s, (2) spec'd ring link bw 35.2 GB/s. Two microbenches close
+the loop:
+
+**E1 (already done).** HBM restickify single-op cost: 107 GB/s effective.
+Probe in earlier session ran this; results are in this branch's history.
+
+**E2.** Ring shuffle microbench. Construct a minimal `STCDPOpLx` data-op
+SDSC at a known transpose-style shape (e.g. `[B, H, M, D] →
+[B, M, H, D]` shuffled across cores), run via `dcg_standalone` or
+`DataOpStandalone` (sibling tools to `dxp_standalone` that already accept
+data-op SDSCs without the `--bundle`-mode guards we hit). Measure wall-clock,
+derive effective ring bw. Compare to 35.2 GB/s spec and to model A/B/C
+predictions. **This experiment is unblocked by deeptools' existing
+standalone tools** — does not require the `dxp_standalone --bundle`
+data-op integration work.
+
+**E3.** End-to-end granite once the compiler-maturity chain
+(`superdsc.py:306` + DDL coverage) is unblocked. Compare baseline (no
+LX_PLANNING) vs LX_PLANNING + ring-restickify at M=2048 and M=8192 where
+the model predicts the largest win. Compare measured layer speedup to
+the model's 1.04-1.18× predictions.
+
+E2 is the next concrete step — it confirms the ring-cost model
+independently of the granite end-to-end blockers, and gives us the real
+per-op speedup number to feed back into the layer-level projections.
+
 ## Quantifying the win — best available estimate
 
 Across 27 real `sencores=32` torch-spyre-compiled bundles (cache analysis,
