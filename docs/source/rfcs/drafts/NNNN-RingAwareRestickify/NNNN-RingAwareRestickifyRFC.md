@@ -213,6 +213,182 @@ under contention, PT compute model under multi-cohort layouts).
 Explicit non-goals for v2 of this RFC: Phase 3 is sketched only as a
 direction. Commit will happen only after Phase 2 measured wins.
 
+### Phase 1.5 — STCDPOpLx codegen swap (landed)
+
+Phase 1.5 is a single-lever inductor codegen change, complementary to
+Phase 1's joint coordination and distinct from it. It targets the
+narrow subset of restickifies that survive `optimize_restickify` and
+`mm_t` fusion as explicit `RESTICKIFY_OP` kernels, and swaps their op-
+func name from `RESTICKIFY_OP` (= `"ReStickifyOpHBM"`) to
+`RING_RESTICKIFY_OP` (= `"STCDPOpLx"`) so the relayout can take the
+RIU ring path instead of the HBM round-trip.
+
+#### Scope and design
+
+The change is a single lever: at codegen-time `store()` for a
+restickify ComputedBuffer, if `config.emit_stcdp_oplx` is True and the
+classifier verdict on the buffer is `FUNDAMENTAL`, the SDSC op-func
+string is `RING_RESTICKIFY_OP`; otherwise it remains `RESTICKIFY_OP`.
+`HBM_LOAD` and `INCIDENTAL` verdicts keep the HBM round-trip
+unconditionally.
+
+Phase 1.5 does **not** touch:
+
+* the layout pass or `optimize_restickify`'s cost function,
+* `work_distribution` splits,
+* any matmul kernel internals (PT-utilization model, k_fast core-id
+  assignment, etc.).
+
+It is a strictly local rewrite at the codegen seam. Default off.
+Enabling it without deeptools support produces silent wrong output: the
+bundle pipeline no-ops `STCDPOpLx` today. Verified empirically by
+generating two SDSC graphs differing only in op-func name, running
+`dxp_standalone --bundle`, and observing that the `STCDPOpLx` graph
+emits an `init.txt` of 1028 bytes of `ffffffff` padding (md5 identical
+across runs) while `ReStickifyOpHBM` emits ~60 lines of real
+instructions. The gate must remain off until the DDC pipeline gains a
+working DDL template; see Deeptools dependency below.
+
+#### Empirical baseline (probe v2b)
+
+Probe at `tests/diag_fundamental_restickify_cost_v2.py` isolates a
+single restickify cost by comparing two matmuls with identical FLOPs,
+output shape, and input element count, where exactly one inserts a
+fundamental restickify on the path:
+
+```
+T_A = time(torch.matmul(X.t(), Y))   # forces restickify on X
+T_B = time(torch.matmul(X1,  Y))     # no restickify
+Δ   = T_A - T_B
+```
+
+At `HD=4096`, `SENCORES=32`, `LX_PLANNING=1`, sweeping M:
+
+| M | \|X\| (MB) | T_A (ms) | T_B (ms) | Δ (ms) | Δ_pred (ms) | Δ/Δ_pred |
+|---|---:|---:|---:|---:|---:|---:|
+| 128  | 1.0  | 0.964  | 1.004  | 0.040 | 0.020 | 2.05× (noise floor) |
+| 512  | 4.2  | 0.922  | 0.991  | 0.068 | 0.078 | 0.87× |
+| 2048 | 16.8 | 2.599  | 2.867  | 0.267 | 0.314 | 0.85× |
+| 8192 | 67.1 | 16.633 | 17.755 | 1.121 | 1.254 | 0.89× |
+
+Cost model: `Δ_pred = 2·|X| / 107 GB/s` (effective HBM bandwidth,
+round-trip). At `M ≥ 512`, `Δ_measured / Δ_pred = 0.85-0.89×`. **The
+HBM round-trip cost model is empirically validated to within ~15%** on
+this lever. Using the validated baseline, the per-op ring speedup
+ceiling — `Δ_ring = |X| / 1328 GB/s` vs `Δ_HBM = 2·|X| / 107 GB/s` — is
+~22× (theoretical ceiling 24.8×).
+
+#### The three absorption mechanisms
+
+A "fundamental" restickify is one where the producer's output layout
+and the consumer's required layout disagree on stick orientation. The
+torch-inductor pipeline absorbs that disagreement through one of three
+mechanisms, only the first of which inserts a kernel Phase 1.5 can
+rewrite:
+
+* **Case 3 — explicit restickify.** A `RESTICKIFY_OP` ComputedBuffer
+  is emitted between producer and consumer. Phase 1.5's codegen swap
+  catches this case.
+* **Case 1 — optimizer absorption.** `optimize_restickify` picks a
+  non-natural output STL for the producer so the consumer's stick
+  alignment falls out by construction. No restickify kernel is
+  inserted; the cost is paid as reduced matmul performance in the
+  producer. NOT caught by Phase 1.5; requires Phase 1's joint
+  coordination to reason about the layout/perf tradeoff.
+* **Case 2 — `mm_t` kernel fusion.** The matmul consumer lowers to a
+  transposed-input kernel variant (e.g. `sdsc_fused_mm_t_0`) that
+  handles the relayout inline via its HBM read pattern. No restickify
+  kernel is inserted; the cost is paid in the `mm_t` kernel's HBM
+  traffic. NOT caught by Phase 1.5; requires deeper codegen work to
+  reroute the inline relayout to the ring.
+
+Cases 1 and 2 are the majority of restickify cost in attention
+workloads, which is why Phase 1's joint coordination remains the
+strategic direction. Phase 1.5 is complementary, not a replacement —
+it picks up the case-3 tail at near-zero engineering cost and zero
+risk to the layout/work_distribution passes.
+
+#### Inductor-side implementation
+
+Landed on branch `AdnanHoque/rfc-ring-aware-restickify`:
+
+* `torch_spyre/_inductor/restickify_classify.py` — classifier module.
+  `classify_inserted_restickify`, `classify_all_restickifies`,
+  `is_ring_eligible_producer`, `annotate_restickify_verdicts`. Verdict
+  enum: `HBM_LOAD` / `INCIDENTAL` / `FUNDAMENTAL`. Ported from
+  `tests/diag_restickify_lx_trace.py`.
+* `torch_spyre/_inductor/passes.py` — new pre-scheduling step
+  `annotate_restickify_verdicts` runs after `work_distribution` (so
+  `op.op_it_space_splits` is populated) and before
+  `restickify_telemetry`. Attaches `_spyre_restickify_verdict` to each
+  restickify ComputedBuffer.
+* `torch_spyre/_inductor/config.py` — `emit_stcdp_oplx: bool` knob,
+  env `SPYRE_EMIT_STCDP_OPLX`. Default False.
+* `torch_spyre/_inductor/constants.py` — `RING_RESTICKIFY_OP =
+  "STCDPOpLx"`.
+* `torch_spyre/_inductor/spyre_kernel.py` (line ~516) — codegen-time
+  `store()` reads `_spyre_restickify_verdict` off the buffer and
+  substitutes `RING_RESTICKIFY_OP` for `RESTICKIFY_OP` when the gate
+  is on and the verdict is `FUNDAMENTAL`.
+* Tests: `tests/inductor/test_restickify_classify.py` (4 tests, all
+  passing) and `tests/inductor/test_ring_aware_restickify_gate.py`
+  (3 tests, all passing).
+* Commits: `83cce1f` (probes), `22b91f8` (classifier), `576a2b2`
+  (gate).
+
+#### Deeptools dependency
+
+`STCDPOpLx` is registered in the deeptools op-func string table but
+has no working DDL template in the `ddc/` (bundle) pipeline. All
+existing implementations live under `dsm/` (sengraph pipeline), which
+torch-spyre's `dxp_standalone --bundle` doesn't traverse. Either of
+these would unblock activation:
+
+* a working DDL template for `ReStickifyOpLx` / `STCDPOpLx` in
+  `deeptools/ddc/ddl_templates/`; or
+* relaxation of `dxp.cpp:456` to allow `datadscs_` data-op entries
+  through the bundle pipeline.
+
+Both are deeptools-team work; the torch-inductor team (this RFC's
+author) cannot land them. The inductor-side gate, classifier, and
+tests are in place so that the moment either of the above lands, a
+single env flag flip activates the path.
+
+#### Activation plan
+
+When deeptools lands the primitive:
+
+1. Add gate-on output-correctness tests alongside the existing
+   `tests/inductor/test_ring_aware_restickify_gate.py` emission tests.
+   The existing tests assert on the SDSC op-func name only and remain
+   valid under both no-op and working-kernel deeptools — they do not
+   need updating. What is missing today is a CPU-vs-Spyre output
+   comparison under gate-on, which would silently fail today and pass
+   once the DDL template is real.
+2. Rerun probe v2b with the gate on; expect `Δ_measured / 0.85` ≈
+   ring time. Predicted: `Δ_ring = |X| / 1328 GB/s`, so per-op ring
+   speedup ≈ 22× on the fundamental case-3 portion.
+3. Flip `emit_stcdp_oplx` default to True after measurement confirms.
+
+#### Composition with Phase 1's joint coordination
+
+Phase 1.5 and Phase 1 target disjoint cost sources and compose
+cleanly:
+
+* Phase 1.5 reduces case-3 restickify cost from `2·B / 107 GB/s` (HBM
+  round-trip) to `B / 1328 GB/s` (ring) — ~24× on the case-3 portion.
+* Phase 1's joint coordination reduces case-1 and case-2 cost through
+  layout and work-distribution decisions that avoid the relayout
+  rather than accelerate it.
+
+If Phase 1 succeeds at converting fundamental restickifies into
+`INCIDENTAL` ones via consumer-split alignment, Phase 1.5's classifier
+will (correctly) leave them on `ReStickifyOpHBM`. HBM is fine for
+`INCIDENTAL` because no real cross-core movement is needed; the
+optimization is to align splits, not to move data faster. The
+classifier itself is reusable by Phase 1 as a diagnostic for which
+restickifies are candidates for which optimization.
+
 ## Metrics
 
 Primary:
@@ -263,6 +439,11 @@ Diagnostic:
    simpler change than joint optimization but doesn't benefit from the
    work-distribution lever. Worth considering as a Phase 1.5 if joint
    optimization is too complex but a single-pass change is feasible.
+   (A different Phase 1.5 — a codegen-side op-func swap from
+   `ReStickifyOpHBM` to `STCDPOpLx` for the case-3 explicit-restickify
+   tail — has been implemented on the `rfc-ring-aware-restickify`
+   branch; see the "Phase 1.5 — STCDPOpLx codegen swap (landed)"
+   section above.)
 
 2. **Pure runtime overlap.** If hardware overlaps RIU traffic with PT
    compute well enough that restickify is fully hidden, the entire
