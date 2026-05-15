@@ -43,37 +43,68 @@ restickified weight to LX instead of HBM, saving the write half of
 HBM-LOAD's 2× HBM round trip — same `STCDPOpLx`/data-op machinery):
 **1.36-1.43×** layer-level speedup combined.
 
-## Granite end-to-end profile — blocker
+## Granite end-to-end profile — blocker chain
 
-To improve on the cache-sample number, we attempted a real granite-3.3-8B
+To improve on the cache-sample estimate, we attempted a real granite-3.3-8B
 end-to-end profile per `docs/source/user_guide/profiling/end_to_end_example.md`
 with `torch.profiler` + kineto-spyre PrivateUse1, both `lx_planning=False`
 (baseline) and `lx_planning=True + allow_all_ops_in_lx_planning=True`
-(future). Setup worked (FMS install, 16 GB checkpoint download, RoPE
-`selected_freqs` kwarg construction matching `fms.utils.generation.generate`),
-but compilation aborted on a torch-spyre own codegen bug at
-[codegen/superdsc.py:306](../torch_spyre/_inductor/codegen/superdsc.py):
+(future). Setup itself worked: FMS+aiu-fms-testing-utils install from the
+`eager_spyre` branches, 16 GB checkpoint download, RoPE `selected_freqs`
+kwarg construction replicated from `fms.utils.generation.generate` (the
+doc example's `torch.randint` input skips that and fails on
+`KeyError: 'selected_freqs'`).
 
-```
-torch._inductor.exc.InductorError: IndexError: list index out of range
-  at: dev_dim_size = arg.device_size[-stride_idx - 2]
-  kernel: sdsc_fused__scaled_dot_product_fused_attention_overrideable_mul_split_with_sizes_unsqueeze_view_4
-```
+Compilation then hit a **chain of four** distinct blockers:
 
-The bug fires on the fused SDPA kernel Inductor produces from granite's
-attention block (`F.scaled_dot_product_attention` + downstream `mul`,
-`split_with_sizes`, `unsqueeze`, `view` fused together). At the outermost
-dim, `stride_idx == len(stride_dim_order) - 1`, so `-stride_idx - 2 ==
--len - 1` indexes one off the end of `arg.device_size`. The bug is
-shape-independent (reproduces at seq_len=64 and seq_len=128) — a real
-torch-spyre limitation on the fused-SDPA shape it has to consume from
-Inductor, not a layout-config-dependent edge case.
+1. **Inductor fuses SDPA into a `dscs_` compute op too big for torch-spyre's
+   codegen**. The Inductor-fused kernel `_scaled_dot_product_fused_attention_overrideable_mul_split_with_sizes_unsqueeze_view`
+   trips an `IndexError` at
+   [codegen/superdsc.py:306](../torch_spyre/_inductor/codegen/superdsc.py):
+   `dev_dim_size = arg.device_size[-stride_idx - 2]` — for the outermost
+   dim, `stride_idx == len(stride_dim_order) - 1` and the index is one
+   off the end. Shape-independent (fires at seq_len=64 and 128).
 
-This is the next prerequisite: fix or bypass
-[codegen/superdsc.py:306](../torch_spyre/_inductor/codegen/superdsc.py)
-so the granite SDPA kernel compiles. Then `diag_granite_profile_fms.py`
-will run end-to-end and we can re-measure with real `torch.profiler`
-device-time numbers, replacing the cache-sample estimate.
+2. **Bypassing #1 by monkey-patching `F.scaled_dot_product_attention` to a
+   manual `matmul + softmax + matmul`** exposes a `.view` non-contiguity
+   failure in [fms/modules/attention.py:735](../../foundation-model-stack/fms/modules/attention.py)
+   — the post-SDPA `.view(B, S, H*D)` requires contig strides, which only
+   the fused kernel produced; the decomposed form leaves BSHD-shape with
+   BHSD-strides after FMS's `.transpose(1, 2)`.
+
+3. **Fixing #2 with `.view` → `.reshape` in FMS** unblocks the FX graph but
+   trips the same `superdsc.py:306` `IndexError` on a *different* fused
+   kernel: `mul_split_with_sizes_sum_unsqueeze_view_3`. The bug is general,
+   not SDPA-specific — any sufficiently-fused kernel with the right shape
+   pattern hits it.
+
+4. **Adding a local bounds-check fix to `superdsc.py:306`** (default
+   `dev_dim_size = 1` for the outermost-dim case — defensible per the
+   semantic) gets the SDSC emitted, but `dxp_standalone` then aborts in
+   deeptools: `DtException: Could not find any suitable dimension
+   mapping` at [ddc/ddl/ddl_conversion.cpp:2489](../../../../deeptools/ddc/ddl/ddl_conversion.cpp).
+   No DDL template covers the dim layout this fused kernel produces.
+
+That's four layers deep, the last two are real torch-spyre + deeptools
+maturity work outside the scope of this RFC. **The cache-sample analysis
+(4% FUNDAMENTAL HBM share + 52% HBM-LOAD HBM share) is therefore our
+best available pre-implementation estimate** for the ring-aware
+restickify project's win. The granite-e2e number will replace it only
+after the underlying torch-spyre fused-kernel codegen + deeptools DDL
+coverage gaps are addressed. The script
+[diag_granite_profile_fms.py](diag_granite_profile_fms.py) is the entry
+point once the prerequisites land — it includes the manual SDPA
+monkey-patch (which can be removed once the fused-kernel path itself
+compiles).
+
+**Workaround attempts that did not unblock the chain:**
+
+| attempt | result |
+|---|---|
+| Manual (non-fused) SDPA via monkey-patch | unblocked #1, exposed #2 |
+| FMS `.view` → `.reshape` | unblocked #2, exposed #3 |
+| Local `superdsc.py:306` bounds-check (defensible fix, not committed) | unblocked #3, exposed #4 |
+| `dxp_standalone` DDL template coverage | requires deeptools work |
 
 ## Goal
 

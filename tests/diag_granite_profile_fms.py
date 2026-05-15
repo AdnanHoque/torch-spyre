@@ -39,6 +39,7 @@ from statistics import mean, median
 sys.path.insert(0, "/home/adnan/dt-inductor/torch-spyre")
 
 import torch
+import torch.nn.functional as F
 import torch_spyre  # noqa: F401
 from torch.profiler import ProfilerActivity, profile
 from fms.models import get_model
@@ -46,6 +47,39 @@ from fms.utils.generation import pad_input_ids
 from transformers import AutoTokenizer
 
 from torch_spyre._inductor import config as ts_config
+
+
+def _manual_sdpa(query, key, value, attn_mask=None, dropout_p=0.0,
+                 is_causal=False, scale=None, enable_gqa=False):
+    """Manual scaled-dot-product attention as matmul + softmax + matmul.
+
+    Bypasses torch's fused SDPA op so Inductor doesn't produce the fused
+    kernel that trips superdsc.py:306. The decomposed form is also exactly
+    the matmul → transposed-consumer pattern we want to measure for the
+    ring-aware-restickify project (q @ k.transpose(-2,-1) is FUNDAMENTAL).
+    """
+    if scale is None:
+        scale = 1.0 / math.sqrt(query.size(-1))
+    scores = (query @ key.transpose(-2, -1)) * scale
+    if is_causal:
+        L, S = query.size(-2), key.size(-2)
+        causal = torch.triu(
+            torch.ones(L, S, dtype=torch.bool, device=query.device),
+            diagonal=1,
+        )
+        scores = scores.masked_fill(causal, float("-inf"))
+    if attn_mask is not None:
+        scores = scores + attn_mask
+    attn = F.softmax(scores, dim=-1)
+    if dropout_p > 0.0:
+        attn = F.dropout(attn, p=dropout_p)
+    return attn @ value
+
+
+# Replace torch's fused SDPA *before* model.compile() runs, so Inductor sees
+# the decomposed primitives in the FX graph.
+F.scaled_dot_product_attention = _manual_sdpa
+torch.nn.functional.scaled_dot_product_attention = _manual_sdpa
 
 DEVICE = torch.device("spyre")
 DTYPE = torch.float16
