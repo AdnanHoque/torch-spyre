@@ -1,0 +1,17 @@
+[
+  {
+    "baseline_byte_hops": 67108864,
+    "baseline_classification": "riu_lx_lx_poor_locality_plausible",
+    "baseline_ms": 1.745849847793579,
+    "byte_hop_delta": 67108864,
+    "case": "adds_then_matmul_x",
+    "delta_riu_aggregate_us": 201.52812012012012,
+    "delta_riu_one_direction_us": 404.270265060241,
+    "observed_delta_us": 36.5525484085083,
+    "size": 2048,
+    "speedup": 1.0213845469841076,
+    "stage3b_byte_hops": 0,
+    "stage3b_classification": "hbm_or_graph_input_boundary_plausible",
+    "stage3b_ms": 1.7092972993850708
+  }
+]

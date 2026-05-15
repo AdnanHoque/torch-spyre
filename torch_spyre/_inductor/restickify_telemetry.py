@@ -53,6 +53,13 @@ def _estimate_to_json(estimate: RestickifyRingEstimate) -> dict:
         "target_stride_map": estimate.target_stride_map,
         "source_stride_map": estimate.source_stride_map,
         "skip_reason": estimate.skip_reason,
+        "locality_certified": estimate.locality_certified,
+        "locality_assertion": estimate.locality_assertion,
+        "locality_skip_reason": estimate.locality_skip_reason,
+        "certified_byte_hops": estimate.certified_byte_hops,
+        "certified_bytes_moved": estimate.certified_bytes_moved,
+        "certified_max_hops": estimate.certified_max_hops,
+        "certified_core_count": estimate.certified_core_count,
     }
 
 

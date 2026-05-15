@@ -36,6 +36,21 @@ from .pass_utils import (
 
 CORE_MAPPING_OVERRIDE_ATTR = "_spyre_core_id_to_work_slice_override"
 CORE_MAPPING_OVERRIDE_OP_INFO_KEY = "core_id_to_work_slice_override"
+LOCALITY_CERTIFICATE_ATTR = "_spyre_restickify_locality_certificate"
+
+
+@dataclasses.dataclass(frozen=True)
+class RestickifyLocalityCertificate:
+    locality_certified: bool
+    locality_assertion: str
+    locality_skip_reason: str | None
+    certified_byte_hops: int | None
+    certified_bytes_moved: int | None
+    certified_max_hops: int | None
+    certified_core_count: int | None
+    producer_splits: dict[str, int]
+    restickify_splits: dict[str, int]
+    symbol_map: dict[str, str]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,6 +72,13 @@ class RestickifyRingEstimate:
     target_stride_map: list[int] | None = None
     source_stride_map: list[int] | None = None
     skip_reason: str | None = None
+    locality_certified: bool = False
+    locality_assertion: str = "not-run"
+    locality_skip_reason: str | None = None
+    certified_byte_hops: int | None = None
+    certified_bytes_moved: int | None = None
+    certified_max_hops: int | None = None
+    certified_core_count: int | None = None
 
 
 def ring_distance(src_core: int, dst_core: int, ring_size: int) -> int:
@@ -447,6 +469,140 @@ def _mapping_for_op(
     )
 
 
+def _locality_certificate_from_op(
+    op: ComputedBuffer,
+) -> RestickifyLocalityCertificate | None:
+    certificate = getattr(op, LOCALITY_CERTIFICATE_ATTR, None)
+    if isinstance(certificate, RestickifyLocalityCertificate):
+        return certificate
+    return None
+
+
+def _certificate_payload(
+    op: ComputedBuffer,
+) -> dict[str, Any]:
+    certificate = _locality_certificate_from_op(op)
+    if certificate is None:
+        return {}
+    return {
+        "locality_certified": certificate.locality_certified,
+        "locality_assertion": certificate.locality_assertion,
+        "locality_skip_reason": certificate.locality_skip_reason,
+        "certified_byte_hops": certificate.certified_byte_hops,
+        "certified_bytes_moved": certificate.certified_bytes_moved,
+        "certified_max_hops": certificate.certified_max_hops,
+        "certified_core_count": certificate.certified_core_count,
+    }
+
+
+def _skipped_certificate(
+    reason: str | None,
+    producer_splits: Mapping[str, int] | None = None,
+    restickify_splits: Mapping[str, int] | None = None,
+    symbol_map: Mapping[str, str] | None = None,
+) -> RestickifyLocalityCertificate:
+    return RestickifyLocalityCertificate(
+        locality_certified=False,
+        locality_assertion="skipped",
+        locality_skip_reason=reason or "unknown",
+        certified_byte_hops=None,
+        certified_bytes_moved=None,
+        certified_max_hops=None,
+        certified_core_count=None,
+        producer_splits=split_dims_only(producer_splits or {}),
+        restickify_splits=split_dims_only(restickify_splits or {}),
+        symbol_map=dict(symbol_map or {}),
+    )
+
+
+def locality_certificate_for_restickify_override(
+    restickify_op: ComputedBuffer,
+    name_to_op: Mapping[str, ComputedBuffer],
+    override: Mapping[str, Mapping[str, int]] | None,
+    ring_size: int,
+    k_fast_ops: Sequence[Any] | None = None,
+) -> RestickifyLocalityCertificate:
+    """Certify that a restickify override preserves producer core locality."""
+    producer_info, reason = producer_for_restickify(restickify_op, name_to_op)
+    if producer_info is None:
+        return _skipped_certificate(reason)
+    if override is None:
+        return _skipped_certificate("no-core-mapping-override")
+
+    producer, read_dep = producer_info
+    producer_splits = decode_op_splits(producer)
+    restickify_splits = decode_op_splits(restickify_op)
+    symbol_map, reason = restickify_symbol_map(producer, restickify_op, read_dep)
+    if reason is not None:
+        return _skipped_certificate(reason, producer_splits, restickify_splits)
+
+    producer_core_count = math.prod(producer_splits.values())
+    restickify_core_count = math.prod(restickify_splits.values())
+    if producer_core_count != restickify_core_count:
+        return _skipped_certificate(
+            "different-core-count",
+            producer_splits,
+            restickify_splits,
+            symbol_map,
+        )
+
+    try:
+        producer_sizes = op_iteration_sizes(producer)
+        restickify_sizes = op_iteration_sizes(restickify_op)
+        elem_size = _element_size_bytes(restickify_op)
+        producer_mapping = _mapping_for_op(
+            producer,
+            producer_sizes,
+            producer_splits,
+            k_fast_ops,
+        )
+        bytes_moved, byte_hops, max_hops = estimate_byte_hops_from_mappings(
+            producer_sizes,
+            restickify_sizes,
+            producer_splits,
+            restickify_splits,
+            producer_mapping,
+            override,
+            symbol_map,
+            elem_size,
+            ring_size,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _skipped_certificate(
+            type(exc).__name__,
+            producer_splits,
+            restickify_splits,
+            symbol_map,
+        )
+
+    if byte_hops != 0:
+        return RestickifyLocalityCertificate(
+            locality_certified=False,
+            locality_assertion="failed",
+            locality_skip_reason="nonzero-byte-hops",
+            certified_byte_hops=byte_hops,
+            certified_bytes_moved=bytes_moved,
+            certified_max_hops=max_hops,
+            certified_core_count=restickify_core_count,
+            producer_splits=split_dims_only(producer_splits),
+            restickify_splits=split_dims_only(restickify_splits),
+            symbol_map=symbol_map,
+        )
+
+    return RestickifyLocalityCertificate(
+        locality_certified=True,
+        locality_assertion="passed",
+        locality_skip_reason=None,
+        certified_byte_hops=byte_hops,
+        certified_bytes_moved=bytes_moved,
+        certified_max_hops=max_hops,
+        certified_core_count=restickify_core_count,
+        producer_splits=split_dims_only(producer_splits),
+        restickify_splits=split_dims_only(restickify_splits),
+        symbol_map=symbol_map,
+    )
+
+
 def _core_rectangles(
     iteration_sizes: Mapping[str, int],
     split_factors: Mapping[str, int],
@@ -561,6 +717,7 @@ def estimate_restickify_ring_cost(
     source_metadata = restickify_source_metadata(
         restickify_op, name_to_op, consumers_of
     )
+    certificate_payload = _certificate_payload(restickify_op)
     producer_info, reason = producer_for_restickify(restickify_op, name_to_op)
     bytes_moved = _bytes_moved_or_zero(restickify_op)
     if producer_info is None:
@@ -576,6 +733,7 @@ def estimate_restickify_ring_cost(
             restickify_splits={},
             symbol_map={},
             **source_metadata,
+            **certificate_payload,
             skip_reason=reason,
         )
 
@@ -597,6 +755,7 @@ def estimate_restickify_ring_cost(
             restickify_splits=split_dims_only(restickify_splits),
             symbol_map={},
             **source_metadata,
+            **certificate_payload,
             skip_reason=reason,
         )
 
@@ -637,6 +796,7 @@ def estimate_restickify_ring_cost(
             restickify_splits=split_dims_only(restickify_splits),
             symbol_map=symbol_map,
             **source_metadata,
+            **certificate_payload,
             skip_reason=type(exc).__name__,
         )
 
@@ -653,6 +813,7 @@ def estimate_restickify_ring_cost(
         restickify_splits=split_dims_only(restickify_splits),
         symbol_map=symbol_map,
         **source_metadata,
+        **certificate_payload,
         skip_reason=None,
     )
 

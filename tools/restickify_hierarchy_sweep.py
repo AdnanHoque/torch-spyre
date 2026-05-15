@@ -297,7 +297,11 @@ def _temporary_env(updates: dict[str, str]):
 
 
 @contextmanager
-def _temporary_spyre_alignment_config(core_mapping: bool, work_distribution: bool):
+def _temporary_spyre_alignment_config(
+    core_mapping: bool,
+    work_distribution: bool,
+    locality_assert: bool,
+):
     """Keep env-driven config flags in sync after torch-spyre has been imported."""
     try:
         import torch_spyre._inductor.config as spyre_config
@@ -307,13 +311,16 @@ def _temporary_spyre_alignment_config(core_mapping: bool, work_distribution: boo
 
     old_core_mapping = spyre_config.align_restickify_core_mapping
     old_work_distribution = spyre_config.align_restickify_work_distribution
+    old_locality_assert = spyre_config.restickify_locality_assert
     spyre_config.align_restickify_core_mapping = core_mapping
     spyre_config.align_restickify_work_distribution = work_distribution
+    spyre_config.restickify_locality_assert = locality_assert
     try:
         yield
     finally:
         spyre_config.align_restickify_core_mapping = old_core_mapping
         spyre_config.align_restickify_work_distribution = old_work_distribution
+        spyre_config.restickify_locality_assert = old_locality_assert
 
 
 def _probe_case(case: HierarchyCase) -> Any:
@@ -377,6 +384,11 @@ def _csv_row(row: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
         "max_hops": row.get("ring_max_hops", 0),
         "source_kinds": json.dumps(row.get("ring_source_kinds", {}), sort_keys=True),
         "skip_reasons": json.dumps(row.get("ring_skip_reasons", {}), sort_keys=True),
+        "locality_assertions": json.dumps(
+            row.get("ring_locality_assertions", {}), sort_keys=True
+        ),
+        "locality_certified_rows": row.get("ring_locality_certified_rows", 0),
+        "certified_byte_hops": row.get("ring_certified_byte_hops", 0),
         "compile_run_ms": f"{row.get('compile_run_ms', 0.0):.3f}" if row.get("compile_run_ms") is not None else "",
         "median_ms": f"{row.get('median_ms', 0.0):.3f}" if row.get("median_ms") is not None else "",
         "p10_ms": f"{row.get('p10_ms', 0.0):.3f}" if row.get("p10_ms") is not None else "",
@@ -446,6 +458,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-correctness", action="store_true", help="Skip CPU correctness comparison.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
     parser.add_argument("--fail-on-error", action="store_true", help="Return nonzero if any row fails.")
+    parser.add_argument(
+        "--locality-assert",
+        action="store_true",
+        help="Enable SPYRE_RESTICKIFY_LOCALITY_ASSERT for stage3b rows.",
+    )
     parser.add_argument("--hbm-gb-s", type=float, default=166.0, help="HBM/core bandwidth in GB/s.")
     parser.add_argument("--riu-gb-s-per-dir", type=float, default=166.0, help="RIU data ring bandwidth per direction in GB/s.")
     parser.add_argument("--riu-aggregate-gb-s", type=float, default=333.0, help="RIU biring aggregate bandwidth in GB/s.")
@@ -485,11 +502,15 @@ def main() -> int:
         env = {
             "SPYRE_ALIGN_RESTICKIFY_CORE_MAPPING": "1" if mode == "stage3b" else "0",
             "SPYRE_ALIGN_RESTICKIFY_WORK_DISTRIBUTION": "1" if mode == "stage3b" else "0",
+            "SPYRE_RESTICKIFY_LOCALITY_ASSERT": "1"
+            if mode == "stage3b" and args.locality_assert
+            else "0",
         }
         enable_alignment = mode == "stage3b"
         with _temporary_env(env), _temporary_spyre_alignment_config(
             core_mapping=enable_alignment,
             work_distribution=enable_alignment,
+            locality_assert=mode == "stage3b" and args.locality_assert,
         ):
             for size in sizes:
                 for hierarchy_case in selected:

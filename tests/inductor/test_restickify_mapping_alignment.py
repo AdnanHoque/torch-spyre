@@ -24,6 +24,7 @@ from torch_spyre._inductor.codegen.superdsc import (
 )
 from torch_spyre._inductor.restickify_ring import (
     CORE_MAPPING_OVERRIDE_OP_INFO_KEY,
+    RestickifyLocalityCertificate,
     RestickifyRingEstimate,
     build_symbol_correspondence,
     estimate_byte_hops_from_mappings,
@@ -218,6 +219,57 @@ def test_restickify_telemetry_json_includes_source_fields():
     assert payload["consumer_kind"] == "computed"
     assert payload["target_stride_map"] == [64, 1]
     assert payload["source_stride_map"] == [1, 64]
+
+
+def test_restickify_telemetry_json_includes_locality_certificate_fields():
+    estimate = RestickifyRingEstimate(
+        restickify_name="buf4",
+        producer_name="buf3",
+        consumer_names=["buf5"],
+        bytes_moved=128,
+        byte_hops=0,
+        avg_hops=0.0,
+        max_hops=0,
+        producer_splits={"d1": 32},
+        restickify_splits={"d0": 32},
+        symbol_map={"d0": "d1"},
+        locality_certified=True,
+        locality_assertion="passed",
+        locality_skip_reason=None,
+        certified_byte_hops=0,
+        certified_bytes_moved=128,
+        certified_max_hops=0,
+        certified_core_count=32,
+    )
+
+    payload = _estimate_to_json(estimate)
+
+    assert payload["locality_certified"] is True
+    assert payload["locality_assertion"] == "passed"
+    assert payload["locality_skip_reason"] is None
+    assert payload["certified_byte_hops"] == 0
+    assert payload["certified_bytes_moved"] == 128
+    assert payload["certified_max_hops"] == 0
+    assert payload["certified_core_count"] == 32
+
+
+def test_locality_certificate_represents_failed_nonzero_byte_hops():
+    certificate = RestickifyLocalityCertificate(
+        locality_certified=False,
+        locality_assertion="failed",
+        locality_skip_reason="nonzero-byte-hops",
+        certified_byte_hops=8,
+        certified_bytes_moved=8,
+        certified_max_hops=1,
+        certified_core_count=4,
+        producer_splits={"d0": 4},
+        restickify_splits={"d0": 4},
+        symbol_map={"d0": "d0"},
+    )
+
+    assert certificate.locality_assertion == "failed"
+    assert certificate.locality_skip_reason == "nonzero-byte-hops"
+    assert certificate.certified_byte_hops == 8
 
 
 def test_producer_aligned_dim_order_prioritizes_mapped_dominant_split():

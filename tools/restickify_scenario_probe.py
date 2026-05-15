@@ -904,6 +904,9 @@ def _read_ring_telemetry(path: Path) -> dict[str, Any]:
             "ring_max_hops": 0,
             "ring_skip_reasons": {},
             "ring_source_kinds": {},
+            "ring_locality_assertions": {},
+            "ring_locality_certified_rows": 0,
+            "ring_certified_byte_hops": 0,
             "ring_exact_rows": 0,
             "ring_skipped_rows": 0,
             "ring_entries": [],
@@ -915,6 +918,7 @@ def _read_ring_telemetry(path: Path) -> dict[str, Any]:
     max_hops = max((int(entry.get("max_hops") or 0) for entry in entries), default=0)
     skip_reasons: dict[str, int] = {}
     source_kinds: dict[str, int] = {}
+    locality_assertions: dict[str, int] = {}
     for entry in entries:
         reason = entry.get("skip_reason")
         if reason:
@@ -922,6 +926,11 @@ def _read_ring_telemetry(path: Path) -> dict[str, Any]:
         source_kind = entry.get("source_kind")
         if source_kind:
             source_kinds[source_kind] = source_kinds.get(source_kind, 0) + 1
+        locality_assertion = entry.get("locality_assertion")
+        if locality_assertion:
+            locality_assertions[locality_assertion] = (
+                locality_assertions.get(locality_assertion, 0) + 1
+            )
     return {
         "ring_rows": len(entries),
         "ring_total_bytes": total_bytes,
@@ -930,6 +939,13 @@ def _read_ring_telemetry(path: Path) -> dict[str, Any]:
         "ring_max_hops": max_hops,
         "ring_skip_reasons": skip_reasons,
         "ring_source_kinds": source_kinds,
+        "ring_locality_assertions": locality_assertions,
+        "ring_locality_certified_rows": sum(
+            1 for entry in entries if entry.get("locality_certified")
+        ),
+        "ring_certified_byte_hops": sum(
+            int(entry.get("certified_byte_hops") or 0) for entry in entries
+        ),
         "ring_exact_rows": sum(1 for entry in entries if not entry.get("skip_reason")),
         "ring_skipped_rows": sum(1 for entry in entries if entry.get("skip_reason")),
         "ring_entries": entries,

@@ -63,4 +63,11 @@ restickify_ring_telemetry_jsonl: str = os.environ.get(
     "",
 )
 
+# Default-off prototype guard for Stage 3B restickify locality. When enabled,
+# producer-aligned restickify core mapping overrides must certify zero modeled
+# RIU byte-hops before reaching codegen.
+restickify_locality_assert: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_LOCALITY_ASSERT", "0") == "1"
+)
+
 install_config_module(sys.modules[__name__])

@@ -1,0 +1,2 @@
+case,size,baseline_ms,stage3b_ms,observed_delta_us,speedup,baseline_byte_hops,stage3b_byte_hops,byte_hop_delta,delta_riu_aggregate_us,delta_riu_one_direction_us,baseline_classification,stage3b_classification
+adds_then_matmul_x,2048,1.745849847793579,1.7092972993850708,36.5525484085083,1.0213845469841076,67108864,0,67108864,201.52812012012012,404.270265060241,riu_lx_lx_poor_locality_plausible,hbm_or_graph_input_boundary_plausible
