@@ -242,3 +242,25 @@ def is_ring_eligible_producer(producer_buffer) -> bool:
     part of the classifier that can be answered pre-split.
     """
     return not _is_graph_input(producer_buffer)
+
+
+def annotate_restickify_verdicts(operations: list[Operation]) -> None:
+    """Attach a `_spyre_restickify_verdict` attribute to every restickify
+    ComputedBuffer in `operations`, set to its FUNDAMENTAL/INCIDENTAL/HBM_LOAD
+    verdict.
+
+    Intended to run as a pre-scheduling pass step *after* `work_distribution`
+    (so splits are populated) and *before* codegen (so spyre_kernel.store can
+    read the verdict back and decide whether to swap RESTICKIFY_OP for
+    STCDPOpLx under `config.emit_stcdp_oplx`). Uses object.__setattr__ to
+    accommodate buffer classes that may be frozen.
+    """
+    verdicts = classify_all_restickifies(operations)
+    for op in operations:
+        if isinstance(op, ComputedBuffer) and _is_restickify(op):
+            v = verdicts.get(op.get_name())
+            if v is not None:
+                try:
+                    op._spyre_restickify_verdict = v  # type: ignore[attr-defined]
+                except AttributeError:
+                    object.__setattr__(op, "_spyre_restickify_verdict", v)

@@ -15,6 +15,10 @@
 BATCH_MATMUL_OP = "batchmatmul"
 IDENTITY_OP = "identity"
 RESTICKIFY_OP = "ReStickifyOpHBM"
+# On-chip RIU BiRing shuffle variant (LX-resident). Gated by
+# `config.emit_stcdp_oplx`; only emitted when the classifier verdict for the
+# restickify is FUNDAMENTAL. See docs/source/rfcs/drafts/NNNN-RingAwareRestickify.
+RING_RESTICKIFY_OP = "STCDPOpLx"
 
 DEVICE_NAME = "spyre"
 

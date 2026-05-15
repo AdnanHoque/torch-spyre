@@ -29,13 +29,16 @@ from torch._inductor.ops_handler import DefaultHandler, StoreMode
 from torch._inductor.utils import IndentedBuffer, sympy_subs
 from torch._inductor.virtualized import V
 
+from . import config
 from .constants import (
     SPYRE_FP32_OPS,
     BATCH_MATMUL_OP,
     IDENTITY_OP,
     RESTICKIFY_OP,
+    RING_RESTICKIFY_OP,
 )
 from .errors import Unsupported
+from .restickify_classify import RestickifyVerdict
 from .ir import FixedTiledLayout
 from .pass_utils import (
     concretize_expr,
@@ -513,7 +516,14 @@ class SpyreKernel(Kernel[CSEVariable]):
                 # Broadcast: scalar input expanding to non-scalar output.
                 op = IDENTITY_OP
             elif in_coords[-1].free_symbols != out_coords[-1].free_symbols:
-                op = RESTICKIFY_OP
+                # Restickify. When the ring-aware gate is on and the classifier
+                # verdict on this restickify is FUNDAMENTAL, emit the on-chip
+                # ring variant instead of the HBM round-trip.
+                verdict = getattr(buf, "_spyre_restickify_verdict", None)
+                if config.emit_stcdp_oplx and verdict is RestickifyVerdict.FUNDAMENTAL:
+                    op = RING_RESTICKIFY_OP
+                else:
+                    op = RESTICKIFY_OP
             else:
                 op = IDENTITY_OP
             op_spec = self.create_op_spec(op, False, args, op_info)

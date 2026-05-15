@@ -41,4 +41,15 @@ restickify_telemetry: bool = os.environ.get("SPYRE_RESTICKIFY_TELEMETRY", "0") =
 # restickify. Off by default while we validate.
 align_consumer_splits: bool = os.environ.get("SPYRE_ALIGN_CONSUMER_SPLITS", "0") == "1"
 
+# Alternative 1.5 in the v2 Ring-Aware Restickify RFC: when True, the
+# codegen-time op-func name for an explicit restickify is swapped from
+# `ReStickifyOpHBM` to `STCDPOpLx` (on-chip RIU BiRing shuffle) when the
+# restickify classifier (torch_spyre/_inductor/restickify_classify.py)
+# returns FUNDAMENTAL. Today STCDPOpLx silently no-ops in the deeptools
+# bundle pipeline (DDL template missing in DDC); the gate is therefore a
+# pre-staging mechanism for the moment deeptools ships the primitive.
+# Off by default -- enabling without deeptools support produces silent
+# wrong output for affected kernels.
+emit_stcdp_oplx: bool = os.environ.get("SPYRE_EMIT_STCDP_OPLX", "0") == "1"
+
 install_config_module(sys.modules[__name__])
