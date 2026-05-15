@@ -138,6 +138,48 @@ def _decode_state_update(x, state, w):
     return state + projected.view_as(state)
 
 
+def _prefill_projection_join(x, y, z, w):
+    return (x + y.t() + z.t()) @ w
+
+
+def _decode_projection_join(x, y, z, w):
+    return (x + y.t() + z.t()) @ w
+
+
+def _attention_prefill_no_softmax(q, k, v, bias):
+    scores = q @ k.transpose(-2, -1)
+    mixed = scores + bias.transpose(-2, -1)
+    return mixed @ v
+
+
+def _attention_decode_no_softmax(q, k, v, bias):
+    scores = q @ k.transpose(-2, -1)
+    mixed = scores + bias.transpose(-2, -1)
+    return mixed @ v
+
+
+def _mamba_chunk_projection_join(x, y, state, w):
+    batch, seq, hidden = x.shape
+    tokens = batch * seq
+    token_view = x.reshape(tokens, hidden)
+    state_view = state.unsqueeze(1).expand(batch, seq, hidden).reshape(tokens, hidden)
+    return (token_view + y.t() + state_view) @ w
+
+
+def _moe_two_expert_join(x, dispatch0, dispatch1, shared, expert0, expert1, gate):
+    shared_out = x @ shared
+    routed0 = (x + dispatch0.t()) @ expert0
+    routed1 = (x + dispatch1.t()) @ expert1
+    return shared_out + routed0 * gate + routed1 * (1.0 - gate)
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+
+
 def _rand(shape: tuple[int, ...], dtype: Any, scale: float = 0.1):
     return torch.randn(shape, dtype=dtype) * scale
 
@@ -240,6 +282,84 @@ def _builder_decode(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
     state = _rand((batch, hidden), dtype)
     w = _rand((hidden, hidden), dtype)
     return (x, state, w), f"batch={batch},hidden={hidden}"
+
+
+def _builder_prefill_projection(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    tokens = n
+    hidden = _env_int("SPYRE_PROBE_HIDDEN", 512)
+    x = _rand((tokens, hidden), dtype)
+    y = _rand((hidden, tokens), dtype)
+    z = _rand((hidden, tokens), dtype)
+    w = _rand((hidden, hidden), dtype)
+    return (x, y, z, w), f"tokens={tokens},hidden={hidden}"
+
+
+def _builder_decode_projection(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    tokens = n
+    hidden = _env_int("SPYRE_PROBE_HIDDEN", 512)
+    x = _rand((tokens, hidden), dtype)
+    y = _rand((hidden, tokens), dtype)
+    z = _rand((hidden, tokens), dtype)
+    w = _rand((hidden, hidden), dtype)
+    return (x, y, z, w), f"active_tokens={tokens},hidden={hidden}"
+
+
+def _builder_attention_prefill_no_softmax(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    batch = _env_int("SPYRE_PROBE_BATCH", 1)
+    heads = _env_int("SPYRE_PROBE_HEADS", 4)
+    head_dim = _env_int("SPYRE_PROBE_HEAD_DIM", 64)
+    seq = n
+    q = _rand((batch, heads, seq, head_dim), dtype)
+    k = _rand((batch, heads, seq, head_dim), dtype)
+    v = _rand((batch, heads, seq, head_dim), dtype)
+    bias = _rand((batch, heads, seq, seq), dtype)
+    return (q, k, v, bias), f"batch={batch},heads={heads},seq={seq},head_dim={head_dim}"
+
+
+def _builder_attention_decode_no_softmax(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    batch = _env_int("SPYRE_PROBE_BATCH", 1)
+    heads = _env_int("SPYRE_PROBE_HEADS", 4)
+    head_dim = _env_int("SPYRE_PROBE_HEAD_DIM", 64)
+    kv_seq = n
+    q_seq = _env_int("SPYRE_PROBE_Q_SEQ", 1)
+    q = _rand((batch, heads, q_seq, head_dim), dtype)
+    k = _rand((batch, heads, kv_seq, head_dim), dtype)
+    v = _rand((batch, heads, kv_seq, head_dim), dtype)
+    bias = _rand((batch, heads, kv_seq, q_seq), dtype)
+    return (q, k, v, bias), f"batch={batch},heads={heads},q_seq={q_seq},kv_seq={kv_seq},head_dim={head_dim}"
+
+
+def _builder_mamba_chunk_projection(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    batch = _env_int("SPYRE_PROBE_BATCH", 1)
+    hidden = _env_int("SPYRE_PROBE_HIDDEN", 512)
+    seq = n
+    tokens = batch * seq
+    x = _rand((batch, seq, hidden), dtype)
+    y = _rand((hidden, tokens), dtype)
+    state = _rand((batch, hidden), dtype)
+    w = _rand((hidden, hidden), dtype)
+    return (x, y, state, w), f"batch={batch},seq={seq},hidden={hidden}"
+
+
+def _builder_moe_two_expert(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    tokens = n
+    hidden = _env_int("SPYRE_PROBE_HIDDEN", 512)
+    x = _rand((tokens, hidden), dtype)
+    dispatch0 = _rand((hidden, tokens), dtype)
+    dispatch1 = _rand((hidden, tokens), dtype)
+    shared = _rand((hidden, hidden), dtype)
+    expert0 = _rand((hidden, hidden), dtype)
+    expert1 = _rand((hidden, hidden), dtype)
+    gate = torch.sigmoid(_rand((tokens, 1), dtype))
+    return (
+        x,
+        dispatch0,
+        dispatch1,
+        shared,
+        expert0,
+        expert1,
+        gate,
+    ), f"tokens={tokens},hidden={hidden},experts=2"
 
 
 CASES: tuple[ProbeCase, ...] = (
@@ -373,6 +493,60 @@ CASES: tuple[ProbeCase, ...] = (
         "Decode-like projection merged into persistent state.",
         _builder_decode,
         _decode_state_update,
+        forward_looking=True,
+    ),
+    ProbeCase(
+        "prefill_projection_join",
+        "prefill_model_slice",
+        "in_graph_producer",
+        "Prefill-like token projection with transposed joins before matmul.",
+        _builder_prefill_projection,
+        _prefill_projection_join,
+        forward_looking=True,
+    ),
+    ProbeCase(
+        "decode_projection_join",
+        "decode_model_slice",
+        "in_graph_producer",
+        "Decode/batched-decode token projection with transposed joins before matmul.",
+        _builder_decode_projection,
+        _decode_projection_join,
+        forward_looking=True,
+    ),
+    ProbeCase(
+        "attention_prefill_no_softmax",
+        "attention_model_slice",
+        "in_graph_producer",
+        "Prefill attention score/value slice without softmax.",
+        _builder_attention_prefill_no_softmax,
+        _attention_prefill_no_softmax,
+        forward_looking=True,
+    ),
+    ProbeCase(
+        "attention_decode_no_softmax",
+        "attention_model_slice",
+        "in_graph_producer",
+        "Decode attention score/value slice without softmax.",
+        _builder_attention_decode_no_softmax,
+        _attention_decode_no_softmax,
+        forward_looking=True,
+    ),
+    ProbeCase(
+        "mamba_chunk_projection_join",
+        "mamba_model_slice",
+        "in_graph_producer",
+        "Mamba-style chunk/state join before projection.",
+        _builder_mamba_chunk_projection,
+        _mamba_chunk_projection_join,
+        forward_looking=True,
+    ),
+    ProbeCase(
+        "moe_two_expert_join",
+        "moe_model_slice",
+        "in_graph_producer",
+        "MoE-style shared/expert projection and combine.",
+        _builder_moe_two_expert,
+        _moe_two_expert_join,
         forward_looking=True,
     ),
 )
