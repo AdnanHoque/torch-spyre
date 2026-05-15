@@ -24,13 +24,17 @@ from torch_spyre._inductor.codegen.superdsc import (
 )
 from torch_spyre._inductor.restickify_ring import (
     CORE_MAPPING_OVERRIDE_OP_INFO_KEY,
+    RestickifyRingEstimate,
     build_symbol_correspondence,
     estimate_byte_hops_from_mappings,
     materialize_default_core_mapping,
     materialize_k_fast_core_mapping,
     producer_aligned_dim_order,
     ring_distance,
+    source_kind_from_buffer,
+    _stride_map_from_layout,
 )
+from torch_spyre._inductor.restickify_telemetry import _estimate_to_json
 
 
 def test_ring_distance_bidirectional():
@@ -131,6 +135,60 @@ def test_symbol_correspondence_skips_ambiguous_strides():
 
     assert mapping == {}
     assert reason == "ambiguous-producer-stride"
+
+
+def test_source_kind_from_buffer_classifies_graph_inputs_by_name():
+    assert (
+        source_kind_from_buffer("arg0_1", object(), graph_input_names=["arg0_1"])
+        == "graph_input_or_weight"
+    )
+
+
+def test_source_kind_from_buffer_classifies_constants_by_type_name():
+    fake_constant = type("SpyreConstantFallback", (), {})()
+
+    assert source_kind_from_buffer("constant0", fake_constant) == "constant_or_extern"
+
+
+def test_stride_map_from_layout_extracts_device_stride_map():
+    class DeviceLayout:
+        stride_map = [128, 1, -1]
+
+    class Layout:
+        device_layout = DeviceLayout()
+
+    assert _stride_map_from_layout(Layout()) == [128, 1, -1]
+
+
+def test_restickify_telemetry_json_includes_source_fields():
+    estimate = RestickifyRingEstimate(
+        restickify_name="buf4",
+        producer_name="<none>",
+        consumer_names=["buf5"],
+        bytes_moved=128,
+        byte_hops=0,
+        avg_hops=0.0,
+        max_hops=0,
+        producer_splits={},
+        restickify_splits={},
+        symbol_map={},
+        source_name="arg0_1",
+        source_kind="graph_input_or_weight",
+        consumer_name="buf5",
+        consumer_kind="computed",
+        target_stride_map=[64, 1],
+        source_stride_map=[1, 64],
+        skip_reason="graph-input-or-missing-producer",
+    )
+
+    payload = _estimate_to_json(estimate)
+
+    assert payload["source_name"] == "arg0_1"
+    assert payload["source_kind"] == "graph_input_or_weight"
+    assert payload["consumer"] == "buf5"
+    assert payload["consumer_kind"] == "computed"
+    assert payload["target_stride_map"] == [64, 1]
+    assert payload["source_stride_map"] == [1, 64]
 
 
 def test_producer_aligned_dim_order_prioritizes_mapped_dominant_split():

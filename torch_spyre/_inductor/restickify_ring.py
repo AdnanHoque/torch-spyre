@@ -25,7 +25,8 @@ from typing import Any
 import sympy
 import torch
 from torch._inductor.dependencies import MemoryDep
-from torch._inductor.ir import ComputedBuffer
+from torch._inductor.ir import ComputedBuffer, ExternKernel, InputBuffer
+from torch._inductor.virtualized import V
 
 from .pass_utils import (
     apply_splits_from_index_coeff,
@@ -49,6 +50,12 @@ class RestickifyRingEstimate:
     producer_splits: dict[str, int]
     restickify_splits: dict[str, int]
     symbol_map: dict[str, str]
+    source_name: str = "<unknown>"
+    source_kind: str = "unknown"
+    consumer_name: str = "<none>"
+    consumer_kind: str = "unknown"
+    target_stride_map: list[int] | None = None
+    source_stride_map: list[int] | None = None
     skip_reason: str | None = None
 
 
@@ -148,10 +155,9 @@ def build_consumers_of(operations) -> dict[str, list[ComputedBuffer]]:
     return consumers
 
 
-def producer_for_restickify(
+def _single_read_dep(
     restickify_op: ComputedBuffer,
-    name_to_op: Mapping[str, ComputedBuffer],
-) -> tuple[tuple[ComputedBuffer, MemoryDep] | None, str | None]:
+) -> tuple[MemoryDep | None, str | None]:
     reads = [
         dep
         for dep in restickify_op.get_read_writes().reads
@@ -159,12 +165,121 @@ def producer_for_restickify(
     ]
     if len(reads) != 1:
         return None, "multi-producer-or-no-input"
+    return reads[0], None
 
-    read_dep = reads[0]
+
+def producer_for_restickify(
+    restickify_op: ComputedBuffer,
+    name_to_op: Mapping[str, ComputedBuffer],
+) -> tuple[tuple[ComputedBuffer, MemoryDep] | None, str | None]:
+    read_dep, reason = _single_read_dep(restickify_op)
+    if read_dep is None:
+        return None, reason
+
     producer = name_to_op.get(read_dep.name)
     if producer is None:
         return None, "graph-input-or-missing-producer"
     return (producer, read_dep), None
+
+
+def _graph_buffer_by_name(name: str) -> Any | None:
+    try:
+        return V.graph.get_buffer(name)
+    except Exception:  # noqa: BLE001
+        try:
+            return V.graph.name_to_buffer.get(name)
+        except Exception:  # noqa: BLE001
+            return None
+
+
+def source_kind_from_buffer(
+    source_name: str,
+    buffer: Any,
+    graph_input_names: Sequence[str] | None = None,
+) -> str:
+    """Classify the origin of a restickify source buffer for telemetry."""
+    if isinstance(buffer, ComputedBuffer):
+        return "in_graph_computed"
+    if graph_input_names is not None and source_name in graph_input_names:
+        return "graph_input_or_weight"
+    if isinstance(buffer, InputBuffer):
+        return "graph_input_or_weight"
+    if isinstance(buffer, ExternKernel) or type(buffer).__name__ in {
+        "ConstantBuffer",
+        "SpyreConstantFallback",
+    }:
+        return "constant_or_extern"
+    if type(getattr(buffer, "layout", None)).__name__ == "MutationLayoutSHOULDREMOVE":
+        return "mutation_target"
+    return "unknown"
+
+
+def _op_kind(op: Any) -> str:
+    if isinstance(op, ComputedBuffer):
+        if is_restickify_op(op):
+            return "restickify"
+        reduction_type = getattr(getattr(op, "data", None), "reduction_type", None)
+        if reduction_type is not None:
+            return f"reduction:{reduction_type}"
+        return "computed"
+    if isinstance(op, InputBuffer):
+        return "graph_input_or_weight"
+    if isinstance(op, ExternKernel):
+        return "constant_or_extern"
+    return type(op).__name__
+
+
+def _stride_map_from_layout(layout: Any) -> list[int] | None:
+    device_layout = getattr(layout, "device_layout", None)
+    stride_map = getattr(device_layout, "stride_map", None)
+    if stride_map is None:
+        return None
+    try:
+        return [int(stride) for stride in stride_map]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _stride_map_from_buffer(buffer: Any) -> list[int] | None:
+    if buffer is None:
+        return None
+    try:
+        layout = buffer.get_layout()
+    except Exception:  # noqa: BLE001
+        layout = getattr(buffer, "layout", None)
+    return _stride_map_from_layout(layout)
+
+
+def restickify_source_metadata(
+    restickify_op: ComputedBuffer,
+    name_to_op: Mapping[str, ComputedBuffer],
+    consumers_of: Mapping[str, list[ComputedBuffer]],
+) -> dict[str, Any]:
+    """Return source/consumer metadata for a restickify telemetry row."""
+    read_dep, _ = _single_read_dep(restickify_op)
+    source_name = read_dep.name if read_dep is not None else "<unknown>"
+    source_buffer = name_to_op.get(source_name) or _graph_buffer_by_name(source_name)
+
+    graph_input_names = None
+    try:
+        graph_input_names = V.graph.graph_input_names
+    except Exception:  # noqa: BLE001
+        pass
+
+    consumer_ops = consumers_of.get(restickify_op.get_name(), [])
+    consumer_name = consumer_ops[0].get_name() if consumer_ops else "<none>"
+    consumer_kind = _op_kind(consumer_ops[0]) if consumer_ops else "unknown"
+
+    return {
+        "source_name": source_name,
+        "source_kind": source_kind_from_buffer(
+            source_name, source_buffer, graph_input_names
+        ),
+        "consumer_name": consumer_name,
+        "consumer_kind": consumer_kind,
+        "target_stride_map": _stride_map_from_buffer(restickify_op),
+        "source_stride_map": _stride_map_from_buffer(source_buffer),
+    }
 
 
 def op_iteration_sizes(op: ComputedBuffer) -> dict[str, int]:
@@ -443,6 +558,9 @@ def estimate_restickify_ring_cost(
 ) -> RestickifyRingEstimate:
     restickify_name = restickify_op.get_name()
     consumer_names = [op.get_name() for op in consumers_of.get(restickify_name, [])]
+    source_metadata = restickify_source_metadata(
+        restickify_op, name_to_op, consumers_of
+    )
     producer_info, reason = producer_for_restickify(restickify_op, name_to_op)
     bytes_moved = _bytes_moved_or_zero(restickify_op)
     if producer_info is None:
@@ -457,6 +575,7 @@ def estimate_restickify_ring_cost(
             producer_splits={},
             restickify_splits={},
             symbol_map={},
+            **source_metadata,
             skip_reason=reason,
         )
 
@@ -477,6 +596,7 @@ def estimate_restickify_ring_cost(
             producer_splits=split_dims_only(producer_splits),
             restickify_splits=split_dims_only(restickify_splits),
             symbol_map={},
+            **source_metadata,
             skip_reason=reason,
         )
 
@@ -516,6 +636,7 @@ def estimate_restickify_ring_cost(
             producer_splits=split_dims_only(producer_splits),
             restickify_splits=split_dims_only(restickify_splits),
             symbol_map=symbol_map,
+            **source_metadata,
             skip_reason=type(exc).__name__,
         )
 
@@ -531,6 +652,7 @@ def estimate_restickify_ring_cost(
         producer_splits=split_dims_only(producer_splits),
         restickify_splits=split_dims_only(restickify_splits),
         symbol_map=symbol_map,
+        **source_metadata,
         skip_reason=None,
     )
 

@@ -38,6 +38,10 @@ def _estimate_to_json(estimate: RestickifyRingEstimate) -> dict:
     return {
         "restickify": estimate.restickify_name,
         "producer": estimate.producer_name,
+        "source_name": estimate.source_name,
+        "source_kind": estimate.source_kind,
+        "consumer": estimate.consumer_name,
+        "consumer_kind": estimate.consumer_kind,
         "consumers": estimate.consumer_names,
         "bytes_moved": estimate.bytes_moved,
         "byte_hops": estimate.byte_hops,
@@ -46,6 +50,8 @@ def _estimate_to_json(estimate: RestickifyRingEstimate) -> dict:
         "producer_splits": estimate.producer_splits,
         "restickify_splits": estimate.restickify_splits,
         "symbol_map": estimate.symbol_map,
+        "target_stride_map": estimate.target_stride_map,
+        "source_stride_map": estimate.source_stride_map,
         "skip_reason": estimate.skip_reason,
     }
 
@@ -93,10 +99,15 @@ def restickify_ring_telemetry(
     for estimate in estimates:
         if estimate.skip_reason is not None:
             logger.info(
-                "restickify_ring restickify=%s producer=%s skip_reason=%s "
+                "restickify_ring restickify=%s source=%s source_kind=%s "
+                "producer=%s consumer=%s consumer_kind=%s skip_reason=%s "
                 "producer_splits=%s restickify_splits=%s consumers=%s",
                 estimate.restickify_name,
+                estimate.source_name,
+                estimate.source_kind,
                 estimate.producer_name,
+                estimate.consumer_name,
+                estimate.consumer_kind,
                 estimate.skip_reason,
                 estimate.producer_splits,
                 estimate.restickify_splits,
@@ -104,11 +115,16 @@ def restickify_ring_telemetry(
             )
             continue
         logger.info(
-            "restickify_ring restickify=%s producer=%s byte_hops=%d "
+            "restickify_ring restickify=%s source=%s source_kind=%s "
+            "producer=%s consumer=%s consumer_kind=%s byte_hops=%d "
             "bytes=%d avg_hops=%.2f max_hops=%d producer_splits=%s "
             "restickify_splits=%s symbol_map=%s consumers=%s",
             estimate.restickify_name,
+            estimate.source_name,
+            estimate.source_kind,
             estimate.producer_name,
+            estimate.consumer_name,
+            estimate.consumer_kind,
             estimate.byte_hops,
             estimate.bytes_moved,
             estimate.avg_hops,
