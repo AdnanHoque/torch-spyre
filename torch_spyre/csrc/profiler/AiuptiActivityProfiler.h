@@ -53,6 +53,7 @@ class AiuptiActivityProfilerSession
                     int64_t captureWindowStartTime,
                     int64_t captureWindowEndTime) override;
   std::unique_ptr<libkineto::DeviceInfo> getDeviceInfo() override;
+  std::string getDeviceProperties() override;
   std::vector<libkineto::ResourceInfo> getResourceInfos() override;
   std::unique_ptr<libkineto::CpuTraceBuffer> getTraceBuffer() override;
 

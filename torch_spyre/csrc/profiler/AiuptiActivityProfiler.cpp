@@ -96,6 +96,10 @@ AiuptiActivityProfilerSession::getDeviceInfo() {
       fmt::format("AIU {}", 0));
 }
 
+std::string AiuptiActivityProfilerSession::getDeviceProperties() {
+  return R"({"id":0,"name":"AIU 0","type":"AIU","multiProcessorCount":32,"computeCapability":"dd2","coreCount":32})";
+}
+
 std::vector<libkineto::ResourceInfo>
 AiuptiActivityProfilerSession::getResourceInfos() {
   std::vector<libkineto::ResourceInfo> resourceInfos;
