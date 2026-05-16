@@ -17,6 +17,9 @@
  */
 #include <aiupti_runtime_cbid.h>
 
+#include <cstdlib>
+#include <fstream>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -25,6 +28,37 @@
 #include "AiuptiActivityProfiler.h"
 
 namespace KINETO_NAMESPACE {
+
+namespace {
+
+const char* metricJsonlPath() {
+  const char* path = std::getenv("AIUPTI_METRIC_ACTIVITY_JSONL");
+  if (path != nullptr && path[0] != '\0') {
+    return path;
+  }
+  return std::getenv("AIUPTI_RAW_METRIC_JSONL");
+}
+
+void dumpMetricActivityJsonl(const AIUpti_ActivityMetric* activity) {
+  const char* path = metricJsonlPath();
+  if (path == nullptr || path[0] == '\0') {
+    return;
+  }
+  static std::mutex mutex;
+  std::lock_guard<std::mutex> guard(mutex);
+  std::ofstream out(path, std::ios::app);
+  if (!out) {
+    return;
+  }
+  out << "{\"source\":\"torch_spyre_pr1856\""
+      << ",\"kind\":" << static_cast<int>(activity->activity_kind)
+      << ",\"event_id\":" << static_cast<int>(activity->event_id)
+      << ",\"timestamp_ns\":" << activity->timestamp
+      << ",\"device_id\":" << activity->device_id
+      << ",\"value\":" << activity->value << "}\n";
+}
+
+}  // namespace
 
 // =========== Session Private Methods ============= //
 void AiuptiActivityProfilerSession::removeCorrelatedPtiActivities(
@@ -546,6 +580,25 @@ void AiuptiActivityProfilerSession::handleMemsetActivity(
   memset_activity->log(*logger);
 }
 
+void AiuptiActivityProfilerSession::handleMetricActivity(
+    const AIUpti_ActivityMetric* activity, libkineto::ActivityLogger* logger) {
+  dumpMetricActivityJsonl(activity);
+
+  traceBuffer_.span.opCount += 1;
+  traceBuffer_.emplace_activity(traceBuffer_.span,
+                                libkineto::ActivityType::CPU_INSTANT_EVENT,
+                                "[aiupti_metric]");
+  auto& metric_event = traceBuffer_.activities.back();
+  metric_event->startTime = activity->timestamp;
+  metric_event->device = activity->device_id;
+  metric_event->resource = activity->device_id;
+  metric_event->threadId = libkineto::threadId();
+  metric_event->addMetadata("Device Id", activity->device_id);
+  metric_event->addMetadata("AIUPTI Event Id", activity->event_id);
+  metric_event->addMetadata("AIUPTI Event Value", activity->value);
+  metric_event->log(*logger);
+}
+
 void AiuptiActivityProfilerSession::handlePtiActivity(
     const AIUpti_Activity* record, libkineto::ActivityLogger* logger) {
   switch (record->kind) {
@@ -568,6 +621,10 @@ void AiuptiActivityProfilerSession::handlePtiActivity(
     case (uint8_t)AIUPTI_ACTIVITY_KIND_MEMORY:
       handleMemoryActivity(
           reinterpret_cast<const AIUpti_ActivityMemory*>(record), logger);
+      break;
+    case (uint8_t)AIUPTI_ACTIVITY_KIND_METRIC:
+      handleMetricActivity(
+          reinterpret_cast<const AIUpti_ActivityMetric*>(record), logger);
       break;
     default:
       errors_.push_back("Unexpected activity type: " +

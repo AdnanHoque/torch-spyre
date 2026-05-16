@@ -34,6 +34,15 @@ namespace KINETO_NAMESPACE {
 
 constexpr size_t kBufSize(32 * 1024 * 1024);
 
+static bool aiuptiMetricActivitiesRequested() {
+  const char* enable_metrics = std::getenv("AIUPTI_ENABLE_METRICS");
+  if (enable_metrics != nullptr && std::string(enable_metrics) != "0") {
+    return true;
+  }
+  const char* metric_trace = std::getenv("AIUPTI_METRIC_TRACE");
+  return metric_trace != nullptr && std::string(metric_trace) != "0";
+}
+
 AiuptiActivityApi& AiuptiActivityApi::singleton() {
   static AiuptiActivityApi instance;
   return instance;
@@ -255,6 +264,11 @@ void AiuptiActivityApi::enableAiuptiActivities(
     }
   }
 
+  if (aiuptiMetricActivitiesRequested()) {
+    AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_METRIC));
+    activityEnabled = true;
+  }
+
   // PyTorch version older than 2.6.0 does not have profile
   // ProfilerActivity.PrivateUse1 therefore we need to enable it via environment
   // variable.
@@ -269,6 +283,9 @@ void AiuptiActivityApi::enableAiuptiActivities(
       AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_CMPT));
       AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_RUNTIME));
       AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_DRIVER));
+      if (aiuptiMetricActivitiesRequested()) {
+        AIUPTI_CALL(aiuptiActivityEnable(AIUPTI_ACTIVITY_KIND_METRIC));
+      }
     }
   }
 
@@ -308,6 +325,11 @@ void AiuptiActivityApi::disablePtiActivities(
     }
   }
 
+  if (aiuptiMetricActivitiesRequested()) {
+    AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_METRIC));
+    activityDisabled = true;
+  }
+
   if (activityDisabled == false) {
     const char* env_value = std::getenv("ProfilerActivity");
     if (env_value != nullptr && std::string(env_value) == "PrivateUse1") {
@@ -319,6 +341,9 @@ void AiuptiActivityApi::disablePtiActivities(
       AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_CMPT));
       AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_RUNTIME));
       AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_DRIVER));
+      if (aiuptiMetricActivitiesRequested()) {
+        AIUPTI_CALL(aiuptiActivityDisable(AIUPTI_ACTIVITY_KIND_METRIC));
+      }
     }
   }
   externalCorrelationEnabled_ = false;
