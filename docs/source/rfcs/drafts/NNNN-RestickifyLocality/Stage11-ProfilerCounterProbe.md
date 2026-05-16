@@ -168,6 +168,20 @@ trace-format compatibility problem: the torch profiler trace produced by this
 prototype does not contain the AIU `deviceProperties` metadata expected by
 `aiu-trace-analyzer`.
 
+
+## DeviceProperties Fix
+
+The immediate compatibility fix is to normalize torch profiler traces after
+`export_chrome_trace()`. If PyTorch exports `deviceProperties: []` for the
+Spyre PrivateUse1 profiler, the probe now injects a single conservative AIU
+entry with device id `0`, name `IBM Spyre AIU`, `PrivateUse1` type, `SENCORES`
+core count, and 128 GiB total memory. This is enough for `acelyzer` ingestion
+and does not manufacture fabric counters.
+
+This should eventually move into the profiler bridge or PyTorch PrivateUse1
+trace export path, but the probe-side normalization keeps the measurement
+workflow unblocked.
+
 ## Interpretation
 
 The evidence now separates into three tiers:

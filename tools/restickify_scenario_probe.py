@@ -992,6 +992,39 @@ def _profiler_value_ms(event: Any, attr: str) -> float:
     return float(getattr(event, attr, 0.0) or 0.0) / 1000.0
 
 
+def _patch_spyre_trace_device_properties(trace_path: Path) -> bool:
+    """Add minimal PrivateUse1 device metadata for acelyzer compatibility.
+
+    PyTorch's Chrome trace exporter currently writes an empty `deviceProperties`
+    list for the Spyre PrivateUse1 profiler. `aiu-trace-analyzer` expects one
+    device entry for torch-profile inputs, so add a conservative AIU entry when
+    the field is present but empty.
+    """
+    try:
+        trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+
+    if not isinstance(trace, dict) or trace.get("deviceProperties") != []:
+        return False
+
+    cores = int(os.environ.get("SENCORES", "32"))
+    trace["deviceProperties"] = [
+        {
+            "id": 0,
+            "name": "IBM Spyre AIU",
+            "type": "PrivateUse1",
+            "totalGlobalMem": 128 * 1024**3,
+            "multiProcessorCount": cores,
+            "numSms": cores,
+            "computeMajor": 0,
+            "computeMinor": 0,
+        }
+    ]
+    trace_path.write_text(json.dumps(trace), encoding="utf-8")
+    return True
+
+
 def _profile_compiled(
     compiled_fn: Callable[..., Any],
     dev_args: tuple[Any, ...],
@@ -1031,8 +1064,10 @@ def _profile_compiled(
     profiler.stop()
 
     trace_error = ""
+    device_properties_patched = False
     try:
         profiler.export_chrome_trace(str(trace_path))
+        device_properties_patched = _patch_spyre_trace_device_properties(trace_path)
     except Exception as exc:
         trace_error = f"{type(exc).__name__}: {exc}"
 
@@ -1084,6 +1119,7 @@ def _profile_compiled(
         "profiler_interesting_event_count": len(interesting_events),
         "profiler_trace_path": str(trace_path) if not trace_error else "",
         "profiler_trace_error": trace_error,
+        "profiler_device_properties_patched": device_properties_patched,
         "profiler_events_json": str(events_json),
         "profiler_events_csv": str(events_csv) if events else "",
         "profiler_top_device_events": device_events[:20],
