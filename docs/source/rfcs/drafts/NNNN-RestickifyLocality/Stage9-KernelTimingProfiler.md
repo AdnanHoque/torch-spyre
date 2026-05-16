@@ -60,6 +60,53 @@ sdsc_fused_mm_1.../bundle.mlir      0.815 ms average
 No event is currently named `ReStickifyOpHBM`. The profiler therefore measures
 fused kernel time, not isolated restickify op time.
 
+## Stage 3B Kernel Timing Check
+
+A disposable combined worktree was created in the pod from PR #1856 plus this
+branch:
+
+```text
+/home/adnan-cdx/dt-inductor-profiler/torch-spyre-profiler-stage3b
+```
+
+The `adds_then_matmul_x` comparison produced the expected compiler telemetry:
+
+```text
+size=512   baseline byte-hops=1,376,256   stage3b byte-hops=655,360
+size=2048  baseline byte-hops=67,108,864  stage3b byte-hops=0
+```
+
+The first short profiler run showed a 2048 fused-kernel improvement from
+`1.734 ms` to `1.591 ms`, but a three-repeat run with 10 profiled iterations
+per mode gave a more stable estimate:
+
+```text
+run  baseline_ms  stage3b_ms  delta_us  speedup
+r1   1.6976       1.6532      44.4      1.0269x
+r2   1.6943       1.6439      50.4      1.0307x
+r3   1.6978       1.6442      53.6      1.0326x
+```
+
+The repeated 2048 result is therefore approximately `1.03x` fused-kernel
+speedup when Stage 3B reduces modeled byte-hops to zero.
+
+The per-kernel split suggests both fused bundles improve slightly:
+
+```text
+baseline add_t    ~0.678 ms
+stage3b  add_t    ~0.646 ms
+baseline add_mm   ~1.018 ms
+stage3b  add_mm   ~1.000 ms
+```
+
+The saved artifacts are in the pod under:
+
+```text
+/tmp/restickify-kernel-timing-sweep
+/tmp/restickify-kernel-stage3b-comparison
+/tmp/restickify-kernel-stage3b-repeat
+```
+
 ## Next Measurements
 
 1. Run a synthetic restickify family sweep with `--torch-profiler`:
@@ -71,8 +118,8 @@ fused kernel time, not isolated restickify op time.
    stable.
 3. Record restickify count, bytes moved, modeled byte-hops, per-kernel device
    time, total device time, wall time, and SDSC bundle names.
-4. Build or use a combined profiler + Stage 3B worktree to compare baseline
-   against Stage 3B at `512`, `1024`, `1536`, `2048`, and `3072`.
+4. Extend the combined profiler + Stage 3B comparison to `1024`, `1536`, and
+   `3072`, with at least three repeats per size.
 5. Compare observed deltas against HBM, RIU, and LX lower bounds. Treat those
    as plausibility checks because the measured events are fused kernels.
 
