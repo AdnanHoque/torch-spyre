@@ -99,29 +99,92 @@ baseline add_mm   ~1.018 ms
 stage3b  add_mm   ~1.000 ms
 ```
 
+## Stage 3B Size Sweep
+
+The combined profiler + Stage 3B worktree was then swept over larger square
+sizes for `adds_then_matmul_x`, with three repeats per size and ten profiled
+iterations per mode. The compiler telemetry and profiler device-time deltas
+were:
+
+```text
+size  baseline_hops  stage3b_hops  saved_hops  RIU_agg_bound  observed_delta  speedup
+1024    11,141,120     1,048,576   10,092,544      30.3 us        -2.8 us     0.9919x
+1536    37,748,736    18,874,368   18,874,368      56.7 us       -12.9 us     0.9833x
+2048    67,108,864             0   67,108,864     201.5 us        49.5 us     1.0301x
+3072   150,994,944    75,497,472   75,497,472     226.7 us        43.8 us     1.0116x
+```
+
+`RIU_agg_bound` is `saved_hops / 333 GB/s`. Using one RIU direction would
+double those lower-bound estimates.
+
+The per-bundle split was mixed:
+
+```text
+size  add_t_delta  add_mm_delta
+1024      4.5 us      -7.2 us
+1536     -1.3 us     -11.6 us
+2048    ~32.0 us     ~18.0 us
+3072     69.9 us     -26.1 us
+```
+
+This is a useful correction to the early hypothesis. Reducing modeled
+byte-hops is necessary for this optimization to matter, but it is not
+sufficient to guarantee lower fused-kernel time. At `1024` and `1536`, Stage
+3B improves the modeled locality but the fused `add_mm` bundle gets slightly
+slower. At `2048`, both bundles improve and the result is stable. At `3072`,
+the transpose/add bundle improves substantially, but the matmul bundle loses
+some of that gain.
+
+The current result should be stated narrowly: Stage 3B can produce a real,
+repeatable fused-kernel speedup for an eligible in-graph restickify at the
+right shape, but the profiler data does not support a blanket bandwidth-only
+model where saved byte-hops directly convert to saved runtime.
+
+## Baseline Restickify Family Profiler Sweep
+
+A baseline profiler sweep over the current restickify probe families also ran
+successfully for sizes `128`, `512`, and `2048`:
+
+```text
+pointwise_transpose_add
+pointwise_three_mixed
+matmul_lhs_wrong_stick
+matmul_rhs_wrong_stick
+adds_then_matmul
+matmul_then_add
+transpose_chain
+fanout_diamond
+linear_weight_transposed
+```
+
+At `2048`, the fused device time ranged from about `0.39 ms` for
+`pointwise_transpose_add` to about `1.40 ms` for `adds_then_matmul`. These
+events are still fused SDSC bundles, not isolated restickify kernels, so the
+sweep is useful for ranking restickify-heavy scenarios but not for directly
+classifying the physical memory path of an individual `ReStickifyOpHBM`.
+
 The saved artifacts are in the pod under:
 
 ```text
 /tmp/restickify-kernel-timing-sweep
 /tmp/restickify-kernel-stage3b-comparison
 /tmp/restickify-kernel-stage3b-repeat
+/tmp/restickify-kernel-stage3b-size-sweep
 ```
 
 ## Next Measurements
 
-1. Run a synthetic restickify family sweep with `--torch-profiler`:
-   `pointwise_control`, `pointwise_transpose_add`, `matmul_control`,
-   `matmul_lhs_wrong_stick`, `matmul_rhs_wrong_stick`, `adds_then_matmul`,
-   `matmul_then_add`, `chain_transposed_intermediate`, and
-   `matmul_both_inputs_upstream_conflict`.
-2. Sweep sizes `128`, `512`, `1024`, and `2048`; add `3072` only if timing is
-   stable.
-3. Record restickify count, bytes moved, modeled byte-hops, per-kernel device
-   time, total device time, wall time, and SDSC bundle names.
-4. Extend the combined profiler + Stage 3B comparison to `1024`, `1536`, and
-   `3072`, with at least three repeats per size.
-5. Compare observed deltas against HBM, RIU, and LX lower bounds. Treat those
-   as plausibility checks because the measured events are fused kernels.
+1. Force or find a probe where restickify is isolated into its own measurable
+   SDSC bundle, instead of being fused into `add_t` or `add_mm`.
+2. Inspect generated SDSC/op-func metadata for `ReStickifyOpHBM` and determine
+   whether the name means the op materializes through HBM, uses HBM-addressed
+   tensors, or is simply the current DeepTools lowering name for layout
+   materialization.
+3. Rerun the high-signal `2048` and `3072` cases with AIUPTI/DeepTools counters
+   if RIU/HBM traffic counters are exposed in the profiler environment.
+4. Add a second high-signal producer-to-restickify pattern that is not
+   `adds_then_matmul_x`, so the Stage 3B evidence is not anchored to a single
+   synthetic graph.
 
 ## Interpretation
 
@@ -130,3 +193,12 @@ have meaningful fused-kernel runtime. It does not yet prove the physical path of
 `ReStickifyOpHBM`, and it cannot isolate restickify cost unless a future probe
 forces restickify into its own measurable bundle or DeepTools/AIUPTI exposes
 per-opfunc timing.
+
+The bandwidth comparisons should therefore be treated as plausibility bounds.
+For example, the 2048 case saves `67,108,864` modeled byte-hops. A literal,
+serialized transfer over a `333 GB/s` bidirectional RIU would have a lower bound
+of about `201.5 us`, while the observed fused-kernel improvement is about
+`49.5 us`. That mismatch does not invalidate the locality signal, but it means
+the compiler byte-hop model is not yet a hardware counter. Transfers may overlap
+with compute, may not be fully serialized, may not map one-to-one to RIU bytes,
+or may be hidden inside HBM-named DeepTools restickify opfuncs.
