@@ -988,6 +988,109 @@ def _time_compiled(compiled_fn: Callable[..., Any], dev_args: tuple[Any, ...], w
     }
 
 
+def _profiler_value_ms(event: Any, attr: str) -> float:
+    return float(getattr(event, attr, 0.0) or 0.0) / 1000.0
+
+
+def _profile_compiled(
+    compiled_fn: Callable[..., Any],
+    dev_args: tuple[Any, ...],
+    warmup: int,
+    iters: int,
+    output_dir: Path,
+    profile_memory: bool,
+    with_stack: bool,
+) -> dict[str, Any]:
+    from torch.profiler import ProfilerActivity
+
+    privateuse1 = getattr(ProfilerActivity, "PrivateUse1", None)
+    if privateuse1 is None:
+        raise RuntimeError("torch.profiler.ProfilerActivity.PrivateUse1 is unavailable")
+
+    for _ in range(warmup):
+        compiled_fn(*dev_args)
+    _sync()
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    events_json = output_dir / "torch_profiler_events.json"
+    events_csv = output_dir / "torch_profiler_events.csv"
+    trace_path = output_dir / "torch_profiler_trace.json"
+
+    profiler = torch.profiler.profile(
+        activities=[ProfilerActivity.CPU, privateuse1],
+        record_shapes=True,
+        profile_memory=profile_memory,
+        with_stack=with_stack,
+        acc_events=True,
+    )
+    profiler.start()
+    for _ in range(iters):
+        compiled_fn(*dev_args)
+        profiler.step()
+    _sync()
+    profiler.stop()
+
+    trace_error = ""
+    try:
+        profiler.export_chrome_trace(str(trace_path))
+    except Exception as exc:
+        trace_error = f"{type(exc).__name__}: {exc}"
+
+    events: list[dict[str, Any]] = []
+    for event in profiler.key_averages():
+        key = str(getattr(event, "key", ""))
+        count = int(getattr(event, "count", 0) or 0)
+        device_total_ms = _profiler_value_ms(event, "device_time_total")
+        self_cpu_total_ms = _profiler_value_ms(event, "self_cpu_time_total")
+        cpu_total_ms = _profiler_value_ms(event, "cpu_time_total")
+        if not (device_total_ms or self_cpu_total_ms or cpu_total_ms):
+            continue
+        events.append(
+            {
+                "key": key,
+                "count": count,
+                "device_time_total_ms": device_total_ms,
+                "device_time_avg_ms": device_total_ms / count if count else 0.0,
+                "self_cpu_time_total_ms": self_cpu_total_ms,
+                "cpu_time_total_ms": cpu_total_ms,
+            }
+        )
+    events.sort(key=lambda item: item["device_time_total_ms"], reverse=True)
+
+    events_json.write_text(json.dumps(events, indent=2, sort_keys=True), encoding="utf-8")
+    if events:
+        with events_csv.open("w", newline="", encoding="utf-8") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=list(events[0].keys()))
+            writer.writeheader()
+            writer.writerows(events)
+
+    device_events = [event for event in events if event["device_time_total_ms"] > 0]
+    interesting_tokens = ("restickify", "ReStickify", "sdsc")
+    interesting_events = [
+        event
+        for event in device_events
+        if any(token.lower() in event["key"].lower() for token in interesting_tokens)
+    ]
+    raw_events = profiler.events()
+    return {
+        "profiler_event_count": len(events),
+        "profiler_device_event_count": len(device_events),
+        "profiler_total_device_ms": sum(
+            _profiler_value_ms(event, "device_time_total") for event in raw_events
+        ),
+        "profiler_total_self_cpu_ms": sum(
+            _profiler_value_ms(event, "self_cpu_time_total") for event in raw_events
+        ),
+        "profiler_interesting_event_count": len(interesting_events),
+        "profiler_trace_path": str(trace_path) if not trace_error else "",
+        "profiler_trace_error": trace_error,
+        "profiler_events_json": str(events_json),
+        "profiler_events_csv": str(events_csv) if events else "",
+        "profiler_top_device_events": device_events[:20],
+        "profiler_interesting_events": interesting_events,
+    }
+
+
 def _run_case(
     case: ProbeCase,
     size: int,
@@ -1001,6 +1104,9 @@ def _run_case(
     atol: float,
     rtol: float,
     ring_telemetry_path: Path | None,
+    torch_profiler_dir: Path | None = None,
+    torch_profiler_memory: bool = False,
+    torch_profiler_with_stack: bool = False,
 ) -> dict[str, Any]:
     args, shape_label = case.input_builder(size, dtype)
     dev_args = tuple(arg.to(device) if hasattr(arg, "to") else arg for arg in args)
@@ -1051,6 +1157,18 @@ def _run_case(
         if do_timing:
             timing = _time_compiled(compiled, dev_args, warmup, iters)
 
+        profiler_summary = {}
+        if torch_profiler_dir is not None:
+            profiler_summary = _profile_compiled(
+                compiled,
+                dev_args,
+                warmup,
+                iters,
+                torch_profiler_dir,
+                profile_memory=torch_profiler_memory,
+                with_stack=torch_profiler_with_stack,
+            )
+
         if not skip_correctness:
             expected = case.fn(*args)
             actual = _tensor_to_cpu(result)
@@ -1073,6 +1191,7 @@ def _run_case(
             "entries": entries,
             **ring_summary,
             **timing,
+            **profiler_summary,
         }
     finally:
         if previous_capture is None:
@@ -1115,6 +1234,17 @@ def _error_row(case: ProbeCase, size: int, dtype: Any, exc: BaseException) -> di
         "ring_exact_rows": 0,
         "ring_skipped_rows": 0,
         "ring_entries": [],
+        "profiler_event_count": 0,
+        "profiler_device_event_count": 0,
+        "profiler_total_device_ms": 0.0,
+        "profiler_total_self_cpu_ms": 0.0,
+        "profiler_interesting_event_count": 0,
+        "profiler_trace_path": "",
+        "profiler_trace_error": "",
+        "profiler_events_json": "",
+        "profiler_events_csv": "",
+        "profiler_top_device_events": [],
+        "profiler_interesting_events": [],
         "error_type": type(exc).__name__,
         "error": str(exc),
         "traceback": traceback.format_exc(),
@@ -1147,6 +1277,15 @@ def _csv_row(row: dict[str, Any]) -> dict[str, Any]:
         "median_ms": f"{row.get('median_ms', 0.0):.3f}" if row.get("median_ms") is not None else "",
         "p10_ms": f"{row.get('p10_ms', 0.0):.3f}" if row.get("p10_ms") is not None else "",
         "p90_ms": f"{row.get('p90_ms', 0.0):.3f}" if row.get("p90_ms") is not None else "",
+        "profiler_event_count": row.get("profiler_event_count", 0),
+        "profiler_device_event_count": row.get("profiler_device_event_count", 0),
+        "profiler_total_device_ms": f"{row.get('profiler_total_device_ms', 0.0):.3f}",
+        "profiler_total_self_cpu_ms": f"{row.get('profiler_total_self_cpu_ms', 0.0):.3f}",
+        "profiler_interesting_event_count": row.get("profiler_interesting_event_count", 0),
+        "profiler_trace_path": row.get("profiler_trace_path", ""),
+        "profiler_trace_error": row.get("profiler_trace_error", ""),
+        "profiler_events_json": row.get("profiler_events_json", ""),
+        "profiler_events_csv": row.get("profiler_events_csv", ""),
         "error_type": row.get("error_type", ""),
         "error": row.get("error", ""),
     }
@@ -1189,6 +1328,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--time", action="store_true", help="Run warmup/timed iterations after compile.")
     parser.add_argument("--warmup", type=int, default=3, help="Warmup iterations for --time.")
     parser.add_argument("--iters", type=int, default=20, help="Timed iterations for --time.")
+    parser.add_argument(
+        "--torch-profiler",
+        action="store_true",
+        help="Capture torch.profiler PrivateUse1 events after compile.",
+    )
+    parser.add_argument(
+        "--torch-profiler-memory",
+        action="store_true",
+        help="Enable torch profiler memory tracking for --torch-profiler.",
+    )
+    parser.add_argument(
+        "--torch-profiler-with-stack",
+        action="store_true",
+        help="Capture Python stacks for --torch-profiler.",
+    )
     parser.add_argument("--atol", type=float, default=0.1, help="Correctness absolute tolerance.")
     parser.add_argument("--rtol", type=float, default=0.1, help="Correctness relative tolerance.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
@@ -1229,6 +1383,11 @@ def main() -> int:
                     if args.ring_telemetry
                     else None
                 )
+                torch_profiler_dir = (
+                    output_dir / "torch_profiler" / f"{case.name}_{size}"
+                    if args.torch_profiler
+                    else None
+                )
                 try:
                     row = _run_case(
                         case=case,
@@ -1243,6 +1402,9 @@ def main() -> int:
                         atol=args.atol,
                         rtol=args.rtol,
                         ring_telemetry_path=telemetry_path,
+                        torch_profiler_dir=torch_profiler_dir,
+                        torch_profiler_memory=args.torch_profiler_memory,
+                        torch_profiler_with_stack=args.torch_profiler_with_stack,
                     )
                 except Exception as exc:
                     row = _error_row(case, size, dtype, exc)
@@ -1256,7 +1418,8 @@ def main() -> int:
                 print(
                     f"{status:5} size={size:<5} case={case.name:<28} "
                     f"restickifies={count:<3} bytes={bytes_moved} "
-                    f"byte_hops={byte_hops}"
+                    f"byte_hops={byte_hops} "
+                    f"device_events={row.get('profiler_device_event_count', 0)}"
                 )
 
     fieldnames = list(_csv_row(rows[0]).keys())

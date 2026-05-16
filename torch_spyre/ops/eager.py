@@ -25,6 +25,24 @@ import operator
 aten = torch.ops.aten
 
 
+def _is_fake_tensor(value):
+    try:
+        from torch._subclasses.fake_tensor import FakeTensor
+
+        return isinstance(value, FakeTensor)
+    except Exception:
+        return False
+
+
+def _python_dispatch_excluded() -> bool:
+    try:
+        return torch._C._dispatch_tls_local_exclude_set().has(
+            torch._C.DispatchKey.Python
+        )
+    except Exception:
+        return False
+
+
 # Decorator to keep track of compiled variant
 def compile_once(op, **compile_kwargs):
     def decorator(fn):
@@ -191,6 +209,12 @@ def spyre__copy_from(self, dst, non_blocking=False):
         _C.copy_tensor(self, dst, non_blocking)
         return dst
     elif self.device.type == "spyre" and self.device == dst.device:
+        if (
+            _is_fake_tensor(self)
+            or _is_fake_tensor(dst)
+            or _python_dispatch_excluded()
+        ):
+            return dst
         torch.ops.spyre.copy_from_d2d(self, dst)
         return dst
     else:

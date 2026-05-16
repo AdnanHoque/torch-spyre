@@ -393,6 +393,15 @@ def _csv_row(row: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
         "median_ms": f"{row.get('median_ms', 0.0):.3f}" if row.get("median_ms") is not None else "",
         "p10_ms": f"{row.get('p10_ms', 0.0):.3f}" if row.get("p10_ms") is not None else "",
         "p90_ms": f"{row.get('p90_ms', 0.0):.3f}" if row.get("p90_ms") is not None else "",
+        "profiler_event_count": row.get("profiler_event_count", 0),
+        "profiler_device_event_count": row.get("profiler_device_event_count", 0),
+        "profiler_total_device_ms": f"{row.get('profiler_total_device_ms', 0.0):.3f}",
+        "profiler_total_self_cpu_ms": f"{row.get('profiler_total_self_cpu_ms', 0.0):.3f}",
+        "profiler_interesting_event_count": row.get("profiler_interesting_event_count", 0),
+        "profiler_trace_path": row.get("profiler_trace_path", ""),
+        "profiler_trace_error": row.get("profiler_trace_error", ""),
+        "profiler_events_json": row.get("profiler_events_json", ""),
+        "profiler_events_csv": row.get("profiler_events_csv", ""),
         "error_type": row.get("error_type", ""),
         "error": row.get("error", ""),
     }
@@ -455,6 +464,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--time", action="store_true", help="Run timed iterations after compile.")
     parser.add_argument("--warmup", type=int, default=5, help="Warmup iterations for --time.")
     parser.add_argument("--iters", type=int, default=30, help="Timed iterations for --time.")
+    parser.add_argument(
+        "--torch-profiler",
+        action="store_true",
+        help="Capture torch.profiler PrivateUse1 events after compile.",
+    )
+    parser.add_argument(
+        "--torch-profiler-memory",
+        action="store_true",
+        help="Enable torch profiler memory tracking for --torch-profiler.",
+    )
+    parser.add_argument(
+        "--torch-profiler-with-stack",
+        action="store_true",
+        help="Capture Python stacks for --torch-profiler.",
+    )
     parser.add_argument("--skip-correctness", action="store_true", help="Skip CPU correctness comparison.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
     parser.add_argument("--fail-on-error", action="store_true", help="Return nonzero if any row fails.")
@@ -515,6 +539,14 @@ def main() -> int:
             for size in sizes:
                 for hierarchy_case in selected:
                     telemetry_path = output_dir / mode / "ring_telemetry" / f"{hierarchy_case.name}_{size}.jsonl"
+                    torch_profiler_dir = (
+                        output_dir
+                        / mode
+                        / "torch_profiler"
+                        / f"{hierarchy_case.name}_{size}"
+                        if args.torch_profiler
+                        else None
+                    )
                     try:
                         row = probe._run_case(
                             case=_probe_case(hierarchy_case),
@@ -529,6 +561,9 @@ def main() -> int:
                             atol=0.1,
                             rtol=0.1,
                             ring_telemetry_path=telemetry_path,
+                            torch_profiler_dir=torch_profiler_dir,
+                            torch_profiler_memory=args.torch_profiler_memory,
+                            torch_profiler_with_stack=args.torch_profiler_with_stack,
                         )
                     except Exception as exc:
                         row = probe._error_row(_probe_case(hierarchy_case), size, dtype, exc)
@@ -539,7 +574,8 @@ def main() -> int:
                         f"case={hierarchy_case.name:<38} restickifies={row.get('restickify_count', 0):<3} "
                         f"bytes={row.get('ring_total_bytes', row.get('total_bytes', 0))} "
                         f"byte_hops={row.get('ring_total_byte_hops', 0)} "
-                        f"median_ms={row.get('median_ms', '')}"
+                        f"median_ms={row.get('median_ms', '')} "
+                        f"device_events={row.get('profiler_device_event_count', 0)}"
                     )
 
     jsonl_path = output_dir / "hierarchy_rows.jsonl"
