@@ -157,6 +157,28 @@ in the pod filesystem or current local checkouts. To patch lower than
 `/opt/ibm/spyre/senlib/lib/libsenlib-dd2.so`, or we need to reverse/decode the
 existing `/tmp/metrics.<bus>` file as a sidecar.
 
+## AIU Toolbox Check
+
+We also shallow-cloned:
+
+```text
+git@github.ibm.com:ai-chip-toolchain/aiu-toolbox.git
+```
+
+This repo does not contain the `/tmp/metrics.<bus>` writer or
+`monitoring.cpp`. It does provide useful adjacent tooling:
+
+- `utils/profile/README.md` documents Flex lightweight and detailed profiling
+  flows (`AIU_TIMING_ENABLED`, `ENABLE_FLEX_TIMING`, `FLEX_GLOBAL_PROFILE_PREFIX`)
+- `utils/profile/*` contains post-processing scripts for Flex profile JSON and
+  timing summaries
+- `benchmarks/p2p-*` contains P2P/ring-style microbenchmarks
+- some P2P benchmarks have optional debug perf-counter reads such as MCI read
+  cycles, HCI write cycles, and MCI stall cycles
+
+Those pieces can help calibrate hardware/fabric behavior, but they do not patch
+the torch-profiler or `/tmp/metrics.<bus>` production path directly.
+
 ## Conclusion
 
 We improved the profiler stack compared to where we started:
