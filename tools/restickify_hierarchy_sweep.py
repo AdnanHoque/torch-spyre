@@ -89,6 +89,14 @@ def _matmul_rhs_wrong_stick(a, b):
     return a @ b.t()
 
 
+def _transpose_contiguous(a):
+    return a.t().contiguous()
+
+
+def _transpose_clone(a):
+    return a.t().clone()
+
+
 def _adds_then_matmul_x(a, b, c, d, e):
     return (a + b.t() + c.t() + d.t()) @ e
 
@@ -129,6 +137,10 @@ def _transpose_4d_chain(x, b, c):
 
 def _builder2(n: int, dtype: Any):
     return _square_inputs(n, dtype, 2)
+
+
+def _builder1(n: int, dtype: Any):
+    return _square_inputs(n, dtype, 1)
 
 
 def _builder3(n: int, dtype: Any):
@@ -206,6 +218,22 @@ CASES: tuple[HierarchyCase, ...] = (
         "a @ b.t(), rhs graph-input layout boundary.",
         _builder2,
         _matmul_rhs_wrong_stick,
+    ),
+    HierarchyCase(
+        "transpose_contiguous",
+        "isolated_restickify",
+        "graph_input_or_weight",
+        "a.t().contiguous(), isolated ReStickifyOpHBM materialization.",
+        _builder1,
+        _transpose_contiguous,
+    ),
+    HierarchyCase(
+        "transpose_clone",
+        "isolated_restickify",
+        "graph_input_or_weight",
+        "a.t().clone(), clone form of isolated ReStickifyOpHBM materialization.",
+        _builder1,
+        _transpose_clone,
     ),
     HierarchyCase(
         "adds_then_matmul_x",
