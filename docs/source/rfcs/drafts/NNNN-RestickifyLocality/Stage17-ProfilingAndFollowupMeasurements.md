@@ -6,9 +6,8 @@ This stage ran three parallel tracks:
 
 1. continue the marker-separated Stage 15 measurement repeats;
 2. query the Spyre Knowledgebase for profiling and memory-hierarchy context;
-3. inspect the profiling/toolchain artifacts available in the pod because direct
-   `github.ibm.com/ai-chip-toolchain` browsing requires IBM SSO from this
-   session.
+3. inspect profiling/toolchain artifacts from both the pod and known
+   `github.ibm.com` SSH clones.
 
 The important outcome is that Stage 3B's compiler-side locality signal remains
 stable, but the measured runtime benefit is smaller and noisier than the first
@@ -119,12 +118,22 @@ It also confirms the conceptual hardware model we have been using:
 The KB does not currently give us fabric-specific counter names for separating
 HBM/off-chip traffic from RIU cross-core LX-LX traffic.
 
-## Installed Toolchain Findings
+## Toolchain Access
 
-Direct browsing of `https://github.ibm.com/ai-chip-toolchain` is blocked by IBM
-SSO from this session, and desktop `gh` is not logged in to
-`github.ibm.com`. The pod-local installed artifacts still answer part of the
-question.
+Direct browser access to `https://github.ibm.com/ai-chip-toolchain` is blocked
+by IBM SSO from this session, and desktop `gh` is not logged in to
+`github.ibm.com`, so org-wide listing does not work.
+
+Known SSH clones do work. For example:
+
+```sh
+git clone git@github.ibm.com:ai-chip-toolchain/libaiupti.git
+```
+
+The sources below combine the installed pod artifacts with the cloned
+`libaiupti` repository.
+
+## Installed And Cloned Toolchain Findings
 
 The installed `libaiupti` headers expose activity records for:
 
@@ -138,19 +147,34 @@ The installed `libaiupti` headers expose activity records for:
 - environment;
 - metric.
 
-The event IDs visible in the installed header are cycle and power oriented:
+The event IDs visible in the installed header and cloned source are cycle and
+power oriented:
 
 - `CYCLES`;
 - `CYCLES_TS1` through `CYCLES_TS5`;
 - `POWER`.
 
-The only metric ID visible in the installed header is:
+The only metric ID visible in the installed header and cloned source is:
 
 - `HPM`.
 
 `AIUpti_ActivityCompute` includes `correlation_id`, timing fields, local-memory
 total, and a fixed-size kernel `name`. That is the best current hook for stable
 mapping from generated SDSC/opfunc names to profiler activity records.
+
+The cloned `libaiupti` source shows that AIUPTI event records are synthesized
+from DMI, compute, and DMO control-block cycle counters. The generated event
+sequence records:
+
+- DMI period cycles;
+- a gap/void period;
+- compute period cycles;
+- DMO period cycles;
+- a reset cycle event;
+- a power event.
+
+That is useful for phase timing, but it is still not a direct RIU fabric
+traffic counter.
 
 The runtime callback IDs include useful windows:
 
@@ -175,6 +199,13 @@ The runtime callback IDs include useful windows:
 It also exposes request-rate groups such as `n_rdmem` and `n_wrmem`. These are
 useful aggregate counters, but they are not named as RIU-vs-HBM fabric counters.
 
+The cloned `libaiupti` metric writer maps old-format terms such as
+`HMI_SOC_PERF_WR_DATA_BEATS`, `HMI_SOC_PERF_RD_DATA_BEATS`,
+`RMI_HCI2RMI_WRITE_LPDDR`, and `RMO_HCI2RMO_READ_LPDDR` into the metric file
+consumed by `aiu-smi`. These names strengthen the interpretation that current
+`rdmem`/`wrmem` are device-memory/HMI/LPDDR-facing counters, not on-chip
+core-to-core RIU counters.
+
 `aiu-trace-analyzer` supports Chrome trace counter events and derived counters
 such as power, bandwidth, collectives bandwidth, prep queue, and RCU
 utilization. It expects `deviceProperties` metadata in torch traces, which
@@ -186,8 +217,9 @@ The missing items are now sharper:
 
 1. A metric catalog for `AIUPTI_ACTIVITY_METRIC_ID_HPM`, or an internal header
    with named HBM/RIU/LX event IDs.
-2. A clear definition of `aiu-smi` `rdmem`/`wrmem`: whether they count only
-   off-chip memory-controller traffic or broader ring-facing memory movement.
+2. A clear public definition of `aiu-smi` `rdmem`/`wrmem`; cloned
+   `libaiupti` source suggests they are memory-controller/LPDDR-facing, but we
+   should confirm with the AIU-monitor/toolchain owners.
 3. Fabric-specific counters separating HBM/off-chip traffic from cross-core
    RIU LX-LX traffic.
 4. `deviceProperties` metadata in torch profiler exports so
@@ -210,4 +242,3 @@ enablement:
 4. bind generated restickify opfunc names to profiler events and counter
    windows;
 5. then rerun isolated restickify and fused cases with fabric-specific evidence.
-
