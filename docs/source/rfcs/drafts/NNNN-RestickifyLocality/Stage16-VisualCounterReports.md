@@ -2,9 +2,9 @@
 
 ## Summary
 
-This sidequest adds automatic visual summaries for restickify counter runs. The
-goal is to make each run produce a compact, Nsight-style report instead of only
-raw JSONL/CSV rows.
+This sidequest adds automatic interactive summaries for restickify counter
+runs. The goal is to make each run produce a compact, Nsight-style HTML report
+instead of only raw JSONL/CSV rows.
 
 The visual report combines:
 
@@ -41,8 +41,11 @@ aiusmi_marker_summary.svg
 aiusmi_marker_summary.html
 ```
 
-Use `--no-figure` to disable report generation for automated runs that only
-want raw data.
+The SVG is a static shareable snapshot. The HTML is the main analysis surface:
+it embeds the run JSON, adds metric/mode/search/sort controls, supports row
+selection, and exposes restickify-entry details plus raw JSON for the selected
+row. Use `--no-figure` to disable report generation for automated runs that
+only want raw data.
 
 ## Example
 
@@ -54,7 +57,7 @@ artifacts/restickify_aiusmi_marker/fused-2048-v2/aiusmi_marker_summary.svg
 artifacts/restickify_aiusmi_marker/fused-2048-v2/aiusmi_marker_summary.html
 ```
 
-The figure highlights the key interpretation:
+The interactive report highlights the key interpretation:
 
 - Stage 3B removes the modeled in-graph byte-hops.
 - Restickify bytes and restickify count stay unchanged.
@@ -79,7 +82,8 @@ makes that distinction visible:
 
 ## Next Improvements
 
-The current report is intentionally static and portable. Good follow-ups are:
+The current report is intentionally self-contained and portable. Good follow-ups
+are:
 
 1. add a timeline view once per-op AIUPTI/PrivateUse1 events include stable
    restickify kernel names;
@@ -89,4 +93,3 @@ The current report is intentionally static and portable. Good follow-ups are:
    probe exports the bundle directory;
 4. embed repeated-run distributions so we can distinguish noise from stable
    speedups.
-
