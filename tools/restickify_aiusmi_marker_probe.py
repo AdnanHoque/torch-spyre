@@ -367,6 +367,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default="/tmp/restickify-aiusmi-marker", help="Output directory.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
     parser.add_argument("--locality-assert", action="store_true", help="Enable locality assert for stage3b.")
+    parser.add_argument("--no-figure", action="store_true", help="Do not emit SVG/HTML visual summary.")
     parser.add_argument("--fail-on-error", action="store_true", help="Return nonzero on errors.")
     return parser.parse_args()
 
@@ -447,8 +448,27 @@ def main() -> int:
         writer.writeheader()
         writer.writerows(rows)
 
+    figure_svg = output_dir / "aiusmi_marker_summary.svg"
+    figure_html = output_dir / "aiusmi_marker_summary.html"
+    if not args.no_figure:
+        try:
+            import restickify_profile_viz
+
+            restickify_profile_viz.write_report(
+                rows,
+                figure_svg,
+                figure_html,
+                title=f"Spyre Restickify Counter Report: {args.case}",
+            )
+        except Exception as exc:
+            print(f"warning: failed to render profile figure: {exc}", file=sys.stderr)
+
     print(f"\nWrote {jsonl_path}")
     print(f"Wrote {csv_path}")
+    if figure_svg.exists():
+        print(f"Wrote {figure_svg}")
+    if figure_html.exists():
+        print(f"Wrote {figure_html}")
     errors = [row for row in rows if row["status"] != "ok"]
     print(f"Completed {len(rows)} rows with {len(errors)} errors")
     return 1 if errors and args.fail_on_error else 0
