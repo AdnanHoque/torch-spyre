@@ -70,4 +70,16 @@ restickify_locality_assert: bool = (
     os.environ.get("SPYRE_RESTICKIFY_LOCALITY_ASSERT", "0") == "1"
 )
 
+# Default-off producer-consumer ownership telemetry. This generalizes the
+# restickify byte-hop estimator to all exact in-graph tensor edges, without
+# changing core division or codegen behavior.
+core_continuity_telemetry: bool = (
+    os.environ.get("SPYRE_CORE_CONTINUITY_TELEMETRY", "0") == "1"
+)
+
+core_continuity_telemetry_jsonl: str = os.environ.get(
+    "SPYRE_CORE_CONTINUITY_TELEMETRY_JSONL",
+    "",
+)
+
 install_config_module(sys.modules[__name__])

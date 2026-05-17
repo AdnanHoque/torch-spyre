@@ -36,6 +36,10 @@ from torch_spyre._inductor.restickify_ring import (
     _stride_map_from_layout,
 )
 from torch_spyre._inductor.pass_utils import stick_compatible
+from torch_spyre._inductor.core_continuity_telemetry import (
+    CoreContinuityEstimate,
+    _estimate_to_json as _core_continuity_estimate_to_json,
+)
 from torch_spyre._inductor.restickify_telemetry import _estimate_to_json
 
 
@@ -251,6 +255,38 @@ def test_restickify_telemetry_json_includes_locality_certificate_fields():
     assert payload["certified_bytes_moved"] == 128
     assert payload["certified_max_hops"] == 0
     assert payload["certified_core_count"] == 32
+
+
+def test_core_continuity_telemetry_json_includes_edge_fields():
+    estimate = CoreContinuityEstimate(
+        source_name="buf3",
+        producer_name="buf3",
+        consumer_name="buf4",
+        producer_kind="computed",
+        consumer_kind="computed",
+        bytes_moved=256,
+        byte_hops=512,
+        avg_hops=2.0,
+        max_hops=4,
+        producer_splits={"d1": 32},
+        consumer_splits={"d1": 32},
+        symbol_map={"d1": "d1"},
+        skip_reason=None,
+    )
+
+    payload = _core_continuity_estimate_to_json(estimate)
+
+    assert payload["source_name"] == "buf3"
+    assert payload["producer"] == "buf3"
+    assert payload["consumer"] == "buf4"
+    assert payload["producer_kind"] == "computed"
+    assert payload["consumer_kind"] == "computed"
+    assert payload["byte_hops"] == 512
+    assert payload["avg_hops"] == 2.0
+    assert payload["max_hops"] == 4
+    assert payload["producer_splits"] == {"d1": 32}
+    assert payload["consumer_splits"] == {"d1": 32}
+    assert payload["symbol_map"] == {"d1": "d1"}
 
 
 def test_locality_certificate_represents_failed_nonzero_byte_hops():

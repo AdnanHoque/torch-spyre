@@ -45,6 +45,7 @@ from .insert_restickify import insert_restickify, finalize_layouts
 from .work_division import span_reduction, work_distribution, k_fast_division
 from .mapping_alignment import align_restickify_core_mappings
 from .restickify_telemetry import restickify_ring_telemetry
+from .core_continuity_telemetry import core_continuity_telemetry
 from .pass_utils import apply_splits_from_index_coeff, iteration_space_from_op
 from .scratchpad import scratchpad_planning
 from .fusion import spyre_fuse_nodes
@@ -237,6 +238,7 @@ class CustomPreSchedulingPasses(CustomGraphPass):
         work_distribution(operations, k_fast_ops)
         align_restickify_core_mappings(operations, k_fast_ops)
         restickify_ring_telemetry(operations, k_fast_ops)
+        core_continuity_telemetry(operations, k_fast_ops)
         if config.lx_planning:
             scratchpad_planning(operations)
 
@@ -254,6 +256,7 @@ class CustomPreSchedulingPasses(CustomGraphPass):
             inspect.getfile(k_fast_division),
             inspect.getfile(align_restickify_core_mappings),
             inspect.getfile(restickify_ring_telemetry),
+            inspect.getfile(core_continuity_telemetry),
             inspect.getfile(scratchpad_planning),
         ]
         return get_hash_for_files(tuple(dict.fromkeys(files + [__file__])))
