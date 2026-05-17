@@ -367,10 +367,17 @@ class GreedyAllocationStrategy(AllocationStrategy):
             same_core_div = True
             if using_multicore and len(users_rw) > 1:
                 # graph input and output can have only 1 read or 1 write user.
-                u0_split = users_rw[0].op_it_space_splits  # a list like [16, 1]
-                same_core_div = all(
-                    u0_split == u.op_it_space_splits for u in users_rw[1:]
-                )
+                # Some user kinds (e.g. SpyreConstantFallback, a CPU fallback
+                # for ops we can't lower) don't have op_it_space_splits set;
+                # they don't participate in the core-split decision, so skip
+                # them rather than crashing on the attribute access.
+                splits = [
+                    getattr(u, "op_it_space_splits", None) for u in users_rw
+                ]
+                splits = [s for s in splits if s is not None]
+                if len(splits) >= 2:
+                    same_core_div = all(splits[0] == s for s in splits[1:])
+                # else: 0 or 1 ops with splits — no mismatch possible.
             core_div_mismatch[buf_name] = not same_core_div
 
         return bufs_to_dealloc_at_idx, buf_users, core_div_mismatch
