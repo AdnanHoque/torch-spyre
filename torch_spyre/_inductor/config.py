@@ -82,4 +82,16 @@ core_continuity_telemetry_jsonl: str = os.environ.get(
     "",
 )
 
+# Default-off source fanout telemetry for read-only graph inputs, weights,
+# constants, and other external sources. This is attribution-only; it does not
+# emit GTR/multicast metadata.
+input_fanout_telemetry: bool = (
+    os.environ.get("SPYRE_INPUT_FANOUT_TELEMETRY", "0") == "1"
+)
+
+input_fanout_telemetry_jsonl: str = os.environ.get(
+    "SPYRE_INPUT_FANOUT_TELEMETRY_JSONL",
+    "",
+)
+
 install_config_module(sys.modules[__name__])

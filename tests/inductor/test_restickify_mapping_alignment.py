@@ -40,6 +40,10 @@ from torch_spyre._inductor.core_continuity_telemetry import (
     CoreContinuityEstimate,
     _estimate_to_json as _core_continuity_estimate_to_json,
 )
+from torch_spyre._inductor.input_fanout_telemetry import (
+    InputFanoutEstimate,
+    _estimate_to_json as _input_fanout_estimate_to_json,
+)
 from torch_spyre._inductor.restickify_telemetry import _estimate_to_json
 
 
@@ -287,6 +291,33 @@ def test_core_continuity_telemetry_json_includes_edge_fields():
     assert payload["producer_splits"] == {"d1": 32}
     assert payload["consumer_splits"] == {"d1": 32}
     assert payload["symbol_map"] == {"d1": "d1"}
+
+
+def test_input_fanout_telemetry_json_includes_source_fields():
+    estimate = InputFanoutEstimate(
+        source_name="arg1_1",
+        source_kind="graph_input_or_weight",
+        consumer_count=2,
+        consumers=["buf2", "buf4"],
+        consumer_kinds={"restickify": 1, "computed": 1},
+        restickify_consumers=["buf2"],
+        restickify_bytes_moved=1024,
+        approximate_consumer_bytes=4096,
+        source_stride_map=[1, 64],
+        target_stride_maps=[[64, 1], [1, 64]],
+    )
+
+    payload = _input_fanout_estimate_to_json(estimate)
+
+    assert payload["source_name"] == "arg1_1"
+    assert payload["source_kind"] == "graph_input_or_weight"
+    assert payload["consumer_count"] == 2
+    assert payload["consumers"] == ["buf2", "buf4"]
+    assert payload["consumer_kinds"] == {"restickify": 1, "computed": 1}
+    assert payload["restickify_consumers"] == ["buf2"]
+    assert payload["restickify_bytes_moved"] == 1024
+    assert payload["source_stride_map"] == [1, 64]
+    assert payload["target_stride_maps"] == [[64, 1], [1, 64]]
 
 
 def test_locality_certificate_represents_failed_nonzero_byte_hops():
