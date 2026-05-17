@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -53,6 +54,7 @@ class InputFanoutEstimate:
     approximate_consumer_bytes: int
     source_stride_map: list[int] | None
     target_stride_maps: list[list[int]]
+    context: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 def _graph_input_names() -> list[str] | None:
@@ -70,8 +72,23 @@ def _source_kind(source_name: str) -> tuple[str, list[int] | None]:
     )
 
 
+def _telemetry_context() -> dict[str, Any]:
+    raw = os.environ.get("SPYRE_TELEMETRY_CONTEXT")
+    if not raw:
+        return {}
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"label": raw}
+    return decoded if isinstance(decoded, dict) else {"value": decoded}
+
+
 def _estimate_to_json(estimate: InputFanoutEstimate) -> dict[str, Any]:
     return {
+        "context": estimate.context,
+        "case": estimate.context.get("case"),
+        "size": estimate.context.get("size"),
+        "scenario": estimate.context.get("scenario"),
         "source_name": estimate.source_name,
         "source_kind": estimate.source_kind,
         "consumer_count": estimate.consumer_count,
@@ -115,6 +132,7 @@ def input_fanout_telemetry(operations: list[Operation]) -> None:
     estimates: list[InputFanoutEstimate] = []
     for source_name, consumers in consumers_by_source.items():
         source_kind, source_stride_map = _source_kind(source_name)
+        context = _telemetry_context()
         if source_kind not in {
             "graph_input_or_weight",
             "constant_or_extern",
@@ -151,6 +169,7 @@ def input_fanout_telemetry(operations: list[Operation]) -> None:
                 ),
                 source_stride_map=source_stride_map,
                 target_stride_maps=target_stride_maps,
+                context=context,
             )
         )
 
@@ -185,4 +204,3 @@ def input_fanout_telemetry(operations: list[Operation]) -> None:
         )
 
     _append_jsonl(config.input_fanout_telemetry_jsonl, estimates)
-

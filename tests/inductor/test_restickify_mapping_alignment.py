@@ -275,11 +275,16 @@ def test_core_continuity_telemetry_json_includes_edge_fields():
         producer_splits={"d1": 32},
         consumer_splits={"d1": 32},
         symbol_map={"d1": "d1"},
+        context={"case": "adds_then_matmul", "size": 2048, "scenario": "producer_to_matmul"},
         skip_reason=None,
     )
 
     payload = _core_continuity_estimate_to_json(estimate)
 
+    assert payload["case"] == "adds_then_matmul"
+    assert payload["size"] == 2048
+    assert payload["scenario"] == "producer_to_matmul"
+    assert payload["context"]["case"] == "adds_then_matmul"
     assert payload["source_name"] == "buf3"
     assert payload["producer"] == "buf3"
     assert payload["consumer"] == "buf4"
@@ -305,10 +310,19 @@ def test_input_fanout_telemetry_json_includes_source_fields():
         approximate_consumer_bytes=4096,
         source_stride_map=[1, 64],
         target_stride_maps=[[64, 1], [1, 64]],
+        context={
+            "case": "linear_weight_transposed",
+            "size": 512,
+            "scenario": "graph_input_or_weight",
+        },
     )
 
     payload = _input_fanout_estimate_to_json(estimate)
 
+    assert payload["case"] == "linear_weight_transposed"
+    assert payload["size"] == 512
+    assert payload["scenario"] == "graph_input_or_weight"
+    assert payload["context"]["case"] == "linear_weight_transposed"
     assert payload["source_name"] == "arg1_1"
     assert payload["source_kind"] == "graph_input_or_weight"
     assert payload["consumer_count"] == 2

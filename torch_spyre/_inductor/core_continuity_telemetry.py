@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,7 @@ class CoreContinuityEstimate:
     producer_splits: dict[str, int]
     consumer_splits: dict[str, int]
     symbol_map: dict[str, str]
+    context: dict[str, Any] = dataclasses.field(default_factory=dict)
     skip_reason: str | None = None
 
 
@@ -130,6 +132,7 @@ def estimate_core_continuity_edge(
     producer_splits = decode_op_splits(producer)
     consumer_splits = decode_op_splits(consumer)
     bytes_moved = _bytes_moved_or_zero(producer)
+    context = _telemetry_context()
 
     symbol_map, reason = _edge_symbol_map(producer, consumer, read_dep)
     if reason is not None:
@@ -146,6 +149,7 @@ def estimate_core_continuity_edge(
             producer_splits=split_dims_only(producer_splits),
             consumer_splits=split_dims_only(consumer_splits),
             symbol_map={},
+            context=context,
             skip_reason=reason,
         )
 
@@ -190,6 +194,7 @@ def estimate_core_continuity_edge(
             producer_splits=split_dims_only(producer_splits),
             consumer_splits=split_dims_only(consumer_splits),
             symbol_map=symbol_map,
+            context=context,
             skip_reason=type(exc).__name__,
         )
 
@@ -206,12 +211,28 @@ def estimate_core_continuity_edge(
         producer_splits=split_dims_only(producer_splits),
         consumer_splits=split_dims_only(consumer_splits),
         symbol_map=symbol_map,
+        context=context,
         skip_reason=None,
     )
 
 
+def _telemetry_context() -> dict[str, Any]:
+    raw = os.environ.get("SPYRE_TELEMETRY_CONTEXT")
+    if not raw:
+        return {}
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return {"label": raw}
+    return decoded if isinstance(decoded, dict) else {"value": decoded}
+
+
 def _estimate_to_json(estimate: CoreContinuityEstimate) -> dict[str, Any]:
     return {
+        "context": estimate.context,
+        "case": estimate.context.get("case"),
+        "size": estimate.context.get("size"),
+        "scenario": estimate.context.get("scenario"),
         "source_name": estimate.source_name,
         "producer": estimate.producer_name,
         "consumer": estimate.consumer_name,
@@ -313,4 +334,3 @@ def core_continuity_telemetry(
         )
 
     _append_jsonl(config.core_continuity_telemetry_jsonl, estimates)
-

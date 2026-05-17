@@ -1153,10 +1153,21 @@ def _run_case(
     previous_capture = os.environ.get("SPYRE_CAPTURE_RESTICKIFY_PLAN")
     previous_ring = os.environ.get("SPYRE_RESTICKIFY_RING_TELEMETRY")
     previous_ring_jsonl = os.environ.get("SPYRE_RESTICKIFY_RING_TELEMETRY_JSONL")
+    previous_context = os.environ.get("SPYRE_TELEMETRY_CONTEXT")
     spyre_config = None
     previous_config_ring = None
     previous_config_ring_jsonl = None
     os.environ["SPYRE_CAPTURE_RESTICKIFY_PLAN"] = "1"
+    os.environ["SPYRE_TELEMETRY_CONTEXT"] = json.dumps(
+        {
+            "case": case.name,
+            "scenario": case.scenario,
+            "source_hint": case.source_hint,
+            "size": size,
+            "shape": shape_label,
+        },
+        sort_keys=True,
+    )
     if ring_telemetry_path is not None:
         ring_telemetry_path.parent.mkdir(parents=True, exist_ok=True)
         ring_telemetry_path.unlink(missing_ok=True)
@@ -1242,6 +1253,10 @@ def _run_case(
             os.environ.pop("SPYRE_RESTICKIFY_RING_TELEMETRY_JSONL", None)
         else:
             os.environ["SPYRE_RESTICKIFY_RING_TELEMETRY_JSONL"] = previous_ring_jsonl
+        if previous_context is None:
+            os.environ.pop("SPYRE_TELEMETRY_CONTEXT", None)
+        else:
+            os.environ["SPYRE_TELEMETRY_CONTEXT"] = previous_context
         if spyre_config is not None:
             spyre_config.restickify_ring_telemetry = previous_config_ring
             spyre_config.restickify_ring_telemetry_jsonl = previous_config_ring_jsonl
