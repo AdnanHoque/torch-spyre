@@ -577,13 +577,126 @@ def parse_op_spec(op_spec: OpSpec) -> SDSCSpec:
     )
 
 
-def compile_op_spec(idx: int, op_spec: OpSpec) -> Any:
+def compile_op_spec(
+    idx: int,
+    op_spec: OpSpec,
+    *,
+    allow_restickify_ddl_bridge: bool = True,
+) -> Any:
     sdsc_spec = parse_op_spec(op_spec)
     logger.debug("%s", sdsc_spec)
     lx_dataop = _compile_restickify_lx_dataop_if_eligible(idx, op_spec, sdsc_spec)
     if lx_dataop is not None:
         return lx_dataop
-    return generate_sdsc(idx, sdsc_spec)
+    sdsc_payload = generate_sdsc(idx, sdsc_spec)
+    ddl_bridge = _compile_restickify_ddl_bridge_if_eligible(
+        idx,
+        op_spec,
+        sdsc_spec,
+        sdsc_payload,
+        allow_restickify_ddl_bridge=allow_restickify_ddl_bridge,
+    )
+    if ddl_bridge is not None:
+        return ddl_bridge
+    return sdsc_payload
+
+
+def _compile_restickify_ddl_bridge_if_eligible(
+    idx: int,
+    op_spec: OpSpec,
+    sdsc_spec: SDSCSpec,
+    sdsc_payload: Any,
+    *,
+    allow_restickify_ddl_bridge: bool,
+) -> Any | None:
+    if op_spec.op != RESTICKIFY_OP:
+        return None
+    if not _spyre_config.restickify_ddl_bridge_e2e:
+        return None
+    if not allow_restickify_ddl_bridge:
+        _append_restickify_ddl_bridge_audit(
+            idx,
+            op_spec,
+            sdsc_spec,
+            status="skipped",
+            reason="mixed-kernel-bundle",
+        )
+        logger.info(
+            "skip ReStickifyOpHBM DDL bridge e2e for SDSC %d: mixed-kernel-bundle",
+            idx,
+        )
+        return None
+
+    from .restickify_ddl_bridge import (
+        generate_restickify_ddl_bridge_sdsc,
+        restickify_ddl_bridge_skip_reason,
+    )
+
+    reason = restickify_ddl_bridge_skip_reason(op_spec, sdsc_spec)
+    if reason is not None:
+        _append_restickify_ddl_bridge_audit(
+            idx,
+            op_spec,
+            sdsc_spec,
+            status="skipped",
+            reason=reason,
+        )
+        logger.info(
+            "skip ReStickifyOpHBM DDL bridge e2e for SDSC %d: %s",
+            idx,
+            reason,
+        )
+        return None
+
+    payload = generate_restickify_ddl_bridge_sdsc(idx, sdsc_spec, sdsc_payload)
+    _append_restickify_ddl_bridge_audit(
+        idx,
+        op_spec,
+        sdsc_spec,
+        status="emitted",
+        reason=None,
+    )
+    logger.info("emitted ReStickifyOpHBM DDL bridge e2e for SDSC %d", idx)
+    return payload
+
+
+def _append_restickify_ddl_bridge_audit(
+    idx: int,
+    op_spec: OpSpec,
+    sdsc_spec: SDSCSpec,
+    *,
+    status: str,
+    reason: str | None,
+) -> None:
+    path = _spyre_config.restickify_ddl_bridge_audit_jsonl
+    if not path:
+        return
+    row = {
+        "sdsc_index": idx,
+        "status": status,
+        "reason": reason,
+        "op": op_spec.op,
+        "work_slices": {
+            str(dim): int(split) for dim, split in sdsc_spec.work_slices.items()
+        },
+        "num_cores": sdsc_spec.num_cores,
+        "arg_layouts": [
+            {
+                "layout": arg.layout,
+                "dim_order": [
+                    str(dim) for dim in sdsc_spec.layouts[arg.layout]["dim_order"]
+                ],
+                "stick_dim_order": str(
+                    sdsc_spec.layouts[arg.layout]["stick_dim_order"]
+                ),
+                "allocation": dict(arg.allocation) if arg.allocation else {},
+            }
+            for arg in sdsc_spec.args
+        ],
+    }
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row, sort_keys=True) + "\n")
 
 
 def _compile_restickify_lx_dataop_if_eligible(

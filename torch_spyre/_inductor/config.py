@@ -93,6 +93,27 @@ restickify_lx_dataop_audit_jsonl: str = os.environ.get(
     "",
 )
 
+# Default-off diagnostic e2e lowering prototype for the Stage42 DDL bridge.
+# When enabled, a small, compile-proven subset of ReStickifyOpHBM SDSCs may be
+# emitted in the compact restickify DDL input form instead of the normal HBM
+# compute SDSC. Unsupported restickifies stay on the existing path.
+restickify_ddl_bridge_e2e: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_DDL_BRIDGE_E2E", "0") == "1"
+)
+
+restickify_ddl_bridge_audit_jsonl: str = os.environ.get(
+    "SPYRE_RESTICKIFY_DDL_BRIDGE_AUDIT_JSONL",
+    "",
+)
+
+# Prototype-only runtime hook for the DDL bridge. The installed DXP currently
+# runs generic corelet splitting and L3 scheduling before DDC, which rejects the
+# compact restickify DDL input. When this is enabled, Torch-Spyre applies the
+# Stage41 preload shim only for bundles containing only DDL-bridge restickifies.
+restickify_ddl_bridge_preddc_shim: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_DDL_BRIDGE_PREDDC_SHIM", "1") == "1"
+)
+
 # Default-off producer-consumer ownership telemetry. This generalizes the
 # restickify byte-hop estimator to all exact in-graph tensor edges, without
 # changing core division or codegen behavior.
