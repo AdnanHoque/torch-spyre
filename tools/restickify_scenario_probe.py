@@ -71,6 +71,14 @@ def _matmul_rhs_wrong_stick(a, b):
     return a @ b.t()
 
 
+def _transpose_contiguous(a):
+    return a.t().contiguous()
+
+
+def _transpose_clone(a):
+    return a.t().clone()
+
+
 def _adds_then_matmul(a, b, c, d):
     return (a + b.t() + c.t()) @ d
 
@@ -244,6 +252,10 @@ def _square_inputs(n: int, dtype: Any, count: int) -> tuple[tuple[Any, ...], str
 
 def _builder_pointwise2(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
     return _square_inputs(n, dtype, 2)
+
+
+def _builder_pointwise1(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
+    return _square_inputs(n, dtype, 1)
 
 
 def _builder_pointwise3(n: int, dtype: Any) -> tuple[tuple[Any, ...], str]:
@@ -587,6 +599,22 @@ CASES: tuple[ProbeCase, ...] = (
         "Matmul with rhs presented in the wrong stick orientation.",
         _builder_pointwise2,
         _matmul_rhs_wrong_stick,
+    ),
+    ProbeCase(
+        "isolated_transpose_contiguous",
+        "isolated_restickify",
+        "graph_input",
+        "a.t().contiguous(), minimal standalone restickify materialization.",
+        _builder_pointwise1,
+        _transpose_contiguous,
+    ),
+    ProbeCase(
+        "isolated_transpose_clone",
+        "isolated_restickify",
+        "graph_input",
+        "a.t().clone(), clone-form standalone restickify materialization.",
+        _builder_pointwise1,
+        _transpose_clone,
     ),
     ProbeCase(
         "adds_then_matmul",
