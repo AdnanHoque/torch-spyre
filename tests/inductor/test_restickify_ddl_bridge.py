@@ -21,7 +21,7 @@ from torch_spyre._inductor.codegen.restickify_ddl_bridge import (
     restickify_ddl_bridge_skip_reason,
 )
 from torch_spyre._inductor.codegen.superdsc import SDSCArgs, SDSCSpec
-from torch_spyre._inductor.constants import RESTICKIFY_OP
+from torch_spyre._inductor.constants import RESTICKIFY_OP, SEGMENT_OFFSETS
 from torch_spyre._inductor.op_spec import OpSpec
 
 
@@ -75,7 +75,7 @@ def _spec(
             offsets={},
             max_dim_sizes={d0: -1, d1: -1},
             allocation={},
-            start_address=0,
+            start_address=SEGMENT_OFFSETS[0],
             backGap={},
         ),
         SDSCArgs(
@@ -86,7 +86,7 @@ def _spec(
             offsets={},
             max_dim_sizes={d0: -1, d1: -1},
             allocation={},
-            start_address=1024,
+            start_address=SEGMENT_OFFSETS[2],
             backGap={},
         ),
     ]
@@ -143,6 +143,7 @@ def test_restickify_ddl_bridge_generates_compact_lx_contract():
     assert len(dsc["dataStageParam_"]) == 2
     assert [node["component_"] for node in dsc["scheduleTree_"][:2]] == ["lx", "lx"]
     assert [lds["dsType_"] for lds in dsc["labeledDs_"]] == ["INPUT", "OUTPUT"]
+    assert [lds["segment_"] for lds in dsc["labeledDs_"]] == ["output", "model"]
     assert all(set(lds["memOrg_"]) == {"lx"} for lds in dsc["labeledDs_"])
     assert dsc["computeOp_"][0]["inputLabeledDs"] == ["Tensor0-idx0"]
     assert dsc["computeOp_"][0]["outputLabeledDs"] == ["Tensor1-idx1"]
@@ -180,6 +181,7 @@ def test_restickify_ddl_bridge_preserves_original_labeled_ds_roles():
 
     assert set(dsc["primaryDsInfo_"]) == {"OUTPUT", "KERNEL"}
     assert [lds["dsType_"] for lds in dsc["labeledDs_"]] == ["OUTPUT", "KERNEL"]
+    assert [lds["segment_"] for lds in dsc["labeledDs_"]] == ["output", "model"]
 
 
 def test_restickify_ddl_bridge_skips_graph_input_sources():
@@ -209,3 +211,12 @@ def test_restickify_ddl_bridge_skips_large_per_core_lx_contract():
     reason = restickify_ddl_bridge_skip_reason(_op_spec_stub(), spec)
 
     assert reason == "lx-bytes-per-core-too-large"
+
+
+def test_restickify_ddl_bridge_skips_unknown_runtime_segments():
+    spec = _spec()
+    spec.args[-1].start_address = 1024
+
+    reason = restickify_ddl_bridge_skip_reason(_op_spec_stub(), spec)
+
+    assert reason == "unsupported-runtime-segment"

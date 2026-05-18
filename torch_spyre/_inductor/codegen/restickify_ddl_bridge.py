@@ -28,6 +28,7 @@ from typing import Any
 from sympy import Expr, Symbol
 
 from torch_spyre._inductor.constants import RESTICKIFY_OP
+from torch_spyre._inductor.constants import SEGMENT_OFFSETS
 from torch_spyre._inductor.op_spec import OpSpec
 
 from .compute_ops import num_bytes
@@ -58,6 +59,11 @@ def restickify_ddl_bridge_skip_reason(
         return "has-padding"
     if sdsc_spec.coordinate_masking:
         return "has-coordinate-masking"
+    if any(
+        _runtime_segment_for_start_address(arg.start_address) is None
+        for arg in sdsc_spec.args
+    ):
+        return "unsupported-runtime-segment"
 
     split_dims = [
         dim for dim, split in sdsc_spec.work_slices.items() if _as_int_or_none(split) != 1
@@ -133,6 +139,8 @@ def generate_restickify_ddl_bridge_sdsc(
     loops = _loop_skeleton(list(reversed(input_layout)))
     input_lx_size = _arg_lx_size(sdsc_spec.args[0], sdsc_spec)
     output_lx_size = _arg_lx_size(sdsc_spec.args[-1], sdsc_spec)
+    input_segment = _required_runtime_segment(sdsc_spec.args[0].start_address)
+    output_segment = _required_runtime_segment(sdsc_spec.args[-1].start_address)
 
     stage0 = _base_stage_param(
         dsc,
@@ -208,6 +216,7 @@ def generate_restickify_ddl_bridge_sdsc(
                     name=input_name,
                     role=input_lds["dsType_"],
                     layout=input_layout,
+                    segment=input_segment,
                     lx_size=input_lx_size,
                     alloc_name=input_alloc,
                 ),
@@ -217,6 +226,7 @@ def generate_restickify_ddl_bridge_sdsc(
                     name=output_name,
                     role=output_lds["dsType_"],
                     layout=output_layout,
+                    segment=output_segment,
                     lx_size=output_lx_size,
                     alloc_name=output_alloc,
                 ),
@@ -294,6 +304,33 @@ def _arg_lx_size(arg: Any, sdsc_spec: SDSCSpec) -> int:
             raise ValueError(f"non-concrete restickify split {dim}")
         volume *= max(1, (dim_size + split - 1) // split)
     return max(1024, volume * num_bytes(arg.data_format))
+
+
+_RUNTIME_SEGMENTS_BY_OFFSET = {
+    SEGMENT_OFFSETS[0]: "output",
+    SEGMENT_OFFSETS[1]: "input",
+    SEGMENT_OFFSETS[2]: "model",
+    SEGMENT_OFFSETS[3]: "stack",
+    SEGMENT_OFFSETS[4]: "heap",
+    SEGMENT_OFFSETS[5]: "reserve1",
+    SEGMENT_OFFSETS[6]: "reserve2",
+}
+
+
+def _runtime_segment_for_start_address(start_address: Any) -> str | None:
+    if isinstance(start_address, Expr) and start_address.free_symbols:
+        return None
+    try:
+        return _RUNTIME_SEGMENTS_BY_OFFSET.get(int(start_address))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _required_runtime_segment(start_address: Any) -> str:
+    segment = _runtime_segment_for_start_address(start_address)
+    if segment is None:
+        raise ValueError(f"unsupported DDL bridge runtime segment {start_address!r}")
+    return segment
 
 
 def _single_root(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -500,6 +537,7 @@ def _lx_labeled_ds(
     name: str,
     role: str,
     layout: list[str],
+    segment: str,
     lx_size: int,
     alloc_name: str,
 ) -> dict[str, Any]:
@@ -509,7 +547,7 @@ def _lx_labeled_ds(
             "ldsIdx_": idx,
             "dsName_": name,
             "dsType_": role,
-            "segment_": "stack",
+            "segment_": segment,
             "isFirstUse_": 0,
             "isExternal_": 0,
             "scale_": [1 for _ in layout],
