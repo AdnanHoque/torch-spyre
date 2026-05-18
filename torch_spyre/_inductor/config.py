@@ -108,8 +108,10 @@ restickify_ddl_bridge_audit_jsonl: str = os.environ.get(
 
 # Prototype-only runtime hook for the DDL bridge. The installed DXP currently
 # runs generic corelet splitting and L3 scheduling before DDC, which rejects the
-# compact restickify DDL input. When this is enabled, Torch-Spyre applies the
-# Stage41 preload shim only for bundles containing only DDL-bridge restickifies.
+# compact restickify DDL input. When this is enabled, Torch-Spyre applies a
+# selective preload shim for bundles containing a DDL-bridge restickify. The
+# shim bypasses those two pre-DDC steps only for the bridge SDSC and delegates
+# normal SDSCs back to Deeptools.
 restickify_ddl_bridge_preddc_shim: bool = (
     os.environ.get("SPYRE_RESTICKIFY_DDL_BRIDGE_PREDDC_SHIM", "1") == "1"
 )

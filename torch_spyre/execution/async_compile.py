@@ -29,21 +29,93 @@ logger = get_inductor_logger("sdsc_compile")
 
 
 _RESTICKIFY_DDL_PREDDC_SHIM_SRC = r'''
+#include <dlfcn.h>
+#include <cstdlib>
 #include <iostream>
-class SuperDsc;
+#include <string>
+
+#include <dsc/superdsc.h>
+#include <dsc/designSpaceConfig.h>
+#include <dsc/dscdefn.h>
+
 class Dsm {
  public:
   static void doCoreletSplitSdsc(SuperDsc* sdsc);
 };
+
 class L3DlOpsScheduler {
  public:
   void run(SuperDsc& sdsc);
 };
-void Dsm::doCoreletSplitSdsc(SuperDsc*) {
-  std::cerr << "[torch-spyre] skipped Dsm::doCoreletSplitSdsc for restickify DDL bridge\n";
+
+static bool has_bridge_name(const SuperDsc* sdsc) {
+  if (!sdsc) {
+    return false;
+  }
+  if (sdsc->name_.find("_ddl_bridge") != std::string::npos) {
+    return true;
+  }
+  for (const auto& dsc : sdsc->dscs_) {
+    if (dsc.name_.find("_ddl_bridge") != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
 }
-void L3DlOpsScheduler::run(SuperDsc&) {
-  std::cerr << "[torch-spyre] skipped L3DlOpsScheduler::run for restickify DDL bridge\n";
+
+static bool is_restickify_ddl_bridge(const SuperDsc* sdsc) {
+  if (!has_bridge_name(sdsc) || sdsc->dscs_.empty()) {
+    return false;
+  }
+  for (const auto& dsc : sdsc->dscs_) {
+    if (dsc.computeOp_.size() != 1) {
+      return false;
+    }
+    const auto op = dsc.computeOp_.front().opFuncName;
+    if (op != OpFuncs::ReStickifyOpHBM && op != OpFuncs::ReStickifyOpLx) {
+      return false;
+    }
+    if (dsc.dataStageParam_.size() < 2) {
+      return false;
+    }
+  }
+  return true;
+}
+
+template <typename Fn>
+static Fn required_next_symbol(const char* name) {
+  dlerror();
+  auto* sym = dlsym(RTLD_NEXT, name);
+  const char* err = dlerror();
+  if (err != nullptr || sym == nullptr) {
+    std::cerr << "[torch-spyre] restickify DDL bridge shim could not find "
+              << name << ": " << (err == nullptr ? "missing symbol" : err)
+              << "\n";
+    std::abort();
+  }
+  return reinterpret_cast<Fn>(sym);
+}
+
+void Dsm::doCoreletSplitSdsc(SuperDsc* sdsc) {
+  if (is_restickify_ddl_bridge(sdsc)) {
+    std::cerr << "[torch-spyre] skipped Dsm::doCoreletSplitSdsc for "
+              << sdsc->name_ << "\n";
+    return;
+  }
+  using Fn = void (*)(SuperDsc*);
+  static Fn next = required_next_symbol<Fn>("_ZN3Dsm18doCoreletSplitSdscEP8SuperDsc");
+  next(sdsc);
+}
+
+void L3DlOpsScheduler::run(SuperDsc& sdsc) {
+  if (is_restickify_ddl_bridge(&sdsc)) {
+    std::cerr << "[torch-spyre] skipped L3DlOpsScheduler::run for "
+              << sdsc.name_ << "\n";
+    return;
+  }
+  using Fn = void (*)(L3DlOpsScheduler*, SuperDsc&);
+  static Fn next = required_next_symbol<Fn>("_ZN16L3DlOpsScheduler3runER8SuperDsc");
+  next(this, sdsc);
 }
 '''
 
@@ -91,7 +163,7 @@ def _dxp_env_for_bundle(output_dir: str) -> dict[str, str] | None:
         return None
     if not _spyre_config.restickify_ddl_bridge_preddc_shim:
         return None
-    if not _bundle_contains_only_restickify_ddl_bridge(output_dir):
+    if not _bundle_contains_restickify_ddl_bridge(output_dir):
         return None
 
     shim = _compile_restickify_ddl_preddc_shim(output_dir)
@@ -101,13 +173,13 @@ def _dxp_env_for_bundle(output_dir: str) -> dict[str, str] | None:
     return env
 
 
-def _bundle_contains_only_restickify_ddl_bridge(output_dir: str) -> bool:
+def _bundle_contains_restickify_ddl_bridge(output_dir: str) -> bool:
     files = [
         name
         for name in os.listdir(output_dir)
         if name.startswith("sdsc_") and name.endswith(".json")
     ]
-    return bool(files) and all("_ddl_bridge" in name for name in files)
+    return any("_ddl_bridge" in name for name in files)
 
 
 def _compile_restickify_ddl_preddc_shim(output_dir: str) -> str:
@@ -120,8 +192,22 @@ def _compile_restickify_ddl_preddc_shim(output_dir: str) -> str:
     cxx = shutil.which("g++") or shutil.which("c++") or shutil.which("clang++")
     if cxx is None:
         raise RuntimeError("restickify DDL bridge shim needs g++, c++, or clang++")
+    deeptools_include = os.path.join(
+        os.environ.get("DEEPTOOLS_INSTALL_DIR", "/opt/ibm/spyre/deeptools"),
+        "include",
+    )
     subprocess.run(
-        [cxx, "-shared", "-fPIC", "-std=c++17", src, "-o", lib],
+        [
+            cxx,
+            "-shared",
+            "-fPIC",
+            "-std=c++17",
+            f"-I{deeptools_include}",
+            src,
+            "-ldl",
+            "-o",
+            lib,
+        ],
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
