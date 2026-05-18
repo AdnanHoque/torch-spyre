@@ -68,18 +68,11 @@ def restickify_ddl_bridge_skip_reason(
     if _as_int_or_none(sdsc_spec.work_slices[split_dim]) != sdsc_spec.num_cores:
         return "split-dim-does-not-cover-all-cores"
 
-    input_layout = sdsc_spec.layouts[sdsc_spec.args[0].layout]
-    output_layout = sdsc_spec.layouts[sdsc_spec.args[-1].layout]
-    input_stick_dim = input_layout.get("stick_dim_order")
-    output_stick_dim = output_layout.get("stick_dim_order")
-
-    # The Stage42 successful contract is the direction where the DDL output is
-    # stickified on the physical owner dimension. The mirrored direction still
-    # compiles through DDC but can fail DCC/DXP register-bound checks for 2048.
-    if output_stick_dim != split_dim:
-        return "output-stick-is-not-split-dim"
-    if input_stick_dim == split_dim:
-        return "input-stick-is-split-dim"
+    # Stage 42 only allowed the direction where the DDL output was stickified on
+    # the split/owner dimension. Stage 49 showed that the mirrored direction also
+    # lowers through DDC/DCC/DXP once restickify.ddl uses the SFP/LX input-port
+    # source spelling. Keep the remaining gates shape/source based and let the
+    # default-off prototype exercise both restickify directions.
 
     per_core_bytes = _arg_bytes_per_core(sdsc_spec)
     if per_core_bytes is None:

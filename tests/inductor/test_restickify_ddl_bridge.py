@@ -148,12 +148,17 @@ def test_restickify_ddl_bridge_generates_compact_lx_contract():
     assert dsc["computeOp_"][0]["outputLabeledDs"] == ["Tensor1-idx1"]
 
 
-def test_restickify_ddl_bridge_skips_mirrored_2048_direction():
+def test_restickify_ddl_bridge_allows_mirrored_2048_direction():
     spec = _spec(input_stick_name="d0", output_stick_name="d1")
+    compute_payload = generate_sdsc(0, spec)
 
     reason = restickify_ddl_bridge_skip_reason(_op_spec_stub(), spec)
+    payload = generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
+    dsc = _dsc(payload)
 
-    assert reason == "output-stick-is-not-split-dim"
+    assert reason is None
+    assert [node["component_"] for node in dsc["scheduleTree_"][:2]] == ["lx", "lx"]
+    assert all(set(lds["memOrg_"]) == {"lx"} for lds in dsc["labeledDs_"])
 
 
 def test_restickify_ddl_bridge_skips_graph_input_sources():
