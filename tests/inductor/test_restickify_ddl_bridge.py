@@ -135,10 +135,10 @@ def test_restickify_ddl_bridge_generates_compact_lx_contract():
 
     assert reason is None
     assert root_name == "0_ReStickifyOpHBM_ddl_bridge"
-    assert root["target_"] == "senulator"
+    assert root.get("target_") is None
     assert root["numWkSlicesPerDim_"] == {"d0": 32, "d1": 1}
     assert root["coreIdToWkSlice_"]["31"] == {"d0": 31, "d1": 0}
-    assert dsc["target_"] == "senulator"
+    assert dsc.get("target_") is None
     assert set(dsc["primaryDsInfo_"]) == {"INPUT", "OUTPUT"}
     assert len(dsc["dataStageParam_"]) == 2
     assert [node["component_"] for node in dsc["scheduleTree_"][:2]] == ["lx", "lx"]
@@ -159,6 +159,27 @@ def test_restickify_ddl_bridge_allows_mirrored_2048_direction():
     assert reason is None
     assert [node["component_"] for node in dsc["scheduleTree_"][:2]] == ["lx", "lx"]
     assert all(set(lds["memOrg_"]) == {"lx"} for lds in dsc["labeledDs_"])
+
+
+def test_restickify_ddl_bridge_preserves_original_labeled_ds_roles():
+    spec = _spec(input_stick_name="d0", output_stick_name="d1")
+    compute_payload = generate_sdsc(0, spec)
+    source_dsc = _dsc(compute_payload)
+    source_dsc["primaryDsInfo_"]["KERNEL"] = source_dsc["primaryDsInfo_"].pop(
+        "OUTPUT"
+    )
+    source_dsc["primaryDsInfo_"]["OUTPUT"] = source_dsc["primaryDsInfo_"].pop("INPUT")
+    for lds in source_dsc["labeledDs_"]:
+        if lds["ldsIdx_"] == 0:
+            lds["dsType_"] = "OUTPUT"
+        elif lds["ldsIdx_"] == 1:
+            lds["dsType_"] = "KERNEL"
+
+    payload = generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
+    dsc = _dsc(payload)
+
+    assert set(dsc["primaryDsInfo_"]) == {"OUTPUT", "KERNEL"}
+    assert [lds["dsType_"] for lds in dsc["labeledDs_"]] == ["OUTPUT", "KERNEL"]
 
 
 def test_restickify_ddl_bridge_skips_graph_input_sources():

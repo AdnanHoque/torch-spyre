@@ -162,7 +162,6 @@ def generate_restickify_ddl_bridge_sdsc(
             "opFuncsUsed_": [],
             "ldsShareInfo_": [],
             "prodConsList": {},
-            "target_": "senulator",
             "dimToSymbolMappingOpcodeCorrection_": {},
             "inputSymbolsAndTags_": {},
             "symbolDefinitions_": {},
@@ -197,14 +196,17 @@ def generate_restickify_ddl_bridge_sdsc(
             "gtrIdsUsed_": [],
             "l0TetheredMode_": "none",
             "scheduleTreeHeadDenId_": 0,
-            "primaryDsInfo_": {"INPUT": input_primary, "OUTPUT": output_primary},
+            "primaryDsInfo_": {
+                input_lds["dsType_"]: input_primary,
+                output_lds["dsType_"]: output_primary,
+            },
             "pdsRelation_": {},
             "labeledDs_": [
                 _lx_labeled_ds(
                     input_lds,
                     idx=0,
                     name=input_name,
-                    role="INPUT",
+                    role=input_lds["dsType_"],
                     layout=input_layout,
                     lx_size=input_lx_size,
                     alloc_name=input_alloc,
@@ -213,13 +215,12 @@ def generate_restickify_ddl_bridge_sdsc(
                     output_lds,
                     idx=1,
                     name=output_name,
-                    role="OUTPUT",
+                    role=output_lds["dsType_"],
                     layout=output_layout,
                     lx_size=output_lx_size,
                     alloc_name=output_alloc,
                 ),
             ],
-            "target_": "senulator",
         }
     )
     out_dsc["scheduleTree_"] = [
