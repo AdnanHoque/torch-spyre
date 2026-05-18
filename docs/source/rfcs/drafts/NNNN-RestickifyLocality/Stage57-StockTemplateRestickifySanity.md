@@ -114,3 +114,53 @@ templates:
 The acceptance check is unchanged: restickify count and bytes moved should stay
 the same, while eligible in-graph byte-hops should drop to zero or near-zero
 under Stage 3B.
+
+## Guardrail Result
+
+The stock-template guardrail passed.
+
+```text
+case: adds_then_matmul
+size: 2048
+```
+
+| mode | restickifies | bytes moved | byte-hops | avg hops | max hops | launch/sync events |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| baseline | 2 | 16,777,216 | 67,108,864 | 4.0 | 16 | 8 |
+| Stage 3B | 2 | 16,777,216 | 0 | 0.0 | 0 | 8 |
+
+The eligible in-graph row is the same producer/restickify edge in both runs:
+
+```text
+producer:    buf1
+restickify:  buf4
+consumer:    buf2
+consumer kind: reduction:batchmatmul
+source kind: in_graph_computed
+bytes moved: 8,388,608
+```
+
+Baseline ownership:
+
+```text
+producer splits:    d1:32
+restickify splits:  d0:32
+byte-hops:          67,108,864
+avg/max hops:       8.0 / 16
+```
+
+Stage 3B ownership:
+
+```text
+producer splits:    d1:32
+restickify splits:  d1:32
+byte-hops:          0
+avg/max hops:       0.0 / 0
+```
+
+The second restickify row is graph-input/weight sourced in both modes and stays
+outside the Stage 3B optimization scope.
+
+This revalidates the narrow Stage 3B claim under stock Deeptools templates:
+Stage 3B changes ownership mapping for an eligible in-graph restickify without
+changing restickify count, bytes moved, placement, or successful retirement.
