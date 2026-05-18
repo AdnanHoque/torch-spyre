@@ -35,6 +35,7 @@ import os
 import statistics
 import time
 import traceback
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -845,6 +846,85 @@ def _sync() -> None:
         cuda.synchronize()
 
 
+@contextmanager
+def _kernel_launch_debug(
+    *,
+    sync_after_kernel: bool,
+    log_path: Path | None,
+):
+    if not sync_after_kernel and log_path is None:
+        yield
+        return
+
+    from torch_spyre.execution import kernel_runner
+
+    original_run = kernel_runner.SpyreSDSCKernelRunner.run
+    event_index = 0
+    handle = None
+    if log_path is not None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = log_path.open("w", encoding="utf-8")
+
+    def emit(event: dict[str, Any]) -> None:
+        nonlocal event_index
+        event_index += 1
+        event = {
+            "event_index": event_index,
+            "timestamp_s": time.time(),
+            **event,
+        }
+        text = json.dumps(event, sort_keys=True)
+        if handle is not None:
+            handle.write(text + "\n")
+            handle.flush()
+        else:
+            print(text, flush=True)
+
+    def patched_run(self, *args, **kw_args):  # noqa: ANN001
+        files: list[str] = []
+        try:
+            files = sorted(
+                name
+                for name in os.listdir(self.code_dir)
+                if name.startswith("sdsc_") and name.endswith(".json")
+            )
+        except Exception:
+            files = []
+        base = {
+            "kernel_name": self.kernel_name,
+            "code_dir": self.code_dir,
+            "sdsc_files": files,
+            "arg_count": len(args),
+        }
+        emit({"phase": "before_launch", **base})
+        try:
+            result = original_run(self, *args, **kw_args)
+        except BaseException as exc:
+            emit(
+                {
+                    "phase": "launch_exception",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    **base,
+                }
+            )
+            raise
+        emit({"phase": "after_launch", **base})
+        if sync_after_kernel:
+            emit({"phase": "before_sync", **base})
+            _sync()
+            emit({"phase": "after_sync", **base})
+        return result
+
+    try:
+        kernel_runner.SpyreSDSCKernelRunner.run = patched_run
+        yield
+    finally:
+        kernel_runner.SpyreSDSCKernelRunner.run = original_run
+        if handle is not None:
+            handle.close()
+
+
 def _reset_compile_caches() -> None:
     dynamo = getattr(torch, "_dynamo", None)
     if dynamo is not None and hasattr(dynamo, "reset"):
@@ -1143,6 +1223,8 @@ def _run_case(
     torch_profiler_dir: Path | None = None,
     torch_profiler_memory: bool = False,
     torch_profiler_with_stack: bool = False,
+    sync_after_kernel: bool = False,
+    kernel_launch_log_path: Path | None = None,
 ) -> dict[str, Any]:
     args, shape_label = case.input_builder(size, dtype)
     dev_args = tuple(arg.to(device) if hasattr(arg, "to") else arg for arg in args)
@@ -1185,41 +1267,51 @@ def _run_case(
             spyre_config = None
 
     try:
-        _reset_compile_caches()
-        compiled = torch.compile(case.fn, backend=backend, dynamic=False)
-        start = time.perf_counter()
-        result = compiled(*dev_args)
-        _sync()
-        compile_run_ms = (time.perf_counter() - start) * 1000.0
+        with _kernel_launch_debug(
+            sync_after_kernel=sync_after_kernel,
+            log_path=kernel_launch_log_path,
+        ):
+            _reset_compile_caches()
+            compiled = torch.compile(case.fn, backend=backend, dynamic=False)
+            start = time.perf_counter()
+            result = compiled(*dev_args)
+            _sync()
+            compile_run_ms = (time.perf_counter() - start) * 1000.0
 
-        plan = dict(insert_restickify.restickify_plan)
-        entries, total_elements, total_bytes = _summarize_plan(plan)
-        ring_summary = (
-            _read_ring_telemetry(ring_telemetry_path)
-            if ring_telemetry_path is not None
-            else {}
-        )
-
-        timing = {}
-        if do_timing:
-            timing = _time_compiled(compiled, dev_args, warmup, iters)
-
-        profiler_summary = {}
-        if torch_profiler_dir is not None:
-            profiler_summary = _profile_compiled(
-                compiled,
-                dev_args,
-                warmup,
-                iters,
-                torch_profiler_dir,
-                profile_memory=torch_profiler_memory,
-                with_stack=torch_profiler_with_stack,
+            plan = dict(insert_restickify.restickify_plan)
+            entries, total_elements, total_bytes = _summarize_plan(plan)
+            ring_summary = (
+                _read_ring_telemetry(ring_telemetry_path)
+                if ring_telemetry_path is not None
+                else {}
             )
 
-        if not skip_correctness:
-            expected = case.fn(*args)
-            actual = _tensor_to_cpu(result)
-            _assert_close(actual, expected, atol=atol, rtol=rtol)
+            timing = {}
+            if do_timing:
+                timing = _time_compiled(compiled, dev_args, warmup, iters)
+
+            profiler_summary = {}
+            if torch_profiler_dir is not None:
+                profiler_summary = _profile_compiled(
+                    compiled,
+                    dev_args,
+                    warmup,
+                    iters,
+                    torch_profiler_dir,
+                    profile_memory=torch_profiler_memory,
+                    with_stack=torch_profiler_with_stack,
+                )
+
+            if not skip_correctness:
+                expected = case.fn(*args)
+                actual = _tensor_to_cpu(result)
+                _assert_close(actual, expected, atol=atol, rtol=rtol)
+
+        kernel_launch_event_count = 0
+        if kernel_launch_log_path is not None and kernel_launch_log_path.exists():
+            kernel_launch_event_count = sum(
+                1 for line in kernel_launch_log_path.read_text().splitlines() if line
+            )
 
         return {
             "status": "ok",
@@ -1236,6 +1328,9 @@ def _run_case(
             "total_elements": total_elements,
             "total_bytes": total_bytes,
             "entries": entries,
+            "sync_after_kernel": sync_after_kernel,
+            "kernel_launch_log": str(kernel_launch_log_path or ""),
+            "kernel_launch_event_count": kernel_launch_event_count,
             **ring_summary,
             **timing,
             **profiler_summary,
@@ -1285,6 +1380,9 @@ def _error_row(case: ProbeCase, size: int, dtype: Any, exc: BaseException) -> di
         "ring_exact_rows": 0,
         "ring_skipped_rows": 0,
         "ring_entries": [],
+        "sync_after_kernel": False,
+        "kernel_launch_log": "",
+        "kernel_launch_event_count": 0,
         "profiler_event_count": 0,
         "profiler_device_event_count": 0,
         "profiler_total_device_ms": 0.0,
@@ -1324,6 +1422,9 @@ def _csv_row(row: dict[str, Any]) -> dict[str, Any]:
         "ring_source_kinds": json.dumps(row.get("ring_source_kinds", {}), sort_keys=True),
         "ring_exact_rows": row.get("ring_exact_rows", 0),
         "ring_skipped_rows": row.get("ring_skipped_rows", 0),
+        "sync_after_kernel": row.get("sync_after_kernel", False),
+        "kernel_launch_log": row.get("kernel_launch_log", ""),
+        "kernel_launch_event_count": row.get("kernel_launch_event_count", 0),
         "compile_run_ms": f"{row.get('compile_run_ms', 0.0):.3f}" if row.get("compile_run_ms") is not None else "",
         "median_ms": f"{row.get('median_ms', 0.0):.3f}" if row.get("median_ms") is not None else "",
         "p10_ms": f"{row.get('p10_ms', 0.0):.3f}" if row.get("p10_ms") is not None else "",
@@ -1394,6 +1495,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Capture Python stacks for --torch-profiler.",
     )
+    parser.add_argument(
+        "--sync-after-kernel",
+        action="store_true",
+        help="Synchronize after each generated Spyre SDSC bundle launch.",
+    )
+    parser.add_argument(
+        "--kernel-launch-log",
+        action="store_true",
+        help="Write JSONL before/after events for each generated Spyre SDSC bundle launch.",
+    )
     parser.add_argument("--atol", type=float, default=0.1, help="Correctness absolute tolerance.")
     parser.add_argument("--rtol", type=float, default=0.1, help="Correctness relative tolerance.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
@@ -1439,6 +1550,11 @@ def main() -> int:
                     if args.torch_profiler
                     else None
                 )
+                kernel_launch_log = (
+                    output_dir / "kernel_launches" / f"{case.name}_{size}.jsonl"
+                    if args.sync_after_kernel or args.kernel_launch_log
+                    else None
+                )
                 try:
                     row = _run_case(
                         case=case,
@@ -1456,6 +1572,8 @@ def main() -> int:
                         torch_profiler_dir=torch_profiler_dir,
                         torch_profiler_memory=args.torch_profiler_memory,
                         torch_profiler_with_stack=args.torch_profiler_with_stack,
+                        sync_after_kernel=args.sync_after_kernel,
+                        kernel_launch_log_path=kernel_launch_log,
                     )
                 except Exception as exc:
                     row = _error_row(case, size, dtype, exc)
