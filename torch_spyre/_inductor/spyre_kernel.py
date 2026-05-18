@@ -552,6 +552,18 @@ class SpyreKernel(Kernel[CSEVariable]):
             else:
                 op = IDENTITY_OP
             op_spec = self.create_op_spec(op, False, args, op_info)
+            # Inject mb=1 into the iteration space for ring-aware restickify so
+            # the matmul-shape SDSC has (mb, out, in) dims as the bmm template
+            # requires. The 2-D restickify input has no natural mb dim; we add
+            # a trivial size-1 mb dim conceptually.
+            if op == RING_RESTICKIFY_OP and not any(
+                str(k) == "mb" for k in op_spec.iteration_space
+            ):
+                import dataclasses as _dc
+                mb_sym = sympy.Symbol("mb")
+                new_it = {mb_sym: (1, 1)}
+                new_it.update(op_spec.iteration_space)
+                op_spec = _dc.replace(op_spec, iteration_space=new_it)
             self.op_specs.append(op_spec)
         else:
             raise Unsupported(f"store value of unexpected type {type(value)}")
