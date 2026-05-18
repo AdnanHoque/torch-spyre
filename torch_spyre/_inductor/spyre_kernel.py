@@ -530,14 +530,13 @@ class SpyreKernel(Kernel[CSEVariable]):
                     from .op_spec import TensorArg
                     input_arg = args[0]
                     output_arg = args[1]
-                    # Synthetic kernel arg — give it an allocation dict so the
-                    # downstream `start_address` resolution doesn't trip on
-                    # None. Aliasing to LX offset 0 for now (wrong data, just
-                    # gets compilation past the bundle.json generation step).
-                    # Real identity-kernel materialization is the next iteration;
-                    # see INDUCTOR_REFACTOR_SPEC.md.
                     kernel_alloc = input_arg.allocation if input_arg.allocation \
                         else {"lx": 0}
+                    # Synthetic kernel arg. Currently aliases input layout —
+                    # downstream _get_layout_label labels it INPUT (matches
+                    # input). Need to give it a distinct layout for correct
+                    # dsType (KERNEL). Layer 3 of the spec; see
+                    # INDUCTOR_REFACTOR_SPEC.md.
                     synthetic_kernel = TensorArg(
                         is_input=True,
                         arg_index=-1,
