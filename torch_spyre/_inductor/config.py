@@ -70,6 +70,14 @@ restickify_locality_assert: bool = (
     os.environ.get("SPYRE_RESTICKIFY_LOCALITY_ASSERT", "0") == "1"
 )
 
+# Default-off diagnostic prototype for emitting restickify-like movement as a
+# Deeptools data-op DSC (`datadscs_`) instead of the normal compute-op SDSC.
+# This is not used by production lowering; it exists to probe STCDPOpLx /
+# ReStickifyOpLx / ReStickifyOpHBM contracts in isolation.
+restickify_lx_dataop: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_LX_DATAOP", "0") == "1"
+)
+
 # Default-off producer-consumer ownership telemetry. This generalizes the
 # restickify byte-hop estimator to all exact in-graph tensor edges, without
 # changing core division or codegen behavior.
