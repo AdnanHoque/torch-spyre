@@ -42,6 +42,12 @@ For each mode the probe can emit:
 - `ReStickifyOpLx`: restickify-specific LX candidate.
 - `ReStickifyOpHBM`: HBM control path using the same data-op container.
 
+`STCDPOpLx` has a stricter backend contract than restickify: input and output
+stick definitions must match. The probe therefore has a `--stcdp-same-stick`
+mode that emits `STCDPOpLx` as a same-stick LX-to-LX movement control. That
+control is not a restickify, but it is useful for proving that Deeptools can
+lower cross-core LX-resident movement without an HBM placement.
+
 ## Commands
 
 Generate standalone JSON:
@@ -63,6 +69,19 @@ python tools/restickify_lx_dataop_probe.py \
   --num-cores 32 \
   --run-dcg \
   --output-dir /tmp/restickify-lx-dataop-probe
+```
+
+Generate the same-stick STCDP LX-to-LX control:
+
+```sh
+SPYRE_RESTICKIFY_LX_DATAOP=1 \
+python tools/restickify_lx_dataop_probe.py \
+  --size 2048 \
+  --num-cores 32 \
+  --op STCDPOpLx \
+  --stcdp-same-stick \
+  --run-dcg \
+  --output-dir /tmp/restickify-lx-stcdp-control
 ```
 
 For data-op-only artifacts, `dcg_standalone -initSdsc` is the useful contract

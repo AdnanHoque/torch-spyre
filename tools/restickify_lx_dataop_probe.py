@@ -29,7 +29,12 @@ def _core_mapping(dims: list[Symbol], split_dim: Symbol, num_cores: int):
     }
 
 
-def _synthetic_spec(size: int, num_cores: int, output_split_dim: Symbol) -> SDSCSpec:
+def _synthetic_spec(
+    size: int,
+    num_cores: int,
+    output_split_dim: Symbol,
+    output_stick_dim: Symbol,
+) -> SDSCSpec:
     # Data-op import in Deeptools expects canonical DSC dimension labels.
     # `mb_` acts as logical d0 and `out_` acts as logical d1 for this probe.
     d0 = Symbol("mb_")
@@ -79,7 +84,7 @@ def _synthetic_spec(size: int, num_cores: int, output_split_dim: Symbol) -> SDSC
             },
             "OUTPUT": {
                 "dim_order": [d1, d0],
-                "stick_dim_order": d0,
+                "stick_dim_order": output_stick_dim,
                 "stick_size": 64,
             },
         },
@@ -153,6 +158,15 @@ def main() -> int:
     parser.add_argument("--run-scheduler", action="store_true")
     parser.add_argument("--scheduler", default="L3DlOpsScheduler_standalone")
     parser.add_argument(
+        "--stcdp-same-stick",
+        action="store_true",
+        help=(
+            "Emit STCDPOpLx as a same-stick LX-LX movement control. "
+            "Without this, STCDPOpLx is expected to reject restickify-shaped "
+            "input/output stick changes."
+        ),
+    )
+    parser.add_argument(
         "--run-dcg",
         action="store_true",
         help="Run dcg_standalone -initSdsc on each generated data-op artifact.",
@@ -176,11 +190,21 @@ def main() -> int:
     rows = []
     for mode in modes:
         output_split_dim = d0 if mode == "baseline" else d1
-        spec = _synthetic_spec(args.size, args.num_cores, output_split_dim)
         output_splits = {d0: 1, d1: 1}
         output_splits[output_split_dim] = args.num_cores
         output_mapping = _core_mapping([d0, d1], output_split_dim, args.num_cores)
         for idx, op_name in enumerate(ops):
+            output_stick_dim = (
+                d1
+                if op_name == "STCDPOpLx" and args.stcdp_same_stick
+                else d0
+            )
+            spec = _synthetic_spec(
+                args.size,
+                args.num_cores,
+                output_split_dim,
+                output_stick_dim,
+            )
             payload = generate_restickify_dataop_sdsc_from_spec(
                 idx,
                 spec,
