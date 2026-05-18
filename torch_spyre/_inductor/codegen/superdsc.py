@@ -13,7 +13,9 @@
 # limitations under the License.
 
 import dataclasses
+import json
 import math
+import os
 from typing import Any
 
 from sympy import Integer, Symbol, Expr, Mod, floor
@@ -29,6 +31,7 @@ from torch_spyre._inductor.constants import (
     MATMUL_LAYOUT_LABELS,
     SEGMENT_OFFSETS,
     TOPK_OPS,
+    RESTICKIFY_OP,
 )
 from torch_spyre._inductor import config as _spyre_config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
@@ -577,4 +580,112 @@ def parse_op_spec(op_spec: OpSpec) -> SDSCSpec:
 def compile_op_spec(idx: int, op_spec: OpSpec) -> Any:
     sdsc_spec = parse_op_spec(op_spec)
     logger.debug("%s", sdsc_spec)
+    lx_dataop = _compile_restickify_lx_dataop_if_eligible(idx, op_spec, sdsc_spec)
+    if lx_dataop is not None:
+        return lx_dataop
     return generate_sdsc(idx, sdsc_spec)
+
+
+def _compile_restickify_lx_dataop_if_eligible(
+    idx: int,
+    op_spec: OpSpec,
+    sdsc_spec: SDSCSpec,
+) -> Any | None:
+    if op_spec.op != RESTICKIFY_OP:
+        return None
+    if not _spyre_config.restickify_lx_dataop_e2e:
+        return None
+
+    reason = _restickify_lx_dataop_skip_reason(op_spec, sdsc_spec)
+    if reason is not None:
+        _append_restickify_lx_dataop_audit(
+            idx,
+            op_spec,
+            sdsc_spec,
+            status="skipped",
+            reason=reason,
+        )
+        logger.info(
+            "skip ReStickifyOpLx data-op e2e for SDSC %d: %s",
+            idx,
+            reason,
+        )
+        return None
+
+    from .restickify_lx_dataop import generate_restickify_dataop_sdsc_from_spec
+
+    payload = generate_restickify_dataop_sdsc_from_spec(
+        idx,
+        sdsc_spec,
+        op_name="ReStickifyOpLx",
+    )
+    _append_restickify_lx_dataop_audit(
+        idx,
+        op_spec,
+        sdsc_spec,
+        status="emitted",
+        reason=None,
+    )
+    logger.info("emitted ReStickifyOpLx data-op e2e for SDSC %d", idx)
+    return payload
+
+
+def _restickify_lx_dataop_skip_reason(
+    op_spec: OpSpec,
+    sdsc_spec: SDSCSpec,
+) -> str | None:
+    if not _spyre_config.restickify_locality_assert:
+        return "locality-assert-disabled"
+    if not op_spec.op_info or CORE_MAPPING_OVERRIDE_OP_INFO_KEY not in op_spec.op_info:
+        return "missing-certified-core-mapping-override"
+    if len(sdsc_spec.args) != 2 or sdsc_spec.num_inputs != 1:
+        return "unsupported-restickify-arity"
+    for idx, arg in enumerate(sdsc_spec.args):
+        if not arg.allocation or "lx" not in arg.allocation:
+            return f"arg{idx}-not-lx-resident"
+    return None
+
+
+def _append_restickify_lx_dataop_audit(
+    idx: int,
+    op_spec: OpSpec,
+    sdsc_spec: SDSCSpec,
+    *,
+    status: str,
+    reason: str | None,
+) -> None:
+    path = _spyre_config.restickify_lx_dataop_audit_jsonl
+    if not path:
+        return
+    row = {
+        "sdsc_index": idx,
+        "status": status,
+        "reason": reason,
+        "op": op_spec.op,
+        "work_slices": {
+            str(dim): int(split) for dim, split in sdsc_spec.work_slices.items()
+        },
+        "has_core_mapping_override": bool(
+            op_spec.op_info
+            and CORE_MAPPING_OVERRIDE_OP_INFO_KEY in op_spec.op_info
+        ),
+        "arg_allocations": [
+            dict(arg.allocation) if arg.allocation else {}
+            for arg in sdsc_spec.args
+        ],
+        "arg_layouts": [
+            {
+                "layout": arg.layout,
+                "dim_order": [
+                    str(dim) for dim in sdsc_spec.layouts[arg.layout]["dim_order"]
+                ],
+                "stick_dim_order": str(
+                    sdsc_spec.layouts[arg.layout]["stick_dim_order"]
+                ),
+            }
+            for arg in sdsc_spec.args
+        ],
+    }
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row, sort_keys=True) + "\n")

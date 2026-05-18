@@ -21,7 +21,9 @@ lx_planning: bool = os.environ.get("LX_PLANNING", "0") == "1"
 
 global_stick_optimizer: bool = os.environ.get("GLOBAL_STICK_OPTIMIZER", "1") == "1"
 
-allow_all_ops_in_lx_planning: bool = False
+allow_all_ops_in_lx_planning: bool = (
+    os.environ.get("SPYRE_ALLOW_ALL_OPS_IN_LX_PLANNING", "0") == "1"
+)
 
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
@@ -76,6 +78,19 @@ restickify_locality_assert: bool = (
 # ReStickifyOpLx / ReStickifyOpHBM contracts in isolation.
 restickify_lx_dataop: bool = (
     os.environ.get("SPYRE_RESTICKIFY_LX_DATAOP", "0") == "1"
+)
+
+# Default-off diagnostic e2e lowering prototype. When enabled, bundle emission
+# may replace a certified local, LX-resident `ReStickifyOpHBM` compute SDSC with
+# a `ReStickifyOpLx` data-op SDSC. This is deliberately narrower than the
+# standalone probe and skips anything HBM-backed or uncertified.
+restickify_lx_dataop_e2e: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_LX_DATAOP_E2E", "0") == "1"
+)
+
+restickify_lx_dataop_audit_jsonl: str = os.environ.get(
+    "SPYRE_RESTICKIFY_LX_DATAOP_AUDIT_JSONL",
+    "",
 )
 
 # Default-off producer-consumer ownership telemetry. This generalizes the

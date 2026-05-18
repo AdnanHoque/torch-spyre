@@ -40,6 +40,9 @@ SUPPORTED_RESTICKIFY_DATA_OPS = frozenset(
 )
 
 _LX_SIZE_BYTES = 2 * 1024 * 1024
+_DEEPTOOLS_DATAOP_DIM_LABELS = frozenset(
+    {"mb", "out", "in", "x", "y", "i", "j", "ki", "kj"}
+)
 
 
 def generate_restickify_dataop_sdsc(
@@ -285,14 +288,17 @@ def _piece_info(
 def _hbm_piece_offset(starts: Mapping[str, int], arg: SDSCArgs) -> int:
     offset = 0
     for dim, stride in arg.strides.items():
-        offset += starts.get(str(dim), 0) * _as_int(stride)
+        offset += starts.get(_dataop_dim_name(str(dim)), 0) * _as_int(stride)
     return offset * num_bytes(arg.data_format)
 
 
 def _core_to_work_slice(sdsc_spec: SDSCSpec) -> dict[str, dict[str, int]]:
     if sdsc_spec.core_id_to_work_slice_override is not None:
         return {
-            str(core_id): {str(dim): int(value) for dim, value in per_dim.items()}
+            str(core_id): {
+                _dataop_dim_name(str(dim)): int(value)
+                for dim, value in per_dim.items()
+            }
             for core_id, per_dim in sdsc_spec.core_id_to_work_slice_override.items()
         }
 
@@ -300,7 +306,7 @@ def _core_to_work_slice(sdsc_spec: SDSCSpec) -> dict[str, dict[str, int]]:
     core_id_sym = Symbol("core_id")
     for core_id in range(sdsc_spec.num_cores):
         result[str(core_id)] = {
-            str(dim): int(expr.subs({core_id_sym: core_id}))
+            _dataop_dim_name(str(dim)): int(expr.subs({core_id_sym: core_id}))
             if isinstance(expr, Expr)
             else int(expr)
             for dim, expr in sdsc_spec.core_id_to_work_slice.items()
@@ -312,13 +318,19 @@ def _normalize_core_to_work_slice(
     mapping: Mapping[str, Mapping[str, int]],
 ) -> dict[str, dict[str, int]]:
     return {
-        str(core_id): {str(dim): int(value) for dim, value in per_dim.items()}
+        str(core_id): {
+            _dataop_dim_name(str(dim)): int(value)
+            for dim, value in per_dim.items()
+        }
         for core_id, per_dim in mapping.items()
     }
 
 
 def _normalize_work_slices(work_slices: Mapping[Any, Any]) -> dict[str, int]:
-    return {str(dim): _as_int(split) for dim, split in work_slices.items()}
+    return {
+        _dataop_dim_name(str(dim)): _as_int(split)
+        for dim, split in work_slices.items()
+    }
 
 
 def _dim_pool(sdsc_spec: SDSCSpec) -> list[str]:
@@ -326,12 +338,13 @@ def _dim_pool(sdsc_spec: SDSCSpec) -> list[str]:
     for layout_info in sdsc_spec.layouts.values():
         dims.update(_layout_dim_names(layout_info))
         dims.update(_stick_dim_names(layout_info))
-    return sorted(dims)
+    return sorted(_dataop_dim_name(dim) for dim in dims)
 
 
 def _dim_size_map(sdsc_spec: SDSCSpec) -> dict[str, int]:
     return {
-        str(dim): _as_int(size) for dim, size in sdsc_spec.iteration_space.items()
+        _dataop_dim_name(str(dim)): _as_int(size)
+        for dim, size in sdsc_spec.iteration_space.items()
     }
 
 
@@ -345,7 +358,7 @@ def _valid_gap(sizes: Mapping[str, int]) -> dict[str, list[list[int]]]:
 
 
 def _layout_dim_names(layout_info: Mapping[str, Any]) -> list[str]:
-    return [str(dim) for dim in layout_info["dim_order"]]
+    return [_dataop_dim_name(str(dim)) for dim in layout_info["dim_order"]]
 
 
 def _stick_dim_names(layout_info: Mapping[str, Any]) -> list[str]:
@@ -353,8 +366,16 @@ def _stick_dim_names(layout_info: Mapping[str, Any]) -> list[str]:
     if raw is None:
         return []
     if isinstance(raw, (list, tuple)):
-        return [str(dim) for dim in raw]
-    return [str(raw)]
+        return [_dataop_dim_name(str(dim)) for dim in raw]
+    return [_dataop_dim_name(str(raw))]
+
+
+def _dataop_dim_name(dim: str) -> str:
+    if dim.endswith("_"):
+        return dim
+    if dim in _DEEPTOOLS_DATAOP_DIM_LABELS:
+        return f"{dim}_"
+    return dim
 
 
 def _stick_size_map(layout_info: Mapping[str, Any]) -> dict[str, int]:
