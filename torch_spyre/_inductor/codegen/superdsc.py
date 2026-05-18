@@ -238,7 +238,10 @@ def _get_padded_iteration_space(
 
 
 def _is_matmul(op: str) -> bool:
-    return op in ("matmul", "batchmatmul")
+    # STCDPOpLx (ring-aware restickify) routes through the matmul-shape
+    # Path B template (cross_core_reduce_bmm.ddl), so it needs matmul-shape
+    # SDSC emission.
+    return op in ("matmul", "batchmatmul", "STCDPOpLx")
 
 
 def _is_topk(op: str) -> bool:

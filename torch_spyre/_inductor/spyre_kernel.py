@@ -522,6 +522,31 @@ class SpyreKernel(Kernel[CSEVariable]):
                 verdict = getattr(buf, "_spyre_restickify_verdict", None)
                 if config.emit_stcdp_oplx and verdict is RestickifyVerdict.FUNDAMENTAL:
                     op = RING_RESTICKIFY_OP
+                    # Path B requires matmul-shape SDSC (3 args: input, kernel,
+                    # output). Inject a synthetic kernel TensorArg that aliases
+                    # the input — this makes the matmul lowering produce a 3-tensor
+                    # SDSC. Numerics will be wrong until the kernel is materialized
+                    # as identity; see INDUCTOR_REFACTOR_SPEC.md for follow-up.
+                    from .op_spec import TensorArg
+                    input_arg = args[0]
+                    output_arg = args[1]
+                    # Synthetic kernel arg — give it an allocation dict so the
+                    # downstream `start_address` resolution doesn't trip on
+                    # None. Aliasing to LX offset 0 for now (wrong data, just
+                    # gets compilation past the bundle.json generation step).
+                    # Real identity-kernel materialization is the next iteration;
+                    # see INDUCTOR_REFACTOR_SPEC.md.
+                    kernel_alloc = input_arg.allocation if input_arg.allocation \
+                        else {"lx": 0}
+                    synthetic_kernel = TensorArg(
+                        is_input=True,
+                        arg_index=-1,
+                        device_dtype=input_arg.device_dtype,
+                        device_size=list(input_arg.device_size),
+                        device_coordinates=list(input_arg.device_coordinates),
+                        allocation=kernel_alloc,
+                    )
+                    args = [input_arg, synthetic_kernel, output_arg]
                 else:
                     op = RESTICKIFY_OP
             else:
