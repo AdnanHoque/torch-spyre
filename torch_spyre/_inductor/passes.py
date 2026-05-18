@@ -44,6 +44,7 @@ from .optimize_restickify import optimize_restickify_locations
 from .insert_restickify import insert_restickify, finalize_layouts
 from .work_division import span_reduction, work_distribution, k_fast_division
 from .mapping_alignment import align_restickify_core_mappings
+from .core_continuity_alignment import align_core_continuity_mappings
 from .restickify_telemetry import restickify_ring_telemetry
 from .core_continuity_telemetry import core_continuity_telemetry
 from .input_fanout_telemetry import input_fanout_telemetry
@@ -238,6 +239,7 @@ class CustomPreSchedulingPasses(CustomGraphPass):
         )
         work_distribution(operations, k_fast_ops)
         align_restickify_core_mappings(operations, k_fast_ops)
+        align_core_continuity_mappings(operations, k_fast_ops)
         restickify_ring_telemetry(operations, k_fast_ops)
         core_continuity_telemetry(operations, k_fast_ops)
         input_fanout_telemetry(operations)
@@ -257,6 +259,7 @@ class CustomPreSchedulingPasses(CustomGraphPass):
             inspect.getfile(work_distribution),
             inspect.getfile(k_fast_division),
             inspect.getfile(align_restickify_core_mappings),
+            inspect.getfile(align_core_continuity_mappings),
             inspect.getfile(restickify_ring_telemetry),
             inspect.getfile(core_continuity_telemetry),
             inspect.getfile(input_fanout_telemetry),

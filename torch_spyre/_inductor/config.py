@@ -94,4 +94,11 @@ input_fanout_telemetry_jsonl: str = os.environ.get(
     "",
 )
 
+# Default-off prototype for preserving producer-consumer core ownership across
+# exact in-graph pointwise edges. This is intentionally narrower than the
+# telemetry and does not change matmul/reduction distribution.
+align_core_division_continuity: bool = (
+    os.environ.get("SPYRE_ALIGN_CORE_DIVISION_CONTINUITY", "0") == "1"
+)
+
 install_config_module(sys.modules[__name__])

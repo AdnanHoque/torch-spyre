@@ -43,6 +43,8 @@ from .restickify_ring import (
 
 logger = get_inductor_logger("core_continuity_telemetry")
 
+CORE_CONTINUITY_ALIGNMENT_ATTR = "_spyre_core_continuity_alignment"
+
 
 @dataclasses.dataclass(frozen=True)
 class CoreContinuityEstimate:
@@ -60,9 +62,14 @@ class CoreContinuityEstimate:
     symbol_map: dict[str, str]
     context: dict[str, Any] = dataclasses.field(default_factory=dict)
     skip_reason: str | None = None
+    continuity_aligned: bool = False
+    continuity_assertion: str = "not-run"
+    continuity_skip_reason: str | None = None
+    baseline_byte_hops: int | None = None
+    aligned_byte_hops: int | None = None
 
 
-def _edge_symbol_map(
+def edge_symbol_map(
     producer: ComputedBuffer,
     consumer: ComputedBuffer,
     read_dep: MemoryDep,
@@ -118,6 +125,20 @@ def _edge_symbol_map(
     return symbol_map, None
 
 
+_edge_symbol_map = edge_symbol_map
+
+
+def _alignment_payload(
+    consumer: ComputedBuffer,
+    source_name: str,
+) -> dict[str, Any]:
+    raw = getattr(consumer, CORE_CONTINUITY_ALIGNMENT_ATTR, None)
+    if not isinstance(raw, dict):
+        return {}
+    payload = raw.get(source_name)
+    return payload if isinstance(payload, dict) else {}
+
+
 def estimate_core_continuity_edge(
     producer: ComputedBuffer,
     consumer: ComputedBuffer,
@@ -133,8 +154,9 @@ def estimate_core_continuity_edge(
     consumer_splits = decode_op_splits(consumer)
     bytes_moved = _bytes_moved_or_zero(producer)
     context = _telemetry_context()
+    alignment_payload = _alignment_payload(consumer, source_name)
 
-    symbol_map, reason = _edge_symbol_map(producer, consumer, read_dep)
+    symbol_map, reason = edge_symbol_map(producer, consumer, read_dep)
     if reason is not None:
         return CoreContinuityEstimate(
             source_name=source_name,
@@ -151,6 +173,7 @@ def estimate_core_continuity_edge(
             symbol_map={},
             context=context,
             skip_reason=reason,
+            **alignment_payload,
         )
 
     try:
@@ -196,6 +219,7 @@ def estimate_core_continuity_edge(
             symbol_map=symbol_map,
             context=context,
             skip_reason=type(exc).__name__,
+            **alignment_payload,
         )
 
     return CoreContinuityEstimate(
@@ -213,6 +237,7 @@ def estimate_core_continuity_edge(
         symbol_map=symbol_map,
         context=context,
         skip_reason=None,
+        **alignment_payload,
     )
 
 
@@ -246,6 +271,11 @@ def _estimate_to_json(estimate: CoreContinuityEstimate) -> dict[str, Any]:
         "consumer_splits": estimate.consumer_splits,
         "symbol_map": estimate.symbol_map,
         "skip_reason": estimate.skip_reason,
+        "continuity_aligned": estimate.continuity_aligned,
+        "continuity_assertion": estimate.continuity_assertion,
+        "continuity_skip_reason": estimate.continuity_skip_reason,
+        "baseline_byte_hops": estimate.baseline_byte_hops,
+        "aligned_byte_hops": estimate.aligned_byte_hops,
     }
 
 

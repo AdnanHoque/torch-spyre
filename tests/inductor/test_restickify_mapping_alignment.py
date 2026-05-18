@@ -40,6 +40,10 @@ from torch_spyre._inductor.core_continuity_telemetry import (
     CoreContinuityEstimate,
     _estimate_to_json as _core_continuity_estimate_to_json,
 )
+from torch_spyre._inductor.core_continuity_alignment import (
+    producer_mapping_override_for_consumer,
+    split_factors_match_after_symbol_map,
+)
 from torch_spyre._inductor.input_fanout_telemetry import (
     InputFanoutEstimate,
     _estimate_to_json as _input_fanout_estimate_to_json,
@@ -296,6 +300,78 @@ def test_core_continuity_telemetry_json_includes_edge_fields():
     assert payload["producer_splits"] == {"d1": 32}
     assert payload["consumer_splits"] == {"d1": 32}
     assert payload["symbol_map"] == {"d1": "d1"}
+    assert payload["continuity_aligned"] is False
+    assert payload["continuity_assertion"] == "not-run"
+    assert payload["continuity_skip_reason"] is None
+    assert payload["baseline_byte_hops"] is None
+    assert payload["aligned_byte_hops"] is None
+
+
+def test_core_continuity_telemetry_json_includes_alignment_fields():
+    estimate = CoreContinuityEstimate(
+        source_name="buf3",
+        producer_name="buf3",
+        consumer_name="buf4",
+        producer_kind="computed",
+        consumer_kind="computed",
+        bytes_moved=256,
+        byte_hops=0,
+        avg_hops=0.0,
+        max_hops=0,
+        producer_splits={"d1": 32},
+        consumer_splits={"d0": 32},
+        symbol_map={"d0": "d1"},
+        continuity_aligned=True,
+        continuity_assertion="passed",
+        baseline_byte_hops=1024,
+        aligned_byte_hops=0,
+    )
+
+    payload = _core_continuity_estimate_to_json(estimate)
+
+    assert payload["continuity_aligned"] is True
+    assert payload["continuity_assertion"] == "passed"
+    assert payload["continuity_skip_reason"] is None
+    assert payload["baseline_byte_hops"] == 1024
+    assert payload["aligned_byte_hops"] == 0
+
+
+def test_core_continuity_split_match_accepts_mapped_equal_splits():
+    matched, reason = split_factors_match_after_symbol_map(
+        {"p0": 1, "p1": 32},
+        {"c0": 32, "c1": 1},
+        {"c0": "p1", "c1": "p0"},
+    )
+
+    assert matched is True
+    assert reason is None
+
+
+def test_core_continuity_split_match_rejects_different_splits():
+    matched, reason = split_factors_match_after_symbol_map(
+        {"p0": 1, "p1": 32},
+        {"c0": 16, "c1": 1},
+        {"c0": "p1", "c1": "p0"},
+    )
+
+    assert matched is False
+    assert reason == "different-core-count"
+
+
+def test_core_continuity_override_remaps_producer_slices_to_consumer_symbols():
+    override = producer_mapping_override_for_consumer(
+        {
+            "0": {"p0": 0, "p1": 0},
+            "1": {"p0": 0, "p1": 1},
+        },
+        {"c0": 128, "c1": 128},
+        {"c0": "p1", "c1": "p0"},
+    )
+
+    assert override == {
+        "0": {"c0": 0, "c1": 0},
+        "1": {"c0": 1, "c1": 0},
+    }
 
 
 def test_input_fanout_telemetry_json_includes_source_fields():

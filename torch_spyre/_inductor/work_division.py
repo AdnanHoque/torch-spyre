@@ -54,6 +54,7 @@ from .restickify_ring import (
     producer_for_restickify,
     restickify_symbol_map,
 )
+from .core_continuity_alignment import core_continuity_dim_order
 
 from .logging_utils import get_inductor_logger
 from . import config
@@ -602,6 +603,14 @@ def work_distribution_pass(
         committed_splits,
         name_to_op,
     )
+    output_dims = maybe_prioritize_core_continuity_output_dims(
+        op,
+        output_dims,
+        it_space_adjusted,
+        max_cores,
+        committed_splits,
+        name_to_op,
+    )
 
     # If span_reduction_pass already committed a reduction split, suppress further
     # reduction splitting so the final result never exceeds one reduction dim split.
@@ -699,6 +708,55 @@ def maybe_prioritize_restickify_output_dims(
     if prioritized != output_dims:
         logger.info(
             "prioritize restickify work-distribution for %s: %s -> %s",
+            op.get_name(),
+            output_dims,
+            prioritized,
+        )
+    return prioritized
+
+
+def maybe_prioritize_core_continuity_output_dims(
+    op: ComputedBuffer,
+    output_dims: list[Symbol],
+    it_space_adjusted: dict[Symbol, Expr],
+    max_cores: int,
+    committed_splits: dict[Symbol, int],
+    name_to_op: dict[str, ComputedBuffer] | None,
+) -> list[Symbol]:
+    """Prefer an in-graph producer's split dim for exact pointwise consumers."""
+    if not config.align_core_division_continuity:
+        return output_dims
+    if name_to_op is None:
+        return output_dims
+
+    prioritized, reason = core_continuity_dim_order(op, output_dims, name_to_op)
+    if prioritized is None:
+        if reason not in {"disabled", "unsupported-consumer"}:
+            logger.info(
+                "skip core continuity work-distribution alignment for %s: %s",
+                op.get_name(),
+                reason,
+            )
+        return output_dims
+
+    preferred_dim = prioritized[0]
+    cores_remaining = max_cores // max(math.prod(committed_splits.values()), 1)
+    if (
+        core_split(concretize_expr(it_space_adjusted[preferred_dim]), cores_remaining)
+        <= 1
+    ):
+        logger.info(
+            "skip core continuity work-distribution alignment for %s: preferred "
+            "dim %s cannot split with %d remaining cores",
+            op.get_name(),
+            preferred_dim,
+            cores_remaining,
+        )
+        return output_dims
+
+    if prioritized != output_dims:
+        logger.info(
+            "prioritize core continuity work-distribution for %s: %s -> %s",
             op.get_name(),
             output_dims,
             prioritized,
@@ -873,7 +931,10 @@ def work_distribution(
     k_fast_ops = k_fast_ops or []
     name_to_op = (
         build_name_to_op_map(operations)
-        if config.align_restickify_work_distribution
+        if (
+            config.align_restickify_work_distribution
+            or config.align_core_division_continuity
+        )
         else None
     )
     max_cores = _validate_max_cores()
