@@ -2,6 +2,13 @@
 
 ## Summary
 
+> Update: Stage 57 showed that this timeout was tied to the experimental
+> `/tmp/stage50-template-share` Deeptools template path, not to the stock
+> `ReStickifyOpHBM` lowering path. With
+> `DEEPTOOLS_PATH=/opt/ibm/spyre/deeptools/share`, the same minimal bundle
+> reaches `after_sync`. Keep this note as the failing-template reproducer, not
+> as evidence that stock HBM restickify hangs.
+
 Stage 55 turned the Stage 54 launch-isolation result into a minimal reproducible
 case for normal `ReStickifyOpHBM` execution. The reproducer is:
 
