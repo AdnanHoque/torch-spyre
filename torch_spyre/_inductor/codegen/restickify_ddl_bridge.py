@@ -43,6 +43,13 @@ def restickify_ddl_bridge_skip_reason(
     """Return why the DDL bridge should not handle this restickify."""
     if op_spec.op != RESTICKIFY_OP or sdsc_spec.opfunc != RESTICKIFY_OP:
         return "not-restickify"
+    source_kind = op_spec.op_info.get("restickify_source_kind")
+    if source_kind != "in_graph_computed":
+        return (
+            "source-not-in-graph-computed"
+            if source_kind is not None
+            else "source-kind-unknown"
+        )
     if sdsc_spec.num_inputs != 1 or len(sdsc_spec.args) != 2:
         return "unsupported-restickify-arity"
     if sdsc_spec.constants:

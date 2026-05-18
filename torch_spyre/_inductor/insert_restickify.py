@@ -136,8 +136,24 @@ def _create_restickify_node(
     graph_lowering.env[restick_fx_node] = restick_tb
 
     restick_buff.layout = restick_arg_info["target_layout"]
+    source_buf = _unwrap_restickify_source(graph_lowering.get_buffer(arg_name))
+    restick_buff.restickify_source_name = arg_name
+    if isinstance(source_buf, ComputedBuffer):
+        restick_buff.restickify_source_kind = "in_graph_computed"
+    elif isinstance(source_buf, InputBuffer):
+        restick_buff.restickify_source_kind = "graph_input_or_weight"
+    elif source_buf is None:
+        restick_buff.restickify_source_kind = "unknown"
+    else:
+        restick_buff.restickify_source_kind = type(source_buf).__name__
 
     return arg_name, restick_buff
+
+
+def _unwrap_restickify_source(source):
+    while isinstance(source, (TensorBox, StorageBox)):
+        source = source.data
+    return source
 
 
 def insert_restickify_on_node_inputs(

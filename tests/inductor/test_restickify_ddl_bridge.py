@@ -35,9 +35,18 @@ def _core_mapping(dims, split_dim, num_cores):
     }
 
 
-def _op_spec_stub() -> OpSpec:
+def _op_spec_stub(source_kind="in_graph_computed") -> OpSpec:
     d0 = Symbol("d0")
-    return OpSpec(RESTICKIFY_OP, False, {d0: (128, 1)}, [], {})
+    return OpSpec(
+        RESTICKIFY_OP,
+        False,
+        {d0: (128, 1)},
+        [],
+        {
+            "restickify_source_kind": source_kind,
+            "restickify_source_name": "buf0",
+        },
+    )
 
 
 def _spec(
@@ -145,6 +154,27 @@ def test_restickify_ddl_bridge_skips_mirrored_2048_direction():
     reason = restickify_ddl_bridge_skip_reason(_op_spec_stub(), spec)
 
     assert reason == "output-stick-is-not-split-dim"
+
+
+def test_restickify_ddl_bridge_skips_graph_input_sources():
+    spec = _spec()
+
+    reason = restickify_ddl_bridge_skip_reason(
+        _op_spec_stub(source_kind="graph_input_or_weight"), spec
+    )
+
+    assert reason == "source-not-in-graph-computed"
+
+
+def test_restickify_ddl_bridge_skips_unknown_sources():
+    spec = _spec()
+    d0 = Symbol("d0")
+
+    reason = restickify_ddl_bridge_skip_reason(
+        OpSpec(RESTICKIFY_OP, False, {d0: (128, 1)}, [], {}), spec
+    )
+
+    assert reason == "source-kind-unknown"
 
 
 def test_restickify_ddl_bridge_skips_large_per_core_lx_contract():

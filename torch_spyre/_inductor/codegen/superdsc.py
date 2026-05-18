@@ -676,6 +676,8 @@ def _append_restickify_ddl_bridge_audit(
         "status": status,
         "reason": reason,
         "op": op_spec.op,
+        "source_name": op_spec.op_info.get("restickify_source_name"),
+        "source_kind": op_spec.op_info.get("restickify_source_kind"),
         "work_slices": {
             str(dim): int(split) for dim, split in sdsc_spec.work_slices.items()
         },

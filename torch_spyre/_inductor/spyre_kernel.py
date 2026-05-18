@@ -524,6 +524,17 @@ class SpyreKernel(Kernel[CSEVariable]):
                 op = RESTICKIFY_OP
             else:
                 op = IDENTITY_OP
+            if op == RESTICKIFY_OP:
+                source_name = getattr(
+                    self.current_node.node, "restickify_source_name", None
+                )
+                source_kind = getattr(
+                    self.current_node.node, "restickify_source_kind", None
+                )
+                if source_name is not None:
+                    op_info["restickify_source_name"] = source_name
+                if source_kind is not None:
+                    op_info["restickify_source_kind"] = source_kind
             op_spec = self.create_op_spec(op, False, args, op_info)
             self.op_specs.append(op_spec)
         else:
