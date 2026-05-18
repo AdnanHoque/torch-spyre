@@ -19,13 +19,16 @@ SDSC. The goal is to identify which pre-DDC field controls the generated
 
 ## DDL Template Finding
 
-The installed restickify DDL template is:
+The installed restickify DDL templates include:
 
 ```text
+/opt/ibm/spyre/deeptools/share/ddc/ddl_templates/restickify.ddl
 /opt/ibm/spyre/deeptools/share/ddc/ddl_templates/restickify_sen1p5.ddl
 ```
 
-The input side uses the external input tensor LX allocation directly:
+Both templates use the same relevant input-side pattern. Stage 49 later
+confirmed that this reducer is loaded through `restickify.ddl`. The input side
+uses the external input tensor LX allocation directly:
 
 ```text
 %inptensor_lx_allocation =
