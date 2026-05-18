@@ -17,6 +17,7 @@ from sympy import Symbol
 
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.restickify_lx_dataop import (
+    combine_dataop_sdscs,
     generate_restickify_dataop_sdsc_from_spec,
 )
 from torch_spyre._inductor.codegen.superdsc import SDSCArgs, SDSCSpec
@@ -174,3 +175,27 @@ def test_restickify_hbm_dataop_includes_hbm_placements():
 def test_rejects_unknown_dataop_name():
     with pytest.raises(ValueError, match="unsupported restickify data op"):
         generate_restickify_dataop_sdsc_from_spec(0, _spec(), op_name="identity")
+
+
+def test_combine_dataop_sdscs_keeps_multiple_dataops():
+    first = generate_restickify_dataop_sdsc_from_spec(
+        0,
+        _spec(),
+        op_name="ReStickifyOpLx",
+    )
+    second = generate_restickify_dataop_sdsc_from_spec(
+        1,
+        _spec(),
+        op_name="STCDPOpLx",
+    )
+
+    combined = combine_dataop_sdscs("0_two_step", [first, second])
+
+    root = combined["0_two_step"]
+    assert root["dscs_"] == []
+    assert len(root["datadscs_"]) == 2
+    ops = [
+        next(iter(datadsc.values()))["op"]["name"]
+        for datadsc in root["datadscs_"]
+    ]
+    assert ops == ["ReStickifyOpLx", "STCDPOpLx"]

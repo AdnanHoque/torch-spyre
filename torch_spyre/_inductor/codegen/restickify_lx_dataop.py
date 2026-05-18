@@ -24,6 +24,7 @@ we can test the Deeptools contract before considering graph integration.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -147,6 +148,38 @@ def generate_restickify_dataop_sdsc_from_spec(
             "symbolDefinitions_": {},
         }
     }
+
+
+def combine_dataop_sdscs(
+    name: str,
+    payloads: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Combine standalone single-dataop SuperDsc payloads into one SuperDsc.
+
+    Deeptools represents data movement operations under ``datadscs_``. This
+    helper is intentionally small and prototype-oriented: it keeps the first
+    payload's global shape metadata and concatenates each payload's data-op
+    entry so we can test a composed movement sequence without adding it to
+    normal TorchInductor lowering.
+    """
+
+    if not payloads:
+        raise ValueError("at least one data-op payload is required")
+
+    roots: list[dict[str, Any]] = []
+    datadscs: list[dict[str, Any]] = []
+    for payload in payloads:
+        if len(payload) != 1:
+            raise ValueError("each data-op payload must contain exactly one root SDSC")
+        root = copy.deepcopy(next(iter(payload.values())))
+        roots.append(root)
+        datadscs.extend(copy.deepcopy(root.get("datadscs_", [])))
+
+    combined = copy.deepcopy(roots[0])
+    combined["numCoresUsed_"] = max(_as_int(root["numCoresUsed_"]) for root in roots)
+    combined["dscs_"] = []
+    combined["datadscs_"] = datadscs
+    return {name: combined}
 
 
 def _labeled_ds(
