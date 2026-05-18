@@ -741,16 +741,31 @@ def maybe_prioritize_core_continuity_output_dims(
 
     preferred_dim = prioritized[0]
     cores_remaining = max_cores // max(math.prod(committed_splits.values()), 1)
-    if (
-        core_split(concretize_expr(it_space_adjusted[preferred_dim]), cores_remaining)
-        <= 1
-    ):
+    preferred_split = core_split(
+        concretize_expr(it_space_adjusted[preferred_dim]), cores_remaining
+    )
+    if preferred_split <= 1:
         logger.info(
             "skip core continuity work-distribution alignment for %s: preferred "
             "dim %s cannot split with %d remaining cores",
             op.get_name(),
             preferred_dim,
             cores_remaining,
+        )
+        return output_dims
+
+    best_output_split = max(
+        core_split(concretize_expr(it_space_adjusted[dim]), cores_remaining)
+        for dim in output_dims
+    )
+    if preferred_split < best_output_split:
+        logger.info(
+            "skip core continuity work-distribution alignment for %s: preferred "
+            "dim %s would use %d cores, but another output dim can use %d",
+            op.get_name(),
+            preferred_dim,
+            preferred_split,
+            best_output_split,
         )
         return output_dims
 
