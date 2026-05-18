@@ -323,18 +323,51 @@ def _create_sdsc_tensors(
             max_dim_sizes[dim] = -1
 
         effective_stick = op_stick_dim if stick_dim is None else stick_dim
-        # For STCDPOpLx (ring-aware restickify), the synthetic kernel aliases
-        # the input's layout, so the normal dedup would assign both label INPUT.
-        # Force position-based labeling instead so we get (INPUT, KERNEL, OUTPUT).
+        # For STCDPOpLx (ring-aware restickify), force matmul-shape layouts
+        # that the bmm template expects:
+        #   Tensor0 (INPUT):  [mb, in]
+        #   Tensor1 (KERNEL): [mb, out, in]
+        #   Tensor2 (OUTPUT): [mb, out]
+        # The position-based assignment also bypasses the layout dedup that
+        # would otherwise collapse INPUT and the synthetic kernel.
         if op_spec.op == "STCDPOpLx" and not use_op_dims:
+            mb_sym, out_sym, in_sym = Symbol("mb"), Symbol("out"), Symbol("in")
             position_label = MATMUL_LAYOUT_LABELS[len(sdsc_args)]
+            # Synthesize bmm-shape per-tensor layouts:
+            #   INPUT:  [mb, in]      stick=in
+            #   KERNEL: [mb, out, in] stick=out
+            #   OUTPUT: [mb, out]     stick=out
+            if position_label == "INPUT":
+                synth_dim_order = [mb_sym, in_sym]
+                effective_stick = in_sym
+            elif position_label == "KERNEL":
+                synth_dim_order = [mb_sym, out_sym, in_sym]
+                effective_stick = out_sym
+            elif position_label == "OUTPUT":
+                synth_dim_order = [mb_sym, out_sym]
+                effective_stick = out_sym
+            else:
+                synth_dim_order = dim_order
             if position_label not in layouts:
                 layouts[position_label] = {
-                    "dim_order": dim_order,
+                    "dim_order": synth_dim_order,
                     "stick_dim_order": effective_stick,
                     "stick_size": arg.device_dtype.elems_per_stick(),
                 }
             label = position_label
+            # Populate per-dim dicts for any synthesized dims (mb, out, in)
+            # that weren't in the original tensor's dim_order. Use trivial
+            # defaults — these dims are virtual (size 1 in iteration space).
+            for synth_dim in synth_dim_order:
+                if synth_dim not in scales:
+                    scales[synth_dim] = 1
+                if synth_dim not in strides:
+                    strides[synth_dim] = 1
+                if synth_dim not in offsets:
+                    offsets[synth_dim] = 0
+                if synth_dim not in max_dim_sizes:
+                    max_dim_sizes[synth_dim] = -1
+            dim_order = synth_dim_order
         else:
             label = _get_layout_label(
                 layouts,
