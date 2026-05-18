@@ -101,4 +101,11 @@ align_core_division_continuity: bool = (
     os.environ.get("SPYRE_ALIGN_CORE_DIVISION_CONTINUITY", "0") == "1"
 )
 
+# Default-off mapping-only producer-consumer continuity prototype. This keeps
+# work split factors unchanged and only attaches certified core mapping
+# overrides when producer/consumer split factors already match.
+align_core_mapping_continuity: bool = (
+    os.environ.get("SPYRE_ALIGN_CORE_MAPPING_CONTINUITY", "0") == "1"
+)
+
 install_config_module(sys.modules[__name__])

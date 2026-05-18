@@ -365,7 +365,10 @@ def align_core_continuity_mappings(
     k_fast_ops: list[Operation] | None = None,
 ) -> None:
     """Attach certified producer-aligned core mappings to pointwise consumers."""
-    if not config.align_core_division_continuity:
+    if not (
+        config.align_core_division_continuity
+        or config.align_core_mapping_continuity
+    ):
         return
 
     name_to_op = build_name_to_op_map(operations)

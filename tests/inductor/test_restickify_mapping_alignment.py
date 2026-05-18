@@ -374,6 +374,17 @@ def test_core_continuity_override_remaps_producer_slices_to_consumer_symbols():
     }
 
 
+def test_core_continuity_split_match_accepts_same_core_count_transposed_dims():
+    matched, reason = split_factors_match_after_symbol_map(
+        {"p0": 32, "p1": 1},
+        {"c0": 1, "c1": 32},
+        {"c0": "p1", "c1": "p0"},
+    )
+
+    assert matched is True
+    assert reason is None
+
+
 def test_input_fanout_telemetry_json_includes_source_fields():
     estimate = InputFanoutEstimate(
         source_name="arg1_1",
