@@ -323,13 +323,26 @@ def _create_sdsc_tensors(
             max_dim_sizes[dim] = -1
 
         effective_stick = op_stick_dim if stick_dim is None else stick_dim
-        label = _get_layout_label(
-            layouts,
-            dim_order,
-            effective_stick,
-            arg.device_dtype.elems_per_stick(),
-            MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS,
-        )
+        # For STCDPOpLx (ring-aware restickify), the synthetic kernel aliases
+        # the input's layout, so the normal dedup would assign both label INPUT.
+        # Force position-based labeling instead so we get (INPUT, KERNEL, OUTPUT).
+        if op_spec.op == "STCDPOpLx" and not use_op_dims:
+            position_label = MATMUL_LAYOUT_LABELS[len(sdsc_args)]
+            if position_label not in layouts:
+                layouts[position_label] = {
+                    "dim_order": dim_order,
+                    "stick_dim_order": effective_stick,
+                    "stick_size": arg.device_dtype.elems_per_stick(),
+                }
+            label = position_label
+        else:
+            label = _get_layout_label(
+                layouts,
+                dim_order,
+                effective_stick,
+                arg.device_dtype.elems_per_stick(),
+                MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS,
+            )
         sdsc_args.append(
             SDSCArgs(
                 layout=label,
