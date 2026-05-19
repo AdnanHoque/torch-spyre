@@ -38,6 +38,13 @@ from .superdsc import SDSCSpec
 _MAX_PROTOTYPE_LX_BYTES_PER_CORE = 512 * 1024
 _BRIDGE_OPFUNC_ENV = "SPYRE_RESTICKIFY_DDL_BRIDGE_OPFUNC"
 _SUPPORTED_BRIDGE_OPFUNCS = {RESTICKIFY_OP, "ReStickifyOpLx"}
+_BRIDGE_SOURCE_ADDRESS_ENV = "SPYRE_RESTICKIFY_DDL_BRIDGE_SOURCE_ADDRESS"
+_BRIDGE_SOURCE_ADDRESS_DEFAULT = "runtime-segment"
+_BRIDGE_SOURCE_ADDRESS_COMPACT_LXLU = "compact-lxlu"
+_SUPPORTED_BRIDGE_SOURCE_ADDRESS = {
+    _BRIDGE_SOURCE_ADDRESS_DEFAULT,
+    _BRIDGE_SOURCE_ADDRESS_COMPACT_LXLU,
+}
 
 
 def restickify_ddl_bridge_skip_reason(
@@ -124,6 +131,7 @@ def generate_restickify_ddl_bridge_sdsc(
     output_alloc = f"allocate_{output_name}_lx"
     input_transfer = "transfer_lds0_src:no_component_dst:lx_lx_local"
     output_transfer = "transfer_lds1_src:lx_dst:no_component_lx_local"
+    source_address_mode = _bridge_source_address_mode()
 
     alloc_templates = [
         node for node in dsc.get("scheduleTree_", []) if node.get("nodeType_") == "allocate"
@@ -237,14 +245,22 @@ def generate_restickify_ddl_bridge_sdsc(
             ],
         }
     )
+    input_alloc_node = _alloc_node(
+        input_alloc_template,
+        name=input_alloc,
+        lds_idx=0,
+        layout=input_layout,
+        user=input_transfer,
+    )
+    input_transfer_node = _transfer_node(input_transfer, src_lx_idx=None, dst_lx_idx=0)
+    if source_address_mode == _BRIDGE_SOURCE_ADDRESS_COMPACT_LXLU:
+        _set_compact_start_address(input_alloc_node, num_cores)
+        dst_offset = input_transfer_node["dstLdsAndLoopOffsets_"][0]
+        _set_compact_start_address(dst_offset, num_cores, field="startAddr_")
+        dst_offset["dataConnect_"] = "lxlu_input"
+
     out_dsc["scheduleTree_"] = [
-        _alloc_node(
-            input_alloc_template,
-            name=input_alloc,
-            lds_idx=0,
-            layout=input_layout,
-            user=input_transfer,
-        ),
+        input_alloc_node,
         _alloc_node(
             output_alloc_template,
             name=output_alloc,
@@ -252,7 +268,7 @@ def generate_restickify_ddl_bridge_sdsc(
             layout=output_layout,
             user=output_transfer,
         ),
-        _transfer_node(input_transfer, src_lx_idx=None, dst_lx_idx=0),
+        input_transfer_node,
         *loops,
         {
             "nodeType_": "block",
@@ -285,6 +301,16 @@ def _bridge_opfunc_name() -> str:
             f"choose one of {sorted(_SUPPORTED_BRIDGE_OPFUNCS)}"
         )
     return opfunc
+
+
+def _bridge_source_address_mode() -> str:
+    mode = os.environ.get(_BRIDGE_SOURCE_ADDRESS_ENV, _BRIDGE_SOURCE_ADDRESS_DEFAULT)
+    if mode not in _SUPPORTED_BRIDGE_SOURCE_ADDRESS:
+        raise ValueError(
+            f"{_BRIDGE_SOURCE_ADDRESS_ENV}={mode!r} is unsupported; "
+            f"choose one of {sorted(_SUPPORTED_BRIDGE_SOURCE_ADDRESS)}"
+        )
+    return mode
 
 
 def _as_int_or_none(value: Any) -> int | None:
@@ -471,6 +497,31 @@ def _alloc_node(
         }
     )
     return node
+
+
+def _compact_start_map(num_cores: int) -> dict[str, str]:
+    return {f"[{core}, 0, 0]": "0" for core in range(num_cores)}
+
+
+def _compact_start_payload(num_cores: int) -> dict[str, Any]:
+    return {
+        "dim_prop_func": [{"Map": {}}, {"Const": {}}, {"Const": {}}],
+        "dim_prop_attr": [
+            {"factor_": num_cores, "label_": "core"},
+            {"factor_": 1, "label_": "corelet"},
+            {"factor_": 1, "label_": "time"},
+        ],
+        "data_": _compact_start_map(num_cores),
+    }
+
+
+def _set_compact_start_address(
+    node_or_offset: dict[str, Any],
+    num_cores: int,
+    *,
+    field: str = "startAddressCoreCorelet_",
+) -> None:
+    node_or_offset[field] = _compact_start_payload(num_cores)
 
 
 def _loop_skeleton(loop_dims: list[str]) -> list[dict[str, Any]]:

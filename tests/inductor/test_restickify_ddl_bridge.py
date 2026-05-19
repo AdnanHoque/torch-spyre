@@ -125,6 +125,10 @@ def _dsc(payload):
     return next(iter(root["dscs_"][0].values()))
 
 
+def _schedule_node(dsc, name):
+    return next(node for node in dsc["scheduleTree_"] if node["name_"] == name)
+
+
 def test_restickify_ddl_bridge_generates_compact_lx_contract():
     spec = _spec()
     compute_payload = generate_sdsc(0, spec)
@@ -148,6 +152,39 @@ def test_restickify_ddl_bridge_generates_compact_lx_contract():
     assert all(set(lds["memOrg_"]) == {"lx"} for lds in dsc["labeledDs_"])
     assert dsc["computeOp_"][0]["inputLabeledDs"] == ["Tensor0-idx0"]
     assert dsc["computeOp_"][0]["outputLabeledDs"] == ["Tensor1-idx1"]
+
+
+def test_restickify_ddl_bridge_can_compact_lxlu_source_address(monkeypatch):
+    monkeypatch.setenv(
+        "SPYRE_RESTICKIFY_DDL_BRIDGE_SOURCE_ADDRESS",
+        "compact-lxlu",
+    )
+    spec = _spec()
+    compute_payload = generate_sdsc(0, spec)
+
+    payload = generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
+    dsc = _dsc(payload)
+    input_alloc = _schedule_node(dsc, "allocate_Tensor0_lx")
+    input_transfer = _schedule_node(
+        dsc,
+        "transfer_lds0_src:no_component_dst:lx_lx_local",
+    )
+    alloc_starts = input_alloc["startAddressCoreCorelet_"]["data_"]
+    dst_offset = input_transfer["dstLdsAndLoopOffsets_"][0]
+
+    assert set(alloc_starts.values()) == {"0"}
+    assert len(alloc_starts) == 32
+    assert dst_offset["dataConnect_"] == "lxlu_input"
+    assert set(dst_offset["startAddr_"]["data_"].values()) == {"0"}
+
+
+def test_restickify_ddl_bridge_rejects_unknown_source_address_mode(monkeypatch):
+    monkeypatch.setenv("SPYRE_RESTICKIFY_DDL_BRIDGE_SOURCE_ADDRESS", "bad-mode")
+    spec = _spec()
+    compute_payload = generate_sdsc(0, spec)
+
+    with pytest.raises(ValueError, match="SOURCE_ADDRESS"):
+        generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
 
 
 def test_restickify_ddl_bridge_allows_mirrored_2048_direction():
