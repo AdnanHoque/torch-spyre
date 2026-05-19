@@ -28,6 +28,15 @@
 #include <memory>
 #include <string>
 
+// The installed Deeptools SDK exposes DeepRt::memTrackers but does not install
+// sharedtools/mem_track_bundle.h. The full class lives in libsharedtools; this
+// narrow declaration is enough for this probe to call the initializer before
+// the Deeprt scheduling pipeline touches the trackers.
+class MemTrackBundle {
+ public:
+  void initializeMemoryTrackers(const DesignSpaceConfigGlobal& dscGlobal);
+};
+
 int main(int argc, char** argv) {
   if (argc < 4) {
     std::cerr << "usage: " << argv[0]
@@ -71,6 +80,7 @@ int main(int argc, char** argv) {
   deep_rt.outputDir = out_dir;
   deep_rt.verbose = 1;
   deep_rt.verticalStackVerbosity = 1;
+  deep_rt.memTrackers->initializeMemoryTrackers(dsc_global);
 
   auto* graph = new sengraph::DscSenGraph(1);
   auto* node = graph->insertNode(sdsc->name_, "SenPreparedOp");
