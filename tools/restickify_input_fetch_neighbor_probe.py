@@ -40,6 +40,7 @@ from typing import Any
 
 
 _TOKENS = ("HBM", "L3LU", "L3SU", "LXLU", "LXSU", "SFP", "PT")
+DESCRIPTOR_FILENAME = "restickify_lx_neighbor_edges.json"
 _IJ_IN_DIM_FIELDS = (
     "N_",
     "unpadN_",
@@ -109,6 +110,10 @@ def _contains_restickify(path: Path) -> bool:
         return any("ReStickify" in op for op in _opfuncs(_load_json(path)))
     except Exception:
         return False
+
+
+class NoDescriptorCandidate(ValueError):
+    pass
 
 
 def _summarize_sdsc(path: Path) -> dict[str, Any]:
@@ -188,7 +193,19 @@ def _select_triplet(
     code_dir: Path,
     sdsc_files: list[str] | None,
     restickify_sdsc_index: int | None,
-) -> tuple[Path, Path, Path]:
+    use_lx_neighbor_descriptor: bool,
+) -> tuple[Path, Path, Path, dict[str, Any]]:
+    if use_lx_neighbor_descriptor:
+        descriptor_triplet = _select_triplet_from_descriptor(
+            code_dir,
+            restickify_sdsc_index,
+        )
+        if descriptor_triplet is None:
+            raise NoDescriptorCandidate(
+                f"{code_dir} has no LX-neighbor descriptor candidate"
+            )
+        return descriptor_triplet
+
     files = [
         code_dir / name
         for name in (sdsc_files or [])
@@ -214,7 +231,40 @@ def _select_triplet(
         raise ValueError(
             f"{files[restickify_pos].name} does not have both producer and consumer neighbors"
         )
-    return files[restickify_pos - 1], files[restickify_pos], files[restickify_pos + 1]
+    return (
+        files[restickify_pos - 1],
+        files[restickify_pos],
+        files[restickify_pos + 1],
+        {},
+    )
+
+
+def _select_triplet_from_descriptor(
+    code_dir: Path,
+    restickify_sdsc_index: int | None,
+) -> tuple[Path, Path, Path, dict[str, Any]] | None:
+    descriptor_path = code_dir / DESCRIPTOR_FILENAME
+    if not descriptor_path.exists():
+        return None
+    descriptor = _load_json(descriptor_path)
+    edges = descriptor.get("edges", []) or []
+    if restickify_sdsc_index is not None:
+        edges = [
+            edge
+            for edge in edges
+            if int(edge.get("restickify", {}).get("index", -1))
+            == restickify_sdsc_index
+        ]
+    if not edges:
+        return None
+
+    edge = edges[0]
+    return (
+        code_dir / edge["producer"]["file"],
+        code_dir / edge["restickify"]["file"],
+        code_dir / edge["consumer"]["file"],
+        edge,
+    )
 
 
 def _find_dcg_inpfetch_standalone(explicit: str | None) -> str | None:
@@ -487,10 +537,20 @@ def _drop_trivial_sdsc_folds(payload: dict[str, Any], notes: list[str]) -> None:
         notes.append("dropped trivial factor-1 sdsc fold metadata for senprog probe")
 
 
-def _make_labeled_ds_lx_pinned(dsc: dict[str, Any], notes: list[str]) -> None:
+def _make_labeled_ds_lx_pinned(
+    dsc: dict[str, Any],
+    notes: list[str],
+    *,
+    lds_indices: set[int] | None = None,
+) -> None:
     nodes = _lx_allocate_nodes(dsc)
     core_ids = [int(core_id) for core_id in dsc.get("coreIdsUsed_", []) or []]
+    pinned: list[int] = []
     for lds in dsc.get("labeledDs_", []) or []:
+        lds_idx = int(lds.get("ldsIdx_", -1))
+        if lds_indices is not None and lds_idx not in lds_indices:
+            continue
+        pinned.append(lds_idx)
         mem_org = lds.setdefault("memOrg_", {})
         if "hbm" in mem_org:
             mem_org["hbm"]["isPresent"] = 0
@@ -511,7 +571,13 @@ def _make_labeled_ds_lx_pinned(dsc: dict[str, Any], notes: list[str]) -> None:
             _core_state(_lx_start_for_core(lx_node, core_id), lx_size)
             for core_id in core_ids
         ]
-    notes.append("marked labeledDs_ as LX-pinned and populated coreStateInit_")
+    if lds_indices is None:
+        notes.append("marked labeledDs_ as LX-pinned and populated coreStateInit_")
+    else:
+        notes.append(
+            "marked selected labeledDs_ as LX-pinned and populated "
+            f"coreStateInit_: {pinned}"
+        )
 
 
 def _retag_consumer_input(dsc: dict[str, Any], input_index: int, notes: list[str]) -> None:
@@ -538,6 +604,17 @@ def _first_compute_input_index(dsc: dict[str, Any]) -> int:
     return int(match.group(1))
 
 
+def _first_compute_output_index(dsc: dict[str, Any]) -> int:
+    compute_ops = dsc.get("computeOp_", []) or []
+    if not compute_ops or not compute_ops[0].get("outputLabeledDs"):
+        raise ValueError("producer dsc has no computeOp_ outputLabeledDs")
+    token = str(compute_ops[0]["outputLabeledDs"][0])
+    match = re.search(r"-idx(\d+)$", token)
+    if not match:
+        raise ValueError(f"could not parse lds index from {token}")
+    return int(match.group(1))
+
+
 def _adapt_scheduled_lx_neighbor(
     *,
     case_dir: Path,
@@ -546,6 +623,7 @@ def _adapt_scheduled_lx_neighbor(
     scheduler_binary: str,
     alias_mb_out_to_ij_in: bool,
     consumer_core_map: str,
+    pin_only_edge_lds: bool,
 ) -> dict[str, Any]:
     adapt_dir = case_dir / "adapted_scheduled_lx_neighbor"
     adapt_dir.mkdir(parents=True, exist_ok=True)
@@ -570,9 +648,19 @@ def _adapt_scheduled_lx_neighbor(
     _, _, _, consumer_dsc = _single_dsc(consumer_payload)
     _copy_scheduled_dims_to_dsc(producer_dsc, notes)
     _copy_scheduled_dims_to_dsc(consumer_dsc, notes)
-    _retag_consumer_input(consumer_dsc, _first_compute_input_index(consumer_dsc), notes)
-    _make_labeled_ds_lx_pinned(producer_dsc, notes)
-    _make_labeled_ds_lx_pinned(consumer_dsc, notes)
+    consumer_input_index = _first_compute_input_index(consumer_dsc)
+    producer_output_index = _first_compute_output_index(producer_dsc)
+    _retag_consumer_input(consumer_dsc, consumer_input_index, notes)
+    _make_labeled_ds_lx_pinned(
+        producer_dsc,
+        notes,
+        lds_indices={producer_output_index} if pin_only_edge_lds else None,
+    )
+    _make_labeled_ds_lx_pinned(
+        consumer_dsc,
+        notes,
+        lds_indices={consumer_input_index} if pin_only_edge_lds else None,
+    )
     if alias_mb_out_to_ij_in:
         _alias_payload_to_ij_in(producer_payload, notes)
         _alias_payload_to_ij_in(consumer_payload, notes)
@@ -657,11 +745,14 @@ def _stage_case(
     adapt_scheduled_lx_neighbor: bool,
     alias_mb_out_to_ij_in: bool,
     consumer_core_map: str,
+    use_lx_neighbor_descriptor: bool,
+    pin_only_edge_lds: bool,
 ) -> dict[str, Any]:
-    producer, restickify, consumer = _select_triplet(
+    producer, restickify, consumer, descriptor_edge = _select_triplet(
         code_dir,
         event.get("sdsc_files"),
         restickify_sdsc_index,
+        use_lx_neighbor_descriptor,
     )
     label = (
         f"{event.get('event_index', 'direct')}_"
@@ -686,6 +777,7 @@ def _stage_case(
         "producer": _summarize_sdsc(staged_producer),
         "restickify_reference": _summarize_sdsc(staged_restickify),
         "consumer": _summarize_sdsc(staged_consumer),
+        "lx_neighbor_descriptor_edge": descriptor_edge,
         "adapted_scheduled_lx_neighbor": {},
         "run": {},
     }
@@ -703,6 +795,7 @@ def _stage_case(
             scheduler_binary=scheduler_binary,
             alias_mb_out_to_ij_in=alias_mb_out_to_ij_in,
             consumer_core_map=consumer_core_map,
+            pin_only_edge_lds=pin_only_edge_lds,
         )
         row["adapted_scheduled_lx_neighbor"] = adapted
         if adapted["status"] != "ok":
@@ -784,6 +877,25 @@ def parse_args() -> argparse.Namespace:
             "'reverse' forces cross-core LX movement while keeping HBM disabled."
         ),
     )
+    parser.add_argument(
+        "--use-lx-neighbor-descriptor",
+        action="store_true",
+        help=(
+            "Select producer/restickify/consumer triples from "
+            f"{DESCRIPTOR_FILENAME} instead of the legacy adjacent-restickify "
+            "heuristic. Code directories without descriptor candidates are "
+            "reported as skipped."
+        ),
+    )
+    parser.add_argument(
+        "--pin-only-edge-lds",
+        action="store_true",
+        help=(
+            "During scheduled LX-neighbor adaptation, only pin the producer "
+            "output LDS and consumer input LDS for the selected edge. This is "
+            "closer to runtime integration than the older all-LDS probe."
+        ),
+    )
     parser.add_argument("--run", action="store_true", help="Run dcg_inpfetch_standalone after staging files.")
     parser.add_argument("--senprog", action="store_true", help="Ask Deeptools to emit senprog text during --run.")
     parser.add_argument("--fail-on-error", action="store_true")
@@ -816,7 +928,15 @@ def main() -> int:
                     adapt_scheduled_lx_neighbor=args.adapt_scheduled_lx_neighbor,
                     alias_mb_out_to_ij_in=args.alias_mb_out_to_ij_in,
                     consumer_core_map=args.consumer_core_map,
+                    use_lx_neighbor_descriptor=args.use_lx_neighbor_descriptor,
+                    pin_only_edge_lds=args.pin_only_edge_lds,
                 )
+            except NoDescriptorCandidate as exc:
+                row = {
+                    "status": "skipped",
+                    "source_code_dir": str(code_dir),
+                    "reason": str(exc),
+                }
             except Exception as exc:  # noqa: BLE001
                 row = {
                     "status": "error",

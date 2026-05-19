@@ -1,0 +1,2 @@
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: lds.isLxPinned() || lds.isRingPinned() || lds.isSfpRingPinned(), file /project_src/deeptools/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp line 30

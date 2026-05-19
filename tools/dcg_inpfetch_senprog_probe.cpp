@@ -24,6 +24,7 @@
 #include <dsc/superdsc.h>
 #include <sharedtools/progtailor.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <map>
@@ -70,9 +71,12 @@ int main(int argc, char** argv) {
 
   const std::string senprog = out_dir + "/senprog.txt";
   data_op_gen.printSenProgram(&consumer_sdsc, senprog);
-  consumer_sdsc.exportJson(out_dir + "/after_inpfetch.json");
 
   std::cout << "wrote " << senprog << "\n";
-  std::cout << "wrote " << out_dir << "/after_inpfetch.json\n";
-  return 0;
+  std::cout.flush();
+  // Probe-only: some installed Deeptools builds tear down or export the
+  // imported InputFetchNeighbor SuperDsc state incorrectly after senprog
+  // emission. The artifact we need has already been written, so exit without
+  // running destructors.
+  std::_Exit(0);
 }

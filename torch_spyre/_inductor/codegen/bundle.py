@@ -15,6 +15,9 @@
 import json
 import os
 
+from torch_spyre._inductor.codegen.lx_neighbor_descriptor import (
+    maybe_emit_lx_neighbor_descriptor,
+)
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
@@ -41,6 +44,8 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         with open(os.path.join(output_dir, file_name), "w") as file:
             logger.info(f"Generating {file.name}")
             json.dump(sdsc_json, file, indent=2)
+
+    maybe_emit_lx_neighbor_descriptor(kernel_name, output_dir, files, specs)
 
     # Generate bundle.mlir
     with open(os.path.join(output_dir, "bundle.mlir"), "w") as file:

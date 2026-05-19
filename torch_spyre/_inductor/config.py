@@ -116,6 +116,14 @@ restickify_ddl_bridge_preddc_shim: bool = (
     os.environ.get("SPYRE_RESTICKIFY_DDL_BRIDGE_PREDDC_SHIM", "1") == "1"
 )
 
+# Default-off integration prototype for Stage 121. When enabled, bundle
+# generation emits a sidecar descriptor for eligible adjacent
+# producer/restickify/consumer triples that can be handed to the
+# InputFetchNeighbor LX-to-LX packaging path.
+restickify_lx_neighbor_descriptor: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_LX_NEIGHBOR_DESCRIPTOR", "0") == "1"
+)
+
 # Default-off producer-consumer ownership telemetry. This generalizes the
 # restickify byte-hop estimator to all exact in-graph tensor edges, without
 # changing core division or codegen behavior.

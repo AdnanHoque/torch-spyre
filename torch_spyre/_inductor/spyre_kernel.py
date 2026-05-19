@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Self, Sequence, Tuple, Union
 from abc import ABC
 
@@ -49,6 +49,8 @@ from .op_spec import OpSpec, TensorArg
 from .restickify_ring import (
     CORE_MAPPING_OVERRIDE_ATTR,
     CORE_MAPPING_OVERRIDE_OP_INFO_KEY,
+    LOCALITY_CERTIFICATE_ATTR,
+    LOCALITY_CERTIFICATE_OP_INFO_KEY,
 )
 import logging
 
@@ -433,6 +435,12 @@ class SpyreKernel(Kernel[CSEVariable]):
         if mapping_override is not None:
             op_info = dict(op_info)
             op_info[CORE_MAPPING_OVERRIDE_OP_INFO_KEY] = mapping_override
+        locality_certificate = getattr(ir_node, LOCALITY_CERTIFICATE_ATTR, None)
+        if locality_certificate is not None:
+            op_info = dict(op_info)
+            op_info[LOCALITY_CERTIFICATE_OP_INFO_KEY] = asdict(
+                locality_certificate
+            )
 
         return OpSpec(
             op,
