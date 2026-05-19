@@ -100,12 +100,14 @@ def test_builds_candidate_descriptor_for_adjacent_certified_restickify():
     assert edge["producer"]["file"] == "sdsc_0_add.json"
     assert edge["restickify"]["file"] == "sdsc_1_ReStickifyOpHBM.json"
     assert edge["consumer"]["file"] == "sdsc_2_add.json"
+    assert edge["same_bundle_internal_edge"] is True
     assert edge["source_kind"] == "in_graph_computed"
     assert edge["locality_certificate"]["certified_byte_hops"] == 0
     assert (
         edge["input_fetch_neighbor"]["path"]
         == "producer-output-lx-to-consumer-input-lx"
     )
+    assert edge["input_fetch_neighbor"]["requires_single_runtime_bundle"] is True
     assert edge["packaging_requirements"]["preserve_producer_lx_core_state"]
 
 
@@ -127,6 +129,29 @@ def test_skips_without_core_mapping_override():
 
     assert descriptor["edges"] == []
     assert descriptor["skipped"][0]["reason"] == "missing-producer-aligned-core-mapping"
+
+
+def test_skips_without_locality_certificate():
+    specs = _candidate_specs()
+    del specs[1].op_info[LOCALITY_CERTIFICATE_OP_INFO_KEY]
+
+    descriptor = build_lx_neighbor_descriptor("k", _files(), specs)
+
+    assert descriptor["edges"] == []
+    assert descriptor["skipped"][0]["reason"] == "missing-locality-certificate"
+
+
+def test_skips_when_locality_certificate_failed():
+    specs = _candidate_specs()
+    specs[1].op_info[LOCALITY_CERTIFICATE_OP_INFO_KEY] = {
+        "locality_certified": False,
+        "locality_skip_reason": "nonzero-byte-hops",
+    }
+
+    descriptor = build_lx_neighbor_descriptor("k", _files(), specs)
+
+    assert descriptor["edges"] == []
+    assert descriptor["skipped"][0]["reason"] == "locality-not-certified"
 
 
 def test_maybe_emit_descriptor_writes_sidecar_when_flag_enabled(tmp_path, monkeypatch):

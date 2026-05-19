@@ -90,6 +90,7 @@ def build_lx_neighbor_descriptor(
         edge = {
             "edge_id": f"{idx - 1}:{idx}:{idx + 1}",
             "status": "candidate",
+            "same_bundle_internal_edge": True,
             "producer": _sdsc_ref(idx - 1, sdsc_files, specs),
             "restickify": _sdsc_ref(idx, sdsc_files, specs),
             "consumer": _sdsc_ref(idx + 1, sdsc_files, specs),
@@ -106,6 +107,7 @@ def build_lx_neighbor_descriptor(
                 "consumer_role": "initSdscMain",
                 "restickify_role": "replaced_internal_edge",
                 "path": "producer-output-lx-to-consumer-input-lx",
+                "requires_single_runtime_bundle": True,
             },
             "packaging_requirements": {
                 "schedule_producer_and_consumer": True,
@@ -148,6 +150,11 @@ def _skip_reason(
         return f"source-kind-{source_kind or 'unknown'}"
     if CORE_MAPPING_OVERRIDE_OP_INFO_KEY not in spec.op_info:
         return "missing-producer-aligned-core-mapping"
+    certificate = spec.op_info.get(LOCALITY_CERTIFICATE_OP_INFO_KEY)
+    if not isinstance(certificate, dict):
+        return "missing-locality-certificate"
+    if not certificate.get("locality_certified"):
+        return "locality-not-certified"
     if len(spec.args) != 2:
         return "unsupported-restickify-arity"
     return None
