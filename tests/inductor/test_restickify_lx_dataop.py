@@ -194,6 +194,10 @@ def test_combine_dataop_sdscs_keeps_multiple_dataops():
     root = combined["0_two_step"]
     assert root["dscs_"] == []
     assert len(root["datadscs_"]) == 2
+    assert root["coreIdToDscSchedule"] == {
+        "0": [[0, -1, 0, 1], [1, -1, 1, 0]],
+        "1": [[0, -1, 0, 1], [1, -1, 1, 0]],
+    }
     ops = [
         next(iter(datadsc.values()))["op"]["name"]
         for datadsc in root["datadscs_"]

@@ -182,7 +182,29 @@ def combine_dataop_sdscs(
     combined["numCoresUsed_"] = max(_as_int(root["numCoresUsed_"]) for root in roots)
     combined["dscs_"] = []
     combined["datadscs_"] = datadscs
+    if len(datadscs) > 1:
+        combined["coreIdToDscSchedule"] = _sequential_dataop_schedule(
+            combined["numCoresUsed_"], len(datadscs)
+        )
     return {name: combined}
+
+
+def _sequential_dataop_schedule(
+    num_cores: int,
+    num_dataops: int,
+) -> dict[str, list[list[int]]]:
+    return {
+        str(core_id): [
+            [
+                dataop_idx,
+                -1,
+                1 if dataop_idx > 0 else 0,
+                1 if dataop_idx < num_dataops - 1 else 0,
+            ]
+            for dataop_idx in range(num_dataops)
+        ]
+        for core_id in range(num_cores)
+    }
 
 
 def _labeled_ds(
