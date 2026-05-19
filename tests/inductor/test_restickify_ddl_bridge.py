@@ -200,6 +200,33 @@ def test_restickify_ddl_bridge_allows_mirrored_2048_direction():
     assert all(set(lds["memOrg_"]) == {"lx"} for lds in dsc["labeledDs_"])
 
 
+def test_restickify_ddl_bridge_skips_multi_split_by_default():
+    spec = _spec(num_cores=32)
+    d0, d1 = list(spec.work_slices)
+    spec.work_slices[d0] = 8
+    spec.work_slices[d1] = 4
+
+    reason = restickify_ddl_bridge_skip_reason(_op_spec_stub(), spec)
+
+    assert reason == "expected-one-split-dim"
+
+
+def test_restickify_ddl_bridge_can_probe_multi_split_when_enabled(monkeypatch):
+    monkeypatch.setenv("SPYRE_RESTICKIFY_DDL_BRIDGE_ALLOW_MULTI_SPLIT", "1")
+    spec = _spec(num_cores=32)
+    d0, d1 = list(spec.work_slices)
+    spec.work_slices[d0] = 8
+    spec.work_slices[d1] = 4
+    compute_payload = generate_sdsc(0, spec)
+
+    reason = restickify_ddl_bridge_skip_reason(_op_spec_stub(), spec)
+    payload = generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
+    dsc = _dsc(payload)
+
+    assert reason is None
+    assert [node["component_"] for node in dsc["scheduleTree_"][:2]] == ["lx", "lx"]
+
+
 def test_restickify_ddl_bridge_can_select_lx_opfunc(monkeypatch):
     monkeypatch.setenv("SPYRE_RESTICKIFY_DDL_BRIDGE_OPFUNC", "ReStickifyOpLx")
     spec = _spec()

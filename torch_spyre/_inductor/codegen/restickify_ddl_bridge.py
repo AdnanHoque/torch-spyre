@@ -45,6 +45,7 @@ _SUPPORTED_BRIDGE_SOURCE_ADDRESS = {
     _BRIDGE_SOURCE_ADDRESS_DEFAULT,
     _BRIDGE_SOURCE_ADDRESS_COMPACT_LXLU,
 }
+_ALLOW_MULTI_SPLIT_ENV = "SPYRE_RESTICKIFY_DDL_BRIDGE_ALLOW_MULTI_SPLIT"
 
 
 def restickify_ddl_bridge_skip_reason(
@@ -78,10 +79,16 @@ def restickify_ddl_bridge_skip_reason(
     split_dims = [
         dim for dim, split in sdsc_spec.work_slices.items() if _as_int_or_none(split) != 1
     ]
-    if len(split_dims) != 1:
+    allow_multi_split = os.environ.get(_ALLOW_MULTI_SPLIT_ENV, "0") == "1"
+    if len(split_dims) != 1 and not allow_multi_split:
         return "expected-one-split-dim"
-    split_dim = split_dims[0]
-    if _as_int_or_none(sdsc_spec.work_slices[split_dim]) != sdsc_spec.num_cores:
+    split_product = 1
+    for split_dim in split_dims:
+        split_factor = _as_int_or_none(sdsc_spec.work_slices[split_dim])
+        if split_factor is None:
+            return "non-concrete-split-dim"
+        split_product *= split_factor
+    if split_product != sdsc_spec.num_cores:
         return "split-dim-does-not-cover-all-cores"
 
     # Stage 42 only allowed the direction where the DDL output was stickified on
