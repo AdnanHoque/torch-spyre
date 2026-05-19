@@ -37,7 +37,12 @@ from .superdsc import SDSCSpec
 
 _MAX_PROTOTYPE_LX_BYTES_PER_CORE = 512 * 1024
 _BRIDGE_OPFUNC_ENV = "SPYRE_RESTICKIFY_DDL_BRIDGE_OPFUNC"
-_SUPPORTED_BRIDGE_OPFUNCS = {RESTICKIFY_OP, "ReStickifyOpLx"}
+_INTERSLICE_TRANSPOSE_FP16_OP = "interslicetranspose_fp16"
+_SUPPORTED_BRIDGE_OPFUNCS = {
+    RESTICKIFY_OP,
+    "ReStickifyOpLx",
+    _INTERSLICE_TRANSPOSE_FP16_OP,
+}
 _BRIDGE_SOURCE_ADDRESS_ENV = "SPYRE_RESTICKIFY_DDL_BRIDGE_SOURCE_ADDRESS"
 _BRIDGE_SOURCE_ADDRESS_DEFAULT = "runtime-segment"
 _BRIDGE_SOURCE_ADDRESS_COMPACT_LXLU = "compact-lxlu"
@@ -53,6 +58,15 @@ _SUPPORTED_BRIDGE_LOOP_ORDERS = {
     "output",
     _BRIDGE_LOOP_ORDER_REVERSED_INPUT,
     "reversed-output",
+}
+_BRIDGE_INTERSLICE_GLOBAL_LAYOUT_ENV = (
+    "SPYRE_RESTICKIFY_DDL_BRIDGE_INTERSLICE_GLOBAL_LAYOUT"
+)
+_BRIDGE_INTERSLICE_GLOBAL_LAYOUT_AS_IS = "as-is"
+_SUPPORTED_BRIDGE_INTERSLICE_GLOBAL_LAYOUTS = {
+    _BRIDGE_INTERSLICE_GLOBAL_LAYOUT_AS_IS,
+    "input",
+    "output",
 }
 
 
@@ -131,6 +145,9 @@ def generate_restickify_ddl_bridge_sdsc(
 
     input_primary = copy.deepcopy(dsc["primaryDsInfo_"][input_lds["dsType_"]])
     output_primary = copy.deepcopy(dsc["primaryDsInfo_"][output_lds["dsType_"]])
+    bridge_opfunc = _bridge_opfunc_name()
+    if bridge_opfunc == _INTERSLICE_TRANSPOSE_FP16_OP:
+        _apply_interslice_global_layout_probe(input_primary, output_primary)
     input_layout = list(input_primary["layoutDimOrder_"])
     output_layout = list(output_primary["layoutDimOrder_"])
 
@@ -180,7 +197,6 @@ def generate_restickify_ddl_bridge_sdsc(
 
     out_root = copy.deepcopy(root)
     out_dsc = copy.deepcopy(dsc)
-    bridge_opfunc = _bridge_opfunc_name()
     out_sdsc_name = f"{idx}_{bridge_opfunc}_ddl_bridge"
     out_dsc_name = f"{bridge_opfunc}_ddl_bridge"
     out_root.update(
@@ -326,6 +342,25 @@ def _bridge_source_address_mode() -> str:
             f"choose one of {sorted(_SUPPORTED_BRIDGE_SOURCE_ADDRESS)}"
         )
     return mode
+
+
+def _apply_interslice_global_layout_probe(
+    input_primary: dict[str, Any],
+    output_primary: dict[str, Any],
+) -> None:
+    mode = os.environ.get(
+        _BRIDGE_INTERSLICE_GLOBAL_LAYOUT_ENV,
+        _BRIDGE_INTERSLICE_GLOBAL_LAYOUT_AS_IS,
+    )
+    if mode not in _SUPPORTED_BRIDGE_INTERSLICE_GLOBAL_LAYOUTS:
+        raise ValueError(
+            f"{_BRIDGE_INTERSLICE_GLOBAL_LAYOUT_ENV}={mode!r} is unsupported; "
+            f"choose one of {sorted(_SUPPORTED_BRIDGE_INTERSLICE_GLOBAL_LAYOUTS)}"
+        )
+    if mode == "input":
+        output_primary["layoutDimOrder_"] = list(input_primary["layoutDimOrder_"])
+    elif mode == "output":
+        input_primary["layoutDimOrder_"] = list(output_primary["layoutDimOrder_"])
 
 
 def _bridge_loop_dims(

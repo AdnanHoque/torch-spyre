@@ -345,6 +345,63 @@ def test_restickify_ddl_bridge_can_select_lx_opfunc(monkeypatch):
     assert dsc["computeOp_"][0]["opFuncName"] == "ReStickifyOpLx"
 
 
+def test_restickify_ddl_bridge_can_probe_interslice_transpose_opfunc(monkeypatch):
+    monkeypatch.setenv(
+        "SPYRE_RESTICKIFY_DDL_BRIDGE_OPFUNC",
+        "interslicetranspose_fp16",
+    )
+    spec = _spec()
+    compute_payload = generate_sdsc(0, spec)
+
+    payload = generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
+    root_name, _ = next(iter(payload.items()))
+    dsc = _dsc(payload)
+
+    assert root_name == "0_interslicetranspose_fp16_ddl_bridge"
+    assert dsc["computeOp_"][0]["opFuncName"] == "interslicetranspose_fp16"
+
+
+def test_restickify_ddl_bridge_can_probe_interslice_same_global_layout(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "SPYRE_RESTICKIFY_DDL_BRIDGE_OPFUNC",
+        "interslicetranspose_fp16",
+    )
+    monkeypatch.setenv(
+        "SPYRE_RESTICKIFY_DDL_BRIDGE_INTERSLICE_GLOBAL_LAYOUT",
+        "input",
+    )
+    spec = _spec()
+    compute_payload = generate_sdsc(0, spec)
+
+    payload = generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
+    dsc = _dsc(payload)
+
+    assert {
+        tuple(info["layoutDimOrder_"])
+        for info in dsc["primaryDsInfo_"].values()
+    } == {("d0", "d1")}
+
+
+def test_restickify_ddl_bridge_rejects_unknown_interslice_global_layout(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "SPYRE_RESTICKIFY_DDL_BRIDGE_OPFUNC",
+        "interslicetranspose_fp16",
+    )
+    monkeypatch.setenv(
+        "SPYRE_RESTICKIFY_DDL_BRIDGE_INTERSLICE_GLOBAL_LAYOUT",
+        "bad-layout",
+    )
+    spec = _spec()
+    compute_payload = generate_sdsc(0, spec)
+
+    with pytest.raises(ValueError, match="INTERSLICE_GLOBAL_LAYOUT"):
+        generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
+
+
 def test_restickify_ddl_bridge_rejects_unknown_opfunc(monkeypatch):
     monkeypatch.setenv("SPYRE_RESTICKIFY_DDL_BRIDGE_OPFUNC", "Nope")
     spec = _spec()
