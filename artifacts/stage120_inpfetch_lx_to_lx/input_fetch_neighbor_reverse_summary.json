@@ -1,0 +1,345 @@
+{
+  "candidate_count": 1,
+  "dcg_inpfetch_standalone": "/opt/ibm/spyre/deeptools/bin/dcg_inpfetch_standalone",
+  "error_count": 0,
+  "l3_scheduler_standalone": "/opt/ibm/spyre/deeptools/bin/L3DlOpsScheduler_standalone",
+  "row_count": 1,
+  "rows": [
+    {
+      "adapted_scheduled_lx_neighbor": {
+        "consumer": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/adapted_scheduled_lx_neighbor/consumer_main.scheduled.input_lx_neighbor.json",
+        "consumer_scheduler": {
+          "command": [
+            "/opt/ibm/spyre/deeptools/bin/L3DlOpsScheduler_standalone",
+            "-s",
+            "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/consumer_main.json",
+            "-o",
+            "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/adapted_scheduled_lx_neighbor/consumer_main.scheduled.json",
+            "-v",
+            "1"
+          ],
+          "output": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/adapted_scheduled_lx_neighbor/consumer_main.scheduled.json",
+          "returncode": 0,
+          "stderr": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/adapted_scheduled_lx_neighbor/consumer_main.scheduled_l3_scheduler_stderr.txt",
+          "stdout": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/adapted_scheduled_lx_neighbor/consumer_main.scheduled_l3_scheduler_stdout.txt"
+        },
+        "notes": [
+          "copied CoreD_ from dataStageParam_[0].ss_",
+          "disabled OUT chunking to avoid OUT->in data-op alias",
+          "copied B_ from dataStageParam_[1].ss_",
+          "set CoreletD_ equal to CoreD_ for probe-only no-corelet-split mode",
+          "copied CoreD_ from dataStageParam_[0].ss_",
+          "disabled OUT chunking to avoid OUT->in data-op alias",
+          "copied B_ from dataStageParam_[1].ss_",
+          "set CoreletD_ equal to CoreD_ for probe-only no-corelet-split mode",
+          "copied consumer primaryDsInfo_[OUTPUT] to INPUT",
+          "retagged consumer Tensor0 as INPUT",
+          "marked labeledDs_ as LX-pinned and populated coreStateInit_",
+          "marked labeledDs_ as LX-pinned and populated coreStateInit_",
+          "aliased Torch-Spyre mb/out dims to Deeptools ij/in InputFetchNeighbor dims",
+          "aliased Torch-Spyre mb/out dims to Deeptools ij/in InputFetchNeighbor dims",
+          "reversed consumer ij ownership over 32 slices"
+        ],
+        "producer": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/adapted_scheduled_lx_neighbor/producer_pre.scheduled.lx_neighbor.json",
+        "producer_scheduler": {
+          "command": [
+            "/opt/ibm/spyre/deeptools/bin/L3DlOpsScheduler_standalone",
+            "-s",
+            "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/producer_pre.json",
+            "-o",
+            "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/adapted_scheduled_lx_neighbor/producer_pre.scheduled.json",
+            "-v",
+            "1"
+          ],
+          "output": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/adapted_scheduled_lx_neighbor/producer_pre.scheduled.json",
+          "returncode": 0,
+          "stderr": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/adapted_scheduled_lx_neighbor/producer_pre.scheduled_l3_scheduler_stderr.txt",
+          "stdout": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/adapted_scheduled_lx_neighbor/producer_pre.scheduled_l3_scheduler_stdout.txt"
+        },
+        "scheduler": "/opt/ibm/spyre/deeptools/bin/L3DlOpsScheduler_standalone",
+        "status": "ok"
+      },
+      "case_dir": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1",
+      "consumer": {
+        "dsc_names": [
+          "add"
+        ],
+        "labeled_ds": [
+          {
+            "core_lbr_first": [],
+            "core_lbr_last": [],
+            "hbm_start": null,
+            "lx_start": null,
+            "name": "Tensor0",
+            "present_components": [
+              "hbm",
+              "lx"
+            ],
+            "type": "OUTPUT"
+          },
+          {
+            "core_lbr_first": [],
+            "core_lbr_last": [],
+            "hbm_start": null,
+            "lx_start": null,
+            "name": "Tensor1",
+            "present_components": [
+              "hbm",
+              "lx"
+            ],
+            "type": "OUTPUT"
+          },
+          {
+            "core_lbr_first": [],
+            "core_lbr_last": [],
+            "hbm_start": null,
+            "lx_start": null,
+            "name": "Tensor2",
+            "present_components": [
+              "hbm",
+              "lx"
+            ],
+            "type": "OUTPUT"
+          }
+        ],
+        "num_cores": 32,
+        "opfuncs": [
+          "add"
+        ],
+        "path": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/consumer_main.json",
+        "sdsc_name": "2_add",
+        "target": null
+      },
+      "kernel_name": "",
+      "producer": {
+        "dsc_names": [
+          "add"
+        ],
+        "labeled_ds": [
+          {
+            "core_lbr_first": [],
+            "core_lbr_last": [],
+            "hbm_start": null,
+            "lx_start": null,
+            "name": "Tensor0",
+            "present_components": [
+              "hbm",
+              "lx"
+            ],
+            "type": "OUTPUT"
+          },
+          {
+            "core_lbr_first": [],
+            "core_lbr_last": [],
+            "hbm_start": null,
+            "lx_start": null,
+            "name": "Tensor1",
+            "present_components": [
+              "hbm",
+              "lx"
+            ],
+            "type": "OUTPUT"
+          },
+          {
+            "core_lbr_first": [],
+            "core_lbr_last": [],
+            "hbm_start": null,
+            "lx_start": null,
+            "name": "Tensor2",
+            "present_components": [
+              "hbm",
+              "lx"
+            ],
+            "type": "OUTPUT"
+          }
+        ],
+        "num_cores": 32,
+        "opfuncs": [
+          "add"
+        ],
+        "path": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/producer_pre.json",
+        "sdsc_name": "0_add",
+        "target": null
+      },
+      "restickify_reference": {
+        "dsc_names": [
+          "ReStickifyOpHBM"
+        ],
+        "labeled_ds": [
+          {
+            "core_lbr_first": [],
+            "core_lbr_last": [],
+            "hbm_start": null,
+            "lx_start": null,
+            "name": "Tensor0",
+            "present_components": [
+              "hbm",
+              "lx"
+            ],
+            "type": "OUTPUT"
+          },
+          {
+            "core_lbr_first": [],
+            "core_lbr_last": [],
+            "hbm_start": null,
+            "lx_start": null,
+            "name": "Tensor1",
+            "present_components": [
+              "hbm",
+              "lx"
+            ],
+            "type": "KERNEL"
+          }
+        ],
+        "num_cores": 32,
+        "opfuncs": [
+          "ReStickifyOpHBM"
+        ],
+        "path": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/restickify_reference.json",
+        "sdsc_name": "1_ReStickifyOpHBM",
+        "target": null
+      },
+      "run": {
+        "command": [
+          "/opt/ibm/spyre/deeptools/bin/dcg_inpfetch_standalone",
+          "-initSdscMain",
+          "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/adapted_scheduled_lx_neighbor/consumer_main.scheduled.input_lx_neighbor.json",
+          "-initSdscPre",
+          "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/adapted_scheduled_lx_neighbor/producer_pre.scheduled.lx_neighbor.json",
+          "-d",
+          "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/dataDSC/relayout.json"
+        ],
+        "generated_sdsc": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/dataDSC2.json",
+        "generated_summary": {
+          "dsc_names": [
+            "add"
+          ],
+          "labeled_ds": [
+            {
+              "core_lbr_first": [
+                0,
+                0,
+                0,
+                0
+              ],
+              "core_lbr_last": [
+                0,
+                0,
+                0,
+                0
+              ],
+              "hbm_start": -1,
+              "lx_start": -1,
+              "name": "Tensor0",
+              "present_components": [
+                "lx"
+              ],
+              "type": "INPUT"
+            },
+            {
+              "core_lbr_first": [
+                8192,
+                8192,
+                8192,
+                8192
+              ],
+              "core_lbr_last": [
+                8192,
+                8192,
+                8192,
+                8192
+              ],
+              "hbm_start": -1,
+              "lx_start": -1,
+              "name": "Tensor1",
+              "present_components": [
+                "lx"
+              ],
+              "type": "OUTPUT"
+            },
+            {
+              "core_lbr_first": [
+                16384,
+                16384,
+                16384,
+                16384
+              ],
+              "core_lbr_last": [
+                16384,
+                16384,
+                16384,
+                16384
+              ],
+              "hbm_start": -1,
+              "lx_start": -1,
+              "name": "Tensor2",
+              "present_components": [
+                "lx"
+              ],
+              "type": "OUTPUT"
+            }
+          ],
+          "num_cores": 32,
+          "opfuncs": [
+            "add"
+          ],
+          "path": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/dataDSC2.json",
+          "sdsc_name": "2_add",
+          "target": "undefined"
+        },
+        "mapping_edges": [
+          "0 --> [ 31 ]",
+          "1 --> [ 30 ]",
+          "2 --> [ 29 ]",
+          "3 --> [ 28 ]",
+          "4 --> [ 27 ]",
+          "5 --> [ 26 ]",
+          "6 --> [ 25 ]",
+          "7 --> [ 24 ]",
+          "8 --> [ 23 ]",
+          "9 --> [ 22 ]",
+          "10 --> [ 21 ]",
+          "11 --> [ 20 ]",
+          "12 --> [ 19 ]",
+          "13 --> [ 18 ]",
+          "14 --> [ 17 ]",
+          "15 --> [ 16 ]",
+          "16 --> [ 15 ]",
+          "17 --> [ 14 ]",
+          "18 --> [ 13 ]",
+          "19 --> [ 12 ]",
+          "20 --> [ 11 ]",
+          "21 --> [ 10 ]",
+          "22 --> [ 9 ]",
+          "23 --> [ 8 ]",
+          "24 --> [ 7 ]",
+          "25 --> [ 6 ]",
+          "26 --> [ 5 ]",
+          "27 --> [ 4 ]",
+          "28 --> [ 3 ]",
+          "29 --> [ 2 ]",
+          "30 --> [ 1 ]",
+          "31 --> [ 0 ]"
+        ],
+        "returncode": 0,
+        "senprog": "/tmp/stage116-inpfetch-reverse/direct_0001_sdsc_fused_add_t_0_1/dataDSC/senprog.txt",
+        "senprog_ear_samples": [],
+        "senprog_token_counts": {
+          "HBM": 0,
+          "L3LU": 0,
+          "L3SU": 0,
+          "L3_LDU": 0,
+          "L3_STU": 0,
+          "LXLU": 0,
+          "LXSU": 0,
+          "PT": 0,
+          "SFP": 0,
+          "l3lu_unit": 0,
+          "l3su_unit": 0
+        }
+      },
+      "source_code_dir": "/tmp/restickify-input-fetch-capture/kernel_code/computed_transpose_adds_then_matmul_2048/0001_sdsc_fused_add_t_0",
+      "status": "ok"
+    }
+  ]
+}

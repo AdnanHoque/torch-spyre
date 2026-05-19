@@ -1,0 +1,416 @@
+Program for coreID : 0
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 1
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 2
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 3
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 4
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 5
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 6
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 7
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 8
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 9
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 10
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 11
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 12
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 13
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 14
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 15
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 16
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 17
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 18
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 19
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 20
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 21
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 22
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 23
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 24
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 25
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 26
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 27
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 28
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 29
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 30
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+
+Program for coreID : 31
+
+Program for unit l3lu:
+L3_MVLOOPCNT :: be:0 dyn_loop:0 imm:2 src0:0
+L3_SYNC :: be:be soft:1 synctag:81
+L3_RETURN :: subroutine:0
+
+Registers for unit l3lu:
+LBR : 0 : 0
+LBR : 1 : 4096
+LBR : 2 : 8192
+LBR : 3 : 12288
+

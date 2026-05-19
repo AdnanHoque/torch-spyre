@@ -40,6 +40,13 @@ from typing import Any
 
 
 _TOKENS = ("HBM", "L3LU", "L3SU", "LXLU", "LXSU", "SFP", "PT")
+_IJ_IN_DIM_FIELDS = (
+    "N_",
+    "unpadN_",
+    "CoreD_",
+    "B_",
+    "CoreletD_",
+)
 
 
 def _load_json(path: Path) -> Any:
@@ -248,7 +255,30 @@ def _count_senprog_tokens(path: Path) -> dict[str, int]:
     if not path.exists():
         return {}
     text = path.read_text(encoding="utf-8", errors="replace")
-    return {token: text.count(token) for token in _TOKENS}
+    counts = {token: text.count(token) for token in _TOKENS}
+    counts.update(
+        {
+            "l3lu_unit": text.count("Program for unit l3lu"),
+            "l3su_unit": text.count("Program for unit l3su"),
+            "L3_LDU": text.count("L3_LDU"),
+            "L3_STU": text.count("L3_STU"),
+        }
+    )
+    return counts
+
+
+def _senprog_ear_samples(path: Path, *, limit: int = 16) -> list[str]:
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8", errors="replace")
+    seen: list[str] = []
+    for match in re.finditer(r"\bEAR\s*:\s*\d+\s*:\s*\d+", text):
+        sample = match.group(0)
+        if sample not in seen:
+            seen.append(sample)
+        if len(seen) >= limit:
+            break
+    return seen
 
 
 def _run_l3_scheduler(work_dir: Path, input_path: Path, output_path: Path, binary: str) -> dict[str, Any]:
@@ -345,6 +375,118 @@ def _copy_scheduled_dims_to_dsc(dsc: dict[str, Any], notes: list[str]) -> None:
         notes.append("set CoreletD_ equal to CoreD_ for probe-only no-corelet-split mode")
 
 
+def _rewrite_dim_dict_to_ij_in(dim_dict: dict[str, Any]) -> None:
+    """Rewrite a Torch-Spyre mb/out shape dict into Deeptools image-ish dims.
+
+    The installed InputFetchNeighbor path has hard-coded i/j ordering checks.
+    This probe-only rewrite gives it the dimension names it expects while
+    preserving the same logical chunk sizes:
+
+    - ``mb_`` becomes row-like ``r_/i_/ij_``.
+    - ``out_`` becomes ``in_``.
+    - singleton column/subpiece dims are forced to 1.
+    """
+
+    mb = dim_dict.get("mb_", dim_dict.get("ij_", dim_dict.get("i_", dim_dict.get("r_", -1))))
+    out = dim_dict.get("out_", dim_dict.get("in_", -1))
+    dim_dict["mb_"] = -1
+    dim_dict["out_"] = -1
+    for key in ("r_", "i_", "ij_"):
+        dim_dict[key] = mb
+    dim_dict["in_"] = out
+    for key in ("c_", "j_", "si_", "sij_", "sj_"):
+        dim_dict[key] = 1
+    for key in ("zi_", "zij_", "zj_"):
+        dim_dict[key] = 0
+
+
+def _rewrite_nested_dim_dicts_to_ij_in(value: Any) -> None:
+    if isinstance(value, dict):
+        if "mb_" in value or "out_" in value:
+            _rewrite_dim_dict_to_ij_in(value)
+        for child in value.values():
+            _rewrite_nested_dim_dicts_to_ij_in(child)
+    elif isinstance(value, list):
+        for child in value:
+            _rewrite_nested_dim_dicts_to_ij_in(child)
+
+
+def _alias_primary_info_to_ij_in(dsc: dict[str, Any]) -> None:
+    def rename(dim: Any) -> Any:
+        if dim == "mb":
+            return "ij"
+        if dim == "out":
+            return "in"
+        return dim
+
+    for info in (dsc.get("primaryDsInfo_", {}) or {}).values():
+        if "layoutDimOrder_" in info:
+            info["layoutDimOrder_"] = [rename(dim) for dim in info["layoutDimOrder_"]]
+        if "stickDimOrder_" in info:
+            info["stickDimOrder_"] = [rename(dim) for dim in info["stickDimOrder_"]]
+
+
+def _alias_wkslices_to_ij_in(root: dict[str, Any]) -> None:
+    raw_splits = root.get("numWkSlicesPerDim_", {}) or {}
+    mb_split = int(raw_splits.get("ij", raw_splits.get("mb", raw_splits.get("mb_", 1))))
+    out_split = int(raw_splits.get("in", raw_splits.get("out", raw_splits.get("out_", 1))))
+    root["numWkSlicesPerDim_"] = {"ij": mb_split, "in": out_split}
+
+    raw_mapping = root.get("coreIdToWkSlice_", {}) or {}
+    remapped: dict[str, dict[str, int]] = {}
+    for core, per_dim in raw_mapping.items():
+        remapped[str(core)] = {
+            "ij": int(per_dim.get("ij", per_dim.get("mb", per_dim.get("mb_", 0)))),
+            "in": int(per_dim.get("in", per_dim.get("out", per_dim.get("out_", 0)))),
+        }
+    root["coreIdToWkSlice_"] = remapped
+
+
+def _reverse_consumer_ij_mapping(root: dict[str, Any], notes: list[str]) -> None:
+    splits = root.get("numWkSlicesPerDim_", {}) or {}
+    ij_split = int(splits.get("ij", 1))
+    if ij_split <= 1:
+        notes.append("requested reverse consumer map but ij split <= 1")
+        return
+    for per_dim in (root.get("coreIdToWkSlice_", {}) or {}).values():
+        per_dim["ij"] = ij_split - 1 - int(per_dim.get("ij", 0))
+    notes.append(f"reversed consumer ij ownership over {ij_split} slices")
+
+
+def _alias_payload_to_ij_in(payload: dict[str, Any], notes: list[str]) -> None:
+    _, root, _, dsc = _single_dsc(payload)
+    _alias_wkslices_to_ij_in(root)
+    _alias_primary_info_to_ij_in(dsc)
+    for field in _IJ_IN_DIM_FIELDS:
+        if field in root:
+            _rewrite_nested_dim_dicts_to_ij_in(root[field])
+        if field in dsc:
+            _rewrite_nested_dim_dicts_to_ij_in(dsc[field])
+    _rewrite_nested_dim_dicts_to_ij_in(dsc.get("dataStageParam_", {}))
+    notes.append("aliased Torch-Spyre mb/out dims to Deeptools ij/in InputFetchNeighbor dims")
+
+
+def _drop_trivial_sdsc_folds(payload: dict[str, Any], notes: list[str]) -> None:
+    """Remove no-op fold metadata that blocks standalone senprog emission.
+
+    The Torch-Spyre pointwise SDSCs in this probe carry a single time fold with
+    factor 1. Deeptools' InputFetchNeighbor standalone path refuses any
+    non-empty ``sdscFoldProps_`` when ``-s`` is requested, even when the fold is
+    semantically trivial. This is a probe-only bridge so we can inspect the
+    generated L3/LX program.
+    """
+
+    _, root = _single_root(payload)
+    props = root.get("sdscFoldProps_", []) or []
+    if not props:
+        return
+    if all(int(prop.get("factor_", 1)) == 1 for prop in props):
+        root["sdscFoldProps_"] = []
+        root["folded_sdsc_name_"] = ""
+        root["fold_coord_"] = []
+        notes.append("dropped trivial factor-1 sdsc fold metadata for senprog probe")
+
+
 def _make_labeled_ds_lx_pinned(dsc: dict[str, Any], notes: list[str]) -> None:
     nodes = _lx_allocate_nodes(dsc)
     core_ids = [int(core_id) for core_id in dsc.get("coreIdsUsed_", []) or []]
@@ -402,6 +544,8 @@ def _adapt_scheduled_lx_neighbor(
     staged_producer: Path,
     staged_consumer: Path,
     scheduler_binary: str,
+    alias_mb_out_to_ij_in: bool,
+    consumer_core_map: str,
 ) -> dict[str, Any]:
     adapt_dir = case_dir / "adapted_scheduled_lx_neighbor"
     adapt_dir.mkdir(parents=True, exist_ok=True)
@@ -429,6 +573,13 @@ def _adapt_scheduled_lx_neighbor(
     _retag_consumer_input(consumer_dsc, _first_compute_input_index(consumer_dsc), notes)
     _make_labeled_ds_lx_pinned(producer_dsc, notes)
     _make_labeled_ds_lx_pinned(consumer_dsc, notes)
+    if alias_mb_out_to_ij_in:
+        _alias_payload_to_ij_in(producer_payload, notes)
+        _alias_payload_to_ij_in(consumer_payload, notes)
+    if consumer_core_map == "reverse":
+        if not alias_mb_out_to_ij_in:
+            raise ValueError("--consumer-core-map reverse requires --alias-mb-out-to-ij-in")
+        _reverse_consumer_ij_mapping(next(iter(consumer_payload.values())), notes)
 
     adapted_producer = adapt_dir / "producer_pre.scheduled.lx_neighbor.json"
     adapted_consumer = adapt_dir / "consumer_main.scheduled.input_lx_neighbor.json"
@@ -476,13 +627,20 @@ def _run_inpfetch(
     (work_dir / "dcg_inpfetch_stderr.txt").write_text(result.stderr, encoding="utf-8")
     generated = work_dir / "dataDSC2.json"
     senprog = work_dir / "dataDSC" / "senprog.txt"
+    mapping_edges = [
+        line.strip()
+        for line in result.stdout.splitlines()
+        if re.match(r"^\d+\s+-->\s+\[", line.strip())
+    ]
     return {
         "command": cmd,
         "returncode": result.returncode,
+        "mapping_edges": mapping_edges,
         "generated_sdsc": str(generated) if generated.exists() else "",
         "generated_summary": _summarize_sdsc(generated) if generated.exists() else {},
         "senprog": str(senprog) if senprog.exists() else "",
         "senprog_token_counts": _count_senprog_tokens(senprog),
+        "senprog_ear_samples": _senprog_ear_samples(senprog),
     }
 
 
@@ -497,6 +655,8 @@ def _stage_case(
     run: bool,
     emit_senprog: bool,
     adapt_scheduled_lx_neighbor: bool,
+    alias_mb_out_to_ij_in: bool,
+    consumer_core_map: str,
 ) -> dict[str, Any]:
     producer, restickify, consumer = _select_triplet(
         code_dir,
@@ -541,6 +701,8 @@ def _stage_case(
             staged_producer=staged_producer,
             staged_consumer=staged_consumer,
             scheduler_binary=scheduler_binary,
+            alias_mb_out_to_ij_in=alias_mb_out_to_ij_in,
+            consumer_core_map=consumer_core_map,
         )
         row["adapted_scheduled_lx_neighbor"] = adapted
         if adapted["status"] != "ok":
@@ -604,6 +766,24 @@ def parse_args() -> argparse.Namespace:
             "and populate coreStateInit_ from scheduled LX allocations."
         ),
     )
+    parser.add_argument(
+        "--alias-mb-out-to-ij-in",
+        action="store_true",
+        help=(
+            "Probe-only workaround for the installed InputFetchNeighbor path: "
+            "rewrite mb/out metadata to ij/in so Deeptools' i/j ordering checks "
+            "can run on Torch-Spyre pointwise SDSCs."
+        ),
+    )
+    parser.add_argument(
+        "--consumer-core-map",
+        choices=("identity", "reverse"),
+        default="identity",
+        help=(
+            "Optional probe-only consumer ownership remap after ij/in aliasing. "
+            "'reverse' forces cross-core LX movement while keeping HBM disabled."
+        ),
+    )
     parser.add_argument("--run", action="store_true", help="Run dcg_inpfetch_standalone after staging files.")
     parser.add_argument("--senprog", action="store_true", help="Ask Deeptools to emit senprog text during --run.")
     parser.add_argument("--fail-on-error", action="store_true")
@@ -634,6 +814,8 @@ def main() -> int:
                     run=args.run,
                     emit_senprog=args.senprog,
                     adapt_scheduled_lx_neighbor=args.adapt_scheduled_lx_neighbor,
+                    alias_mb_out_to_ij_in=args.alias_mb_out_to_ij_in,
+                    consumer_core_map=args.consumer_core_map,
                 )
             except Exception as exc:  # noqa: BLE001
                 row = {
