@@ -173,6 +173,20 @@ in the expected order.
 
 This is a verification task, not a reason to abandon the path.
 
+There is also an existing Torch-Spyre-side data-op prototype:
+
+```text
+torch_spyre/_inductor/codegen/restickify_lx_dataop.py
+```
+
+That prototype is still useful, but it builds standalone data-op payloads from a
+single `SDSCSpec`. The new hypothesis is slightly different: generate or reuse a
+producer `SuperDsc` and a consumer `SuperDsc`, then let Deeptools'
+`InputFetchNeighbor` construct the identity-preserving `STCDPOpLx` movement
+between them. In other words, do not merely replace `ReStickifyOpHBM` with a
+single standalone data op; connect the producer and consumer ownership records
+through the input-neighbor contract.
+
 ## Next Experiment
 
 Use the Stage 62/69 clean fixture:
