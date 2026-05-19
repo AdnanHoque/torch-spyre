@@ -83,6 +83,18 @@ def _adds_then_matmul(a, b, c, d):
     return (a + b.t() + c.t()) @ d
 
 
+def _plain_adds_then_matmul(a, b, c, d):
+    return (a + b + c) @ d
+
+
+def _computed_transpose_adds_then_matmul(a, b, c, d):
+    return (a + (b + c).t()) @ d
+
+
+def _computed_transpose_join(a, b, c):
+    return a + (b + c).t()
+
+
 def _matmul_then_add(a, b, c):
     return (a @ b) + c.t()
 
@@ -623,6 +635,30 @@ CASES: tuple[ProbeCase, ...] = (
         "Pointwise producer feeds a matmul that may force restickification.",
         _builder_pointwise4,
         _adds_then_matmul,
+    ),
+    ProbeCase(
+        "plain_adds_then_matmul",
+        "producer_to_matmul",
+        "in_graph_producer",
+        "Pointwise producer without graph-input transpose feeds a matmul.",
+        _builder_pointwise4,
+        _plain_adds_then_matmul,
+    ),
+    ProbeCase(
+        "computed_transpose_adds_then_matmul",
+        "producer_to_matmul",
+        "in_graph_producer",
+        "Computed transposed producer feeds a pointwise join before matmul.",
+        _builder_pointwise4,
+        _computed_transpose_adds_then_matmul,
+    ),
+    ProbeCase(
+        "computed_transpose_join",
+        "computed_view_join",
+        "in_graph_producer",
+        "Computed producer is consumed through a transposed pointwise join.",
+        _builder_pointwise3,
+        _computed_transpose_join,
     ),
     ProbeCase(
         "matmul_then_add",

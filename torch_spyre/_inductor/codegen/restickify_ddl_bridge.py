@@ -23,6 +23,7 @@ config flag.
 from __future__ import annotations
 
 import copy
+import os
 from typing import Any
 
 from sympy import Expr, Symbol
@@ -35,6 +36,8 @@ from .compute_ops import num_bytes
 from .superdsc import SDSCSpec
 
 _MAX_PROTOTYPE_LX_BYTES_PER_CORE = 512 * 1024
+_BRIDGE_OPFUNC_ENV = "SPYRE_RESTICKIFY_DDL_BRIDGE_OPFUNC"
+_SUPPORTED_BRIDGE_OPFUNCS = {RESTICKIFY_OP, "ReStickifyOpLx"}
 
 
 def restickify_ddl_bridge_skip_reason(
@@ -154,8 +157,9 @@ def generate_restickify_ddl_bridge_sdsc(
 
     out_root = copy.deepcopy(root)
     out_dsc = copy.deepcopy(dsc)
-    out_sdsc_name = f"{idx}_{RESTICKIFY_OP}_ddl_bridge"
-    out_dsc_name = f"{RESTICKIFY_OP}_ddl_bridge"
+    bridge_opfunc = _bridge_opfunc_name()
+    out_sdsc_name = f"{idx}_{bridge_opfunc}_ddl_bridge"
+    out_dsc_name = f"{bridge_opfunc}_ddl_bridge"
     out_root.update(
         {
             "coreFoldProp_": copy.deepcopy(
@@ -261,7 +265,7 @@ def generate_restickify_ddl_bridge_sdsc(
     ]
     op.update(
         {
-            "opFuncName": RESTICKIFY_OP,
+            "opFuncName": bridge_opfunc,
             "inputLabeledDs": [f"{input_name}-idx0"],
             "interimLabeledDs": [],
             "outputLabeledDs": [f"{output_name}-idx1"],
@@ -271,6 +275,16 @@ def generate_restickify_ddl_bridge_sdsc(
     out_dsc["computeOp_"] = [op]
     out_root["dscs_"] = [{out_dsc_name: out_dsc}]
     return {out_sdsc_name: out_root}
+
+
+def _bridge_opfunc_name() -> str:
+    opfunc = os.environ.get(_BRIDGE_OPFUNC_ENV, RESTICKIFY_OP)
+    if opfunc not in _SUPPORTED_BRIDGE_OPFUNCS:
+        raise ValueError(
+            f"{_BRIDGE_OPFUNC_ENV}={opfunc!r} is unsupported; "
+            f"choose one of {sorted(_SUPPORTED_BRIDGE_OPFUNCS)}"
+        )
+    return opfunc
 
 
 def _as_int_or_none(value: Any) -> int | None:

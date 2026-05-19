@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pytest
 from sympy import Symbol
 
 from torch_spyre._C import DataFormats
@@ -160,6 +161,28 @@ def test_restickify_ddl_bridge_allows_mirrored_2048_direction():
     assert reason is None
     assert [node["component_"] for node in dsc["scheduleTree_"][:2]] == ["lx", "lx"]
     assert all(set(lds["memOrg_"]) == {"lx"} for lds in dsc["labeledDs_"])
+
+
+def test_restickify_ddl_bridge_can_select_lx_opfunc(monkeypatch):
+    monkeypatch.setenv("SPYRE_RESTICKIFY_DDL_BRIDGE_OPFUNC", "ReStickifyOpLx")
+    spec = _spec()
+    compute_payload = generate_sdsc(0, spec)
+
+    payload = generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
+    root_name, _ = next(iter(payload.items()))
+    dsc = _dsc(payload)
+
+    assert root_name == "0_ReStickifyOpLx_ddl_bridge"
+    assert dsc["computeOp_"][0]["opFuncName"] == "ReStickifyOpLx"
+
+
+def test_restickify_ddl_bridge_rejects_unknown_opfunc(monkeypatch):
+    monkeypatch.setenv("SPYRE_RESTICKIFY_DDL_BRIDGE_OPFUNC", "Nope")
+    spec = _spec()
+    compute_payload = generate_sdsc(0, spec)
+
+    with pytest.raises(ValueError, match="unsupported"):
+        generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
 
 
 def test_restickify_ddl_bridge_preserves_original_labeled_ds_roles():
