@@ -239,9 +239,11 @@ def _patch_payload_lx_only(
     dsc["numCoreletsUsed_"] = corelet_factor
     dsc["numCoreletsUsed_DSC2_"] = corelet_factor
 
+    original_ds_type = None
     for lds in dsc.get("labeledDs_", []) or []:
         if int(lds.get("ldsIdx_", -1)) != int(lds_idx):
             continue
+        original_ds_type = lds.get("dsType_")
         lx_meta = dict((lds.get("memOrg_", {}) or {}).get("lx", {}))
         lx_meta["isPresent"] = 1
         lx_meta["allocateNode_"] = allocate_name
@@ -249,6 +251,15 @@ def _patch_payload_lx_only(
         lds["hbmStartAddress_"] = -1
         if force_ds_type is not None:
             lds["dsType_"] = force_ds_type
+
+    if force_ds_type is not None:
+        primary = dsc.setdefault("primaryDsInfo_", {})
+        if force_ds_type not in primary:
+            source = primary.get(original_ds_type)
+            if source is None and primary:
+                source = next(iter(primary.values()))
+            if source is not None:
+                primary[force_ds_type] = copy.deepcopy(source)
 
     for node in dsc.get("scheduleTree_", []) or []:
         if (

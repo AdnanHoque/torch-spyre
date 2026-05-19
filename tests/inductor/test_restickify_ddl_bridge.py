@@ -480,6 +480,7 @@ def test_restickify_lx_boundary_patch_marks_adjacent_consumer_input_lx_only():
         consumer_input_lds["memOrg_"]["lx"]["allocateNode_"]
         == "allocate-Tensor1_lx"
     )
+    assert "INPUT" in consumer_dsc["primaryDsInfo_"]
     assert consumer_input_alloc["component_"] == "lx"
     assert consumer_input_alloc["startAddressCoreCorelet_"] == bridge_output_start
 
