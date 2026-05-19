@@ -32,6 +32,7 @@ import csv
 import json
 import math
 import os
+import shutil
 import statistics
 import time
 import traceback
@@ -915,8 +916,9 @@ def _kernel_launch_debug(
     *,
     sync_after_kernel: bool,
     log_path: Path | None,
+    copy_code_dir_root: Path | None = None,
 ):
-    if not sync_after_kernel and log_path is None:
+    if not sync_after_kernel and log_path is None and copy_code_dir_root is None:
         yield
         return
 
@@ -924,10 +926,13 @@ def _kernel_launch_debug(
 
     original_run = kernel_runner.SpyreSDSCKernelRunner.run
     event_index = 0
+    copy_index = 0
     handle = None
     if log_path is not None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         handle = log_path.open("w", encoding="utf-8")
+    if copy_code_dir_root is not None:
+        copy_code_dir_root.mkdir(parents=True, exist_ok=True)
 
     def emit(event: dict[str, Any]) -> None:
         nonlocal event_index
@@ -945,6 +950,7 @@ def _kernel_launch_debug(
             print(text, flush=True)
 
     def patched_run(self, *args, **kw_args):  # noqa: ANN001
+        nonlocal copy_index
         files: list[str] = []
         try:
             files = sorted(
@@ -954,9 +960,20 @@ def _kernel_launch_debug(
             )
         except Exception:
             files = []
+        copied_code_dir = ""
+        if copy_code_dir_root is not None:
+            copy_index += 1
+            safe_kernel = "".join(
+                char if char.isalnum() or char in "._-" else "_"
+                for char in str(self.kernel_name)
+            )
+            copied = copy_code_dir_root / f"{copy_index:04d}_{safe_kernel}"
+            shutil.copytree(self.code_dir, copied, dirs_exist_ok=True)
+            copied_code_dir = str(copied)
         base = {
             "kernel_name": self.kernel_name,
             "code_dir": self.code_dir,
+            "copied_code_dir": copied_code_dir,
             "sdsc_files": files,
             "arg_count": len(args),
         }
@@ -1289,6 +1306,7 @@ def _run_case(
     torch_profiler_with_stack: bool = False,
     sync_after_kernel: bool = False,
     kernel_launch_log_path: Path | None = None,
+    copy_kernel_code_dir: Path | None = None,
 ) -> dict[str, Any]:
     args, shape_label = case.input_builder(size, dtype)
     dev_args = tuple(arg.to(device) if hasattr(arg, "to") else arg for arg in args)
@@ -1334,6 +1352,7 @@ def _run_case(
         with _kernel_launch_debug(
             sync_after_kernel=sync_after_kernel,
             log_path=kernel_launch_log_path,
+            copy_code_dir_root=copy_kernel_code_dir,
         ):
             _reset_compile_caches()
             compiled = torch.compile(case.fn, backend=backend, dynamic=False)
@@ -1569,6 +1588,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Write JSONL before/after events for each generated Spyre SDSC bundle launch.",
     )
+    parser.add_argument(
+        "--copy-kernel-code",
+        action="store_true",
+        help="Copy each generated Spyre SDSC bundle directory into the probe output.",
+    )
     parser.add_argument("--atol", type=float, default=0.1, help="Correctness absolute tolerance.")
     parser.add_argument("--rtol", type=float, default=0.1, help="Correctness relative tolerance.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
@@ -1616,7 +1640,14 @@ def main() -> int:
                 )
                 kernel_launch_log = (
                     output_dir / "kernel_launches" / f"{case.name}_{size}.jsonl"
-                    if args.sync_after_kernel or args.kernel_launch_log
+                    if args.sync_after_kernel
+                    or args.kernel_launch_log
+                    or args.copy_kernel_code
+                    else None
+                )
+                copy_kernel_code_dir = (
+                    output_dir / "kernel_code" / f"{case.name}_{size}"
+                    if args.copy_kernel_code
                     else None
                 )
                 try:
@@ -1638,6 +1669,7 @@ def main() -> int:
                         torch_profiler_with_stack=args.torch_profiler_with_stack,
                         sync_after_kernel=args.sync_after_kernel,
                         kernel_launch_log_path=kernel_launch_log,
+                        copy_kernel_code_dir=copy_kernel_code_dir,
                     )
                 except Exception as exc:
                     row = _error_row(case, size, dtype, exc)
