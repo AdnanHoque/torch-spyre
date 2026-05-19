@@ -30,7 +30,11 @@ allow_all_ops_in_lx_planning: bool = False
 # 20% LX is the "user" scratchpad (only used when LX_PLANNING=1, off by
 # default). At LX_FRAC=0.2 (prior default) inductor's scratchpad allocator
 # would get 80% but was never invoked, leaving the LX underutilised.
-dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.8"))
+# NB: DDC reads this via getenv("DXP_LX_FRAC_AVAIL") in dxp.cpp -- the python
+# config value alone does NOT propagate. Setdefault the env var below so a
+# fresh process gets 0.8 even if not set explicitly; allow user override.
+os.environ.setdefault("DXP_LX_FRAC_AVAIL", "0.8")
+dxp_lx_frac_avail: float = float(os.environ["DXP_LX_FRAC_AVAIL"])
 
 sencores: int = int(os.getenv("SENCORES", "32"))
 
