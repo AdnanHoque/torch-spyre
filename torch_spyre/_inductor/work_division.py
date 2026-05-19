@@ -549,6 +549,80 @@ def span_reduction_pass(
 _MN_SPLIT_N_CAP = 8
 
 
+def _matmul_names_unsafe_for_2d(operations: list[Operation]) -> set[str]:
+    """Matmul output buf names that share a fusion group with a non-matmul op.
+
+    A 2D m×n split on a matmul whose output is read by a non-matmul (or whose
+    input is written by a non-matmul) forces cross-core data redistribution
+    inside the resulting fused bundle (the non-matmul stays on default
+    (mb, out) split). Measured cost on mlp [512,4096]: kernel +14% despite
+    each standalone matmul winning 1.26-1.49x.
+    """
+    matmul_names: set[str] = set()
+    matmul_input_names: dict[str, set[str]] = {}
+    nm_outputs: set[str] = set()
+    nm_inputs: set[str] = set()
+    for op in _iter_computed_buffers(operations):
+        rw = op.get_read_writes()
+        is_matmul = (
+            isinstance(op.data, Reduction)
+            and op.data.reduction_type == BATCH_MATMUL_OP
+        )
+        if is_matmul:
+            matmul_names.add(op.get_name())
+            matmul_input_names[op.get_name()] = {d.name for d in rw.reads}
+        else:
+            nm_outputs.add(op.get_name())
+            for d in rw.reads:
+                nm_inputs.add(d.name)
+    unsafe: set[str] = set()
+    for mname in matmul_names:
+        if mname in nm_inputs:
+            unsafe.add(mname)
+            continue
+        if any(inp in nm_outputs for inp in matmul_input_names[mname]):
+            unsafe.add(mname)
+    return unsafe
+
+
+def _2d_split_would_fire(
+    op: ComputedBuffer,
+    it_space_adjusted: dict[Symbol, Expr],
+    output_td: TensorDep,
+    stick_vars: dict[Symbol, int],
+    committed_splits: dict[Symbol, int],
+    max_cores: int,
+    unsafe_for_2d: set[str],
+) -> bool:
+    """True if _maybe_2d_mn_split would produce a 2D split for this op."""
+    if not config.two_d_mn_split:
+        return False
+    if op.get_name() in unsafe_for_2d:
+        return False
+    if not isinstance(op.data, Reduction):
+        return False
+    if op.data.reduction_type != BATCH_MATMUL_OP:
+        return False
+    if committed_splits:
+        return False
+    output_coord_vars = {
+        v for e in output_td.device_coords[:-1] for v in e.free_symbols
+    }
+    n_dims = [d for d in output_coord_vars if d in stick_vars]
+    m_dims = [d for d in output_coord_vars if d not in stick_vars]
+    if len(n_dims) != 1 or len(m_dims) != 1:
+        return False
+    n_dim, m_dim = n_dims[0], m_dims[0]
+    M = concretize_expr(it_space_adjusted[m_dim])
+    n_sticks = concretize_expr(it_space_adjusted[n_dim])
+    # m-split regime: the default planner picks pure-m only when M > n_sticks.
+    if M <= n_sticks:
+        return False
+    if core_split(n_sticks, min(_MN_SPLIT_N_CAP, max_cores)) <= 1:
+        return False
+    return True
+
+
 def _maybe_2d_mn_split(
     op: ComputedBuffer,
     splits: dict[Symbol, int],
@@ -557,13 +631,17 @@ def _maybe_2d_mn_split(
     stick_vars: dict[Symbol, int],
     committed_splits: dict[Symbol, int],
     max_cores: int,
+    unsafe_for_2d: set[str],
 ) -> dict[Symbol, int]:
     """Replace a matmul's pure-m work-split with a 2D m x n co-split.
 
     A pure m-split (m split, n and k not) is HBM-slow; co-splitting n
     instead runs ~2-3.7x faster (verified). Only fires on a pure m-split
-    BATCH_MATMUL_OP with no span_reduction commitments.
+    BATCH_MATMUL_OP with no span_reduction commitments and no non-matmul
+    fusion neighbour (see _matmul_names_unsafe_for_2d).
     """
+    if op.get_name() in unsafe_for_2d:
+        return splits
     if not isinstance(op.data, Reduction):
         return splits
     if op.data.reduction_type != BATCH_MATMUL_OP:
@@ -604,6 +682,7 @@ def work_distribution_pass(
     op: ComputedBuffer,
     args: list[SchedNodeArg],
     max_cores: int,
+    unsafe_for_2d: set[str] | None = None,
 ) -> None:
     """Optional per-op pass: distribute remaining cores to maximize parallelism.
 
@@ -668,6 +747,7 @@ def work_distribution_pass(
             stick_vars,
             committed_splits,
             max_cores,
+            unsafe_for_2d if unsafe_for_2d is not None else set(),
         )
 
     apply_splits(op, splits, output_td)
@@ -849,18 +929,27 @@ def work_distribution(
     """
     k_fast_ops = k_fast_ops or []
     max_cores = _validate_max_cores()
+    unsafe_for_2d = (
+        _matmul_names_unsafe_for_2d(operations) if config.two_d_mn_split else set()
+    )
+
+    def pass_fn(op_, args_, max_cores_):
+        work_distribution_pass(op_, args_, max_cores_, unsafe_for_2d)
+
     for op in _iter_computed_buffers(operations):
         if op in k_fast_ops:
             continue
         rw = op.get_read_writes()
         args = get_mem_deps_from_rw(rw)
         if isinstance(op.data, Pointwise):
-            divide_pointwise_op(op, args, max_cores, work_distribution_pass)
+            divide_pointwise_op(op, args, max_cores, pass_fn)
         elif isinstance(op.data, Reduction):
-            divide_reduction_op(op, args, max_cores, work_distribution_pass)
+            divide_reduction_op(op, args, max_cores, pass_fn)
 
 
-def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> bool:
+def _k_fast_divide_op(
+    op: ComputedBuffer, max_cores: int, unsafe_for_2d: set[str]
+) -> bool:
     """Divide one matmul op with k_fast when the heuristic fires.
 
     Runs between span_reduction and work_distribution. Reads span_reduction's
@@ -879,7 +968,7 @@ def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> bool:
     all_tds = input_tds + [output_td]
 
     it_space = iteration_space_from_op(op)
-    it_space_adjusted, _ = adjust_it_space_for_sticks(it_space, all_tds)
+    it_space_adjusted, stick_vars = adjust_it_space_for_sticks(it_space, all_tds)
 
     # op.op_it_space_splits holds span_reduction's commits here: span_reduction
     # runs before this pass, and work_distribution — which would overwrite it —
@@ -893,6 +982,15 @@ def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> bool:
         span_committed = {s: v for s, v in span_splits.items() if v > 1}
     else:
         span_committed = {}
+
+    # Defer to the 2D m×n rule when it would fire on this op: 2D beats k_fast
+    # by 1.2-3.6x in the m-split regime (verified across n=256..2048 at m=512).
+    # See tests/diag_hbm_bank_aware_findings.md.
+    if _2d_split_would_fire(
+        op, it_space_adjusted, output_td, stick_vars, span_committed,
+        max_cores, unsafe_for_2d,
+    ):
+        return False
 
     forced = _try_k_fast_split(it_space, output_td, span_committed, max_cores)
     if forced is None:
@@ -922,8 +1020,11 @@ def k_fast_division(operations: list[Operation]) -> list[Operation]:
     divided by exactly one of the two passes.
     """
     max_cores = _validate_max_cores()
+    unsafe_for_2d = (
+        _matmul_names_unsafe_for_2d(operations) if config.two_d_mn_split else set()
+    )
     k_fast_ops: list[Operation] = []
     for op in _iter_computed_buffers(operations):
-        if _k_fast_divide_op(op, max_cores):
+        if _k_fast_divide_op(op, max_cores, unsafe_for_2d):
             k_fast_ops.append(op)
     return k_fast_ops
