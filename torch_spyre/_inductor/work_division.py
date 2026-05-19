@@ -545,18 +545,27 @@ def span_reduction_pass(
 
 # A pure m-split matmul reads HBM ~2-3.7x slower than a 2D m x n co-split
 # (see tests/diag_hbm_bank_aware_findings.md). The optimal (m_split, n_split)
-# is N-aware: at m=512 prefill, an empirical sweep on (m,n,k) shows the
-# winning kernel time depends on n_sticks:
-#   n_sticks=16   (matmul_KV  N=1024 ):  best (4, 8, 1) — 126 us
-#   n_sticks=64   (matmul_QO  N=4096 ):  best (8, 4, 1) — 760 us
-#   n_sticks=200  (matmul_MLP N=12800):  best (16,2, 1) — 3078 us
-# A flat n_split cap (the prior _MN_SPLIT_N_CAP=8 picked (4,8,1) everywhere)
-# loses 1.16-1.51x on the bigger-N shapes. Target rule that fits all three:
-#   target_m_split = max(_MN_SPLIT_M_MIN,
-#                        min(max_cores // 2, n_sticks // _MN_SPLIT_PER_CORE_N_STICKS))
-# yields m_split ∈ {4, 8, 16} for the three shapes above.
-_MN_SPLIT_M_MIN = 4              # never go below m_split=4 (per-core M too small)
-_MN_SPLIT_PER_CORE_N_STICKS = 8  # target per-core N-band ≈ 8 sticks
+# depends on dxp_lx_frac_avail (how much LX DDC has for tile staging):
+#
+#   At low LX_FRAC (<= 0.2): kernels can only stage small tiles. Per-core
+#   N-band size dominates; the rule targets _MN_SPLIT_LOWLX_TARGET_N_STICKS
+#   sticks per core. Optimal splits at m=512 are:
+#     n_sticks=16   (matmul_KV  ): (4, 8, 1) — 126 us
+#     n_sticks=64   (matmul_QO  ): (8, 4, 1) — 760 us
+#     n_sticks=200  (matmul_MLP ): (16,2, 1) — 3078 us
+#
+#   At high LX_FRAC (>= 0.5): bigger tiles unlock per-core compute throughput.
+#   Per-core M-band size dominates; the rule targets at least
+#   _MN_SPLIT_HIGHLX_TARGET_PT_PASSES PT-passes worth of M rows. At m=512,
+#   target_per_core_m = 8 * _PT_ROWS = 64, so target_m_split = 512/64 = 8.
+#   (8, 4, 1) wins universally for the three shapes at LX_FRAC=0.8:
+#     KV  114 us (was 126)   QO 326 us (was 760)   MLP 1186 us (was 3078)
+#
+# Both rules generalize: target_m_split scales with M and respects max_cores.
+_MN_SPLIT_M_MIN = 4                            # don't fragment past this
+_MN_SPLIT_LOWLX_TARGET_N_STICKS = 8            # low-LX: per-core N target
+_MN_SPLIT_HIGHLX_TARGET_PT_PASSES = 8          # high-LX: per-core M = target * _PT_ROWS rows
+_MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD = 0.5       # LX_FRAC regime gate
 
 
 def _matmul_names_unsafe_for_2d(operations: list[Operation]) -> set[str]:
@@ -674,12 +683,21 @@ def _maybe_2d_mn_split(
         return splits
     n_sticks = concretize_expr(it_space_adjusted[n_dim])
     m_size = concretize_expr(it_space_adjusted[m_dim])
-    # N-aware target: scale m_split with n_sticks so per-core N-band stays
-    # near _MN_SPLIT_PER_CORE_N_STICKS. Clamp to [_MN_SPLIT_M_MIN, max_cores/2].
-    target_m_split = max(
-        _MN_SPLIT_M_MIN,
-        min(max_cores // 2, n_sticks // _MN_SPLIT_PER_CORE_N_STICKS),
-    )
+    # Target m_split is LX-aware (see comments at the constants).
+    if config.dxp_lx_frac_avail >= _MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD:
+        # High LX: target per-core M = N_PT_PASSES * _PT_ROWS rows.
+        # Bigger tiles let DDC pipeline HBM/compute better.
+        target_per_core_m = _MN_SPLIT_HIGHLX_TARGET_PT_PASSES * _PT_ROWS
+        target_m_split = max(
+            _MN_SPLIT_M_MIN,
+            min(max_cores // 2, max(1, m_size // target_per_core_m)),
+        )
+    else:
+        # Low LX: target per-core N-band = target sticks.
+        target_m_split = max(
+            _MN_SPLIT_M_MIN,
+            min(max_cores // 2, n_sticks // _MN_SPLIT_LOWLX_TARGET_N_STICKS),
+        )
     # Walk divisors of max_cores from target down to _MN_SPLIT_M_MIN until we
     # find an m_split that (a) divides M, (b) leaves n_split = max_cores/m_split
     # dividing n_sticks. If none, fall back to the cap-N-stick rule.
