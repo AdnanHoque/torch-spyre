@@ -106,6 +106,16 @@ restickify_ddl_bridge_audit_jsonl: str = os.environ.get(
     "",
 )
 
+# Default-off boundary prototype for the DDL bridge. When enabled, adjacent
+# producer -> ReStickifyOpHBM_ddl_bridge -> consumer triples are patched as one
+# internal LX edge: producer output, bridge endpoints, and consumer input are
+# marked LX-only so the consumer no longer lowers that logical input as an HBM
+# reload. This is still experimental and intentionally requires the DDL bridge
+# flag above.
+restickify_ddl_bridge_boundary_patch: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_DDL_BRIDGE_BOUNDARY_PATCH", "0") == "1"
+)
+
 # Prototype-only runtime hook for the DDL bridge. The installed DXP currently
 # runs generic corelet splitting and L3 scheduling before DDC, which rejects the
 # compact restickify DDL input. When this is enabled, Torch-Spyre applies a

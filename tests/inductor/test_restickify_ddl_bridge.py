@@ -21,9 +21,12 @@ from torch_spyre._inductor.codegen.restickify_ddl_bridge import (
     generate_restickify_ddl_bridge_sdsc,
     restickify_ddl_bridge_skip_reason,
 )
+from torch_spyre._inductor.codegen.restickify_lx_boundary import (
+    patch_restickify_ddl_bridge_boundaries,
+)
 from torch_spyre._inductor.codegen.superdsc import SDSCArgs, SDSCSpec
 from torch_spyre._inductor.constants import RESTICKIFY_OP, SEGMENT_OFFSETS
-from torch_spyre._inductor.op_spec import OpSpec
+from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 
 
 def _core_mapping(dims, split_dim, num_cores):
@@ -127,6 +130,83 @@ def _dsc(payload):
 
 def _schedule_node(dsc, name):
     return next(node for node in dsc["scheduleTree_"] if node["name_"] == name)
+
+
+def _pointwise_spec(
+    *,
+    opfunc="add",
+    size=2048,
+    num_inputs=1,
+) -> SDSCSpec:
+    d0 = Symbol("d0")
+    d1 = Symbol("d1")
+    data_format = DataFormats.SEN169_FP16
+    work_slices = {d0: 32, d1: 1}
+    args = []
+    for idx in range(num_inputs):
+        args.append(
+            SDSCArgs(
+                layout=f"INPUT{idx}",
+                data_format=data_format,
+                scales={d0: 1, d1: 1},
+                strides={d0: size, d1: 1},
+                offsets={},
+                max_dim_sizes={d0: -1, d1: -1},
+                allocation={},
+                start_address=SEGMENT_OFFSETS[idx],
+                backGap={},
+            )
+        )
+    args.append(
+        SDSCArgs(
+            layout="OUTPUT",
+            data_format=data_format,
+            scales={d0: 1, d1: 1},
+            strides={d0: size, d1: 1},
+            offsets={},
+            max_dim_sizes={d0: -1, d1: -1},
+            allocation={},
+            start_address=SEGMENT_OFFSETS[2],
+            backGap={},
+        )
+    )
+    layouts = {
+        arg.layout: {
+            "dim_order": [d0, d1],
+            "stick_dim_order": d1,
+            "stick_size": 64,
+        }
+        for arg in args
+    }
+    return SDSCSpec(
+        opfunc=opfunc,
+        execution_unit="sfp",
+        data_format=data_format,
+        num_inputs=num_inputs,
+        iteration_space={d0: size, d1: size},
+        num_cores=32,
+        work_slices=work_slices,
+        core_id_to_work_slice={},
+        core_id_to_work_slice_override=_core_mapping([d0, d1], d0, 32),
+        padding={},
+        layouts=layouts,
+        args=args,
+        constants={},
+        coordinate_masking={},
+    )
+
+
+def _tensor_arg(*, is_input, arg_index):
+    d0 = Symbol("d0")
+    d1 = Symbol("d1")
+    return TensorArg(
+        is_input=is_input,
+        arg_index=arg_index,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[2048, 2048],
+        device_coordinates=[d0, d1],
+        allocation={},
+    )
 
 
 def test_restickify_ddl_bridge_generates_compact_lx_contract():
@@ -307,3 +387,144 @@ def test_restickify_ddl_bridge_skips_unknown_runtime_segments():
     reason = restickify_ddl_bridge_skip_reason(_op_spec_stub(), spec)
 
     assert reason == "unsupported-runtime-segment"
+
+
+def test_restickify_lx_boundary_patch_marks_adjacent_consumer_input_lx_only():
+    producer_sdsc_spec = _pointwise_spec(num_inputs=1)
+    restickify_sdsc_spec = _spec()
+    consumer_sdsc_spec = _pointwise_spec(num_inputs=2)
+    producer_payload = generate_sdsc(0, producer_sdsc_spec)
+    restickify_payload = generate_restickify_ddl_bridge_sdsc(
+        1,
+        restickify_sdsc_spec,
+        generate_sdsc(1, restickify_sdsc_spec),
+    )
+    consumer_payload = generate_sdsc(2, consumer_sdsc_spec)
+    d0 = Symbol("d0")
+    op_specs = [
+        OpSpec(
+            "add",
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=0),
+                _tensor_arg(is_input=False, arg_index=7),
+            ],
+            {},
+        ),
+        OpSpec(
+            RESTICKIFY_OP,
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=7),
+                _tensor_arg(is_input=False, arg_index=8),
+            ],
+            {"restickify_source_kind": "in_graph_computed"},
+        ),
+        OpSpec(
+            "add",
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=0),
+                _tensor_arg(is_input=True, arg_index=8),
+                _tensor_arg(is_input=False, arg_index=9),
+            ],
+            {},
+        ),
+    ]
+    payloads = [producer_payload, restickify_payload, consumer_payload]
+    producer_dsc = _dsc(producer_payload)
+    bridge_dsc = _dsc(restickify_payload)
+    consumer_dsc = _dsc(consumer_payload)
+    producer_start = _schedule_node(producer_dsc, "allocate-Tensor1_hbm")[
+        "startAddressCoreCorelet_"
+    ]
+    bridge_output_start = _schedule_node(bridge_dsc, "allocate_Tensor1_lx")[
+        "startAddressCoreCorelet_"
+    ]
+
+    rows = patch_restickify_ddl_bridge_boundaries(payloads, op_specs)
+
+    assert rows[0]["status"] == "patched"
+    producer_dsc = _dsc(producer_payload)
+    bridge_dsc = _dsc(restickify_payload)
+    consumer_dsc = _dsc(consumer_payload)
+    producer_output_lds = producer_dsc["labeledDs_"][1]
+    bridge_input_alloc = _schedule_node(bridge_dsc, "allocate_Tensor0_lx")
+    bridge_input_transfer = _schedule_node(
+        bridge_dsc,
+        "transfer_lds0_src:no_component_dst:lx_lx_local",
+    )
+    bridge_output_transfer = _schedule_node(
+        bridge_dsc,
+        "transfer_lds1_src:lx_dst:no_component_lx_local",
+    )
+    consumer_input_lds = consumer_dsc["labeledDs_"][1]
+    consumer_input_alloc = _schedule_node(consumer_dsc, "allocate-Tensor1_lx")
+
+    assert set(producer_output_lds["memOrg_"]) == {"lx"}
+    assert bridge_input_alloc["startAddressCoreCorelet_"] == producer_start
+    assert (
+        bridge_input_transfer["dstLdsAndLoopOffsets_"][0]["startAddr_"]
+        == producer_start
+    )
+    assert (
+        bridge_output_transfer["srcLdsAndLoopOffsets_"]["startAddr_"]
+        == bridge_output_start
+    )
+    assert consumer_input_lds["dsType_"] == "INPUT"
+    assert set(consumer_input_lds["memOrg_"]) == {"lx"}
+    assert (
+        consumer_input_lds["memOrg_"]["lx"]["allocateNode_"]
+        == "allocate-Tensor1_lx"
+    )
+    assert consumer_input_alloc["component_"] == "lx"
+    assert consumer_input_alloc["startAddressCoreCorelet_"] == bridge_output_start
+
+
+def test_restickify_lx_boundary_patch_skips_when_restickify_stays_hbm():
+    producer_payload = generate_sdsc(0, _pointwise_spec(num_inputs=1))
+    restickify_payload = generate_sdsc(1, _spec())
+    consumer_payload = generate_sdsc(2, _pointwise_spec(num_inputs=2))
+    d0 = Symbol("d0")
+    op_specs = [
+        OpSpec(
+            "add",
+            False,
+            {d0: (2048, 32)},
+            [_tensor_arg(is_input=False, arg_index=7)],
+            {},
+        ),
+        OpSpec(
+            RESTICKIFY_OP,
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=7),
+                _tensor_arg(is_input=False, arg_index=8),
+            ],
+            {},
+        ),
+        OpSpec(
+            "add",
+            False,
+            {d0: (2048, 32)},
+            [_tensor_arg(is_input=True, arg_index=8)],
+            {},
+        ),
+    ]
+
+    rows = patch_restickify_ddl_bridge_boundaries(
+        [producer_payload, restickify_payload, consumer_payload],
+        op_specs,
+    )
+
+    assert rows == [
+        {
+            "sdsc_index": 1,
+            "status": "skipped",
+            "reason": "restickify-was-not-ddl-bridge",
+        }
+    ]
