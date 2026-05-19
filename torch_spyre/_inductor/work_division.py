@@ -544,9 +544,19 @@ def span_reduction_pass(
 
 
 # A pure m-split matmul reads HBM ~2-3.7x slower than a 2D m x n co-split
-# (see tests/diag_hbm_bank_aware_findings.md). Splitting n beyond this many
-# cores hits an over-split cliff, so cap n_split here and give the rest to m.
-_MN_SPLIT_N_CAP = 8
+# (see tests/diag_hbm_bank_aware_findings.md). The optimal (m_split, n_split)
+# is N-aware: at m=512 prefill, an empirical sweep on (m,n,k) shows the
+# winning kernel time depends on n_sticks:
+#   n_sticks=16   (matmul_KV  N=1024 ):  best (4, 8, 1) — 126 us
+#   n_sticks=64   (matmul_QO  N=4096 ):  best (8, 4, 1) — 760 us
+#   n_sticks=200  (matmul_MLP N=12800):  best (16,2, 1) — 3078 us
+# A flat n_split cap (the prior _MN_SPLIT_N_CAP=8 picked (4,8,1) everywhere)
+# loses 1.16-1.51x on the bigger-N shapes. Target rule that fits all three:
+#   target_m_split = max(_MN_SPLIT_M_MIN,
+#                        min(max_cores // 2, n_sticks // _MN_SPLIT_PER_CORE_N_STICKS))
+# yields m_split ∈ {4, 8, 16} for the three shapes above.
+_MN_SPLIT_M_MIN = 4              # never go below m_split=4 (per-core M too small)
+_MN_SPLIT_PER_CORE_N_STICKS = 8  # target per-core N-band ≈ 8 sticks
 
 
 def _matmul_names_unsafe_for_2d(operations: list[Operation]) -> set[str]:
@@ -618,7 +628,7 @@ def _2d_split_would_fire(
     # m-split regime: the default planner picks pure-m only when M > n_sticks.
     if M <= n_sticks:
         return False
-    if core_split(n_sticks, min(_MN_SPLIT_N_CAP, max_cores)) <= 1:
+    if core_split(n_sticks, min(8, max_cores)) <= 1:
         return False
     return True
 
@@ -663,14 +673,35 @@ def _maybe_2d_mn_split(
     if any(v > 1 for d, v in splits.items() if d is not m_dim):
         return splits
     n_sticks = concretize_expr(it_space_adjusted[n_dim])
-    n_split = core_split(n_sticks, min(_MN_SPLIT_N_CAP, max_cores))
-    if n_split <= 1:
-        return splits  # n not splittable — leave the pure-m split
     m_size = concretize_expr(it_space_adjusted[m_dim])
-    m_split = core_split(m_size, max_cores // n_split)
+    # N-aware target: scale m_split with n_sticks so per-core N-band stays
+    # near _MN_SPLIT_PER_CORE_N_STICKS. Clamp to [_MN_SPLIT_M_MIN, max_cores/2].
+    target_m_split = max(
+        _MN_SPLIT_M_MIN,
+        min(max_cores // 2, n_sticks // _MN_SPLIT_PER_CORE_N_STICKS),
+    )
+    # Walk divisors of max_cores from target down to _MN_SPLIT_M_MIN until we
+    # find an m_split that (a) divides M, (b) leaves n_split = max_cores/m_split
+    # dividing n_sticks. If none, fall back to the cap-N-stick rule.
+    m_split = n_split = 0
+    for cand in sorted(
+        (d for d in (1, 2, 4, 8, 16, 32) if d <= max_cores and d >= _MN_SPLIT_M_MIN),
+        key=lambda d: (abs(d - target_m_split), -d),
+    ):
+        cand_n = max_cores // cand
+        if m_size % cand == 0 and n_sticks % cand_n == 0 and cand_n >= 1:
+            m_split, n_split = cand, cand_n
+            break
+    if n_split <= 1 or m_split <= 1:
+        # Fallback to the prior cap-style rule
+        n_split = core_split(n_sticks, min(8, max_cores))
+        if n_split <= 1:
+            return splits
+        m_split = core_split(m_size, max_cores // n_split)
     logger.debug(
         f"2d_mn_split work_division {op.get_name()}: "
-        f"m-split {splits[m_dim]} -> ({m_split}, {n_split}) (m x n)"
+        f"m-split {splits[m_dim]} -> ({m_split}, {n_split}) (m x n) "
+        f"[n_sticks={n_sticks} target_m={target_m_split}]"
     )
     splits = dict(splits)
     splits[m_dim] = m_split
