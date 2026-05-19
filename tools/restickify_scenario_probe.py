@@ -1599,6 +1599,11 @@ def _apply_lx_boundary_stitch_prototype(code_dir: Path) -> dict[str, Any]:
         _read_json_file(consumer_debug),
         lds_idx=consumer_lds_idx,
     )
+    if (
+        consumer_lx_start is not None
+        and os.environ.get("SPYRE_RESTICKIFY_LX_BOUNDARY_COLLAPSE_CORELETS") == "1"
+    ):
+        consumer_lx_start = _collapse_start_payload_to_one_corelet(consumer_lx_start)
     producer_output_indices = _compute_output_indices(producer_dsc)
     producer_lx_start = None
     if producer_debug.exists() and producer_output_indices:
@@ -1606,6 +1611,13 @@ def _apply_lx_boundary_stitch_prototype(code_dir: Path) -> dict[str, Any]:
             _read_json_file(producer_debug),
             lds_idx=producer_output_indices[0],
         )
+        if (
+            producer_lx_start is not None
+            and os.environ.get("SPYRE_RESTICKIFY_LX_BOUNDARY_COLLAPSE_CORELETS") == "1"
+        ):
+            producer_lx_start = _collapse_start_payload_to_one_corelet(
+                producer_lx_start
+            )
     bridge_lx_start = None
     bridge_lx_start_source = ""
     if base_override:
@@ -1931,6 +1943,32 @@ def _corelet_factor(start_payload: dict[str, Any]) -> int:
 
 def _unique_start_values(start_payload: dict[str, Any]) -> list[int]:
     return sorted({int(value) for value in start_payload.get("data_", {}).values()})
+
+
+def _collapse_start_payload_to_one_corelet(start_payload: dict[str, Any]) -> dict[str, Any]:
+    """Keep the corelet-0 address for each core and rewrite cardinality to 32x1x1."""
+
+    collapsed = copy.deepcopy(start_payload)
+    attrs = collapsed.get("dim_prop_attr", [])
+    if len(attrs) >= 2:
+        attrs[1] = {**attrs[1], "factor_": 1, "label_": "corelet"}
+    data = collapsed.get("data_", {})
+    core_to_value: dict[int, str] = {}
+    for key, value in data.items():
+        try:
+            core_str, corelet_str, _time_str = key.strip("[]").split(",")
+            core = int(core_str.strip())
+            corelet = int(corelet_str.strip())
+        except ValueError:
+            continue
+        if corelet == 0:
+            core_to_value[core] = str(value)
+    if not core_to_value:
+        return collapsed
+    collapsed["data_"] = {
+        f"[{core}, 0, 0]": core_to_value[core] for core in sorted(core_to_value)
+    }
+    return collapsed
 
 
 def _core_factor(payload: dict[str, Any]) -> int:
