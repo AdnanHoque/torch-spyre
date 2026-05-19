@@ -211,10 +211,8 @@ Build a tiny standalone `InputFetchNeighbor` probe:
 
    ```text
    HBM=0
-   L3LU=0
-   L3SU=0
-   LXLU>0
-   LXSU>0
+   L3LU/L3SU>0
+   ringDT comments with lx/ring endpoints
    ```
 
 4. Confirm source piece addresses match producer `coreStateInit_.lbrInit_`
@@ -223,6 +221,10 @@ Build a tiny standalone `InputFetchNeighbor` probe:
    `coreIdToDscSchedule` step `[0, 0, false, false]`.
 6. Only then wire Torch-Spyre restickify lowering to emit this schedule/data-op
    shape behind a default-off flag.
+
+Stage 73 corrected the expected token signature: cross-core LX-to-LX traffic over
+RIU can legitimately appear as ring-facing `L3LU`/`L3SU` instructions. The key
+negative proof is absence of `HBM`, not absence of `L3`.
 
 ## Working Conclusion
 

@@ -69,7 +69,7 @@ What remains unproven:
 
 ## Next Options
 
-1. Build a tiny `i/j`-shaped fixture that satisfies the existing `InputFetchNeighbor` assumptions and verify the generated `senprog.txt` has `LXLU/LXSU` with no `HBM/L3LU/L3SU`.
+1. Build a tiny `i/j`-shaped fixture that satisfies the existing `InputFetchNeighbor` assumptions and verify the generated `senprog.txt` has no `HBM` plus ring-facing `L3LU/L3SU` traffic. Stage 73 corrected the expected signature: cross-core LX-to-LX RIU movement can show up as `L3LU/L3SU`, because those are the ring-facing units.
 2. Patch a local Deeptools experiment to generalize `inputNeighborFetchL3LUSubpieceOrder` away from hard-coded `i/j` ordering.
 3. Return to the Torch-Spyre-side mapping-only Stage 3B path, since it remains the smallest production-shaped optimization.
 
