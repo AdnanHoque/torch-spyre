@@ -267,6 +267,31 @@ def test_restickify_ddl_bridge_rejects_unknown_source_address_mode(monkeypatch):
         generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
 
 
+def test_restickify_ddl_bridge_can_probe_loop_order(monkeypatch):
+    monkeypatch.setenv("SPYRE_RESTICKIFY_DDL_BRIDGE_LOOP_ORDER", "output")
+    spec = _spec()
+    compute_payload = generate_sdsc(0, spec)
+
+    payload = generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
+    dsc = _dsc(payload)
+    loop_names = [
+        node["name_"]
+        for node in dsc["scheduleTree_"]
+        if node["nodeType_"] == "loop"
+    ]
+
+    assert loop_names == ["loop_ds0_ds1_d1", "loop_ds0_ds1_d0"]
+
+
+def test_restickify_ddl_bridge_rejects_unknown_loop_order(monkeypatch):
+    monkeypatch.setenv("SPYRE_RESTICKIFY_DDL_BRIDGE_LOOP_ORDER", "bad-order")
+    spec = _spec()
+    compute_payload = generate_sdsc(0, spec)
+
+    with pytest.raises(ValueError, match="LOOP_ORDER"):
+        generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
+
+
 def test_restickify_ddl_bridge_allows_mirrored_2048_direction():
     spec = _spec(input_stick_name="d0", output_stick_name="d1")
     compute_payload = generate_sdsc(0, spec)

@@ -46,6 +46,14 @@ _SUPPORTED_BRIDGE_SOURCE_ADDRESS = {
     _BRIDGE_SOURCE_ADDRESS_COMPACT_LXLU,
 }
 _ALLOW_MULTI_SPLIT_ENV = "SPYRE_RESTICKIFY_DDL_BRIDGE_ALLOW_MULTI_SPLIT"
+_BRIDGE_LOOP_ORDER_ENV = "SPYRE_RESTICKIFY_DDL_BRIDGE_LOOP_ORDER"
+_BRIDGE_LOOP_ORDER_REVERSED_INPUT = "reversed-input"
+_SUPPORTED_BRIDGE_LOOP_ORDERS = {
+    "input",
+    "output",
+    _BRIDGE_LOOP_ORDER_REVERSED_INPUT,
+    "reversed-output",
+}
 
 
 def restickify_ddl_bridge_skip_reason(
@@ -154,7 +162,7 @@ def generate_restickify_ddl_bridge_sdsc(
         alloc_templates[-1],
     )
 
-    loops = _loop_skeleton(list(reversed(input_layout)))
+    loops = _loop_skeleton(_bridge_loop_dims(input_layout, output_layout))
     input_lx_size = _arg_lx_size(sdsc_spec.args[0], sdsc_spec)
     output_lx_size = _arg_lx_size(sdsc_spec.args[-1], sdsc_spec)
     input_segment = _required_runtime_segment(sdsc_spec.args[0].start_address)
@@ -318,6 +326,28 @@ def _bridge_source_address_mode() -> str:
             f"choose one of {sorted(_SUPPORTED_BRIDGE_SOURCE_ADDRESS)}"
         )
     return mode
+
+
+def _bridge_loop_dims(
+    input_layout: list[str],
+    output_layout: list[str],
+) -> list[str]:
+    mode = os.environ.get(
+        _BRIDGE_LOOP_ORDER_ENV,
+        _BRIDGE_LOOP_ORDER_REVERSED_INPUT,
+    )
+    if mode not in _SUPPORTED_BRIDGE_LOOP_ORDERS:
+        raise ValueError(
+            f"{_BRIDGE_LOOP_ORDER_ENV}={mode!r} is unsupported; "
+            f"choose one of {sorted(_SUPPORTED_BRIDGE_LOOP_ORDERS)}"
+        )
+    if mode == "input":
+        return list(input_layout)
+    if mode == "output":
+        return list(output_layout)
+    if mode == "reversed-output":
+        return list(reversed(output_layout))
+    return list(reversed(input_layout))
 
 
 def _as_int_or_none(value: Any) -> int | None:
