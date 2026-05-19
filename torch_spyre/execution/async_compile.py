@@ -82,6 +82,37 @@ static bool is_restickify_ddl_bridge(const SuperDsc* sdsc) {
   return true;
 }
 
+static bool name_matches_any(const SuperDsc* sdsc, const char* raw_names) {
+  if (!sdsc || raw_names == nullptr || raw_names[0] == '\0') {
+    return false;
+  }
+  const std::string names(raw_names);
+  const auto has_match = [&names](const std::string& candidate) {
+    std::size_t start = 0;
+    while (start <= names.size()) {
+      auto end = names.find(',', start);
+      auto token = names.substr(start, end == std::string::npos ? end : end - start);
+      if (!token.empty() && candidate.find(token) != std::string::npos) {
+        return true;
+      }
+      if (end == std::string::npos) {
+        break;
+      }
+      start = end + 1;
+    }
+    return false;
+  };
+  if (has_match(sdsc->name_)) {
+    return true;
+  }
+  for (const auto& dsc : sdsc->dscs_) {
+    if (has_match(dsc.name_)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 template <typename Fn>
 static Fn required_next_symbol(const char* name) {
   dlerror();
@@ -102,6 +133,13 @@ void Dsm::doCoreletSplitSdsc(SuperDsc* sdsc) {
               << sdsc->name_ << "\n";
     return;
   }
+  const char* skip_names =
+      std::getenv("SPYRE_RESTICKIFY_DDL_SHIM_SKIP_CORELET_NAMES");
+  if (name_matches_any(sdsc, skip_names)) {
+    std::cerr << "[torch-spyre] skipped Dsm::doCoreletSplitSdsc by name for "
+              << sdsc->name_ << "\n";
+    return;
+  }
   using Fn = void (*)(SuperDsc*);
   static Fn next = required_next_symbol<Fn>("_ZN3Dsm18doCoreletSplitSdscEP8SuperDsc");
   next(sdsc);
@@ -109,7 +147,22 @@ void Dsm::doCoreletSplitSdsc(SuperDsc* sdsc) {
 
 void L3DlOpsScheduler::run(SuperDsc& sdsc) {
   if (is_restickify_ddl_bridge(&sdsc)) {
+    const char* run_bridge_l3 =
+        std::getenv("SPYRE_RESTICKIFY_DDL_SHIM_RUN_L3_FOR_BRIDGE");
+    if (run_bridge_l3 != nullptr && std::string(run_bridge_l3) == "1") {
+      using Fn = void (*)(L3DlOpsScheduler*, SuperDsc&);
+      static Fn next = required_next_symbol<Fn>("_ZN16L3DlOpsScheduler3runER8SuperDsc");
+      next(this, sdsc);
+      return;
+    }
     std::cerr << "[torch-spyre] skipped L3DlOpsScheduler::run for "
+              << sdsc.name_ << "\n";
+    return;
+  }
+  const char* skip_names =
+      std::getenv("SPYRE_RESTICKIFY_DDL_SHIM_SKIP_L3_NAMES");
+  if (name_matches_any(&sdsc, skip_names)) {
+    std::cerr << "[torch-spyre] skipped L3DlOpsScheduler::run by name for "
               << sdsc.name_ << "\n";
     return;
   }

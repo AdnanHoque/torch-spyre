@@ -28,12 +28,16 @@ reasons.
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import json
 import math
 import os
+import re
+import subprocess
 import shutil
 import statistics
+import sys
 import time
 import traceback
 from contextlib import contextmanager
@@ -911,14 +915,25 @@ def _sync() -> None:
         cuda.synchronize()
 
 
+_LX_SPLIT_DATAOP_HANDLED = object()
+
+
 @contextmanager
 def _kernel_launch_debug(
     *,
     sync_after_kernel: bool,
     log_path: Path | None,
     copy_code_dir_root: Path | None = None,
+    lx_boundary_stitch_prototype: bool = False,
+    lx_split_dataop_prototype: bool = False,
 ):
-    if not sync_after_kernel and log_path is None and copy_code_dir_root is None:
+    if (
+        not sync_after_kernel
+        and log_path is None
+        and copy_code_dir_root is None
+        and not lx_boundary_stitch_prototype
+        and not lx_split_dataop_prototype
+    ):
         yield
         return
 
@@ -961,6 +976,27 @@ def _kernel_launch_debug(
         except Exception:
             files = []
         copied_code_dir = ""
+        base = {
+            "kernel_name": self.kernel_name,
+            "code_dir": self.code_dir,
+            "copied_code_dir": copied_code_dir,
+            "sdsc_files": files,
+            "arg_count": len(args),
+        }
+        if lx_boundary_stitch_prototype:
+            try:
+                stitch_info = _apply_lx_boundary_stitch_prototype(Path(self.code_dir))
+            except BaseException as exc:
+                emit(
+                    {
+                        "phase": "lx_boundary_stitch_exception",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        **base,
+                    }
+                )
+                raise
+            emit({"phase": "lx_boundary_stitch", **stitch_info, **base})
         if copy_code_dir_root is not None:
             copy_index += 1
             safe_kernel = "".join(
@@ -970,16 +1006,24 @@ def _kernel_launch_debug(
             copied = copy_code_dir_root / f"{copy_index:04d}_{safe_kernel}"
             shutil.copytree(self.code_dir, copied, dirs_exist_ok=True)
             copied_code_dir = str(copied)
-        base = {
-            "kernel_name": self.kernel_name,
-            "code_dir": self.code_dir,
-            "copied_code_dir": copied_code_dir,
-            "sdsc_files": files,
-            "arg_count": len(args),
-        }
+            base["copied_code_dir"] = copied_code_dir
         emit({"phase": "before_launch", **base})
         try:
-            result = original_run(self, *args, **kw_args)
+            if lx_split_dataop_prototype:
+                split_result = _run_lx_split_dataop_prototype(
+                    Path(self.code_dir),
+                    args,
+                    emit=emit,
+                    base=base,
+                )
+            else:
+                split_result = None
+            if split_result is _LX_SPLIT_DATAOP_HANDLED:
+                result = None
+            elif split_result is not None:
+                result = split_result
+            else:
+                result = original_run(self, *args, **kw_args)
         except BaseException as exc:
             emit(
                 {
@@ -1004,6 +1048,906 @@ def _kernel_launch_debug(
         kernel_runner.SpyreSDSCKernelRunner.run = original_run
         if handle is not None:
             handle.close()
+
+
+def _run_lx_split_dataop_prototype(
+    code_dir: Path,
+    launch_args: tuple[Any, ...],
+    *,
+    emit: Callable[[dict[str, Any]], None],
+    base: dict[str, Any],
+) -> object | None:
+    """Launch producer -> LX data-op restickify -> consumer for one fixture.
+
+    This is intentionally a probe-only path.  It does not alter Torch-Spyre
+    lowering; it recognizes an already-generated producer/restickify/consumer
+    bundle, builds launchable pieces next to it, and runs those pieces in place
+    of the original bundle.
+    """
+
+    triplet = _select_restickify_triplet(code_dir)
+    if triplet is None:
+        return None
+
+    split_root = Path(str(code_dir) + "_lx_split_dataop")
+    try:
+        summary = _prepare_lx_split_dataop_prototype(
+            code_dir,
+            triplet=triplet,
+            split_root=split_root,
+        )
+    except Exception as exc:  # noqa: BLE001
+        emit(
+            {
+                "phase": "lx_split_dataop_prepare_error",
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                **base,
+            }
+        )
+        raise
+
+    emit({"phase": "lx_split_dataop_launch_start", **summary, **base})
+    from torch_spyre._C import launch_kernel
+
+    producer_args = tuple(launch_args[index] for index in summary["producer_arg_indices"])
+    consumer_args = tuple(launch_args[index] for index in summary["consumer_arg_indices"])
+    stages = {
+        stage.strip()
+        for stage in os.environ.get(
+            "SPYRE_RESTICKIFY_LX_SPLIT_STAGES",
+            "producer,dataop,consumer",
+        ).split(",")
+        if stage.strip()
+    }
+    sync_each = os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_SYNC_EACH", "0") == "1"
+    if "producer" in stages:
+        emit({"phase": "lx_split_dataop_before_producer", **summary, **base})
+        launch_kernel(str(split_root / "producer"), producer_args)
+        if sync_each:
+            _sync()
+        emit({"phase": "lx_split_dataop_after_producer", **summary, **base})
+    if "dataop" in stages:
+        emit({"phase": "lx_split_dataop_before_dataop", **summary, **base})
+        launch_kernel(str(split_root / "dataop_launch"), ())
+        if sync_each:
+            _sync()
+        emit({"phase": "lx_split_dataop_after_dataop", **summary, **base})
+    if "consumer" in stages:
+        emit({"phase": "lx_split_dataop_before_consumer", **summary, **base})
+        launch_kernel(str(split_root / "consumer"), consumer_args)
+        if sync_each:
+            _sync()
+        emit({"phase": "lx_split_dataop_after_consumer", **summary, **base})
+    emit({"phase": "lx_split_dataop_launch_done", **summary, **base})
+    return _LX_SPLIT_DATAOP_HANDLED
+
+
+def _prepare_lx_split_dataop_prototype(
+    code_dir: Path,
+    *,
+    triplet: tuple[Path, Path, Path],
+    split_root: Path,
+) -> dict[str, Any]:
+    ready = split_root / ".ready.json"
+    if ready.exists():
+        return _read_json_file(ready)
+
+    shutil.rmtree(split_root, ignore_errors=True)
+    split_root.mkdir(parents=True, exist_ok=True)
+
+    producer_path, restickify_path, consumer_path = triplet
+    producer_payload = _read_json_file(producer_path)
+    restickify_payload = _read_json_file(restickify_path)
+    consumer_payload = _read_json_file(consumer_path)
+    _, producer_dsc = _single_payload_dsc(producer_payload)
+    _, restickify_dsc = _single_payload_dsc(restickify_payload)
+    _, consumer_dsc = _single_payload_dsc(consumer_payload)
+
+    restickify_input_idx = _first_compute_input_index(restickify_dsc)
+    restickify_output_idx = _first_compute_output_index(restickify_dsc)
+    restickify_input_hbm = _base_address(
+        _alloc_start_map(restickify_dsc, lds_idx=restickify_input_idx, component="hbm")
+    )
+    restickify_output_hbm = _base_address(
+        _alloc_start_map(restickify_dsc, lds_idx=restickify_output_idx, component="hbm")
+    )
+    arg_index_by_base = _arg_index_by_hbm_base(
+        [producer_dsc, restickify_dsc, consumer_dsc]
+    )
+    producer_output_idx = _find_matching_lds_by_hbm_base(
+        producer_dsc,
+        candidate_indices=_compute_output_indices(producer_dsc),
+        target_base=restickify_input_hbm,
+    )
+    consumer_input_idx = _find_matching_lds_by_hbm_base(
+        consumer_dsc,
+        candidate_indices=_compute_input_indices(consumer_dsc),
+        target_base=restickify_output_hbm,
+    )
+
+    producer_base = int(os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_PRODUCER_BASE", "16384"))
+    consumer_base = int(os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_CONSUMER_BASE", "8192"))
+    producer_start = _constant_lx_start_payload(
+        num_cores=_core_factor(producer_payload),
+        base=producer_base,
+    )
+    consumer_start = _constant_lx_start_payload(
+        num_cores=_core_factor(consumer_payload),
+        base=consumer_base,
+    )
+
+    _patch_lx_allocation_by_index(
+        producer_payload,
+        lds_idx=producer_output_idx,
+        start_payload=producer_start,
+    )
+    consumer_input_name = next(
+        str(lds.get("dsName_", f"lds{consumer_input_idx}"))
+        for lds in consumer_dsc.get("labeledDs_", []) or []
+        if int(lds.get("ldsIdx_", -1)) == int(consumer_input_idx)
+    )
+    _patch_consumer_input_lx_map(
+        consumer_payload,
+        consumer_input_name,
+        lds_idx=consumer_input_idx,
+        start_payload=consumer_start,
+    )
+    _, patched_producer_dsc = _single_payload_dsc(producer_payload)
+    _, patched_consumer_dsc = _single_payload_dsc(consumer_payload)
+    producer_arg_indices = _dsc_hbm_arg_indices(
+        patched_producer_dsc,
+        arg_index_by_base,
+    )
+    consumer_arg_indices = _dsc_hbm_arg_indices(
+        patched_consumer_dsc,
+        arg_index_by_base,
+    )
+
+    producer_dir = split_root / "producer"
+    consumer_dir = split_root / "consumer"
+    _write_single_sdsc_bundle(producer_dir, producer_path.name, producer_payload)
+    _write_single_sdsc_bundle(consumer_dir, consumer_path.name, consumer_payload)
+    _compile_dxp_bundle(producer_dir)
+    _compile_dxp_bundle(consumer_dir)
+
+    dataop_summary = _generate_and_package_lx_dataop(code_dir, split_root=split_root)
+
+    summary = {
+        "status": "prepared",
+        "split_root": str(split_root),
+        "producer_dir": str(producer_dir),
+        "consumer_dir": str(consumer_dir),
+        "dataop_launch_dir": str(split_root / "dataop_launch"),
+        "producer_sdsc": producer_path.name,
+        "restickify_sdsc": restickify_path.name,
+        "consumer_sdsc": consumer_path.name,
+        "producer_output_lds_idx": producer_output_idx,
+        "consumer_input_lds_idx": consumer_input_idx,
+        "producer_arg_indices": producer_arg_indices,
+        "consumer_arg_indices": consumer_arg_indices,
+        "producer_lx_base": producer_base,
+        "consumer_lx_base": consumer_base,
+        **dataop_summary,
+    }
+    _write_json_file(ready, summary)
+    return summary
+
+
+def _select_restickify_triplet(code_dir: Path) -> tuple[Path, Path, Path] | None:
+    files = sorted(code_dir.glob("sdsc_*.json"), key=_sdsc_index)
+    for index, path in enumerate(files):
+        try:
+            payload = _read_json_file(path)
+            _, dsc = _single_payload_dsc(payload)
+        except Exception:  # noqa: BLE001
+            continue
+        op_names = [
+            str(op.get("opFuncName", ""))
+            for op in dsc.get("computeOp_", []) or []
+        ]
+        if not any("ReStickify" in name for name in op_names):
+            continue
+        if index == 0 or index + 1 >= len(files):
+            return None
+        return files[index - 1], path, files[index + 1]
+    return None
+
+
+def _sdsc_index(path: Path) -> int:
+    match = re.match(r"sdsc_(\d+)_", path.name)
+    return int(match.group(1)) if match else 10**9
+
+
+def _write_single_sdsc_bundle(
+    output_dir: Path,
+    sdsc_name: str,
+    payload: dict[str, Any],
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    _write_json_file(output_dir / sdsc_name, payload)
+    (output_dir / "bundle.mlir").write_text(
+        "module {\n"
+        "\tfunc.func @sdsc_bundle() {\n"
+        f'\t\tsdscbundle.sdsc_execute () {{sdsc_filename="{sdsc_name}"}}\n'
+        "\t\treturn\n"
+        "\t}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+
+def _compile_dxp_bundle(code_dir: Path) -> None:
+    result = _run_dxp_bundle(code_dir, cwd=code_dir, verbose=False)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"dxp_standalone failed for {code_dir}:\n"
+            + result.stdout[-4000:]
+            + result.stderr[-4000:]
+        )
+
+
+def _generate_and_package_lx_dataop(
+    code_dir: Path,
+    *,
+    split_root: Path,
+) -> dict[str, Any]:
+    gen_dir = split_root / "dataop_gen"
+    script = Path(__file__).with_name("restickify_address_preserving_dataop_probe.py")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--code-dir",
+            str(code_dir),
+            "--output-dir",
+            str(gen_dir),
+            "--mode",
+            "stage3b",
+            "--no-run-dataop-standalone",
+        ],
+        cwd=Path.cwd(),
+        env={
+            **os.environ,
+            "SPYRE_RESTICKIFY_LX_DATAOP": "1",
+            "TORCH_DEVICE_BACKEND_AUTOLOAD": "0",
+        },
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    (split_root / "dataop_gen.stdout.txt").write_text(proc.stdout, encoding="utf-8")
+    (split_root / "dataop_gen.stderr.txt").write_text(proc.stderr, encoding="utf-8")
+    if proc.returncode != 0:
+        raise RuntimeError(
+            "address-preserving data-op generation failed:\n"
+            + proc.stdout[-2000:]
+            + proc.stderr[-4000:]
+        )
+
+    summary_path = gen_dir / "summary.json"
+    dataop_summary = _read_json_file(summary_path)
+    patched_path = Path(dataop_summary["patched"]["path"])
+    exporter = os.environ.get(
+        "SPYRE_RESTICKIFY_DEEPRT_DATAOP_EXPORTER",
+        "/tmp/stage65-deeprt-dataop-probe",
+    )
+    export_dir = split_root / "dataop_export"
+    proc = subprocess.run(
+        [exporter, str(patched_path), str(export_dir), "sentient"],
+        cwd=split_root,
+        env=os.environ.copy(),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    (split_root / "dataop_export.stdout.txt").write_text(proc.stdout, encoding="utf-8")
+    (split_root / "dataop_export.stderr.txt").write_text(proc.stderr, encoding="utf-8")
+
+    init_candidates = sorted((export_dir / "execute").glob("*/init.txt"))
+    senprog_candidates = sorted((export_dir / "execute").glob("*/senprog.txt"))
+    if not init_candidates:
+        raise RuntimeError(
+            "Deeprt data-op export did not produce execute/*/init.txt:\n"
+            + proc.stdout[-2000:]
+            + proc.stderr[-4000:]
+        )
+
+    launch_dir = split_root / "dataop_launch"
+    launch_name = launch_dir.name
+    init_target = (
+        launch_dir
+        / "loadprogram_to_device"
+        / f"{launch_name}-SenProgSend"
+        / "init.txt"
+    )
+    init_target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(init_candidates[0], init_target)
+    (launch_dir / "bundle.mlir").write_text(
+        "module {\n"
+        "\tfunc.func @sdsc_bundle() {\n"
+        "\t\tsdscbundle.sdsc_execute () {sdsc_filename=\"sdsc_0_lx_split_dataop.json\"}\n"
+        "\t\treturn\n"
+        "\t}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    return {
+        "dataop_generation_summary": str(summary_path),
+        "dataop_patched_sdsc": str(patched_path),
+        "dataop_export_dir": str(export_dir),
+        "dataop_export_returncode": proc.returncode,
+        "dataop_init": str(init_candidates[0]),
+        "dataop_senprog": str(senprog_candidates[0]) if senprog_candidates else "",
+    }
+
+
+def _first_compute_input_index(dsc: dict[str, Any]) -> int:
+    indices = _compute_input_indices(dsc)
+    if not indices:
+        raise ValueError("DSC has no compute input LDS")
+    return indices[0]
+
+
+def _first_compute_output_index(dsc: dict[str, Any]) -> int:
+    indices = _compute_output_indices(dsc)
+    if not indices:
+        raise ValueError("DSC has no compute output LDS")
+    return indices[0]
+
+
+def _compute_input_indices(dsc: dict[str, Any]) -> list[int]:
+    ops = dsc.get("computeOp_", []) or []
+    if not ops:
+        return []
+    return [_lds_label_index(token) for token in ops[0].get("inputLabeledDs", []) or []]
+
+
+def _compute_output_indices(dsc: dict[str, Any]) -> list[int]:
+    ops = dsc.get("computeOp_", []) or []
+    if not ops:
+        return []
+    return [_lds_label_index(token) for token in ops[0].get("outputLabeledDs", []) or []]
+
+
+def _lds_label_index(token: str) -> int:
+    match = re.search(r"-idx(\d+)$", str(token))
+    if not match:
+        raise ValueError(f"could not parse LDS index from {token!r}")
+    return int(match.group(1))
+
+
+def _parse_core_key(key: str) -> int | None:
+    parts = [part.strip() for part in key.strip("[]").split(",") if part.strip()]
+    if not parts:
+        return None
+    return int(parts[0])
+
+
+def _alloc_start_map(
+    dsc: dict[str, Any],
+    *,
+    lds_idx: int,
+    component: str,
+) -> dict[int, int]:
+    candidates: list[tuple[str, dict[int, int]]] = []
+    for node in dsc.get("scheduleTree_", []) or []:
+        if not isinstance(node, dict) or node.get("nodeType_") != "allocate":
+            continue
+        if int(node.get("ldsIdx_", -1)) != int(lds_idx):
+            continue
+        if node.get("component_") != component:
+            continue
+        data = ((node.get("startAddressCoreCorelet_") or {}).get("data_") or {})
+        starts = {
+            core: int(value)
+            for key, value in data.items()
+            if (core := _parse_core_key(str(key))) is not None
+        }
+        if starts:
+            candidates.append((str(node.get("name_", "")), starts))
+    if not candidates:
+        raise ValueError(f"no {component} allocation found for ldsIdx {lds_idx}")
+    candidates.sort(key=lambda item: ("allocate_lds" not in item[0], item[0]))
+    return candidates[0][1]
+
+
+def _base_address(starts: dict[int, int]) -> int:
+    return int(starts[min(starts)])
+
+
+def _find_matching_lds_by_hbm_base(
+    dsc: dict[str, Any],
+    *,
+    candidate_indices: list[int],
+    target_base: int,
+) -> int:
+    for index in candidate_indices:
+        try:
+            starts = _alloc_start_map(dsc, lds_idx=index, component="hbm")
+        except ValueError:
+            continue
+        if _base_address(starts) == int(target_base):
+            return index
+    raise ValueError(f"no candidate LDS has HBM base {target_base}")
+
+
+def _arg_index_by_hbm_base(dscs: list[dict[str, Any]]) -> dict[int, int]:
+    bases: set[int] = set()
+    for dsc in dscs:
+        for lds in dsc.get("labeledDs_", []) or []:
+            try:
+                starts = _alloc_start_map(
+                    dsc,
+                    lds_idx=int(lds.get("ldsIdx_", -1)),
+                    component="hbm",
+                )
+            except ValueError:
+                continue
+            bases.add(_base_address(starts))
+    return {base: index for index, base in enumerate(sorted(bases))}
+
+
+def _dsc_hbm_arg_indices(
+    dsc: dict[str, Any],
+    arg_index_by_base: dict[int, int],
+) -> list[int]:
+    indices: list[int] = []
+    for lds in sorted(
+        dsc.get("labeledDs_", []) or [],
+        key=lambda item: int(item.get("ldsIdx_", -1)),
+    ):
+        lds_idx = int(lds.get("ldsIdx_", -1))
+        try:
+            base = _base_address(
+                _alloc_start_map(dsc, lds_idx=lds_idx, component="hbm")
+            )
+        except ValueError:
+            continue
+        if base not in arg_index_by_base:
+            raise ValueError(f"HBM base {base} missing from split-launch arg map")
+        indices.append(arg_index_by_base[base])
+    return indices
+
+
+def _patch_lx_allocation_by_index(
+    payload: dict[str, Any],
+    *,
+    lds_idx: int,
+    start_payload: dict[str, Any],
+) -> None:
+    root, dsc = _single_payload_dsc(payload)
+    corelet_factor = _corelet_factor(start_payload)
+    root["coreletFoldProp_"] = {"factor_": corelet_factor, "label_": "corelet"}
+    dsc["numCoreletsUsed_"] = corelet_factor
+    dsc["numCoreletsUsed_DSC2_"] = corelet_factor
+    lds_name = None
+    for lds in dsc.get("labeledDs_", []) or []:
+        if int(lds.get("ldsIdx_", -1)) == int(lds_idx):
+            lds_name = str(lds.get("dsName_", f"lds{lds_idx}"))
+            lx_meta = dict(lds.get("memOrg_", {}).get("lx", {}))
+            lx_meta["isPresent"] = 1
+            lx_meta["allocateNode_"] = f"allocate-{lds_name}_lx"
+            lds["memOrg_"] = {"lx": lx_meta}
+            lds["hbmStartAddress_"] = -1
+            break
+    if lds_name is None:
+        raise ValueError(f"LDS index {lds_idx} not found")
+    for node in dsc.get("scheduleTree_", []) or []:
+        if node.get("nodeType_") == "allocate" and int(node.get("ldsIdx_", -1)) == int(lds_idx):
+            node["name_"] = f"allocate-{lds_name}_lx"
+            node["component_"] = "lx"
+            node["startAddressCoreCorelet_"] = start_payload
+
+
+def _apply_lx_boundary_stitch_prototype(code_dir: Path) -> dict[str, Any]:
+    """Patch one DDL bridge boundary to share the consumer's LX address map."""
+
+    sdsc_files = sorted(code_dir.glob("sdsc_*.json"))
+    bridge_files = [path for path in sdsc_files if "_ddl_bridge" in path.name]
+    if not bridge_files:
+        return {"status": "not-applicable", "reason": "no-ddl-bridge"}
+    if len(bridge_files) != 1:
+        return {
+            "status": "not-applicable",
+            "reason": "expected-one-ddl-bridge",
+            "bridge_count": len(bridge_files),
+        }
+
+    bridge_path = bridge_files[0]
+    try:
+        consumer_path = sdsc_files[sdsc_files.index(bridge_path) + 1]
+        producer_path = sdsc_files[sdsc_files.index(bridge_path) - 1]
+    except (ValueError, IndexError):
+        return {"status": "not-applicable", "reason": "missing-consumer-after-bridge"}
+
+    bridge_payload = _read_json_file(bridge_path)
+    producer_payload = _read_json_file(producer_path)
+    consumer_payload = _read_json_file(consumer_path)
+    _, bridge_dsc = _single_payload_dsc(bridge_payload)
+    _, producer_dsc = _single_payload_dsc(producer_payload)
+    _, consumer_dsc = _single_payload_dsc(consumer_payload)
+    bridge_input_name = _single_input_ds_name(bridge_dsc)
+    bridge_output_name = _single_output_ds_name(bridge_dsc)
+    consumer_lds_idx = _lds_index_by_name(consumer_dsc, bridge_output_name)
+    if consumer_lds_idx is None:
+        return {
+            "status": "not-applicable",
+            "reason": "consumer-ds-name-not-found",
+            "bridge_output": bridge_output_name,
+        }
+
+    debug_root = code_dir / "debug"
+    shutil.rmtree(debug_root, ignore_errors=True)
+    discover = _run_dxp_bundle(code_dir, cwd=code_dir, verbose=True)
+    producer_debug = debug_root / producer_path.stem / f"{producer_path.stem}.out.out.json"
+    consumer_debug = debug_root / consumer_path.stem / f"{consumer_path.stem}.out.out.json"
+    if not consumer_debug.exists():
+        return {
+            "status": "not-applicable",
+            "reason": "missing-consumer-debug-json",
+            "consumer_debug": str(consumer_debug),
+            "dxp_returncode": discover.returncode,
+        }
+
+    bridge_debug = debug_root / bridge_path.stem / f"{bridge_path.stem}.out.out.json"
+    base_override = os.environ.get("SPYRE_RESTICKIFY_LX_BOUNDARY_BASE")
+    match_consumer = os.environ.get("SPYRE_RESTICKIFY_LX_BOUNDARY_MATCH_CONSUMER") == "1"
+    consumer_lx_start = _consumer_lxlu_start_payload(
+        _read_json_file(consumer_debug),
+        lds_idx=consumer_lds_idx,
+    )
+    producer_output_indices = _compute_output_indices(producer_dsc)
+    producer_lx_start = None
+    if producer_debug.exists() and producer_output_indices:
+        producer_lx_start = _producer_lxsu_start_payload(
+            _read_json_file(producer_debug),
+            lds_idx=producer_output_indices[0],
+        )
+    bridge_lx_start = None
+    bridge_lx_start_source = ""
+    if base_override:
+        bridge_lx_start = _constant_lx_start_payload(
+            num_cores=_core_factor(bridge_payload),
+            base=int(base_override),
+        )
+        bridge_lx_start_source = "constant-override"
+    elif match_consumer and consumer_lx_start is not None:
+        bridge_lx_start = consumer_lx_start
+        bridge_lx_start_source = "consumer-lxlu-input"
+    elif bridge_debug.exists():
+        bridge_lx_start = _bridge_output_lxsu_start_payload(_read_json_file(bridge_debug))
+        bridge_lx_start_source = "bridge-lxsu-output"
+    if bridge_lx_start is None:
+        return {
+            "status": "not-applicable",
+            "reason": "missing-bridge-lxsu-output",
+            "bridge_debug": str(bridge_debug),
+        }
+
+    bridge_changed = False
+    input_override = os.environ.get("SPYRE_RESTICKIFY_LX_BOUNDARY_INPUT_BASE")
+    bridge_input_start = None
+    if input_override:
+        bridge_input_start = _constant_lx_start_payload(
+            num_cores=_core_factor(bridge_payload),
+            base=int(input_override),
+        )
+        _patch_bridge_input_lx_map(bridge_payload, bridge_input_name, bridge_input_start)
+        bridge_changed = True
+    elif match_consumer and producer_lx_start is not None:
+        bridge_input_start = producer_lx_start
+        _patch_bridge_input_lx_map(bridge_payload, bridge_input_name, bridge_input_start)
+        bridge_changed = True
+    elif os.environ.get("SPYRE_RESTICKIFY_LX_BOUNDARY_PATCH_PRODUCER") == "1":
+        bridge_input_start = _constant_lx_start_payload(
+            num_cores=_core_factor(bridge_payload),
+            base=0,
+        )
+        if not producer_output_indices:
+            return {
+                "status": "not-applicable",
+                "reason": "missing-producer-output",
+                "producer": producer_path.name,
+            }
+        _patch_lx_allocation_by_index(
+            producer_payload,
+            lds_idx=producer_output_indices[0],
+            start_payload=bridge_input_start,
+        )
+        _patch_bridge_input_lx_map(bridge_payload, bridge_input_name, bridge_input_start)
+        _write_json_file(producer_path, producer_payload)
+        bridge_changed = True
+
+    if base_override or (match_consumer and consumer_lx_start is not None):
+        _patch_bridge_output_lx_map(bridge_payload, bridge_output_name, bridge_lx_start)
+        bridge_changed = True
+    if bridge_changed:
+        _write_json_file(bridge_path, bridge_payload)
+    _patch_consumer_input_lx_map(
+        consumer_payload,
+        bridge_output_name,
+        consumer_lds_idx,
+        bridge_lx_start,
+    )
+    _force_consumer_corelets(consumer_payload, factor=_corelet_factor(bridge_lx_start))
+    _write_json_file(consumer_path, consumer_payload)
+
+    final_verbose = os.environ.get("SPYRE_RESTICKIFY_LX_BOUNDARY_STITCH_DEBUG") == "1"
+    final = _run_dxp_bundle(code_dir, cwd=code_dir, verbose=final_verbose)
+    if final.returncode != 0:
+        raise RuntimeError(
+            "stage77 LX boundary stitch DXP rerun failed:\n"
+            + final.stdout[-4000:]
+            + final.stderr[-4000:]
+        )
+
+    return {
+        "status": "patched",
+        "bridge": bridge_path.name,
+        "consumer": consumer_path.name,
+        "bridge_input": bridge_input_name,
+        "bridge_output": bridge_output_name,
+        "consumer_lds_idx": consumer_lds_idx,
+        "bridge_input_unique_starts": (
+            _unique_start_values(bridge_input_start) if bridge_input_start else []
+        ),
+        "consumer_lx_unique_starts": (
+            _unique_start_values(consumer_lx_start) if consumer_lx_start else []
+        ),
+        "producer_lx_unique_starts": (
+            _unique_start_values(producer_lx_start) if producer_lx_start else []
+        ),
+        "bridge_lx_start_source": bridge_lx_start_source,
+        "bridge_lx_unique_starts": _unique_start_values(bridge_lx_start),
+        "bridge_lx_corelet_factor": _corelet_factor(bridge_lx_start),
+    }
+
+
+def _run_dxp_bundle(
+    code_dir: Path,
+    *,
+    cwd: Path,
+    verbose: bool,
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    if verbose:
+        env["DXP_VERBOSE"] = "1"
+    else:
+        env.pop("DXP_VERBOSE", None)
+    shim = code_dir / "librestickify_ddl_preddc_shim.so"
+    if shim.exists():
+        old_preload = env.get("LD_PRELOAD")
+        env["LD_PRELOAD"] = str(shim) if not old_preload else f"{shim}:{old_preload}"
+    return subprocess.run(
+        ["dxp_standalone", "--bundle", "-d", str(code_dir)],
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+
+
+def _read_json_file(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _write_json_file(path: Path, payload: dict[str, Any]) -> None:
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+
+
+def _single_payload_dsc(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    root = next(iter(payload.values()))
+    return root, next(iter(root["dscs_"][0].values()))
+
+
+def _single_output_ds_name(dsc: dict[str, Any]) -> str:
+    output_label = dsc["computeOp_"][0]["outputLabeledDs"][0]
+    _, idx = output_label.rsplit("-idx", 1)
+    output_idx = int(idx)
+    for lds in dsc["labeledDs_"]:
+        if int(lds["ldsIdx_"]) == output_idx:
+            return str(lds["dsName_"])
+    raise ValueError(f"could not resolve output LDS {output_idx}")
+
+
+def _single_input_ds_name(dsc: dict[str, Any]) -> str:
+    input_label = dsc["computeOp_"][0]["inputLabeledDs"][0]
+    _, idx = input_label.rsplit("-idx", 1)
+    input_idx = int(idx)
+    for lds in dsc["labeledDs_"]:
+        if int(lds["ldsIdx_"]) == input_idx:
+            return str(lds["dsName_"])
+    raise ValueError(f"could not resolve input LDS {input_idx}")
+
+
+def _lds_index_by_name(dsc: dict[str, Any], ds_name: str) -> int | None:
+    for lds in dsc["labeledDs_"]:
+        if lds.get("dsName_") == ds_name:
+            return int(lds["ldsIdx_"])
+    return None
+
+
+def _consumer_lxlu_start_payload(
+    payload: dict[str, Any],
+    *,
+    lds_idx: int,
+) -> dict[str, Any] | None:
+    _, dsc = _single_payload_dsc(payload)
+    wanted = f"transfer_lds{lds_idx}_src:lxlu_dst:sfp"
+    for node in dsc.get("scheduleTree_", []):
+        if node.get("name_") != wanted:
+            continue
+        start = node.get("srcLdsAndLoopOffsets_", {}).get("startAddr_")
+        if isinstance(start, dict) and start.get("data_"):
+            return start
+    return None
+
+
+def _producer_lxsu_start_payload(
+    payload: dict[str, Any],
+    *,
+    lds_idx: int,
+) -> dict[str, Any] | None:
+    _, dsc = _single_payload_dsc(payload)
+    wanted = f"transfer_lds{lds_idx}_src:sfp_dst:lxsu"
+    for node in dsc.get("scheduleTree_", []):
+        if node.get("name_") != wanted:
+            continue
+        offsets = node.get("dstLdsAndLoopOffsets_", [])
+        for offset in offsets:
+            start = offset.get("startAddr_") if isinstance(offset, dict) else None
+            if isinstance(start, dict) and start.get("data_"):
+                return start
+    return None
+
+
+def _bridge_output_lxsu_start_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    _, dsc = _single_payload_dsc(payload)
+    for node in dsc.get("scheduleTree_", []):
+        name = node.get("name_", "")
+        if not (name.startswith("transfer_lds") and "_src:ptrow0_dst:lxsu" in name):
+            continue
+        offsets = node.get("dstLdsAndLoopOffsets_", [])
+        for offset in offsets:
+            start = offset.get("startAddr_") if isinstance(offset, dict) else None
+            if isinstance(start, dict) and start.get("data_"):
+                return start
+    return None
+
+
+def _force_consumer_corelets(payload: dict[str, Any], *, factor: int) -> None:
+    root, dsc = _single_payload_dsc(payload)
+    root["coreletFoldProp_"] = {"factor_": factor, "label_": "corelet"}
+    dsc["numCoreletsUsed_"] = factor
+    dsc["numCoreletsUsed_DSC2_"] = factor
+
+
+def _patch_bridge_output_lx_map(
+    payload: dict[str, Any],
+    output_name: str,
+    start_payload: dict[str, Any],
+) -> None:
+    root, dsc = _single_payload_dsc(payload)
+    corelet_factor = _corelet_factor(start_payload)
+    root["coreletFoldProp_"] = {"factor_": corelet_factor, "label_": "corelet"}
+    dsc["numCoreletsUsed_"] = corelet_factor
+    dsc["numCoreletsUsed_DSC2_"] = corelet_factor
+    output_idx = _lds_index_by_name(dsc, output_name)
+    if output_idx is None:
+        raise ValueError(f"bridge output {output_name!r} not found")
+    alloc_name = f"allocate_{output_name}_lx"
+    for lds in dsc["labeledDs_"]:
+        if int(lds["ldsIdx_"]) == output_idx:
+            lx_meta = dict(lds.get("memOrg_", {}).get("lx", {}))
+            lx_meta["isPresent"] = 1
+            lx_meta["allocateNode_"] = alloc_name
+            lds["memOrg_"] = {"lx": lx_meta}
+    for node in dsc.get("scheduleTree_", []):
+        if node.get("nodeType_") == "allocate" and int(node.get("ldsIdx_", -1)) == output_idx:
+            node["name_"] = alloc_name
+            node["component_"] = "lx"
+            node["startAddressCoreCorelet_"] = start_payload
+        if node.get("nodeType_") == "transfer" and node.get("name_") == (
+            "transfer_lds1_src:lx_dst:no_component_lx_local"
+        ):
+            src = node.get("srcLdsAndLoopOffsets_")
+            if isinstance(src, dict):
+                src["startAddr_"] = start_payload
+
+
+def _patch_bridge_input_lx_map(
+    payload: dict[str, Any],
+    input_name: str,
+    start_payload: dict[str, Any],
+) -> None:
+    root, dsc = _single_payload_dsc(payload)
+    corelet_factor = _corelet_factor(start_payload)
+    root["coreletFoldProp_"] = {"factor_": corelet_factor, "label_": "corelet"}
+    dsc["numCoreletsUsed_"] = corelet_factor
+    dsc["numCoreletsUsed_DSC2_"] = corelet_factor
+    input_idx = _lds_index_by_name(dsc, input_name)
+    if input_idx is None:
+        raise ValueError(f"bridge input {input_name!r} not found")
+    alloc_name = f"allocate_{input_name}_lx"
+    for lds in dsc["labeledDs_"]:
+        if int(lds["ldsIdx_"]) == input_idx:
+            lx_meta = dict(lds.get("memOrg_", {}).get("lx", {}))
+            lx_meta["isPresent"] = 1
+            lx_meta["allocateNode_"] = alloc_name
+            lds["memOrg_"] = {"lx": lx_meta}
+    for node in dsc.get("scheduleTree_", []):
+        if node.get("nodeType_") == "allocate" and int(node.get("ldsIdx_", -1)) == input_idx:
+            node["name_"] = alloc_name
+            node["component_"] = "lx"
+            node["startAddressCoreCorelet_"] = start_payload
+        if node.get("nodeType_") == "transfer" and node.get("name_") == (
+            "transfer_lds0_src:no_component_dst:lx_lx_local"
+        ):
+            offsets = node.get("dstLdsAndLoopOffsets_", [])
+            for offset in offsets:
+                if isinstance(offset, dict):
+                    offset["startAddr_"] = start_payload
+
+
+def _patch_consumer_input_lx_map(
+    payload: dict[str, Any],
+    input_name: str,
+    lds_idx: int,
+    start_payload: dict[str, Any],
+) -> None:
+    _, dsc = _single_payload_dsc(payload)
+    allocate_name = f"allocate-{input_name}_lx"
+    primary = dsc.setdefault("primaryDsInfo_", {})
+    if "INPUT" not in primary and "OUTPUT" in primary:
+        primary["INPUT"] = copy.deepcopy(primary["OUTPUT"])
+    for lds in dsc["labeledDs_"]:
+        if int(lds["ldsIdx_"]) == lds_idx:
+            lx_meta = dict(lds.get("memOrg_", {}).get("lx", {}))
+            lx_meta["isPresent"] = 1
+            lx_meta["allocateNode_"] = allocate_name
+            lds["memOrg_"] = {"lx": lx_meta}
+            lds["dsType_"] = "INPUT"
+    for node in dsc.get("scheduleTree_", []):
+        if node.get("nodeType_") == "allocate" and int(node.get("ldsIdx_", -1)) == lds_idx:
+            node["name_"] = allocate_name
+            node["component_"] = "lx"
+            node["startAddressCoreCorelet_"] = start_payload
+
+
+def _corelet_factor(start_payload: dict[str, Any]) -> int:
+    attrs = start_payload.get("dim_prop_attr", [])
+    if len(attrs) > 1:
+        return int(attrs[1].get("factor_", 1) or 1)
+    return 1
+
+
+def _unique_start_values(start_payload: dict[str, Any]) -> list[int]:
+    return sorted({int(value) for value in start_payload.get("data_", {}).values()})
+
+
+def _core_factor(payload: dict[str, Any]) -> int:
+    root = next(iter(payload.values()))
+    return int(root.get("coreFoldProp_", {}).get("factor_", 32) or 32)
+
+
+def _constant_lx_start_payload(*, num_cores: int, base: int) -> dict[str, Any]:
+    return {
+        "dim_prop_func": [{"Map": {}}, {"Const": {}}, {"Const": {}}],
+        "dim_prop_attr": [
+            {"factor_": num_cores, "label_": "core"},
+            {"factor_": 1, "label_": "corelet"},
+            {"factor_": 1, "label_": "time"},
+        ],
+        "data_": {f"[{core}, 0, 0]": str(base) for core in range(num_cores)},
+    }
 
 
 def _reset_compile_caches() -> None:
@@ -1307,6 +2251,8 @@ def _run_case(
     sync_after_kernel: bool = False,
     kernel_launch_log_path: Path | None = None,
     copy_kernel_code_dir: Path | None = None,
+    lx_boundary_stitch_prototype: bool = False,
+    lx_split_dataop_prototype: bool = False,
 ) -> dict[str, Any]:
     args, shape_label = case.input_builder(size, dtype)
     dev_args = tuple(arg.to(device) if hasattr(arg, "to") else arg for arg in args)
@@ -1353,6 +2299,8 @@ def _run_case(
             sync_after_kernel=sync_after_kernel,
             log_path=kernel_launch_log_path,
             copy_code_dir_root=copy_kernel_code_dir,
+            lx_boundary_stitch_prototype=lx_boundary_stitch_prototype,
+            lx_split_dataop_prototype=lx_split_dataop_prototype,
         ):
             _reset_compile_caches()
             compiled = torch.compile(case.fn, backend=backend, dynamic=False)
@@ -1593,6 +2541,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Copy each generated Spyre SDSC bundle directory into the probe output.",
     )
+    parser.add_argument(
+        "--lx-boundary-stitch-prototype",
+        action="store_true",
+        help="Probe-only launch-time patch for DDL bridge producer/restickify/consumer LX boundary stitching.",
+    )
+    parser.add_argument(
+        "--lx-split-dataop-prototype",
+        action="store_true",
+        help=(
+            "Probe-only launch-time split: producer compute, address-preserving "
+            "LX data-op restickify, then consumer compute."
+        ),
+    )
     parser.add_argument("--atol", type=float, default=0.1, help="Correctness absolute tolerance.")
     parser.add_argument("--rtol", type=float, default=0.1, help="Correctness relative tolerance.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
@@ -1643,6 +2604,8 @@ def main() -> int:
                     if args.sync_after_kernel
                     or args.kernel_launch_log
                     or args.copy_kernel_code
+                    or args.lx_boundary_stitch_prototype
+                    or args.lx_split_dataop_prototype
                     else None
                 )
                 copy_kernel_code_dir = (
@@ -1670,6 +2633,8 @@ def main() -> int:
                         sync_after_kernel=args.sync_after_kernel,
                         kernel_launch_log_path=kernel_launch_log,
                         copy_kernel_code_dir=copy_kernel_code_dir,
+                        lx_boundary_stitch_prototype=args.lx_boundary_stitch_prototype,
+                        lx_split_dataop_prototype=args.lx_split_dataop_prototype,
                     )
                 except Exception as exc:
                     row = _error_row(case, size, dtype, exc)

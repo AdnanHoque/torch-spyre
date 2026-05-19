@@ -19,6 +19,7 @@ from torch_spyre._inductor.codegen.lx_neighbor_descriptor import (
     maybe_emit_lx_neighbor_descriptor,
 )
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
+from torch_spyre._inductor.constants import RESTICKIFY_OP
 from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 
@@ -32,7 +33,14 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     # 1. Generate SDSC.json for each OpSpec
     sdscs_json = []
     for idx, ks in enumerate(specs):
-        sdsc_json = compile_op_spec(idx, ks)
+        allow_restickify_ddl_bridge = _allow_restickify_ddl_bridge_in_bundle(
+            idx, ks, specs
+        )
+        sdsc_json = compile_op_spec(
+            idx,
+            ks,
+            allow_restickify_ddl_bridge=allow_restickify_ddl_bridge,
+        )
         sdscs_json.append(sdsc_json)
 
     # Write JSON SDSCs to file system
@@ -57,3 +65,24 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         file.write("\t\treturn\n")
         file.write("\t}\n")
         file.write("}\n")
+
+
+def _allow_restickify_ddl_bridge_in_bundle(
+    idx: int,
+    spec: OpSpec,
+    specs: list[OpSpec],
+) -> bool:
+    """Gate the probe-only DDL bridge to same-bundle internal edges.
+
+    The DDL bridge prototype is only meaningful when a producer, restickify,
+    and consumer are packaged in the same runtime bundle. A leading restickify
+    can still have an in-graph producer at the Torch FX level, but if that
+    producer lives in a previous runtime bundle then the bridge has no LX
+    allocation to alias and must stay on the existing HBM path.
+    """
+
+    if spec.op != RESTICKIFY_OP:
+        return True
+    if idx == 0 or idx + 1 >= len(specs):
+        return False
+    return True
