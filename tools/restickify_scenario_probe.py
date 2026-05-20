@@ -1539,6 +1539,12 @@ def _generate_and_package_lx_dataop(
     )
     (split_root / "dataop_export.stdout.txt").write_text(proc.stdout, encoding="utf-8")
     (split_root / "dataop_export.stderr.txt").write_text(proc.stderr, encoding="utf-8")
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"Deeprt data-op export failed with return code {proc.returncode}:\n"
+            + proc.stdout[-2000:]
+            + proc.stderr[-4000:]
+        )
 
     init_candidates = sorted((export_dir / "execute").glob("*/init.txt"))
     senprog_candidates = sorted((export_dir / "execute").glob("*/senprog.txt"))
