@@ -954,12 +954,15 @@ def _tensor_to_cpu(value: Any) -> Any:
 
 
 def _sync() -> None:
+    strict = os.environ.get("SPYRE_PROBE_STRICT_SYNC", "0") == "1"
     accelerator = getattr(torch, "accelerator", None)
     if accelerator is not None and hasattr(accelerator, "synchronize"):
         try:
             accelerator.synchronize()
             return
         except Exception:
+            if strict:
+                raise
             pass
     cuda = getattr(torch, "cuda", None)
     if cuda is not None and hasattr(cuda, "is_available") and cuda.is_available():
@@ -1325,7 +1328,10 @@ def _prepare_lx_split_dataop_prototype(
         for lds in consumer_dsc.get("labeledDs_", []) or []
         if int(lds.get("ldsIdx_", -1)) == int(consumer_input_idx)
     )
-    if "consumer" in stages:
+    skip_consumer_patch = (
+        os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_SKIP_CONSUMER_PATCH", "0") == "1"
+    )
+    if "consumer" in stages and not skip_consumer_patch:
         _patch_consumer_input_lx_map(
             consumer_payload,
             consumer_input_name,
@@ -1346,21 +1352,28 @@ def _prepare_lx_split_dataop_prototype(
         patched_consumer_dsc,
         arg_index_by_base,
     )
+    if (
+        "consumer" in stages
+        and os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_KEEP_BRIDGE_ARG", "0") == "1"
+    ):
+        bridge_arg = arg_index_by_base.get(int(restickify_output_hbm))
+        if bridge_arg is not None and bridge_arg not in consumer_arg_indices:
+            insert_at = 1 if consumer_arg_indices else 0
+            consumer_arg_indices.insert(insert_at, bridge_arg)
 
     producer_dir = split_root / "producer"
     consumer_dir = split_root / "consumer"
     if "producer" in stages:
         _write_single_sdsc_bundle(producer_dir, producer_path.name, producer_payload)
         _compile_dxp_bundle(producer_dir)
-    if "consumer" in stages:
-        _write_single_sdsc_bundle(consumer_dir, consumer_path.name, consumer_payload)
-        _compile_dxp_bundle(consumer_dir)
-
     dataop_summary = (
         _generate_and_package_lx_dataop(code_dir, split_root=split_root)
         if "dataop" in stages
         else {}
     )
+    if "consumer" in stages:
+        _write_single_sdsc_bundle(consumer_dir, consumer_path.name, consumer_payload)
+        _compile_dxp_bundle(consumer_dir)
 
     summary = {
         "status": "prepared",
@@ -1396,11 +1409,15 @@ def _lx_split_prepare_signature(stages: set[str]) -> dict[str, Any]:
         "SPYRE_RESTICKIFY_LX_SPLIT_CONSUMER_BASE",
         "SPYRE_RESTICKIFY_LX_SPLIT_COLLAPSE_CORELETS",
         "SPYRE_RESTICKIFY_LX_SPLIT_DATAOP_MODE",
+        "SPYRE_RESTICKIFY_LX_SPLIT_DDL_LIKE_INPUT",
+        "SPYRE_RESTICKIFY_LX_SPLIT_DDL_LX_SIZE",
         "SPYRE_RESTICKIFY_LX_SPLIT_PRESERVE_CONSUMER_ROLE",
         "SPYRE_RESTICKIFY_LX_SPLIT_PREPARE_ONLY",
         "SPYRE_RESTICKIFY_LX_SPLIT_PRODUCER_BASE",
         "SPYRE_RESTICKIFY_LX_SPLIT_REQUIRE_MATERIALIZATION_CONTRACT",
+        "SPYRE_RESTICKIFY_LX_SPLIT_SKIP_CONSUMER_PATCH",
         "SPYRE_RESTICKIFY_LX_SPLIT_STOP_AFTER_BRIDGE",
+        "SPYRE_RESTICKIFY_LX_SPLIT_KEEP_BRIDGE_ARG",
         "SPYRE_RESTICKIFY_LX_SPLIT_USE_DEBUG_LX",
     ]
     return {
@@ -2639,6 +2656,10 @@ def _patch_consumer_input_lx_map(
 ) -> None:
     _, dsc = _single_payload_dsc(payload)
     allocate_name = f"allocate-{input_name}_lx"
+    ddl_like = os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_DDL_LIKE_INPUT", "0") == "1"
+    ddl_lx_size = int(
+        os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_DDL_LX_SIZE", "262144")
+    )
     preserve_role = (
         os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_PRESERVE_CONSUMER_ROLE", "1")
         != "0"
@@ -2652,13 +2673,34 @@ def _patch_consumer_input_lx_map(
             lx_meta = dict(original_mem.get("lx", {}))
             lx_meta["isPresent"] = 1
             lx_meta["allocateNode_"] = allocate_name
+            if ddl_like:
+                lx_meta.update(
+                    {
+                        "isPadded": 0,
+                        "isZeroPadded": 0,
+                        "zpadGapFront": [0, 0],
+                        "gapPerDim": {},
+                        "dsOffset": 0,
+                    }
+                )
             lds["memOrg_"] = {"lx": lx_meta}
             lds["hbmStartAddress_"] = -1
-            lds["hbmSize_"] = 0
-            if int(lds.get("lxSize_", 0) or 0) <= 0:
-                lds["lxSize_"] = 2_147_483_647
-            if int(lds.get("lxBufferSize_", 0) or 0) <= 0:
-                lds["lxBufferSize_"] = 2_147_483_647
+            if ddl_like:
+                lds["segment_"] = "stack"
+                lds["isFirstUse_"] = 0
+                lds["isExternal_"] = 0
+                lds["dataTransfers_"] = []
+                lds["lxStartAddress_"] = -1
+                lds["hbmSize_"] = 18_446_744_073_709_551_615
+                lds["lxSize_"] = ddl_lx_size
+                lds["lxBufferSize_"] = 18_446_744_073_709_551_615
+                lds["totSlicesPerDim_"] = {}
+            else:
+                lds["hbmSize_"] = 0
+                if int(lds.get("lxSize_", 0) or 0) <= 0:
+                    lds["lxSize_"] = 2_147_483_647
+                if int(lds.get("lxBufferSize_", 0) or 0) <= 0:
+                    lds["lxBufferSize_"] = 2_147_483_647
             lds["coreStateInit_"] = _constant_lx_core_state_init(start_payload)
             if not preserve_role:
                 lds["dsType_"] = "INPUT"

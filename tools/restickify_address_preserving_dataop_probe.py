@@ -405,11 +405,6 @@ def _patch_dataop_payload(
     second_output = second["labeledDs_"][-1]
     producer_patch = _patch_piece_starts(first_input, producer_lx_starts)
     consumer_patch = _patch_piece_starts(second_output, consumer_lx_starts)
-    root["addressPreservingProbe_"] = {
-        **address_summary,
-        "producer_endpoint_patch_sample": producer_patch[:4] + producer_patch[-4:],
-        "consumer_endpoint_patch_sample": consumer_patch[:4] + consumer_patch[-4:],
-    }
     _write_json(output_path, payload)
     return {
         "path": str(output_path),
