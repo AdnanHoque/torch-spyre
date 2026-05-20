@@ -530,6 +530,7 @@ def test_restickify_lx_boundary_patch_marks_adjacent_consumer_input_lx_only():
     rows = patch_restickify_ddl_bridge_boundaries(payloads, op_specs)
 
     assert rows[0]["status"] == "patched"
+    assert rows[0]["value_flow_contract_ok"] is True
     producer_dsc = _dsc(producer_payload)
     bridge_dsc = _dsc(restickify_payload)
     consumer_dsc = _dsc(consumer_payload)
@@ -556,15 +557,277 @@ def test_restickify_lx_boundary_patch_marks_adjacent_consumer_input_lx_only():
         bridge_output_transfer["srcLdsAndLoopOffsets_"]["startAddr_"]
         == bridge_output_start
     )
+    assert rows[0]["consumer_input_role_preserved"] is False
+    assert rows[0]["consumer_input_original_ds_type"] == "INPUT1"
     assert consumer_input_lds["dsType_"] == "INPUT"
     assert set(consumer_input_lds["memOrg_"]) == {"lx"}
     assert (
         consumer_input_lds["memOrg_"]["lx"]["allocateNode_"]
         == "allocate-Tensor1_lx"
     )
-    assert "INPUT" in consumer_dsc["primaryDsInfo_"]
+    assert (
+        consumer_dsc["primaryDsInfo_"]["INPUT"]
+        == bridge_dsc["primaryDsInfo_"][bridge_dsc["labeledDs_"][1]["dsType_"]]
+    )
     assert consumer_input_alloc["component_"] == "lx"
     assert consumer_input_alloc["startAddressCoreCorelet_"] == bridge_output_start
+
+
+def test_restickify_lx_boundary_value_flow_catches_source_view_mismatch():
+    producer_sdsc_spec = _pointwise_spec(num_inputs=1)
+    restickify_sdsc_spec = _spec(split_dim_name="d1")
+    consumer_sdsc_spec = _pointwise_spec(num_inputs=2)
+    producer_payload = generate_sdsc(0, producer_sdsc_spec)
+    restickify_payload = generate_restickify_ddl_bridge_sdsc(
+        1,
+        restickify_sdsc_spec,
+        generate_sdsc(1, restickify_sdsc_spec),
+    )
+    consumer_payload = generate_sdsc(2, consumer_sdsc_spec)
+    d0 = Symbol("d0")
+    op_specs = [
+        OpSpec(
+            "add",
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=0),
+                _tensor_arg(is_input=False, arg_index=7),
+            ],
+            {},
+        ),
+        OpSpec(
+            RESTICKIFY_OP,
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=7),
+                _tensor_arg(is_input=False, arg_index=8),
+            ],
+            {"restickify_source_kind": "in_graph_computed"},
+        ),
+        OpSpec(
+            "add",
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=0),
+                _tensor_arg(is_input=True, arg_index=8),
+                _tensor_arg(is_input=False, arg_index=9),
+            ],
+            {},
+        ),
+    ]
+
+    rows = patch_restickify_ddl_bridge_boundaries(
+        [producer_payload, restickify_payload, consumer_payload],
+        op_specs,
+    )
+
+    assert rows[0]["status"] == "patched"
+    assert rows[0]["value_flow_contract_ok"] is False
+    assert "num_work_slices_per_dim" in rows[0]["value_flow_contract"][
+        "producer_to_bridge_input"
+    ]["mismatches"]
+    assert "core_id_to_work_slice" in rows[0]["value_flow_contract"][
+        "producer_to_bridge_input"
+    ]["mismatches"]
+
+
+def test_restickify_lx_boundary_value_flow_assert_raises(monkeypatch):
+    monkeypatch.setenv("SPYRE_RESTICKIFY_DDL_BRIDGE_VALUE_FLOW_ASSERT", "1")
+    producer_sdsc_spec = _pointwise_spec(num_inputs=1)
+    restickify_sdsc_spec = _spec(split_dim_name="d1")
+    consumer_sdsc_spec = _pointwise_spec(num_inputs=2)
+    producer_payload = generate_sdsc(0, producer_sdsc_spec)
+    restickify_payload = generate_restickify_ddl_bridge_sdsc(
+        1,
+        restickify_sdsc_spec,
+        generate_sdsc(1, restickify_sdsc_spec),
+    )
+    consumer_payload = generate_sdsc(2, consumer_sdsc_spec)
+    d0 = Symbol("d0")
+    op_specs = [
+        OpSpec(
+            "add",
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=0),
+                _tensor_arg(is_input=False, arg_index=7),
+            ],
+            {},
+        ),
+        OpSpec(
+            RESTICKIFY_OP,
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=7),
+                _tensor_arg(is_input=False, arg_index=8),
+            ],
+            {"restickify_source_kind": "in_graph_computed"},
+        ),
+        OpSpec(
+            "add",
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=0),
+                _tensor_arg(is_input=True, arg_index=8),
+                _tensor_arg(is_input=False, arg_index=9),
+            ],
+            {},
+        ),
+    ]
+
+    with pytest.raises(ValueError, match="failed LX value-flow contract"):
+        patch_restickify_ddl_bridge_boundaries(
+            [producer_payload, restickify_payload, consumer_payload],
+            op_specs,
+        )
+
+
+def test_restickify_lx_boundary_patch_preserves_compatible_consumer_role():
+    producer_sdsc_spec = _pointwise_spec(num_inputs=1)
+    restickify_sdsc_spec = _spec()
+    consumer_sdsc_spec = _pointwise_spec(num_inputs=2)
+    producer_payload = generate_sdsc(0, producer_sdsc_spec)
+    restickify_payload = generate_restickify_ddl_bridge_sdsc(
+        1,
+        restickify_sdsc_spec,
+        generate_sdsc(1, restickify_sdsc_spec),
+    )
+    consumer_payload = generate_sdsc(2, consumer_sdsc_spec)
+    bridge_dsc = _dsc(restickify_payload)
+    consumer_dsc = _dsc(consumer_payload)
+    consumer_dsc["primaryDsInfo_"]["INPUT1"] = bridge_dsc["primaryDsInfo_"][
+        bridge_dsc["labeledDs_"][1]["dsType_"]
+    ]
+    d0 = Symbol("d0")
+    op_specs = [
+        OpSpec(
+            "add",
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=0),
+                _tensor_arg(is_input=False, arg_index=7),
+            ],
+            {},
+        ),
+        OpSpec(
+            RESTICKIFY_OP,
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=7),
+                _tensor_arg(is_input=False, arg_index=8),
+            ],
+            {"restickify_source_kind": "in_graph_computed"},
+        ),
+        OpSpec(
+            "add",
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=0),
+                _tensor_arg(is_input=True, arg_index=8),
+                _tensor_arg(is_input=False, arg_index=9),
+            ],
+            {},
+        ),
+    ]
+
+    rows = patch_restickify_ddl_bridge_boundaries(
+        [producer_payload, restickify_payload, consumer_payload],
+        op_specs,
+    )
+
+    consumer_dsc = _dsc(consumer_payload)
+    consumer_input_lds = consumer_dsc["labeledDs_"][1]
+    assert rows[0]["status"] == "patched"
+    assert rows[0]["consumer_input_role_preserved"] is True
+    assert rows[0]["consumer_input_original_ds_type"] == "INPUT1"
+    assert consumer_input_lds["dsType_"] == "INPUT1"
+    assert set(consumer_input_lds["memOrg_"]) == {"lx"}
+
+
+def test_restickify_lx_boundary_patch_can_relayout_producer_output(monkeypatch):
+    monkeypatch.setenv(
+        "SPYRE_RESTICKIFY_DDL_BRIDGE_PATCH_PRODUCER_OUTPUT_LAYOUT", "1"
+    )
+    producer_sdsc_spec = _pointwise_spec(num_inputs=1)
+    restickify_sdsc_spec = _spec()
+    consumer_sdsc_spec = _pointwise_spec(num_inputs=2)
+    producer_payload = generate_sdsc(0, producer_sdsc_spec)
+    restickify_payload = generate_restickify_ddl_bridge_sdsc(
+        1,
+        restickify_sdsc_spec,
+        generate_sdsc(1, restickify_sdsc_spec),
+    )
+    consumer_payload = generate_sdsc(2, consumer_sdsc_spec)
+    producer_dsc = _dsc(producer_payload)
+    bridge_dsc = _dsc(restickify_payload)
+    producer_dsc["labeledDs_"][0]["dsType_"] = producer_dsc["labeledDs_"][1][
+        "dsType_"
+    ]
+    producer_original_primary = producer_dsc["primaryDsInfo_"][
+        producer_dsc["labeledDs_"][1]["dsType_"]
+    ]
+    bridge_input_primary = bridge_dsc["primaryDsInfo_"][
+        bridge_dsc["labeledDs_"][0]["dsType_"]
+    ]
+    d0 = Symbol("d0")
+    op_specs = [
+        OpSpec(
+            "add",
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=0),
+                _tensor_arg(is_input=False, arg_index=7),
+            ],
+            {},
+        ),
+        OpSpec(
+            RESTICKIFY_OP,
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=7),
+                _tensor_arg(is_input=False, arg_index=8),
+            ],
+            {"restickify_source_kind": "in_graph_computed"},
+        ),
+        OpSpec(
+            "add",
+            False,
+            {d0: (2048, 32)},
+            [
+                _tensor_arg(is_input=True, arg_index=0),
+                _tensor_arg(is_input=True, arg_index=8),
+                _tensor_arg(is_input=False, arg_index=9),
+            ],
+            {},
+        ),
+    ]
+
+    rows = patch_restickify_ddl_bridge_boundaries(
+        [producer_payload, restickify_payload, consumer_payload],
+        op_specs,
+    )
+
+    producer_dsc = _dsc(producer_payload)
+    producer_alloc = _schedule_node(producer_dsc, "allocate-Tensor1_lx")
+    producer_output_lds = producer_dsc["labeledDs_"][1]
+    assert rows[0]["status"] == "patched"
+    assert rows[0]["producer_output_layout_patched"] is True
+    assert rows[0]["producer_output_patched_ds_type"] == "KERNEL"
+    assert producer_output_lds["dsType_"] == "KERNEL"
+    assert producer_dsc["primaryDsInfo_"]["OUTPUT"] == producer_original_primary
+    assert producer_dsc["primaryDsInfo_"]["KERNEL"] == bridge_input_primary
+    assert producer_alloc["layoutDimOrder_"] == bridge_input_primary["layoutDimOrder_"]
 
 
 def test_restickify_lx_boundary_patch_skips_when_restickify_stays_hbm():
