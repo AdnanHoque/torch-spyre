@@ -644,6 +644,35 @@ def _2d_split_would_fire(
     return True
 
 
+def _mn_cosplit(m_size: int, n_sticks: int, cores: int) -> tuple[int, int]:
+    """Co-split ``cores`` between M and N. Returns (m_split, n_split) or (0, 0).
+
+    Walks divisors of ``cores`` from the LX-aware target_m_split down to
+    _MN_SPLIT_M_MIN, picking the first that divides both M and N cleanly.
+    """
+    if config.dxp_lx_frac_avail >= _MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD:
+        # High LX: target per-core M = N_PT_PASSES * _PT_ROWS rows.
+        target_per_core_m = _MN_SPLIT_HIGHLX_TARGET_PT_PASSES * _PT_ROWS
+        target_m_split = max(
+            _MN_SPLIT_M_MIN,
+            min(cores // 2, max(1, m_size // target_per_core_m)),
+        )
+    else:
+        # Low LX: target per-core N-band = target sticks.
+        target_m_split = max(
+            _MN_SPLIT_M_MIN,
+            min(cores // 2, n_sticks // _MN_SPLIT_LOWLX_TARGET_N_STICKS),
+        )
+    for cand in sorted(
+        (d for d in (1, 2, 4, 8, 16, 32) if d <= cores and d >= _MN_SPLIT_M_MIN),
+        key=lambda d: (abs(d - target_m_split), -d),
+    ):
+        cand_n = cores // cand
+        if m_size % cand == 0 and n_sticks % cand_n == 0 and cand_n >= 1:
+            return cand, cand_n
+    return 0, 0
+
+
 def _maybe_2d_mn_split(
     op: ComputedBuffer,
     splits: dict[Symbol, int],
@@ -653,6 +682,7 @@ def _maybe_2d_mn_split(
     committed_splits: dict[Symbol, int],
     max_cores: int,
     unsafe_for_2d: set[str],
+    input_tds: list[TensorDep] | None = None,
 ) -> dict[Symbol, int]:
     """Replace a matmul's pure-m work-split with a 2D m x n co-split.
 
@@ -660,6 +690,11 @@ def _maybe_2d_mn_split(
     instead runs ~2-3.7x faster (verified). Only fires on a pure m-split
     BATCH_MATMUL_OP with no span_reduction commitments and no non-matmul
     fusion neighbour (see _matmul_names_unsafe_for_2d).
+
+    For a true bmm (a batch dim present), the batch is left iterated within
+    cores (the default planner pipelines that well) and M x N is co-split
+    across all cores, mirroring the 2D rule (~1.5x on large-K bmm, parity
+    otherwise). M is identified by input deps, not by size.
     """
     if op.get_name() in unsafe_for_2d:
         return splits
@@ -675,58 +710,77 @@ def _maybe_2d_mn_split(
     }
     n_dims = [d for d in output_coord_vars if d in stick_vars]
     m_dims = [d for d in output_coord_vars if d not in stick_vars]
-    if len(n_dims) != 1 or len(m_dims) != 1:
+    # One stick (N) dim required. A 2D matmul has exactly one non-stick output
+    # dim (M); a true bmm has extra non-stick output dim(s) — the batch.
+    if len(n_dims) != 1 or not m_dims:
         return splits
-    n_dim, m_dim = n_dims[0], m_dims[0]
-    # verified regime is a *pure* m-split: m split, nothing else
-    if splits.get(m_dim, 1) <= 1:
+    n_dim = n_dims[0]
+
+    if len(m_dims) == 1:
+        # ===== 2D matmul: unchanged behaviour =====
+        m_dim = m_dims[0]
+        # verified regime is a *pure* m-split: m split, nothing else
+        if splits.get(m_dim, 1) <= 1:
+            return splits
+        if any(v > 1 for d, v in splits.items() if d is not m_dim):
+            return splits
+        n_sticks = concretize_expr(it_space_adjusted[n_dim])
+        m_size = concretize_expr(it_space_adjusted[m_dim])
+        m_split, n_split = _mn_cosplit(m_size, n_sticks, max_cores)
+        if n_split <= 1 or m_split <= 1:
+            # Fallback to the prior cap-style rule
+            n_split = core_split(n_sticks, min(8, max_cores))
+            if n_split <= 1:
+                return splits
+            m_split = core_split(m_size, max_cores // n_split)
+        logger.debug(
+            f"2d_mn_split work_division {op.get_name()}: "
+            f"m-split {splits[m_dim]} -> ({m_split}, {n_split}) (m x n) "
+            f"[n_sticks={n_sticks} target_m={m_split}]"
+        )
+        splits = dict(splits)
+        splits[m_dim] = m_split
+        splits[n_dim] = n_split
         return splits
-    if any(v > 1 for d, v in splits.items() if d is not m_dim):
+
+    # ===== true bmm: co-split M x N, leave batch iterated =====
+    if not input_tds:
+        return splits
+    # M is the non-stick output dim that appears in exactly one input (the LHS);
+    # batch dims appear in both inputs. Identify M by deps, not by size, so a
+    # decode shape (batch > M) is never mistaken for an M to co-split.
+    def _n_inputs(dim: Symbol) -> int:
+        return sum(
+            1
+            for td in input_tds
+            if dim in {v for e in td.device_coords for v in e.free_symbols}
+        )
+
+    m_candidates = [d for d in m_dims if _n_inputs(d) == 1]
+    if len(m_candidates) != 1:
+        return splits  # can't identify M unambiguously — leave to default
+    m_dim = m_candidates[0]
+    # Only fire when the default planner pure-split M itself (the HBM-slow
+    # pattern). If it split a batch dim (e.g. decode M=1), leave it alone.
+    split_dims = [d for d, v in splits.items() if v > 1]
+    if len(split_dims) != 1 or split_dims[0] is not m_dim:
         return splits
     n_sticks = concretize_expr(it_space_adjusted[n_dim])
     m_size = concretize_expr(it_space_adjusted[m_dim])
-    # Target m_split is LX-aware (see comments at the constants).
-    if config.dxp_lx_frac_avail >= _MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD:
-        # High LX: target per-core M = N_PT_PASSES * _PT_ROWS rows.
-        # Bigger tiles let DDC pipeline HBM/compute better.
-        target_per_core_m = _MN_SPLIT_HIGHLX_TARGET_PT_PASSES * _PT_ROWS
-        target_m_split = max(
-            _MN_SPLIT_M_MIN,
-            min(max_cores // 2, max(1, m_size // target_per_core_m)),
-        )
-    else:
-        # Low LX: target per-core N-band = target sticks.
-        target_m_split = max(
-            _MN_SPLIT_M_MIN,
-            min(max_cores // 2, n_sticks // _MN_SPLIT_LOWLX_TARGET_N_STICKS),
-        )
-    # Walk divisors of max_cores from target down to _MN_SPLIT_M_MIN until we
-    # find an m_split that (a) divides M, (b) leaves n_split = max_cores/m_split
-    # dividing n_sticks. If none, fall back to the cap-N-stick rule.
-    m_split = n_split = 0
-    for cand in sorted(
-        (d for d in (1, 2, 4, 8, 16, 32) if d <= max_cores and d >= _MN_SPLIT_M_MIN),
-        key=lambda d: (abs(d - target_m_split), -d),
-    ):
-        cand_n = max_cores // cand
-        if m_size % cand == 0 and n_sticks % cand_n == 0 and cand_n >= 1:
-            m_split, n_split = cand, cand_n
-            break
+    m_split, n_split = _mn_cosplit(m_size, n_sticks, max_cores)
     if n_split <= 1 or m_split <= 1:
-        # Fallback to the prior cap-style rule
-        n_split = core_split(n_sticks, min(8, max_cores))
-        if n_split <= 1:
-            return splits
-        m_split = core_split(m_size, max_cores // n_split)
+        return splits
+    new_splits = dict(splits)
+    new_splits[m_dim] = m_split
+    new_splits[n_dim] = n_split
+    if math.prod(new_splits.values()) < math.prod(splits.values()):
+        return splits
     logger.debug(
-        f"2d_mn_split work_division {op.get_name()}: "
-        f"m-split {splits[m_dim]} -> ({m_split}, {n_split}) (m x n) "
-        f"[n_sticks={n_sticks} target_m={target_m_split}]"
+        f"2d_mn_split work_division {op.get_name()} (bmm): "
+        f"m-split {splits.get(m_dim, 1)} -> ({m_split}, {n_split}) (m x n) "
+        f"[m_size={m_size} n_sticks={n_sticks}]"
     )
-    splits = dict(splits)
-    splits[m_dim] = m_split
-    splits[n_dim] = n_split
-    return splits
+    return new_splits
 
 
 def work_distribution_pass(
@@ -799,6 +853,7 @@ def work_distribution_pass(
             committed_splits,
             max_cores,
             unsafe_for_2d if unsafe_for_2d is not None else set(),
+            input_tds,
         )
 
     apply_splits(op, splits, output_td)
