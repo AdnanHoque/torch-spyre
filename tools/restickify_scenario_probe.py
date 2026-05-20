@@ -995,6 +995,7 @@ def _kernel_launch_debug(
     original_run = kernel_runner.SpyreSDSCKernelRunner.run
     event_index = 0
     copy_index = 0
+    lx_split_bridge_completed = False
     handle = None
     if log_path is not None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1018,7 +1019,7 @@ def _kernel_launch_debug(
             print(text, flush=True)
 
     def patched_run(self, *args, **kw_args):  # noqa: ANN001
-        nonlocal copy_index
+        nonlocal copy_index, lx_split_bridge_completed
         files: list[str] = []
         try:
             files = sorted(
@@ -1072,6 +1073,29 @@ def _kernel_launch_debug(
                     emit=emit,
                     base=base,
                 )
+                if split_result is _LX_SPLIT_DATAOP_HANDLED:
+                    lx_split_bridge_completed = True
+                if (
+                    split_result is None
+                    and os.environ.get(
+                        "SPYRE_RESTICKIFY_LX_SPLIT_PREPARE_ONLY",
+                        "0",
+                    )
+                    == "1"
+                ):
+                    emit({"phase": "lx_split_dataop_prepare_only_skip", **base})
+                    split_result = _LX_SPLIT_DATAOP_HANDLED
+                elif (
+                    split_result is None
+                    and lx_split_bridge_completed
+                    and os.environ.get(
+                        "SPYRE_RESTICKIFY_LX_SPLIT_STOP_AFTER_BRIDGE",
+                        "0",
+                    )
+                    == "1"
+                ):
+                    emit({"phase": "lx_split_dataop_stop_after_bridge_skip", **base})
+                    split_result = _LX_SPLIT_DATAOP_HANDLED
             else:
                 split_result = None
             if split_result is _LX_SPLIT_DATAOP_HANDLED:
@@ -1153,6 +1177,10 @@ def _run_lx_split_dataop_prototype(
         raise
 
     emit({"phase": "lx_split_dataop_launch_start", **summary, **base})
+    if os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_PREPARE_ONLY", "0") == "1":
+        emit({"phase": "lx_split_dataop_prepare_only_done", **summary, **base})
+        return _LX_SPLIT_DATAOP_HANDLED
+
     from torch_spyre._C import launch_kernel
 
     producer_args = tuple(launch_args[index] for index in summary["producer_arg_indices"])
@@ -1369,7 +1397,10 @@ def _lx_split_prepare_signature(stages: set[str]) -> dict[str, Any]:
         "SPYRE_RESTICKIFY_LX_SPLIT_COLLAPSE_CORELETS",
         "SPYRE_RESTICKIFY_LX_SPLIT_DATAOP_MODE",
         "SPYRE_RESTICKIFY_LX_SPLIT_PRESERVE_CONSUMER_ROLE",
+        "SPYRE_RESTICKIFY_LX_SPLIT_PREPARE_ONLY",
         "SPYRE_RESTICKIFY_LX_SPLIT_PRODUCER_BASE",
+        "SPYRE_RESTICKIFY_LX_SPLIT_REQUIRE_MATERIALIZATION_CONTRACT",
+        "SPYRE_RESTICKIFY_LX_SPLIT_STOP_AFTER_BRIDGE",
         "SPYRE_RESTICKIFY_LX_SPLIT_USE_DEBUG_LX",
     ]
     return {
@@ -1472,6 +1503,25 @@ def _generate_and_package_lx_dataop(
 
     summary_path = gen_dir / "summary.json"
     dataop_summary = _read_json_file(summary_path)
+    endpoint_contract = (
+        dataop_summary.get("address_summary", {}).get("endpoint_contract", {})
+    )
+    contract_source = endpoint_contract.get("source", "")
+    require_materialization = (
+        os.environ.get(
+            "SPYRE_RESTICKIFY_LX_SPLIT_REQUIRE_MATERIALIZATION_CONTRACT",
+            "1",
+        )
+        == "1"
+    )
+    if require_materialization and contract_source != (
+        "schema-v4-lx-materialization-contract"
+    ):
+        raise RuntimeError(
+            "LX split data-op requires schema-v4 materialization contract; "
+            f"got {contract_source or '<missing>'}"
+        )
+
     patched_path = Path(dataop_summary["patched"]["path"])
     exporter = os.environ.get(
         "SPYRE_RESTICKIFY_DEEPRT_DATAOP_EXPORTER",
@@ -1520,6 +1570,23 @@ def _generate_and_package_lx_dataop(
     )
     return {
         "dataop_generation_summary": str(summary_path),
+        "dataop_contract_source": contract_source,
+        "dataop_materialization_kind": endpoint_contract.get(
+            "materialization_kind",
+            "",
+        ),
+        "dataop_intended_sequence": endpoint_contract.get(
+            "intended_deeptools_sequence",
+            [],
+        ),
+        "dataop_producer_pieces_patched": dataop_summary.get("patched", {}).get(
+            "producer_pieces_patched",
+            0,
+        ),
+        "dataop_consumer_pieces_patched": dataop_summary.get("patched", {}).get(
+            "consumer_pieces_patched",
+            0,
+        ),
         "dataop_patched_sdsc": str(patched_path),
         "dataop_export_dir": str(export_dir),
         "dataop_export_returncode": proc.returncode,
@@ -2809,6 +2876,10 @@ def _read_ring_telemetry(path: Path) -> dict[str, Any]:
 def _assert_close(actual: Any, expected: Any, atol: float, rtol: float) -> None:
     if isinstance(actual, tuple):
         assert isinstance(expected, tuple) and len(actual) == len(expected)
+        tuple_prefix = int(os.environ.get("SPYRE_PROBE_VALIDATE_TUPLE_PREFIX", "0"))
+        if tuple_prefix > 0:
+            actual = actual[:tuple_prefix]
+            expected = expected[:tuple_prefix]
         for actual_item, expected_item in zip(actual, expected):
             _assert_close(actual_item, expected_item, atol, rtol)
         return
@@ -3315,6 +3386,16 @@ def parse_args() -> argparse.Namespace:
             "--skip-correctness."
         ),
     )
+    parser.add_argument(
+        "--validate-tuple-prefix",
+        type=int,
+        default=0,
+        help=(
+            "For tuple outputs, compare only the first N values. This is useful "
+            "when a launch hook intentionally skips later kernels that only "
+            "produce later tuple outputs."
+        ),
+    )
     parser.add_argument("--atol", type=float, default=0.1, help="Correctness absolute tolerance.")
     parser.add_argument("--rtol", type=float, default=0.1, help="Correctness relative tolerance.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
@@ -3347,71 +3428,85 @@ def main() -> int:
     csv_path = output_dir / args.csv_name
 
     rows: list[dict[str, Any]] = []
-    with jsonl_path.open("w", encoding="utf-8") as jsonl:
-        for size in sizes:
-            for case in selected:
-                telemetry_path = (
-                    output_dir / "ring_telemetry" / f"{case.name}_{size}.jsonl"
-                    if args.ring_telemetry
-                    else None
-                )
-                torch_profiler_dir = (
-                    output_dir / "torch_profiler" / f"{case.name}_{size}"
-                    if args.torch_profiler
-                    else None
-                )
-                kernel_launch_log = (
-                    output_dir / "kernel_launches" / f"{case.name}_{size}.jsonl"
-                    if args.sync_after_kernel
-                    or args.kernel_launch_log
-                    or args.copy_kernel_code
-                    or args.lx_boundary_stitch_prototype
-                    or args.lx_split_dataop_prototype
-                    else None
-                )
-                copy_kernel_code_dir = (
-                    output_dir / "kernel_code" / f"{case.name}_{size}"
-                    if args.copy_kernel_code
-                    else None
-                )
-                try:
-                    row = _run_case(
-                        case=case,
-                        size=size,
-                        dtype=dtype,
-                        device=args.device,
-                        backend=args.backend,
-                        skip_correctness=args.skip_correctness,
-                        do_timing=args.time,
-                        warmup=args.warmup,
-                        iters=args.iters,
-                        atol=args.atol,
-                        rtol=args.rtol,
-                        ring_telemetry_path=telemetry_path,
-                        torch_profiler_dir=torch_profiler_dir,
-                        torch_profiler_memory=args.torch_profiler_memory,
-                        torch_profiler_with_stack=args.torch_profiler_with_stack,
-                        sync_after_kernel=args.sync_after_kernel,
-                        kernel_launch_log_path=kernel_launch_log,
-                        copy_kernel_code_dir=copy_kernel_code_dir,
-                        lx_boundary_stitch_prototype=args.lx_boundary_stitch_prototype,
-                        lx_split_dataop_prototype=args.lx_split_dataop_prototype,
-                        skip_kernel_launch=args.skip_kernel_launch,
+    previous_tuple_prefix = os.environ.get("SPYRE_PROBE_VALIDATE_TUPLE_PREFIX")
+    if args.validate_tuple_prefix:
+        os.environ["SPYRE_PROBE_VALIDATE_TUPLE_PREFIX"] = str(
+            args.validate_tuple_prefix
+        )
+    try:
+        with jsonl_path.open("w", encoding="utf-8") as jsonl:
+            for size in sizes:
+                for case in selected:
+                    telemetry_path = (
+                        output_dir / "ring_telemetry" / f"{case.name}_{size}.jsonl"
+                        if args.ring_telemetry
+                        else None
                     )
-                except Exception as exc:
-                    row = _error_row(case, size, dtype, exc)
-                rows.append(row)
-                jsonl.write(json.dumps(row, sort_keys=True) + "\n")
-                jsonl.flush()
-                status = row["status"]
-                count = row.get("restickify_count", 0)
-                bytes_moved = row.get("total_bytes", 0)
-                byte_hops = row.get("ring_total_byte_hops", 0)
-                print(
-                    f"{status:5} size={size:<5} case={case.name:<28} "
-                    f"restickifies={count:<3} bytes={bytes_moved} "
-                    f"byte_hops={byte_hops} "
-                    f"device_events={row.get('profiler_device_event_count', 0)}"
+                    torch_profiler_dir = (
+                        output_dir / "torch_profiler" / f"{case.name}_{size}"
+                        if args.torch_profiler
+                        else None
+                    )
+                    kernel_launch_log = (
+                        output_dir / "kernel_launches" / f"{case.name}_{size}.jsonl"
+                        if args.sync_after_kernel
+                        or args.kernel_launch_log
+                        or args.copy_kernel_code
+                        or args.lx_boundary_stitch_prototype
+                        or args.lx_split_dataop_prototype
+                        else None
+                    )
+                    copy_kernel_code_dir = (
+                        output_dir / "kernel_code" / f"{case.name}_{size}"
+                        if args.copy_kernel_code
+                        else None
+                    )
+                    try:
+                        row = _run_case(
+                            case=case,
+                            size=size,
+                            dtype=dtype,
+                            device=args.device,
+                            backend=args.backend,
+                            skip_correctness=args.skip_correctness,
+                            do_timing=args.time,
+                            warmup=args.warmup,
+                            iters=args.iters,
+                            atol=args.atol,
+                            rtol=args.rtol,
+                            ring_telemetry_path=telemetry_path,
+                            torch_profiler_dir=torch_profiler_dir,
+                            torch_profiler_memory=args.torch_profiler_memory,
+                            torch_profiler_with_stack=args.torch_profiler_with_stack,
+                            sync_after_kernel=args.sync_after_kernel,
+                            kernel_launch_log_path=kernel_launch_log,
+                            copy_kernel_code_dir=copy_kernel_code_dir,
+                            lx_boundary_stitch_prototype=args.lx_boundary_stitch_prototype,
+                            lx_split_dataop_prototype=args.lx_split_dataop_prototype,
+                            skip_kernel_launch=args.skip_kernel_launch,
+                        )
+                    except Exception as exc:
+                        row = _error_row(case, size, dtype, exc)
+                    rows.append(row)
+                    jsonl.write(json.dumps(row, sort_keys=True) + "\n")
+                    jsonl.flush()
+                    status = row["status"]
+                    count = row.get("restickify_count", 0)
+                    bytes_moved = row.get("total_bytes", 0)
+                    byte_hops = row.get("ring_total_byte_hops", 0)
+                    print(
+                        f"{status:5} size={size:<5} case={case.name:<28} "
+                        f"restickifies={count:<3} bytes={bytes_moved} "
+                        f"byte_hops={byte_hops} "
+                        f"device_events={row.get('profiler_device_event_count', 0)}"
+                    )
+    finally:
+        if args.validate_tuple_prefix:
+            if previous_tuple_prefix is None:
+                os.environ.pop("SPYRE_PROBE_VALIDATE_TUPLE_PREFIX", None)
+            else:
+                os.environ["SPYRE_PROBE_VALIDATE_TUPLE_PREFIX"] = (
+                    previous_tuple_prefix
                 )
 
     fieldnames = list(_csv_row(rows[0]).keys())
