@@ -43,6 +43,7 @@ from typing import Any
 
 
 _TOKENS = ("HBM", "L3", "L3LU", "L3SU", "LXLU", "LXSU", "LX", "SFP", "PT")
+_DESCRIPTOR_FILENAME = "restickify_lx_neighbor_edges.json"
 
 
 def _load_json(path: Path) -> Any:
@@ -121,6 +122,73 @@ def _select_triplet(code_dir: Path) -> tuple[Path, Path, Path]:
                 raise ValueError(f"{path.name} does not have producer and consumer neighbors")
             return files[pos - 1], path, files[pos + 1]
     raise ValueError(f"{code_dir} has no restickify SDSC")
+
+
+def _resolve_code_dir_path(code_dir: Path, name: str) -> Path:
+    path = Path(name)
+    return path if path.is_absolute() else code_dir / path
+
+
+def _select_descriptor_edge(
+    *,
+    code_dir: Path,
+    descriptor_path: Path | None,
+) -> tuple[Path, dict[str, Any], dict[str, Any]] | None:
+    path = descriptor_path or code_dir / _DESCRIPTOR_FILENAME
+    if not path.exists():
+        return None
+    descriptor = _load_json(path)
+    for edge in descriptor.get("edges", []) or []:
+        if not isinstance(edge, dict):
+            continue
+        if "lx_endpoint_contract" not in edge:
+            continue
+        if "sdsc_contract" not in edge:
+            continue
+        return path, descriptor, edge
+    return None
+
+
+def _descriptor_triplet(
+    *,
+    code_dir: Path,
+    edge: dict[str, Any],
+) -> tuple[Path, Path, Path]:
+    return (
+        _resolve_code_dir_path(code_dir, edge["producer"]["file"]),
+        _resolve_code_dir_path(code_dir, edge["restickify"]["file"]),
+        _resolve_code_dir_path(code_dir, edge["consumer"]["file"]),
+    )
+
+
+def _descriptor_role_idx(edge: dict[str, Any], path: tuple[str, ...]) -> int:
+    node: Any = edge
+    for key in path:
+        node = node[key]
+    return int(node["lds_idx"])
+
+
+def _descriptor_int(edge: dict[str, Any], path: tuple[str, ...]) -> int:
+    node: Any = edge
+    for key in path:
+        node = node[key]
+    return int(node)
+
+
+def _alloc_start_map_or_empty(
+    dsc: dict[str, Any],
+    *,
+    lds_idx: int,
+    component: str,
+) -> dict[int, int]:
+    try:
+        return _alloc_start_map(dsc, lds_idx=lds_idx, component=component)
+    except ValueError:
+        return {}
+
+
+def _base_address_or_none(starts: dict[int, int]) -> int | None:
+    return _base_address(starts) if starts else None
 
 
 def _lds_idx(token: str) -> int:
@@ -419,7 +487,38 @@ def _run_dataop_standalone(
 
 
 def _address_summary(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]:
-    producer, restickify, consumer = _select_triplet(Path(args.code_dir))
+    code_dir = Path(args.code_dir)
+    descriptor_path = Path(args.descriptor).resolve() if args.descriptor else None
+    descriptor_selection = _select_descriptor_edge(
+        code_dir=code_dir,
+        descriptor_path=descriptor_path,
+    )
+    descriptor_summary: dict[str, Any] = {
+        "source": "legacy-hbm-base-match",
+        "path": "",
+        "schema_version": None,
+        "edge_id": "",
+    }
+    if descriptor_selection is not None:
+        resolved_descriptor, descriptor, edge = descriptor_selection
+        producer, restickify, consumer = _descriptor_triplet(
+            code_dir=code_dir,
+            edge=edge,
+        )
+        descriptor_summary = {
+            "source": "schema-v3-lx-endpoint-contract",
+            "path": str(resolved_descriptor),
+            "schema_version": descriptor.get("schema_version"),
+            "edge_id": edge.get("edge_id", ""),
+            "contract_kind": (edge.get("lx_endpoint_contract") or {}).get("kind"),
+            "memory_space": (edge.get("lx_endpoint_contract") or {}).get(
+                "memory_space"
+            ),
+        }
+    else:
+        producer, restickify, consumer = _select_triplet(code_dir)
+        edge = {}
+
     producer_payload = _load_json(producer)
     restickify_payload = _load_json(restickify)
     consumer_payload = _load_json(consumer)
@@ -427,29 +526,49 @@ def _address_summary(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]
     _, restickify_root, _, restickify_dsc = _single_dsc(restickify_payload)
     _, consumer_root, _, consumer_dsc = _single_dsc(consumer_payload)
 
-    restickify_input_idx = _compute_input_indices(restickify_dsc)[0]
-    restickify_output_idx = _compute_output_indices(restickify_dsc)[0]
-    restickify_input_hbm = _alloc_start_map(
+    if descriptor_selection is not None:
+        producer_output_idx = _descriptor_role_idx(
+            edge,
+            ("sdsc_contract", "producer_output_role"),
+        )
+        restickify_input_idx = _descriptor_int(
+            edge,
+            ("sdsc_contract", "restickify_edge_roles", "source_lds_idx"),
+        )
+        restickify_output_idx = _descriptor_int(
+            edge,
+            ("sdsc_contract", "restickify_edge_roles", "destination_lds_idx"),
+        )
+        consumer_input_idx = _descriptor_role_idx(
+            edge,
+            ("sdsc_contract", "consumer_input_role"),
+        )
+    else:
+        restickify_input_idx = _compute_input_indices(restickify_dsc)[0]
+        restickify_output_idx = _compute_output_indices(restickify_dsc)[0]
+
+    restickify_input_hbm = _alloc_start_map_or_empty(
         restickify_dsc,
         lds_idx=restickify_input_idx,
         component="hbm",
     )
-    restickify_output_hbm = _alloc_start_map(
+    restickify_output_hbm = _alloc_start_map_or_empty(
         restickify_dsc,
         lds_idx=restickify_output_idx,
         component="hbm",
     )
 
-    producer_output_idx = _find_matching_lds_by_hbm_base(
-        producer_dsc,
-        candidate_indices=_compute_output_indices(producer_dsc),
-        target_base=_base_address(restickify_input_hbm),
-    )
-    consumer_input_idx = _find_matching_lds_by_hbm_base(
-        consumer_dsc,
-        candidate_indices=_compute_input_indices(consumer_dsc),
-        target_base=_base_address(restickify_output_hbm),
-    )
+    if descriptor_selection is None:
+        producer_output_idx = _find_matching_lds_by_hbm_base(
+            producer_dsc,
+            candidate_indices=_compute_output_indices(producer_dsc),
+            target_base=_base_address(restickify_input_hbm),
+        )
+        consumer_input_idx = _find_matching_lds_by_hbm_base(
+            consumer_dsc,
+            candidate_indices=_compute_input_indices(consumer_dsc),
+            target_base=_base_address(restickify_output_hbm),
+        )
 
     scheduler = _tool_path(args.scheduler, "L3DlOpsScheduler_standalone")
     scheduled_dir = work_dir / "scheduled"
@@ -483,6 +602,22 @@ def _address_summary(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]
         lds_idx=consumer_input_idx,
         component="lx",
     )
+    producer_lx_source = "l3-scheduler"
+    consumer_lx_source = "l3-scheduler"
+    if os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_PRODUCER_BASE"):
+        producer_base = int(os.environ["SPYRE_RESTICKIFY_LX_SPLIT_PRODUCER_BASE"])
+        producer_lx = {
+            core: producer_base
+            for core in range(int(restickify_root.get("numCoresUsed_", 32)))
+        }
+        producer_lx_source = "env-override"
+    if os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_CONSUMER_BASE"):
+        consumer_base = int(os.environ["SPYRE_RESTICKIFY_LX_SPLIT_CONSUMER_BASE"])
+        consumer_lx = {
+            core: consumer_base
+            for core in range(int(restickify_root.get("numCoresUsed_", 32)))
+        }
+        consumer_lx_source = "env-override"
     size, num_cores = _infer_size_and_cores(restickify_root)
     return {
         "producer_path": str(producer),
@@ -495,10 +630,13 @@ def _address_summary(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]
         "restickify_input_lds_idx": restickify_input_idx,
         "restickify_output_lds_idx": restickify_output_idx,
         "consumer_input_lds_idx": consumer_input_idx,
-        "restickify_input_hbm_base": _base_address(restickify_input_hbm),
-        "restickify_output_hbm_base": _base_address(restickify_output_hbm),
+        "endpoint_contract": descriptor_summary,
+        "restickify_input_hbm_base": _base_address_or_none(restickify_input_hbm),
+        "restickify_output_hbm_base": _base_address_or_none(restickify_output_hbm),
         "producer_lx_base_by_core": producer_lx,
         "consumer_lx_base_by_core": consumer_lx,
+        "producer_lx_source": producer_lx_source,
+        "consumer_lx_source": consumer_lx_source,
         "producer_lx_unique_bases": sorted(set(producer_lx.values())),
         "consumer_lx_unique_bases": sorted(set(consumer_lx.values())),
         "producer_core_map_sample": dict(list((producer_root.get("coreIdToWkSlice_") or {}).items())[:4]),
@@ -512,6 +650,15 @@ def _address_summary(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--code-dir", required=True)
+    parser.add_argument(
+        "--descriptor",
+        default=None,
+        help=(
+            "Optional restickify_lx_neighbor_edges.json path. If omitted, "
+            "the probe uses the descriptor in --code-dir when present and "
+            "falls back to legacy HBM-base matching otherwise."
+        ),
+    )
     parser.add_argument("--output-dir", default="/tmp/restickify-address-preserving-dataop")
     parser.add_argument("--mode", choices=("baseline", "stage3b"), default="stage3b")
     parser.add_argument("--size", type=int, default=None)
