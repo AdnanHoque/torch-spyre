@@ -62,7 +62,13 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             logger.info(f"Generating {file.name}")
             json.dump(sdsc_json, file, indent=2)
 
-    maybe_emit_lx_neighbor_descriptor(kernel_name, output_dir, files, specs)
+    maybe_emit_lx_neighbor_descriptor(
+        kernel_name,
+        output_dir,
+        files,
+        specs,
+        sdsc_payloads=sdscs_json,
+    )
 
     # Generate bundle.mlir
     with open(os.path.join(output_dir, "bundle.mlir"), "w") as file:

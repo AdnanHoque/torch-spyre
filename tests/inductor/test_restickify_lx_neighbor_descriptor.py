@@ -62,6 +62,131 @@ def _files() -> list[str]:
     ]
 
 
+def _sdsc_payload(
+    name: str,
+    opfunc: str,
+    *,
+    input_labels: list[str] | None = None,
+    output_labels: list[str] | None = None,
+    primary_ds_info: dict | None = None,
+    labeled_ds: list[dict] | None = None,
+) -> dict:
+    return {
+        name: {
+            "numCoresUsed_": 2,
+            "numWkSlicesPerDim_": {"d0": 2},
+            "coreIdToWkSlice_": {
+                "0": {"d0": 0},
+                "1": {"d0": 1},
+            },
+            "dscs_": [
+                {
+                    opfunc: {
+                        "numCoresUsed_": 2,
+                        "primaryDsInfo_": primary_ds_info
+                        or {
+                            "INPUT": {
+                                "layoutDimOrder_": ["mb", "out"],
+                                "stickDimOrder_": ["out"],
+                                "stickSize_": [64],
+                            },
+                            "OUTPUT": {
+                                "layoutDimOrder_": ["out", "mb"],
+                                "stickDimOrder_": ["mb"],
+                                "stickSize_": [64],
+                            },
+                            "KERNEL": {
+                                "layoutDimOrder_": ["mb", "out"],
+                                "stickDimOrder_": ["out"],
+                                "stickSize_": [64],
+                            },
+                        },
+                        "scheduleTree_": [
+                            {
+                                "nodeType_": "allocate",
+                                "name_": "allocate-Tensor0_lx",
+                                "ldsIdx_": 0,
+                                "component_": "lx",
+                                "layoutDimOrder_": ["mb", "out"],
+                                "maxDimSizes_": [2048, 2048],
+                                "startAddressCoreCorelet_": {
+                                    "data_": {
+                                        "[0, 0, 0]": "1024",
+                                        "[1, 0, 0]": "1024",
+                                    }
+                                },
+                            }
+                        ],
+                        "labeledDs_": labeled_ds
+                        or [
+                            {
+                                "ldsIdx_": 0,
+                                "dsName_": "Tensor0",
+                                "dsType_": "INPUT",
+                                "scale_": [1, 1],
+                                "wordLength": 2,
+                                "dataFormat_": "SEN169_FP16",
+                                "memOrg_": {"lx": {"isPresent": 1}},
+                            },
+                            {
+                                "ldsIdx_": 1,
+                                "dsName_": "Tensor1",
+                                "dsType_": "OUTPUT",
+                                "scale_": [1, 1],
+                                "wordLength": 2,
+                                "dataFormat_": "SEN169_FP16",
+                                "memOrg_": {"lx": {"isPresent": 1}},
+                            },
+                        ],
+                        "computeOp_": [
+                            {
+                                "exUnit": "sfp",
+                                "opFuncName": opfunc,
+                                "inputLabeledDs": input_labels or ["Tensor0-idx0"],
+                                "outputLabeledDs": output_labels
+                                or ["Tensor1-idx1"],
+                            }
+                        ],
+                    }
+                }
+            ],
+        }
+    }
+
+
+def _payloads() -> list[dict]:
+    return [
+        _sdsc_payload("0_add", "add"),
+        _sdsc_payload(
+            "1_ReStickifyOpHBM",
+            "ReStickifyOpHBM",
+            input_labels=["Tensor0-idx0"],
+            output_labels=["Tensor1-idx1"],
+            labeled_ds=[
+                {
+                    "ldsIdx_": 0,
+                    "dsName_": "Tensor0",
+                    "dsType_": "OUTPUT",
+                    "scale_": [1, 1],
+                    "wordLength": 2,
+                    "dataFormat_": "SEN169_FP16",
+                    "memOrg_": {"lx": {"isPresent": 1}},
+                },
+                {
+                    "ldsIdx_": 1,
+                    "dsName_": "Tensor1",
+                    "dsType_": "KERNEL",
+                    "scale_": [1, 1],
+                    "wordLength": 2,
+                    "dataFormat_": "SEN169_FP16",
+                    "memOrg_": {"lx": {"isPresent": 1}},
+                },
+            ],
+        ),
+        _sdsc_payload("2_add", "add"),
+    ]
+
+
 def _candidate_specs() -> list[OpSpec]:
     return [
         _op("add"),
@@ -91,7 +216,7 @@ def test_builds_candidate_descriptor_for_adjacent_certified_restickify():
         _candidate_specs(),
     )
 
-    assert descriptor["schema_version"] == 1
+    assert descriptor["schema_version"] == 3
     assert descriptor["kind"] == "torch_spyre.restickify_lx_neighbor_edges"
     assert descriptor["skipped"] == []
     assert len(descriptor["edges"]) == 1
@@ -109,6 +234,79 @@ def test_builds_candidate_descriptor_for_adjacent_certified_restickify():
     )
     assert edge["input_fetch_neighbor"]["requires_single_runtime_bundle"] is True
     assert edge["packaging_requirements"]["preserve_producer_lx_core_state"]
+    contract = edge["source_view_contract"]
+    assert contract["producer_physical_output"]["device_coordinates"] == ["d0", "d1"]
+    assert contract["restickify_logical_source_view"]["device_size"] == [2048, 2048]
+    assert (
+        contract["coordinate_relations"]["producer_output_to_restickify_input"][
+            "same_coordinate_strings"
+        ]
+        == [True, True]
+    )
+    endpoint_contract = edge["lx_endpoint_contract"]
+    assert endpoint_contract["kind"] == "torch_spyre.restickify_lx_endpoint_contract"
+    assert endpoint_contract["memory_space"] == "lx"
+    assert endpoint_contract["post_hoc_hbm_alias_allowed"] is False
+    assert endpoint_contract["requires_deeptools_contract_work"] is True
+    assert endpoint_contract["candidate_deeptools_ops"] == [
+        "ReStickifyOpLx",
+        "STCDPOpLx",
+    ]
+    assert set(endpoint_contract["endpoints"]) == {
+        "producer_lx_source",
+        "restickify_lx_input",
+        "restickify_lx_output",
+        "consumer_lx_sink",
+    }
+    assert endpoint_contract["endpoints"]["producer_lx_source"]["sdsc_index"] == 0
+    assert endpoint_contract["endpoints"]["consumer_lx_sink"]["sdsc_index"] == 2
+    assert endpoint_contract["requirements"][
+        "preserve_producer_lx_allocation_identity"
+    ]
+    assert endpoint_contract["requirements"][
+        "single_runtime_lifetime_or_explicit_cross_bundle_handoff"
+    ]
+
+
+def test_includes_sdsc_contract_when_payloads_are_provided():
+    descriptor = build_lx_neighbor_descriptor(
+        "sdsc_fused_add",
+        _files(),
+        _candidate_specs(),
+        sdsc_payloads=_payloads(),
+    )
+
+    edge = descriptor["edges"][0]
+    contract = edge["sdsc_contract"]
+    assert contract["producer"]["opfunc"] == "add"
+    assert contract["restickify"]["opfunc"] == "ReStickifyOpHBM"
+    assert contract["consumer"]["opfunc"] == "add"
+    assert contract["producer_output_role"]["lds_idx"] == 1
+    assert contract["producer_output_role"]["ds_type"] == "OUTPUT"
+    assert contract["restickify_edge_roles"]["source_ds_type"] == "OUTPUT"
+    assert contract["restickify_edge_roles"]["destination_ds_type"] == "KERNEL"
+    assert contract["consumer_input_role"]["lds_idx"] == 0
+    assert contract["consumer_input_role"]["ds_type"] == "INPUT"
+    assert contract["restickify_edge_roles"]["source_primary"][
+        "layoutDimOrder_"
+    ] == ["out", "mb"]
+    assert contract["restickify_edge_roles"]["destination_primary"][
+        "layoutDimOrder_"
+    ] == ["mb", "out"]
+    assert contract["restickify"]["allocate_nodes"][0]["component"] == "lx"
+    endpoint_contract = edge["lx_endpoint_contract"]
+    assert endpoint_contract["endpoints"]["producer_lx_source"]["sdsc_endpoint"][
+        "lds_idx"
+    ] == 1
+    assert endpoint_contract["endpoints"]["restickify_lx_input"]["sdsc_endpoint"][
+        "lds_idx"
+    ] == 0
+    assert endpoint_contract["endpoints"]["restickify_lx_output"]["sdsc_endpoint"][
+        "lds_idx"
+    ] == 1
+    assert endpoint_contract["endpoints"]["consumer_lx_sink"]["sdsc_endpoint"][
+        "lds_idx"
+    ] == 0
 
 
 def test_skips_graph_input_sources():
