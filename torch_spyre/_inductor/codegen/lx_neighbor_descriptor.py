@@ -140,13 +140,18 @@ def build_lx_neighbor_descriptor(
                 specs,
                 sdsc_payloads=sdsc_payloads,
             ),
+            "lx_materialization_contract": _lx_materialization_contract(
+                idx,
+                specs,
+                sdsc_payloads=sdsc_payloads,
+            ),
         }
         if sdsc_payloads is not None:
             edge["sdsc_contract"] = _sdsc_contract(idx, specs, sdsc_payloads)
         edges.append(edge)
 
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "kind": "torch_spyre.restickify_lx_neighbor_edges",
         "kernel_name": kernel_name,
         "descriptor_file": DESCRIPTOR_FILENAME,
@@ -162,6 +167,9 @@ def build_lx_neighbor_descriptor(
             "that an LX bridge must preserve",
             "lx_endpoint_contract is the production-shaped target: it describes "
             "real LX endpoints to preserve, not a post-hoc HBM-to-LX alias",
+            "lx_materialization_contract is the generalized bridge target: it "
+            "reads the producer's real physical LX output view and materializes "
+            "the restickified consumer view",
         ],
     }
 
@@ -367,6 +375,113 @@ def _lx_endpoint_contract(
             "copy producer coreIdToWkSlice_ without changing restickify split contract",
         ],
     }
+
+
+def _lx_materialization_contract(
+    idx: int,
+    specs: Sequence[OpSpec],
+    *,
+    sdsc_payloads: Sequence[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Describe the general LX bridge that materializes the consumer view.
+
+    Unlike the endpoint contract, this intentionally does not require producer
+    and restickify source views to be identical.  It records the real producer
+    view as the source and the consumer/restickify destination view as the
+    materialized output.
+    """
+
+    producer = specs[idx - 1]
+    restickify = specs[idx]
+    consumer = specs[idx + 1]
+    producer_output = _output_arg(producer)
+    restickify_input = restickify.args[0]
+    restickify_output = restickify.args[-1]
+    consumer_input = _matching_consumer_input(consumer, restickify_output)
+
+    contract: dict[str, Any] = {
+        "contract_version": 1,
+        "kind": "torch_spyre.restickify_lx_materialization_contract",
+        "memory_space": "lx",
+        "source_role": "producer_physical_output",
+        "destination_role": "consumer_restickified_input",
+        "source": _tensor_arg_summary(producer_output),
+        "restickify_logical_source": _tensor_arg_summary(restickify_input),
+        "restickify_destination": _tensor_arg_summary(restickify_output),
+        "consumer_sink": _tensor_arg_summary(consumer_input),
+        "view_relations": {
+            "producer_to_restickify_source": _coordinate_pair(
+                producer_output,
+                restickify_input,
+            ),
+            "restickify_destination_to_consumer": _coordinate_pair(
+                restickify_output,
+                consumer_input,
+            ),
+        },
+        "intended_deeptools_sequence": ["ReStickifyOpLx", "STCDPOpLx"],
+        "strategy": {
+            "first_op": {
+                "op": "ReStickifyOpLx",
+                "input": "producer_physical_output",
+                "output": "restickified_view_with_intermediate_ownership",
+            },
+            "second_op": {
+                "op": "STCDPOpLx",
+                "input": "restickified_view_with_intermediate_ownership",
+                "output": "consumer_restickified_input",
+            },
+        },
+        "requires_producer_primary_to_match_bridge_input": False,
+        "requires_remote_lx_materialization": True,
+        "post_hoc_endpoint_alias_only_is_sufficient": False,
+        "requirements": {
+            "read_real_producer_lx_piece_addresses": True,
+            "write_real_consumer_lx_piece_addresses": True,
+            "preserve_producer_physical_source_view": True,
+            "materialize_resticked_destination_view": True,
+            "single_runtime_lifetime_or_explicit_cross_bundle_handoff": True,
+            "sync_producer_before_materialization": True,
+            "sync_materialization_before_consumer": True,
+        },
+    }
+
+    if sdsc_payloads is not None:
+        producer_lds_idx = _arg_position_for_arg_index(
+            producer,
+            int(restickify_input.arg_index),
+            want_input=False,
+        )
+        consumer_lds_idx = _arg_position_for_arg_index(
+            consumer,
+            int(restickify_output.arg_index),
+            want_input=True,
+        )
+        restickify_roles = _restickify_edge_roles(sdsc_payloads[idx])
+        contract["sdsc_endpoints"] = {
+            "producer_source": _payload_lds_role(
+                sdsc_payloads[idx - 1],
+                producer_lds_idx,
+            ),
+            "restickify_source": {
+                "lds_idx": restickify_roles["source_lds_idx"],
+                "ds_type": restickify_roles["source_ds_type"],
+                "primary": restickify_roles["source_primary"],
+                "compute_label": restickify_roles["compute_input_label"],
+            },
+            "restickify_destination": {
+                "lds_idx": restickify_roles["destination_lds_idx"],
+                "ds_type": restickify_roles["destination_ds_type"],
+                "primary": restickify_roles["destination_primary"],
+                "compute_label": restickify_roles["compute_output_label"],
+            },
+            "consumer_sink": _payload_lds_role(
+                sdsc_payloads[idx + 1],
+                consumer_lds_idx,
+            ),
+        }
+
+    return contract
 
 
 def _endpoint_summary(

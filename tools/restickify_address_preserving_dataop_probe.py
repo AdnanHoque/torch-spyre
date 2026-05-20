@@ -143,6 +143,8 @@ def _select_descriptor_edge(
             continue
         if "lx_endpoint_contract" not in edge:
             continue
+        if "lx_materialization_contract" not in edge:
+            continue
         if "sdsc_contract" not in edge:
             continue
         return path, descriptor, edge
@@ -506,11 +508,17 @@ def _address_summary(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]
             edge=edge,
         )
         descriptor_summary = {
-            "source": "schema-v3-lx-endpoint-contract",
+            "source": "schema-v4-lx-materialization-contract",
             "path": str(resolved_descriptor),
             "schema_version": descriptor.get("schema_version"),
             "edge_id": edge.get("edge_id", ""),
             "contract_kind": (edge.get("lx_endpoint_contract") or {}).get("kind"),
+            "materialization_kind": (
+                edge.get("lx_materialization_contract") or {}
+            ).get("kind"),
+            "intended_deeptools_sequence": (
+                edge.get("lx_materialization_contract") or {}
+            ).get("intended_deeptools_sequence", []),
             "memory_space": (edge.get("lx_endpoint_contract") or {}).get(
                 "memory_space"
             ),

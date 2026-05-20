@@ -216,7 +216,7 @@ def test_builds_candidate_descriptor_for_adjacent_certified_restickify():
         _candidate_specs(),
     )
 
-    assert descriptor["schema_version"] == 3
+    assert descriptor["schema_version"] == 4
     assert descriptor["kind"] == "torch_spyre.restickify_lx_neighbor_edges"
     assert descriptor["skipped"] == []
     assert len(descriptor["edges"]) == 1
@@ -266,6 +266,26 @@ def test_builds_candidate_descriptor_for_adjacent_certified_restickify():
     assert endpoint_contract["requirements"][
         "single_runtime_lifetime_or_explicit_cross_bundle_handoff"
     ]
+    materialization_contract = edge["lx_materialization_contract"]
+    assert (
+        materialization_contract["kind"]
+        == "torch_spyre.restickify_lx_materialization_contract"
+    )
+    assert materialization_contract["memory_space"] == "lx"
+    assert materialization_contract["source_role"] == "producer_physical_output"
+    assert (
+        materialization_contract["destination_role"]
+        == "consumer_restickified_input"
+    )
+    assert materialization_contract["intended_deeptools_sequence"] == [
+        "ReStickifyOpLx",
+        "STCDPOpLx",
+    ]
+    assert (
+        materialization_contract["requires_producer_primary_to_match_bridge_input"]
+        is False
+    )
+    assert materialization_contract["requires_remote_lx_materialization"] is True
 
 
 def test_includes_sdsc_contract_when_payloads_are_provided():
@@ -305,6 +325,19 @@ def test_includes_sdsc_contract_when_payloads_are_provided():
         "lds_idx"
     ] == 1
     assert endpoint_contract["endpoints"]["consumer_lx_sink"]["sdsc_endpoint"][
+        "lds_idx"
+    ] == 0
+    materialization_contract = edge["lx_materialization_contract"]
+    assert materialization_contract["sdsc_endpoints"]["producer_source"][
+        "lds_idx"
+    ] == 1
+    assert materialization_contract["sdsc_endpoints"]["restickify_source"][
+        "lds_idx"
+    ] == 0
+    assert materialization_contract["sdsc_endpoints"]["restickify_destination"][
+        "lds_idx"
+    ] == 1
+    assert materialization_contract["sdsc_endpoints"]["consumer_sink"][
         "lds_idx"
     ] == 0
 
