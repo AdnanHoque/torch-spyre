@@ -977,6 +977,7 @@ def _kernel_launch_debug(
     copy_code_dir_root: Path | None = None,
     lx_boundary_stitch_prototype: bool = False,
     lx_split_dataop_prototype: bool = False,
+    skip_kernel_launch: bool = False,
 ):
     if (
         not sync_after_kernel
@@ -984,6 +985,7 @@ def _kernel_launch_debug(
         and copy_code_dir_root is None
         and not lx_boundary_stitch_prototype
         and not lx_split_dataop_prototype
+        and not skip_kernel_launch
     ):
         yield
         return
@@ -1060,7 +1062,10 @@ def _kernel_launch_debug(
             base["copied_code_dir"] = copied_code_dir
         emit({"phase": "before_launch", **base})
         try:
-            if lx_split_dataop_prototype:
+            if skip_kernel_launch:
+                emit({"phase": "skip_launch", **base})
+                split_result = _LX_SPLIT_DATAOP_HANDLED
+            elif lx_split_dataop_prototype:
                 split_result = _run_lx_split_dataop_prototype(
                     Path(self.code_dir),
                     args,
@@ -2997,6 +3002,7 @@ def _run_case(
     copy_kernel_code_dir: Path | None = None,
     lx_boundary_stitch_prototype: bool = False,
     lx_split_dataop_prototype: bool = False,
+    skip_kernel_launch: bool = False,
 ) -> dict[str, Any]:
     args, shape_label = case.input_builder(size, dtype)
     dev_args = tuple(arg.to(device) if hasattr(arg, "to") else arg for arg in args)
@@ -3045,6 +3051,7 @@ def _run_case(
             copy_code_dir_root=copy_kernel_code_dir,
             lx_boundary_stitch_prototype=lx_boundary_stitch_prototype,
             lx_split_dataop_prototype=lx_split_dataop_prototype,
+            skip_kernel_launch=skip_kernel_launch,
         ):
             _reset_compile_caches()
             compiled = torch.compile(case.fn, backend=backend, dynamic=False)
@@ -3106,6 +3113,7 @@ def _run_case(
             "sync_after_kernel": sync_after_kernel,
             "kernel_launch_log": str(kernel_launch_log_path or ""),
             "kernel_launch_event_count": kernel_launch_event_count,
+            "skip_kernel_launch": skip_kernel_launch,
             **ring_summary,
             **timing,
             **profiler_summary,
@@ -3298,6 +3306,15 @@ def parse_args() -> argparse.Namespace:
             "LX data-op restickify, then consumer compute."
         ),
     )
+    parser.add_argument(
+        "--skip-kernel-launch",
+        action="store_true",
+        help=(
+            "Probe-only codegen mode: generate and optionally copy Spyre SDSC "
+            "bundle directories, but do not launch them. Use with "
+            "--skip-correctness."
+        ),
+    )
     parser.add_argument("--atol", type=float, default=0.1, help="Correctness absolute tolerance.")
     parser.add_argument("--rtol", type=float, default=0.1, help="Correctness relative tolerance.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
@@ -3379,6 +3396,7 @@ def main() -> int:
                         copy_kernel_code_dir=copy_kernel_code_dir,
                         lx_boundary_stitch_prototype=args.lx_boundary_stitch_prototype,
                         lx_split_dataop_prototype=args.lx_split_dataop_prototype,
+                        skip_kernel_launch=args.skip_kernel_launch,
                     )
                 except Exception as exc:
                     row = _error_row(case, size, dtype, exc)
