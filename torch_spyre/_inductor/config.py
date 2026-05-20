@@ -24,6 +24,17 @@ global_stick_optimizer: bool = os.environ.get("GLOBAL_STICK_OPTIMIZER", "1") == 
 
 allow_all_ops_in_lx_planning: bool = False
 
+# Fraction of LX (scratchpad memory) reserved for the deeptools backend (DXP).
+# Higher = more LX for DDC's tile pipelining = faster matmul kernels.
+# Empirical sweep (matmul m=512, k=4096, n in {1024, 4096, 12800}) shows
+# 0.8 closes the matmul kernel_ms gap with sendnn by 1.8-2.4x; the residual
+# 20% LX is the "user" scratchpad (only used when LX_PLANNING=1, off by
+# default). At LX_FRAC=0.2 (prior default) inductor's scratchpad allocator
+# would get 80% but was never invoked, leaving the LX underutilised.
+# NB: DDC reads this via getenv("DXP_LX_FRAC_AVAIL") in dxp.cpp -- the python
+# config value alone does NOT propagate. To opt in to the larger DDC tile
+# budget, set DXP_LX_FRAC_AVAIL=0.8 in the environment; the LX-aware 2D split
+# in work_division.py keys off this value (>=0.5) to pick deeper PT passes.
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
