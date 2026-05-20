@@ -218,21 +218,50 @@ def _generate_address_preserving_sdsc(args: argparse.Namespace, output_dir: Path
 def _export_frame(args: argparse.Namespace, patched_sdsc: Path, output_dir: Path) -> dict[str, Any]:
     exporter = _default_exporter(args.exporter)
     export_dir = output_dir / "deeprt_export"
-    rc = _run(
-        [exporter, str(patched_sdsc), str(export_dir), args.target],
-        cwd=output_dir,
-        stdout=output_dir / "deeprt_export.stdout.txt",
-        stderr=output_dir / "deeprt_export.stderr.txt",
-        env=os.environ.copy(),
-    )
-    init = _first_export_file(export_dir, "init.txt")
-    senprog = _first_export_file(export_dir, "senprog.txt")
+    cmd = [exporter, str(patched_sdsc), str(export_dir), args.target]
+    attempts = []
+    init = None
+    senprog = None
+    rc = 1
+    for attempt in range(max(0, args.export_retries) + 1):
+        if attempt:
+            shutil.rmtree(export_dir, ignore_errors=True)
+        rc = _run(
+            cmd,
+            cwd=output_dir,
+            stdout=output_dir / f"deeprt_export.attempt{attempt}.stdout.txt",
+            stderr=output_dir / f"deeprt_export.attempt{attempt}.stderr.txt",
+            env=os.environ.copy(),
+        )
+        # Preserve the historical filenames for ad hoc inspection.
+        if attempt == 0:
+            shutil.copy2(
+                output_dir / f"deeprt_export.attempt{attempt}.stdout.txt",
+                output_dir / "deeprt_export.stdout.txt",
+            )
+            shutil.copy2(
+                output_dir / f"deeprt_export.attempt{attempt}.stderr.txt",
+                output_dir / "deeprt_export.stderr.txt",
+            )
+        init = _first_export_file(export_dir, "init.txt")
+        senprog = _first_export_file(export_dir, "senprog.txt")
+        attempts.append(
+            {
+                "attempt": attempt,
+                "returncode": rc,
+                "init": str(init) if init else "",
+                "senprog": str(senprog) if senprog else "",
+            }
+        )
+        if rc == 0:
+            break
     return {
-        "command": [exporter, str(patched_sdsc), str(export_dir), args.target],
+        "command": cmd,
         "returncode": rc,
         "export_dir": str(export_dir),
         "init": str(init) if init else "",
         "senprog": str(senprog) if senprog else "",
+        "attempts": attempts,
     }
 
 
@@ -310,6 +339,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--python", default=os.environ.get("PYTHON", sys.executable))
     parser.add_argument("--address-probe", default=str(_default_address_probe()))
     parser.add_argument("--exporter", default=None)
+    parser.add_argument(
+        "--export-retries",
+        type=int,
+        default=1,
+        help="Retry DeeRT export this many times after a nonzero return code.",
+    )
     parser.add_argument("--clean", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
         "--require-materialization-contract",

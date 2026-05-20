@@ -980,6 +980,7 @@ def _kernel_launch_debug(
     copy_code_dir_root: Path | None = None,
     lx_boundary_stitch_prototype: bool = False,
     lx_split_dataop_prototype: bool = False,
+    lx_bridge_same_artifact_splice: bool = False,
     skip_kernel_launch: bool = False,
 ):
     if (
@@ -988,6 +989,7 @@ def _kernel_launch_debug(
         and copy_code_dir_root is None
         and not lx_boundary_stitch_prototype
         and not lx_split_dataop_prototype
+        and not lx_bridge_same_artifact_splice
         and not skip_kernel_launch
     ):
         yield
@@ -1054,6 +1056,23 @@ def _kernel_launch_debug(
                 )
                 raise
             emit({"phase": "lx_boundary_stitch", **stitch_info, **base})
+        if lx_bridge_same_artifact_splice:
+            try:
+                splice_info = _run_lx_bridge_same_artifact_splice_prototype(
+                    Path(self.code_dir),
+                )
+            except BaseException as exc:
+                emit(
+                    {
+                        "phase": "lx_bridge_same_artifact_splice_exception",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                        **base,
+                    }
+                )
+                raise
+            if splice_info is not None:
+                emit({"phase": "lx_bridge_same_artifact_splice", **splice_info, **base})
         if copy_code_dir_root is not None:
             copy_index += 1
             safe_kernel = "".join(
@@ -1209,6 +1228,137 @@ def _run_lx_split_dataop_prototype(
         emit({"phase": "lx_split_dataop_after_consumer", **summary, **base})
     emit({"phase": "lx_split_dataop_launch_done", **summary, **base})
     return _LX_SPLIT_DATAOP_HANDLED
+
+
+def _has_restickify_sdsc(code_dir: Path) -> bool:
+    for path in sorted(code_dir.glob("sdsc_*.json"), key=_sdsc_index):
+        if "ReStickify" in path.name:
+            return True
+        try:
+            if "ReStickify" in path.read_text(encoding="utf-8", errors="replace"):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _run_lx_bridge_same_artifact_splice_prototype(
+    code_dir: Path,
+) -> dict[str, Any] | None:
+    """Generate an LX bridge frame and splice it into this code dir in place."""
+
+    descriptor = code_dir / "restickify_lx_neighbor_edges.json"
+    if not descriptor.exists() or not _has_restickify_sdsc(code_dir):
+        return None
+
+    marker = code_dir / ".stage154_lx_bridge_same_artifact_spliced"
+    if marker.exists():
+        return _read_json_file(marker)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    work_root = Path(
+        os.environ.get(
+            "SPYRE_RESTICKIFY_LX_BRIDGE_SAME_ARTIFACT_WORK_ROOT",
+            str(Path(str(code_dir) + "_lx_bridge_same_artifact")),
+        )
+    )
+    shutil.rmtree(work_root, ignore_errors=True)
+    work_root.mkdir(parents=True, exist_ok=True)
+    frame_dir = work_root / "bridge_frame"
+    splice_summary = work_root / "splice_summary.json"
+
+    env = {
+        **os.environ,
+        "SPYRE_RESTICKIFY_LX_DATAOP": "1",
+        "TORCH_DEVICE_BACKEND_AUTOLOAD": "0",
+    }
+    frame_cmd = [
+        sys.executable,
+        str(repo_root / "tools" / "restickify_lx_bridge_frame.py"),
+        "--code-dir",
+        str(code_dir),
+        "--output-dir",
+        str(frame_dir),
+        "--mode",
+        "stage3b",
+        "--fail-on-hbm",
+        "--fail-on-missing-senprog",
+    ]
+    frame_proc = subprocess.run(
+        frame_cmd,
+        cwd=repo_root,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    (work_root / "bridge_frame.stdout.txt").write_text(
+        frame_proc.stdout,
+        encoding="utf-8",
+    )
+    (work_root / "bridge_frame.stderr.txt").write_text(
+        frame_proc.stderr,
+        encoding="utf-8",
+    )
+    if frame_proc.returncode != 0:
+        raise RuntimeError(
+            "LX bridge frame generation failed:\n"
+            + frame_proc.stdout[-2000:]
+            + frame_proc.stderr[-4000:]
+        )
+
+    splice_cmd = [
+        sys.executable,
+        str(repo_root / "tools" / "restickify_lx_bridge_same_artifact_splice.py"),
+        "--code-dir",
+        str(code_dir),
+        "--bridge-frame-dir",
+        str(frame_dir),
+        "--summary",
+        str(splice_summary),
+        "--require-hbm-free",
+    ]
+    splice_proc = subprocess.run(
+        splice_cmd,
+        cwd=repo_root,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    (work_root / "splice.stdout.txt").write_text(splice_proc.stdout, encoding="utf-8")
+    (work_root / "splice.stderr.txt").write_text(splice_proc.stderr, encoding="utf-8")
+    if splice_proc.returncode != 0:
+        raise RuntimeError(
+            "same-artifact LX bridge splice failed:\n"
+            + splice_proc.stdout[-2000:]
+            + splice_proc.stderr[-4000:]
+        )
+
+    splice = _read_json_file(splice_summary)
+    frame_summary = _read_json_file(frame_dir / "summary.json")
+    result = {
+        "status": "patched",
+        "code_dir": str(code_dir),
+        "work_root": str(work_root),
+        "bridge_frame_dir": str(frame_dir),
+        "bridge_frame_returncode": frame_proc.returncode,
+        "splice_returncode": splice_proc.returncode,
+        "splice_summary": str(splice_summary),
+        "patched_bytes": splice.get("patched_bytes"),
+        "patched_flits_128b": splice.get("patched_flits_128b"),
+        "restickify_start_flit": splice.get("restickify_start_flit"),
+        "restickify_original_bytes": splice.get("restickify_original_bytes"),
+        "bridge_frame_bytes": splice.get("bridge_frame_bytes"),
+        "bridge_hbm_free": (frame_summary.get("frame") or {}).get("hbm_free"),
+        "bridge_tokens": (frame_summary.get("frame") or {}).get(
+            "senprog_token_counts",
+        ),
+    }
+    _write_json_file(marker, result)
+    return result
 
 
 def _prepare_lx_split_dataop_prototype(
@@ -3121,6 +3271,7 @@ def _run_case(
     copy_kernel_code_dir: Path | None = None,
     lx_boundary_stitch_prototype: bool = False,
     lx_split_dataop_prototype: bool = False,
+    lx_bridge_same_artifact_splice: bool = False,
     skip_kernel_launch: bool = False,
 ) -> dict[str, Any]:
     args, shape_label = case.input_builder(size, dtype)
@@ -3170,6 +3321,7 @@ def _run_case(
             copy_code_dir_root=copy_kernel_code_dir,
             lx_boundary_stitch_prototype=lx_boundary_stitch_prototype,
             lx_split_dataop_prototype=lx_split_dataop_prototype,
+            lx_bridge_same_artifact_splice=lx_bridge_same_artifact_splice,
             skip_kernel_launch=skip_kernel_launch,
         ):
             _reset_compile_caches()
@@ -3426,6 +3578,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--lx-bridge-same-artifact-splice",
+        action="store_true",
+        help=(
+            "Probe-only launch-time patch: generate an HBM-free LX bridge frame "
+            "and splice it into the normal fused runtime artifact before launch."
+        ),
+    )
+    parser.add_argument(
         "--skip-kernel-launch",
         action="store_true",
         help=(
@@ -3502,6 +3662,7 @@ def main() -> int:
                         or args.copy_kernel_code
                         or args.lx_boundary_stitch_prototype
                         or args.lx_split_dataop_prototype
+                        or args.lx_bridge_same_artifact_splice
                         else None
                     )
                     copy_kernel_code_dir = (
@@ -3531,6 +3692,7 @@ def main() -> int:
                             copy_kernel_code_dir=copy_kernel_code_dir,
                             lx_boundary_stitch_prototype=args.lx_boundary_stitch_prototype,
                             lx_split_dataop_prototype=args.lx_split_dataop_prototype,
+                            lx_bridge_same_artifact_splice=args.lx_bridge_same_artifact_splice,
                             skip_kernel_launch=args.skip_kernel_launch,
                         )
                     except Exception as exc:
