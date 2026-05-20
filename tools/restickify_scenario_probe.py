@@ -96,8 +96,27 @@ def _computed_transpose_adds_then_matmul(a, b, c, d):
     return (a + (b + c).t()) @ d
 
 
+def _computed_transpose_adds_then_matmul_tuple(a, b, c, d):
+    u = a + (b + c).t()
+    return u, u @ d
+
+
 def _computed_transpose_join(a, b, c):
     return a + (b + c).t()
+
+
+def _computed_contiguous_then_add(a, b, c):
+    return (a + b).t().contiguous() + c
+
+
+def _computed_self_transpose_join(a, b):
+    u = a + b
+    return u + u.t()
+
+
+def _computed_self_transpose_join3(a, b, c):
+    u = a + b
+    return u + u.t() + c
 
 
 def _matmul_then_add(a, b, c):
@@ -658,12 +677,44 @@ CASES: tuple[ProbeCase, ...] = (
         _computed_transpose_adds_then_matmul,
     ),
     ProbeCase(
+        "computed_transpose_adds_then_matmul_tuple",
+        "producer_to_matmul",
+        "in_graph_producer",
+        "Computed transposed producer feeds a pointwise join before matmul and returns the join for bridge validation.",
+        _builder_pointwise4,
+        _computed_transpose_adds_then_matmul_tuple,
+    ),
+    ProbeCase(
         "computed_transpose_join",
         "computed_view_join",
         "in_graph_producer",
         "Computed producer is consumed through a transposed pointwise join.",
         _builder_pointwise3,
         _computed_transpose_join,
+    ),
+    ProbeCase(
+        "computed_contiguous_then_add",
+        "computed_view_join",
+        "in_graph_producer",
+        "Computed producer is restickified by contiguous() before a pointwise consumer.",
+        _builder_pointwise3,
+        _computed_contiguous_then_add,
+    ),
+    ProbeCase(
+        "computed_self_transpose_join",
+        "computed_view_join",
+        "in_graph_producer",
+        "Computed producer is consumed in both original and transposed pointwise layouts.",
+        _builder_pointwise2,
+        _computed_self_transpose_join,
+    ),
+    ProbeCase(
+        "computed_self_transpose_join3",
+        "computed_view_join",
+        "in_graph_producer",
+        "Computed producer is consumed in original and transposed pointwise layouts with an extra add.",
+        _builder_pointwise3,
+        _computed_self_transpose_join3,
     ),
     ProbeCase(
         "matmul_then_add",
@@ -1070,11 +1121,20 @@ def _run_lx_split_dataop_prototype(
         return None
 
     split_root = Path(str(code_dir) + "_lx_split_dataop")
+    stages = {
+        stage.strip()
+        for stage in os.environ.get(
+            "SPYRE_RESTICKIFY_LX_SPLIT_STAGES",
+            "producer,dataop,consumer",
+        ).split(",")
+        if stage.strip()
+    }
     try:
         summary = _prepare_lx_split_dataop_prototype(
             code_dir,
             triplet=triplet,
             split_root=split_root,
+            stages=stages,
         )
     except Exception as exc:  # noqa: BLE001
         emit(
@@ -1092,14 +1152,6 @@ def _run_lx_split_dataop_prototype(
 
     producer_args = tuple(launch_args[index] for index in summary["producer_arg_indices"])
     consumer_args = tuple(launch_args[index] for index in summary["consumer_arg_indices"])
-    stages = {
-        stage.strip()
-        for stage in os.environ.get(
-            "SPYRE_RESTICKIFY_LX_SPLIT_STAGES",
-            "producer,dataop,consumer",
-        ).split(",")
-        if stage.strip()
-    }
     sync_each = os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_SYNC_EACH", "0") == "1"
     if "producer" in stages:
         emit({"phase": "lx_split_dataop_before_producer", **summary, **base})
@@ -1128,10 +1180,13 @@ def _prepare_lx_split_dataop_prototype(
     *,
     triplet: tuple[Path, Path, Path],
     split_root: Path,
+    stages: set[str],
 ) -> dict[str, Any]:
     ready = split_root / ".ready.json"
     if ready.exists():
-        return _read_json_file(ready)
+        cached = _read_json_file(ready)
+        if cached.get("prepare_signature") == _lx_split_prepare_signature(stages):
+            return cached
 
     shutil.rmtree(split_root, ignore_errors=True)
     split_root.mkdir(parents=True, exist_ok=True)
@@ -1140,8 +1195,8 @@ def _prepare_lx_split_dataop_prototype(
     producer_payload = _read_json_file(producer_path)
     restickify_payload = _read_json_file(restickify_path)
     consumer_payload = _read_json_file(consumer_path)
-    _, producer_dsc = _single_payload_dsc(producer_payload)
-    _, restickify_dsc = _single_payload_dsc(restickify_payload)
+    producer_root, producer_dsc = _single_payload_dsc(producer_payload)
+    restickify_root, restickify_dsc = _single_payload_dsc(restickify_payload)
     _, consumer_dsc = _single_payload_dsc(consumer_payload)
 
     restickify_input_idx = _first_compute_input_index(restickify_dsc)
@@ -1168,6 +1223,8 @@ def _prepare_lx_split_dataop_prototype(
 
     producer_base = int(os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_PRODUCER_BASE", "16384"))
     consumer_base = int(os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_CONSUMER_BASE", "8192"))
+    producer_start_source = "constant"
+    consumer_start_source = "constant"
     producer_start = _constant_lx_start_payload(
         num_cores=_core_factor(producer_payload),
         base=producer_base,
@@ -1176,23 +1233,76 @@ def _prepare_lx_split_dataop_prototype(
         num_cores=_core_factor(consumer_payload),
         base=consumer_base,
     )
+    if os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_USE_DEBUG_LX", "0") == "1":
+        debug_root = code_dir / "debug"
+        shutil.rmtree(debug_root, ignore_errors=True)
+        debug_result = _run_dxp_bundle(code_dir, cwd=code_dir, verbose=True)
+        if debug_result.returncode != 0:
+            raise RuntimeError(
+                "DXP verbose discovery failed for LX split prototype:\n"
+                + debug_result.stdout[-4000:]
+                + debug_result.stderr[-4000:]
+            )
+        producer_debug = (
+            debug_root
+            / producer_path.stem
+            / f"{producer_path.stem}.out.out.json"
+        )
+        consumer_debug = (
+            debug_root
+            / consumer_path.stem
+            / f"{consumer_path.stem}.out.out.json"
+        )
+        debug_producer_start = (
+            _producer_lxsu_start_payload(
+                _read_json_file(producer_debug),
+                lds_idx=producer_output_idx,
+            )
+            if producer_debug.exists()
+            else None
+        )
+        debug_consumer_start = (
+            _consumer_lxlu_start_payload(
+                _read_json_file(consumer_debug),
+                lds_idx=consumer_input_idx,
+            )
+            if consumer_debug.exists()
+            else None
+        )
+        if debug_producer_start is not None:
+            producer_start = debug_producer_start
+            producer_start_source = "dxp-debug-lxsu"
+        if debug_consumer_start is not None:
+            consumer_start = debug_consumer_start
+            consumer_start_source = "dxp-debug-lxlu"
+        if os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_COLLAPSE_CORELETS", "0") == "1":
+            producer_start = _collapse_start_payload_to_one_corelet(producer_start)
+            consumer_start = _collapse_start_payload_to_one_corelet(consumer_start)
+            producer_start_source += "-collapsed"
+            consumer_start_source += "-collapsed"
 
-    _patch_lx_allocation_by_index(
-        producer_payload,
-        lds_idx=producer_output_idx,
-        start_payload=producer_start,
-    )
+    if "producer" in stages:
+        _patch_lx_allocation_by_index(
+            producer_payload,
+            lds_idx=producer_output_idx,
+            start_payload=producer_start,
+        )
     consumer_input_name = next(
         str(lds.get("dsName_", f"lds{consumer_input_idx}"))
         for lds in consumer_dsc.get("labeledDs_", []) or []
         if int(lds.get("ldsIdx_", -1)) == int(consumer_input_idx)
     )
-    _patch_consumer_input_lx_map(
-        consumer_payload,
-        consumer_input_name,
-        lds_idx=consumer_input_idx,
-        start_payload=consumer_start,
-    )
+    if "consumer" in stages:
+        _patch_consumer_input_lx_map(
+            consumer_payload,
+            consumer_input_name,
+            lds_idx=consumer_input_idx,
+            start_payload=consumer_start,
+        )
+        _force_consumer_corelets(
+            consumer_payload,
+            factor=_corelet_factor(consumer_start),
+        )
     _, patched_producer_dsc = _single_payload_dsc(producer_payload)
     _, patched_consumer_dsc = _single_payload_dsc(consumer_payload)
     producer_arg_indices = _dsc_hbm_arg_indices(
@@ -1206,15 +1316,23 @@ def _prepare_lx_split_dataop_prototype(
 
     producer_dir = split_root / "producer"
     consumer_dir = split_root / "consumer"
-    _write_single_sdsc_bundle(producer_dir, producer_path.name, producer_payload)
-    _write_single_sdsc_bundle(consumer_dir, consumer_path.name, consumer_payload)
-    _compile_dxp_bundle(producer_dir)
-    _compile_dxp_bundle(consumer_dir)
+    if "producer" in stages:
+        _write_single_sdsc_bundle(producer_dir, producer_path.name, producer_payload)
+        _compile_dxp_bundle(producer_dir)
+    if "consumer" in stages:
+        _write_single_sdsc_bundle(consumer_dir, consumer_path.name, consumer_payload)
+        _compile_dxp_bundle(consumer_dir)
 
-    dataop_summary = _generate_and_package_lx_dataop(code_dir, split_root=split_root)
+    dataop_summary = (
+        _generate_and_package_lx_dataop(code_dir, split_root=split_root)
+        if "dataop" in stages
+        else {}
+    )
 
     summary = {
         "status": "prepared",
+        "prepare_signature": _lx_split_prepare_signature(stages),
+        "prepared_stages": sorted(stages),
         "split_root": str(split_root),
         "producer_dir": str(producer_dir),
         "consumer_dir": str(consumer_dir),
@@ -1228,10 +1346,31 @@ def _prepare_lx_split_dataop_prototype(
         "consumer_arg_indices": consumer_arg_indices,
         "producer_lx_base": producer_base,
         "consumer_lx_base": consumer_base,
+        "producer_lx_start_source": producer_start_source,
+        "consumer_lx_start_source": consumer_start_source,
+        "producer_lx_unique_starts": _unique_start_values(producer_start),
+        "consumer_lx_unique_starts": _unique_start_values(consumer_start),
+        "producer_lx_corelet_factor": _corelet_factor(producer_start),
+        "consumer_lx_corelet_factor": _corelet_factor(consumer_start),
         **dataop_summary,
     }
     _write_json_file(ready, summary)
     return summary
+
+
+def _lx_split_prepare_signature(stages: set[str]) -> dict[str, Any]:
+    env_keys = [
+        "SPYRE_RESTICKIFY_LX_SPLIT_CONSUMER_BASE",
+        "SPYRE_RESTICKIFY_LX_SPLIT_COLLAPSE_CORELETS",
+        "SPYRE_RESTICKIFY_LX_SPLIT_DATAOP_MODE",
+        "SPYRE_RESTICKIFY_LX_SPLIT_PRESERVE_CONSUMER_ROLE",
+        "SPYRE_RESTICKIFY_LX_SPLIT_PRODUCER_BASE",
+        "SPYRE_RESTICKIFY_LX_SPLIT_USE_DEBUG_LX",
+    ]
+    return {
+        "stages": sorted(stages),
+        "env": {key: os.environ.get(key, "") for key in env_keys},
+    }
 
 
 def _select_restickify_triplet(code_dir: Path) -> tuple[Path, Path, Path] | None:
@@ -1303,7 +1442,7 @@ def _generate_and_package_lx_dataop(
             "--output-dir",
             str(gen_dir),
             "--mode",
-            "stage3b",
+            os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_DATAOP_MODE", "stage3b"),
             "--no-run-dataop-standalone",
         ],
         cwd=Path.cwd(),
@@ -1528,10 +1667,24 @@ def _patch_lx_allocation_by_index(
         if int(lds.get("ldsIdx_", -1)) == int(lds_idx):
             lds_name = str(lds.get("dsName_", f"lds{lds_idx}"))
             lx_meta = dict(lds.get("memOrg_", {}).get("lx", {}))
-            lx_meta["isPresent"] = 1
-            lx_meta["allocateNode_"] = f"allocate-{lds_name}_lx"
+            lx_meta.update(
+                {
+                    "isPresent": 1,
+                    "isPadded": 0,
+                    "isZeroPadded": 0,
+                    "zpadGapFront": [0, 0],
+                    "gapPerDim": {},
+                    "dsOffset": 0,
+                    "allocateNode_": f"allocate-{lds_name}_lx",
+                }
+            )
             lds["memOrg_"] = {"lx": lx_meta}
             lds["hbmStartAddress_"] = -1
+            lds["hbmSize_"] = 0
+            if int(lds.get("lxSize_", 0) or 0) <= 0:
+                lds["lxSize_"] = 2_147_483_647
+            if int(lds.get("lxBufferSize_", 0) or 0) <= 0:
+                lds["lxBufferSize_"] = 2_147_483_647
             break
     if lds_name is None:
         raise ValueError(f"LDS index {lds_idx} not found")
@@ -1542,12 +1695,263 @@ def _patch_lx_allocation_by_index(
             node["startAddressCoreCorelet_"] = start_payload
 
 
+def _allocation_node_by_lds(
+    dsc: dict[str, Any],
+    *,
+    lds_idx: int,
+) -> dict[str, Any] | None:
+    for node in dsc.get("scheduleTree_", []) or []:
+        if node.get("nodeType_") == "allocate" and int(node.get("ldsIdx_", -1)) == int(lds_idx):
+            return node
+    return None
+
+
+def _copy_allocation_shape_metadata(
+    *,
+    src_dsc: dict[str, Any],
+    src_lds_idx: int,
+    dst_dsc: dict[str, Any],
+    dst_lds_idx: int,
+    keys: tuple[str, ...],
+) -> None:
+    src_node = _allocation_node_by_lds(src_dsc, lds_idx=src_lds_idx)
+    dst_node = _allocation_node_by_lds(dst_dsc, lds_idx=dst_lds_idx)
+    if src_node is None or dst_node is None:
+        raise ValueError(
+            f"cannot copy allocation metadata src={src_lds_idx} dst={dst_lds_idx}"
+        )
+    for key in keys:
+        if key in src_node:
+            dst_node[key] = copy.deepcopy(src_node[key])
+
+
+def _canonical_dim_name(name: Any) -> str:
+    return str(name).rstrip("_")
+
+
+def _root_work_splits(root: dict[str, Any]) -> dict[str, int]:
+    splits = {
+        _canonical_dim_name(dim): int(value)
+        for dim, value in (root.get("numWkSlicesPerDim_", {}) or {}).items()
+    }
+    if splits:
+        return splits
+
+    inferred: dict[str, int] = {}
+    for raw_slice in (root.get("coreIdToWkSlice_", {}) or {}).values():
+        if not isinstance(raw_slice, dict):
+            continue
+        for dim, value in raw_slice.items():
+            dim_name = _canonical_dim_name(dim)
+            inferred[dim_name] = max(inferred.get(dim_name, 0), int(value) + 1)
+    return inferred
+
+
+def _root_core_to_slice(root: dict[str, Any]) -> dict[int, dict[str, int]]:
+    mapping: dict[int, dict[str, int]] = {}
+    for core, raw_slice in (root.get("coreIdToWkSlice_", {}) or {}).items():
+        if not isinstance(raw_slice, dict):
+            continue
+        mapping[int(core)] = {
+            _canonical_dim_name(dim): int(value)
+            for dim, value in raw_slice.items()
+        }
+    return mapping
+
+
+def _dsc_core_chunk_sizes(dsc: dict[str, Any]) -> dict[str, int]:
+    for param in (dsc.get("dataStageParam_", {}) or {}).values():
+        if not isinstance(param, dict):
+            continue
+        stage = param.get("ss_") or param.get("el_") or {}
+        dims: dict[str, int] = {}
+        for dim, value in stage.items():
+            dim_name = _canonical_dim_name(dim)
+            if dim_name == "name":
+                continue
+            try:
+                dims[dim_name] = int(value)
+            except (TypeError, ValueError):
+                continue
+        if dims:
+            return dims
+    return {}
+
+
+def _dim_totals_from_contract(
+    root: dict[str, Any],
+    dsc: dict[str, Any],
+) -> dict[str, int]:
+    splits = _root_work_splits(root)
+    chunk_sizes = _dsc_core_chunk_sizes(dsc)
+    return {
+        dim: chunk_sizes[dim] * max(1, splits.get(dim, 1))
+        for dim in chunk_sizes
+    }
+
+
+def _work_region_for_core(
+    *,
+    core: int,
+    root: dict[str, Any],
+    dsc: dict[str, Any],
+) -> dict[str, tuple[int, int]]:
+    splits = _root_work_splits(root)
+    core_to_slice = _root_core_to_slice(root)
+    chunk_sizes = _dsc_core_chunk_sizes(dsc)
+    totals = _dim_totals_from_contract(root, dsc)
+    region: dict[str, tuple[int, int]] = {}
+    dims = sorted(set(splits) | set(chunk_sizes) | set(totals))
+    for dim in dims:
+        factor = max(1, int(splits.get(dim, 1)))
+        index = int(core_to_slice.get(core, {}).get(dim, 0))
+        chunk = chunk_sizes.get(dim)
+        total = totals.get(dim)
+        if chunk is None and total is not None:
+            chunk = math.ceil(total / factor)
+        if chunk is None:
+            continue
+        start = index * chunk
+        end = start + chunk
+        if total is not None:
+            end = min(end, total)
+            if end < start:
+                end = start
+        region[dim] = (start, end)
+    return region
+
+
+def _region_volume(region: dict[str, tuple[int, int]]) -> int:
+    if not region:
+        return 0
+    volume = 1
+    for start, end in region.values():
+        volume *= max(0, int(end) - int(start))
+    return volume
+
+
+def _intersection_volume(
+    left: dict[str, tuple[int, int]],
+    right: dict[str, tuple[int, int]],
+) -> int:
+    dims = set(left) | set(right)
+    if not dims:
+        return 0
+    volume = 1
+    for dim in dims:
+        if dim not in left or dim not in right:
+            return 0
+        start = max(left[dim][0], right[dim][0])
+        end = min(left[dim][1], right[dim][1])
+        volume *= max(0, end - start)
+    return volume
+
+
+def _invalid_core_map_entries(root: dict[str, Any]) -> list[dict[str, int | str]]:
+    splits = _root_work_splits(root)
+    invalid: list[dict[str, int | str]] = []
+    for core, raw_slice in _root_core_to_slice(root).items():
+        for dim, index in raw_slice.items():
+            factor = splits.get(dim)
+            if factor is None:
+                invalid.append({"core": core, "dim": dim, "index": index, "factor": -1})
+            elif index < 0 or index >= factor:
+                invalid.append(
+                    {"core": core, "dim": dim, "index": index, "factor": factor}
+                )
+    return invalid
+
+
+def _format_region(region: dict[str, tuple[int, int]]) -> dict[str, list[int]]:
+    return {dim: [int(start), int(end)] for dim, (start, end) in region.items()}
+
+
+def _stock_lx_alias_ownership_summary(
+    *,
+    producer_root: dict[str, Any],
+    producer_dsc: dict[str, Any],
+    restickify_root: dict[str, Any],
+    restickify_dsc: dict[str, Any],
+) -> dict[str, Any]:
+    producer_map = _root_core_to_slice(producer_root)
+    restickify_map = _root_core_to_slice(restickify_root)
+    cores = sorted(set(producer_map) & set(restickify_map))
+    samples: list[dict[str, Any]] = []
+    overlap_ratios: list[float] = []
+    for core in cores:
+        producer_region = _work_region_for_core(
+            core=core,
+            root=producer_root,
+            dsc=producer_dsc,
+        )
+        restickify_region = _work_region_for_core(
+            core=core,
+            root=restickify_root,
+            dsc=restickify_dsc,
+        )
+        needed = _region_volume(restickify_region)
+        overlap = _intersection_volume(producer_region, restickify_region)
+        ratio = (overlap / needed) if needed else 0.0
+        overlap_ratios.append(ratio)
+        if core in {0, 1, 7, 15, 31}:
+            samples.append(
+                {
+                    "core": core,
+                    "producer_slice": producer_map.get(core, {}),
+                    "restickify_slice": restickify_map.get(core, {}),
+                    "producer_region": _format_region(producer_region),
+                    "restickify_needed_region": _format_region(restickify_region),
+                    "local_overlap_ratio": ratio,
+                }
+            )
+
+    invalid_entries = _invalid_core_map_entries(restickify_root)
+    min_overlap = min(overlap_ratios, default=0.0)
+    avg_overlap = (
+        sum(overlap_ratios) / len(overlap_ratios) if overlap_ratios else 0.0
+    )
+    max_overlap = max(overlap_ratios, default=0.0)
+    return {
+        "producer_work_splits": _root_work_splits(producer_root),
+        "restickify_work_splits": _root_work_splits(restickify_root),
+        "producer_core_chunk_sizes": _dsc_core_chunk_sizes(producer_dsc),
+        "restickify_core_chunk_sizes": _dsc_core_chunk_sizes(restickify_dsc),
+        "producer_dim_totals": _dim_totals_from_contract(producer_root, producer_dsc),
+        "restickify_dim_totals": _dim_totals_from_contract(
+            restickify_root, restickify_dsc
+        ),
+        "core_count_compared": len(cores),
+        "core_maps_equal": producer_map == restickify_map,
+        "restickify_core_map_valid": not invalid_entries,
+        "restickify_invalid_core_map_entries": invalid_entries[:12],
+        "restickify_invalid_core_map_entry_count": len(invalid_entries),
+        "local_overlap_min": min_overlap,
+        "local_overlap_avg": avg_overlap,
+        "local_overlap_max": max_overlap,
+        "direct_lx_alias_safe": (
+            bool(cores)
+            and not invalid_entries
+            and min_overlap == 1.0
+            and max_overlap == 1.0
+        ),
+        "requires_remote_lx_fetch": not (
+            bool(cores)
+            and not invalid_entries
+            and min_overlap == 1.0
+            and max_overlap == 1.0
+        ),
+        "sample_core_regions": samples,
+    }
+
+
 def _apply_lx_boundary_stitch_prototype(code_dir: Path) -> dict[str, Any]:
     """Patch one DDL bridge boundary to share the consumer's LX address map."""
 
     sdsc_files = sorted(code_dir.glob("sdsc_*.json"))
     bridge_files = [path for path in sdsc_files if "_ddl_bridge" in path.name]
     if not bridge_files:
+        if os.environ.get("SPYRE_RESTICKIFY_STOCK_LX_ALIAS", "0") == "1":
+            return _apply_stock_restickify_lx_alias_prototype(code_dir, sdsc_files)
         return {"status": "not-applicable", "reason": "no-ddl-bridge"}
     if len(bridge_files) != 1:
         return {
@@ -1715,6 +2119,246 @@ def _apply_lx_boundary_stitch_prototype(code_dir: Path) -> dict[str, Any]:
         "bridge_lx_start_source": bridge_lx_start_source,
         "bridge_lx_unique_starts": _unique_start_values(bridge_lx_start),
         "bridge_lx_corelet_factor": _corelet_factor(bridge_lx_start),
+    }
+
+
+def _apply_stock_restickify_lx_alias_prototype(
+    code_dir: Path,
+    sdsc_files: list[Path],
+) -> dict[str, Any]:
+    """Patch a stock ReStickifyOpHBM triplet to use LX aliases.
+
+    This keeps Deeptools' stock restickify DDL/lowering contract, but rewires
+    the adjacent producer output, restickify input/output, and consumer input
+    to LX-only allocations.  It is intentionally a probe-only path.
+    """
+
+    restickify_files: list[Path] = []
+    for path in sdsc_files:
+        try:
+            payload = _read_json_file(path)
+            _, dsc = _single_payload_dsc(payload)
+        except Exception:  # noqa: BLE001
+            continue
+        op_names = [
+            str(op.get("opFuncName", "")) for op in dsc.get("computeOp_", []) or []
+        ]
+        if any(name == "ReStickifyOpHBM" for name in op_names):
+            restickify_files.append(path)
+    if not restickify_files:
+        return {"status": "not-applicable", "reason": "no-stock-restickify"}
+    if len(restickify_files) != 1:
+        return {
+            "status": "not-applicable",
+            "reason": "expected-one-stock-restickify",
+            "restickify_count": len(restickify_files),
+        }
+
+    restickify_path = restickify_files[0]
+    try:
+        restickify_index = sdsc_files.index(restickify_path)
+        producer_path = sdsc_files[restickify_index - 1]
+        consumer_path = sdsc_files[restickify_index + 1]
+    except (ValueError, IndexError):
+        return {"status": "not-applicable", "reason": "missing-adjacent-sdsc"}
+
+    producer_payload = _read_json_file(producer_path)
+    restickify_payload = _read_json_file(restickify_path)
+    consumer_payload = _read_json_file(consumer_path)
+    producer_root, producer_dsc = _single_payload_dsc(producer_payload)
+    restickify_root, restickify_dsc = _single_payload_dsc(restickify_payload)
+    _, consumer_dsc = _single_payload_dsc(consumer_payload)
+
+    restickify_input_idx = _first_compute_input_index(restickify_dsc)
+    restickify_output_idx = _first_compute_output_index(restickify_dsc)
+    restickify_input_hbm = _base_address(
+        _alloc_start_map(restickify_dsc, lds_idx=restickify_input_idx, component="hbm")
+    )
+    restickify_output_hbm = _base_address(
+        _alloc_start_map(restickify_dsc, lds_idx=restickify_output_idx, component="hbm")
+    )
+    producer_output_idx = _find_matching_lds_by_hbm_base(
+        producer_dsc,
+        candidate_indices=_compute_output_indices(producer_dsc),
+        target_base=restickify_input_hbm,
+    )
+    consumer_input_idx = _find_matching_lds_by_hbm_base(
+        consumer_dsc,
+        candidate_indices=_compute_input_indices(consumer_dsc),
+        target_base=restickify_output_hbm,
+    )
+
+    debug_root = code_dir / "debug"
+    shutil.rmtree(debug_root, ignore_errors=True)
+    discover = _run_dxp_bundle(code_dir, cwd=code_dir, verbose=True)
+    producer_debug = (
+        debug_root
+        / producer_path.stem
+        / f"{producer_path.stem}.out.out.json"
+    )
+    consumer_debug = (
+        debug_root
+        / consumer_path.stem
+        / f"{consumer_path.stem}.out.out.json"
+    )
+    if discover.returncode != 0 or not producer_debug.exists() or not consumer_debug.exists():
+        return {
+            "status": "not-applicable",
+            "reason": "debug-discovery-failed",
+            "dxp_returncode": discover.returncode,
+            "producer_debug": str(producer_debug),
+            "consumer_debug": str(consumer_debug),
+        }
+
+    producer_start = _producer_lxsu_start_payload(
+        _read_json_file(producer_debug),
+        lds_idx=producer_output_idx,
+    )
+    consumer_start = _consumer_lxlu_start_payload(
+        _read_json_file(consumer_debug),
+        lds_idx=consumer_input_idx,
+    )
+    if producer_start is None or consumer_start is None:
+        return {
+            "status": "not-applicable",
+            "reason": "missing-debug-lx-address",
+            "producer_has_start": producer_start is not None,
+            "consumer_has_start": consumer_start is not None,
+        }
+
+    ownership_before = _stock_lx_alias_ownership_summary(
+        producer_root=producer_root,
+        producer_dsc=producer_dsc,
+        restickify_root=restickify_root,
+        restickify_dsc=restickify_dsc,
+    )
+    copy_producer_map = (
+        os.environ.get("SPYRE_RESTICKIFY_STOCK_LX_ALIAS_COPY_PRODUCER_MAP", "1")
+        != "0"
+        and producer_root.get("coreIdToWkSlice_")
+    )
+    if copy_producer_map:
+        restickify_root_after = copy.deepcopy(restickify_root)
+        restickify_root_after["coreIdToWkSlice_"] = copy.deepcopy(
+            producer_root["coreIdToWkSlice_"]
+        )
+    else:
+        restickify_root_after = restickify_root
+    ownership_after = _stock_lx_alias_ownership_summary(
+        producer_root=producer_root,
+        producer_dsc=producer_dsc,
+        restickify_root=restickify_root_after,
+        restickify_dsc=restickify_dsc,
+    )
+    if (
+        os.environ.get("SPYRE_RESTICKIFY_STOCK_LX_ALIAS_REQUIRE_SAFE", "0") == "1"
+        and not ownership_after["direct_lx_alias_safe"]
+    ):
+        return {
+            "status": "not-applicable",
+            "reason": "stock-lx-alias-ownership-mismatch",
+            "diagnostic_only": True,
+            "ownership_before_core_map_copy": ownership_before,
+            "ownership_after_core_map_copy": ownership_after,
+        }
+
+    # The discovered maps are post-corelet-split.  The pre-scheduler SDSC
+    # contract expects one corelet unless corelet split has already run, so use
+    # the corelet-0 address per core by default.
+    if os.environ.get("SPYRE_RESTICKIFY_STOCK_LX_ALIAS_COLLAPSE", "1") != "0":
+        producer_start = _collapse_start_payload_to_one_corelet(producer_start)
+        consumer_start = _collapse_start_payload_to_one_corelet(consumer_start)
+
+    _patch_lx_allocation_by_index(
+        producer_payload,
+        lds_idx=producer_output_idx,
+        start_payload=producer_start,
+    )
+    _patch_lx_allocation_by_index(
+        restickify_payload,
+        lds_idx=restickify_input_idx,
+        start_payload=producer_start,
+    )
+    input_layout_mode = os.environ.get(
+        "SPYRE_RESTICKIFY_STOCK_LX_ALIAS_INPUT_LAYOUT", "keep"
+    )
+    if input_layout_mode != "keep":
+        metadata_keys = {
+            "layout": ("layoutDimOrder_",),
+            "layout-max": ("layoutDimOrder_", "maxDimSizes_"),
+            "producer": ("layoutDimOrder_", "maxDimSizes_", "coordinates_"),
+        }.get(input_layout_mode)
+        if metadata_keys is None:
+            raise ValueError(
+                "SPYRE_RESTICKIFY_STOCK_LX_ALIAS_INPUT_LAYOUT must be "
+                "keep, layout, layout-max, or producer"
+            )
+        _copy_allocation_shape_metadata(
+            src_dsc=producer_dsc,
+            src_lds_idx=producer_output_idx,
+            dst_dsc=restickify_dsc,
+            dst_lds_idx=restickify_input_idx,
+            keys=metadata_keys,
+        )
+    _patch_lx_allocation_by_index(
+        restickify_payload,
+        lds_idx=restickify_output_idx,
+        start_payload=consumer_start,
+    )
+    # The stock restickify template can compile this LX-alias shape when the
+    # restickify's physical ownership follows the producer.  Keep the selected
+    # split factors untouched; this is only a prototype core-map alias.
+    if copy_producer_map:
+        restickify_root["coreIdToWkSlice_"] = copy.deepcopy(
+            producer_root["coreIdToWkSlice_"]
+        )
+    _patch_lx_allocation_by_index(
+        consumer_payload,
+        lds_idx=consumer_input_idx,
+        start_payload=consumer_start,
+    )
+
+    # Remove stale generated artifacts from the discovery pass before rerunning
+    # DXP on the patched JSON files.
+    for child in ("debug", "execute", "loadprogram_to_device", "profile", "logs"):
+        shutil.rmtree(code_dir / child, ignore_errors=True)
+
+    _write_json_file(producer_path, producer_payload)
+    _write_json_file(restickify_path, restickify_payload)
+    _write_json_file(consumer_path, consumer_payload)
+
+    final_verbose = os.environ.get("SPYRE_RESTICKIFY_STOCK_LX_ALIAS_DEBUG", "0") == "1"
+    final = _run_dxp_bundle(code_dir, cwd=code_dir, verbose=final_verbose)
+    if final.returncode != 0:
+        raise RuntimeError(
+            "stock LX alias DXP rerun failed:\n"
+            + final.stdout[-4000:]
+            + final.stderr[-4000:]
+        )
+
+    return {
+        "status": "patched-stock-lx-alias",
+        "producer": producer_path.name,
+        "restickify": restickify_path.name,
+        "consumer": consumer_path.name,
+        "producer_output_lds_idx": producer_output_idx,
+        "restickify_input_lds_idx": restickify_input_idx,
+        "restickify_output_lds_idx": restickify_output_idx,
+        "consumer_input_lds_idx": consumer_input_idx,
+        "producer_lx_unique_starts": _unique_start_values(producer_start),
+        "consumer_lx_unique_starts": _unique_start_values(consumer_start),
+        "producer_lx_corelet_factor": _corelet_factor(producer_start),
+        "consumer_lx_corelet_factor": _corelet_factor(consumer_start),
+        "diagnostic_only": True,
+        "production_candidate": False,
+        "prototype_warning": (
+            "stock LX aliasing is a diagnostic probe; correctness requires "
+            "per-core producer ownership to match the restickify input need, "
+            "or an explicit remote-LX fetch path"
+        ),
+        "copied_producer_core_map": bool(copy_producer_map),
+        "ownership_before_core_map_copy": ownership_before,
+        "ownership_after_core_map_copy": ownership_after,
     }
 
 
@@ -1917,21 +2561,80 @@ def _patch_consumer_input_lx_map(
 ) -> None:
     _, dsc = _single_payload_dsc(payload)
     allocate_name = f"allocate-{input_name}_lx"
+    preserve_role = (
+        os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_PRESERVE_CONSUMER_ROLE", "1")
+        != "0"
+    )
     primary = dsc.setdefault("primaryDsInfo_", {})
-    if "INPUT" not in primary and "OUTPUT" in primary:
+    if not preserve_role and "INPUT" not in primary and "OUTPUT" in primary:
         primary["INPUT"] = copy.deepcopy(primary["OUTPUT"])
     for lds in dsc["labeledDs_"]:
         if int(lds["ldsIdx_"]) == lds_idx:
-            lx_meta = dict(lds.get("memOrg_", {}).get("lx", {}))
+            original_mem = lds.get("memOrg_", {}) or {}
+            lx_meta = dict(original_mem.get("lx", {}))
             lx_meta["isPresent"] = 1
             lx_meta["allocateNode_"] = allocate_name
             lds["memOrg_"] = {"lx": lx_meta}
-            lds["dsType_"] = "INPUT"
+            lds["hbmStartAddress_"] = -1
+            lds["hbmSize_"] = 0
+            if int(lds.get("lxSize_", 0) or 0) <= 0:
+                lds["lxSize_"] = 2_147_483_647
+            if int(lds.get("lxBufferSize_", 0) or 0) <= 0:
+                lds["lxBufferSize_"] = 2_147_483_647
+            lds["coreStateInit_"] = _constant_lx_core_state_init(start_payload)
+            if not preserve_role:
+                lds["dsType_"] = "INPUT"
     for node in dsc.get("scheduleTree_", []):
         if node.get("nodeType_") == "allocate" and int(node.get("ldsIdx_", -1)) == lds_idx:
             node["name_"] = allocate_name
             node["component_"] = "lx"
             node["startAddressCoreCorelet_"] = start_payload
+
+
+def _constant_lx_core_state_init(start_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    data = start_payload.get("data_", {}) or {}
+    core_values: dict[int, dict[int, int]] = {}
+    for key, raw_value in data.items():
+        try:
+            core_str, corelet_str, _time_str = key.strip("[]").split(",")
+            core = int(core_str.strip())
+            corelet = int(corelet_str.strip())
+        except ValueError:
+            continue
+        core_values.setdefault(core, {})[corelet] = int(raw_value)
+    requested_corelets = int(
+        os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_CORESTATE_CORELETS", "1")
+    )
+    corelet_stride = int(
+        os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_CORESTATE_CORELET_STRIDE", "8192")
+    )
+    for values in core_values.values():
+        if not values:
+            continue
+        base = values[min(values)]
+        for corelet in range(requested_corelets):
+            values.setdefault(corelet, base + corelet * corelet_stride)
+    return [
+        {
+            "ebrInit_": -1,
+            "gtr_": {
+                "type": "multicast",
+                "id": 18446744073709551615,
+                "count": 0,
+                "sharers": 0,
+                "groupInfo_": {},
+            },
+            "condGtr_": [],
+            "lbrInit_": [
+                core_values[core][corelet]
+                for corelet in sorted(core_values[core])
+            ],
+            "gapPerDim_": {},
+            "lxSizeWithGaps_": 2_147_483_647,
+            "lbrInitForwardGap_": 0,
+        }
+        for core in sorted(core_values)
+    ]
 
 
 def _corelet_factor(start_payload: dict[str, Any]) -> int:
@@ -1952,6 +2655,9 @@ def _collapse_start_payload_to_one_corelet(start_payload: dict[str, Any]) -> dic
     attrs = collapsed.get("dim_prop_attr", [])
     if len(attrs) >= 2:
         attrs[1] = {**attrs[1], "factor_": 1, "label_": "corelet"}
+    funcs = collapsed.get("dim_prop_func", [])
+    if len(funcs) >= 2:
+        funcs[1] = {"Const": {}}
     data = collapsed.get("data_", {})
     core_to_value: dict[int, str] = {}
     for key, value in data.items():
