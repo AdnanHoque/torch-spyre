@@ -37,6 +37,7 @@ from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.restickify_ring import (
     CORE_MAPPING_OVERRIDE_OP_INFO_KEY,
     LOCALITY_CERTIFICATE_OP_INFO_KEY,
+    PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY,
 )
 from torch_spyre._inductor.codegen.superdsc import SDSCArgs, SDSCSpec
 
@@ -260,13 +261,21 @@ def test_mixed_ptlx_bridge_with_consumer_schedule_shape():
 
 def test_plan_mixed_ptlx_schedule_from_opspecs():
     specs = [
-        _minimal_op_spec("add", [_arg(True, 0), _arg(False, 4)]),
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 0), _arg(False, 4, allocation={"lx": 64 * 1024})],
+        ),
         _minimal_op_spec(
             RESTICKIFY_OP,
             [_arg(True, 4), _arg(False, 5)],
-            op_info=_certified_restickify_info(),
+            op_info=_certified_restickify_info(
+                _endpoint_allocation(64 * 1024, 96 * 1024)
+            ),
         ),
-        _minimal_op_spec("add", [_arg(True, 5), _arg(False, 6)]),
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 5, allocation={"lx": 96 * 1024}), _arg(False, 6)],
+        ),
     ]
 
     plans = plan_restickify_ptlx_mixed_schedules(specs)
@@ -282,13 +291,13 @@ def test_plan_mixed_ptlx_schedule_from_opspecs():
     assert plan.producer_endpoint.role == "producer_output"
     assert plan.producer_endpoint.is_input is False
     assert plan.producer_endpoint.sdsc_index == 0
-    assert plan.producer_endpoint.base == 16 * 1024
-    assert plan.producer_endpoint.base_source == "prototype-default"
+    assert plan.producer_endpoint.base == 64 * 1024
+    assert plan.producer_endpoint.base_source == "op-spec-allocation"
     assert plan.consumer_endpoint.role == "consumer_input"
     assert plan.consumer_endpoint.is_input is True
     assert plan.consumer_endpoint.sdsc_index == 2
-    assert plan.consumer_endpoint.base == 8 * 1024
-    assert plan.consumer_endpoint.base_source == "prototype-default"
+    assert plan.consumer_endpoint.base == 96 * 1024
+    assert plan.consumer_endpoint.base_source == "op-spec-allocation"
 
 
 def test_plan_mixed_ptlx_schedule_uses_op_spec_lx_allocations():
@@ -300,7 +309,9 @@ def test_plan_mixed_ptlx_schedule_uses_op_spec_lx_allocations():
         _minimal_op_spec(
             RESTICKIFY_OP,
             [_arg(True, 4), _arg(False, 5)],
-            op_info=_certified_restickify_info(),
+            op_info=_certified_restickify_info(
+                _endpoint_allocation(64 * 1024, 96 * 1024)
+            ),
         ),
         _minimal_op_spec(
             "add",
@@ -319,13 +330,21 @@ def test_plan_mixed_ptlx_schedule_uses_op_spec_lx_allocations():
 def test_endpoint_core_starts_come_from_endpoint_plan():
     endpoint = plan_restickify_ptlx_mixed_schedules(
         [
-            _minimal_op_spec("add", [_arg(True, 0), _arg(False, 4)]),
+            _minimal_op_spec(
+                "add",
+                [_arg(True, 0), _arg(False, 4, allocation={"lx": 16 * 1024})],
+            ),
             _minimal_op_spec(
                 RESTICKIFY_OP,
                 [_arg(True, 4), _arg(False, 5)],
-                op_info=_certified_restickify_info(),
+                op_info=_certified_restickify_info(
+                    _endpoint_allocation(16 * 1024, 8 * 1024)
+                ),
             ),
-            _minimal_op_spec("add", [_arg(True, 5), _arg(False, 6)]),
+            _minimal_op_spec(
+                "add",
+                [_arg(True, 5, allocation={"lx": 8 * 1024}), _arg(False, 6)],
+            ),
         ]
     )[1].producer_endpoint
 
@@ -341,6 +360,46 @@ def test_plan_mixed_ptlx_schedule_skips_uncertified_restickify():
         _minimal_op_spec("add", [_arg(True, 0), _arg(False, 4)]),
         _minimal_op_spec(RESTICKIFY_OP, [_arg(True, 4), _arg(False, 5)]),
         _minimal_op_spec("add", [_arg(True, 5), _arg(False, 6)]),
+    ]
+
+    plans = plan_restickify_ptlx_mixed_schedules(specs)
+
+    assert plans == {}
+
+
+def test_plan_mixed_ptlx_schedule_skips_without_allocator_endpoints():
+    specs = [
+        _minimal_op_spec("add", [_arg(True, 0), _arg(False, 4)]),
+        _minimal_op_spec(
+            RESTICKIFY_OP,
+            [_arg(True, 4), _arg(False, 5)],
+            op_info=_certified_restickify_info(),
+        ),
+        _minimal_op_spec("add", [_arg(True, 5), _arg(False, 6)]),
+    ]
+
+    plans = plan_restickify_ptlx_mixed_schedules(specs)
+
+    assert plans == {}
+
+
+def test_plan_mixed_ptlx_schedule_skips_invalid_endpoint_overlap():
+    specs = [
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 0), _arg(False, 4, allocation={"lx": 64 * 1024})],
+        ),
+        _minimal_op_spec(
+            RESTICKIFY_OP,
+            [_arg(True, 4), _arg(False, 5)],
+            op_info=_certified_restickify_info(
+                _endpoint_allocation(64 * 1024, 96 * 1024, valid=False)
+            ),
+        ),
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 5, allocation={"lx": 96 * 1024}), _arg(False, 6)],
+        ),
     ]
 
     plans = plan_restickify_ptlx_mixed_schedules(specs)
@@ -398,13 +457,21 @@ def test_mixed_ptlx_value_flow_contract_matches_bridge_endpoints():
 def test_materialize_bridge_lx_endpoints_uses_planned_endpoints():
     plan = plan_restickify_ptlx_mixed_schedules(
         [
-            _minimal_op_spec("add", [_arg(True, 0), _arg(False, 4)]),
+            _minimal_op_spec(
+                "add",
+                [_arg(True, 0), _arg(False, 4, allocation={"lx": 16 * 1024})],
+            ),
             _minimal_op_spec(
                 RESTICKIFY_OP,
                 [_arg(True, 4), _arg(False, 5)],
-                op_info=_certified_restickify_info(),
+                op_info=_certified_restickify_info(
+                    _endpoint_allocation(16 * 1024, 8 * 1024)
+                ),
             ),
-            _minimal_op_spec("add", [_arg(True, 5), _arg(False, 6)]),
+            _minimal_op_spec(
+                "add",
+                [_arg(True, 5, allocation={"lx": 8 * 1024}), _arg(False, 6)],
+            ),
         ]
     )[1]
     bridge = generate_ptlx_restickify_bridge_sdsc(
@@ -550,8 +617,37 @@ def _minimal_op_spec(
     )
 
 
-def _certified_restickify_info() -> dict:
+def _endpoint_allocation(
+    producer_base: int,
+    consumer_base: int,
+    *,
+    valid: bool = True,
+) -> dict:
     return {
+        "kind": "ptlx_endpoint_allocation",
+        "producer_buffer": "producer",
+        "consumer_buffer": "consumer",
+        "producer": {
+            "buffer": "producer",
+            "start": producer_base,
+            "size": 128,
+            "end": producer_base + 128,
+        },
+        "consumer": {
+            "buffer": "consumer",
+            "start": consumer_base,
+            "size": 128,
+            "end": consumer_base + 128,
+        },
+        "overlap_check": {
+            "valid": valid,
+            "overlaps": [] if valid else [{"endpoint": "producer"}],
+        },
+    }
+
+
+def _certified_restickify_info(endpoint_allocation: dict | None = None) -> dict:
+    info = {
         "restickify_source_kind": "in_graph_computed",
         CORE_MAPPING_OVERRIDE_OP_INFO_KEY: {"0": {}},
         LOCALITY_CERTIFICATE_OP_INFO_KEY: {
@@ -559,3 +655,6 @@ def _certified_restickify_info() -> dict:
             "certified_byte_hops": 0,
         },
     }
+    if endpoint_allocation is not None:
+        info[PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY] = endpoint_allocation
+    return info

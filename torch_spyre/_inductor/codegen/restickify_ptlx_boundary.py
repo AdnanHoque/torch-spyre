@@ -203,6 +203,15 @@ def _plan_one_mixed_schedule(
         env_var=_CONSUMER_BASE_ENV,
         default_base=_DEFAULT_CONSUMER_BASE,
     )
+    endpoint_reason = _allocator_endpoint_skip_reason(
+        restickify_spec,
+        producer_base=producer_base,
+        producer_base_source=producer_base_source,
+        consumer_base=consumer_base,
+        consumer_base_source=consumer_base_source,
+    )
+    if endpoint_reason is not None:
+        return endpoint_reason
 
     return PTLXMixedSchedulePlan(
         sdsc_index=idx,
@@ -495,6 +504,38 @@ def _eligibility_skip_reason(spec: OpSpec) -> str | None:
         return "locality-not-certified"
     if int(certificate.get("certified_byte_hops", -1)) != 0:
         return "nonzero-certified-byte-hops"
+    return None
+
+
+def _allocator_endpoint_skip_reason(
+    spec: OpSpec,
+    *,
+    producer_base: int,
+    producer_base_source: str,
+    consumer_base: int,
+    consumer_base_source: str,
+) -> str | None:
+    if producer_base_source != "op-spec-allocation":
+        return f"producer-endpoint-not-allocator-backed:{producer_base_source}"
+    if consumer_base_source != "op-spec-allocation":
+        return f"consumer-endpoint-not-allocator-backed:{consumer_base_source}"
+
+    endpoint_allocation = (spec.op_info or {}).get(
+        PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY
+    )
+    if not isinstance(endpoint_allocation, dict):
+        return "missing-endpoint-allocation"
+    overlap_check = endpoint_allocation.get("overlap_check")
+    if not isinstance(overlap_check, dict) or not overlap_check.get("valid"):
+        return "invalid-endpoint-overlap-check"
+    producer = endpoint_allocation.get("producer")
+    consumer = endpoint_allocation.get("consumer")
+    if not isinstance(producer, dict) or not isinstance(consumer, dict):
+        return "missing-endpoint-ranges"
+    if int(producer.get("start", -1)) != int(producer_base):
+        return "producer-endpoint-base-mismatch"
+    if int(consumer.get("start", -1)) != int(consumer_base):
+        return "consumer-endpoint-base-mismatch"
     return None
 
 
