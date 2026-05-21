@@ -1,0 +1,257 @@
+{
+  "rows": [
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "",
+      "dxp_rc": 0,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "original",
+      "opfunc": "ReStickifyOpHBM",
+      "path": "/tmp/stage201-true-dl-probe/ReStickifyOpHBM_original",
+      "sdsc": "/tmp/stage201-true-dl-probe/ReStickifyOpHBM_original/sdsc_0_ReStickifyOpHBM_original.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "ReStickifyOpHBM_original",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "",
+      "dxp_rc": 0,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "output_lx",
+      "opfunc": "ReStickifyOpHBM",
+      "path": "/tmp/stage201-true-dl-probe/ReStickifyOpHBM_output_lx",
+      "sdsc": "/tmp/stage201-true-dl-probe/ReStickifyOpHBM_output_lx/sdsc_0_ReStickifyOpHBM_output_lx.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "ReStickifyOpHBM_output_lx",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "",
+      "dxp_rc": 0,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "all_lx",
+      "opfunc": "ReStickifyOpHBM",
+      "path": "/tmp/stage201-true-dl-probe/ReStickifyOpHBM_all_lx",
+      "sdsc": "/tmp/stage201-true-dl-probe/ReStickifyOpHBM_all_lx/sdsc_0_ReStickifyOpHBM_all_lx.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "ReStickifyOpHBM_all_lx",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "",
+      "dxp_rc": 0,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "original",
+      "opfunc": "ReStickifyOpLx",
+      "path": "/tmp/stage201-true-dl-probe/ReStickifyOpLx_original",
+      "sdsc": "/tmp/stage201-true-dl-probe/ReStickifyOpLx_original/sdsc_0_ReStickifyOpLx_original.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "ReStickifyOpLx_original",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "",
+      "dxp_rc": 0,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "output_lx",
+      "opfunc": "ReStickifyOpLx",
+      "path": "/tmp/stage201-true-dl-probe/ReStickifyOpLx_output_lx",
+      "sdsc": "/tmp/stage201-true-dl-probe/ReStickifyOpLx_output_lx/sdsc_0_ReStickifyOpLx_output_lx.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "ReStickifyOpLx_output_lx",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "",
+      "dxp_rc": 0,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "all_lx",
+      "opfunc": "ReStickifyOpLx",
+      "path": "/tmp/stage201-true-dl-probe/ReStickifyOpLx_all_lx",
+      "sdsc": "/tmp/stage201-true-dl-probe/ReStickifyOpLx_all_lx/sdsc_0_ReStickifyOpLx_all_lx.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "ReStickifyOpLx_all_lx",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "",
+      "dxp_rc": 0,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "original",
+      "opfunc": "ReStickifyOpWithPTLx",
+      "path": "/tmp/stage201-true-dl-probe/ReStickifyOpWithPTLx_original",
+      "sdsc": "/tmp/stage201-true-dl-probe/ReStickifyOpWithPTLx_original/sdsc_0_ReStickifyOpWithPTLx_original.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "ReStickifyOpWithPTLx_original",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "",
+      "dxp_rc": 0,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "output_lx",
+      "opfunc": "ReStickifyOpWithPTLx",
+      "path": "/tmp/stage201-true-dl-probe/ReStickifyOpWithPTLx_output_lx",
+      "sdsc": "/tmp/stage201-true-dl-probe/ReStickifyOpWithPTLx_output_lx/sdsc_0_ReStickifyOpWithPTLx_output_lx.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "ReStickifyOpWithPTLx_output_lx",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "",
+      "dxp_rc": 0,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "all_lx",
+      "opfunc": "ReStickifyOpWithPTLx",
+      "path": "/tmp/stage201-true-dl-probe/ReStickifyOpWithPTLx_all_lx",
+      "sdsc": "/tmp/stage201-true-dl-probe/ReStickifyOpWithPTLx_all_lx/sdsc_0_ReStickifyOpWithPTLx_all_lx.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "ReStickifyOpWithPTLx_all_lx",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "cannot open input file '/opt/ibm/spyre/deeptools/share/ddc/ddl_templates/inter_slice_transpose.ddl': No such file or directory\ndxp_standalone: /AIU-SHARE-CICD/llvm_for_deeptools/dd6f6a096a59892ce1f9c454461aa5ed4c2aa971/llvm-project/llvm/include/llvm/Support/Casting.h:662: decltype(auto) llvm::dyn_cast(From*) [with To = mlir::ddl::OperationBindOp; From = mlir::Operation]: Assertion `detail::isPresent(Val) && \"dyn_cast on a non-existent value\"' failed.",
+      "dxp_rc": -6,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "original",
+      "opfunc": "interslicetranspose_fp16",
+      "path": "/tmp/stage201-true-dl-probe/interslicetranspose_fp16_original",
+      "sdsc": "/tmp/stage201-true-dl-probe/interslicetranspose_fp16_original/sdsc_0_interslicetranspose_fp16_original.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "interslicetranspose_fp16_original",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "cannot open input file '/opt/ibm/spyre/deeptools/share/ddc/ddl_templates/inter_slice_transpose.ddl': No such file or directory\ndxp_standalone: /AIU-SHARE-CICD/llvm_for_deeptools/dd6f6a096a59892ce1f9c454461aa5ed4c2aa971/llvm-project/llvm/include/llvm/Support/Casting.h:662: decltype(auto) llvm::dyn_cast(From*) [with To = mlir::ddl::OperationBindOp; From = mlir::Operation]: Assertion `detail::isPresent(Val) && \"dyn_cast on a non-existent value\"' failed.",
+      "dxp_rc": -6,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "output_lx",
+      "opfunc": "interslicetranspose_fp16",
+      "path": "/tmp/stage201-true-dl-probe/interslicetranspose_fp16_output_lx",
+      "sdsc": "/tmp/stage201-true-dl-probe/interslicetranspose_fp16_output_lx/sdsc_0_interslicetranspose_fp16_output_lx.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "interslicetranspose_fp16_output_lx",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "cannot open input file '/opt/ibm/spyre/deeptools/share/ddc/ddl_templates/inter_slice_transpose.ddl': No such file or directory\ndxp_standalone: /AIU-SHARE-CICD/llvm_for_deeptools/dd6f6a096a59892ce1f9c454461aa5ed4c2aa971/llvm-project/llvm/include/llvm/Support/Casting.h:662: decltype(auto) llvm::dyn_cast(From*) [with To = mlir::ddl::OperationBindOp; From = mlir::Operation]: Assertion `detail::isPresent(Val) && \"dyn_cast on a non-existent value\"' failed.",
+      "dxp_rc": -6,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "all_lx",
+      "opfunc": "interslicetranspose_fp16",
+      "path": "/tmp/stage201-true-dl-probe/interslicetranspose_fp16_all_lx",
+      "sdsc": "/tmp/stage201-true-dl-probe/interslicetranspose_fp16_all_lx/sdsc_0_interslicetranspose_fp16_all_lx.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "interslicetranspose_fp16_all_lx",
+      "work_op_count": 0
+    }
+  ],
+  "seed_sdsc": "/tmp/torchinductor_1000800000/tmpnrou89vy/inductor-spyre/sdsc_fused_add_t_0_tzl9n3wr/sdsc_1_ReStickifyOpHBM.json"
+}

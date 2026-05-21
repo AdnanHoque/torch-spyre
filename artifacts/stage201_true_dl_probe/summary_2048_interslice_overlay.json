@@ -1,0 +1,68 @@
+{
+  "rows": [
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "terminate called after throwing an instance of 'DtException'\n  what():  DtException: Cannot allocate even the smallest size, file /project_src/deeptools/ddc/ddcv1.cpp line 1286",
+      "dxp_rc": -6,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "original",
+      "opfunc": "interslicetranspose_fp16",
+      "path": "/tmp/stage201-true-dl-interslice-overlay/interslicetranspose_fp16_original",
+      "sdsc": "/tmp/stage201-true-dl-interslice-overlay/interslicetranspose_fp16_original/sdsc_0_interslicetranspose_fp16_original.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "interslicetranspose_fp16_original",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "terminate called after throwing an instance of 'DtException'\n  what():  DtException: Cannot allocate even the smallest size, file /project_src/deeptools/ddc/ddcv1.cpp line 1286",
+      "dxp_rc": -6,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "output_lx",
+      "opfunc": "interslicetranspose_fp16",
+      "path": "/tmp/stage201-true-dl-interslice-overlay/interslicetranspose_fp16_output_lx",
+      "sdsc": "/tmp/stage201-true-dl-interslice-overlay/interslicetranspose_fp16_output_lx/sdsc_0_interslicetranspose_fp16_output_lx.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "interslicetranspose_fp16_output_lx",
+      "work_op_count": 0
+    },
+    {
+      "dcc_error_tail": "",
+      "dcc_rc": 0,
+      "dxp_error_tail": "terminate called after throwing an instance of 'DtException'\n  what():  DtException: Cannot allocate even the smallest size, file /project_src/deeptools/ddc/ddcv1.cpp line 1286",
+      "dxp_rc": -6,
+      "has_hbm": false,
+      "has_l3": true,
+      "has_lxlu": false,
+      "has_lxsu": false,
+      "has_pt_or_sfp": false,
+      "memory_mode": "all_lx",
+      "opfunc": "interslicetranspose_fp16",
+      "path": "/tmp/stage201-true-dl-interslice-overlay/interslicetranspose_fp16_all_lx",
+      "sdsc": "/tmp/stage201-true-dl-interslice-overlay/interslicetranspose_fp16_all_lx/sdsc_0_interslicetranspose_fp16_all_lx.json",
+      "unit_counts": {
+        "l3lu": 32,
+        "l3su": 32
+      },
+      "variant": "interslicetranspose_fp16_all_lx",
+      "work_op_count": 0
+    }
+  ],
+  "seed_sdsc": "/tmp/torchinductor_1000800000/tmpnrou89vy/inductor-spyre/sdsc_fused_add_t_0_tzl9n3wr/sdsc_1_ReStickifyOpHBM.json"
+}
