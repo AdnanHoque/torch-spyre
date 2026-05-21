@@ -23,6 +23,7 @@ from torch_spyre._inductor.codegen.restickify_lx_boundary import (
     patch_restickify_ddl_bridge_boundaries,
 )
 from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
+    patch_restickify_ptlx_mixed_schedules,
     patch_restickify_ptlx_bridge_boundaries,
 )
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
@@ -55,7 +56,11 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         for row in rows:
             logger.info("restickify DDL bridge boundary patch: %s", row)
 
-    if _spyre_config.restickify_ptlx_bridge_e2e:
+    if _spyre_config.restickify_ptlx_mixed_schedule_e2e:
+        rows = patch_restickify_ptlx_mixed_schedules(sdscs_json, specs)
+        for row in rows:
+            logger.info("restickify PT-LX mixed schedule patch: %s", row)
+    elif _spyre_config.restickify_ptlx_bridge_e2e:
         rows = patch_restickify_ptlx_bridge_boundaries(sdscs_json, specs)
         for row in rows:
             logger.info("restickify PT-LX bridge boundary patch: %s", row)
@@ -63,6 +68,8 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     # Write JSON SDSCs to file system
     files = []
     for sdsc_json in sdscs_json:
+        if sdsc_json is None:
+            continue
         sdsc_name = next(iter(sdsc_json))
         file_name = f"sdsc_{sdsc_name}.json"
         files.append(file_name)
@@ -70,13 +77,14 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             logger.info(f"Generating {file.name}")
             json.dump(sdsc_json, file, indent=2)
 
-    maybe_emit_lx_neighbor_descriptor(
-        kernel_name,
-        output_dir,
-        files,
-        specs,
-        sdsc_payloads=sdscs_json,
-    )
+    if not _spyre_config.restickify_ptlx_mixed_schedule_e2e:
+        maybe_emit_lx_neighbor_descriptor(
+            kernel_name,
+            output_dir,
+            files,
+            specs,
+            sdsc_payloads=sdscs_json,
+        )
 
     # Generate bundle.mlir
     with open(os.path.join(output_dir, "bundle.mlir"), "w") as file:

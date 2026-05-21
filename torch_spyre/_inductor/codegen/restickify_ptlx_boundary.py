@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from copy import deepcopy
 from typing import Any
 
 from torch_spyre._inductor import config as _spyre_config
@@ -58,6 +59,169 @@ def patch_restickify_ptlx_bridge_boundaries(
         rows.append(row)
         _append_audit(row)
     return rows
+
+
+def patch_restickify_ptlx_mixed_schedules(
+    sdsc_payloads: list[dict[str, Any] | None],
+    specs: list[OpSpec],
+) -> list[dict[str, Any]]:
+    """Replace eligible restickify+consumer pairs with one mixed SuperDsc.
+
+    The mixed SuperDsc is the Stage198 production-shaped artifact:
+
+    ``ReStickifyOpWithPTLx`` data op, then ``STCDPOpLx`` data op, then the
+    consumer DL op.  DCC can lower this shape through ``runDcgForDataOpsDlOps``;
+    installed DXP still rejects imported mixed SDSCs, so this remains a
+    default-off prototype.
+    """
+
+    rows = []
+    consumed_indices: set[int] = set()
+    for idx, spec in enumerate(specs):
+        if idx in consumed_indices or spec.op != RESTICKIFY_OP:
+            continue
+        row = _patch_one_mixed_schedule(idx, sdsc_payloads, specs)
+        if row.get("status") == "patched":
+            consumed_indices.add(idx + 1)
+        rows.append(row)
+        _append_audit(row)
+    return rows
+
+
+def _patch_one_mixed_schedule(
+    idx: int,
+    sdsc_payloads: list[dict[str, Any] | None],
+    specs: list[OpSpec],
+) -> dict[str, Any]:
+    if idx == 0 or idx + 1 >= len(specs):
+        return _row(idx, "skipped", "restickify-not-between-adjacent-sdscs")
+    if sdsc_payloads[idx] is None or sdsc_payloads[idx + 1] is None:
+        return _row(idx, "skipped", "restickify-or-consumer-already-consumed")
+
+    restickify_spec = specs[idx]
+    reason = _eligibility_skip_reason(restickify_spec)
+    if reason is not None:
+        return _row(idx, "skipped", reason)
+
+    restickify_payload = sdsc_payloads[idx]
+    assert restickify_payload is not None
+    if not _is_restickify_hbm_payload(restickify_payload):
+        return _row(idx, "skipped", "restickify-payload-not-hbm-compute")
+
+    producer_payload = sdsc_payloads[idx - 1]
+    consumer_payload = sdsc_payloads[idx + 1]
+    if producer_payload is None or consumer_payload is None:
+        return _row(idx, "skipped", "producer-or-consumer-missing")
+    producer_spec = specs[idx - 1]
+    consumer_spec = specs[idx + 1]
+    if len(restickify_spec.args) != 2:
+        return _row(idx, "skipped", "unsupported-restickify-arity")
+
+    producer_lds_idx = _arg_position_for_arg_index(
+        producer_spec,
+        int(restickify_spec.args[0].arg_index),
+        want_input=False,
+    )
+    consumer_lds_idx = _arg_position_for_arg_index(
+        consumer_spec,
+        int(restickify_spec.args[-1].arg_index),
+        want_input=True,
+    )
+    if producer_lds_idx is None:
+        return _row(idx, "skipped", "producer-output-arg-not-adjacent")
+    if consumer_lds_idx is None:
+        return _row(idx, "skipped", "consumer-input-arg-not-adjacent")
+
+    _, producer_dsc = _single_payload_dsc(producer_payload)
+    restickify_root, restickify_dsc = _single_payload_dsc(restickify_payload)
+    _, consumer_dsc = _single_payload_dsc(consumer_payload)
+    restickify_input_idx = _first_compute_input_index(restickify_dsc)
+    restickify_output_idx = _first_compute_output_index(restickify_dsc)
+    restickify_logical_direction = _infer_restickify_direction(
+        restickify_dsc,
+        input_lds_idx=restickify_input_idx,
+        output_lds_idx=restickify_output_idx,
+    )
+    direction = _infer_endpoint_direction(
+        producer_dsc,
+        producer_lds_idx=producer_lds_idx,
+        consumer_dsc=consumer_dsc,
+        consumer_lds_idx=consumer_lds_idx,
+        restickify_logical_direction=restickify_logical_direction,
+    )
+    if direction != "kernel-to-output":
+        return _row(idx, "skipped", f"unsupported-direction:{direction}")
+
+    size, num_cores = _infer_size_and_cores(restickify_root, restickify_dsc)
+    producer_base = int(os.environ.get(_PRODUCER_BASE_ENV, _DEFAULT_PRODUCER_BASE))
+    consumer_base = int(os.environ.get(_CONSUMER_BASE_ENV, _DEFAULT_CONSUMER_BASE))
+    producer_start = _constant_lx_start_payload(
+        num_cores=num_cores,
+        base=producer_base,
+    )
+    consumer_start = _constant_lx_start_payload(
+        num_cores=num_cores,
+        base=consumer_base,
+    )
+
+    producer_patches = _patch_lx_allocation_by_index(
+        producer_payload,
+        lds_idx=producer_lds_idx,
+        start_payload=producer_start,
+    )
+    consumer_name = _lds_name(consumer_dsc, consumer_lds_idx)
+    _patch_consumer_input_lx_map(
+        consumer_payload,
+        input_name=consumer_name,
+        lds_idx=consumer_lds_idx,
+        start_payload=consumer_start,
+    )
+    _force_consumer_corelets(
+        consumer_payload,
+        factor=_corelet_factor(consumer_start),
+    )
+
+    bridge_payload = generate_ptlx_restickify_bridge_sdsc(
+        f"{idx}_TwoStepReStickifyOpWithPTLxStcdp",
+        size=size,
+        num_cores=num_cores,
+        mode="stage3b",
+        direction=direction,
+        input_start_address=producer_base,
+        output_start_address=consumer_base,
+        restickify_op_name="ReStickifyOpWithPTLx",
+    )
+    endpoint_patch = _patch_bridge_endpoint_pieces(
+        bridge_payload,
+        producer_starts={core: producer_base for core in range(num_cores)},
+        consumer_starts={core: consumer_base for core in range(num_cores)},
+    )
+    mixed_name = f"{idx}_MixedReStickifyOpWithPTLxConsumer"
+    mixed_payload = _combine_ptlx_bridge_with_consumer(
+        mixed_name,
+        bridge_payload,
+        consumer_payload,
+    )
+    sdsc_payloads[idx] = mixed_payload
+    sdsc_payloads[idx + 1] = None
+
+    return {
+        **_row(idx, "patched", None),
+        "kind": "ptlx-mixed-schedule",
+        "direction": direction,
+        "restickify_logical_direction": restickify_logical_direction,
+        "size": size,
+        "num_cores": num_cores,
+        "producer_lds_idx": producer_lds_idx,
+        "consumer_lds_idx": consumer_lds_idx,
+        "consumer_index_omitted": idx + 1,
+        "producer_lx_unique_starts": _unique_start_values(producer_start),
+        "consumer_lx_unique_starts": _unique_start_values(consumer_start),
+        "producer_allocation_patches": producer_patches,
+        "bridge_endpoint_patch": endpoint_patch,
+        "replacement_sdsc": mixed_name,
+        "mixed_schedule": _bridge_then_dl_schedule(num_cores)["0"],
+    }
 
 
 def _patch_one_boundary(
@@ -538,6 +702,36 @@ def _force_consumer_corelets(payload: dict[str, Any], *, factor: int) -> None:
     root["coreletFoldProp_"] = {"factor_": factor, "label_": "corelet"}
     dsc["numCoreletsUsed_"] = factor
     dsc["numCoreletsUsed_DSC2_"] = factor
+
+
+def _combine_ptlx_bridge_with_consumer(
+    name: str,
+    bridge_payload: dict[str, Any],
+    consumer_payload: dict[str, Any],
+) -> dict[str, Any]:
+    consumer_root, _ = _single_payload_dsc(consumer_payload)
+    bridge_root = next(iter(bridge_payload.values()))
+    root = deepcopy(consumer_root)
+    root["datadscs_"] = deepcopy(bridge_root.get("datadscs_", []) or [])
+    root["coreIdToDscSchedule"] = _bridge_then_dl_schedule(
+        int(root.get("numCoresUsed_", 32) or 32)
+    )
+    dataop_names = {
+        str(next(iter(datadsc.values())).get("op", {}).get("name"))
+        for datadsc in root["datadscs_"]
+        if next(iter(datadsc.values())).get("op", {}).get("name") is not None
+    }
+    root["opFuncsUsed_"] = sorted(
+        set(root.get("opFuncsUsed_", []) or []) | dataop_names
+    )
+    return {name: root}
+
+
+def _bridge_then_dl_schedule(num_cores: int) -> dict[str, list[list[int]]]:
+    return {
+        str(core_id): [[0, -1, 0, 1], [1, -1, 1, 1], [-1, 0, 1, 0]]
+        for core_id in range(num_cores)
+    }
 
 
 def _patch_bridge_endpoint_pieces(

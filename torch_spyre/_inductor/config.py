@@ -106,6 +106,16 @@ restickify_ptlx_bridge_audit_jsonl: str = os.environ.get(
     "",
 )
 
+# Default-off mixed-schedule prototype for the PT-aware LX restickify bridge.
+# When enabled, eligible adjacent `ReStickifyOpHBM -> consumer` pairs are
+# emitted as one mixed SuperDsc containing the bridge data ops and the consumer
+# DL op with an explicit coreIdToDscSchedule. This is the production-shaped
+# follow-up to the Stage198 probe, but it still requires Deeptools/DXP mixed
+# SuperDsc bundle support before it can launch.
+restickify_ptlx_mixed_schedule_e2e: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_PTLX_MIXED_SCHEDULE_E2E", "0") == "1"
+)
+
 # Default-off diagnostic e2e lowering prototype for the Stage42 DDL bridge.
 # When enabled, a small, compile-proven subset of ReStickifyOpHBM SDSCs may be
 # emitted in the compact restickify DDL input form instead of the normal HBM

@@ -18,7 +18,11 @@ from sympy import Symbol
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     combine_dataop_sdscs,
+    generate_ptlx_restickify_bridge_sdsc,
     generate_restickify_dataop_sdsc_from_spec,
+)
+from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
+    _combine_ptlx_bridge_with_consumer,
 )
 from torch_spyre._inductor.codegen.superdsc import SDSCArgs, SDSCSpec
 
@@ -203,3 +207,38 @@ def test_combine_dataop_sdscs_keeps_multiple_dataops():
         for datadsc in root["datadscs_"]
     ]
     assert ops == ["ReStickifyOpLx", "STCDPOpLx"]
+
+
+def test_mixed_ptlx_bridge_with_consumer_schedule_shape():
+    bridge = generate_ptlx_restickify_bridge_sdsc(
+        "ptlx_bridge",
+        size=128,
+        num_cores=2,
+        mode="stage3b",
+        direction="kernel-to-output",
+        restickify_op_name="ReStickifyOpWithPTLx",
+    )
+    consumer = {
+        "2_add": {
+            "numCoresUsed_": 2,
+            "opFuncsUsed_": ["add"],
+            "dscs_": [{"add": {"computeOp_": [{"opFuncName": "add"}]}}],
+            "datadscs_": [],
+            "coreIdToDscSchedule": {},
+        }
+    }
+
+    mixed = _combine_ptlx_bridge_with_consumer("1_mixed", bridge, consumer)
+
+    root = mixed["1_mixed"]
+    assert len(root["dscs_"]) == 1
+    assert len(root["datadscs_"]) == 2
+    assert root["opFuncsUsed_"] == [
+        "ReStickifyOpWithPTLx",
+        "STCDPOpLx",
+        "add",
+    ]
+    assert root["coreIdToDscSchedule"] == {
+        "0": [[0, -1, 0, 1], [1, -1, 1, 1], [-1, 0, 1, 0]],
+        "1": [[0, -1, 0, 1], [1, -1, 1, 1], [-1, 0, 1, 0]],
+    }
