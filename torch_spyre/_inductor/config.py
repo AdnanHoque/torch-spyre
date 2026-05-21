@@ -93,6 +93,19 @@ restickify_lx_dataop_audit_jsonl: str = os.environ.get(
     "",
 )
 
+# Default-off normal-bundle prototype for replacing an adjacent
+# producer -> ReStickifyOpHBM -> consumer edge with the PT-aware LX data-op
+# bridge proven by the same-artifact splice. Unlike the splice hook, this runs
+# before bundle files and runtime frames are generated.
+restickify_ptlx_bridge_e2e: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_PTLX_BRIDGE_E2E", "0") == "1"
+)
+
+restickify_ptlx_bridge_audit_jsonl: str = os.environ.get(
+    "SPYRE_RESTICKIFY_PTLX_BRIDGE_AUDIT_JSONL",
+    "",
+)
+
 # Default-off diagnostic e2e lowering prototype for the Stage42 DDL bridge.
 # When enabled, a small, compile-proven subset of ReStickifyOpHBM SDSCs may be
 # emitted in the compact restickify DDL input form instead of the normal HBM

@@ -30,6 +30,7 @@ from typing import Any
 
 from sympy import Expr, Symbol
 
+from torch_spyre._C import DataFormats
 from torch_spyre._inductor.op_spec import OpSpec
 
 from .compute_ops import num_bytes
@@ -204,6 +205,200 @@ def combine_dataop_sdscs(
             combined["numCoresUsed_"], len(datadscs)
         )
     return {name: combined}
+
+
+def generate_ptlx_restickify_bridge_sdsc(
+    name: str,
+    *,
+    size: int,
+    num_cores: int,
+    mode: str = "stage3b",
+    direction: str = "kernel-to-output",
+    input_start_address: int = 0,
+    output_start_address: int = 1536 * 1024,
+    restickify_op_name: str = "ReStickifyOpWithPTLx",
+) -> dict[str, Any]:
+    """Generate the PT-aware two-step LX restickify bridge.
+
+    This is the compiler-side form of the standalone probe used during the LX
+    restickify study. It emits a combined data-op SDSC with:
+
+        ReStickifyOpWithPTLx -> STCDPOpLx
+
+    The generated bridge is intentionally narrow: it covers the proven
+    ``kernel-to-output`` materialization shape used by the high-signal
+    producer/restickify/consumer bundle. Callers may patch endpoint PieceInfo
+    starts after generation if they want to preserve scheduler-selected LX
+    addresses from neighboring SDSCs.
+    """
+
+    if restickify_op_name not in {"ReStickifyOpLx", "ReStickifyOpWithPTLx"}:
+        raise ValueError(
+            f"unsupported PT-LX restickify op {restickify_op_name!r}"
+        )
+    if direction != "kernel-to-output":
+        raise ValueError(
+            "PT-LX restickify bridge currently supports only "
+            f"direction='kernel-to-output', got {direction!r}"
+        )
+    if mode not in {"baseline", "stage3b"}:
+        raise ValueError(f"unsupported PT-LX bridge mode {mode!r}")
+
+    d0 = Symbol("mb_")
+    d1 = Symbol("out_")
+    dims = [d0, d1]
+    input_splits = {d0: 1, d1: num_cores}
+    input_mapping = _explicit_core_mapping(dims, d1, num_cores)
+
+    # ReStickifyOpWithPTLx handles the stick/layout conversion locally. Keep
+    # the intermediate split off the input stick dimension, then use STCDPOpLx
+    # to remap ownership to the Stage 3B final split.
+    intermediate_splits = {d0: num_cores, d1: 1}
+    intermediate_mapping = _explicit_core_mapping(dims, d0, num_cores)
+    final_split_dim = d0 if mode == "baseline" else d1
+    final_splits = {d0: 1, d1: 1}
+    final_splits[final_split_dim] = num_cores
+    final_mapping = _explicit_core_mapping(dims, final_split_dim, num_cores)
+
+    intermediate_start = 1024 * 1024
+    restickify_spec = _synthetic_ptlx_bridge_spec(
+        size,
+        num_cores,
+        output_split_dim=d0,
+        output_stick_dim=d0,
+        input_start_address=input_start_address,
+        output_start_address=intermediate_start,
+    )
+    restickify_payload = generate_restickify_dataop_sdsc_from_spec(
+        0,
+        restickify_spec,
+        op_name=restickify_op_name,
+        input_work_slices=input_splits,
+        input_core_to_work_slice=input_mapping,
+        output_work_slices=intermediate_splits,
+        output_core_to_work_slice=intermediate_mapping,
+    )
+
+    restickified_strides = {d0: 1, d1: size}
+    stcdp_spec = _synthetic_ptlx_bridge_spec(
+        size,
+        num_cores,
+        output_split_dim=final_split_dim,
+        output_stick_dim=d0,
+        input_stick_dim=d0,
+        input_start_address=intermediate_start,
+        output_start_address=output_start_address,
+        input_layout_order=[d1, d0],
+        output_layout_order=[d1, d0],
+        input_strides=restickified_strides,
+        output_strides=restickified_strides,
+    )
+    stcdp_payload = generate_restickify_dataop_sdsc_from_spec(
+        1,
+        stcdp_spec,
+        op_name="STCDPOpLx",
+        input_work_slices=intermediate_splits,
+        input_core_to_work_slice=intermediate_mapping,
+        output_work_slices=final_splits,
+        output_core_to_work_slice=final_mapping,
+    )
+
+    return combine_dataop_sdscs(
+        name,
+        [restickify_payload, stcdp_payload],
+    )
+
+
+def _explicit_core_mapping(
+    dims: Sequence[Symbol],
+    split_dim: Symbol,
+    num_cores: int,
+) -> dict[str, dict[str, int]]:
+    return {
+        str(core): {str(dim): core if dim == split_dim else 0 for dim in dims}
+        for core in range(num_cores)
+    }
+
+
+def _synthetic_ptlx_bridge_spec(
+    size: int,
+    num_cores: int,
+    output_split_dim: Symbol,
+    output_stick_dim: Symbol,
+    *,
+    input_stick_dim: Symbol | None = None,
+    input_start_address: int = 0,
+    output_start_address: int = 1024 * 1024,
+    input_layout_order: list[Symbol] | None = None,
+    output_layout_order: list[Symbol] | None = None,
+    input_strides: dict[Symbol, int] | None = None,
+    output_strides: dict[Symbol, int] | None = None,
+) -> SDSCSpec:
+    d0 = Symbol("mb_")
+    d1 = Symbol("out_")
+    dims = [d0, d1]
+    input_stick_dim = input_stick_dim or d1
+    input_layout_order = input_layout_order or [d0, d1]
+    output_layout_order = output_layout_order or [d1, d0]
+    input_strides = input_strides or {d0: size, d1: 1}
+    output_strides = output_strides or {d0: 1, d1: size}
+    data_format = DataFormats.SEN169_FP16
+    work_slices = {d0: 1, d1: 1}
+    work_slices[output_split_dim] = num_cores
+    return SDSCSpec(
+        opfunc="ReStickifyOpHBM",
+        execution_unit="sfp",
+        data_format=data_format,
+        num_inputs=1,
+        iteration_space={d0: size, d1: size},
+        num_cores=num_cores,
+        work_slices=work_slices,
+        core_id_to_work_slice={},
+        core_id_to_work_slice_override=_explicit_core_mapping(
+            dims,
+            output_split_dim,
+            num_cores,
+        ),
+        padding={},
+        layouts={
+            "INPUT": {
+                "dim_order": input_layout_order,
+                "stick_dim_order": input_stick_dim,
+                "stick_size": 64,
+            },
+            "OUTPUT": {
+                "dim_order": output_layout_order,
+                "stick_dim_order": output_stick_dim,
+                "stick_size": 64,
+            },
+        },
+        args=[
+            SDSCArgs(
+                layout="INPUT",
+                data_format=data_format,
+                scales={d0: 1, d1: 1},
+                strides=input_strides,
+                offsets={},
+                max_dim_sizes={d0: -1, d1: -1},
+                allocation={"lx": 0},
+                start_address=input_start_address,
+                backGap={},
+            ),
+            SDSCArgs(
+                layout="OUTPUT",
+                data_format=data_format,
+                scales={d0: 1, d1: 1},
+                strides=output_strides,
+                offsets={},
+                max_dim_sizes={d0: -1, d1: -1},
+                allocation={"lx": 0},
+                start_address=output_start_address,
+                backGap={},
+            ),
+        ],
+        constants={},
+        coordinate_masking={},
+    )
 
 
 def _sequential_dataop_schedule(

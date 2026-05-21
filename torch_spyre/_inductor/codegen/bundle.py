@@ -22,6 +22,9 @@ from torch_spyre._inductor.codegen.lx_neighbor_descriptor import (
 from torch_spyre._inductor.codegen.restickify_lx_boundary import (
     patch_restickify_ddl_bridge_boundaries,
 )
+from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
+    patch_restickify_ptlx_bridge_boundaries,
+)
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.constants import RESTICKIFY_OP
 from torch_spyre._inductor.op_spec import OpSpec
@@ -51,6 +54,11 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         rows = patch_restickify_ddl_bridge_boundaries(sdscs_json, specs)
         for row in rows:
             logger.info("restickify DDL bridge boundary patch: %s", row)
+
+    if _spyre_config.restickify_ptlx_bridge_e2e:
+        rows = patch_restickify_ptlx_bridge_boundaries(sdscs_json, specs)
+        for row in rows:
+            logger.info("restickify PT-LX bridge boundary patch: %s", row)
 
     # Write JSON SDSCs to file system
     files = []
