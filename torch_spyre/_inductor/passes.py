@@ -40,6 +40,7 @@ from .propagate_layouts import (
     propagate_mutation_layouts,
     propagate_spyre_tensor_layouts,
 )
+from .copy_back_elision import elide_identity_copy_back
 from .optimize_restickify import optimize_restickify_locations
 from .insert_restickify import insert_restickify, finalize_layouts
 from .memory_planning import memory_planning
@@ -226,6 +227,7 @@ class CustomPreSchedulingPasses(CustomGraphPass):
 
         deadcode_elimination(operations)
         propagate_spyre_tensor_layouts(operations)
+        elide_identity_copy_back(operations)
         optimize_restickify_locations(operations)
         finalize_layouts(operations)
         insert_restickify(operations)
@@ -247,6 +249,7 @@ class CustomPreSchedulingPasses(CustomGraphPass):
             inspect.getfile(deadcode_elimination),
             inspect.getfile(dedup_and_promote_constants),
             inspect.getfile(propagate_spyre_tensor_layouts),
+            inspect.getfile(elide_identity_copy_back),
             inspect.getfile(optimize_restickify_locations),
             inspect.getfile(insert_restickify),
             inspect.getfile(insert_bmm_padding),

@@ -670,17 +670,22 @@ def propagate_mutation_layouts(
             continue
         if not isinstance(n.node.layout, MutationLayoutSHOULDREMOVE):
             continue
-        if isinstance(n.node.data, Pointwise):
+        if isinstance(n.node.data, (Pointwise, Reduction)):
             real = n.node.layout.real_layout()
             if isinstance(real, FixedTiledLayout):
                 n.node.layout = real
-            else:
+            elif isinstance(n.node.data, Pointwise):
                 rw = n.read_writes
                 output_dep = next(iter(rw.writes))
                 args = _get_prop_args(rw.reads)
                 output = n.node.get_layout()
                 layouts = list(compute_layouts(n.node, output, output_dep, args))
                 n.node.layout = layouts[0]
+            else:
+                logger.warning(
+                    "propagate_mutation_layouts: mutation target of "
+                    f"{n.node.get_name()} has no committed FixedTiledLayout"
+                )
         else:
             logger.warning(
                 f"propagate_mutation_layouts: unhandled mutation op {type(n.node.data)}"
