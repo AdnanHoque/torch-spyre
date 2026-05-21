@@ -26,6 +26,8 @@ from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
     _constant_lx_start_payload,
     _combine_ptlx_bridge_with_consumer,
     _mixed_value_flow_contract,
+    _endpoint_core_starts,
+    _materialize_bridge_lx_endpoints,
     _patch_bridge_endpoint_pieces,
     _patch_consumer_input_lx_map,
     _patch_lx_allocation_by_index,
@@ -285,6 +287,26 @@ def test_plan_mixed_ptlx_schedule_from_opspecs():
     assert plan.consumer_endpoint.sdsc_index == 2
 
 
+def test_endpoint_core_starts_come_from_endpoint_plan():
+    endpoint = plan_restickify_ptlx_mixed_schedules(
+        [
+            _minimal_op_spec("add", [_arg(True, 0), _arg(False, 4)]),
+            _minimal_op_spec(
+                RESTICKIFY_OP,
+                [_arg(True, 4), _arg(False, 5)],
+                op_info=_certified_restickify_info(),
+            ),
+            _minimal_op_spec("add", [_arg(True, 5), _arg(False, 6)]),
+        ]
+    )[1].producer_endpoint
+
+    assert _endpoint_core_starts(endpoint, num_cores=3) == {
+        0: 16 * 1024,
+        1: 16 * 1024,
+        2: 16 * 1024,
+    }
+
+
 def test_plan_mixed_ptlx_schedule_skips_uncertified_restickify():
     specs = [
         _minimal_op_spec("add", [_arg(True, 0), _arg(False, 4)]),
@@ -342,6 +364,46 @@ def test_mixed_ptlx_value_flow_contract_matches_bridge_endpoints():
     assert contract["bridge_output_to_consumer_match"] is True
     assert contract["producer_unique_starts"] == [16 * 1024]
     assert contract["consumer_unique_starts"] == [8 * 1024]
+
+
+def test_materialize_bridge_lx_endpoints_uses_planned_endpoints():
+    plan = plan_restickify_ptlx_mixed_schedules(
+        [
+            _minimal_op_spec("add", [_arg(True, 0), _arg(False, 4)]),
+            _minimal_op_spec(
+                RESTICKIFY_OP,
+                [_arg(True, 4), _arg(False, 5)],
+                op_info=_certified_restickify_info(),
+            ),
+            _minimal_op_spec("add", [_arg(True, 5), _arg(False, 6)]),
+        ]
+    )[1]
+    bridge = generate_ptlx_restickify_bridge_sdsc(
+        "ptlx_bridge",
+        size=128,
+        num_cores=2,
+        mode="stage3b",
+        direction="kernel-to-output",
+        restickify_op_name="ReStickifyOpWithPTLx",
+        input_start_address=plan.producer_endpoint.base,
+        output_start_address=plan.consumer_endpoint.base,
+    )
+
+    patch = _materialize_bridge_lx_endpoints(bridge, plan=plan, num_cores=2)
+
+    assert patch["producer_pieces_patched"] == 2
+    assert patch["consumer_pieces_patched"] == 2
+    root = next(iter(bridge.values()))
+    first = next(iter(root["datadscs_"][0].values()))
+    last = next(iter(root["datadscs_"][-1].values()))
+    assert {
+        piece["PlacementInfo"][0]["startAddr"][0]
+        for piece in first["labeledDs_"][0]["PieceInfo"]
+    } == {16 * 1024}
+    assert {
+        piece["PlacementInfo"][0]["startAddr"][0]
+        for piece in last["labeledDs_"][-1]["PieceInfo"]
+    } == {8 * 1024}
 
 
 def test_mixed_ptlx_value_flow_contract_catches_bridge_mismatch():

@@ -293,14 +293,10 @@ def _patch_one_mixed_schedule(
         output_start_address=plan.consumer_endpoint.base,
         restickify_op_name="ReStickifyOpWithPTLx",
     )
-    endpoint_patch = _patch_bridge_endpoint_pieces(
+    endpoint_patch = _materialize_bridge_lx_endpoints(
         bridge_payload,
-        producer_starts={
-            core: plan.producer_endpoint.base for core in range(num_cores)
-        },
-        consumer_starts={
-            core: plan.consumer_endpoint.base for core in range(num_cores)
-        },
+        plan=plan,
+        num_cores=num_cores,
     )
     value_flow_contract = _mixed_value_flow_contract(
         producer_payload=producer_payload,
@@ -865,6 +861,33 @@ def _materialize_consumer_lx_endpoint(
         start_payload=start_payload,
     )
     return start_payload, consumer_name
+
+
+def _materialize_bridge_lx_endpoints(
+    payload: dict[str, Any],
+    *,
+    plan: PTLXMixedSchedulePlan,
+    num_cores: int,
+) -> dict[str, Any]:
+    return _patch_bridge_endpoint_pieces(
+        payload,
+        producer_starts=_endpoint_core_starts(
+            plan.producer_endpoint,
+            num_cores=num_cores,
+        ),
+        consumer_starts=_endpoint_core_starts(
+            plan.consumer_endpoint,
+            num_cores=num_cores,
+        ),
+    )
+
+
+def _endpoint_core_starts(
+    endpoint: PTLXLXEndpointPlan,
+    *,
+    num_cores: int,
+) -> dict[int, int]:
+    return {core: endpoint.base for core in range(num_cores)}
 
 
 def _require_endpoint_role(
