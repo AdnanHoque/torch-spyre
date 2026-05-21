@@ -282,9 +282,38 @@ def test_plan_mixed_ptlx_schedule_from_opspecs():
     assert plan.producer_endpoint.role == "producer_output"
     assert plan.producer_endpoint.is_input is False
     assert plan.producer_endpoint.sdsc_index == 0
+    assert plan.producer_endpoint.base == 16 * 1024
+    assert plan.producer_endpoint.base_source == "prototype-default"
     assert plan.consumer_endpoint.role == "consumer_input"
     assert plan.consumer_endpoint.is_input is True
     assert plan.consumer_endpoint.sdsc_index == 2
+    assert plan.consumer_endpoint.base == 8 * 1024
+    assert plan.consumer_endpoint.base_source == "prototype-default"
+
+
+def test_plan_mixed_ptlx_schedule_uses_op_spec_lx_allocations():
+    specs = [
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 0), _arg(False, 4, allocation={"lx": 64 * 1024})],
+        ),
+        _minimal_op_spec(
+            RESTICKIFY_OP,
+            [_arg(True, 4), _arg(False, 5)],
+            op_info=_certified_restickify_info(),
+        ),
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 5, allocation={"lx": 96 * 1024}), _arg(False, 6)],
+        ),
+    ]
+
+    plan = plan_restickify_ptlx_mixed_schedules(specs)[1]
+
+    assert plan.producer_endpoint.base == 64 * 1024
+    assert plan.producer_endpoint.base_source == "op-spec-allocation"
+    assert plan.consumer_endpoint.base == 96 * 1024
+    assert plan.consumer_endpoint.base_source == "op-spec-allocation"
 
 
 def test_endpoint_core_starts_come_from_endpoint_plan():
@@ -490,14 +519,19 @@ def _minimal_compute_payload(name: str, lds_name: str, *, lds_idx: int):
     }
 
 
-def _arg(is_input: bool, arg_index: int) -> TensorArg:
+def _arg(
+    is_input: bool,
+    arg_index: int,
+    *,
+    allocation: dict | None = None,
+) -> TensorArg:
     return TensorArg(
         is_input=is_input,
         arg_index=arg_index,
         device_dtype=DataFormats.SEN169_FP16,
         device_size=[],
         device_coordinates=[],
-        allocation=None,
+        allocation=allocation,
     )
 
 

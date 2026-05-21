@@ -53,6 +53,7 @@ class PTLXLXEndpointPlan:
     lds_idx: int
     arg_index: int
     base: int
+    base_source: str
     is_input: bool
 
 
@@ -191,6 +192,16 @@ def _plan_one_mixed_schedule(
         return "producer-output-arg-not-adjacent"
     if consumer_lds_idx is None:
         return "consumer-input-arg-not-adjacent"
+    producer_base, producer_base_source = _planned_endpoint_base(
+        producer_spec.args[producer_lds_idx],
+        env_var=_PRODUCER_BASE_ENV,
+        default_base=_DEFAULT_PRODUCER_BASE,
+    )
+    consumer_base, consumer_base_source = _planned_endpoint_base(
+        consumer_spec.args[consumer_lds_idx],
+        env_var=_CONSUMER_BASE_ENV,
+        default_base=_DEFAULT_CONSUMER_BASE,
+    )
 
     return PTLXMixedSchedulePlan(
         sdsc_index=idx,
@@ -201,7 +212,8 @@ def _plan_one_mixed_schedule(
             sdsc_index=idx - 1,
             lds_idx=producer_lds_idx,
             arg_index=producer_arg_index,
-            base=int(os.environ.get(_PRODUCER_BASE_ENV, _DEFAULT_PRODUCER_BASE)),
+            base=producer_base,
+            base_source=producer_base_source,
             is_input=False,
         ),
         consumer_endpoint=PTLXLXEndpointPlan(
@@ -209,7 +221,8 @@ def _plan_one_mixed_schedule(
             sdsc_index=idx + 1,
             lds_idx=consumer_lds_idx,
             arg_index=consumer_arg_index,
-            base=int(os.environ.get(_CONSUMER_BASE_ENV, _DEFAULT_CONSUMER_BASE)),
+            base=consumer_base,
+            base_source=consumer_base_source,
             is_input=True,
         ),
     )
@@ -504,6 +517,23 @@ def _arg_position_for_arg_index(
         if bool(arg.is_input) == want_input and int(arg.arg_index) == arg_index:
             return position
     return None
+
+
+def _planned_endpoint_base(
+    arg: Any,
+    *,
+    env_var: str,
+    default_base: int,
+) -> tuple[int, str]:
+    env_value = os.environ.get(env_var)
+    if env_value is not None:
+        return int(env_value), f"env:{env_var}"
+
+    allocation = getattr(arg, "allocation", None) or {}
+    if isinstance(allocation, dict) and "lx" in allocation:
+        return int(allocation["lx"]), "op-spec-allocation"
+
+    return int(default_base), "prototype-default"
 
 
 def _is_restickify_hbm_payload(payload: dict[str, Any]) -> bool:
