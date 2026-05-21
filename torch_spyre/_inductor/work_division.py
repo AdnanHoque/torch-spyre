@@ -16,6 +16,7 @@
 import dataclasses
 import math
 import itertools
+import os
 from sympy import Expr, Symbol, divisors
 from .ir import SpyreConstantFallback, SpyreEmptyFallback
 
@@ -40,6 +41,7 @@ from .pass_utils import (
     SchedNodeArg,
     concretize_expr,
     get_mem_deps_from_rw,
+    host_coordinates,
     device_coordinates,
     iteration_space_from_op,
     splits_by_index_coeff,
@@ -543,10 +545,288 @@ def span_reduction_pass(
         )
 
 
+# Rewrite eligible pure-M matmul splits to m x n. Low-LX mode targets per-core
+# N-band width; high-LX mode targets per-core M rows.
+_MN_SPLIT_M_MIN = 4
+_MN_SPLIT_LOWLX_TARGET_N_STICKS = 8
+_MN_SPLIT_HIGHLX_TARGET_PT_PASSES = 8
+_MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD = 0.5
+
+
+def _ddc_lx_frac_avail() -> float:
+    """Return the LX fraction visible to DDC."""
+    return float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
+
+
+def _matmul_names_unsafe_for_2d(operations: list[Operation]) -> set[str]:
+    """Return matmuls whose fused neighbors need the default work partition."""
+    matmul_names: set[str] = set()
+    matmul_input_names: dict[str, set[str]] = {}
+    nm_outputs: set[str] = set()
+    nm_inputs: set[str] = set()
+    for op in _iter_computed_buffers(operations):
+        rw = op.get_read_writes()
+        is_matmul = (
+            isinstance(op.data, Reduction)
+            and op.data.reduction_type == BATCH_MATMUL_OP
+        )
+        if is_matmul:
+            matmul_names.add(op.get_name())
+            matmul_input_names[op.get_name()] = {d.name for d in rw.reads}
+        else:
+            nm_outputs.add(op.get_name())
+            for d in rw.reads:
+                nm_inputs.add(d.name)
+    unsafe: set[str] = set()
+    for mname in matmul_names:
+        if mname in nm_inputs:
+            unsafe.add(mname)
+            continue
+        if any(inp in nm_outputs for inp in matmul_input_names[mname]):
+            unsafe.add(mname)
+    return unsafe
+
+
+def _eligible_for_2d_mn_split(
+    op: ComputedBuffer,
+    committed_splits: dict[Symbol, int],
+    unsafe_for_2d: set[str],
+) -> bool:
+    return (
+        config.two_d_mn_split
+        and op.get_name() not in unsafe_for_2d
+        and isinstance(op.data, Reduction)
+        and op.data.reduction_type == BATCH_MATMUL_OP
+        and not committed_splits
+    )
+
+
+def _output_mn_dims(
+    output_td: TensorDep,
+    stick_vars: dict[Symbol, int],
+) -> tuple[Symbol, list[Symbol]] | None:
+    output_dims: list[Symbol] = []
+    for coord in output_td.device_coords[:-1]:
+        for dim in coord.free_symbols:
+            if dim not in output_dims:
+                output_dims.append(dim)
+
+    n_dims = [d for d in output_dims if d in stick_vars]
+    m_dims = [d for d in output_dims if d not in stick_vars]
+    if len(n_dims) != 1 or not m_dims:
+        return None
+    return n_dims[0], m_dims
+
+
+def _pure_m_to_mn_split(
+    splits: dict[Symbol, int],
+    it_space_adjusted: dict[Symbol, Expr],
+    m_dim: Symbol,
+    n_dim: Symbol,
+    max_cores: int,
+    *,
+    use_legacy_fallback: bool,
+    keep_parallelism: bool = False,
+) -> tuple[dict[Symbol, int], int] | None:
+    if splits.get(m_dim, 1) <= 1:
+        return None
+    if any(v > 1 for d, v in splits.items() if d != m_dim):
+        return None
+
+    n_sticks = concretize_expr(it_space_adjusted[n_dim])
+    m_size = concretize_expr(it_space_adjusted[m_dim])
+    m_split, n_split, target_m_split = _mn_cosplit(m_size, n_sticks, max_cores)
+    if use_legacy_fallback and (n_split <= 1 or m_split <= 1):
+        n_split = core_split(n_sticks, min(8, max_cores))
+        if n_split > 1:
+            m_split = core_split(m_size, max_cores // n_split)
+    if n_split <= 1 or m_split <= 1:
+        return None
+
+    new_splits = dict(splits)
+    new_splits[m_dim] = m_split
+    new_splits[n_dim] = n_split
+    if keep_parallelism and math.prod(new_splits.values()) < math.prod(
+        splits.values()
+    ):
+        return None
+    return new_splits, target_m_split
+
+
+def _2d_split_would_fire(
+    op: ComputedBuffer,
+    it_space_adjusted: dict[Symbol, Expr],
+    output_td: TensorDep,
+    stick_vars: dict[Symbol, int],
+    committed_splits: dict[Symbol, int],
+    max_cores: int,
+    unsafe_for_2d: set[str],
+) -> bool:
+    """True if _maybe_2d_mn_split would produce a 2D split for this op."""
+    if not _eligible_for_2d_mn_split(op, committed_splits, unsafe_for_2d):
+        return False
+    if len(output_td.layout.size) != 2:
+        return False
+    mn_dims = _output_mn_dims(output_td, stick_vars)
+    if mn_dims is None:
+        return False
+    n_dim, m_dims = mn_dims
+    if len(m_dims) != 1:
+        return False
+
+    output_dims, reduction_dims = prioritize_dimensions(output_td, it_space_adjusted)
+    default_splits = multi_dim_iteration_space_split(
+        it_space_adjusted,
+        max_cores,
+        output_dims,
+        reduction_dims,
+        committed_splits,
+    )
+    return (
+        _pure_m_to_mn_split(
+            default_splits,
+            it_space_adjusted,
+            m_dims[0],
+            n_dim,
+            max_cores,
+            use_legacy_fallback=True,
+        )
+        is not None
+    )
+
+
+def _mn_cosplit(m_size: int, n_sticks: int, cores: int) -> tuple[int, int, int]:
+    """Co-split ``cores`` between M and N.
+
+    Returns (m_split, n_split, target_m_split), with (0, 0, target) when no
+    clean split exists.
+    """
+    if _ddc_lx_frac_avail() >= _MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD:
+        # High LX: target per-core M = N_PT_PASSES * _PT_ROWS rows.
+        target_per_core_m = _MN_SPLIT_HIGHLX_TARGET_PT_PASSES * _PT_ROWS
+        target_m_split = max(
+            _MN_SPLIT_M_MIN,
+            min(cores // 2, max(1, m_size // target_per_core_m)),
+        )
+    else:
+        # Low LX: target per-core N-band = target sticks.
+        target_m_split = max(
+            _MN_SPLIT_M_MIN,
+            min(cores // 2, n_sticks // _MN_SPLIT_LOWLX_TARGET_N_STICKS),
+        )
+    for cand in sorted(
+        (int(d) for d in divisors(cores) if d >= _MN_SPLIT_M_MIN),
+        key=lambda d: (abs(d - target_m_split), -d),
+    ):
+        cand_n = cores // cand
+        if m_size % cand == 0 and n_sticks % cand_n == 0 and cand_n >= 1:
+            return cand, cand_n, target_m_split
+    return 0, 0, target_m_split
+
+
+def _maybe_2d_mn_split(
+    op: ComputedBuffer,
+    splits: dict[Symbol, int],
+    it_space_adjusted: dict[Symbol, Expr],
+    output_td: TensorDep,
+    stick_vars: dict[Symbol, int],
+    committed_splits: dict[Symbol, int],
+    max_cores: int,
+    unsafe_for_2d: set[str],
+    input_tds: list[TensorDep] | None = None,
+) -> dict[Symbol, int]:
+    """Replace eligible pure-M matmul work splits with m x n splits."""
+    if not _eligible_for_2d_mn_split(op, committed_splits, unsafe_for_2d):
+        return splits
+    mn_dims = _output_mn_dims(output_td, stick_vars)
+    if mn_dims is None:
+        return splits
+    n_dim, m_dims = mn_dims
+
+    is_batched = len(output_td.layout.size) > 2 or any(
+        len(td.layout.size) > 2 for td in input_tds or []
+    )
+
+    if not is_batched:
+        if len(m_dims) != 1:
+            return splits
+        m_dim = m_dims[0]
+        result = _pure_m_to_mn_split(
+            splits,
+            it_space_adjusted,
+            m_dim,
+            n_dim,
+            max_cores,
+            use_legacy_fallback=True,
+        )
+        if result is None:
+            return splits
+        new_splits, target_m_split = result
+        n_sticks = concretize_expr(it_space_adjusted[n_dim])
+        logger.debug(
+            f"2d_mn_split work_division {op.get_name()}: "
+            f"m-split {splits[m_dim]} -> "
+            f"({new_splits[m_dim]}, {new_splits[n_dim]}) (m x n) "
+            f"[n_sticks={n_sticks} target_m={target_m_split}]"
+        )
+        return new_splits
+
+    if not input_tds:
+        return splits
+    # Decode M=1 has no useful M axis to co-split.
+    if concretize_expr(output_td.layout.size[-2]) <= 1:
+        return splits
+
+    def _n_inputs(dim: Symbol) -> int:
+        return sum(
+            1
+            for td in input_tds
+            if dim in {v for e in td.device_coords for v in e.free_symbols}
+        )
+
+    m_candidates = [d for d in m_dims if _n_inputs(d) == 1]
+    if not m_candidates:
+        return splits
+    host_coords = host_coordinates(output_td.layout, output_td.dep)
+    logical_m_symbols = host_coords[-2].free_symbols
+    logical_m_dim = (
+        next(iter(logical_m_symbols)) if len(logical_m_symbols) == 1 else None
+    )
+    if logical_m_dim in m_candidates:
+        m_dim = logical_m_dim
+    elif len(m_candidates) == 1:
+        m_dim = m_candidates[0]
+    else:
+        return splits
+
+    result = _pure_m_to_mn_split(
+        splits,
+        it_space_adjusted,
+        m_dim,
+        n_dim,
+        max_cores,
+        use_legacy_fallback=False,
+        keep_parallelism=True,
+    )
+    if result is None:
+        return splits
+    new_splits, _target_m_split = result
+    n_sticks = concretize_expr(it_space_adjusted[n_dim])
+    m_size = concretize_expr(it_space_adjusted[m_dim])
+    logger.debug(
+        f"2d_mn_split work_division {op.get_name()} (bmm): "
+        f"m-split {splits.get(m_dim, 1)} -> "
+        f"({new_splits[m_dim]}, {new_splits[n_dim]}) (m x n) "
+        f"[m_size={m_size} n_sticks={n_sticks}]"
+    )
+    return new_splits
+
+
 def work_distribution_pass(
     op: ComputedBuffer,
     args: list[SchedNodeArg],
     max_cores: int,
+    unsafe_for_2d: set[str] | None = None,
 ) -> None:
     """Optional per-op pass: distribute remaining cores to maximize parallelism.
 
@@ -557,7 +837,7 @@ def work_distribution_pass(
     input_tds, output_td = collect_tensor_deps(op, args)
     all_tds = input_tds + [output_td]
 
-    it_space_adjusted, _ = adjust_it_space_for_sticks(it_space, all_tds)
+    it_space_adjusted, stick_vars = adjust_it_space_for_sticks(it_space, all_tds)
 
     # Recover splits committed by span_reduction_pass using the same
     # coeff-keyed encoding that codegen uses — stable across passes.
@@ -602,6 +882,18 @@ def work_distribution_pass(
         reduction_dims,
         committed_splits,
     )
+    if config.two_d_mn_split:
+        splits = _maybe_2d_mn_split(
+            op,
+            splits,
+            it_space_adjusted,
+            output_td,
+            stick_vars,
+            committed_splits,
+            max_cores,
+            unsafe_for_2d if unsafe_for_2d is not None else set(),
+            input_tds,
+        )
 
     apply_splits(op, splits, output_td)
 
@@ -625,11 +917,7 @@ def _try_k_fast_split(
     min_splits: dict[Symbol, int] | None,
     max_cores: int,
 ) -> dict[Symbol, int] | None:
-    """Propose (1, n_split, k_split>1) for narrow-N small-M matmul shapes.
-
-    Caller (k_fast_division pass) gates on matmul + the feature flag.
-    Range thresholds derived from empirical hardware measurements.
-    """
+    """Propose (1, n_split, k_split>1) for narrow-N small-M matmuls."""
     dims = list(it_space.keys())
     output_coord_vars = {v for e in output_td.device_coords for v in e.free_symbols}
     reduction_dims = [d for d in dims if d not in output_coord_vars]
@@ -641,7 +929,7 @@ def _try_k_fast_split(
     output_dims = [d for d in dims if d in output_coord_vars]
     # TODO: 2D matmul only. bmm has a B dim the planner already splits;
     # folding it into m_dims would waste that lever. Needs a bmm-aware policy.
-    if len(output_dims) != 2:
+    if len(output_dims) != 2 or len(output_td.layout.size) != 2:
         return None
     # Pick the larger of the two output dims to split across cores; "N" is
     # convention (for the target shape M < N, max picks the conventional N).
@@ -782,18 +1070,27 @@ def work_distribution(
     """
     k_fast_ops = k_fast_ops or []
     max_cores = _validate_max_cores()
+    unsafe_for_2d = (
+        _matmul_names_unsafe_for_2d(operations) if config.two_d_mn_split else set()
+    )
+
+    def pass_fn(op_, args_, max_cores_):
+        work_distribution_pass(op_, args_, max_cores_, unsafe_for_2d)
+
     for op in _iter_computed_buffers(operations):
         if op in k_fast_ops:
             continue
         rw = op.get_read_writes()
         args = get_mem_deps_from_rw(rw)
         if isinstance(op.data, Pointwise):
-            divide_pointwise_op(op, args, max_cores, work_distribution_pass)
+            divide_pointwise_op(op, args, max_cores, pass_fn)
         elif isinstance(op.data, Reduction):
-            divide_reduction_op(op, args, max_cores, work_distribution_pass)
+            divide_reduction_op(op, args, max_cores, pass_fn)
 
 
-def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> bool:
+def _k_fast_divide_op(
+    op: ComputedBuffer, max_cores: int, unsafe_for_2d: set[str]
+) -> bool:
     """Divide one matmul op with k_fast when the heuristic fires.
 
     Runs between span_reduction and work_distribution. Reads span_reduction's
@@ -812,7 +1109,7 @@ def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> bool:
     all_tds = input_tds + [output_td]
 
     it_space = iteration_space_from_op(op)
-    it_space_adjusted, _ = adjust_it_space_for_sticks(it_space, all_tds)
+    it_space_adjusted, stick_vars = adjust_it_space_for_sticks(it_space, all_tds)
 
     # op.op_it_space_splits holds span_reduction's commits here: span_reduction
     # runs before this pass, and work_distribution — which would overwrite it —
@@ -826,6 +1123,13 @@ def _k_fast_divide_op(op: ComputedBuffer, max_cores: int) -> bool:
         span_committed = {s: v for s, v in span_splits.items() if v > 1}
     else:
         span_committed = {}
+
+    # Prefer the 2D rule in the pure-M regime; k_fast targets different shapes.
+    if _2d_split_would_fire(
+        op, it_space_adjusted, output_td, stick_vars, span_committed,
+        max_cores, unsafe_for_2d,
+    ):
+        return False
 
     forced = _try_k_fast_split(it_space, output_td, span_committed, max_cores)
     if forced is None:
@@ -855,8 +1159,11 @@ def k_fast_division(operations: list[Operation]) -> list[Operation]:
     divided by exactly one of the two passes.
     """
     max_cores = _validate_max_cores()
+    unsafe_for_2d = (
+        _matmul_names_unsafe_for_2d(operations) if config.two_d_mn_split else set()
+    )
     k_fast_ops: list[Operation] = []
     for op in _iter_computed_buffers(operations):
-        if _k_fast_divide_op(op, max_cores):
+        if _k_fast_divide_op(op, max_cores, unsafe_for_2d):
             k_fast_ops.append(op)
     return k_fast_ops

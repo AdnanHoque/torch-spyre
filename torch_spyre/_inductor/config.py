@@ -39,4 +39,7 @@ core_id_k_fast_emission: bool = (
     os.environ.get("SPYRE_CORE_ID_K_FAST_EMISSION", "1") == "1"
 )
 
+# Enable the opt-in m x n rewrite for pure-M matmul work splits.
+two_d_mn_split: bool = os.environ.get("SPYRE_2D_MN_SPLIT", "0") == "1"
+
 install_config_module(sys.modules[__name__])
