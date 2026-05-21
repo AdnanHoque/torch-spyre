@@ -28,9 +28,12 @@ from .logging_utils import get_inductor_logger
 from .ir import FixedTiledLayout, TensorBox
 from . import config
 from .restickify_ring import (
-    CORE_MAPPING_OVERRIDE_ATTR,
+    build_name_to_op_map,
+    decode_op_splits,
     LOCALITY_CERTIFICATE_ATTR,
+    op_iteration_sizes,
     PTLX_ENDPOINT_ALLOCATION_ATTR,
+    producer_for_restickify,
 )
 
 OP_OUTPUT_GOOD_FOR_LX_REUSE = [
@@ -348,22 +351,34 @@ class GreedyAllocationStrategy(AllocationStrategy):
         buf_users: dict[str, Operation],
         core_div_mismatch: dict[str, bool],
     ) -> set[str]:
-        """Buffers that a certified PT-LX restickify edge needs on LX.
+        """Buffers that a PT-LX restickify edge needs on LX.
 
         This is narrower than the scratchpad allowlist: it only forces the
-        producer output and restickify output buffers for a restickify op that
-        has already been locality-certified for the default-off PT-LX mixed
-        schedule prototype.
+        producer output and restickify output buffers for an in-graph
+        restickify edge in the default-off PT-LX mixed schedule prototype.
+        A Stage 3B zero-hop certificate is useful when present, but it is not
+        required to build an HBM-avoiding LX bridge.
         """
 
         if not config.restickify_ptlx_mixed_schedule_e2e:
             return set()
 
         forced: set[str] = set()
+        name_to_op = build_name_to_op_map(operations)
         for op in operations:
             if not self.should_consider_op(op):
                 continue
-            if not _is_certified_ptlx_restickify_op(op):
+            mem_usage = self.alloc.mem_usage_by_op(op, core_div_mismatch, [])
+            endpoint_bytes = sum(
+                int(mem_usage[name]["size_per_core"])
+                for name in mem_usage["all_buf_used"]
+            )
+            if not _is_ptlx_restickify_candidate_op(
+                op,
+                name_to_op,
+                lx_limit=self.alloc.limit,
+                endpoint_bytes=endpoint_bytes,
+            ):
                 continue
             rw = op.get_read_writes()
             input_names = [dep.name for dep in rw.reads]
@@ -644,7 +659,7 @@ class GreedyAllocationStrategy(AllocationStrategy):
     ) -> None:
         if not config.restickify_ptlx_mixed_schedule_e2e:
             return
-        if not _is_certified_ptlx_restickify_op(op):
+        if not _is_ptlx_restickify_source_candidate(op):
             return
         rw = op.get_read_writes()
         input_names = [dep.name for dep in rw.reads]
@@ -701,11 +716,61 @@ def scratchpad_planning(
     strategy.plan_allocation(operations)
 
 
-def _is_certified_ptlx_restickify_op(op: Operation) -> bool:
+def _is_ptlx_restickify_candidate_op(
+    op: Operation,
+    name_to_op: dict[str, ComputedBuffer],
+    *,
+    lx_limit: int,
+    endpoint_bytes: int,
+) -> bool:
+    if not _is_ptlx_restickify_source_candidate(op):
+        return False
+    has_zero_hop_certificate = _has_zero_hop_certificate(op)
+    if has_zero_hop_certificate:
+        return endpoint_bytes <= lx_limit // 2
+    if not isinstance(op, ComputedBuffer):
+        return False
+    producer_info, _ = producer_for_restickify(op, name_to_op)
+    if producer_info is None:
+        return False
+    producer, _ = producer_info
+    if _split_core_count(producer) != _split_core_count(op):
+        return False
+    # The current single-bridge prototype cannot yet recover if greedy LX
+    # endpoint allocation partially succeeds and then the mixed schedule skips.
+    # Keep uncertified coverage to the value-correct 2048 envelope until
+    # endpoint planning can reserve the producer/restickify/consumer edge as
+    # an atomic allocation.
+    if max(op_iteration_sizes(op).values()) > 2048:
+        return False
+    if not (
+        _has_stick_sized_split_pieces(producer)
+        and _has_stick_sized_split_pieces(op)
+    ):
+        return False
+
+    return (
+        # Leave room for transient/live LX ranges that the greedy allocator
+        # may need around the restickify edge. If this check is too optimistic
+        # and allocation later fails, the stock HBM path can see LX-only
+        # endpoint metadata, so be deliberately conservative.
+        endpoint_bytes <= lx_limit // 2
+    )
+
+
+def _is_ptlx_restickify_source_candidate(op: Operation) -> bool:
     if getattr(op, "restickify_source_kind", None) != "in_graph_computed":
         return False
-    if getattr(op, CORE_MAPPING_OVERRIDE_ATTR, None) is None:
+    certificate = getattr(op, LOCALITY_CERTIFICATE_ATTR, None)
+    if (
+        certificate is not None
+        and getattr(certificate, "locality_assertion", None) == "failed"
+    ):
         return False
+    return True
+
+
+def _has_zero_hop_certificate(op: Operation) -> bool:
     certificate = getattr(op, LOCALITY_CERTIFICATE_ATTR, None)
     if certificate is None:
         return False
@@ -716,6 +781,23 @@ def _is_certified_ptlx_restickify_op(op: Operation) -> bool:
         bool(getattr(certificate, "locality_certified", False))
         and int(certified_byte_hops) == 0
     )
+
+
+def _has_stick_sized_split_pieces(op: ComputedBuffer) -> bool:
+    sizes = op_iteration_sizes(op)
+    splits = decode_op_splits(op)
+    stick_size = 64
+    for sym, split in splits.items():
+        size = sizes.get(sym)
+        if size is None:
+            return False
+        if split > 1 and size // split < stick_size:
+            return False
+    return True
+
+
+def _split_core_count(op: ComputedBuffer) -> int:
+    return math.prod(decode_op_splits(op).values())
 
 
 def _live_lx_ranges(usage: dict[str, dict[str, int]]) -> list[dict[str, int | str]]:

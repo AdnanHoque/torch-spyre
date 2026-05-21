@@ -259,6 +259,37 @@ def test_mixed_ptlx_bridge_with_consumer_schedule_shape():
     }
 
 
+def test_ptlx_bridge_accepts_stock_mixed_restickify_split():
+    bridge = generate_ptlx_restickify_bridge_sdsc(
+        "ptlx_bridge",
+        size=512,
+        num_cores=32,
+        mode="stage3b",
+        direction="kernel-to-output",
+        restickify_op_name="ReStickifyOpWithPTLx",
+        input_work_slices={"mb": 32, "out": 1},
+        input_core_to_work_slice={
+            str(core): {"mb": core, "out": 0} for core in range(32)
+        },
+        intermediate_work_slices={"mb": 4, "out": 8},
+        intermediate_core_to_work_slice={
+            str(core): {"mb": core % 4, "out": core // 4}
+            for core in range(32)
+        },
+        output_work_slices={"mb": 32, "out": 1},
+        output_core_to_work_slice={
+            str(core): {"mb": core, "out": 0} for core in range(32)
+        },
+    )
+
+    root = bridge["ptlx_bridge"]
+    first = next(iter(root["datadscs_"][0].values()))
+    output_piece = first["labeledDs_"][1]["PieceInfo"][0]
+
+    assert output_piece["dimToSize_"] == {"out_": 64, "mb_": 128}
+    assert output_piece["dimToStartCordinate"] == {"out_": 0, "mb_": 0}
+
+
 def test_plan_mixed_ptlx_schedule_from_opspecs():
     specs = [
         _minimal_op_spec(
@@ -355,7 +386,7 @@ def test_endpoint_core_starts_come_from_endpoint_plan():
     }
 
 
-def test_plan_mixed_ptlx_schedule_skips_uncertified_restickify():
+def test_plan_mixed_ptlx_schedule_skips_non_in_graph_restickify():
     specs = [
         _minimal_op_spec("add", [_arg(True, 0), _arg(False, 4)]),
         _minimal_op_spec(RESTICKIFY_OP, [_arg(True, 4), _arg(False, 5)]),
@@ -367,13 +398,38 @@ def test_plan_mixed_ptlx_schedule_skips_uncertified_restickify():
     assert plans == {}
 
 
+def test_plan_mixed_ptlx_schedule_allows_uncertified_in_graph_restickify():
+    specs = [
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 0), _arg(False, 4, allocation={"lx": 64 * 1024})],
+        ),
+        _minimal_op_spec(
+            RESTICKIFY_OP,
+            [_arg(True, 4), _arg(False, 5)],
+            op_info=_ptlx_restickify_info(
+                _endpoint_allocation(64 * 1024, 96 * 1024)
+            ),
+        ),
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 5, allocation={"lx": 96 * 1024}), _arg(False, 6)],
+        ),
+    ]
+
+    plan = plan_restickify_ptlx_mixed_schedules(specs)[1]
+
+    assert plan.producer_endpoint.base == 64 * 1024
+    assert plan.consumer_endpoint.base == 96 * 1024
+
+
 def test_plan_mixed_ptlx_schedule_skips_without_allocator_endpoints():
     specs = [
         _minimal_op_spec("add", [_arg(True, 0), _arg(False, 4)]),
         _minimal_op_spec(
             RESTICKIFY_OP,
             [_arg(True, 4), _arg(False, 5)],
-            op_info=_certified_restickify_info(),
+            op_info=_ptlx_restickify_info(),
         ),
         _minimal_op_spec("add", [_arg(True, 5), _arg(False, 6)]),
     ]
@@ -647,13 +703,22 @@ def _endpoint_allocation(
 
 
 def _certified_restickify_info(endpoint_allocation: dict | None = None) -> dict:
+    info = _ptlx_restickify_info(endpoint_allocation)
+    info.update(
+        {
+            CORE_MAPPING_OVERRIDE_OP_INFO_KEY: {"0": {}},
+            LOCALITY_CERTIFICATE_OP_INFO_KEY: {
+                "locality_certified": True,
+                "certified_byte_hops": 0,
+            },
+        }
+    )
+    return info
+
+
+def _ptlx_restickify_info(endpoint_allocation: dict | None = None) -> dict:
     info = {
         "restickify_source_kind": "in_graph_computed",
-        CORE_MAPPING_OVERRIDE_OP_INFO_KEY: {"0": {}},
-        LOCALITY_CERTIFICATE_OP_INFO_KEY: {
-            "locality_certified": True,
-            "certified_byte_hops": 0,
-        },
     }
     if endpoint_allocation is not None:
         info[PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY] = endpoint_allocation

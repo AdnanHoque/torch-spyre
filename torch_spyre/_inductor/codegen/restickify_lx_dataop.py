@@ -217,6 +217,12 @@ def generate_ptlx_restickify_bridge_sdsc(
     input_start_address: int = 0,
     output_start_address: int = 1536 * 1024,
     restickify_op_name: str = "ReStickifyOpWithPTLx",
+    input_work_slices: Mapping[Any, Any] | None = None,
+    input_core_to_work_slice: Mapping[str, Mapping[str, int]] | None = None,
+    intermediate_work_slices: Mapping[Any, Any] | None = None,
+    intermediate_core_to_work_slice: Mapping[str, Mapping[str, int]] | None = None,
+    output_work_slices: Mapping[Any, Any] | None = None,
+    output_core_to_work_slice: Mapping[str, Mapping[str, int]] | None = None,
 ) -> dict[str, Any]:
     """Generate the PT-aware two-step LX restickify bridge.
 
@@ -247,18 +253,25 @@ def generate_ptlx_restickify_bridge_sdsc(
     d0 = Symbol("mb_")
     d1 = Symbol("out_")
     dims = [d0, d1]
-    input_splits = {d0: 1, d1: num_cores}
-    input_mapping = _explicit_core_mapping(dims, d1, num_cores)
+    default_input_splits = {d0: 1, d1: num_cores}
+    default_input_mapping = _explicit_core_mapping(dims, d1, num_cores)
 
     # ReStickifyOpWithPTLx handles the stick/layout conversion locally. Keep
     # the intermediate split off the input stick dimension, then use STCDPOpLx
     # to remap ownership to the Stage 3B final split.
-    intermediate_splits = {d0: num_cores, d1: 1}
-    intermediate_mapping = _explicit_core_mapping(dims, d0, num_cores)
+    default_intermediate_splits = {d0: num_cores, d1: 1}
+    default_intermediate_mapping = _explicit_core_mapping(dims, d0, num_cores)
     final_split_dim = d0 if mode == "baseline" else d1
-    final_splits = {d0: 1, d1: 1}
-    final_splits[final_split_dim] = num_cores
-    final_mapping = _explicit_core_mapping(dims, final_split_dim, num_cores)
+    default_output_splits = {d0: 1, d1: 1}
+    default_output_splits[final_split_dim] = num_cores
+    default_output_mapping = _explicit_core_mapping(dims, final_split_dim, num_cores)
+
+    input_splits = input_work_slices or default_input_splits
+    input_mapping = input_core_to_work_slice or default_input_mapping
+    intermediate_splits = intermediate_work_slices or default_intermediate_splits
+    intermediate_mapping = intermediate_core_to_work_slice or default_intermediate_mapping
+    final_splits = output_work_slices or default_output_splits
+    final_mapping = output_core_to_work_slice or default_output_mapping
 
     intermediate_start = 1024 * 1024
     restickify_spec = _synthetic_ptlx_bridge_spec(

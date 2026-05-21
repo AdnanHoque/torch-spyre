@@ -290,6 +290,14 @@ def _patch_one_mixed_schedule(
         return _row(idx, "skipped", f"unsupported-direction:{direction}")
 
     size, num_cores = _infer_size_and_cores(restickify_root, restickify_dsc)
+    piece_reason = _ptlx_piece_size_skip_reason(
+        size,
+        producer_payload=producer_payload,
+        restickify_payload=restickify_payload,
+    )
+    if piece_reason is not None:
+        return _row(idx, "skipped", piece_reason)
+
     producer_start, producer_patches = _materialize_producer_lx_endpoint(
         producer_payload,
         endpoint=plan.producer_endpoint,
@@ -310,11 +318,17 @@ def _patch_one_mixed_schedule(
         f"{idx}_TwoStepReStickifyOpWithPTLxStcdp",
         size=size,
         num_cores=num_cores,
-        mode="stage3b",
+        mode=_bridge_mode(restickify_spec),
         direction=direction,
         input_start_address=plan.producer_endpoint.base,
         output_start_address=plan.consumer_endpoint.base,
         restickify_op_name="ReStickifyOpWithPTLx",
+        input_work_slices=_root_work_slices(producer_payload),
+        input_core_to_work_slice=_root_core_mapping(producer_payload),
+        intermediate_work_slices=_root_work_slices(restickify_payload),
+        intermediate_core_to_work_slice=_root_core_mapping(restickify_payload),
+        output_work_slices=_root_work_slices(consumer_payload),
+        output_core_to_work_slice=_root_core_mapping(consumer_payload),
     )
     endpoint_patch = _materialize_bridge_lx_endpoints(
         bridge_payload,
@@ -361,6 +375,7 @@ def _patch_one_mixed_schedule(
         "endpoint_allocation": restickify_spec.op_info.get(
             PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY
         ),
+        "core_locality": _core_locality_summary(restickify_spec),
         "bridge_endpoint_patch": endpoint_patch,
         "value_flow_contract": value_flow_contract,
         "replacement_sdsc": mixed_name,
@@ -495,16 +510,41 @@ def _eligibility_skip_reason(spec: OpSpec) -> str | None:
     op_info = spec.op_info or {}
     if op_info.get("restickify_source_kind") != "in_graph_computed":
         return "source-not-in-graph-computed"
-    if CORE_MAPPING_OVERRIDE_OP_INFO_KEY not in op_info:
-        return "missing-core-mapping-override"
-    certificate = op_info.get(LOCALITY_CERTIFICATE_OP_INFO_KEY)
-    if not isinstance(certificate, dict):
-        return "missing-locality-certificate"
-    if not certificate.get("locality_certified"):
-        return "locality-not-certified"
-    if int(certificate.get("certified_byte_hops", -1)) != 0:
-        return "nonzero-certified-byte-hops"
     return None
+
+
+def _bridge_mode(spec: OpSpec) -> str:
+    # The PT-LX bridge must keep the final output split off the output stick
+    # dimension; otherwise small shapes can generate pieces smaller than a
+    # stick and fail Deeptools validation. Stage 3B locality is optional, but
+    # this PT-safe bridge topology is not.
+    return "stage3b"
+
+
+def _core_locality_summary(spec: OpSpec) -> dict[str, Any]:
+    op_info = spec.op_info or {}
+    certificate = op_info.get(LOCALITY_CERTIFICATE_OP_INFO_KEY)
+    has_override = CORE_MAPPING_OVERRIDE_OP_INFO_KEY in op_info
+    if not isinstance(certificate, dict):
+        return {
+            "has_core_mapping_override": has_override,
+            "locality_certified": False,
+            "bridge_mode": _bridge_mode(spec),
+            "reason": "missing-locality-certificate",
+        }
+
+    certified = (
+        bool(certificate.get("locality_certified"))
+        and int(certificate.get("certified_byte_hops", -1)) == 0
+    )
+    return {
+        "has_core_mapping_override": has_override,
+        "locality_certified": certified,
+        "bridge_mode": _bridge_mode(spec),
+        "assertion": certificate.get("locality_assertion"),
+        "skip_reason": certificate.get("locality_skip_reason"),
+        "certified_byte_hops": certificate.get("certified_byte_hops"),
+    }
 
 
 def _allocator_endpoint_skip_reason(
@@ -536,6 +576,56 @@ def _allocator_endpoint_skip_reason(
         return "producer-endpoint-base-mismatch"
     if int(consumer.get("start", -1)) != int(consumer_base):
         return "consumer-endpoint-base-mismatch"
+    return None
+
+
+def _root_work_slices(payload: dict[str, Any]) -> dict[str, int]:
+    root = next(iter(payload.values()))
+    return {
+        str(dim): int(split)
+        for dim, split in (root.get("numWkSlicesPerDim_") or {}).items()
+    }
+
+
+def _root_core_mapping(payload: dict[str, Any]) -> dict[str, dict[str, int]]:
+    root = next(iter(payload.values()))
+    return {
+        str(core): {str(dim): int(value) for dim, value in per_dim.items()}
+        for core, per_dim in (root.get("coreIdToWkSlice_") or {}).items()
+    }
+
+
+def _ptlx_piece_size_skip_reason(
+    size: int,
+    *,
+    producer_payload: dict[str, Any],
+    restickify_payload: dict[str, Any],
+) -> str | None:
+    """Fail closed when the single-dataop PT bridge would violate stick size.
+
+    ``ReStickifyOpWithPTLx`` currently needs the input and output pieces to be
+    at least one output stick wide in the output-stick dimension. If the
+    producer has already split that dimension too finely, this prototype would
+    need an additional gather/fetch stage rather than a single bridge op.
+    """
+
+    output_stick_dim = "mb"
+    stick_size = 64
+    max_valid_split = size // stick_size
+    if max_valid_split < 1:
+        return "ptlx-shape-smaller-than-stick"
+
+    for label, payload in (
+        ("producer-input", producer_payload),
+        ("restickify-output", restickify_payload),
+    ):
+        splits = _root_work_slices(payload)
+        split = int(splits.get(output_stick_dim, splits.get(f"{output_stick_dim}_", 1)))
+        if split > max_valid_split:
+            return (
+                f"ptlx-piece-smaller-than-stick:{label}:"
+                f"{output_stick_dim}:split={split}:max={max_valid_split}"
+            )
     return None
 
 
