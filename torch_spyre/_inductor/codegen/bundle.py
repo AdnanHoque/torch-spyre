@@ -23,6 +23,7 @@ from torch_spyre._inductor.codegen.restickify_lx_boundary import (
     patch_restickify_ddl_bridge_boundaries,
 )
 from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
+    plan_restickify_ptlx_mixed_schedules,
     patch_restickify_ptlx_mixed_schedules,
     patch_restickify_ptlx_bridge_boundaries,
 )
@@ -37,6 +38,12 @@ logger = get_inductor_logger("sdsc_compile")
 
 def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     """Output the SDSC Bundle for the OpSpecs in the given output_dir for the OpSpecs"""
+
+    ptlx_mixed_plans = (
+        plan_restickify_ptlx_mixed_schedules(specs)
+        if _spyre_config.restickify_ptlx_mixed_schedule_e2e
+        else {}
+    )
 
     # 1. Generate SDSC.json for each OpSpec
     sdscs_json = []
@@ -57,7 +64,11 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             logger.info("restickify DDL bridge boundary patch: %s", row)
 
     if _spyre_config.restickify_ptlx_mixed_schedule_e2e:
-        rows = patch_restickify_ptlx_mixed_schedules(sdscs_json, specs)
+        rows = patch_restickify_ptlx_mixed_schedules(
+            sdscs_json,
+            specs,
+            plans=ptlx_mixed_plans,
+        )
         for row in rows:
             logger.info("restickify PT-LX mixed schedule patch: %s", row)
     elif _spyre_config.restickify_ptlx_bridge_e2e:

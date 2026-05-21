@@ -16,6 +16,7 @@ import pytest
 from sympy import Symbol
 
 from torch_spyre._C import DataFormats
+from torch_spyre._inductor.constants import RESTICKIFY_OP
 from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     combine_dataop_sdscs,
     generate_ptlx_restickify_bridge_sdsc,
@@ -28,6 +29,12 @@ from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
     _patch_bridge_endpoint_pieces,
     _patch_consumer_input_lx_map,
     _patch_lx_allocation_by_index,
+    plan_restickify_ptlx_mixed_schedules,
+)
+from torch_spyre._inductor.op_spec import OpSpec, TensorArg
+from torch_spyre._inductor.restickify_ring import (
+    CORE_MAPPING_OVERRIDE_OP_INFO_KEY,
+    LOCALITY_CERTIFICATE_OP_INFO_KEY,
 )
 from torch_spyre._inductor.codegen.superdsc import SDSCArgs, SDSCSpec
 
@@ -249,6 +256,41 @@ def test_mixed_ptlx_bridge_with_consumer_schedule_shape():
     }
 
 
+def test_plan_mixed_ptlx_schedule_from_opspecs():
+    specs = [
+        _minimal_op_spec("add", [_arg(True, 0), _arg(False, 4)]),
+        _minimal_op_spec(
+            RESTICKIFY_OP,
+            [_arg(True, 4), _arg(False, 5)],
+            op_info=_certified_restickify_info(),
+        ),
+        _minimal_op_spec("add", [_arg(True, 5), _arg(False, 6)]),
+    ]
+
+    plans = plan_restickify_ptlx_mixed_schedules(specs)
+
+    plan = plans[1]
+    assert plan.sdsc_index == 1
+    assert plan.producer_index == 0
+    assert plan.consumer_index == 2
+    assert plan.producer_lds_idx == 1
+    assert plan.consumer_lds_idx == 0
+    assert plan.producer_arg_index == 4
+    assert plan.consumer_arg_index == 5
+
+
+def test_plan_mixed_ptlx_schedule_skips_uncertified_restickify():
+    specs = [
+        _minimal_op_spec("add", [_arg(True, 0), _arg(False, 4)]),
+        _minimal_op_spec(RESTICKIFY_OP, [_arg(True, 4), _arg(False, 5)]),
+        _minimal_op_spec("add", [_arg(True, 5), _arg(False, 6)]),
+    ]
+
+    plans = plan_restickify_ptlx_mixed_schedules(specs)
+
+    assert plans == {}
+
+
 def test_mixed_ptlx_value_flow_contract_matches_bridge_endpoints():
     producer = _minimal_compute_payload("0_add", "producer_out", lds_idx=1)
     consumer = _minimal_compute_payload("2_add", "consumer_in", lds_idx=0)
@@ -377,4 +419,41 @@ def _minimal_compute_payload(name: str, lds_name: str, *, lds_idx: int):
             "datadscs_": [],
             "coreIdToDscSchedule": {},
         }
+    }
+
+
+def _arg(is_input: bool, arg_index: int) -> TensorArg:
+    return TensorArg(
+        is_input=is_input,
+        arg_index=arg_index,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[],
+        device_coordinates=[],
+        allocation=None,
+    )
+
+
+def _minimal_op_spec(
+    op: str,
+    args: list[TensorArg],
+    *,
+    op_info: dict | None = None,
+) -> OpSpec:
+    return OpSpec(
+        op=op,
+        is_reduction=False,
+        iteration_space={},
+        args=args,
+        op_info=op_info or {},
+    )
+
+
+def _certified_restickify_info() -> dict:
+    return {
+        "restickify_source_kind": "in_graph_computed",
+        CORE_MAPPING_OVERRIDE_OP_INFO_KEY: {"0": {}},
+        LOCALITY_CERTIFICATE_OP_INFO_KEY: {
+            "locality_certified": True,
+            "certified_byte_hops": 0,
+        },
     }

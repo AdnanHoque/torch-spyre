@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from dataclasses import asdict, dataclass
 from copy import deepcopy
 from typing import Any
 
@@ -43,6 +44,39 @@ _PRODUCER_BASE_ENV = "SPYRE_RESTICKIFY_PTLX_BRIDGE_PRODUCER_BASE"
 _CONSUMER_BASE_ENV = "SPYRE_RESTICKIFY_PTLX_BRIDGE_CONSUMER_BASE"
 _DEFAULT_PRODUCER_BASE = 16 * 1024
 _DEFAULT_CONSUMER_BASE = 8 * 1024
+
+
+@dataclass(frozen=True)
+class PTLXMixedSchedulePlan:
+    sdsc_index: int
+    producer_index: int
+    consumer_index: int
+    producer_lds_idx: int
+    consumer_lds_idx: int
+    producer_arg_index: int
+    consumer_arg_index: int
+    producer_base: int
+    consumer_base: int
+
+
+def plan_restickify_ptlx_mixed_schedules(
+    specs: list[OpSpec],
+) -> dict[int, PTLXMixedSchedulePlan]:
+    """Plan eligible PT/LX mixed restickify triples from OpSpecs.
+
+    This is the normal-lowering side of the prototype: decide which
+    producer/restickify/consumer triples are eligible and record their intended
+    LX endpoints before SDSC JSON is emitted.
+    """
+
+    plans: dict[int, PTLXMixedSchedulePlan] = {}
+    for idx, spec in enumerate(specs):
+        if spec.op != RESTICKIFY_OP:
+            continue
+        plan = _plan_one_mixed_schedule(idx, specs)
+        if isinstance(plan, PTLXMixedSchedulePlan):
+            plans[idx] = plan
+    return plans
 
 
 def patch_restickify_ptlx_bridge_boundaries(
@@ -64,6 +98,7 @@ def patch_restickify_ptlx_bridge_boundaries(
 def patch_restickify_ptlx_mixed_schedules(
     sdsc_payloads: list[dict[str, Any] | None],
     specs: list[OpSpec],
+    plans: dict[int, PTLXMixedSchedulePlan] | None = None,
 ) -> list[dict[str, Any]]:
     """Replace eligible restickify+consumer pairs with one mixed SuperDsc.
 
@@ -75,12 +110,18 @@ def patch_restickify_ptlx_mixed_schedules(
     default-off prototype.
     """
 
+    if plans is None:
+        plans = plan_restickify_ptlx_mixed_schedules(specs)
     rows = []
     consumed_indices: set[int] = set()
     for idx, spec in enumerate(specs):
         if idx in consumed_indices or spec.op != RESTICKIFY_OP:
             continue
-        row = _patch_one_mixed_schedule(idx, sdsc_payloads, specs)
+        plan = plans.get(idx)
+        if plan is None:
+            row = _plan_skip_row(idx, specs)
+        else:
+            row = _patch_one_mixed_schedule(plan, sdsc_payloads, specs)
         if row.get("status") == "patched":
             consumed_indices.add(idx + 1)
         rows.append(row)
@@ -88,14 +129,66 @@ def patch_restickify_ptlx_mixed_schedules(
     return rows
 
 
-def _patch_one_mixed_schedule(
+def _plan_one_mixed_schedule(
     idx: int,
+    specs: list[OpSpec],
+) -> PTLXMixedSchedulePlan | str:
+    if idx == 0 or idx + 1 >= len(specs):
+        return "restickify-not-between-adjacent-sdscs"
+
+    restickify_spec = specs[idx]
+    reason = _eligibility_skip_reason(restickify_spec)
+    if reason is not None:
+        return reason
+    if len(restickify_spec.args) != 2:
+        return "unsupported-restickify-arity"
+
+    producer_spec = specs[idx - 1]
+    consumer_spec = specs[idx + 1]
+    producer_arg_index = int(restickify_spec.args[0].arg_index)
+    consumer_arg_index = int(restickify_spec.args[-1].arg_index)
+    producer_lds_idx = _arg_position_for_arg_index(
+        producer_spec,
+        producer_arg_index,
+        want_input=False,
+    )
+    consumer_lds_idx = _arg_position_for_arg_index(
+        consumer_spec,
+        consumer_arg_index,
+        want_input=True,
+    )
+    if producer_lds_idx is None:
+        return "producer-output-arg-not-adjacent"
+    if consumer_lds_idx is None:
+        return "consumer-input-arg-not-adjacent"
+
+    return PTLXMixedSchedulePlan(
+        sdsc_index=idx,
+        producer_index=idx - 1,
+        consumer_index=idx + 1,
+        producer_lds_idx=producer_lds_idx,
+        consumer_lds_idx=consumer_lds_idx,
+        producer_arg_index=producer_arg_index,
+        consumer_arg_index=consumer_arg_index,
+        producer_base=int(os.environ.get(_PRODUCER_BASE_ENV, _DEFAULT_PRODUCER_BASE)),
+        consumer_base=int(os.environ.get(_CONSUMER_BASE_ENV, _DEFAULT_CONSUMER_BASE)),
+    )
+
+
+def _plan_skip_row(idx: int, specs: list[OpSpec]) -> dict[str, Any]:
+    planned = _plan_one_mixed_schedule(idx, specs)
+    if isinstance(planned, PTLXMixedSchedulePlan):
+        return _row(idx, "skipped", "planned-but-not-selected")
+    return _row(idx, "skipped", planned)
+
+
+def _patch_one_mixed_schedule(
+    plan: PTLXMixedSchedulePlan,
     sdsc_payloads: list[dict[str, Any] | None],
     specs: list[OpSpec],
 ) -> dict[str, Any]:
-    if idx == 0 or idx + 1 >= len(specs):
-        return _row(idx, "skipped", "restickify-not-between-adjacent-sdscs")
-    if sdsc_payloads[idx] is None or sdsc_payloads[idx + 1] is None:
+    idx = plan.sdsc_index
+    if sdsc_payloads[idx] is None or sdsc_payloads[plan.consumer_index] is None:
         return _row(idx, "skipped", "restickify-or-consumer-already-consumed")
 
     restickify_spec = specs[idx]
@@ -109,28 +202,9 @@ def _patch_one_mixed_schedule(
         return _row(idx, "skipped", "restickify-payload-not-hbm-compute")
 
     producer_payload = sdsc_payloads[idx - 1]
-    consumer_payload = sdsc_payloads[idx + 1]
+    consumer_payload = sdsc_payloads[plan.consumer_index]
     if producer_payload is None or consumer_payload is None:
         return _row(idx, "skipped", "producer-or-consumer-missing")
-    producer_spec = specs[idx - 1]
-    consumer_spec = specs[idx + 1]
-    if len(restickify_spec.args) != 2:
-        return _row(idx, "skipped", "unsupported-restickify-arity")
-
-    producer_lds_idx = _arg_position_for_arg_index(
-        producer_spec,
-        int(restickify_spec.args[0].arg_index),
-        want_input=False,
-    )
-    consumer_lds_idx = _arg_position_for_arg_index(
-        consumer_spec,
-        int(restickify_spec.args[-1].arg_index),
-        want_input=True,
-    )
-    if producer_lds_idx is None:
-        return _row(idx, "skipped", "producer-output-arg-not-adjacent")
-    if consumer_lds_idx is None:
-        return _row(idx, "skipped", "consumer-input-arg-not-adjacent")
 
     _, producer_dsc = _single_payload_dsc(producer_payload)
     restickify_root, restickify_dsc = _single_payload_dsc(restickify_payload)
@@ -144,36 +218,34 @@ def _patch_one_mixed_schedule(
     )
     direction = _infer_endpoint_direction(
         producer_dsc,
-        producer_lds_idx=producer_lds_idx,
+        producer_lds_idx=plan.producer_lds_idx,
         consumer_dsc=consumer_dsc,
-        consumer_lds_idx=consumer_lds_idx,
+        consumer_lds_idx=plan.consumer_lds_idx,
         restickify_logical_direction=restickify_logical_direction,
     )
     if direction != "kernel-to-output":
         return _row(idx, "skipped", f"unsupported-direction:{direction}")
 
     size, num_cores = _infer_size_and_cores(restickify_root, restickify_dsc)
-    producer_base = int(os.environ.get(_PRODUCER_BASE_ENV, _DEFAULT_PRODUCER_BASE))
-    consumer_base = int(os.environ.get(_CONSUMER_BASE_ENV, _DEFAULT_CONSUMER_BASE))
     producer_start = _constant_lx_start_payload(
         num_cores=num_cores,
-        base=producer_base,
+        base=plan.producer_base,
     )
     consumer_start = _constant_lx_start_payload(
         num_cores=num_cores,
-        base=consumer_base,
+        base=plan.consumer_base,
     )
 
     producer_patches = _patch_lx_allocation_by_index(
         producer_payload,
-        lds_idx=producer_lds_idx,
+        lds_idx=plan.producer_lds_idx,
         start_payload=producer_start,
     )
-    consumer_name = _lds_name(consumer_dsc, consumer_lds_idx)
+    consumer_name = _lds_name(consumer_dsc, plan.consumer_lds_idx)
     _patch_consumer_input_lx_map(
         consumer_payload,
         input_name=consumer_name,
-        lds_idx=consumer_lds_idx,
+        lds_idx=plan.consumer_lds_idx,
         start_payload=consumer_start,
     )
     _force_consumer_corelets(
@@ -187,21 +259,21 @@ def _patch_one_mixed_schedule(
         num_cores=num_cores,
         mode="stage3b",
         direction=direction,
-        input_start_address=producer_base,
-        output_start_address=consumer_base,
+        input_start_address=plan.producer_base,
+        output_start_address=plan.consumer_base,
         restickify_op_name="ReStickifyOpWithPTLx",
     )
     endpoint_patch = _patch_bridge_endpoint_pieces(
         bridge_payload,
-        producer_starts={core: producer_base for core in range(num_cores)},
-        consumer_starts={core: consumer_base for core in range(num_cores)},
+        producer_starts={core: plan.producer_base for core in range(num_cores)},
+        consumer_starts={core: plan.consumer_base for core in range(num_cores)},
     )
     value_flow_contract = _mixed_value_flow_contract(
         producer_payload=producer_payload,
         bridge_payload=bridge_payload,
         consumer_payload=consumer_payload,
-        producer_lds_idx=producer_lds_idx,
-        consumer_lds_idx=consumer_lds_idx,
+        producer_lds_idx=plan.producer_lds_idx,
+        consumer_lds_idx=plan.consumer_lds_idx,
     )
     if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
         "valid"
@@ -217,18 +289,19 @@ def _patch_one_mixed_schedule(
         consumer_payload,
     )
     sdsc_payloads[idx] = mixed_payload
-    sdsc_payloads[idx + 1] = None
+    sdsc_payloads[plan.consumer_index] = None
 
     return {
         **_row(idx, "patched", None),
         "kind": "ptlx-mixed-schedule",
+        "plan": asdict(plan),
         "direction": direction,
         "restickify_logical_direction": restickify_logical_direction,
         "size": size,
         "num_cores": num_cores,
-        "producer_lds_idx": producer_lds_idx,
-        "consumer_lds_idx": consumer_lds_idx,
-        "consumer_index_omitted": idx + 1,
+        "producer_lds_idx": plan.producer_lds_idx,
+        "consumer_lds_idx": plan.consumer_lds_idx,
+        "consumer_index_omitted": plan.consumer_index,
         "producer_lx_unique_starts": _unique_start_values(producer_start),
         "consumer_lx_unique_starts": _unique_start_values(consumer_start),
         "producer_allocation_patches": producer_patches,
