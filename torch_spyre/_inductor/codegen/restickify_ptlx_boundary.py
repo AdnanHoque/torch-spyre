@@ -196,6 +196,20 @@ def _patch_one_mixed_schedule(
         producer_starts={core: producer_base for core in range(num_cores)},
         consumer_starts={core: consumer_base for core in range(num_cores)},
     )
+    value_flow_contract = _mixed_value_flow_contract(
+        producer_payload=producer_payload,
+        bridge_payload=bridge_payload,
+        consumer_payload=consumer_payload,
+        producer_lds_idx=producer_lds_idx,
+        consumer_lds_idx=consumer_lds_idx,
+    )
+    if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
+        "valid"
+    ]:
+        raise RuntimeError(
+            "PT-LX mixed restickify value-flow contract failed for "
+            f"SDSC {idx}: {value_flow_contract}"
+        )
     mixed_name = f"{idx}_MixedReStickifyOpWithPTLxConsumer"
     mixed_payload = _combine_ptlx_bridge_with_consumer(
         mixed_name,
@@ -219,6 +233,7 @@ def _patch_one_mixed_schedule(
         "consumer_lx_unique_starts": _unique_start_values(consumer_start),
         "producer_allocation_patches": producer_patches,
         "bridge_endpoint_patch": endpoint_patch,
+        "value_flow_contract": value_flow_contract,
         "replacement_sdsc": mixed_name,
         "mixed_schedule": _bridge_then_dl_schedule(num_cores)["0"],
     }
@@ -755,6 +770,148 @@ def _patch_bridge_endpoint_pieces(
         ),
         "num_dataops": len(datadscs),
     }
+
+
+def _mixed_value_flow_contract(
+    *,
+    producer_payload: dict[str, Any],
+    bridge_payload: dict[str, Any],
+    consumer_payload: dict[str, Any],
+    producer_lds_idx: int,
+    consumer_lds_idx: int,
+) -> dict[str, Any]:
+    """Summarize whether all LX endpoints for the mixed bridge agree.
+
+    This verifier intentionally inspects the generated SDSC JSON rather than
+    trusting the Python-side constants used to patch it. That makes it a small
+    contract check between normal Torch-Spyre lowering and the mixed
+    data-op-plus-DL artifact that Deeptools consumes.
+    """
+
+    producer_starts = _lx_allocate_starts_by_core(producer_payload, producer_lds_idx)
+    bridge_input_starts = _bridge_endpoint_starts_by_core(
+        bridge_payload,
+        datadsc_idx=0,
+        use_last_labeled_ds=False,
+    )
+    bridge_output_starts = _bridge_endpoint_starts_by_core(
+        bridge_payload,
+        datadsc_idx=-1,
+        use_last_labeled_ds=True,
+    )
+    consumer_starts = _consumer_input_lx_starts_by_core(
+        consumer_payload,
+        consumer_lds_idx,
+    )
+    producer_match = producer_starts == bridge_input_starts
+    consumer_match = consumer_starts == bridge_output_starts
+    return {
+        "valid": producer_match and consumer_match,
+        "producer_to_bridge_input_match": producer_match,
+        "bridge_output_to_consumer_match": consumer_match,
+        "producer_core_count": len(producer_starts),
+        "bridge_input_core_count": len(bridge_input_starts),
+        "bridge_output_core_count": len(bridge_output_starts),
+        "consumer_core_count": len(consumer_starts),
+        "producer_unique_starts": sorted(set(producer_starts.values())),
+        "bridge_input_unique_starts": sorted(set(bridge_input_starts.values())),
+        "bridge_output_unique_starts": sorted(set(bridge_output_starts.values())),
+        "consumer_unique_starts": sorted(set(consumer_starts.values())),
+        "producer_missing_cores": sorted(
+            set(bridge_input_starts) - set(producer_starts)
+        ),
+        "bridge_input_missing_cores": sorted(
+            set(producer_starts) - set(bridge_input_starts)
+        ),
+        "bridge_output_missing_cores": sorted(
+            set(consumer_starts) - set(bridge_output_starts)
+        ),
+        "consumer_missing_cores": sorted(
+            set(bridge_output_starts) - set(consumer_starts)
+        ),
+    }
+
+
+def _lx_allocate_starts_by_core(
+    payload: dict[str, Any],
+    lds_idx: int,
+) -> dict[int, int]:
+    _, dsc = _single_payload_dsc(payload)
+    for node in dsc.get("scheduleTree_", []) or []:
+        if (
+            node.get("nodeType_") == "allocate"
+            and int(node.get("ldsIdx_", -1)) == int(lds_idx)
+            and node.get("component_") == "lx"
+        ):
+            return _start_payload_to_core_starts(
+                node.get("startAddressCoreCorelet_", {}) or {}
+            )
+    return {}
+
+
+def _consumer_input_lx_starts_by_core(
+    payload: dict[str, Any],
+    lds_idx: int,
+) -> dict[int, int]:
+    _, dsc = _single_payload_dsc(payload)
+    for lds in dsc.get("labeledDs_", []) or []:
+        if int(lds.get("ldsIdx_", -1)) != int(lds_idx):
+            continue
+        starts: dict[int, int] = {}
+        for core, init in enumerate(lds.get("coreStateInit_", []) or []):
+            lbr_init = init.get("lbrInit_", []) or []
+            if lbr_init:
+                starts[core] = int(lbr_init[0])
+        if starts:
+            return starts
+    return _lx_allocate_starts_by_core(payload, lds_idx)
+
+
+def _bridge_endpoint_starts_by_core(
+    payload: dict[str, Any],
+    *,
+    datadsc_idx: int,
+    use_last_labeled_ds: bool,
+) -> dict[int, int]:
+    root = next(iter(payload.values()))
+    datadscs = root.get("datadscs_", []) or []
+    if not datadscs:
+        return {}
+    datadsc = next(iter(datadscs[datadsc_idx].values()))
+    labeled = datadsc.get("labeledDs_", []) or []
+    if not labeled:
+        return {}
+    lds = labeled[-1] if use_last_labeled_ds else labeled[0]
+    starts: dict[int, int] = {}
+    for piece in lds.get("PieceInfo", []) or []:
+        for placement in piece.get("PlacementInfo", []) or []:
+            if placement.get("type") != "lx":
+                continue
+            mem_id = placement.get("memId") or []
+            start_addr = placement.get("startAddr") or []
+            if not mem_id or not start_addr:
+                continue
+            core = int(mem_id[0])
+            start = int(start_addr[0])
+            existing = starts.get(core)
+            if existing is not None and existing != start:
+                raise ValueError(
+                    f"multiple LX starts for bridge core {core}: "
+                    f"{existing} and {start}"
+                )
+            starts[core] = start
+    return starts
+
+
+def _start_payload_to_core_starts(payload: dict[str, Any]) -> dict[int, int]:
+    starts: dict[int, int] = {}
+    for key, value in (payload.get("data_", {}) or {}).items():
+        try:
+            core = int(str(key).strip("[]").split(",")[0].strip())
+        except (ValueError, IndexError):
+            continue
+        starts[core] = int(value)
+    return starts
 
 
 def _patch_piece_starts(

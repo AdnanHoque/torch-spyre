@@ -22,7 +22,12 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     generate_restickify_dataop_sdsc_from_spec,
 )
 from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
+    _constant_lx_start_payload,
     _combine_ptlx_bridge_with_consumer,
+    _mixed_value_flow_contract,
+    _patch_bridge_endpoint_pieces,
+    _patch_consumer_input_lx_map,
+    _patch_lx_allocation_by_index,
 )
 from torch_spyre._inductor.codegen.superdsc import SDSCArgs, SDSCSpec
 
@@ -241,4 +246,135 @@ def test_mixed_ptlx_bridge_with_consumer_schedule_shape():
     assert root["coreIdToDscSchedule"] == {
         "0": [[0, -1, 0, 1], [1, -1, 1, 1], [-1, 0, 1, 0]],
         "1": [[0, -1, 0, 1], [1, -1, 1, 1], [-1, 0, 1, 0]],
+    }
+
+
+def test_mixed_ptlx_value_flow_contract_matches_bridge_endpoints():
+    producer = _minimal_compute_payload("0_add", "producer_out", lds_idx=1)
+    consumer = _minimal_compute_payload("2_add", "consumer_in", lds_idx=0)
+    producer_start = _constant_lx_start_payload(num_cores=2, base=16 * 1024)
+    consumer_start = _constant_lx_start_payload(num_cores=2, base=8 * 1024)
+    _patch_lx_allocation_by_index(
+        producer,
+        lds_idx=1,
+        start_payload=producer_start,
+    )
+    _patch_consumer_input_lx_map(
+        consumer,
+        input_name="consumer_in",
+        lds_idx=0,
+        start_payload=consumer_start,
+    )
+    bridge = generate_ptlx_restickify_bridge_sdsc(
+        "ptlx_bridge",
+        size=128,
+        num_cores=2,
+        mode="stage3b",
+        direction="kernel-to-output",
+        restickify_op_name="ReStickifyOpWithPTLx",
+        input_start_address=16 * 1024,
+        output_start_address=8 * 1024,
+    )
+    _patch_bridge_endpoint_pieces(
+        bridge,
+        producer_starts={0: 16 * 1024, 1: 16 * 1024},
+        consumer_starts={0: 8 * 1024, 1: 8 * 1024},
+    )
+
+    contract = _mixed_value_flow_contract(
+        producer_payload=producer,
+        bridge_payload=bridge,
+        consumer_payload=consumer,
+        producer_lds_idx=1,
+        consumer_lds_idx=0,
+    )
+
+    assert contract["valid"] is True
+    assert contract["producer_to_bridge_input_match"] is True
+    assert contract["bridge_output_to_consumer_match"] is True
+    assert contract["producer_unique_starts"] == [16 * 1024]
+    assert contract["consumer_unique_starts"] == [8 * 1024]
+
+
+def test_mixed_ptlx_value_flow_contract_catches_bridge_mismatch():
+    producer = _minimal_compute_payload("0_add", "producer_out", lds_idx=1)
+    consumer = _minimal_compute_payload("2_add", "consumer_in", lds_idx=0)
+    producer_start = _constant_lx_start_payload(num_cores=2, base=16 * 1024)
+    consumer_start = _constant_lx_start_payload(num_cores=2, base=8 * 1024)
+    _patch_lx_allocation_by_index(
+        producer,
+        lds_idx=1,
+        start_payload=producer_start,
+    )
+    _patch_consumer_input_lx_map(
+        consumer,
+        input_name="consumer_in",
+        lds_idx=0,
+        start_payload=consumer_start,
+    )
+    bridge = generate_ptlx_restickify_bridge_sdsc(
+        "ptlx_bridge",
+        size=128,
+        num_cores=2,
+        mode="stage3b",
+        direction="kernel-to-output",
+        restickify_op_name="ReStickifyOpWithPTLx",
+        input_start_address=16 * 1024,
+        output_start_address=8 * 1024,
+    )
+    _patch_bridge_endpoint_pieces(
+        bridge,
+        producer_starts={0: 1234, 1: 16 * 1024},
+        consumer_starts={0: 8 * 1024, 1: 8 * 1024},
+    )
+
+    contract = _mixed_value_flow_contract(
+        producer_payload=producer,
+        bridge_payload=bridge,
+        consumer_payload=consumer,
+        producer_lds_idx=1,
+        consumer_lds_idx=0,
+    )
+
+    assert contract["valid"] is False
+    assert contract["producer_to_bridge_input_match"] is False
+    assert contract["bridge_output_to_consumer_match"] is True
+
+
+def _minimal_compute_payload(name: str, lds_name: str, *, lds_idx: int):
+    return {
+        name: {
+            "numCoresUsed_": 2,
+            "opFuncsUsed_": ["add"],
+            "dscs_": [
+                {
+                    "add": {
+                        "numCoreletsUsed_": 1,
+                        "numCoreletsUsed_DSC2_": 1,
+                        "labeledDs_": [
+                            {
+                                "ldsIdx_": lds_idx,
+                                "dsName_": lds_name,
+                                "memOrg_": {"hbm": {"isPresent": 1}},
+                                "hbmStartAddress_": 0,
+                                "hbmSize_": 256,
+                                "lxSize_": 0,
+                                "lxBufferSize_": 0,
+                            }
+                        ],
+                        "scheduleTree_": [
+                            {
+                                "nodeType_": "allocate",
+                                "ldsIdx_": lds_idx,
+                                "name_": f"allocate-{lds_name}_hbm",
+                                "component_": "hbm",
+                            }
+                        ],
+                        "computeOp_": [{"opFuncName": "add"}],
+                    }
+                }
+            ],
+            "datadscs_": [],
+            "coreIdToDscSchedule": {},
+        }
     }

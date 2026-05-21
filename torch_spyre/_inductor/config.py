@@ -116,6 +116,13 @@ restickify_ptlx_mixed_schedule_e2e: bool = (
     os.environ.get("SPYRE_RESTICKIFY_PTLX_MIXED_SCHEDULE_E2E", "0") == "1"
 )
 
+# Default-off verifier for the PT-aware LX mixed bridge. When enabled, the
+# generated producer output, bridge endpoints, and consumer input must agree on
+# the same per-core LX addresses before bundle files are written.
+restickify_ptlx_value_flow_assert: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_PTLX_VALUE_FLOW_ASSERT", "0") == "1"
+)
+
 # Default-off diagnostic e2e lowering prototype for the Stage42 DDL bridge.
 # When enabled, a small, compile-proven subset of ReStickifyOpHBM SDSCs may be
 # emitted in the compact restickify DDL input form instead of the normal HBM
