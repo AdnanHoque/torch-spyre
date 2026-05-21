@@ -23,18 +23,13 @@ global_stick_optimizer: bool = os.environ.get("GLOBAL_STICK_OPTIMIZER", "1") == 
 
 allow_all_ops_in_lx_planning: bool = False
 
+# Fraction of LX reserved for DDC tile staging. DDC reads the env var directly;
+# Python-only config patches do not change the backend budget.
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
 
-# k_fast: a two-layer optimisation for K-split matmul work-divisions.
-#   Layer 1 (planner, core_division.py): picks (1, n, k>1) over pure-M
-#     for narrow-N small-M matmul shapes that would otherwise leave the
-#     PT array under-utilised.
-#   Layer 2 (SDSC emitter, codegen/compute_ops.py): permutes physical
-#     core IDs so K-collaborators land on adjacent ring positions,
-#     reducing PSUM chain hops from m*n to 1.
-# Set SPYRE_CORE_ID_K_FAST_EMISSION=0 to disable both layers.
+# Gate for the K-split matmul planner and its physical core remapping.
 core_id_k_fast_emission: bool = (
     os.environ.get("SPYRE_CORE_ID_K_FAST_EMISSION", "1") == "1"
 )
