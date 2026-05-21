@@ -1,0 +1,51 @@
+diff --git a/dxp/SdscTree.cpp b/dxp/SdscTree.cpp
+index c7d56cb8aa..e391a81704 100644
+--- a/dxp/SdscTree.cpp
++++ b/dxp/SdscTree.cpp
+@@ -149,7 +149,11 @@ std::unique_ptr<SuperDsc> SdscNode::importSdsc(const std::string& filename,
+   auto mySdsc = std::make_unique<SuperDsc>();
+   mySdsc->importJson(filename);
+   mySdsc->target_ = target;
+-  DT_CHECK_MSG(mySdsc->dataOpdscs_.empty(), "Datadsc not allowed, use dldsc");
++  const bool hasMixedDataOpSchedule =
++      !mySdsc->dataOpdscs_.empty() && !mySdsc->dscs_.empty() &&
++      !mySdsc->coreIdToDscSchedule.empty();
++  DT_CHECK_MSG(mySdsc->dataOpdscs_.empty() || hasMixedDataOpSchedule,
++               "Datadsc not allowed without dldsc schedule");
+   DT_CHECK_MSG(!mySdsc->dscs_.empty(), "No dsc in sdsc input");
+   return mySdsc;
+ }
+diff --git a/dxp/dxp.cpp b/dxp/dxp.cpp
+index 649a42cb5b..b6c16159f6 100644
+--- a/dxp/dxp.cpp
++++ b/dxp/dxp.cpp
+@@ -253,8 +253,21 @@ void Dxp::runCodegen(SuperDsc* sdsc) {
+   dcg.progIRcodeGen = DCGProgIRGen::DCC;
+   dcg.createSenProg = false;
+ 
++  bool hasDscSchedule = false;
++  if (sdsc->coreIdToDscSchedule.size() == sdsc->numCoresUsed_) {
++    hasDscSchedule = true;
++    for (auto& kv : sdsc->coreIdToDscSchedule) {
++      if (kv.second.size() == 0) {
++        hasDscSchedule = false;
++        break;
++      }
++    }
++  }
++
+   // DCG to generate L3 programs
+-  if (sdsc->dscs_.size() == 0 && sdsc->dataOpdscs_.size() > 0) {
++  if (hasDscSchedule) {
++    dcg.runDcgForDataOpsDlOps(*sdsc);
++  } else if (sdsc->dscs_.size() == 0 && sdsc->dataOpdscs_.size() > 0) {
+     dcg.runDcg(*sdsc);
+   } else {
+     dcg.runDcgForDlOpsStandalone(*sdsc);
+@@ -1502,4 +1515,4 @@ void Dxp::runDxp(std::string searchDir, bool bundleMode) {
+   }
+ 
+   DT_CHECK_MSG(foundOne, "Nothing found processed");
+-}
+\ No newline at end of file
++}

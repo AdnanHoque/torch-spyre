@@ -217,13 +217,45 @@ def _run_deeptools(variant_dir: Path, bin_dir: Path, sdsc_path: Path) -> dict[st
     dxp_proc = _run([dxp, "--bundle", "-d", str(variant_dir)], cwd=variant_dir)
     (variant_dir / "dxp.out").write_text(dxp_proc.stdout, encoding="utf-8")
     (variant_dir / "dxp.err").write_text(dxp_proc.stderr, encoding="utf-8")
+    dcc_error = "\n".join(dcc_proc.stderr.splitlines()[-8:])
+    dxp_error = "\n".join(dxp_proc.stderr.splitlines()[-8:])
 
     return {
         "dcc_rc": dcc_proc.returncode,
         "dxp_rc": dxp_proc.returncode,
-        "dxp_error_tail": "\n".join(dxp_proc.stderr.splitlines()[-8:]),
+        "dcc_error_tail": dcc_error,
+        "dxp_error_tail": dxp_error,
+        "dxp_mixed_schedule_status": _mixed_schedule_status(
+            dcc_proc.returncode,
+            dcc_error,
+            dxp_proc.returncode,
+            dxp_error,
+        ),
         **_summarize_text(variant_dir / "dcc.out"),
     }
+
+
+def _mixed_schedule_status(
+    dcc_rc: int,
+    dcc_error: str,
+    dxp_rc: int,
+    dxp_error: str,
+) -> str:
+    """Classify the current mixed-schedule integration boundary."""
+
+    if "Datadsc not allowed, use dldsc" in dxp_error:
+        return "installed-dxp-missing-mixed-import-support"
+    if "Datadsc not allowed without dldsc schedule" in dxp_error:
+        return "malformed-mixed-schedule"
+    if dcc_rc != 0:
+        if "myOutPiece.second.dimToSize_" in dcc_error:
+            return "dcc-restickify-piece-contract-failed"
+        if "reqInpFetch ^ reqDLOp" in dcc_error:
+            return "dcc-schedule-step-pairing-contract-failed"
+        return "dcc-failed"
+    if dxp_rc != 0:
+        return "dxp-failed-after-mixed-import"
+    return "mixed-schedule-accepted-by-dcc-and-dxp"
 
 
 def main() -> int:

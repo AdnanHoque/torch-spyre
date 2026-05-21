@@ -1,0 +1,26 @@
+{
+  "dcc_rc": 0,
+  "has_hbm": false,
+  "mixed_sdsc": "/tmp/torchinductor_1000800000/tmpz7xxnbj0/inductor-spyre/sdsc_fused_add_t_0_np3vpchr/sdsc_1_MixedReStickifyOpWithPTLxConsumer.json",
+  "source": "/tmp/stage202-dcc-mixed-2048/dcc.out",
+  "unit_counts": {
+    "l0lu0": 32,
+    "l0su0": 32,
+    "l3lu": 993,
+    "l3su": 932,
+    "lxlu0": 32,
+    "lxsu0": 32,
+    "pe0": 32,
+    "pt_slice_mask_arf_write": 8,
+    "ptrow0_0": 32,
+    "ptrow1_0": 32,
+    "ptrow2_0": 32,
+    "ptrow3_0": 32,
+    "ptrow4_0": 32,
+    "ptrow5_0": 32,
+    "ptrow6_0": 32,
+    "ptrow7_0": 32,
+    "sfp0": 32
+  },
+  "work_op_count": 822
+}
