@@ -470,6 +470,9 @@ class SpyreKernel(Kernel[CSEVariable]):
 
     def load(self, name: str, index: sympy.Expr):
         """Codegen a load from an InputBuffer"""
+        # A producer retargeted by elide_copy_to_input writes into a mutated
+        # graph input; reads of its buffer must resolve to that real storage.
+        name = V.graph.scheduler.mutation_real_name.get(name, name)
         buf = V.graph.get_buffer(name)
         layout = buf.get_layout()
         if not isinstance(layout, FixedTiledLayout):

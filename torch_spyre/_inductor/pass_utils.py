@@ -22,6 +22,7 @@ from torch._inductor.ir import (
     ComputedBuffer,
     FixedLayout,
     Loops,
+    MutationLayoutSHOULDREMOVE,
     Operation,
     Pointwise,
     Reduction,
@@ -41,15 +42,27 @@ class SchedNodeArg(NamedTuple):
     layout: "FixedTiledLayout"
 
 
+def _resolve_read_layout(buf):
+    """Return a read buffer's committed device layout.
+
+    A producer retargeted by elide_copy_to_input carries a
+    MutationLayoutSHOULDREMOVE until propagate_mutation_layouts resolves it;
+    its committed device layout is the mutation target's.
+    """
+    layout = buf.get_layout()
+    if isinstance(layout, MutationLayoutSHOULDREMOVE):
+        layout = layout.real_layout()
+    if not isinstance(layout, FixedTiledLayout):
+        raise RuntimeError(f"{buf} does not have FixedTiledLayout")
+    return layout
+
+
 def get_mem_deps(n: SchedulerNode) -> list[SchedNodeArg]:
     res: list[SchedNodeArg] = []
     for arg in n.read_writes.reads:
         if isinstance(arg, MemoryDep):
             buf = V.graph.get_buffer(arg.name)
-            layout = buf.get_layout()
-            if not isinstance(layout, FixedTiledLayout):
-                raise RuntimeError(f"{buf} does not have FixedTiledLayout")
-            res.append(SchedNodeArg(arg, layout))
+            res.append(SchedNodeArg(arg, _resolve_read_layout(buf)))
     return res
 
 
@@ -98,10 +111,7 @@ def get_mem_deps_from_rw(read_writes: ReadWrites) -> list[SchedNodeArg]:
     for arg in read_writes.reads:
         if isinstance(arg, MemoryDep):
             buf = V.graph.get_buffer(arg.name)
-            layout = buf.get_layout()
-            if not isinstance(layout, FixedTiledLayout):
-                raise RuntimeError(f"{buf} does not have FixedTiledLayout")
-            res.append(SchedNodeArg(arg, layout))
+            res.append(SchedNodeArg(arg, _resolve_read_layout(buf)))
     return res
 
 
