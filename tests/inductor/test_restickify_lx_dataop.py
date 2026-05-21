@@ -277,6 +277,12 @@ def test_plan_mixed_ptlx_schedule_from_opspecs():
     assert plan.consumer_lds_idx == 0
     assert plan.producer_arg_index == 4
     assert plan.consumer_arg_index == 5
+    assert plan.producer_endpoint.role == "producer_output"
+    assert plan.producer_endpoint.is_input is False
+    assert plan.producer_endpoint.sdsc_index == 0
+    assert plan.consumer_endpoint.role == "consumer_input"
+    assert plan.consumer_endpoint.is_input is True
+    assert plan.consumer_endpoint.sdsc_index == 2
 
 
 def test_plan_mixed_ptlx_schedule_skips_uncertified_restickify():

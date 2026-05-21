@@ -47,16 +47,46 @@ _DEFAULT_CONSUMER_BASE = 8 * 1024
 
 
 @dataclass(frozen=True)
+class PTLXLXEndpointPlan:
+    role: str
+    sdsc_index: int
+    lds_idx: int
+    arg_index: int
+    base: int
+    is_input: bool
+
+
+@dataclass(frozen=True)
 class PTLXMixedSchedulePlan:
     sdsc_index: int
     producer_index: int
     consumer_index: int
-    producer_lds_idx: int
-    consumer_lds_idx: int
-    producer_arg_index: int
-    consumer_arg_index: int
-    producer_base: int
-    consumer_base: int
+    producer_endpoint: PTLXLXEndpointPlan
+    consumer_endpoint: PTLXLXEndpointPlan
+
+    @property
+    def producer_lds_idx(self) -> int:
+        return self.producer_endpoint.lds_idx
+
+    @property
+    def consumer_lds_idx(self) -> int:
+        return self.consumer_endpoint.lds_idx
+
+    @property
+    def producer_arg_index(self) -> int:
+        return self.producer_endpoint.arg_index
+
+    @property
+    def consumer_arg_index(self) -> int:
+        return self.consumer_endpoint.arg_index
+
+    @property
+    def producer_base(self) -> int:
+        return self.producer_endpoint.base
+
+    @property
+    def consumer_base(self) -> int:
+        return self.consumer_endpoint.base
 
 
 def plan_restickify_ptlx_mixed_schedules(
@@ -166,12 +196,22 @@ def _plan_one_mixed_schedule(
         sdsc_index=idx,
         producer_index=idx - 1,
         consumer_index=idx + 1,
-        producer_lds_idx=producer_lds_idx,
-        consumer_lds_idx=consumer_lds_idx,
-        producer_arg_index=producer_arg_index,
-        consumer_arg_index=consumer_arg_index,
-        producer_base=int(os.environ.get(_PRODUCER_BASE_ENV, _DEFAULT_PRODUCER_BASE)),
-        consumer_base=int(os.environ.get(_CONSUMER_BASE_ENV, _DEFAULT_CONSUMER_BASE)),
+        producer_endpoint=PTLXLXEndpointPlan(
+            role="producer_output",
+            sdsc_index=idx - 1,
+            lds_idx=producer_lds_idx,
+            arg_index=producer_arg_index,
+            base=int(os.environ.get(_PRODUCER_BASE_ENV, _DEFAULT_PRODUCER_BASE)),
+            is_input=False,
+        ),
+        consumer_endpoint=PTLXLXEndpointPlan(
+            role="consumer_input",
+            sdsc_index=idx + 1,
+            lds_idx=consumer_lds_idx,
+            arg_index=consumer_arg_index,
+            base=int(os.environ.get(_CONSUMER_BASE_ENV, _DEFAULT_CONSUMER_BASE)),
+            is_input=True,
+        ),
     )
 
 
@@ -227,26 +267,16 @@ def _patch_one_mixed_schedule(
         return _row(idx, "skipped", f"unsupported-direction:{direction}")
 
     size, num_cores = _infer_size_and_cores(restickify_root, restickify_dsc)
-    producer_start = _constant_lx_start_payload(
-        num_cores=num_cores,
-        base=plan.producer_base,
-    )
-    consumer_start = _constant_lx_start_payload(
-        num_cores=num_cores,
-        base=plan.consumer_base,
-    )
-
-    producer_patches = _patch_lx_allocation_by_index(
+    producer_start, producer_patches = _materialize_producer_lx_endpoint(
         producer_payload,
-        lds_idx=plan.producer_lds_idx,
-        start_payload=producer_start,
+        endpoint=plan.producer_endpoint,
+        num_cores=num_cores,
     )
-    consumer_name = _lds_name(consumer_dsc, plan.consumer_lds_idx)
-    _patch_consumer_input_lx_map(
+    consumer_start, consumer_name = _materialize_consumer_lx_endpoint(
         consumer_payload,
-        input_name=consumer_name,
-        lds_idx=plan.consumer_lds_idx,
-        start_payload=consumer_start,
+        consumer_dsc=consumer_dsc,
+        endpoint=plan.consumer_endpoint,
+        num_cores=num_cores,
     )
     _force_consumer_corelets(
         consumer_payload,
@@ -259,14 +289,18 @@ def _patch_one_mixed_schedule(
         num_cores=num_cores,
         mode="stage3b",
         direction=direction,
-        input_start_address=plan.producer_base,
-        output_start_address=plan.consumer_base,
+        input_start_address=plan.producer_endpoint.base,
+        output_start_address=plan.consumer_endpoint.base,
         restickify_op_name="ReStickifyOpWithPTLx",
     )
     endpoint_patch = _patch_bridge_endpoint_pieces(
         bridge_payload,
-        producer_starts={core: plan.producer_base for core in range(num_cores)},
-        consumer_starts={core: plan.consumer_base for core in range(num_cores)},
+        producer_starts={
+            core: plan.producer_endpoint.base for core in range(num_cores)
+        },
+        consumer_starts={
+            core: plan.consumer_endpoint.base for core in range(num_cores)
+        },
     )
     value_flow_contract = _mixed_value_flow_contract(
         producer_payload=producer_payload,
@@ -790,6 +824,60 @@ def _force_consumer_corelets(payload: dict[str, Any], *, factor: int) -> None:
     root["coreletFoldProp_"] = {"factor_": factor, "label_": "corelet"}
     dsc["numCoreletsUsed_"] = factor
     dsc["numCoreletsUsed_DSC2_"] = factor
+
+
+def _materialize_producer_lx_endpoint(
+    payload: dict[str, Any],
+    *,
+    endpoint: PTLXLXEndpointPlan,
+    num_cores: int,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    _require_endpoint_role(endpoint, role="producer_output", is_input=False)
+    start_payload = _constant_lx_start_payload(
+        num_cores=num_cores,
+        base=endpoint.base,
+    )
+    patches = _patch_lx_allocation_by_index(
+        payload,
+        lds_idx=endpoint.lds_idx,
+        start_payload=start_payload,
+    )
+    return start_payload, patches
+
+
+def _materialize_consumer_lx_endpoint(
+    payload: dict[str, Any],
+    *,
+    consumer_dsc: dict[str, Any],
+    endpoint: PTLXLXEndpointPlan,
+    num_cores: int,
+) -> tuple[dict[str, Any], str]:
+    _require_endpoint_role(endpoint, role="consumer_input", is_input=True)
+    start_payload = _constant_lx_start_payload(
+        num_cores=num_cores,
+        base=endpoint.base,
+    )
+    consumer_name = _lds_name(consumer_dsc, endpoint.lds_idx)
+    _patch_consumer_input_lx_map(
+        payload,
+        input_name=consumer_name,
+        lds_idx=endpoint.lds_idx,
+        start_payload=start_payload,
+    )
+    return start_payload, consumer_name
+
+
+def _require_endpoint_role(
+    endpoint: PTLXLXEndpointPlan,
+    *,
+    role: str,
+    is_input: bool,
+) -> None:
+    if endpoint.role != role or endpoint.is_input != is_input:
+        raise ValueError(
+            "unexpected PT-LX endpoint plan: "
+            f"expected role={role!r} is_input={is_input}, got {endpoint}"
+        )
 
 
 def _combine_ptlx_bridge_with_consumer(
