@@ -27,6 +27,10 @@ from torch._inductor.graph import GraphLowering
 from .logging_utils import get_inductor_logger
 from .ir import FixedTiledLayout, TensorBox
 from . import config
+from .restickify_ring import (
+    CORE_MAPPING_OVERRIDE_ATTR,
+    LOCALITY_CERTIFICATE_ATTR,
+)
 
 OP_OUTPUT_GOOD_FOR_LX_REUSE = [
     "max",
@@ -127,7 +131,14 @@ class ScratchPadAllocator:
             # NOTE allow_inplace also implies allow_output_to_lx
             return None
 
-    def try_allocate(self, mem_usage: dict, idx: int, org_op_name: str):
+    def try_allocate(
+        self,
+        mem_usage: dict,
+        idx: int,
+        org_op_name: str,
+        *,
+        force_lx_buffers: set[str] | None = None,
+    ):
         """
         Simple reuse rule:
         1. for an "input" tensor, find a matched tensor (name and size) on LX
@@ -148,6 +159,7 @@ class ScratchPadAllocator:
                  now, even if not all the cores are being used. (over-allocated for
                  simplicity reason)
         """
+        force_lx_buffers = force_lx_buffers or set()
         graph_output_buf_name = self.get_output_names()
         for tensor_name in mem_usage["all_buf_used"]:
             tensor_info = mem_usage[tensor_name]
@@ -156,10 +168,15 @@ class ScratchPadAllocator:
             needed_size = tensor_info["size_per_core"]
             is_input = tensor_info["is_input"]
             core_div_mismatch = (not is_input) and tensor_info["core_div_mismatch"]
-            if is_graph_input or is_graph_output or core_div_mismatch:
+            force_lx = tensor_name in force_lx_buffers
+            if is_graph_input or is_graph_output or (core_div_mismatch and not force_lx):
                 # graph input itself cannot be pinned (see try_insert_clone_())
                 # graph output has to go back to HBM
-                # if buf users have diff core-splits -> cause cross-core LX read/write
+                # if buf users have diff core-splits -> cause cross-core LX read/write.
+                # Certified PT-LX restickify endpoints are the narrow exception:
+                # their producer/restickify ownership was already proven to have
+                # zero modeled byte-hops, so the generic split-equality guard is
+                # too conservative for that edge.
                 continue
 
             # Decide whether to reuse/pin.
@@ -171,12 +188,14 @@ class ScratchPadAllocator:
 
             if is_input and tensor_on_lx and size_match:
                 addr = self.usage[tensor_name]["addr"]
+            elif is_input and force_lx:
+                addr = self.find_free_block(needed_size)
             elif not is_input and allow_inplace:
                 addr = self.find_inplace_address(tensor_name, mem_usage, needed_size)
                 if addr is None:
                     # NOTE 0 is a legitimate address, so we can't test "if not addr:"
                     addr = self.find_free_block(needed_size)
-            elif not is_input and allow_output_to_lx:
+            elif not is_input and (allow_output_to_lx or force_lx):
                 addr = self.find_free_block(needed_size)
 
             # add lx info into V.graph.buffers.layout for later codegen use.
@@ -294,6 +313,7 @@ class GreedyAllocationStrategy(AllocationStrategy):
         idx: int,
         core_div_mismatch: dict[str, bool] = {},
         release_next: list = [],
+        force_lx_buffers: set[str] | None = None,
     ):
         """
         If core_div_mismatch is not provided, we will consider LX pinning without taking
@@ -314,7 +334,50 @@ class GreedyAllocationStrategy(AllocationStrategy):
         org_op_name = (
             op.origin_node.target._opname if op.origin_node is not None else ""
         )
-        self.alloc.try_allocate(mem_usage, idx, org_op_name)
+        self.alloc.try_allocate(
+            mem_usage,
+            idx,
+            org_op_name,
+            force_lx_buffers=force_lx_buffers,
+        )
+
+    def ptlx_endpoint_buffer_names(
+        self,
+        operations: list[Operation],
+        buf_users: dict[str, Operation],
+        core_div_mismatch: dict[str, bool],
+    ) -> set[str]:
+        """Buffers that a certified PT-LX restickify edge needs on LX.
+
+        This is narrower than the scratchpad allowlist: it only forces the
+        producer output and restickify output buffers for a restickify op that
+        has already been locality-certified for the default-off PT-LX mixed
+        schedule prototype.
+        """
+
+        if not config.restickify_ptlx_mixed_schedule_e2e:
+            return set()
+
+        forced: set[str] = set()
+        for op in operations:
+            if not self.should_consider_op(op):
+                continue
+            if not _is_certified_ptlx_restickify_op(op):
+                continue
+            rw = op.get_read_writes()
+            input_names = [dep.name for dep in rw.reads]
+            output_names = [dep.name for dep in rw.writes]
+            if len(input_names) != 1 or len(output_names) != 1:
+                continue
+            source_name = input_names[0]
+            output_name = output_names[0]
+            if (
+                self.alloc.is_graph_input(source_name)
+                or output_name in self.alloc.get_output_names()
+            ):
+                continue
+            forced.update({source_name, output_name})
+        return forced
 
     def buf_analysis(self, operations: list[Operation]):
         """
@@ -525,6 +588,11 @@ class GreedyAllocationStrategy(AllocationStrategy):
         idx_to_dealloc_bufs, buf_users, core_div_mismatch = self.buf_analysis(
             operations
         )
+        force_lx_buffers = self.ptlx_endpoint_buffer_names(
+            operations,
+            buf_users,
+            core_div_mismatch,
+        )
 
         if "clone" in OP_OUTPUT_GOOD_FOR_LX_REUSE:
             num_ops_before = len(operations)
@@ -540,6 +608,11 @@ class GreedyAllocationStrategy(AllocationStrategy):
                 idx_to_dealloc_bufs, buf_users, core_div_mismatch = self.buf_analysis(
                     operations
                 )
+                force_lx_buffers = self.ptlx_endpoint_buffer_names(
+                    operations,
+                    buf_users,
+                    core_div_mismatch,
+                )
 
         for idx, op in enumerate(operations):
             # release unneeded LX allocations before actual planning
@@ -548,7 +621,13 @@ class GreedyAllocationStrategy(AllocationStrategy):
             self.alloc.deallocate(release_now)
 
             if self.should_consider_op(op):
-                self.consider_for_scratchpad(op, idx, core_div_mismatch, release_next)
+                self.consider_for_scratchpad(
+                    op,
+                    idx,
+                    core_div_mismatch,
+                    release_next,
+                    force_lx_buffers=force_lx_buffers,
+                )
         # logger.info(alloc.lx_usage_hist)
 
 
@@ -562,3 +641,20 @@ def scratchpad_planning(
     if not strategy:
         strategy = GreedyAllocationStrategy()
     strategy.plan_allocation(operations)
+
+
+def _is_certified_ptlx_restickify_op(op: Operation) -> bool:
+    if getattr(op, "restickify_source_kind", None) != "in_graph_computed":
+        return False
+    if getattr(op, CORE_MAPPING_OVERRIDE_ATTR, None) is None:
+        return False
+    certificate = getattr(op, LOCALITY_CERTIFICATE_ATTR, None)
+    if certificate is None:
+        return False
+    certified_byte_hops = getattr(certificate, "certified_byte_hops", None)
+    if certified_byte_hops is None:
+        return False
+    return (
+        bool(getattr(certificate, "locality_certified", False))
+        and int(certified_byte_hops) == 0
+    )

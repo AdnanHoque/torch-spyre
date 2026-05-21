@@ -2,6 +2,7 @@ from collections import defaultdict
 import copy
 from dataclasses import dataclass
 import itertools
+from types import SimpleNamespace
 from typing import Callable, Optional, Iterable, override
 from unittest import TestCase, expectedFailure
 from enum import Enum
@@ -16,6 +17,10 @@ from torch_spyre._inductor.scratchpad import (
     GreedyAllocationStrategy,
 )
 from torch_spyre._inductor import config
+from torch_spyre._inductor.restickify_ring import (
+    CORE_MAPPING_OVERRIDE_ATTR,
+    LOCALITY_CERTIFICATE_ATTR,
+)
 
 # From scratchpad.py
 AVAILABLE_LX_SIZE = int((2 << 20) * (1.0 - config.dxp_lx_frac_avail))
@@ -256,6 +261,7 @@ class InstrumentedAllocator(ScratchPadAllocator):
             result[tensor_name] = {
                 "is_input": is_input,
                 "size": op._buffer_registry[tensor_name].size,
+                "size_per_core": op._buffer_registry[tensor_name].size,
                 "core_div_mismatch": False,
                 "last_usage": tensor_name in release_next,
             }
@@ -345,6 +351,16 @@ class InstrumentedGreedyAllocationStrategy(GreedyAllocationStrategy):
             op.outputs = [
                 buffer_name if buf.name == output else output for output in op.outputs
             ]
+
+
+class NoAllowlistInstrumentedAllocator(InstrumentedAllocator):
+    @override
+    def op_output_good_for_lx_reuse(self, org_op_name: str) -> bool:
+        return False
+
+    @override
+    def op_good_for_lx_inplace(self, org_op_name: str) -> bool:
+        return False
 
 
 class TestExamplePattern(TestCase):
@@ -619,6 +635,48 @@ class TestExamplePattern(TestCase):
 
     def test_verify_simple_fragmentation_pattern(self):
         self.verify_pattern(self.make_simple_fragmentation_pattern())
+
+    def test_certified_ptlx_restickify_edge_forces_only_endpoint_buffers(self):
+        buffers = make_buffer_registry(
+            {
+                "arg": 128,
+                "producer_out": 128,
+                "restickify_out": 128,
+                "graph_out": 128,
+            }
+        )
+        ops = make_operations(
+            [
+                ("producer_add", "arg", "producer_out"),
+                ("restickify", "producer_out", "restickify_out"),
+                ("consumer_add", "restickify_out", "graph_out"),
+            ],
+            buffers,
+        )
+        restickify = ops[1]
+        restickify.restickify_source_name = "producer_out"
+        restickify.restickify_source_kind = "in_graph_computed"
+        setattr(restickify, CORE_MAPPING_OVERRIDE_ATTR, {"0": {}})
+        setattr(
+            restickify,
+            LOCALITY_CERTIFICATE_ATTR,
+            SimpleNamespace(locality_certified=True, certified_byte_hops=0),
+        )
+        pattern = Pattern(
+            buffers,
+            ops,
+            make_nonevicting_allocation_result(buffers, {}, ops),
+        )
+        lowering = MockGraphLowering(pattern)
+        alloc = NoAllowlistInstrumentedAllocator(pattern, lowering)
+        strategy = InstrumentedGreedyAllocationStrategy(pattern, alloc, lowering)
+
+        with config.patch(restickify_ptlx_mixed_schedule_e2e=True):
+            scratchpad_planning(pattern.operations, strategy)
+
+        assert set(alloc.allocations) == {"producer_out", "restickify_out"}
+        assert alloc.allocations["producer_out"] == 0
+        assert alloc.allocations["restickify_out"] == 128
 
     @usuallyExpectedFailure
     def test_simple_fragmentation_pattern(self):
