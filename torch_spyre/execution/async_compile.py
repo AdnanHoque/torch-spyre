@@ -31,6 +31,7 @@ logger = get_inductor_logger("sdsc_compile")
 _RESTICKIFY_DDL_PREDDC_SHIM_SRC = r'''
 #include <dlfcn.h>
 #include <cstdlib>
+#include <exception>
 #include <iostream>
 #include <string>
 
@@ -47,6 +48,19 @@ class L3DlOpsScheduler {
  public:
   void run(SuperDsc& sdsc);
 };
+
+namespace ddc {
+class Ddc {
+ public:
+  bool run_v1(SuperDsc& sdsc);
+  void coordinateCapture();
+  bool buildFoldForTransfer(dsc2::TransferNode* transferNode,
+                            dsc2::CoordPropInfoType& coordPropInfo);
+};
+}  // namespace ddc
+
+static bool skip_bridge_ddc_after_l3 = false;
+static bool skip_coordinate_capture_after_bridge_l3 = false;
 
 static bool has_bridge_name(const SuperDsc* sdsc) {
   if (!sdsc) {
@@ -113,6 +127,33 @@ static bool name_matches_any(const SuperDsc* sdsc, const char* raw_names) {
   return false;
 }
 
+static void rename_prefilled_interslice_nodes_before_l3(SuperDsc& sdsc) {
+  if (!name_matches_any(&sdsc, "interslicetranspose_fp16_ddl_bridge")) {
+    skip_bridge_ddc_after_l3 = false;
+    skip_coordinate_capture_after_bridge_l3 = false;
+    return;
+  }
+  skip_bridge_ddc_after_l3 = true;
+  skip_coordinate_capture_after_bridge_l3 = true;
+  for (auto& dsc : sdsc.dscs_) {
+    for (auto* node : dsc.scheduleTree_.traverseTreeDFSMutable()) {
+      if (node->name_ == "transfer_lds0_src:no_component_dst:lx_lx_local") {
+        node->name_ = "prefill_transfer_lds0_src:no_component_dst:lx_lx_local";
+      } else if (node->name_ == "transfer_lds1_src:lx_dst:no_component_lx_local") {
+        node->name_ = "prefill_transfer_lds1_src:lx_dst:no_component_lx_local";
+      } else if (node->name_ == "loop_ds0_ds1_y") {
+        node->name_ = "prefill_loop_ds0_ds1_y";
+      } else if (node->name_ == "loop_ds0_ds1_out") {
+        node->name_ = "prefill_loop_ds0_ds1_out";
+      } else if (node->name_ == "loop_ds0_ds1_mb") {
+        node->name_ = "prefill_loop_ds0_ds1_mb";
+      } else if (node->name_ == "lx_below_schedule") {
+        node->name_ = "prefill_lx_below_schedule";
+      }
+    }
+  }
+}
+
 template <typename Fn>
 static Fn required_next_symbol(const char* name) {
   dlerror();
@@ -129,6 +170,14 @@ static Fn required_next_symbol(const char* name) {
 
 void Dsm::doCoreletSplitSdsc(SuperDsc* sdsc) {
   if (is_restickify_ddl_bridge(sdsc)) {
+    const char* run_bridge_corelet =
+        std::getenv("SPYRE_RESTICKIFY_DDL_SHIM_RUN_CORELET_FOR_BRIDGE");
+    if (run_bridge_corelet != nullptr && std::string(run_bridge_corelet) == "1") {
+      using Fn = void (*)(SuperDsc*);
+      static Fn next = required_next_symbol<Fn>("_ZN3Dsm18doCoreletSplitSdscEP8SuperDsc");
+      next(sdsc);
+      return;
+    }
     std::cerr << "[torch-spyre] skipped Dsm::doCoreletSplitSdsc for "
               << sdsc->name_ << "\n";
     return;
@@ -166,9 +215,96 @@ void L3DlOpsScheduler::run(SuperDsc& sdsc) {
               << sdsc.name_ << "\n";
     return;
   }
+  rename_prefilled_interslice_nodes_before_l3(sdsc);
   using Fn = void (*)(L3DlOpsScheduler*, SuperDsc&);
   static Fn next = required_next_symbol<Fn>("_ZN16L3DlOpsScheduler3runER8SuperDsc");
+  const char* swallow_l3_errors =
+      std::getenv("SPYRE_RESTICKIFY_DDL_SHIM_SWALLOW_L3_ERRORS");
+  if (swallow_l3_errors != nullptr &&
+      std::string(swallow_l3_errors) == "1" && has_bridge_name(&sdsc)) {
+    try {
+      next(this, sdsc);
+    } catch (const std::exception& ex) {
+      std::cerr << "[torch-spyre] swallowed L3DlOpsScheduler::run exception for "
+                << sdsc.name_ << ": " << ex.what() << "\n";
+    }
+    return;
+  }
   next(this, sdsc);
+}
+
+bool ddc::Ddc::run_v1(SuperDsc& sdsc) {
+  using Fn = bool (*)(ddc::Ddc*, SuperDsc&);
+  static Fn next = required_next_symbol<Fn>("_ZN3ddc3Ddc6run_v1ER8SuperDsc");
+  const char* skip_bridge_ddc =
+      std::getenv("SPYRE_RESTICKIFY_DDL_SHIM_SKIP_BRIDGE_DDC_AFTER_L3");
+  if (skip_bridge_ddc != nullptr && std::string(skip_bridge_ddc) == "1" &&
+      skip_bridge_ddc_after_l3 && has_bridge_name(&sdsc)) {
+    std::cerr << "[torch-spyre] skipped DDC run_v1 after interslice bridge L3 "
+              << "scheduling for " << sdsc.name_ << "\n";
+    skip_bridge_ddc_after_l3 = false;
+    skip_coordinate_capture_after_bridge_l3 = false;
+    return true;
+  }
+  skip_bridge_ddc_after_l3 = false;
+  return next(this, sdsc);
+}
+
+void ddc::Ddc::coordinateCapture() {
+  using Fn = void (*)(ddc::Ddc*);
+  static Fn next = required_next_symbol<Fn>("_ZN3ddc3Ddc17coordinateCaptureEv");
+  const char* skip_bridge_coordinate_capture =
+      std::getenv("SPYRE_RESTICKIFY_DDL_SHIM_SKIP_BRIDGE_COORDINATE_CAPTURE");
+  if (skip_bridge_coordinate_capture != nullptr &&
+      std::string(skip_bridge_coordinate_capture) == "1" &&
+      skip_coordinate_capture_after_bridge_l3) {
+    std::cerr << "[torch-spyre] skipped DDC coordinateCapture after "
+              << "interslice bridge L3 scheduling\n";
+    skip_coordinate_capture_after_bridge_l3 = false;
+    return;
+  }
+  skip_coordinate_capture_after_bridge_l3 = false;
+  next(this);
+}
+
+bool ddc::Ddc::buildFoldForTransfer(dsc2::TransferNode* transferNode,
+                                    dsc2::CoordPropInfoType& coordPropInfo) {
+  using Fn = bool (*)(ddc::Ddc*, dsc2::TransferNode*, dsc2::CoordPropInfoType&);
+  static Fn next = required_next_symbol<Fn>(
+      "_ZN3ddc3Ddc20buildFoldForTransferEPN4dsc212TransferNodeERNS1_17CoordPropInfoTypeE");
+  const char* log_transfers =
+      std::getenv("SPYRE_RESTICKIFY_DDL_SHIM_LOG_DDC_TRANSFERS");
+  const bool should_log =
+      log_transfers != nullptr && std::string(log_transfers) == "1";
+  if (should_log && transferNode != nullptr) {
+    std::cerr << "[torch-spyre] DDC buildFoldForTransfer "
+              << transferNode->name_ << "\n";
+    coordPropInfo.print(std::cerr);
+    std::cerr << "\n";
+  }
+  try {
+    return next(this, transferNode, coordPropInfo);
+  } catch (const std::exception& ex) {
+    std::cerr << "[torch-spyre] DDC buildFoldForTransfer failed";
+    if (transferNode != nullptr) {
+      std::cerr << " for " << transferNode->name_;
+    }
+    std::cerr << ": " << ex.what() << "\n";
+    coordPropInfo.print(std::cerr);
+    std::cerr << "\n";
+    const char* swallow_transfer_errors =
+        std::getenv("SPYRE_RESTICKIFY_DDL_SHIM_SWALLOW_DDC_TRANSFER_ERRORS");
+    if (swallow_transfer_errors != nullptr &&
+        std::string(swallow_transfer_errors) == "1") {
+      std::cerr << "[torch-spyre] swallowed DDC buildFoldForTransfer failure";
+      if (transferNode != nullptr) {
+        std::cerr << " for " << transferNode->name_;
+      }
+      std::cerr << "\n";
+      return false;
+    }
+    throw;
+  }
 }
 '''
 

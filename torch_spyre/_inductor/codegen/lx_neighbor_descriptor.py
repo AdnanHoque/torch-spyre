@@ -40,6 +40,9 @@ from torch_spyre._inductor.restickify_ring import (
 logger = get_inductor_logger("sdsc_compile")
 
 DESCRIPTOR_FILENAME = "restickify_lx_neighbor_edges.json"
+_ALLOW_UNCERTIFIED_ENV = (
+    "SPYRE_RESTICKIFY_LX_NEIGHBOR_DESCRIPTOR_ALLOW_UNCERTIFIED"
+)
 
 
 def maybe_emit_lx_neighbor_descriptor(
@@ -186,6 +189,10 @@ def _skip_reason(
     source_kind = spec.op_info.get("restickify_source_kind")
     if source_kind != "in_graph_computed":
         return f"source-kind-{source_kind or 'unknown'}"
+    if os.environ.get(_ALLOW_UNCERTIFIED_ENV, "0") == "1":
+        if len(spec.args) != 2:
+            return "unsupported-restickify-arity"
+        return None
     if CORE_MAPPING_OVERRIDE_OP_INFO_KEY not in spec.op_info:
         return "missing-producer-aligned-core-mapping"
     certificate = spec.op_info.get(LOCALITY_CERTIFICATE_OP_INFO_KEY)

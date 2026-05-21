@@ -44,6 +44,7 @@ from typing import Any
 
 _TOKENS = ("HBM", "L3", "L3LU", "L3SU", "LXLU", "LXSU", "LX", "SFP", "PT")
 _DESCRIPTOR_FILENAME = "restickify_lx_neighbor_edges.json"
+_DIRECTION_ENV = "SPYRE_RESTICKIFY_LX_DATAOP_DIRECTION"
 
 
 def _load_json(path: Path) -> Any:
@@ -252,6 +253,48 @@ def _base_address(starts: dict[int, int]) -> int:
     return starts[min(starts)]
 
 
+def _normalize_dim_name(dim: Any) -> str:
+    return str(dim).removesuffix("_")
+
+
+def _primary_layout(primary: dict[str, Any]) -> list[str]:
+    return [_normalize_dim_name(dim) for dim in primary.get("layoutDimOrder_", [])]
+
+
+def _primary_stick(primary: dict[str, Any]) -> list[str]:
+    return [_normalize_dim_name(dim) for dim in primary.get("stickDimOrder_", [])]
+
+
+def _infer_dataop_direction(edge: dict[str, Any]) -> str:
+    forced = os.environ.get(_DIRECTION_ENV)
+    if forced:
+        return forced
+
+    roles = (edge.get("sdsc_contract") or {}).get("restickify_edge_roles") or {}
+    source_primary = roles.get("source_primary") or {}
+    destination_primary = roles.get("destination_primary") or {}
+    source_layout = _primary_layout(source_primary)
+    destination_layout = _primary_layout(destination_primary)
+    source_stick = _primary_stick(source_primary)
+    destination_stick = _primary_stick(destination_primary)
+
+    if (
+        source_layout == ["out", "mb"]
+        and destination_layout == ["mb", "out"]
+        and source_stick == ["mb"]
+        and destination_stick == ["out"]
+    ):
+        return "output-to-kernel"
+    if (
+        source_layout == ["mb", "out"]
+        and destination_layout == ["out", "mb"]
+        and source_stick == ["out"]
+        and destination_stick == ["mb"]
+    ):
+        return "kernel-to-output"
+    return "kernel-to-output"
+
+
 def _find_matching_lds_by_hbm_base(
     dsc: dict[str, Any],
     *,
@@ -396,15 +439,15 @@ def _patch_dataop_payload(
     payload = _load_json(seed_path)
     _, root = _single_root(payload)
     datadscs = root.get("datadscs_", []) or []
-    if len(datadscs) < 2:
-        raise ValueError("expected at least two datadscs_ entries")
+    if not datadscs:
+        raise ValueError("expected at least one datadscs_ entry")
     _ensure_sequential_dataop_schedule(root, len(datadscs))
     first = next(iter(datadscs[0].values()))
-    second = next(iter(datadscs[1].values()))
+    last = next(iter(datadscs[-1].values()))
     first_input = first["labeledDs_"][0]
-    second_output = second["labeledDs_"][-1]
+    last_output = last["labeledDs_"][-1]
     producer_patch = _patch_piece_starts(first_input, producer_lx_starts)
-    consumer_patch = _patch_piece_starts(second_output, consumer_lx_starts)
+    consumer_patch = _patch_piece_starts(last_output, consumer_lx_starts)
     _write_json(output_path, payload)
     return {
         "path": str(output_path),
@@ -642,6 +685,7 @@ def _address_summary(args: argparse.Namespace, work_dir: Path) -> dict[str, Any]
         "consumer_lx_source": consumer_lx_source,
         "producer_lx_unique_bases": sorted(set(producer_lx.values())),
         "consumer_lx_unique_bases": sorted(set(consumer_lx.values())),
+        "dataop_direction": _infer_dataop_direction(edge),
         "producer_core_map_sample": dict(list((producer_root.get("coreIdToWkSlice_") or {}).items())[:4]),
         "restickify_core_map_sample": dict(list((restickify_root.get("coreIdToWkSlice_") or {}).items())[:4]),
         "consumer_core_map_sample": dict(list((consumer_root.get("coreIdToWkSlice_") or {}).items())[:4]),
@@ -676,6 +720,7 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     summary = _address_summary(args, output_dir)
+    env[_DIRECTION_ENV] = str(summary.get("dataop_direction") or "kernel-to-output")
     size = args.size or int(summary["size"])
     num_cores = args.num_cores or int(summary["num_cores"])
 

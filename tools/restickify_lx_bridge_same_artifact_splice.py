@@ -156,6 +156,28 @@ def _bridge_frame(bridge_dir: Path) -> tuple[bytes, str]:
     return _clear_sentinel(raw.read_bytes()), str(raw)
 
 
+def _replacement_frame(path: Path, *, clear_sentinel: bool) -> tuple[bytes, str]:
+    if path.is_dir():
+        path = _runtime_init_path(path)
+    data = _read_hex_init(path)
+    if clear_sentinel:
+        data = _clear_sentinel(data)
+    return data, str(path)
+
+
+def _parse_replacement_frame(item: str) -> tuple[int, Path]:
+    if ":" not in item:
+        raise ValueError(
+            "--replacement-frame must be formatted as "
+            "'<frame-index>:<init-or-code-dir>'"
+        )
+    index_text, path_text = item.split(":", 1)
+    index = int(index_text)
+    if index < 0:
+        raise ValueError(f"replacement frame index must be non-negative: {index}")
+    return index, Path(path_text)
+
+
 def _load_bridge_summary(bridge_dir: Path) -> dict[str, Any]:
     path = bridge_dir / "summary.json"
     if not path.exists():
@@ -269,7 +291,35 @@ def splice(args: argparse.Namespace) -> dict[str, Any]:
         if hbm_free is not True:
             raise ValueError(f"bridge summary does not prove hbm_free=true: {hbm_free}")
 
-    patched = original[:restickify_start] + bridge + original[restickify_end:]
+    replacements: dict[int, tuple[bytes, str]] = {
+        restickify_pos: (bridge, bridge_source),
+    }
+    for item in args.replacement_frame or []:
+        position, replacement_path = _parse_replacement_frame(item)
+        if position >= len(frame_sizes):
+            raise ValueError(
+                f"replacement frame index {position} is out of range for "
+                f"{len(frame_sizes)} frames"
+            )
+        replacement, source = _replacement_frame(
+            replacement_path.resolve(),
+            clear_sentinel=position > 0,
+        )
+        if len(replacement) % 128 != 0:
+            raise ValueError(
+                f"replacement frame {replacement_path} is not 128-byte aligned: "
+                f"{len(replacement)}"
+            )
+        replacements[position] = (replacement, source)
+
+    chunks = []
+    for index, start in enumerate(starts):
+        original_size = frame_sizes[index]
+        if index in replacements:
+            chunks.append(replacements[index][0])
+        else:
+            chunks.append(original[start : start + original_size])
+    patched = b"".join(chunks)
     _write_hex_init(init_path, patched)
     metadata = {
         "segment_size": _update_segment_size(code_dir, len(patched) // 128),
@@ -297,6 +347,14 @@ def splice(args: argparse.Namespace) -> dict[str, Any]:
         "bridge_frame_source": bridge_source,
         "bridge_frame_bytes": len(bridge),
         "bridge_frame_flits_128b": len(bridge) // 128,
+        "replacement_frames": {
+            str(index): {
+                "source": source,
+                "bytes": len(data),
+                "flits_128b": len(data) // 128,
+            }
+            for index, (data, source) in replacements.items()
+        },
         "original_header_word": _header_word(original),
         "restickify_original_header_word": _header_word(original, restickify_start),
         "bridge_header_word": _header_word(bridge),
@@ -324,6 +382,15 @@ def parse_args() -> argparse.Namespace:
         "--frame-sizes",
         default="",
         help="Comma-separated frame sizes in bytes. If omitted, infer from init headers.",
+    )
+    parser.add_argument(
+        "--replacement-frame",
+        action="append",
+        default=[],
+        help=(
+            "Additional frame replacement formatted as "
+            "'<frame-index>:<init.txt-or-code-dir>'. Can be repeated."
+        ),
     )
     parser.add_argument("--clean", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--require-hbm-free", action=argparse.BooleanOptionalAction, default=True)

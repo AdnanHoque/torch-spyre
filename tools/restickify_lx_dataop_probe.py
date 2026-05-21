@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -18,6 +19,31 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     generate_restickify_dataop_sdsc_from_spec,
 )
 from torch_spyre._inductor.codegen.superdsc import SDSCArgs, SDSCSpec
+
+_RESTICKIFY_LX_DATAOP_RESTICKIFY_OP_ENV = (
+    "SPYRE_RESTICKIFY_LX_DATAOP_RESTICKIFY_OP"
+)
+_SUPPORTED_TWO_STEP_RESTICKIFY_OPS = frozenset(
+    {"ReStickifyOpLx", "ReStickifyOpWithPTLx"}
+)
+
+
+def _two_step_restickify_op_name() -> str:
+    op_name = os.environ.get(
+        _RESTICKIFY_LX_DATAOP_RESTICKIFY_OP_ENV,
+        "ReStickifyOpLx",
+    )
+    if op_name not in _SUPPORTED_TWO_STEP_RESTICKIFY_OPS:
+        raise ValueError(
+            f"{_RESTICKIFY_LX_DATAOP_RESTICKIFY_OP_ENV}={op_name!r} is not "
+            "supported for the composed LX bridge; expected one of "
+            f"{sorted(_SUPPORTED_TWO_STEP_RESTICKIFY_OPS)}"
+        )
+    if op_name not in SUPPORTED_RESTICKIFY_DATA_OPS:
+        raise ValueError(
+            f"{op_name!r} is not enabled in SUPPORTED_RESTICKIFY_DATA_OPS"
+        )
+    return op_name
 
 
 def _core_mapping(dims: list[Symbol], split_dim: Symbol, num_cores: int):
@@ -115,11 +141,263 @@ def _two_step_lx_restickify_payload(
 ) -> dict:
     d0 = Symbol("mb_")
     d1 = Symbol("out_")
+    direction = os.environ.get(
+        "SPYRE_RESTICKIFY_LX_DATAOP_DIRECTION",
+        "kernel-to-output",
+    )
+    single_op = os.environ.get("SPYRE_RESTICKIFY_LX_DATAOP_SINGLE_OP", "0") == "1"
+    restickify_op_name = _two_step_restickify_op_name()
+    if direction == "restickify-stcdp-restickify":
+        producer_splits = {d0: num_cores, d1: 1}
+        producer_mapping = _core_mapping([d0, d1], d0, num_cores)
+        source_view_splits = {d0: num_cores, d1: 1}
+        source_view_mapping = _core_mapping([d0, d1], d0, num_cores)
+        transferred_splits = {d0: 1, d1: num_cores}
+        transferred_mapping = _core_mapping([d0, d1], d1, num_cores)
+        consumer_splits = {d0: num_cores, d1: 1}
+        consumer_mapping = _core_mapping([d0, d1], d0, num_cores)
+
+        source_view_start = 1024 * 1024
+        transferred_start = 1280 * 1024
+        output_start = 1536 * 1024
+        physical_strides = {d0: size, d1: 1}
+        transpose_source_strides = {d0: 1, d1: size}
+
+        source_view_spec = _synthetic_spec(
+            size,
+            num_cores,
+            output_split_dim=d0,
+            output_stick_dim=d0,
+            input_stick_dim=d1,
+            input_start_address=0,
+            output_start_address=source_view_start,
+            input_layout_order=[d0, d1],
+            output_layout_order=[d1, d0],
+            input_strides=physical_strides,
+            output_strides=transpose_source_strides,
+        )
+        source_view_payload = generate_restickify_dataop_sdsc_from_spec(
+            0,
+            source_view_spec,
+            op_name=restickify_op_name,
+            input_work_slices=producer_splits,
+            input_core_to_work_slice=producer_mapping,
+            output_work_slices=source_view_splits,
+            output_core_to_work_slice=source_view_mapping,
+        )
+
+        transfer_spec = _synthetic_spec(
+            size,
+            num_cores,
+            output_split_dim=d1,
+            output_stick_dim=d0,
+            input_stick_dim=d0,
+            input_start_address=source_view_start,
+            output_start_address=transferred_start,
+            input_layout_order=[d1, d0],
+            output_layout_order=[d1, d0],
+            input_strides=transpose_source_strides,
+            output_strides=transpose_source_strides,
+        )
+        transfer_payload = generate_restickify_dataop_sdsc_from_spec(
+            1,
+            transfer_spec,
+            op_name="STCDPOpLx",
+            input_work_slices=source_view_splits,
+            input_core_to_work_slice=source_view_mapping,
+            output_work_slices=transferred_splits,
+            output_core_to_work_slice=transferred_mapping,
+        )
+
+        destination_spec = _synthetic_spec(
+            size,
+            num_cores,
+            output_split_dim=d0,
+            output_stick_dim=d1,
+            input_stick_dim=d0,
+            input_start_address=transferred_start,
+            output_start_address=output_start,
+            input_layout_order=[d1, d0],
+            output_layout_order=[d0, d1],
+            input_strides=transpose_source_strides,
+            output_strides=physical_strides,
+        )
+        destination_payload = generate_restickify_dataop_sdsc_from_spec(
+            2,
+            destination_spec,
+            op_name=restickify_op_name,
+            input_work_slices=transferred_splits,
+            input_core_to_work_slice=transferred_mapping,
+            output_work_slices=consumer_splits,
+            output_core_to_work_slice=consumer_mapping,
+        )
+
+        return combine_dataop_sdscs(
+            f"0_{restickify_op_name}Stcdp{restickify_op_name}_{mode}_dataop",
+            [source_view_payload, transfer_payload, destination_payload],
+        )
+
+    if direction == "stcdp-then-restickify":
+        producer_splits = {d0: num_cores, d1: 1}
+        producer_mapping = _core_mapping([d0, d1], d0, num_cores)
+        intermediate_splits = {d0: 1, d1: num_cores}
+        intermediate_mapping = _core_mapping([d0, d1], d1, num_cores)
+        consumer_splits = {d0: num_cores, d1: 1}
+        consumer_mapping = _core_mapping([d0, d1], d0, num_cores)
+
+        intermediate_start = 1024 * 1024
+        output_start = 1536 * 1024
+        physical_strides = {d0: size, d1: 1}
+        transpose_source_strides = {d0: 1, d1: size}
+
+        stcdp_spec = _synthetic_spec(
+            size,
+            num_cores,
+            output_split_dim=d1,
+            output_stick_dim=d0,
+            input_stick_dim=d1,
+            input_start_address=0,
+            output_start_address=intermediate_start,
+            input_layout_order=[d0, d1],
+            output_layout_order=[d1, d0],
+            input_strides=physical_strides,
+            output_strides=transpose_source_strides,
+        )
+        stcdp_payload = generate_restickify_dataop_sdsc_from_spec(
+            0,
+            stcdp_spec,
+            op_name="STCDPOpLx",
+            input_work_slices=producer_splits,
+            input_core_to_work_slice=producer_mapping,
+            output_work_slices=intermediate_splits,
+            output_core_to_work_slice=intermediate_mapping,
+        )
+
+        restickify_spec = _synthetic_spec(
+            size,
+            num_cores,
+            output_split_dim=d0,
+            output_stick_dim=d1,
+            input_stick_dim=d0,
+            input_start_address=intermediate_start,
+            output_start_address=output_start,
+            input_layout_order=[d1, d0],
+            output_layout_order=[d0, d1],
+            input_strides=transpose_source_strides,
+            output_strides=physical_strides,
+        )
+        restickify_payload = generate_restickify_dataop_sdsc_from_spec(
+            1,
+            restickify_spec,
+            op_name=restickify_op_name,
+            input_work_slices=intermediate_splits,
+            input_core_to_work_slice=intermediate_mapping,
+            output_work_slices=consumer_splits,
+            output_core_to_work_slice=consumer_mapping,
+        )
+
+        return combine_dataop_sdscs(
+            f"0_StcdpThen{restickify_op_name}_{mode}_dataop",
+            [stcdp_payload, restickify_payload],
+        )
+
+    if direction == "output-to-kernel":
+        input_splits = {d0: num_cores, d1: 1}
+        input_mapping = _core_mapping([d0, d1], d0, num_cores)
+
+        # The real HBM restickify in the computed transpose fixture converts
+        # OUTPUT ([out, mb], stick mb) to KERNEL ([mb, out], stick out).  Keep
+        # the ReStickifyOpLx output split off the input stick dimension, then
+        # use a same-stick STCDP stage to restore the consumer's split.
+        intermediate_splits = {d0: 1, d1: num_cores}
+        intermediate_mapping = _core_mapping([d0, d1], d1, num_cores)
+
+        final_split_dim = d0 if mode == "baseline" else d1
+        final_splits = {d0: 1, d1: 1}
+        final_splits[final_split_dim] = num_cores
+        final_mapping = _core_mapping([d0, d1], final_split_dim, num_cores)
+
+        intermediate_start = 1024 * 1024
+        output_start = 1536 * 1024
+        restickify_output_start = output_start if single_op else intermediate_start
+        restickify_output_splits = final_splits if single_op else intermediate_splits
+        restickify_output_mapping = final_mapping if single_op else intermediate_mapping
+        input_strides = {d0: 1, d1: size}
+        output_strides = {d0: size, d1: 1}
+
+        restickify_spec = _synthetic_spec(
+            size,
+            num_cores,
+            output_split_dim=d1,
+            output_stick_dim=d1,
+            input_stick_dim=d0,
+            input_start_address=0,
+            output_start_address=restickify_output_start,
+            input_layout_order=[d1, d0],
+            output_layout_order=[d0, d1],
+            input_strides=input_strides,
+            output_strides=output_strides,
+        )
+        restickify_payload = generate_restickify_dataop_sdsc_from_spec(
+            0,
+            restickify_spec,
+            op_name=restickify_op_name,
+            input_work_slices=input_splits,
+            input_core_to_work_slice=input_mapping,
+            output_work_slices=restickify_output_splits,
+            output_core_to_work_slice=restickify_output_mapping,
+        )
+        if single_op:
+            return combine_dataop_sdscs(
+                f"0_{restickify_op_name}_{mode}_{direction}_single_dataop",
+                [restickify_payload],
+            )
+
+        stcdp_spec = _synthetic_spec(
+            size,
+            num_cores,
+            output_split_dim=final_split_dim,
+            output_stick_dim=d1,
+            input_stick_dim=d1,
+            input_start_address=intermediate_start,
+            output_start_address=output_start,
+            input_layout_order=[d0, d1],
+            output_layout_order=[d0, d1],
+            input_strides=output_strides,
+            output_strides=output_strides,
+        )
+        stcdp_payload = generate_restickify_dataop_sdsc_from_spec(
+            1,
+            stcdp_spec,
+            op_name="STCDPOpLx",
+            input_work_slices=intermediate_splits,
+            input_core_to_work_slice=intermediate_mapping,
+            output_work_slices=final_splits,
+            output_core_to_work_slice=final_mapping,
+        )
+
+        return combine_dataop_sdscs(
+            f"0_TwoStep{restickify_op_name}Stcdp_{mode}_{direction}_dataop",
+            [restickify_payload, stcdp_payload],
+        )
+
+    if direction != "kernel-to-output":
+        raise ValueError(
+            "SPYRE_RESTICKIFY_LX_DATAOP_DIRECTION must be "
+            "'kernel-to-output', 'output-to-kernel', or "
+            "'stcdp-then-restickify', or "
+            "'restickify-stcdp-restickify'"
+        )
+
     input_splits = {d0: 1, d1: num_cores}
     input_mapping = _core_mapping([d0, d1], d1, num_cores)
 
-    intermediate_splits = {d0: 1, d1: num_cores}
-    intermediate_mapping = _core_mapping([d0, d1], d1, num_cores)
+    # ReStickifyOpLx requires each output piece to cover at least one full
+    # input stick.  The input stick is `out`, so the intermediate restickified
+    # tensor must not be split across `out` before the local restickify runs.
+    # A following STCDP stage can still remap ownership for Stage 3B.
+    intermediate_splits = {d0: num_cores, d1: 1}
+    intermediate_mapping = _core_mapping([d0, d1], d0, num_cores)
 
     final_split_dim = d0 if mode == "baseline" else d1
     final_splits = {d0: 1, d1: 1}
@@ -132,7 +410,7 @@ def _two_step_lx_restickify_payload(
     restickify_spec = _synthetic_spec(
         size,
         num_cores,
-        output_split_dim=d1,
+        output_split_dim=d0,
         output_stick_dim=d0,
         input_start_address=0,
         output_start_address=intermediate_start,
@@ -140,7 +418,7 @@ def _two_step_lx_restickify_payload(
     restickify_payload = generate_restickify_dataop_sdsc_from_spec(
         0,
         restickify_spec,
-        op_name="ReStickifyOpLx",
+        op_name=restickify_op_name,
         input_work_slices=input_splits,
         input_core_to_work_slice=input_mapping,
         output_work_slices=intermediate_splits,
@@ -172,7 +450,7 @@ def _two_step_lx_restickify_payload(
     )
 
     return combine_dataop_sdscs(
-        f"0_TwoStepReStickifyLxStcdp_{mode}_dataop",
+        f"0_TwoStep{restickify_op_name}Stcdp_{mode}_dataop",
         [restickify_payload, stcdp_payload],
     )
 

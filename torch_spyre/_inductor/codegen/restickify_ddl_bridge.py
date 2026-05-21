@@ -41,6 +41,8 @@ _INTERSLICE_TRANSPOSE_FP16_OP = "interslicetranspose_fp16"
 _SUPPORTED_BRIDGE_OPFUNCS = {
     RESTICKIFY_OP,
     "ReStickifyOpLx",
+    "ReStickifyOpWithPTLx",
+    "ReStickifyOpWithPTHBM",
     _INTERSLICE_TRANSPOSE_FP16_OP,
 }
 _BRIDGE_SOURCE_ADDRESS_ENV = "SPYRE_RESTICKIFY_DDL_BRIDGE_SOURCE_ADDRESS"
@@ -61,6 +63,12 @@ _SUPPORTED_BRIDGE_LOOP_ORDERS = {
 }
 _BRIDGE_INTERSLICE_GLOBAL_LAYOUT_ENV = (
     "SPYRE_RESTICKIFY_DDL_BRIDGE_INTERSLICE_GLOBAL_LAYOUT"
+)
+_BRIDGE_INTERSLICE_REFERENCE_CONTRACT_ENV = (
+    "SPYRE_RESTICKIFY_DDL_BRIDGE_INTERSLICE_REFERENCE_CONTRACT"
+)
+_BRIDGE_INTERSLICE_PRESERVE_CORE_MAPPING_ENV = (
+    "SPYRE_RESTICKIFY_DDL_BRIDGE_INTERSLICE_PRESERVE_CORE_MAPPING"
 )
 _BRIDGE_INTERSLICE_GLOBAL_LAYOUT_AS_IS = "as-is"
 _SUPPORTED_BRIDGE_INTERSLICE_GLOBAL_LAYOUTS = {
@@ -146,23 +154,47 @@ def generate_restickify_ddl_bridge_sdsc(
     input_primary = copy.deepcopy(dsc["primaryDsInfo_"][input_lds["dsType_"]])
     output_primary = copy.deepcopy(dsc["primaryDsInfo_"][output_lds["dsType_"]])
     bridge_opfunc = _bridge_opfunc_name()
+    reference_interslice = (
+        bridge_opfunc == _INTERSLICE_TRANSPOSE_FP16_OP
+        and os.environ.get(_BRIDGE_INTERSLICE_REFERENCE_CONTRACT_ENV, "0") == "1"
+    )
     if bridge_opfunc == _INTERSLICE_TRANSPOSE_FP16_OP:
         _apply_interslice_global_layout_probe(input_primary, output_primary)
     input_layout = list(input_primary["layoutDimOrder_"])
     output_layout = list(output_primary["layoutDimOrder_"])
+    input_role = input_lds["dsType_"]
+    output_role = output_lds["dsType_"]
+
+    if reference_interslice:
+        (
+            input_role,
+            output_role,
+            input_primary,
+            output_primary,
+            input_layout,
+            output_layout,
+        ) = _reference_interslice_contract(input_primary, output_primary)
 
     dims = _known_dims(root, dsc)
     reduced_dims = _positive_layout_dims(dims, [input_layout, output_layout])
+    if reference_interslice:
+        reduced_dims["y"] = 1
+        dims["y"] = 1
+        _ensure_reference_interslice_dims(dims, reduced_dims)
     n_struct = _new_dim_struct("n", {**dims, **reduced_dims})
     neg_dims = {dim: -1 for dim in dims}
 
     num_cores = int(root.get("numCoresUsed_") or dsc.get("numCoresUsed_") or 1)
+    num_corelets = 2 if reference_interslice else 1
     input_name = input_lds["dsName_"]
     output_name = output_lds["dsName_"]
     input_alloc = f"allocate_{input_name}_lx"
     output_alloc = f"allocate_{output_name}_lx"
     input_transfer = "transfer_lds0_src:no_component_dst:lx_lx_local"
     output_transfer = "transfer_lds1_src:lx_dst:no_component_lx_local"
+    if reference_interslice:
+        input_transfer = f"prefill_{input_transfer}"
+        output_transfer = f"prefill_{output_transfer}"
     source_address_mode = _bridge_source_address_mode()
 
     alloc_templates = [
@@ -194,6 +226,14 @@ def generate_restickify_ddl_bridge_sdsc(
     stage1 = copy.deepcopy(stage0)
     stage1["ss_"]["name_"] = "chunk"
     stage1["el_"]["name_"] = "chunk"
+    num_wk_slices = copy.deepcopy(root.get("numWkSlicesPerDim_", {}) or {})
+    if reference_interslice:
+        num_wk_slices["y"] = 1
+        stage0, stage1 = _reference_interslice_stage_params(
+            n_struct,
+            num_wk_slices,
+            input_primary,
+        )
 
     out_root = copy.deepcopy(root)
     out_dsc = copy.deepcopy(dsc)
@@ -205,9 +245,13 @@ def generate_restickify_ddl_bridge_sdsc(
                 root.get("coreFoldProp_") or {"factor_": num_cores, "label_": "core"}
             ),
             "coreletFoldProp_": copy.deepcopy(
-                root.get("coreletFoldProp_") or {"factor_": 1, "label_": "corelet"}
+                {"factor_": num_corelets, "label_": "corelet"}
+                if reference_interslice
+                else root.get("coreletFoldProp_")
+                or {"factor_": 1, "label_": "corelet"}
             ),
             "numCoresUsed_": num_cores,
+            "numWkSlicesPerDim_": num_wk_slices,
             "unpadN_": copy.deepcopy(n_struct),
             "N_": copy.deepcopy(n_struct),
             "opFuncsUsed_": [],
@@ -218,10 +262,12 @@ def generate_restickify_ddl_bridge_sdsc(
             "symbolDefinitions_": {},
         }
     )
+    if reference_interslice:
+        _ensure_reference_interslice_wk_slice(out_root)
     out_dsc.update(
         {
             "numCoresUsed_": num_cores,
-            "numCoreletsUsed_": 1,
+            "numCoreletsUsed_": num_corelets,
             "coreIdsUsed_": list(range(num_cores)),
             "unpadN_": copy.deepcopy(n_struct),
             "N_": copy.deepcopy(n_struct),
@@ -241,15 +287,15 @@ def generate_restickify_ddl_bridge_sdsc(
             "coordinateMasking_": {},
             "maskingConstId_": -1,
             "dimToSymbolMapping_": {},
-            "numCoreletsUsed_DSC2_": 1,
+            "numCoreletsUsed_DSC2_": num_corelets,
             "dataStageParam_": {"0": stage0, "1": stage1},
             "constantInfo_": {},
             "gtrIdsUsed_": [],
             "l0TetheredMode_": "none",
             "scheduleTreeHeadDenId_": 0,
             "primaryDsInfo_": {
-                input_lds["dsType_"]: input_primary,
-                output_lds["dsType_"]: output_primary,
+                input_role: input_primary,
+                output_role: output_primary,
             },
             "pdsRelation_": {},
             "labeledDs_": [
@@ -257,7 +303,7 @@ def generate_restickify_ddl_bridge_sdsc(
                     input_lds,
                     idx=0,
                     name=input_name,
-                    role=input_lds["dsType_"],
+                    role=input_role,
                     layout=input_layout,
                     segment=input_segment,
                     lx_size=input_lx_size,
@@ -267,7 +313,7 @@ def generate_restickify_ddl_bridge_sdsc(
                     output_lds,
                     idx=1,
                     name=output_name,
-                    role=output_lds["dsType_"],
+                    role=output_role,
                     layout=output_layout,
                     segment=output_segment,
                     lx_size=output_lx_size,
@@ -285,31 +331,50 @@ def generate_restickify_ddl_bridge_sdsc(
     )
     input_transfer_node = _transfer_node(input_transfer, src_lx_idx=None, dst_lx_idx=0)
     if source_address_mode == _BRIDGE_SOURCE_ADDRESS_COMPACT_LXLU:
-        _set_compact_start_address(input_alloc_node, num_cores)
+        _set_compact_start_address(input_alloc_node, num_cores, num_corelets)
         dst_offset = input_transfer_node["dstLdsAndLoopOffsets_"][0]
-        _set_compact_start_address(dst_offset, num_cores, field="startAddr_")
+        _set_compact_start_address(
+            dst_offset,
+            num_cores,
+            num_corelets,
+            field="startAddr_",
+        )
         dst_offset["dataConnect_"] = "lxlu_input"
+
+    output_alloc_node = _alloc_node(
+        output_alloc_template,
+        name=output_alloc,
+        lds_idx=1,
+        layout=output_layout,
+        user=output_transfer,
+    )
+    if reference_interslice and source_address_mode == _BRIDGE_SOURCE_ADDRESS_COMPACT_LXLU:
+        _set_compact_start_address(
+            output_alloc_node,
+            num_cores,
+            num_corelets,
+            base=input_lx_size,
+        )
+
+    output_transfer_node = _transfer_node(output_transfer, src_lx_idx=1, dst_lx_idx=None)
+    if reference_interslice:
+        output_transfer_node["srcLdsAndLoopOffsets_"]["dataConnect_"] = "lxsu_input"
 
     out_dsc["scheduleTree_"] = [
         input_alloc_node,
-        _alloc_node(
-            output_alloc_template,
-            name=output_alloc,
-            lds_idx=1,
-            layout=output_layout,
-            user=output_transfer,
-        ),
+        output_alloc_node,
         input_transfer_node,
         *loops,
-        {
-            "nodeType_": "block",
-            "name_": "lx_below_schedule",
-            "prev_": loops[-1]["name_"] if loops else "",
-            "relevantComps_": {},
-            "next_": [],
-        },
-        _transfer_node(output_transfer, src_lx_idx=1, dst_lx_idx=None),
+        _block_node(loops[-1]["name_"] if loops else ""),
+        output_transfer_node,
     ]
+    if reference_interslice:
+        out_dsc["scheduleTree_"] = _reference_interslice_schedule_tree(
+            input_alloc_node,
+            input_transfer_node,
+            output_alloc_node,
+            output_transfer_node,
+        )
     op.update(
         {
             "opFuncName": bridge_opfunc,
@@ -319,6 +384,13 @@ def generate_restickify_ddl_bridge_sdsc(
             "indirectAccessIndexLabeledDs": [],
         }
     )
+    if reference_interslice:
+        op["exUnit"] = "pt"
+        op["location"] = "Inner"
+        op["isAtMainLoop"] = 1
+        op["isAtTop"] = 1
+        op["level"] = 0
+        op.pop("attributes_", None)
     out_dsc["computeOp_"] = [op]
     out_root["dscs_"] = [{out_dsc_name: out_dsc}]
     return {out_sdsc_name: out_root}
@@ -361,6 +433,144 @@ def _apply_interslice_global_layout_probe(
         output_primary["layoutDimOrder_"] = list(input_primary["layoutDimOrder_"])
     elif mode == "output":
         input_primary["layoutDimOrder_"] = list(output_primary["layoutDimOrder_"])
+
+
+def _reference_interslice_contract(
+    input_primary: dict[str, Any],
+    output_primary: dict[str, Any],
+) -> tuple[str, str, dict[str, Any], dict[str, Any], list[str], list[str]]:
+    """Return the reference-shaped interslice contract accepted by DDC.
+
+    Deeptools' checked-in interslice SDSC models the output stick as the input
+    stick dimension carried through the slice layout plus the new output stick
+    dimension.  Preserve that shape for this prototype instead of inheriting
+    Torch-Spyre's OUTPUT/KERNEL role names directly.
+    """
+
+    output_layout = list(output_primary["layoutDimOrder_"])
+    if not output_layout:
+        output_layout = list(input_primary["layoutDimOrder_"])
+    canonical_layout = list(output_layout)
+    if "y" not in canonical_layout:
+        canonical_layout.append("y")
+
+    input_stick = list(output_primary.get("stickDimOrder_", []) or [])
+    if not input_stick:
+        input_stick = canonical_layout[:1]
+    carried_sticks = list(input_stick)
+    for dim in input_primary.get("stickDimOrder_", []) or []:
+        if dim not in carried_sticks:
+            carried_sticks.append(dim)
+
+    ref_input = {
+        "layoutDimOrder_": canonical_layout,
+        "stickDimOrder_": input_stick,
+        "stickSize_": [64 for _ in input_stick],
+        "stickRepl_": [1 for _ in input_stick],
+    }
+    ref_output = {
+        "layoutDimOrder_": canonical_layout,
+        "stickDimOrder_": carried_sticks,
+        "stickSize_": [8 for _ in carried_sticks],
+        "stickRepl_": [1 for _ in carried_sticks],
+    }
+    return "INPUT", "OUTPUT", ref_input, ref_output, canonical_layout, canonical_layout
+
+
+def _ensure_reference_interslice_dims(
+    dims: dict[str, int],
+    reduced_dims: dict[str, int],
+) -> None:
+    # The Deeptools reference SDSC for this template carries the standard DSC
+    # dimension vocabulary even when most dimensions are dropped.  DDC's
+    # fold/cardinality import path expects those names to exist.
+    for dim in (
+        "in",
+        "i",
+        "j",
+        "ki",
+        "kj",
+        "x",
+        "x1",
+        "r",
+        "c",
+        "ij",
+        "rc",
+        "kij",
+        "sij",
+        "zij",
+        "si",
+        "sj",
+        "zi",
+        "zj",
+    ):
+        dims.setdefault(dim, -1)
+    for dim in ("i", "j", "ij"):
+        reduced_dims.setdefault(dim, 1)
+
+
+def _ensure_reference_interslice_wk_slice(root: dict[str, Any]) -> None:
+    if os.environ.get(_BRIDGE_INTERSLICE_PRESERVE_CORE_MAPPING_ENV, "0") == "1":
+        for wk_slice in (root.get("coreIdToWkSlice_") or {}).values():
+            if isinstance(wk_slice, dict):
+                wk_slice.setdefault("y", 0)
+        return
+    slices = root.get("numWkSlicesPerDim_") or {}
+    num_cores = int(root.get("numCoresUsed_") or 1)
+    out_slices = int(slices.get("out", 0) or 0)
+    mb_slices = int(slices.get("mb", 0) or 0)
+    if out_slices > 0 and mb_slices > 0 and out_slices * mb_slices == num_cores:
+        root["coreIdToWkSlice_"] = {
+            str(core): {
+                "out": core % out_slices,
+                "mb": core // out_slices,
+                "y": 0,
+            }
+            for core in range(num_cores)
+        }
+        return
+    for wk_slice in (root.get("coreIdToWkSlice_") or {}).values():
+        if isinstance(wk_slice, dict):
+            wk_slice.setdefault("y", 0)
+
+
+def _reference_interslice_stage_params(
+    n_struct: dict[str, Any],
+    slices: dict[str, int],
+    input_primary: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    input_stick = list(input_primary.get("stickDimOrder_", []) or [])
+    split_dim = input_stick[0] if input_stick else "mb"
+    split_peer = "mb" if split_dim != "mb" else "out"
+    core_sizes: dict[str, int] = {}
+    for dim in input_primary["layoutDimOrder_"]:
+        value = int(n_struct.get(f"{dim}_", 1) or 1)
+        divisor = int(slices.get(dim, 1) or 1)
+        core_sizes[dim] = max(1, (value + divisor - 1) // divisor)
+    if split_peer in core_sizes:
+        corelet_dim = split_peer
+    else:
+        corelet_dim = next(
+            (dim for dim in input_primary["layoutDimOrder_"] if dim != split_dim),
+            split_dim,
+        )
+
+    def stage(name: str, sizes: dict[str, int], split_values: list[int]) -> dict[str, Any]:
+        payload = _new_dim_struct(name, sizes)
+        payload["coreletSplit_"] = {corelet_dim: split_values}
+        return {"ss_": copy.deepcopy(payload), "el_": copy.deepcopy(payload)}
+
+    corelet_extent = max(2, core_sizes.get(corelet_dim, 1))
+    first = corelet_extent // 2
+    second = corelet_extent - first
+    core_split = [first, second]
+    chunk_sizes = dict(core_sizes)
+    chunk_sizes[corelet_dim] = min(corelet_extent, 32)
+    chunk_split = [
+        max(1, chunk_sizes[corelet_dim] // 2),
+        max(1, chunk_sizes[corelet_dim] - chunk_sizes[corelet_dim] // 2),
+    ]
+    return stage("core", core_sizes, core_split), stage("chunk", chunk_sizes, chunk_split)
 
 
 def _bridge_loop_dims(
@@ -546,6 +756,10 @@ def _alloc_node(
     user: str,
 ) -> dict[str, Any]:
     node = copy.deepcopy(template)
+    # The source compute allocation may already have post-planning coordinates.
+    # They describe the original HBM restickify contract and can disagree with
+    # the DDL bridge's corelet/layout contract; let DDC recreate them.
+    node.pop("coordinates_", None)
     node.update(
         {
             "nodeType_": "allocate",
@@ -571,44 +785,73 @@ def _alloc_node(
     return node
 
 
-def _compact_start_map(num_cores: int) -> dict[str, str]:
-    return {f"[{core}, 0, 0]": "0" for core in range(num_cores)}
-
-
-def _compact_start_payload(num_cores: int) -> dict[str, Any]:
+def _compact_start_map(
+    num_cores: int,
+    num_corelets: int,
+    *,
+    base: int = 0,
+) -> dict[str, str]:
     return {
-        "dim_prop_func": [{"Map": {}}, {"Const": {}}, {"Const": {}}],
+        f"[{core}, {corelet}, 0]": str(base)
+        for core in range(num_cores)
+        for corelet in range(num_corelets)
+    }
+
+
+def _compact_start_payload(
+    num_cores: int,
+    num_corelets: int = 1,
+    *,
+    base: int = 0,
+) -> dict[str, Any]:
+    return {
+        "dim_prop_func": [
+            {"Map": {}},
+            {"Map": {}} if num_corelets > 1 else {"Const": {}},
+            {"Const": {}},
+        ],
         "dim_prop_attr": [
             {"factor_": num_cores, "label_": "core"},
-            {"factor_": 1, "label_": "corelet"},
+            {"factor_": num_corelets, "label_": "corelet"},
             {"factor_": 1, "label_": "time"},
         ],
-        "data_": _compact_start_map(num_cores),
+        "data_": _compact_start_map(num_cores, num_corelets, base=base),
     }
 
 
 def _set_compact_start_address(
     node_or_offset: dict[str, Any],
     num_cores: int,
+    num_corelets: int = 1,
     *,
+    base: int = 0,
     field: str = "startAddressCoreCorelet_",
 ) -> None:
-    node_or_offset[field] = _compact_start_payload(num_cores)
+    node_or_offset[field] = _compact_start_payload(
+        num_cores,
+        num_corelets,
+        base=base,
+    )
 
 
-def _loop_skeleton(loop_dims: list[str]) -> list[dict[str, Any]]:
+def _loop_skeleton(
+    loop_dims: list[str],
+    *,
+    prefix: str = "",
+    terminal_block: str = "lx_below_schedule",
+) -> list[dict[str, Any]]:
     loops: list[dict[str, Any]] = []
     for index, dim in enumerate(loop_dims):
-        prev = "" if index == 0 else f"loop_ds0_ds1_{loop_dims[index - 1]}"
+        prev = "" if index == 0 else f"{prefix}loop_ds0_ds1_{loop_dims[index - 1]}"
         next_name = (
-            f"loop_ds0_ds1_{loop_dims[index + 1]}"
+            f"{prefix}loop_ds0_ds1_{loop_dims[index + 1]}"
             if index + 1 < len(loop_dims)
-            else "lx_below_schedule"
+            else terminal_block
         )
         loops.append(
             {
                 "nodeType_": "loop",
-                "name_": f"loop_ds0_ds1_{dim}",
+                "name_": f"{prefix}loop_ds0_ds1_{dim}",
                 "prev_": prev,
                 "relevantComps_": {},
                 "next_": [next_name],
@@ -622,6 +865,133 @@ def _loop_skeleton(loop_dims: list[str]) -> list[dict[str, Any]]:
             }
         )
     return loops
+
+
+def _block_node(prev: str, *, name: str = "lx_below_schedule") -> dict[str, Any]:
+    return {
+        "nodeType_": "block",
+        "name_": name,
+        "prev_": prev,
+        "relevantComps_": {},
+        "next_": [],
+    }
+
+
+def _sync_node(
+    name: str,
+    *,
+    prev: str,
+    unit: str,
+    is_receive: int,
+    other: str,
+) -> dict[str, Any]:
+    return {
+        "nodeType_": "sync",
+        "name_": name,
+        "prev_": prev,
+        "relevantComps_": {},
+        "units_": [unit],
+        "isReceive_": is_receive,
+        "isSoft_": 0,
+        "implicitSyncRefTransfer_": "",
+        "otherEndOfTheSignals_": [other],
+    }
+
+
+def _reference_interslice_schedule_tree(
+    input_alloc_node: dict[str, Any],
+    input_transfer_node: dict[str, Any],
+    output_alloc_node: dict[str, Any],
+    output_transfer_node: dict[str, Any],
+) -> list[dict[str, Any]]:
+    block_name = "lx_below_schedule"
+    loops = _loop_skeleton(
+        ["y", "out", "mb"],
+        prefix="prefill_",
+        terminal_block=block_name,
+    )
+    body_names = [
+        input_alloc_node["name_"],
+        input_transfer_node["name_"],
+        output_alloc_node["name_"],
+        "sync_send_l3lu_to_lxlu",
+        "sync_receive_lxlu_from_l3lu",
+        "sync_send_lxlu_to_l3lu",
+        "sync_receive_l3lu_from_lxlu",
+        block_name,
+        "sync_send_lxsu_to_l3su",
+        "sync_receive_l3su_from_lxsu",
+        "sync_send_l3su_to_lxsu",
+        "sync_receive_lxsu_from_l3su",
+        output_transfer_node["name_"],
+    ]
+    loops[-1]["next_"] = body_names
+    for node in (input_alloc_node, input_transfer_node, output_alloc_node, output_transfer_node):
+        node["prev_"] = loops[-1]["name_"]
+    return [
+        *loops,
+        input_alloc_node,
+        input_transfer_node,
+        output_alloc_node,
+        _sync_node(
+            "sync_send_l3lu_to_lxlu",
+            prev=loops[-1]["name_"],
+            unit="l3lu",
+            is_receive=0,
+            other="sync_receive_lxlu_from_l3lu",
+        ),
+        _sync_node(
+            "sync_receive_lxlu_from_l3lu",
+            prev=loops[-1]["name_"],
+            unit="lxlu",
+            is_receive=1,
+            other="sync_send_l3lu_to_lxlu",
+        ),
+        _sync_node(
+            "sync_send_lxlu_to_l3lu",
+            prev=loops[-1]["name_"],
+            unit="lxlu",
+            is_receive=0,
+            other="sync_receive_l3lu_from_lxlu",
+        ),
+        _sync_node(
+            "sync_receive_l3lu_from_lxlu",
+            prev=loops[-1]["name_"],
+            unit="l3lu",
+            is_receive=1,
+            other="sync_send_lxlu_to_l3lu",
+        ),
+        _block_node(loops[-1]["name_"], name=block_name),
+        _sync_node(
+            "sync_send_lxsu_to_l3su",
+            prev=loops[-1]["name_"],
+            unit="lxsu",
+            is_receive=0,
+            other="sync_receive_l3su_from_lxsu",
+        ),
+        _sync_node(
+            "sync_receive_l3su_from_lxsu",
+            prev=loops[-1]["name_"],
+            unit="l3su",
+            is_receive=1,
+            other="sync_send_lxsu_to_l3su",
+        ),
+        _sync_node(
+            "sync_send_l3su_to_lxsu",
+            prev=loops[-1]["name_"],
+            unit="l3su",
+            is_receive=0,
+            other="sync_receive_lxsu_from_l3su",
+        ),
+        _sync_node(
+            "sync_receive_lxsu_from_l3su",
+            prev=loops[-1]["name_"],
+            unit="lxsu",
+            is_receive=1,
+            other="sync_send_l3su_to_lxsu",
+        ),
+        output_transfer_node,
+    ]
 
 
 def _transfer_node(

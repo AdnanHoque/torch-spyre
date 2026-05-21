@@ -36,7 +36,7 @@ from .compute_ops import num_bytes
 from .superdsc import SDSCArgs, SDSCSpec, parse_op_spec
 
 SUPPORTED_RESTICKIFY_DATA_OPS = frozenset(
-    {"STCDPOpLx", "ReStickifyOpLx", "ReStickifyOpHBM"}
+    {"STCDPOpLx", "ReStickifyOpLx", "ReStickifyOpWithPTLx", "ReStickifyOpHBM"}
 )
 
 _LX_SIZE_BYTES = 2 * 1024 * 1024
@@ -119,7 +119,7 @@ def generate_restickify_dataop_sdsc_from_spec(
             {"name_": "dataOUT", "dimNames": dim_pool},
         ],
         "labeledDs_": [input_lds, output_lds],
-        "op": {"name": op_name},
+        "op": _op_payload(op_name),
     }
 
     return {
@@ -151,6 +151,23 @@ def generate_restickify_dataop_sdsc_from_spec(
             "symbolDefinitions_": {},
         }
     }
+
+
+def _op_payload(op_name: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {"name": op_name}
+    if op_name == "ReStickifyOpWithPTLx":
+        payload.update(
+            {
+                "numClToUse": 1,
+                "defaultClId": 0,
+                "workSplitDim": "null_ptr",
+                "cl0ToLxOffsetLU": 0,
+                "cl0ToLxOffsetSU": 0,
+                "useARF": 1,
+                "doInPlace": 0,
+            }
+        )
+    return payload
 
 
 def combine_dataop_sdscs(

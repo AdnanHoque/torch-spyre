@@ -202,6 +202,7 @@ def _core_mapping_override_for_sdsc(
     op_info: dict[str, Any] | None,
     symbol_mapping: dict[Symbol, Symbol],
     num_cores: int,
+    dim_splits: dict[Symbol, int] | None = None,
 ) -> dict[str, dict[str, int]] | None:
     if not op_info:
         return None
@@ -210,6 +211,11 @@ def _core_mapping_override_for_sdsc(
         return None
 
     str_symbol_mapping = {str(src): str(dst) for src, dst in symbol_mapping.items()}
+    str_dim_splits = (
+        {str(dim): int(split) for dim, split in dim_splits.items()}
+        if dim_splits is not None
+        else None
+    )
     mapped_dims = list(str_symbol_mapping.values())
     override: dict[str, dict[str, int]] = {}
     for core_id, per_dim in raw.items():
@@ -226,6 +232,11 @@ def _core_mapping_override_for_sdsc(
                 if str(dim) in str_symbol_mapping
             }
         )
+        if str_dim_splits is not None:
+            for dim, slice_idx in mapped.items():
+                split = str_dim_splits.get(dim, 1)
+                if slice_idx < 0 or slice_idx >= split:
+                    return None
         override[str(core)] = mapped
 
     if len(override) != num_cores:
@@ -543,6 +554,7 @@ def parse_op_spec(op_spec: OpSpec) -> SDSCSpec:
         op_spec.op_info,
         symbol_mapping,
         num_cores,
+        dim_splits,
     )
     if core_id_to_work_slice_override is not None:
         core_id_to_work_slice = _get_core_to_slice_mapping(

@@ -624,6 +624,8 @@ def _adapt_scheduled_lx_neighbor(
     alias_mb_out_to_ij_in: bool,
     consumer_core_map: str,
     pin_only_edge_lds: bool,
+    producer_output_index: int | None,
+    consumer_input_index: int | None,
 ) -> dict[str, Any]:
     adapt_dir = case_dir / "adapted_scheduled_lx_neighbor"
     adapt_dir.mkdir(parents=True, exist_ok=True)
@@ -648,8 +650,16 @@ def _adapt_scheduled_lx_neighbor(
     _, _, _, consumer_dsc = _single_dsc(consumer_payload)
     _copy_scheduled_dims_to_dsc(producer_dsc, notes)
     _copy_scheduled_dims_to_dsc(consumer_dsc, notes)
-    consumer_input_index = _first_compute_input_index(consumer_dsc)
-    producer_output_index = _first_compute_output_index(producer_dsc)
+    consumer_input_index = (
+        _first_compute_input_index(consumer_dsc)
+        if consumer_input_index is None
+        else consumer_input_index
+    )
+    producer_output_index = (
+        _first_compute_output_index(producer_dsc)
+        if producer_output_index is None
+        else producer_output_index
+    )
     _retag_consumer_input(consumer_dsc, consumer_input_index, notes)
     _make_labeled_ds_lx_pinned(
         producer_dsc,
@@ -668,6 +678,9 @@ def _adapt_scheduled_lx_neighbor(
         if not alias_mb_out_to_ij_in:
             raise ValueError("--consumer-core-map reverse requires --alias-mb-out-to-ij-in")
         _reverse_consumer_ij_mapping(next(iter(consumer_payload.values())), notes)
+    if os.environ.get("SPYRE_RESTICKIFY_INPFETCH_DROP_FOLDS", "0") == "1":
+        _drop_trivial_sdsc_folds(producer_payload, notes)
+        _drop_trivial_sdsc_folds(consumer_payload, notes)
 
     adapted_producer = adapt_dir / "producer_pre.scheduled.lx_neighbor.json"
     adapted_consumer = adapt_dir / "consumer_main.scheduled.input_lx_neighbor.json"
@@ -747,6 +760,8 @@ def _stage_case(
     consumer_core_map: str,
     use_lx_neighbor_descriptor: bool,
     pin_only_edge_lds: bool,
+    producer_output_index: int | None,
+    consumer_input_index: int | None,
 ) -> dict[str, Any]:
     producer, restickify, consumer, descriptor_edge = _select_triplet(
         code_dir,
@@ -796,6 +811,8 @@ def _stage_case(
             alias_mb_out_to_ij_in=alias_mb_out_to_ij_in,
             consumer_core_map=consumer_core_map,
             pin_only_edge_lds=pin_only_edge_lds,
+            producer_output_index=producer_output_index,
+            consumer_input_index=consumer_input_index,
         )
         row["adapted_scheduled_lx_neighbor"] = adapted
         if adapted["status"] != "ok":
@@ -896,6 +913,24 @@ def parse_args() -> argparse.Namespace:
             "closer to runtime integration than the older all-LDS probe."
         ),
     )
+    parser.add_argument(
+        "--producer-output-index",
+        type=int,
+        default=None,
+        help=(
+            "Probe-only override for the producer output LDS index that feeds "
+            "the neighbor fetch. Defaults to the first compute output."
+        ),
+    )
+    parser.add_argument(
+        "--consumer-input-index",
+        type=int,
+        default=None,
+        help=(
+            "Probe-only override for the consumer input LDS index fed by the "
+            "neighbor fetch. Defaults to the first compute input."
+        ),
+    )
     parser.add_argument("--run", action="store_true", help="Run dcg_inpfetch_standalone after staging files.")
     parser.add_argument("--senprog", action="store_true", help="Ask Deeptools to emit senprog text during --run.")
     parser.add_argument("--fail-on-error", action="store_true")
@@ -930,6 +965,8 @@ def main() -> int:
                     consumer_core_map=args.consumer_core_map,
                     use_lx_neighbor_descriptor=args.use_lx_neighbor_descriptor,
                     pin_only_edge_lds=args.pin_only_edge_lds,
+                    producer_output_index=args.producer_output_index,
+                    consumer_input_index=args.consumer_input_index,
                 )
             except NoDescriptorCandidate as exc:
                 row = {

@@ -1272,11 +1272,162 @@ def _run_lx_bridge_same_artifact_splice_prototype(
         "SPYRE_RESTICKIFY_LX_DATAOP": "1",
         "TORCH_DEVICE_BACKEND_AUTOLOAD": "0",
     }
+    frame_source_dir = code_dir
+    consumer_recompile_summary: dict[str, Any] = {}
+    if os.environ.get("SPYRE_RESTICKIFY_LX_BRIDGE_PATCH_CONSUMER_SDSC", "0") == "1":
+        frame_source_dir = work_root / "frame_source_original"
+        shutil.copytree(code_dir, frame_source_dir, dirs_exist_ok=True)
+        triplet = _select_restickify_triplet(code_dir)
+        if triplet is None:
+            raise RuntimeError("LX bridge consumer SDSC patch could not find triplet")
+        producer_path, restickify_path, consumer_path = triplet
+        producer_payload = _read_json_file(producer_path)
+        restickify_payload = _read_json_file(restickify_path)
+        consumer_payload = _read_json_file(consumer_path)
+        _, producer_dsc = _single_payload_dsc(producer_payload)
+        _, restickify_dsc = _single_payload_dsc(restickify_payload)
+        _, consumer_dsc = _single_payload_dsc(consumer_payload)
+        restickify_input_idx = _first_compute_input_index(restickify_dsc)
+        restickify_output_idx = _first_compute_output_index(restickify_dsc)
+        restickify_input_hbm = _base_address(
+            _alloc_start_map(
+                restickify_dsc,
+                lds_idx=restickify_input_idx,
+                component="hbm",
+            )
+        )
+        restickify_output_hbm = _base_address(
+            _alloc_start_map(
+                restickify_dsc,
+                lds_idx=restickify_output_idx,
+                component="hbm",
+            )
+        )
+        producer_output_idx = _find_matching_lds_by_hbm_base(
+            producer_dsc,
+            candidate_indices=_compute_output_indices(producer_dsc),
+            target_base=restickify_input_hbm,
+        )
+        consumer_input_idx = _find_matching_lds_by_hbm_base(
+            consumer_dsc,
+            candidate_indices=_compute_input_indices(consumer_dsc),
+            target_base=restickify_output_hbm,
+        )
+        producer_base = int(
+            os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_PRODUCER_BASE", "16384")
+        )
+        consumer_input_name = next(
+            str(lds.get("dsName_", f"lds{consumer_input_idx}"))
+            for lds in consumer_dsc.get("labeledDs_", []) or []
+            if int(lds.get("ldsIdx_", -1)) == int(consumer_input_idx)
+        )
+        consumer_base = int(
+            os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_CONSUMER_BASE", "8192")
+        )
+        consumer_start = _constant_lx_start_payload(
+            num_cores=_core_factor(consumer_payload),
+            base=consumer_base,
+        )
+        producer_start = _constant_lx_start_payload(
+            num_cores=_core_factor(producer_payload),
+            base=producer_base,
+        )
+        if (
+            os.environ.get(
+                "SPYRE_RESTICKIFY_LX_BRIDGE_PATCH_PRODUCER_SOURCE_VIEW",
+                "0",
+            )
+            == "1"
+        ):
+            restickify_input_lds = next(
+                lds
+                for lds in restickify_dsc.get("labeledDs_", []) or []
+                if int(lds.get("ldsIdx_", -1)) == int(restickify_input_idx)
+            )
+            restickify_input_primary = restickify_dsc["primaryDsInfo_"][
+                str(restickify_input_lds["dsType_"])
+            ]
+            _patch_producer_output_source_view(
+                producer_payload,
+                lds_idx=producer_output_idx,
+                source_primary=restickify_input_primary,
+            )
+        _patch_lx_allocation_by_index(
+            producer_payload,
+            lds_idx=producer_output_idx,
+            start_payload=producer_start,
+        )
+        _patch_consumer_input_lx_map(
+            consumer_payload,
+            consumer_input_name,
+            lds_idx=consumer_input_idx,
+            start_payload=consumer_start,
+        )
+        _force_consumer_corelets(
+            consumer_payload,
+            factor=_corelet_factor(consumer_start),
+        )
+        _write_json_file(producer_path, producer_payload)
+        _write_json_file(consumer_path, consumer_payload)
+        for generated_name in (
+            "execute",
+            "loadmodel_to_device",
+            "loadmodel_to_spad",
+            "loadprogram_to_device",
+            "loadprogram_to_spad",
+            "loadprogram_to_device_dsg.txt",
+            "loadprogram_to_spad_dsg.txt",
+            "loadmodel_to_device_dsg.txt",
+            "loadmodel_to_spad_dsg.txt",
+            "execute_dsg.txt",
+            "segment_size.json",
+            "spyreCodeDir",
+        ):
+            generated_path = code_dir / generated_name
+            if generated_path.is_dir():
+                shutil.rmtree(generated_path, ignore_errors=True)
+            else:
+                generated_path.unlink(missing_ok=True)
+        recompile_proc = _run_dxp_bundle(code_dir, cwd=code_dir, verbose=False)
+        (work_root / "consumer_sdsc_recompile.stdout.txt").write_text(
+            recompile_proc.stdout,
+            encoding="utf-8",
+        )
+        (work_root / "consumer_sdsc_recompile.stderr.txt").write_text(
+            recompile_proc.stderr,
+            encoding="utf-8",
+        )
+        if recompile_proc.returncode != 0:
+            raise RuntimeError(
+                "LX bridge consumer SDSC recompile failed:\n"
+                + recompile_proc.stdout[-2000:]
+                + recompile_proc.stderr[-4000:]
+            )
+        consumer_recompile_summary = {
+            "consumer_sdsc_patch": "in_place_full_bundle_recompile",
+            "consumer_sdsc_recompile_returncode": recompile_proc.returncode,
+            "consumer_input_lds_idx": consumer_input_idx,
+            "producer_output_lds_idx": producer_output_idx,
+            "producer_source_view_patch": os.environ.get(
+                "SPYRE_RESTICKIFY_LX_BRIDGE_PATCH_PRODUCER_SOURCE_VIEW",
+                "0",
+            )
+            == "1",
+            "producer_lx_unique_starts": _unique_start_values(producer_start),
+            "consumer_lx_unique_starts": _unique_start_values(consumer_start),
+            "consumer_sdsc_recompile_stdout": str(
+                work_root / "consumer_sdsc_recompile.stdout.txt"
+            ),
+            "consumer_sdsc_recompile_stderr": str(
+                work_root / "consumer_sdsc_recompile.stderr.txt"
+            ),
+        }
+
     frame_cmd = [
         sys.executable,
         str(repo_root / "tools" / "restickify_lx_bridge_frame.py"),
         "--code-dir",
-        str(code_dir),
+        str(frame_source_dir),
         "--output-dir",
         str(frame_dir),
         "--mode",
@@ -1308,6 +1459,53 @@ def _run_lx_bridge_same_artifact_splice_prototype(
             + frame_proc.stderr[-4000:]
         )
 
+    extra_replacement_args: list[str] = []
+    consumer_frame_summary: dict[str, Any] = {}
+    if os.environ.get("SPYRE_RESTICKIFY_LX_BRIDGE_PATCH_CONSUMER_FRAME", "0") == "1":
+        if (
+            os.environ.get(
+                "SPYRE_RESTICKIFY_LX_BRIDGE_ALLOW_UNSAFE_CONSUMER_FRAME",
+                "0",
+            )
+            != "1"
+        ):
+            raise RuntimeError(
+                "standalone consumer-frame replacement is disabled because it "
+                "can mismatch fused-bundle runtime metadata; use "
+                "SPYRE_RESTICKIFY_LX_BRIDGE_PATCH_CONSUMER_SDSC=1 instead"
+            )
+        triplet = _select_restickify_triplet(code_dir)
+        if triplet is None:
+            raise RuntimeError("LX bridge consumer-frame patch could not find triplet")
+        _producer_path, _restickify_path, consumer_path = triplet
+        sdscs = sorted(code_dir.glob("sdsc_*.json"), key=_sdsc_index)
+        consumer_pos = sdscs.index(consumer_path)
+        consumer_split_root = work_root / "consumer_frame"
+        consumer_summary = _prepare_lx_split_dataop_prototype(
+            code_dir,
+            triplet=triplet,
+            split_root=consumer_split_root,
+            stages={"consumer"},
+        )
+        consumer_dir = Path(consumer_summary["consumer_dir"])
+        consumer_inits = sorted((consumer_dir / "loadprogram_to_device").glob("*/init.txt"))
+        if len(consumer_inits) != 1:
+            raise RuntimeError(
+                "LX bridge consumer-frame patch expected one consumer init, "
+                f"found {len(consumer_inits)} in {consumer_dir}"
+            )
+        extra_replacement_args.extend(
+            ["--replacement-frame", f"{consumer_pos}:{consumer_inits[0]}"]
+        )
+        consumer_frame_summary = {
+            "consumer_frame_position": consumer_pos,
+            "consumer_frame_init": str(consumer_inits[0]),
+            "consumer_frame_dir": str(consumer_dir),
+            "consumer_input_lds_idx": consumer_summary.get("consumer_input_lds_idx"),
+            "consumer_lx_start_source": consumer_summary.get("consumer_lx_start_source"),
+            "consumer_lx_unique_starts": consumer_summary.get("consumer_lx_unique_starts"),
+        }
+
     splice_cmd = [
         sys.executable,
         str(repo_root / "tools" / "restickify_lx_bridge_same_artifact_splice.py"),
@@ -1318,6 +1516,7 @@ def _run_lx_bridge_same_artifact_splice_prototype(
         "--summary",
         str(splice_summary),
         "--require-hbm-free",
+        *extra_replacement_args,
     ]
     splice_proc = subprocess.run(
         splice_cmd,
@@ -1342,6 +1541,7 @@ def _run_lx_bridge_same_artifact_splice_prototype(
     result = {
         "status": "patched",
         "code_dir": str(code_dir),
+        "frame_source_code_dir": str(frame_source_dir),
         "work_root": str(work_root),
         "bridge_frame_dir": str(frame_dir),
         "bridge_frame_returncode": frame_proc.returncode,
@@ -1349,6 +1549,8 @@ def _run_lx_bridge_same_artifact_splice_prototype(
         "splice_summary": str(splice_summary),
         "patched_bytes": splice.get("patched_bytes"),
         "patched_flits_128b": splice.get("patched_flits_128b"),
+        **consumer_recompile_summary,
+        **consumer_frame_summary,
         "restickify_start_flit": splice.get("restickify_start_flit"),
         "restickify_original_bytes": splice.get("restickify_original_bytes"),
         "bridge_frame_bytes": splice.get("bridge_frame_bytes"),
@@ -1938,6 +2140,34 @@ def _patch_lx_allocation_by_index(
             node["name_"] = f"allocate-{lds_name}_lx"
             node["component_"] = "lx"
             node["startAddressCoreCorelet_"] = start_payload
+
+
+def _patch_producer_output_source_view(
+    payload: dict[str, Any],
+    *,
+    lds_idx: int,
+    source_primary: dict[str, Any],
+) -> None:
+    """Make a producer output use the restickify source-view layout role."""
+
+    _root, dsc = _single_payload_dsc(payload)
+    bridge_role = os.environ.get(
+        "SPYRE_RESTICKIFY_LX_BRIDGE_PRODUCER_SOURCE_VIEW_ROLE",
+        "LX_BRIDGE_SOURCE",
+    )
+    dsc.setdefault("primaryDsInfo_", {})[bridge_role] = copy.deepcopy(source_primary)
+    layout_order = list(source_primary.get("layoutDimOrder_", []) or [])
+    for lds in dsc.get("labeledDs_", []) or []:
+        if int(lds.get("ldsIdx_", -1)) == int(lds_idx):
+            lds["dsType_"] = bridge_role
+            break
+    for node in dsc.get("scheduleTree_", []) or []:
+        if node.get("nodeType_") != "allocate":
+            continue
+        if int(node.get("ldsIdx_", -1)) != int(lds_idx):
+            continue
+        if layout_order:
+            node["layoutDimOrder_"] = copy.deepcopy(layout_order)
 
 
 def _allocation_node_by_lds(
@@ -3284,6 +3514,9 @@ def _run_case(
     previous_ring = os.environ.get("SPYRE_RESTICKIFY_RING_TELEMETRY")
     previous_ring_jsonl = os.environ.get("SPYRE_RESTICKIFY_RING_TELEMETRY_JSONL")
     previous_context = os.environ.get("SPYRE_TELEMETRY_CONTEXT")
+    previous_allow_uncertified_descriptor = os.environ.get(
+        "SPYRE_RESTICKIFY_LX_NEIGHBOR_DESCRIPTOR_ALLOW_UNCERTIFIED"
+    )
     spyre_config = None
     previous_config_ring = None
     previous_config_ring_jsonl = None
@@ -3298,6 +3531,8 @@ def _run_case(
         },
         sort_keys=True,
     )
+    if lx_bridge_same_artifact_splice:
+        os.environ["SPYRE_RESTICKIFY_LX_NEIGHBOR_DESCRIPTOR_ALLOW_UNCERTIFIED"] = "1"
     if ring_telemetry_path is not None:
         ring_telemetry_path.parent.mkdir(parents=True, exist_ok=True)
         ring_telemetry_path.unlink(missing_ok=True)
@@ -3406,6 +3641,15 @@ def _run_case(
             os.environ.pop("SPYRE_TELEMETRY_CONTEXT", None)
         else:
             os.environ["SPYRE_TELEMETRY_CONTEXT"] = previous_context
+        if previous_allow_uncertified_descriptor is None:
+            os.environ.pop(
+                "SPYRE_RESTICKIFY_LX_NEIGHBOR_DESCRIPTOR_ALLOW_UNCERTIFIED",
+                None,
+            )
+        else:
+            os.environ[
+                "SPYRE_RESTICKIFY_LX_NEIGHBOR_DESCRIPTOR_ALLOW_UNCERTIFIED"
+            ] = previous_allow_uncertified_descriptor
         if spyre_config is not None:
             spyre_config.restickify_ring_telemetry = previous_config_ring
             spyre_config.restickify_ring_telemetry_jsonl = previous_config_ring_jsonl
