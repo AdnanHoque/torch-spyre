@@ -36,6 +36,7 @@ from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.restickify_ring import (
     CORE_MAPPING_OVERRIDE_OP_INFO_KEY,
     LOCALITY_CERTIFICATE_OP_INFO_KEY,
+    PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY,
 )
 
 from .restickify_lx_dataop import generate_ptlx_restickify_bridge_sdsc
@@ -348,6 +349,9 @@ def _patch_one_mixed_schedule(
         "producer_lx_unique_starts": _unique_start_values(producer_start),
         "consumer_lx_unique_starts": _unique_start_values(consumer_start),
         "producer_allocation_patches": producer_patches,
+        "endpoint_allocation": restickify_spec.op_info.get(
+            PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY
+        ),
         "bridge_endpoint_patch": endpoint_patch,
         "value_flow_contract": value_flow_contract,
         "replacement_sdsc": mixed_name,

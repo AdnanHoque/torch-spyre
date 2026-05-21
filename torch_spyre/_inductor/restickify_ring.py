@@ -38,6 +38,8 @@ CORE_MAPPING_OVERRIDE_ATTR = "_spyre_core_id_to_work_slice_override"
 CORE_MAPPING_OVERRIDE_OP_INFO_KEY = "core_id_to_work_slice_override"
 LOCALITY_CERTIFICATE_ATTR = "_spyre_restickify_locality_certificate"
 LOCALITY_CERTIFICATE_OP_INFO_KEY = "restickify_locality_certificate"
+PTLX_ENDPOINT_ALLOCATION_ATTR = "_spyre_ptlx_endpoint_allocation"
+PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY = "ptlx_endpoint_allocation"
 
 
 @dataclasses.dataclass(frozen=True)

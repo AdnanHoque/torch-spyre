@@ -20,6 +20,7 @@ from torch_spyre._inductor import config
 from torch_spyre._inductor.restickify_ring import (
     CORE_MAPPING_OVERRIDE_ATTR,
     LOCALITY_CERTIFICATE_ATTR,
+    PTLX_ENDPOINT_ALLOCATION_ATTR,
 )
 
 # From scratchpad.py
@@ -677,6 +678,25 @@ class TestExamplePattern(TestCase):
         assert set(alloc.allocations) == {"producer_out", "restickify_out"}
         assert alloc.allocations["producer_out"] == 0
         assert alloc.allocations["restickify_out"] == 128
+        endpoint_allocation = getattr(restickify, PTLX_ENDPOINT_ALLOCATION_ATTR)
+        assert endpoint_allocation["producer_buffer"] == "producer_out"
+        assert endpoint_allocation["consumer_buffer"] == "restickify_out"
+        assert endpoint_allocation["producer"] == {
+            "buffer": "producer_out",
+            "start": 0,
+            "size": 128,
+            "end": 128,
+        }
+        assert endpoint_allocation["consumer"] == {
+            "buffer": "restickify_out",
+            "start": 128,
+            "size": 128,
+            "end": 256,
+        }
+        assert endpoint_allocation["overlap_check"] == {
+            "valid": True,
+            "overlaps": [],
+        }
 
     @usuallyExpectedFailure
     def test_simple_fragmentation_pattern(self):

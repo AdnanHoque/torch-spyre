@@ -30,6 +30,7 @@ from . import config
 from .restickify_ring import (
     CORE_MAPPING_OVERRIDE_ATTR,
     LOCALITY_CERTIFICATE_ATTR,
+    PTLX_ENDPOINT_ALLOCATION_ATTR,
 )
 
 OP_OUTPUT_GOOD_FOR_LX_REUSE = [
@@ -628,7 +629,64 @@ class GreedyAllocationStrategy(AllocationStrategy):
                     release_next,
                     force_lx_buffers=force_lx_buffers,
                 )
+                self.record_ptlx_endpoint_allocation(
+                    op,
+                    idx,
+                    force_lx_buffers,
+                )
         # logger.info(alloc.lx_usage_hist)
+
+    def record_ptlx_endpoint_allocation(
+        self,
+        op: Operation,
+        idx: int,
+        force_lx_buffers: set[str],
+    ) -> None:
+        if not config.restickify_ptlx_mixed_schedule_e2e:
+            return
+        if not _is_certified_ptlx_restickify_op(op):
+            return
+        rw = op.get_read_writes()
+        input_names = [dep.name for dep in rw.reads]
+        output_names = [dep.name for dep in rw.writes]
+        if len(input_names) != 1 or len(output_names) != 1:
+            return
+        producer_name = input_names[0]
+        consumer_name = output_names[0]
+        if (
+            producer_name not in force_lx_buffers
+            or consumer_name not in force_lx_buffers
+        ):
+            return
+        if (
+            producer_name not in self.alloc.usage
+            or consumer_name not in self.alloc.usage
+        ):
+            return
+
+        live_ranges = _live_lx_ranges(self.alloc.usage)
+        endpoint_names = {producer_name, consumer_name}
+        overlaps = _endpoint_overlaps(live_ranges, endpoint_names)
+        record = {
+            "kind": "ptlx_endpoint_allocation",
+            "node_idx": idx,
+            "producer_buffer": producer_name,
+            "consumer_buffer": consumer_name,
+            "producer": _range_for_buffer(live_ranges, producer_name),
+            "consumer": _range_for_buffer(live_ranges, consumer_name),
+            "forced_buffers": sorted(endpoint_names),
+            "live_lx_ranges": live_ranges,
+            "overlap_check": {
+                "valid": not overlaps,
+                "overlaps": overlaps,
+            },
+        }
+        if overlaps:
+            raise RuntimeError(
+                "PT-LX endpoint allocation overlap for "
+                f"{_op_name(op)}: {overlaps}"
+            )
+        setattr(op, PTLX_ENDPOINT_ALLOCATION_ATTR, record)
 
 
 def scratchpad_planning(
@@ -658,3 +716,76 @@ def _is_certified_ptlx_restickify_op(op: Operation) -> bool:
         bool(getattr(certificate, "locality_certified", False))
         and int(certified_byte_hops) == 0
     )
+
+
+def _live_lx_ranges(usage: dict[str, dict[str, int]]) -> list[dict[str, int | str]]:
+    ranges = []
+    for name, record in usage.items():
+        start = int(record["addr"])
+        size = int(record["size"])
+        ranges.append(
+            {
+                "buffer": str(name),
+                "start": start,
+                "size": size,
+                "end": start + size,
+            }
+        )
+    return sorted(ranges, key=lambda item: (int(item["start"]), str(item["buffer"])))
+
+
+def _endpoint_overlaps(
+    ranges: list[dict[str, int | str]],
+    endpoint_names: set[str],
+) -> list[dict[str, Any]]:
+    overlaps: list[dict[str, Any]] = []
+    by_name = {str(record["buffer"]): record for record in ranges}
+    for endpoint_name in sorted(endpoint_names):
+        endpoint = by_name.get(endpoint_name)
+        if endpoint is None:
+            continue
+        for other in ranges:
+            other_name = str(other["buffer"])
+            if other_name == endpoint_name:
+                continue
+            if _ranges_overlap(endpoint, other):
+                overlaps.append(
+                    {
+                        "endpoint": endpoint_name,
+                        "other": other_name,
+                        "endpoint_range": {
+                            "start": int(endpoint["start"]),
+                            "end": int(endpoint["end"]),
+                        },
+                        "other_range": {
+                            "start": int(other["start"]),
+                            "end": int(other["end"]),
+                        },
+                    }
+                )
+    return overlaps
+
+
+def _ranges_overlap(
+    left: dict[str, int | str],
+    right: dict[str, int | str],
+) -> bool:
+    return int(left["start"]) < int(right["end"]) and int(right["start"]) < int(
+        left["end"]
+    )
+
+
+def _range_for_buffer(
+    ranges: list[dict[str, int | str]],
+    name: str,
+) -> dict[str, int | str] | None:
+    for record in ranges:
+        if record["buffer"] == name:
+            return record
+    return None
+
+
+def _op_name(op: Operation) -> str:
+    if hasattr(op, "get_name"):
+        return str(op.get_name())
+    return str(getattr(op, "name", type(op).__name__))

@@ -51,6 +51,8 @@ from .restickify_ring import (
     CORE_MAPPING_OVERRIDE_OP_INFO_KEY,
     LOCALITY_CERTIFICATE_ATTR,
     LOCALITY_CERTIFICATE_OP_INFO_KEY,
+    PTLX_ENDPOINT_ALLOCATION_ATTR,
+    PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY,
 )
 import logging
 
@@ -543,6 +545,15 @@ class SpyreKernel(Kernel[CSEVariable]):
                     op_info["restickify_source_name"] = source_name
                 if source_kind is not None:
                     op_info["restickify_source_kind"] = source_kind
+                endpoint_allocation = getattr(
+                    self.current_node.node,
+                    PTLX_ENDPOINT_ALLOCATION_ATTR,
+                    None,
+                )
+                if endpoint_allocation is not None:
+                    op_info[PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY] = (
+                        endpoint_allocation
+                    )
             op_spec = self.create_op_spec(op, False, args, op_info)
             self.op_specs.append(op_spec)
         else:
