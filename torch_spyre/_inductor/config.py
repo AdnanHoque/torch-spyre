@@ -124,6 +124,14 @@ restickify_ptlx_streaming_e2e: bool = (
     os.environ.get("SPYRE_RESTICKIFY_PTLX_STREAMING_E2E", "0") == "1"
 )
 
+# Default-off refinement of the streaming PT-LX prototype. When enabled, the
+# streaming bridge emits each 64x64 tile using Deeptools' native
+# ReStickifyOpWithPTLx 4D local-transform contract rather than the older 2D
+# endpoint-only STCDP shape.
+restickify_ptlx_native_tile_e2e: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_PTLX_NATIVE_TILE_E2E", "0") == "1"
+)
+
 # Default-off cross-bundle prototype for the production-shaped PT-LX path. This
 # delays DXP compilation until all SDSC bundle JSON has been emitted, so an
 # eligible trailing producer/restickify bundle and the following consumer bundle

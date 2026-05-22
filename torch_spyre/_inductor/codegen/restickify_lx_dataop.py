@@ -348,6 +348,178 @@ def generate_streaming_ptlx_tile_bridge_sdsc(
     }
 
 
+def generate_streaming_ptlx_native_tile_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+    *,
+    tile_index: int = 0,
+) -> dict[str, Any]:
+    """Lower one tile using the native 4D PT-LX local transform contract.
+
+    This is the production-shaped successor to
+    ``generate_streaming_ptlx_tile_bridge_sdsc``.  The older helper represents
+    the gather, restickify, and scatter phases as 2D ``mb_/out_`` data ops; that
+    is enough to prove endpoint plumbing, but it is not a semantic certificate
+    for the restickify transform.  This helper keeps the same three phases but
+    expresses the tile workspace in Deeptools' native
+    ``j_, i_, out_, mb_`` PT-LX shape:
+
+        STCDPOpLx             gather source fragments into tile-local coords
+        ReStickifyOpWithPTLx  switch stick dimension out_ -> j_
+        STCDPOpLx             scatter tile-local coords to destination fragments
+
+    The helper remains default-off and codegen-only until the surrounding
+    producer/consumer LX endpoint contract is value-checked on hardware.
+    """
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    if descriptor.get("kind") != "streaming_ptlx_restickify_descriptor":
+        raise ValueError("expected a streaming_ptlx_restickify_descriptor")
+    tiles = descriptor.get("tiles") or []
+    if tile_index < 0 or tile_index >= len(tiles):
+        raise ValueError(f"tile_index {tile_index} is outside materialized tiles")
+
+    tile = tiles[tile_index]
+    tile_size = _as_int(descriptor["tile_size"])
+    tile_row_start = _as_int(tile["tile_row"]) * tile_size
+    tile_col_start = _as_int(tile["tile_col"]) * tile_size
+    gather_stage, restickify_stage, scatter_stage = tile["stages"]
+    bridge_core = _as_int(tile["bridge_core"])
+    source_fragments = list(gather_stage.get("fragments") or [])
+    dest_fragments = list(scatter_stage.get("fragments") or [])
+    tile_rows, tile_cols = _native_tile_shape(source_fragments, dest_fragments)
+    if tile_rows % 64 != 0 or tile_cols % 64 != 0:
+        raise ValueError(
+            "native PT-LX tile bridge currently requires 64-aligned tile fragments"
+        )
+
+    gather_input_fragments = [
+        _native_fragment(fragment, tile_row_start, tile_col_start)
+        for fragment in source_fragments
+    ]
+    gather_output_fragments = [
+        _native_whole_tile_fragment(
+            core=bridge_core,
+            tile_rows=tile_rows,
+            tile_cols=tile_cols,
+        )
+    ]
+    scatter_input_fragments = [
+        _native_whole_tile_fragment(
+            core=bridge_core,
+            tile_rows=tile_rows,
+            tile_cols=tile_cols,
+        )
+    ]
+    scatter_output_fragments = [
+        _native_fragment(fragment, tile_row_start, tile_col_start)
+        for fragment in dest_fragments
+    ]
+
+    gather_core_ids = _fragment_core_ids(source_fragments, bridge_core)
+    restickify_core_ids = [bridge_core]
+    scatter_core_ids = _fragment_core_ids(dest_fragments, bridge_core)
+    stage_core_ids = [gather_core_ids, restickify_core_ids, scatter_core_ids]
+    num_cores = max(
+        _streaming_tile_core_ids(
+            tile,
+            _as_int(descriptor.get("source_core_count", 1)),
+            _as_int(descriptor.get("dest_core_count", 1)),
+        )
+    ) + 1
+    datadscs = [
+        {
+            f"0_STCDPOpLx_native_gather_tile{tile_index}": _native_tile_dataop(
+                "STCDPOpLx",
+                core_ids=gather_core_ids,
+                input_stick=("out_",),
+                output_stick=("out_",),
+                input_base=_as_int(gather_stage["input_base"]),
+                output_base=_as_int(gather_stage["output_base"]),
+                input_fragments=gather_input_fragments,
+                output_fragments=gather_output_fragments,
+                tile_rows=tile_rows,
+                tile_cols=tile_cols,
+            )
+        },
+        {
+            f"1_ReStickifyOpWithPTLx_native_tile{tile_index}": _native_tile_dataop(
+                "ReStickifyOpWithPTLx",
+                core_ids=restickify_core_ids,
+                input_stick=("out_",),
+                output_stick=("j_",),
+                input_base=_as_int(restickify_stage["input_base"]),
+                output_base=_as_int(restickify_stage["output_base"]),
+                input_fragments=gather_output_fragments,
+                output_fragments=scatter_input_fragments,
+                tile_rows=tile_rows,
+                tile_cols=tile_cols,
+            )
+        },
+        {
+            f"2_STCDPOpLx_native_scatter_tile{tile_index}": _native_tile_dataop(
+                "STCDPOpLx",
+                core_ids=scatter_core_ids,
+                input_stick=("j_",),
+                output_stick=("j_",),
+                input_base=_as_int(scatter_stage["input_base"]),
+                output_base=_as_int(scatter_stage["output_base"]),
+                input_fragments=scatter_input_fragments,
+                output_fragments=scatter_output_fragments,
+                tile_rows=tile_rows,
+                tile_cols=tile_cols,
+            )
+        },
+    ]
+    return {
+        name: {
+            "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],
+            "sdscFolds_": {
+                "dim_prop_func": [{"Affine": {"alpha_": 1, "beta_": 0}}],
+                "dim_prop_attr": [{"factor_": 1, "label_": "time"}],
+                "data_": {"[0]": "0"},
+            },
+            "coreFoldProp_": {"factor_": num_cores, "label_": "core"},
+            "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
+            "numCoresUsed_": num_cores,
+            "unpadN_": {"name_": "unpadn", **_native_tile_unpad()},
+            "N_": {"name_": "n", **_native_tile_sizes(tile_rows, tile_cols)},
+            "coreIdToDsc_": {},
+            "numWkSlicesPerDim_": {},
+            "coreIdToWkSlice_": {},
+            "opFuncsUsed_": [
+                "STCDPOpLx",
+                "ReStickifyOpWithPTLx",
+                "STCDPOpLx",
+            ],
+            "ldsShareInfo_": [],
+            "prodConsList": {},
+            "coreIdToDscSchedule": _sparse_dataop_schedule(
+                num_cores,
+                stage_core_ids,
+            ),
+            "pcfg_": {},
+            "target_": "senulator",
+            "dscs_": [],
+            "datadscs_": datadscs,
+            "dimToSymbolMappingOpcodeCorrection_": {},
+            "inputSymbolsAndTags_": {},
+            "symbolDefinitions_": {},
+            "streamingPTLXNativeTile_": {
+                "tile_index": int(tile_index),
+                "tile_row": _as_int(tile["tile_row"]),
+                "tile_col": _as_int(tile["tile_col"]),
+                "tile_rows": tile_rows,
+                "tile_cols": tile_cols,
+                "bridge_core": bridge_core,
+                "status": "static-codegen-only",
+                "semantic_transform_certified": True,
+                "fallback": "ReStickifyOpHBM",
+            },
+        }
+    }
+
+
 def generate_ptlx_local_tile_restickify_sdsc(
     name: str,
     *,
@@ -507,6 +679,62 @@ def generate_streaming_ptlx_full_bridge_sdsc(
         "status": "static-codegen-only",
         "tile_count": len(tiles),
         "datadsc_count": len(all_datadscs),
+        "fallback": "ReStickifyOpHBM",
+    }
+    return {name: combined}
+
+
+def generate_streaming_ptlx_native_full_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Combine every materialized native PT-LX tile bridge into one payload."""
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    tiles = descriptor.get("tiles") or []
+    if not tiles:
+        raise ValueError("streaming descriptor has no materialized tiles")
+
+    roots: list[dict[str, Any]] = []
+    all_datadscs: list[dict[str, Any]] = []
+    combined_schedule: dict[str, list[list[int]]] = {}
+    offset = 0
+    for tile_index in range(len(tiles)):
+        tile_payload = generate_streaming_ptlx_native_tile_bridge_sdsc(
+            f"{name}_native_tile{tile_index}",
+            streaming_artifact,
+            tile_index=tile_index,
+        )
+        tile_root = copy.deepcopy(next(iter(tile_payload.values())))
+        roots.append(tile_root)
+        tile_datadscs = tile_root.get("datadscs_", []) or []
+        all_datadscs.extend(tile_datadscs)
+        for core_id, steps in (tile_root.get("coreIdToDscSchedule") or {}).items():
+            core_steps = combined_schedule.setdefault(str(core_id), [])
+            for step in steps:
+                adjusted = list(step)
+                adjusted[0] = int(adjusted[0]) + offset
+                core_steps.append(adjusted)
+        offset += len(tile_datadscs)
+
+    combined = copy.deepcopy(roots[0])
+    combined["datadscs_"] = all_datadscs
+    combined["numCoresUsed_"] = max(_as_int(root["numCoresUsed_"]) for root in roots)
+    for core_id in range(combined["numCoresUsed_"]):
+        combined_schedule.setdefault(str(core_id), [])
+    combined["coreIdToDscSchedule"] = combined_schedule
+    combined["opFuncsUsed_"] = [
+        next(iter(datadsc.values()))["op"]["name"] for datadsc in all_datadscs
+    ]
+    combined["streamingPTLXNativeTile_"] = {}
+    combined["streamingPTLXFull_"] = {
+        "status": "static-codegen-only",
+        "coalescing": "native-64x64-tiles",
+        "tile_count": len(tiles),
+        "logical_tile_count": _as_int(descriptor.get("total_tiles", len(tiles))),
+        "datadsc_count": len(all_datadscs),
+        "native_local_transform_contract": True,
+        "semantic_transform_certified": False,
         "fallback": "ReStickifyOpHBM",
     }
     return {name: combined}
@@ -1410,6 +1638,175 @@ def _local_ptlx_labeled_ds(
         "lxSize_": _LX_SIZE_BYTES,
         "lxStartAddress_": {},
     }
+
+
+def _native_tile_dataop(
+    op_name: str,
+    *,
+    core_ids: Sequence[int],
+    input_stick: Sequence[str],
+    output_stick: Sequence[str],
+    input_base: int,
+    output_base: int,
+    input_fragments: Sequence[Mapping[str, Any]],
+    output_fragments: Sequence[Mapping[str, Any]],
+    tile_rows: int,
+    tile_cols: int,
+) -> dict[str, Any]:
+    return {
+        "coreIdsUsed_": [int(core) for core in core_ids],
+        "dimPool_": ["j_", "i_", "out_", "mb_"],
+        "outDimTodimRelation_": [],
+        "primaryDs_": [
+            {"name_": "dataIN", "dimNames": ["out_", "mb_", "i_", "j_"]},
+            {"name_": "dataOUT", "dimNames": ["out_", "mb_", "i_", "j_"]},
+        ],
+        "labeledDs_": [
+            _native_tile_labeled_ds(
+                "dataIN_L0",
+                "dataIN",
+                stick=input_stick,
+                base=input_base,
+                fragments=input_fragments,
+                tile_rows=tile_rows,
+                tile_cols=tile_cols,
+            ),
+            _native_tile_labeled_ds(
+                "dataOUT_L0",
+                "dataOUT",
+                stick=output_stick,
+                base=output_base,
+                fragments=output_fragments,
+                tile_rows=tile_rows,
+                tile_cols=tile_cols,
+            ),
+        ],
+        "op": _op_payload(op_name),
+    }
+
+
+def _native_tile_labeled_ds(
+    lds_name: str,
+    pds_name: str,
+    *,
+    stick: Sequence[str],
+    base: int,
+    fragments: Sequence[Mapping[str, Any]],
+    tile_rows: int,
+    tile_cols: int,
+) -> dict[str, Any]:
+    layout_sizes = _native_tile_sizes(tile_rows, tile_cols)
+    stick_dims = [str(dim) for dim in stick]
+    return {
+        "ldsName_": lds_name,
+        "pdsName_": pds_name,
+        "wordLength": num_bytes(DataFormats.SEN169_FP16),
+        "dataformat": DataFormats.SEN169_FP16.name,
+        "isExternal_": 0,
+        "segment_": "output",
+        "layoutDimOrder_": ["j_", "i_", "out_", "mb_"],
+        "stickDimOrder_": stick_dims,
+        "dimToLayoutSize_": layout_sizes,
+        "dimToStickSize_": {dim: 64 for dim in stick_dims},
+        "validGap_": _valid_gap(layout_sizes),
+        "totElements": -1,
+        "PieceInfo": [
+            _native_tile_piece_info(fragment, base=base, key=f"p{idx + 1}")
+            for idx, fragment in enumerate(fragments)
+        ],
+        "hbmSize_": 0,
+        "hbmStartAddress_": 0,
+        "lxSize_": _LX_SIZE_BYTES,
+        "lxStartAddress_": {},
+    }
+
+
+def _native_tile_piece_info(
+    fragment: Mapping[str, Any],
+    *,
+    base: int,
+    key: str,
+) -> dict[str, Any]:
+    sizes = {
+        "j_": _as_int(fragment["j_end"]) - _as_int(fragment["j_start"]),
+        "i_": 1,
+        "out_": _as_int(fragment["out_end"]) - _as_int(fragment["out_start"]),
+        "mb_": 1,
+    }
+    return {
+        "key_": key,
+        "dimToStartCordinate": {
+            "j_": _as_int(fragment["j_start"]),
+            "i_": 0,
+            "out_": _as_int(fragment["out_start"]),
+            "mb_": 0,
+        },
+        "dimToSize_": sizes,
+        "validGap_": _valid_gap(sizes),
+        "PlacementInfo": [
+            {
+                "type": "lx",
+                "memId": [_as_int(fragment["core"])],
+                "startAddr": [int(base)],
+            }
+        ],
+    }
+
+
+def _native_fragment(
+    fragment: Mapping[str, Any],
+    tile_row_start: int,
+    tile_col_start: int,
+) -> dict[str, int]:
+    return {
+        "core": _as_int(fragment["core"]),
+        "j_start": _as_int(fragment["row_start"]) - int(tile_row_start),
+        "j_end": _as_int(fragment["row_end"]) - int(tile_row_start),
+        "out_start": _as_int(fragment["col_start"]) - int(tile_col_start),
+        "out_end": _as_int(fragment["col_end"]) - int(tile_col_start),
+    }
+
+
+def _native_whole_tile_fragment(
+    *,
+    core: int,
+    tile_rows: int,
+    tile_cols: int,
+) -> dict[str, int]:
+    return {
+        "core": int(core),
+        "j_start": 0,
+        "j_end": int(tile_rows),
+        "out_start": 0,
+        "out_end": int(tile_cols),
+    }
+
+
+def _native_tile_shape(
+    source_fragments: Sequence[Mapping[str, Any]],
+    dest_fragments: Sequence[Mapping[str, Any]],
+) -> tuple[int, int]:
+    fragments = list(source_fragments) + list(dest_fragments)
+    if not fragments:
+        raise ValueError("native PT-LX tile bridge needs at least one fragment")
+    row_start = min(_as_int(fragment["row_start"]) for fragment in fragments)
+    row_end = max(_as_int(fragment["row_end"]) for fragment in fragments)
+    col_start = min(_as_int(fragment["col_start"]) for fragment in fragments)
+    col_end = max(_as_int(fragment["col_end"]) for fragment in fragments)
+    return row_end - row_start, col_end - col_start
+
+
+def _native_tile_sizes(tile_rows: int, tile_cols: int) -> dict[str, int]:
+    return {
+        "j_": int(tile_rows),
+        "i_": 1,
+        "out_": int(tile_cols),
+        "mb_": 1,
+    }
+
+
+def _native_tile_unpad() -> dict[str, int]:
+    return {dim: -1 for dim in ["j_", "i_", "out_", "mb_"]}
 
 
 def _coalesced_tile_fragment(

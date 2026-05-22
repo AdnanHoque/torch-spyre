@@ -43,6 +43,7 @@ from torch_spyre._inductor.restickify_ring import (
 from .restickify_lx_dataop import (
     generate_ptlx_restickify_bridge_sdsc,
     generate_streaming_ptlx_full_bridge_sdsc,
+    generate_streaming_ptlx_native_full_bridge_sdsc,
 )
 from .restickify_ptlx_streaming import (
     generate_streaming_ptlx_artifact,
@@ -582,6 +583,55 @@ def _patch_streaming_mixed_schedule(
         row["streaming_storage"] = streaming_plan
         return row
 
+    summary = streaming_plan["summary"]
+    artifact = generate_streaming_ptlx_artifact(
+        f"{idx}_StreamingPTLXDescriptor",
+        summary,
+        producer_base=plan.producer_endpoint.base,
+        consumer_base=plan.consumer_endpoint.base,
+        tile_workspace_base=int(streaming_plan["tile_workspace"]["start"]),
+        max_tiles=summary.total_tiles,
+    )
+    bridge_payload = _generate_streaming_ptlx_bridge_payload(
+        f"{idx}_StreamingReStickifyOpWithPTLx",
+        artifact,
+    )
+    value_flow_contract = _streaming_value_flow_contract(
+        bridge_payload=bridge_payload,
+        producer_base=plan.producer_endpoint.base,
+        consumer_base=plan.consumer_endpoint.base,
+        expected_tiles=summary.total_tiles,
+    )
+    if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
+        "valid"
+    ]:
+        raise RuntimeError(
+            "streaming PT-LX restickify value-flow contract failed for "
+            f"SDSC {idx}: {value_flow_contract}"
+        )
+    if not value_flow_contract["valid"]:
+        return {
+            **_row(
+                idx,
+                "skipped",
+                value_flow_contract.get("semantic_skip_reason")
+                or "streaming-value-flow-contract-invalid",
+            ),
+            "kind": "ptlx-streaming-mixed-schedule",
+            "trigger_reason": trigger_reason,
+            "plan": asdict(plan),
+            "size": size,
+            "num_cores": num_cores,
+            "streaming_storage": {
+                key: value
+                for key, value in streaming_plan.items()
+                if key != "summary"
+            },
+            "streaming_summary": _streaming_summary_audit(summary),
+            "value_flow_contract": value_flow_contract,
+            "fallback": "ReStickifyOpHBM",
+        }
+
     producer_start, producer_patches = _materialize_producer_lx_endpoint(
         producer_payload,
         endpoint=plan.producer_endpoint,
@@ -598,39 +648,12 @@ def _patch_streaming_mixed_schedule(
         consumer_payload,
         factor=_corelet_factor(consumer_start),
     )
-
-    summary = streaming_plan["summary"]
-    artifact = generate_streaming_ptlx_artifact(
-        f"{idx}_StreamingPTLXDescriptor",
-        summary,
-        producer_base=plan.producer_endpoint.base,
-        consumer_base=plan.consumer_endpoint.base,
-        tile_workspace_base=int(streaming_plan["tile_workspace"]["start"]),
-        max_tiles=summary.total_tiles,
-    )
-    bridge_payload = generate_streaming_ptlx_full_bridge_sdsc(
-        f"{idx}_StreamingReStickifyOpWithPTLx",
-        artifact,
-    )
     mixed_name = f"{idx}_StreamingMixedReStickifyOpWithPTLxConsumer"
     mixed_payload = _combine_ptlx_bridge_with_consumer(
         mixed_name,
         bridge_payload,
         consumer_payload,
     )
-    value_flow_contract = _streaming_value_flow_contract(
-        bridge_payload=bridge_payload,
-        producer_base=plan.producer_endpoint.base,
-        consumer_base=plan.consumer_endpoint.base,
-        expected_tiles=summary.total_tiles,
-    )
-    if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
-        "valid"
-    ]:
-        raise RuntimeError(
-            "streaming PT-LX restickify value-flow contract failed for "
-            f"SDSC {idx}: {value_flow_contract}"
-        )
 
     sdsc_payloads[idx] = mixed_payload
     sdsc_payloads[plan.consumer_index] = None
@@ -790,22 +813,6 @@ def _patch_one_cross_bundle_handoff(
             "streaming_storage": streaming_plan,
         }
 
-    producer_start, producer_patches = _materialize_producer_lx_endpoint(
-        producer_payload,
-        endpoint=plan.producer_endpoint,
-        num_cores=num_cores,
-    )
-    consumer_start, consumer_name = _materialize_consumer_lx_endpoint(
-        consumer_payload,
-        consumer_dsc=consumer_dsc,
-        endpoint=plan.consumer_endpoint,
-        num_cores=num_cores,
-    )
-    _force_consumer_corelets(
-        consumer_payload,
-        factor=_corelet_factor(consumer_start),
-    )
-
     summary = streaming_plan["summary"]
     artifact = generate_streaming_ptlx_artifact(
         f"{idx}_CrossBundleStreamingPTLXDescriptor",
@@ -815,7 +822,7 @@ def _patch_one_cross_bundle_handoff(
         tile_workspace_base=int(streaming_plan["tile_workspace"]["start"]),
         max_tiles=summary.total_tiles,
     )
-    bridge_payload = generate_streaming_ptlx_full_bridge_sdsc(
+    bridge_payload = _generate_streaming_ptlx_bridge_payload(
         f"{idx}_CrossBundleStreamingReStickifyOpWithPTLx",
         artifact,
     )
@@ -832,6 +839,43 @@ def _patch_one_cross_bundle_handoff(
             "cross-bundle streaming PT-LX restickify value-flow contract "
             f"failed for SDSC {idx}: {value_flow_contract}"
         )
+    if not value_flow_contract["valid"]:
+        return {
+            **row_base,
+            **_row(
+                idx,
+                "skipped",
+                value_flow_contract.get("semantic_skip_reason")
+                or "streaming-value-flow-contract-invalid",
+            ),
+            "plan": asdict(plan),
+            "size": size,
+            "num_cores": num_cores,
+            "streaming_storage": {
+                key: value
+                for key, value in streaming_plan.items()
+                if key != "summary"
+            },
+            "streaming_summary": _streaming_summary_audit(summary),
+            "value_flow_contract": value_flow_contract,
+            "fallback": "ReStickifyOpHBM",
+        }
+
+    producer_start, producer_patches = _materialize_producer_lx_endpoint(
+        producer_payload,
+        endpoint=plan.producer_endpoint,
+        num_cores=num_cores,
+    )
+    consumer_start, consumer_name = _materialize_consumer_lx_endpoint(
+        consumer_payload,
+        consumer_dsc=consumer_dsc,
+        endpoint=plan.consumer_endpoint,
+        num_cores=num_cores,
+    )
+    _force_consumer_corelets(
+        consumer_payload,
+        factor=_corelet_factor(consumer_start),
+    )
 
     mixed_name = f"{idx}_CrossBundleProducerStreamingReStickifyOpWithPTLx"
     mixed_payload = _combine_producer_with_ptlx_bridge(
@@ -954,22 +998,6 @@ def _patch_one_implicit_alias(
     if size % 64 != 0:
         return _row(consumer_idx, "skipped", f"non-64-tiled-size:{size}")
 
-    producer_start, producer_patches = _materialize_producer_lx_endpoint(
-        producer_payload,
-        endpoint=candidate.producer_endpoint,
-        num_cores=num_cores,
-    )
-    consumer_start, consumer_name = _materialize_consumer_lx_endpoint(
-        consumer_payload,
-        consumer_dsc=consumer_dsc,
-        endpoint=candidate.consumer_endpoint,
-        num_cores=num_cores,
-    )
-    _force_consumer_corelets(
-        consumer_payload,
-        factor=_corelet_factor(consumer_start),
-    )
-
     producer_piece_size = _piece_bytes_per_core(producer_payload, size)
     consumer_piece_size = _piece_bytes_per_core(consumer_payload, size)
     source_range = {
@@ -1021,7 +1049,7 @@ def _patch_one_implicit_alias(
         tile_workspace_base=workspace_start,
         max_tiles=workspace_summary.total_tiles,
     )
-    bridge_payload = generate_streaming_ptlx_full_bridge_sdsc(
+    bridge_payload = _generate_streaming_ptlx_bridge_payload(
         f"{consumer_idx}_ImplicitAliasStreamingReStickifyOpWithPTLx",
         artifact,
     )
@@ -1038,6 +1066,39 @@ def _patch_one_implicit_alias(
             "implicit-alias streaming PT-LX value-flow contract failed for "
             f"SDSC {consumer_idx}: {value_flow_contract}"
         )
+    if not value_flow_contract["valid"]:
+        return {
+            **_row(
+                consumer_idx,
+                "skipped",
+                value_flow_contract.get("semantic_skip_reason")
+                or "streaming-value-flow-contract-invalid",
+            ),
+            "kind": "ptlx-implicit-alias-producer-streaming",
+            "plan": asdict(candidate),
+            "direction": direction,
+            "size": size,
+            "num_cores": num_cores,
+            "streaming_summary": _streaming_summary_audit(workspace_summary),
+            "value_flow_contract": value_flow_contract,
+            "fallback": "ReStickifyOpHBM",
+        }
+
+    producer_start, producer_patches = _materialize_producer_lx_endpoint(
+        producer_payload,
+        endpoint=candidate.producer_endpoint,
+        num_cores=num_cores,
+    )
+    consumer_start, consumer_name = _materialize_consumer_lx_endpoint(
+        consumer_payload,
+        consumer_dsc=consumer_dsc,
+        endpoint=candidate.consumer_endpoint,
+        num_cores=num_cores,
+    )
+    _force_consumer_corelets(
+        consumer_payload,
+        factor=_corelet_factor(consumer_start),
+    )
 
     bridge_name = f"{consumer_idx}_ImplicitAliasStreamingReStickifyOpWithPTLx"
     producer_mixed_name = (
@@ -2028,9 +2089,23 @@ def _streaming_semantic_transform_certificate(
     meta = root.get("streamingPTLXFull_", {}) or {}
     if meta.get("semantic_transform_certified") is True:
         return True, None
+    if meta.get("coalescing") == "native-64x64-tiles":
+        return False, (
+            "native-ptlx-tile-bridge-compiles-but-needs-value-correct-"
+            "coordinate-contract"
+        )
     return False, (
         "streaming-ptlx-stcdp-gather-scatter-does-not-certify-coordinate-remap"
     )
+
+
+def _generate_streaming_ptlx_bridge_payload(
+    name: str,
+    artifact: dict[str, Any],
+) -> dict[str, Any]:
+    if _spyre_config.restickify_ptlx_native_tile_e2e:
+        return generate_streaming_ptlx_native_full_bridge_sdsc(name, artifact)
+    return generate_streaming_ptlx_full_bridge_sdsc(name, artifact)
 
 
 def _piece_lx_starts(pieces: list[dict[str, Any]]) -> set[int]:

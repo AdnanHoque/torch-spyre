@@ -751,15 +751,17 @@ def _ptlx_restickify_candidate_skip_reason(
     # an atomic allocation.
     if max(op_iteration_sizes(op).values()) > 2048:
         return "shape-too-large"
-    streaming_skip_reason = _streaming_ptlx_endpoint_skip_reason(op, buf_users)
     if not (
         _has_stick_sized_split_pieces(producer)
         and _has_stick_sized_split_pieces(op)
-    ) and streaming_skip_reason is not None:
-        return (
-            "not-stick-sized-and-not-streaming-candidate:"
-            f"{streaming_skip_reason}"
-        )
+    ):
+        streaming_skip_reason = _streaming_ptlx_endpoint_skip_reason(op, buf_users)
+        if streaming_skip_reason is not None:
+            return (
+                "not-stick-sized-and-not-streaming-candidate:"
+                f"{streaming_skip_reason}"
+            )
+        return "streaming-ptlx-not-value-certified"
 
     if not (
         # Leave room for transient/live LX ranges that the greedy allocator

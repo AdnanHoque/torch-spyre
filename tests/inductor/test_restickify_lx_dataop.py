@@ -24,6 +24,8 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     generate_ptlx_restickify_bridge_sdsc,
     generate_restickify_dataop_sdsc_from_spec,
     generate_streaming_ptlx_full_bridge_sdsc,
+    generate_streaming_ptlx_native_full_bridge_sdsc,
+    generate_streaming_ptlx_native_tile_bridge_sdsc,
     generate_streaming_ptlx_tile_bridge_sdsc,
 )
 from torch_spyre._inductor.codegen.restickify_ptlx_streaming import (
@@ -36,6 +38,7 @@ from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
     _combine_ptlx_bridge_with_consumer,
     _mixed_value_flow_contract,
     _endpoint_core_starts,
+    _generate_streaming_ptlx_bridge_payload,
     _materialize_bridge_lx_endpoints,
     _patch_bridge_endpoint_pieces,
     _patch_consumer_input_lx_map,
@@ -400,6 +403,70 @@ def test_streaming_ptlx_tile_bridge_sdsc_materializes_three_lx_dataops():
     assert root["coreIdToDscSchedule"]["4"] == []
 
 
+def test_streaming_ptlx_native_tile_bridge_uses_4d_local_transform():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=1,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=1)
+
+    payload = generate_streaming_ptlx_native_tile_bridge_sdsc(
+        "native_tile_bridge",
+        artifact,
+    )
+    root = payload["native_tile_bridge"]
+    gather = next(iter(root["datadscs_"][0].values()))
+    restickify = next(iter(root["datadscs_"][1].values()))
+    scatter = next(iter(root["datadscs_"][2].values()))
+
+    assert root["streamingPTLXNativeTile_"]["semantic_transform_certified"] is True
+    assert root["streamingPTLXNativeTile_"]["tile_rows"] == 64
+    assert root["streamingPTLXNativeTile_"]["tile_cols"] == 64
+    assert [
+        next(iter(dataop.values()))["op"]["name"] for dataop in root["datadscs_"]
+    ] == [
+        "STCDPOpLx",
+        "ReStickifyOpWithPTLx",
+        "STCDPOpLx",
+    ]
+    assert gather["labeledDs_"][0]["layoutDimOrder_"] == [
+        "j_",
+        "i_",
+        "out_",
+        "mb_",
+    ]
+    assert gather["labeledDs_"][0]["stickDimOrder_"] == ["out_"]
+    assert restickify["labeledDs_"][0]["stickDimOrder_"] == ["out_"]
+    assert restickify["labeledDs_"][1]["stickDimOrder_"] == ["j_"]
+    assert scatter["labeledDs_"][0]["stickDimOrder_"] == ["j_"]
+    assert scatter["labeledDs_"][1]["stickDimOrder_"] == ["j_"]
+    assert gather["labeledDs_"][1]["PieceInfo"][0]["dimToStartCordinate"] == {
+        "j_": 0,
+        "i_": 0,
+        "out_": 0,
+        "mb_": 0,
+    }
+    assert gather["labeledDs_"][1]["PieceInfo"][0]["dimToSize_"] == {
+        "j_": 64,
+        "i_": 1,
+        "out_": 64,
+        "mb_": 1,
+    }
+    assert all(
+        placement["type"] != "hbm"
+        for dataop in root["datadscs_"]
+        for ds in next(iter(dataop.values()))["labeledDs_"]
+        for piece in ds["PieceInfo"]
+        for placement in piece["PlacementInfo"]
+    )
+
+
 def test_streaming_ptlx_full_bridge_sdsc_combines_materialized_tiles():
     source = {"mb": 32, "out": 1}
     dest = {"mb": 4, "out": 8}
@@ -432,6 +499,52 @@ def test_streaming_ptlx_full_bridge_sdsc_combines_materialized_tiles():
     ]
     assert root["coreIdToDscSchedule"]["1"] == [
         [0, -1, 0, 0],
+        [3, -1, 0, 0],
+    ]
+
+
+def test_streaming_ptlx_native_full_bridge_combines_materialized_tiles():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=2,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=2)
+
+    payload = generate_streaming_ptlx_native_full_bridge_sdsc(
+        "native_full_bridge",
+        artifact,
+    )
+    root = payload["native_full_bridge"]
+    contract = _streaming_value_flow_contract(
+        bridge_payload=payload,
+        producer_base=0,
+        consumer_base=256 * 1024,
+        expected_tiles=2,
+    )
+
+    assert root["streamingPTLXFull_"]["coalescing"] == "native-64x64-tiles"
+    assert root["streamingPTLXFull_"]["native_local_transform_contract"] is True
+    assert root["streamingPTLXFull_"]["semantic_transform_certified"] is False
+    assert root["streamingPTLXFull_"]["tile_count"] == 2
+    assert root["streamingPTLXFull_"]["datadsc_count"] == 6
+    assert len(root["datadscs_"]) == 6
+    assert contract["endpoint_contract_valid"] is True
+    assert contract["semantic_transform_certified"] is False
+    assert contract["valid"] is False
+    assert contract["semantic_skip_reason"] == (
+        "native-ptlx-tile-bridge-compiles-but-needs-value-correct-"
+        "coordinate-contract"
+    )
+    assert root["coreIdToDscSchedule"]["0"][:4] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 0],
         [3, -1, 0, 0],
     ]
 
@@ -489,6 +602,48 @@ def test_streaming_ptlx_full_bridge_coalesces_single_owner_row_stripes():
     assert contract["gather_count"] == 32
     assert contract["scatter_count"] == 0
     assert contract["direct_consumer_write_count"] == 32
+
+
+def test_streaming_ptlx_bridge_selector_uses_native_tiles_when_enabled():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=2,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=2)
+
+    with config.patch(restickify_ptlx_native_tile_e2e=False):
+        legacy = _generate_streaming_ptlx_bridge_payload("legacy", artifact)
+    with config.patch(restickify_ptlx_native_tile_e2e=True):
+        native = _generate_streaming_ptlx_bridge_payload("native", artifact)
+
+    legacy_contract = _streaming_value_flow_contract(
+        bridge_payload=legacy,
+        producer_base=0,
+        consumer_base=256 * 1024,
+        expected_tiles=2,
+    )
+    native_contract = _streaming_value_flow_contract(
+        bridge_payload=native,
+        producer_base=0,
+        consumer_base=256 * 1024,
+        expected_tiles=2,
+    )
+
+    assert legacy_contract["endpoint_contract_valid"] is True
+    assert legacy_contract["semantic_transform_certified"] is False
+    assert legacy_contract["valid"] is False
+    assert native_contract["endpoint_contract_valid"] is True
+    assert native_contract["semantic_transform_certified"] is False
+    assert native_contract["valid"] is False
+    assert next(iter(native.values()))["streamingPTLXFull_"]["coalescing"] == (
+        "native-64x64-tiles"
+    )
 
 
 def test_streaming_ptlx_full_bridge_combines_with_consumer_schedule():
@@ -593,22 +748,24 @@ def test_streaming_ptlx_patch_replaces_small_shape_hbm_restickify_boundary():
         rows = patch_restickify_ptlx_mixed_schedules(payloads, specs, plans=plans)
 
     patched = rows[0]
-    assert patched["status"] == "patched"
+    assert patched["status"] == "skipped"
     assert patched["kind"] == "ptlx-streaming-mixed-schedule"
     assert patched["trigger_reason"].startswith("ptlx-piece-smaller-than-stick")
     assert patched["streaming_summary"]["total_tiles"] == 64
     assert patched["value_flow_contract"]["endpoint_contract_valid"] is True
     assert patched["value_flow_contract"]["semantic_transform_certified"] is False
     assert patched["value_flow_contract"]["valid"] is False
-    assert payloads[2] is None
+    assert patched["fallback"] == "ReStickifyOpHBM"
+    assert payloads[1] is restickify_payload
+    assert payloads[2] is not None
     root = next(iter(payloads[1].values()))
-    assert root["streamingPTLXFull_"]["tile_count"] == 64
-    assert len(root["datadscs_"]) == 64 * 3
-    assert all(
-        next(iter(datadsc.values()))["op"]["name"] != "ReStickifyOpHBM"
-        for datadsc in root["datadscs_"]
+    assert "streamingPTLXFull_" not in root
+    assert next(iter(root["dscs_"][0].values()))["computeOp_"][0][
+        "opFuncName"
+    ] == "ReStickifyOpHBM"
+    assert patched["reason"] == (
+        "streaming-ptlx-stcdp-gather-scatter-does-not-certify-coordinate-remap"
     )
-    assert root["coreIdToDscSchedule"]["0"][-1] == [-1, 0, 1, 0]
 
 
 def test_implicit_alias_streaming_patch_materializes_consumer_input_bridge():
@@ -683,34 +840,20 @@ def test_implicit_alias_streaming_patch_materializes_consumer_input_bridge():
 
     assert len(rows) == 1
     patched = rows[0]
-    assert patched["status"] == "patched"
+    assert patched["status"] == "skipped"
     assert patched["kind"] == "ptlx-implicit-alias-producer-streaming"
     assert patched["value_flow_contract"]["endpoint_contract_valid"] is True
     assert patched["value_flow_contract"]["semantic_transform_certified"] is False
     assert patched["value_flow_contract"]["valid"] is False
     assert patched["streaming_summary"]["tile_size"] == 64
     assert patched["streaming_summary"]["total_tiles"] == 64
-    assert patched["split_bridge_sdsc"] is False
-    assert patched["producer_mixed_bridge_sdsc"] is True
+    assert patched["fallback"] == "ReStickifyOpHBM"
     assert patched["plan"]["consumer_input_position"] == 0
-    assert patched["consumer_lx_unique_starts"] != [0]
 
     root = next(iter(payloads[0].values()))
     assert len(payloads) == 2
-    assert "ImplicitAliasProducerStreamingReStickifyOpWithPTLx" in next(
-        iter(payloads[0])
-    )
-    assert root["streamingPTLXFull_"]["tile_count"] == 64
-    assert root["dscs_"]
-    assert root["datadscs_"]
-    assert {"add", "ReStickifyOpWithPTLx", "STCDPOpLx"} <= set(
-        root["opFuncsUsed_"]
-    )
-    assert root["coreIdToDscSchedule"]["0"][0] == [-1, 0, 0, 0]
-    assert all(
-        next(iter(datadsc.values()))["op"]["name"] != "ReStickifyOpHBM"
-        for datadsc in root["datadscs_"]
-    )
+    assert "ImplicitAliasProducerStreamingReStickifyOpWithPTLx" not in next(iter(payloads[0]))
+    assert "streamingPTLXFull_" not in root
     assert next(iter(payloads[1])) == "1_add"
 
 
@@ -822,21 +965,19 @@ def test_streaming_ptlx_cross_bundle_patch_rewrites_handoff_pair():
 
     assert len(rows) == 1
     patched = rows[0]
-    assert patched["status"] == "patched"
+    assert patched["status"] == "skipped"
     assert patched["kind"] == "ptlx-streaming-cross-bundle-handoff"
     assert patched["value_flow_contract"]["endpoint_contract_valid"] is True
     assert patched["value_flow_contract"]["semantic_transform_certified"] is False
     assert patched["value_flow_contract"]["valid"] is False
     assert patched["streaming_summary"]["total_tiles"] == 64
-    assert records[0]["sdscs_json"][1] is None
+    assert patched["fallback"] == "ReStickifyOpHBM"
+    assert records[0]["sdscs_json"][1] is restickify_payload
     bridge_root = next(iter(records[0]["sdscs_json"][0].values()))
-    assert "CrossBundleProducerStreamingReStickifyOpWithPTLx" in next(
+    assert "CrossBundleProducerStreamingReStickifyOpWithPTLx" not in next(
         iter(records[0]["sdscs_json"][0])
     )
-    assert bridge_root["streamingPTLXFull_"]["tile_count"] == 64
-    assert len(bridge_root["datadscs_"]) == 64 * 3
-    assert bridge_root["dscs_"]
-    assert bridge_root["coreIdToDscSchedule"]["0"][0] == [-1, 0, 0, 0]
+    assert "streamingPTLXFull_" not in bridge_root
     consumer_root = next(iter(records[1]["sdscs_json"][0].values()))
     consumer_dsc = next(iter(consumer_root["dscs_"][0].values()))
     allocate_nodes = [
@@ -844,7 +985,7 @@ def test_streaming_ptlx_cross_bundle_patch_rewrites_handoff_pair():
         for node in consumer_dsc["scheduleTree_"]
         if node["nodeType_"] == "allocate"
     ]
-    assert allocate_nodes[0]["component_"] == "lx"
+    assert allocate_nodes[0]["component_"] == "hbm"
     assert allocate_nodes[1]["component_"] == "hbm"
 
 
