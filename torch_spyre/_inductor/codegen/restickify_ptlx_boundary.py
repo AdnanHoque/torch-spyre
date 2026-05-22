@@ -460,19 +460,23 @@ def _patch_one_mixed_schedule(
             restickify_payload=restickify_payload,
         )
 
+    producer_candidate = deepcopy(producer_payload)
+    consumer_candidate = deepcopy(consumer_payload)
+    _, consumer_candidate_dsc = _single_payload_dsc(consumer_candidate)
+
     producer_start, producer_patches = _materialize_producer_lx_endpoint(
-        producer_payload,
+        producer_candidate,
         endpoint=plan.producer_endpoint,
         num_cores=num_cores,
     )
     consumer_start, consumer_name = _materialize_consumer_lx_endpoint(
-        consumer_payload,
-        consumer_dsc=consumer_dsc,
+        consumer_candidate,
+        consumer_dsc=consumer_candidate_dsc,
         endpoint=plan.consumer_endpoint,
         num_cores=num_cores,
     )
     _force_consumer_corelets(
-        consumer_payload,
+        consumer_candidate,
         factor=_corelet_factor(consumer_start),
     )
 
@@ -499,9 +503,9 @@ def _patch_one_mixed_schedule(
         num_cores=num_cores,
     )
     value_flow_contract = _mixed_value_flow_contract(
-        producer_payload=producer_payload,
+        producer_payload=producer_candidate,
         bridge_payload=bridge_payload,
-        consumer_payload=consumer_payload,
+        consumer_payload=consumer_candidate,
         producer_lds_idx=plan.producer_lds_idx,
         consumer_lds_idx=plan.consumer_lds_idx,
     )
@@ -512,12 +516,34 @@ def _patch_one_mixed_schedule(
             "PT-LX mixed restickify value-flow contract failed for "
             f"SDSC {idx}: {value_flow_contract}"
         )
+    if not value_flow_contract["valid"]:
+        return {
+            **_row(idx, "skipped", "mixed-value-flow-contract-invalid"),
+            "kind": "ptlx-mixed-schedule",
+            "plan": asdict(plan),
+            "direction": direction,
+            "restickify_logical_direction": restickify_logical_direction,
+            "size": size,
+            "num_cores": num_cores,
+            "producer_lx_unique_starts": _unique_start_values(producer_start),
+            "consumer_lx_unique_starts": _unique_start_values(consumer_start),
+            "producer_allocation_patches": producer_patches,
+            "endpoint_allocation": restickify_spec.op_info.get(
+                PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY
+            ),
+            "bridge_storage": bridge_storage,
+            "core_locality": _core_locality_summary(restickify_spec),
+            "bridge_endpoint_patch": endpoint_patch,
+            "value_flow_contract": value_flow_contract,
+            "fallback": "ReStickifyOpHBM",
+        }
     mixed_name = f"{idx}_MixedReStickifyOpWithPTLxConsumer"
     mixed_payload = _combine_ptlx_bridge_with_consumer(
         mixed_name,
         bridge_payload,
-        consumer_payload,
+        consumer_candidate,
     )
+    sdsc_payloads[plan.producer_index] = producer_candidate
     sdsc_payloads[idx] = mixed_payload
     sdsc_payloads[plan.consumer_index] = None
 
@@ -2117,12 +2143,28 @@ def _streaming_value_flow_contract(
         )
     else:
         producer_start_valid = producer_starts == {int(producer_base)}
+    if coalescing == "direct-64x64-tiles":
+        consumer_limit = _streaming_consumer_lx_limit(
+            int(consumer_base),
+            full_meta=full_meta,
+            expected_tiles=expected_tiles,
+        )
+        consumer_start_valid = (
+            bool(consumer_starts)
+            and min(consumer_starts) == int(consumer_base)
+            and all(
+                int(consumer_base) <= start < consumer_limit
+                for start in consumer_starts
+            )
+        )
+    else:
+        consumer_start_valid = consumer_starts == {int(consumer_base)}
     endpoint_valid = (
         hbm_placements == 0
         and not has_hbm_restickify
         and count_contract_valid
         and producer_start_valid
-        and consumer_starts == {int(consumer_base)}
+        and consumer_start_valid
     )
     consumer_descriptor_contract = None
     if consumer_payload is not None and consumer_lds_idx is not None:
@@ -2186,6 +2228,7 @@ def _streaming_value_flow_contract(
         "value_preservation_contract": value_preservation_contract,
         "value_preservation_valid": value_preservation_valid,
         "producer_start_valid": producer_start_valid,
+        "consumer_start_valid": consumer_start_valid,
         "producer_starts": sorted(producer_starts),
         "consumer_starts": sorted(consumer_starts),
         "expected_tiles": int(expected_tiles),
@@ -2203,6 +2246,20 @@ def _streaming_value_flow_contract(
         "producer_input_unique_starts": sorted(producer_starts),
         "consumer_output_unique_starts": sorted(consumer_starts),
     }
+
+
+def _streaming_consumer_lx_limit(
+    consumer_base: int,
+    *,
+    full_meta: dict[str, Any],
+    expected_tiles: int,
+) -> int:
+    tile_size = int(full_meta.get("tile_size", 64) or 64)
+    logical_tile_count = int(full_meta.get("logical_tile_count", expected_tiles) or 0)
+    tensor_bytes = logical_tile_count * tile_size * tile_size * 2
+    if tensor_bytes <= 0:
+        return int(consumer_base) + _LX_BYTES_PER_CORE
+    return min(_LX_BYTES_PER_CORE, int(consumer_base) + tensor_bytes)
 
 
 def _streaming_bridge_value_preservation_contract(

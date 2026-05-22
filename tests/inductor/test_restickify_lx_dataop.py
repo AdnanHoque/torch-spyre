@@ -860,6 +860,46 @@ def test_streaming_ptlx_direct_full_bridge_combines_direct_tiles():
     ]
 
 
+def test_streaming_ptlx_direct_full_bridge_accepts_scattered_consumer_offsets():
+    source = {"mb": 1, "out": 32}
+    dest = {"mb": 32, "out": 1}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=64,
+        sample_all_tiles=True,
+    )
+    artifact = generate_streaming_ptlx_artifact(
+        "streaming",
+        summary,
+        producer_base=16 * 1024,
+        consumer_base=256 * 1024,
+        max_tiles=summary.total_tiles,
+    )
+
+    payload = generate_streaming_ptlx_direct_full_bridge_sdsc(
+        "direct_full_bridge",
+        artifact,
+    )
+    contract = _streaming_value_flow_contract(
+        bridge_payload=payload,
+        producer_base=16 * 1024,
+        consumer_base=256 * 1024,
+        expected_tiles=summary.total_tiles,
+    )
+
+    assert contract["consumer_start_valid"] is True
+    assert contract["endpoint_contract_valid"] is True
+    assert contract["scatter_count"] == summary.total_tiles
+    assert len(contract["consumer_starts"]) > 1
+    assert min(contract["consumer_starts"]) == 256 * 1024
+    assert contract["semantic_transform_certified"] is False
+    assert contract["valid"] is False
+
+
 def test_streaming_ptlx_validgap_consumer_tile_bridge_uses_sparse_output_stick_alias():
     source = {"mb": 32, "out": 1}
     dest = {"mb": 4, "out": 8}
@@ -1906,6 +1946,59 @@ def test_plan_mixed_ptlx_schedule_skips_invalid_endpoint_overlap():
     assert plans == {}
 
 
+def test_mixed_ptlx_patch_replaces_only_after_value_flow_contract_passes():
+    producer_payload, restickify_payload, consumer_payload, specs = (
+        _mixed_patch_fixture()
+    )
+    payloads = [producer_payload, restickify_payload, consumer_payload]
+    plans = plan_restickify_ptlx_mixed_schedules(specs)
+
+    rows = patch_restickify_ptlx_mixed_schedules(payloads, specs, plans=plans)
+
+    patched = rows[0]
+    assert patched["status"] == "patched"
+    assert patched["value_flow_contract"]["valid"] is True
+    assert patched["replacement_sdsc"] == "1_MixedReStickifyOpWithPTLxConsumer"
+    assert payloads[0] is not producer_payload
+    assert payloads[1] is not restickify_payload
+    assert payloads[2] is None
+    assert next(iter(payloads[1])) == "1_MixedReStickifyOpWithPTLxConsumer"
+
+
+def test_mixed_ptlx_patch_falls_back_when_value_flow_contract_fails():
+    producer_payload, restickify_payload, consumer_payload, specs = (
+        _mixed_patch_fixture()
+    )
+    producer_root, producer_dsc = next(iter(producer_payload.values())), next(
+        iter(next(iter(producer_payload.values()))["dscs_"][0].values())
+    )
+    producer_dsc["scheduleTree_"] = [
+        node
+        for node in producer_dsc["scheduleTree_"]
+        if int(node.get("ldsIdx_", -1)) != 1
+    ]
+    payloads = [producer_payload, restickify_payload, consumer_payload]
+    plans = plan_restickify_ptlx_mixed_schedules(specs)
+
+    rows = patch_restickify_ptlx_mixed_schedules(payloads, specs, plans=plans)
+
+    patched = rows[0]
+    assert patched["status"] == "skipped"
+    assert patched["reason"] == "mixed-value-flow-contract-invalid"
+    assert patched["fallback"] == "ReStickifyOpHBM"
+    assert patched["value_flow_contract"]["valid"] is False
+    assert patched["value_flow_contract"]["producer_to_bridge_input_match"] is False
+    assert payloads[0] is producer_payload
+    assert payloads[1] is restickify_payload
+    assert payloads[2] is consumer_payload
+    assert next(iter(payloads[1].values()))["opFuncsUsed_"] == ["ReStickifyOpHBM"]
+    assert all(
+        lds.get("memOrg_", {}).get("hbm", {}).get("isPresent") == 1
+        for lds in producer_root["dscs_"][0]["add"]["labeledDs_"]
+        if int(lds.get("ldsIdx_", -1)) == 1
+    )
+
+
 def test_mixed_ptlx_value_flow_contract_matches_bridge_endpoints():
     producer = _minimal_compute_payload("0_add", "producer_out", lds_idx=1)
     consumer = _minimal_compute_payload("2_add", "consumer_in", lds_idx=0)
@@ -2044,6 +2137,71 @@ def test_mixed_ptlx_value_flow_contract_catches_bridge_mismatch():
     assert contract["valid"] is False
     assert contract["producer_to_bridge_input_match"] is False
     assert contract["bridge_output_to_consumer_match"] is True
+
+
+def _mixed_patch_fixture():
+    producer_base = 64 * 1024
+    consumer_base = 512 * 1024
+    endpoint_allocation = _endpoint_allocation(
+        producer_base,
+        consumer_base,
+        size=256 * 1024,
+    )
+    producer_payload = _minimal_layout_payload(
+        "0_add",
+        opfunc="add",
+        size=2048,
+        work_slices={"mb": 32, "out": 1},
+        core_mapping=default_core_mapping({"mb": 32, "out": 1}),
+        lds=[
+            _layout_lds(0, "producer_in", "dataIN", ["mb", "out"], ["out"]),
+            _layout_lds(1, "producer_out", "dataOUT", ["mb", "out"], ["out"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
+    restickify_payload = _minimal_layout_payload(
+        "1_restickify",
+        opfunc="ReStickifyOpHBM",
+        size=2048,
+        work_slices={"mb": 1, "out": 32},
+        core_mapping=default_core_mapping({"mb": 1, "out": 32}),
+        lds=[
+            _layout_lds(0, "producer_out", "dataIN", ["mb", "out"], ["out"]),
+            _layout_lds(1, "restickify_out", "dataOUT", ["out", "mb"], ["mb"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
+    consumer_payload = _minimal_layout_payload(
+        "2_add",
+        opfunc="add",
+        size=2048,
+        work_slices={"mb": 1, "out": 32},
+        core_mapping=default_core_mapping({"mb": 1, "out": 32}),
+        lds=[
+            _layout_lds(0, "restickify_out", "dataIN", ["out", "mb"], ["mb"]),
+            _layout_lds(1, "consumer_out", "dataOUT", ["out", "mb"], ["mb"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
+    specs = [
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 0), _arg(False, 4, allocation={"lx": producer_base})],
+        ),
+        _minimal_op_spec(
+            RESTICKIFY_OP,
+            [_arg(True, 4), _arg(False, 5)],
+            op_info=_ptlx_restickify_info(endpoint_allocation),
+        ),
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 5, allocation={"lx": consumer_base}), _arg(False, 6)],
+        ),
+    ]
+    return producer_payload, restickify_payload, consumer_payload, specs
 
 
 def _minimal_compute_payload(name: str, lds_name: str, *, lds_idx: int):
