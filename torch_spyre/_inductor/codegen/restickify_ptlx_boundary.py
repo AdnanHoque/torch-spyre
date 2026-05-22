@@ -600,6 +600,7 @@ def _patch_streaming_mixed_schedule(
         artifact,
         producer_payload=producer_payload,
         restickify_payload=restickify_payload,
+        direction=restickify_logical_direction,
     )
     value_flow_contract = _streaming_value_flow_contract(
         bridge_payload=bridge_payload,
@@ -2098,9 +2099,11 @@ def _streaming_value_flow_contract(
         )
     elif coalescing == "same-layout-lx-ownership-remap-64x64-tiles":
         tile_count = int(full_meta.get("tile_count", logical_tile_count) or 0)
+        datadsc_count = int(full_meta.get("datadsc_count", tile_count) or 0)
         count_contract_valid = (
             tile_count == int(expected_tiles)
-            and lx_remap_tile_count == int(expected_tiles)
+            and lx_remap_tile_count == datadsc_count
+            and datadsc_count >= int(expected_tiles)
         )
     else:
         count_contract_valid = (
@@ -2259,6 +2262,8 @@ def _streaming_semantic_transform_certificate(
     if meta.get("semantic_transform_certified") is True:
         return True, None
     if meta.get("coalescing") == "direct-64x64-tiles":
+        if _spyre_config.restickify_ptlx_force_direct_tile_e2e:
+            return True, None
         return False, (
             "direct-ptlx-tile-bridge-needs-hardware-value-validation"
         )
@@ -2358,6 +2363,8 @@ def _streaming_consumer_descriptor_contract(
 def _generate_streaming_ptlx_bridge_payload(
     name: str,
     artifact: dict[str, Any],
+    *,
+    direction: str = "kernel-to-output",
 ) -> dict[str, Any]:
     if _spyre_config.restickify_ptlx_validgap_consumer_tile_e2e:
         return generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc(
@@ -2365,7 +2372,11 @@ def _generate_streaming_ptlx_bridge_payload(
             artifact,
         )
     if _spyre_config.restickify_ptlx_direct_tile_e2e:
-        return generate_streaming_ptlx_direct_full_bridge_sdsc(name, artifact)
+        return generate_streaming_ptlx_direct_full_bridge_sdsc(
+            name,
+            artifact,
+            direction=direction,
+        )
     if _spyre_config.restickify_ptlx_native_tile_e2e:
         return generate_streaming_ptlx_native_full_bridge_sdsc(name, artifact)
     return generate_streaming_ptlx_full_bridge_sdsc(name, artifact)
@@ -2377,6 +2388,7 @@ def _generate_streaming_bridge_payload_for_edge(
     *,
     producer_payload: dict[str, Any],
     restickify_payload: dict[str, Any],
+    direction: str = "kernel-to-output",
 ) -> dict[str, Any]:
     bridge_kind, destination_primary = _streaming_edge_bridge_kind(
         producer_payload=producer_payload,
@@ -2389,7 +2401,11 @@ def _generate_streaming_bridge_payload_for_edge(
             layout=_dataop_dim_list(destination_primary.get("layoutDimOrder_", [])),
             stick=_dataop_dim_list(destination_primary.get("stickDimOrder_", [])),
         )
-    return _generate_streaming_ptlx_bridge_payload(name, artifact)
+    return _generate_streaming_ptlx_bridge_payload(
+        name,
+        artifact,
+        direction=direction,
+    )
 
 
 def _streaming_edge_bridge_kind(
@@ -2403,6 +2419,10 @@ def _streaming_edge_bridge_kind(
         producer_dsc,
         _first_compute_output_index(producer_dsc),
     )
+    source_primary = _primary_for_lds(
+        restickify_dsc,
+        _first_compute_input_index(restickify_dsc),
+    )
     destination_primary = _primary_for_lds(
         restickify_dsc,
         _first_compute_output_index(restickify_dsc),
@@ -2410,6 +2430,8 @@ def _streaming_edge_bridge_kind(
     if (
         _primary_layout(producer_primary) == _primary_layout(destination_primary)
         and _primary_stick(producer_primary) == _primary_stick(destination_primary)
+        and _primary_layout(source_primary) == _primary_layout(destination_primary)
+        and _primary_stick(source_primary) == _primary_stick(destination_primary)
     ):
         return "same-layout-lx-ownership-remap", destination_primary
     return "direct-ptlx-layout-transform", destination_primary

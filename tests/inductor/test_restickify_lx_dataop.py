@@ -522,6 +522,42 @@ def test_streaming_ptlx_direct_tile_bridge_uses_single_2d_restickify():
     )
 
 
+def test_streaming_ptlx_direct_tile_output_to_kernel_matches_consumer_layout():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=1,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=1)
+
+    payload = generate_streaming_ptlx_direct_tile_bridge_sdsc(
+        "direct_tile_bridge",
+        artifact,
+        direction="output-to-kernel",
+    )
+    root = payload["direct_tile_bridge"]
+    gather = next(iter(root["datadscs_"][0].values()))
+    restickify = next(iter(root["datadscs_"][1].values()))
+    input_lds, output_lds = restickify["labeledDs_"]
+
+    assert root["streamingPTLXDirectTile_"]["direction"] == "output-to-kernel"
+    assert gather["labeledDs_"][0]["stickDimOrder_"] == ["out_"]
+    assert gather["labeledDs_"][1]["stickDimOrder_"] == ["mb_"]
+    assert input_lds["layoutDimOrder_"] == ["out_", "mb_"]
+    assert input_lds["stickDimOrder_"] == ["mb_"]
+    assert output_lds["layoutDimOrder_"] == ["mb_", "out_"]
+    assert output_lds["stickDimOrder_"] == ["out_"]
+    assert output_lds["PieceInfo"][0]["dimToStartCordinate"] == {
+        "mb_": 0,
+        "out_": 0,
+    }
+
+
 def test_streaming_ptlx_full_bridge_sdsc_combines_materialized_tiles():
     source = {"mb": 32, "out": 1}
     dest = {"mb": 4, "out": 8}
@@ -967,12 +1003,23 @@ def test_streaming_lx_remap_full_bridge_uses_one_stcdp_per_tile():
         "same-layout-lx-ownership-remap-64x64-tiles"
     )
     assert root["streamingLXRemapFull_"]["semantic_transform_certified"] is True
-    assert len(root["datadscs_"]) == 64
+    assert len(root["datadscs_"]) == 256
     assert first["op"]["name"] == "STCDPOpLx"
     assert first["labeledDs_"][0]["layoutDimOrder_"] == ["mb_", "out_"]
     assert first["labeledDs_"][1]["layoutDimOrder_"] == ["mb_", "out_"]
+    input_pieces = first["labeledDs_"][0]["PieceInfo"]
+    output_pieces = first["labeledDs_"][1]["PieceInfo"]
+    assert len(input_pieces) == len(output_pieces)
+    assert len(input_pieces) == 1
+    assert [
+        piece["dimToStartCordinate"] for piece in input_pieces
+    ] == [
+        piece["dimToStartCordinate"] for piece in output_pieces
+    ]
+    assert {piece["PlacementInfo"][0]["memId"][0] for piece in input_pieces} == {0}
+    assert {piece["PlacementInfo"][0]["memId"][0] for piece in output_pieces} == {0}
     assert contract["valid"] is True
-    assert contract["lx_remap_tile_count"] == 64
+    assert contract["lx_remap_tile_count"] == 256
     assert contract["has_hbm_restickify"] is False
 
 

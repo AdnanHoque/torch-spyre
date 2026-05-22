@@ -141,6 +141,14 @@ restickify_ptlx_direct_tile_e2e: bool = (
     os.environ.get("SPYRE_RESTICKIFY_PTLX_DIRECT_TILE_E2E", "0") == "1"
 )
 
+# Default-off validation-only gate for running the direct tiled PT-LX
+# candidate as the real mixed bridge. This is not a production eligibility
+# rule; it exists so hardware value checks can decide whether the descriptor
+# deserves a real semantic certificate.
+restickify_ptlx_force_direct_tile_e2e: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_PTLX_FORCE_DIRECT_TILE_E2E", "0") == "1"
+)
+
 # Default-off diagnostic refinement of the streaming PT-LX prototype. This
 # emits a consumer-shaped ReStickifyOpWithPTLx tile descriptor using a validGap
 # on the source stick dimension. The shape is Deeptools-legal and preserves live
