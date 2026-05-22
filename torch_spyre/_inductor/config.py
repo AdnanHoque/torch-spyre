@@ -123,6 +123,14 @@ restickify_ptlx_value_flow_assert: bool = (
     os.environ.get("SPYRE_RESTICKIFY_PTLX_VALUE_FLOW_ASSERT", "0") == "1"
 )
 
+# Benchmark-only escape hatch for forcing the PT-LX mixed bridge with explicit
+# environment-provided endpoint bases when the scratchpad allocator did not
+# attach a full endpoint-allocation record. This remains default-off and is not
+# a production eligibility rule.
+restickify_ptlx_force_env_endpoints: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_PTLX_FORCE_ENV_ENDPOINTS", "0") == "1"
+)
+
 # Default-off diagnostic e2e lowering prototype for the Stage42 DDL bridge.
 # When enabled, a small, compile-proven subset of ReStickifyOpHBM SDSCs may be
 # emitted in the compact restickify DDL input form instead of the normal HBM

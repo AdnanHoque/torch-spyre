@@ -45,6 +45,8 @@ _PRODUCER_BASE_ENV = "SPYRE_RESTICKIFY_PTLX_BRIDGE_PRODUCER_BASE"
 _CONSUMER_BASE_ENV = "SPYRE_RESTICKIFY_PTLX_BRIDGE_CONSUMER_BASE"
 _DEFAULT_PRODUCER_BASE = 16 * 1024
 _DEFAULT_CONSUMER_BASE = 8 * 1024
+_LX_BYTES_PER_CORE = 2 * 1024 * 1024
+_LX_ALIGNMENT = 4096
 
 
 @dataclass(frozen=True)
@@ -297,6 +299,17 @@ def _patch_one_mixed_schedule(
     )
     if piece_reason is not None:
         return _row(idx, "skipped", piece_reason)
+    bridge_storage = _plan_bridge_intermediate_storage(
+        restickify_spec,
+        producer_payload=producer_payload,
+        restickify_payload=restickify_payload,
+        consumer_payload=consumer_payload,
+        plan=plan,
+        size=size,
+    )
+    storage_reason = bridge_storage.get("reason")
+    if storage_reason is not None:
+        return _row(idx, "skipped", str(storage_reason))
 
     producer_start, producer_patches = _materialize_producer_lx_endpoint(
         producer_payload,
@@ -327,6 +340,7 @@ def _patch_one_mixed_schedule(
         input_core_to_work_slice=_root_core_mapping(producer_payload),
         intermediate_work_slices=_root_work_slices(restickify_payload),
         intermediate_core_to_work_slice=_root_core_mapping(restickify_payload),
+        intermediate_start_address=bridge_storage["intermediate"]["start"],
         output_work_slices=_root_work_slices(consumer_payload),
         output_core_to_work_slice=_root_core_mapping(consumer_payload),
     )
@@ -375,6 +389,7 @@ def _patch_one_mixed_schedule(
         "endpoint_allocation": restickify_spec.op_info.get(
             PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY
         ),
+        "bridge_storage": bridge_storage,
         "core_locality": _core_locality_summary(restickify_spec),
         "bridge_endpoint_patch": endpoint_patch,
         "value_flow_contract": value_flow_contract,
@@ -555,6 +570,15 @@ def _allocator_endpoint_skip_reason(
     consumer_base: int,
     consumer_base_source: str,
 ) -> str | None:
+    if _spyre_config.restickify_ptlx_force_env_endpoints:
+        producer_is_env = producer_base_source.startswith("env:")
+        consumer_is_env = consumer_base_source.startswith("env:")
+        if not producer_is_env or not consumer_is_env:
+            return "force-env-endpoints-requires-explicit-bases"
+        if producer_base == consumer_base:
+            return "force-env-endpoints-overlap"
+        return None
+
     if producer_base_source != "op-spec-allocation":
         return f"producer-endpoint-not-allocator-backed:{producer_base_source}"
     if consumer_base_source != "op-spec-allocation":
@@ -577,6 +601,151 @@ def _allocator_endpoint_skip_reason(
     if int(consumer.get("start", -1)) != int(consumer_base):
         return "consumer-endpoint-base-mismatch"
     return None
+
+
+def _plan_bridge_intermediate_storage(
+    spec: OpSpec,
+    *,
+    producer_payload: dict[str, Any],
+    restickify_payload: dict[str, Any],
+    consumer_payload: dict[str, Any],
+    plan: PTLXMixedSchedulePlan,
+    size: int,
+) -> dict[str, Any]:
+    endpoint_allocation = (spec.op_info or {}).get(
+        PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY
+    )
+    if _spyre_config.restickify_ptlx_force_env_endpoints:
+        endpoint_allocation = None
+    producer_range = _endpoint_range(
+        endpoint_allocation,
+        "producer",
+        fallback_base=plan.producer_endpoint.base,
+        fallback_size=_piece_bytes_per_core(producer_payload, size),
+    )
+    consumer_range = _endpoint_range(
+        endpoint_allocation,
+        "consumer",
+        fallback_base=plan.consumer_endpoint.base,
+        fallback_size=_piece_bytes_per_core(consumer_payload, size),
+    )
+    endpoint_ranges = [producer_range, consumer_range]
+    endpoint_overlaps = _range_overlaps(endpoint_ranges)
+    if endpoint_overlaps:
+        return {
+            "reason": "ptlx-endpoint-ranges-overlap",
+            "producer": producer_range,
+            "consumer": consumer_range,
+            "endpoint_overlaps": endpoint_overlaps,
+        }
+
+    intermediate_size = _piece_bytes_per_core(restickify_payload, size)
+    intermediate_start = _first_free_lx_range(
+        endpoint_ranges,
+        size=intermediate_size,
+        limit=_LX_BYTES_PER_CORE,
+        alignment=_LX_ALIGNMENT,
+    )
+    if intermediate_start is None:
+        return {
+            "reason": "missing-intermediate-lx-space",
+            "producer": producer_range,
+            "consumer": consumer_range,
+            "intermediate": {"size": intermediate_size},
+            "lx_limit": _LX_BYTES_PER_CORE,
+        }
+
+    intermediate_range = {
+        "start": intermediate_start,
+        "end": intermediate_start + intermediate_size,
+        "size": intermediate_size,
+        "source": "planned-free-range",
+    }
+    return {
+        "reason": None,
+        "producer": producer_range,
+        "consumer": consumer_range,
+        "intermediate": intermediate_range,
+        "lx_limit": _LX_BYTES_PER_CORE,
+        "alignment": _LX_ALIGNMENT,
+    }
+
+
+def _endpoint_range(
+    endpoint_allocation: Any,
+    key: str,
+    *,
+    fallback_base: int,
+    fallback_size: int,
+) -> dict[str, int | str]:
+    if isinstance(endpoint_allocation, dict):
+        value = endpoint_allocation.get(key)
+        if isinstance(value, dict) and {"start", "end", "size"} <= set(value):
+            return {
+                "start": int(value["start"]),
+                "end": int(value["end"]),
+                "size": int(value["size"]),
+                "source": "op-spec-allocation",
+            }
+    return {
+        "start": int(fallback_base),
+        "end": int(fallback_base) + int(fallback_size),
+        "size": int(fallback_size),
+        "source": "planned-endpoint-base",
+    }
+
+
+def _piece_bytes_per_core(payload: dict[str, Any], size: int) -> int:
+    root = next(iter(payload.values()))
+    total_bytes = int(size) * int(size) * 2
+    split_count = 1
+    for split in (root.get("numWkSlicesPerDim_") or {}).values():
+        split_count *= max(1, int(split))
+    if split_count <= 0:
+        split_count = max(1, int(root.get("numCoresUsed_", 1) or 1))
+    return _align_up((total_bytes + split_count - 1) // split_count, _LX_ALIGNMENT)
+
+
+def _first_free_lx_range(
+    ranges: list[dict[str, int | str]],
+    *,
+    size: int,
+    limit: int,
+    alignment: int,
+) -> int | None:
+    candidate = 0
+    for live_range in sorted(ranges, key=lambda item: int(item["start"])):
+        candidate = _align_up(candidate, alignment)
+        start = int(live_range["start"])
+        if candidate + size <= start:
+            return candidate
+        candidate = max(candidate, int(live_range["end"]))
+    candidate = _align_up(candidate, alignment)
+    if candidate + size <= limit:
+        return candidate
+    return None
+
+
+def _range_overlaps(
+    ranges: list[dict[str, int | str]],
+) -> list[dict[str, int]]:
+    overlaps = []
+    sorted_ranges = sorted(ranges, key=lambda item: int(item["start"]))
+    for left, right in zip(sorted_ranges, sorted_ranges[1:]):
+        if int(left["end"]) > int(right["start"]):
+            overlaps.append(
+                {
+                    "left_start": int(left["start"]),
+                    "left_end": int(left["end"]),
+                    "right_start": int(right["start"]),
+                    "right_end": int(right["end"]),
+                }
+            )
+    return overlaps
+
+
+def _align_up(value: int, alignment: int) -> int:
+    return ((int(value) + int(alignment) - 1) // int(alignment)) * int(alignment)
 
 
 def _root_work_slices(payload: dict[str, Any]) -> dict[str, int]:

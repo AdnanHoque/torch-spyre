@@ -221,6 +221,7 @@ def generate_ptlx_restickify_bridge_sdsc(
     input_core_to_work_slice: Mapping[str, Mapping[str, int]] | None = None,
     intermediate_work_slices: Mapping[Any, Any] | None = None,
     intermediate_core_to_work_slice: Mapping[str, Mapping[str, int]] | None = None,
+    intermediate_start_address: int | None = None,
     output_work_slices: Mapping[Any, Any] | None = None,
     output_core_to_work_slice: Mapping[str, Mapping[str, int]] | None = None,
 ) -> dict[str, Any]:
@@ -273,7 +274,11 @@ def generate_ptlx_restickify_bridge_sdsc(
     final_splits = output_work_slices or default_output_splits
     final_mapping = output_core_to_work_slice or default_output_mapping
 
-    intermediate_start = 1024 * 1024
+    intermediate_start = (
+        1024 * 1024
+        if intermediate_start_address is None
+        else int(intermediate_start_address)
+    )
     restickify_spec = _synthetic_ptlx_bridge_spec(
         size,
         num_cores,

@@ -119,6 +119,11 @@ def _dataop(payload):
     return next(iter(root["datadscs_"][0].values()))
 
 
+def _dataop_at(payload, idx):
+    root = payload[next(iter(payload))]
+    return next(iter(root["datadscs_"][idx].values()))
+
+
 def test_generate_stcdp_lx_dataop_sdsc_shape():
     d0 = Symbol("d0")
     d1 = Symbol("d1")
@@ -288,6 +293,28 @@ def test_ptlx_bridge_accepts_stock_mixed_restickify_split():
 
     assert output_piece["dimToSize_"] == {"out_": 64, "mb_": 128}
     assert output_piece["dimToStartCordinate"] == {"out_": 0, "mb_": 0}
+
+
+def test_ptlx_bridge_uses_planned_intermediate_lx_start():
+    bridge = generate_ptlx_restickify_bridge_sdsc(
+        "ptlx_bridge",
+        size=128,
+        num_cores=2,
+        mode="stage3b",
+        direction="kernel-to-output",
+        input_start_address=0,
+        intermediate_start_address=128 * 1024,
+        output_start_address=256 * 1024,
+        restickify_op_name="ReStickifyOpWithPTLx",
+    )
+
+    first = _dataop_at(bridge, 0)
+    second = _dataop_at(bridge, 1)
+    first_output = first["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"]
+    second_input = second["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"]
+
+    assert first_output == [{"type": "lx", "memId": [0], "startAddr": [128 * 1024]}]
+    assert second_input == [{"type": "lx", "memId": [0], "startAddr": [128 * 1024]}]
 
 
 def test_plan_mixed_ptlx_schedule_from_opspecs():
