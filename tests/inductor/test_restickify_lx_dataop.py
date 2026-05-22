@@ -21,6 +21,12 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     combine_dataop_sdscs,
     generate_ptlx_restickify_bridge_sdsc,
     generate_restickify_dataop_sdsc_from_spec,
+    generate_streaming_ptlx_tile_bridge_sdsc,
+)
+from torch_spyre._inductor.codegen.restickify_ptlx_streaming import (
+    default_core_mapping,
+    generate_streaming_ptlx_artifact,
+    plan_streaming_ptlx_tiles,
 )
 from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
     _constant_lx_start_payload,
@@ -258,10 +264,77 @@ def test_mixed_ptlx_bridge_with_consumer_schedule_shape():
         "STCDPOpLx",
         "add",
     ]
-    assert root["coreIdToDscSchedule"] == {
-        "0": [[0, -1, 0, 1], [1, -1, 1, 1], [-1, 0, 1, 0]],
-        "1": [[0, -1, 0, 1], [1, -1, 1, 1], [-1, 0, 1, 0]],
-    }
+
+
+def test_streaming_ptlx_tile_bridge_sdsc_materializes_three_lx_dataops():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=1,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=1)
+
+    payload = generate_streaming_ptlx_tile_bridge_sdsc("tile_bridge", artifact)
+    root = payload["tile_bridge"]
+
+    assert root["streamingPTLXTile_"]["status"] == "static-codegen-only"
+    assert root["dscs_"] == []
+    assert [
+        next(iter(dataop.values()))["op"]["name"] for dataop in root["datadscs_"]
+    ] == [
+        "STCDPOpLx",
+        "ReStickifyOpWithPTLx",
+        "STCDPOpLx",
+    ]
+    assert root["opFuncsUsed_"] == [
+        "STCDPOpLx",
+        "ReStickifyOpWithPTLx",
+        "STCDPOpLx",
+    ]
+    gather = next(iter(root["datadscs_"][0].values()))
+    restickify = next(iter(root["datadscs_"][1].values()))
+    scatter = next(iter(root["datadscs_"][2].values()))
+
+    gather_input_placements = [
+        piece["PlacementInfo"][0] for piece in gather["labeledDs_"][0]["PieceInfo"]
+    ]
+    gather_output_placements = [
+        piece["PlacementInfo"][0] for piece in gather["labeledDs_"][1]["PieceInfo"]
+    ]
+    assert [placement["type"] for placement in gather_input_placements] == [
+        "lx",
+        "lx",
+        "lx",
+        "lx",
+    ]
+    assert [placement["memId"][0] for placement in gather_input_placements] == [
+        0,
+        1,
+        2,
+        3,
+    ]
+    assert {placement["memId"][0] for placement in gather_output_placements} == {0}
+    assert restickify["labeledDs_"][0]["stickDimOrder_"] == ["out_"]
+    assert restickify["labeledDs_"][1]["stickDimOrder_"] == ["mb_"]
+    assert scatter["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"][0]["type"] == "lx"
+    assert all(
+        placement["type"] != "hbm"
+        for dataop in root["datadscs_"]
+        for ds in next(iter(dataop.values()))["labeledDs_"]
+        for piece in ds["PieceInfo"]
+        for placement in piece["PlacementInfo"]
+    )
+    assert len(root["coreIdToDscSchedule"]) == 32
+    assert root["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 0],
+    ]
 
 
 def test_ptlx_bridge_accepts_stock_mixed_restickify_split():

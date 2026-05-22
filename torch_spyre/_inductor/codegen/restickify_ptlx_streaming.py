@@ -184,6 +184,8 @@ def generate_streaming_ptlx_artifact(
             "tiles_per_row": summary.tiles_per_row,
             "tiles_per_col": summary.tiles_per_col,
             "total_tiles": summary.total_tiles,
+            "source_core_count": summary.source_core_count,
+            "dest_core_count": summary.dest_core_count,
             "contract": contract,
             "lx_buffers": {
                 "producer_base": int(producer_base),

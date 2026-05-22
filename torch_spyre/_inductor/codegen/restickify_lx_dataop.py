@@ -207,6 +207,137 @@ def combine_dataop_sdscs(
     return {name: combined}
 
 
+def generate_streaming_ptlx_tile_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+    *,
+    tile_index: int = 0,
+) -> dict[str, Any]:
+    """Lower one streaming PT-LX descriptor tile into a SuperDSC-shaped object.
+
+    This helper is intentionally static/codegen-only. It proves the descriptor
+    can be represented as Deeptools-style data-op JSON with explicit LX
+    fragments, but it does not yet claim the generated shape is accepted by DDC
+    or safe to run on hardware.
+    """
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    if descriptor.get("kind") != "streaming_ptlx_restickify_descriptor":
+        raise ValueError("expected a streaming_ptlx_restickify_descriptor")
+    tiles = descriptor.get("tiles") or []
+    if tile_index < 0 or tile_index >= len(tiles):
+        raise ValueError(f"tile_index {tile_index} is outside materialized tiles")
+
+    tile = tiles[tile_index]
+    buffers = descriptor.get("lx_buffers") or {}
+    size = _as_int(descriptor["size"])
+    tile_size = _as_int(descriptor["tile_size"])
+    source_count = _as_int(descriptor.get("source_core_count", 1))
+    dest_count = _as_int(descriptor.get("dest_core_count", 1))
+    core_ids = _streaming_tile_core_ids(tile, source_count, dest_count)
+
+    gather_stage, restickify_stage, scatter_stage = tile["stages"]
+    bridge_core = _as_int(tile["bridge_core"])
+    source_fragments = list(gather_stage.get("fragments") or [])
+    dest_fragments = list(scatter_stage.get("fragments") or [])
+
+    gather_output_fragments = [
+        {**fragment, "core": bridge_core} for fragment in source_fragments
+    ]
+    scatter_input_fragments = [
+        {**fragment, "core": bridge_core} for fragment in dest_fragments
+    ]
+
+    datadscs = [
+        {
+            f"0_STCDPOpLx_gather_tile{tile_index}": _tile_dataop(
+                "STCDPOpLx",
+                core_ids=core_ids,
+                input_layout=("mb_", "out_"),
+                input_stick=("out_",),
+                output_layout=("mb_", "out_"),
+                output_stick=("out_",),
+                input_base=_as_int(gather_stage["input_base"]),
+                output_base=_as_int(gather_stage["output_base"]),
+                input_fragments=source_fragments,
+                output_fragments=gather_output_fragments,
+            )
+        },
+        {
+            f"1_ReStickifyOpWithPTLx_tile{tile_index}": _tile_dataop(
+                "ReStickifyOpWithPTLx",
+                core_ids=core_ids,
+                input_layout=("mb_", "out_"),
+                input_stick=("out_",),
+                output_layout=("out_", "mb_"),
+                output_stick=("mb_",),
+                input_base=_as_int(restickify_stage["input_base"]),
+                output_base=_as_int(restickify_stage["output_base"]),
+                input_fragments=gather_output_fragments,
+                output_fragments=scatter_input_fragments,
+            )
+        },
+        {
+            f"2_STCDPOpLx_scatter_tile{tile_index}": _tile_dataop(
+                "STCDPOpLx",
+                core_ids=core_ids,
+                input_layout=("out_", "mb_"),
+                input_stick=("mb_",),
+                output_layout=("out_", "mb_"),
+                output_stick=("mb_",),
+                input_base=_as_int(scatter_stage["input_base"]),
+                output_base=_as_int(scatter_stage["output_base"]),
+                input_fragments=scatter_input_fragments,
+                output_fragments=dest_fragments,
+            )
+        },
+    ]
+    num_cores = max(core_ids) + 1
+    return {
+        name: {
+            "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],
+            "sdscFolds_": {
+                "dim_prop_func": [{"Affine": {"alpha_": 1, "beta_": 0}}],
+                "dim_prop_attr": [{"factor_": 1, "label_": "time"}],
+                "data_": {"[0]": "0"},
+            },
+            "coreFoldProp_": {"factor_": num_cores, "label_": "core"},
+            "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
+            "numCoresUsed_": num_cores,
+            "unpadN_": {"name_": "unpadn", "mb_": -1, "out_": -1},
+            "N_": {"name_": "n", "mb_": size, "out_": size},
+            "coreIdToDsc_": {},
+            "numWkSlicesPerDim_": {},
+            "coreIdToWkSlice_": {},
+            "opFuncsUsed_": [
+                "STCDPOpLx",
+                "ReStickifyOpWithPTLx",
+                "STCDPOpLx",
+            ],
+            "ldsShareInfo_": [],
+            "prodConsList": {},
+            "coreIdToDscSchedule": _sequential_dataop_schedule(num_cores, 3),
+            "pcfg_": {},
+            "target_": "senulator",
+            "dscs_": [],
+            "datadscs_": datadscs,
+            "dimToSymbolMappingOpcodeCorrection_": {},
+            "inputSymbolsAndTags_": {},
+            "symbolDefinitions_": {},
+            "streamingPTLXTile_": {
+                "tile_index": int(tile_index),
+                "tile_row": _as_int(tile["tile_row"]),
+                "tile_col": _as_int(tile["tile_col"]),
+                "tile_size": tile_size,
+                "bridge_core": bridge_core,
+                "status": "static-codegen-only",
+                "fallback": "ReStickifyOpHBM",
+                "workspace_base": _as_int(buffers.get("tile_workspace_base", 0)),
+            },
+        }
+    }
+
+
 def generate_ptlx_restickify_bridge_sdsc(
     name: str,
     *,
@@ -655,3 +786,136 @@ def _as_int(value: Any) -> int:
         raise ValueError(
             f"data-op prototype requires concrete integer value, got {value}"
         ) from exc
+
+
+def _single_streaming_descriptor(artifact: Mapping[str, Any]) -> dict[str, Any]:
+    if len(artifact) != 1:
+        raise ValueError("streaming artifact must contain exactly one descriptor")
+    return next(iter(artifact.values()))
+
+
+def _streaming_tile_core_ids(
+    tile: Mapping[str, Any],
+    source_count: int,
+    dest_count: int,
+) -> list[int]:
+    max_core = max(
+        [int(source_count) - 1, int(dest_count) - 1]
+        + [_as_int(core) for core in tile.get("source_cores", []) or []]
+        + [_as_int(core) for core in tile.get("dest_cores", []) or []]
+        + [_as_int(tile.get("bridge_core", 0))]
+    )
+    return list(range(max_core + 1))
+
+
+def _tile_dataop(
+    op_name: str,
+    *,
+    core_ids: Sequence[int],
+    input_layout: Sequence[str],
+    input_stick: Sequence[str],
+    output_layout: Sequence[str],
+    output_stick: Sequence[str],
+    input_base: int,
+    output_base: int,
+    input_fragments: Sequence[Mapping[str, Any]],
+    output_fragments: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "coreIdsUsed_": [int(core) for core in core_ids],
+        "dimPool_": ["mb_", "out_"],
+        "outDimTodimRelation_": [],
+        "primaryDs_": [
+            {"name_": "dataIN", "dimNames": ["mb_", "out_"]},
+            {"name_": "dataOUT", "dimNames": ["mb_", "out_"]},
+        ],
+        "labeledDs_": [
+            _tile_labeled_ds(
+                "dataIN_L0",
+                "dataIN",
+                layout=input_layout,
+                stick=input_stick,
+                base=input_base,
+                fragments=input_fragments,
+            ),
+            _tile_labeled_ds(
+                "dataOUT_L0",
+                "dataOUT",
+                layout=output_layout,
+                stick=output_stick,
+                base=output_base,
+                fragments=output_fragments,
+            ),
+        ],
+        "op": _op_payload(op_name),
+    }
+
+
+def _tile_labeled_ds(
+    lds_name: str,
+    pds_name: str,
+    *,
+    layout: Sequence[str],
+    stick: Sequence[str],
+    base: int,
+    fragments: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    layout_dims = [str(dim) for dim in layout]
+    stick_dims = [str(dim) for dim in stick]
+    layout_sizes = _tile_layout_size(fragments)
+    return {
+        "ldsName_": lds_name,
+        "pdsName_": pds_name,
+        "wordLength": num_bytes(DataFormats.SEN169_FP16),
+        "dataformat": DataFormats.SEN169_FP16.name,
+        "isExternal_": 0,
+        "segment_": "output",
+        "layoutDimOrder_": layout_dims,
+        "stickDimOrder_": stick_dims,
+        "dimToLayoutSize_": layout_sizes,
+        "dimToStickSize_": {dim: 64 for dim in stick_dims},
+        "validGap_": _valid_gap(layout_sizes),
+        "totElements": -1,
+        "PieceInfo": [
+            _tile_piece_info(fragment, base=base, key=f"p{idx + 1}")
+            for idx, fragment in enumerate(fragments)
+        ],
+        "hbmSize_": 0,
+        "hbmStartAddress_": 0,
+        "lxSize_": _LX_SIZE_BYTES,
+        "lxStartAddress_": {},
+    }
+
+
+def _tile_layout_size(fragments: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    mb_end = max((_as_int(fragment["row_end"]) for fragment in fragments), default=0)
+    out_end = max((_as_int(fragment["col_end"]) for fragment in fragments), default=0)
+    return {"mb_": mb_end, "out_": out_end}
+
+
+def _tile_piece_info(
+    fragment: Mapping[str, Any],
+    *,
+    base: int,
+    key: str,
+) -> dict[str, Any]:
+    sizes = {
+        "mb_": _as_int(fragment["row_end"]) - _as_int(fragment["row_start"]),
+        "out_": _as_int(fragment["col_end"]) - _as_int(fragment["col_start"]),
+    }
+    return {
+        "key_": key,
+        "dimToStartCordinate": {
+            "mb_": _as_int(fragment["row_start"]),
+            "out_": _as_int(fragment["col_start"]),
+        },
+        "dimToSize_": sizes,
+        "validGap_": _valid_gap(sizes),
+        "PlacementInfo": [
+            {
+                "type": "lx",
+                "memId": [_as_int(fragment["core"])],
+                "startAddr": [int(base)],
+            }
+        ],
+    }
