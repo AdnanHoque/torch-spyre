@@ -132,6 +132,13 @@ restickify_ptlx_native_tile_e2e: bool = (
     os.environ.get("SPYRE_RESTICKIFY_PTLX_NATIVE_TILE_E2E", "0") == "1"
 )
 
+# Default-off validation switch for the native 64x64 tile contract. This is
+# intentionally separate from restickify_ptlx_native_tile_e2e so the compiler
+# can generate/audit the candidate without claiming value correctness.
+restickify_ptlx_force_native_tile_e2e: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_PTLX_FORCE_NATIVE_TILE_E2E", "0") == "1"
+)
+
 # Default-off diagnostic refinement of the streaming PT-LX prototype. Instead
 # of STCDP gather -> local 4D restickify -> STCDP scatter, emit one
 # ReStickifyOpWithPTLx per tile from producer fragments directly into consumer
@@ -139,6 +146,14 @@ restickify_ptlx_native_tile_e2e: bool = (
 # value-correct full-tensor PT-LX bridge.
 restickify_ptlx_direct_tile_e2e: bool = (
     os.environ.get("SPYRE_RESTICKIFY_PTLX_DIRECT_TILE_E2E", "0") == "1"
+)
+
+# Default-off diagnostic variant of the direct tiled PT-LX path. When enabled,
+# the bridge skips the STCDP pre-gather and lets ReStickifyOpWithPTLx consume
+# producer fragments directly. This answers whether Deeptools' PT-LX op can
+# handle the remote fragmented source view without an explicit gather.
+restickify_ptlx_direct_fragment_tile_e2e: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_PTLX_DIRECT_FRAGMENT_TILE_E2E", "0") == "1"
 )
 
 # Default-off validation-only gate for running the direct tiled PT-LX

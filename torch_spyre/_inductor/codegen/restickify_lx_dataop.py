@@ -353,6 +353,7 @@ def generate_streaming_ptlx_native_tile_bridge_sdsc(
     streaming_artifact: Mapping[str, Any],
     *,
     tile_index: int = 0,
+    direction: str = "kernel-to-output",
 ) -> dict[str, Any]:
     """Lower one tile using the native 4D PT-LX local transform contract.
 
@@ -380,6 +381,8 @@ def generate_streaming_ptlx_native_tile_bridge_sdsc(
         raise ValueError(f"tile_index {tile_index} is outside materialized tiles")
 
     tile = tiles[tile_index]
+    if direction not in {"kernel-to-output", "output-to-kernel"}:
+        raise ValueError(f"unsupported native PT-LX tile direction {direction!r}")
     tile_size = _as_int(descriptor["tile_size"])
     tile_row_start = _as_int(tile["tile_row"]) * tile_size
     tile_col_start = _as_int(tile["tile_col"]) * tile_size
@@ -420,6 +423,8 @@ def generate_streaming_ptlx_native_tile_bridge_sdsc(
     restickify_core_ids = [bridge_core]
     scatter_core_ids = _fragment_core_ids(dest_fragments, bridge_core)
     stage_core_ids = [gather_core_ids, restickify_core_ids, scatter_core_ids]
+    input_stick = ("out_",) if direction == "kernel-to-output" else ("j_",)
+    output_stick = ("j_",) if direction == "kernel-to-output" else ("out_",)
     num_cores = max(
         _streaming_tile_core_ids(
             tile,
@@ -432,8 +437,8 @@ def generate_streaming_ptlx_native_tile_bridge_sdsc(
             f"0_STCDPOpLx_native_gather_tile{tile_index}": _native_tile_dataop(
                 "STCDPOpLx",
                 core_ids=gather_core_ids,
-                input_stick=("out_",),
-                output_stick=("out_",),
+                input_stick=input_stick,
+                output_stick=input_stick,
                 input_base=_as_int(gather_stage["input_base"]),
                 output_base=_as_int(gather_stage["output_base"]),
                 input_fragments=gather_input_fragments,
@@ -446,8 +451,8 @@ def generate_streaming_ptlx_native_tile_bridge_sdsc(
             f"1_ReStickifyOpWithPTLx_native_tile{tile_index}": _native_tile_dataop(
                 "ReStickifyOpWithPTLx",
                 core_ids=restickify_core_ids,
-                input_stick=("out_",),
-                output_stick=("j_",),
+                input_stick=input_stick,
+                output_stick=output_stick,
                 input_base=_as_int(restickify_stage["input_base"]),
                 output_base=_as_int(restickify_stage["output_base"]),
                 input_fragments=gather_output_fragments,
@@ -460,8 +465,8 @@ def generate_streaming_ptlx_native_tile_bridge_sdsc(
             f"2_STCDPOpLx_native_scatter_tile{tile_index}": _native_tile_dataop(
                 "STCDPOpLx",
                 core_ids=scatter_core_ids,
-                input_stick=("j_",),
-                output_stick=("j_",),
+                input_stick=output_stick,
+                output_stick=output_stick,
                 input_base=_as_int(scatter_stage["input_base"]),
                 output_base=_as_int(scatter_stage["output_base"]),
                 input_fragments=scatter_input_fragments,
@@ -512,6 +517,7 @@ def generate_streaming_ptlx_native_tile_bridge_sdsc(
                 "tile_rows": tile_rows,
                 "tile_cols": tile_cols,
                 "bridge_core": bridge_core,
+                "direction": direction,
                 "status": "static-codegen-only",
                 "semantic_transform_certified": False,
                 "fallback": "ReStickifyOpHBM",
@@ -526,15 +532,18 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
     *,
     tile_index: int = 0,
     direction: str = "kernel-to-output",
+    fragmented_input: bool = False,
 ) -> dict[str, Any]:
     """Lower one tile as a direct 2D PT-LX restickify data op.
 
     This diagnostic path avoids using ``STCDPOpLx`` as the final coordinate
     remapper. The source fragments are the producer-owned ``mb_/out_`` tile
-    pieces, and the output fragments are the consumer-owned ``out_/mb_`` tile
-    pieces. If producer fragments are smaller than one PT tile, a same-layout
-    gather coalesces them before ``ReStickifyOpWithPTLx`` writes directly to
-    the consumer endpoint.
+    pieces, and the output fragments are the consumer-owned tile pieces. If
+    producer fragments are smaller than one PT tile, a same-layout gather
+    normally coalesces them before ``ReStickifyOpWithPTLx`` writes directly to
+    the consumer endpoint.  ``fragmented_input`` skips that gather so hardware
+    validation can answer whether ``ReStickifyOpWithPTLx`` can consume the
+    remote fragmented source view directly.
     """
 
     descriptor = _single_streaming_descriptor(streaming_artifact)
@@ -560,25 +569,32 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
         or _as_int(fragment["col_end"]) - _as_int(fragment["col_start"]) < 64
         for fragment in source_fragments
     )
-    restickify_input_fragments = source_fragments
+    source_input_fragments = (
+        [_transpose_tile_fragment(fragment) for fragment in source_fragments]
+        if direction == "output-to-kernel"
+        else source_fragments
+    )
+    dest_output_fragments = (
+        dest_fragments
+        if direction == "output-to-kernel"
+        else [_transpose_tile_fragment(fragment) for fragment in dest_fragments]
+    )
+
+    restickify_input_fragments = list(source_input_fragments)
     restickify_input_base = _as_int(gather_stage["input_base"])
     datadscs = []
     stage_core_ids = []
-    if needs_gather:
-        gathered_fragment = _coalesced_tile_fragment(
-            source_fragments,
+    if needs_gather and not fragmented_input:
+        gather_input_fragments = list(source_input_fragments)
+        gather_output_fragment = _coalesced_tile_fragment(
+            source_input_fragments,
             core=bridge_core,
         )
-        gather_output_fragment = (
-            _transpose_tile_fragment(gathered_fragment)
-            if direction == "output-to-kernel"
-            else gathered_fragment
-        )
         gather_core_ids = _fragment_core_ids(source_fragments, bridge_core)
-        gather_output_layout = (
+        gather_layout = (
             ("out_", "mb_") if direction == "output-to-kernel" else ("mb_", "out_")
         )
-        gather_output_stick = (
+        gather_stick = (
             ("mb_",) if direction == "output-to-kernel" else ("out_",)
         )
         datadscs.append(
@@ -586,28 +602,25 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
                 f"0_STCDPOpLx_gather_direct_tile{tile_index}": _tile_dataop(
                     "STCDPOpLx",
                     core_ids=gather_core_ids,
-                    input_layout=("mb_", "out_"),
-                    input_stick=("out_",),
-                    output_layout=gather_output_layout,
-                    output_stick=gather_output_stick,
+                    input_layout=gather_layout,
+                    input_stick=gather_stick,
+                    output_layout=gather_layout,
+                    output_stick=gather_stick,
                     input_base=_as_int(gather_stage["input_base"]),
                     output_base=_as_int(gather_stage["output_base"]),
-                    input_fragments=source_fragments,
+                    input_fragments=gather_input_fragments,
                     output_fragments=[gather_output_fragment],
-                    output_piece_dims=gather_output_layout,
+                    input_piece_dims=gather_layout,
+                    output_piece_dims=gather_layout,
                 )
             }
         )
         stage_core_ids.append(gather_core_ids)
         restickify_input_fragments = [gather_output_fragment]
         restickify_input_base = _as_int(gather_stage["output_base"])
-    elif direction == "output-to-kernel":
-        restickify_input_fragments = [
-            _transpose_tile_fragment(fragment) for fragment in source_fragments
-        ]
 
     restickify_core_ids = _fragment_core_ids(
-        [*restickify_input_fragments, *dest_fragments],
+        [*restickify_input_fragments, *dest_output_fragments],
         bridge_core,
     )
     restickify_input_layout = (
@@ -635,7 +648,10 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
                 input_base=restickify_input_base,
                 output_base=_as_int(scatter_stage["output_base"]),
                 input_fragments=restickify_input_fragments,
-                output_fragments=dest_fragments,
+                output_fragments=[
+                    _fragment_local_to_owner(fragment)
+                    for fragment in dest_output_fragments
+                ],
                 input_piece_dims=restickify_input_layout,
                 output_piece_dims=restickify_output_layout,
             )
@@ -693,6 +709,7 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
                 "source_fragment_count": len(source_fragments),
                 "dest_fragment_count": len(dest_fragments),
                 "gather_stage": needs_gather,
+                "fragmented_input": bool(fragmented_input),
                 "direction": direction,
                 "status": "static-codegen-only",
                 "semantic_transform_certified": False,
@@ -1013,6 +1030,8 @@ def generate_streaming_ptlx_full_bridge_sdsc(
 def generate_streaming_ptlx_native_full_bridge_sdsc(
     name: str,
     streaming_artifact: Mapping[str, Any],
+    *,
+    direction: str = "kernel-to-output",
 ) -> dict[str, Any]:
     """Combine every materialized native PT-LX tile bridge into one payload."""
 
@@ -1030,6 +1049,7 @@ def generate_streaming_ptlx_native_full_bridge_sdsc(
             f"{name}_native_tile{tile_index}",
             streaming_artifact,
             tile_index=tile_index,
+            direction=direction,
         )
         tile_root = copy.deepcopy(next(iter(tile_payload.values())))
         roots.append(tile_root)
@@ -1058,6 +1078,7 @@ def generate_streaming_ptlx_native_full_bridge_sdsc(
     combined["streamingPTLXFull_"] = {
         "status": "static-codegen-only",
         "coalescing": "native-64x64-tiles",
+        "direction": direction,
         "tile_count": len(tiles),
         "logical_tile_count": _as_int(descriptor.get("total_tiles", len(tiles))),
         "datadsc_count": len(all_datadscs),
@@ -1073,6 +1094,7 @@ def generate_streaming_ptlx_direct_full_bridge_sdsc(
     streaming_artifact: Mapping[str, Any],
     *,
     direction: str = "kernel-to-output",
+    fragmented_input: bool = False,
 ) -> dict[str, Any]:
     """Combine every direct 2D PT-LX restickify tile into one payload."""
 
@@ -1091,6 +1113,7 @@ def generate_streaming_ptlx_direct_full_bridge_sdsc(
             streaming_artifact,
             tile_index=tile_index,
             direction=direction,
+            fragmented_input=fragmented_input,
         )
         tile_root = copy.deepcopy(next(iter(tile_payload.values())))
         roots.append(tile_root)
@@ -1120,6 +1143,7 @@ def generate_streaming_ptlx_direct_full_bridge_sdsc(
         "status": "static-codegen-only",
         "coalescing": "direct-64x64-tiles",
         "direction": direction,
+        "fragmented_input": bool(fragmented_input),
         "tile_count": len(tiles),
         "logical_tile_count": _as_int(descriptor.get("total_tiles", len(tiles))),
         "datadsc_count": len(all_datadscs),
@@ -2184,13 +2208,19 @@ def _tile_dataop(
     input_piece_dims: Sequence[str] = ("mb_", "out_"),
     output_piece_dims: Sequence[str] = ("mb_", "out_"),
 ) -> dict[str, Any]:
+    input_dims = [str(dim) for dim in input_piece_dims]
+    output_dims = [str(dim) for dim in output_piece_dims]
+    dim_pool = []
+    for dim in [*input_dims, *output_dims]:
+        if dim not in dim_pool:
+            dim_pool.append(dim)
     return {
         "coreIdsUsed_": [int(core) for core in core_ids],
-        "dimPool_": ["mb_", "out_"],
+        "dimPool_": dim_pool,
         "outDimTodimRelation_": [],
         "primaryDs_": [
-            {"name_": "dataIN", "dimNames": ["mb_", "out_"]},
-            {"name_": "dataOUT", "dimNames": ["mb_", "out_"]},
+            {"name_": "dataIN", "dimNames": input_dims},
+            {"name_": "dataOUT", "dimNames": output_dims},
         ],
         "labeledDs_": [
             _tile_labeled_ds(
@@ -2711,6 +2741,24 @@ def _transpose_tile_fragment(fragment: Mapping[str, Any]) -> dict[str, int]:
         "row_end": _as_int(fragment["col_end"]),
         "col_start": _as_int(fragment["row_start"]),
         "col_end": _as_int(fragment["row_end"]),
+        "owner_row_start": _as_int(fragment.get("owner_col_start", 0)),
+        "owner_col_start": _as_int(fragment.get("owner_row_start", 0)),
+        "bytes": _as_int(fragment.get("bytes", 0)),
+        "hops": _as_int(fragment.get("hops", 0)),
+    }
+
+
+def _fragment_local_to_owner(fragment: Mapping[str, Any]) -> dict[str, int]:
+    owner_row_start = _as_int(fragment.get("owner_row_start", 0))
+    owner_col_start = _as_int(fragment.get("owner_col_start", 0))
+    return {
+        "core": _as_int(fragment["core"]),
+        "row_start": _as_int(fragment["row_start"]) - owner_row_start,
+        "row_end": _as_int(fragment["row_end"]) - owner_row_start,
+        "col_start": _as_int(fragment["col_start"]) - owner_col_start,
+        "col_end": _as_int(fragment["col_end"]) - owner_col_start,
+        "owner_row_start": 0,
+        "owner_col_start": 0,
         "bytes": _as_int(fragment.get("bytes", 0)),
         "hops": _as_int(fragment.get("hops", 0)),
     }

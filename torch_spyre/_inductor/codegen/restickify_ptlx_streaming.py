@@ -44,6 +44,8 @@ class TileFragment:
     row_end: int
     col_start: int
     col_end: int
+    owner_row_start: int
+    owner_col_start: int
     bytes: int
     hops: int
 
@@ -254,6 +256,8 @@ def _fragment_payload(fragment: TileFragment) -> dict[str, int]:
         "row_end": fragment.row_end,
         "col_start": fragment.col_start,
         "col_end": fragment.col_end,
+        "owner_row_start": fragment.owner_row_start,
+        "owner_col_start": fragment.owner_col_start,
         "bytes": fragment.bytes,
         "hops": fragment.hops,
     }
@@ -557,6 +561,8 @@ def _intersections(
                 row_end=row_end,
                 col_start=col_start,
                 col_end=col_end,
+                owner_row_start=owner.row_start,
+                owner_col_start=owner.col_start,
                 bytes=(row_end - row_start) * (col_end - col_start) * bytes_per_element,
                 hops=hops,
             )

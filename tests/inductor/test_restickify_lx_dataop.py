@@ -473,6 +473,38 @@ def test_streaming_ptlx_native_tile_bridge_uses_4d_local_transform():
     )
 
 
+def test_streaming_ptlx_native_tile_bridge_supports_output_to_kernel_direction():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=1,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=1)
+
+    payload = generate_streaming_ptlx_native_tile_bridge_sdsc(
+        "native_tile_bridge",
+        artifact,
+        direction="output-to-kernel",
+    )
+    root = payload["native_tile_bridge"]
+    gather = next(iter(root["datadscs_"][0].values()))
+    restickify = next(iter(root["datadscs_"][1].values()))
+    scatter = next(iter(root["datadscs_"][2].values()))
+
+    assert root["streamingPTLXNativeTile_"]["direction"] == "output-to-kernel"
+    assert gather["labeledDs_"][0]["stickDimOrder_"] == ["j_"]
+    assert gather["labeledDs_"][1]["stickDimOrder_"] == ["j_"]
+    assert restickify["labeledDs_"][0]["stickDimOrder_"] == ["j_"]
+    assert restickify["labeledDs_"][1]["stickDimOrder_"] == ["out_"]
+    assert scatter["labeledDs_"][0]["stickDimOrder_"] == ["out_"]
+    assert scatter["labeledDs_"][1]["stickDimOrder_"] == ["out_"]
+
+
 def test_streaming_ptlx_direct_tile_bridge_uses_single_2d_restickify():
     source = {"mb": 32, "out": 1}
     dest = {"mb": 4, "out": 8}
@@ -546,7 +578,9 @@ def test_streaming_ptlx_direct_tile_output_to_kernel_matches_consumer_layout():
     input_lds, output_lds = restickify["labeledDs_"]
 
     assert root["streamingPTLXDirectTile_"]["direction"] == "output-to-kernel"
-    assert gather["labeledDs_"][0]["stickDimOrder_"] == ["out_"]
+    assert gather["labeledDs_"][0]["layoutDimOrder_"] == ["out_", "mb_"]
+    assert gather["labeledDs_"][0]["stickDimOrder_"] == ["mb_"]
+    assert gather["labeledDs_"][1]["layoutDimOrder_"] == ["out_", "mb_"]
     assert gather["labeledDs_"][1]["stickDimOrder_"] == ["mb_"]
     assert input_lds["layoutDimOrder_"] == ["out_", "mb_"]
     assert input_lds["stickDimOrder_"] == ["mb_"]
@@ -556,6 +590,45 @@ def test_streaming_ptlx_direct_tile_output_to_kernel_matches_consumer_layout():
         "mb_": 0,
         "out_": 0,
     }
+
+
+def test_streaming_ptlx_direct_tile_fragmented_output_to_kernel_skips_gather():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=1,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=1)
+
+    payload = generate_streaming_ptlx_direct_tile_bridge_sdsc(
+        "direct_tile_bridge",
+        artifact,
+        direction="output-to-kernel",
+        fragmented_input=True,
+    )
+    root = payload["direct_tile_bridge"]
+    restickify = next(iter(root["datadscs_"][0].values()))
+    input_lds, output_lds = restickify["labeledDs_"]
+
+    assert len(root["datadscs_"]) == 1
+    assert root["opFuncsUsed_"] == ["ReStickifyOpWithPTLx"]
+    assert root["streamingPTLXDirectTile_"]["fragmented_input"] is True
+    assert root["streamingPTLXDirectTile_"]["gather_stage"] is True
+    assert input_lds["layoutDimOrder_"] == ["out_", "mb_"]
+    assert input_lds["stickDimOrder_"] == ["mb_"]
+    assert output_lds["layoutDimOrder_"] == ["mb_", "out_"]
+    assert output_lds["stickDimOrder_"] == ["out_"]
+    assert len(input_lds["PieceInfo"]) == 4
+    assert len(output_lds["PieceInfo"]) == 1
+    assert {
+        piece["PlacementInfo"][0]["memId"][0]
+        for piece in input_lds["PieceInfo"]
+    } == {0, 1, 2, 3}
 
 
 def test_streaming_ptlx_full_bridge_sdsc_combines_materialized_tiles():
@@ -638,6 +711,58 @@ def test_streaming_ptlx_native_full_bridge_combines_materialized_tiles():
         [2, -1, 1, 1],
         [3, -1, 1, 0],
     ]
+
+
+def test_streaming_ptlx_native_full_bridge_can_be_force_validated():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=2,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=2)
+    payload = generate_streaming_ptlx_native_full_bridge_sdsc(
+        "native_full_bridge",
+        artifact,
+    )
+    consumer = _minimal_layout_payload(
+        "2_add",
+        opfunc="add",
+        size=512,
+        work_slices=dest,
+        core_mapping=default_core_mapping(dest),
+        lds=[
+            _layout_lds(0, "restickify_out", "dataIN", ["mb", "out"], ["out"]),
+            _layout_lds(1, "consumer_out", "dataOUT", ["mb", "out"], ["out"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
+
+    with config.patch(restickify_ptlx_force_native_tile_e2e=True):
+        contract = _streaming_value_flow_contract(
+            bridge_payload=payload,
+            producer_base=0,
+            consumer_base=256 * 1024,
+            expected_tiles=2,
+            consumer_payload=consumer,
+            consumer_lds_idx=0,
+        )
+
+    descriptor = contract["consumer_descriptor_contract"]
+    assert contract["endpoint_contract_valid"] is True
+    assert contract["consumer_descriptor_valid"] is True
+    assert contract["value_preservation_valid"] is True
+    assert contract["semantic_transform_certified"] is True
+    assert contract["semantic_skip_reason"] is None
+    assert descriptor["native_tile_consumer_descriptor_override"] is True
+    assert descriptor["layout_match"] is False
+    assert descriptor["stick_match"] is False
+    assert contract["valid"] is True
 
 
 def test_streaming_ptlx_direct_full_bridge_combines_direct_tiles():
@@ -788,6 +913,19 @@ def test_streaming_ptlx_validgap_consumer_full_bridge_can_be_force_validated():
         "validgap_full_bridge",
         artifact,
     )
+    consumer = _minimal_layout_payload(
+        "2_add",
+        opfunc="add",
+        size=512,
+        work_slices=dest,
+        core_mapping=default_core_mapping(dest),
+        lds=[
+            _layout_lds(0, "restickify_out", "dataIN", ["mb", "out"], ["out"]),
+            _layout_lds(1, "consumer_out", "dataOUT", ["mb", "out"], ["out"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
 
     with config.patch(restickify_ptlx_force_validgap_consumer_tile_e2e=True):
         contract = _streaming_value_flow_contract(
@@ -795,13 +933,19 @@ def test_streaming_ptlx_validgap_consumer_full_bridge_can_be_force_validated():
             producer_base=0,
             consumer_base=256 * 1024,
             expected_tiles=2,
+            consumer_payload=consumer,
+            consumer_lds_idx=0,
         )
 
+    descriptor = contract["consumer_descriptor_contract"]
     assert contract["endpoint_contract_valid"] is True
     assert contract["consumer_descriptor_valid"] is True
     assert contract["value_preservation_valid"] is True
     assert contract["semantic_transform_certified"] is True
     assert contract["semantic_skip_reason"] is None
+    assert descriptor["validgap_consumer_descriptor_override"] is True
+    assert descriptor["bridge_layout"] == ["mb", "in"]
+    assert descriptor["consumer_layout"] == ["mb", "out"]
     assert contract["valid"] is True
 
 

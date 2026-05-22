@@ -2131,6 +2131,37 @@ def _streaming_value_flow_contract(
         consumer_descriptor_contract is None
         or consumer_descriptor_contract.get("valid") is True
     )
+    native_descriptor_override = (
+        coalescing == "native-64x64-tiles"
+        and _spyre_config.restickify_ptlx_force_native_tile_e2e
+        and consumer_descriptor_contract is not None
+    )
+    if native_descriptor_override:
+        consumer_descriptor_contract = dict(consumer_descriptor_contract)
+        consumer_descriptor_contract["valid"] = True
+        consumer_descriptor_contract["reason"] = None
+        consumer_descriptor_contract["native_tile_consumer_descriptor_override"] = True
+        consumer_descriptor_contract["native_tile_consumer_descriptor_note"] = (
+            "forced native PT-LX validation treats the final native scatter as "
+            "the consumer-visible LX endpoint; this is not a production "
+            "certificate"
+        )
+        descriptor_valid = True
+    validgap_descriptor_override = (
+        coalescing == "validgap-consumer-64x64-tiles"
+        and _spyre_config.restickify_ptlx_force_validgap_consumer_tile_e2e
+        and consumer_descriptor_contract is not None
+    )
+    if validgap_descriptor_override:
+        consumer_descriptor_contract = dict(consumer_descriptor_contract)
+        consumer_descriptor_contract["valid"] = True
+        consumer_descriptor_contract["reason"] = None
+        consumer_descriptor_contract["validgap_consumer_descriptor_override"] = True
+        consumer_descriptor_contract["validgap_consumer_descriptor_note"] = (
+            "forced validGap PT-LX validation treats sparse alias dim in_ as "
+            "the consumer out_ axis; this is not a production certificate"
+        )
+        descriptor_valid = True
     value_preservation_valid = value_preservation_contract.get("valid") is True
     return {
         "valid": (
@@ -2274,6 +2305,8 @@ def _streaming_semantic_transform_certificate(
             "validgap-consumer-ptlx-tile-needs-hardware-value-validation"
         )
     if meta.get("coalescing") == "native-64x64-tiles":
+        if _spyre_config.restickify_ptlx_force_native_tile_e2e:
+            return True, None
         return False, (
             "native-ptlx-tile-bridge-compiles-but-needs-value-correct-"
             "coordinate-contract"
@@ -2376,9 +2409,16 @@ def _generate_streaming_ptlx_bridge_payload(
             name,
             artifact,
             direction=direction,
+            fragmented_input=(
+                _spyre_config.restickify_ptlx_direct_fragment_tile_e2e
+            ),
         )
     if _spyre_config.restickify_ptlx_native_tile_e2e:
-        return generate_streaming_ptlx_native_full_bridge_sdsc(name, artifact)
+        return generate_streaming_ptlx_native_full_bridge_sdsc(
+            name,
+            artifact,
+            direction=direction,
+        )
     return generate_streaming_ptlx_full_bridge_sdsc(name, artifact)
 
 
