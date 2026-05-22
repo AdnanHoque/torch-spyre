@@ -1247,26 +1247,48 @@ def _run_lx_split_dataop_prototype(
     producer_args = tuple(launch_args[index] for index in summary["producer_arg_indices"])
     consumer_args = tuple(launch_args[index] for index in summary["consumer_arg_indices"])
     sync_each = os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_SYNC_EACH", "0") == "1"
+    health_each = (
+        os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_HEALTH_EACH", "0") == "1"
+    )
     if "producer" in stages:
         emit({"phase": "lx_split_dataop_before_producer", **summary, **base})
         launch_kernel(str(split_root / "producer"), producer_args)
         if sync_each:
             _sync()
+        if health_each:
+            _lx_split_health_check("producer", emit=emit, summary=summary, base=base)
         emit({"phase": "lx_split_dataop_after_producer", **summary, **base})
     if "dataop" in stages:
         emit({"phase": "lx_split_dataop_before_dataop", **summary, **base})
         launch_kernel(str(split_root / "dataop_launch"), ())
         if sync_each:
             _sync()
+        if health_each:
+            _lx_split_health_check("dataop", emit=emit, summary=summary, base=base)
         emit({"phase": "lx_split_dataop_after_dataop", **summary, **base})
     if "consumer" in stages:
         emit({"phase": "lx_split_dataop_before_consumer", **summary, **base})
         launch_kernel(str(split_root / "consumer"), consumer_args)
         if sync_each:
             _sync()
+        if health_each:
+            _lx_split_health_check("consumer", emit=emit, summary=summary, base=base)
         emit({"phase": "lx_split_dataop_after_consumer", **summary, **base})
     emit({"phase": "lx_split_dataop_launch_done", **summary, **base})
     return _LX_SPLIT_DATAOP_HANDLED
+
+
+def _lx_split_health_check(
+    label: str,
+    *,
+    emit: Callable[[dict[str, Any]], None],
+    summary: dict[str, Any],
+    base: dict[str, Any],
+) -> None:
+    emit({"phase": f"lx_split_dataop_before_health_{label}", **summary, **base})
+    torch.tensor([0], dtype=torch.float16, device="spyre")
+    _sync()
+    emit({"phase": f"lx_split_dataop_after_health_{label}", **summary, **base})
 
 
 def _has_restickify_sdsc(code_dir: Path) -> bool:
@@ -1360,9 +1382,7 @@ def _run_lx_bridge_same_artifact_splice_prototype(
             for lds in consumer_dsc.get("labeledDs_", []) or []
             if int(lds.get("ldsIdx_", -1)) == int(consumer_input_idx)
         )
-        consumer_base = int(
-            os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_CONSUMER_BASE", "8192")
-        )
+        consumer_base = _lx_split_consumer_base(code_dir)
         consumer_start = _constant_lx_start_payload(
             num_cores=_core_factor(consumer_payload),
             base=consumer_base,
@@ -1649,7 +1669,7 @@ def _prepare_lx_split_dataop_prototype(
     )
 
     producer_base = int(os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_PRODUCER_BASE", "16384"))
-    consumer_base = int(os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_CONSUMER_BASE", "8192"))
+    consumer_base = _lx_split_consumer_base(code_dir)
     producer_start_source = "constant"
     consumer_start_source = "constant"
     producer_start = _constant_lx_start_payload(
@@ -1806,12 +1826,14 @@ def _lx_split_prepare_signature(stages: set[str]) -> dict[str, Any]:
         "SPYRE_RESTICKIFY_LX_SPLIT_PREPARE_ONLY",
         "SPYRE_RESTICKIFY_LX_SPLIT_PRODUCER_BASE",
         "SPYRE_RESTICKIFY_LX_SPLIT_REQUIRE_MATERIALIZATION_CONTRACT",
+        "SPYRE_RESTICKIFY_LX_SPLIT_ALLOW_UNCERTIFIED_DIRECT",
         "SPYRE_RESTICKIFY_LX_SPLIT_SKIP_CONSUMER_PATCH",
         "SPYRE_RESTICKIFY_LX_SPLIT_STOP_AFTER_BRIDGE",
         "SPYRE_RESTICKIFY_LX_SPLIT_KEEP_BRIDGE_ARG",
         "SPYRE_RESTICKIFY_LX_SPLIT_USE_DEBUG_LX",
     ]
     return {
+        "version": 2,
         "stages": sorted(stages),
         "env": {key: os.environ.get(key, "") for key in env_keys},
     }
@@ -1868,6 +1890,31 @@ def _compile_dxp_bundle(code_dir: Path) -> None:
             + result.stdout[-4000:]
             + result.stderr[-4000:]
         )
+
+
+def _lx_split_consumer_base(
+    code_dir: Path | None = None,
+    *,
+    original_consumer_starts: list[int] | None = None,
+) -> int:
+    configured = os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_CONSUMER_BASE")
+    if configured:
+        return int(configured)
+    if original_consumer_starts:
+        return min(int(start) for start in original_consumer_starts)
+    if (
+        code_dir is not None
+        and os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_DATAOP_MODE") == "lx-neighbor-direct-ptlx"
+    ):
+        try:
+            sidecar = _select_lx_neighbor_direct_ptlx_sidecar(code_dir)
+            sidecar_payload = _read_json_file(sidecar)
+            sidecar_root = next(iter(sidecar_payload.values()))
+            starts = _direct_ptlx_sidecar_lx_starts(sidecar_root)["consumer_starts"]
+            return min(int(start) for start in starts)
+        except Exception:
+            pass
+    return 8192
 
 
 def _generate_and_package_lx_dataop(
@@ -2024,12 +2071,28 @@ def _package_lx_neighbor_direct_ptlx_sidecar(
     sidecar = _select_lx_neighbor_direct_ptlx_sidecar(code_dir)
     sidecar_payload = _read_json_file(sidecar)
     original_sidecar_root = next(iter(sidecar_payload.values()))
+    sidecar_meta = original_sidecar_root.get("streamingPTLXFull_", {}) or {}
+    allow_uncertified = (
+        os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_ALLOW_UNCERTIFIED_DIRECT", "0")
+        == "1"
+    )
+    if (
+        not allow_uncertified
+        and not sidecar_meta.get("semantic_transform_certified", False)
+    ):
+        raise RuntimeError(
+            "direct PT-LX split sidecar is not semantically certified; "
+            "fall back to ReStickifyOpHBM or set "
+            "SPYRE_RESTICKIFY_LX_SPLIT_ALLOW_UNCERTIFIED_DIRECT=1 for "
+            "diagnostic hardware probing"
+        )
     original_start_summary = _direct_ptlx_sidecar_lx_starts(original_sidecar_root)
     expected_producer_base = int(
         os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_PRODUCER_BASE", "16384")
     )
-    expected_consumer_base = int(
-        os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_CONSUMER_BASE", "8192")
+    expected_consumer_base = _lx_split_consumer_base(
+        code_dir,
+        original_consumer_starts=original_start_summary["consumer_starts"],
     )
     sidecar_payload = copy.deepcopy(sidecar_payload)
     sidecar_root = next(iter(sidecar_payload.values()))
@@ -2049,7 +2112,11 @@ def _package_lx_neighbor_direct_ptlx_sidecar(
             f"LX base: sidecar={start_summary['producer_base']} "
             f"split={expected_producer_base}"
         )
-    if start_summary["consumer_starts"] != [expected_consumer_base]:
+    if (
+        not start_summary["consumer_starts"]
+        or min(start_summary["consumer_starts"]) != expected_consumer_base
+        or any(start < expected_consumer_base for start in start_summary["consumer_starts"])
+    ):
         raise RuntimeError(
             "direct PT-LX sidecar consumer base does not match split consumer "
             f"LX base: sidecar={start_summary['consumer_starts']} "
@@ -2149,17 +2216,23 @@ def _select_lx_neighbor_direct_ptlx_sidecar(code_dir: Path) -> Path:
 
 def _direct_ptlx_sidecar_lx_starts(root: dict[str, Any]) -> dict[str, Any]:
     producer_starts: set[int] = set()
-    consumer_starts: set[int] = set()
+    direct_consumer_starts: set[int] = set()
+    scatter_consumer_starts: set[int] = set()
     for datadsc in root.get("datadscs_", []) or []:
         name, dataop = next(iter(datadsc.items()))
         if "STCDPOpLx_gather_direct_tile" in str(name):
             producer_starts.update(
                 _piece_lx_starts(dataop["labeledDs_"][0].get("PieceInfo", []) or [])
             )
-        if "ReStickifyOpWithPTLx_direct_tile" in str(name):
-            consumer_starts.update(
+        if "STCDPOpLx_scatter_direct_tile" in str(name):
+            scatter_consumer_starts.update(
                 _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
             )
+        if "ReStickifyOpWithPTLx_direct_tile" in str(name):
+            direct_consumer_starts.update(
+                _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
+            )
+    consumer_starts = scatter_consumer_starts or direct_consumer_starts
     if not producer_starts:
         raise RuntimeError("direct PT-LX sidecar has no producer LX starts")
     if not consumer_starts:
@@ -2177,6 +2250,10 @@ def _patch_direct_ptlx_sidecar_lx_starts(
     producer_delta: int,
     consumer_delta: int,
 ) -> None:
+    has_scatter = any(
+        "STCDPOpLx_scatter_direct_tile" in str(next(iter(datadsc)))
+        for datadsc in root.get("datadscs_", []) or []
+    )
     for datadsc in root.get("datadscs_", []) or []:
         name, dataop = next(iter(datadsc.items()))
         if "STCDPOpLx_gather_direct_tile" in str(name):
@@ -2184,7 +2261,15 @@ def _patch_direct_ptlx_sidecar_lx_starts(
                 dataop["labeledDs_"][0].get("PieceInfo", []) or [],
                 delta=producer_delta,
             )
-        if "ReStickifyOpWithPTLx_direct_tile" in str(name):
+        if (
+            not has_scatter
+            and "ReStickifyOpWithPTLx_direct_tile" in str(name)
+        ):
+            _adjust_piece_lx_starts(
+                dataop["labeledDs_"][-1].get("PieceInfo", []) or [],
+                delta=consumer_delta,
+            )
+        if "STCDPOpLx_scatter_direct_tile" in str(name):
             _adjust_piece_lx_starts(
                 dataop["labeledDs_"][-1].get("PieceInfo", []) or [],
                 delta=consumer_delta,

@@ -265,7 +265,7 @@ def _streaming_bridge_candidate(
     size = int(streaming["summary"]["size"])
     tile_size = int(streaming["tile_size"])
     producer_root, _ = _unwrap_sdsc_root_and_dsc(sdsc_payloads[idx - 1])
-    destination_root, _ = _unwrap_sdsc_root_and_dsc(sdsc_payloads[idx])
+    destination_root, _ = _unwrap_sdsc_root_and_dsc(sdsc_payloads[idx + 1])
     source_slices = _work_slices_for_dims(producer_root, row_dim, col_dim)
     dest_slices = _work_slices_for_dims(destination_root, row_dim, col_dim)
     if source_slices is None or dest_slices is None:
@@ -785,9 +785,9 @@ def _lx_materialization_contract(
         }
         contract["streaming_ptlx"] = _streaming_ptlx_materialization_plan(
             producer_payload=sdsc_payloads[idx - 1],
-            destination_payload=sdsc_payloads[idx],
+            destination_payload=sdsc_payloads[idx + 1],
             producer_lds_idx=producer_lds_idx,
-            destination_lds_idx=restickify_roles["destination_lds_idx"],
+            destination_lds_idx=consumer_lds_idx,
             restickify_output=restickify_output,
         )
 
@@ -805,9 +805,10 @@ def _streaming_ptlx_materialization_plan(
     """Describe the 64x64 remote-LX movement needed for this edge.
 
     This is the production-shaped bridge contract: source ownership comes from
-    the producer SDSC, destination ownership comes from the restickify output
-    endpoint, and the result is a bounded tile plan that a future lowering can
-    turn into InputFetchNeighbor/STCDPOpLx plus local PT-LX restickification.
+    the producer SDSC, destination ownership comes from the actual consumer
+    input endpoint, and the result is a bounded tile plan that a future lowering
+    can turn into InputFetchNeighbor/STCDPOpLx plus local PT-LX
+    restickification.
     """
 
     if producer_lds_idx is None:
@@ -886,7 +887,7 @@ def _streaming_ptlx_materialization_plan(
         "destination_sdsc": destination_root.get(
             "name_", next(iter(destination_payload))
         ),
-        "destination_role": "restickify_output_consumer_sink_contract",
+        "destination_role": "consumer_sink_contract",
         "producer_primary": producer_primary,
         "destination_primary": destination_primary,
         "producer_work_slices": source_slices,

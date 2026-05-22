@@ -579,6 +579,14 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
         if direction == "output-to-kernel"
         else [_transpose_tile_fragment(fragment) for fragment in dest_fragments]
     )
+    needs_scatter = (
+        len({_as_int(fragment["core"]) for fragment in dest_output_fragments}) > 1
+        or any(
+            _as_int(fragment["row_end"]) - _as_int(fragment["row_start"]) < 64
+            or _as_int(fragment["col_end"]) - _as_int(fragment["col_start"]) < 64
+            for fragment in dest_output_fragments
+        )
+    )
 
     restickify_input_fragments = list(source_input_fragments)
     restickify_input_base = _as_int(gather_stage["input_base"])
@@ -624,10 +632,6 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
         restickify_input_fragments = [gather_output_fragment]
         restickify_input_base = _as_int(gather_stage["output_base"])
 
-    restickify_core_ids = _fragment_core_ids(
-        [*restickify_input_fragments, *dest_output_fragments],
-        bridge_core,
-    )
     restickify_input_layout = (
         ("out_", "mb_") if direction == "output-to-kernel" else ("mb_", "out_")
     )
@@ -640,6 +644,23 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
     restickify_output_stick = (
         ("out_",) if direction == "output-to-kernel" else ("mb_",)
     )
+    restickify_output_base = (
+        _direct_tile_workspace_base(_as_int(gather_stage["output_base"]), slot=1)
+        if needs_scatter
+        else _as_int(scatter_stage["output_base"])
+    )
+    restickify_output_fragments = (
+        [_compact_tile_fragment(dest_output_fragments, core=bridge_core)]
+        if needs_scatter
+        else [
+            _fragment_local_to_owner(fragment)
+            for fragment in dest_output_fragments
+        ]
+    )
+    restickify_core_ids = _fragment_core_ids(
+        [*restickify_input_fragments, *restickify_output_fragments],
+        bridge_core,
+    )
     restickify_idx = len(datadscs)
     datadscs.append(
         {
@@ -651,18 +672,50 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
                 output_layout=restickify_output_layout,
                 output_stick=restickify_output_stick,
                 input_base=restickify_input_base,
-                output_base=_as_int(scatter_stage["output_base"]),
+                output_base=restickify_output_base,
                 input_fragments=restickify_input_fragments,
-                output_fragments=[
-                    _fragment_local_to_owner(fragment)
-                    for fragment in dest_output_fragments
-                ],
+                output_fragments=restickify_output_fragments,
                 input_piece_dims=restickify_input_layout,
                 output_piece_dims=restickify_output_layout,
             )
         }
     )
     stage_core_ids.append(restickify_core_ids)
+    if needs_scatter:
+        scatter_input_fragment = _compact_tile_fragment(
+            dest_output_fragments,
+            core=bridge_core,
+        )
+        scatter_output_fragments = _compact_lx_write_fragments(
+            dest_output_fragments,
+            base=_as_int(scatter_stage["output_base"]),
+            piece_dims=restickify_output_layout,
+            stick_dims=restickify_output_stick,
+        )
+        scatter_core_ids = _fragment_core_ids(
+            [scatter_input_fragment, *dest_output_fragments],
+            bridge_core,
+        )
+        scatter_idx = len(datadscs)
+        datadscs.append(
+            {
+                f"{scatter_idx}_STCDPOpLx_scatter_direct_tile{tile_index}": _tile_dataop(
+                    "STCDPOpLx",
+                    core_ids=scatter_core_ids,
+                    input_layout=restickify_output_layout,
+                    input_stick=restickify_output_stick,
+                    output_layout=restickify_output_layout,
+                    output_stick=restickify_output_stick,
+                    input_base=restickify_output_base,
+                    output_base=_as_int(scatter_stage["output_base"]),
+                    input_fragments=[scatter_input_fragment],
+                    output_fragments=scatter_output_fragments,
+                    input_piece_dims=restickify_output_layout,
+                    output_piece_dims=restickify_output_layout,
+                )
+            }
+        )
+        stage_core_ids.append(scatter_core_ids)
 
     num_cores = max(
         _streaming_tile_core_ids(
@@ -714,9 +767,11 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
                 "source_fragment_count": len(source_fragments),
                 "dest_fragment_count": len(dest_fragments),
                 "gather_stage": needs_gather,
+                "scatter_stage": needs_scatter,
                 "fragmented_input": bool(fragmented_input),
                 "tile_local_workspace": bool(needs_gather and not fragmented_input),
                 "compact_lx_read_fragments": bool(needs_gather and not fragmented_input),
+                "compact_lx_write_fragments": bool(needs_scatter),
                 "direction": direction,
                 "status": "static-codegen-only",
                 "semantic_transform_certified": False,
@@ -2799,6 +2854,25 @@ def _compact_lx_read_fragments(
         )
         result.append(compact)
     return result
+
+
+def _compact_lx_write_fragments(
+    fragments: Sequence[Mapping[str, Any]],
+    *,
+    base: int,
+    piece_dims: Sequence[str],
+    stick_dims: Sequence[str],
+) -> list[dict[str, int]]:
+    return _compact_lx_read_fragments(
+        fragments,
+        base=base,
+        piece_dims=piece_dims,
+        stick_dims=stick_dims,
+    )
+
+
+def _direct_tile_workspace_base(base: int, *, slot: int) -> int:
+    return int(base) + int(slot) * 64 * 64 * num_bytes(DataFormats.SEN169_FP16)
 
 
 def _lx_fragment_offset_bytes(

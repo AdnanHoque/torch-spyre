@@ -513,6 +513,8 @@ def test_materialization_contract_includes_streaming_tile_plan_for_row_to_col():
     assert streaming["col_dim"] == "out"
     assert streaming["producer_work_slices"] == {"mb": 32, "out": 1}
     assert streaming["destination_work_slices"] == {"mb": 1, "out": 32}
+    assert streaming["destination_sdsc"] == "2_add"
+    assert streaming["destination_role"] == "consumer_sink_contract"
     assert streaming["bounded_workspace_ok"] is True
     assert streaming["requires_remote_lx_gather"] is True
     assert streaming["requires_remote_lx_scatter"] is False
@@ -849,6 +851,7 @@ def test_streaming_bridge_does_not_treat_coordinate_change_as_same_layout_remap(
     assert candidate["status"] == "emitted"
     assert candidate["bridge_kind"] == "direct-ptlx-layout-transform"
     assert candidate["direction"] == "output-to-kernel"
+    assert candidate["bridge_endpoint_contract_valid"] is True
     assert candidate["bridge_metadata"]["coalescing"] == "direct-64x64-tiles"
     assert candidate["bridge_metadata"]["direction"] == "output-to-kernel"
     assert candidate["bridge_metadata"]["semantic_transform_certified"] is False
