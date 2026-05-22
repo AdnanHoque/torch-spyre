@@ -513,7 +513,154 @@ def generate_streaming_ptlx_native_tile_bridge_sdsc(
                 "tile_cols": tile_cols,
                 "bridge_core": bridge_core,
                 "status": "static-codegen-only",
-                "semantic_transform_certified": True,
+                "semantic_transform_certified": False,
+                "fallback": "ReStickifyOpHBM",
+            },
+        }
+    }
+
+
+def generate_streaming_ptlx_direct_tile_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+    *,
+    tile_index: int = 0,
+) -> dict[str, Any]:
+    """Lower one tile as a direct 2D PT-LX restickify data op.
+
+    This diagnostic path avoids using ``STCDPOpLx`` as the final coordinate
+    remapper. The source fragments are the producer-owned ``mb_/out_`` tile
+    pieces, and the output fragments are the consumer-owned ``out_/mb_`` tile
+    pieces. If producer fragments are smaller than one PT tile, a same-layout
+    gather coalesces them before ``ReStickifyOpWithPTLx`` writes directly to
+    the consumer endpoint.
+    """
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    if descriptor.get("kind") != "streaming_ptlx_restickify_descriptor":
+        raise ValueError("expected a streaming_ptlx_restickify_descriptor")
+    tiles = descriptor.get("tiles") or []
+    if tile_index < 0 or tile_index >= len(tiles):
+        raise ValueError(f"tile_index {tile_index} is outside materialized tiles")
+
+    tile = tiles[tile_index]
+    gather_stage, _restickify_stage, scatter_stage = tile["stages"]
+    source_fragments = list(gather_stage.get("fragments") or [])
+    dest_fragments = list(scatter_stage.get("fragments") or [])
+    if not source_fragments or not dest_fragments:
+        raise ValueError("direct PT-LX tile bridge needs source and dest fragments")
+
+    bridge_core = _as_int(tile["bridge_core"])
+    needs_gather = any(
+        _as_int(fragment["row_end"]) - _as_int(fragment["row_start"]) < 64
+        or _as_int(fragment["col_end"]) - _as_int(fragment["col_start"]) < 64
+        for fragment in source_fragments
+    )
+    restickify_input_fragments = source_fragments
+    restickify_input_base = _as_int(gather_stage["input_base"])
+    datadscs = []
+    stage_core_ids = []
+    if needs_gather:
+        gathered_fragment = _coalesced_tile_fragment(
+            source_fragments,
+            core=bridge_core,
+        )
+        gather_core_ids = _fragment_core_ids(source_fragments, bridge_core)
+        datadscs.append(
+            {
+                f"0_STCDPOpLx_gather_direct_tile{tile_index}": _tile_dataop(
+                    "STCDPOpLx",
+                    core_ids=gather_core_ids,
+                    input_layout=("mb_", "out_"),
+                    input_stick=("out_",),
+                    output_layout=("mb_", "out_"),
+                    output_stick=("out_",),
+                    input_base=_as_int(gather_stage["input_base"]),
+                    output_base=_as_int(gather_stage["output_base"]),
+                    input_fragments=source_fragments,
+                    output_fragments=[gathered_fragment],
+                )
+            }
+        )
+        stage_core_ids.append(gather_core_ids)
+        restickify_input_fragments = [gathered_fragment]
+        restickify_input_base = _as_int(gather_stage["output_base"])
+
+    restickify_core_ids = _fragment_core_ids(
+        [*restickify_input_fragments, *dest_fragments],
+        bridge_core,
+    )
+    restickify_idx = len(datadscs)
+    datadscs.append(
+        {
+            f"{restickify_idx}_ReStickifyOpWithPTLx_direct_tile{tile_index}": _tile_dataop(
+                "ReStickifyOpWithPTLx",
+                core_ids=restickify_core_ids,
+                input_layout=("mb_", "out_"),
+                input_stick=("out_",),
+                output_layout=("out_", "mb_"),
+                output_stick=("mb_",),
+                input_base=restickify_input_base,
+                output_base=_as_int(scatter_stage["output_base"]),
+                input_fragments=restickify_input_fragments,
+                output_fragments=dest_fragments,
+            )
+        }
+    )
+    stage_core_ids.append(restickify_core_ids)
+
+    num_cores = max(
+        _streaming_tile_core_ids(
+            tile,
+            _as_int(descriptor.get("source_core_count", 1)),
+            _as_int(descriptor.get("dest_core_count", 1)),
+        )
+    ) + 1
+    return {
+        name: {
+            "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],
+            "sdscFolds_": {
+                "dim_prop_func": [{"Affine": {"alpha_": 1, "beta_": 0}}],
+                "dim_prop_attr": [{"factor_": 1, "label_": "time"}],
+                "data_": {"[0]": "0"},
+            },
+            "coreFoldProp_": {"factor_": num_cores, "label_": "core"},
+            "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
+            "numCoresUsed_": num_cores,
+            "unpadN_": {"name_": "unpadn", "mb_": -1, "out_": -1},
+            "N_": {
+                "name_": "n",
+                "mb_": _as_int(descriptor["size"]),
+                "out_": _as_int(descriptor["size"]),
+            },
+            "coreIdToDsc_": {},
+            "numWkSlicesPerDim_": {},
+            "coreIdToWkSlice_": {},
+            "opFuncsUsed_": [
+                next(iter(datadsc.values()))["op"]["name"] for datadsc in datadscs
+            ],
+            "ldsShareInfo_": [],
+            "prodConsList": {},
+            "coreIdToDscSchedule": _sparse_dataop_schedule(
+                num_cores,
+                stage_core_ids,
+            ),
+            "pcfg_": {},
+            "target_": "senulator",
+            "dscs_": [],
+            "datadscs_": datadscs,
+            "dimToSymbolMappingOpcodeCorrection_": {},
+            "inputSymbolsAndTags_": {},
+            "symbolDefinitions_": {},
+            "streamingPTLXDirectTile_": {
+                "tile_index": int(tile_index),
+                "tile_row": _as_int(tile["tile_row"]),
+                "tile_col": _as_int(tile["tile_col"]),
+                "source_fragment_count": len(source_fragments),
+                "dest_fragment_count": len(dest_fragments),
+                "gather_stage": needs_gather,
+                "status": "static-codegen-only",
+                "semantic_transform_certified": False,
                 "fallback": "ReStickifyOpHBM",
             },
         }
@@ -670,7 +817,9 @@ def generate_streaming_ptlx_full_bridge_sdsc(
     combined["numCoresUsed_"] = max(_as_int(root["numCoresUsed_"]) for root in roots)
     for core_id in range(combined["numCoresUsed_"]):
         combined_schedule.setdefault(str(core_id), [])
-    combined["coreIdToDscSchedule"] = combined_schedule
+    combined["coreIdToDscSchedule"] = _with_local_schedule_dependencies(
+        combined_schedule
+    )
     combined["opFuncsUsed_"] = [
         next(iter(datadsc.values()))["op"]["name"] for datadsc in all_datadscs
     ]
@@ -722,7 +871,9 @@ def generate_streaming_ptlx_native_full_bridge_sdsc(
     combined["numCoresUsed_"] = max(_as_int(root["numCoresUsed_"]) for root in roots)
     for core_id in range(combined["numCoresUsed_"]):
         combined_schedule.setdefault(str(core_id), [])
-    combined["coreIdToDscSchedule"] = combined_schedule
+    combined["coreIdToDscSchedule"] = _with_local_schedule_dependencies(
+        combined_schedule
+    )
     combined["opFuncsUsed_"] = [
         next(iter(datadsc.values()))["op"]["name"] for datadsc in all_datadscs
     ]
@@ -734,6 +885,64 @@ def generate_streaming_ptlx_native_full_bridge_sdsc(
         "logical_tile_count": _as_int(descriptor.get("total_tiles", len(tiles))),
         "datadsc_count": len(all_datadscs),
         "native_local_transform_contract": True,
+        "semantic_transform_certified": False,
+        "fallback": "ReStickifyOpHBM",
+    }
+    return {name: combined}
+
+
+def generate_streaming_ptlx_direct_full_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Combine every direct 2D PT-LX restickify tile into one payload."""
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    tiles = descriptor.get("tiles") or []
+    if not tiles:
+        raise ValueError("streaming descriptor has no materialized tiles")
+
+    roots: list[dict[str, Any]] = []
+    all_datadscs: list[dict[str, Any]] = []
+    combined_schedule: dict[str, list[list[int]]] = {}
+    offset = 0
+    for tile_index in range(len(tiles)):
+        tile_payload = generate_streaming_ptlx_direct_tile_bridge_sdsc(
+            f"{name}_direct_tile{tile_index}",
+            streaming_artifact,
+            tile_index=tile_index,
+        )
+        tile_root = copy.deepcopy(next(iter(tile_payload.values())))
+        roots.append(tile_root)
+        tile_datadscs = tile_root.get("datadscs_", []) or []
+        all_datadscs.extend(tile_datadscs)
+        for core_id, steps in (tile_root.get("coreIdToDscSchedule") or {}).items():
+            core_steps = combined_schedule.setdefault(str(core_id), [])
+            for step in steps:
+                adjusted = list(step)
+                adjusted[0] = int(adjusted[0]) + offset
+                core_steps.append(adjusted)
+        offset += len(tile_datadscs)
+
+    combined = copy.deepcopy(roots[0])
+    combined["datadscs_"] = all_datadscs
+    combined["numCoresUsed_"] = max(_as_int(root["numCoresUsed_"]) for root in roots)
+    for core_id in range(combined["numCoresUsed_"]):
+        combined_schedule.setdefault(str(core_id), [])
+    combined["coreIdToDscSchedule"] = _with_local_schedule_dependencies(
+        combined_schedule
+    )
+    combined["opFuncsUsed_"] = [
+        next(iter(datadsc.values()))["op"]["name"] for datadsc in all_datadscs
+    ]
+    combined["streamingPTLXDirectTile_"] = {}
+    combined["streamingPTLXFull_"] = {
+        "status": "static-codegen-only",
+        "coalescing": "direct-64x64-tiles",
+        "tile_count": len(tiles),
+        "logical_tile_count": _as_int(descriptor.get("total_tiles", len(tiles))),
+        "datadsc_count": len(all_datadscs),
+        "direct_restickify_contract": True,
         "semantic_transform_certified": False,
         "fallback": "ReStickifyOpHBM",
     }
@@ -1230,6 +1439,26 @@ def _sparse_dataop_schedule(
             for local_idx, stage_idx in enumerate(local_stages)
         ]
     return schedule
+
+
+def _with_local_schedule_dependencies(
+    schedule: Mapping[str, Sequence[Sequence[int]]],
+) -> dict[str, list[list[int]]]:
+    """Recompute local before/after dependency bits after concatenating tiles."""
+
+    result: dict[str, list[list[int]]] = {}
+    for core_id, steps in schedule.items():
+        normalized_steps = [list(step) for step in steps]
+        result[str(core_id)] = [
+            [
+                int(step[0]),
+                int(step[1]),
+                1 if idx > 0 else 0,
+                1 if idx < len(normalized_steps) - 1 else 0,
+            ]
+            for idx, step in enumerate(normalized_steps)
+        ]
+    return result
 
 
 def _labeled_ds(

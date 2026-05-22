@@ -132,6 +132,15 @@ restickify_ptlx_native_tile_e2e: bool = (
     os.environ.get("SPYRE_RESTICKIFY_PTLX_NATIVE_TILE_E2E", "0") == "1"
 )
 
+# Default-off diagnostic refinement of the streaming PT-LX prototype. Instead
+# of STCDP gather -> local 4D restickify -> STCDP scatter, emit one
+# ReStickifyOpWithPTLx per tile from producer fragments directly into consumer
+# fragments using the same 2D mb/out -> out/mb layout contract as the
+# value-correct full-tensor PT-LX bridge.
+restickify_ptlx_direct_tile_e2e: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_PTLX_DIRECT_TILE_E2E", "0") == "1"
+)
+
 # Default-off cross-bundle prototype for the production-shaped PT-LX path. This
 # delays DXP compilation until all SDSC bundle JSON has been emitted, so an
 # eligible trailing producer/restickify bundle and the following consumer bundle

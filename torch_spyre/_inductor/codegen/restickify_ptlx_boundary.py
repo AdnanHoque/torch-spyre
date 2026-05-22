@@ -42,6 +42,7 @@ from torch_spyre._inductor.restickify_ring import (
 
 from .restickify_lx_dataop import (
     generate_ptlx_restickify_bridge_sdsc,
+    generate_streaming_ptlx_direct_full_bridge_sdsc,
     generate_streaming_ptlx_full_bridge_sdsc,
     generate_streaming_ptlx_native_full_bridge_sdsc,
 )
@@ -1998,6 +1999,7 @@ def _streaming_value_flow_contract(
     gather_count = 0
     scatter_count = 0
     direct_consumer_write_count = 0
+    direct_tile_count = 0
     for datadsc in datadscs:
         name, dataop = next(iter(datadsc.items()))
         op_name = str(dataop.get("op", {}).get("name"))
@@ -2022,6 +2024,16 @@ def _streaming_value_flow_contract(
             consumer_starts.update(
                 _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
             )
+        if "direct_tile" in str(name) and op_name == "ReStickifyOpWithPTLx":
+            direct_tile_count += 1
+            direct_input_starts = _piece_lx_starts(
+                dataop["labeledDs_"][0].get("PieceInfo", []) or []
+            )
+            if direct_input_starts == {int(producer_base)}:
+                producer_starts.update(direct_input_starts)
+            consumer_starts.update(
+                _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
+            )
 
     has_hbm_restickify = "ReStickifyOpHBM" in op_names
     full_meta = root.get("streamingPTLXFull_", {}) or {}
@@ -2034,6 +2046,12 @@ def _streaming_value_flow_contract(
             and gather_count == stripe_count
             and direct_consumer_write_count == stripe_count
             and stripe_count > 0
+        )
+    elif coalescing == "direct-64x64-tiles":
+        tile_count = int(full_meta.get("tile_count", logical_tile_count) or 0)
+        count_contract_valid = (
+            tile_count == int(expected_tiles)
+            and direct_tile_count == int(expected_tiles)
         )
     else:
         count_contract_valid = (
@@ -2058,6 +2076,7 @@ def _streaming_value_flow_contract(
         "gather_count": gather_count,
         "scatter_count": scatter_count,
         "direct_consumer_write_count": direct_consumer_write_count,
+        "direct_tile_count": direct_tile_count,
         "datadsc_count": len(datadscs),
         "hbm_placements": hbm_placements,
         "has_hbm_restickify": has_hbm_restickify,
@@ -2089,6 +2108,10 @@ def _streaming_semantic_transform_certificate(
     meta = root.get("streamingPTLXFull_", {}) or {}
     if meta.get("semantic_transform_certified") is True:
         return True, None
+    if meta.get("coalescing") == "direct-64x64-tiles":
+        return False, (
+            "direct-ptlx-tile-bridge-needs-hardware-value-validation"
+        )
     if meta.get("coalescing") == "native-64x64-tiles":
         return False, (
             "native-ptlx-tile-bridge-compiles-but-needs-value-correct-"
@@ -2103,6 +2126,8 @@ def _generate_streaming_ptlx_bridge_payload(
     name: str,
     artifact: dict[str, Any],
 ) -> dict[str, Any]:
+    if _spyre_config.restickify_ptlx_direct_tile_e2e:
+        return generate_streaming_ptlx_direct_full_bridge_sdsc(name, artifact)
     if _spyre_config.restickify_ptlx_native_tile_e2e:
         return generate_streaming_ptlx_native_full_bridge_sdsc(name, artifact)
     return generate_streaming_ptlx_full_bridge_sdsc(name, artifact)
