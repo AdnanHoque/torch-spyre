@@ -348,6 +348,111 @@ def generate_streaming_ptlx_tile_bridge_sdsc(
     }
 
 
+def generate_ptlx_local_tile_restickify_sdsc(
+    name: str,
+    *,
+    core_id: int,
+    input_base: int,
+    output_base: int,
+    tile_rows: int = 64,
+    tile_cols: int = 64,
+    i_size: int = 1,
+    mb_size: int = 1,
+) -> dict[str, Any]:
+    """Generate a native PT-LX local-tile restickify data-op payload.
+
+    Deeptools' ``ReStickifyOpWithPTLx`` examples model the PT transform using
+    four dimensions (``j_, i_, out_, mb_``) and switch the stick dimension from
+    ``out_`` to ``j_``.  This helper captures that local transform contract for
+    one bridge core.  It is intentionally only the middle phase of the
+    production streaming bridge; same-stick gather/scatter must surround it.
+    """
+
+    if tile_rows <= 0 or tile_cols <= 0:
+        raise ValueError("tile rows and columns must be positive")
+    if tile_rows % 64 != 0 or tile_cols % 64 != 0:
+        raise ValueError("PT-LX local tile dimensions must be 64-aligned")
+    if i_size <= 0 or mb_size <= 0:
+        raise ValueError("i_size and mb_size must be positive")
+
+    dims = ["j_", "i_", "out_", "mb_"]
+    sizes = {
+        "j_": int(tile_rows),
+        "i_": int(i_size),
+        "out_": int(tile_cols),
+        "mb_": int(mb_size),
+    }
+    dataop_name = f"0_ReStickifyOpWithPTLx_local_tile_core{int(core_id)}"
+    dataop = {
+        "coreIdsUsed_": [int(core_id)],
+        "dimPool_": dims,
+        "outDimTodimRelation_": [],
+        "primaryDs_": [
+            {"name_": "dataIN", "dimNames": dims},
+            {"name_": "dataOUT", "dimNames": dims},
+        ],
+        "labeledDs_": [
+            _local_ptlx_labeled_ds(
+                "dataIN_L0",
+                "dataIN",
+                stick=("out_",),
+                sizes=sizes,
+                core_id=int(core_id),
+                base=int(input_base),
+            ),
+            _local_ptlx_labeled_ds(
+                "dataOUT_L0",
+                "dataOUT",
+                stick=("j_",),
+                sizes=sizes,
+                core_id=int(core_id),
+                base=int(output_base),
+            ),
+        ],
+        "op": _op_payload("ReStickifyOpWithPTLx"),
+    }
+
+    return {
+        name: {
+            "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],
+            "sdscFolds_": {
+                "dim_prop_func": [{"Affine": {"alpha_": 1, "beta_": 0}}],
+                "dim_prop_attr": [{"factor_": 1, "label_": "time"}],
+                "data_": {"[0]": "0"},
+            },
+            "coreFoldProp_": {"factor_": 1, "label_": "core"},
+            "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
+            "numCoresUsed_": 1,
+            "unpadN_": {"name_": "unpadn", **{dim: -1 for dim in dims}},
+            "N_": {"name_": "n", **sizes},
+            "coreIdToDsc_": {},
+            "numWkSlicesPerDim_": {},
+            "coreIdToWkSlice_": {},
+            "opFuncsUsed_": ["ReStickifyOpWithPTLx"],
+            "ldsShareInfo_": [],
+            "prodConsList": {},
+            "coreIdToDscSchedule": {
+                str(int(core_id)): [[0, -1, 0, 0]],
+            },
+            "pcfg_": {},
+            "target_": "senulator",
+            "dscs_": [],
+            "datadscs_": [{dataop_name: dataop}],
+            "dimToSymbolMappingOpcodeCorrection_": {},
+            "inputSymbolsAndTags_": {},
+            "symbolDefinitions_": {},
+            "streamingPTLXLocalTile_": {
+                "semantic_transform_certified": True,
+                "tile_rows": int(tile_rows),
+                "tile_cols": int(tile_cols),
+                "core_id": int(core_id),
+                "input_stick_dim": "out_",
+                "output_stick_dim": "j_",
+            },
+        }
+    }
+
+
 def generate_streaming_ptlx_full_bridge_sdsc(
     name: str,
     streaming_artifact: Mapping[str, Any],
@@ -1258,6 +1363,52 @@ def _tile_piece_info(
                 "startAddr": [int(base)],
             }
         ],
+    }
+
+
+def _local_ptlx_labeled_ds(
+    lds_name: str,
+    pds_name: str,
+    *,
+    stick: Sequence[str],
+    sizes: Mapping[str, int],
+    core_id: int,
+    base: int,
+) -> dict[str, Any]:
+    layout_dims = ["j_", "i_", "out_", "mb_"]
+    normalized_sizes = {dim: int(sizes[dim]) for dim in layout_dims}
+    return {
+        "ldsName_": lds_name,
+        "pdsName_": pds_name,
+        "wordLength": num_bytes(DataFormats.SEN169_FP16),
+        "dataformat": DataFormats.SEN169_FP16.name,
+        "isExternal_": 0,
+        "segment_": "output",
+        "layoutDimOrder_": layout_dims,
+        "stickDimOrder_": list(stick),
+        "dimToLayoutSize_": normalized_sizes,
+        "dimToStickSize_": {dim: 64 for dim in stick},
+        "validGap_": _valid_gap(normalized_sizes),
+        "totElements": -1,
+        "PieceInfo": [
+            {
+                "key_": "p1",
+                "dimToStartCordinate": {dim: 0 for dim in layout_dims},
+                "dimToSize_": normalized_sizes,
+                "validGap_": _valid_gap(normalized_sizes),
+                "PlacementInfo": [
+                    {
+                        "type": "lx",
+                        "memId": [int(core_id)],
+                        "startAddr": [int(base)],
+                    }
+                ],
+            }
+        ],
+        "hbmSize_": 0,
+        "hbmStartAddress_": 0,
+        "lxSize_": _LX_SIZE_BYTES,
+        "lxStartAddress_": {},
     }
 
 

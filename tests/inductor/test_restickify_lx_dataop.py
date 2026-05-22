@@ -20,6 +20,7 @@ from torch_spyre._inductor import config
 from torch_spyre._inductor.constants import RESTICKIFY_OP
 from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     combine_dataop_sdscs,
+    generate_ptlx_local_tile_restickify_sdsc,
     generate_ptlx_restickify_bridge_sdsc,
     generate_restickify_dataop_sdsc_from_spec,
     generate_streaming_ptlx_full_bridge_sdsc,
@@ -269,6 +270,56 @@ def test_mixed_ptlx_bridge_with_consumer_schedule_shape():
         "ReStickifyOpWithPTLx",
         "STCDPOpLx",
         "add",
+    ]
+
+
+def test_ptlx_local_tile_restickify_sdsc_certifies_native_transform_contract():
+    payload = generate_ptlx_local_tile_restickify_sdsc(
+        "local_tile",
+        core_id=7,
+        input_base=64 * 1024,
+        output_base=128 * 1024,
+        tile_rows=64,
+        tile_cols=64,
+    )
+
+    root = payload["local_tile"]
+    dataop = next(iter(root["datadscs_"][0].values()))
+    input_lds, output_lds = dataop["labeledDs_"]
+
+    assert root["dscs_"] == []
+    assert root["opFuncsUsed_"] == ["ReStickifyOpWithPTLx"]
+    assert root["coreIdToDscSchedule"] == {"7": [[0, -1, 0, 0]]}
+    assert root["streamingPTLXLocalTile_"] == {
+        "semantic_transform_certified": True,
+        "tile_rows": 64,
+        "tile_cols": 64,
+        "core_id": 7,
+        "input_stick_dim": "out_",
+        "output_stick_dim": "j_",
+    }
+    assert dataop["op"]["name"] == "ReStickifyOpWithPTLx"
+    assert dataop["coreIdsUsed_"] == [7]
+    assert dataop["dimPool_"] == ["j_", "i_", "out_", "mb_"]
+    assert input_lds["layoutDimOrder_"] == ["j_", "i_", "out_", "mb_"]
+    assert input_lds["stickDimOrder_"] == ["out_"]
+    assert output_lds["layoutDimOrder_"] == ["j_", "i_", "out_", "mb_"]
+    assert output_lds["stickDimOrder_"] == ["j_"]
+    assert input_lds["dimToLayoutSize_"] == {
+        "j_": 64,
+        "i_": 1,
+        "out_": 64,
+        "mb_": 1,
+    }
+    assert input_lds["dimToStickSize_"] == {"out_": 64}
+    assert output_lds["dimToStickSize_"] == {"j_": 64}
+    assert input_lds["hbmSize_"] == 0
+    assert output_lds["hbmSize_"] == 0
+    assert input_lds["PieceInfo"][0]["PlacementInfo"] == [
+        {"type": "lx", "memId": [7], "startAddr": [64 * 1024]}
+    ]
+    assert output_lds["PieceInfo"][0]["PlacementInfo"] == [
+        {"type": "lx", "memId": [7], "startAddr": [128 * 1024]}
     ]
 
 
