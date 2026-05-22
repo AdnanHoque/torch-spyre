@@ -602,6 +602,8 @@ def _patch_streaming_mixed_schedule(
         producer_base=plan.producer_endpoint.base,
         consumer_base=plan.consumer_endpoint.base,
         expected_tiles=summary.total_tiles,
+        consumer_payload=consumer_payload,
+        consumer_lds_idx=plan.consumer_lds_idx,
     )
     if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
         "valid"
@@ -832,6 +834,8 @@ def _patch_one_cross_bundle_handoff(
         producer_base=producer_base,
         consumer_base=consumer_base,
         expected_tiles=summary.total_tiles,
+        consumer_payload=consumer_payload,
+        consumer_lds_idx=consumer_lds_idx,
     )
     if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
         "valid"
@@ -1059,6 +1063,8 @@ def _patch_one_implicit_alias(
         producer_base=candidate.producer_endpoint.base,
         consumer_base=candidate.consumer_endpoint.base,
         expected_tiles=workspace_summary.total_tiles,
+        consumer_payload=consumer_payload,
+        consumer_lds_idx=candidate.consumer_endpoint.lds_idx,
     )
     if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
         "valid"
@@ -1989,6 +1995,8 @@ def _streaming_value_flow_contract(
     producer_base: int,
     consumer_base: int,
     expected_tiles: int,
+    consumer_payload: dict[str, Any] | None = None,
+    consumer_lds_idx: int | None = None,
 ) -> dict[str, Any]:
     root = next(iter(bridge_payload.values()))
     datadscs = root.get("datadscs_", []) or []
@@ -2064,14 +2072,27 @@ def _streaming_value_flow_contract(
         and producer_starts == {int(producer_base)}
         and consumer_starts == {int(consumer_base)}
     )
+    consumer_descriptor_contract = None
+    if consumer_payload is not None and consumer_lds_idx is not None:
+        consumer_descriptor_contract = _streaming_consumer_descriptor_contract(
+            bridge_payload=bridge_payload,
+            consumer_payload=consumer_payload,
+            consumer_lds_idx=consumer_lds_idx,
+        )
     semantic_certified, semantic_reason = _streaming_semantic_transform_certificate(
         root
     )
+    descriptor_valid = (
+        consumer_descriptor_contract is None
+        or consumer_descriptor_contract.get("valid") is True
+    )
     return {
-        "valid": endpoint_valid and semantic_certified,
+        "valid": endpoint_valid and semantic_certified and descriptor_valid,
         "endpoint_contract_valid": endpoint_valid,
         "semantic_transform_certified": semantic_certified,
         "semantic_skip_reason": semantic_reason,
+        "consumer_descriptor_contract": consumer_descriptor_contract,
+        "consumer_descriptor_valid": descriptor_valid,
         "expected_tiles": int(expected_tiles),
         "gather_count": gather_count,
         "scatter_count": scatter_count,
@@ -2120,6 +2141,79 @@ def _streaming_semantic_transform_certificate(
     return False, (
         "streaming-ptlx-stcdp-gather-scatter-does-not-certify-coordinate-remap"
     )
+
+
+def _streaming_consumer_descriptor_contract(
+    *,
+    bridge_payload: dict[str, Any],
+    consumer_payload: dict[str, Any],
+    consumer_lds_idx: int,
+) -> dict[str, Any]:
+    """Compare the streaming bridge output LDS against the consumer input LDS."""
+
+    try:
+        bridge_root = next(iter(bridge_payload.values()))
+        datadscs = bridge_root.get("datadscs_", []) or []
+        if not datadscs:
+            return {"valid": False, "reason": "missing-bridge-datadscs"}
+        bridge_output = next(iter(datadscs[-1].values()))["labeledDs_"][-1]
+        _, consumer_dsc = _single_payload_dsc(consumer_payload)
+        consumer_lds = _labeled_ds_by_index(consumer_dsc, consumer_lds_idx)
+        consumer_primary = _primary_for_lds(consumer_dsc, consumer_lds_idx)
+    except (KeyError, ValueError, StopIteration, TypeError) as exc:
+        return {
+            "valid": False,
+            "reason": f"malformed-descriptor:{type(exc).__name__}",
+        }
+
+    bridge_layout = _normalized_lds_layout(bridge_output)
+    bridge_stick = _normalized_lds_stick(bridge_output)
+    consumer_layout = _normalized_lds_layout(consumer_lds) or _primary_layout(
+        consumer_primary
+    )
+    consumer_stick = _normalized_lds_stick(consumer_lds) or _primary_stick(
+        consumer_primary
+    )
+    layout_match = bridge_layout == consumer_layout
+    stick_match = bridge_stick == consumer_stick
+    bridge_pieces = bridge_output.get("PieceInfo", []) or []
+    consumer_pieces = consumer_lds.get("PieceInfo", []) or []
+    piece_contract_available = bool(bridge_pieces and consumer_pieces)
+    piece_match = False
+    piece_reason = None
+    if not bridge_pieces:
+        piece_reason = "missing-bridge-piece-info"
+    elif not consumer_pieces:
+        piece_reason = "missing-consumer-piece-info"
+    else:
+        bridge_signature = _piece_signature(bridge_pieces)
+        consumer_signature = _piece_signature(consumer_pieces)
+        piece_match = bridge_signature == consumer_signature
+        if not piece_match:
+            piece_reason = "piece-info-mismatch"
+
+    valid = layout_match and stick_match and piece_contract_available and piece_match
+    reason = None
+    if not layout_match:
+        reason = "layout-dim-order-mismatch"
+    elif not stick_match:
+        reason = "stick-dim-order-mismatch"
+    elif not piece_match:
+        reason = piece_reason
+    return {
+        "valid": valid,
+        "reason": reason,
+        "layout_match": layout_match,
+        "stick_match": stick_match,
+        "piece_contract_available": piece_contract_available,
+        "piece_match": piece_match,
+        "bridge_layout": bridge_layout,
+        "consumer_layout": consumer_layout,
+        "bridge_stick": bridge_stick,
+        "consumer_stick": consumer_stick,
+        "bridge_piece_count": len(bridge_pieces),
+        "consumer_piece_count": len(consumer_pieces),
+    }
 
 
 def _generate_streaming_ptlx_bridge_payload(
@@ -2244,6 +2338,13 @@ def _lds_name(dsc: dict[str, Any], lds_idx: int) -> str:
     raise ValueError(f"LDS index {lds_idx} not found")
 
 
+def _labeled_ds_by_index(dsc: dict[str, Any], lds_idx: int) -> dict[str, Any]:
+    for lds in dsc.get("labeledDs_", []) or []:
+        if int(lds.get("ldsIdx_", -1)) == int(lds_idx):
+            return lds
+    raise ValueError(f"LDS index {lds_idx} not found")
+
+
 def _primary_for_lds(dsc: dict[str, Any], lds_idx: int) -> dict[str, Any]:
     for lds in dsc.get("labeledDs_", []) or []:
         if int(lds.get("ldsIdx_", -1)) == int(lds_idx):
@@ -2256,12 +2357,58 @@ def _normalize_dim(dim: Any) -> str:
     return str(dim).removesuffix("_")
 
 
+def _normalized_lds_layout(lds: dict[str, Any]) -> list[str]:
+    return [_normalize_dim(dim) for dim in lds.get("layoutDimOrder_", []) or []]
+
+
+def _normalized_lds_stick(lds: dict[str, Any]) -> list[str]:
+    return [_normalize_dim(dim) for dim in lds.get("stickDimOrder_", []) or []]
+
+
 def _primary_layout(primary: dict[str, Any]) -> list[str]:
     return [_normalize_dim(dim) for dim in primary.get("layoutDimOrder_", [])]
 
 
 def _primary_stick(primary: dict[str, Any]) -> list[str]:
     return [_normalize_dim(dim) for dim in primary.get("stickDimOrder_", [])]
+
+
+def _piece_signature(pieces: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        (
+            {
+                "start": _normalized_dim_map(
+                    piece.get("dimToStartCordinate", {}) or {}
+                ),
+                "size": _normalized_dim_map(piece.get("dimToSize_", {}) or {}),
+                "placements": _placement_signature(
+                    piece.get("PlacementInfo", []) or []
+                ),
+            }
+            for piece in pieces
+        ),
+        key=lambda item: json.dumps(item, sort_keys=True),
+    )
+
+
+def _normalized_dim_map(raw: dict[str, Any]) -> dict[str, int]:
+    return {_normalize_dim(dim): int(value) for dim, value in raw.items()}
+
+
+def _placement_signature(placements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        (
+            {
+                "type": str(placement.get("type")),
+                "memId": [int(value) for value in placement.get("memId", []) or []],
+                "startAddr": [
+                    int(value) for value in placement.get("startAddr", []) or []
+                ],
+            }
+            for placement in placements
+        ),
+        key=lambda item: json.dumps(item, sort_keys=True),
+    )
 
 
 def _infer_endpoint_direction(

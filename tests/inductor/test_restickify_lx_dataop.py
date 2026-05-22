@@ -644,6 +644,55 @@ def test_streaming_ptlx_direct_full_bridge_combines_direct_tiles():
     ]
 
 
+def test_streaming_ptlx_contract_reports_missing_consumer_piece_descriptor():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=2,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=2)
+    bridge = generate_streaming_ptlx_direct_full_bridge_sdsc(
+        "direct_full_bridge",
+        artifact,
+    )
+    consumer = _minimal_layout_payload(
+        "2_add",
+        opfunc="add",
+        size=512,
+        work_slices=dest,
+        core_mapping=default_core_mapping(dest),
+        lds=[
+            _layout_lds(0, "restickify_out", "dataIN", ["out", "mb"], ["mb"]),
+            _layout_lds(1, "consumer_out", "dataOUT", ["out", "mb"], ["mb"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
+
+    contract = _streaming_value_flow_contract(
+        bridge_payload=bridge,
+        producer_base=0,
+        consumer_base=256 * 1024,
+        expected_tiles=2,
+        consumer_payload=consumer,
+        consumer_lds_idx=0,
+    )
+
+    descriptor = contract["consumer_descriptor_contract"]
+    assert contract["endpoint_contract_valid"] is True
+    assert contract["consumer_descriptor_valid"] is False
+    assert descriptor["layout_match"] is True
+    assert descriptor["stick_match"] is True
+    assert descriptor["piece_contract_available"] is False
+    assert descriptor["reason"] == "missing-consumer-piece-info"
+    assert contract["valid"] is False
+
+
 def test_streaming_ptlx_full_bridge_coalesces_single_owner_row_stripes():
     source = {"mb": 1, "out": 32}
     dest = {"mb": 32, "out": 1}
