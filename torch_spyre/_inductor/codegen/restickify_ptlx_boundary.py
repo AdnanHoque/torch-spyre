@@ -52,6 +52,10 @@ from .restickify_ptlx_streaming import (
 
 _PRODUCER_BASE_ENV = "SPYRE_RESTICKIFY_PTLX_BRIDGE_PRODUCER_BASE"
 _CONSUMER_BASE_ENV = "SPYRE_RESTICKIFY_PTLX_BRIDGE_CONSUMER_BASE"
+_STREAMING_TILE_SIZE_ENV = "SPYRE_RESTICKIFY_PTLX_STREAMING_TILE_SIZE"
+_IMPLICIT_ALIAS_SPLIT_BRIDGE_ENV = (
+    "SPYRE_RESTICKIFY_PTLX_IMPLICIT_ALIAS_SPLIT_BRIDGE"
+)
 _DEFAULT_PRODUCER_BASE = 16 * 1024
 _DEFAULT_CONSUMER_BASE = 8 * 1024
 _LX_BYTES_PER_CORE = 2 * 1024 * 1024
@@ -980,7 +984,9 @@ def _patch_one_implicit_alias(
         "size": consumer_piece_size,
         "source": candidate.consumer_endpoint.base_source,
     }
-    tile_size = _bounded_streaming_tile_size(size)
+    tile_size = _streaming_ptlx_tile_size(size)
+    if isinstance(tile_size, str):
+        return _row(consumer_idx, "skipped", tile_size)
     workspace_summary = plan_streaming_ptlx_tiles(
         size=size,
         source_work_slices=_root_work_slices(producer_payload),
@@ -1033,15 +1039,30 @@ def _patch_one_implicit_alias(
             f"SDSC {consumer_idx}: {value_flow_contract}"
         )
 
-    mixed_name = f"{consumer_idx}_ImplicitAliasStreamingReStickifyOpWithPTLxConsumer"
-    sdsc_payloads[candidate.consumer_index] = _combine_ptlx_bridge_with_consumer(
-        mixed_name,
-        bridge_payload,
-        consumer_payload,
+    bridge_name = f"{consumer_idx}_ImplicitAliasStreamingReStickifyOpWithPTLx"
+    producer_mixed_name = (
+        f"{consumer_idx}_ImplicitAliasProducerStreamingReStickifyOpWithPTLx"
     )
+    replacement_sdsc = producer_mixed_name
+    split_bridge = os.environ.get(_IMPLICIT_ALIAS_SPLIT_BRIDGE_ENV, "0") == "1"
+    if split_bridge:
+        sdsc_payloads[candidate.consumer_index] = bridge_payload
+        sdsc_payloads.insert(candidate.consumer_index + 1, consumer_payload)
+        replacement_sdsc = bridge_name
+    else:
+        sdsc_payloads[candidate.producer_index] = _combine_producer_with_ptlx_bridge(
+            producer_mixed_name,
+            producer_payload,
+            bridge_payload,
+        )
+        sdsc_payloads[candidate.consumer_index] = consumer_payload
     return {
         **_row(consumer_idx, "patched", None),
-        "kind": "ptlx-implicit-alias-streaming",
+        "kind": (
+            "ptlx-implicit-alias-streaming-split-bridge"
+            if split_bridge
+            else "ptlx-implicit-alias-producer-streaming"
+        ),
         "plan": asdict(candidate),
         "direction": direction,
         "size": size,
@@ -1059,9 +1080,11 @@ def _patch_one_implicit_alias(
             "size": workspace_size,
             "tile_size": tile_size,
         },
+        "split_bridge_sdsc": split_bridge,
+        "producer_mixed_bridge_sdsc": not split_bridge,
         "streaming_summary": _streaming_summary_audit(workspace_summary),
         "value_flow_contract": value_flow_contract,
-        "replacement_sdsc": mixed_name,
+        "replacement_sdsc": replacement_sdsc,
     }
 
 
@@ -1644,6 +1667,29 @@ def _bounded_streaming_tile_size(
     max_edge = int(math.isqrt(max_elements))
     tile = (min(int(size), max_edge) // 64) * 64
     return max(64, tile)
+
+
+def _streaming_ptlx_tile_size(size: int) -> int | str:
+    """Return the tile edge for the production-shaped streaming bridge.
+
+    The production contract streams 64x64 logical tiles through bounded LX
+    workspace.  ``auto`` is kept as a prototype escape hatch for the older
+    largest-fitting-tile behavior, but the default must stay at 64 so generated
+    bridges exercise the intended gather/restickify/scatter shape.
+    """
+
+    raw = os.environ.get(_STREAMING_TILE_SIZE_ENV, "64").strip().lower()
+    if raw == "auto":
+        return _bounded_streaming_tile_size(size)
+    try:
+        tile_size = int(raw)
+    except ValueError:
+        return f"invalid-streaming-tile-size:{raw}"
+    if tile_size <= 0:
+        return f"invalid-streaming-tile-size:{tile_size}"
+    if tile_size % 64 != 0:
+        return f"non-64-aligned-streaming-tile-size:{tile_size}"
+    return min(tile_size, int(size))
 
 
 def _endpoint_range(
@@ -2423,13 +2469,11 @@ def _combine_ptlx_bridge_with_consumer(
     )
     if "streamingPTLXFull_" in bridge_root:
         root["streamingPTLXFull_"] = deepcopy(bridge_root["streamingPTLXFull_"])
-    dataop_names = {
-        str(next(iter(datadsc.values())).get("op", {}).get("name"))
-        for datadsc in root["datadscs_"]
-        if next(iter(datadsc.values())).get("op", {}).get("name") is not None
-    }
+    dataop_names = _datadsc_opfunc_names(root)
     root["opFuncsUsed_"] = sorted(
-        set(root.get("opFuncsUsed_", []) or []) | dataop_names
+        set(root.get("opFuncsUsed_", []) or [])
+        | _dldsc_opfunc_names(root)
+        | dataop_names
     )
     return {name: root}
 
@@ -2449,15 +2493,34 @@ def _combine_producer_with_ptlx_bridge(
     )
     if "streamingPTLXFull_" in bridge_root:
         root["streamingPTLXFull_"] = deepcopy(bridge_root["streamingPTLXFull_"])
-    dataop_names = {
-        str(next(iter(datadsc.values())).get("op", {}).get("name"))
-        for datadsc in root["datadscs_"]
-        if next(iter(datadsc.values())).get("op", {}).get("name") is not None
-    }
+    dataop_names = _datadsc_opfunc_names(root)
     root["opFuncsUsed_"] = sorted(
-        set(root.get("opFuncsUsed_", []) or []) | dataop_names
+        set(root.get("opFuncsUsed_", []) or [])
+        | _dldsc_opfunc_names(root)
+        | dataop_names
     )
     return {name: root}
+
+
+def _datadsc_opfunc_names(root: dict[str, Any]) -> set[str]:
+    names: set[str] = set()
+    for datadsc in root.get("datadscs_", []) or []:
+        payload = next(iter(datadsc.values()))
+        name = payload.get("op", {}).get("name")
+        if name is not None:
+            names.add(str(name))
+    return names
+
+
+def _dldsc_opfunc_names(root: dict[str, Any]) -> set[str]:
+    names: set[str] = set()
+    for dsc_entry in root.get("dscs_", []) or []:
+        dsc = next(iter(dsc_entry.values()))
+        for compute_op in dsc.get("computeOp_", []) or []:
+            name = compute_op.get("opFuncName")
+            if name is not None:
+                names.add(str(name))
+    return names
 
 
 def _bridge_schedule_then_dl_schedule(

@@ -630,23 +630,32 @@ def test_implicit_alias_streaming_patch_materializes_consumer_input_bridge():
     assert len(rows) == 1
     patched = rows[0]
     assert patched["status"] == "patched"
-    assert patched["kind"] == "ptlx-implicit-alias-streaming"
+    assert patched["kind"] == "ptlx-implicit-alias-producer-streaming"
     assert patched["value_flow_contract"]["valid"] is True
-    assert patched["streaming_summary"]["tile_size"] == 512
-    assert patched["streaming_summary"]["total_tiles"] == 1
+    assert patched["streaming_summary"]["tile_size"] == 64
+    assert patched["streaming_summary"]["total_tiles"] == 64
+    assert patched["split_bridge_sdsc"] is False
+    assert patched["producer_mixed_bridge_sdsc"] is True
     assert patched["plan"]["consumer_input_position"] == 0
     assert patched["consumer_lx_unique_starts"] != [0]
 
-    root = next(iter(payloads[1].values()))
-    assert "ImplicitAliasStreamingReStickifyOpWithPTLxConsumer" in next(
-        iter(payloads[1])
+    root = next(iter(payloads[0].values()))
+    assert len(payloads) == 2
+    assert "ImplicitAliasProducerStreamingReStickifyOpWithPTLx" in next(
+        iter(payloads[0])
     )
-    assert root["streamingPTLXFull_"]["tile_count"] == 1
+    assert root["streamingPTLXFull_"]["tile_count"] == 64
+    assert root["dscs_"]
     assert root["datadscs_"]
+    assert {"add", "ReStickifyOpWithPTLx", "STCDPOpLx"} <= set(
+        root["opFuncsUsed_"]
+    )
+    assert root["coreIdToDscSchedule"]["0"][0] == [-1, 0, 0, 0]
     assert all(
         next(iter(datadsc.values()))["op"]["name"] != "ReStickifyOpHBM"
         for datadsc in root["datadscs_"]
     )
+    assert next(iter(payloads[1])) == "1_add"
 
 
 def test_streaming_ptlx_cross_bundle_patch_rewrites_handoff_pair():
