@@ -345,6 +345,58 @@ def generate_streaming_ptlx_tile_bridge_sdsc(
     }
 
 
+def generate_streaming_ptlx_full_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Combine every materialized streaming tile into one static payload."""
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    tiles = descriptor.get("tiles") or []
+    if not tiles:
+        raise ValueError("streaming descriptor has no materialized tiles")
+
+    roots: list[dict[str, Any]] = []
+    all_datadscs: list[dict[str, Any]] = []
+    combined_schedule: dict[str, list[list[int]]] = {}
+    offset = 0
+    for tile_index in range(len(tiles)):
+        tile_payload = generate_streaming_ptlx_tile_bridge_sdsc(
+            f"{name}_tile{tile_index}",
+            streaming_artifact,
+            tile_index=tile_index,
+        )
+        tile_root = copy.deepcopy(next(iter(tile_payload.values())))
+        roots.append(tile_root)
+        tile_datadscs = tile_root.get("datadscs_", []) or []
+        all_datadscs.extend(tile_datadscs)
+        for core_id, steps in (tile_root.get("coreIdToDscSchedule") or {}).items():
+            core_steps = combined_schedule.setdefault(str(core_id), [])
+            for step in steps:
+                adjusted = list(step)
+                adjusted[0] = int(adjusted[0]) + offset
+                core_steps.append(adjusted)
+        offset += len(tile_datadscs)
+
+    combined = copy.deepcopy(roots[0])
+    combined["datadscs_"] = all_datadscs
+    combined["numCoresUsed_"] = max(_as_int(root["numCoresUsed_"]) for root in roots)
+    for core_id in range(combined["numCoresUsed_"]):
+        combined_schedule.setdefault(str(core_id), [])
+    combined["coreIdToDscSchedule"] = combined_schedule
+    combined["opFuncsUsed_"] = [
+        next(iter(datadsc.values()))["op"]["name"] for datadsc in all_datadscs
+    ]
+    combined["streamingPTLXTile_"] = {}
+    combined["streamingPTLXFull_"] = {
+        "status": "static-codegen-only",
+        "tile_count": len(tiles),
+        "datadsc_count": len(all_datadscs),
+        "fallback": "ReStickifyOpHBM",
+    }
+    return {name: combined}
+
+
 def generate_ptlx_restickify_bridge_sdsc(
     name: str,
     *,

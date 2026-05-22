@@ -21,6 +21,7 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     combine_dataop_sdscs,
     generate_ptlx_restickify_bridge_sdsc,
     generate_restickify_dataop_sdsc_from_spec,
+    generate_streaming_ptlx_full_bridge_sdsc,
     generate_streaming_ptlx_tile_bridge_sdsc,
 )
 from torch_spyre._inductor.codegen.restickify_ptlx_streaming import (
@@ -341,6 +342,42 @@ def test_streaming_ptlx_tile_bridge_sdsc_materializes_three_lx_dataops():
     ]
     assert root["coreIdToDscSchedule"]["1"] == [[0, -1, 0, 0]]
     assert root["coreIdToDscSchedule"]["4"] == []
+
+
+def test_streaming_ptlx_full_bridge_sdsc_combines_materialized_tiles():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=2,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=2)
+
+    payload = generate_streaming_ptlx_full_bridge_sdsc("full_bridge", artifact)
+    root = payload["full_bridge"]
+
+    assert root["streamingPTLXFull_"]["tile_count"] == 2
+    assert root["streamingPTLXFull_"]["datadsc_count"] == 6
+    assert len(root["datadscs_"]) == 6
+    assert root["coreIdToDscSchedule"]["0"][:4] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 0],
+        [3, -1, 0, 0],
+    ]
+    assert root["coreIdToDscSchedule"]["4"] == [
+        [3, -1, 0, 1],
+        [4, -1, 1, 1],
+        [5, -1, 1, 0],
+    ]
+    assert root["coreIdToDscSchedule"]["1"] == [
+        [0, -1, 0, 0],
+        [3, -1, 0, 0],
+    ]
 
 
 def test_ptlx_bridge_accepts_stock_mixed_restickify_split():
