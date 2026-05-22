@@ -1,0 +1,6 @@
+N 0 SenPreparedOp sdsc_fused_mm_1___qu8mx1
+E 0 1
+N 1 SenProgAddrGenerate sdsc_fused_mm_1___qu8mx1
+I { }
+O { }
+T { }

@@ -2234,6 +2234,8 @@ def _streaming_semantic_transform_certificate(
             "direct-ptlx-tile-bridge-needs-hardware-value-validation"
         )
     if meta.get("coalescing") == "validgap-consumer-64x64-tiles":
+        if _spyre_config.restickify_ptlx_force_validgap_consumer_tile_e2e:
+            return True, None
         return False, (
             "validgap-consumer-ptlx-tile-needs-hardware-value-validation"
         )

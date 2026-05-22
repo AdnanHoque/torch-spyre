@@ -1,0 +1,6 @@
+N 0 SenProgSend sdsc_fused_mm_1___qu8mx1-SenProgSend
+A dev_ptr 6 120259084288
+A size 6 7040
+I { }
+O { }
+T { }

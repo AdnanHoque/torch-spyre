@@ -731,6 +731,39 @@ def test_streaming_ptlx_validgap_consumer_full_bridge_contracts_but_needs_values
     assert contract["valid"] is False
 
 
+def test_streaming_ptlx_validgap_consumer_full_bridge_can_be_force_validated():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=2,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=2)
+    payload = generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc(
+        "validgap_full_bridge",
+        artifact,
+    )
+
+    with config.patch(restickify_ptlx_force_validgap_consumer_tile_e2e=True):
+        contract = _streaming_value_flow_contract(
+            bridge_payload=payload,
+            producer_base=0,
+            consumer_base=256 * 1024,
+            expected_tiles=2,
+        )
+
+    assert contract["endpoint_contract_valid"] is True
+    assert contract["consumer_descriptor_valid"] is True
+    assert contract["value_preservation_valid"] is True
+    assert contract["semantic_transform_certified"] is True
+    assert contract["semantic_skip_reason"] is None
+    assert contract["valid"] is True
+
+
 def test_streaming_ptlx_contract_allows_missing_consumer_piece_descriptor():
     source = {"mb": 32, "out": 1}
     dest = {"mb": 4, "out": 8}
