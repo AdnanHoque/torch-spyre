@@ -45,6 +45,7 @@ from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
     _patch_bridge_endpoint_pieces,
     _patch_consumer_input_lx_map,
     _patch_lx_allocation_by_index,
+    _streaming_bridge_value_preservation_contract,
     _streaming_value_flow_contract,
     patch_implicit_restickify_ptlx_aliases,
     patch_restickify_ptlx_cross_bundle_handoffs,
@@ -691,6 +692,65 @@ def test_streaming_ptlx_contract_reports_missing_consumer_piece_descriptor():
     assert descriptor["piece_contract_available"] is False
     assert descriptor["reason"] == "missing-consumer-piece-info"
     assert contract["valid"] is False
+
+
+def test_streaming_ptlx_value_preservation_rejects_expanded_live_axis():
+    root = {
+        "datadscs_": [
+            {
+                "0_ReStickifyOpWithPTLx_expanded": {
+                    "op": {"name": "ReStickifyOpWithPTLx"},
+                    "labeledDs_": [
+                        _value_contract_lds(
+                            layout=["out_", "mb_", "in_"],
+                            stick=["out_"],
+                            size={"out_": 64, "mb_": 64, "in_": 64},
+                        ),
+                        _value_contract_lds(
+                            layout=["mb_", "in_"],
+                            stick=["in_"],
+                            size={"mb_": 64, "in_": 64},
+                        ),
+                    ],
+                }
+            }
+        ]
+    }
+
+    contract = _streaming_bridge_value_preservation_contract(root)
+
+    assert contract["valid"] is False
+    assert contract["rows"][0]["input_live_elements"] == 64 * 64 * 64
+    assert contract["rows"][0]["output_live_elements"] == 64 * 64
+    assert contract["rows"][0]["reason"] == (
+        "restickify-live-element-count-mismatch"
+    )
+
+
+def test_streaming_ptlx_value_preservation_accepts_direct_tile():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=1,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=1)
+    payload = generate_streaming_ptlx_direct_tile_bridge_sdsc(
+        "direct_tile_bridge",
+        artifact,
+    )
+
+    contract = _streaming_bridge_value_preservation_contract(
+        payload["direct_tile_bridge"]
+    )
+
+    assert contract["valid"] is True
+    assert contract["rows"][0]["input_live_elements"] == 64 * 64
+    assert contract["rows"][0]["output_live_elements"] == 64 * 64
 
 
 def test_streaming_ptlx_full_bridge_coalesces_single_owner_row_stripes():
@@ -1614,6 +1674,24 @@ def _layout_lds(
         "hbmSize_": 512 * 512 * 2,
         "lxSize_": 0,
         "lxBufferSize_": 0,
+    }
+
+
+def _value_contract_lds(
+    *,
+    layout: list[str],
+    stick: list[str],
+    size: dict[str, int],
+) -> dict:
+    return {
+        "layoutDimOrder_": layout,
+        "stickDimOrder_": stick,
+        "PieceInfo": [
+            {
+                "dimToSize_": size,
+                "validGap_": {dim: [[value, 0]] for dim, value in size.items()},
+            }
+        ],
     }
 
 

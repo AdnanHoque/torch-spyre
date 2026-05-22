@@ -2079,6 +2079,7 @@ def _streaming_value_flow_contract(
             consumer_payload=consumer_payload,
             consumer_lds_idx=consumer_lds_idx,
         )
+    value_preservation_contract = _streaming_bridge_value_preservation_contract(root)
     semantic_certified, semantic_reason = _streaming_semantic_transform_certificate(
         root
     )
@@ -2086,13 +2087,21 @@ def _streaming_value_flow_contract(
         consumer_descriptor_contract is None
         or consumer_descriptor_contract.get("valid") is True
     )
+    value_preservation_valid = value_preservation_contract.get("valid") is True
     return {
-        "valid": endpoint_valid and semantic_certified and descriptor_valid,
+        "valid": (
+            endpoint_valid
+            and semantic_certified
+            and descriptor_valid
+            and value_preservation_valid
+        ),
         "endpoint_contract_valid": endpoint_valid,
         "semantic_transform_certified": semantic_certified,
         "semantic_skip_reason": semantic_reason,
         "consumer_descriptor_contract": consumer_descriptor_contract,
         "consumer_descriptor_valid": descriptor_valid,
+        "value_preservation_contract": value_preservation_contract,
+        "value_preservation_valid": value_preservation_valid,
         "expected_tiles": int(expected_tiles),
         "gather_count": gather_count,
         "scatter_count": scatter_count,
@@ -2106,6 +2115,79 @@ def _streaming_value_flow_contract(
         "producer_input_unique_starts": sorted(producer_starts),
         "consumer_output_unique_starts": sorted(consumer_starts),
     }
+
+
+def _streaming_bridge_value_preservation_contract(
+    root: dict[str, Any],
+) -> dict[str, Any]:
+    """Check that PT-LX restickify data-ops preserve live element count."""
+
+    rows: list[dict[str, Any]] = []
+    for datadsc in root.get("datadscs_", []) or []:
+        name, dataop = next(iter(datadsc.items()))
+        if str(dataop.get("op", {}).get("name")) != "ReStickifyOpWithPTLx":
+            continue
+        labeled = dataop.get("labeledDs_", []) or []
+        if len(labeled) < 2:
+            rows.append(
+                {
+                    "name": str(name),
+                    "valid": False,
+                    "reason": "missing-restickify-input-or-output-lds",
+                }
+            )
+            continue
+        input_elements = _lds_live_elements(labeled[0])
+        output_elements = _lds_live_elements(labeled[-1])
+        rows.append(
+            {
+                "name": str(name),
+                "valid": input_elements == output_elements,
+                "input_live_elements": input_elements,
+                "output_live_elements": output_elements,
+                "reason": None
+                if input_elements == output_elements
+                else "restickify-live-element-count-mismatch",
+            }
+        )
+
+    valid = all(row.get("valid") is True for row in rows)
+    return {
+        "valid": valid,
+        "restickify_count": len(rows),
+        "rows": rows,
+        "reason": None if valid else "restickify-live-element-count-mismatch",
+    }
+
+
+def _lds_live_elements(lds: dict[str, Any]) -> int:
+    pieces = lds.get("PieceInfo", []) or []
+    if not pieces:
+        return 0
+    return sum(_piece_live_elements(piece) for piece in pieces)
+
+
+def _piece_live_elements(piece: dict[str, Any]) -> int:
+    sizes = piece.get("dimToSize_", {}) or {}
+    valid_gap = piece.get("validGap_", {}) or {}
+    total = 1
+    for dim, raw_size in sizes.items():
+        total *= _valid_elements_for_dim(valid_gap.get(dim), fallback=int(raw_size))
+    return int(total)
+
+
+def _valid_elements_for_dim(raw_valid_gap: Any, *, fallback: int) -> int:
+    if isinstance(raw_valid_gap, (int, float)):
+        return int(fallback)
+    if isinstance(raw_valid_gap, list):
+        total = 0
+        for entry in raw_valid_gap:
+            if isinstance(entry, (list, tuple)) and entry:
+                total += int(entry[0])
+            elif isinstance(entry, dict) and "valid" in entry:
+                total += int(entry["valid"])
+        return total if total > 0 else int(fallback)
+    return int(fallback)
 
 
 def _streaming_semantic_transform_certificate(
