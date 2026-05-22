@@ -24,6 +24,7 @@ from torch_spyre._inductor.codegen.restickify_lx_boundary import (
 )
 from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
     plan_restickify_ptlx_mixed_schedules,
+    patch_implicit_restickify_ptlx_aliases,
     patch_restickify_ptlx_mixed_schedules,
     patch_restickify_ptlx_bridge_boundaries,
 )
@@ -71,6 +72,9 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         )
         for row in rows:
             logger.info("restickify PT-LX mixed schedule patch: %s", row)
+        rows = patch_implicit_restickify_ptlx_aliases(sdscs_json, specs)
+        for row in rows:
+            logger.info("implicit restickify PT-LX alias patch: %s", row)
     elif _spyre_config.restickify_ptlx_bridge_e2e:
         rows = patch_restickify_ptlx_bridge_boundaries(sdscs_json, specs)
         for row in rows:

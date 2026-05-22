@@ -40,6 +40,7 @@ from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
     _patch_consumer_input_lx_map,
     _patch_lx_allocation_by_index,
     _streaming_value_flow_contract,
+    patch_implicit_restickify_ptlx_aliases,
     patch_restickify_ptlx_cross_bundle_handoffs,
     patch_restickify_ptlx_mixed_schedules,
     plan_restickify_ptlx_mixed_schedules,
@@ -553,6 +554,99 @@ def test_streaming_ptlx_patch_replaces_small_shape_hbm_restickify_boundary():
         for datadsc in root["datadscs_"]
     )
     assert root["coreIdToDscSchedule"]["0"][-1] == [-1, 0, 1, 0]
+
+
+def test_implicit_alias_streaming_patch_materializes_consumer_input_bridge():
+    c0 = Symbol("c0")
+    c1 = Symbol("c1")
+    source_coords = [c0, c1]
+    dest_coords = [c1, c0]
+    producer_payload = _minimal_layout_payload(
+        "0_add",
+        opfunc="add",
+        size=512,
+        work_slices={"mb": 32, "out": 1},
+        core_mapping=default_core_mapping({"mb": 32, "out": 1}),
+        lds=[
+            _layout_lds(0, "producer_in", "dataIN", ["mb", "out"], ["out"]),
+            _layout_lds(1, "producer_out", "dataOUT", ["mb", "out"], ["out"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
+    consumer_payload = _minimal_layout_payload(
+        "1_add",
+        opfunc="add",
+        size=512,
+        work_slices={"mb": 1, "out": 32},
+        core_mapping=default_core_mapping({"mb": 1, "out": 32}),
+        lds=[
+            _layout_lds(0, "source_alias", "INPUT0", ["mb", "out"], ["out"]),
+            _layout_lds(1, "view_alias", "INPUT1", ["out", "mb"], ["mb"]),
+            _layout_lds(2, "consumer_out", "OUTPUT", ["out", "mb"], ["mb"]),
+        ],
+        input_indices=[0, 1],
+        output_indices=[2],
+    )
+    _patch_consumer_input_lx_map(
+        consumer_payload,
+        input_name="source_alias",
+        lds_idx=0,
+        start_payload=_constant_lx_start_payload(num_cores=32, base=0),
+    )
+    _patch_consumer_input_lx_map(
+        consumer_payload,
+        input_name="view_alias",
+        lds_idx=1,
+        start_payload=_constant_lx_start_payload(num_cores=32, base=0),
+    )
+    specs = [
+        _minimal_op_spec(
+            "add",
+            [
+                _arg(True, 0),
+                _arg(False, -1, allocation={"lx": 0}, device_coordinates=source_coords),
+            ],
+        ),
+        _minimal_op_spec(
+            "add",
+            [
+                _arg(True, -1, allocation={"lx": 0}, device_coordinates=source_coords),
+                _arg(True, -1, allocation={"lx": 0}, device_coordinates=dest_coords),
+                _arg(False, 2, device_coordinates=dest_coords),
+            ],
+        ),
+    ]
+    payloads = [producer_payload, consumer_payload]
+
+    with config.patch(
+        restickify_use_specific_insert=True,
+        restickify_ptlx_mixed_schedule_e2e=True,
+        restickify_ptlx_streaming_e2e=True,
+        restickify_ptlx_value_flow_assert=True,
+    ):
+        rows = patch_implicit_restickify_ptlx_aliases(payloads, specs)
+
+    assert len(rows) == 1
+    patched = rows[0]
+    assert patched["status"] == "patched"
+    assert patched["kind"] == "ptlx-implicit-alias-streaming"
+    assert patched["value_flow_contract"]["valid"] is True
+    assert patched["streaming_summary"]["tile_size"] == 512
+    assert patched["streaming_summary"]["total_tiles"] == 1
+    assert patched["plan"]["consumer_input_position"] == 0
+    assert patched["consumer_lx_unique_starts"] != [0]
+
+    root = next(iter(payloads[1].values()))
+    assert "ImplicitAliasStreamingReStickifyOpWithPTLxConsumer" in next(
+        iter(payloads[1])
+    )
+    assert root["streamingPTLXFull_"]["tile_count"] == 1
+    assert root["datadscs_"]
+    assert all(
+        next(iter(datadsc.values()))["op"]["name"] != "ReStickifyOpHBM"
+        for datadsc in root["datadscs_"]
+    )
 
 
 def test_streaming_ptlx_cross_bundle_patch_rewrites_handoff_pair():

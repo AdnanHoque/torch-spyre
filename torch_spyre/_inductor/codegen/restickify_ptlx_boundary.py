@@ -24,6 +24,7 @@ the consumer input is made LX-resident at the bridge output address.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from dataclasses import asdict, dataclass
@@ -101,6 +102,16 @@ class PTLXMixedSchedulePlan:
         return self.consumer_endpoint.base
 
 
+@dataclass(frozen=True)
+class PTLXImplicitAliasPlan:
+    consumer_index: int
+    producer_index: int
+    producer_output_position: int
+    consumer_input_position: int
+    producer_endpoint: PTLXLXEndpointPlan
+    consumer_endpoint: PTLXLXEndpointPlan
+
+
 def plan_restickify_ptlx_mixed_schedules(
     specs: list[OpSpec],
 ) -> dict[int, PTLXMixedSchedulePlan]:
@@ -168,6 +179,43 @@ def patch_restickify_ptlx_mixed_schedules(
             consumed_indices.add(idx + 1)
         rows.append(row)
         _append_audit(row)
+    return rows
+
+
+def patch_implicit_restickify_ptlx_aliases(
+    sdsc_payloads: list[dict[str, Any] | None],
+    specs: list[OpSpec],
+) -> list[dict[str, Any]]:
+    """Patch use-specific insertion's LX alias shape into an explicit bridge.
+
+    ``SPYRE_RESTICKIFY_USE_SPECIFIC_INSERT=1`` can leave a repeated-buffer
+    consumer reading the same producer LX allocation through two logical
+    layouts.  That is the right high-level dependency shape, but it is not a
+    backend contract: Deeptools sees one allocation reinterpreted two ways and
+    may fail scheduling.  This pass finds the narrow internal, non-PT case and
+    materializes the mismatched consumer input through the streaming PT-LX
+    bridge before the consumer runs.
+    """
+
+    if not (
+        _spyre_config.restickify_use_specific_insert
+        and _spyre_config.restickify_ptlx_mixed_schedule_e2e
+        and _spyre_config.restickify_ptlx_streaming_e2e
+    ):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    consumed_indices: set[int] = set()
+    for consumer_idx, _ in enumerate(specs):
+        if consumer_idx in consumed_indices:
+            continue
+        row = _patch_one_implicit_alias(consumer_idx, sdsc_payloads, specs)
+        if row is None:
+            continue
+        rows.append(row)
+        _append_audit(row)
+        if row.get("status") == "patched":
+            consumed_indices.add(consumer_idx)
     return rows
 
 
@@ -852,6 +900,374 @@ def _cross_bundle_consumer_arg(
     return "ambiguous-cross-bundle-consumer-input"
 
 
+def _patch_one_implicit_alias(
+    consumer_idx: int,
+    sdsc_payloads: list[dict[str, Any] | None],
+    specs: list[OpSpec],
+) -> dict[str, Any] | None:
+    candidate = _plan_one_implicit_alias(consumer_idx, sdsc_payloads, specs)
+    if candidate is None:
+        return None
+    if isinstance(candidate, str):
+        return _row(consumer_idx, "skipped", candidate)
+
+    producer_payload = sdsc_payloads[candidate.producer_index]
+    consumer_payload = sdsc_payloads[candidate.consumer_index]
+    if producer_payload is None or consumer_payload is None:
+        return _row(consumer_idx, "skipped", "producer-or-consumer-already-consumed")
+
+    try:
+        _single_payload_dsc(producer_payload)
+        consumer_root, consumer_dsc = _single_payload_dsc(consumer_payload)
+    except (KeyError, ValueError, StopIteration, TypeError) as exc:
+        return _row(
+            consumer_idx,
+            "skipped",
+            f"malformed-payload:{type(exc).__name__}",
+        )
+
+    if _dsc_uses_execution_unit(consumer_dsc, "pt"):
+        return _row(
+            consumer_idx,
+            "skipped",
+            f"pt-consumer:{specs[consumer_idx].op}",
+        )
+
+    consumer_output_lds_idx = _first_compute_output_index(consumer_dsc)
+    direction = _infer_implicit_alias_direction(
+        consumer_dsc,
+        source_lds_idx=candidate.consumer_endpoint.lds_idx,
+        output_lds_idx=consumer_output_lds_idx,
+    )
+    if direction != "kernel-to-output":
+        return _row(
+            consumer_idx,
+            "skipped",
+            f"unsupported-implicit-direction:{direction}",
+        )
+
+    size, num_cores = _infer_size_and_cores(consumer_root, consumer_dsc)
+    if size % 64 != 0:
+        return _row(consumer_idx, "skipped", f"non-64-tiled-size:{size}")
+
+    producer_start, producer_patches = _materialize_producer_lx_endpoint(
+        producer_payload,
+        endpoint=candidate.producer_endpoint,
+        num_cores=num_cores,
+    )
+    consumer_start, consumer_name = _materialize_consumer_lx_endpoint(
+        consumer_payload,
+        consumer_dsc=consumer_dsc,
+        endpoint=candidate.consumer_endpoint,
+        num_cores=num_cores,
+    )
+    _force_consumer_corelets(
+        consumer_payload,
+        factor=_corelet_factor(consumer_start),
+    )
+
+    producer_piece_size = _piece_bytes_per_core(producer_payload, size)
+    consumer_piece_size = _piece_bytes_per_core(consumer_payload, size)
+    source_range = {
+        "start": candidate.producer_endpoint.base,
+        "end": candidate.producer_endpoint.base + producer_piece_size,
+        "size": producer_piece_size,
+        "source": candidate.producer_endpoint.base_source,
+    }
+    consumer_range = {
+        "start": candidate.consumer_endpoint.base,
+        "end": candidate.consumer_endpoint.base + consumer_piece_size,
+        "size": consumer_piece_size,
+        "source": candidate.consumer_endpoint.base_source,
+    }
+    tile_size = _bounded_streaming_tile_size(size)
+    workspace_summary = plan_streaming_ptlx_tiles(
+        size=size,
+        source_work_slices=_root_work_slices(producer_payload),
+        source_core_mapping=_root_core_mapping(producer_payload),
+        dest_work_slices=_root_work_slices(consumer_payload),
+        dest_core_mapping=_root_core_mapping(consumer_payload),
+        tile_size=tile_size,
+        sample_limit=_streaming_tile_count(size, tile_size=tile_size),
+        sample_all_tiles=True,
+    )
+    workspace_size = int(workspace_summary.tile_buffer_bytes) * 3
+    workspace_start = _first_free_lx_range(
+        [source_range, consumer_range],
+        size=workspace_size,
+        limit=_LX_BYTES_PER_CORE,
+        alignment=_LX_ALIGNMENT,
+    )
+    if workspace_start is None:
+        return {
+            **_row(consumer_idx, "skipped", "missing-streaming-tile-workspace"),
+            "kind": "ptlx-implicit-alias",
+            "source_range": source_range,
+            "consumer_range": consumer_range,
+            "tile_workspace": {"size": workspace_size},
+        }
+
+    artifact = generate_streaming_ptlx_artifact(
+        f"{consumer_idx}_ImplicitAliasStreamingPTLXDescriptor",
+        workspace_summary,
+        producer_base=candidate.producer_endpoint.base,
+        consumer_base=candidate.consumer_endpoint.base,
+        tile_workspace_base=workspace_start,
+        max_tiles=workspace_summary.total_tiles,
+    )
+    bridge_payload = generate_streaming_ptlx_full_bridge_sdsc(
+        f"{consumer_idx}_ImplicitAliasStreamingReStickifyOpWithPTLx",
+        artifact,
+    )
+    value_flow_contract = _streaming_value_flow_contract(
+        bridge_payload=bridge_payload,
+        producer_base=candidate.producer_endpoint.base,
+        consumer_base=candidate.consumer_endpoint.base,
+        expected_tiles=workspace_summary.total_tiles,
+    )
+    if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
+        "valid"
+    ]:
+        raise RuntimeError(
+            "implicit-alias streaming PT-LX value-flow contract failed for "
+            f"SDSC {consumer_idx}: {value_flow_contract}"
+        )
+
+    mixed_name = f"{consumer_idx}_ImplicitAliasStreamingReStickifyOpWithPTLxConsumer"
+    sdsc_payloads[candidate.consumer_index] = _combine_ptlx_bridge_with_consumer(
+        mixed_name,
+        bridge_payload,
+        consumer_payload,
+    )
+    return {
+        **_row(consumer_idx, "patched", None),
+        "kind": "ptlx-implicit-alias-streaming",
+        "plan": asdict(candidate),
+        "direction": direction,
+        "size": size,
+        "num_cores": num_cores,
+        "producer_index": candidate.producer_index,
+        "producer_lx_unique_starts": _unique_start_values(producer_start),
+        "consumer_lx_unique_starts": _unique_start_values(consumer_start),
+        "producer_allocation_patches": producer_patches,
+        "consumer_input_name": consumer_name,
+        "source_range": source_range,
+        "consumer_range": consumer_range,
+        "tile_workspace": {
+            "start": workspace_start,
+            "end": workspace_start + workspace_size,
+            "size": workspace_size,
+            "tile_size": tile_size,
+        },
+        "streaming_summary": _streaming_summary_audit(workspace_summary),
+        "value_flow_contract": value_flow_contract,
+        "replacement_sdsc": mixed_name,
+    }
+
+
+def _plan_one_implicit_alias(
+    consumer_idx: int,
+    sdsc_payloads: list[dict[str, Any] | None],
+    specs: list[OpSpec],
+) -> PTLXImplicitAliasPlan | str | None:
+    if consumer_idx <= 0 or consumer_idx >= len(specs):
+        return None
+    if consumer_idx >= len(sdsc_payloads) or sdsc_payloads[consumer_idx] is None:
+        return None
+    consumer_spec = specs[consumer_idx]
+    if consumer_spec.op == RESTICKIFY_OP or consumer_spec.is_reduction:
+        return None
+
+    output_arg = _single_output_arg(consumer_spec)
+    if output_arg is None:
+        return None
+
+    candidates: list[tuple[int, int, int, Any, Any]] = []
+    for producer_idx in range(consumer_idx - 1, -1, -1):
+        producer_payload = sdsc_payloads[producer_idx]
+        if producer_payload is None:
+            continue
+        producer_spec = specs[producer_idx]
+        producer_outputs = _output_arg_positions(producer_spec)
+        if not producer_outputs:
+            continue
+        for producer_output_position, producer_output in producer_outputs:
+            producer_base = _lx_base(producer_output)
+            if producer_base is None:
+                continue
+            matching_inputs = [
+                (consumer_input_position, consumer_input)
+                for consumer_input_position, consumer_input in _input_arg_positions(
+                    consumer_spec
+                )
+                if _lx_base(consumer_input) == producer_base
+            ]
+            if len(matching_inputs) < 2:
+                continue
+            for consumer_input_position, consumer_input in matching_inputs:
+                if not _same_expr_seq(
+                    consumer_input.device_coordinates,
+                    producer_output.device_coordinates,
+                ):
+                    continue
+                if _same_expr_seq(
+                    consumer_input.device_coordinates,
+                    output_arg.device_coordinates,
+                ):
+                    continue
+                candidates.append(
+                    (
+                        producer_idx,
+                        producer_output_position,
+                        consumer_input_position,
+                        producer_output,
+                        consumer_input,
+                    )
+                )
+        if candidates:
+            break
+
+    if not candidates:
+        return None
+    if len(candidates) > 1:
+        return "ambiguous-implicit-alias-candidates"
+
+    (
+        producer_idx,
+        producer_output_position,
+        consumer_input_position,
+        producer_output,
+        consumer_input,
+    ) = candidates[0]
+    producer_payload = sdsc_payloads[producer_idx]
+    consumer_payload = sdsc_payloads[consumer_idx]
+    assert producer_payload is not None and consumer_payload is not None
+    try:
+        _, producer_dsc = _single_payload_dsc(producer_payload)
+        consumer_root, consumer_dsc = _single_payload_dsc(consumer_payload)
+        size, _ = _infer_size_and_cores(consumer_root, consumer_dsc)
+    except (KeyError, ValueError, StopIteration, TypeError) as exc:
+        return f"malformed-payload:{type(exc).__name__}"
+
+    producer_output_indices = _compute_output_indices(producer_dsc)
+    consumer_input_indices = _compute_input_indices(consumer_dsc)
+    if producer_output_position >= len(producer_output_indices):
+        return "producer-output-position-out-of-range"
+    if consumer_input_position >= len(consumer_input_indices):
+        return "consumer-input-position-out-of-range"
+
+    producer_base = _lx_base(producer_output)
+    assert producer_base is not None
+    producer_piece_size = _piece_bytes_per_core(producer_payload, size)
+    consumer_base = _first_free_lx_range(
+        [
+            {
+                "start": producer_base,
+                "end": producer_base + producer_piece_size,
+                "size": producer_piece_size,
+                "source": "producer-output",
+            }
+        ],
+        size=_piece_bytes_per_core(consumer_payload, size),
+        limit=_LX_BYTES_PER_CORE,
+        alignment=_LX_ALIGNMENT,
+    )
+    if consumer_base is None:
+        return "missing-consumer-lx-endpoint-space"
+
+    return PTLXImplicitAliasPlan(
+        consumer_index=consumer_idx,
+        producer_index=producer_idx,
+        producer_output_position=producer_output_position,
+        consumer_input_position=consumer_input_position,
+        producer_endpoint=PTLXLXEndpointPlan(
+            role="producer_output",
+            sdsc_index=producer_idx,
+            lds_idx=producer_output_indices[producer_output_position],
+            arg_index=int(producer_output.arg_index),
+            base=producer_base,
+            base_source="op-spec-allocation",
+            is_input=False,
+        ),
+        consumer_endpoint=PTLXLXEndpointPlan(
+            role="consumer_input",
+            sdsc_index=consumer_idx,
+            lds_idx=consumer_input_indices[consumer_input_position],
+            arg_index=int(consumer_input.arg_index),
+            base=consumer_base,
+            base_source="planned-free-range",
+            is_input=True,
+        ),
+    )
+
+
+def _single_output_arg(spec: OpSpec) -> Any | None:
+    outputs = [arg for arg in spec.args if not getattr(arg, "is_input", False)]
+    return outputs[0] if len(outputs) == 1 else None
+
+
+def _input_arg_positions(spec: OpSpec) -> list[tuple[int, Any]]:
+    inputs: list[tuple[int, Any]] = []
+    input_position = 0
+    for arg in spec.args:
+        if getattr(arg, "is_input", False):
+            inputs.append((input_position, arg))
+            input_position += 1
+    return inputs
+
+
+def _output_arg_positions(spec: OpSpec) -> list[tuple[int, Any]]:
+    outputs: list[tuple[int, Any]] = []
+    output_position = 0
+    for arg in spec.args:
+        if not getattr(arg, "is_input", False):
+            outputs.append((output_position, arg))
+            output_position += 1
+    return outputs
+
+
+def _lx_base(arg: Any) -> int | None:
+    allocation = getattr(arg, "allocation", None) or {}
+    if not isinstance(allocation, dict) or "lx" not in allocation:
+        return None
+    return int(allocation["lx"])
+
+
+def _same_expr_seq(left: Any, right: Any) -> bool:
+    if len(left or []) != len(right or []):
+        return False
+    return all(str(lhs) == str(rhs) for lhs, rhs in zip(left, right))
+
+
+def _infer_implicit_alias_direction(
+    consumer_dsc: dict[str, Any],
+    *,
+    source_lds_idx: int,
+    output_lds_idx: int,
+) -> str:
+    source_primary = _primary_for_lds(consumer_dsc, source_lds_idx)
+    destination_primary = _primary_for_lds(consumer_dsc, output_lds_idx)
+    source_layout = _primary_layout(source_primary)
+    destination_layout = _primary_layout(destination_primary)
+    source_stick = _primary_stick(source_primary)
+    destination_stick = _primary_stick(destination_primary)
+    if (
+        source_layout == ["mb", "out"]
+        and destination_layout == ["out", "mb"]
+        and source_stick == ["out"]
+        and destination_stick == ["mb"]
+    ):
+        return "kernel-to-output"
+    if (
+        source_layout == ["out", "mb"]
+        and destination_layout == ["mb", "out"]
+        and source_stick == ["mb"]
+        and destination_stick == ["out"]
+    ):
+        return "output-to-kernel"
+    return f"unknown:{source_layout}:{source_stick}->{destination_layout}:{destination_stick}"
+
+
 def _patch_one_boundary(
     idx: int,
     sdsc_payloads: list[dict[str, Any]],
@@ -1214,6 +1630,20 @@ def _plan_streaming_bridge_storage(
 def _streaming_tile_count(size: int, tile_size: int = 64) -> int:
     tiles_per_axis = (int(size) + int(tile_size) - 1) // int(tile_size)
     return tiles_per_axis * tiles_per_axis
+
+
+def _bounded_streaming_tile_size(
+    size: int,
+    *,
+    tile_buffers: int = 3,
+    bytes_per_element: int = 2,
+) -> int:
+    """Choose the largest 64-aligned square tile that fits per-core LX workspace."""
+
+    max_elements = _LX_BYTES_PER_CORE // (int(tile_buffers) * int(bytes_per_element))
+    max_edge = int(math.isqrt(max_elements))
+    tile = (min(int(size), max_edge) // 64) * 64
+    return max(64, tile)
 
 
 def _endpoint_range(
