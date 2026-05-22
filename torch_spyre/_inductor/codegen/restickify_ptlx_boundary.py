@@ -2219,11 +2219,35 @@ def _streaming_value_flow_contract(
         and descriptor_valid
         and value_preservation_valid
     )
+    production_valid = (
+        valid
+        and not bool(semantic_certificate["forced"])
+        and semantic_certificate["source"] in {"bridge-metadata"}
+    )
+    production_requirements = _streaming_production_requirements(
+        endpoint_valid=endpoint_valid,
+        descriptor_valid=descriptor_valid,
+        value_preservation_valid=value_preservation_valid,
+        semantic_certificate=semantic_certificate,
+        coalescing=coalescing,
+    )
     return {
         "valid": valid,
-        "production_valid": valid
-        and not bool(semantic_certificate["forced"])
-        and semantic_certificate["source"] in {"bridge-metadata"},
+        "diagnostic_valid": valid,
+        "production_valid": production_valid,
+        "production_requirements": production_requirements,
+        "production_blocker": None
+        if production_valid
+        else production_requirements["blocker"],
+        "production_blocker_stage": None
+        if production_valid
+        else production_requirements["stage"],
+        "production_required_primitive": None
+        if production_valid
+        else production_requirements["required_primitive"],
+        "production_required_lowering": None
+        if production_valid
+        else production_requirements["required_lowering"],
         "endpoint_contract_valid": endpoint_valid,
         "semantic_transform_certified": semantic_certified,
         "semantic_transform_forced": bool(semantic_certificate["forced"]),
@@ -2251,6 +2275,76 @@ def _streaming_value_flow_contract(
         "logical_tile_count": logical_tile_count,
         "producer_input_unique_starts": sorted(producer_starts),
         "consumer_output_unique_starts": sorted(consumer_starts),
+    }
+
+
+def _streaming_production_requirements(
+    *,
+    endpoint_valid: bool,
+    descriptor_valid: bool,
+    value_preservation_valid: bool,
+    semantic_certificate: dict[str, Any],
+    coalescing: Any,
+) -> dict[str, Any]:
+    """Explain what is still missing before a streaming PT-LX replacement is safe."""
+
+    primitive = "remote-fragment-aware-ptlx-coordinate-remap"
+    lowering = (
+        "STCDPOpLx/InputFetchNeighbor gather -> local PT/interslice tile "
+        "transform -> STCDPOpLx/InputFetchNeighbor scatter or consumer LX write"
+    )
+    if not endpoint_valid:
+        return {
+            "stage": "endpoint",
+            "blocker": "lx-endpoint-contract-invalid",
+            "required_primitive": "producer-bridge-consumer-lx-endpoint-contract",
+            "required_lowering": lowering,
+        }
+    if not value_preservation_valid:
+        return {
+            "stage": "value-preservation",
+            "blocker": "bridge-does-not-preserve-live-element-count",
+            "required_primitive": primitive,
+            "required_lowering": lowering,
+        }
+    if not descriptor_valid:
+        return {
+            "stage": "consumer-descriptor",
+            "blocker": "bridge-output-does-not-match-consumer-lx-input",
+            "required_primitive": "consumer-visible-lx-descriptor-contract",
+            "required_lowering": lowering,
+        }
+    if semantic_certificate.get("forced"):
+        return {
+            "stage": "semantic-transform",
+            "blocker": "diagnostic-force-is-not-a-production-certificate",
+            "required_primitive": primitive,
+            "required_lowering": lowering,
+        }
+    if semantic_certificate.get("certified") is True:
+        return {
+            "stage": None,
+            "blocker": None,
+            "required_primitive": None,
+            "required_lowering": None,
+        }
+
+    if coalescing == "same-layout-lx-ownership-remap-64x64-tiles":
+        blocker = "same-layout-lx-remap-metadata-missing"
+        primitive = "same-layout-lx-ownership-remap"
+    elif coalescing == "direct-64x64-tiles":
+        blocker = "direct-ptlx-tile-lacks-proven-remote-fragment-coordinate-map"
+    elif coalescing == "native-64x64-tiles":
+        blocker = "native-ptlx-tile-lacks-consumer-fragment-coordinate-map"
+    elif coalescing == "validgap-consumer-64x64-tiles":
+        blocker = "validgap-consumer-tile-lacks-hardware-value-proof"
+    else:
+        blocker = "stcdp-gather-scatter-does-not-certify-stick-layout-transform"
+    return {
+        "stage": "semantic-transform",
+        "blocker": blocker,
+        "required_primitive": primitive,
+        "required_lowering": lowering,
     }
 
 

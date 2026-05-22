@@ -817,6 +817,12 @@ def test_streaming_ptlx_native_full_bridge_can_be_force_validated():
     assert descriptor["stick_match"] is False
     assert contract["valid"] is True
     assert contract["production_valid"] is False
+    assert contract["production_blocker"] == (
+        "diagnostic-force-is-not-a-production-certificate"
+    )
+    assert contract["production_required_primitive"] == (
+        "remote-fragment-aware-ptlx-coordinate-remap"
+    )
 
 
 def test_streaming_ptlx_direct_full_bridge_combines_direct_tiles():
@@ -904,6 +910,10 @@ def test_streaming_ptlx_direct_full_bridge_accepts_scattered_consumer_offsets():
     assert contract["semantic_certificate_source"] == "uncertified"
     assert contract["valid"] is False
     assert contract["production_valid"] is False
+    assert contract["production_blocker"] == (
+        "direct-ptlx-tile-lacks-proven-remote-fragment-coordinate-map"
+    )
+    assert "InputFetchNeighbor gather" in contract["production_required_lowering"]
 
 
 def test_streaming_ptlx_validgap_consumer_tile_bridge_uses_sparse_output_stick_alias():
@@ -1266,6 +1276,8 @@ def test_streaming_lx_remap_full_bridge_uses_one_stcdp_per_tile():
     assert {piece["PlacementInfo"][0]["memId"][0] for piece in output_pieces} == {0}
     assert contract["valid"] is True
     assert contract["production_valid"] is True
+    assert contract["production_blocker"] is None
+    assert contract["production_required_primitive"] is None
     assert contract["semantic_certificate_source"] == "bridge-metadata"
     assert contract["semantic_transform_forced"] is False
     assert contract["lx_remap_tile_count"] == 256
@@ -1333,6 +1345,9 @@ def test_streaming_ptlx_bridge_selector_uses_native_tiles_when_enabled():
     assert direct_contract["semantic_transform_forced"] is False
     assert direct_contract["semantic_certificate_source"] == "uncertified"
     assert direct_contract["valid"] is False
+    assert direct_contract["production_blocker"] == (
+        "direct-ptlx-tile-lacks-proven-remote-fragment-coordinate-map"
+    )
     assert next(iter(direct.values()))["streamingPTLXFull_"]["coalescing"] == (
         "direct-64x64-tiles"
     )
@@ -1354,6 +1369,9 @@ def test_streaming_ptlx_bridge_selector_uses_native_tiles_when_enabled():
     assert validgap_contract["semantic_transform_certified"] is False
     assert validgap_contract["semantic_transform_forced"] is False
     assert validgap_contract["semantic_certificate_source"] == "uncertified"
+    assert validgap_contract["production_blocker"] == (
+        "validgap-consumer-tile-lacks-hardware-value-proof"
+    )
     assert next(iter(validgap.values()))["streamingPTLXFull_"]["coalescing"] == (
         "validgap-consumer-64x64-tiles"
     )
