@@ -331,8 +331,18 @@ def _patch_one_mixed_schedule(
         consumer_lds_idx=plan.consumer_lds_idx,
         restickify_logical_direction=restickify_logical_direction,
     )
-    if direction != "kernel-to-output":
+    if direction not in {"kernel-to-output", "output-to-kernel"}:
         return _row(idx, "skipped", f"unsupported-direction:{direction}")
+    if direction == "output-to-kernel" and _dsc_uses_execution_unit(
+        consumer_dsc, "pt"
+    ):
+        return _streaming_candidate_row(
+            idx,
+            "output-to-kernel-pt-consumer-mixed-schedule-unsafe",
+            size=_infer_size_and_cores(restickify_root, restickify_dsc)[0],
+            producer_payload=producer_payload,
+            restickify_payload=restickify_payload,
+        )
 
     size, num_cores = _infer_size_and_cores(restickify_root, restickify_dsc)
     piece_reason = _ptlx_piece_size_skip_reason(
@@ -1006,6 +1016,14 @@ def _core_locality_summary(spec: OpSpec) -> dict[str, Any]:
     }
 
 
+def _dsc_uses_execution_unit(dsc: dict[str, Any], execution_unit: str) -> bool:
+    expected = str(execution_unit).lower()
+    for compute_op in dsc.get("computeOp_", []) or []:
+        if str(compute_op.get("exUnit", "")).lower() == expected:
+            return True
+    return False
+
+
 def _allocator_endpoint_skip_reason(
     spec: OpSpec,
     *,
@@ -1664,6 +1682,14 @@ def _infer_endpoint_direction(
         and destination_layout == ["mb", "out"]
         and source_stick == ["mb"]
         and destination_stick == ["out"]
+    ):
+        return "output-to-kernel"
+    if (
+        source_layout == ["out", "mb"]
+        and destination_layout == ["mb", "in"]
+        and source_stick == ["mb"]
+        and destination_stick == ["in"]
+        and restickify_logical_direction == "output-to-kernel"
     ):
         return "output-to-kernel"
     if (

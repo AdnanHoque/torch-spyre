@@ -718,6 +718,46 @@ def test_ptlx_bridge_accepts_stock_mixed_restickify_split():
     assert output_piece["dimToStartCordinate"] == {"out_": 0, "mb_": 0}
 
 
+def test_ptlx_bridge_accepts_output_to_kernel_direction():
+    bridge = generate_ptlx_restickify_bridge_sdsc(
+        "ptlx_bridge",
+        size=2048,
+        num_cores=32,
+        mode="baseline",
+        direction="output-to-kernel",
+        restickify_op_name="ReStickifyOpWithPTLx",
+        input_work_slices={"mb": 1, "out": 32},
+        input_core_to_work_slice={
+            str(core): {"mb": 0, "out": core} for core in range(32)
+        },
+        intermediate_work_slices={"mb": 32, "out": 1},
+        intermediate_core_to_work_slice={
+            str(core): {"mb": core, "out": 0} for core in range(32)
+        },
+        output_work_slices={"mb": 32, "out": 1},
+        output_core_to_work_slice={
+            str(core): {"mb": core, "out": 0} for core in range(32)
+        },
+    )
+
+    first = _dataop_at(bridge, 0)
+    second = _dataop_at(bridge, 1)
+
+    assert first["labeledDs_"][0]["layoutDimOrder_"] == ["mb_", "out_"]
+    assert first["labeledDs_"][0]["stickDimOrder_"] == ["out_"]
+    assert first["labeledDs_"][1]["layoutDimOrder_"] == ["out_", "mb_"]
+    assert first["labeledDs_"][1]["stickDimOrder_"] == ["mb_"]
+    intermediate_piece = first["labeledDs_"][1]["PieceInfo"][0]
+    assert intermediate_piece["dimToSize_"] == {"out_": 2048, "mb_": 64}
+    assert second["labeledDs_"][0]["layoutDimOrder_"] == ["out_", "mb_"]
+    assert second["labeledDs_"][1]["layoutDimOrder_"] == ["out_", "mb_"]
+    # The bridge uses a synthetic dimension alias: out_ corresponds to the
+    # consumer row/reduction dimension, so the final split is still core-local.
+    output_piece = second["labeledDs_"][1]["PieceInfo"][0]
+    assert output_piece["dimToStartCordinate"] == {"out_": 0, "mb_": 0}
+    assert output_piece["dimToSize_"] == {"out_": 64, "mb_": 2048}
+
+
 def test_ptlx_bridge_uses_planned_intermediate_lx_start():
     bridge = generate_ptlx_restickify_bridge_sdsc(
         "ptlx_bridge",

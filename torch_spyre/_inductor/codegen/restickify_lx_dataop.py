@@ -619,10 +619,11 @@ def generate_ptlx_restickify_bridge_sdsc(
         raise ValueError(
             f"unsupported PT-LX restickify op {restickify_op_name!r}"
         )
-    if direction != "kernel-to-output":
+    if direction not in {"kernel-to-output", "output-to-kernel"}:
         raise ValueError(
             "PT-LX restickify bridge currently supports only "
-            f"direction='kernel-to-output', got {direction!r}"
+            "direction='kernel-to-output' or 'output-to-kernel', "
+            f"got {direction!r}"
         )
     if mode not in {"baseline", "stage3b"}:
         raise ValueError(f"unsupported PT-LX bridge mode {mode!r}")
@@ -649,19 +650,45 @@ def generate_ptlx_restickify_bridge_sdsc(
     intermediate_mapping = intermediate_core_to_work_slice or default_intermediate_mapping
     final_splits = output_work_slices or default_output_splits
     final_mapping = output_core_to_work_slice or default_output_mapping
+    if direction == "output-to-kernel":
+        input_splits = _swap_mb_out_splits(input_splits)
+        input_mapping = _swap_mb_out_mapping(input_mapping)
+        # Keep the PT-LX restickify output split in the proven forward shape
+        # and let STCDPOpLx remap ownership into the consumer split.
+        intermediate_splits = default_intermediate_splits
+        intermediate_mapping = default_intermediate_mapping
+        final_splits = _swap_mb_out_splits(final_splits)
+        final_mapping = _swap_mb_out_mapping(final_mapping)
 
     intermediate_start = (
         1024 * 1024
         if intermediate_start_address is None
         else int(intermediate_start_address)
     )
+    # ``ReStickifyOpWithPTLx`` is only proven on hardware for the forward
+    # kernel-to-output shape.  For an output-to-kernel logical edge, keep that
+    # Deeptools contract intact and swap the bridge dimension names instead:
+    # synthetic mb_ represents the source/output dimension and synthetic out_
+    # represents the destination/reduction dimension.
+    restickify_input_layout = [d0, d1]
+    restickify_input_stick = d1
+    restickify_input_strides = {d0: size, d1: 1}
+    restickify_output_layout = [d1, d0]
+    restickify_output_stick = d0
+    restickified_strides = {d0: 1, d1: size}
+
     restickify_spec = _synthetic_ptlx_bridge_spec(
         size,
         num_cores,
         output_split_dim=d0,
-        output_stick_dim=d0,
+        output_stick_dim=restickify_output_stick,
+        input_stick_dim=restickify_input_stick,
         input_start_address=input_start_address,
         output_start_address=intermediate_start,
+        input_layout_order=restickify_input_layout,
+        output_layout_order=restickify_output_layout,
+        input_strides=restickify_input_strides,
+        output_strides=restickified_strides,
     )
     restickify_payload = generate_restickify_dataop_sdsc_from_spec(
         0,
@@ -673,17 +700,16 @@ def generate_ptlx_restickify_bridge_sdsc(
         output_core_to_work_slice=intermediate_mapping,
     )
 
-    restickified_strides = {d0: 1, d1: size}
     stcdp_spec = _synthetic_ptlx_bridge_spec(
         size,
         num_cores,
         output_split_dim=final_split_dim,
-        output_stick_dim=d0,
-        input_stick_dim=d0,
+        output_stick_dim=restickify_output_stick,
+        input_stick_dim=restickify_output_stick,
         input_start_address=intermediate_start,
         output_start_address=output_start_address,
-        input_layout_order=[d1, d0],
-        output_layout_order=[d1, d0],
+        input_layout_order=restickify_output_layout,
+        output_layout_order=restickify_output_layout,
         input_strides=restickified_strides,
         output_strides=restickified_strides,
     )
@@ -712,6 +738,35 @@ def _explicit_core_mapping(
         str(core): {str(dim): core if dim == split_dim else 0 for dim in dims}
         for core in range(num_cores)
     }
+
+
+def _swap_mb_out_splits(splits: Mapping[Any, Any]) -> dict[str, int]:
+    normalized = _normalize_work_slices(splits)
+    return {
+        dim: int(normalized.get(_swap_mb_out_dim(dim), value))
+        for dim, value in normalized.items()
+    }
+
+
+def _swap_mb_out_mapping(
+    mapping: Mapping[str, Mapping[str, int]],
+) -> dict[str, dict[str, int]]:
+    normalized = _normalize_core_to_work_slice(mapping)
+    return {
+        str(core): {
+            dim: int(per_dim.get(_swap_mb_out_dim(dim), value))
+            for dim, value in per_dim.items()
+        }
+        for core, per_dim in normalized.items()
+    }
+
+
+def _swap_mb_out_dim(dim: str) -> str:
+    if dim == "mb_":
+        return "out_"
+    if dim == "out_":
+        return "mb_"
+    return dim
 
 
 def _synthetic_ptlx_bridge_spec(
