@@ -1978,15 +1978,21 @@ def _streaming_value_flow_contract(
         count_contract_valid = (
             gather_count == int(expected_tiles) and scatter_count == int(expected_tiles)
         )
-    valid = (
+    endpoint_valid = (
         hbm_placements == 0
         and not has_hbm_restickify
         and count_contract_valid
         and producer_starts == {int(producer_base)}
         and consumer_starts == {int(consumer_base)}
     )
+    semantic_certified, semantic_reason = _streaming_semantic_transform_certificate(
+        root
+    )
     return {
-        "valid": valid,
+        "valid": endpoint_valid and semantic_certified,
+        "endpoint_contract_valid": endpoint_valid,
+        "semantic_transform_certified": semantic_certified,
+        "semantic_skip_reason": semantic_reason,
         "expected_tiles": int(expected_tiles),
         "gather_count": gather_count,
         "scatter_count": scatter_count,
@@ -1999,6 +2005,32 @@ def _streaming_value_flow_contract(
         "producer_input_unique_starts": sorted(producer_starts),
         "consumer_output_unique_starts": sorted(consumer_starts),
     }
+
+
+def _streaming_semantic_transform_certificate(
+    root: dict[str, Any],
+) -> tuple[bool, str | None]:
+    """Return whether a streaming bridge proves the restickify value transform.
+
+    The first streaming prototype proved an endpoint contract: generated data
+    ops stayed in LX and pointed at the producer/consumer bases. Hardware
+    validation later showed that this was insufficient. The current STCDP
+    gather/scatter shape either preserves global coordinates into a sparse
+    workspace, which can compile but is not value-correct, or uses compact tile
+    coordinates, which Deeptools rejects in ``checkSubPieceCoverage`` because
+    plain ``STCDPOpLx`` only creates overlapping subpieces.
+
+    Keep the field explicit so future lowering can flip it only after it emits
+    a Deeptools-native coordinate-remap primitive, an InputFetchNeighbor-backed
+    bridge, or another hardware-validated transform.
+    """
+
+    meta = root.get("streamingPTLXFull_", {}) or {}
+    if meta.get("semantic_transform_certified") is True:
+        return True, None
+    return False, (
+        "streaming-ptlx-stcdp-gather-scatter-does-not-certify-coordinate-remap"
+    )
 
 
 def _piece_lx_starts(pieces: list[dict[str, Any]]) -> set[int]:

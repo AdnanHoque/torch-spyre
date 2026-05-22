@@ -427,12 +427,14 @@ def test_streaming_ptlx_full_bridge_coalesces_single_owner_row_stripes():
     assert first_restickify["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"] == [
         {"type": "lx", "memId": [0], "startAddr": [512 * 1024]}
     ]
+    assert contract["endpoint_contract_valid"] is True
+    assert contract["semantic_transform_certified"] is False
+    assert contract["valid"] is False
     assert root["coreIdToDscSchedule"]["0"][:3] == [
         [0, -1, 0, 1],
         [1, -1, 1, 1],
         [2, -1, 1, 1],
     ]
-    assert contract["valid"] is True
     assert contract["gather_count"] == 32
     assert contract["scatter_count"] == 0
     assert contract["direct_consumer_write_count"] == 32
@@ -544,7 +546,9 @@ def test_streaming_ptlx_patch_replaces_small_shape_hbm_restickify_boundary():
     assert patched["kind"] == "ptlx-streaming-mixed-schedule"
     assert patched["trigger_reason"].startswith("ptlx-piece-smaller-than-stick")
     assert patched["streaming_summary"]["total_tiles"] == 64
-    assert patched["value_flow_contract"]["valid"] is True
+    assert patched["value_flow_contract"]["endpoint_contract_valid"] is True
+    assert patched["value_flow_contract"]["semantic_transform_certified"] is False
+    assert patched["value_flow_contract"]["valid"] is False
     assert payloads[2] is None
     root = next(iter(payloads[1].values()))
     assert root["streamingPTLXFull_"]["tile_count"] == 64
@@ -623,7 +627,6 @@ def test_implicit_alias_streaming_patch_materializes_consumer_input_bridge():
         restickify_use_specific_insert=True,
         restickify_ptlx_mixed_schedule_e2e=True,
         restickify_ptlx_streaming_e2e=True,
-        restickify_ptlx_value_flow_assert=True,
     ):
         rows = patch_implicit_restickify_ptlx_aliases(payloads, specs)
 
@@ -631,7 +634,9 @@ def test_implicit_alias_streaming_patch_materializes_consumer_input_bridge():
     patched = rows[0]
     assert patched["status"] == "patched"
     assert patched["kind"] == "ptlx-implicit-alias-producer-streaming"
-    assert patched["value_flow_contract"]["valid"] is True
+    assert patched["value_flow_contract"]["endpoint_contract_valid"] is True
+    assert patched["value_flow_contract"]["semantic_transform_certified"] is False
+    assert patched["value_flow_contract"]["valid"] is False
     assert patched["streaming_summary"]["tile_size"] == 64
     assert patched["streaming_summary"]["total_tiles"] == 64
     assert patched["split_bridge_sdsc"] is False
@@ -768,7 +773,9 @@ def test_streaming_ptlx_cross_bundle_patch_rewrites_handoff_pair():
     patched = rows[0]
     assert patched["status"] == "patched"
     assert patched["kind"] == "ptlx-streaming-cross-bundle-handoff"
-    assert patched["value_flow_contract"]["valid"] is True
+    assert patched["value_flow_contract"]["endpoint_contract_valid"] is True
+    assert patched["value_flow_contract"]["semantic_transform_certified"] is False
+    assert patched["value_flow_contract"]["valid"] is False
     assert patched["streaming_summary"]["total_tiles"] == 64
     assert records[0]["sdscs_json"][1] is None
     bridge_root = next(iter(records[0]["sdscs_json"][0].values()))
