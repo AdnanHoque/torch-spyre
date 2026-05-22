@@ -592,6 +592,57 @@ def test_streaming_ptlx_direct_tile_output_to_kernel_matches_consumer_layout():
     }
 
 
+def test_streaming_ptlx_direct_tile_uses_compact_workspace_for_later_tiles():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=2,
+        sample_all_tiles=True,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=2)
+
+    payload = generate_streaming_ptlx_direct_tile_bridge_sdsc(
+        "direct_tile_bridge",
+        artifact,
+        tile_index=1,
+        direction="output-to-kernel",
+    )
+    root = payload["direct_tile_bridge"]
+    gather = next(iter(root["datadscs_"][0].values()))
+    restickify = next(iter(root["datadscs_"][1].values()))
+    gather_input, gather_output = gather["labeledDs_"]
+    restickify_input, restickify_output = restickify["labeledDs_"]
+
+    assert root["streamingPTLXDirectTile_"]["tile_local_workspace"] is True
+    assert root["streamingPTLXDirectTile_"]["compact_lx_read_fragments"] is True
+    assert gather_input["dimToLayoutSize_"] == {"out_": 64, "mb_": 64}
+    assert gather_output["dimToLayoutSize_"] == {"out_": 64, "mb_": 64}
+    assert restickify_input["dimToLayoutSize_"] == {"out_": 64, "mb_": 64}
+    assert restickify_output["dimToLayoutSize_"] == {"mb_": 64, "out_": 64}
+    assert gather_input["PieceInfo"][0]["dimToStartCordinate"] == {
+        "out_": 0,
+        "mb_": 0,
+    }
+    assert gather_input["PieceInfo"][1]["dimToStartCordinate"] == {
+        "out_": 0,
+        "mb_": 16,
+    }
+    assert gather_input["PieceInfo"][0]["PlacementInfo"][0]["startAddr"] == [8192]
+    assert restickify_input["PieceInfo"][0]["dimToStartCordinate"] == {
+        "out_": 0,
+        "mb_": 0,
+    }
+    assert restickify_output["PieceInfo"][0]["dimToStartCordinate"] == {
+        "mb_": 0,
+        "out_": 0,
+    }
+
+
 def test_streaming_ptlx_direct_tile_fragmented_output_to_kernel_skips_gather():
     source = {"mb": 32, "out": 1}
     dest = {"mb": 4, "out": 8}

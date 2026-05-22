@@ -585,18 +585,23 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
     datadscs = []
     stage_core_ids = []
     if needs_gather and not fragmented_input:
-        gather_input_fragments = list(source_input_fragments)
-        gather_output_fragment = _coalesced_tile_fragment(
-            source_input_fragments,
-            core=bridge_core,
-        )
-        gather_core_ids = _fragment_core_ids(source_fragments, bridge_core)
         gather_layout = (
             ("out_", "mb_") if direction == "output-to-kernel" else ("mb_", "out_")
         )
         gather_stick = (
             ("mb_",) if direction == "output-to-kernel" else ("out_",)
         )
+        gather_input_fragments = _compact_lx_read_fragments(
+            source_input_fragments,
+            base=_as_int(gather_stage["input_base"]),
+            piece_dims=gather_layout,
+            stick_dims=gather_stick,
+        )
+        gather_output_fragment = _compact_tile_fragment(
+            source_input_fragments,
+            core=bridge_core,
+        )
+        gather_core_ids = _fragment_core_ids(source_fragments, bridge_core)
         datadscs.append(
             {
                 f"0_STCDPOpLx_gather_direct_tile{tile_index}": _tile_dataop(
@@ -710,6 +715,8 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
                 "dest_fragment_count": len(dest_fragments),
                 "gather_stage": needs_gather,
                 "fragmented_input": bool(fragmented_input),
+                "tile_local_workspace": bool(needs_gather and not fragmented_input),
+                "compact_lx_read_fragments": bool(needs_gather and not fragmented_input),
                 "direction": direction,
                 "status": "static-codegen-only",
                 "semantic_transform_certified": False,
@@ -2323,7 +2330,7 @@ def _tile_piece_info(
             {
                 "type": "lx",
                 "memId": [_as_int(fragment["core"])],
-                "startAddr": [int(base)],
+                "startAddr": [int(fragment.get("start_addr", base))],
             }
         ],
     }
@@ -2762,6 +2769,59 @@ def _fragment_local_to_owner(fragment: Mapping[str, Any]) -> dict[str, int]:
         "bytes": _as_int(fragment.get("bytes", 0)),
         "hops": _as_int(fragment.get("hops", 0)),
     }
+
+
+def _compact_lx_read_fragments(
+    fragments: Sequence[Mapping[str, Any]],
+    *,
+    base: int,
+    piece_dims: Sequence[str],
+    stick_dims: Sequence[str],
+) -> list[dict[str, int]]:
+    if not fragments:
+        return []
+
+    row_start = min(_as_int(fragment["row_start"]) for fragment in fragments)
+    col_start = min(_as_int(fragment["col_start"]) for fragment in fragments)
+    result: list[dict[str, int]] = []
+    for fragment in fragments:
+        compact = dict(fragment)
+        compact["row_start"] = _as_int(fragment["row_start"]) - row_start
+        compact["row_end"] = _as_int(fragment["row_end"]) - row_start
+        compact["col_start"] = _as_int(fragment["col_start"]) - col_start
+        compact["col_end"] = _as_int(fragment["col_end"]) - col_start
+        compact["owner_row_start"] = 0
+        compact["owner_col_start"] = 0
+        compact["start_addr"] = int(base) + _lx_fragment_offset_bytes(
+            fragment,
+            piece_dims=piece_dims,
+            stick_dims=stick_dims,
+        )
+        result.append(compact)
+    return result
+
+
+def _lx_fragment_offset_bytes(
+    fragment: Mapping[str, Any],
+    *,
+    piece_dims: Sequence[str],
+    stick_dims: Sequence[str],
+) -> int:
+    row_dim, col_dim = (str(dim) for dim in piece_dims)
+    stick_dim = str(stick_dims[0]) if stick_dims else col_dim
+    row_local = _as_int(fragment["row_start"]) - _as_int(
+        fragment.get("owner_row_start", 0)
+    )
+    col_local = _as_int(fragment["col_start"]) - _as_int(
+        fragment.get("owner_col_start", 0)
+    )
+    if stick_dim == col_dim:
+        offset_elements = row_local * 64 + col_local
+    elif stick_dim == row_dim:
+        offset_elements = col_local * 64 + row_local
+    else:
+        offset_elements = 0
+    return offset_elements * num_bytes(DataFormats.SEN169_FP16)
 
 
 def _compact_tile_workspace_enabled() -> bool:

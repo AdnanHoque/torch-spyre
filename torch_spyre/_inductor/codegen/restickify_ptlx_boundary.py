@@ -2109,11 +2109,19 @@ def _streaming_value_flow_contract(
         count_contract_valid = (
             gather_count == int(expected_tiles) and scatter_count == int(expected_tiles)
         )
+    if coalescing == "direct-64x64-tiles":
+        producer_start_valid = (
+            bool(producer_starts)
+            and min(producer_starts) == int(producer_base)
+            and all(start >= int(producer_base) for start in producer_starts)
+        )
+    else:
+        producer_start_valid = producer_starts == {int(producer_base)}
     endpoint_valid = (
         hbm_placements == 0
         and not has_hbm_restickify
         and count_contract_valid
-        and producer_starts == {int(producer_base)}
+        and producer_start_valid
         and consumer_starts == {int(consumer_base)}
     )
     consumer_descriptor_contract = None
@@ -2177,6 +2185,9 @@ def _streaming_value_flow_contract(
         "consumer_descriptor_valid": descriptor_valid,
         "value_preservation_contract": value_preservation_contract,
         "value_preservation_valid": value_preservation_valid,
+        "producer_start_valid": producer_start_valid,
+        "producer_starts": sorted(producer_starts),
+        "consumer_starts": sorted(consumer_starts),
         "expected_tiles": int(expected_tiles),
         "gather_count": gather_count,
         "scatter_count": scatter_count,
