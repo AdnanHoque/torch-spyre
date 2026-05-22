@@ -29,14 +29,19 @@ from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.restickify_ring import CORE_MAPPING_OVERRIDE_OP_INFO_KEY
 
 
-def _arg(is_input: bool, *, arg_index: int = -1) -> TensorArg:
+def _arg(
+    is_input: bool,
+    *,
+    arg_index: int = -1,
+    device_size: list[int] | None = None,
+) -> TensorArg:
     d0 = Symbol("d0")
     d1 = Symbol("d1")
     return TensorArg(
         is_input=is_input,
         arg_index=arg_index,
         device_dtype=DataFormats.SEN169_FP16,
-        device_size=[2048, 2048],
+        device_size=device_size or [2048, 2048],
         device_coordinates=[d0, d1],
         allocation={},
     )
@@ -66,6 +71,8 @@ def _sdsc_payload(
     name: str,
     opfunc: str,
     *,
+    num_work_slices: dict | None = None,
+    core_mapping: dict | None = None,
     input_labels: list[str] | None = None,
     output_labels: list[str] | None = None,
     primary_ds_info: dict | None = None,
@@ -74,8 +81,8 @@ def _sdsc_payload(
     return {
         name: {
             "numCoresUsed_": 2,
-            "numWkSlicesPerDim_": {"d0": 2},
-            "coreIdToWkSlice_": {
+            "numWkSlicesPerDim_": num_work_slices or {"d0": 2},
+            "coreIdToWkSlice_": core_mapping or {
                 "0": {"d0": 0},
                 "1": {"d0": 1},
             },
@@ -184,6 +191,59 @@ def _payloads() -> list[dict]:
             ],
         ),
         _sdsc_payload("2_add", "add"),
+    ]
+
+
+def _row_to_col_payloads() -> list[dict]:
+    producer_mapping = {
+        str(core): {"mb": core, "out": 0}
+        for core in range(32)
+    }
+    consumer_mapping = {
+        str(core): {"mb": 0, "out": core}
+        for core in range(32)
+    }
+    return [
+        _sdsc_payload(
+            "0_add",
+            "add",
+            num_work_slices={"mb": 32, "out": 1},
+            core_mapping=producer_mapping,
+        ),
+        _sdsc_payload(
+            "1_ReStickifyOpHBM",
+            "ReStickifyOpHBM",
+            num_work_slices={"mb": 1, "out": 32},
+            core_mapping=consumer_mapping,
+            input_labels=["Tensor0-idx0"],
+            output_labels=["Tensor1-idx1"],
+            labeled_ds=[
+                {
+                    "ldsIdx_": 0,
+                    "dsName_": "Tensor0",
+                    "dsType_": "OUTPUT",
+                    "scale_": [1, 1],
+                    "wordLength": 2,
+                    "dataFormat_": "SEN169_FP16",
+                    "memOrg_": {"lx": {"isPresent": 1}},
+                },
+                {
+                    "ldsIdx_": 1,
+                    "dsName_": "Tensor1",
+                    "dsType_": "KERNEL",
+                    "scale_": [1, 1],
+                    "wordLength": 2,
+                    "dataFormat_": "SEN169_FP16",
+                    "memOrg_": {"lx": {"isPresent": 1}},
+                },
+            ],
+        ),
+        _sdsc_payload(
+            "2_add",
+            "add",
+            num_work_slices={"mb": 1, "out": 32},
+            core_mapping=consumer_mapping,
+        ),
     ]
 
 
@@ -340,6 +400,76 @@ def test_includes_sdsc_contract_when_payloads_are_provided():
     assert materialization_contract["sdsc_endpoints"]["consumer_sink"][
         "lds_idx"
     ] == 0
+    assert materialization_contract["streaming_ptlx"]["available"] is False
+    assert (
+        materialization_contract["streaming_ptlx"]["reason"]
+        == "producer-work-slices-missing-layout-dims"
+    )
+
+
+def test_materialization_contract_includes_streaming_tile_plan_for_row_to_col():
+    descriptor = build_lx_neighbor_descriptor(
+        "sdsc_fused_add",
+        _files(),
+        _candidate_specs(),
+        sdsc_payloads=_row_to_col_payloads(),
+    )
+
+    streaming = descriptor["edges"][0]["lx_materialization_contract"][
+        "streaming_ptlx"
+    ]
+
+    assert streaming["available"] is True
+    assert streaming["row_dim"] == "mb"
+    assert streaming["col_dim"] == "out"
+    assert streaming["producer_work_slices"] == {"mb": 32, "out": 1}
+    assert streaming["destination_work_slices"] == {"mb": 1, "out": 32}
+    assert streaming["bounded_workspace_ok"] is True
+    assert streaming["requires_remote_lx_gather"] is True
+    assert streaming["requires_remote_lx_scatter"] is False
+    assert streaming["contract"]["tile_size"] == 64
+    assert streaming["contract"]["bounded_workspace_bytes"] == 24576
+    assert streaming["summary"]["size"] == 2048
+    assert streaming["summary"]["total_tiles"] == 1024
+    assert streaming["summary"]["local_tiles"] == 32
+    assert streaming["summary"]["moving_tiles"] == 992
+    assert streaming["summary"]["tile_buffer_bytes"] == 8192
+    assert streaming["summary"]["total_byte_hops"] > 0
+    assert streaming["summary"]["sample_tiles"][0]["tile_row"] == 0
+    assert streaming["summary"]["sample_tiles"][0]["tile_col"] == 0
+    assert streaming["summary"]["sample_tiles"][1]["source_cores"] == [0]
+    assert streaming["summary"]["sample_tiles"][1]["dest_cores"] == [1]
+    assert streaming["producer_core_mapping_sample"]["entries"]["0"] == {
+        "mb": 0,
+        "out": 0,
+    }
+    assert streaming["destination_core_mapping_sample"]["entries"]["1"] == {
+        "mb": 0,
+        "out": 1,
+    }
+
+
+def test_streaming_tile_plan_accepts_tiled_3d_restickify_shape():
+    specs = _candidate_specs()
+    specs[1].args = [
+        _arg(True, device_size=[32, 2048, 64]),
+        _arg(False, device_size=[32, 2048, 64]),
+    ]
+
+    descriptor = build_lx_neighbor_descriptor(
+        "sdsc_fused_add",
+        _files(),
+        specs,
+        sdsc_payloads=_row_to_col_payloads(),
+    )
+
+    streaming = descriptor["edges"][0]["lx_materialization_contract"][
+        "streaming_ptlx"
+    ]
+
+    assert streaming["available"] is True
+    assert streaming["summary"]["size"] == 2048
+    assert streaming["summary"]["total_tiles"] == 1024
 
 
 def test_skips_graph_input_sources():

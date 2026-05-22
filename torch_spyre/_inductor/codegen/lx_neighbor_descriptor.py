@@ -23,6 +23,7 @@ facts that made the edge safe to try as LX-to-LX movement.
 
 from __future__ import annotations
 
+from dataclasses import asdict
 import json
 import os
 from collections.abc import Sequence
@@ -35,6 +36,11 @@ from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.restickify_ring import (
     CORE_MAPPING_OVERRIDE_OP_INFO_KEY,
     LOCALITY_CERTIFICATE_OP_INFO_KEY,
+)
+
+from .restickify_ptlx_streaming import (
+    plan_streaming_ptlx_tiles,
+    streaming_ptlx_contract,
 )
 
 logger = get_inductor_logger("sdsc_compile")
@@ -487,8 +493,223 @@ def _lx_materialization_contract(
                 consumer_lds_idx,
             ),
         }
+        contract["streaming_ptlx"] = _streaming_ptlx_materialization_plan(
+            producer_payload=sdsc_payloads[idx - 1],
+            destination_payload=sdsc_payloads[idx],
+            producer_lds_idx=producer_lds_idx,
+            destination_lds_idx=restickify_roles["destination_lds_idx"],
+            restickify_output=restickify_output,
+        )
 
     return contract
+
+
+def _streaming_ptlx_materialization_plan(
+    *,
+    producer_payload: dict[str, Any],
+    destination_payload: dict[str, Any],
+    producer_lds_idx: int | None,
+    destination_lds_idx: int | None,
+    restickify_output: TensorArg,
+) -> dict[str, Any]:
+    """Describe the 64x64 remote-LX movement needed for this edge.
+
+    This is the production-shaped bridge contract: source ownership comes from
+    the producer SDSC, destination ownership comes from the restickify output
+    endpoint, and the result is a bounded tile plan that a future lowering can
+    turn into InputFetchNeighbor/STCDPOpLx plus local PT-LX restickification.
+    """
+
+    if producer_lds_idx is None:
+        return _streaming_unavailable("producer-lds-missing")
+    if destination_lds_idx is None:
+        return _streaming_unavailable("destination-lds-missing")
+
+    producer_root, _ = _unwrap_sdsc_root_and_dsc(producer_payload)
+    destination_root, _ = _unwrap_sdsc_root_and_dsc(destination_payload)
+    producer_role = _payload_lds_role(producer_payload, producer_lds_idx)
+    destination_role = _payload_lds_role(destination_payload, destination_lds_idx)
+    producer_primary = producer_role.get("primary") or {}
+    destination_primary = destination_role.get("primary") or {}
+    dims = _materialization_dims(producer_primary, destination_primary)
+    if dims is None:
+        return _streaming_unavailable(
+            "unsupported-materialization-dims",
+            producer_primary=producer_primary,
+            destination_primary=destination_primary,
+        )
+    row_dim, col_dim = dims
+
+    size = _square_tensor_size(restickify_output)
+    if size is None:
+        return _streaming_unavailable(
+            "expected-square-2d-restickify-output",
+            device_size=[_json_scalar(v) for v in restickify_output.device_size],
+        )
+
+    source_slices = _work_slices_for_dims(producer_root, row_dim, col_dim)
+    dest_slices = _work_slices_for_dims(destination_root, row_dim, col_dim)
+    if source_slices is None:
+        return _streaming_unavailable(
+            "producer-work-slices-missing-layout-dims",
+            row_dim=row_dim,
+            col_dim=col_dim,
+            work_slices=producer_root.get("numWkSlicesPerDim_", {}),
+        )
+    if dest_slices is None:
+        return _streaming_unavailable(
+            "destination-work-slices-missing-layout-dims",
+            row_dim=row_dim,
+            col_dim=col_dim,
+            work_slices=destination_root.get("numWkSlicesPerDim_", {}),
+        )
+
+    source_core_mapping = _core_mapping_for_dims(producer_root, row_dim, col_dim)
+    dest_core_mapping = _core_mapping_for_dims(destination_root, row_dim, col_dim)
+    try:
+        summary = plan_streaming_ptlx_tiles(
+            size=size,
+            source_work_slices=source_slices,
+            dest_work_slices=dest_slices,
+            source_core_mapping=source_core_mapping,
+            dest_core_mapping=dest_core_mapping,
+            tile_size=64,
+            row_dim=row_dim,
+            col_dim=col_dim,
+            sample_limit=8,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _streaming_unavailable(
+            "streaming-plan-failed",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+    contract = streaming_ptlx_contract(summary)
+    summary_payload = _streaming_summary_payload(summary)
+    return {
+        "available": True,
+        "kind": "torch_spyre.restickify_streaming_ptlx_materialization",
+        "tile_size": 64,
+        "row_dim": row_dim,
+        "col_dim": col_dim,
+        "producer_sdsc": producer_root.get("name_", next(iter(producer_payload))),
+        "destination_sdsc": destination_root.get(
+            "name_", next(iter(destination_payload))
+        ),
+        "destination_role": "restickify_output_consumer_sink_contract",
+        "producer_primary": producer_primary,
+        "destination_primary": destination_primary,
+        "producer_work_slices": source_slices,
+        "destination_work_slices": dest_slices,
+        "producer_core_mapping_sample": _mapping_sample(source_core_mapping),
+        "destination_core_mapping_sample": _mapping_sample(dest_core_mapping),
+        "requires_remote_lx_gather": summary.max_fan_in > 1
+        or summary.total_byte_hops > 0,
+        "requires_remote_lx_scatter": summary.max_fan_out > 1,
+        "bounded_workspace_ok": bool(contract["fits_lx_workspace"]),
+        "contract": contract,
+        "summary": summary_payload,
+        "lowering_sequence": [
+            "gather-source-fragments-from-producer-lx",
+            "local-ptlx-restickify-64x64-tile",
+            "write-consumer-owned-lx-tile",
+        ],
+        "fallback": "ReStickifyOpHBM",
+    }
+
+
+def _streaming_unavailable(reason: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "available": False,
+        "reason": reason,
+        **extra,
+    }
+
+
+def _materialization_dims(
+    producer_primary: dict[str, Any],
+    consumer_primary: dict[str, Any],
+) -> tuple[str, str] | None:
+    producer_layout = [str(dim) for dim in producer_primary.get("layoutDimOrder_", [])]
+    consumer_layout = [str(dim) for dim in consumer_primary.get("layoutDimOrder_", [])]
+    common = [dim for dim in consumer_layout if dim in producer_layout]
+    if "mb" in common and "out" in common:
+        return "mb", "out"
+    if len(common) >= 2:
+        return common[0], common[1]
+    return None
+
+
+def _square_tensor_size(arg: TensorArg) -> int | None:
+    if len(arg.device_size) != 2:
+        if len(arg.device_size) != 3:
+            return None
+        try:
+            tile_count = int(arg.device_size[0])
+            cols = int(arg.device_size[1])
+            tile_size = int(arg.device_size[2])
+        except Exception:  # noqa: BLE001
+            return None
+        rows = tile_count * tile_size
+        if rows <= 0 or rows != cols:
+            return None
+        return rows
+    try:
+        rows = int(arg.device_size[0])
+        cols = int(arg.device_size[1])
+    except Exception:  # noqa: BLE001
+        return None
+    if rows <= 0 or rows != cols:
+        return None
+    return rows
+
+
+def _work_slices_for_dims(
+    root: dict[str, Any],
+    row_dim: str,
+    col_dim: str,
+) -> dict[str, int] | None:
+    slices = root.get("numWkSlicesPerDim_", {}) or {}
+    if row_dim not in slices or col_dim not in slices:
+        return None
+    return {row_dim: int(slices[row_dim]), col_dim: int(slices[col_dim])}
+
+
+def _core_mapping_for_dims(
+    root: dict[str, Any],
+    row_dim: str,
+    col_dim: str,
+) -> dict[str, dict[str, int]] | None:
+    mapping = root.get("coreIdToWkSlice_", {}) or {}
+    if not mapping:
+        return None
+    out: dict[str, dict[str, int]] = {}
+    for core, per_dim in mapping.items():
+        if row_dim not in per_dim or col_dim not in per_dim:
+            return None
+        out[str(core)] = {
+            row_dim: int(per_dim[row_dim]),
+            col_dim: int(per_dim[col_dim]),
+        }
+    return out
+
+
+def _mapping_sample(mapping: dict[str, dict[str, int]] | None) -> dict[str, Any]:
+    if mapping is None:
+        return {"available": False}
+    return {
+        "available": True,
+        "entries": {
+            core: mapping[core]
+            for core in sorted(mapping, key=lambda value: int(value))[:8]
+        },
+    }
+
+
+def _streaming_summary_payload(summary: Any) -> dict[str, Any]:
+    payload = asdict(summary)
+    payload["sample_tiles"] = payload.get("sample_tiles", [])[:8]
+    return payload
 
 
 def _endpoint_summary(
@@ -642,6 +863,14 @@ def _unwrap_sdsc_payload(sdsc_payload: dict[str, Any]) -> tuple[str, dict[str, A
     if not dscs:
         return sdsc_name, {}
     return sdsc_name, next(iter(dscs[0].values()))
+
+
+def _unwrap_sdsc_root_and_dsc(
+    sdsc_payload: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    _, outer = next(iter(sdsc_payload.items()))
+    dscs = outer.get("dscs_", [])
+    return outer, next(iter(dscs[0].values())) if dscs else {}
 
 
 def _opfunc_name(dsc: dict[str, Any]) -> str | None:
