@@ -566,6 +566,12 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--all-streaming-tiles",
+        action="store_true",
+        help="With --streaming-ptlx-tile, emit every materialized tile.",
+    )
+    parser.add_argument("--tile-index", type=int, default=0)
+    parser.add_argument(
         "--source-work-slices",
         action="append",
         default=None,
@@ -604,51 +610,74 @@ def main() -> int:
             args.dest_work_slices,
             {"mb": 4, "out": max(1, args.num_cores // 4)},
         )
+        default_sample_limit = ((args.size + 63) // 64) ** 2
+        sample_limit = (
+            default_sample_limit
+            if args.all_streaming_tiles
+            else args.artifact_max_tiles
+        )
         summary = plan_streaming_ptlx_tiles(
             size=args.size,
             source_work_slices=source_slices,
             source_core_mapping=default_core_mapping(source_slices),
             dest_work_slices=dest_slices,
             dest_core_mapping=default_core_mapping(dest_slices),
-            sample_limit=args.artifact_max_tiles,
+            sample_limit=sample_limit,
         )
         artifact = generate_streaming_ptlx_artifact(
             f"streaming_ptlx_{args.size}",
             summary,
-            max_tiles=args.artifact_max_tiles,
+            max_tiles=sample_limit,
         )
-        payload = generate_streaming_ptlx_tile_bridge_sdsc(
-            f"0_StreamingPTLXTileBridge_{args.size}",
-            artifact,
+        root = next(iter(artifact.values()))
+        materialized_tiles = root.get("tiles", []) or []
+        tile_indices = (
+            range(len(materialized_tiles))
+            if args.all_streaming_tiles
+            else [args.tile_index]
         )
-        path = output_dir / f"sdsc_streaming_ptlx_tile_{args.size}.json"
-        _write_json(path, payload)
-        dcg_rc = None
-        dcg_log = ""
-        if args.run_dcg:
-            dcg_rc, dcg_log_path = _run_dcg(
-                path,
-                output_dir / "dcg",
-                args.dcg_standalone,
+        for tile_index in tile_indices:
+            payload = generate_streaming_ptlx_tile_bridge_sdsc(
+                f"{tile_index}_StreamingPTLXTileBridge_{args.size}",
+                artifact,
+                tile_index=tile_index,
             )
-            dcg_log = str(dcg_log_path)
-        row = {
-            "mode": "streaming_ptlx_tile",
-            "op": "StreamingPTLXTileBridge",
-            "size": args.size,
-            "path": str(path),
-            "dcg_rc": dcg_rc,
-            "dcg_log": dcg_log,
-            "source_work_slices": source_slices,
-            "dest_work_slices": dest_slices,
-            "tile_count": summary.total_tiles,
-            "sample_tiles": len(summary.sample_tiles),
-        }
-        rows.append(row)
-        print(
-            f"streaming_ptlx_tile: wrote {path}"
-            + (f" dcg_rc={dcg_rc} dcg_log={dcg_log}" if args.run_dcg else "")
-        )
+            path = output_dir / (
+                f"sdsc_streaming_ptlx_tile_{args.size}_{tile_index}.json"
+            )
+            _write_json(path, payload)
+            dcg_rc = None
+            dcg_log = ""
+            if args.run_dcg:
+                dcg_rc, dcg_log_path = _run_dcg(
+                    path,
+                    output_dir / "dcg",
+                    args.dcg_standalone,
+                )
+                dcg_log = str(dcg_log_path)
+            tile = materialized_tiles[tile_index]
+            row = {
+                "mode": "streaming_ptlx_tile",
+                "op": "StreamingPTLXTileBridge",
+                "size": args.size,
+                "path": str(path),
+                "dcg_rc": dcg_rc,
+                "dcg_log": dcg_log,
+                "source_work_slices": source_slices,
+                "dest_work_slices": dest_slices,
+                "tile_count": summary.total_tiles,
+                "sample_tiles": len(summary.sample_tiles),
+                "tile_index": tile_index,
+                "tile_row": tile.get("tile_row"),
+                "tile_col": tile.get("tile_col"),
+                "fan_in": tile.get("fan_in"),
+                "fan_out": tile.get("fan_out"),
+            }
+            rows.append(row)
+            print(
+                f"streaming_ptlx_tile[{tile_index}]: wrote {path}"
+                + (f" dcg_rc={dcg_rc} dcg_log={dcg_log}" if args.run_dcg else "")
+            )
         _write_json(output_dir / "summary.json", {"rows": rows})
         return 0
 
