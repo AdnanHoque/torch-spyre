@@ -94,6 +94,54 @@ class StreamingPTLXSummary:
     sample_tiles: list[StreamingTileSample]
 
 
+def streaming_ptlx_contract(
+    summary: StreamingPTLXSummary,
+    *,
+    lx_limit_bytes: int = 2 * 1024 * 1024,
+    tile_buffers: int = 3,
+) -> dict[str, Any]:
+    """Return the production-shaped lowering contract for a streaming plan.
+
+    This is deliberately a contract, not a guarantee that lowering exists yet.
+    It states which movement phases are required and whether the bounded tile
+    workspace fits inside a single core's LX budget. Lowering may consume this
+    contract to decide whether to emit a streaming PT-LX bridge or fall back to
+    ``ReStickifyOpHBM``.
+    """
+
+    workspace_bytes = int(summary.tile_buffer_bytes) * int(tile_buffers)
+    phases = []
+    if summary.max_fan_in > 1:
+        phases.append("gather-source-fragments")
+    else:
+        phases.append("read-source-tile")
+    phases.append("local-ptlx-restickify")
+    if summary.max_fan_out > 1:
+        phases.append("scatter-dest-fragments")
+    else:
+        phases.append("write-dest-tile")
+
+    fits_workspace = workspace_bytes <= int(lx_limit_bytes)
+    return {
+        "kind": "streaming_ptlx_contract",
+        "tile_size": summary.tile_size,
+        "tile_buffer_bytes": summary.tile_buffer_bytes,
+        "tile_buffers": int(tile_buffers),
+        "bounded_workspace_bytes": workspace_bytes,
+        "lx_limit_bytes": int(lx_limit_bytes),
+        "fits_lx_workspace": fits_workspace,
+        "requires_gather": summary.max_fan_in > 1,
+        "requires_scatter": summary.max_fan_out > 1,
+        "requires_core_count_adapter": summary.source_core_count
+        != summary.dest_core_count,
+        "max_fan_in": summary.max_fan_in,
+        "max_fan_out": summary.max_fan_out,
+        "phases": phases,
+        "fallback_required": not fits_workspace,
+        "fallback_reason": None if fits_workspace else "tile-workspace-exceeds-lx",
+    }
+
+
 def ring_distance(a: int, b: int, n: int) -> int:
     distance = abs(int(a) - int(b))
     return min(distance, int(n) - distance)

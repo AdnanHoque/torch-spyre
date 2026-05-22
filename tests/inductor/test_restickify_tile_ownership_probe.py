@@ -4,6 +4,7 @@ from tools.restickify_tile_ownership_probe import (
     plan_streaming_ptlx_tiles,
     ring_distance,
     summarize,
+    streaming_ptlx_contract,
     tile_exchange_but_no_local_transpose,
 )
 
@@ -127,3 +128,44 @@ def test_streaming_ptlx_plan_reduces_4096_workspace_to_tile_buffer():
     assert summary.full_tensor_bytes_per_dest_core == 1024 * 1024
     assert summary.tile_buffer_bytes == 8192
     assert summary.tile_buffer_bytes < summary.full_tensor_bytes_per_source_core
+
+
+def test_streaming_ptlx_contract_names_required_gather_phases():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+    )
+    contract = streaming_ptlx_contract(summary)
+
+    assert contract["fits_lx_workspace"] is True
+    assert contract["bounded_workspace_bytes"] == 3 * 8192
+    assert contract["requires_gather"] is True
+    assert contract["requires_scatter"] is False
+    assert contract["phases"] == [
+        "gather-source-fragments",
+        "local-ptlx-restickify",
+        "write-dest-tile",
+    ]
+
+
+def test_streaming_ptlx_contract_marks_core_count_adapter():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 24, "out": 1}
+
+    summary = plan_streaming_ptlx_tiles(
+        size=3072,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+    )
+    contract = streaming_ptlx_contract(summary)
+
+    assert contract["fits_lx_workspace"] is True
+    assert contract["requires_core_count_adapter"] is True

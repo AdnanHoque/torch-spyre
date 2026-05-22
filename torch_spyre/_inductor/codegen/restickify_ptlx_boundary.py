@@ -40,7 +40,10 @@ from torch_spyre._inductor.restickify_ring import (
 )
 
 from .restickify_lx_dataop import generate_ptlx_restickify_bridge_sdsc
-from .restickify_ptlx_streaming import plan_streaming_ptlx_tiles
+from .restickify_ptlx_streaming import (
+    plan_streaming_ptlx_tiles,
+    streaming_ptlx_contract,
+)
 
 _PRODUCER_BASE_ENV = "SPYRE_RESTICKIFY_PTLX_BRIDGE_PRODUCER_BASE"
 _CONSUMER_BASE_ENV = "SPYRE_RESTICKIFY_PTLX_BRIDGE_CONSUMER_BASE"
@@ -154,7 +157,7 @@ def patch_restickify_ptlx_mixed_schedules(
             continue
         plan = plans.get(idx)
         if plan is None:
-            row = _plan_skip_row(idx, specs)
+            row = _plan_skip_row(idx, specs, sdsc_payloads=sdsc_payloads)
         else:
             row = _patch_one_mixed_schedule(plan, sdsc_payloads, specs)
         if row.get("status") == "patched":
@@ -241,11 +244,18 @@ def _plan_one_mixed_schedule(
     )
 
 
-def _plan_skip_row(idx: int, specs: list[OpSpec]) -> dict[str, Any]:
+def _plan_skip_row(
+    idx: int,
+    specs: list[OpSpec],
+    sdsc_payloads: list[dict[str, Any] | None] | None = None,
+) -> dict[str, Any]:
     planned = _plan_one_mixed_schedule(idx, specs)
     if isinstance(planned, PTLXMixedSchedulePlan):
         return _row(idx, "skipped", "planned-but-not-selected")
-    return _row(idx, "skipped", planned)
+    row = _row(idx, "skipped", planned)
+    if _spyre_config.restickify_ptlx_streaming_e2e and sdsc_payloads is not None:
+        row.update(_streaming_candidate_for_skip(idx, sdsc_payloads))
+    return row
 
 
 def _patch_one_mixed_schedule(
@@ -832,6 +842,45 @@ def _streaming_candidate_row(
     return row
 
 
+def _streaming_candidate_for_skip(
+    idx: int,
+    sdsc_payloads: list[dict[str, Any] | None],
+) -> dict[str, Any]:
+    if idx <= 0 or idx >= len(sdsc_payloads):
+        return {
+            "streaming_ptlx_candidate": {
+                "available": False,
+                "reason": "restickify-not-between-payloads",
+            }
+        }
+    producer_payload = sdsc_payloads[idx - 1]
+    restickify_payload = sdsc_payloads[idx]
+    if producer_payload is None or restickify_payload is None:
+        return {
+            "streaming_ptlx_candidate": {
+                "available": False,
+                "reason": "producer-or-restickify-payload-missing",
+            }
+        }
+    try:
+        restickify_root, restickify_dsc = _single_payload_dsc(restickify_payload)
+        size, _ = _infer_size_and_cores(restickify_root, restickify_dsc)
+    except Exception as exc:
+        return {
+            "streaming_ptlx_candidate": {
+                "available": False,
+                "reason": f"{type(exc).__name__}: {exc}",
+            }
+        }
+    return {
+        "streaming_ptlx_candidate": _streaming_candidate_summary(
+            size=size,
+            producer_payload=producer_payload,
+            restickify_payload=restickify_payload,
+        )
+    }
+
+
 def _streaming_candidate_summary(
     *,
     size: int,
@@ -850,6 +899,10 @@ def _streaming_candidate_summary(
     except Exception as exc:
         return {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
     payload = asdict(summary)
+    payload["contract"] = streaming_ptlx_contract(
+        summary,
+        lx_limit_bytes=_LX_BYTES_PER_CORE,
+    )
     payload["available"] = True
     return payload
 

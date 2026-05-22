@@ -116,6 +116,14 @@ restickify_ptlx_mixed_schedule_e2e: bool = (
     os.environ.get("SPYRE_RESTICKIFY_PTLX_MIXED_SCHEDULE_E2E", "0") == "1"
 )
 
+# Default-off production-shaped follow-up for PT-LX restickify. This flag does
+# not remove the stock HBM path; it allows the compiler to build/audit a
+# streaming 64x64 tile contract for PT-LX when the single full-tensor bridge is
+# not representable.
+restickify_ptlx_streaming_e2e: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_PTLX_STREAMING_E2E", "0") == "1"
+)
+
 # Default-off verifier for the PT-aware LX mixed bridge. When enabled, the
 # generated producer output, bridge endpoints, and consumer input must agree on
 # the same per-core LX addresses before bundle files are written.

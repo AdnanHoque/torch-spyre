@@ -36,6 +36,7 @@ _STREAMING_PLANNER_SPEC.loader.exec_module(_STREAMING_PLANNER)
 
 default_core_mapping = _STREAMING_PLANNER.default_core_mapping
 plan_streaming_ptlx_tiles = _STREAMING_PLANNER.plan_streaming_ptlx_tiles
+streaming_ptlx_contract = _STREAMING_PLANNER.streaming_ptlx_contract
 
 
 @dataclass(frozen=True)
@@ -288,6 +289,12 @@ def main() -> int:
                 f"full tensor/core src="
                 f"{streaming_summary.full_tensor_bytes_per_source_core} B, "
                 f"dst={streaming_summary.full_tensor_bytes_per_dest_core} B"
+            )
+            contract = streaming_ptlx_contract(streaming_summary)
+            print(
+                f"contract: phases={contract['phases']}, "
+                f"bounded_workspace={contract['bounded_workspace_bytes']} B, "
+                f"fits_lx={contract['fits_lx_workspace']}"
             )
             print(f"notes: {streaming_summary.notes}")
         return 0
