@@ -1,0 +1,9 @@
+Reading SuperDsc for file../tmp/stage251-expanded-consumer-compile/expanded_consumer.json
+Running DCG for DL+Data Op: Node-name:expanded_consumer
+Running DCG for DataOp: Node-name:expanded_consumer
+Computing Re-StickifyOpWithPT (Special re-stickify) transfer function..
+Creating PCFG for DataDsc..
+Creating pcfg for coreID:0 : LX : l0lu0 : l0su0 : sfp0 : pe0 : ptrow0_0 : ptrow1_0 : ptrow2_0 : ptrow3_0 : ptrow4_0 : ptrow5_0 : ptrow6_0 : ptrow7_0 ...
+Writing DataDsc to /tmp/stage251-expanded-consumer-compile/dcg/sdsc.json..
+Writing PCFG to /tmp/stage251-expanded-consumer-compile/dcg/pcfg.json..
+Writing SenPrograms to dataDSC/senprog.txt..

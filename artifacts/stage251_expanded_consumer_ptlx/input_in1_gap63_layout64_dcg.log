@@ -1,0 +1,6 @@
+Reading SuperDsc for file../tmp/stage251-expanded-sparse-input-compile/input_in1_gap63_layout64.json
+Running DCG for DL+Data Op: Node-name:input_in1_gap63_layout64
+Running DCG for DataOp: Node-name:input_in1_gap63_layout64
+Computing Re-StickifyOpWithPT (Special re-stickify) transfer function..
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: myInpPiece.second.dimToSize_.at(dimName) >= op->outLds->dimToStickSize_.at(dimName) - op->outLds->validGap_.at(dimName)[0].second, file /home/adnan-cdx/dt-inductor-mixed/deeptools/dcg/dcg_fe/pcfg_gen/restickifyOp.cpp line 353
