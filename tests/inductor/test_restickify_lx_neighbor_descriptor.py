@@ -60,6 +60,18 @@ def _op(op: str, op_info=None, args=None) -> OpSpec:
     )
 
 
+def _op_with_args(op: str, args: list[TensorArg], op_info=None) -> OpSpec:
+    d0 = Symbol("d0")
+    d1 = Symbol("d1")
+    return OpSpec(
+        op=op,
+        is_reduction=False,
+        iteration_space={d0: (512, 32), d1: (512, 1)},
+        args=args,
+        op_info=op_info or {},
+    )
+
+
 def _files() -> list[str]:
     return [
         "sdsc_0_add.json",
@@ -284,6 +296,65 @@ def _candidate_specs() -> list[OpSpec]:
             },
         ),
         _op("add"),
+    ]
+
+
+def _coordinate_changing_specs() -> list[OpSpec]:
+    c0 = Symbol("c0")
+    c1 = Symbol("c1")
+    d0 = Symbol("d0")
+    d1 = Symbol("d1")
+    producer_output = TensorArg(
+        is_input=False,
+        arg_index=3,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[8, 512, 64],
+        device_coordinates=[c1 // 64, c0, c1 % 64],
+        allocation={},
+    )
+    restickify_input = TensorArg(
+        is_input=True,
+        arg_index=3,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[8, 512, 64],
+        device_coordinates=[d0 // 64, d1, d0 % 64],
+        allocation={},
+    )
+    restickify_output = TensorArg(
+        is_input=False,
+        arg_index=4,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[8, 512, 64],
+        device_coordinates=[d1 // 64, d0, d1 % 64],
+        allocation={},
+    )
+    consumer_input = TensorArg(
+        is_input=True,
+        arg_index=4,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[8, 512, 64],
+        device_coordinates=[c1 // 64, c0, c1 % 64],
+        allocation={},
+    )
+    return [
+        _op_with_args("add", [_arg(True), _arg(True), producer_output]),
+        _op_with_args(
+            RESTICKIFY_OP,
+            [restickify_input, restickify_output],
+            op_info={
+                "restickify_source_name": "buf0",
+                "restickify_source_kind": "in_graph_computed",
+                CORE_MAPPING_OVERRIDE_OP_INFO_KEY: {
+                    "0": {"d0": 0, "d1": 0},
+                    "1": {"d0": 1, "d1": 0},
+                },
+                LOCALITY_CERTIFICATE_OP_INFO_KEY: {
+                    "locality_certified": True,
+                    "certified_byte_hops": 0,
+                },
+            },
+        ),
+        _op_with_args("add", [_arg(True), consumer_input, _arg(False)]),
     ]
 
 
@@ -655,3 +726,129 @@ def test_maybe_emit_streaming_bridge_candidate_sidecar(tmp_path, monkeypatch):
     )
     assert "ReStickifyOpHBM" not in candidate["op_funcs_used"]
     assert set(candidate["op_funcs_used"]) == {"STCDPOpLx"}
+
+
+def test_streaming_bridge_does_not_treat_coordinate_change_as_same_layout_remap(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(config, "restickify_lx_neighbor_descriptor", True)
+    monkeypatch.setattr(config, "restickify_lx_neighbor_streaming_bridge", True)
+    specs = _coordinate_changing_specs()
+    producer_mapping = {str(core): {"mb": core, "out": 0} for core in range(32)}
+    destination_mapping = {
+        str(core): {"mb": core % 4, "out": core // 4} for core in range(32)
+    }
+    same_primary = {
+        "INPUT": {
+            "layoutDimOrder_": ["mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    payloads = [
+        _sdsc_payload(
+            "0_add",
+            "add",
+            num_work_slices={"mb": 32, "out": 1},
+            core_mapping=producer_mapping,
+            primary_ds_info=same_primary,
+            input_labels=["Tensor0-idx0", "Tensor1-idx1"],
+            output_labels=["Tensor2-idx2"],
+            labeled_ds=[
+                {
+                    "ldsIdx_": 0,
+                    "dsName_": "Tensor0",
+                    "dsType_": "INPUT",
+                    "scale_": [1, 1],
+                    "wordLength": 2,
+                    "dataFormat_": "SEN169_FP16",
+                    "memOrg_": {"lx": {"isPresent": 1}},
+                },
+                {
+                    "ldsIdx_": 1,
+                    "dsName_": "Tensor1",
+                    "dsType_": "INPUT",
+                    "scale_": [1, 1],
+                    "wordLength": 2,
+                    "dataFormat_": "SEN169_FP16",
+                    "memOrg_": {"lx": {"isPresent": 1}},
+                },
+                {
+                    "ldsIdx_": 2,
+                    "dsName_": "Tensor2",
+                    "dsType_": "OUTPUT",
+                    "scale_": [1, 1],
+                    "wordLength": 2,
+                    "dataFormat_": "SEN169_FP16",
+                    "memOrg_": {"lx": {"isPresent": 1}},
+                },
+            ],
+        ),
+        _sdsc_payload(
+            "1_ReStickifyOpHBM",
+            "ReStickifyOpHBM",
+            num_work_slices={"mb": 4, "out": 8},
+            core_mapping=destination_mapping,
+            input_labels=["Tensor0-idx0"],
+            output_labels=["Tensor1-idx1"],
+            labeled_ds=[
+                {
+                    "ldsIdx_": 0,
+                    "dsName_": "Tensor0",
+                    "dsType_": "OUTPUT",
+                    "scale_": [1, 1],
+                    "wordLength": 2,
+                    "dataFormat_": "SEN169_FP16",
+                    "memOrg_": {"lx": {"isPresent": 1}},
+                },
+                {
+                    "ldsIdx_": 1,
+                    "dsName_": "Tensor1",
+                    "dsType_": "KERNEL",
+                    "scale_": [1, 1],
+                    "wordLength": 2,
+                    "dataFormat_": "SEN169_FP16",
+                    "memOrg_": {"lx": {"isPresent": 1}},
+                },
+            ],
+        ),
+        _sdsc_payload(
+            "2_add",
+            "add",
+            num_work_slices={"mb": 4, "out": 8},
+            core_mapping=destination_mapping,
+            primary_ds_info=same_primary,
+        ),
+    ]
+
+    descriptor = maybe_emit_lx_neighbor_descriptor(
+        "sdsc_fused_add",
+        str(tmp_path),
+        _files(),
+        specs,
+        sdsc_payloads=payloads,
+    )
+
+    assert descriptor is not None
+    relation = descriptor["edges"][0]["source_view_contract"]["coordinate_relations"]
+    assert relation["producer_output_to_restickify_input"][
+        "same_coordinate_strings"
+    ] == [False, False, False]
+    candidate = descriptor["streaming_bridge_candidates"][0]
+    assert candidate["status"] == "emitted"
+    assert candidate["bridge_kind"] == "direct-ptlx-layout-transform"
+    assert candidate["direction"] == "output-to-kernel"
+    assert candidate["bridge_metadata"]["coalescing"] == "direct-64x64-tiles"
+    assert candidate["bridge_metadata"]["direction"] == "output-to-kernel"
+    assert candidate["bridge_metadata"]["semantic_transform_certified"] is False

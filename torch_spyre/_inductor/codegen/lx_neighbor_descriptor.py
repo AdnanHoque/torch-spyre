@@ -294,7 +294,8 @@ def _streaming_bridge_candidate(
             summary,
             max_tiles=summary.total_tiles,
         )
-        bridge_kind = _select_streaming_bridge_kind(streaming)
+        bridge_kind = _select_streaming_bridge_kind(edge, streaming)
+        direction = _restickify_direction(edge)
         if bridge_kind == "same-layout-lx-ownership-remap":
             payload = generate_streaming_lx_remap_full_bridge_sdsc(
                 f"{idx}_LXNeighborStreamingSTCDPOpLxRemap",
@@ -314,6 +315,7 @@ def _streaming_bridge_candidate(
             payload = generate_streaming_ptlx_direct_full_bridge_sdsc(
                 f"{idx}_LXNeighborStreamingReStickifyOpWithPTLx",
                 artifact,
+                direction=direction,
             )
     except Exception as exc:  # noqa: BLE001
         return {
@@ -338,6 +340,7 @@ def _streaming_bridge_candidate(
         "executable_in_bundle": False,
         "bundle_mlir_unchanged": True,
         "bridge_kind": bridge_kind,
+        "direction": direction,
         "source_edge_id": edge.get("edge_id"),
         "size": size,
         "tile_size": tile_size,
@@ -353,17 +356,67 @@ def _streaming_bridge_candidate(
     }
 
 
-def _select_streaming_bridge_kind(streaming: dict[str, Any]) -> str:
+def _select_streaming_bridge_kind(
+    edge: dict[str, Any],
+    streaming: dict[str, Any],
+) -> str:
     producer_primary = streaming.get("producer_primary", {}) or {}
     destination_primary = streaming.get("destination_primary", {}) or {}
+    source_view = edge.get("source_view_contract", {}) or {}
+    coordinate_relations = source_view.get("coordinate_relations", {}) or {}
     if (
         _normalize_dim_list(producer_primary.get("layoutDimOrder_", []))
         == _normalize_dim_list(destination_primary.get("layoutDimOrder_", []))
         and _normalize_dim_list(producer_primary.get("stickDimOrder_", []))
         == _normalize_dim_list(destination_primary.get("stickDimOrder_", []))
+        and _coordinate_relation_is_identity(
+            coordinate_relations.get("producer_output_to_restickify_input", {})
+        )
+        and _coordinate_relation_is_identity(
+            coordinate_relations.get("restickify_output_to_consumer_input", {})
+        )
     ):
         return "same-layout-lx-ownership-remap"
     return "direct-ptlx-layout-transform"
+
+
+def _coordinate_relation_is_identity(relation: dict[str, Any]) -> bool:
+    same = relation.get("same_coordinate_strings")
+    return bool(same) and all(bool(value) for value in same)
+
+
+def _restickify_direction(edge: dict[str, Any]) -> str:
+    endpoints = (
+        edge.get("lx_materialization_contract", {})
+        .get("sdsc_endpoints", {})
+    )
+    source_primary = endpoints.get("restickify_source", {}).get("primary", {})
+    destination_primary = (
+        endpoints.get("restickify_destination", {}).get("primary", {})
+    )
+    source_layout = _normalize_dim_list(source_primary.get("layoutDimOrder_", []))
+    source_stick = _normalize_dim_list(source_primary.get("stickDimOrder_", []))
+    destination_layout = _normalize_dim_list(
+        destination_primary.get("layoutDimOrder_", [])
+    )
+    destination_stick = _normalize_dim_list(
+        destination_primary.get("stickDimOrder_", [])
+    )
+    if (
+        source_layout == ["mb", "out"]
+        and source_stick == ["out"]
+        and destination_layout == ["out", "mb"]
+        and destination_stick == ["mb"]
+    ):
+        return "kernel-to-output"
+    if (
+        source_layout == ["out", "mb"]
+        and source_stick == ["mb"]
+        and destination_layout == ["mb", "out"]
+        and destination_stick == ["out"]
+    ):
+        return "output-to-kernel"
+    return "kernel-to-output"
 
 
 def _bridge_metadata(root: dict[str, Any]) -> dict[str, Any]:
