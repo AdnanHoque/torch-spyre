@@ -299,6 +299,9 @@ def test_streaming_ptlx_tile_bridge_sdsc_materializes_three_lx_dataops():
     gather = next(iter(root["datadscs_"][0].values()))
     restickify = next(iter(root["datadscs_"][1].values()))
     scatter = next(iter(root["datadscs_"][2].values()))
+    assert gather["coreIdsUsed_"] == [0, 1, 2, 3]
+    assert restickify["coreIdsUsed_"] == [0]
+    assert scatter["coreIdsUsed_"] == [0]
 
     gather_input_placements = [
         piece["PlacementInfo"][0] for piece in gather["labeledDs_"][0]["PieceInfo"]
@@ -318,6 +321,7 @@ def test_streaming_ptlx_tile_bridge_sdsc_materializes_three_lx_dataops():
         2,
         3,
     ]
+    assert len(gather_output_placements) == 1
     assert {placement["memId"][0] for placement in gather_output_placements} == {0}
     assert restickify["labeledDs_"][0]["stickDimOrder_"] == ["out_"]
     assert restickify["labeledDs_"][1]["stickDimOrder_"] == ["mb_"]
@@ -335,6 +339,8 @@ def test_streaming_ptlx_tile_bridge_sdsc_materializes_three_lx_dataops():
         [1, -1, 1, 1],
         [2, -1, 1, 0],
     ]
+    assert root["coreIdToDscSchedule"]["1"] == [[0, -1, 0, 0]]
+    assert root["coreIdToDscSchedule"]["4"] == []
 
 
 def test_ptlx_bridge_accepts_stock_mixed_restickify_split():

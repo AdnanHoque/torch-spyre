@@ -242,17 +242,21 @@ def generate_streaming_ptlx_tile_bridge_sdsc(
     dest_fragments = list(scatter_stage.get("fragments") or [])
 
     gather_output_fragments = [
-        {**fragment, "core": bridge_core} for fragment in source_fragments
+        _coalesced_tile_fragment(source_fragments, core=bridge_core)
     ]
     scatter_input_fragments = [
-        {**fragment, "core": bridge_core} for fragment in dest_fragments
+        _coalesced_tile_fragment(dest_fragments, core=bridge_core)
     ]
+    gather_core_ids = _fragment_core_ids(source_fragments, bridge_core)
+    restickify_core_ids = [bridge_core]
+    scatter_core_ids = _fragment_core_ids(dest_fragments, bridge_core)
 
+    stage_core_ids = [gather_core_ids, restickify_core_ids, scatter_core_ids]
     datadscs = [
         {
             f"0_STCDPOpLx_gather_tile{tile_index}": _tile_dataop(
                 "STCDPOpLx",
-                core_ids=core_ids,
+                core_ids=gather_core_ids,
                 input_layout=("mb_", "out_"),
                 input_stick=("out_",),
                 output_layout=("mb_", "out_"),
@@ -266,7 +270,7 @@ def generate_streaming_ptlx_tile_bridge_sdsc(
         {
             f"1_ReStickifyOpWithPTLx_tile{tile_index}": _tile_dataop(
                 "ReStickifyOpWithPTLx",
-                core_ids=core_ids,
+                core_ids=restickify_core_ids,
                 input_layout=("mb_", "out_"),
                 input_stick=("out_",),
                 output_layout=("out_", "mb_"),
@@ -280,7 +284,7 @@ def generate_streaming_ptlx_tile_bridge_sdsc(
         {
             f"2_STCDPOpLx_scatter_tile{tile_index}": _tile_dataop(
                 "STCDPOpLx",
-                core_ids=core_ids,
+                core_ids=scatter_core_ids,
                 input_layout=("out_", "mb_"),
                 input_stick=("mb_",),
                 output_layout=("out_", "mb_"),
@@ -316,7 +320,10 @@ def generate_streaming_ptlx_tile_bridge_sdsc(
             ],
             "ldsShareInfo_": [],
             "prodConsList": {},
-            "coreIdToDscSchedule": _sequential_dataop_schedule(num_cores, 3),
+            "coreIdToDscSchedule": _sparse_dataop_schedule(
+                num_cores,
+                stage_core_ids,
+            ),
             "pcfg_": {},
             "target_": "senulator",
             "dscs_": [],
@@ -568,6 +575,29 @@ def _sequential_dataop_schedule(
     }
 
 
+def _sparse_dataop_schedule(
+    num_cores: int,
+    stage_core_ids: Sequence[Sequence[int]],
+) -> dict[str, list[list[int]]]:
+    schedule: dict[str, list[list[int]]] = {}
+    for core_id in range(num_cores):
+        local_stages = [
+            stage_idx
+            for stage_idx, core_ids in enumerate(stage_core_ids)
+            if core_id in {int(core) for core in core_ids}
+        ]
+        schedule[str(core_id)] = [
+            [
+                stage_idx,
+                -1,
+                1 if local_idx > 0 else 0,
+                1 if local_idx < len(local_stages) - 1 else 0,
+            ]
+            for local_idx, stage_idx in enumerate(local_stages)
+        ]
+    return schedule
+
+
 def _labeled_ds(
     arg: SDSCArgs,
     sdsc_spec: SDSCSpec,
@@ -808,6 +838,15 @@ def _streaming_tile_core_ids(
     return list(range(max_core + 1))
 
 
+def _fragment_core_ids(
+    fragments: Sequence[Mapping[str, Any]],
+    bridge_core: int,
+) -> list[int]:
+    return sorted(
+        {_as_int(fragment["core"]) for fragment in fragments} | {int(bridge_core)}
+    )
+
+
 def _tile_dataop(
     op_name: str,
     *,
@@ -918,4 +957,26 @@ def _tile_piece_info(
                 "startAddr": [int(base)],
             }
         ],
+    }
+
+
+def _coalesced_tile_fragment(
+    fragments: Sequence[Mapping[str, Any]],
+    *,
+    core: int,
+) -> dict[str, int]:
+    if not fragments:
+        raise ValueError("cannot coalesce an empty fragment list")
+    row_start = min(_as_int(fragment["row_start"]) for fragment in fragments)
+    row_end = max(_as_int(fragment["row_end"]) for fragment in fragments)
+    col_start = min(_as_int(fragment["col_start"]) for fragment in fragments)
+    col_end = max(_as_int(fragment["col_end"]) for fragment in fragments)
+    return {
+        "core": int(core),
+        "row_start": row_start,
+        "row_end": row_end,
+        "col_start": col_start,
+        "col_end": col_end,
+        "bytes": (row_end - row_start) * (col_end - col_start) * 2,
+        "hops": 0,
     }

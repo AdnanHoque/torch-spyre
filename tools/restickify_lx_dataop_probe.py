@@ -17,6 +17,12 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     SUPPORTED_RESTICKIFY_DATA_OPS,
     combine_dataop_sdscs,
     generate_restickify_dataop_sdsc_from_spec,
+    generate_streaming_ptlx_tile_bridge_sdsc,
+)
+from torch_spyre._inductor.codegen.restickify_ptlx_streaming import (
+    default_core_mapping,
+    generate_streaming_ptlx_artifact,
+    plan_streaming_ptlx_tiles,
 )
 from torch_spyre._inductor.codegen.superdsc import SDSCArgs, SDSCSpec
 
@@ -54,6 +60,16 @@ def _core_mapping(dims: list[Symbol], split_dim: Symbol, num_cores: int):
         }
         for core in range(num_cores)
     }
+
+
+def _parse_work_slices(values: list[str] | None, default: dict[str, int]) -> dict[str, int]:
+    result = dict(default)
+    for item in values or []:
+        if ":" not in item:
+            raise ValueError(f"expected DIM:SPLIT work-slice item, got {item!r}")
+        dim, split = item.split(":", 1)
+        result[dim] = int(split)
+    return result
 
 
 def _synthetic_spec(
@@ -541,6 +557,27 @@ def main() -> int:
             "cross-core movement needed by the requested mode."
         ),
     )
+    parser.add_argument(
+        "--streaming-ptlx-tile",
+        action="store_true",
+        help=(
+            "Emit the first static streaming PT-LX tile bridge from the "
+            "fragment-level descriptor."
+        ),
+    )
+    parser.add_argument(
+        "--source-work-slices",
+        action="append",
+        default=None,
+        help="Streaming source split item like mb:32; repeat for multiple dims.",
+    )
+    parser.add_argument(
+        "--dest-work-slices",
+        action="append",
+        default=None,
+        help="Streaming destination split item like out:8; repeat for multiple dims.",
+    )
+    parser.add_argument("--artifact-max-tiles", type=int, default=1)
     parser.add_argument("--dcg-standalone", default="dcg_standalone")
     args = parser.parse_args()
 
@@ -558,6 +595,63 @@ def main() -> int:
     input_mapping = _core_mapping([d0, d1], d1, args.num_cores)
 
     rows = []
+    if args.streaming_ptlx_tile:
+        source_slices = _parse_work_slices(
+            args.source_work_slices,
+            {"mb": args.num_cores, "out": 1},
+        )
+        dest_slices = _parse_work_slices(
+            args.dest_work_slices,
+            {"mb": 4, "out": max(1, args.num_cores // 4)},
+        )
+        summary = plan_streaming_ptlx_tiles(
+            size=args.size,
+            source_work_slices=source_slices,
+            source_core_mapping=default_core_mapping(source_slices),
+            dest_work_slices=dest_slices,
+            dest_core_mapping=default_core_mapping(dest_slices),
+            sample_limit=args.artifact_max_tiles,
+        )
+        artifact = generate_streaming_ptlx_artifact(
+            f"streaming_ptlx_{args.size}",
+            summary,
+            max_tiles=args.artifact_max_tiles,
+        )
+        payload = generate_streaming_ptlx_tile_bridge_sdsc(
+            f"0_StreamingPTLXTileBridge_{args.size}",
+            artifact,
+        )
+        path = output_dir / f"sdsc_streaming_ptlx_tile_{args.size}.json"
+        _write_json(path, payload)
+        dcg_rc = None
+        dcg_log = ""
+        if args.run_dcg:
+            dcg_rc, dcg_log_path = _run_dcg(
+                path,
+                output_dir / "dcg",
+                args.dcg_standalone,
+            )
+            dcg_log = str(dcg_log_path)
+        row = {
+            "mode": "streaming_ptlx_tile",
+            "op": "StreamingPTLXTileBridge",
+            "size": args.size,
+            "path": str(path),
+            "dcg_rc": dcg_rc,
+            "dcg_log": dcg_log,
+            "source_work_slices": source_slices,
+            "dest_work_slices": dest_slices,
+            "tile_count": summary.total_tiles,
+            "sample_tiles": len(summary.sample_tiles),
+        }
+        rows.append(row)
+        print(
+            f"streaming_ptlx_tile: wrote {path}"
+            + (f" dcg_rc={dcg_rc} dcg_log={dcg_log}" if args.run_dcg else "")
+        )
+        _write_json(output_dir / "summary.json", {"rows": rows})
+        return 0
+
     for mode in modes:
         if args.two_step_lx_restickify:
             payload = _two_step_lx_restickify_payload(
