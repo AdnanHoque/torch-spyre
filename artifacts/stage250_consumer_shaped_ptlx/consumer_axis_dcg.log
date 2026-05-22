@@ -1,0 +1,11 @@
+Reading SuperDsc for file../tmp/stage250-consumer-axis-compile/consumer_axis.json
+Running DCG for DL+Data Op: Node-name:consumer_axis
+Computing transfer function metaData..
+0 --> [ 0 ]
+1 --> [ 0 ]
+2 --> [ 0 ]
+3 --> [ 0 ]
+maxConsumers: 1
+Creating PCFG for DataDsc..
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: op->inpLds->stickDimOrder_ != op->outLds->stickDimOrder_, file /home/adnan-cdx/dt-inductor-mixed/deeptools/dcg/dcg_fe/pcfg_gen/restickifyOp.cpp line 1846

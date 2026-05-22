@@ -1,0 +1,11 @@
+Reading SuperDsc for file../tmp/stage250-consumer-shaped-compile2/consumer_shaped.json
+Running DCG for DL+Data Op: Node-name:consumer_shaped
+Computing transfer function metaData..
+0 --> [ 0 ]
+1 --> [ 0 ]
+2 --> [ 0 ]
+3 --> [ 0 ]
+maxConsumers: 1
+Creating PCFG for DataDsc..
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: false, file /project_src/deeptools/dcg/utils/dcg_common_utils.h line 34
