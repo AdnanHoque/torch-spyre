@@ -39,6 +39,7 @@ from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
     _patch_bridge_endpoint_pieces,
     _patch_consumer_input_lx_map,
     _patch_lx_allocation_by_index,
+    _streaming_value_flow_contract,
     patch_restickify_ptlx_cross_bundle_handoffs,
     patch_restickify_ptlx_mixed_schedules,
     plan_restickify_ptlx_mixed_schedules,
@@ -383,6 +384,59 @@ def test_streaming_ptlx_full_bridge_sdsc_combines_materialized_tiles():
     ]
 
 
+def test_streaming_ptlx_full_bridge_coalesces_single_owner_row_stripes():
+    source = {"mb": 1, "out": 32}
+    dest = {"mb": 32, "out": 1}
+    summary = plan_streaming_ptlx_tiles(
+        size=2048,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=1024,
+        sample_all_tiles=True,
+    )
+    artifact = generate_streaming_ptlx_artifact(
+        "streaming",
+        summary,
+        producer_base=0,
+        consumer_base=512 * 1024,
+        max_tiles=summary.total_tiles,
+    )
+
+    payload = generate_streaming_ptlx_full_bridge_sdsc("full_bridge", artifact)
+    root = payload["full_bridge"]
+    first_gather = next(iter(root["datadscs_"][0].values()))
+    first_restickify = next(iter(root["datadscs_"][1].values()))
+    contract = _streaming_value_flow_contract(
+        bridge_payload=payload,
+        producer_base=0,
+        consumer_base=512 * 1024,
+        expected_tiles=summary.total_tiles,
+    )
+
+    assert root["streamingPTLXFull_"]["coalescing"] == "row-stripe-direct-output"
+    assert root["streamingPTLXFull_"]["tile_count"] == 1024
+    assert root["streamingPTLXFull_"]["stripe_count"] == 32
+    assert root["streamingPTLXFull_"]["datadsc_count"] == 64
+    assert len(root["datadscs_"]) == 64
+    assert first_gather["op"]["name"] == "STCDPOpLx"
+    assert len(first_gather["labeledDs_"][0]["PieceInfo"]) == 32
+    assert first_restickify["op"]["name"] == "ReStickifyOpWithPTLx"
+    assert first_restickify["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"] == [
+        {"type": "lx", "memId": [0], "startAddr": [512 * 1024]}
+    ]
+    assert root["coreIdToDscSchedule"]["0"][:3] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 1],
+    ]
+    assert contract["valid"] is True
+    assert contract["gather_count"] == 32
+    assert contract["scatter_count"] == 0
+    assert contract["direct_consumer_write_count"] == 32
+
+
 def test_streaming_ptlx_full_bridge_combines_with_consumer_schedule():
     source = {"mb": 32, "out": 1}
     dest = {"mb": 4, "out": 8}
@@ -613,16 +667,21 @@ def test_streaming_ptlx_cross_bundle_patch_rewrites_handoff_pair():
     assert patched["kind"] == "ptlx-streaming-cross-bundle-handoff"
     assert patched["value_flow_contract"]["valid"] is True
     assert patched["streaming_summary"]["total_tiles"] == 64
-    bridge_root = next(iter(records[0]["sdscs_json"][1].values()))
-    assert "CrossBundleStreamingReStickifyOpWithPTLx" in next(
-        iter(records[0]["sdscs_json"][1])
+    assert records[0]["sdscs_json"][1] is None
+    bridge_root = next(iter(records[0]["sdscs_json"][0].values()))
+    assert "CrossBundleProducerStreamingReStickifyOpWithPTLx" in next(
+        iter(records[0]["sdscs_json"][0])
     )
     assert bridge_root["streamingPTLXFull_"]["tile_count"] == 64
     assert len(bridge_root["datadscs_"]) == 64 * 3
+    assert bridge_root["dscs_"]
+    assert bridge_root["coreIdToDscSchedule"]["0"][0] == [-1, 0, 0, 0]
     consumer_root = next(iter(records[1]["sdscs_json"][0].values()))
     consumer_dsc = next(iter(consumer_root["dscs_"][0].values()))
     allocate_nodes = [
-        node for node in consumer_dsc["scheduleTree_"] if node["nodeType_"] == "allocate"
+        node
+        for node in consumer_dsc["scheduleTree_"]
+        if node["nodeType_"] == "allocate"
     ]
     assert allocate_nodes[0]["component_"] == "lx"
     assert allocate_nodes[1]["component_"] == "hbm"

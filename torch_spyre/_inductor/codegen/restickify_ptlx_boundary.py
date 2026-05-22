@@ -771,7 +771,14 @@ def _patch_one_cross_bundle_handoff(
             f"failed for SDSC {idx}: {value_flow_contract}"
         )
 
-    left_payloads[idx] = bridge_payload
+    mixed_name = f"{idx}_CrossBundleProducerStreamingReStickifyOpWithPTLx"
+    mixed_payload = _combine_producer_with_ptlx_bridge(
+        mixed_name,
+        producer_payload,
+        bridge_payload,
+    )
+    left_payloads[idx - 1] = mixed_payload
+    left_payloads[idx] = None
     return {
         **row_base,
         **_row(idx, "patched", None),
@@ -789,7 +796,8 @@ def _patch_one_cross_bundle_handoff(
         },
         "streaming_summary": _streaming_summary_audit(summary),
         "value_flow_contract": value_flow_contract,
-        "replacement_sdsc": next(iter(bridge_payload)),
+        "omitted_restickify_index": idx,
+        "replacement_sdsc": mixed_name,
     }
 
 
@@ -1149,6 +1157,7 @@ def _plan_streaming_bridge_storage(
         dest_work_slices=_root_work_slices(restickify_payload),
         dest_core_mapping=_root_core_mapping(restickify_payload),
         sample_limit=_streaming_tile_count(size),
+        sample_all_tiles=True,
     )
     workspace_size = int(summary.tile_buffer_bytes) * 3
     workspace_start = _first_free_lx_range(
@@ -1433,6 +1442,7 @@ def _streaming_value_flow_contract(
     consumer_starts: set[int] = set()
     gather_count = 0
     scatter_count = 0
+    direct_consumer_write_count = 0
     for datadsc in datadscs:
         name, dataop = next(iter(datadsc.items()))
         op_name = str(dataop.get("op", {}).get("name"))
@@ -1452,13 +1462,32 @@ def _streaming_value_flow_contract(
             consumer_starts.update(
                 _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
             )
+        if "direct_output" in str(name):
+            direct_consumer_write_count += 1
+            consumer_starts.update(
+                _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
+            )
 
     has_hbm_restickify = "ReStickifyOpHBM" in op_names
+    full_meta = root.get("streamingPTLXFull_", {}) or {}
+    logical_tile_count = int(full_meta.get("logical_tile_count", expected_tiles))
+    coalescing = full_meta.get("coalescing")
+    if coalescing == "row-stripe-direct-output":
+        stripe_count = int(full_meta.get("stripe_count", 0) or 0)
+        count_contract_valid = (
+            logical_tile_count == int(expected_tiles)
+            and gather_count == stripe_count
+            and direct_consumer_write_count == stripe_count
+            and stripe_count > 0
+        )
+    else:
+        count_contract_valid = (
+            gather_count == int(expected_tiles) and scatter_count == int(expected_tiles)
+        )
     valid = (
         hbm_placements == 0
         and not has_hbm_restickify
-        and gather_count == int(expected_tiles)
-        and scatter_count == int(expected_tiles)
+        and count_contract_valid
         and producer_starts == {int(producer_base)}
         and consumer_starts == {int(consumer_base)}
     )
@@ -1467,9 +1496,12 @@ def _streaming_value_flow_contract(
         "expected_tiles": int(expected_tiles),
         "gather_count": gather_count,
         "scatter_count": scatter_count,
+        "direct_consumer_write_count": direct_consumer_write_count,
         "datadsc_count": len(datadscs),
         "hbm_placements": hbm_placements,
         "has_hbm_restickify": has_hbm_restickify,
+        "coalescing": coalescing,
+        "logical_tile_count": logical_tile_count,
         "producer_input_unique_starts": sorted(producer_starts),
         "consumer_output_unique_starts": sorted(consumer_starts),
     }
@@ -1946,6 +1978,32 @@ def _combine_ptlx_bridge_with_consumer(
     return {name: root}
 
 
+def _combine_producer_with_ptlx_bridge(
+    name: str,
+    producer_payload: dict[str, Any],
+    bridge_payload: dict[str, Any],
+) -> dict[str, Any]:
+    producer_root, _ = _single_payload_dsc(producer_payload)
+    bridge_root = next(iter(bridge_payload.values()))
+    root = deepcopy(producer_root)
+    root["datadscs_"] = deepcopy(bridge_root.get("datadscs_", []) or [])
+    root["coreIdToDscSchedule"] = _dl_schedule_then_bridge_schedule(
+        bridge_root,
+        int(root.get("numCoresUsed_", 32) or 32),
+    )
+    if "streamingPTLXFull_" in bridge_root:
+        root["streamingPTLXFull_"] = deepcopy(bridge_root["streamingPTLXFull_"])
+    dataop_names = {
+        str(next(iter(datadsc.values())).get("op", {}).get("name"))
+        for datadsc in root["datadscs_"]
+        if next(iter(datadsc.values())).get("op", {}).get("name") is not None
+    }
+    root["opFuncsUsed_"] = sorted(
+        set(root.get("opFuncsUsed_", []) or []) | dataop_names
+    )
+    return {name: root}
+
+
 def _bridge_schedule_then_dl_schedule(
     bridge_root: dict[str, Any],
     consumer_num_cores: int,
@@ -1975,6 +2033,23 @@ def _bridge_schedule_then_dl_schedule(
         else:
             steps.append([-1, 0, 0, 0])
         schedule[str(core_id)] = steps
+    return schedule
+
+
+def _dl_schedule_then_bridge_schedule(
+    bridge_root: dict[str, Any],
+    producer_num_cores: int,
+) -> dict[str, list[list[int]]]:
+    bridge_schedule = bridge_root.get("coreIdToDscSchedule") or {}
+    num_cores = max(
+        int(producer_num_cores),
+        max((int(core) for core in bridge_schedule.keys()), default=-1) + 1,
+    )
+    schedule: dict[str, list[list[int]]] = {}
+    for core in range(num_cores):
+        entries = [[-1, 0, 0, 0]]
+        entries.extend(deepcopy(bridge_schedule.get(str(core), [])))
+        schedule[str(core)] = entries
     return schedule
 
 

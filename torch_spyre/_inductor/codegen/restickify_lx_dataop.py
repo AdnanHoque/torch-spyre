@@ -356,6 +356,13 @@ def generate_streaming_ptlx_full_bridge_sdsc(
     if not tiles:
         raise ValueError("streaming descriptor has no materialized tiles")
 
+    striped_payload = _generate_streaming_ptlx_row_stripe_bridge_sdsc(
+        name,
+        descriptor,
+    )
+    if striped_payload is not None:
+        return striped_payload
+
     roots: list[dict[str, Any]] = []
     all_datadscs: list[dict[str, Any]] = []
     combined_schedule: dict[str, list[list[int]]] = {}
@@ -395,6 +402,185 @@ def generate_streaming_ptlx_full_bridge_sdsc(
         "fallback": "ReStickifyOpHBM",
     }
     return {name: combined}
+
+
+def _generate_streaming_ptlx_row_stripe_bridge_sdsc(
+    name: str,
+    descriptor: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Coalesce simple one-owner tiles into row-stripe bridge data ops.
+
+    The 2048 high-signal shape decomposes into 1024 64x64 logical tiles, but
+    every tile has exactly one producer owner and one consumer owner. Emitting a
+    gather/restickify/scatter triplet per tile is correct but too instruction
+    heavy for DCC. For this simple case, gather a whole destination row stripe
+    into the bridge core and have ``ReStickifyOpWithPTLx`` write directly to the
+    consumer LX endpoint. More fragmented shapes keep the conservative per-tile
+    lowering above.
+    """
+
+    tiles = list(descriptor.get("tiles") or [])
+    if len(tiles) != _as_int(descriptor.get("total_tiles", len(tiles))):
+        return None
+    if not all(_simple_one_owner_tile(tile) for tile in tiles):
+        return None
+
+    groups = _row_stripe_groups(tiles)
+    if groups is None:
+        return None
+
+    skeleton = generate_streaming_ptlx_tile_bridge_sdsc(
+        f"{name}_row_stripe_skeleton",
+        {name: dict(descriptor)},
+        tile_index=0,
+    )
+    combined = copy.deepcopy(next(iter(skeleton.values())))
+    datadscs: list[dict[str, Any]] = []
+    stage_core_ids: list[list[int]] = []
+
+    for stripe_idx, group in enumerate(groups):
+        first = group[0]
+        gather_stage, _restickify_stage, scatter_stage = first["stages"]
+        bridge_core = _as_int(first["bridge_core"])
+        source_fragments = [
+            fragment
+            for tile in group
+            for fragment in tile["stages"][0].get("fragments", []) or []
+        ]
+        dest_fragments = [
+            fragment
+            for tile in group
+            for fragment in tile["stages"][2].get("fragments", []) or []
+        ]
+        gathered_fragment = _coalesced_tile_fragment(
+            source_fragments,
+            core=bridge_core,
+        )
+        output_fragment = _coalesced_tile_fragment(
+            dest_fragments,
+            core=bridge_core,
+        )
+        gather_core_ids = _fragment_core_ids(source_fragments, bridge_core)
+        restickify_core_ids = [bridge_core]
+        gather_idx = len(datadscs)
+        datadscs.append(
+            {
+                f"{gather_idx}_STCDPOpLx_gather_row_stripe{stripe_idx}": _tile_dataop(
+                    "STCDPOpLx",
+                    core_ids=gather_core_ids,
+                    input_layout=("mb_", "out_"),
+                    input_stick=("out_",),
+                    output_layout=("mb_", "out_"),
+                    output_stick=("out_",),
+                    input_base=_as_int(gather_stage["input_base"]),
+                    output_base=_as_int(gather_stage["output_base"]),
+                    input_fragments=source_fragments,
+                    output_fragments=[gathered_fragment],
+                )
+            }
+        )
+        stage_core_ids.append(gather_core_ids)
+        restickify_idx = len(datadscs)
+        restickify_name = (
+            f"{restickify_idx}_ReStickifyOpWithPTLx_"
+            f"row_stripe{stripe_idx}_direct_output"
+        )
+        datadscs.append(
+            {
+                restickify_name: _tile_dataop(
+                    "ReStickifyOpWithPTLx",
+                    core_ids=restickify_core_ids,
+                    input_layout=("mb_", "out_"),
+                    input_stick=("out_",),
+                    output_layout=("out_", "mb_"),
+                    output_stick=("mb_",),
+                    input_base=_as_int(gather_stage["output_base"]),
+                    output_base=_as_int(scatter_stage["output_base"]),
+                    input_fragments=[gathered_fragment],
+                    output_fragments=[output_fragment],
+                )
+            }
+        )
+        stage_core_ids.append(restickify_core_ids)
+
+    num_cores = max(
+        _as_int(descriptor.get("source_core_count", 1)),
+        _as_int(descriptor.get("dest_core_count", 1)),
+        max((max(core_ids) for core_ids in stage_core_ids if core_ids), default=-1) + 1,
+    )
+    combined["datadscs_"] = datadscs
+    combined["numCoresUsed_"] = num_cores
+    combined["coreIdToDscSchedule"] = _sparse_dataop_schedule(
+        num_cores,
+        stage_core_ids,
+    )
+    combined["opFuncsUsed_"] = [
+        next(iter(datadsc.values()))["op"]["name"] for datadsc in datadscs
+    ]
+    combined["streamingPTLXTile_"] = {}
+    combined["streamingPTLXFull_"] = {
+        "status": "static-codegen-only",
+        "coalescing": "row-stripe-direct-output",
+        "tile_count": len(tiles),
+        "logical_tile_count": len(tiles),
+        "stripe_count": len(groups),
+        "datadsc_count": len(datadscs),
+        "fallback": "ReStickifyOpHBM",
+    }
+    return {name: combined}
+
+
+def _simple_one_owner_tile(tile: Mapping[str, Any]) -> bool:
+    if _as_int(tile.get("fan_in", 0)) != 1 or _as_int(tile.get("fan_out", 0)) != 1:
+        return False
+    stages = tile.get("stages") or []
+    if len(stages) != 3:
+        return False
+    source_fragments = stages[0].get("fragments", []) or []
+    dest_fragments = stages[2].get("fragments", []) or []
+    if len(source_fragments) != 1 or len(dest_fragments) != 1:
+        return False
+    return _as_int(dest_fragments[0]["core"]) == _as_int(tile.get("bridge_core", -1))
+
+
+def _row_stripe_groups(
+    tiles: Sequence[Mapping[str, Any]],
+) -> list[list[Mapping[str, Any]]] | None:
+    by_row_and_core: dict[tuple[int, int], list[Mapping[str, Any]]] = {}
+    for tile in tiles:
+        key = (_as_int(tile["tile_row"]), _as_int(tile["bridge_core"]))
+        by_row_and_core.setdefault(key, []).append(tile)
+
+    groups: list[list[Mapping[str, Any]]] = []
+    for key in sorted(by_row_and_core):
+        group = sorted(by_row_and_core[key], key=lambda tile: _as_int(tile["tile_col"]))
+        if not _is_contiguous_row_stripe(group):
+            return None
+        groups.append(group)
+    return groups
+
+
+def _is_contiguous_row_stripe(group: Sequence[Mapping[str, Any]]) -> bool:
+    if not group:
+        return False
+    dest_fragments = [
+        tile["stages"][2]["fragments"][0]
+        for tile in group
+    ]
+    row_start = _as_int(dest_fragments[0]["row_start"])
+    row_end = _as_int(dest_fragments[0]["row_end"])
+    if any(
+        _as_int(fragment["row_start"]) != row_start
+        or _as_int(fragment["row_end"]) != row_end
+        for fragment in dest_fragments
+    ):
+        return False
+    expected_col = _as_int(dest_fragments[0]["col_start"])
+    for fragment in dest_fragments:
+        if _as_int(fragment["col_start"]) != expected_col:
+            return False
+        expected_col = _as_int(fragment["col_end"])
+    return True
 
 
 def generate_ptlx_restickify_bridge_sdsc(

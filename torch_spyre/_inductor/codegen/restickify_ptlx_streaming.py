@@ -330,6 +330,7 @@ def plan_streaming_ptlx_tiles(
     row_dim: str = "mb",
     col_dim: str = "out",
     sample_limit: int = 8,
+    sample_all_tiles: bool = False,
 ) -> StreamingPTLXSummary:
     """Return a tiled gather/restickify/scatter plan summary.
 
@@ -448,7 +449,14 @@ def plan_streaming_ptlx_tiles(
             if fan_out > 1:
                 scatter_tiles += 1
 
-            if _should_sample_tile(byte_hops, fan_in, fan_out, sample_tiles, sample_limit):
+            if _should_sample_tile(
+                byte_hops,
+                fan_in,
+                fan_out,
+                sample_tiles,
+                sample_limit,
+                sample_all_tiles=sample_all_tiles,
+            ):
                 sample_tiles.append(
                     StreamingTileSample(
                         tile_row=tile_row,
@@ -572,9 +580,13 @@ def _should_sample_tile(
     fan_out: int,
     samples: list[StreamingTileSample],
     sample_limit: int,
+    *,
+    sample_all_tiles: bool = False,
 ) -> bool:
     if len(samples) >= sample_limit:
         return False
+    if sample_all_tiles:
+        return True
     return byte_hops != 0 or fan_in > 1 or fan_out > 1 or not samples
 
 
