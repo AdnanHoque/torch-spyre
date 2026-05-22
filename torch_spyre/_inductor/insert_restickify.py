@@ -14,14 +14,16 @@
 
 import logging
 import os
-from collections import defaultdict
+from collections import Counter, defaultdict
 
+import sympy
 import torch
 
 from .ir import FixedTiledLayout
 from .logging_utils import get_inductor_logger
 from .pass_utils import host_coordinates, device_coordinates
 from .pass_utils import compute_restickify_target_layout
+from . import config
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.ir import (
     ComputedBuffer,
@@ -54,7 +56,7 @@ def _fixed_tiled(layout: FixedLayout, stl: SpyreTensorLayout) -> FixedTiledLayou
 
 def _record_restickify(
     op: Operation,
-    dep_name: str,
+    dep: MemoryDep,
     target_layout: FixedTiledLayout,
     restickify_plan: dict,
 ) -> None:
@@ -64,7 +66,7 @@ def _record_restickify(
     finalize_layouts and executed later by insert_restickify.
     """
     restickify_plan[op.get_name()].append(
-        {"arg_name": dep_name, "target_layout": target_layout}
+        {"arg_name": dep.name, "dep_index": dep.index, "target_layout": target_layout}
     )
 
 
@@ -74,12 +76,33 @@ class NameSwapHandler(WrapperHandler):
     nodes upstream that change the input buffers.
     """
 
-    def __init__(self, inner, name_map: dict[str, str]):
+    def __init__(self, inner, name_map: dict[str, list[dict]]):
         super().__init__(inner)
         self._name_map = name_map
 
     def load(self, name, index):
-        return super().load(self._name_map.get(name, name), index)
+        rules = self._name_map.get(name)
+        if not rules:
+            return super().load(name, index)
+        for rule in rules:
+            dep_index = rule.get("dep_index")
+            if dep_index is not None and _same_index(index, dep_index):
+                return super().load(rule["new_name"], index)
+        non_strict_rules = [
+            rule for rule in rules if not rule.get("strict_use_match", False)
+        ]
+        if non_strict_rules:
+            return super().load(non_strict_rules[-1]["new_name"], index)
+        return super().load(name, index)
+
+
+def _same_index(lhs, rhs) -> bool:
+    if lhs == rhs:
+        return True
+    try:
+        return bool(sympy.simplify(lhs - rhs) == 0)
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _create_restickify_node(
@@ -165,7 +188,10 @@ def insert_restickify_on_node_inputs(
     to read the new buffer names, and reconstruct the consumer ComputedBuffer to
     invalidate its sizes cache.
     """
-    name_map = {}
+    name_map: dict[str, list[dict]] = defaultdict(list)
+    read_counts = Counter(
+        dep.name for dep in op.get_read_writes().reads if isinstance(dep, MemoryDep)
+    )
     try:
         op_index = operations.index(op)
     except ValueError:
@@ -175,7 +201,20 @@ def insert_restickify_on_node_inputs(
 
     for restick_arg_info in resticks_needed:
         old_name, restick_buff = _create_restickify_node(restick_arg_info, op)
-        name_map[old_name] = restick_buff.get_name()
+        name_map[old_name].append(
+            {
+                "new_name": restick_buff.get_name(),
+                "dep_index": (
+                    restick_arg_info.get("dep_index")
+                    if config.restickify_use_specific_insert
+                    else None
+                ),
+                "strict_use_match": (
+                    config.restickify_use_specific_insert
+                    and read_counts[old_name] > 1
+                ),
+            }
+        )
 
         # lower_restickify calls pw.realize() which appends restick_buff to operations.
         # Move it to just before the consumer op to preserve topological order.
@@ -294,7 +333,7 @@ def finalize_layouts(operations: list) -> None:
                 f"Injecting restickify on {op.get_name()} input {edge.dep.name}: "
                 f"{list(in_stl.stride_map)} -> {list(target_stl.stride_map)}"
             )
-            _record_restickify(op, edge.dep.name, restick_target, plan)
+            _record_restickify(op, edge.dep, restick_target, plan)
 
     # Handle mutation ops: check if their inputs need restickifying to match target buffer's stick.
     for op in operations:
@@ -335,7 +374,7 @@ def finalize_layouts(operations: list) -> None:
                 f"Injecting restickify on {op.get_name()} input {dep.name}: "
                 f"{list(in_stl.stride_map)} -> {list(target_stl.stride_map)}"
             )
-            _record_restickify(op, dep.name, restick_target, plan)
+            _record_restickify(op, dep, restick_target, plan)
 
     V.graph.restickify_plan = plan
     if logger.isEnabledFor(logging.DEBUG):

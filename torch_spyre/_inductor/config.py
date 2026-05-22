@@ -147,6 +147,15 @@ restickify_ptlx_force_env_endpoints: bool = (
     os.environ.get("SPYRE_RESTICKIFY_PTLX_FORCE_ENV_ENDPOINTS", "0") == "1"
 )
 
+# Default-off restickify insertion experiment.  The stock insertion rewrite maps
+# by buffer name, so if one consumer reads the same source through multiple
+# logical views, all loads are redirected to the restickified buffer.  This
+# prototype carries the MemoryDep index through the plan and only redirects the
+# matching logical use when a buffer appears more than once in a consumer.
+restickify_use_specific_insert: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_USE_SPECIFIC_INSERT", "0") == "1"
+)
+
 # Default-off diagnostic e2e lowering prototype for the Stage42 DDL bridge.
 # When enabled, a small, compile-proven subset of ReStickifyOpHBM SDSCs may be
 # emitted in the compact restickify DDL input form instead of the normal HBM
