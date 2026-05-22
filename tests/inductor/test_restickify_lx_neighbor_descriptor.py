@@ -711,6 +711,7 @@ def test_maybe_emit_streaming_bridge_candidate_sidecar(tmp_path, monkeypatch):
     assert candidate["bundle_mlir_unchanged"] is True
     assert candidate["executable_in_bundle"] is False
     assert candidate["fallback"] == "ReStickifyOpHBM"
+    assert candidate["bridge_lowering"] == "same-layout-lx-ownership-remap"
     assert candidate["size"] == 512
     assert candidate["total_tiles"] == 64
     assert candidate["tile_records_materialized"] == 64
@@ -857,6 +858,7 @@ def test_streaming_bridge_does_not_treat_coordinate_change_as_same_layout_remap(
     candidate = descriptor["streaming_bridge_candidates"][0]
     assert candidate["status"] == "emitted"
     assert candidate["bridge_kind"] == "direct-ptlx-layout-transform"
+    assert candidate["bridge_lowering"] == "direct-ptlx-diagnostic"
     assert candidate["direction"] == "output-to-kernel"
     assert candidate["bridge_endpoint_contract_valid"] is True
     assert candidate["production_valid"] is False
@@ -879,3 +881,115 @@ def test_streaming_bridge_does_not_treat_coordinate_change_as_same_layout_remap(
     assert candidate["bridge_metadata"]["coalescing"] == "direct-64x64-tiles"
     assert candidate["bridge_metadata"]["direction"] == "output-to-kernel"
     assert candidate["bridge_metadata"]["semantic_transform_certified"] is False
+
+
+def test_streaming_bridge_uses_three_stage_for_kernel_to_output_transform(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(config, "restickify_lx_neighbor_descriptor", True)
+    monkeypatch.setattr(config, "restickify_lx_neighbor_streaming_bridge", True)
+    specs = _candidate_specs()
+    c0 = Symbol("c0")
+    c1 = Symbol("c1")
+    d0 = Symbol("d0")
+    d1 = Symbol("d1")
+    for spec in specs:
+        for arg in spec.args:
+            arg.device_size = [512, 512]
+    specs[0].args[-1].device_coordinates = [c0, c1]
+    specs[1].args[0].device_coordinates = [d1, d0]
+    specs[1].args[-1].device_coordinates = [d0, d1]
+    specs[2].args[0].device_coordinates = [c1, c0]
+    producer_primary = {
+        "INPUT": {
+            "layoutDimOrder_": ["mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    destination_primary = {
+        "INPUT": {
+            "layoutDimOrder_": ["out", "mb"],
+            "stickDimOrder_": ["mb"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["out", "mb"],
+            "stickDimOrder_": ["mb"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["out", "mb"],
+            "stickDimOrder_": ["mb"],
+            "stickSize_": [64],
+        },
+    }
+    producer_mapping = {str(core): {"mb": core, "out": 0} for core in range(32)}
+    destination_mapping = {
+        str(core): {"mb": core % 4, "out": core // 4} for core in range(32)
+    }
+    payloads = [
+        _sdsc_payload(
+            "0_add",
+            "add",
+            num_work_slices={"mb": 32, "out": 1},
+            core_mapping=producer_mapping,
+            primary_ds_info=producer_primary,
+        ),
+        _sdsc_payload(
+            "1_ReStickifyOpHBM",
+            "ReStickifyOpHBM",
+            num_work_slices={"mb": 4, "out": 8},
+            core_mapping=destination_mapping,
+            primary_ds_info={
+                **producer_primary,
+                "OUTPUT": destination_primary["OUTPUT"],
+                "KERNEL": destination_primary["KERNEL"],
+            },
+            input_labels=["Tensor0-idx0"],
+            output_labels=["Tensor1-idx1"],
+        ),
+        _sdsc_payload(
+            "2_add",
+            "add",
+            num_work_slices={"mb": 4, "out": 8},
+            core_mapping=destination_mapping,
+            primary_ds_info=destination_primary,
+        ),
+    ]
+
+    descriptor = maybe_emit_lx_neighbor_descriptor(
+        "sdsc_fused_add",
+        str(tmp_path),
+        _files(),
+        specs,
+        sdsc_payloads=payloads,
+    )
+
+    assert descriptor is not None
+    candidate = descriptor["streaming_bridge_candidates"][0]
+    assert candidate["status"] == "emitted"
+    assert candidate["bridge_kind"] == "direct-ptlx-layout-transform"
+    assert candidate["bridge_lowering"] == "three-stage-gather-transform-scatter"
+    assert candidate["direction"] == "kernel-to-output"
+    assert candidate["bridge_endpoint_contract_valid"] is True
+    assert candidate["production_valid"] is False
+    assert candidate["production_blocker"] == (
+        "three-stage-ptlx-lacks-value-correct-transform-certificate"
+    )
+    assert set(candidate["op_funcs_used"]) == {"STCDPOpLx", "ReStickifyOpWithPTLx"}
+    assert candidate["production_contract"]["tile_contract"][
+        "all_tiles_materialized"
+    ] is True
+    assert candidate["bridge_metadata"]["fallback"] == "ReStickifyOpHBM"

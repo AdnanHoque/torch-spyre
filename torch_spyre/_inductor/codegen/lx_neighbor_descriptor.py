@@ -41,6 +41,7 @@ from torch_spyre._inductor.restickify_ring import (
 from .restickify_lx_dataop import (
     generate_streaming_lx_remap_full_bridge_sdsc,
     generate_streaming_ptlx_direct_full_bridge_sdsc,
+    generate_streaming_ptlx_full_bridge_sdsc,
 )
 from .restickify_ptlx_streaming import (
     generate_streaming_ptlx_artifact,
@@ -297,6 +298,7 @@ def _streaming_bridge_candidate(
         bridge_kind = _select_streaming_bridge_kind(edge, streaming)
         direction = _restickify_direction(edge)
         if bridge_kind == "same-layout-lx-ownership-remap":
+            bridge_lowering = "same-layout-lx-ownership-remap"
             payload = generate_streaming_lx_remap_full_bridge_sdsc(
                 f"{idx}_LXNeighborStreamingSTCDPOpLxRemap",
                 artifact,
@@ -311,7 +313,14 @@ def _streaming_bridge_candidate(
                     )
                 ),
             )
+        elif direction == "kernel-to-output":
+            bridge_lowering = "three-stage-gather-transform-scatter"
+            payload = generate_streaming_ptlx_full_bridge_sdsc(
+                f"{idx}_LXNeighborStreamingThreeStageReStickifyOpWithPTLx",
+                artifact,
+            )
         else:
+            bridge_lowering = "direct-ptlx-diagnostic"
             payload = generate_streaming_ptlx_direct_full_bridge_sdsc(
                 f"{idx}_LXNeighborStreamingReStickifyOpWithPTLx",
                 artifact,
@@ -338,6 +347,7 @@ def _streaming_bridge_candidate(
         bridge_kind=bridge_kind,
         bridge_metadata=bridge_metadata,
         bridge_endpoint_contract=bridge_endpoint_contract,
+        bridge_lowering=bridge_lowering,
         streaming=streaming,
         summary=summary,
         materialized_tile_count=len(summary.sample_tiles),
@@ -349,6 +359,7 @@ def _streaming_bridge_candidate(
         "executable_in_bundle": False,
         "bundle_mlir_unchanged": True,
         "bridge_kind": bridge_kind,
+        "bridge_lowering": bridge_lowering,
         "direction": direction,
         "source_edge_id": edge.get("edge_id"),
         "size": size,
@@ -444,6 +455,7 @@ def _bridge_production_contract(
     bridge_kind: str,
     bridge_metadata: dict[str, Any],
     bridge_endpoint_contract: dict[str, Any],
+    bridge_lowering: str,
     streaming: dict[str, Any],
     summary: Any,
     materialized_tile_count: int,
@@ -462,6 +474,7 @@ def _bridge_production_contract(
     common = {
         "contract_version": 1,
         "bridge_kind": bridge_kind,
+        "bridge_lowering": bridge_lowering,
         "endpoint_contract_valid": endpoint_valid,
         "semantic_transform_certified": metadata_certified,
         "bounded_workspace_ok": bounded_workspace_ok,
@@ -491,10 +504,24 @@ def _bridge_production_contract(
             ],
         }
 
+    if bridge_lowering == "three-stage-gather-transform-scatter":
+        blocker = "three-stage-ptlx-lacks-value-correct-transform-certificate"
+        why = (
+            "the sidecar now has the required gather -> local transform -> "
+            "consumer-write shape, but the local PT/interslice tile transform "
+            "still needs a value-correct certificate before replacing HBM"
+        )
+    else:
+        blocker = "missing-three-stage-remote-fragment-ptlx-lowering"
+        why = (
+            "direct ReStickifyOpWithPTLx tile descriptors can describe LX "
+            "endpoints, but they do not prove the producer-fragment coordinate "
+            "remap or the local PT/interslice value transform"
+        )
     return {
         **common,
         "production_valid": False,
-        "blocker": "missing-three-stage-remote-fragment-ptlx-lowering",
+        "blocker": blocker,
         "required_primitive": "remote-fragment-aware-ptlx-coordinate-remap",
         "required_lowering": [
             "STCDPOpLx/InputFetchNeighbor gather producer LX fragments into "
@@ -503,11 +530,7 @@ def _bridge_production_contract(
             "STCDPOpLx/InputFetchNeighbor writes or scatters the consumer-owned "
             "LX tile",
         ],
-        "why_sidecar_is_not_enough": (
-            "direct ReStickifyOpWithPTLx tile descriptors can describe LX "
-            "endpoints, but they do not prove the producer-fragment coordinate "
-            "remap or the local PT/interslice value transform"
-        ),
+        "why_sidecar_is_not_enough": why,
     }
 
 
