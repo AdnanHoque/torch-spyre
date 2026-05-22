@@ -1,0 +1,292 @@
+{
+  "mb_in_full": {
+    "sdscFoldProps_": [
+      {
+        "factor_": 1,
+        "label_": "time"
+      }
+    ],
+    "sdscFolds_": {
+      "dim_prop_func": [
+        {
+          "Affine": {
+            "alpha_": 1,
+            "beta_": 0
+          }
+        }
+      ],
+      "dim_prop_attr": [
+        {
+          "factor_": 1,
+          "label_": "time"
+        }
+      ],
+      "data_": {
+        "[0]": "0"
+      }
+    },
+    "coreFoldProp_": {
+      "factor_": 1,
+      "label_": "core"
+    },
+    "coreletFoldProp_": {
+      "factor_": 1,
+      "label_": "corelet"
+    },
+    "numCoresUsed_": 1,
+    "unpadN_": {
+      "name_": "unpadn",
+      "out_": -1,
+      "mb_": -1,
+      "in_": -1
+    },
+    "N_": {
+      "name_": "n",
+      "out_": 64,
+      "mb_": 64,
+      "in_": 64
+    },
+    "coreIdToDsc_": {},
+    "numWkSlicesPerDim_": {},
+    "coreIdToWkSlice_": {},
+    "opFuncsUsed_": [
+      "ReStickifyOpWithPTLx"
+    ],
+    "ldsShareInfo_": [],
+    "prodConsList": {},
+    "coreIdToDscSchedule": {
+      "0": [
+        [
+          0,
+          -1,
+          0,
+          0
+        ]
+      ]
+    },
+    "pcfg_": {},
+    "target_": "senulator",
+    "dscs_": [],
+    "datadscs_": [
+      {
+        "0_ReStickifyOpWithPTLx_mb_in_full": {
+          "coreIdsUsed_": [
+            0
+          ],
+          "dimPool_": [
+            "out_",
+            "mb_",
+            "in_"
+          ],
+          "outDimTodimRelation_": [],
+          "primaryDs_": [
+            {
+              "name_": "dataIN",
+              "dimNames": [
+                "out_",
+                "mb_",
+                "in_"
+              ]
+            },
+            {
+              "name_": "dataOUT",
+              "dimNames": [
+                "mb_",
+                "in_"
+              ]
+            }
+          ],
+          "labeledDs_": [
+            {
+              "ldsName_": "dataIN_L0",
+              "pdsName_": "dataIN",
+              "wordLength": 2,
+              "dataformat": "SEN169_FP16",
+              "isExternal_": 0,
+              "segment_": "output",
+              "layoutDimOrder_": [
+                "out_",
+                "mb_",
+                "in_"
+              ],
+              "stickDimOrder_": [
+                "out_"
+              ],
+              "dimToLayoutSize_": {
+                "out_": 64,
+                "mb_": 64,
+                "in_": 64
+              },
+              "dimToStickSize_": {
+                "out_": 64
+              },
+              "validGap_": {
+                "out_": [
+                  [
+                    64,
+                    0
+                  ]
+                ],
+                "mb_": [
+                  [
+                    64,
+                    0
+                  ]
+                ],
+                "in_": [
+                  [
+                    64,
+                    0
+                  ]
+                ]
+              },
+              "totElements": -1,
+              "PieceInfo": [
+                {
+                  "key_": "p1",
+                  "dimToStartCordinate": {
+                    "out_": 0,
+                    "mb_": 0,
+                    "in_": 0
+                  },
+                  "dimToSize_": {
+                    "out_": 64,
+                    "mb_": 64,
+                    "in_": 64
+                  },
+                  "validGap_": {
+                    "out_": [
+                      [
+                        64,
+                        0
+                      ]
+                    ],
+                    "mb_": [
+                      [
+                        64,
+                        0
+                      ]
+                    ],
+                    "in_": [
+                      [
+                        64,
+                        0
+                      ]
+                    ]
+                  },
+                  "PlacementInfo": [
+                    {
+                      "type": "lx",
+                      "memId": [
+                        0
+                      ],
+                      "startAddr": [
+                        0
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "hbmSize_": 0,
+              "hbmStartAddress_": 0,
+              "lxSize_": 2147483647,
+              "lxStartAddress_": {}
+            },
+            {
+              "ldsName_": "dataOUT_L0",
+              "pdsName_": "dataOUT",
+              "wordLength": 2,
+              "dataformat": "SEN169_FP16",
+              "isExternal_": 0,
+              "segment_": "output",
+              "layoutDimOrder_": [
+                "mb_",
+                "in_"
+              ],
+              "stickDimOrder_": [
+                "in_"
+              ],
+              "dimToLayoutSize_": {
+                "mb_": 64,
+                "in_": 64
+              },
+              "dimToStickSize_": {
+                "in_": 64
+              },
+              "validGap_": {
+                "mb_": [
+                  [
+                    64,
+                    0
+                  ]
+                ],
+                "in_": [
+                  [
+                    64,
+                    0
+                  ]
+                ]
+              },
+              "totElements": -1,
+              "PieceInfo": [
+                {
+                  "key_": "p1",
+                  "dimToStartCordinate": {
+                    "mb_": 0,
+                    "in_": 0
+                  },
+                  "dimToSize_": {
+                    "mb_": 64,
+                    "in_": 64
+                  },
+                  "validGap_": {
+                    "mb_": [
+                      [
+                        64,
+                        0
+                      ]
+                    ],
+                    "in_": [
+                      [
+                        64,
+                        0
+                      ]
+                    ]
+                  },
+                  "PlacementInfo": [
+                    {
+                      "type": "lx",
+                      "memId": [
+                        0
+                      ],
+                      "startAddr": [
+                        1048576
+                      ]
+                    }
+                  ]
+                }
+              ],
+              "hbmSize_": 0,
+              "hbmStartAddress_": 0,
+              "lxSize_": 2147483647,
+              "lxStartAddress_": {}
+            }
+          ],
+          "op": {
+            "name": "ReStickifyOpWithPTLx",
+            "numClToUse": 1,
+            "defaultClId": 0,
+            "workSplitDim": "null_ptr",
+            "cl0ToLxOffsetLU": 0,
+            "cl0ToLxOffsetSU": 0,
+            "useARF": 1,
+            "doInPlace": 0
+          }
+        }
+      }
+    ],
+    "dimToSymbolMappingOpcodeCorrection_": {},
+    "inputSymbolsAndTags_": {},
+    "symbolDefinitions_": {}
+  }
+}
