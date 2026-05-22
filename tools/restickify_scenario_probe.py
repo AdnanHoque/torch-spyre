@@ -990,7 +990,10 @@ def _tensor_to_cpu(value: Any) -> Any:
 
 
 def _sync() -> None:
-    strict = os.environ.get("SPYRE_PROBE_STRICT_SYNC", "0") == "1"
+    strict = (
+        os.environ.get("SPYRE_PROBE_STRICT_SYNC", "0") == "1"
+        or os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_SYNC_EACH", "0") == "1"
+    )
     accelerator = getattr(torch, "accelerator", None)
     if accelerator is not None and hasattr(accelerator, "synchronize"):
         try:
@@ -1872,6 +1875,13 @@ def _generate_and_package_lx_dataop(
     *,
     split_root: Path,
 ) -> dict[str, Any]:
+    mode = os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_DATAOP_MODE", "stage3b")
+    if mode == "lx-neighbor-direct-ptlx":
+        return _package_lx_neighbor_direct_ptlx_sidecar(
+            code_dir,
+            split_root=split_root,
+        )
+
     gen_dir = split_root / "dataop_gen"
     script = Path(__file__).with_name("restickify_address_preserving_dataop_probe.py")
     proc = subprocess.run(
@@ -1883,7 +1893,7 @@ def _generate_and_package_lx_dataop(
             "--output-dir",
             str(gen_dir),
             "--mode",
-            os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_DATAOP_MODE", "stage3b"),
+            mode,
             "--no-run-dataop-standalone",
         ],
         cwd=Path.cwd(),
@@ -2004,6 +2014,205 @@ def _generate_and_package_lx_dataop(
         "dataop_init": str(init_candidates[0]),
         "dataop_senprog": str(senprog_candidates[0]) if senprog_candidates else "",
     }
+
+
+def _package_lx_neighbor_direct_ptlx_sidecar(
+    code_dir: Path,
+    *,
+    split_root: Path,
+) -> dict[str, Any]:
+    sidecar = _select_lx_neighbor_direct_ptlx_sidecar(code_dir)
+    sidecar_payload = _read_json_file(sidecar)
+    original_sidecar_root = next(iter(sidecar_payload.values()))
+    original_start_summary = _direct_ptlx_sidecar_lx_starts(original_sidecar_root)
+    expected_producer_base = int(
+        os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_PRODUCER_BASE", "16384")
+    )
+    expected_consumer_base = int(
+        os.environ.get("SPYRE_RESTICKIFY_LX_SPLIT_CONSUMER_BASE", "8192")
+    )
+    sidecar_payload = copy.deepcopy(sidecar_payload)
+    sidecar_root = next(iter(sidecar_payload.values()))
+    _patch_direct_ptlx_sidecar_lx_starts(
+        sidecar_root,
+        producer_delta=expected_producer_base
+        - int(original_start_summary["producer_base"]),
+        consumer_delta=expected_consumer_base
+        - int(original_start_summary["consumer_starts"][0]),
+    )
+    patched_sidecar = split_root / "dataop_sidecar_patched.json"
+    _write_json_file(patched_sidecar, sidecar_payload)
+    start_summary = _direct_ptlx_sidecar_lx_starts(sidecar_root)
+    if start_summary["producer_base"] != expected_producer_base:
+        raise RuntimeError(
+            "direct PT-LX sidecar producer base does not match split producer "
+            f"LX base: sidecar={start_summary['producer_base']} "
+            f"split={expected_producer_base}"
+        )
+    if start_summary["consumer_starts"] != [expected_consumer_base]:
+        raise RuntimeError(
+            "direct PT-LX sidecar consumer base does not match split consumer "
+            f"LX base: sidecar={start_summary['consumer_starts']} "
+            f"split={expected_consumer_base}"
+        )
+
+    exporter = os.environ.get(
+        "SPYRE_RESTICKIFY_DEEPRT_DATAOP_EXPORTER",
+        "/tmp/stage65-deeprt-dataop-probe",
+    )
+    export_dir = split_root / "dataop_export"
+    proc = subprocess.run(
+        [exporter, str(patched_sidecar), str(export_dir), "sentient"],
+        cwd=split_root,
+        env=os.environ.copy(),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    (split_root / "dataop_export.stdout.txt").write_text(proc.stdout, encoding="utf-8")
+    (split_root / "dataop_export.stderr.txt").write_text(proc.stderr, encoding="utf-8")
+
+    init_candidates = sorted((export_dir / "execute").glob("*/init.txt"))
+    senprog_candidates = sorted((export_dir / "execute").glob("*/senprog.txt"))
+    if not init_candidates:
+        raise RuntimeError(
+            "direct PT-LX sidecar export did not produce execute/*/init.txt; "
+            f"return code {proc.returncode}:\n"
+            + proc.stdout[-2000:]
+            + proc.stderr[-4000:]
+        )
+
+    launch_dir = split_root / "dataop_launch"
+    launch_name = launch_dir.name
+    init_target = (
+        launch_dir
+        / "loadprogram_to_device"
+        / f"{launch_name}-SenProgSend"
+        / "init.txt"
+    )
+    init_target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(init_candidates[0], init_target)
+    (launch_dir / "bundle.mlir").write_text(
+        "module {\n"
+        "\tfunc.func @sdsc_bundle() {\n"
+        "\t\tsdscbundle.sdsc_execute () {sdsc_filename=\"sdsc_0_lx_neighbor_direct_ptlx.json\"}\n"
+        "\t\treturn\n"
+        "\t}\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    return {
+        "dataop_generation_summary": "",
+        "dataop_contract_source": "lx-neighbor-direct-ptlx-sidecar",
+        "dataop_materialization_kind": "direct-ptlx-layout-transform",
+        "dataop_intended_sequence": [
+            "STCDPOpLx",
+            "ReStickifyOpWithPTLx",
+        ],
+        "dataop_producer_pieces_patched": 0,
+        "dataop_consumer_pieces_patched": 0,
+        "dataop_patched_sdsc": str(patched_sidecar),
+        "dataop_original_sidecar": str(sidecar),
+        "dataop_export_dir": str(export_dir),
+        "dataop_export_returncode": proc.returncode,
+        "dataop_export_accepted_after_nonzero_rc": proc.returncode != 0,
+        "dataop_init": str(init_candidates[0]),
+        "dataop_senprog": str(senprog_candidates[0]) if senprog_candidates else "",
+        "dataop_sidecar_producer_base": start_summary["producer_base"],
+        "dataop_sidecar_producer_starts": start_summary["producer_starts"],
+        "dataop_sidecar_consumer_starts": start_summary["consumer_starts"],
+        "dataop_original_sidecar_producer_base": original_start_summary[
+            "producer_base"
+        ],
+        "dataop_original_sidecar_consumer_starts": original_start_summary[
+            "consumer_starts"
+        ],
+    }
+
+
+def _select_lx_neighbor_direct_ptlx_sidecar(code_dir: Path) -> Path:
+    candidates = sorted(code_dir.glob("restickify_lx_neighbor_streaming_bridge_edge_*.json"))
+    for candidate in candidates:
+        payload = _read_json_file(candidate)
+        root = next(iter(payload.values()))
+        meta = root.get("streamingPTLXFull_", {}) or {}
+        if meta.get("coalescing") == "direct-64x64-tiles":
+            return candidate
+    raise RuntimeError(
+        "LX-neighbor direct PT-LX sidecar was not emitted; enable "
+        "SPYRE_RESTICKIFY_LX_NEIGHBOR_DESCRIPTOR=1, "
+        "SPYRE_RESTICKIFY_LX_NEIGHBOR_DESCRIPTOR_ALLOW_UNCERTIFIED=1, and "
+        "SPYRE_RESTICKIFY_LX_NEIGHBOR_STREAMING_BRIDGE=1"
+    )
+
+
+def _direct_ptlx_sidecar_lx_starts(root: dict[str, Any]) -> dict[str, Any]:
+    producer_starts: set[int] = set()
+    consumer_starts: set[int] = set()
+    for datadsc in root.get("datadscs_", []) or []:
+        name, dataop = next(iter(datadsc.items()))
+        if "STCDPOpLx_gather_direct_tile" in str(name):
+            producer_starts.update(
+                _piece_lx_starts(dataop["labeledDs_"][0].get("PieceInfo", []) or [])
+            )
+        if "ReStickifyOpWithPTLx_direct_tile" in str(name):
+            consumer_starts.update(
+                _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
+            )
+    if not producer_starts:
+        raise RuntimeError("direct PT-LX sidecar has no producer LX starts")
+    if not consumer_starts:
+        raise RuntimeError("direct PT-LX sidecar has no consumer LX starts")
+    return {
+        "producer_base": min(producer_starts),
+        "producer_starts": sorted(producer_starts),
+        "consumer_starts": sorted(consumer_starts),
+    }
+
+
+def _patch_direct_ptlx_sidecar_lx_starts(
+    root: dict[str, Any],
+    *,
+    producer_delta: int,
+    consumer_delta: int,
+) -> None:
+    for datadsc in root.get("datadscs_", []) or []:
+        name, dataop = next(iter(datadsc.items()))
+        if "STCDPOpLx_gather_direct_tile" in str(name):
+            _adjust_piece_lx_starts(
+                dataop["labeledDs_"][0].get("PieceInfo", []) or [],
+                delta=producer_delta,
+            )
+        if "ReStickifyOpWithPTLx_direct_tile" in str(name):
+            _adjust_piece_lx_starts(
+                dataop["labeledDs_"][-1].get("PieceInfo", []) or [],
+                delta=consumer_delta,
+            )
+
+
+def _adjust_piece_lx_starts(pieces: list[dict[str, Any]], *, delta: int) -> None:
+    if int(delta) == 0:
+        return
+    for piece in pieces:
+        for placement in piece.get("PlacementInfo", []) or []:
+            if placement.get("type") != "lx":
+                continue
+            placement["startAddr"] = [
+                int(start) + int(delta)
+                for start in placement.get("startAddr", []) or []
+            ]
+
+
+def _piece_lx_starts(pieces: list[dict[str, Any]]) -> set[int]:
+    starts: set[int] = set()
+    for piece in pieces:
+        for placement in piece.get("PlacementInfo", []) or []:
+            if placement.get("type") != "lx":
+                continue
+            for start in placement.get("startAddr", []) or []:
+                starts.add(int(start))
+    return starts
 
 
 def _first_compute_input_index(dsc: dict[str, Any]) -> int:
