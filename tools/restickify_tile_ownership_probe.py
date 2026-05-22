@@ -10,9 +10,32 @@ from another core before the local restickification step can be correct?
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import os
+import sys
 from collections import Counter
 from dataclasses import asdict, dataclass
+
+_STREAMING_PLANNER_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    "torch_spyre",
+    "_inductor",
+    "codegen",
+    "restickify_ptlx_streaming.py",
+)
+_STREAMING_PLANNER_SPEC = importlib.util.spec_from_file_location(
+    "_restickify_ptlx_streaming",
+    _STREAMING_PLANNER_PATH,
+)
+if _STREAMING_PLANNER_SPEC is None or _STREAMING_PLANNER_SPEC.loader is None:
+    raise ImportError(f"cannot load streaming planner from {_STREAMING_PLANNER_PATH}")
+_STREAMING_PLANNER = importlib.util.module_from_spec(_STREAMING_PLANNER_SPEC)
+sys.modules[_STREAMING_PLANNER_SPEC.name] = _STREAMING_PLANNER
+_STREAMING_PLANNER_SPEC.loader.exec_module(_STREAMING_PLANNER)
+
+default_core_mapping = _STREAMING_PLANNER.default_core_mapping
+plan_streaming_ptlx_tiles = _STREAMING_PLANNER.plan_streaming_ptlx_tiles
 
 
 @dataclass(frozen=True)
@@ -189,12 +212,86 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-cores", type=int, default=32)
     parser.add_argument("--source-split-dim", default="row")
     parser.add_argument("--dest-split-dim", default="col")
+    parser.add_argument(
+        "--streaming-ptlx",
+        action="store_true",
+        help="Emit the Stage214 streaming PT-LX tile plan summary.",
+    )
+    parser.add_argument(
+        "--source-work-slices",
+        default="mb:32,out:1",
+        help="Comma separated source split map, for example mb:32,out:1.",
+    )
+    parser.add_argument(
+        "--dest-work-slices",
+        default="mb:1,out:32",
+        help="Comma separated destination split map, for example mb:1,out:32.",
+    )
+    parser.add_argument("--row-dim", default="mb")
+    parser.add_argument("--col-dim", default="out")
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.streaming_ptlx:
+        source_work_slices = _parse_work_slices(args.source_work_slices)
+        dest_work_slices = _parse_work_slices(args.dest_work_slices)
+        streaming_summary = plan_streaming_ptlx_tiles(
+            size=args.size,
+            tile_size=args.tile_size,
+            ring_size=args.num_cores,
+            source_work_slices=source_work_slices,
+            source_core_mapping=default_core_mapping(
+                source_work_slices,
+                row_dim=args.row_dim,
+                col_dim=args.col_dim,
+            ),
+            dest_work_slices=dest_work_slices,
+            dest_core_mapping=default_core_mapping(
+                dest_work_slices,
+                row_dim=args.row_dim,
+                col_dim=args.col_dim,
+            ),
+            row_dim=args.row_dim,
+            col_dim=args.col_dim,
+        )
+        payload = asdict(streaming_summary)
+        if args.json:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(
+                f"{args.size}x{args.size}, tile={args.tile_size}, "
+                f"tiles={streaming_summary.tiles_per_row}x"
+                f"{streaming_summary.tiles_per_col}"
+            )
+            print(
+                f"source={streaming_summary.source_work_slices}, "
+                f"dest={streaming_summary.dest_work_slices}"
+            )
+            print(
+                f"tiles: total={streaming_summary.total_tiles}, "
+                f"local={streaming_summary.local_tiles}, "
+                f"moving={streaming_summary.moving_tiles}, "
+                f"gather={streaming_summary.gather_tiles}, "
+                f"scatter={streaming_summary.scatter_tiles}"
+            )
+            print(
+                f"fan-in max={streaming_summary.max_fan_in}, "
+                f"fan-out max={streaming_summary.max_fan_out}, "
+                f"byte-hops={streaming_summary.total_byte_hops}, "
+                f"max hops={streaming_summary.max_tile_hops}"
+            )
+            print(
+                f"workspace: tile buffer={streaming_summary.tile_buffer_bytes} B, "
+                f"full tensor/core src="
+                f"{streaming_summary.full_tensor_bytes_per_source_core} B, "
+                f"dst={streaming_summary.full_tensor_bytes_per_dest_core} B"
+            )
+            print(f"notes: {streaming_summary.notes}")
+        return 0
+
     summary = summarize(
         size=args.size,
         tile_size=args.tile_size,
@@ -226,6 +323,19 @@ def main() -> int:
         for coord, values in summary.sample_values.items():
             print(f"  {coord}: {values}")
     return 0
+
+
+def _parse_work_slices(value: str) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if ":" not in item:
+            raise ValueError(f"invalid work-slice item {item!r}; expected dim:split")
+        dim, split = item.split(":", 1)
+        out[dim.strip()] = int(split)
+    return out
 
 
 if __name__ == "__main__":

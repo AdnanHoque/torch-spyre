@@ -40,6 +40,7 @@ from torch_spyre._inductor.restickify_ring import (
 )
 
 from .restickify_lx_dataop import generate_ptlx_restickify_bridge_sdsc
+from .restickify_ptlx_streaming import plan_streaming_ptlx_tiles
 
 _PRODUCER_BASE_ENV = "SPYRE_RESTICKIFY_PTLX_BRIDGE_PRODUCER_BASE"
 _CONSUMER_BASE_ENV = "SPYRE_RESTICKIFY_PTLX_BRIDGE_CONSUMER_BASE"
@@ -298,7 +299,13 @@ def _patch_one_mixed_schedule(
         restickify_payload=restickify_payload,
     )
     if piece_reason is not None:
-        return _row(idx, "skipped", piece_reason)
+        return _streaming_candidate_row(
+            idx,
+            piece_reason,
+            size=size,
+            producer_payload=producer_payload,
+            restickify_payload=restickify_payload,
+        )
     bridge_storage = _plan_bridge_intermediate_storage(
         restickify_spec,
         producer_payload=producer_payload,
@@ -309,7 +316,13 @@ def _patch_one_mixed_schedule(
     )
     storage_reason = bridge_storage.get("reason")
     if storage_reason is not None:
-        return _row(idx, "skipped", str(storage_reason))
+        return _streaming_candidate_row(
+            idx,
+            str(storage_reason),
+            size=size,
+            producer_payload=producer_payload,
+            restickify_payload=restickify_payload,
+        )
 
     producer_start, producer_patches = _materialize_producer_lx_endpoint(
         producer_payload,
@@ -800,6 +813,45 @@ def _ptlx_piece_size_skip_reason(
 
 def _row(idx: int, status: str, reason: str | None) -> dict[str, Any]:
     return {"sdsc_index": idx, "status": status, "reason": reason}
+
+
+def _streaming_candidate_row(
+    idx: int,
+    reason: str,
+    *,
+    size: int,
+    producer_payload: dict[str, Any],
+    restickify_payload: dict[str, Any],
+) -> dict[str, Any]:
+    row = _row(idx, "skipped", reason)
+    row["streaming_ptlx_candidate"] = _streaming_candidate_summary(
+        size=size,
+        producer_payload=producer_payload,
+        restickify_payload=restickify_payload,
+    )
+    return row
+
+
+def _streaming_candidate_summary(
+    *,
+    size: int,
+    producer_payload: dict[str, Any],
+    restickify_payload: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        summary = plan_streaming_ptlx_tiles(
+            size=size,
+            source_work_slices=_root_work_slices(producer_payload),
+            source_core_mapping=_root_core_mapping(producer_payload),
+            dest_work_slices=_root_work_slices(restickify_payload),
+            dest_core_mapping=_root_core_mapping(restickify_payload),
+            sample_limit=4,
+        )
+    except Exception as exc:
+        return {"available": False, "reason": f"{type(exc).__name__}: {exc}"}
+    payload = asdict(summary)
+    payload["available"] = True
+    return payload
 
 
 def _append_audit(row: dict[str, Any]) -> None:
