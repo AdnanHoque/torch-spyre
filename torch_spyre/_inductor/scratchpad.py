@@ -417,11 +417,16 @@ class GreedyAllocationStrategy(AllocationStrategy):
 
         for idx, op in enumerate(operations):
             rw = op.get_read_writes()
-            read_names = op.get_read_names()
+            read_dep_names = {dep.name for dep in rw.reads}
             for dep in rw.reads | rw.writes:  # union of the OrderedSets
                 buf = dep.name  # buffer name, i.e. a str
                 last_used[buf] = idx
-                if buf in read_names:
+                # Use the dependency sets returned by get_read_writes() as the
+                # source of truth.  get_read_names() can be stale after
+                # insert_restickify patches a consumer's inner_fn, which hides
+                # the direct restickify -> consumer edge from PT-LX endpoint
+                # planning.
+                if buf in read_dep_names:
                     buf_read_counts[buf] = buf_read_counts.get(buf, 0) + 1
                     buf_users[buf] = buf_users.get(buf, []) + [op]
                 else:

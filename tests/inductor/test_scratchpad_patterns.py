@@ -111,6 +111,20 @@ class Operation:
         return self.inputs
 
 
+class StaleReadNamesOperation(Operation):
+    def __init__(
+        self,
+        *args,
+        stale_read_names: list[str],
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self._stale_read_names = stale_read_names
+
+    def get_read_names(self):
+        return self._stale_read_names
+
+
 def make_operations(
     names_inputs_outputs: Iterable[tuple[str, str | list[str], str | list[str]]],
     buffers: dict[str, Buffer],
@@ -743,6 +757,41 @@ class TestExamplePattern(TestCase):
                 )
                 is None
             )
+
+    def test_buf_analysis_uses_recomputed_read_writes_after_restickify(self):
+        buffers = make_buffer_registry(
+            {
+                "producer_out": 128,
+                "restickify_out": 128,
+                "graph_out": 128,
+            }
+        )
+        restickify = Operation(
+            "restickify",
+            ["producer_out"],
+            ["restickify_out"],
+            buffers,
+        )
+        consumer = StaleReadNamesOperation(
+            "consumer_add",
+            ["restickify_out"],
+            ["graph_out"],
+            buffers,
+            stale_read_names=["producer_out"],
+        )
+        pattern = Pattern(
+            buffers,
+            [restickify, consumer],
+            make_nonevicting_allocation_result(buffers, {}, [restickify, consumer]),
+        )
+        lowering = MockGraphLowering(pattern)
+        alloc = NoAllowlistInstrumentedAllocator(pattern, lowering)
+        strategy = InstrumentedGreedyAllocationStrategy(pattern, alloc, lowering)
+
+        _, buf_users, _ = strategy.buf_analysis(pattern.operations)
+
+        assert buf_users["restickify_out"] == [consumer]
+        assert buf_users["producer_out"] == [restickify]
 
     @usuallyExpectedFailure
     def test_simple_fragmentation_pattern(self):

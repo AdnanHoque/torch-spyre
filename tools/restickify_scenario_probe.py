@@ -109,6 +109,18 @@ def _computed_contiguous_then_add(a, b, c):
     return (a + b).t().contiguous() + c
 
 
+def _computed_contiguous_add_reversed(a, b, c):
+    return c + (a + b).t().contiguous()
+
+
+def _computed_clone_then_add(a, b, c):
+    return (a + b).t().clone() + c
+
+
+def _computed_clone_add_reversed(a, b, c):
+    return c + (a + b).t().clone()
+
+
 def _computed_self_transpose_join(a, b):
     u = a + b
     return u + u.t()
@@ -699,6 +711,30 @@ CASES: tuple[ProbeCase, ...] = (
         "Computed producer is restickified by contiguous() before a pointwise consumer.",
         _builder_pointwise3,
         _computed_contiguous_then_add,
+    ),
+    ProbeCase(
+        "computed_contiguous_add_reversed",
+        "computed_view_join",
+        "in_graph_producer",
+        "Computed producer is restickified by contiguous() before a reversed pointwise consumer.",
+        _builder_pointwise3,
+        _computed_contiguous_add_reversed,
+    ),
+    ProbeCase(
+        "computed_clone_then_add",
+        "computed_view_join",
+        "in_graph_producer",
+        "Computed producer is restickified by clone() before a pointwise consumer.",
+        _builder_pointwise3,
+        _computed_clone_then_add,
+    ),
+    ProbeCase(
+        "computed_clone_add_reversed",
+        "computed_view_join",
+        "in_graph_producer",
+        "Computed producer is restickified by clone() before a reversed pointwise consumer.",
+        _builder_pointwise3,
+        _computed_clone_add_reversed,
     ),
     ProbeCase(
         "computed_self_transpose_join",
