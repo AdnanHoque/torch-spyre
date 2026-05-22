@@ -718,6 +718,13 @@ def test_maybe_emit_streaming_bridge_candidate_sidecar(tmp_path, monkeypatch):
     assert candidate["streaming_summary"]["max_fan_out"] == 1
     assert candidate["bridge_kind"] == "same-layout-lx-ownership-remap"
     assert candidate["bridge_endpoint_contract_valid"] is True
+    assert candidate["production_valid"] is True
+    assert candidate["production_blocker"] is None
+    production = candidate["production_contract"]
+    assert production["semantic_transform_certified"] is True
+    assert production["tile_contract"]["all_tiles_materialized"] is True
+    assert production["tile_contract"]["max_fan_in"] == 4
+    assert production["required_primitive"] is None
     bridge_path = tmp_path / BRIDGE_CANDIDATE_FILENAME_TEMPLATE.format(idx=1)
     assert bridge_path.exists()
     bridge = json.loads(bridge_path.read_text(encoding="utf-8"))
@@ -852,6 +859,23 @@ def test_streaming_bridge_does_not_treat_coordinate_change_as_same_layout_remap(
     assert candidate["bridge_kind"] == "direct-ptlx-layout-transform"
     assert candidate["direction"] == "output-to-kernel"
     assert candidate["bridge_endpoint_contract_valid"] is True
+    assert candidate["production_valid"] is False
+    assert candidate["production_blocker"] == (
+        "missing-three-stage-remote-fragment-ptlx-lowering"
+    )
+    assert candidate["production_contract"]["required_primitive"] == (
+        "remote-fragment-aware-ptlx-coordinate-remap"
+    )
+    assert candidate["production_contract"]["tile_contract"][
+        "all_tiles_materialized"
+    ] is True
+    assert candidate["production_contract"]["required_lowering"] == [
+        "STCDPOpLx/InputFetchNeighbor gather producer LX fragments into "
+        "bounded per-core tile workspace",
+        "local PT/interslice tile transform changes stick/layout semantics",
+        "STCDPOpLx/InputFetchNeighbor writes or scatters the consumer-owned "
+        "LX tile",
+    ]
     assert candidate["bridge_metadata"]["coalescing"] == "direct-64x64-tiles"
     assert candidate["bridge_metadata"]["direction"] == "output-to-kernel"
     assert candidate["bridge_metadata"]["semantic_transform_certified"] is False

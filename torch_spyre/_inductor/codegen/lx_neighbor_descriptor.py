@@ -329,9 +329,18 @@ def _streaming_bridge_candidate(
         next(iter(datadsc.values())).get("op", {}).get("name")
         for datadsc in root.get("datadscs_", []) or []
     ]
+    bridge_metadata = _bridge_metadata(root)
     bridge_endpoint_contract = _bridge_destination_endpoint_contract(
         payload,
         streaming.get("destination_primary", {}),
+    )
+    production_contract = _bridge_production_contract(
+        bridge_kind=bridge_kind,
+        bridge_metadata=bridge_metadata,
+        bridge_endpoint_contract=bridge_endpoint_contract,
+        streaming=streaming,
+        summary=summary,
+        materialized_tile_count=len(summary.sample_tiles),
     )
     return {
         "status": "emitted",
@@ -349,9 +358,12 @@ def _streaming_bridge_candidate(
         "datadsc_count": len(root.get("datadscs_", []) or []),
         "op_funcs_used": dataop_names,
         "streaming_summary": _streaming_summary_payload(summary),
-        "bridge_metadata": _bridge_metadata(root),
+        "bridge_metadata": bridge_metadata,
         "bridge_endpoint_contract": bridge_endpoint_contract,
         "bridge_endpoint_contract_valid": bridge_endpoint_contract["valid"],
+        "production_contract": production_contract,
+        "production_valid": production_contract["production_valid"],
+        "production_blocker": production_contract["blocker"],
         "payload": payload,
     }
 
@@ -425,6 +437,124 @@ def _bridge_metadata(root: dict[str, Any]) -> dict[str, Any]:
         or root.get("streamingPTLXFull_")
         or {}
     )
+
+
+def _bridge_production_contract(
+    *,
+    bridge_kind: str,
+    bridge_metadata: dict[str, Any],
+    bridge_endpoint_contract: dict[str, Any],
+    streaming: dict[str, Any],
+    summary: Any,
+    materialized_tile_count: int,
+) -> dict[str, Any]:
+    """Explain whether a sidecar bridge is safe to turn into replacement."""
+
+    tile_contract = _bridge_tile_contract(
+        streaming=streaming,
+        summary=summary,
+        materialized_tile_count=materialized_tile_count,
+    )
+    endpoint_valid = bridge_endpoint_contract.get("valid") is True
+    metadata_certified = bridge_metadata.get("semantic_transform_certified") is True
+    bounded_workspace_ok = streaming.get("bounded_workspace_ok") is True
+    all_tiles_materialized = tile_contract["all_tiles_materialized"]
+    common = {
+        "contract_version": 1,
+        "bridge_kind": bridge_kind,
+        "endpoint_contract_valid": endpoint_valid,
+        "semantic_transform_certified": metadata_certified,
+        "bounded_workspace_ok": bounded_workspace_ok,
+        "tile_contract": tile_contract,
+        "fallback": "ReStickifyOpHBM",
+    }
+
+    if bridge_kind == "same-layout-lx-ownership-remap":
+        production_valid = (
+            endpoint_valid
+            and metadata_certified
+            and bounded_workspace_ok
+            and all_tiles_materialized
+        )
+        return {
+            **common,
+            "production_valid": production_valid,
+            "blocker": None
+            if production_valid
+            else "same-layout-lx-remap-contract-incomplete",
+            "required_primitive": None
+            if production_valid
+            else "STCDPOpLx-same-layout-ownership-remap",
+            "required_lowering": [
+                "STCDPOpLx materializes producer-owned LX fragments into "
+                "consumer-owned LX fragments without changing stick layout"
+            ],
+        }
+
+    return {
+        **common,
+        "production_valid": False,
+        "blocker": "missing-three-stage-remote-fragment-ptlx-lowering",
+        "required_primitive": "remote-fragment-aware-ptlx-coordinate-remap",
+        "required_lowering": [
+            "STCDPOpLx/InputFetchNeighbor gather producer LX fragments into "
+            "bounded per-core tile workspace",
+            "local PT/interslice tile transform changes stick/layout semantics",
+            "STCDPOpLx/InputFetchNeighbor writes or scatters the consumer-owned "
+            "LX tile",
+        ],
+        "why_sidecar_is_not_enough": (
+            "direct ReStickifyOpWithPTLx tile descriptors can describe LX "
+            "endpoints, but they do not prove the producer-fragment coordinate "
+            "remap or the local PT/interslice value transform"
+        ),
+    }
+
+
+def _bridge_tile_contract(
+    *,
+    streaming: dict[str, Any],
+    summary: Any,
+    materialized_tile_count: int,
+) -> dict[str, Any]:
+    fan_in_histogram: dict[str, int] = {}
+    fan_out_histogram: dict[str, int] = {}
+    remote_gather_tiles = 0
+    remote_scatter_tiles = 0
+    for tile in getattr(summary, "sample_tiles", []) or []:
+        fan_in = int(getattr(tile, "fan_in", 0))
+        fan_out = int(getattr(tile, "fan_out", 0))
+        fan_in_histogram[str(fan_in)] = fan_in_histogram.get(str(fan_in), 0) + 1
+        fan_out_histogram[str(fan_out)] = fan_out_histogram.get(str(fan_out), 0) + 1
+        source_cores = set(getattr(tile, "source_cores", []) or [])
+        dest_cores = set(getattr(tile, "dest_cores", []) or [])
+        bridge_core = int(getattr(tile, "bridge_core", -1))
+        if source_cores and source_cores != {bridge_core}:
+            remote_gather_tiles += 1
+        if dest_cores and dest_cores != {bridge_core}:
+            remote_scatter_tiles += 1
+
+    total_tiles = int(getattr(summary, "total_tiles", 0) or 0)
+    return {
+        "tile_size": int(getattr(summary, "tile_size", 0) or 0),
+        "total_tiles": total_tiles,
+        "materialized_tile_count": int(materialized_tile_count),
+        "all_tiles_materialized": int(materialized_tile_count) == total_tiles,
+        "max_fan_in": int(getattr(summary, "max_fan_in", 0) or 0),
+        "max_fan_out": int(getattr(summary, "max_fan_out", 0) or 0),
+        "fan_in_histogram": fan_in_histogram,
+        "fan_out_histogram": fan_out_histogram,
+        "remote_gather_tiles": remote_gather_tiles,
+        "remote_scatter_tiles": remote_scatter_tiles,
+        "requires_remote_lx_gather": bool(streaming.get("requires_remote_lx_gather")),
+        "requires_remote_lx_scatter": bool(streaming.get("requires_remote_lx_scatter")),
+        "bounded_workspace_ok": bool(streaming.get("bounded_workspace_ok")),
+        "bounded_workspace_bytes": int(
+            (streaming.get("contract") or {}).get("bounded_workspace_bytes", 0) or 0
+        ),
+        "tile_buffer_bytes": int(getattr(summary, "tile_buffer_bytes", 0) or 0),
+        "total_byte_hops": int(getattr(summary, "total_byte_hops", 0) or 0),
+    }
 
 
 def _bridge_destination_endpoint_contract(
