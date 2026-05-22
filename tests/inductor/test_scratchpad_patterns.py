@@ -5,6 +5,7 @@ import itertools
 from types import SimpleNamespace
 from typing import Callable, Optional, Iterable, override
 from unittest import TestCase, expectedFailure
+from unittest.mock import patch
 from enum import Enum
 import os
 from functools import wraps
@@ -15,6 +16,7 @@ from torch_spyre._inductor.scratchpad import (
     scratchpad_planning,
     ScratchPadAllocator,
     GreedyAllocationStrategy,
+    _streaming_ptlx_endpoint_skip_reason,
 )
 from torch_spyre._inductor import config
 from torch_spyre._inductor.restickify_ring import (
@@ -697,6 +699,50 @@ class TestExamplePattern(TestCase):
             "valid": True,
             "overlaps": [],
         }
+
+    def test_streaming_ptlx_endpoint_requires_internal_non_pt_consumer(self):
+        buffers = make_buffer_registry(
+            {
+                "producer_out": 128,
+                "restickify_out": 128,
+                "graph_out": 128,
+            }
+        )
+        restickify = make_operations(
+            [("restickify", "producer_out", "restickify_out")],
+            buffers,
+        )[0]
+        consumer = make_operations(
+            [("consumer_add", "restickify_out", "graph_out")],
+            buffers,
+        )[0]
+        pt_consumer = make_operations(
+            [("batchmatmul", "restickify_out", "graph_out")],
+            buffers,
+        )[0]
+
+        with (
+            config.patch(restickify_ptlx_streaming_e2e=True),
+            patch("torch_spyre._inductor.scratchpad.ComputedBuffer", Operation),
+            patch(
+                "torch_spyre._inductor.scratchpad.op_iteration_sizes",
+                return_value={"d0": 512, "d1": 512},
+            ),
+        ):
+            assert _streaming_ptlx_endpoint_skip_reason(restickify, {}) == (
+                "consumer-count:0"
+            )
+            assert _streaming_ptlx_endpoint_skip_reason(
+                restickify,
+                {"restickify_out": [pt_consumer]},
+            ) == "pt-consumer:batchmatmul"
+            assert (
+                _streaming_ptlx_endpoint_skip_reason(
+                    restickify,
+                    {"restickify_out": [consumer]},
+                )
+                is None
+            )
 
     @usuallyExpectedFailure
     def test_simple_fragmentation_pattern(self):

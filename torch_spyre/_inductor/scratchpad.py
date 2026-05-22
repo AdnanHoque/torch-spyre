@@ -373,12 +373,14 @@ class GreedyAllocationStrategy(AllocationStrategy):
                 int(mem_usage[name]["size_per_core"])
                 for name in mem_usage["all_buf_used"]
             )
-            if not _is_ptlx_restickify_candidate_op(
+            candidate_reason = _ptlx_restickify_candidate_skip_reason(
                 op,
                 name_to_op,
                 lx_limit=self.alloc.limit,
                 endpoint_bytes=endpoint_bytes,
-            ):
+                buf_users=buf_users,
+            )
+            if candidate_reason is not None:
                 continue
             rw = op.get_read_writes()
             input_names = [dep.name for dep in rw.reads]
@@ -716,45 +718,111 @@ def scratchpad_planning(
     strategy.plan_allocation(operations)
 
 
-def _is_ptlx_restickify_candidate_op(
+def _ptlx_restickify_candidate_skip_reason(
     op: Operation,
     name_to_op: dict[str, ComputedBuffer],
     *,
     lx_limit: int,
     endpoint_bytes: int,
-) -> bool:
+    buf_users: dict[str, list[Operation]],
+) -> str | None:
     if not _is_ptlx_restickify_source_candidate(op):
-        return False
+        return "not-in-graph-restickify-source"
     has_zero_hop_certificate = _has_zero_hop_certificate(op)
     if has_zero_hop_certificate:
-        return endpoint_bytes <= lx_limit // 2
+        return None if endpoint_bytes <= lx_limit // 2 else "endpoint-bytes-too-large"
     if not isinstance(op, ComputedBuffer):
-        return False
+        return "not-computed-buffer"
     producer_info, _ = producer_for_restickify(op, name_to_op)
     if producer_info is None:
-        return False
+        return "missing-producer"
     producer, _ = producer_info
     if _split_core_count(producer) != _split_core_count(op):
-        return False
+        return "producer-restickify-core-count-mismatch"
     # The current single-bridge prototype cannot yet recover if greedy LX
     # endpoint allocation partially succeeds and then the mixed schedule skips.
     # Keep uncertified coverage to the value-correct 2048 envelope until
     # endpoint planning can reserve the producer/restickify/consumer edge as
     # an atomic allocation.
     if max(op_iteration_sizes(op).values()) > 2048:
-        return False
+        return "shape-too-large"
+    streaming_skip_reason = _streaming_ptlx_endpoint_skip_reason(op, buf_users)
     if not (
         _has_stick_sized_split_pieces(producer)
         and _has_stick_sized_split_pieces(op)
-    ):
-        return False
+    ) and streaming_skip_reason is not None:
+        return (
+            "not-stick-sized-and-not-streaming-candidate:"
+            f"{streaming_skip_reason}"
+        )
 
-    return (
+    if not (
         # Leave room for transient/live LX ranges that the greedy allocator
         # may need around the restickify edge. If this check is too optimistic
         # and allocation later fails, the stock HBM path can see LX-only
         # endpoint metadata, so be deliberately conservative.
         endpoint_bytes <= lx_limit // 2
+    ):
+        return "endpoint-bytes-too-large"
+    return None
+
+
+def _is_streaming_ptlx_endpoint_candidate(
+    op: Operation,
+    buf_users: dict[str, list[Operation]],
+) -> bool:
+    return _streaming_ptlx_endpoint_skip_reason(op, buf_users) is None
+
+
+def _streaming_ptlx_endpoint_skip_reason(
+    op: Operation,
+    buf_users: dict[str, list[Operation]],
+) -> str | None:
+    """Return why an uncertified streaming PT-LX endpoint cannot be forced.
+
+    Streaming PT-LX is stricter than ordinary scratchpad reuse.  If the later
+    bridge patch does not consume the forced endpoint, the stock HBM restickify
+    fallback can inherit LX-only endpoint metadata and fail in DXP.  Keep this
+    as a direct internal edge: one restickify output, one known non-PT consumer,
+    and 64x64-tile-compatible iteration sizes.
+    """
+
+    if not config.restickify_ptlx_streaming_e2e:
+        return "streaming-disabled"
+    if not isinstance(op, ComputedBuffer):
+        return "not-computed-buffer"
+    sizes = op_iteration_sizes(op)
+    if not sizes or any(size % 64 != 0 for size in sizes.values()):
+        return f"non-64-tiled-size:{sizes}"
+    rw = op.get_read_writes()
+    output_names = [dep.name for dep in rw.writes]
+    if len(output_names) != 1:
+        return f"output-count:{len(output_names)}"
+    consumers = buf_users.get(output_names[0], [])
+    if len(consumers) != 1:
+        return f"consumer-count:{len(consumers)}"
+    if _is_probably_pt_consumer(consumers[0]):
+        return f"pt-consumer:{_op_name(consumers[0])}"
+    return None
+
+
+def _is_probably_pt_consumer(op: Operation) -> bool:
+    name_parts = [_op_name(op)]
+    origin = getattr(op, "origin_node", None)
+    target = getattr(origin, "target", None)
+    if target is not None:
+        name_parts.append(getattr(target, "_opname", str(target)))
+    lowered = " ".join(name_parts).lower()
+    return any(
+        token in lowered
+        for token in (
+            "matmul",
+            "batchmatmul",
+            "bmm",
+            "addmm",
+            "mm",
+            "linear",
+        )
     )
 
 
