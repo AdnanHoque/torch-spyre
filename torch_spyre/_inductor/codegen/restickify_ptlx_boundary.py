@@ -2174,9 +2174,9 @@ def _streaming_value_flow_contract(
             consumer_lds_idx=consumer_lds_idx,
         )
     value_preservation_contract = _streaming_bridge_value_preservation_contract(root)
-    semantic_certified, semantic_reason = _streaming_semantic_transform_certificate(
-        root
-    )
+    semantic_certificate = _streaming_semantic_transform_certificate(root)
+    semantic_certified = bool(semantic_certificate["certified"])
+    semantic_reason = semantic_certificate["reason"]
     descriptor_valid = (
         consumer_descriptor_contract is None
         or consumer_descriptor_contract.get("valid") is True
@@ -2213,15 +2213,21 @@ def _streaming_value_flow_contract(
         )
         descriptor_valid = True
     value_preservation_valid = value_preservation_contract.get("valid") is True
+    valid = (
+        endpoint_valid
+        and semantic_certified
+        and descriptor_valid
+        and value_preservation_valid
+    )
     return {
-        "valid": (
-            endpoint_valid
-            and semantic_certified
-            and descriptor_valid
-            and value_preservation_valid
-        ),
+        "valid": valid,
+        "production_valid": valid
+        and not bool(semantic_certificate["forced"])
+        and semantic_certificate["source"] in {"bridge-metadata"},
         "endpoint_contract_valid": endpoint_valid,
         "semantic_transform_certified": semantic_certified,
+        "semantic_transform_forced": bool(semantic_certificate["forced"]),
+        "semantic_certificate_source": semantic_certificate["source"],
         "semantic_skip_reason": semantic_reason,
         "consumer_descriptor_contract": consumer_descriptor_contract,
         "consumer_descriptor_valid": descriptor_valid,
@@ -2335,9 +2341,7 @@ def _valid_elements_for_dim(raw_valid_gap: Any, *, fallback: int) -> int:
     return int(fallback)
 
 
-def _streaming_semantic_transform_certificate(
-    root: dict[str, Any],
-) -> tuple[bool, str | None]:
+def _streaming_semantic_transform_certificate(root: dict[str, Any]) -> dict[str, Any]:
     """Return whether a streaming bridge proves the restickify value transform.
 
     The first streaming prototype proved an endpoint contract: generated data
@@ -2355,33 +2359,72 @@ def _streaming_semantic_transform_certificate(
 
     remap_meta = root.get("streamingLXRemapFull_", {}) or {}
     if remap_meta.get("semantic_transform_certified") is True:
-        return True, None
+        return {
+            "certified": True,
+            "reason": None,
+            "source": "bridge-metadata",
+            "forced": False,
+        }
 
     meta = root.get("streamingPTLXFull_", {}) or {}
     if meta.get("semantic_transform_certified") is True:
-        return True, None
+        return {
+            "certified": True,
+            "reason": None,
+            "source": "bridge-metadata",
+            "forced": False,
+        }
     if meta.get("coalescing") == "direct-64x64-tiles":
         if _spyre_config.restickify_ptlx_force_direct_tile_e2e:
-            return True, None
-        return False, (
-            "direct-ptlx-tile-bridge-needs-hardware-value-validation"
-        )
+            return {
+                "certified": True,
+                "reason": None,
+                "source": "forced-direct-tile-env",
+                "forced": True,
+            }
+        return {
+            "certified": False,
+            "reason": "direct-ptlx-tile-bridge-needs-hardware-value-validation",
+            "source": "uncertified",
+            "forced": False,
+        }
     if meta.get("coalescing") == "validgap-consumer-64x64-tiles":
         if _spyre_config.restickify_ptlx_force_validgap_consumer_tile_e2e:
-            return True, None
-        return False, (
-            "validgap-consumer-ptlx-tile-needs-hardware-value-validation"
-        )
+            return {
+                "certified": True,
+                "reason": None,
+                "source": "forced-validgap-consumer-tile-env",
+                "forced": True,
+            }
+        return {
+            "certified": False,
+            "reason": "validgap-consumer-ptlx-tile-needs-hardware-value-validation",
+            "source": "uncertified",
+            "forced": False,
+        }
     if meta.get("coalescing") == "native-64x64-tiles":
         if _spyre_config.restickify_ptlx_force_native_tile_e2e:
-            return True, None
-        return False, (
-            "native-ptlx-tile-bridge-compiles-but-needs-value-correct-"
-            "coordinate-contract"
-        )
-    return False, (
-        "streaming-ptlx-stcdp-gather-scatter-does-not-certify-coordinate-remap"
-    )
+            return {
+                "certified": True,
+                "reason": None,
+                "source": "forced-native-tile-env",
+                "forced": True,
+            }
+        return {
+            "certified": False,
+            "reason": (
+                "native-ptlx-tile-bridge-compiles-but-needs-value-correct-"
+                "coordinate-contract"
+            ),
+            "source": "uncertified",
+            "forced": False,
+        }
+    return {
+        "certified": False,
+        "reason": "streaming-ptlx-stcdp-gather-scatter-does-not-certify-coordinate-remap",
+        "source": "uncertified",
+        "forced": False,
+    }
 
 
 def _streaming_consumer_descriptor_contract(

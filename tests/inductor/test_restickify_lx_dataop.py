@@ -809,11 +809,14 @@ def test_streaming_ptlx_native_full_bridge_can_be_force_validated():
     assert contract["consumer_descriptor_valid"] is True
     assert contract["value_preservation_valid"] is True
     assert contract["semantic_transform_certified"] is True
+    assert contract["semantic_transform_forced"] is True
+    assert contract["semantic_certificate_source"] == "forced-native-tile-env"
     assert contract["semantic_skip_reason"] is None
     assert descriptor["native_tile_consumer_descriptor_override"] is True
     assert descriptor["layout_match"] is False
     assert descriptor["stick_match"] is False
     assert contract["valid"] is True
+    assert contract["production_valid"] is False
 
 
 def test_streaming_ptlx_direct_full_bridge_combines_direct_tiles():
@@ -897,7 +900,10 @@ def test_streaming_ptlx_direct_full_bridge_accepts_scattered_consumer_offsets():
     assert len(contract["consumer_starts"]) > 1
     assert min(contract["consumer_starts"]) == 256 * 1024
     assert contract["semantic_transform_certified"] is False
+    assert contract["semantic_transform_forced"] is False
+    assert contract["semantic_certificate_source"] == "uncertified"
     assert contract["valid"] is False
+    assert contract["production_valid"] is False
 
 
 def test_streaming_ptlx_validgap_consumer_tile_bridge_uses_sparse_output_stick_alias():
@@ -1033,11 +1039,16 @@ def test_streaming_ptlx_validgap_consumer_full_bridge_can_be_force_validated():
     assert contract["consumer_descriptor_valid"] is True
     assert contract["value_preservation_valid"] is True
     assert contract["semantic_transform_certified"] is True
+    assert contract["semantic_transform_forced"] is True
+    assert contract["semantic_certificate_source"] == (
+        "forced-validgap-consumer-tile-env"
+    )
     assert contract["semantic_skip_reason"] is None
     assert descriptor["validgap_consumer_descriptor_override"] is True
     assert descriptor["bridge_layout"] == ["mb", "in"]
     assert descriptor["consumer_layout"] == ["mb", "out"]
     assert contract["valid"] is True
+    assert contract["production_valid"] is False
 
 
 def test_streaming_ptlx_contract_allows_missing_consumer_piece_descriptor():
@@ -1254,6 +1265,9 @@ def test_streaming_lx_remap_full_bridge_uses_one_stcdp_per_tile():
     assert {piece["PlacementInfo"][0]["memId"][0] for piece in input_pieces} == {0}
     assert {piece["PlacementInfo"][0]["memId"][0] for piece in output_pieces} == {0}
     assert contract["valid"] is True
+    assert contract["production_valid"] is True
+    assert contract["semantic_certificate_source"] == "bridge-metadata"
+    assert contract["semantic_transform_forced"] is False
     assert contract["lx_remap_tile_count"] == 256
     assert contract["has_hbm_restickify"] is False
 
@@ -1291,9 +1305,13 @@ def test_streaming_ptlx_bridge_selector_uses_native_tiles_when_enabled():
 
     assert legacy_contract["endpoint_contract_valid"] is True
     assert legacy_contract["semantic_transform_certified"] is False
+    assert legacy_contract["semantic_transform_forced"] is False
+    assert legacy_contract["semantic_certificate_source"] == "uncertified"
     assert legacy_contract["valid"] is False
     assert native_contract["endpoint_contract_valid"] is True
     assert native_contract["semantic_transform_certified"] is False
+    assert native_contract["semantic_transform_forced"] is False
+    assert native_contract["semantic_certificate_source"] == "uncertified"
     assert native_contract["valid"] is False
     assert next(iter(native.values()))["streamingPTLXFull_"]["coalescing"] == (
         "native-64x64-tiles"
@@ -1312,6 +1330,8 @@ def test_streaming_ptlx_bridge_selector_uses_native_tiles_when_enabled():
     )
     assert direct_contract["endpoint_contract_valid"] is True
     assert direct_contract["semantic_transform_certified"] is False
+    assert direct_contract["semantic_transform_forced"] is False
+    assert direct_contract["semantic_certificate_source"] == "uncertified"
     assert direct_contract["valid"] is False
     assert next(iter(direct.values()))["streamingPTLXFull_"]["coalescing"] == (
         "direct-64x64-tiles"
@@ -1332,6 +1352,8 @@ def test_streaming_ptlx_bridge_selector_uses_native_tiles_when_enabled():
     assert validgap_contract["endpoint_contract_valid"] is True
     assert validgap_contract["value_preservation_valid"] is True
     assert validgap_contract["semantic_transform_certified"] is False
+    assert validgap_contract["semantic_transform_forced"] is False
+    assert validgap_contract["semantic_certificate_source"] == "uncertified"
     assert next(iter(validgap.values()))["streamingPTLXFull_"]["coalescing"] == (
         "validgap-consumer-64x64-tiles"
     )
