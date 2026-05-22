@@ -178,14 +178,16 @@ def generate_restickify_ddl_bridge_sdsc(
     dims = _known_dims(root, dsc)
     reduced_dims = _positive_layout_dims(dims, [input_layout, output_layout])
     if reference_interslice:
-        reduced_dims["y"] = 1
-        dims["y"] = 1
         _ensure_reference_interslice_dims(dims, reduced_dims)
     n_struct = _new_dim_struct("n", {**dims, **reduced_dims})
     neg_dims = {dim: -1 for dim in dims}
 
     num_cores = int(root.get("numCoresUsed_") or dsc.get("numCoresUsed_") or 1)
-    num_corelets = 2 if reference_interslice else 1
+    # The value-correct interslice prototype uses PT internally, but its DDL
+    # contract is a single-corelet SDSC.  Forcing a two-corelet fold here makes
+    # DXP's caller/cardinality import disagree with the JSON even for the
+    # 512-size bridge that should otherwise compile.
+    num_corelets = 1
     input_name = input_lds["dsName_"]
     output_name = output_lds["dsName_"]
     input_alloc = f"allocate_{input_name}_lx"
@@ -228,7 +230,6 @@ def generate_restickify_ddl_bridge_sdsc(
     stage1["el_"]["name_"] = "chunk"
     num_wk_slices = copy.deepcopy(root.get("numWkSlicesPerDim_", {}) or {})
     if reference_interslice:
-        num_wk_slices["y"] = 1
         stage0, stage1 = _reference_interslice_stage_params(
             n_struct,
             num_wk_slices,
@@ -374,6 +375,7 @@ def generate_restickify_ddl_bridge_sdsc(
             input_transfer_node,
             output_alloc_node,
             output_transfer_node,
+            loop_dims=input_layout,
         )
     op.update(
         {
@@ -451,16 +453,13 @@ def _reference_interslice_contract(
     if not output_layout:
         output_layout = list(input_primary["layoutDimOrder_"])
     canonical_layout = list(output_layout)
-    if "y" not in canonical_layout:
-        canonical_layout.append("y")
 
-    input_stick = list(output_primary.get("stickDimOrder_", []) or [])
+    input_stick = list(input_primary.get("stickDimOrder_", []) or [])
     if not input_stick:
         input_stick = canonical_layout[:1]
-    carried_sticks = list(input_stick)
-    for dim in input_primary.get("stickDimOrder_", []) or []:
-        if dim not in carried_sticks:
-            carried_sticks.append(dim)
+    output_stick = list(output_primary.get("stickDimOrder_", []) or [])
+    if not output_stick:
+        output_stick = canonical_layout[-1:]
 
     ref_input = {
         "layoutDimOrder_": canonical_layout,
@@ -470,9 +469,9 @@ def _reference_interslice_contract(
     }
     ref_output = {
         "layoutDimOrder_": canonical_layout,
-        "stickDimOrder_": carried_sticks,
-        "stickSize_": [8 for _ in carried_sticks],
-        "stickRepl_": [1 for _ in carried_sticks],
+        "stickDimOrder_": output_stick,
+        "stickSize_": [64 for _ in output_stick],
+        "stickRepl_": [1 for _ in output_stick],
     }
     return "INPUT", "OUTPUT", ref_input, ref_output, canonical_layout, canonical_layout
 
@@ -513,7 +512,8 @@ def _ensure_reference_interslice_wk_slice(root: dict[str, Any]) -> None:
     if os.environ.get(_BRIDGE_INTERSLICE_PRESERVE_CORE_MAPPING_ENV, "0") == "1":
         for wk_slice in (root.get("coreIdToWkSlice_") or {}).values():
             if isinstance(wk_slice, dict):
-                wk_slice.setdefault("y", 0)
+                if "y" in (root.get("numWkSlicesPerDim_") or {}):
+                    wk_slice.setdefault("y", 0)
         return
     slices = root.get("numWkSlicesPerDim_") or {}
     num_cores = int(root.get("numCoresUsed_") or 1)
@@ -524,14 +524,14 @@ def _ensure_reference_interslice_wk_slice(root: dict[str, Any]) -> None:
             str(core): {
                 "out": core % out_slices,
                 "mb": core // out_slices,
-                "y": 0,
             }
             for core in range(num_cores)
         }
         return
     for wk_slice in (root.get("coreIdToWkSlice_") or {}).values():
         if isinstance(wk_slice, dict):
-            wk_slice.setdefault("y", 0)
+            if "y" in slices:
+                wk_slice.setdefault("y", 0)
 
 
 def _reference_interslice_stage_params(
@@ -903,10 +903,12 @@ def _reference_interslice_schedule_tree(
     input_transfer_node: dict[str, Any],
     output_alloc_node: dict[str, Any],
     output_transfer_node: dict[str, Any],
+    *,
+    loop_dims: list[str],
 ) -> list[dict[str, Any]]:
     block_name = "lx_below_schedule"
     loops = _loop_skeleton(
-        ["y", "out", "mb"],
+        list(reversed(loop_dims)),
         prefix="prefill_",
         terminal_block=block_name,
     )

@@ -361,6 +361,35 @@ def test_restickify_ddl_bridge_can_probe_interslice_transpose_opfunc(monkeypatch
     assert dsc["computeOp_"][0]["opFuncName"] == "interslicetranspose_fp16"
 
 
+def test_restickify_ddl_bridge_reference_interslice_uses_single_corelet(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "SPYRE_RESTICKIFY_DDL_BRIDGE_OPFUNC",
+        "interslicetranspose_fp16",
+    )
+    monkeypatch.setenv(
+        "SPYRE_RESTICKIFY_DDL_BRIDGE_INTERSLICE_REFERENCE_CONTRACT",
+        "1",
+    )
+    spec = _spec()
+    compute_payload = generate_sdsc(0, spec)
+
+    payload = generate_restickify_ddl_bridge_sdsc(0, spec, compute_payload)
+    root = next(iter(payload.values()))
+    dsc = _dsc(payload)
+
+    assert root["coreletFoldProp_"] == {"factor_": 1, "label_": "corelet"}
+    assert dsc["numCoreletsUsed_"] == 1
+    assert dsc["numCoreletsUsed_DSC2_"] == 1
+    assert root["numWkSlicesPerDim_"] == {"d0": 32, "d1": 1}
+    assert dsc["primaryDsInfo_"]["INPUT"]["layoutDimOrder_"] == ["d1", "d0"]
+    assert dsc["primaryDsInfo_"]["OUTPUT"]["layoutDimOrder_"] == ["d1", "d0"]
+    assert dsc["primaryDsInfo_"]["INPUT"]["stickDimOrder_"] == ["d1"]
+    assert dsc["primaryDsInfo_"]["OUTPUT"]["stickDimOrder_"] == ["d0"]
+    assert dsc["primaryDsInfo_"]["OUTPUT"]["stickSize_"] == [64]
+
+
 def test_restickify_ddl_bridge_can_probe_interslice_same_global_layout(
     monkeypatch,
 ):

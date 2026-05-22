@@ -647,7 +647,7 @@ def test_streaming_ptlx_direct_full_bridge_combines_direct_tiles():
     ]
 
 
-def test_streaming_ptlx_validgap_consumer_tile_bridge_uses_sparse_source_stick():
+def test_streaming_ptlx_validgap_consumer_tile_bridge_uses_sparse_output_stick_alias():
     source = {"mb": 32, "out": 1}
     dest = {"mb": 4, "out": 8}
     summary = plan_streaming_ptlx_tiles(
@@ -672,6 +672,9 @@ def test_streaming_ptlx_validgap_consumer_tile_bridge_uses_sparse_source_stick()
 
     assert root["streamingPTLXValidGapConsumerTile_"][
         "source_stick_live_lanes"
+    ] == 64
+    assert root["streamingPTLXValidGapConsumerTile_"][
+        "output_stick_alias_live_lanes"
     ] == 1
     assert restickify["op"]["name"] == "ReStickifyOpWithPTLx"
     assert input_lds["layoutDimOrder_"] == ["out_", "mb_", "in_"]
@@ -681,7 +684,8 @@ def test_streaming_ptlx_validgap_consumer_tile_bridge_uses_sparse_source_stick()
         "mb_": 64,
         "in_": 64,
     }
-    assert input_lds["PieceInfo"][0]["validGap_"]["out_"] == [[1, 63]]
+    assert input_lds["PieceInfo"][0]["validGap_"]["out_"] == [[64, 0]]
+    assert input_lds["PieceInfo"][0]["validGap_"]["in_"] == [[1, 63]]
     assert output_lds["layoutDimOrder_"] == ["mb_", "in_"]
     assert output_lds["stickDimOrder_"] == ["in_"]
     assert value_contract["valid"] is True

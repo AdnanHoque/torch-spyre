@@ -679,14 +679,17 @@ def generate_streaming_ptlx_validgap_consumer_tile_bridge_sdsc(
     appear in the input descriptor and requires the input/output stick
     dimensions to differ.  A plain ``mb_/out_ -> mb_/in_`` tile cannot satisfy
     both constraints.  This diagnostic shape uses an expanded input descriptor
-    ``out_, mb_, in_`` with stick ``out_`` and marks only one ``out_`` lane live
-    via ``validGap_``.  That keeps the physical live element count at one
-    64x64 tile while producing a consumer-shaped ``mb_, in_`` output with stick
+    ``out_, mb_, in_`` with stick ``out_`` and marks only one consumer/output
+    stick-axis lane (``in_``) live via ``validGap_``.  Deeptools'
+    ``determineSubOp`` validates the input valid-gap on the output stick
+    dimension, so the sparse axis must be ``in_`` rather than the source stick
+    axis ``out_``.  This keeps the physical live element count at one 64x64
+    tile while producing a consumer-shaped ``mb_, in_`` output with stick
     ``in_``.
 
     The descriptor is compile/contract-oriented only; it is not semantic proof
     until hardware value validation confirms Deeptools interprets the sparse
-    source-stick axis the way the compiler intends.
+    output-stick alias axis the way the compiler intends.
     """
 
     descriptor = _single_streaming_descriptor(streaming_artifact)
@@ -796,7 +799,8 @@ def generate_streaming_ptlx_validgap_consumer_tile_bridge_sdsc(
                 "dest_fragment_count": len(dest_fragments),
                 "source_stick_dim": "out_",
                 "consumer_stick_dim": "in_",
-                "source_stick_live_lanes": 1,
+                "source_stick_live_lanes": 64,
+                "output_stick_alias_live_lanes": 1,
                 "status": "static-codegen-only",
                 "semantic_transform_certified": False,
                 "fallback": "ReStickifyOpHBM",
@@ -2074,9 +2078,9 @@ def _validgap_consumer_input_labeled_ds(
         },
         "dimToStickSize_": {"out_": 64},
         "validGap_": {
-            "out_": [[1, 63]],
+            "out_": [[int(tensor_size), 0]],
             "mb_": [[int(tensor_size), 0]],
-            "in_": [[int(tensor_size), 0]],
+            "in_": [[1, 63]],
         },
         "totElements": -1,
         "PieceInfo": [
@@ -2140,9 +2144,9 @@ def _validgap_consumer_input_piece(
         },
         "dimToSize_": {"out_": 64, "mb_": rows, "in_": cols},
         "validGap_": {
-            "out_": [[1, 63]],
+            "out_": [[64, 0]],
             "mb_": [[rows, 0]],
-            "in_": [[cols, 0]],
+            "in_": [[1, cols - 1]],
         },
         "PlacementInfo": [
             {
