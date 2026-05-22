@@ -108,6 +108,14 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         file.write("\t}\n")
         file.write("}\n")
 
+    return {
+        "kernel_name": kernel_name,
+        "output_dir": output_dir,
+        "specs": specs,
+        "sdscs_json": sdscs_json,
+        "files": files,
+    }
+
 
 def _allow_restickify_ddl_bridge_in_bundle(
     idx: int,

@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+
 from torch._inductor.scheduler import (
     BaseSchedulerNode,
     FusedSchedulerNode,
@@ -24,7 +26,10 @@ from torch_spyre._inductor.logging_utils import _get_env_bool
 _FUSION_ENABLED = _get_env_bool("SPYRE_INDUCTOR_ENABLE_FUSION", True)
 
 # Until https://github.com/torch-spyre/torch-spyre/issues/827 is completed.
-_MAX_BUNDLE_TENSORS = 6
+_DEFAULT_MAX_BUNDLE_TENSORS = 6
+_MAX_BUNDLE_TENSORS = int(
+    os.environ.get("SPYRE_INDUCTOR_MAX_BUNDLE_TENSORS", _DEFAULT_MAX_BUNDLE_TENSORS)
+)
 
 
 def _make_fused(nodes: list[SchedulerNode]) -> BaseSchedulerNode | None:

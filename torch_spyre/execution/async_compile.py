@@ -14,6 +14,7 @@
 
 import tempfile
 from typing import Any
+import json
 import os
 import subprocess
 import shutil
@@ -23,6 +24,9 @@ from torch_spyre._inductor import config as _spyre_config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.op_spec import OpSpec, UnimplementedOp
 from torch_spyre._inductor.codegen.bundle import generate_bundle
+from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
+    patch_restickify_ptlx_cross_bundle_handoffs,
+)
 from .kernel_runner import SpyreSDSCKernelRunner, SpyreUnimplementedRunner
 
 logger = get_inductor_logger("sdsc_compile")
@@ -318,7 +322,7 @@ def get_output_dir(kernel_name: str):
 
 class SpyreAsyncCompile:
     def __init__(self) -> None:
-        pass
+        self._pending_sdsc_bundles: list[dict[str, Any]] = []
 
     def sdsc(self, kernel_name: str, specs: list[OpSpec | UnimplementedOp]):
         unimp = [s for s in specs if isinstance(s, UnimplementedOp)]
@@ -331,20 +335,76 @@ class SpyreAsyncCompile:
         # Generate SDSC Bundle from OpSpecs
         output_dir = get_output_dir(kernel_name)
         op_specs = [s for s in specs if isinstance(s, OpSpec)]
-        generate_bundle(kernel_name, output_dir, op_specs)
+        bundle_record = generate_bundle(kernel_name, output_dir, op_specs)
+        runner = SpyreSDSCKernelRunner(kernel_name, output_dir)
+
+        if _spyre_config.restickify_ptlx_cross_bundle_e2e:
+            bundle_record["runner"] = runner
+            self._pending_sdsc_bundles.append(bundle_record)
+            return runner
 
         # Invoke backend compiler of SDSC Bundle
-        env = _dxp_env_for_bundle(output_dir)
-        subprocess.run(
-            ["dxp_standalone", "--bundle", "-d", output_dir],
-            check=True,
-            env=env,
-        )
+        _compile_sdsc_bundle(output_dir)
 
-        return SpyreSDSCKernelRunner(kernel_name, output_dir)
+        return runner
 
     def wait(self, scope: dict[str, Any]) -> None:
-        pass
+        if not self._pending_sdsc_bundles:
+            return
+
+        rows = patch_restickify_ptlx_cross_bundle_handoffs(
+            self._pending_sdsc_bundles
+        )
+        for row in rows:
+            logger.info("restickify PT-LX cross-bundle handoff patch: %s", row)
+
+        for record in self._pending_sdsc_bundles:
+            _rewrite_bundle_files(record)
+        for record in self._pending_sdsc_bundles:
+            _compile_sdsc_bundle(str(record["output_dir"]))
+        self._pending_sdsc_bundles.clear()
+
+
+def _compile_sdsc_bundle(output_dir: str) -> None:
+    env = _dxp_env_for_bundle(output_dir)
+    subprocess.run(
+        ["dxp_standalone", "--bundle", "-d", output_dir],
+        check=True,
+        env=env,
+    )
+
+
+def _rewrite_bundle_files(record: dict[str, Any]) -> None:
+    output_dir = str(record["output_dir"])
+    for file_name in os.listdir(output_dir):
+        if file_name.startswith("sdsc_") and file_name.endswith(".json"):
+            os.remove(os.path.join(output_dir, file_name))
+
+    files: list[str] = []
+    for sdsc_json in record["sdscs_json"]:
+        if sdsc_json is None:
+            continue
+        sdsc_name = next(iter(sdsc_json))
+        file_name = f"sdsc_{sdsc_name}.json"
+        files.append(file_name)
+        with open(os.path.join(output_dir, file_name), "w") as file:
+            logger.info("Generating %s", file.name)
+            json.dump(sdsc_json, file, indent=2)
+
+    record["files"] = files
+    with open(os.path.join(output_dir, "bundle.mlir"), "w") as file:
+        logger.info("Generating %s", file.name)
+        file.write("module {\n")
+        file.write("\tfunc.func @sdsc_bundle() {\n")
+        for file_name in files:
+            file.write(
+                '\t\tsdscbundle.sdsc_execute () {sdsc_filename="'
+                + file_name
+                + '"}\n'
+            )
+        file.write("\t\treturn\n")
+        file.write("\t}\n")
+        file.write("}\n")
 
 
 def _dxp_env_for_bundle(output_dir: str) -> dict[str, str] | None:

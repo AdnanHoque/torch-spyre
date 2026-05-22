@@ -16,6 +16,7 @@ import pytest
 from sympy import Symbol
 
 from torch_spyre._C import DataFormats
+from torch_spyre._inductor import config
 from torch_spyre._inductor.constants import RESTICKIFY_OP
 from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     combine_dataop_sdscs,
@@ -38,6 +39,8 @@ from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
     _patch_bridge_endpoint_pieces,
     _patch_consumer_input_lx_map,
     _patch_lx_allocation_by_index,
+    patch_restickify_ptlx_cross_bundle_handoffs,
+    patch_restickify_ptlx_mixed_schedules,
     plan_restickify_ptlx_mixed_schedules,
 )
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
@@ -378,6 +381,251 @@ def test_streaming_ptlx_full_bridge_sdsc_combines_materialized_tiles():
         [0, -1, 0, 0],
         [3, -1, 0, 0],
     ]
+
+
+def test_streaming_ptlx_full_bridge_combines_with_consumer_schedule():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=2,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=2)
+    bridge = generate_streaming_ptlx_full_bridge_sdsc("full_bridge", artifact)
+    consumer = {
+        "2_add": {
+            "numCoresUsed_": 32,
+            "opFuncsUsed_": ["add"],
+            "dscs_": [{"add": {"computeOp_": [{"opFuncName": "add"}]}}],
+            "datadscs_": [],
+            "coreIdToDscSchedule": {},
+        }
+    }
+
+    mixed = _combine_ptlx_bridge_with_consumer("streaming_mixed", bridge, consumer)
+    root = mixed["streaming_mixed"]
+
+    assert len(root["datadscs_"]) == 6
+    assert len(root["dscs_"]) == 1
+    assert root["streamingPTLXFull_"]["tile_count"] == 2
+    assert root["coreIdToDscSchedule"]["0"][-1] == [-1, 0, 1, 0]
+    assert root["coreIdToDscSchedule"]["1"] == [
+        [0, -1, 0, 0],
+        [3, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert root["coreIdToDscSchedule"]["8"] == [[-1, 0, 0, 0]]
+
+
+def test_streaming_ptlx_patch_replaces_small_shape_hbm_restickify_boundary():
+    producer_payload = _minimal_layout_payload(
+        "0_add",
+        opfunc="add",
+        size=512,
+        work_slices={"mb": 32, "out": 1},
+        core_mapping=default_core_mapping({"mb": 32, "out": 1}),
+        lds=[
+            _layout_lds(0, "producer_in", "dataIN", ["mb", "out"], ["out"]),
+            _layout_lds(1, "producer_out", "dataOUT", ["mb", "out"], ["out"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
+    restickify_payload = _minimal_layout_payload(
+        "1_restickify",
+        opfunc="ReStickifyOpHBM",
+        size=512,
+        work_slices={"mb": 4, "out": 8},
+        core_mapping=default_core_mapping({"mb": 4, "out": 8}),
+        lds=[
+            _layout_lds(0, "producer_out", "dataIN", ["mb", "out"], ["out"]),
+            _layout_lds(1, "restickify_out", "dataOUT", ["out", "mb"], ["mb"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
+    consumer_payload = _minimal_layout_payload(
+        "2_add",
+        opfunc="add",
+        size=512,
+        work_slices={"mb": 4, "out": 8},
+        core_mapping=default_core_mapping({"mb": 4, "out": 8}),
+        lds=[
+            _layout_lds(0, "restickify_out", "dataIN", ["out", "mb"], ["mb"]),
+            _layout_lds(1, "consumer_out", "dataOUT", ["out", "mb"], ["mb"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
+    specs = [
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 0), _arg(False, 4, allocation={"lx": 0})],
+        ),
+        _minimal_op_spec(
+            RESTICKIFY_OP,
+            [_arg(True, 4), _arg(False, 5)],
+            op_info=_ptlx_restickify_info(
+                _endpoint_allocation(0, 256 * 1024, size=64 * 1024)
+            ),
+        ),
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 5, allocation={"lx": 256 * 1024}), _arg(False, 6)],
+        ),
+    ]
+    payloads = [producer_payload, restickify_payload, consumer_payload]
+    plans = plan_restickify_ptlx_mixed_schedules(specs)
+
+    with config.patch(restickify_ptlx_streaming_e2e=True):
+        rows = patch_restickify_ptlx_mixed_schedules(payloads, specs, plans=plans)
+
+    patched = rows[0]
+    assert patched["status"] == "patched"
+    assert patched["kind"] == "ptlx-streaming-mixed-schedule"
+    assert patched["trigger_reason"].startswith("ptlx-piece-smaller-than-stick")
+    assert patched["streaming_summary"]["total_tiles"] == 64
+    assert patched["value_flow_contract"]["valid"] is True
+    assert payloads[2] is None
+    root = next(iter(payloads[1].values()))
+    assert root["streamingPTLXFull_"]["tile_count"] == 64
+    assert len(root["datadscs_"]) == 64 * 3
+    assert all(
+        next(iter(datadsc.values()))["op"]["name"] != "ReStickifyOpHBM"
+        for datadsc in root["datadscs_"]
+    )
+    assert root["coreIdToDscSchedule"]["0"][-1] == [-1, 0, 1, 0]
+
+
+def test_streaming_ptlx_cross_bundle_patch_rewrites_handoff_pair():
+    producer_payload = _minimal_layout_payload(
+        "0_add",
+        opfunc="add",
+        size=512,
+        work_slices={"mb": 1, "out": 32},
+        core_mapping=default_core_mapping({"mb": 1, "out": 32}),
+        lds=[
+            _layout_lds(0, "producer_in", "dataIN", ["mb", "out"], ["out"]),
+            _layout_lds(1, "producer_out", "dataOUT", ["mb", "out"], ["out"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
+    restickify_payload = _minimal_layout_payload(
+        "1_restickify",
+        opfunc="ReStickifyOpHBM",
+        size=512,
+        work_slices={"mb": 8, "out": 4},
+        core_mapping=default_core_mapping({"mb": 8, "out": 4}),
+        lds=[
+            _layout_lds(0, "producer_out", "dataIN", ["mb", "out"], ["out"]),
+            _layout_lds(1, "restickify_out", "dataOUT", ["out", "mb"], ["mb"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
+    consumer_payload = _minimal_layout_payload(
+        "0_batchmatmul",
+        opfunc="batchmatmul",
+        size=512,
+        work_slices={"mb": 32, "out": 1},
+        core_mapping=default_core_mapping({"mb": 32, "out": 1}),
+        lds=[
+            _layout_lds(0, "restickify_out", "dataIN", ["out", "mb"], ["mb"]),
+            _layout_lds(1, "weight", "KERNEL", ["out", "mb"], ["mb"]),
+            _layout_lds(2, "consumer_out", "dataOUT", ["out", "mb"], ["mb"]),
+        ],
+        input_indices=[0, 1],
+        output_indices=[2],
+    )
+    endpoint_allocation = _endpoint_allocation(0, 256 * 1024, size=64 * 1024)
+    c0 = Symbol("c0")
+    c1 = Symbol("c1")
+    c2 = Symbol("c2")
+    restickify_device_size = [8, 512, 64]
+    restickify_output_coords = [c1, c0, c1]
+    left_specs = [
+        _minimal_op_spec(
+            "add",
+            [_arg(True, 0), _arg(False, 5, allocation={"lx": 0})],
+        ),
+        _minimal_op_spec(
+            RESTICKIFY_OP,
+            [
+                _arg(True, 5),
+                _arg(
+                    False,
+                    6,
+                    device_size=restickify_device_size,
+                    device_coordinates=restickify_output_coords,
+                ),
+            ],
+            op_info=_ptlx_restickify_info(endpoint_allocation),
+        ),
+    ]
+    right_specs = [
+        _minimal_op_spec(
+            "batchmatmul",
+            [
+                _arg(
+                    True,
+                    0,
+                    allocation={"lx": 256 * 1024},
+                    device_size=restickify_device_size,
+                    device_coordinates=[c2, c0, c2],
+                ),
+                _arg(
+                    True,
+                    1,
+                    device_size=restickify_device_size,
+                    device_coordinates=[c1, c2, c1],
+                ),
+                _arg(False, 2),
+            ],
+        )
+    ]
+    records = [
+        {
+            "kernel_name": "producer_bundle",
+            "specs": left_specs,
+            "sdscs_json": [producer_payload, restickify_payload],
+        },
+        {
+            "kernel_name": "consumer_bundle",
+            "specs": right_specs,
+            "sdscs_json": [consumer_payload],
+        },
+    ]
+
+    with config.patch(
+        restickify_ptlx_cross_bundle_e2e=True,
+        restickify_ptlx_streaming_e2e=True,
+    ):
+        rows = patch_restickify_ptlx_cross_bundle_handoffs(records)
+
+    assert len(rows) == 1
+    patched = rows[0]
+    assert patched["status"] == "patched"
+    assert patched["kind"] == "ptlx-streaming-cross-bundle-handoff"
+    assert patched["value_flow_contract"]["valid"] is True
+    assert patched["streaming_summary"]["total_tiles"] == 64
+    bridge_root = next(iter(records[0]["sdscs_json"][1].values()))
+    assert "CrossBundleStreamingReStickifyOpWithPTLx" in next(
+        iter(records[0]["sdscs_json"][1])
+    )
+    assert bridge_root["streamingPTLXFull_"]["tile_count"] == 64
+    assert len(bridge_root["datadscs_"]) == 64 * 3
+    consumer_root = next(iter(records[1]["sdscs_json"][0].values()))
+    consumer_dsc = next(iter(consumer_root["dscs_"][0].values()))
+    allocate_nodes = [
+        node for node in consumer_dsc["scheduleTree_"] if node["nodeType_"] == "allocate"
+    ]
+    assert allocate_nodes[0]["component_"] == "lx"
+    assert allocate_nodes[1]["component_"] == "hbm"
 
 
 def test_ptlx_bridge_accepts_stock_mixed_restickify_split():
@@ -785,18 +1033,99 @@ def _minimal_compute_payload(name: str, lds_name: str, *, lds_idx: int):
     }
 
 
+def _layout_lds(
+    lds_idx: int,
+    name: str,
+    ds_type: str,
+    layout: list[str],
+    stick: list[str],
+) -> dict:
+    return {
+        "ldsIdx_": lds_idx,
+        "dsName_": name,
+        "dsType_": ds_type,
+        "layoutDimOrder_": layout,
+        "stickDimOrder_": stick,
+        "memOrg_": {"hbm": {"isPresent": 1}},
+        "hbmStartAddress_": 0,
+        "hbmSize_": 512 * 512 * 2,
+        "lxSize_": 0,
+        "lxBufferSize_": 0,
+    }
+
+
+def _minimal_layout_payload(
+    name: str,
+    *,
+    opfunc: str,
+    size: int,
+    work_slices: dict[str, int],
+    core_mapping: dict[str, dict[str, int]],
+    lds: list[dict],
+    input_indices: list[int],
+    output_indices: list[int],
+) -> dict:
+    dsc = {
+        "numCoreletsUsed_": 1,
+        "numCoreletsUsed_DSC2_": 1,
+        "N_": {"name_": "n", "mb_": size, "out_": size},
+        "labeledDs_": lds,
+        "primaryDsInfo_": {
+            lds_item["dsType_"]: {
+                "layoutDimOrder_": lds_item["layoutDimOrder_"],
+                "stickDimOrder_": lds_item["stickDimOrder_"],
+            }
+            for lds_item in lds
+        },
+        "scheduleTree_": [
+            {
+                "nodeType_": "allocate",
+                "ldsIdx_": lds_item["ldsIdx_"],
+                "name_": f"allocate-{lds_item['dsName_']}_hbm",
+                "component_": "hbm",
+            }
+            for lds_item in lds
+        ],
+        "computeOp_": [
+            {
+                "opFuncName": opfunc,
+                "inputLabeledDs": [
+                    f"dataIN_L{idx}-idx{idx}" for idx in input_indices
+                ],
+                "outputLabeledDs": [
+                    f"dataOUT_L{idx}-idx{idx}" for idx in output_indices
+                ],
+            }
+        ],
+    }
+    return {
+        name: {
+            "numCoresUsed_": 32,
+            "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
+            "numWkSlicesPerDim_": work_slices,
+            "coreIdToWkSlice_": core_mapping,
+            "opFuncsUsed_": [opfunc],
+            "dscs_": [{opfunc: dsc}],
+            "datadscs_": [],
+            "coreIdToDscSchedule": {},
+        }
+    }
+
+
 def _arg(
     is_input: bool,
     arg_index: int,
     *,
     allocation: dict | None = None,
+    device_size: list | None = None,
+    device_coordinates: list | None = None,
 ) -> TensorArg:
     return TensorArg(
         is_input=is_input,
         arg_index=arg_index,
         device_dtype=DataFormats.SEN169_FP16,
-        device_size=[],
-        device_coordinates=[],
+        device_size=device_size or [],
+        device_coordinates=device_coordinates or [],
         allocation=allocation,
     )
 
@@ -821,6 +1150,7 @@ def _endpoint_allocation(
     consumer_base: int,
     *,
     valid: bool = True,
+    size: int = 128,
 ) -> dict:
     return {
         "kind": "ptlx_endpoint_allocation",
@@ -829,14 +1159,14 @@ def _endpoint_allocation(
         "producer": {
             "buffer": "producer",
             "start": producer_base,
-            "size": 128,
-            "end": producer_base + 128,
+            "size": size,
+            "end": producer_base + size,
         },
         "consumer": {
             "buffer": "consumer",
             "start": consumer_base,
-            "size": 128,
-            "end": consumer_base + 128,
+            "size": size,
+            "end": consumer_base + size,
         },
         "overlap_check": {
             "valid": valid,

@@ -124,6 +124,14 @@ restickify_ptlx_streaming_e2e: bool = (
     os.environ.get("SPYRE_RESTICKIFY_PTLX_STREAMING_E2E", "0") == "1"
 )
 
+# Default-off cross-bundle prototype for the production-shaped PT-LX path. This
+# delays DXP compilation until all SDSC bundle JSON has been emitted, so an
+# eligible trailing producer/restickify bundle and the following consumer bundle
+# can be patched as one LX handoff contract before backend compilation.
+restickify_ptlx_cross_bundle_e2e: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_PTLX_CROSS_BUNDLE_E2E", "0") == "1"
+)
+
 # Default-off verifier for the PT-aware LX mixed bridge. When enabled, the
 # generated producer output, bridge endpoints, and consumer input must agree on
 # the same per-core LX addresses before bundle files are written.

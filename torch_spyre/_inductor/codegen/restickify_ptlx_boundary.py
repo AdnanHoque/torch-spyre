@@ -39,8 +39,12 @@ from torch_spyre._inductor.restickify_ring import (
     PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY,
 )
 
-from .restickify_lx_dataop import generate_ptlx_restickify_bridge_sdsc
+from .restickify_lx_dataop import (
+    generate_ptlx_restickify_bridge_sdsc,
+    generate_streaming_ptlx_full_bridge_sdsc,
+)
 from .restickify_ptlx_streaming import (
+    generate_streaming_ptlx_artifact,
     plan_streaming_ptlx_tiles,
     streaming_ptlx_contract,
 )
@@ -164,6 +168,34 @@ def patch_restickify_ptlx_mixed_schedules(
             consumed_indices.add(idx + 1)
         rows.append(row)
         _append_audit(row)
+    return rows
+
+
+def patch_restickify_ptlx_cross_bundle_handoffs(
+    bundle_records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Patch trailing restickify bundles and their next consumer bundle.
+
+    This is the production-shaped bridge window: normal Torch-Spyre lowering may
+    split an eligible edge as ``producer -> restickify`` in one runtime bundle
+    and ``consumer`` in the next.  The bundle-local patcher cannot see that
+    consumer.  This deferred pass runs after all bundle JSON is emitted but
+    before DXP compilation, so it can patch the producer output, replace the
+    trailing restickify with a streaming PT-LX bridge, and patch the next
+    bundle's consumer input to the same LX endpoint.
+    """
+
+    if not _spyre_config.restickify_ptlx_cross_bundle_e2e:
+        return []
+
+    rows = []
+    for bundle_index, (left, right) in enumerate(
+        zip(bundle_records, bundle_records[1:])
+    ):
+        row = _patch_one_cross_bundle_handoff(bundle_index, left, right)
+        if row is not None:
+            rows.append(row)
+            _append_audit(row)
     return rows
 
 
@@ -309,6 +341,20 @@ def _patch_one_mixed_schedule(
         restickify_payload=restickify_payload,
     )
     if piece_reason is not None:
+        if _spyre_config.restickify_ptlx_streaming_e2e:
+            return _patch_streaming_mixed_schedule(
+                plan,
+                sdsc_payloads,
+                specs,
+                size=size,
+                num_cores=num_cores,
+                producer_payload=producer_payload,
+                restickify_payload=restickify_payload,
+                consumer_payload=consumer_payload,
+                direction=direction,
+                restickify_logical_direction=restickify_logical_direction,
+                trigger_reason=piece_reason,
+            )
         return _streaming_candidate_row(
             idx,
             piece_reason,
@@ -326,6 +372,20 @@ def _patch_one_mixed_schedule(
     )
     storage_reason = bridge_storage.get("reason")
     if storage_reason is not None:
+        if _spyre_config.restickify_ptlx_streaming_e2e:
+            return _patch_streaming_mixed_schedule(
+                plan,
+                sdsc_payloads,
+                specs,
+                size=size,
+                num_cores=num_cores,
+                producer_payload=producer_payload,
+                restickify_payload=restickify_payload,
+                consumer_payload=consumer_payload,
+                direction=direction,
+                restickify_logical_direction=restickify_logical_direction,
+                trigger_reason=str(storage_reason),
+            )
         return _streaming_candidate_row(
             idx,
             str(storage_reason),
@@ -419,6 +479,359 @@ def _patch_one_mixed_schedule(
         "replacement_sdsc": mixed_name,
         "mixed_schedule": _bridge_then_dl_schedule(num_cores)["0"],
     }
+
+
+def _patch_streaming_mixed_schedule(
+    plan: PTLXMixedSchedulePlan,
+    sdsc_payloads: list[dict[str, Any] | None],
+    specs: list[OpSpec],
+    *,
+    size: int,
+    num_cores: int,
+    producer_payload: dict[str, Any],
+    restickify_payload: dict[str, Any],
+    consumer_payload: dict[str, Any],
+    direction: str,
+    restickify_logical_direction: str,
+    trigger_reason: str,
+) -> dict[str, Any]:
+    idx = plan.sdsc_index
+    if direction != "kernel-to-output":
+        return _row(idx, "skipped", f"unsupported-streaming-direction:{direction}")
+
+    restickify_spec = specs[idx]
+    streaming_plan = _plan_streaming_bridge_storage(
+        restickify_spec,
+        producer_payload=producer_payload,
+        restickify_payload=restickify_payload,
+        plan=plan,
+        size=size,
+    )
+    storage_reason = streaming_plan.get("reason")
+    if storage_reason is not None:
+        row = _streaming_candidate_row(
+            idx,
+            str(storage_reason),
+            size=size,
+            producer_payload=producer_payload,
+            restickify_payload=restickify_payload,
+        )
+        row["streaming_trigger_reason"] = trigger_reason
+        row["streaming_storage"] = streaming_plan
+        return row
+
+    producer_start, producer_patches = _materialize_producer_lx_endpoint(
+        producer_payload,
+        endpoint=plan.producer_endpoint,
+        num_cores=num_cores,
+    )
+    _, consumer_dsc = _single_payload_dsc(consumer_payload)
+    consumer_start, consumer_name = _materialize_consumer_lx_endpoint(
+        consumer_payload,
+        consumer_dsc=consumer_dsc,
+        endpoint=plan.consumer_endpoint,
+        num_cores=num_cores,
+    )
+    _force_consumer_corelets(
+        consumer_payload,
+        factor=_corelet_factor(consumer_start),
+    )
+
+    summary = streaming_plan["summary"]
+    artifact = generate_streaming_ptlx_artifact(
+        f"{idx}_StreamingPTLXDescriptor",
+        summary,
+        producer_base=plan.producer_endpoint.base,
+        consumer_base=plan.consumer_endpoint.base,
+        tile_workspace_base=int(streaming_plan["tile_workspace"]["start"]),
+        max_tiles=summary.total_tiles,
+    )
+    bridge_payload = generate_streaming_ptlx_full_bridge_sdsc(
+        f"{idx}_StreamingReStickifyOpWithPTLx",
+        artifact,
+    )
+    mixed_name = f"{idx}_StreamingMixedReStickifyOpWithPTLxConsumer"
+    mixed_payload = _combine_ptlx_bridge_with_consumer(
+        mixed_name,
+        bridge_payload,
+        consumer_payload,
+    )
+    value_flow_contract = _streaming_value_flow_contract(
+        bridge_payload=bridge_payload,
+        producer_base=plan.producer_endpoint.base,
+        consumer_base=plan.consumer_endpoint.base,
+        expected_tiles=summary.total_tiles,
+    )
+    if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
+        "valid"
+    ]:
+        raise RuntimeError(
+            "streaming PT-LX restickify value-flow contract failed for "
+            f"SDSC {idx}: {value_flow_contract}"
+        )
+
+    sdsc_payloads[idx] = mixed_payload
+    sdsc_payloads[plan.consumer_index] = None
+
+    return {
+        **_row(idx, "patched", None),
+        "kind": "ptlx-streaming-mixed-schedule",
+        "trigger_reason": trigger_reason,
+        "plan": asdict(plan),
+        "direction": direction,
+        "restickify_logical_direction": restickify_logical_direction,
+        "size": size,
+        "num_cores": num_cores,
+        "consumer_index_omitted": plan.consumer_index,
+        "producer_lx_unique_starts": _unique_start_values(producer_start),
+        "consumer_lx_unique_starts": _unique_start_values(consumer_start),
+        "producer_allocation_patches": producer_patches,
+        "consumer_input_name": consumer_name,
+        "endpoint_allocation": restickify_spec.op_info.get(
+            PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY
+        ),
+        "streaming_storage": {
+            key: value
+            for key, value in streaming_plan.items()
+            if key != "summary"
+        },
+        "streaming_summary": _streaming_summary_audit(summary),
+        "value_flow_contract": value_flow_contract,
+        "replacement_sdsc": mixed_name,
+    }
+
+
+def _patch_one_cross_bundle_handoff(
+    bundle_index: int,
+    left: dict[str, Any],
+    right: dict[str, Any],
+) -> dict[str, Any] | None:
+    left_specs: list[OpSpec] = left.get("specs") or []
+    right_specs: list[OpSpec] = right.get("specs") or []
+    left_payloads: list[dict[str, Any] | None] = left.get("sdscs_json") or []
+    right_payloads: list[dict[str, Any] | None] = right.get("sdscs_json") or []
+    if not left_specs or not right_specs or not left_payloads or not right_payloads:
+        return None
+
+    idx = len(left_specs) - 1
+    restickify_spec = left_specs[idx]
+    if restickify_spec.op != RESTICKIFY_OP:
+        return None
+
+    row_base = {
+        "bundle_index": bundle_index,
+        "producer_kernel": left.get("kernel_name"),
+        "consumer_kernel": right.get("kernel_name"),
+        "sdsc_index": idx,
+        "kind": "ptlx-streaming-cross-bundle-handoff",
+    }
+    if idx <= 0:
+        return {**row_base, **_row(idx, "skipped", "missing-producer-in-left-bundle")}
+    if not _spyre_config.restickify_ptlx_streaming_e2e:
+        return {**row_base, **_row(idx, "skipped", "streaming-ptlx-disabled")}
+
+    reason = _eligibility_skip_reason(restickify_spec)
+    if reason is not None:
+        return {**row_base, **_row(idx, "skipped", reason)}
+    if len(restickify_spec.args) != 2:
+        return {**row_base, **_row(idx, "skipped", "unsupported-restickify-arity")}
+
+    producer_payload = left_payloads[idx - 1]
+    restickify_payload = left_payloads[idx]
+    consumer_payload = right_payloads[0]
+    if producer_payload is None or restickify_payload is None or consumer_payload is None:
+        return {**row_base, **_row(idx, "skipped", "missing-cross-bundle-payload")}
+    if not _is_restickify_hbm_payload(restickify_payload):
+        return {**row_base, **_row(idx, "skipped", "restickify-payload-not-hbm-compute")}
+
+    producer_spec = left_specs[idx - 1]
+    consumer_spec = right_specs[0]
+    producer_arg_index = int(restickify_spec.args[0].arg_index)
+    producer_lds_idx = _arg_position_for_arg_index(
+        producer_spec,
+        producer_arg_index,
+        want_input=False,
+    )
+    if producer_lds_idx is None:
+        return {**row_base, **_row(idx, "skipped", "producer-output-arg-not-adjacent")}
+
+    consumer_choice = _cross_bundle_consumer_arg(restickify_spec, consumer_spec)
+    if isinstance(consumer_choice, str):
+        return {**row_base, **_row(idx, "skipped", consumer_choice)}
+    consumer_lds_idx, consumer_arg = consumer_choice
+
+    producer_base, producer_base_source = _planned_endpoint_base(
+        producer_spec.args[producer_lds_idx],
+        env_var=_PRODUCER_BASE_ENV,
+        default_base=_DEFAULT_PRODUCER_BASE,
+    )
+    consumer_base, consumer_base_source = _planned_endpoint_base(
+        consumer_arg,
+        env_var=_CONSUMER_BASE_ENV,
+        default_base=_DEFAULT_CONSUMER_BASE,
+    )
+    endpoint_reason = _allocator_endpoint_skip_reason(
+        restickify_spec,
+        producer_base=producer_base,
+        producer_base_source=producer_base_source,
+        consumer_base=consumer_base,
+        consumer_base_source=consumer_base_source,
+    )
+    if endpoint_reason is not None:
+        return {**row_base, **_row(idx, "skipped", endpoint_reason)}
+
+    plan = PTLXMixedSchedulePlan(
+        sdsc_index=idx,
+        producer_index=idx - 1,
+        consumer_index=0,
+        producer_endpoint=PTLXLXEndpointPlan(
+            role="producer_output",
+            sdsc_index=idx - 1,
+            lds_idx=producer_lds_idx,
+            arg_index=producer_arg_index,
+            base=producer_base,
+            base_source=producer_base_source,
+            is_input=False,
+        ),
+        consumer_endpoint=PTLXLXEndpointPlan(
+            role="consumer_input",
+            sdsc_index=0,
+            lds_idx=consumer_lds_idx,
+            arg_index=int(consumer_arg.arg_index),
+            base=consumer_base,
+            base_source=consumer_base_source,
+            is_input=True,
+        ),
+    )
+
+    restickify_root, restickify_dsc = _single_payload_dsc(restickify_payload)
+    _, consumer_dsc = _single_payload_dsc(consumer_payload)
+    size, num_cores = _infer_size_and_cores(restickify_root, restickify_dsc)
+    streaming_plan = _plan_streaming_bridge_storage(
+        restickify_spec,
+        producer_payload=producer_payload,
+        restickify_payload=restickify_payload,
+        plan=plan,
+        size=size,
+    )
+    storage_reason = streaming_plan.get("reason")
+    if storage_reason is not None:
+        return {
+            **row_base,
+            **_streaming_candidate_row(
+                idx,
+                str(storage_reason),
+                size=size,
+                producer_payload=producer_payload,
+                restickify_payload=restickify_payload,
+            ),
+            "streaming_storage": streaming_plan,
+        }
+
+    producer_start, producer_patches = _materialize_producer_lx_endpoint(
+        producer_payload,
+        endpoint=plan.producer_endpoint,
+        num_cores=num_cores,
+    )
+    consumer_start, consumer_name = _materialize_consumer_lx_endpoint(
+        consumer_payload,
+        consumer_dsc=consumer_dsc,
+        endpoint=plan.consumer_endpoint,
+        num_cores=num_cores,
+    )
+    _force_consumer_corelets(
+        consumer_payload,
+        factor=_corelet_factor(consumer_start),
+    )
+
+    summary = streaming_plan["summary"]
+    artifact = generate_streaming_ptlx_artifact(
+        f"{idx}_CrossBundleStreamingPTLXDescriptor",
+        summary,
+        producer_base=producer_base,
+        consumer_base=consumer_base,
+        tile_workspace_base=int(streaming_plan["tile_workspace"]["start"]),
+        max_tiles=summary.total_tiles,
+    )
+    bridge_payload = generate_streaming_ptlx_full_bridge_sdsc(
+        f"{idx}_CrossBundleStreamingReStickifyOpWithPTLx",
+        artifact,
+    )
+    value_flow_contract = _streaming_value_flow_contract(
+        bridge_payload=bridge_payload,
+        producer_base=producer_base,
+        consumer_base=consumer_base,
+        expected_tiles=summary.total_tiles,
+    )
+    if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
+        "valid"
+    ]:
+        raise RuntimeError(
+            "cross-bundle streaming PT-LX restickify value-flow contract "
+            f"failed for SDSC {idx}: {value_flow_contract}"
+        )
+
+    left_payloads[idx] = bridge_payload
+    return {
+        **row_base,
+        **_row(idx, "patched", None),
+        "plan": asdict(plan),
+        "size": size,
+        "num_cores": num_cores,
+        "consumer_lx_unique_starts": _unique_start_values(consumer_start),
+        "producer_lx_unique_starts": _unique_start_values(producer_start),
+        "producer_allocation_patches": producer_patches,
+        "consumer_input_name": consumer_name,
+        "streaming_storage": {
+            key: value
+            for key, value in streaming_plan.items()
+            if key != "summary"
+        },
+        "streaming_summary": _streaming_summary_audit(summary),
+        "value_flow_contract": value_flow_contract,
+        "replacement_sdsc": next(iter(bridge_payload)),
+    }
+
+
+def _cross_bundle_consumer_arg(
+    restickify_spec: OpSpec,
+    consumer_spec: OpSpec,
+) -> tuple[int, Any] | str:
+    output_arg = restickify_spec.args[-1]
+    candidates = []
+    for arg in consumer_spec.args:
+        if not getattr(arg, "is_input", False):
+            continue
+        if getattr(arg, "device_dtype", None) != getattr(output_arg, "device_dtype", None):
+            continue
+        if list(getattr(arg, "device_size", [])) != list(
+            getattr(output_arg, "device_size", [])
+        ):
+            continue
+        lds_idx = _arg_position_for_arg_index(
+            consumer_spec,
+            int(arg.arg_index),
+            want_input=True,
+        )
+        if lds_idx is not None:
+            candidates.append((lds_idx, arg))
+
+    if not candidates:
+        return "consumer-input-not-layout-compatible"
+    if len(candidates) == 1:
+        return candidates[0]
+
+    output_coords = [str(coord) for coord in getattr(output_arg, "device_coordinates", [])]
+    matching_nonstick_coord = [
+        (lds_idx, arg)
+        for lds_idx, arg in candidates
+        if len(getattr(arg, "device_coordinates", [])) > 1
+        and len(output_coords) > 1
+        and str(arg.device_coordinates[1]) == output_coords[1]
+    ]
+    if len(matching_nonstick_coord) == 1:
+        return matching_nonstick_coord[0]
+    return "ambiguous-cross-bundle-consumer-input"
 
 
 def _patch_one_boundary(
@@ -694,6 +1107,88 @@ def _plan_bridge_intermediate_storage(
     }
 
 
+def _plan_streaming_bridge_storage(
+    spec: OpSpec,
+    *,
+    producer_payload: dict[str, Any],
+    restickify_payload: dict[str, Any],
+    plan: PTLXMixedSchedulePlan,
+    size: int,
+) -> dict[str, Any]:
+    endpoint_allocation = (spec.op_info or {}).get(
+        PTLX_ENDPOINT_ALLOCATION_OP_INFO_KEY
+    )
+    if _spyre_config.restickify_ptlx_force_env_endpoints:
+        endpoint_allocation = None
+    producer_range = _endpoint_range(
+        endpoint_allocation,
+        "producer",
+        fallback_base=plan.producer_endpoint.base,
+        fallback_size=_piece_bytes_per_core(producer_payload, size),
+    )
+    consumer_range = _endpoint_range(
+        endpoint_allocation,
+        "consumer",
+        fallback_base=plan.consumer_endpoint.base,
+        fallback_size=_piece_bytes_per_core(restickify_payload, size),
+    )
+    endpoint_ranges = [producer_range, consumer_range]
+    endpoint_overlaps = _range_overlaps(endpoint_ranges)
+    if endpoint_overlaps:
+        return {
+            "reason": "ptlx-endpoint-ranges-overlap",
+            "producer": producer_range,
+            "consumer": consumer_range,
+            "endpoint_overlaps": endpoint_overlaps,
+        }
+
+    summary = plan_streaming_ptlx_tiles(
+        size=size,
+        source_work_slices=_root_work_slices(producer_payload),
+        source_core_mapping=_root_core_mapping(producer_payload),
+        dest_work_slices=_root_work_slices(restickify_payload),
+        dest_core_mapping=_root_core_mapping(restickify_payload),
+        sample_limit=_streaming_tile_count(size),
+    )
+    workspace_size = int(summary.tile_buffer_bytes) * 3
+    workspace_start = _first_free_lx_range(
+        endpoint_ranges,
+        size=workspace_size,
+        limit=_LX_BYTES_PER_CORE,
+        alignment=_LX_ALIGNMENT,
+    )
+    if workspace_start is None:
+        return {
+            "reason": "missing-streaming-tile-workspace",
+            "producer": producer_range,
+            "consumer": consumer_range,
+            "tile_workspace": {"size": workspace_size},
+            "lx_limit": _LX_BYTES_PER_CORE,
+        }
+
+    return {
+        "reason": None,
+        "producer": producer_range,
+        "consumer": consumer_range,
+        "tile_workspace": {
+            "start": workspace_start,
+            "end": workspace_start + workspace_size,
+            "size": workspace_size,
+            "source": "planned-free-range",
+            "tile_buffer_bytes": int(summary.tile_buffer_bytes),
+            "tile_buffers": 3,
+        },
+        "lx_limit": _LX_BYTES_PER_CORE,
+        "alignment": _LX_ALIGNMENT,
+        "summary": summary,
+    }
+
+
+def _streaming_tile_count(size: int, tile_size: int = 64) -> int:
+    tiles_per_axis = (int(size) + int(tile_size) - 1) // int(tile_size)
+    return tiles_per_axis * tiles_per_axis
+
+
 def _endpoint_range(
     endpoint_allocation: Any,
     key: str,
@@ -905,6 +1400,89 @@ def _streaming_candidate_summary(
     )
     payload["available"] = True
     return payload
+
+
+def _streaming_summary_audit(summary: Any) -> dict[str, Any]:
+    return {
+        "size": int(summary.size),
+        "tile_size": int(summary.tile_size),
+        "total_tiles": int(summary.total_tiles),
+        "source_core_count": int(summary.source_core_count),
+        "dest_core_count": int(summary.dest_core_count),
+        "max_fan_in": int(summary.max_fan_in),
+        "max_fan_out": int(summary.max_fan_out),
+        "tile_buffer_bytes": int(summary.tile_buffer_bytes),
+        "total_transfer_bytes": int(summary.total_transfer_bytes),
+        "total_byte_hops": int(summary.total_byte_hops),
+        "notes": list(summary.notes),
+    }
+
+
+def _streaming_value_flow_contract(
+    *,
+    bridge_payload: dict[str, Any],
+    producer_base: int,
+    consumer_base: int,
+    expected_tiles: int,
+) -> dict[str, Any]:
+    root = next(iter(bridge_payload.values()))
+    datadscs = root.get("datadscs_", []) or []
+    op_names: list[str] = []
+    hbm_placements = 0
+    producer_starts: set[int] = set()
+    consumer_starts: set[int] = set()
+    gather_count = 0
+    scatter_count = 0
+    for datadsc in datadscs:
+        name, dataop = next(iter(datadsc.items()))
+        op_name = str(dataop.get("op", {}).get("name"))
+        op_names.append(op_name)
+        for ds in dataop.get("labeledDs_", []) or []:
+            for piece in ds.get("PieceInfo", []) or []:
+                for placement in piece.get("PlacementInfo", []) or []:
+                    if placement.get("type") == "hbm":
+                        hbm_placements += 1
+        if "gather" in str(name):
+            gather_count += 1
+            producer_starts.update(
+                _piece_lx_starts(dataop["labeledDs_"][0].get("PieceInfo", []) or [])
+            )
+        if "scatter" in str(name):
+            scatter_count += 1
+            consumer_starts.update(
+                _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
+            )
+
+    has_hbm_restickify = "ReStickifyOpHBM" in op_names
+    valid = (
+        hbm_placements == 0
+        and not has_hbm_restickify
+        and gather_count == int(expected_tiles)
+        and scatter_count == int(expected_tiles)
+        and producer_starts == {int(producer_base)}
+        and consumer_starts == {int(consumer_base)}
+    )
+    return {
+        "valid": valid,
+        "expected_tiles": int(expected_tiles),
+        "gather_count": gather_count,
+        "scatter_count": scatter_count,
+        "datadsc_count": len(datadscs),
+        "hbm_placements": hbm_placements,
+        "has_hbm_restickify": has_hbm_restickify,
+        "producer_input_unique_starts": sorted(producer_starts),
+        "consumer_output_unique_starts": sorted(consumer_starts),
+    }
+
+
+def _piece_lx_starts(pieces: list[dict[str, Any]]) -> set[int]:
+    starts: set[int] = set()
+    for piece in pieces:
+        for placement in piece.get("PlacementInfo", []) or []:
+            if placement.get("type") != "lx":
+                continue
+            starts.update(int(value) for value in placement.get("startAddr", []) or [])
+    return starts
 
 
 def _append_audit(row: dict[str, Any]) -> None:
@@ -1351,9 +1929,12 @@ def _combine_ptlx_bridge_with_consumer(
     bridge_root = next(iter(bridge_payload.values()))
     root = deepcopy(consumer_root)
     root["datadscs_"] = deepcopy(bridge_root.get("datadscs_", []) or [])
-    root["coreIdToDscSchedule"] = _bridge_then_dl_schedule(
-        int(root.get("numCoresUsed_", 32) or 32)
+    root["coreIdToDscSchedule"] = _bridge_schedule_then_dl_schedule(
+        bridge_root,
+        int(root.get("numCoresUsed_", 32) or 32),
     )
+    if "streamingPTLXFull_" in bridge_root:
+        root["streamingPTLXFull_"] = deepcopy(bridge_root["streamingPTLXFull_"])
     dataop_names = {
         str(next(iter(datadsc.values())).get("op", {}).get("name"))
         for datadsc in root["datadscs_"]
@@ -1363,6 +1944,38 @@ def _combine_ptlx_bridge_with_consumer(
         set(root.get("opFuncsUsed_", []) or []) | dataop_names
     )
     return {name: root}
+
+
+def _bridge_schedule_then_dl_schedule(
+    bridge_root: dict[str, Any],
+    consumer_num_cores: int,
+) -> dict[str, list[list[int]]]:
+    num_dataops = len(bridge_root.get("datadscs_", []) or [])
+    bridge_schedule = bridge_root.get("coreIdToDscSchedule") or {}
+    num_cores = max(
+        int(consumer_num_cores),
+        int(bridge_root.get("numCoresUsed_", 0) or 0),
+    )
+    schedule: dict[str, list[list[int]]] = {}
+    for core_id in range(num_cores):
+        steps = [list(step) for step in bridge_schedule.get(str(core_id), [])]
+        if not steps and not bridge_schedule and num_dataops:
+            steps = [
+                [
+                    dataop_idx,
+                    -1,
+                    1 if dataop_idx > 0 else 0,
+                    1 if dataop_idx < num_dataops - 1 else 0,
+                ]
+                for dataop_idx in range(num_dataops)
+            ]
+        if steps:
+            steps[-1][3] = 1
+            steps.append([-1, 0, 1, 0])
+        else:
+            steps.append([-1, 0, 0, 0])
+        schedule[str(core_id)] = steps
+    return schedule
 
 
 def _bridge_then_dl_schedule(num_cores: int) -> dict[str, list[list[int]]]:
