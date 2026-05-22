@@ -234,6 +234,14 @@ restickify_lx_neighbor_descriptor: bool = (
     os.environ.get("SPYRE_RESTICKIFY_LX_NEIGHBOR_DESCRIPTOR", "0") == "1"
 )
 
+# Default-off sidecar lowering for Stage257+ PT-LX work. When enabled with the
+# descriptor flag, bundle generation emits a Deeptools-shaped streaming bridge
+# candidate next to the descriptor. It is intentionally not added to bundle.mlir,
+# so the stock HBM restickify fallback remains the executable path.
+restickify_lx_neighbor_streaming_bridge: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_LX_NEIGHBOR_STREAMING_BRIDGE", "0") == "1"
+)
+
 # Default-off producer-consumer ownership telemetry. This generalizes the
 # restickify byte-hop estimator to all exact in-graph tensor edges, without
 # changing core division or codegen behavior.

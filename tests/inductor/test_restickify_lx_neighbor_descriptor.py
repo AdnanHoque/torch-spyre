@@ -19,6 +19,7 @@ from sympy import Symbol
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor import config
 from torch_spyre._inductor.codegen.lx_neighbor_descriptor import (
+    BRIDGE_CANDIDATE_FILENAME_TEMPLATE,
     DESCRIPTOR_FILENAME,
     LOCALITY_CERTIFICATE_OP_INFO_KEY,
     build_lx_neighbor_descriptor,
@@ -276,7 +277,7 @@ def test_builds_candidate_descriptor_for_adjacent_certified_restickify():
         _candidate_specs(),
     )
 
-    assert descriptor["schema_version"] == 4
+    assert descriptor["schema_version"] == 5
     assert descriptor["kind"] == "torch_spyre.restickify_lx_neighbor_edges"
     assert descriptor["skipped"] == []
     assert len(descriptor["edges"]) == 1
@@ -529,3 +530,91 @@ def test_maybe_emit_descriptor_writes_sidecar_when_flag_enabled(tmp_path, monkey
     assert descriptor_path.exists()
     payload = json.loads(descriptor_path.read_text(encoding="utf-8"))
     assert len(payload["edges"]) == 1
+
+
+def test_maybe_emit_streaming_bridge_candidate_sidecar(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "restickify_lx_neighbor_descriptor", True)
+    monkeypatch.setattr(config, "restickify_lx_neighbor_streaming_bridge", True)
+    specs = _candidate_specs()
+    for spec in specs:
+        for arg in spec.args:
+            arg.device_size = [512, 512]
+    producer_mapping = {
+        str(core): {"mb": core, "out": 0}
+        for core in range(32)
+    }
+    destination_mapping = {
+        str(core): {"mb": core % 4, "out": core // 4}
+        for core in range(32)
+    }
+    payloads = [
+        _sdsc_payload(
+            "0_add",
+            "add",
+            num_work_slices={"mb": 32, "out": 1},
+            core_mapping=producer_mapping,
+        ),
+        _sdsc_payload(
+            "1_ReStickifyOpHBM",
+            "ReStickifyOpHBM",
+            num_work_slices={"mb": 4, "out": 8},
+            core_mapping=destination_mapping,
+            input_labels=["Tensor0-idx0"],
+            output_labels=["Tensor1-idx1"],
+            labeled_ds=[
+                {
+                    "ldsIdx_": 0,
+                    "dsName_": "Tensor0",
+                    "dsType_": "OUTPUT",
+                    "scale_": [1, 1],
+                    "wordLength": 2,
+                    "dataFormat_": "SEN169_FP16",
+                    "memOrg_": {"lx": {"isPresent": 1}},
+                },
+                {
+                    "ldsIdx_": 1,
+                    "dsName_": "Tensor1",
+                    "dsType_": "KERNEL",
+                    "scale_": [1, 1],
+                    "wordLength": 2,
+                    "dataFormat_": "SEN169_FP16",
+                    "memOrg_": {"lx": {"isPresent": 1}},
+                },
+            ],
+        ),
+        _sdsc_payload(
+            "2_add",
+            "add",
+            num_work_slices={"mb": 4, "out": 8},
+            core_mapping=destination_mapping,
+        ),
+    ]
+
+    descriptor = maybe_emit_lx_neighbor_descriptor(
+        "sdsc_fused_add",
+        str(tmp_path),
+        _files(),
+        specs,
+        sdsc_payloads=payloads,
+    )
+
+    assert descriptor is not None
+    candidate = descriptor["streaming_bridge_candidates"][0]
+    assert candidate["status"] == "emitted"
+    assert candidate["bundle_mlir_unchanged"] is True
+    assert candidate["executable_in_bundle"] is False
+    assert candidate["fallback"] == "ReStickifyOpHBM"
+    assert candidate["size"] == 512
+    assert candidate["total_tiles"] == 64
+    assert candidate["tile_records_materialized"] == 64
+    assert candidate["streaming_summary"]["max_fan_in"] == 4
+    assert candidate["streaming_summary"]["max_fan_out"] == 1
+    bridge_path = tmp_path / BRIDGE_CANDIDATE_FILENAME_TEMPLATE.format(idx=1)
+    assert bridge_path.exists()
+    bridge = json.loads(bridge_path.read_text(encoding="utf-8"))
+    root = next(iter(bridge.values()))
+    assert root["streamingPTLXFull_"]["fallback"] == "ReStickifyOpHBM"
+    assert root["streamingPTLXFull_"]["coalescing"] == "direct-64x64-tiles"
+    assert root["streamingPTLXFull_"]["direct_restickify_contract"] is True
+    assert "ReStickifyOpHBM" not in candidate["op_funcs_used"]
+    assert set(candidate["op_funcs_used"]) == {"STCDPOpLx", "ReStickifyOpWithPTLx"}

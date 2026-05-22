@@ -38,7 +38,9 @@ from torch_spyre._inductor.restickify_ring import (
     LOCALITY_CERTIFICATE_OP_INFO_KEY,
 )
 
+from .restickify_lx_dataop import generate_streaming_ptlx_direct_full_bridge_sdsc
 from .restickify_ptlx_streaming import (
+    generate_streaming_ptlx_artifact,
     plan_streaming_ptlx_tiles,
     streaming_ptlx_contract,
 )
@@ -46,6 +48,9 @@ from .restickify_ptlx_streaming import (
 logger = get_inductor_logger("sdsc_compile")
 
 DESCRIPTOR_FILENAME = "restickify_lx_neighbor_edges.json"
+BRIDGE_CANDIDATE_FILENAME_TEMPLATE = (
+    "restickify_lx_neighbor_streaming_bridge_edge_{idx}.json"
+)
 _ALLOW_UNCERTIFIED_ENV = (
     "SPYRE_RESTICKIFY_LX_NEIGHBOR_DESCRIPTOR_ALLOW_UNCERTIFIED"
 )
@@ -69,6 +74,15 @@ def maybe_emit_lx_neighbor_descriptor(
         specs,
         sdsc_payloads=sdsc_payloads,
     )
+    if (
+        _spyre_config.restickify_lx_neighbor_streaming_bridge
+        and sdsc_payloads is not None
+    ):
+        _emit_streaming_bridge_candidates(
+            descriptor,
+            output_dir=output_dir,
+            sdsc_payloads=sdsc_payloads,
+        )
     path = os.path.join(output_dir, DESCRIPTOR_FILENAME)
     with open(path, "w", encoding="utf-8") as file:
         logger.info("Generating %s", file.name)
@@ -160,7 +174,7 @@ def build_lx_neighbor_descriptor(
         edges.append(edge)
 
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "kind": "torch_spyre.restickify_lx_neighbor_edges",
         "kernel_name": kernel_name,
         "descriptor_file": DESCRIPTOR_FILENAME,
@@ -179,7 +193,136 @@ def build_lx_neighbor_descriptor(
             "lx_materialization_contract is the generalized bridge target: it "
             "reads the producer's real physical LX output view and materializes "
             "the restickified consumer view",
+            "streaming bridge candidates are non-executable sidecars when "
+            "enabled; bundle.mlir intentionally keeps the stock HBM fallback",
         ],
+    }
+
+
+def _emit_streaming_bridge_candidates(
+    descriptor: dict[str, Any],
+    *,
+    output_dir: str,
+    sdsc_payloads: Sequence[dict[str, Any]],
+) -> None:
+    """Emit non-executable bridge SDSC sidecars for available descriptors.
+
+    This consumes the real producer/restickify ownership metadata, materializes
+    every 64x64 tile record, and lowers the tile plan into Deeptools-shaped
+    data-op JSON. The file is deliberately not inserted into ``bundle.mlir``;
+    it is evidence for the next lowering step while preserving the stock HBM
+    path as the runnable fallback.
+    """
+
+    candidates: list[dict[str, Any]] = []
+    for edge in descriptor.get("edges", []) or []:
+        idx = int(edge["restickify"]["index"])
+        candidate = _streaming_bridge_candidate(
+            edge,
+            sdsc_payloads=sdsc_payloads,
+        )
+        if candidate.get("status") == "emitted":
+            file_name = BRIDGE_CANDIDATE_FILENAME_TEMPLATE.format(idx=idx)
+            candidate["file"] = file_name
+            path = os.path.join(output_dir, file_name)
+            with open(path, "w", encoding="utf-8") as file:
+                logger.info("Generating %s", file.name)
+                json.dump(candidate["payload"], file, default=str, indent=2)
+                file.write("\n")
+            candidate = {key: value for key, value in candidate.items() if key != "payload"}
+        edge["streaming_bridge_candidate"] = candidate
+        candidates.append(
+            {
+                key: value
+                for key, value in candidate.items()
+                if key not in {"payload"}
+            }
+        )
+    descriptor["streaming_bridge_candidates"] = candidates
+
+
+def _streaming_bridge_candidate(
+    edge: dict[str, Any],
+    *,
+    sdsc_payloads: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    streaming = (
+        edge.get("lx_materialization_contract", {}).get("streaming_ptlx", {})
+    )
+    if streaming.get("available") is not True:
+        return {
+            "status": "skipped",
+            "reason": streaming.get("reason", "streaming-plan-unavailable"),
+            "fallback": "ReStickifyOpHBM",
+        }
+
+    idx = int(edge["restickify"]["index"])
+    row_dim = str(streaming["row_dim"])
+    col_dim = str(streaming["col_dim"])
+    size = int(streaming["summary"]["size"])
+    tile_size = int(streaming["tile_size"])
+    producer_root, _ = _unwrap_sdsc_root_and_dsc(sdsc_payloads[idx - 1])
+    destination_root, _ = _unwrap_sdsc_root_and_dsc(sdsc_payloads[idx])
+    source_slices = _work_slices_for_dims(producer_root, row_dim, col_dim)
+    dest_slices = _work_slices_for_dims(destination_root, row_dim, col_dim)
+    if source_slices is None or dest_slices is None:
+        return {
+            "status": "skipped",
+            "reason": "missing-source-or-destination-work-slices",
+            "fallback": "ReStickifyOpHBM",
+        }
+    source_mapping = _core_mapping_for_dims(producer_root, row_dim, col_dim)
+    dest_mapping = _core_mapping_for_dims(destination_root, row_dim, col_dim)
+    try:
+        summary = plan_streaming_ptlx_tiles(
+            size=size,
+            source_work_slices=source_slices,
+            dest_work_slices=dest_slices,
+            source_core_mapping=source_mapping,
+            dest_core_mapping=dest_mapping,
+            tile_size=tile_size,
+            row_dim=row_dim,
+            col_dim=col_dim,
+            sample_limit=int(streaming["summary"]["total_tiles"]),
+            sample_all_tiles=True,
+        )
+        artifact = generate_streaming_ptlx_artifact(
+            f"{idx}_LXNeighborStreamingPTLXDescriptor",
+            summary,
+            max_tiles=summary.total_tiles,
+        )
+        payload = generate_streaming_ptlx_direct_full_bridge_sdsc(
+            f"{idx}_LXNeighborStreamingReStickifyOpWithPTLx",
+            artifact,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "status": "skipped",
+            "reason": f"bridge-generation-failed:{type(exc).__name__}: {exc}",
+            "fallback": "ReStickifyOpHBM",
+        }
+
+    root = next(iter(payload.values()))
+    dataop_names = [
+        next(iter(datadsc.values())).get("op", {}).get("name")
+        for datadsc in root.get("datadscs_", []) or []
+    ]
+    return {
+        "status": "emitted",
+        "kind": "torch_spyre.restickify_lx_neighbor_streaming_bridge_candidate",
+        "fallback": "ReStickifyOpHBM",
+        "executable_in_bundle": False,
+        "bundle_mlir_unchanged": True,
+        "source_edge_id": edge.get("edge_id"),
+        "size": size,
+        "tile_size": tile_size,
+        "tile_records_materialized": len(summary.sample_tiles),
+        "total_tiles": int(summary.total_tiles),
+        "datadsc_count": len(root.get("datadscs_", []) or []),
+        "op_funcs_used": dataop_names,
+        "streaming_summary": _streaming_summary_payload(summary),
+        "bridge_metadata": root.get("streamingPTLXFull_", {}),
+        "payload": payload,
     }
 
 
