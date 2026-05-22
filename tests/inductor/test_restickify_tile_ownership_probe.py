@@ -1,5 +1,6 @@
 from tools.restickify_tile_ownership_probe import (
     default_core_mapping,
+    generate_streaming_ptlx_artifact,
     no_tile_exchange_but_local_transpose,
     plan_streaming_ptlx_tiles,
     ring_distance,
@@ -169,3 +170,32 @@ def test_streaming_ptlx_contract_marks_core_count_adapter():
 
     assert contract["fits_lx_workspace"] is True
     assert contract["requires_core_count_adapter"] is True
+
+
+def test_streaming_ptlx_artifact_materializes_tile_stages():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=2,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=2)
+    root = artifact["streaming"]
+
+    assert root["kind"] == "streaming_ptlx_restickify_descriptor"
+    assert root["status"] == "codegen-only"
+    assert root["tile_records_materialized"] == 2
+    assert root["contract"]["requires_gather"] is True
+    first_tile = root["tiles"][0]
+    assert [stage["op"] for stage in first_tile["stages"]] == [
+        "STCDPOpLx",
+        "ReStickifyOpWithPTLx",
+        "STCDPOpLx",
+    ]
+    assert first_tile["stages"][0]["role"] == "gather-source-fragments"
+    assert len(first_tile["stages"][0]["fragments"]) == 4

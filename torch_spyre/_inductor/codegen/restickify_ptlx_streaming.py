@@ -142,6 +142,121 @@ def streaming_ptlx_contract(
     }
 
 
+def generate_streaming_ptlx_artifact(
+    name: str,
+    summary: StreamingPTLXSummary,
+    *,
+    producer_base: int = 0,
+    consumer_base: int = 256 * 1024,
+    tile_workspace_base: int = 512 * 1024,
+    tile_buffers: int = 3,
+    max_tiles: int | None = None,
+) -> dict[str, Any]:
+    """Generate a codegen-only streaming PT-LX descriptor.
+
+    The descriptor is intentionally not a Deeptools SuperDsc yet. It is the
+    production-shaped contract lowering should consume next: a sequence of
+    per-tile data-op stages with explicit source fragments, destination
+    fragments, and bounded LX tile buffers.
+    """
+
+    contract = streaming_ptlx_contract(summary, tile_buffers=tile_buffers)
+    tiles = []
+    for sample in summary.sample_tiles:
+        tiles.append(
+            _tile_artifact(
+                sample,
+                producer_base=producer_base,
+                consumer_base=consumer_base,
+                tile_workspace_base=tile_workspace_base,
+                tile_buffer_bytes=summary.tile_buffer_bytes,
+            )
+        )
+    if max_tiles is not None:
+        tiles = tiles[: int(max_tiles)]
+    return {
+        name: {
+            "kind": "streaming_ptlx_restickify_descriptor",
+            "version": 1,
+            "status": "codegen-only",
+            "size": summary.size,
+            "tile_size": summary.tile_size,
+            "tiles_per_row": summary.tiles_per_row,
+            "tiles_per_col": summary.tiles_per_col,
+            "total_tiles": summary.total_tiles,
+            "contract": contract,
+            "lx_buffers": {
+                "producer_base": int(producer_base),
+                "consumer_base": int(consumer_base),
+                "tile_workspace_base": int(tile_workspace_base),
+                "tile_buffer_bytes": summary.tile_buffer_bytes,
+                "tile_buffers": int(tile_buffers),
+            },
+            "tile_records_materialized": len(tiles),
+            "tiles": tiles,
+        }
+    }
+
+
+def _tile_artifact(
+    tile: StreamingTileSample,
+    *,
+    producer_base: int,
+    consumer_base: int,
+    tile_workspace_base: int,
+    tile_buffer_bytes: int,
+) -> dict[str, Any]:
+    gather_buffer = tile_workspace_base
+    restickified_buffer = tile_workspace_base + tile_buffer_bytes
+    output_buffer = tile_workspace_base + 2 * tile_buffer_bytes
+    return {
+        "tile_row": tile.tile_row,
+        "tile_col": tile.tile_col,
+        "bridge_core": tile.bridge_core,
+        "source_cores": tile.source_cores,
+        "dest_cores": tile.dest_cores,
+        "fan_in": tile.fan_in,
+        "fan_out": tile.fan_out,
+        "byte_hops": tile.byte_hops,
+        "stages": [
+            {
+                "op": "STCDPOpLx",
+                "role": "gather-source-fragments",
+                "input_base": int(producer_base),
+                "output_base": int(gather_buffer),
+                "fragments": [_fragment_payload(fragment) for fragment in tile.source_fragments],
+            },
+            {
+                "op": "ReStickifyOpWithPTLx",
+                "role": "local-ptlx-restickify",
+                "input_base": int(gather_buffer),
+                "output_base": int(restickified_buffer),
+                "core": tile.bridge_core,
+            },
+            {
+                "op": "STCDPOpLx",
+                "role": "write-dest-tile",
+                "input_base": int(restickified_buffer),
+                "output_base": int(consumer_base),
+                "tile_output_base": int(output_buffer),
+                "fragments": [_fragment_payload(fragment) for fragment in tile.dest_fragments],
+            },
+        ],
+    }
+
+
+def _fragment_payload(fragment: TileFragment) -> dict[str, int]:
+    return {
+        "core": fragment.core,
+        "row_start": fragment.row_start,
+        "row_end": fragment.row_end,
+        "col_start": fragment.col_start,
+        "col_end": fragment.col_end,
+        "bytes": fragment.bytes,
+        "hops": fragment.hops,
+    }
+
+
 def ring_distance(a: int, b: int, n: int) -> int:
     distance = abs(int(a) - int(b))
     return min(distance, int(n) - distance)

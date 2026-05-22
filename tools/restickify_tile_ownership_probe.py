@@ -35,6 +35,7 @@ sys.modules[_STREAMING_PLANNER_SPEC.name] = _STREAMING_PLANNER
 _STREAMING_PLANNER_SPEC.loader.exec_module(_STREAMING_PLANNER)
 
 default_core_mapping = _STREAMING_PLANNER.default_core_mapping
+generate_streaming_ptlx_artifact = _STREAMING_PLANNER.generate_streaming_ptlx_artifact
 plan_streaming_ptlx_tiles = _STREAMING_PLANNER.plan_streaming_ptlx_tiles
 streaming_ptlx_contract = _STREAMING_PLANNER.streaming_ptlx_contract
 
@@ -230,6 +231,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--row-dim", default="mb")
     parser.add_argument("--col-dim", default="out")
+    parser.add_argument(
+        "--streaming-artifact",
+        action="store_true",
+        help="Emit a codegen-only streaming PT-LX descriptor.",
+    )
+    parser.add_argument("--artifact-max-tiles", type=int, default=8)
     parser.add_argument("--json", action="store_true", help="Emit JSON instead of text.")
     return parser.parse_args()
 
@@ -257,7 +264,16 @@ def main() -> int:
             ),
             row_dim=args.row_dim,
             col_dim=args.col_dim,
+            sample_limit=args.artifact_max_tiles if args.streaming_artifact else 8,
         )
+        if args.streaming_artifact:
+            artifact = generate_streaming_ptlx_artifact(
+                f"streaming_ptlx_{args.size}",
+                streaming_summary,
+                max_tiles=args.artifact_max_tiles,
+            )
+            print(json.dumps(artifact, indent=2, sort_keys=True))
+            return 0
         payload = asdict(streaming_summary)
         if args.json:
             print(json.dumps(payload, indent=2, sort_keys=True))
