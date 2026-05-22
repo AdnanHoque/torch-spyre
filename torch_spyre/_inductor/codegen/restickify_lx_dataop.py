@@ -25,6 +25,7 @@ we can test the Deeptools contract before considering graph integration.
 from __future__ import annotations
 
 import copy
+import os
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -41,6 +42,7 @@ SUPPORTED_RESTICKIFY_DATA_OPS = frozenset(
 )
 
 _LX_SIZE_BYTES = 2 * 1024 * 1024
+_COMPACT_TILE_WORKSPACE_ENV = "SPYRE_RESTICKIFY_PTLX_COMPACT_TILE_WORKSPACE"
 _DEEPTOOLS_DATAOP_DIM_LABELS = frozenset(
     {"mb", "out", "in", "x", "y", "i", "j", "ki", "kj"}
 )
@@ -241,12 +243,13 @@ def generate_streaming_ptlx_tile_bridge_sdsc(
     source_fragments = list(gather_stage.get("fragments") or [])
     dest_fragments = list(scatter_stage.get("fragments") or [])
 
-    gather_output_fragments = [
-        _coalesced_tile_fragment(source_fragments, core=bridge_core)
-    ]
-    scatter_input_fragments = [
-        _coalesced_tile_fragment(dest_fragments, core=bridge_core)
-    ]
+    internal_fragment = (
+        _compact_tile_fragment
+        if _compact_tile_workspace_enabled()
+        else _coalesced_tile_fragment
+    )
+    gather_output_fragments = [internal_fragment(source_fragments, core=bridge_core)]
+    scatter_input_fragments = [internal_fragment(dest_fragments, core=bridge_core)]
     gather_core_ids = _fragment_core_ids(source_fragments, bridge_core)
     restickify_core_ids = [bridge_core]
     scatter_core_ids = _fragment_core_ids(dest_fragments, bridge_core)
@@ -452,7 +455,12 @@ def _generate_streaming_ptlx_row_stripe_bridge_sdsc(
             for tile in group
             for fragment in tile["stages"][2].get("fragments", []) or []
         ]
-        gathered_fragment = _coalesced_tile_fragment(
+        internal_fragment = (
+            _compact_tile_fragment
+            if _compact_tile_workspace_enabled()
+            else _coalesced_tile_fragment
+        )
+        gathered_fragment = internal_fragment(
             source_fragments,
             core=bridge_core,
         )
@@ -1270,6 +1278,32 @@ def _coalesced_tile_fragment(
         "row_end": row_end,
         "col_start": col_start,
         "col_end": col_end,
+        "bytes": (row_end - row_start) * (col_end - col_start) * 2,
+        "hops": 0,
+    }
+
+
+def _compact_tile_workspace_enabled() -> bool:
+    return os.environ.get(_COMPACT_TILE_WORKSPACE_ENV, "0") == "1"
+
+
+def _compact_tile_fragment(
+    fragments: Sequence[Mapping[str, Any]],
+    *,
+    core: int,
+) -> dict[str, int]:
+    if not fragments:
+        raise ValueError("cannot compact an empty fragment list")
+    row_start = min(_as_int(fragment["row_start"]) for fragment in fragments)
+    row_end = max(_as_int(fragment["row_end"]) for fragment in fragments)
+    col_start = min(_as_int(fragment["col_start"]) for fragment in fragments)
+    col_end = max(_as_int(fragment["col_end"]) for fragment in fragments)
+    return {
+        "core": int(core),
+        "row_start": 0,
+        "row_end": row_end - row_start,
+        "col_start": 0,
+        "col_end": col_end - col_start,
         "bytes": (row_end - row_start) * (col_end - col_start) * 2,
         "hops": 0,
     }
