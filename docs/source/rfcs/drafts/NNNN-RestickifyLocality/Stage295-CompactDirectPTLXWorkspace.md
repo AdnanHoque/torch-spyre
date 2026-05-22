@@ -122,6 +122,60 @@ program files. This is progress relative to the previous blocker:
 - now: the full direct PT-LX sidecar compiles far enough to emit an HBM-free
   program, then fails during late export/packaging
 
+## Runtime Packaging Smoke
+
+Even though the throwaway Deeprt export probe returned `SIGSEGV`, it had already
+written the execute-node `init.txt`. Following the Stage 66 packaging shape, the
+file was staged as:
+
+```text
+/tmp/stage295-direct-runtime-shape/
+  bundle.mlir
+  loadprogram_to_device/
+    stage295-direct-runtime-shape-SenProgSend/
+      init.txt
+```
+
+The first launch attempt failed with the expected setup error:
+
+```text
+RuntimeContext not created
+```
+
+After initializing the runtime with a tiny Spyre tensor, the no-argument direct
+PT-LX sidecar launched and synchronized:
+
+```python
+import torch
+import torch_spyre
+from torch_spyre._C import launch_kernel
+
+x = torch.empty((1,), dtype=torch.float16, device="spyre")
+torch.accelerator.synchronize()
+
+launch_kernel("/tmp/stage295-direct-runtime-shape", [])
+torch.accelerator.synchronize()
+```
+
+Output:
+
+```text
+runtime_initialized
+launch_returned
+direct_ptlx_runtime_smoke_ok
+```
+
+A post-launch stock Spyre smoke also passed:
+
+```text
+post_sidecar_stock_smoke_ok spyre:0
+```
+
+This proves the generated direct PT-LX sidecar program can retire through the
+normal Torch-Spyre `launch_kernel` runtime shape. It does **not** prove tensor
+value correctness yet because this smoke does not bind producer/consumer tensors
+around the sidecar.
+
 ## Non-Signal Probe
 
 A manually truncated 2-tile sidecar failed earlier in DCC with:
@@ -135,10 +189,14 @@ manual pruning also invalidated schedule structure.
 
 ## Current Blocker
 
-The next blocker is not the PT local valid-gap contract anymore. It is the late
-Deeptools export/packaging crash for the full 64-tile direct PT-LX sidecar.
+The next blocker is not the PT local valid-gap contract anymore, and not basic
+runtime retirement of the HBM-free sidecar. It is value-correct integration:
+the normal Torch-Spyre producer/restickify/consumer bundle still needs to bind
+the producer output, direct PT-LX sidecar, and consumer input to the same
+internal LX value-flow contract.
 
-The next useful step is to make the full sidecar export cleanly, or to package
-the generated HBM-free program through the same runtime path used by the normal
-Torch-Spyre bundle and run a value-correct 512 hardware test.
-
+The next useful step is to package the generated HBM-free program into a
+producer-sidecar-consumer graph and run a value-correct 512 hardware test. A
+clean non-segfaulting exporter remains desirable, but the staged runtime smoke
+shows the late harness/export crash is not by itself a hardware-retirement
+blocker.
