@@ -210,6 +210,23 @@ def _row_to_col_payloads() -> list[dict]:
             "add",
             num_work_slices={"mb": 32, "out": 1},
             core_mapping=producer_mapping,
+            primary_ds_info={
+                "INPUT": {
+                    "layoutDimOrder_": ["mb", "out"],
+                    "stickDimOrder_": ["out"],
+                    "stickSize_": [64],
+                },
+                "OUTPUT": {
+                    "layoutDimOrder_": ["mb", "out"],
+                    "stickDimOrder_": ["out"],
+                    "stickSize_": [64],
+                },
+                "KERNEL": {
+                    "layoutDimOrder_": ["mb", "out"],
+                    "stickDimOrder_": ["out"],
+                    "stickSize_": [64],
+                },
+            },
         ),
         _sdsc_payload(
             "1_ReStickifyOpHBM",
@@ -553,6 +570,23 @@ def test_maybe_emit_streaming_bridge_candidate_sidecar(tmp_path, monkeypatch):
             "add",
             num_work_slices={"mb": 32, "out": 1},
             core_mapping=producer_mapping,
+            primary_ds_info={
+                "INPUT": {
+                    "layoutDimOrder_": ["mb", "out"],
+                    "stickDimOrder_": ["out"],
+                    "stickSize_": [64],
+                },
+                "OUTPUT": {
+                    "layoutDimOrder_": ["mb", "out"],
+                    "stickDimOrder_": ["out"],
+                    "stickSize_": [64],
+                },
+                "KERNEL": {
+                    "layoutDimOrder_": ["mb", "out"],
+                    "stickDimOrder_": ["out"],
+                    "stickSize_": [64],
+                },
+            },
         ),
         _sdsc_payload(
             "1_ReStickifyOpHBM",
@@ -609,17 +643,15 @@ def test_maybe_emit_streaming_bridge_candidate_sidecar(tmp_path, monkeypatch):
     assert candidate["tile_records_materialized"] == 64
     assert candidate["streaming_summary"]["max_fan_in"] == 4
     assert candidate["streaming_summary"]["max_fan_out"] == 1
-    assert candidate["bridge_endpoint_contract_valid"] is False
-    assert (
-        candidate["bridge_endpoint_contract"]["reason"]
-        == "layout-dim-order-mismatch"
-    )
+    assert candidate["bridge_kind"] == "same-layout-lx-ownership-remap"
+    assert candidate["bridge_endpoint_contract_valid"] is True
     bridge_path = tmp_path / BRIDGE_CANDIDATE_FILENAME_TEMPLATE.format(idx=1)
     assert bridge_path.exists()
     bridge = json.loads(bridge_path.read_text(encoding="utf-8"))
     root = next(iter(bridge.values()))
-    assert root["streamingPTLXFull_"]["fallback"] == "ReStickifyOpHBM"
-    assert root["streamingPTLXFull_"]["coalescing"] == "direct-64x64-tiles"
-    assert root["streamingPTLXFull_"]["direct_restickify_contract"] is True
+    assert root["streamingLXRemapFull_"]["fallback"] == "ReStickifyOpHBM"
+    assert root["streamingLXRemapFull_"]["coalescing"] == (
+        "same-layout-lx-ownership-remap-64x64-tiles"
+    )
     assert "ReStickifyOpHBM" not in candidate["op_funcs_used"]
-    assert set(candidate["op_funcs_used"]) == {"STCDPOpLx", "ReStickifyOpWithPTLx"}
+    assert set(candidate["op_funcs_used"]) == {"STCDPOpLx"}

@@ -1149,6 +1149,163 @@ def generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc(
     return {name: combined}
 
 
+def generate_streaming_lx_remap_tile_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+    *,
+    tile_index: int = 0,
+    layout: Sequence[str] = ("mb_", "out_"),
+    stick: Sequence[str] = ("out_",),
+) -> dict[str, Any]:
+    """Lower one streaming tile as a same-layout LX ownership remap.
+
+    Some current-main restickify edges do not need a local PT-LX stick/layout
+    transform at the bridge boundary; the producer and destination descriptors
+    already agree on layout/stick and only the physical core ownership differs.
+    This helper emits that narrower bridge as one tiled ``STCDPOpLx`` movement.
+    """
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    if descriptor.get("kind") != "streaming_ptlx_restickify_descriptor":
+        raise ValueError("expected a streaming_ptlx_restickify_descriptor")
+    tiles = descriptor.get("tiles") or []
+    if tile_index < 0 or tile_index >= len(tiles):
+        raise ValueError(f"tile_index {tile_index} is outside materialized tiles")
+
+    tile = tiles[tile_index]
+    gather_stage, _restickify_stage, scatter_stage = tile["stages"]
+    source_fragments = list(gather_stage.get("fragments") or [])
+    dest_fragments = list(scatter_stage.get("fragments") or [])
+    bridge_core = _as_int(tile["bridge_core"])
+    core_ids = _fragment_core_ids(
+        [*source_fragments, *dest_fragments],
+        bridge_core,
+    )
+    dataop_name = f"0_STCDPOpLx_lx_remap_tile{tile_index}"
+    dataop = _tile_dataop(
+        "STCDPOpLx",
+        core_ids=core_ids,
+        input_layout=layout,
+        input_stick=stick,
+        output_layout=layout,
+        output_stick=stick,
+        input_base=_as_int(gather_stage["input_base"]),
+        output_base=_as_int(scatter_stage["output_base"]),
+        input_fragments=source_fragments,
+        output_fragments=dest_fragments,
+    )
+    num_cores = max(
+        _streaming_tile_core_ids(
+            tile,
+            _as_int(descriptor.get("source_core_count", 1)),
+            _as_int(descriptor.get("dest_core_count", 1)),
+        )
+    ) + 1
+    return {
+        name: {
+            "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],
+            "sdscFolds_": {
+                "dim_prop_func": [{"Affine": {"alpha_": 1, "beta_": 0}}],
+                "dim_prop_attr": [{"factor_": 1, "label_": "time"}],
+                "data_": {"[0]": "0"},
+            },
+            "coreFoldProp_": {"factor_": num_cores, "label_": "core"},
+            "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
+            "numCoresUsed_": num_cores,
+            "unpadN_": {"name_": "unpadn", "mb_": -1, "out_": -1},
+            "N_": {
+                "name_": "n",
+                "mb_": _as_int(descriptor["size"]),
+                "out_": _as_int(descriptor["size"]),
+            },
+            "coreIdToDsc_": {},
+            "numWkSlicesPerDim_": {},
+            "coreIdToWkSlice_": {},
+            "opFuncsUsed_": ["STCDPOpLx"],
+            "ldsShareInfo_": [],
+            "prodConsList": {},
+            "coreIdToDscSchedule": _sparse_dataop_schedule(num_cores, [core_ids]),
+            "pcfg_": {},
+            "target_": "senulator",
+            "dscs_": [],
+            "datadscs_": [{dataop_name: dataop}],
+            "dimToSymbolMappingOpcodeCorrection_": {},
+            "inputSymbolsAndTags_": {},
+            "symbolDefinitions_": {},
+            "streamingLXRemapTile_": {
+                "tile_index": int(tile_index),
+                "tile_row": _as_int(tile["tile_row"]),
+                "tile_col": _as_int(tile["tile_col"]),
+                "source_fragment_count": len(source_fragments),
+                "dest_fragment_count": len(dest_fragments),
+                "status": "static-codegen-only",
+                "semantic_transform_certified": True,
+                "fallback": "ReStickifyOpHBM",
+            },
+        }
+    }
+
+
+def generate_streaming_lx_remap_full_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+    *,
+    layout: Sequence[str] = ("mb_", "out_"),
+    stick: Sequence[str] = ("out_",),
+) -> dict[str, Any]:
+    """Combine every same-layout LX ownership-remap tile into one payload."""
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    tiles = descriptor.get("tiles") or []
+    if not tiles:
+        raise ValueError("streaming descriptor has no materialized tiles")
+
+    roots: list[dict[str, Any]] = []
+    all_datadscs: list[dict[str, Any]] = []
+    combined_schedule: dict[str, list[list[int]]] = {}
+    offset = 0
+    for tile_index in range(len(tiles)):
+        tile_payload = generate_streaming_lx_remap_tile_bridge_sdsc(
+            f"{name}_lx_remap_tile{tile_index}",
+            streaming_artifact,
+            tile_index=tile_index,
+            layout=layout,
+            stick=stick,
+        )
+        tile_root = copy.deepcopy(next(iter(tile_payload.values())))
+        roots.append(tile_root)
+        tile_datadscs = tile_root.get("datadscs_", []) or []
+        all_datadscs.extend(tile_datadscs)
+        for core_id, steps in (tile_root.get("coreIdToDscSchedule") or {}).items():
+            core_steps = combined_schedule.setdefault(str(core_id), [])
+            for step in steps:
+                adjusted = list(step)
+                adjusted[0] = int(adjusted[0]) + offset
+                core_steps.append(adjusted)
+        offset += len(tile_datadscs)
+
+    combined = copy.deepcopy(roots[0])
+    combined["datadscs_"] = all_datadscs
+    combined["numCoresUsed_"] = max(_as_int(root["numCoresUsed_"]) for root in roots)
+    for core_id in range(combined["numCoresUsed_"]):
+        combined_schedule.setdefault(str(core_id), [])
+    combined["coreIdToDscSchedule"] = _with_local_schedule_dependencies(
+        combined_schedule
+    )
+    combined["opFuncsUsed_"] = ["STCDPOpLx"]
+    combined["streamingLXRemapTile_"] = {}
+    combined["streamingLXRemapFull_"] = {
+        "status": "static-codegen-only",
+        "coalescing": "same-layout-lx-ownership-remap-64x64-tiles",
+        "tile_count": len(tiles),
+        "logical_tile_count": _as_int(descriptor.get("total_tiles", len(tiles))),
+        "datadsc_count": len(all_datadscs),
+        "semantic_transform_certified": True,
+        "fallback": "ReStickifyOpHBM",
+    }
+    return {name: combined}
+
+
 def _generate_streaming_ptlx_row_stripe_bridge_sdsc(
     name: str,
     descriptor: Mapping[str, Any],

@@ -42,6 +42,7 @@ from torch_spyre._inductor.restickify_ring import (
 
 from .restickify_lx_dataop import (
     generate_ptlx_restickify_bridge_sdsc,
+    generate_streaming_lx_remap_full_bridge_sdsc,
     generate_streaming_ptlx_direct_full_bridge_sdsc,
     generate_streaming_ptlx_full_bridge_sdsc,
     generate_streaming_ptlx_native_full_bridge_sdsc,
@@ -594,9 +595,11 @@ def _patch_streaming_mixed_schedule(
         tile_workspace_base=int(streaming_plan["tile_workspace"]["start"]),
         max_tiles=summary.total_tiles,
     )
-    bridge_payload = _generate_streaming_ptlx_bridge_payload(
+    bridge_payload = _generate_streaming_bridge_payload_for_edge(
         f"{idx}_StreamingReStickifyOpWithPTLx",
         artifact,
+        producer_payload=producer_payload,
+        restickify_payload=restickify_payload,
     )
     value_flow_contract = _streaming_value_flow_contract(
         bridge_payload=bridge_payload,
@@ -826,9 +829,11 @@ def _patch_one_cross_bundle_handoff(
         tile_workspace_base=int(streaming_plan["tile_workspace"]["start"]),
         max_tiles=summary.total_tiles,
     )
-    bridge_payload = _generate_streaming_ptlx_bridge_payload(
+    bridge_payload = _generate_streaming_bridge_payload_for_edge(
         f"{idx}_CrossBundleStreamingReStickifyOpWithPTLx",
         artifact,
+        producer_payload=producer_payload,
+        restickify_payload=restickify_payload,
     )
     value_flow_contract = _streaming_value_flow_contract(
         bridge_payload=bridge_payload,
@@ -2009,6 +2014,7 @@ def _streaming_value_flow_contract(
     scatter_count = 0
     direct_consumer_write_count = 0
     direct_tile_count = 0
+    lx_remap_tile_count = 0
     validgap_tile_count = 0
     for datadsc in datadscs:
         name, dataop = next(iter(datadsc.items()))
@@ -2044,6 +2050,14 @@ def _streaming_value_flow_contract(
             consumer_starts.update(
                 _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
             )
+        if "lx_remap_tile" in str(name) and op_name == "STCDPOpLx":
+            lx_remap_tile_count += 1
+            producer_starts.update(
+                _piece_lx_starts(dataop["labeledDs_"][0].get("PieceInfo", []) or [])
+            )
+            consumer_starts.update(
+                _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
+            )
         if (
             "validgap_consumer_tile" in str(name)
             and op_name == "ReStickifyOpWithPTLx"
@@ -2054,7 +2068,11 @@ def _streaming_value_flow_contract(
             )
 
     has_hbm_restickify = "ReStickifyOpHBM" in op_names
-    full_meta = root.get("streamingPTLXFull_", {}) or {}
+    full_meta = (
+        root.get("streamingLXRemapFull_", {})
+        or root.get("streamingPTLXFull_", {})
+        or {}
+    )
     logical_tile_count = int(full_meta.get("logical_tile_count", expected_tiles))
     coalescing = full_meta.get("coalescing")
     if coalescing == "row-stripe-direct-output":
@@ -2077,6 +2095,12 @@ def _streaming_value_flow_contract(
             tile_count == int(expected_tiles)
             and gather_count == int(expected_tiles)
             and validgap_tile_count == int(expected_tiles)
+        )
+    elif coalescing == "same-layout-lx-ownership-remap-64x64-tiles":
+        tile_count = int(full_meta.get("tile_count", logical_tile_count) or 0)
+        count_contract_valid = (
+            tile_count == int(expected_tiles)
+            and lx_remap_tile_count == int(expected_tiles)
         )
     else:
         count_contract_valid = (
@@ -2124,6 +2148,7 @@ def _streaming_value_flow_contract(
         "scatter_count": scatter_count,
         "direct_consumer_write_count": direct_consumer_write_count,
         "direct_tile_count": direct_tile_count,
+        "lx_remap_tile_count": lx_remap_tile_count,
         "validgap_tile_count": validgap_tile_count,
         "datadsc_count": len(datadscs),
         "hbm_placements": hbm_placements,
@@ -2225,6 +2250,10 @@ def _streaming_semantic_transform_certificate(
     a Deeptools-native coordinate-remap primitive, an InputFetchNeighbor-backed
     bridge, or another hardware-validated transform.
     """
+
+    remap_meta = root.get("streamingLXRemapFull_", {}) or {}
+    if remap_meta.get("semantic_transform_certified") is True:
+        return True, None
 
     meta = root.get("streamingPTLXFull_", {}) or {}
     if meta.get("semantic_transform_certified") is True:
@@ -2340,6 +2369,54 @@ def _generate_streaming_ptlx_bridge_payload(
     if _spyre_config.restickify_ptlx_native_tile_e2e:
         return generate_streaming_ptlx_native_full_bridge_sdsc(name, artifact)
     return generate_streaming_ptlx_full_bridge_sdsc(name, artifact)
+
+
+def _generate_streaming_bridge_payload_for_edge(
+    name: str,
+    artifact: dict[str, Any],
+    *,
+    producer_payload: dict[str, Any],
+    restickify_payload: dict[str, Any],
+) -> dict[str, Any]:
+    bridge_kind, destination_primary = _streaming_edge_bridge_kind(
+        producer_payload=producer_payload,
+        restickify_payload=restickify_payload,
+    )
+    if bridge_kind == "same-layout-lx-ownership-remap":
+        return generate_streaming_lx_remap_full_bridge_sdsc(
+            name,
+            artifact,
+            layout=_dataop_dim_list(destination_primary.get("layoutDimOrder_", [])),
+            stick=_dataop_dim_list(destination_primary.get("stickDimOrder_", [])),
+        )
+    return _generate_streaming_ptlx_bridge_payload(name, artifact)
+
+
+def _streaming_edge_bridge_kind(
+    *,
+    producer_payload: dict[str, Any],
+    restickify_payload: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    _, producer_dsc = _single_payload_dsc(producer_payload)
+    _, restickify_dsc = _single_payload_dsc(restickify_payload)
+    producer_primary = _primary_for_lds(
+        producer_dsc,
+        _first_compute_output_index(producer_dsc),
+    )
+    destination_primary = _primary_for_lds(
+        restickify_dsc,
+        _first_compute_output_index(restickify_dsc),
+    )
+    if (
+        _primary_layout(producer_primary) == _primary_layout(destination_primary)
+        and _primary_stick(producer_primary) == _primary_stick(destination_primary)
+    ):
+        return "same-layout-lx-ownership-remap", destination_primary
+    return "direct-ptlx-layout-transform", destination_primary
+
+
+def _dataop_dim_list(values: list[Any]) -> list[str]:
+    return [f"{str(value).removesuffix('_')}_" for value in values]
 
 
 def _piece_lx_starts(pieces: list[dict[str, Any]]) -> set[int]:
@@ -2863,6 +2940,8 @@ def _combine_ptlx_bridge_with_consumer(
     )
     if "streamingPTLXFull_" in bridge_root:
         root["streamingPTLXFull_"] = deepcopy(bridge_root["streamingPTLXFull_"])
+    if "streamingLXRemapFull_" in bridge_root:
+        root["streamingLXRemapFull_"] = deepcopy(bridge_root["streamingLXRemapFull_"])
     dataop_names = _datadsc_opfunc_names(root)
     root["opFuncsUsed_"] = sorted(
         set(root.get("opFuncsUsed_", []) or [])
@@ -2887,6 +2966,8 @@ def _combine_producer_with_ptlx_bridge(
     )
     if "streamingPTLXFull_" in bridge_root:
         root["streamingPTLXFull_"] = deepcopy(bridge_root["streamingPTLXFull_"])
+    if "streamingLXRemapFull_" in bridge_root:
+        root["streamingLXRemapFull_"] = deepcopy(bridge_root["streamingLXRemapFull_"])
     dataop_names = _datadsc_opfunc_names(root)
     root["opFuncsUsed_"] = sorted(
         set(root.get("opFuncsUsed_", []) or [])

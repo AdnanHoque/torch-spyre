@@ -23,6 +23,7 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     generate_ptlx_local_tile_restickify_sdsc,
     generate_ptlx_restickify_bridge_sdsc,
     generate_restickify_dataop_sdsc_from_spec,
+    generate_streaming_lx_remap_full_bridge_sdsc,
     generate_streaming_ptlx_direct_full_bridge_sdsc,
     generate_streaming_ptlx_direct_tile_bridge_sdsc,
     generate_streaming_ptlx_full_bridge_sdsc,
@@ -930,6 +931,49 @@ def test_streaming_ptlx_full_bridge_coalesces_single_owner_row_stripes():
     assert contract["gather_count"] == 32
     assert contract["scatter_count"] == 0
     assert contract["direct_consumer_write_count"] == 32
+
+
+def test_streaming_lx_remap_full_bridge_uses_one_stcdp_per_tile():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=64,
+        sample_all_tiles=True,
+    )
+    artifact = generate_streaming_ptlx_artifact(
+        "streaming",
+        summary,
+        producer_base=0,
+        consumer_base=256 * 1024,
+        max_tiles=summary.total_tiles,
+    )
+
+    payload = generate_streaming_lx_remap_full_bridge_sdsc("remap", artifact)
+    root = payload["remap"]
+    first = next(iter(root["datadscs_"][0].values()))
+    contract = _streaming_value_flow_contract(
+        bridge_payload=payload,
+        producer_base=0,
+        consumer_base=256 * 1024,
+        expected_tiles=summary.total_tiles,
+    )
+
+    assert root["streamingLXRemapFull_"]["coalescing"] == (
+        "same-layout-lx-ownership-remap-64x64-tiles"
+    )
+    assert root["streamingLXRemapFull_"]["semantic_transform_certified"] is True
+    assert len(root["datadscs_"]) == 64
+    assert first["op"]["name"] == "STCDPOpLx"
+    assert first["labeledDs_"][0]["layoutDimOrder_"] == ["mb_", "out_"]
+    assert first["labeledDs_"][1]["layoutDimOrder_"] == ["mb_", "out_"]
+    assert contract["valid"] is True
+    assert contract["lx_remap_tile_count"] == 64
+    assert contract["has_hbm_restickify"] is False
 
 
 def test_streaming_ptlx_bridge_selector_uses_native_tiles_when_enabled():

@@ -38,7 +38,10 @@ from torch_spyre._inductor.restickify_ring import (
     LOCALITY_CERTIFICATE_OP_INFO_KEY,
 )
 
-from .restickify_lx_dataop import generate_streaming_ptlx_direct_full_bridge_sdsc
+from .restickify_lx_dataop import (
+    generate_streaming_lx_remap_full_bridge_sdsc,
+    generate_streaming_ptlx_direct_full_bridge_sdsc,
+)
 from .restickify_ptlx_streaming import (
     generate_streaming_ptlx_artifact,
     plan_streaming_ptlx_tiles,
@@ -291,10 +294,27 @@ def _streaming_bridge_candidate(
             summary,
             max_tiles=summary.total_tiles,
         )
-        payload = generate_streaming_ptlx_direct_full_bridge_sdsc(
-            f"{idx}_LXNeighborStreamingReStickifyOpWithPTLx",
-            artifact,
-        )
+        bridge_kind = _select_streaming_bridge_kind(streaming)
+        if bridge_kind == "same-layout-lx-ownership-remap":
+            payload = generate_streaming_lx_remap_full_bridge_sdsc(
+                f"{idx}_LXNeighborStreamingSTCDPOpLxRemap",
+                artifact,
+                layout=_dataop_dim_list(
+                    streaming.get("destination_primary", {}).get(
+                        "layoutDimOrder_", []
+                    )
+                ),
+                stick=_dataop_dim_list(
+                    streaming.get("destination_primary", {}).get(
+                        "stickDimOrder_", []
+                    )
+                ),
+            )
+        else:
+            payload = generate_streaming_ptlx_direct_full_bridge_sdsc(
+                f"{idx}_LXNeighborStreamingReStickifyOpWithPTLx",
+                artifact,
+            )
     except Exception as exc:  # noqa: BLE001
         return {
             "status": "skipped",
@@ -317,6 +337,7 @@ def _streaming_bridge_candidate(
         "fallback": "ReStickifyOpHBM",
         "executable_in_bundle": False,
         "bundle_mlir_unchanged": True,
+        "bridge_kind": bridge_kind,
         "source_edge_id": edge.get("edge_id"),
         "size": size,
         "tile_size": tile_size,
@@ -325,11 +346,32 @@ def _streaming_bridge_candidate(
         "datadsc_count": len(root.get("datadscs_", []) or []),
         "op_funcs_used": dataop_names,
         "streaming_summary": _streaming_summary_payload(summary),
-        "bridge_metadata": root.get("streamingPTLXFull_", {}),
+        "bridge_metadata": _bridge_metadata(root),
         "bridge_endpoint_contract": bridge_endpoint_contract,
         "bridge_endpoint_contract_valid": bridge_endpoint_contract["valid"],
         "payload": payload,
     }
+
+
+def _select_streaming_bridge_kind(streaming: dict[str, Any]) -> str:
+    producer_primary = streaming.get("producer_primary", {}) or {}
+    destination_primary = streaming.get("destination_primary", {}) or {}
+    if (
+        _normalize_dim_list(producer_primary.get("layoutDimOrder_", []))
+        == _normalize_dim_list(destination_primary.get("layoutDimOrder_", []))
+        and _normalize_dim_list(producer_primary.get("stickDimOrder_", []))
+        == _normalize_dim_list(destination_primary.get("stickDimOrder_", []))
+    ):
+        return "same-layout-lx-ownership-remap"
+    return "direct-ptlx-layout-transform"
+
+
+def _bridge_metadata(root: dict[str, Any]) -> dict[str, Any]:
+    return (
+        root.get("streamingLXRemapFull_")
+        or root.get("streamingPTLXFull_")
+        or {}
+    )
 
 
 def _bridge_destination_endpoint_contract(
@@ -372,6 +414,10 @@ def _bridge_destination_endpoint_contract(
 
 def _normalize_dim_list(values: Sequence[Any]) -> list[str]:
     return [str(value).removesuffix("_") for value in values]
+
+
+def _dataop_dim_list(values: Sequence[Any]) -> list[str]:
+    return [f"{str(value).removesuffix('_')}_" for value in values]
 
 
 def _skip_reason(
