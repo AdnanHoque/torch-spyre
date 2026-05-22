@@ -40,6 +40,11 @@ production_blocker = diagnostic-force-is-not-a-production-certificate
 That keeps force-mode hardware experiments from being mistaken for a compiler
 proof.
 
+The streaming mixed-schedule patchers now use `production_valid`, not
+`diagnostic_valid`, as the replacement gate.  A candidate that only passes
+because of a force flag remains audit evidence and falls back to
+`ReStickifyOpHBM`.
+
 ## Current Distance To Wide-Size Enablement
 
 The wide-size PT-LX path is not blocked by endpoint plumbing anymore.  It is
@@ -82,6 +87,7 @@ Result:
 
 ```text
 58 passed in 8.59s
+58 passed in 4.12s after tightening the replacement gate
 ```
 
 ## Next Step

@@ -1486,6 +1486,7 @@ def test_streaming_ptlx_patch_replaces_small_shape_hbm_restickify_boundary():
     assert patched["value_flow_contract"]["endpoint_contract_valid"] is True
     assert patched["value_flow_contract"]["semantic_transform_certified"] is False
     assert patched["value_flow_contract"]["valid"] is False
+    assert patched["value_flow_contract"]["production_valid"] is False
     assert patched["fallback"] == "ReStickifyOpHBM"
     assert payloads[1] is restickify_payload
     assert payloads[2] is not None
@@ -1495,7 +1496,7 @@ def test_streaming_ptlx_patch_replaces_small_shape_hbm_restickify_boundary():
         "opFuncName"
     ] == "ReStickifyOpHBM"
     assert patched["reason"] == (
-        "streaming-ptlx-stcdp-gather-scatter-does-not-certify-coordinate-remap"
+        "stcdp-gather-scatter-does-not-certify-stick-layout-transform"
     )
 
 

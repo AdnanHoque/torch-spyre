@@ -636,20 +636,20 @@ def _patch_streaming_mixed_schedule(
         consumer_payload=consumer_payload,
         consumer_lds_idx=plan.consumer_lds_idx,
     )
-    if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
-        "valid"
-    ]:
+    if (
+        _spyre_config.restickify_ptlx_value_flow_assert
+        and not _streaming_contract_allows_replacement(value_flow_contract)
+    ):
         raise RuntimeError(
             "streaming PT-LX restickify value-flow contract failed for "
             f"SDSC {idx}: {value_flow_contract}"
         )
-    if not value_flow_contract["valid"]:
+    if not _streaming_contract_allows_replacement(value_flow_contract):
         return {
             **_row(
                 idx,
                 "skipped",
-                value_flow_contract.get("semantic_skip_reason")
-                or "streaming-value-flow-contract-invalid",
+                _streaming_contract_rejection_reason(value_flow_contract),
             ),
             "kind": "ptlx-streaming-mixed-schedule",
             "trigger_reason": trigger_reason,
@@ -870,21 +870,21 @@ def _patch_one_cross_bundle_handoff(
         consumer_payload=consumer_payload,
         consumer_lds_idx=consumer_lds_idx,
     )
-    if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
-        "valid"
-    ]:
+    if (
+        _spyre_config.restickify_ptlx_value_flow_assert
+        and not _streaming_contract_allows_replacement(value_flow_contract)
+    ):
         raise RuntimeError(
             "cross-bundle streaming PT-LX restickify value-flow contract "
             f"failed for SDSC {idx}: {value_flow_contract}"
         )
-    if not value_flow_contract["valid"]:
+    if not _streaming_contract_allows_replacement(value_flow_contract):
         return {
             **row_base,
             **_row(
                 idx,
                 "skipped",
-                value_flow_contract.get("semantic_skip_reason")
-                or "streaming-value-flow-contract-invalid",
+                _streaming_contract_rejection_reason(value_flow_contract),
             ),
             "plan": asdict(plan),
             "size": size,
@@ -1099,20 +1099,20 @@ def _patch_one_implicit_alias(
         consumer_payload=consumer_payload,
         consumer_lds_idx=candidate.consumer_endpoint.lds_idx,
     )
-    if _spyre_config.restickify_ptlx_value_flow_assert and not value_flow_contract[
-        "valid"
-    ]:
+    if (
+        _spyre_config.restickify_ptlx_value_flow_assert
+        and not _streaming_contract_allows_replacement(value_flow_contract)
+    ):
         raise RuntimeError(
             "implicit-alias streaming PT-LX value-flow contract failed for "
             f"SDSC {consumer_idx}: {value_flow_contract}"
         )
-    if not value_flow_contract["valid"]:
+    if not _streaming_contract_allows_replacement(value_flow_contract):
         return {
             **_row(
                 consumer_idx,
                 "skipped",
-                value_flow_contract.get("semantic_skip_reason")
-                or "streaming-value-flow-contract-invalid",
+                _streaming_contract_rejection_reason(value_flow_contract),
             ),
             "kind": "ptlx-implicit-alias-producer-streaming",
             "plan": asdict(candidate),
@@ -2346,6 +2346,20 @@ def _streaming_production_requirements(
         "required_primitive": primitive,
         "required_lowering": lowering,
     }
+
+
+def _streaming_contract_allows_replacement(contract: dict[str, Any]) -> bool:
+    """Return whether a streaming bridge may replace stock ReStickifyOpHBM."""
+
+    return contract.get("production_valid") is True
+
+
+def _streaming_contract_rejection_reason(contract: dict[str, Any]) -> str:
+    return (
+        contract.get("production_blocker")
+        or contract.get("semantic_skip_reason")
+        or "streaming-value-flow-contract-invalid"
+    )
 
 
 def _streaming_consumer_lx_limit(
