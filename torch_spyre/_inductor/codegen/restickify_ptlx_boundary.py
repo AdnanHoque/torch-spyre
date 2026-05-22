@@ -45,6 +45,7 @@ from .restickify_lx_dataop import (
     generate_streaming_ptlx_direct_full_bridge_sdsc,
     generate_streaming_ptlx_full_bridge_sdsc,
     generate_streaming_ptlx_native_full_bridge_sdsc,
+    generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc,
 )
 from .restickify_ptlx_streaming import (
     generate_streaming_ptlx_artifact,
@@ -2008,6 +2009,7 @@ def _streaming_value_flow_contract(
     scatter_count = 0
     direct_consumer_write_count = 0
     direct_tile_count = 0
+    validgap_tile_count = 0
     for datadsc in datadscs:
         name, dataop = next(iter(datadsc.items()))
         op_name = str(dataop.get("op", {}).get("name"))
@@ -2042,6 +2044,14 @@ def _streaming_value_flow_contract(
             consumer_starts.update(
                 _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
             )
+        if (
+            "validgap_consumer_tile" in str(name)
+            and op_name == "ReStickifyOpWithPTLx"
+        ):
+            validgap_tile_count += 1
+            consumer_starts.update(
+                _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
+            )
 
     has_hbm_restickify = "ReStickifyOpHBM" in op_names
     full_meta = root.get("streamingPTLXFull_", {}) or {}
@@ -2060,6 +2070,13 @@ def _streaming_value_flow_contract(
         count_contract_valid = (
             tile_count == int(expected_tiles)
             and direct_tile_count == int(expected_tiles)
+        )
+    elif coalescing == "validgap-consumer-64x64-tiles":
+        tile_count = int(full_meta.get("tile_count", logical_tile_count) or 0)
+        count_contract_valid = (
+            tile_count == int(expected_tiles)
+            and gather_count == int(expected_tiles)
+            and validgap_tile_count == int(expected_tiles)
         )
     else:
         count_contract_valid = (
@@ -2107,6 +2124,7 @@ def _streaming_value_flow_contract(
         "scatter_count": scatter_count,
         "direct_consumer_write_count": direct_consumer_write_count,
         "direct_tile_count": direct_tile_count,
+        "validgap_tile_count": validgap_tile_count,
         "datadsc_count": len(datadscs),
         "hbm_placements": hbm_placements,
         "has_hbm_restickify": has_hbm_restickify,
@@ -2215,6 +2233,10 @@ def _streaming_semantic_transform_certificate(
         return False, (
             "direct-ptlx-tile-bridge-needs-hardware-value-validation"
         )
+    if meta.get("coalescing") == "validgap-consumer-64x64-tiles":
+        return False, (
+            "validgap-consumer-ptlx-tile-needs-hardware-value-validation"
+        )
     if meta.get("coalescing") == "native-64x64-tiles":
         return False, (
             "native-ptlx-tile-bridge-compiles-but-needs-value-correct-"
@@ -2274,17 +2296,21 @@ def _streaming_consumer_descriptor_contract(
         if not piece_match:
             piece_reason = "piece-info-mismatch"
 
-    valid = layout_match and stick_match and piece_contract_available and piece_match
+    valid = layout_match and stick_match and (
+        piece_match or (bool(bridge_pieces) and not consumer_pieces)
+    )
     reason = None
-    if not layout_match:
-        reason = "layout-dim-order-mismatch"
-    elif not stick_match:
-        reason = "stick-dim-order-mismatch"
-    elif not piece_match:
-        reason = piece_reason
+    if not valid:
+        if not layout_match:
+            reason = "layout-dim-order-mismatch"
+        elif not stick_match:
+            reason = "stick-dim-order-mismatch"
+        elif not piece_match:
+            reason = piece_reason
     return {
         "valid": valid,
         "reason": reason,
+        "piece_reason": piece_reason,
         "layout_match": layout_match,
         "stick_match": stick_match,
         "piece_contract_available": piece_contract_available,
@@ -2302,6 +2328,11 @@ def _generate_streaming_ptlx_bridge_payload(
     name: str,
     artifact: dict[str, Any],
 ) -> dict[str, Any]:
+    if _spyre_config.restickify_ptlx_validgap_consumer_tile_e2e:
+        return generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc(
+            name,
+            artifact,
+        )
     if _spyre_config.restickify_ptlx_direct_tile_e2e:
         return generate_streaming_ptlx_direct_full_bridge_sdsc(name, artifact)
     if _spyre_config.restickify_ptlx_native_tile_e2e:

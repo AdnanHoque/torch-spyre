@@ -1,0 +1,892 @@
+{
+  "out_valid1_mb64_in64_to_mb64_in64" : {
+    "sdscFoldProps_" : [
+      {"factor_" : 1, "label_" : "time"}
+    ],
+    "pcfgMap_" : {
+      "0" : {"lxlu0" : 0, "lxsu0" : 1, "l0lu0" : 2, "l0su0" : 3, "sfp0" : 4, "pe0" : 5, "ptrow0_0" : 6}
+    },
+    "pcfgPool_" : {
+      "0" : [
+        {
+          "name" : "c0-lxlu0-Outer-Loop-0",
+          "type" : "mvloop",
+          "next" : ["c0-lxlu0-IL-mb_-0"],
+          "prev" : [],
+          "loopName" : "c0-lxlu0-Outer-Loop-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-lxlu0-IL-mb_-0",
+          "type" : "mvloop",
+          "next" : ["c0-lxlu0-IL-in_-0"],
+          "prev" : ["c0-lxlu0-Outer-Loop-0"],
+          "loopName" : "c0-lxlu0-IL-mb_-0",
+          "loopCount" : 64,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-lxlu0-IL-in_-0",
+          "type" : "mvloop",
+          "next" : ["c0-lxlu0-innerMost-Loop-in_-0"],
+          "prev" : ["c0-lxlu0-IL-mb_-0"],
+          "loopName" : "c0-lxlu0-IL-in_-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-lxlu0-innerMost-Loop-in_-0",
+          "type" : "mvloop",
+          "next" : ["c0-lxlu0-lx-sfp-lx-sfp0-0"],
+          "prev" : ["c0-lxlu0-IL-in_-0"],
+          "loopName" : "c0-lxlu0-innerMost-Loop-in_-0",
+          "loopCount" : 64,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-lxlu0-lx-sfp-lx-sfp0-0",
+          "type" : "datatransfer",
+          "next" : ["c0-lxlu0-InnerMost-LoopBranch-in_-0"],
+          "prev" : ["c0-lxlu0-innerMost-Loop-in_-0"],
+          "coreletId" : 0,
+          "isPartStick" : 0,
+          "dimLayoutOrder" : ["out_", "mb_", "in_"],
+          "srcDest" : ["lx", "sfp0"],
+          "srcStartAddr" : "0",
+          "destStartAddr" : "-1",
+          "srcStartCondAndVal" : [
+            { "loopName" : "c0-lxlu0-Outer-Loop-0", "condOp" : "eq", "condVal" : 0, "startAddr" : "0" }
+          ],
+          "destStartCondAndVal" : [
+          ],
+          "EAROffCondAndVal" : [
+          ],
+          "EBRTag" : {"isValid" : 0, "tag" : "null"},
+          "LRFTag" : {"isValid" : 0, "tag" : "null"},
+          "useBurst" : "false",
+          "myBigDimSize" : { "in_" : 64, "mb_" : 64, "out_" : 1 },
+          "myBigSubDimSize" : {  },
+          "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+          "myLitDimSize" : { "in_" : 1, "mb_" : 1, "out_" : 1 },
+          "myLitSubDimSize" : {  },
+          "myLitDimGap" : {  },
+          "myLitDimSize_el" : {  },
+          "myLitSubDimSize_el" : {  },
+          "elCond" : [
+          ],
+          "bigStAddrOffsets" : { 
+            "c0-lxlu0-IL-in_-0" : { "dimOffset" : 4096, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }, 
+            "c0-lxlu0-IL-mb_-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }, 
+            "c0-lxlu0-innerMost-Loop-in_-0" : { "dimOffset" : 64, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+          },
+          "wordLength" : -1,
+          "stickSize" : -1,
+          "dtFormat" : "SEN169_FP16",
+          "auxLoopBigStAddrOffsets" : { 
+          },
+          "gapOffset" : 0,
+          "GTRAndBurstCondAndVal": [
+          ],
+          "gtr_imm_opt_en" : 0,
+          "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+          "useSAMVCondAndVal" : [
+          ],
+          "litStAddrOffsets" : { 
+          }
+        },
+        {
+          "name" : "c0-lxlu0-InnerMost-LoopBranch-in_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-lxlu0-innerMost-Loop-in_-0", "c0-lxlu0-ILBranch-in_-0"],
+          "prev" : ["c0-lxlu0-lx-sfp-lx-sfp0-0"],
+          "loopNode" : "c0-lxlu0-innerMost-Loop-in_-0"
+        },
+        {
+          "name" : "c0-lxlu0-ILBranch-in_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-lxlu0-IL-in_-0", "c0-lxlu0-ILBranch-mb_-0"],
+          "prev" : ["c0-lxlu0-InnerMost-LoopBranch-in_-0"],
+          "loopNode" : "c0-lxlu0-IL-in_-0"
+        },
+        {
+          "name" : "c0-lxlu0-ILBranch-mb_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-lxlu0-IL-mb_-0", "c0-lxlu0-Outer-LoopBranch-0"],
+          "prev" : ["c0-lxlu0-ILBranch-in_-0"],
+          "loopNode" : "c0-lxlu0-IL-mb_-0"
+        },
+        {
+          "name" : "c0-lxlu0-Outer-LoopBranch-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-lxlu0-Outer-Loop-0"],
+          "prev" : ["c0-lxlu0-ILBranch-mb_-0"],
+          "loopNode" : "c0-lxlu0-Outer-Loop-0"
+        }
+      ],
+      "1" : [
+        {
+          "name" : "c0-lxsu0-Outer-Loop-0",
+          "type" : "mvloop",
+          "next" : ["c0-lxsu0-IL-mb_-0"],
+          "prev" : [],
+          "loopName" : "c0-lxsu0-Outer-Loop-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-lxsu0-IL-mb_-0",
+          "type" : "mvloop",
+          "next" : ["c0-lxsu0-IL-in_-0"],
+          "prev" : ["c0-lxsu0-Outer-Loop-0"],
+          "loopName" : "c0-lxsu0-IL-mb_-0",
+          "loopCount" : 64,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-lxsu0-IL-in_-0",
+          "type" : "mvloop",
+          "next" : ["c0-lxsu0-innerMost-extra-Loop-out_-0-extra-0"],
+          "prev" : ["c0-lxsu0-IL-mb_-0"],
+          "loopName" : "c0-lxsu0-IL-in_-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-lxsu0-innerMost-extra-Loop-out_-0-extra-0",
+          "type" : "mvloop",
+          "next" : ["c0-lxsu0-innerMost-extra-Loop-out_-0-extra-1"],
+          "prev" : ["c0-lxsu0-IL-in_-0"],
+          "loopName" : "c0-lxsu0-innerMost-extra-Loop-out_-0-extra-0",
+          "loopCount" : 2,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-lxsu0-innerMost-extra-Loop-out_-0-extra-1",
+          "type" : "mvloop",
+          "next" : ["c0-lxsu0-innerMost-Loop-out_-0"],
+          "prev" : ["c0-lxsu0-innerMost-extra-Loop-out_-0-extra-0"],
+          "loopName" : "c0-lxsu0-innerMost-extra-Loop-out_-0-extra-1",
+          "loopCount" : 8,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-lxsu0-innerMost-Loop-out_-0",
+          "type" : "mvloop",
+          "next" : ["c0-lxsu0-lx-sfp-pe0-lx-0"],
+          "prev" : ["c0-lxsu0-innerMost-extra-Loop-out_-0-extra-1"],
+          "loopName" : "c0-lxsu0-innerMost-Loop-out_-0",
+          "loopCount" : 4,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-lxsu0-lx-sfp-pe0-lx-0",
+          "type" : "datatransfer",
+          "next" : ["c0-lxsu0-InnerMost-LoopBranch-out_-0"],
+          "prev" : ["c0-lxsu0-innerMost-Loop-out_-0"],
+          "coreletId" : 0,
+          "isPartStick" : 0,
+          "dimLayoutOrder" : ["mb_", "in_"],
+          "srcDest" : ["pe0", "lx"],
+          "srcStartAddr" : "-1",
+          "destStartAddr" : "1048576",
+          "srcStartCondAndVal" : [
+          ],
+          "destStartCondAndVal" : [
+            { "loopName" : "c0-lxsu0-Outer-Loop-0", "condOp" : "eq", "condVal" : 0, "startAddr" : "1048576" }
+          ],
+          "EAROffCondAndVal" : [
+          ],
+          "EBRTag" : {"isValid" : 0, "tag" : "null"},
+          "LRFTag" : {"isValid" : 0, "tag" : "null"},
+          "useBurst" : "false",
+          "myBigDimSize" : { "in_" : 1, "mb_" : 64 },
+          "myBigSubDimSize" : {  },
+          "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+          "myLitDimSize" : { "in_" : 1, "mb_" : 1 },
+          "myLitSubDimSize" : {  },
+          "myLitDimGap" : {  },
+          "myLitDimSize_el" : {  },
+          "myLitSubDimSize_el" : {  },
+          "elCond" : [
+          ],
+          "bigStAddrOffsets" : { 
+            "c0-lxsu0-IL-in_-0" : { "dimOffset" : 64, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }, 
+            "c0-lxsu0-IL-mb_-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+          },
+          "wordLength" : -1,
+          "stickSize" : -1,
+          "dtFormat" : "SEN169_FP16",
+          "auxLoopBigStAddrOffsets" : { 
+          },
+          "gapOffset" : 0,
+          "GTRAndBurstCondAndVal": [
+          ],
+          "gtr_imm_opt_en" : 0,
+          "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+          "useSAMVCondAndVal" : [
+          ],
+          "litStAddrOffsets" : { 
+          }
+        },
+        {
+          "name" : "c0-lxsu0-InnerMost-LoopBranch-out_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-lxsu0-innerMost-Loop-out_-0", "c0-lxsu0-InnerMost-extra-LoopBranch-out_-0-extra-1"],
+          "prev" : ["c0-lxsu0-lx-sfp-pe0-lx-0"],
+          "loopNode" : "c0-lxsu0-innerMost-Loop-out_-0"
+        },
+        {
+          "name" : "c0-lxsu0-InnerMost-extra-LoopBranch-out_-0-extra-1",
+          "type" : "mvloopbranch",
+          "next" : ["c0-lxsu0-innerMost-extra-Loop-out_-0-extra-1", "c0-lxsu0-InnerMost-extra-LoopBranch-out_-0-extra-0"],
+          "prev" : ["c0-lxsu0-InnerMost-LoopBranch-out_-0"],
+          "loopNode" : "c0-lxsu0-innerMost-extra-Loop-out_-0-extra-1"
+        },
+        {
+          "name" : "c0-lxsu0-InnerMost-extra-LoopBranch-out_-0-extra-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-lxsu0-innerMost-extra-Loop-out_-0-extra-0", "c0-lxsu0-ILBranch-in_-0"],
+          "prev" : ["c0-lxsu0-InnerMost-extra-LoopBranch-out_-0-extra-1"],
+          "loopNode" : "c0-lxsu0-innerMost-extra-Loop-out_-0-extra-0"
+        },
+        {
+          "name" : "c0-lxsu0-ILBranch-in_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-lxsu0-IL-in_-0", "c0-lxsu0-ILBranch-mb_-0"],
+          "prev" : ["c0-lxsu0-InnerMost-extra-LoopBranch-out_-0-extra-0"],
+          "loopNode" : "c0-lxsu0-IL-in_-0"
+        },
+        {
+          "name" : "c0-lxsu0-ILBranch-mb_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-lxsu0-IL-mb_-0", "c0-lxsu0-Outer-LoopBranch-0"],
+          "prev" : ["c0-lxsu0-ILBranch-in_-0"],
+          "loopNode" : "c0-lxsu0-IL-mb_-0"
+        },
+        {
+          "name" : "c0-lxsu0-Outer-LoopBranch-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-lxsu0-Outer-Loop-0"],
+          "prev" : ["c0-lxsu0-ILBranch-mb_-0"],
+          "loopNode" : "c0-lxsu0-Outer-Loop-0"
+        }
+      ],
+      "2" : [
+        {
+          "name" : "c0-l0lu0-Outer-Loop-0",
+          "type" : "mvloop",
+          "next" : ["c0-l0lu0-IL-mb_-0"],
+          "prev" : [],
+          "loopName" : "c0-l0lu0-Outer-Loop-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-l0lu0-IL-mb_-0",
+          "type" : "mvloop",
+          "next" : ["c0-l0lu0-IL-in_-0"],
+          "prev" : ["c0-l0lu0-Outer-Loop-0"],
+          "loopName" : "c0-l0lu0-IL-mb_-0",
+          "loopCount" : 64,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-l0lu0-IL-in_-0",
+          "type" : "mvloop",
+          "next" : ["c0-l0lu0-sendSync-0"],
+          "prev" : ["c0-l0lu0-IL-mb_-0"],
+          "loopName" : "c0-l0lu0-IL-in_-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-l0lu0-sendSync-0",
+          "type" : "sync",
+          "next" : ["c0-l0lu0-rcvSync-0"],
+          "prev" : ["c0-l0lu0-IL-in_-0"],
+          "sendOrRecv" : 0,
+          "isSoft" : 0,
+          "sendrecvall" : 0,
+          "self" : "l0lu0",
+          "external" : [ "l0su0" ]
+        },
+        {
+          "name" : "c0-l0lu0-rcvSync-0",
+          "type" : "sync",
+          "next" : ["c0-l0lu0-innerMost-Loop-in_0-0"],
+          "prev" : ["c0-l0lu0-sendSync-0"],
+          "sendOrRecv" : 1,
+          "isSoft" : 0,
+          "sendrecvall" : 0,
+          "self" : "l0lu0",
+          "external" : [ "l0su0" ]
+        },
+        {
+          "name" : "c0-l0lu0-innerMost-Loop-in_0-0",
+          "type" : "mvloop",
+          "next" : ["c0-l0lu0-innerMost-Loop-in_1-0"],
+          "prev" : ["c0-l0lu0-rcvSync-0"],
+          "loopName" : "c0-l0lu0-innerMost-Loop-in_0-0",
+          "loopCount" : 2,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-l0lu0-innerMost-Loop-in_1-0",
+          "type" : "mvloop",
+          "next" : ["c0-l0lu0-innerMost-Loop-in_2-0"],
+          "prev" : ["c0-l0lu0-innerMost-Loop-in_0-0"],
+          "loopName" : "c0-l0lu0-innerMost-Loop-in_1-0",
+          "loopCount" : 8,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-l0lu0-innerMost-Loop-in_2-0",
+          "type" : "mvloop",
+          "next" : ["c0-l0lu0-l0-transfers-l0-ptrow0_0-0"],
+          "prev" : ["c0-l0lu0-innerMost-Loop-in_1-0"],
+          "loopName" : "c0-l0lu0-innerMost-Loop-in_2-0",
+          "loopCount" : 4,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-l0lu0-l0-transfers-l0-ptrow0_0-0",
+          "type" : "datatransfer",
+          "next" : ["c0-l0lu0-InnerMost-LoopBranch-in_2-0"],
+          "prev" : ["c0-l0lu0-innerMost-Loop-in_2-0"],
+          "coreletId" : 0,
+          "isPartStick" : 0,
+          "dimLayoutOrder" : ["out_", "mb_", "in_"],
+          "srcDest" : ["l0", "ptrow0_0"],
+          "srcStartAddr" : "0",
+          "destStartAddr" : "0",
+          "srcStartCondAndVal" : [
+            { "loopName" : "c0-l0lu0-IL-in_-0", "condOp" : "always", "condVal" : -1, "startAddr" : "0" }
+          ],
+          "destStartCondAndVal" : [
+          ],
+          "EAROffCondAndVal" : [
+          ],
+          "EBRTag" : {"isValid" : 0, "tag" : "null"},
+          "LRFTag" : {"isValid" : 0, "tag" : "null"},
+          "useBurst" : "true",
+          "myBigDimSize" : { "in_" : 64, "mb_" : 1, "out_" : 64 },
+          "myBigSubDimSize" : {  },
+          "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+          "myLitDimSize" : { "in_" : 1, "mb_" : 1, "out_" : 1 },
+          "myLitSubDimSize" : {  },
+          "myLitDimGap" : {  },
+          "myLitDimSize_el" : {  },
+          "myLitSubDimSize_el" : {  },
+          "elCond" : [
+          ],
+          "bigStAddrOffsets" : { 
+            "c0-l0lu0-innerMost-Loop-in_0-0" : { "dimOffset" : 4, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }, 
+            "c0-l0lu0-innerMost-Loop-in_1-0" : { "dimOffset" : 8, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }, 
+            "c0-l0lu0-innerMost-Loop-in_2-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+          },
+          "wordLength" : -1,
+          "stickSize" : -1,
+          "dtFormat" : "SEN169_FP16",
+          "auxLoopBigStAddrOffsets" : { 
+          },
+          "gapOffset" : 0,
+          "GTRAndBurstCondAndVal": [
+          ],
+          "gtr_imm_opt_en" : 0,
+          "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+          "useSAMVCondAndVal" : [
+          ],
+          "litStAddrOffsets" : { 
+          }
+        },
+        {
+          "name" : "c0-l0lu0-InnerMost-LoopBranch-in_2-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-l0lu0-innerMost-Loop-in_2-0", "c0-l0lu0-InnerMost-LoopBranch-in_1-0"],
+          "prev" : ["c0-l0lu0-l0-transfers-l0-ptrow0_0-0"],
+          "loopNode" : "c0-l0lu0-innerMost-Loop-in_2-0"
+        },
+        {
+          "name" : "c0-l0lu0-InnerMost-LoopBranch-in_1-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-l0lu0-innerMost-Loop-in_1-0", "c0-l0lu0-InnerMost-LoopBranch-in_0-0"],
+          "prev" : ["c0-l0lu0-InnerMost-LoopBranch-in_2-0"],
+          "loopNode" : "c0-l0lu0-innerMost-Loop-in_1-0"
+        },
+        {
+          "name" : "c0-l0lu0-InnerMost-LoopBranch-in_0-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-l0lu0-innerMost-Loop-in_0-0", "c0-l0lu0-ILBranch-in_-0"],
+          "prev" : ["c0-l0lu0-InnerMost-LoopBranch-in_1-0"],
+          "loopNode" : "c0-l0lu0-innerMost-Loop-in_0-0"
+        },
+        {
+          "name" : "c0-l0lu0-ILBranch-in_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-l0lu0-IL-in_-0", "c0-l0lu0-ILBranch-mb_-0"],
+          "prev" : ["c0-l0lu0-InnerMost-LoopBranch-in_0-0"],
+          "loopNode" : "c0-l0lu0-IL-in_-0"
+        },
+        {
+          "name" : "c0-l0lu0-ILBranch-mb_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-l0lu0-IL-mb_-0", "c0-l0lu0-Outer-LoopBranch-0"],
+          "prev" : ["c0-l0lu0-ILBranch-in_-0"],
+          "loopNode" : "c0-l0lu0-IL-mb_-0"
+        },
+        {
+          "name" : "c0-l0lu0-Outer-LoopBranch-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-l0lu0-Outer-Loop-0"],
+          "prev" : ["c0-l0lu0-ILBranch-mb_-0"],
+          "loopNode" : "c0-l0lu0-Outer-Loop-0"
+        }
+      ],
+      "3" : [
+        {
+          "name" : "c0-l0su0-Outer-Loop-0",
+          "type" : "mvloop",
+          "next" : ["c0-l0su0-IL-mb_-0"],
+          "prev" : [],
+          "loopName" : "c0-l0su0-Outer-Loop-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-l0su0-IL-mb_-0",
+          "type" : "mvloop",
+          "next" : ["c0-l0su0-IL-in_-0"],
+          "prev" : ["c0-l0su0-Outer-Loop-0"],
+          "loopName" : "c0-l0su0-IL-mb_-0",
+          "loopCount" : 64,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-l0su0-IL-in_-0",
+          "type" : "mvloop",
+          "next" : ["c0-l0su0-rcvSync-0"],
+          "prev" : ["c0-l0su0-IL-mb_-0"],
+          "loopName" : "c0-l0su0-IL-in_-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-l0su0-rcvSync-0",
+          "type" : "sync",
+          "next" : ["c0-l0su0-innerMost-Loop-in_0-0"],
+          "prev" : ["c0-l0su0-IL-in_-0"],
+          "sendOrRecv" : 1,
+          "isSoft" : 0,
+          "sendrecvall" : 0,
+          "self" : "l0su0",
+          "external" : [ "l0lu0" ]
+        },
+        {
+          "name" : "c0-l0su0-innerMost-Loop-in_0-0",
+          "type" : "mvloop",
+          "next" : ["c0-l0su0-innerMost-Loop-in_1-0"],
+          "prev" : ["c0-l0su0-rcvSync-0"],
+          "loopName" : "c0-l0su0-innerMost-Loop-in_0-0",
+          "loopCount" : 8,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-l0su0-innerMost-Loop-in_1-0",
+          "type" : "mvloop",
+          "next" : ["c0-l0su0-l0-transfers-sfp0-l0-0"],
+          "prev" : ["c0-l0su0-innerMost-Loop-in_0-0"],
+          "loopName" : "c0-l0su0-innerMost-Loop-in_1-0",
+          "loopCount" : 8,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-l0su0-l0-transfers-sfp0-l0-0",
+          "type" : "datatransfer",
+          "next" : ["c0-l0su0-InnerMost-LoopBranch-in_1-0"],
+          "prev" : ["c0-l0su0-innerMost-Loop-in_1-0"],
+          "coreletId" : 0,
+          "isPartStick" : 0,
+          "dimLayoutOrder" : ["out_", "mb_", "in_"],
+          "srcDest" : ["sfp0", "l0"],
+          "srcStartAddr" : "0",
+          "destStartAddr" : "0",
+          "srcStartCondAndVal" : [
+          ],
+          "destStartCondAndVal" : [
+            { "loopName" : "c0-l0su0-IL-in_-0", "condOp" : "always", "condVal" : -1, "startAddr" : "0" }
+          ],
+          "EAROffCondAndVal" : [
+          ],
+          "EBRTag" : {"isValid" : 0, "tag" : "null"},
+          "LRFTag" : {"isValid" : 0, "tag" : "null"},
+          "useBurst" : "true",
+          "myBigDimSize" : { "in_" : 64, "mb_" : 1, "out_" : 64 },
+          "myBigSubDimSize" : {  },
+          "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+          "myLitDimSize" : { "in_" : 1, "mb_" : 1, "out_" : 1 },
+          "myLitSubDimSize" : {  },
+          "myLitDimGap" : {  },
+          "myLitDimSize_el" : {  },
+          "myLitSubDimSize_el" : {  },
+          "elCond" : [
+          ],
+          "bigStAddrOffsets" : { 
+            "c0-l0su0-innerMost-Loop-in_0-0" : { "dimOffset" : 8, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }, 
+            "c0-l0su0-innerMost-Loop-in_1-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+          },
+          "wordLength" : -1,
+          "stickSize" : -1,
+          "dtFormat" : "SEN169_FP16",
+          "auxLoopBigStAddrOffsets" : { 
+          },
+          "gapOffset" : 0,
+          "GTRAndBurstCondAndVal": [
+          ],
+          "gtr_imm_opt_en" : 0,
+          "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+          "useSAMVCondAndVal" : [
+          ],
+          "litStAddrOffsets" : { 
+          }
+        },
+        {
+          "name" : "c0-l0su0-InnerMost-LoopBranch-in_1-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-l0su0-innerMost-Loop-in_1-0", "c0-l0su0-InnerMost-LoopBranch-in_0-0"],
+          "prev" : ["c0-l0su0-l0-transfers-sfp0-l0-0"],
+          "loopNode" : "c0-l0su0-innerMost-Loop-in_1-0"
+        },
+        {
+          "name" : "c0-l0su0-InnerMost-LoopBranch-in_0-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-l0su0-innerMost-Loop-in_0-0", "c0-l0su0-sendSync-0"],
+          "prev" : ["c0-l0su0-InnerMost-LoopBranch-in_1-0"],
+          "loopNode" : "c0-l0su0-innerMost-Loop-in_0-0"
+        },
+        {
+          "name" : "c0-l0su0-sendSync-0",
+          "type" : "sync",
+          "next" : ["c0-l0su0-ILBranch-in_-0"],
+          "prev" : ["c0-l0su0-InnerMost-LoopBranch-in_0-0"],
+          "sendOrRecv" : 0,
+          "isSoft" : 0,
+          "sendrecvall" : 0,
+          "self" : "l0su0",
+          "external" : [ "l0lu0" ]
+        },
+        {
+          "name" : "c0-l0su0-ILBranch-in_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-l0su0-IL-in_-0", "c0-l0su0-ILBranch-mb_-0"],
+          "prev" : ["c0-l0su0-sendSync-0"],
+          "loopNode" : "c0-l0su0-IL-in_-0"
+        },
+        {
+          "name" : "c0-l0su0-ILBranch-mb_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-l0su0-IL-mb_-0", "c0-l0su0-Outer-LoopBranch-0"],
+          "prev" : ["c0-l0su0-ILBranch-in_-0"],
+          "loopNode" : "c0-l0su0-IL-mb_-0"
+        },
+        {
+          "name" : "c0-l0su0-Outer-LoopBranch-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-l0su0-Outer-Loop-0"],
+          "prev" : ["c0-l0su0-ILBranch-mb_-0"],
+          "loopNode" : "c0-l0su0-Outer-Loop-0"
+        }
+      ],
+      "4" : [
+        {
+          "name" : "c0-sfp0-Outer-Loop-0",
+          "type" : "mvloop",
+          "next" : ["c0-sfp0-IL-mb_-0"],
+          "prev" : [],
+          "loopName" : "c0-sfp0-Outer-Loop-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-sfp0-IL-mb_-0",
+          "type" : "mvloop",
+          "next" : ["c0-sfp0-IL-in_-0"],
+          "prev" : ["c0-sfp0-Outer-Loop-0"],
+          "loopName" : "c0-sfp0-IL-mb_-0",
+          "loopCount" : 64,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-sfp0-IL-in_-0",
+          "type" : "mvloop",
+          "next" : ["c0-sfp0-innerMost-Loop-in_0-0"],
+          "prev" : ["c0-sfp0-IL-mb_-0"],
+          "loopName" : "c0-sfp0-IL-in_-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-sfp0-innerMost-Loop-in_0-0",
+          "type" : "mvloop",
+          "next" : ["c0-sfp0-sfpcompute-0"],
+          "prev" : ["c0-sfp0-IL-in_-0"],
+          "loopName" : "c0-sfp0-innerMost-Loop-in_0-0",
+          "loopCount" : 8,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-sfp0-sfpcompute-0",
+          "type" : "sfpcompute",
+          "next" : ["c0-sfp0-InnerMost-LoopBranch-in_0-0"],
+          "prev" : ["c0-sfp0-innerMost-Loop-in_0-0"],
+          "coreletId" : 0,
+          "opFuncName" : "sfp_readlx_transpose_fwdl0",
+          "restickifyInfo" : {"numBlocks" : 8, "transposeType" : [64,8], "nExtraZSticks" : 0, "scaleFactor" : 1, "inpDf" : "SEN169_FP16", "outDf" : "SEN169_FP16", "numMaxRegiterPerRow" : 4, "registerType" : 2}, 
+          "myOpDimSize" : {  },
+          "myOpSubDimSize" : {  },
+          "myOffsetPerDs" : { 
+          },
+          "myRegDsSize" : { 
+          },
+          "myRegOffsetperDs" : { 
+          },
+          "myOpDimSize_el" : {  },
+          "myOpSubDimSize_el" : {  },
+          "elCond" : [
+          ],
+          "dtFormat" : "SEN169_FP16"
+        },
+        {
+          "name" : "c0-sfp0-InnerMost-LoopBranch-in_0-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-sfp0-innerMost-Loop-in_0-0", "c0-sfp0-ILBranch-in_-0"],
+          "prev" : ["c0-sfp0-sfpcompute-0"],
+          "loopNode" : "c0-sfp0-innerMost-Loop-in_0-0"
+        },
+        {
+          "name" : "c0-sfp0-ILBranch-in_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-sfp0-IL-in_-0", "c0-sfp0-ILBranch-mb_-0"],
+          "prev" : ["c0-sfp0-InnerMost-LoopBranch-in_0-0"],
+          "loopNode" : "c0-sfp0-IL-in_-0"
+        },
+        {
+          "name" : "c0-sfp0-ILBranch-mb_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-sfp0-IL-mb_-0", "c0-sfp0-Outer-LoopBranch-0"],
+          "prev" : ["c0-sfp0-ILBranch-in_-0"],
+          "loopNode" : "c0-sfp0-IL-mb_-0"
+        },
+        {
+          "name" : "c0-sfp0-Outer-LoopBranch-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-sfp0-Outer-Loop-0"],
+          "prev" : ["c0-sfp0-ILBranch-mb_-0"],
+          "loopNode" : "c0-sfp0-Outer-Loop-0"
+        }
+      ],
+      "5" : [
+        {
+          "name" : "c0-pe0-Outer-Loop-0",
+          "type" : "mvloop",
+          "next" : ["c0-pe0-IL-mb_-0"],
+          "prev" : [],
+          "loopName" : "c0-pe0-Outer-Loop-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-pe0-IL-mb_-0",
+          "type" : "mvloop",
+          "next" : ["c0-pe0-IL-in_-0"],
+          "prev" : ["c0-pe0-Outer-Loop-0"],
+          "loopName" : "c0-pe0-IL-mb_-0",
+          "loopCount" : 64,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-pe0-IL-in_-0",
+          "type" : "mvloop",
+          "next" : ["c0-pe0-innerMost-Loop-in_0-0"],
+          "prev" : ["c0-pe0-IL-mb_-0"],
+          "loopName" : "c0-pe0-IL-in_-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-pe0-innerMost-Loop-in_0-0",
+          "type" : "mvloop",
+          "next" : ["c0-pe0-innerMost-Loop-in_1-0"],
+          "prev" : ["c0-pe0-IL-in_-0"],
+          "loopName" : "c0-pe0-innerMost-Loop-in_0-0",
+          "loopCount" : 8,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-pe0-innerMost-Loop-in_1-0",
+          "type" : "mvloop",
+          "next" : ["c0-pe0-FIFO-ptrow7_0-lx-0"],
+          "prev" : ["c0-pe0-innerMost-Loop-in_0-0"],
+          "loopName" : "c0-pe0-innerMost-Loop-in_1-0",
+          "loopCount" : 8,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-pe0-FIFO-ptrow7_0-lx-0",
+          "type" : "ptsfpdatatransfer",
+          "next" : ["c0-pe0-InnerMost-LoopBranch-in_1-0"],
+          "prev" : ["c0-pe0-innerMost-Loop-in_1-0"],
+          "coreletId" : 0,
+          "isPartStick" : 0,
+          "dimLayoutOrder" : [],
+          "srcDest" : ["ptrow7_0", "lx"],
+          "srcStartAddr" : "-1",
+          "destStartAddr" : "-1",
+          "srcStartCondAndVal" : [
+          ],
+          "destStartCondAndVal" : [
+          ],
+          "EAROffCondAndVal" : [
+          ],
+          "EBRTag" : {"isValid" : 0, "tag" : "null"},
+          "LRFTag" : {"isValid" : 0, "tag" : "null"},
+          "useBurst" : "false",
+          "myBigDimSize" : {  },
+          "myBigSubDimSize" : {  },
+          "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+          "myLitDimSize" : {  },
+          "myLitSubDimSize" : {  },
+          "myLitDimGap" : {  },
+          "myLitDimSize_el" : {  },
+          "myLitSubDimSize_el" : {  },
+          "elCond" : [
+          ],
+          "bigStAddrOffsets" : { 
+          },
+          "wordLength" : -1,
+          "stickSize" : -1,
+          "self" : "pe0",
+          "reqXRFReset" : 1,
+          "xrfRowIdx" : -1,
+          "useImaOrFma" : 0,
+          "padVal" : 0,
+          "padValBin" : -1,
+          "has_multiple_dest_" : 0,
+          "multiple_dest_" : [],
+          "dtFormat" : "SEN169_FP16",
+          "auxLoopBigStAddrOffsets" : { 
+          },
+          "gapOffset" : 0,
+          "GTRAndBurstCondAndVal": [
+          ],
+          "gtr_imm_opt_en" : 0,
+          "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+          "useSAMVCondAndVal" : [
+          ],
+          "litStAddrOffsets" : { 
+          }
+        },
+        {
+          "name" : "c0-pe0-InnerMost-LoopBranch-in_1-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-pe0-innerMost-Loop-in_1-0", "c0-pe0-InnerMost-LoopBranch-in_0-0"],
+          "prev" : ["c0-pe0-FIFO-ptrow7_0-lx-0"],
+          "loopNode" : "c0-pe0-innerMost-Loop-in_1-0"
+        },
+        {
+          "name" : "c0-pe0-InnerMost-LoopBranch-in_0-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-pe0-innerMost-Loop-in_0-0", "c0-pe0-ILBranch-in_-0"],
+          "prev" : ["c0-pe0-InnerMost-LoopBranch-in_1-0"],
+          "loopNode" : "c0-pe0-innerMost-Loop-in_0-0"
+        },
+        {
+          "name" : "c0-pe0-ILBranch-in_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-pe0-IL-in_-0", "c0-pe0-ILBranch-mb_-0"],
+          "prev" : ["c0-pe0-InnerMost-LoopBranch-in_0-0"],
+          "loopNode" : "c0-pe0-IL-in_-0"
+        },
+        {
+          "name" : "c0-pe0-ILBranch-mb_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-pe0-IL-mb_-0", "c0-pe0-Outer-LoopBranch-0"],
+          "prev" : ["c0-pe0-ILBranch-in_-0"],
+          "loopNode" : "c0-pe0-IL-mb_-0"
+        },
+        {
+          "name" : "c0-pe0-Outer-LoopBranch-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-pe0-Outer-Loop-0"],
+          "prev" : ["c0-pe0-ILBranch-mb_-0"],
+          "loopNode" : "c0-pe0-Outer-Loop-0"
+        }
+      ],
+      "6" : [
+        {
+          "name" : "c0-ptrow0_0-Outer-Loop-0",
+          "type" : "mvloop",
+          "next" : ["c0-ptrow0_0-IL-mb_-0"],
+          "prev" : [],
+          "loopName" : "c0-ptrow0_0-Outer-Loop-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-ptrow0_0-IL-mb_-0",
+          "type" : "mvloop",
+          "next" : ["c0-ptrow0_0-IL-in_-0"],
+          "prev" : ["c0-ptrow0_0-Outer-Loop-0"],
+          "loopName" : "c0-ptrow0_0-IL-mb_-0",
+          "loopCount" : 64,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-ptrow0_0-IL-in_-0",
+          "type" : "mvloop",
+          "next" : ["c0-ptrow0_0-ptcompute-0"],
+          "prev" : ["c0-ptrow0_0-IL-mb_-0"],
+          "loopName" : "c0-ptrow0_0-IL-in_-0",
+          "loopCount" : 1,
+          "loopDim" : 0
+        },
+        {
+          "name" : "c0-ptrow0_0-ptcompute-0",
+          "type" : "ptcompute",
+          "next" : ["c0-ptrow0_0-ILBranch-in_-0"],
+          "prev" : ["c0-ptrow0_0-IL-in_-0"],
+          "coreletId" : 0,
+          "opFuncName" : "pt_blk_transpose_load",
+          "ptRowIdx" : 0,
+          "restickifyInfo" : {"numBlocks" : 8, "transposeType" : [64,8], "nExtraZSticks" : 0, "scaleFactor" : 1, "inpDf" : "SEN169_FP16", "outDf" : "SEN169_FP16", "numMaxRegiterPerRow" : 4, "registerType" : 2}, 
+          "myOpDimSize" : {  },
+          "myOpDimSize_el" : {  },
+          "elCond" : [
+          ],
+          "dtFormat" : "SEN169_FP16"
+        },
+        {
+          "name" : "c0-ptrow0_0-ILBranch-in_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-ptrow0_0-IL-in_-0", "c0-ptrow0_0-ILBranch-mb_-0"],
+          "prev" : ["c0-ptrow0_0-ptcompute-0"],
+          "loopNode" : "c0-ptrow0_0-IL-in_-0"
+        },
+        {
+          "name" : "c0-ptrow0_0-ILBranch-mb_-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-ptrow0_0-IL-mb_-0", "c0-ptrow0_0-Outer-LoopBranch-0"],
+          "prev" : ["c0-ptrow0_0-ILBranch-in_-0"],
+          "loopNode" : "c0-ptrow0_0-IL-mb_-0"
+        },
+        {
+          "name" : "c0-ptrow0_0-Outer-LoopBranch-0",
+          "type" : "mvloopbranch",
+          "next" : ["c0-ptrow0_0-Outer-Loop-0"],
+          "prev" : ["c0-ptrow0_0-ILBranch-mb_-0"],
+          "loopNode" : "c0-ptrow0_0-Outer-Loop-0"
+        }
+      ]
+    }
+  }
+}

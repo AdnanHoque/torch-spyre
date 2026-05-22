@@ -29,6 +29,8 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     generate_streaming_ptlx_native_full_bridge_sdsc,
     generate_streaming_ptlx_native_tile_bridge_sdsc,
     generate_streaming_ptlx_tile_bridge_sdsc,
+    generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc,
+    generate_streaming_ptlx_validgap_consumer_tile_bridge_sdsc,
 )
 from torch_spyre._inductor.codegen.restickify_ptlx_streaming import (
     default_core_mapping,
@@ -645,7 +647,91 @@ def test_streaming_ptlx_direct_full_bridge_combines_direct_tiles():
     ]
 
 
-def test_streaming_ptlx_contract_reports_missing_consumer_piece_descriptor():
+def test_streaming_ptlx_validgap_consumer_tile_bridge_uses_sparse_source_stick():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=1,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=1)
+
+    payload = generate_streaming_ptlx_validgap_consumer_tile_bridge_sdsc(
+        "validgap_tile_bridge",
+        artifact,
+    )
+    root = payload["validgap_tile_bridge"]
+    restickify = next(iter(root["datadscs_"][1].values()))
+    input_lds = restickify["labeledDs_"][0]
+    output_lds = restickify["labeledDs_"][1]
+    value_contract = _streaming_bridge_value_preservation_contract(root)
+
+    assert root["streamingPTLXValidGapConsumerTile_"][
+        "source_stick_live_lanes"
+    ] == 1
+    assert restickify["op"]["name"] == "ReStickifyOpWithPTLx"
+    assert input_lds["layoutDimOrder_"] == ["out_", "mb_", "in_"]
+    assert input_lds["stickDimOrder_"] == ["out_"]
+    assert input_lds["PieceInfo"][0]["dimToSize_"] == {
+        "out_": 64,
+        "mb_": 64,
+        "in_": 64,
+    }
+    assert input_lds["PieceInfo"][0]["validGap_"]["out_"] == [[1, 63]]
+    assert output_lds["layoutDimOrder_"] == ["mb_", "in_"]
+    assert output_lds["stickDimOrder_"] == ["in_"]
+    assert value_contract["valid"] is True
+    assert value_contract["rows"][0]["input_live_elements"] == 64 * 64
+    assert value_contract["rows"][0]["output_live_elements"] == 64 * 64
+
+
+def test_streaming_ptlx_validgap_consumer_full_bridge_contracts_but_needs_values():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=2,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=2)
+
+    payload = generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc(
+        "validgap_full_bridge",
+        artifact,
+    )
+    root = payload["validgap_full_bridge"]
+    contract = _streaming_value_flow_contract(
+        bridge_payload=payload,
+        producer_base=0,
+        consumer_base=256 * 1024,
+        expected_tiles=2,
+    )
+
+    assert root["streamingPTLXFull_"]["coalescing"] == (
+        "validgap-consumer-64x64-tiles"
+    )
+    assert root["streamingPTLXFull_"]["validgap_consumer_contract"] is True
+    assert root["streamingPTLXFull_"]["semantic_transform_certified"] is False
+    assert root["streamingPTLXFull_"]["datadsc_count"] == 4
+    assert contract["endpoint_contract_valid"] is True
+    assert contract["value_preservation_valid"] is True
+    assert contract["gather_count"] == 2
+    assert contract["validgap_tile_count"] == 2
+    assert contract["semantic_transform_certified"] is False
+    assert contract["semantic_skip_reason"] == (
+        "validgap-consumer-ptlx-tile-needs-hardware-value-validation"
+    )
+    assert contract["valid"] is False
+
+
+def test_streaming_ptlx_contract_allows_missing_consumer_piece_descriptor():
     source = {"mb": 32, "out": 1}
     dest = {"mb": 4, "out": 8}
     summary = plan_streaming_ptlx_tiles(
@@ -686,11 +772,12 @@ def test_streaming_ptlx_contract_reports_missing_consumer_piece_descriptor():
 
     descriptor = contract["consumer_descriptor_contract"]
     assert contract["endpoint_contract_valid"] is True
-    assert contract["consumer_descriptor_valid"] is False
+    assert contract["consumer_descriptor_valid"] is True
     assert descriptor["layout_match"] is True
     assert descriptor["stick_match"] is True
     assert descriptor["piece_contract_available"] is False
-    assert descriptor["reason"] == "missing-consumer-piece-info"
+    assert descriptor["piece_reason"] == "missing-consumer-piece-info"
+    assert descriptor["reason"] is None
     assert contract["valid"] is False
 
 
@@ -865,6 +952,25 @@ def test_streaming_ptlx_bridge_selector_uses_native_tiles_when_enabled():
     assert direct_contract["valid"] is False
     assert next(iter(direct.values()))["streamingPTLXFull_"]["coalescing"] == (
         "direct-64x64-tiles"
+    )
+
+    with config.patch(
+        restickify_ptlx_validgap_consumer_tile_e2e=True,
+        restickify_ptlx_direct_tile_e2e=True,
+        restickify_ptlx_native_tile_e2e=True,
+    ):
+        validgap = _generate_streaming_ptlx_bridge_payload("validgap", artifact)
+    validgap_contract = _streaming_value_flow_contract(
+        bridge_payload=validgap,
+        producer_base=0,
+        consumer_base=256 * 1024,
+        expected_tiles=2,
+    )
+    assert validgap_contract["endpoint_contract_valid"] is True
+    assert validgap_contract["value_preservation_valid"] is True
+    assert validgap_contract["semantic_transform_certified"] is False
+    assert next(iter(validgap.values()))["streamingPTLXFull_"]["coalescing"] == (
+        "validgap-consumer-64x64-tiles"
     )
 
 

@@ -141,6 +141,14 @@ restickify_ptlx_direct_tile_e2e: bool = (
     os.environ.get("SPYRE_RESTICKIFY_PTLX_DIRECT_TILE_E2E", "0") == "1"
 )
 
+# Default-off diagnostic refinement of the streaming PT-LX prototype. This
+# emits a consumer-shaped ReStickifyOpWithPTLx tile descriptor using a validGap
+# on the source stick dimension. The shape is Deeptools-legal and preserves live
+# element count, but remains uncertified until hardware value validation passes.
+restickify_ptlx_validgap_consumer_tile_e2e: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_PTLX_VALIDGAP_CONSUMER_TILE_E2E", "0") == "1"
+)
+
 # Default-off cross-bundle prototype for the production-shaped PT-LX path. This
 # delays DXP compilation until all SDSC bundle JSON has been emitted, so an
 # eligible trailing producer/restickify bundle and the following consumer bundle

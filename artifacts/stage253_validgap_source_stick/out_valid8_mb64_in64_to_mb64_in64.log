@@ -1,0 +1,9 @@
+Reading SuperDsc for file../tmp/stage253-validgap-source-stick/out_valid8_mb64_in64_to_mb64_in64.json
+Running DCG for DL+Data Op: Node-name:out_valid8_mb64_in64_to_mb64_in64
+Running DCG for DataOp: Node-name:out_valid8_mb64_in64_to_mb64_in64
+Computing Re-StickifyOpWithPT (Special re-stickify) transfer function..
+Creating PCFG for DataDsc..
+Creating pcfg for coreID:0 : LX : l0lu0 : l0su0 : sfp0 : pe0 : ptrow0_0 : ptrow1_0 : ptrow2_0 : ptrow3_0 : ptrow4_0 : ptrow5_0 : ptrow6_0 : ptrow7_0 ...
+Writing DataDsc to /tmp/stage253-validgap-source-stick/dcg-out_valid8_mb64_in64_to_mb64_in64/sdsc.json..
+Writing PCFG to /tmp/stage253-validgap-source-stick/dcg-out_valid8_mb64_in64_to_mb64_in64/pcfg.json..
+Writing SenPrograms to dataDSC/senprog.txt..

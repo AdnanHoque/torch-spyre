@@ -667,6 +667,144 @@ def generate_streaming_ptlx_direct_tile_bridge_sdsc(
     }
 
 
+def generate_streaming_ptlx_validgap_consumer_tile_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+    *,
+    tile_index: int = 0,
+) -> dict[str, Any]:
+    """Lower one tile into the consumer-shaped validGap PT-LX descriptor.
+
+    Deeptools' PT-LX restickify contract requires every output dimension to also
+    appear in the input descriptor and requires the input/output stick
+    dimensions to differ.  A plain ``mb_/out_ -> mb_/in_`` tile cannot satisfy
+    both constraints.  This diagnostic shape uses an expanded input descriptor
+    ``out_, mb_, in_`` with stick ``out_`` and marks only one ``out_`` lane live
+    via ``validGap_``.  That keeps the physical live element count at one
+    64x64 tile while producing a consumer-shaped ``mb_, in_`` output with stick
+    ``in_``.
+
+    The descriptor is compile/contract-oriented only; it is not semantic proof
+    until hardware value validation confirms Deeptools interprets the sparse
+    source-stick axis the way the compiler intends.
+    """
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    if descriptor.get("kind") != "streaming_ptlx_restickify_descriptor":
+        raise ValueError("expected a streaming_ptlx_restickify_descriptor")
+    tiles = descriptor.get("tiles") or []
+    if tile_index < 0 or tile_index >= len(tiles):
+        raise ValueError(f"tile_index {tile_index} is outside materialized tiles")
+
+    tile = tiles[tile_index]
+    gather_stage, _restickify_stage, scatter_stage = tile["stages"]
+    source_fragments = list(gather_stage.get("fragments") or [])
+    dest_fragments = list(scatter_stage.get("fragments") or [])
+    if not source_fragments or not dest_fragments:
+        raise ValueError("validGap PT-LX tile bridge needs source and dest fragments")
+
+    bridge_core = _as_int(tile["bridge_core"])
+    gathered_fragment = _coalesced_tile_fragment(source_fragments, core=bridge_core)
+    tile_rows, tile_cols = _tile_shape_from_fragment(gathered_fragment)
+    if tile_rows != 64 or tile_cols != 64:
+        raise ValueError(
+            "validGap PT-LX consumer tile bridge currently requires full 64x64 tiles"
+        )
+
+    gather_core_ids = _fragment_core_ids(source_fragments, bridge_core)
+    restickify_core_ids = _fragment_core_ids(dest_fragments, bridge_core)
+    datadscs = [
+        {
+            f"0_STCDPOpLx_gather_validgap_consumer_tile{tile_index}": _tile_dataop(
+                "STCDPOpLx",
+                core_ids=gather_core_ids,
+                input_layout=("mb_", "out_"),
+                input_stick=("out_",),
+                output_layout=("mb_", "out_"),
+                output_stick=("out_",),
+                input_base=_as_int(gather_stage["input_base"]),
+                output_base=_as_int(gather_stage["output_base"]),
+                input_fragments=source_fragments,
+                output_fragments=[gathered_fragment],
+            )
+        },
+        {
+            f"1_ReStickifyOpWithPTLx_validgap_consumer_tile{tile_index}": (
+                _validgap_consumer_tile_dataop(
+                    core_ids=restickify_core_ids,
+                    input_base=_as_int(gather_stage["output_base"]),
+                    output_base=_as_int(scatter_stage["output_base"]),
+                    input_fragment=gathered_fragment,
+                    output_fragments=dest_fragments,
+                    tensor_size=_as_int(descriptor["size"]),
+                )
+            )
+        },
+    ]
+
+    num_cores = max(
+        _streaming_tile_core_ids(
+            tile,
+            _as_int(descriptor.get("source_core_count", 1)),
+            _as_int(descriptor.get("dest_core_count", 1)),
+        )
+    ) + 1
+    return {
+        name: {
+            "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],
+            "sdscFolds_": {
+                "dim_prop_func": [{"Affine": {"alpha_": 1, "beta_": 0}}],
+                "dim_prop_attr": [{"factor_": 1, "label_": "time"}],
+                "data_": {"[0]": "0"},
+            },
+            "coreFoldProp_": {"factor_": num_cores, "label_": "core"},
+            "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
+            "numCoresUsed_": num_cores,
+            "unpadN_": {"name_": "unpadn", "out_": -1, "mb_": -1, "in_": -1},
+            "N_": {
+                "name_": "n",
+                "out_": _as_int(descriptor["size"]),
+                "mb_": _as_int(descriptor["size"]),
+                "in_": _as_int(descriptor["size"]),
+            },
+            "coreIdToDsc_": {},
+            "numWkSlicesPerDim_": {},
+            "coreIdToWkSlice_": {},
+            "opFuncsUsed_": [
+                next(iter(datadsc.values()))["op"]["name"] for datadsc in datadscs
+            ],
+            "ldsShareInfo_": [],
+            "prodConsList": {},
+            "coreIdToDscSchedule": _sparse_dataop_schedule(
+                num_cores,
+                [gather_core_ids, restickify_core_ids],
+            ),
+            "pcfg_": {},
+            "target_": "senulator",
+            "dscs_": [],
+            "datadscs_": datadscs,
+            "dimToSymbolMappingOpcodeCorrection_": {},
+            "inputSymbolsAndTags_": {},
+            "symbolDefinitions_": {},
+            "streamingPTLXValidGapConsumerTile_": {
+                "tile_index": int(tile_index),
+                "tile_row": _as_int(tile["tile_row"]),
+                "tile_col": _as_int(tile["tile_col"]),
+                "tile_rows": tile_rows,
+                "tile_cols": tile_cols,
+                "source_fragment_count": len(source_fragments),
+                "dest_fragment_count": len(dest_fragments),
+                "source_stick_dim": "out_",
+                "consumer_stick_dim": "in_",
+                "source_stick_live_lanes": 1,
+                "status": "static-codegen-only",
+                "semantic_transform_certified": False,
+                "fallback": "ReStickifyOpHBM",
+            },
+        }
+    }
+
+
 def generate_ptlx_local_tile_restickify_sdsc(
     name: str,
     *,
@@ -943,6 +1081,64 @@ def generate_streaming_ptlx_direct_full_bridge_sdsc(
         "logical_tile_count": _as_int(descriptor.get("total_tiles", len(tiles))),
         "datadsc_count": len(all_datadscs),
         "direct_restickify_contract": True,
+        "semantic_transform_certified": False,
+        "fallback": "ReStickifyOpHBM",
+    }
+    return {name: combined}
+
+
+def generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Combine every validGap consumer-shaped PT-LX tile into one payload."""
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    tiles = descriptor.get("tiles") or []
+    if not tiles:
+        raise ValueError("streaming descriptor has no materialized tiles")
+
+    roots: list[dict[str, Any]] = []
+    all_datadscs: list[dict[str, Any]] = []
+    combined_schedule: dict[str, list[list[int]]] = {}
+    offset = 0
+    for tile_index in range(len(tiles)):
+        tile_payload = generate_streaming_ptlx_validgap_consumer_tile_bridge_sdsc(
+            f"{name}_validgap_consumer_tile{tile_index}",
+            streaming_artifact,
+            tile_index=tile_index,
+        )
+        tile_root = copy.deepcopy(next(iter(tile_payload.values())))
+        roots.append(tile_root)
+        tile_datadscs = tile_root.get("datadscs_", []) or []
+        all_datadscs.extend(tile_datadscs)
+        for core_id, steps in (tile_root.get("coreIdToDscSchedule") or {}).items():
+            core_steps = combined_schedule.setdefault(str(core_id), [])
+            for step in steps:
+                adjusted = list(step)
+                adjusted[0] = int(adjusted[0]) + offset
+                core_steps.append(adjusted)
+        offset += len(tile_datadscs)
+
+    combined = copy.deepcopy(roots[0])
+    combined["datadscs_"] = all_datadscs
+    combined["numCoresUsed_"] = max(_as_int(root["numCoresUsed_"]) for root in roots)
+    for core_id in range(combined["numCoresUsed_"]):
+        combined_schedule.setdefault(str(core_id), [])
+    combined["coreIdToDscSchedule"] = _with_local_schedule_dependencies(
+        combined_schedule
+    )
+    combined["opFuncsUsed_"] = [
+        next(iter(datadsc.values()))["op"]["name"] for datadsc in all_datadscs
+    ]
+    combined["streamingPTLXValidGapConsumerTile_"] = {}
+    combined["streamingPTLXFull_"] = {
+        "status": "static-codegen-only",
+        "coalescing": "validgap-consumer-64x64-tiles",
+        "tile_count": len(tiles),
+        "logical_tile_count": _as_int(descriptor.get("total_tiles", len(tiles))),
+        "datadsc_count": len(all_datadscs),
+        "validgap_consumer_contract": True,
         "semantic_transform_certified": False,
         "fallback": "ReStickifyOpHBM",
     }
@@ -1821,6 +2017,174 @@ def _tile_piece_info(
             }
         ],
     }
+
+
+def _validgap_consumer_tile_dataop(
+    *,
+    core_ids: Sequence[int],
+    input_base: int,
+    output_base: int,
+    input_fragment: Mapping[str, Any],
+    output_fragments: Sequence[Mapping[str, Any]],
+    tensor_size: int,
+) -> dict[str, Any]:
+    return {
+        "coreIdsUsed_": [int(core) for core in core_ids],
+        "dimPool_": ["out_", "mb_", "in_"],
+        "outDimTodimRelation_": [],
+        "primaryDs_": [
+            {"name_": "dataIN", "dimNames": ["out_", "mb_", "in_"]},
+            {"name_": "dataOUT", "dimNames": ["mb_", "in_"]},
+        ],
+        "labeledDs_": [
+            _validgap_consumer_input_labeled_ds(
+                base=int(input_base),
+                fragment=input_fragment,
+                tensor_size=int(tensor_size),
+            ),
+            _validgap_consumer_output_labeled_ds(
+                base=int(output_base),
+                fragments=output_fragments,
+                tensor_size=int(tensor_size),
+            ),
+        ],
+        "op": _op_payload("ReStickifyOpWithPTLx"),
+    }
+
+
+def _validgap_consumer_input_labeled_ds(
+    *,
+    base: int,
+    fragment: Mapping[str, Any],
+    tensor_size: int,
+) -> dict[str, Any]:
+    return {
+        "ldsName_": "dataIN_L0",
+        "pdsName_": "dataIN",
+        "wordLength": num_bytes(DataFormats.SEN169_FP16),
+        "dataformat": DataFormats.SEN169_FP16.name,
+        "isExternal_": 0,
+        "segment_": "output",
+        "layoutDimOrder_": ["out_", "mb_", "in_"],
+        "stickDimOrder_": ["out_"],
+        "dimToLayoutSize_": {
+            "out_": int(tensor_size),
+            "mb_": int(tensor_size),
+            "in_": int(tensor_size),
+        },
+        "dimToStickSize_": {"out_": 64},
+        "validGap_": {
+            "out_": [[1, 63]],
+            "mb_": [[int(tensor_size), 0]],
+            "in_": [[int(tensor_size), 0]],
+        },
+        "totElements": -1,
+        "PieceInfo": [
+            _validgap_consumer_input_piece(
+                fragment,
+                base=base,
+            )
+        ],
+        "hbmSize_": 0,
+        "hbmStartAddress_": 0,
+        "lxSize_": _LX_SIZE_BYTES,
+        "lxStartAddress_": {},
+    }
+
+
+def _validgap_consumer_output_labeled_ds(
+    *,
+    base: int,
+    fragments: Sequence[Mapping[str, Any]],
+    tensor_size: int,
+) -> dict[str, Any]:
+    return {
+        "ldsName_": "dataOUT_L0",
+        "pdsName_": "dataOUT",
+        "wordLength": num_bytes(DataFormats.SEN169_FP16),
+        "dataformat": DataFormats.SEN169_FP16.name,
+        "isExternal_": 0,
+        "segment_": "output",
+        "layoutDimOrder_": ["mb_", "in_"],
+        "stickDimOrder_": ["in_"],
+        "dimToLayoutSize_": {"mb_": int(tensor_size), "in_": int(tensor_size)},
+        "dimToStickSize_": {"in_": 64},
+        "validGap_": {
+            "mb_": [[int(tensor_size), 0]],
+            "in_": [[int(tensor_size), 0]],
+        },
+        "totElements": -1,
+        "PieceInfo": [
+            _validgap_consumer_output_piece(fragment, base=base, key=f"p{idx + 1}")
+            for idx, fragment in enumerate(fragments)
+        ],
+        "hbmSize_": 0,
+        "hbmStartAddress_": 0,
+        "lxSize_": _LX_SIZE_BYTES,
+        "lxStartAddress_": {},
+    }
+
+
+def _validgap_consumer_input_piece(
+    fragment: Mapping[str, Any],
+    *,
+    base: int,
+) -> dict[str, Any]:
+    rows, cols = _tile_shape_from_fragment(fragment)
+    return {
+        "key_": "p1",
+        "dimToStartCordinate": {
+            "out_": _as_int(fragment["col_start"]),
+            "mb_": _as_int(fragment["row_start"]),
+            "in_": _as_int(fragment["col_start"]),
+        },
+        "dimToSize_": {"out_": 64, "mb_": rows, "in_": cols},
+        "validGap_": {
+            "out_": [[1, 63]],
+            "mb_": [[rows, 0]],
+            "in_": [[cols, 0]],
+        },
+        "PlacementInfo": [
+            {
+                "type": "lx",
+                "memId": [_as_int(fragment["core"])],
+                "startAddr": [int(base)],
+            }
+        ],
+    }
+
+
+def _validgap_consumer_output_piece(
+    fragment: Mapping[str, Any],
+    *,
+    base: int,
+    key: str,
+) -> dict[str, Any]:
+    rows, cols = _tile_shape_from_fragment(fragment)
+    sizes = {"mb_": rows, "in_": cols}
+    return {
+        "key_": key,
+        "dimToStartCordinate": {
+            "mb_": _as_int(fragment["row_start"]),
+            "in_": _as_int(fragment["col_start"]),
+        },
+        "dimToSize_": sizes,
+        "validGap_": _valid_gap(sizes),
+        "PlacementInfo": [
+            {
+                "type": "lx",
+                "memId": [_as_int(fragment["core"])],
+                "startAddr": [int(base)],
+            }
+        ],
+    }
+
+
+def _tile_shape_from_fragment(fragment: Mapping[str, Any]) -> tuple[int, int]:
+    return (
+        _as_int(fragment["row_end"]) - _as_int(fragment["row_start"]),
+        _as_int(fragment["col_end"]) - _as_int(fragment["col_start"]),
+    )
 
 
 def _local_ptlx_labeled_ds(
