@@ -609,6 +609,11 @@ def test_maybe_emit_streaming_bridge_candidate_sidecar(tmp_path, monkeypatch):
     assert candidate["tile_records_materialized"] == 64
     assert candidate["streaming_summary"]["max_fan_in"] == 4
     assert candidate["streaming_summary"]["max_fan_out"] == 1
+    assert candidate["bridge_endpoint_contract_valid"] is False
+    assert (
+        candidate["bridge_endpoint_contract"]["reason"]
+        == "layout-dim-order-mismatch"
+    )
     bridge_path = tmp_path / BRIDGE_CANDIDATE_FILENAME_TEMPLATE.format(idx=1)
     assert bridge_path.exists()
     bridge = json.loads(bridge_path.read_text(encoding="utf-8"))

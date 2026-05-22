@@ -307,6 +307,10 @@ def _streaming_bridge_candidate(
         next(iter(datadsc.values())).get("op", {}).get("name")
         for datadsc in root.get("datadscs_", []) or []
     ]
+    bridge_endpoint_contract = _bridge_destination_endpoint_contract(
+        payload,
+        streaming.get("destination_primary", {}),
+    )
     return {
         "status": "emitted",
         "kind": "torch_spyre.restickify_lx_neighbor_streaming_bridge_candidate",
@@ -322,8 +326,52 @@ def _streaming_bridge_candidate(
         "op_funcs_used": dataop_names,
         "streaming_summary": _streaming_summary_payload(summary),
         "bridge_metadata": root.get("streamingPTLXFull_", {}),
+        "bridge_endpoint_contract": bridge_endpoint_contract,
+        "bridge_endpoint_contract_valid": bridge_endpoint_contract["valid"],
         "payload": payload,
     }
+
+
+def _bridge_destination_endpoint_contract(
+    bridge_payload: dict[str, Any],
+    destination_primary: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        root = next(iter(bridge_payload.values()))
+        datadscs = root.get("datadscs_", []) or []
+        if not datadscs:
+            return {"valid": False, "reason": "missing-bridge-datadscs"}
+        bridge_output = next(iter(datadscs[-1].values()))["labeledDs_"][-1]
+    except (KeyError, StopIteration, TypeError) as exc:
+        return {"valid": False, "reason": f"malformed-bridge:{type(exc).__name__}"}
+
+    bridge_layout = _normalize_dim_list(bridge_output.get("layoutDimOrder_", []))
+    bridge_stick = _normalize_dim_list(bridge_output.get("stickDimOrder_", []))
+    destination_layout = _normalize_dim_list(
+        destination_primary.get("layoutDimOrder_", [])
+    )
+    destination_stick = _normalize_dim_list(
+        destination_primary.get("stickDimOrder_", [])
+    )
+    layout_match = bridge_layout == destination_layout
+    stick_match = bridge_stick == destination_stick
+    reason = None
+    if not layout_match:
+        reason = "layout-dim-order-mismatch"
+    elif not stick_match:
+        reason = "stick-dim-order-mismatch"
+    return {
+        "valid": layout_match and stick_match,
+        "reason": reason,
+        "bridge_layout": bridge_layout,
+        "destination_layout": destination_layout,
+        "bridge_stick": bridge_stick,
+        "destination_stick": destination_stick,
+    }
+
+
+def _normalize_dim_list(values: Sequence[Any]) -> list[str]:
+    return [str(value).removesuffix("_") for value in values]
 
 
 def _skip_reason(
