@@ -20,6 +20,7 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     generate_restickify_dataop_sdsc_from_spec,
     generate_streaming_ptlx_full_bridge_sdsc,
     generate_streaming_ptlx_tile_bridge_sdsc,
+    generate_validgap_ptlx_consumer_endpoint_adapter_tile_sdsc,
 )
 from torch_spyre._inductor.codegen.restickify_ptlx_streaming import (
     default_core_mapping,
@@ -576,6 +577,14 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--validgap-endpoint-adapter-tile",
+        action="store_true",
+        help=(
+            "With --streaming-ptlx-tile, emit one valid-gap shaped PT-LX "
+            "workspace to consumer LX endpoint adapter artifact."
+        ),
+    )
+    parser.add_argument(
         "--all-streaming-tiles",
         action="store_true",
         help="With --streaming-ptlx-tile, emit every materialized tile.",
@@ -703,6 +712,18 @@ def main() -> int:
                 )
                 row_mode = "native_ptlx_endpoint_adapter_tile"
                 row_op = "NativePTLXEndpointAdapterTile"
+            elif args.validgap_endpoint_adapter_tile:
+                payload = generate_validgap_ptlx_consumer_endpoint_adapter_tile_sdsc(
+                    f"{tile_index}_ValidGapPTLXEndpointAdapterTile_{args.size}",
+                    artifact,
+                    tile_index=tile_index,
+                )
+                path = output_dir / (
+                    f"sdsc_validgap_ptlx_endpoint_adapter_tile_"
+                    f"{args.size}_{tile_index}.json"
+                )
+                row_mode = "validgap_ptlx_endpoint_adapter_tile"
+                row_op = "ValidGapPTLXEndpointAdapterTile"
             else:
                 payload = generate_streaming_ptlx_tile_bridge_sdsc(
                     f"{tile_index}_StreamingPTLXTileBridge_{args.size}",

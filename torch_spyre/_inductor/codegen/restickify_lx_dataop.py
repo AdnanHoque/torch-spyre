@@ -673,6 +673,126 @@ def generate_native_ptlx_consumer_endpoint_adapter_tile_sdsc(
     }
 
 
+def generate_validgap_ptlx_consumer_endpoint_adapter_tile_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+    *,
+    tile_index: int = 0,
+) -> dict[str, Any]:
+    """Emit a valid-gap shaped adapter from native PT-LX workspace to consumer LX.
+
+    The direct native endpoint adapter keeps the native 4D
+    ``j_, i_, out_, mb_`` descriptor as the input and currently fails Deeptools
+    shape checks.  This diagnostic adapter narrows the problem: it assumes the
+    native tile workspace already exists at the restickify output base, then
+    exposes that workspace through the same ``out_, mb_, in_`` valid-gap
+    descriptor family that Deeptools accepts for the consumer endpoint.
+
+    This is compile-only scaffolding.  It is not a semantic proof that native
+    PT-LX output can be reinterpreted as the valid-gap descriptor without an
+    explicit value-moving transform.
+    """
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    if descriptor.get("kind") != "streaming_ptlx_restickify_descriptor":
+        raise ValueError("expected a streaming_ptlx_restickify_descriptor")
+    tiles = descriptor.get("tiles") or []
+    if tile_index < 0 or tile_index >= len(tiles):
+        raise ValueError(f"tile_index {tile_index} is outside materialized tiles")
+
+    tile = tiles[tile_index]
+    _gather_stage, restickify_stage, scatter_stage = tile["stages"]
+    bridge_core = _as_int(tile["bridge_core"])
+    dest_fragments = list(scatter_stage.get("fragments") or [])
+    if not dest_fragments:
+        raise ValueError("validGap endpoint adapter needs destination fragments")
+
+    input_fragment = _coalesced_tile_fragment(dest_fragments, core=bridge_core)
+    tile_rows, tile_cols = _tile_shape_from_fragment(input_fragment)
+    if tile_rows != 64 or tile_cols != 64:
+        raise ValueError(
+            "validGap endpoint adapter currently requires full 64x64 tiles"
+        )
+
+    adapter_core_ids = _fragment_core_ids(dest_fragments, bridge_core)
+    dataop = _validgap_consumer_tile_dataop(
+        core_ids=adapter_core_ids,
+        input_base=_as_int(restickify_stage["output_base"]),
+        output_base=_as_int(scatter_stage["output_base"]),
+        input_fragment=input_fragment,
+        output_fragments=dest_fragments,
+        tensor_size=_as_int(descriptor["size"]),
+    )
+    num_cores = max(
+        _streaming_tile_core_ids(
+            tile,
+            _as_int(descriptor.get("source_core_count", 1)),
+            _as_int(descriptor.get("dest_core_count", 1)),
+        )
+    ) + 1
+    return {
+        name: {
+            "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],
+            "sdscFolds_": {
+                "dim_prop_func": [{"Affine": {"alpha_": 1, "beta_": 0}}],
+                "dim_prop_attr": [{"factor_": 1, "label_": "time"}],
+                "data_": {"[0]": "0"},
+            },
+            "coreFoldProp_": {"factor_": num_cores, "label_": "core"},
+            "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
+            "numCoresUsed_": num_cores,
+            "unpadN_": {"name_": "unpadn", "out_": -1, "mb_": -1, "in_": -1},
+            "N_": {
+                "name_": "n",
+                "out_": _as_int(descriptor["size"]),
+                "mb_": _as_int(descriptor["size"]),
+                "in_": _as_int(descriptor["size"]),
+            },
+            "coreIdToDsc_": {},
+            "numWkSlicesPerDim_": {},
+            "coreIdToWkSlice_": {},
+            "opFuncsUsed_": ["ReStickifyOpWithPTLx"],
+            "ldsShareInfo_": [],
+            "prodConsList": {},
+            "coreIdToDscSchedule": _sparse_dataop_schedule(
+                num_cores,
+                [adapter_core_ids],
+            ),
+            "pcfg_": {},
+            "target_": "senulator",
+            "dscs_": [],
+            "datadscs_": [
+                {
+                    f"0_ReStickifyOpWithPTLx_validgap_endpoint_adapter_tile"
+                    f"{tile_index}": dataop
+                }
+            ],
+            "dimToSymbolMappingOpcodeCorrection_": {},
+            "inputSymbolsAndTags_": {},
+            "symbolDefinitions_": {},
+            "streamingPTLXValidGapEndpointAdapterTile_": {
+                "tile_index": int(tile_index),
+                "tile_row": _as_int(tile["tile_row"]),
+                "tile_col": _as_int(tile["tile_col"]),
+                "tile_rows": tile_rows,
+                "tile_cols": tile_cols,
+                "bridge_core": bridge_core,
+                "source_layout": ["out_", "mb_", "in_"],
+                "source_stick": ["out_"],
+                "destination_layout": ["mb_", "in_"],
+                "destination_stick": ["in_"],
+                "adapter_reinterprets_native_workspace": True,
+                "source_workspace": "native-ptlx-restickify-output",
+                "source_base": _as_int(restickify_stage["output_base"]),
+                "destination_base": _as_int(scatter_stage["output_base"]),
+                "status": "static-codegen-only",
+                "semantic_transform_certified": False,
+                "fallback": "ReStickifyOpHBM",
+            },
+        }
+    }
+
+
 def generate_streaming_ptlx_direct_tile_bridge_sdsc(
     name: str,
     streaming_artifact: Mapping[str, Any],

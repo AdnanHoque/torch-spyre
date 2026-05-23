@@ -33,6 +33,7 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     generate_streaming_ptlx_tile_bridge_sdsc,
     generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc,
     generate_streaming_ptlx_validgap_consumer_tile_bridge_sdsc,
+    generate_validgap_ptlx_consumer_endpoint_adapter_tile_sdsc,
 )
 from torch_spyre._inductor.codegen.restickify_ptlx_streaming import (
     default_core_mapping,
@@ -1014,6 +1015,48 @@ def test_streaming_ptlx_validgap_consumer_tile_bridge_uses_sparse_output_stick_a
     assert output_lds["layoutDimOrder_"] == ["mb_", "in_"]
     assert output_lds["stickDimOrder_"] == ["in_"]
     assert value_contract["valid"] is True
+    assert value_contract["rows"][0]["input_live_elements"] == 64 * 64
+    assert value_contract["rows"][0]["output_live_elements"] == 64 * 64
+
+
+def test_validgap_ptlx_consumer_endpoint_adapter_tile_reuses_validgap_contract():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=1,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=1)
+
+    payload = generate_validgap_ptlx_consumer_endpoint_adapter_tile_sdsc(
+        "validgap_endpoint_adapter",
+        artifact,
+    )
+
+    root = payload["validgap_endpoint_adapter"]
+    adapter = root["streamingPTLXValidGapEndpointAdapterTile_"]
+    restickify = next(iter(root["datadscs_"][0].values()))
+    input_lds, output_lds = restickify["labeledDs_"]
+    value_contract = _streaming_bridge_value_preservation_contract(root)
+
+    assert root["dscs_"] == []
+    assert root["opFuncsUsed_"] == ["ReStickifyOpWithPTLx"]
+    assert adapter["adapter_reinterprets_native_workspace"] is True
+    assert adapter["source_workspace"] == "native-ptlx-restickify-output"
+    assert adapter["semantic_transform_certified"] is False
+    assert adapter["fallback"] == "ReStickifyOpHBM"
+    assert restickify["op"]["name"] == "ReStickifyOpWithPTLx"
+    assert input_lds["layoutDimOrder_"] == ["out_", "mb_", "in_"]
+    assert input_lds["stickDimOrder_"] == ["out_"]
+    assert input_lds["PieceInfo"][0]["validGap_"]["in_"] == [[1, 63]]
+    assert output_lds["layoutDimOrder_"] == ["mb_", "in_"]
+    assert output_lds["stickDimOrder_"] == ["in_"]
+    assert value_contract["valid"] is True
+    assert value_contract["restickify_count"] == 1
     assert value_contract["rows"][0]["input_live_elements"] == 64 * 64
     assert value_contract["rows"][0]["output_live_elements"] == 64 * 64
 
