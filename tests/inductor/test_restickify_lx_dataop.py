@@ -54,6 +54,7 @@ from torch_spyre._inductor.codegen.restickify_ptlx_boundary import (
     _patch_consumer_input_lx_map,
     _patch_lx_allocation_by_index,
     _streaming_bridge_value_preservation_contract,
+    _streaming_contract_allows_replacement,
     _streaming_value_flow_contract,
     patch_implicit_restickify_ptlx_aliases,
     patch_restickify_ptlx_cross_bundle_handoffs,
@@ -1282,6 +1283,16 @@ def test_streaming_ptlx_chunked_contract_aggregates_all_roots():
     assert descriptor["bridge_piece_count"] == 64
     assert contract["consumer_descriptor_valid"] is True
     assert contract["production_valid"] is False
+
+
+def test_streaming_contract_allows_forced_direct_diagnostic_replacement():
+    contract = {
+        "production_valid": False,
+        "valid": True,
+        "semantic_certificate_source": "forced-direct-tile-env",
+    }
+
+    assert _streaming_contract_allows_replacement(contract) is True
 
 
 def test_streaming_ptlx_validgap_consumer_full_bridge_contracts_but_needs_values():

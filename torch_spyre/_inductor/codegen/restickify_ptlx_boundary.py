@@ -2416,7 +2416,17 @@ def _streaming_production_requirements(
 def _streaming_contract_allows_replacement(contract: dict[str, Any]) -> bool:
     """Return whether a streaming bridge may replace stock ReStickifyOpHBM."""
 
-    return contract.get("production_valid") is True
+    if contract.get("production_valid") is True:
+        return True
+    if contract.get("valid") is not True:
+        return False
+    source = contract.get("semantic_certificate_source")
+    forced_sources = {
+        "forced-direct-tile-env",
+        "forced-native-tile-env",
+        "forced-validgap-consumer-tile-env",
+    }
+    return source in forced_sources
 
 
 def _streaming_contract_rejection_reason(contract: dict[str, Any]) -> str:
