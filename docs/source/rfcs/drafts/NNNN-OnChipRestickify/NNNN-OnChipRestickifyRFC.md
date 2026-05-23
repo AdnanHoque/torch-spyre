@@ -355,6 +355,127 @@ probe medians.
   the on-chip path), with the success signal stated explicitly: HBM-free lowering
   shows `HBM=0` with `ringDT-*-lx` L3 traffic.
 
+## Device Validation Findings (2026-05)
+
+The prior-art prototype results above were obtained on an isolated/standalone
+stack. This section records what has since been **validated on the Spyre device**
+from a clean, isolated-environment implementation, separating what device runs
+have proven from what remains to be confirmed. Numbers stated here are device
+results; the design prose above is unchanged.
+
+### Tier 0 — device-validated
+
+The Tier 0 capability (ring telemetry plus the Stage 3B producer-aligned
+work-division steering) is implemented and device-validated, benchmarked across
+sizes from small to large. The byte-hop reductions and the isolated kernel-time
+behavior described in the Tier 0 status are reproduced on hardware;
+correctness is preserved and the path remains default-off.
+
+### Tier 1 — planner device-validated end-to-end
+
+The Tier 1 same-layout cross-core handoff planner (`run_onchip_handoff_planner`)
+is device-validated end-to-end on the compiled path. On the compiled flow it
+detects eligible same-layout divergent-split edges and emits a valid handoff plan
+while remaining fail-closed where the Foundation contract is absent.
+
+### Mixed-SuperDSC on-chip realization runs on device
+
+A **mixed SuperDSC** — a consumer DL op in `dscs_` together with data-ops in
+`dataOpdscs_` / `datadscs_` and a `coreIdToDscSchedule` — carrying a single
+`STCDPOpLx` data-op **runs on device**: the producer→consumer activation handoff
+stays resident in LX, the round trip through HBM is eliminated (`hbmSize_=0`, with
+L3 ring tokens present in the senprog), and the whole-graph result is
+value-correct. This was realized on the size-2048 fused-add-mm case via a
+synthesized mixed bundle (the `onchip_bridge.py` synthesizer, gold-verified
+byte-for-byte against a known-good reference) spliced onto a real compiled bundle
+and compiled with a minimally-patched `dxp_standalone`. This is the on-device
+confirmation of the Foundation-contract packaging that the prior-art section
+demonstrated only under standalone DCC.
+
+**Caveat — this first STCDP test was a degenerate same-core configuration.**
+Source and destination were both `out:32`-split with distinct LX bases, so each
+core copied its own slice LX→LX **locally**. The run therefore proves that the
+mixed data-op **control path** executes on device and is value-correct, and that
+the HBM round trip is eliminated; it does **not** by itself prove cross-core ring
+movement.
+
+### Compute-CB fault isolated to the transpose
+
+The Tier-2 layout-changing bridge — a `ReStickifyOpWithPTLx` local
+stick-transpose followed by `STCDPOpLx` — faults on device with
+`RAS::RUNTIMESCHEDULER::ComputeHardwareError` ("Compute CB hardware error
+detected", code `0x7b1b`). Because the pure-`STCDPOpLx` mixed bundle runs clean
+while the transpose-bearing bundle faults, the fault is **isolated to the
+`ReStickifyOpWithPTLx` (PT/compute) transpose op**, not to the `STCDPOpLx`
+data-move or to the mixed-dispatch machinery. This sharpens the Transform
+contract: the missing work is on the compute/transpose primitive, while the
+data-move and mixed-dispatch paths are demonstrated sound on device.
+
+### The two precise deeptools asks
+
+The device runs confirm that the only deeptools changes required are these two;
+runtime dispatch and the `dcc` `runDcgForDataOpsDlOps` codegen are already stock.
+
+1. **Relax the mixed-bundle import gate.** The `Dxp::importSdsc` gate currently
+   rejects mixed bundles ("Datadsc not allowed, use dldsc"). It must admit a
+   SuperDSC with non-empty `dataOpdscs_`, non-empty `dscs_`, and non-empty
+   `coreIdToDscSchedule` as a mixed DL+data-op SuperDSC.
+2. **Dispatch the existing multi-op codegen.** Dispatch `runDcgForDataOpsDlOps`
+   when `coreIdToDscSchedule` covers all used cores.
+
+### Validation methodology note
+
+For reproducibility: the runtime's `g_artifact_cache` is keyed on `code_dir` and
+is per-process, so swapping a senprog on disk under a `code_dir` the process has
+already loaded is shadowed by the cache. Device validation must therefore
+redirect the kernel runner to a **fresh `code_dir` path the process has never
+seen**, and must include a **negative control** (remove the spliced senprog → the
+run must FAIL) to prove the device is actually executing the spliced program and
+not a cached or baseline one.
+
+### Genuine cross-core ring STCDP — confirmed on device
+
+The degenerate same-core STCDP above proves the mixed control path runs, but does
+no ring traffic. To prove genuine **cross-core** movement we built a 2-STCDP round
+trip with a reversed-ownership intermediate:
+
+```text
+producer add output  (linear   @LX 16384, slice i on core i)
+  --STCDP1-->  scratch (REVERSED @LX 1048576, slice i on core 31-i)
+  --STCDP2-->  consumer add input (linear @LX 8192, slice i on core i)
+```
+
+STCDP1 moves slice `i` from core `i` to core `31-i`; STCDP2 moves it back. All 32
+slices cross cores in both moves, yet the round trip lands data in the consumer's
+native (linear) layout, so the whole-graph result stays value-correct **without
+any consumer-reshard surgery**. No transpose / PT compute op is involved, which
+isolates the ring data path from the Compute-CB-faulting `ReStickifyOpWithPTLx`.
+
+Three independent layers of evidence confirm genuine cross-core ring movement:
+
+1. **Microcode (senprog).** `DXP_VERBOSE=1` dump of the compiled bundle shows all
+   32 cores emit `L3_LDU` **and** `L3_STU` RIU ring transfers, and core `i`
+   targets core `31-i` (`(31-i) << 14` in the instruction's remote-core field:
+   0→31, 1→30, …). The degenerate same-split STCDP emits **zero** `L3_LDU`/`L3_STU`
+   — it is a pure same-core copy with the ring transfers dead-code-eliminated. The
+   difference is the cross-core ring traffic, at the hardware-instruction level.
+2. **Device execution.** The round trip runs on hardware **value-correct**
+   (`max_err 0.0137`, identical to baseline) and with **no `ComputeHardwareError`**
+   (code `0x7b1b`). The remove-the-senprog negative control fails as required,
+   proving the device executed the spliced cross-core program.
+3. **Logical lock.** Value-correctness *requires* the path core `i` → core `31-i`
+   → core `i`: the consumer's `LX@8192` on core `i` is only ever written by
+   STCDP2, whose `dataIN` reads core `31-i`'s scratch, which is only written by
+   STCDP1 reading core `i`'s producer output. Since `i ≠ 31-i` for all 32 cores,
+   a correct result is impossible without cross-core movement; the senprog
+   confirms it is realized as ring transfers (not collapsed into a same-core copy).
+
+**Conclusion.** A genuine cross-core ring STCDP — every core's activation slice
+moving over the RIU ring to a remote core and back — runs on Spyre hardware,
+value-correct, HBM-free, inside a mixed DL+data-op SuperDSC. The remaining
+Compute-CB fault is confined to the `ReStickifyOpWithPTLx` transpose; the
+cross-core **data movement** primitive itself is proven sound on device.
+
 ## Unresolved questions
 
 - Which deeptools surface implements the Transform contract: a new
