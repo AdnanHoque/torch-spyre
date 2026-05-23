@@ -344,10 +344,15 @@ def _streaming_bridge_candidate(
         payload,
         streaming.get("destination_primary", {}),
     )
+    consumer_endpoint_adapter = _bridge_consumer_endpoint_adapter_contract(
+        bridge_endpoint_contract=bridge_endpoint_contract,
+        direction=direction,
+    )
     production_contract = _bridge_production_contract(
         bridge_kind=bridge_kind,
         bridge_metadata=bridge_metadata,
         bridge_endpoint_contract=bridge_endpoint_contract,
+        consumer_endpoint_adapter=consumer_endpoint_adapter,
         bridge_lowering=bridge_lowering,
         streaming=streaming,
         summary=summary,
@@ -373,6 +378,7 @@ def _streaming_bridge_candidate(
         "bridge_metadata": bridge_metadata,
         "bridge_endpoint_contract": bridge_endpoint_contract,
         "bridge_endpoint_contract_valid": bridge_endpoint_contract["valid"],
+        "consumer_endpoint_adapter": consumer_endpoint_adapter,
         "production_contract": production_contract,
         "production_valid": production_contract["production_valid"],
         "production_blocker": production_contract["blocker"],
@@ -456,6 +462,7 @@ def _bridge_production_contract(
     bridge_kind: str,
     bridge_metadata: dict[str, Any],
     bridge_endpoint_contract: dict[str, Any],
+    consumer_endpoint_adapter: dict[str, Any],
     bridge_lowering: str,
     streaming: dict[str, Any],
     summary: Any,
@@ -478,6 +485,7 @@ def _bridge_production_contract(
         "bridge_lowering": bridge_lowering,
         "endpoint_contract_valid": endpoint_valid,
         "semantic_transform_certified": metadata_certified,
+        "consumer_endpoint_adapter": consumer_endpoint_adapter,
         "bounded_workspace_ok": bounded_workspace_ok,
         "tile_contract": tile_contract,
         "fallback": "ReStickifyOpHBM",
@@ -509,17 +517,22 @@ def _bridge_production_contract(
         blocker = "bridge-output-does-not-match-consumer-endpoint"
         if bridge_metadata.get("coalescing") == "native-64x64-tiles":
             blocker = "native-ptlx-output-needs-consumer-endpoint-adapter"
+        adapter_available = consumer_endpoint_adapter.get("available") is True
         return {
             **common,
             "production_valid": False,
             "blocker": blocker,
             "required_primitive": "consumer-lx-endpoint-adapter",
-            "required_lowering": [
-                "materialize the native PT-LX tile output into a descriptor "
-                "the consumer can read directly from LX",
-                "preserve consumer layout/stick metadata at the final bridge "
-                "endpoint",
-            ],
+            "required_lowering": (
+                consumer_endpoint_adapter.get("required_lowering")
+                if adapter_available
+                else [
+                    "materialize the native PT-LX tile output into a descriptor "
+                    "the consumer can read directly from LX",
+                    "preserve consumer layout/stick metadata at the final bridge "
+                    "endpoint",
+                ]
+            ),
             "why_sidecar_is_not_enough": (
                 "the local PT-LX tile descriptor is present, but the last "
                 "bridge output descriptor does not yet match the consumer "
@@ -647,6 +660,61 @@ def _bridge_destination_endpoint_contract(
         "bridge_stick": bridge_stick,
         "destination_stick": destination_stick,
         "native_endpoint_adapter_required": native_endpoint_adapter_required,
+    }
+
+
+def _bridge_consumer_endpoint_adapter_contract(
+    *,
+    bridge_endpoint_contract: dict[str, Any],
+    direction: str,
+) -> dict[str, Any]:
+    """Describe the adapter needed after a native PT-LX local tile.
+
+    Native ``ReStickifyOpWithPTLx`` descriptors expose tile-local dimensions
+    such as ``j`` and ``out``.  The consumer still expects its normal logical
+    endpoint, for example ``out,mb`` with ``mb`` as the stick dimension.  This
+    contract records the coordinate map a future lowering must implement before
+    the sidecar may replace ``ReStickifyOpHBM``.
+    """
+
+    if not bridge_endpoint_contract.get("native_endpoint_adapter_required"):
+        return {
+            "available": False,
+            "reason": "bridge-output-already-matches-consumer-endpoint"
+            if bridge_endpoint_contract.get("valid")
+            else "unsupported-endpoint-mismatch",
+        }
+    if direction != "kernel-to-output":
+        return {
+            "available": False,
+            "reason": f"unsupported-native-adapter-direction-{direction}",
+        }
+
+    return {
+        "available": True,
+        "status": "planned",
+        "executable": False,
+        "direction": direction,
+        "source_layout": bridge_endpoint_contract.get("bridge_layout", []),
+        "source_stick": bridge_endpoint_contract.get("bridge_stick", []),
+        "destination_layout": bridge_endpoint_contract.get("destination_layout", []),
+        "destination_stick": bridge_endpoint_contract.get("destination_stick", []),
+        "coordinate_map": {
+            "destination_out": "native_out",
+            "destination_mb": "native_j",
+        },
+        "dropped_singleton_dims": ["native_i", "native_mb"],
+        "required_stick_transform": {
+            "from": "native_j",
+            "to": "destination_mb",
+        },
+        "required_lowering": [
+            "read native PT-LX tile workspace from LX",
+            "map native out -> consumer out and native j -> consumer mb",
+            "drop native singleton i/mb dimensions",
+            "write the result using the consumer layout/stick descriptor",
+        ],
+        "blocker": "adapter-lowering-not-implemented",
     }
 
 

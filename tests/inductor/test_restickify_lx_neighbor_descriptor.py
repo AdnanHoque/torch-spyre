@@ -997,6 +997,19 @@ def test_streaming_bridge_uses_three_stage_for_kernel_to_output_transform(
     assert candidate["production_contract"]["required_primitive"] == (
         "consumer-lx-endpoint-adapter"
     )
+    adapter = candidate["consumer_endpoint_adapter"]
+    assert adapter["available"] is True
+    assert adapter["executable"] is False
+    assert adapter["coordinate_map"] == {
+        "destination_out": "native_out",
+        "destination_mb": "native_j",
+    }
+    assert adapter["dropped_singleton_dims"] == ["native_i", "native_mb"]
+    assert adapter["required_stick_transform"] == {
+        "from": "native_j",
+        "to": "destination_mb",
+    }
+    assert candidate["production_contract"]["consumer_endpoint_adapter"] == adapter
     assert set(candidate["op_funcs_used"]) == {"STCDPOpLx", "ReStickifyOpWithPTLx"}
     assert candidate["datadsc_count"] == candidate["total_tiles"] * 3
     assert candidate["production_contract"]["tile_contract"][
