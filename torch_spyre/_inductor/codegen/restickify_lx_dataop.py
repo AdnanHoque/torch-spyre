@@ -799,12 +799,13 @@ def generate_native_ptlx_validgap_endpoint_tile_bridge_sdsc(
     *,
     tile_index: int = 0,
 ) -> dict[str, Any]:
-    """Emit gather -> native PT-LX transform -> valid-gap endpoint adapter.
+    """Emit gather -> native PT-LX -> valid-gap endpoint -> scatter.
 
     This is the first controlled bundle that places the accepted valid-gap
     endpoint adapter behind the native local PT-LX restickify sidecar.  It
-    intentionally drops the native helper's final scatter data-op, because the
-    valid-gap adapter is the consumer-facing write for this probe.
+    writes the adapter result to a full 64-wide tile workspace, then scatters to
+    the consumer's actual LX fragments.  The final scatter is required for real
+    consumer ownership maps whose per-core fragments are narrower than one stick.
     """
 
     native_payload = generate_streaming_ptlx_native_tile_bridge_sdsc(
@@ -813,28 +814,55 @@ def generate_native_ptlx_validgap_endpoint_tile_bridge_sdsc(
         tile_index=tile_index,
         direction="kernel-to-output",
     )
-    adapter_payload = generate_validgap_ptlx_consumer_endpoint_adapter_tile_sdsc(
-        f"{name}_validgap_endpoint_tile{tile_index}",
-        streaming_artifact,
-        tile_index=tile_index,
-    )
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    if descriptor.get("kind") != "streaming_ptlx_restickify_descriptor":
+        raise ValueError("expected a streaming_ptlx_restickify_descriptor")
+    tiles = descriptor.get("tiles") or []
+    if tile_index < 0 or tile_index >= len(tiles):
+        raise ValueError(f"tile_index {tile_index} is outside materialized tiles")
+    tile = tiles[tile_index]
+    _gather_stage, restickify_stage, scatter_stage = tile["stages"]
+    bridge_core = _as_int(tile["bridge_core"])
+    dest_fragments = list(scatter_stage.get("fragments") or [])
+    if not dest_fragments:
+        raise ValueError("native validGap endpoint tile needs destination fragments")
+    endpoint_fragment = _coalesced_tile_fragment(dest_fragments, core=bridge_core)
+
     native_root = copy.deepcopy(next(iter(native_payload.values())))
     native_root["datadscs_"] = list(native_root.get("datadscs_", []) or [])[:2]
-    native_root["opFuncsUsed_"] = [
-        next(iter(datadsc.values()))["op"]["name"]
-        for datadsc in native_root["datadscs_"]
+    adapter_core_ids = _fragment_core_ids([endpoint_fragment], bridge_core)
+    scatter_core_ids = _fragment_core_ids(dest_fragments, bridge_core)
+    adapter_dataop = _validgap_consumer_tile_dataop(
+        core_ids=adapter_core_ids,
+        input_base=_as_int(restickify_stage["output_base"]),
+        output_base=_as_int(scatter_stage["tile_output_base"]),
+        input_fragment=endpoint_fragment,
+        output_fragments=[endpoint_fragment],
+        tensor_size=_as_int(descriptor["size"]),
+    )
+    scatter_dataop = _tile_dataop(
+        "STCDPOpLx",
+        core_ids=scatter_core_ids,
+        input_layout=("mb_", "in_"),
+        input_stick=("in_",),
+        output_layout=("mb_", "in_"),
+        output_stick=("in_",),
+        input_base=_as_int(scatter_stage["tile_output_base"]),
+        output_base=_as_int(scatter_stage["output_base"]),
+        input_fragments=[endpoint_fragment],
+        output_fragments=dest_fragments,
+        input_piece_dims=("mb_", "in_"),
+        output_piece_dims=("mb_", "in_"),
+    )
+    combined = copy.deepcopy(native_root)
+    combined["datadscs_"] = [
+        *copy.deepcopy(native_root["datadscs_"]),
+        {
+            f"2_ReStickifyOpWithPTLx_validgap_endpoint_adapter_tile"
+            f"{tile_index}": adapter_dataop
+        },
+        {f"3_STCDPOpLx_validgap_endpoint_scatter_tile{tile_index}": scatter_dataop},
     ]
-    native_root["coreIdToDscSchedule"] = _sequential_dataop_schedule(
-        _as_int(native_root["numCoresUsed_"]),
-        len(native_root["datadscs_"]),
-    )
-    adapter_root = copy.deepcopy(next(iter(adapter_payload.values())))
-
-    combined_payload = combine_dataop_sdscs(
-        name,
-        [{f"{name}_native_prefix": native_root}, adapter_payload],
-    )
-    combined = next(iter(combined_payload.values()))
     stage_core_ids = [
         list(next(iter(datadsc.values())).get("coreIdsUsed_", []) or [])
         for datadsc in combined.get("datadscs_", []) or []
@@ -857,9 +885,9 @@ def generate_native_ptlx_validgap_endpoint_tile_bridge_sdsc(
         "name_": "n",
         "j_": (native_root.get("N_") or {}).get("j_", 64),
         "i_": (native_root.get("N_") or {}).get("i_", 1),
-        "out_": (adapter_root.get("N_") or {}).get("out_", 64),
-        "mb_": (adapter_root.get("N_") or {}).get("mb_", 64),
-        "in_": (adapter_root.get("N_") or {}).get("in_", 64),
+        "out_": _as_int(descriptor["size"]),
+        "mb_": _as_int(descriptor["size"]),
+        "in_": _as_int(descriptor["size"]),
     }
     combined["unpadN_"] = {
         "name_": "unpadn",
@@ -870,20 +898,41 @@ def generate_native_ptlx_validgap_endpoint_tile_bridge_sdsc(
         "in_": -1,
     }
     combined["streamingPTLXNativeTile_"] = {}
-    combined["streamingPTLXValidGapEndpointAdapterTile_"] = copy.deepcopy(
-        adapter_root["streamingPTLXValidGapEndpointAdapterTile_"]
-    )
+    combined["streamingPTLXValidGapEndpointAdapterTile_"] = {
+        "tile_index": int(tile_index),
+        "tile_row": _as_int(tile["tile_row"]),
+        "tile_col": _as_int(tile["tile_col"]),
+        "tile_rows": _as_int(endpoint_fragment["row_end"])
+        - _as_int(endpoint_fragment["row_start"]),
+        "tile_cols": _as_int(endpoint_fragment["col_end"])
+        - _as_int(endpoint_fragment["col_start"]),
+        "bridge_core": bridge_core,
+        "source_layout": ["out_", "mb_", "in_"],
+        "source_stick": ["out_"],
+        "destination_layout": ["mb_", "in_"],
+        "destination_stick": ["in_"],
+        "adapter_reinterprets_native_workspace": True,
+        "adapter_output_is_tile_workspace": True,
+        "source_workspace": "native-ptlx-restickify-output",
+        "source_base": _as_int(restickify_stage["output_base"]),
+        "destination_base": _as_int(scatter_stage["tile_output_base"]),
+        "final_consumer_base": _as_int(scatter_stage["output_base"]),
+        "status": "static-codegen-only",
+        "semantic_transform_certified": False,
+        "fallback": "ReStickifyOpHBM",
+    }
     combined["streamingPTLXNativeValidGapEndpointTile_"] = {
         "tile_index": int(tile_index),
         "native_dataops_kept": 2,
         "native_scatter_omitted": True,
         "endpoint_adapter": "validgap",
+        "endpoint_adapter_scatter": True,
         "datadsc_count": len(combined.get("datadscs_", []) or []),
         "status": "static-codegen-only",
         "semantic_transform_certified": False,
         "fallback": "ReStickifyOpHBM",
     }
-    return combined_payload
+    return {name: combined}
 
 
 def generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
@@ -939,13 +988,14 @@ def generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
     combined["streamingPTLXNativeValidGapEndpointTile_"] = {}
     combined["streamingPTLXFull_"] = {
         "status": "static-codegen-only",
-        "coalescing": "native-validgap-endpoint-64x64-tiles",
+        "coalescing": "native-validgap-endpoint-scatter-64x64-tiles",
         "direction": "kernel-to-output",
         "tile_count": len(tiles),
         "logical_tile_count": _as_int(descriptor.get("total_tiles", len(tiles))),
         "datadsc_count": len(all_datadscs),
         "native_local_transform_contract": True,
         "validgap_endpoint_adapter_contract": True,
+        "validgap_endpoint_scatter_contract": True,
         "semantic_transform_certified": False,
         "fallback": "ReStickifyOpHBM",
     }

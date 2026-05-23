@@ -2044,6 +2044,7 @@ def _streaming_value_flow_contract(
     direct_tile_count = 0
     lx_remap_tile_count = 0
     validgap_tile_count = 0
+    validgap_endpoint_workspace_starts: set[int] = set()
     for datadsc in datadscs:
         name, dataop = next(iter(datadsc.items()))
         op_name = str(dataop.get("op", {}).get("name"))
@@ -2086,15 +2087,17 @@ def _streaming_value_flow_contract(
             consumer_starts.update(
                 _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
             )
-        if (
-            (
-                "validgap_consumer_tile" in str(name)
-                or "validgap_endpoint_adapter_tile" in str(name)
+        if "validgap_consumer_tile" in str(name) and op_name == "ReStickifyOpWithPTLx":
+            validgap_tile_count += 1
+            consumer_starts.update(
+                _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
             )
+        if (
+            "validgap_endpoint_adapter_tile" in str(name)
             and op_name == "ReStickifyOpWithPTLx"
         ):
             validgap_tile_count += 1
-            consumer_starts.update(
+            validgap_endpoint_workspace_starts.update(
                 _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
             )
 
@@ -2127,12 +2130,13 @@ def _streaming_value_flow_contract(
             and gather_count == int(expected_tiles)
             and validgap_tile_count == int(expected_tiles)
         )
-    elif coalescing == "native-validgap-endpoint-64x64-tiles":
+    elif coalescing == "native-validgap-endpoint-scatter-64x64-tiles":
         tile_count = int(full_meta.get("tile_count", logical_tile_count) or 0)
         count_contract_valid = (
             tile_count == int(expected_tiles)
             and gather_count == int(expected_tiles)
             and validgap_tile_count == int(expected_tiles)
+            and scatter_count == int(expected_tiles)
         )
     elif coalescing == "same-layout-lx-ownership-remap-64x64-tiles":
         tile_count = int(full_meta.get("tile_count", logical_tile_count) or 0)
@@ -2279,6 +2283,7 @@ def _streaming_value_flow_contract(
         "direct_tile_count": direct_tile_count,
         "lx_remap_tile_count": lx_remap_tile_count,
         "validgap_tile_count": validgap_tile_count,
+        "validgap_endpoint_workspace_starts": sorted(validgap_endpoint_workspace_starts),
         "datadsc_count": len(datadscs),
         "hbm_placements": hbm_placements,
         "has_hbm_restickify": has_hbm_restickify,
@@ -2349,8 +2354,8 @@ def _streaming_production_requirements(
         blocker = "native-ptlx-tile-lacks-consumer-fragment-coordinate-map"
     elif coalescing == "validgap-consumer-64x64-tiles":
         blocker = "validgap-consumer-tile-lacks-hardware-value-proof"
-    elif coalescing == "native-validgap-endpoint-64x64-tiles":
-        blocker = "native-validgap-endpoint-tile-lacks-hardware-value-proof"
+    elif coalescing == "native-validgap-endpoint-scatter-64x64-tiles":
+        blocker = "native-validgap-endpoint-scatter-tile-lacks-hardware-value-proof"
     else:
         blocker = "stcdp-gather-scatter-does-not-certify-stick-layout-transform"
     return {
@@ -2523,10 +2528,10 @@ def _streaming_semantic_transform_certificate(root: dict[str, Any]) -> dict[str,
             "source": "uncertified",
             "forced": False,
         }
-    if meta.get("coalescing") == "native-validgap-endpoint-64x64-tiles":
+    if meta.get("coalescing") == "native-validgap-endpoint-scatter-64x64-tiles":
         return {
             "certified": False,
-            "reason": "native-validgap-endpoint-ptlx-tile-needs-hardware-value-validation",
+            "reason": "native-validgap-endpoint-scatter-ptlx-tile-needs-hardware-value-validation",
             "source": "uncertified",
             "forced": False,
         }

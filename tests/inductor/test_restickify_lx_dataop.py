@@ -1086,10 +1086,16 @@ def test_native_ptlx_validgap_endpoint_tile_bridge_omits_native_scatter():
     contract = root["streamingPTLXNativeValidGapEndpointTile_"]
     value_contract = _streaming_bridge_value_preservation_contract(root)
 
-    assert ops == ["STCDPOpLx", "ReStickifyOpWithPTLx", "ReStickifyOpWithPTLx"]
+    assert ops == [
+        "STCDPOpLx",
+        "ReStickifyOpWithPTLx",
+        "ReStickifyOpWithPTLx",
+        "STCDPOpLx",
+    ]
     assert contract["native_dataops_kept"] == 2
     assert contract["native_scatter_omitted"] is True
     assert contract["endpoint_adapter"] == "validgap"
+    assert contract["endpoint_adapter_scatter"] is True
     assert contract["semantic_transform_certified"] is False
     assert root["streamingPTLXValidGapEndpointAdapterTile_"][
         "adapter_reinterprets_native_workspace"
@@ -1125,11 +1131,12 @@ def test_streaming_ptlx_native_validgap_endpoint_full_bridge_combines_tiles():
         expected_tiles=2,
     )
 
-    assert len(root["datadscs_"]) == 6
+    assert len(root["datadscs_"]) == 8
     assert root["streamingPTLXFull_"]["coalescing"] == (
-        "native-validgap-endpoint-64x64-tiles"
+        "native-validgap-endpoint-scatter-64x64-tiles"
     )
     assert root["streamingPTLXFull_"]["validgap_endpoint_adapter_contract"] is True
+    assert root["streamingPTLXFull_"]["validgap_endpoint_scatter_contract"] is True
     assert root["streamingPTLXFull_"]["semantic_transform_certified"] is False
     assert root["streamingPTLXFull_"]["fallback"] == "ReStickifyOpHBM"
     assert contract["endpoint_contract_valid"] is True
@@ -1137,8 +1144,9 @@ def test_streaming_ptlx_native_validgap_endpoint_full_bridge_combines_tiles():
     assert contract["semantic_transform_certified"] is False
     assert contract["validgap_tile_count"] == 2
     assert contract["gather_count"] == 2
+    assert contract["scatter_count"] == 2
     assert contract["production_blocker"] == (
-        "native-validgap-endpoint-tile-lacks-hardware-value-proof"
+        "native-validgap-endpoint-scatter-tile-lacks-hardware-value-proof"
     )
 
 
@@ -1524,11 +1532,11 @@ def test_streaming_ptlx_bridge_selector_uses_native_tiles_when_enabled():
     assert native_validgap_contract["value_preservation_valid"] is True
     assert native_validgap_contract["semantic_transform_certified"] is False
     assert native_validgap_contract["production_blocker"] == (
-        "native-validgap-endpoint-tile-lacks-hardware-value-proof"
+        "native-validgap-endpoint-scatter-tile-lacks-hardware-value-proof"
     )
     assert next(iter(native_validgap.values()))["streamingPTLXFull_"][
         "coalescing"
-    ] == "native-validgap-endpoint-64x64-tiles"
+    ] == "native-validgap-endpoint-scatter-64x64-tiles"
 
     with config.patch(
         restickify_ptlx_direct_tile_e2e=True,

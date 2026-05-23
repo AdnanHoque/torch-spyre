@@ -16,6 +16,7 @@ sidecar candidate using:
 STCDPOpLx gather
 ReStickifyOpWithPTLx native local tile transform
 ReStickifyOpWithPTLx valid-gap consumer endpoint adapter
+STCDPOpLx valid-gap endpoint scatter
 ```
 
 The stock `ReStickifyOpHBM` path remains the runnable fallback. The sidecar is
@@ -33,9 +34,10 @@ It combines every materialized 64x64 tile using the Stage317 per-tile shape and
 records:
 
 ```text
-coalescing = native-validgap-endpoint-64x64-tiles
+coalescing = native-validgap-endpoint-scatter-64x64-tiles
 native_local_transform_contract = true
 validgap_endpoint_adapter_contract = true
+validgap_endpoint_scatter_contract = true
 semantic_transform_certified = false
 fallback = ReStickifyOpHBM
 ```
@@ -77,5 +79,5 @@ but it remains explicitly diagnostic:
 
 Next step: generate a real Torch-Spyre code directory with this flag enabled,
 verify that the emitted `restickify_lx_neighbor_streaming_bridge_edge_*.json`
-uses `native-validgap-endpoint-64x64-tiles`, then package that sidecar through
+uses `native-validgap-endpoint-scatter-64x64-tiles`, then package that sidecar through
 the Stage318 export path.

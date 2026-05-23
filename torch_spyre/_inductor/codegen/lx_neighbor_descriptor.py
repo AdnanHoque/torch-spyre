@@ -737,11 +737,11 @@ def _bridge_consumer_endpoint_adapter_contract(
                 ),
             },
             {
-                "name": "native-validgap-endpoint-64x64-tiles",
+                "name": "native-validgap-endpoint-scatter-64x64-tiles",
                 "role": "native-local-transform-plus-consumer-endpoint-probe",
                 "endpoint_contract": "can-compile-consumer-endpoint-adapter",
                 "production_blocker": (
-                    "native-validgap-endpoint-tile-lacks-hardware-value-proof"
+                    "native-validgap-endpoint-scatter-tile-lacks-hardware-value-proof"
                 ),
             },
             {
