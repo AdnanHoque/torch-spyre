@@ -71,5 +71,11 @@ onchip_handoff_planner: bool = (
 onchip_handoff_telemetry_jsonl: str = os.environ.get(
     "SPYRE_ONCHIP_HANDOFF_TELEMETRY_JSONL", ""
 )
+# Realize eligible same-layout handoffs as a mixed DL+data-op SuperDSC (the
+# producer/consumer LX value flow) instead of fail-closing. Default off; the
+# planner stays fail-closed unless this is set.
+onchip_handoff_realize: bool = (
+    os.environ.get("SPYRE_ONCHIP_HANDOFF_REALIZE", "0") == "1"
+)
 
 install_config_module(sys.modules[__name__])
