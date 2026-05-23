@@ -178,8 +178,14 @@ def _plan_edge(
     if producer_write is None:
         return None
 
-    producer_coords = device_coordinates(producer.get_layout(), producer_write)
-    consumer_coords = device_coordinates(consumer.get_layout(), consumer_read)
+    # device_coordinates wants the SpyreTensorLayout, which FixedTiledLayout
+    # nests as .device_layout; skip edges whose layout isn't finalized.
+    producer_stl = getattr(producer.get_layout(), "device_layout", None)
+    consumer_stl = getattr(consumer.get_layout(), "device_layout", None)
+    if producer_stl is None or consumer_stl is None:
+        return None
+    producer_coords = device_coordinates(producer_stl, producer_write)
+    consumer_coords = device_coordinates(consumer_stl, consumer_read)
 
     # Tier 1 only owns SAME-stick edges. A restickify-needed edge (different
     # stick layout) is Tier 2's territory -- skip it.
