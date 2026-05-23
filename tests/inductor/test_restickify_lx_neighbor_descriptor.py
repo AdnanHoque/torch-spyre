@@ -983,13 +983,26 @@ def test_streaming_bridge_uses_three_stage_for_kernel_to_output_transform(
     assert candidate["bridge_kind"] == "direct-ptlx-layout-transform"
     assert candidate["bridge_lowering"] == "three-stage-gather-transform-scatter"
     assert candidate["direction"] == "kernel-to-output"
-    assert candidate["bridge_endpoint_contract_valid"] is True
+    assert candidate["bridge_endpoint_contract_valid"] is False
+    assert candidate["bridge_endpoint_contract"]["reason"] == (
+        "native-ptlx-output-needs-consumer-endpoint-adapter"
+    )
+    assert candidate["bridge_endpoint_contract"][
+        "native_endpoint_adapter_required"
+    ] is True
     assert candidate["production_valid"] is False
     assert candidate["production_blocker"] == (
-        "three-stage-ptlx-lacks-value-correct-transform-certificate"
+        "native-ptlx-output-needs-consumer-endpoint-adapter"
+    )
+    assert candidate["production_contract"]["required_primitive"] == (
+        "consumer-lx-endpoint-adapter"
     )
     assert set(candidate["op_funcs_used"]) == {"STCDPOpLx", "ReStickifyOpWithPTLx"}
+    assert candidate["datadsc_count"] == candidate["total_tiles"] * 3
     assert candidate["production_contract"]["tile_contract"][
         "all_tiles_materialized"
     ] is True
     assert candidate["bridge_metadata"]["fallback"] == "ReStickifyOpHBM"
+    assert candidate["bridge_metadata"]["coalescing"] == "native-64x64-tiles"
+    assert candidate["bridge_metadata"]["native_local_transform_contract"] is True
+    assert candidate["bridge_metadata"]["semantic_transform_certified"] is False

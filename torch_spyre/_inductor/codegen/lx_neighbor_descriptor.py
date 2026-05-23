@@ -41,7 +41,7 @@ from torch_spyre._inductor.restickify_ring import (
 from .restickify_lx_dataop import (
     generate_streaming_lx_remap_full_bridge_sdsc,
     generate_streaming_ptlx_direct_full_bridge_sdsc,
-    generate_streaming_ptlx_full_bridge_sdsc,
+    generate_streaming_ptlx_native_full_bridge_sdsc,
 )
 from .restickify_ptlx_streaming import (
     generate_streaming_ptlx_artifact,
@@ -315,9 +315,10 @@ def _streaming_bridge_candidate(
             )
         elif direction == "kernel-to-output":
             bridge_lowering = "three-stage-gather-transform-scatter"
-            payload = generate_streaming_ptlx_full_bridge_sdsc(
+            payload = generate_streaming_ptlx_native_full_bridge_sdsc(
                 f"{idx}_LXNeighborStreamingThreeStageReStickifyOpWithPTLx",
                 artifact,
+                direction=direction,
             )
         else:
             bridge_lowering = "direct-ptlx-diagnostic"
@@ -504,6 +505,28 @@ def _bridge_production_contract(
             ],
         }
 
+    if not endpoint_valid:
+        blocker = "bridge-output-does-not-match-consumer-endpoint"
+        if bridge_metadata.get("coalescing") == "native-64x64-tiles":
+            blocker = "native-ptlx-output-needs-consumer-endpoint-adapter"
+        return {
+            **common,
+            "production_valid": False,
+            "blocker": blocker,
+            "required_primitive": "consumer-lx-endpoint-adapter",
+            "required_lowering": [
+                "materialize the native PT-LX tile output into a descriptor "
+                "the consumer can read directly from LX",
+                "preserve consumer layout/stick metadata at the final bridge "
+                "endpoint",
+            ],
+            "why_sidecar_is_not_enough": (
+                "the local PT-LX tile descriptor is present, but the last "
+                "bridge output descriptor does not yet match the consumer "
+                "input endpoint"
+            ),
+        }
+
     if bridge_lowering == "three-stage-gather-transform-scatter":
         blocker = "three-stage-ptlx-lacks-value-correct-transform-certificate"
         why = (
@@ -586,6 +609,7 @@ def _bridge_destination_endpoint_contract(
 ) -> dict[str, Any]:
     try:
         root = next(iter(bridge_payload.values()))
+        bridge_metadata = _bridge_metadata(root)
         datadscs = root.get("datadscs_", []) or []
         if not datadscs:
             return {"valid": False, "reason": "missing-bridge-datadscs"}
@@ -608,6 +632,13 @@ def _bridge_destination_endpoint_contract(
         reason = "layout-dim-order-mismatch"
     elif not stick_match:
         reason = "stick-dim-order-mismatch"
+    native_endpoint_adapter_required = (
+        bridge_metadata.get("coalescing") == "native-64x64-tiles"
+        and bridge_layout == ["j", "i", "out", "mb"]
+        and not layout_match
+    )
+    if native_endpoint_adapter_required:
+        reason = "native-ptlx-output-needs-consumer-endpoint-adapter"
     return {
         "valid": layout_match and stick_match,
         "reason": reason,
@@ -615,6 +646,7 @@ def _bridge_destination_endpoint_contract(
         "destination_layout": destination_layout,
         "bridge_stick": bridge_stick,
         "destination_stick": destination_stick,
+        "native_endpoint_adapter_required": native_endpoint_adapter_required,
     }
 
 
