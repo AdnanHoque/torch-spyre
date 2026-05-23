@@ -189,3 +189,24 @@ def build_transpose_bridge(
     )
     datadscs = [rs, stcdp]
     return datadscs, ["ReStickifyOpWithPTLx", "STCDPOpLx"], mixed_schedule(2, num_cores)
+
+
+def build_same_layout_bridge(
+    dim_pool, iter_sizes, stick_size, num_cores, lx_size,
+    src_base, dst_base, layout, stick_dim, src_split_dim, dst_split_dim,
+):
+    """Tier-1 bridge: a single STCDPOpLx pure same-stick cross-core move.
+
+    No transpose -- src and dst share layout/stick; only the per-core ownership
+    (which dim is split across cores) differs (src_split_dim -> dst_split_dim).
+    This is the pure data move (no PT/compute op), the part proven HBM-free on
+    the ring. Used to isolate the Compute-CB fault to the transpose.
+    """
+    stcdp = make_datadsc(
+        "0_STCDPOpLx_dataop", _stcdp_op(), dim_pool,
+        src=Endpoint(layout, stick_dim, src_split_dim, src_base),
+        dst=Endpoint(layout, stick_dim, dst_split_dim, dst_base),
+        iter_sizes=iter_sizes, stick_size=stick_size, num_cores=num_cores,
+        lx_size=lx_size,
+    )
+    return [stcdp], ["STCDPOpLx"], mixed_schedule(1, num_cores)
