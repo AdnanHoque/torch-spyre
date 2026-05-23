@@ -1223,6 +1223,67 @@ def test_streaming_ptlx_native_validgap_endpoint_auto_chunks_by_tile_row():
         assert all(schedule[str(core)] for core in range(root["numCoresUsed_"]))
 
 
+def test_streaming_ptlx_chunked_contract_aggregates_all_roots():
+    source = {"mb": 1, "out": 32}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=64,
+        sample_all_tiles=True,
+    )
+    artifact = generate_streaming_ptlx_artifact(
+        "streaming",
+        summary,
+        max_tiles=summary.total_tiles,
+        producer_base=0,
+        consumer_base=256 * 1024,
+    )
+    payload = generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc(
+        "native_validgap_row_chunked",
+        artifact,
+        max_tiles_per_chunk=0,
+    )
+    consumer = _minimal_layout_payload(
+        "2_add",
+        opfunc="add",
+        size=512,
+        work_slices=dest,
+        core_mapping=default_core_mapping(dest),
+        lds=[
+            _layout_lds(0, "restickify_out", "dataIN", ["mb", "in"], ["in"]),
+            _layout_lds(1, "consumer_out", "dataOUT", ["mb", "in"], ["in"]),
+        ],
+        input_indices=[0],
+        output_indices=[1],
+    )
+
+    contract = _streaming_value_flow_contract(
+        bridge_payload=payload,
+        producer_base=0,
+        consumer_base=256 * 1024,
+        expected_tiles=summary.total_tiles,
+        consumer_payload=consumer,
+        consumer_lds_idx=0,
+    )
+
+    descriptor = contract["consumer_descriptor_contract"]
+    assert contract["endpoint_contract_valid"] is True
+    assert contract["logical_tile_count"] == 64
+    assert contract["gather_count"] == 64
+    assert contract["validgap_tile_count"] == 64
+    assert contract["scatter_count"] == 64
+    assert contract["datadsc_count"] == 256
+    assert descriptor["bridge_root_count"] == 8
+    assert descriptor["bridge_output_count"] == 64
+    assert descriptor["bridge_piece_count"] == 64
+    assert contract["consumer_descriptor_valid"] is True
+    assert contract["production_valid"] is False
+
+
 def test_streaming_ptlx_validgap_consumer_full_bridge_contracts_but_needs_values():
     source = {"mb": 32, "out": 1}
     dest = {"mb": 4, "out": 8}

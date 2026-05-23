@@ -2033,8 +2033,8 @@ def _streaming_value_flow_contract(
     consumer_payload: dict[str, Any] | None = None,
     consumer_lds_idx: int | None = None,
 ) -> dict[str, Any]:
-    root = next(iter(bridge_payload.values()))
-    datadscs = root.get("datadscs_", []) or []
+    roots = _bridge_payload_roots(bridge_payload)
+    datadscs = _bridge_payload_datadscs(bridge_payload)
     op_names: list[str] = []
     hbm_placements = 0
     producer_starts: set[int] = set()
@@ -2103,11 +2103,7 @@ def _streaming_value_flow_contract(
             )
 
     has_hbm_restickify = "ReStickifyOpHBM" in op_names
-    full_meta = (
-        root.get("streamingLXRemapFull_", {})
-        or root.get("streamingPTLXFull_", {})
-        or {}
-    )
+    full_meta = _bridge_payload_full_meta(bridge_payload, expected_tiles=expected_tiles)
     logical_tile_count = int(full_meta.get("logical_tile_count", expected_tiles))
     coalescing = full_meta.get("coalescing")
     if coalescing == "row-stripe-direct-output":
@@ -2189,8 +2185,10 @@ def _streaming_value_flow_contract(
             consumer_payload=consumer_payload,
             consumer_lds_idx=consumer_lds_idx,
         )
-    value_preservation_contract = _streaming_bridge_value_preservation_contract(root)
-    semantic_certificate = _streaming_semantic_transform_certificate(root)
+    value_preservation_contract = _streaming_bridge_value_preservation_contract(
+        {"datadscs_": datadscs}
+    )
+    semantic_certificate = _streaming_semantic_transform_certificate(roots[0])
     semantic_certified = bool(semantic_certificate["certified"])
     semantic_reason = semantic_certificate["reason"]
     descriptor_valid = (
@@ -2293,6 +2291,54 @@ def _streaming_value_flow_contract(
         "producer_input_unique_starts": sorted(producer_starts),
         "consumer_output_unique_starts": sorted(consumer_starts),
     }
+
+
+def _bridge_payload_roots(bridge_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    roots = list(bridge_payload.values())
+    if not roots:
+        raise ValueError("expected at least one bridge payload root")
+    return roots
+
+
+def _bridge_payload_datadscs(bridge_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    datadscs: list[dict[str, Any]] = []
+    for root in _bridge_payload_roots(bridge_payload):
+        datadscs.extend(root.get("datadscs_", []) or [])
+    return datadscs
+
+
+def _bridge_payload_full_meta(
+    bridge_payload: dict[str, Any],
+    *,
+    expected_tiles: int,
+) -> dict[str, Any]:
+    metas: list[dict[str, Any]] = []
+    for root in _bridge_payload_roots(bridge_payload):
+        meta = root.get("streamingLXRemapFull_", {}) or root.get(
+            "streamingPTLXFull_", {}
+        )
+        if meta:
+            metas.append(meta)
+    if not metas:
+        return {}
+
+    combined = dict(metas[0])
+    if len(metas) == 1:
+        return combined
+
+    combined["chunk_count"] = len(metas)
+    combined["tile_count"] = sum(
+        int(meta.get("chunk_tile_count", meta.get("tile_count", 0)) or 0)
+        for meta in metas
+    )
+    combined["logical_tile_count"] = int(expected_tiles)
+    combined["datadsc_count"] = sum(
+        int(meta.get("datadsc_count", 0) or 0) for meta in metas
+    )
+    combined["chunked_payload"] = all(
+        bool(meta.get("chunked_payload")) for meta in metas
+    )
+    return combined
 
 
 def _streaming_production_requirements(
@@ -2570,11 +2616,9 @@ def _streaming_consumer_descriptor_contract(
     """Compare the streaming bridge output LDS against the consumer input LDS."""
 
     try:
-        bridge_root = next(iter(bridge_payload.values()))
-        datadscs = bridge_root.get("datadscs_", []) or []
-        if not datadscs:
+        bridge_outputs = _bridge_consumer_endpoint_outputs(bridge_payload)
+        if not bridge_outputs:
             return {"valid": False, "reason": "missing-bridge-datadscs"}
-        bridge_output = next(iter(datadscs[-1].values()))["labeledDs_"][-1]
         _, consumer_dsc = _single_payload_dsc(consumer_payload)
         consumer_lds = _labeled_ds_by_index(consumer_dsc, consumer_lds_idx)
         consumer_primary = _primary_for_lds(consumer_dsc, consumer_lds_idx)
@@ -2584,17 +2628,25 @@ def _streaming_consumer_descriptor_contract(
             "reason": f"malformed-descriptor:{type(exc).__name__}",
         }
 
-    bridge_layout = _normalized_lds_layout(bridge_output)
-    bridge_stick = _normalized_lds_stick(bridge_output)
+    bridge_layout = _normalized_lds_layout(bridge_outputs[0])
+    bridge_stick = _normalized_lds_stick(bridge_outputs[0])
     consumer_layout = _normalized_lds_layout(consumer_lds) or _primary_layout(
         consumer_primary
     )
     consumer_stick = _normalized_lds_stick(consumer_lds) or _primary_stick(
         consumer_primary
     )
-    layout_match = bridge_layout == consumer_layout
-    stick_match = bridge_stick == consumer_stick
-    bridge_pieces = bridge_output.get("PieceInfo", []) or []
+    layout_match = bridge_layout == consumer_layout and all(
+        _normalized_lds_layout(output) == bridge_layout for output in bridge_outputs
+    )
+    stick_match = bridge_stick == consumer_stick and all(
+        _normalized_lds_stick(output) == bridge_stick for output in bridge_outputs
+    )
+    bridge_pieces = [
+        piece
+        for bridge_output in bridge_outputs
+        for piece in bridge_output.get("PieceInfo", []) or []
+    ]
     consumer_pieces = consumer_lds.get("PieceInfo", []) or []
     piece_contract_available = bool(bridge_pieces and consumer_pieces)
     piece_match = False
@@ -2633,9 +2685,42 @@ def _streaming_consumer_descriptor_contract(
         "consumer_layout": consumer_layout,
         "bridge_stick": bridge_stick,
         "consumer_stick": consumer_stick,
+        "bridge_root_count": len(_bridge_payload_roots(bridge_payload)),
+        "bridge_output_count": len(bridge_outputs),
         "bridge_piece_count": len(bridge_pieces),
         "consumer_piece_count": len(consumer_pieces),
     }
+
+
+def _bridge_consumer_endpoint_outputs(
+    bridge_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    outputs: list[dict[str, Any]] = []
+    fallback_outputs: list[dict[str, Any]] = []
+    for bridge_root in _bridge_payload_roots(bridge_payload):
+        datadscs = bridge_root.get("datadscs_", []) or []
+        if datadscs:
+            fallback_outputs.append(
+                next(iter(datadscs[-1].values()))["labeledDs_"][-1]
+            )
+        for datadsc in datadscs:
+            name, dataop = next(iter(datadsc.items()))
+            op_name = str(dataop.get("op", {}).get("name"))
+            is_endpoint = (
+                "scatter" in str(name)
+                or "direct_output" in str(name)
+                or (
+                    "direct_tile" in str(name)
+                    and op_name == "ReStickifyOpWithPTLx"
+                )
+                or (
+                    "lx_remap_tile" in str(name)
+                    and op_name == "STCDPOpLx"
+                )
+            )
+            if is_endpoint:
+                outputs.append(dataop["labeledDs_"][-1])
+    return outputs or fallback_outputs
 
 
 def _generate_streaming_ptlx_bridge_payload(
