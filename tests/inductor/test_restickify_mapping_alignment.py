@@ -48,6 +48,11 @@ from torch_spyre._inductor.input_fanout_telemetry import (
     InputFanoutEstimate,
     _estimate_to_json as _input_fanout_estimate_to_json,
 )
+from torch_spyre._inductor.on_chip_handoff import (
+    OnChipHandoffEstimate,
+    _estimate_to_json as _on_chip_handoff_estimate_to_json,
+    realization_status,
+)
 from torch_spyre._inductor.restickify_telemetry import _estimate_to_json
 
 
@@ -383,6 +388,43 @@ def test_core_continuity_split_match_accepts_same_core_count_transposed_dims():
 
     assert matched is True
     assert reason is None
+
+
+def test_on_chip_handoff_json_records_foundation_contract_blocker():
+    estimate = OnChipHandoffEstimate(
+        source_name="buf0",
+        producer_name="buf0",
+        consumer_name="buf1",
+        producer_kind="computed",
+        consumer_kind="computed",
+        bytes_moved=1024,
+        byte_hops=8192,
+        avg_hops=8.0,
+        max_hops=16,
+        producer_splits={"d1": 32},
+        consumer_splits={"d0": 32},
+        symbol_map={"d0": "d1"},
+        status="planned",
+        skip_reason=None,
+        foundation_contract_available=False,
+        realization_status=realization_status(False),
+    )
+
+    payload = _on_chip_handoff_estimate_to_json(estimate)
+
+    assert payload["transport_kind"] == "same-stick-lx-to-lx"
+    assert payload["status"] == "planned"
+    assert payload["realization_status"] == "blocked-missing-foundation-contract"
+    assert payload["requirements"]["mixed_dataop_dlop_superdsc"] is True
+    assert payload["requirements"]["dataop_output_to_consumer_labeled_ds_binding"]
+
+
+def test_on_chip_handoff_realization_status_names_foundation_contract():
+    assert realization_status(False) == "blocked-missing-foundation-contract"
+    assert (
+        realization_status(True)
+        == "planned-foundation-contract-present-codegen-not-enabled"
+    )
 
 
 def test_input_fanout_telemetry_json_includes_source_fields():

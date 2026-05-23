@@ -311,6 +311,27 @@ input_fanout_telemetry_jsonl: str = os.environ.get(
     "",
 )
 
+# Default-off Tier 1 planner for same-stick in-graph on-chip handoff edges.
+# This is planning/telemetry only: it identifies producer -> consumer edges
+# that could use LX-to-LX transport, but it does not replace HBM behavior unless
+# the Deeptools mixed data-op/DL-op Foundation contract is implemented.
+on_chip_handoff_planning: bool = (
+    os.environ.get("SPYRE_ON_CHIP_HANDOFF_PLANNING", "0") == "1"
+)
+
+on_chip_handoff_plan_jsonl: str = os.environ.get(
+    "SPYRE_ON_CHIP_HANDOFF_PLAN_JSONL",
+    "",
+)
+
+# Set only in a build where Deeptools supports mixed data-op + DL-op SuperDSCs
+# and a first-class data-op-output -> consumer-input LX binding hook. Current
+# Torch-Spyre code still fail-closes to HBM; this flag is recorded in planning
+# rows so experiments do not confuse "planned" with "realized".
+on_chip_handoff_foundation_contract: bool = (
+    os.environ.get("SPYRE_ON_CHIP_HANDOFF_FOUNDATION_CONTRACT", "0") == "1"
+)
+
 # Default-off prototype for preserving producer-consumer core ownership across
 # exact in-graph pointwise edges. This is intentionally narrower than the
 # telemetry and does not change matmul/reduction distribution.
