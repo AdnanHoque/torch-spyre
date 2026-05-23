@@ -714,6 +714,33 @@ def _bridge_consumer_endpoint_adapter_contract(
             "drop native singleton i/mb dimensions",
             "write the result using the consumer layout/stick descriptor",
         ],
+        "diagnostic_candidates": [
+            {
+                "name": "native-64x64-tiles",
+                "role": "local-ptlx-transform",
+                "endpoint_contract": "missing-consumer-endpoint-adapter",
+                "production_blocker": (
+                    "native-ptlx-output-needs-consumer-endpoint-adapter"
+                ),
+            },
+            {
+                "name": "direct-64x64-tiles",
+                "role": "consumer-endpoint-shape-probe",
+                "endpoint_contract": "can-match-consumer-descriptor",
+                "production_blocker": (
+                    "direct-ptlx-tile-lacks-proven-remote-fragment-"
+                    "coordinate-map"
+                ),
+            },
+            {
+                "name": "validgap-consumer-64x64-tiles",
+                "role": "sparse-alias-consumer-endpoint-probe",
+                "endpoint_contract": "force-validates-consumer-descriptor",
+                "production_blocker": (
+                    "validgap-consumer-tile-lacks-hardware-value-proof"
+                ),
+            },
+        ],
         "blocker": "adapter-lowering-not-implemented",
     }
 

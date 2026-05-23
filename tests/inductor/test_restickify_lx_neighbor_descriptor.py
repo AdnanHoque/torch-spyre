@@ -1009,6 +1009,18 @@ def test_streaming_bridge_uses_three_stage_for_kernel_to_output_transform(
         "from": "native_j",
         "to": "destination_mb",
     }
+    diagnostic_candidates = {
+        entry["name"]: entry for entry in adapter["diagnostic_candidates"]
+    }
+    assert diagnostic_candidates["native-64x64-tiles"]["role"] == (
+        "local-ptlx-transform"
+    )
+    assert diagnostic_candidates["direct-64x64-tiles"]["production_blocker"] == (
+        "direct-ptlx-tile-lacks-proven-remote-fragment-coordinate-map"
+    )
+    assert diagnostic_candidates["validgap-consumer-64x64-tiles"][
+        "production_blocker"
+    ] == "validgap-consumer-tile-lacks-hardware-value-proof"
     assert candidate["production_contract"]["consumer_endpoint_adapter"] == adapter
     assert set(candidate["op_funcs_used"]) == {"STCDPOpLx", "ReStickifyOpWithPTLx"}
     assert candidate["datadsc_count"] == candidate["total_tiles"] * 3
