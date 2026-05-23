@@ -16,6 +16,7 @@ from torch_spyre._inductor import config as spyre_config
 from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     SUPPORTED_RESTICKIFY_DATA_OPS,
     combine_dataop_sdscs,
+    generate_native_ptlx_consumer_endpoint_adapter_tile_sdsc,
     generate_restickify_dataop_sdsc_from_spec,
     generate_streaming_ptlx_full_bridge_sdsc,
     generate_streaming_ptlx_tile_bridge_sdsc,
@@ -567,6 +568,14 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--native-endpoint-adapter-tile",
+        action="store_true",
+        help=(
+            "With --streaming-ptlx-tile, emit one native PT-LX tile workspace "
+            "to consumer LX endpoint adapter artifact."
+        ),
+    )
+    parser.add_argument(
         "--all-streaming-tiles",
         action="store_true",
         help="With --streaming-ptlx-tile, emit every materialized tile.",
@@ -682,14 +691,29 @@ def main() -> int:
             else [args.tile_index]
         )
         for tile_index in tile_indices:
-            payload = generate_streaming_ptlx_tile_bridge_sdsc(
-                f"{tile_index}_StreamingPTLXTileBridge_{args.size}",
-                artifact,
-                tile_index=tile_index,
-            )
-            path = output_dir / (
-                f"sdsc_streaming_ptlx_tile_{args.size}_{tile_index}.json"
-            )
+            if args.native_endpoint_adapter_tile:
+                payload = generate_native_ptlx_consumer_endpoint_adapter_tile_sdsc(
+                    f"{tile_index}_NativePTLXEndpointAdapterTile_{args.size}",
+                    artifact,
+                    tile_index=tile_index,
+                )
+                path = output_dir / (
+                    f"sdsc_native_ptlx_endpoint_adapter_tile_"
+                    f"{args.size}_{tile_index}.json"
+                )
+                row_mode = "native_ptlx_endpoint_adapter_tile"
+                row_op = "NativePTLXEndpointAdapterTile"
+            else:
+                payload = generate_streaming_ptlx_tile_bridge_sdsc(
+                    f"{tile_index}_StreamingPTLXTileBridge_{args.size}",
+                    artifact,
+                    tile_index=tile_index,
+                )
+                path = output_dir / (
+                    f"sdsc_streaming_ptlx_tile_{args.size}_{tile_index}.json"
+                )
+                row_mode = "streaming_ptlx_tile"
+                row_op = "StreamingPTLXTileBridge"
             _write_json(path, payload)
             dcg_rc = None
             dcg_log = ""
@@ -702,8 +726,8 @@ def main() -> int:
                 dcg_log = str(dcg_log_path)
             tile = materialized_tiles[tile_index]
             row = {
-                "mode": "streaming_ptlx_tile",
-                "op": "StreamingPTLXTileBridge",
+                "mode": row_mode,
+                "op": row_op,
                 "size": args.size,
                 "path": str(path),
                 "dcg_rc": dcg_rc,
@@ -720,7 +744,7 @@ def main() -> int:
             }
             rows.append(row)
             print(
-                f"streaming_ptlx_tile[{tile_index}]: wrote {path}"
+                f"{row_mode}[{tile_index}]: wrote {path}"
                 + (f" dcg_rc={dcg_rc} dcg_log={dcg_log}" if args.run_dcg else "")
             )
         _write_json(output_dir / "summary.json", {"rows": rows})

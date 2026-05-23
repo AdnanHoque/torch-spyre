@@ -632,7 +632,7 @@ def generate_native_ptlx_consumer_endpoint_adapter_tile_sdsc(
             "coreIdToDsc_": {},
             "numWkSlicesPerDim_": {},
             "coreIdToWkSlice_": {},
-            "opFuncsUsed_": ["STCDPOpLx"],
+            "opFuncsUsed_": ["ReStickifyOpWithPTLx"],
             "ldsShareInfo_": [],
             "prodConsList": {},
             "coreIdToDscSchedule": _sparse_dataop_schedule(
@@ -2835,7 +2835,7 @@ def _native_to_consumer_endpoint_adapter_dataop(
                 piece_dims=("mb_", "out_"),
             ),
         ],
-        "op": _op_payload("STCDPOpLx"),
+        "op": _op_payload("ReStickifyOpWithPTLx"),
     }
 
 

@@ -9,7 +9,7 @@ consumer endpoint adapter:
 generate_native_ptlx_consumer_endpoint_adapter_tile_sdsc
 ```
 
-The helper emits one codegen-only `STCDPOpLx` tile adapter:
+The helper emits one codegen-only `ReStickifyOpWithPTLx` tile adapter:
 
 ```text
 native PT-LX tile workspace -> consumer LX endpoint

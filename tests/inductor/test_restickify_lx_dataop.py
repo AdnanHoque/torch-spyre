@@ -530,7 +530,7 @@ def test_native_ptlx_consumer_endpoint_adapter_tile_describes_missing_lowering()
     input_lds, output_lds = dataop["labeledDs_"]
 
     assert root["dscs_"] == []
-    assert root["opFuncsUsed_"] == ["STCDPOpLx"]
+    assert root["opFuncsUsed_"] == ["ReStickifyOpWithPTLx"]
     assert adapter["source_layout"] == ["j_", "i_", "out_", "mb_"]
     assert adapter["source_stick"] == ["j_"]
     assert adapter["destination_layout"] == ["out_", "mb_"]
@@ -542,7 +542,7 @@ def test_native_ptlx_consumer_endpoint_adapter_tile_describes_missing_lowering()
     assert adapter["dropped_singleton_dims"] == ["native_i", "native_mb"]
     assert adapter["semantic_transform_certified"] is False
     assert adapter["fallback"] == "ReStickifyOpHBM"
-    assert dataop["op"]["name"] == "STCDPOpLx"
+    assert dataop["op"]["name"] == "ReStickifyOpWithPTLx"
     assert input_lds["layoutDimOrder_"] == ["j_", "i_", "out_", "mb_"]
     assert input_lds["stickDimOrder_"] == ["j_"]
     assert output_lds["layoutDimOrder_"] == ["out_", "mb_"]
