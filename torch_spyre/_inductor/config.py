@@ -40,4 +40,36 @@ core_id_k_fast_emission: bool = (
     os.environ.get("SPYRE_CORE_ID_K_FAST_EMISSION", "1") == "1"
 )
 
+# --- Tier 0: ring-aware restickify (telemetry + producer-aligned work division) ---
+# Default-off ring byte-hop telemetry for compiler-inserted restickifies.
+restickify_ring_telemetry: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_RING_TELEMETRY", "0") == "1"
+)
+restickify_ring_telemetry_jsonl: str = os.environ.get(
+    "SPYRE_RESTICKIFY_RING_TELEMETRY_JSONL", ""
+)
+# Stage 2: align a restickify's physical core mapping to its producer's.
+align_restickify_core_mapping: bool = (
+    os.environ.get("SPYRE_ALIGN_RESTICKIFY_CORE_MAPPING", "0") == "1"
+)
+# Stage 3B: steer a restickify's work-division split to the producer's dim.
+align_restickify_work_distribution: bool = (
+    os.environ.get("SPYRE_ALIGN_RESTICKIFY_WORK_DISTRIBUTION", "0") == "1"
+)
+# Assert (rather than skip) when a locality override cannot be certified.
+restickify_locality_assert: bool = (
+    os.environ.get("SPYRE_RESTICKIFY_LOCALITY_ASSERT", "0") == "1"
+)
+
+# --- Tier 1: general same-layout cross-core on-chip handoff planner ---
+# Default-off planner: detect same-stick producer->consumer edges that re-partition
+# across cores and would otherwise spill to HBM. Plans + telemetry only; realizing
+# the on-chip transfer needs the deeptools Foundation contract, so this fail-closes.
+onchip_handoff_planner: bool = (
+    os.environ.get("SPYRE_ONCHIP_HANDOFF_PLANNER", "0") == "1"
+)
+onchip_handoff_telemetry_jsonl: str = os.environ.get(
+    "SPYRE_ONCHIP_HANDOFF_TELEMETRY_JSONL", ""
+)
+
 install_config_module(sys.modules[__name__])

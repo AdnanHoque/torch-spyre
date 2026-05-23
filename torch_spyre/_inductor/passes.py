@@ -50,6 +50,9 @@ from .memory_planning import memory_planning
 from .work_division import span_reduction, work_distribution, k_fast_division
 from .pass_utils import apply_splits_from_index_coeff, iteration_space_from_op
 from .scratchpad import scratchpad_planning
+from .mapping_alignment import align_restickify_core_mappings
+from .restickify_telemetry import restickify_ring_telemetry
+from .onchip_handoff import run_onchip_handoff_planner
 from .fusion import spyre_fuse_nodes
 from .constants import DEVICE_NAME
 from .deadcode_elimination import deadcode_elimination
@@ -249,6 +252,12 @@ class CustomPreSchedulingPasses(CustomGraphPass):
             k_fast_division(operations) if config.core_id_k_fast_emission else []
         )
         work_distribution(operations, k_fast_ops)
+        # Tier 0/1 (all default-off, self-gating, no graph mutation when disabled):
+        # Stage 2 producer-aligned core mapping, ring byte-hop telemetry, and the
+        # same-layout cross-core on-chip handoff planner (fail-closed).
+        align_restickify_core_mappings(operations, k_fast_ops)
+        restickify_ring_telemetry(operations, k_fast_ops)
+        run_onchip_handoff_planner(operations, config.sencores)
         if config.lx_planning:
             scratchpad_planning(operations)
 
@@ -267,6 +276,9 @@ class CustomPreSchedulingPasses(CustomGraphPass):
             inspect.getfile(span_reduction),
             inspect.getfile(work_distribution),
             inspect.getfile(k_fast_division),
+            inspect.getfile(align_restickify_core_mappings),
+            inspect.getfile(restickify_ring_telemetry),
+            inspect.getfile(run_onchip_handoff_planner),
             inspect.getfile(scratchpad_planning),
         ]
         return get_hash_for_files(tuple(dict.fromkeys(files + [__file__])))
