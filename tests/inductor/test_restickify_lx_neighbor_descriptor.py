@@ -1005,6 +1005,9 @@ def test_streaming_bridge_uses_three_stage_for_kernel_to_output_transform(
         "destination_mb": "native_j",
     }
     assert adapter["dropped_singleton_dims"] == ["native_i", "native_mb"]
+    assert adapter["lowering_helper"] == (
+        "generate_native_ptlx_consumer_endpoint_adapter_tile_sdsc"
+    )
     assert adapter["required_stick_transform"] == {
         "from": "native_j",
         "to": "destination_mb",

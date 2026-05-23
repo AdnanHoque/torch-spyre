@@ -526,6 +526,153 @@ def generate_streaming_ptlx_native_tile_bridge_sdsc(
     }
 
 
+def generate_native_ptlx_consumer_endpoint_adapter_tile_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+    *,
+    tile_index: int = 0,
+    direction: str = "kernel-to-output",
+) -> dict[str, Any]:
+    """Lower one native PT-LX tile buffer into a consumer-shaped endpoint.
+
+    This is the narrow adapter called out by the LX-neighbor production
+    contract.  It consumes the native local-tile output produced by
+    ``ReStickifyOpWithPTLx``:
+
+        j_, i_, out_, mb_   stick j_
+
+    and writes the consumer-visible LX endpoint:
+
+        out_, mb_           stick mb_
+
+    The helper is static/codegen-only.  It describes the missing endpoint
+    adapter; it is not a production certificate until the generated descriptor
+    is compiled and value-checked on hardware.
+    """
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    if descriptor.get("kind") != "streaming_ptlx_restickify_descriptor":
+        raise ValueError("expected a streaming_ptlx_restickify_descriptor")
+    tiles = descriptor.get("tiles") or []
+    if tile_index < 0 or tile_index >= len(tiles):
+        raise ValueError(f"tile_index {tile_index} is outside materialized tiles")
+    if direction != "kernel-to-output":
+        raise ValueError(
+            "native consumer endpoint adapter currently supports "
+            "kernel-to-output only"
+        )
+
+    tile = tiles[tile_index]
+    _gather_stage, restickify_stage, scatter_stage = tile["stages"]
+    bridge_core = _as_int(tile["bridge_core"])
+    dest_fragments = list(scatter_stage.get("fragments") or [])
+    if not dest_fragments:
+        raise ValueError("native endpoint adapter needs destination fragments")
+
+    tile_size = _as_int(descriptor["tile_size"])
+    tile_row_start = _as_int(tile["tile_row"]) * tile_size
+    tile_col_start = _as_int(tile["tile_col"]) * tile_size
+    tile_rows, tile_cols = _native_tile_shape(dest_fragments, dest_fragments)
+    if tile_rows % 64 != 0 or tile_cols % 64 != 0:
+        raise ValueError(
+            "native endpoint adapter currently requires 64-aligned tile fragments"
+        )
+
+    input_fragment = _native_whole_tile_fragment(
+        core=bridge_core,
+        tile_rows=tile_rows,
+        tile_cols=tile_cols,
+    )
+    output_fragments = [
+        _fragment_global_to_consumer_tile(
+            fragment,
+            tile_row_start=tile_row_start,
+            tile_col_start=tile_col_start,
+        )
+        for fragment in dest_fragments
+    ]
+    adapter_core_ids = _fragment_core_ids(
+        [{"core": bridge_core}, *output_fragments],
+        bridge_core,
+    )
+    dataop = _native_to_consumer_endpoint_adapter_dataop(
+        core_ids=adapter_core_ids,
+        input_base=_as_int(restickify_stage["output_base"]),
+        output_base=_as_int(scatter_stage["output_base"]),
+        input_fragment=input_fragment,
+        output_fragments=output_fragments,
+        tile_rows=tile_rows,
+        tile_cols=tile_cols,
+    )
+    return {
+        name: {
+            "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],
+            "sdscFolds_": {
+                "dim_prop_func": [{"Affine": {"alpha_": 1, "beta_": 0}}],
+                "dim_prop_attr": [{"factor_": 1, "label_": "time"}],
+                "data_": {"[0]": "0"},
+            },
+            "coreFoldProp_": {"factor_": max(adapter_core_ids) + 1, "label_": "core"},
+            "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
+            "numCoresUsed_": max(adapter_core_ids) + 1,
+            "unpadN_": {
+                "name_": "unpadn",
+                "j_": -1,
+                "i_": -1,
+                "out_": -1,
+                "mb_": -1,
+            },
+            "N_": {
+                "name_": "n",
+                "j_": tile_rows,
+                "i_": 1,
+                "out_": tile_cols,
+                "mb_": tile_rows,
+            },
+            "coreIdToDsc_": {},
+            "numWkSlicesPerDim_": {},
+            "coreIdToWkSlice_": {},
+            "opFuncsUsed_": ["STCDPOpLx"],
+            "ldsShareInfo_": [],
+            "prodConsList": {},
+            "coreIdToDscSchedule": _sparse_dataop_schedule(
+                max(adapter_core_ids) + 1,
+                [adapter_core_ids],
+            ),
+            "pcfg_": {},
+            "target_": "senulator",
+            "dscs_": [],
+            "datadscs_": [
+                {f"0_STCDPOpLx_native_endpoint_adapter_tile{tile_index}": dataop}
+            ],
+            "dimToSymbolMappingOpcodeCorrection_": {},
+            "inputSymbolsAndTags_": {},
+            "symbolDefinitions_": {},
+            "streamingPTLXEndpointAdapterTile_": {
+                "tile_index": int(tile_index),
+                "tile_row": _as_int(tile["tile_row"]),
+                "tile_col": _as_int(tile["tile_col"]),
+                "tile_rows": tile_rows,
+                "tile_cols": tile_cols,
+                "bridge_core": bridge_core,
+                "direction": direction,
+                "source_layout": ["j_", "i_", "out_", "mb_"],
+                "source_stick": ["j_"],
+                "destination_layout": ["out_", "mb_"],
+                "destination_stick": ["mb_"],
+                "coordinate_map": {
+                    "destination_out": "native_out",
+                    "destination_mb": "native_j",
+                },
+                "dropped_singleton_dims": ["native_i", "native_mb"],
+                "status": "static-codegen-only",
+                "semantic_transform_certified": False,
+                "fallback": "ReStickifyOpHBM",
+            },
+        }
+    }
+
+
 def generate_streaming_ptlx_direct_tile_bridge_sdsc(
     name: str,
     streaming_artifact: Mapping[str, Any],
@@ -2650,6 +2797,48 @@ def _native_tile_dataop(
     }
 
 
+def _native_to_consumer_endpoint_adapter_dataop(
+    *,
+    core_ids: Sequence[int],
+    input_base: int,
+    output_base: int,
+    input_fragment: Mapping[str, Any],
+    output_fragments: Sequence[Mapping[str, Any]],
+    tile_rows: int,
+    tile_cols: int,
+) -> dict[str, Any]:
+    return {
+        "coreIdsUsed_": [int(core) for core in core_ids],
+        "dimPool_": ["j_", "i_", "out_", "mb_"],
+        "outDimTodimRelation_": [],
+        "primaryDs_": [
+            {"name_": "dataIN", "dimNames": ["j_", "i_", "out_", "mb_"]},
+            {"name_": "dataOUT", "dimNames": ["out_", "mb_"]},
+        ],
+        "labeledDs_": [
+            _native_tile_labeled_ds(
+                "dataIN_L0",
+                "dataIN",
+                stick=("j_",),
+                base=input_base,
+                fragments=[input_fragment],
+                tile_rows=tile_rows,
+                tile_cols=tile_cols,
+            ),
+            _tile_labeled_ds(
+                "dataOUT_L0",
+                "dataOUT",
+                layout=("out_", "mb_"),
+                stick=("mb_",),
+                base=output_base,
+                fragments=output_fragments,
+                piece_dims=("mb_", "out_"),
+            ),
+        ],
+        "op": _op_payload("STCDPOpLx"),
+    }
+
+
 def _native_tile_labeled_ds(
     lds_name: str,
     pds_name: str,
@@ -2772,6 +2961,27 @@ def _native_tile_sizes(tile_rows: int, tile_cols: int) -> dict[str, int]:
 
 def _native_tile_unpad() -> dict[str, int]:
     return {dim: -1 for dim in ["j_", "i_", "out_", "mb_"]}
+
+
+def _fragment_global_to_consumer_tile(
+    fragment: Mapping[str, Any],
+    *,
+    tile_row_start: int,
+    tile_col_start: int,
+) -> dict[str, int]:
+    row_start = _as_int(fragment["row_start"])
+    row_end = _as_int(fragment["row_end"])
+    col_start = _as_int(fragment["col_start"])
+    col_end = _as_int(fragment["col_end"])
+    if row_start < int(tile_row_start) or col_start < int(tile_col_start):
+        raise ValueError("consumer fragment starts before native tile")
+    return {
+        "core": _as_int(fragment["core"]),
+        "row_start": row_start,
+        "row_end": row_end,
+        "col_start": col_start,
+        "col_end": col_end,
+    }
 
 
 def _coalesced_tile_fragment(

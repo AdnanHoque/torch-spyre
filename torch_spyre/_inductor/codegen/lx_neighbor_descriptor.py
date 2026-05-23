@@ -704,6 +704,9 @@ def _bridge_consumer_endpoint_adapter_contract(
             "destination_mb": "native_j",
         },
         "dropped_singleton_dims": ["native_i", "native_mb"],
+        "lowering_helper": (
+            "generate_native_ptlx_consumer_endpoint_adapter_tile_sdsc"
+        ),
         "required_stick_transform": {
             "from": "native_j",
             "to": "destination_mb",

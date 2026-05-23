@@ -23,6 +23,7 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     generate_ptlx_local_tile_restickify_sdsc,
     generate_ptlx_restickify_bridge_sdsc,
     generate_restickify_dataop_sdsc_from_spec,
+    generate_native_ptlx_consumer_endpoint_adapter_tile_sdsc,
     generate_streaming_lx_remap_full_bridge_sdsc,
     generate_streaming_ptlx_direct_full_bridge_sdsc,
     generate_streaming_ptlx_direct_tile_bridge_sdsc,
@@ -503,6 +504,61 @@ def test_streaming_ptlx_native_tile_bridge_supports_output_to_kernel_direction()
     assert restickify["labeledDs_"][1]["stickDimOrder_"] == ["out_"]
     assert scatter["labeledDs_"][0]["stickDimOrder_"] == ["out_"]
     assert scatter["labeledDs_"][1]["stickDimOrder_"] == ["out_"]
+
+
+def test_native_ptlx_consumer_endpoint_adapter_tile_describes_missing_lowering():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=1,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=1)
+
+    payload = generate_native_ptlx_consumer_endpoint_adapter_tile_sdsc(
+        "native_endpoint_adapter",
+        artifact,
+    )
+
+    root = payload["native_endpoint_adapter"]
+    adapter = root["streamingPTLXEndpointAdapterTile_"]
+    dataop = next(iter(root["datadscs_"][0].values()))
+    input_lds, output_lds = dataop["labeledDs_"]
+
+    assert root["dscs_"] == []
+    assert root["opFuncsUsed_"] == ["STCDPOpLx"]
+    assert adapter["source_layout"] == ["j_", "i_", "out_", "mb_"]
+    assert adapter["source_stick"] == ["j_"]
+    assert adapter["destination_layout"] == ["out_", "mb_"]
+    assert adapter["destination_stick"] == ["mb_"]
+    assert adapter["coordinate_map"] == {
+        "destination_out": "native_out",
+        "destination_mb": "native_j",
+    }
+    assert adapter["dropped_singleton_dims"] == ["native_i", "native_mb"]
+    assert adapter["semantic_transform_certified"] is False
+    assert adapter["fallback"] == "ReStickifyOpHBM"
+    assert dataop["op"]["name"] == "STCDPOpLx"
+    assert input_lds["layoutDimOrder_"] == ["j_", "i_", "out_", "mb_"]
+    assert input_lds["stickDimOrder_"] == ["j_"]
+    assert output_lds["layoutDimOrder_"] == ["out_", "mb_"]
+    assert output_lds["stickDimOrder_"] == ["mb_"]
+    assert input_lds["PieceInfo"][0]["dimToStartCordinate"] == {
+        "j_": 0,
+        "i_": 0,
+        "out_": 0,
+        "mb_": 0,
+    }
+    assert output_lds["PieceInfo"][0]["dimToStartCordinate"] == {
+        "mb_": 0,
+        "out_": 0,
+    }
+    assert input_lds["hbmSize_"] == 0
+    assert output_lds["hbmSize_"] == 0
 
 
 def test_streaming_ptlx_direct_tile_bridge_uses_single_2d_restickify():
