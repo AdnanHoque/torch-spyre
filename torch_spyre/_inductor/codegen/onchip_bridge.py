@@ -43,20 +43,29 @@ def _piece_info(
     chunk: int,
     base: int,
     num_cores: int,
+    reverse: bool = False,
 ) -> list[dict]:
-    """Per-core PieceInfo: split_dim is chunked across cores, others are full."""
+    """Per-core PieceInfo: split_dim is chunked across cores, others are full.
+
+    Piece i always covers logical slice i (dimToStartCordinate = i*chunk). When
+    reverse=True, piece i is *placed* on core (num_cores-1-i) instead of core i,
+    so the logical->physical core mapping is mirrored. Matching pieces by logical
+    coordinate against a non-reversed endpoint then forces a genuine cross-core
+    move (slice i lives on core i one side, core 31-i the other).
+    """
     pieces = []
     for i in range(num_cores):
         start = {d: (i * chunk if d == split_dim else 0) for d in layout_order}
         size = {d: (chunk if d == split_dim else iter_sizes[d]) for d in layout_order}
         gap = {d: [[size[d], 0]] for d in layout_order}
+        mem = (num_cores - 1 - i) if reverse else i
         pieces.append(
             {
                 "key_": f"p{i + 1}",
                 "dimToStartCordinate": start,
                 "dimToSize_": size,
                 "validGap_": gap,
-                "PlacementInfo": [{"type": "lx", "memId": [i], "startAddr": [base]}],
+                "PlacementInfo": [{"type": "lx", "memId": [mem], "startAddr": [base]}],
             }
         )
     return pieces
@@ -72,6 +81,7 @@ def _labeled_ds(
     base: int,
     num_cores: int,
     lx_size: int,
+    reverse: bool = False,
 ) -> dict:
     """One labeledDs (dataIN_L0 / dataOUT_L0) with its per-core PieceInfo."""
     chunk = iter_sizes[split_dim] // num_cores
@@ -93,7 +103,7 @@ def _labeled_ds(
         "lxSize_": lx_size,
         "lxStartAddress_": {},
         "PieceInfo": _piece_info(
-            layout_order, split_dim, iter_sizes, chunk, base, num_cores
+            layout_order, split_dim, iter_sizes, chunk, base, num_cores, reverse
         ),
     }
 
@@ -117,11 +127,14 @@ def _datadsc(name: str, op: dict, dim_pool: Sequence[str], in_ld: dict, out_ld: 
 
 # --- endpoint descriptor: (layoutDimOrder_, stickDim, splitDim, lxBase) ---
 class Endpoint:
-    def __init__(self, layout, stick_dim, split_dim, base):
+    def __init__(self, layout, stick_dim, split_dim, base, reverse=False):
         self.layout = layout
         self.stick_dim = stick_dim
         self.split_dim = split_dim
         self.base = base
+        # reverse=True mirrors the logical->physical core mapping (piece i on
+        # core num_cores-1-i), forcing genuine cross-core ring traffic.
+        self.reverse = reverse
 
 
 def _stcdp_op() -> dict:
@@ -147,9 +160,11 @@ def make_datadsc(
     iter_sizes: Mapping[str, int], stick_size: int, num_cores: int, lx_size: int,
 ) -> dict:
     in_ld = _labeled_ds("dataIN", src.layout, src.stick_dim, src.split_dim,
-                        iter_sizes, stick_size, src.base, num_cores, lx_size)
+                        iter_sizes, stick_size, src.base, num_cores, lx_size,
+                        src.reverse)
     out_ld = _labeled_ds("dataOUT", dst.layout, dst.stick_dim, dst.split_dim,
-                         iter_sizes, stick_size, dst.base, num_cores, lx_size)
+                         iter_sizes, stick_size, dst.base, num_cores, lx_size,
+                         dst.reverse)
     return _datadsc(name, op, dim_pool, in_ld, out_ld, num_cores)
 
 
@@ -210,3 +225,39 @@ def build_same_layout_bridge(
         lx_size=lx_size,
     )
     return [stcdp], ["STCDPOpLx"], mixed_schedule(1, num_cores)
+
+
+def build_roundtrip_bridge(
+    dim_pool, iter_sizes, stick_size, num_cores, lx_size,
+    producer_base, scratch_base, consumer_base, layout, stick_dim, split_dim,
+):
+    """Genuine cross-core ring proof: two same-stick STCDPOpLx moves that mirror
+    then un-mirror the per-core ownership.
+
+    STCDP1: producer (linear @producer_base, piece i on core i)
+            -> scratch  (reversed @scratch_base, piece i on core 31-i)
+    STCDP2: scratch  (reversed @scratch_base, piece i on core 31-i)
+            -> consumer (linear @consumer_base, piece i on core i)
+
+    Each STCDP moves slice i between core i and core 31-i -> real ring traffic.
+    The round trip lands data back in the consumer's native (linear) layout, so
+    the result is value-correct WITHOUT any consumer-reshard surgery. Pure data
+    moves (no PT/compute op), to test the ring path in isolation from the
+    Compute-CB-faulting transpose.
+    """
+    stcdp1 = make_datadsc(
+        "0_STCDPOpLx_dataop", _stcdp_op(), dim_pool,
+        src=Endpoint(layout, stick_dim, split_dim, producer_base),
+        dst=Endpoint(layout, stick_dim, split_dim, scratch_base, reverse=True),
+        iter_sizes=iter_sizes, stick_size=stick_size, num_cores=num_cores,
+        lx_size=lx_size,
+    )
+    stcdp2 = make_datadsc(
+        "1_STCDPOpLx_dataop", _stcdp_op(), dim_pool,
+        src=Endpoint(layout, stick_dim, split_dim, scratch_base, reverse=True),
+        dst=Endpoint(layout, stick_dim, split_dim, consumer_base),
+        iter_sizes=iter_sizes, stick_size=stick_size, num_cores=num_cores,
+        lx_size=lx_size,
+    )
+    return ([stcdp1, stcdp2], ["STCDPOpLx", "STCDPOpLx"],
+            mixed_schedule(2, num_cores))
