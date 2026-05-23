@@ -1187,6 +1187,42 @@ def test_streaming_ptlx_native_validgap_endpoint_chunked_bridge_bounds_tiles():
         assert meta["datadsc_count"] == 64
 
 
+def test_streaming_ptlx_native_validgap_endpoint_auto_chunks_by_tile_row():
+    source = {"mb": 1, "out": 32}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=64,
+        sample_all_tiles=True,
+    )
+    artifact = generate_streaming_ptlx_artifact(
+        "streaming",
+        summary,
+        max_tiles=summary.total_tiles,
+    )
+
+    payload = generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc(
+        "native_validgap_row_chunked",
+        artifact,
+        max_tiles_per_chunk=0,
+    )
+
+    assert len(payload) == 8
+    for index, root in enumerate(payload.values()):
+        meta = root["streamingPTLXFull_"]
+        schedule = root["coreIdToDscSchedule"]
+        assert meta["chunked_payload"] is True
+        assert meta["chunk_index"] == index
+        assert meta["chunk_tile_count"] == 8
+        assert meta["tile_count"] == 8
+        assert meta["datadsc_count"] == 32
+        assert all(schedule[str(core)] for core in range(root["numCoresUsed_"]))
+
+
 def test_streaming_ptlx_validgap_consumer_full_bridge_contracts_but_needs_values():
     source = {"mb": 32, "out": 1}
     dest = {"mb": 4, "out": 8}

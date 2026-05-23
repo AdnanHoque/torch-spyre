@@ -2651,7 +2651,7 @@ def _generate_streaming_ptlx_bridge_payload(
         chunk_size = (
             _spyre_config.restickify_ptlx_native_validgap_endpoint_tile_chunk_size
         )
-        if chunk_size > 0:
+        if chunk_size >= 0:
             return generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc(
                 name,
                 artifact,

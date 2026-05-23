@@ -339,7 +339,7 @@ def _streaming_bridge_candidate(
                 chunk_size = (
                     _spyre_config.restickify_ptlx_native_validgap_endpoint_tile_chunk_size
                 )
-                if chunk_size > 0:
+                if chunk_size >= 0:
                     payload = (
                         generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc(
                             f"{idx}_LXNeighborStreamingNativeValidGapEndpointReStickifyOpWithPTLx",

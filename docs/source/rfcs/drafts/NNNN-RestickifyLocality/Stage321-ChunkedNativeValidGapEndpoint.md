@@ -18,13 +18,17 @@ When enabled, it writes separate sidecar JSON files:
 restickify_lx_neighbor_streaming_bridge_edge_<idx>_chunk<N>.json
 ```
 
-The default chunk size is `16` tiles and can be controlled with:
+The default chunk mode is schedule-aware row chunking and can be controlled with:
 
 ```text
 SPYRE_RESTICKIFY_PTLX_NATIVE_VALIDGAP_ENDPOINT_TILE_CHUNK_SIZE=<N>
 ```
 
-A value `<= 0` keeps the older single-SDSC full bridge.
+Values:
+
+- `0`: automatic row chunks, one complete 64x64 tile row per sidecar file.
+- positive: fixed tile count per chunk.
+- negative: keep the older single-SDSC full bridge.
 
 ## Validation
 
@@ -41,12 +45,11 @@ python -m pytest \
   tests/inductor/test_restickify_lx_dataop.py -q
 ```
 
-Result: `64 passed`.
+Result: `65 passed`.
 
 ## 512 Real Sidecar Result
 
-For `matmul_then_add`, size `512`, the sidecar now emits 4 chunk files with 16
-tiles each:
+For `matmul_then_add`, size `512`, fixed 16-tile chunks emit 4 chunk files:
 
 | Chunk | Tiles | DataOps | DeeRT Export | HBM Tokens | Notes |
 |---:|---:|---:|---:|---:|---|
@@ -73,16 +76,40 @@ some tile groups map active core schedules, especially chunks that touch only a
 subset of destination cores while the SDSC still advertises broader core
 coverage.
 
+## Row-Chunk Probe
+
+Automatic row chunking emits 8 files with 8 tiles and 32 dataops each. Every
+chunk has a dense non-empty schedule for all advertised cores, so the earlier
+`dsc_schedule.size() > 0` failure disappears.
+
+| Chunks | Tiles/Chunk | DataOps/Chunk | DeeRT Export | HBM Tokens |
+|---:|---:|---:|---|---:|
+| 8 | 8 | 32 | 5 clean, 3 post-export segfaults | 0 for all emitted programs |
+
+The remaining segfaults occur after `sdsc.json`, `senprog.txt`, `smc.txt`, and
+`init.txt` are emitted. They look like a DeeRT export/metadata finalization
+issue rather than a DCC lowering issue. The generated `senprog.txt` files still
+show no `HBM` tokens.
+
+The post-export segfault is nondeterministic. A retry loop over the 8 row chunks
+with up to 3 attempts per chunk produced at least one clean rc=0 export for
+every chunk:
+
+```text
+summary ok=8 fail=0
+HBM=0 for every successful chunk
+```
+
 ## Interpretation
 
-Chunking is the right direction for the IBUFF problem, but the chunk boundary
-must be schedule-aware:
+Chunking is the right direction for the IBUFF problem, and the chunk boundary
+does need to be schedule-aware. Row chunks are better than arbitrary fixed
+chunks because they avoid empty per-core schedules.
 
-- each chunk should include a compact `numCoresUsed_` and remapped local core
-  IDs, or
-- each chunk should retain a dense schedule for every advertised core, or
-- chunks should be grouped by destination/core bands that Deeptools can lower
-  without empty dataflow schedules.
+The next blocker is not DCC lowering for the row chunks. It is making the
+export/runtime packaging path deterministic enough to launch the generated
+chunks as one bridge sequence, or bypassing the flaky sidecar export finalizer
+and consuming the emitted `senprog.txt`/`init.txt` artifacts directly.
 
 The stock `ReStickifyOpHBM` fallback remains the only runnable path. The PT-LX
 sidecars are still diagnostic evidence.

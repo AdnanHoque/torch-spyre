@@ -1015,17 +1015,29 @@ def generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc(
     if not tiles:
         raise ValueError("streaming descriptor has no materialized tiles")
     chunk_size = int(max_tiles_per_chunk)
-    if chunk_size <= 0 or len(tiles) <= chunk_size:
+    if chunk_size < 0:
+        return generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
+            name,
+            streaming_artifact,
+        )
+
+    if chunk_size == 0:
+        chunks = _streaming_tile_row_chunks(tiles)
+    else:
+        chunks = [
+            (start, min(start + chunk_size, len(tiles)), tiles[start : start + chunk_size])
+            for start in range(0, len(tiles), chunk_size)
+        ]
+    if len(chunks) == 1:
         return generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
             name,
             streaming_artifact,
         )
 
     payload: dict[str, Any] = {}
-    for chunk_index, start in enumerate(range(0, len(tiles), chunk_size)):
-        stop = min(start + chunk_size, len(tiles))
+    for chunk_index, (start, stop, chunk_tiles) in enumerate(chunks):
         chunk_descriptor = copy.deepcopy(descriptor)
-        chunk_descriptor["tiles"] = copy.deepcopy(tiles[start:stop])
+        chunk_descriptor["tiles"] = copy.deepcopy(chunk_tiles)
         chunk_descriptor["tile_records_materialized"] = stop - start
         chunk_artifact = {f"{name}_descriptor_chunk{chunk_index}": chunk_descriptor}
         chunk_payload = generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
@@ -1040,6 +1052,27 @@ def generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc(
         chunk_root["streamingPTLXFull_"]["chunk_size_limit"] = chunk_size
         payload.update(chunk_payload)
     return payload
+
+
+def _streaming_tile_row_chunks(
+    tiles: Sequence[Mapping[str, Any]],
+) -> list[tuple[int, int, list[Mapping[str, Any]]]]:
+    chunks: list[tuple[int, int, list[Mapping[str, Any]]]] = []
+    rows: dict[int, list[tuple[int, Mapping[str, Any]]]] = {}
+    for index, tile in enumerate(tiles):
+        tile_row = _as_int(tile.get("tile_row", 0))
+        rows.setdefault(tile_row, []).append((index, tile))
+    for tile_row in sorted(rows):
+        indexed_tiles = rows[tile_row]
+        indices = [index for index, _tile in indexed_tiles]
+        chunks.append(
+            (
+                min(indices),
+                max(indices) + 1,
+                [tile for _index, tile in indexed_tiles],
+            )
+        )
+    return chunks
 
 
 def generate_streaming_ptlx_direct_tile_bridge_sdsc(
