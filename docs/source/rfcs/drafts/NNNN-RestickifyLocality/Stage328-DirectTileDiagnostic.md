@@ -74,9 +74,8 @@ direct tile is likely reading producer fragments in the wrong logical coordinate
 order or placing them in the wrong consumer coordinates.
 
 The next production-shaped step should not be descriptor relabeling.  It should
-compare the direct tile's generated `PieceInfo` against the known-correct
-chunked sidecar/native path and derive an explicit coordinate map for each
-producer fragment to each consumer fragment.
+return to the value-correct Stage195 full-tensor PT-LX bridge contract and move
+that contract from late artifact splice into normal mixed-schedule lowering.
 
 ## Validation
 
