@@ -144,6 +144,15 @@ restickify_ptlx_native_validgap_endpoint_tile_e2e: bool = (
     == "1"
 )
 
+# Limit the diagnostic native valid-gap endpoint sidecar to bounded groups of
+# 64x64 tiles. A value <= 0 keeps the older single-SDSC full bridge.
+restickify_ptlx_native_validgap_endpoint_tile_chunk_size: int = int(
+    os.environ.get(
+        "SPYRE_RESTICKIFY_PTLX_NATIVE_VALIDGAP_ENDPOINT_TILE_CHUNK_SIZE",
+        "16",
+    )
+)
+
 # Default-off validation switch for the native 64x64 tile contract. This is
 # intentionally separate from restickify_ptlx_native_tile_e2e so the compiler
 # can generate/audit the candidate without claiming value correctness.

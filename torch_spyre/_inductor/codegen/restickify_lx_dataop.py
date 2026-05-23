@@ -1002,6 +1002,46 @@ def generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
     return {name: combined}
 
 
+def generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+    *,
+    max_tiles_per_chunk: int,
+) -> dict[str, Any]:
+    """Split the native valid-gap endpoint bridge into bounded tile chunks."""
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    tiles = list(descriptor.get("tiles") or [])
+    if not tiles:
+        raise ValueError("streaming descriptor has no materialized tiles")
+    chunk_size = int(max_tiles_per_chunk)
+    if chunk_size <= 0 or len(tiles) <= chunk_size:
+        return generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
+            name,
+            streaming_artifact,
+        )
+
+    payload: dict[str, Any] = {}
+    for chunk_index, start in enumerate(range(0, len(tiles), chunk_size)):
+        stop = min(start + chunk_size, len(tiles))
+        chunk_descriptor = copy.deepcopy(descriptor)
+        chunk_descriptor["tiles"] = copy.deepcopy(tiles[start:stop])
+        chunk_descriptor["tile_records_materialized"] = stop - start
+        chunk_artifact = {f"{name}_descriptor_chunk{chunk_index}": chunk_descriptor}
+        chunk_payload = generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
+            f"{name}_chunk{chunk_index}",
+            chunk_artifact,
+        )
+        chunk_root = next(iter(chunk_payload.values()))
+        chunk_root["streamingPTLXFull_"]["chunked_payload"] = True
+        chunk_root["streamingPTLXFull_"]["chunk_index"] = chunk_index
+        chunk_root["streamingPTLXFull_"]["chunk_start_tile"] = start
+        chunk_root["streamingPTLXFull_"]["chunk_tile_count"] = stop - start
+        chunk_root["streamingPTLXFull_"]["chunk_size_limit"] = chunk_size
+        payload.update(chunk_payload)
+    return payload
+
+
 def generate_streaming_ptlx_direct_tile_bridge_sdsc(
     name: str,
     streaming_artifact: Mapping[str, Any],

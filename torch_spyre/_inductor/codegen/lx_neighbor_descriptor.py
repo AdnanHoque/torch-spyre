@@ -42,6 +42,7 @@ from .restickify_lx_dataop import (
     generate_streaming_lx_remap_full_bridge_sdsc,
     generate_streaming_ptlx_direct_full_bridge_sdsc,
     generate_streaming_ptlx_native_full_bridge_sdsc,
+    generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc,
     generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc,
 )
 from .restickify_ptlx_streaming import (
@@ -227,13 +228,30 @@ def _emit_streaming_bridge_candidates(
             sdsc_payloads=sdsc_payloads,
         )
         if candidate.get("status") == "emitted":
-            file_name = BRIDGE_CANDIDATE_FILENAME_TEMPLATE.format(idx=idx)
-            candidate["file"] = file_name
-            path = os.path.join(output_dir, file_name)
-            with open(path, "w", encoding="utf-8") as file:
-                logger.info("Generating %s", file.name)
-                json.dump(candidate["payload"], file, default=str, indent=2)
-                file.write("\n")
+            payload = candidate["payload"]
+            if len(payload) > 1:
+                files = []
+                for chunk_idx, (node_name, node_payload) in enumerate(payload.items()):
+                    file_name = (
+                        BRIDGE_CANDIDATE_FILENAME_TEMPLATE.format(idx=idx)
+                        .removesuffix(".json")
+                        + f"_chunk{chunk_idx}.json"
+                    )
+                    files.append(file_name)
+                    path = os.path.join(output_dir, file_name)
+                    with open(path, "w", encoding="utf-8") as file:
+                        logger.info("Generating %s", file.name)
+                        json.dump({node_name: node_payload}, file, default=str, indent=2)
+                        file.write("\n")
+                candidate["files"] = files
+            else:
+                file_name = BRIDGE_CANDIDATE_FILENAME_TEMPLATE.format(idx=idx)
+                candidate["file"] = file_name
+                path = os.path.join(output_dir, file_name)
+                with open(path, "w", encoding="utf-8") as file:
+                    logger.info("Generating %s", file.name)
+                    json.dump(payload, file, default=str, indent=2)
+                    file.write("\n")
             candidate = {key: value for key, value in candidate.items() if key != "payload"}
         edge["streaming_bridge_candidate"] = candidate
         candidates.append(
@@ -318,12 +336,24 @@ def _streaming_bridge_candidate(
             bridge_lowering = "three-stage-gather-transform-scatter"
             if _spyre_config.restickify_ptlx_native_validgap_endpoint_tile_e2e:
                 bridge_lowering = "native-transform-validgap-endpoint-adapter"
-                payload = (
-                    generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
+                chunk_size = (
+                    _spyre_config.restickify_ptlx_native_validgap_endpoint_tile_chunk_size
+                )
+                if chunk_size > 0:
+                    payload = (
+                        generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc(
+                            f"{idx}_LXNeighborStreamingNativeValidGapEndpointReStickifyOpWithPTLx",
+                            artifact,
+                            max_tiles_per_chunk=chunk_size,
+                        )
+                    )
+                else:
+                    payload = (
+                        generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
                         f"{idx}_LXNeighborStreamingNativeValidGapEndpointReStickifyOpWithPTLx",
                         artifact,
+                        )
                     )
-                )
             else:
                 payload = generate_streaming_ptlx_native_full_bridge_sdsc(
                     f"{idx}_LXNeighborStreamingThreeStageReStickifyOpWithPTLx",
@@ -344,10 +374,12 @@ def _streaming_bridge_candidate(
             "fallback": "ReStickifyOpHBM",
         }
 
-    root = next(iter(payload.values()))
+    roots = list(payload.values())
+    root = roots[0]
     dataop_names = [
         next(iter(datadsc.values())).get("op", {}).get("name")
-        for datadsc in root.get("datadscs_", []) or []
+        for payload_root in roots
+        for datadsc in payload_root.get("datadscs_", []) or []
     ]
     bridge_metadata = _bridge_metadata(root)
     bridge_endpoint_contract = _bridge_destination_endpoint_contract(
@@ -382,7 +414,8 @@ def _streaming_bridge_candidate(
         "tile_size": tile_size,
         "tile_records_materialized": len(summary.sample_tiles),
         "total_tiles": int(summary.total_tiles),
-        "datadsc_count": len(root.get("datadscs_", []) or []),
+        "payload_node_count": len(roots),
+        "datadsc_count": sum(len(root.get("datadscs_", []) or []) for root in roots),
         "op_funcs_used": dataop_names,
         "streaming_summary": _streaming_summary_payload(summary),
         "bridge_metadata": bridge_metadata,

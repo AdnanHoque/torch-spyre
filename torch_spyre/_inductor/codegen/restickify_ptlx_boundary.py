@@ -46,6 +46,7 @@ from .restickify_lx_dataop import (
     generate_streaming_ptlx_direct_full_bridge_sdsc,
     generate_streaming_ptlx_full_bridge_sdsc,
     generate_streaming_ptlx_native_full_bridge_sdsc,
+    generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc,
     generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc,
     generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc,
 )
@@ -2647,6 +2648,15 @@ def _generate_streaming_ptlx_bridge_payload(
         direction == "kernel-to-output"
         and _spyre_config.restickify_ptlx_native_validgap_endpoint_tile_e2e
     ):
+        chunk_size = (
+            _spyre_config.restickify_ptlx_native_validgap_endpoint_tile_chunk_size
+        )
+        if chunk_size > 0:
+            return generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc(
+                name,
+                artifact,
+                max_tiles_per_chunk=chunk_size,
+            )
         return generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
             name,
             artifact,

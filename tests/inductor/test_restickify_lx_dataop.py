@@ -31,6 +31,7 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     generate_streaming_ptlx_full_bridge_sdsc,
     generate_streaming_ptlx_native_full_bridge_sdsc,
     generate_streaming_ptlx_native_tile_bridge_sdsc,
+    generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc,
     generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc,
     generate_streaming_ptlx_tile_bridge_sdsc,
     generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc,
@@ -1148,6 +1149,42 @@ def test_streaming_ptlx_native_validgap_endpoint_full_bridge_combines_tiles():
     assert contract["production_blocker"] == (
         "native-validgap-endpoint-scatter-tile-lacks-hardware-value-proof"
     )
+
+
+def test_streaming_ptlx_native_validgap_endpoint_chunked_bridge_bounds_tiles():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=64,
+        sample_all_tiles=True,
+    )
+    artifact = generate_streaming_ptlx_artifact(
+        "streaming",
+        summary,
+        max_tiles=summary.total_tiles,
+    )
+
+    payload = generate_streaming_ptlx_native_validgap_endpoint_chunked_bridge_sdsc(
+        "native_validgap_chunked",
+        artifact,
+        max_tiles_per_chunk=16,
+    )
+
+    assert len(payload) == 4
+    for index, root in enumerate(payload.values()):
+        meta = root["streamingPTLXFull_"]
+        assert meta["coalescing"] == "native-validgap-endpoint-scatter-64x64-tiles"
+        assert meta["chunked_payload"] is True
+        assert meta["chunk_index"] == index
+        assert meta["chunk_size_limit"] == 16
+        assert meta["chunk_tile_count"] == 16
+        assert meta["tile_count"] == 16
+        assert meta["datadsc_count"] == 64
 
 
 def test_streaming_ptlx_validgap_consumer_full_bridge_contracts_but_needs_values():
