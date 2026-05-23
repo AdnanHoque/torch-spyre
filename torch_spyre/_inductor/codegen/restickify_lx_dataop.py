@@ -793,6 +793,99 @@ def generate_validgap_ptlx_consumer_endpoint_adapter_tile_sdsc(
     }
 
 
+def generate_native_ptlx_validgap_endpoint_tile_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+    *,
+    tile_index: int = 0,
+) -> dict[str, Any]:
+    """Emit gather -> native PT-LX transform -> valid-gap endpoint adapter.
+
+    This is the first controlled bundle that places the accepted valid-gap
+    endpoint adapter behind the native local PT-LX restickify sidecar.  It
+    intentionally drops the native helper's final scatter data-op, because the
+    valid-gap adapter is the consumer-facing write for this probe.
+    """
+
+    native_payload = generate_streaming_ptlx_native_tile_bridge_sdsc(
+        f"{name}_native_tile{tile_index}",
+        streaming_artifact,
+        tile_index=tile_index,
+        direction="kernel-to-output",
+    )
+    adapter_payload = generate_validgap_ptlx_consumer_endpoint_adapter_tile_sdsc(
+        f"{name}_validgap_endpoint_tile{tile_index}",
+        streaming_artifact,
+        tile_index=tile_index,
+    )
+    native_root = copy.deepcopy(next(iter(native_payload.values())))
+    native_root["datadscs_"] = list(native_root.get("datadscs_", []) or [])[:2]
+    native_root["opFuncsUsed_"] = [
+        next(iter(datadsc.values()))["op"]["name"]
+        for datadsc in native_root["datadscs_"]
+    ]
+    native_root["coreIdToDscSchedule"] = _sequential_dataop_schedule(
+        _as_int(native_root["numCoresUsed_"]),
+        len(native_root["datadscs_"]),
+    )
+    adapter_root = copy.deepcopy(next(iter(adapter_payload.values())))
+
+    combined_payload = combine_dataop_sdscs(
+        name,
+        [{f"{name}_native_prefix": native_root}, adapter_payload],
+    )
+    combined = next(iter(combined_payload.values()))
+    stage_core_ids = [
+        list(next(iter(datadsc.values())).get("coreIdsUsed_", []) or [])
+        for datadsc in combined.get("datadscs_", []) or []
+    ]
+    num_cores = max(
+        [0]
+        + [
+            int(core)
+            for core_ids in stage_core_ids
+            for core in core_ids
+        ]
+    ) + 1
+    combined["numCoresUsed_"] = num_cores
+    combined["coreFoldProp_"] = {"factor_": num_cores, "label_": "core"}
+    combined["coreIdToDscSchedule"] = _sparse_dataop_schedule(
+        num_cores,
+        stage_core_ids,
+    )
+    combined["N_"] = {
+        "name_": "n",
+        "j_": (native_root.get("N_") or {}).get("j_", 64),
+        "i_": (native_root.get("N_") or {}).get("i_", 1),
+        "out_": (adapter_root.get("N_") or {}).get("out_", 64),
+        "mb_": (adapter_root.get("N_") or {}).get("mb_", 64),
+        "in_": (adapter_root.get("N_") or {}).get("in_", 64),
+    }
+    combined["unpadN_"] = {
+        "name_": "unpadn",
+        "j_": -1,
+        "i_": -1,
+        "out_": -1,
+        "mb_": -1,
+        "in_": -1,
+    }
+    combined["streamingPTLXNativeTile_"] = {}
+    combined["streamingPTLXValidGapEndpointAdapterTile_"] = copy.deepcopy(
+        adapter_root["streamingPTLXValidGapEndpointAdapterTile_"]
+    )
+    combined["streamingPTLXNativeValidGapEndpointTile_"] = {
+        "tile_index": int(tile_index),
+        "native_dataops_kept": 2,
+        "native_scatter_omitted": True,
+        "endpoint_adapter": "validgap",
+        "datadsc_count": len(combined.get("datadscs_", []) or []),
+        "status": "static-codegen-only",
+        "semantic_transform_certified": False,
+        "fallback": "ReStickifyOpHBM",
+    }
+    return combined_payload
+
+
 def generate_streaming_ptlx_direct_tile_bridge_sdsc(
     name: str,
     streaming_artifact: Mapping[str, Any],

@@ -24,6 +24,7 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     generate_ptlx_restickify_bridge_sdsc,
     generate_restickify_dataop_sdsc_from_spec,
     generate_native_ptlx_consumer_endpoint_adapter_tile_sdsc,
+    generate_native_ptlx_validgap_endpoint_tile_bridge_sdsc,
     generate_streaming_lx_remap_full_bridge_sdsc,
     generate_streaming_ptlx_direct_full_bridge_sdsc,
     generate_streaming_ptlx_direct_tile_bridge_sdsc,
@@ -1059,6 +1060,42 @@ def test_validgap_ptlx_consumer_endpoint_adapter_tile_reuses_validgap_contract()
     assert value_contract["restickify_count"] == 1
     assert value_contract["rows"][0]["input_live_elements"] == 64 * 64
     assert value_contract["rows"][0]["output_live_elements"] == 64 * 64
+
+
+def test_native_ptlx_validgap_endpoint_tile_bridge_omits_native_scatter():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=1,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=1)
+
+    payload = generate_native_ptlx_validgap_endpoint_tile_bridge_sdsc(
+        "native_validgap_endpoint",
+        artifact,
+    )
+
+    root = payload["native_validgap_endpoint"]
+    ops = [next(iter(datadsc.values()))["op"]["name"] for datadsc in root["datadscs_"]]
+    contract = root["streamingPTLXNativeValidGapEndpointTile_"]
+    value_contract = _streaming_bridge_value_preservation_contract(root)
+
+    assert ops == ["STCDPOpLx", "ReStickifyOpWithPTLx", "ReStickifyOpWithPTLx"]
+    assert contract["native_dataops_kept"] == 2
+    assert contract["native_scatter_omitted"] is True
+    assert contract["endpoint_adapter"] == "validgap"
+    assert contract["semantic_transform_certified"] is False
+    assert root["streamingPTLXValidGapEndpointAdapterTile_"][
+        "adapter_reinterprets_native_workspace"
+    ] is True
+    assert value_contract["restickify_count"] == 2
+    assert value_contract["rows"][0]["valid"] is True
+    assert value_contract["rows"][1]["valid"] is True
 
 
 def test_streaming_ptlx_validgap_consumer_full_bridge_contracts_but_needs_values():
