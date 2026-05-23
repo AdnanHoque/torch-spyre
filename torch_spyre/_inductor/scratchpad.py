@@ -834,7 +834,8 @@ def _is_probably_pt_consumer(op: Operation) -> bool:
 
 
 def _is_ptlx_restickify_source_candidate(op: Operation) -> bool:
-    if getattr(op, "restickify_source_kind", None) != "in_graph_computed":
+    source_kind = getattr(op, "restickify_source_kind", None)
+    if source_kind is not None and source_kind != "in_graph_computed":
         return False
     certificate = getattr(op, LOCALITY_CERTIFICATE_ATTR, None)
     if (

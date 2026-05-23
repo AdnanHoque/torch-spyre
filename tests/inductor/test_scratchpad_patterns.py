@@ -714,6 +714,46 @@ class TestExamplePattern(TestCase):
             "overlaps": [],
         }
 
+    def test_ptlx_restickify_endpoint_allocation_allows_missing_source_kind(self):
+        buffers = make_buffer_registry(
+            {
+                "arg": 128,
+                "producer_out": 128,
+                "restickify_out": 128,
+                "graph_out": 128,
+            }
+        )
+        ops = make_operations(
+            [
+                ("producer_add", "arg", "producer_out"),
+                ("restickify", "producer_out", "restickify_out"),
+                ("consumer_add", "restickify_out", "graph_out"),
+            ],
+            buffers,
+        )
+        restickify = ops[1]
+        restickify.restickify_source_name = "producer_out"
+        setattr(
+            restickify,
+            LOCALITY_CERTIFICATE_ATTR,
+            SimpleNamespace(locality_certified=True, certified_byte_hops=0),
+        )
+        pattern = Pattern(
+            buffers,
+            ops,
+            make_nonevicting_allocation_result(buffers, {}, ops),
+        )
+        lowering = MockGraphLowering(pattern)
+        alloc = NoAllowlistInstrumentedAllocator(pattern, lowering)
+        strategy = InstrumentedGreedyAllocationStrategy(pattern, alloc, lowering)
+
+        with config.patch(restickify_ptlx_mixed_schedule_e2e=True):
+            scratchpad_planning(pattern.operations, strategy)
+
+        assert set(alloc.allocations) == {"producer_out", "restickify_out"}
+        endpoint_allocation = getattr(restickify, PTLX_ENDPOINT_ALLOCATION_ATTR)
+        assert endpoint_allocation["overlap_check"]["valid"] is True
+
     def test_streaming_ptlx_endpoint_requires_internal_non_pt_consumer(self):
         buffers = make_buffer_registry(
             {
