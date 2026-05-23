@@ -100,6 +100,21 @@ summary ok=8 fail=0
 HBM=0 for every successful chunk
 ```
 
+## Larger Shape Smoke
+
+The same default row-chunk path was checked on larger `matmul_then_add` sizes
+without launching hardware:
+
+| Size | Chunk Files | Tiles/Chunk | DataOps/Chunk | Schedule Holes | Export Sample |
+|---:|---:|---:|---:|---:|---|
+| 1024 | 16 | 16 | 64 | 0 | chunks 0, 1, 8, 15 rc=0, `HBM=0` |
+| 2048 | 32 | 32 | 128 | 0 | chunks 0, 1, 16, 31 rc=0, `HBM=0` |
+
+The 2048 sample is important because this is the high-signal size where the
+stock HBM restickify path was most interesting in earlier measurements. The
+row-chunk sidecar now generates bounded, dense-schedule, no-HBM programs for
+representative chunks at that size.
+
 ## Interpretation
 
 Chunking is the right direction for the IBUFF problem, and the chunk boundary
