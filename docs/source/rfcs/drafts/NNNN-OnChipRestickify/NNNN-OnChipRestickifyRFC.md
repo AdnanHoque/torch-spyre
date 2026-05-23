@@ -27,7 +27,7 @@ correctness proof:
 | Tier | Capability | New deeptools surface | Status / proof |
 |---|---|---|---|
 | 0 | Producer-aligned work division (no movement; reduce ring byte-hops *inside* the HBM world) | none | Prototyped (≈1.03× @2048) |
-| 1 | **Same-stick cross-core transport** (replace HBM restickify when no layout change is needed) | mixed-bundle import + consumer binding | Fabric op proven; needs packaging |
+| 1 | **Same-layout cross-core handoff** (general on-chip LX remap; keeps re-partitioned activations on-chip — *not* a restickify replacement) | multi-op SuperDSC import + consumer binding | Fabric op proven; needs packaging |
 | 2 | **Layout-changing PT/LX bridge** (replace HBM restickify with on-chip transpose) | Tier-1 contracts + remote-fragment-aware coordinate remap | Value-correct on aligned shape (≈1.3× @2048); needs the transform primitive to generalize |
 
 Tier 0 is in scope for the Inductor backend today and requires no deeptools
@@ -130,66 +130,92 @@ Default-off, correctness-preserving (existing restickify tests pass).
 **Dependencies.** None outside the Inductor backend. Tier 0 is the only tier
 shippable without deeptools changes and should land first.
 
-### Tier 1 — Same-stick cross-core transport
+### Tier 1 — Same-layout cross-core handoff (general on-chip LX remap)
 
-**What.** For an in-graph edge whose producer output and consumer input require
-the **same stick layout** but live on the **wrong cores**, replace
-`ReStickifyOpHBM` with an in-bundle `STCDPOpLx` / `InputFetchNeighbor` cross-core
-LX→LX move. No transpose is involved, so there is no value transform to certify
-— the only correctness object is the address map.
+**What — and what it is *not*.** Tier 1 is **not** a restickify replacement. A
+same-layout re-partition does not produce a `ReStickifyOpHBM` at all:
+`compute_restickify_needed` only fires on stick *incompatibility*. When a
+producer and consumer share a stick layout but the consumer re-partitions the
+data across cores differently, the activation simply round-trips HBM at the
+**bundle/SDSC boundary** (how separate SDSCs hand off). Tier 1 is therefore a
+**general internal LX-remap / on-chip handoff**: keep that same-layout activation
+resident in LX and move the re-partitioned bytes core-to-core over the ring,
+instead of spilling the whole activation to HBM and reloading it.
 
-**Eligibility gate** (all must hold; else fall back to HBM):
+**Customers.** This is the substrate for the on-chip collective patterns, not
+restickify: MoE token dispatch/combine (all-to-all), tensor-parallel all-gather
+between sharded GEMMs, and residual / elementwise joins across divergent core
+splits. The reduce half already exists (`CrossCoreReduceOpLx`); Tier 1 adds the
+gather / scatter / all-to-all half. (Restickify itself is a Tier 2 customer,
+since it changes the stick.)
 
-- `source_kind == in_graph_computed`;
-- producer output `SpyreTensorLayout` stick order **equals** consumer required
-  stick order (this gate is what separates Tier 1 from Tier 2);
-- producer core ownership differs from consumer core ownership (else the edge is
-  already free);
-- producer, edge, and consumer are co-schedulable in one fused bundle.
+**Eligibility** (all must hold; else leave the stock HBM handoff in place):
 
-**Out of scope for Tier 1.** Stick-changing edges (Tier 2); graph-input,
-weight, constant, and persistent-state sources (prelayout, separate work);
-cross-bundle edges (LX does not survive a launch boundary).
+- the edge is an in-graph producer→consumer activation handoff;
+- producer output and consumer input share the same stick layout (no transpose —
+  this separates Tier 1 from Tier 2);
+- producer and consumer core ownership differ (else the handoff is already
+  local);
+- producer and consumer can be co-scheduled into one SuperDSC (see Realization).
 
-**Inductor-side design.**
+**Out of scope.** Stick-changing edges (Tier 2); graph-input / weight /
+constant / persistent-state sources (prelayout); cross-bundle edges where LX
+cannot persist.
 
-1. *Reuse Tier 0 metadata.* Producer ownership from `decode_op_splits`, the
-   consumer's committed split from `finalize_layouts`, and the dimension
-   correspondence from the restickify symbol map.
-2. *Build a transfer plan.* For each consumer-owned tile, list the producer
-   core(s) and LX offsets holding its bytes. Because the stick is unchanged this
-   is a pure address remap `(src_core, src_lx_off) → (dst_core, dst_lx_off)` with
-   no coordinate arithmetic.
-3. *Emit one mixed SuperDSC.* Consumer DL op in `dscs_`, transport op(s) in
-   `dataOpdscs_`, and `coreIdToDscSchedule` entries running the transport before
-   the consumer. The schedule step form is
-   `[datadsc_idx, dldsc_idx, after_sync, before_sync]`.
-4. *Default-off flag; HBM fallback* whenever any gate fails.
+**Architecture — a planner, in two stages.** The on-chip realization is *not*
+self-contained in one inductor pass, because the on-chip unit is the **SDSC**,
+not the bundle: `generate_bundle` emits one SDSC per op, and LX does not persist
+across `sdsc_execute`, so even same-*bundle* op-to-op handoff goes through HBM.
 
-**Value-correctness contract.** Same-stick transport is identity on values, so
-the certificate reduces to: (a) the address map is consistent with ownership
-metadata (checkable offline), and (b) single-bundle LX lifetime — the producer
+1. *Detection / planning (inductor, after `work_distribution`).* Core ownership
+   is known after work division. A new pass — best framed as an **extension of
+   LX-residency / scratchpad planning** rather than a standalone op — detects
+   same-layout edges whose producer/consumer ownership differs and that would
+   otherwise spill to HBM, and builds the transfer plan: for each consumer-owned
+   tile, the producer core(s) and LX offsets holding its bytes. Because the stick
+   is unchanged this is a pure address remap
+   `(src_core, src_lx_off) → (dst_core, dst_lx_off)`, no coordinate arithmetic.
+   Reuse the ownership / symbol-map / byte-hop primitives from
+   `restickify_ring.py` (Tier 0); do **not** hang this off `insert_restickify.py`
+   — these edges are not restickifies. Note: such edges are **invisible to the
+   existing restickify telemetry**, so detecting them is itself net-new and is
+   the planner's first job.
+2. *Realization (SDSC codegen, gated on the Foundation contract).* Keeping the
+   intermediate LX-resident across the edge requires co-scheduling producer and
+   consumer into one SuperDSC with the cross-core transfer as a scheduled step
+   (`coreIdToDscSchedule`). Stock deeptools will not do this from bundle import
+   (`runDcgForDlOpsStandalone` is one-op-per-SDSC), so this stage depends on the
+   Foundation contract below. **The planner must fail closed:** when the contract
+   is absent or any gate fails, leave the stock HBM handoff in place.
+
+**Value-correctness contract.** Same-layout transport is identity on values, so
+the certificate reduces to (a) the address map is consistent with ownership
+metadata (checkable offline) and (b) single-SuperDSC LX lifetime — the producer
 output LX is live when the transport reads, and the transport output LX *is* the
 consumer's input endpoint.
 
 **Why Tier 1 should generalize across shapes.** The multi-source same-stick
 gather was bitwise-verified across all 32 cores at arbitrary ownership in the
 prototype (HBM=0). Unlike Tier 2, Tier 1's gather is a *proven* fabric op for
-every shape; the only open work is packaging, not a missing op.
+every shape; the open work is packaging, not a missing op.
 
 **Deeptools requirement — the Foundation contract (shared with Tier 2).**
 
-1. *Mixed DL + data-op bundle import.* DXP bundle import currently rejects any
-   SuperDSC carrying `dataOpdscs_` ("Datadsc not allowed, use dldsc"). Accept it
-   when `dscs_` and a populated `coreIdToDscSchedule` coexist, and route such
-   SuperDSCs through `runDcgForDataOpsDlOps`. A ≈50-line patch of this shape
-   already exists in tree (see Prior Art) and was shown sufficient to lower the
-   mixed SuperDSC HBM-free under standalone DCC.
+1. *Multi-op SuperDSC codegen reachable from bundle import.* The codegen that
+   keeps an intermediate in LX across multiple scheduled ops
+   (`runDcgForDataOpsDlOps`) already **exists** in deeptools but is not reachable
+   from bundle import — stock `dxp.cpp` only dispatches to `runDcg`
+   (data-op-only) or `runDcgForDlOpsStandalone` (one DL op per SDSC), and import
+   rejects any SuperDSC carrying `dataOpdscs_` ("Datadsc not allowed, use
+   dldsc"). The change **wires an existing function** (≈50-line patch in tree,
+   see Prior Art: relax the import gate when `dscs_` + a populated
+   `coreIdToDscSchedule` coexist, and route to `runDcgForDataOpsDlOps`); it is
+   *not* a new fabric primitive. It was shown sufficient to lower the multi-op
+   SuperDSC HBM-free under standalone DCC.
 2. *A supported producer→consumer LX binding hook.* The current graph API binds
-   by graph-port index (`Edge::Pair.index_`), which is not the internal
-   `labeledDs_` index the consumer input needs. A first-class hook is required
-   so the transport output can be bound to a specific consumer input without
-   launch-time artifact splicing.
+   by graph-port index (`Edge::Pair.index_`), not the internal `labeledDs_`
+   index the consumer input needs. A first-class hook lets the transport output
+   bind to a specific consumer input without launch-time artifact splicing.
 
 ### Tier 2 — Layout-changing PT/LX bridge
 
