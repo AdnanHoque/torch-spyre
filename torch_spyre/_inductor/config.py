@@ -132,6 +132,18 @@ restickify_ptlx_native_tile_e2e: bool = (
     os.environ.get("SPYRE_RESTICKIFY_PTLX_NATIVE_TILE_E2E", "0") == "1"
 )
 
+# Default-off diagnostic follow-up to native tiled PT-LX. When enabled, the
+# streaming sidecar keeps the native local PT-LX transform and appends the
+# validGap consumer endpoint adapter, so the emitted candidate reaches the
+# consumer LX endpoint shape instead of stopping at the native tile workspace.
+restickify_ptlx_native_validgap_endpoint_tile_e2e: bool = (
+    os.environ.get(
+        "SPYRE_RESTICKIFY_PTLX_NATIVE_VALIDGAP_ENDPOINT_TILE_E2E",
+        "0",
+    )
+    == "1"
+)
+
 # Default-off validation switch for the native 64x64 tile contract. This is
 # intentionally separate from restickify_ptlx_native_tile_e2e so the compiler
 # can generate/audit the candidate without claiming value correctness.

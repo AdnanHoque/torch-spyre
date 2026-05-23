@@ -42,6 +42,7 @@ from .restickify_lx_dataop import (
     generate_streaming_lx_remap_full_bridge_sdsc,
     generate_streaming_ptlx_direct_full_bridge_sdsc,
     generate_streaming_ptlx_native_full_bridge_sdsc,
+    generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc,
 )
 from .restickify_ptlx_streaming import (
     generate_streaming_ptlx_artifact,
@@ -315,11 +316,20 @@ def _streaming_bridge_candidate(
             )
         elif direction == "kernel-to-output":
             bridge_lowering = "three-stage-gather-transform-scatter"
-            payload = generate_streaming_ptlx_native_full_bridge_sdsc(
-                f"{idx}_LXNeighborStreamingThreeStageReStickifyOpWithPTLx",
-                artifact,
-                direction=direction,
-            )
+            if _spyre_config.restickify_ptlx_native_validgap_endpoint_tile_e2e:
+                bridge_lowering = "native-transform-validgap-endpoint-adapter"
+                payload = (
+                    generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
+                        f"{idx}_LXNeighborStreamingNativeValidGapEndpointReStickifyOpWithPTLx",
+                        artifact,
+                    )
+                )
+            else:
+                payload = generate_streaming_ptlx_native_full_bridge_sdsc(
+                    f"{idx}_LXNeighborStreamingThreeStageReStickifyOpWithPTLx",
+                    artifact,
+                    direction=direction,
+                )
         else:
             bridge_lowering = "direct-ptlx-diagnostic"
             payload = generate_streaming_ptlx_direct_full_bridge_sdsc(
@@ -724,6 +734,14 @@ def _bridge_consumer_endpoint_adapter_contract(
                 "endpoint_contract": "missing-consumer-endpoint-adapter",
                 "production_blocker": (
                     "native-ptlx-output-needs-consumer-endpoint-adapter"
+                ),
+            },
+            {
+                "name": "native-validgap-endpoint-64x64-tiles",
+                "role": "native-local-transform-plus-consumer-endpoint-probe",
+                "endpoint_contract": "can-compile-consumer-endpoint-adapter",
+                "production_blocker": (
+                    "native-validgap-endpoint-tile-lacks-hardware-value-proof"
                 ),
             },
             {

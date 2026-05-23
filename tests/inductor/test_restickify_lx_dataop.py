@@ -31,6 +31,7 @@ from torch_spyre._inductor.codegen.restickify_lx_dataop import (
     generate_streaming_ptlx_full_bridge_sdsc,
     generate_streaming_ptlx_native_full_bridge_sdsc,
     generate_streaming_ptlx_native_tile_bridge_sdsc,
+    generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc,
     generate_streaming_ptlx_tile_bridge_sdsc,
     generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc,
     generate_streaming_ptlx_validgap_consumer_tile_bridge_sdsc,
@@ -1098,6 +1099,49 @@ def test_native_ptlx_validgap_endpoint_tile_bridge_omits_native_scatter():
     assert value_contract["rows"][1]["valid"] is True
 
 
+def test_streaming_ptlx_native_validgap_endpoint_full_bridge_combines_tiles():
+    source = {"mb": 32, "out": 1}
+    dest = {"mb": 4, "out": 8}
+    summary = plan_streaming_ptlx_tiles(
+        size=512,
+        source_work_slices=source,
+        source_core_mapping=default_core_mapping(source),
+        dest_work_slices=dest,
+        dest_core_mapping=default_core_mapping(dest),
+        sample_limit=2,
+    )
+    artifact = generate_streaming_ptlx_artifact("streaming", summary, max_tiles=2)
+
+    payload = generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
+        "native_validgap_full",
+        artifact,
+    )
+
+    root = payload["native_validgap_full"]
+    contract = _streaming_value_flow_contract(
+        bridge_payload=payload,
+        producer_base=0,
+        consumer_base=256 * 1024,
+        expected_tiles=2,
+    )
+
+    assert len(root["datadscs_"]) == 6
+    assert root["streamingPTLXFull_"]["coalescing"] == (
+        "native-validgap-endpoint-64x64-tiles"
+    )
+    assert root["streamingPTLXFull_"]["validgap_endpoint_adapter_contract"] is True
+    assert root["streamingPTLXFull_"]["semantic_transform_certified"] is False
+    assert root["streamingPTLXFull_"]["fallback"] == "ReStickifyOpHBM"
+    assert contract["endpoint_contract_valid"] is True
+    assert contract["value_preservation_valid"] is True
+    assert contract["semantic_transform_certified"] is False
+    assert contract["validgap_tile_count"] == 2
+    assert contract["gather_count"] == 2
+    assert contract["production_blocker"] == (
+        "native-validgap-endpoint-tile-lacks-hardware-value-proof"
+    )
+
+
 def test_streaming_ptlx_validgap_consumer_full_bridge_contracts_but_needs_values():
     source = {"mb": 32, "out": 1}
     dest = {"mb": 4, "out": 8}
@@ -1464,6 +1508,27 @@ def test_streaming_ptlx_bridge_selector_uses_native_tiles_when_enabled():
     assert next(iter(native.values()))["streamingPTLXFull_"]["coalescing"] == (
         "native-64x64-tiles"
     )
+
+    with config.patch(restickify_ptlx_native_validgap_endpoint_tile_e2e=True):
+        native_validgap = _generate_streaming_ptlx_bridge_payload(
+            "native_validgap",
+            artifact,
+        )
+    native_validgap_contract = _streaming_value_flow_contract(
+        bridge_payload=native_validgap,
+        producer_base=0,
+        consumer_base=256 * 1024,
+        expected_tiles=2,
+    )
+    assert native_validgap_contract["endpoint_contract_valid"] is True
+    assert native_validgap_contract["value_preservation_valid"] is True
+    assert native_validgap_contract["semantic_transform_certified"] is False
+    assert native_validgap_contract["production_blocker"] == (
+        "native-validgap-endpoint-tile-lacks-hardware-value-proof"
+    )
+    assert next(iter(native_validgap.values()))["streamingPTLXFull_"][
+        "coalescing"
+    ] == "native-validgap-endpoint-64x64-tiles"
 
     with config.patch(
         restickify_ptlx_direct_tile_e2e=True,

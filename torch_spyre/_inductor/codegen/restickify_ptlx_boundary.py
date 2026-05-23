@@ -46,6 +46,7 @@ from .restickify_lx_dataop import (
     generate_streaming_ptlx_direct_full_bridge_sdsc,
     generate_streaming_ptlx_full_bridge_sdsc,
     generate_streaming_ptlx_native_full_bridge_sdsc,
+    generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc,
     generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc,
 )
 from .restickify_ptlx_streaming import (
@@ -2086,7 +2087,10 @@ def _streaming_value_flow_contract(
                 _piece_lx_starts(dataop["labeledDs_"][-1].get("PieceInfo", []) or [])
             )
         if (
-            "validgap_consumer_tile" in str(name)
+            (
+                "validgap_consumer_tile" in str(name)
+                or "validgap_endpoint_adapter_tile" in str(name)
+            )
             and op_name == "ReStickifyOpWithPTLx"
         ):
             validgap_tile_count += 1
@@ -2117,6 +2121,13 @@ def _streaming_value_flow_contract(
             and direct_tile_count == int(expected_tiles)
         )
     elif coalescing == "validgap-consumer-64x64-tiles":
+        tile_count = int(full_meta.get("tile_count", logical_tile_count) or 0)
+        count_contract_valid = (
+            tile_count == int(expected_tiles)
+            and gather_count == int(expected_tiles)
+            and validgap_tile_count == int(expected_tiles)
+        )
+    elif coalescing == "native-validgap-endpoint-64x64-tiles":
         tile_count = int(full_meta.get("tile_count", logical_tile_count) or 0)
         count_contract_valid = (
             tile_count == int(expected_tiles)
@@ -2338,6 +2349,8 @@ def _streaming_production_requirements(
         blocker = "native-ptlx-tile-lacks-consumer-fragment-coordinate-map"
     elif coalescing == "validgap-consumer-64x64-tiles":
         blocker = "validgap-consumer-tile-lacks-hardware-value-proof"
+    elif coalescing == "native-validgap-endpoint-64x64-tiles":
+        blocker = "native-validgap-endpoint-tile-lacks-hardware-value-proof"
     else:
         blocker = "stcdp-gather-scatter-does-not-certify-stick-layout-transform"
     return {
@@ -2510,6 +2523,13 @@ def _streaming_semantic_transform_certificate(root: dict[str, Any]) -> dict[str,
             "source": "uncertified",
             "forced": False,
         }
+    if meta.get("coalescing") == "native-validgap-endpoint-64x64-tiles":
+        return {
+            "certified": False,
+            "reason": "native-validgap-endpoint-ptlx-tile-needs-hardware-value-validation",
+            "source": "uncertified",
+            "forced": False,
+        }
     if meta.get("coalescing") == "native-64x64-tiles":
         if _spyre_config.restickify_ptlx_force_native_tile_e2e:
             return {
@@ -2618,6 +2638,14 @@ def _generate_streaming_ptlx_bridge_payload(
     *,
     direction: str = "kernel-to-output",
 ) -> dict[str, Any]:
+    if (
+        direction == "kernel-to-output"
+        and _spyre_config.restickify_ptlx_native_validgap_endpoint_tile_e2e
+    ):
+        return generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
+            name,
+            artifact,
+        )
     if _spyre_config.restickify_ptlx_validgap_consumer_tile_e2e:
         return generate_streaming_ptlx_validgap_consumer_full_bridge_sdsc(
             name,

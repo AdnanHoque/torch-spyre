@@ -886,6 +886,72 @@ def generate_native_ptlx_validgap_endpoint_tile_bridge_sdsc(
     return combined_payload
 
 
+def generate_streaming_ptlx_native_validgap_endpoint_full_bridge_sdsc(
+    name: str,
+    streaming_artifact: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Combine every native PT-LX + valid-gap endpoint tile into one payload."""
+
+    descriptor = _single_streaming_descriptor(streaming_artifact)
+    tiles = descriptor.get("tiles") or []
+    if not tiles:
+        raise ValueError("streaming descriptor has no materialized tiles")
+
+    roots: list[dict[str, Any]] = []
+    all_datadscs: list[dict[str, Any]] = []
+    combined_schedule: dict[str, list[list[int]]] = {}
+    offset = 0
+    for tile_index in range(len(tiles)):
+        tile_payload = generate_native_ptlx_validgap_endpoint_tile_bridge_sdsc(
+            f"{name}_native_validgap_endpoint_tile{tile_index}",
+            streaming_artifact,
+            tile_index=tile_index,
+        )
+        tile_root = copy.deepcopy(next(iter(tile_payload.values())))
+        roots.append(tile_root)
+        tile_datadscs = tile_root.get("datadscs_", []) or []
+        all_datadscs.extend(tile_datadscs)
+        for core_id, steps in (tile_root.get("coreIdToDscSchedule") or {}).items():
+            core_steps = combined_schedule.setdefault(str(core_id), [])
+            for step in steps:
+                adjusted = list(step)
+                adjusted[0] = int(adjusted[0]) + offset
+                core_steps.append(adjusted)
+        offset += len(tile_datadscs)
+
+    combined = copy.deepcopy(roots[0])
+    combined["datadscs_"] = all_datadscs
+    combined["numCoresUsed_"] = max(_as_int(root["numCoresUsed_"]) for root in roots)
+    combined["coreFoldProp_"] = {
+        "factor_": combined["numCoresUsed_"],
+        "label_": "core",
+    }
+    for core_id in range(combined["numCoresUsed_"]):
+        combined_schedule.setdefault(str(core_id), [])
+    combined["coreIdToDscSchedule"] = _with_local_schedule_dependencies(
+        combined_schedule
+    )
+    combined["opFuncsUsed_"] = [
+        next(iter(datadsc.values()))["op"]["name"] for datadsc in all_datadscs
+    ]
+    combined["streamingPTLXNativeTile_"] = {}
+    combined["streamingPTLXValidGapEndpointAdapterTile_"] = {}
+    combined["streamingPTLXNativeValidGapEndpointTile_"] = {}
+    combined["streamingPTLXFull_"] = {
+        "status": "static-codegen-only",
+        "coalescing": "native-validgap-endpoint-64x64-tiles",
+        "direction": "kernel-to-output",
+        "tile_count": len(tiles),
+        "logical_tile_count": _as_int(descriptor.get("total_tiles", len(tiles))),
+        "datadsc_count": len(all_datadscs),
+        "native_local_transform_contract": True,
+        "validgap_endpoint_adapter_contract": True,
+        "semantic_transform_certified": False,
+        "fallback": "ReStickifyOpHBM",
+    }
+    return {name: combined}
+
+
 def generate_streaming_ptlx_direct_tile_bridge_sdsc(
     name: str,
     streaming_artifact: Mapping[str, Any],
