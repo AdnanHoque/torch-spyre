@@ -1,0 +1,9 @@
+## rep 1
+BENCH size=2048 baseline_HBM median_ms=1.5344 min_ms=1.5066 max_err=0.013672
+BENCH size=2048 spliced=/tmp/spliced-stcdp median_ms=1.3213 min_ms=1.2860 max_err=0.013672
+BENCH size=2048 spliced=/tmp/spliced-roundtrip median_ms=1.3392 min_ms=1.3138 max_err=0.013672
+## rep 2
+BENCH size=2048 baseline_HBM median_ms=1.5410 min_ms=1.5143 max_err=0.013672
+BENCH size=2048 spliced=/tmp/spliced-stcdp median_ms=1.3062 min_ms=1.2905 max_err=0.013672
+BENCH size=2048 spliced=/tmp/spliced-roundtrip median_ms=1.3403 min_ms=1.3185 max_err=0.013672
+DONE

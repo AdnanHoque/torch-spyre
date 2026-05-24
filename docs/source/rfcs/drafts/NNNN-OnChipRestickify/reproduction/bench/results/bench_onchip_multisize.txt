@@ -1,0 +1,17 @@
+## size 512
+BENCH size=512 baseline_HBM median_ms=0.0957 min_ms=0.0930 max_err=0.004883
+BENCH size=512 spliced=/tmp/spliced-stcdp-512 median_ms=0.1006 min_ms=0.0934 max_err=0.004883
+BENCH size=512 spliced=/tmp/spliced-roundtrip-512 median_ms=0.1067 min_ms=0.1014 max_err=0.004883
+## size 1024
+BENCH size=1024 baseline_HBM median_ms=0.3202 min_ms=0.3119 max_err=0.007812
+BENCH size=1024 spliced=/tmp/spliced-stcdp-1024 median_ms=0.2629 min_ms=0.2554 max_err=0.007812
+BENCH size=1024 spliced=/tmp/spliced-roundtrip-1024 median_ms=0.2768 min_ms=0.2642 max_err=0.007812
+## size 2048
+BENCH size=2048 baseline_HBM median_ms=1.5570 min_ms=1.5316 max_err=0.013672
+BENCH size=2048 spliced=/tmp/spliced-stcdp median_ms=1.3127 min_ms=1.2902 max_err=0.013672
+BENCH size=2048 spliced=/tmp/spliced-roundtrip median_ms=1.3294 min_ms=1.3103 max_err=0.013672
+## size 4096
+BENCH size=4096 baseline_HBM median_ms=7.9100 min_ms=7.8216 max_err=0.031250
+BENCH size=4096 spliced=/tmp/spliced-stcdp-4096 median_ms=7.0151 min_ms=6.9068 max_err=0.031250
+BENCH size=4096 spliced=/tmp/spliced-roundtrip-4096 median_ms=7.1389 min_ms=7.0587 max_err=6.148438
+DONE

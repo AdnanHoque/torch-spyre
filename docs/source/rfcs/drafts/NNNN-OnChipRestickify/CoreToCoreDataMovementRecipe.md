@@ -891,18 +891,29 @@ bandwidth-bound decode and MoE at mid-size hidden dimensions.
 
 ---
 
-## Appendix: file index (all paths absolute)
+## Appendix: file index
+
+The reproduction scripts now live in-repo under `reproduction/` (relative to this
+recipe); they were originally developed as throwaway scripts in `/tmp`. See
+`reproduction/README.md` for the env-var contract and run order. Toolchain and
+on-disk-artifact paths below remain machine-absolute.
 
 | Role | Path |
 |---|---|
-| Synthesizer (emission core) | `/tmp/tier-up/torch_spyre/_inductor/codegen/onchip_bridge.py` |
-| Splice — same-core STCDP (2048) | `/tmp/splice_2048_stcdp.py` |
-| Splice — cross-core round trip (2048) | `/tmp/splice_2048_roundtrip.py` |
-| Splice — Tier-2 transpose (FAULTS) | `/tmp/splice_2048_bmm.py` |
-| Splice — size-parameterized (`SPLICE_SIZE`) | `/tmp/splice_onchip_stcdp.py`, `/tmp/splice_onchip_roundtrip.py` |
-| Device validation — direct | `/tmp/devval_direct.py`, `/tmp/devval_direct.sh` |
-| Device validation — round trip | `/tmp/devval_roundtrip.py`, `/tmp/devval_roundtrip.sh` |
-| Benchmark harness + results | `/tmp/bench_onchip.py`, `/tmp/bench_onchip_results.txt`, `/tmp/bench_onchip_multisize.txt` |
+| Reproduction harness root + operator guide | `reproduction/README.md`, `reproduction/env.sh` |
+| Synthesizer (emission core) | `$ONCHIP_SRC/torch_spyre/_inductor/codegen/onchip_bridge.py` (default `/tmp/tier-up/...`; the on-chip worktree, not copied in) |
+| Splice — same-core STCDP (2048) | `reproduction/splice/splice_2048_stcdp.py` |
+| Splice — cross-core round trip (2048) | `reproduction/splice/splice_2048_roundtrip.py` |
+| Splice — Tier-2 transpose (FAULTS) | `reproduction/splice/splice_2048_bmm.py` |
+| Splice — size-parameterized (`SPLICE_SIZE`) | `reproduction/splice/splice_onchip_stcdp.py`, `reproduction/splice/splice_onchip_roundtrip.py` |
+| Device validation — direct (Tier-2 transpose) | `reproduction/devval/devval_direct.py`, `reproduction/devval/devval_direct.sh` |
+| Device validation — round trip (2048) | `reproduction/devval/devval_roundtrip.py`, `reproduction/devval/devval_roundtrip.sh` |
+| Device validation — round trip FIXED (per size) | `reproduction/devval/devval_roundtrip_fix.py`, `reproduction/devval/devval_roundtrip_fix_{512,1024,2048}.sh` |
+| val-boot import shim | `reproduction/val-boot/sitecustomize.py` |
+| Baseline compile | `reproduction/bench/gen_baseline.py` |
+| Benchmark harness | `reproduction/bench/bench_onchip.py`, `reproduction/bench/bench_onchip_driver.sh`, `reproduction/bench/bench_onchip_multisize.sh` |
+| Benchmark recorded results | `reproduction/bench/results/bench_onchip_results.txt`, `reproduction/bench/results/bench_onchip_multisize.txt` |
+| Handoff analysis | `reproduction/analysis/edge_analyze.py`, `reproduction/analysis/gen_report.py`, `reproduction/analysis/real_edge_analysis.md` |
 | deeptools foundation patch | `/home/adnan/dt-inductor/deeptools_onchip_foundation.patch` |
 | Patched dxp binary | `/home/adnan/dt-inductor/build/deeptools-onchip/dxp/dxp_standalone` |
 | Cross-core senprog (proof) | `/tmp/rt-verbose/debug/sdsc_2_add/senprog.txt` |
