@@ -34,6 +34,7 @@ from .codegen.onchip_bridge import (
     allocate_lx_bases,
     allocate_stream_bases,
     build_same_layout_bridge,
+    build_same_stick_bridge,
     build_streamed_bridge,
     num_stream_tiles,
     per_core_slice_bytes,
@@ -248,16 +249,76 @@ _POINTWISE_HANDOFF_OPS = {
 }
 
 
+def _body(sdsc_json: dict) -> dict:
+    return sdsc_json[next(iter(sdsc_json))]
+
+
 def _dl_op(sdsc_json: dict) -> dict:
     """Return the single DL op dict of an SDSC body's first dsc."""
-    body = sdsc_json[next(iter(sdsc_json))]
-    dsc = body["dscs_"][0]
+    dsc = _body(sdsc_json)["dscs_"][0]
     return dsc[next(iter(dsc))]
 
 
 def _op_name(sdsc_json: dict) -> str:
-    dsc = sdsc_json[next(iter(sdsc_json))]["dscs_"][0]
+    dsc = _body(sdsc_json)["dscs_"][0]
     return next(iter(dsc))
+
+
+def _symbol_dim(dim: str) -> str:
+    return dim if dim.endswith("_") else f"{dim}_"
+
+
+def _lds_by_idx(dl: dict, lds_idx: int) -> dict | None:
+    for lds in dl.get("labeledDs_", []):
+        if lds.get("ldsIdx_") == lds_idx:
+            return lds
+    return None
+
+
+def _primary_ds_info(dl: dict, lds_idx: int) -> dict:
+    lds = _lds_by_idx(dl, lds_idx)
+    if lds is None:
+        return {}
+    role = lds.get("dsType_")
+    return dl.get("primaryDsInfo_", {}).get(role, {})
+
+
+def _stick_dim_for_lds(dl: dict, lds_idx: int) -> str | None:
+    sticks = _primary_ds_info(dl, lds_idx).get("stickDimOrder_", [])
+    if len(sticks) != 1:
+        return None
+    return _symbol_dim(sticks[0])
+
+
+def _layout_for_lds(dl: dict, lds_idx: int) -> list[str] | None:
+    layout = _primary_ds_info(dl, lds_idx).get("layoutDimOrder_", [])
+    if not layout:
+        return None
+    return [_symbol_dim(d) for d in layout]
+
+
+def _single_split_dim(shard: dict[str, int]) -> str | None:
+    split = [d for d, v in shard.items() if v > 1]
+    if len(split) != 1:
+        return None
+    return _symbol_dim(split[0])
+
+
+def _iter_sizes_for_layout(dl: dict, layout: list[str]) -> dict[str, int] | None:
+    sizes = dl.get("N_", {})
+    out: dict[str, int] = {}
+    for dim in layout:
+        if dim not in sizes:
+            return None
+        out[dim] = int(sizes[dim])
+    return out
+
+
+def _handoff_bytes(iter_sizes: dict[str, int], word_length: int) -> int:
+    size = word_length
+    for n in iter_sizes.values():
+        size *= n
+    return size
 
 
 def _core_state_init_entry(lx_base: int) -> dict:
@@ -338,7 +399,21 @@ def _future_consumers(sdscs_json: list[dict], start: int, hbm_addr: str):
         cons = sdscs_json[c]
         cons_dl = _dl_op(cons)
         for in_idx in _consumer_input_indices(cons_dl):
-            if _hbm_base(cons_dl, in_idx) == hbm_addr:
+            if _hbm_base(cons_dl, in_idx) != hbm_addr:
+                continue
+            # Scratch HBM addresses are reused.  Treat an input as belonging to
+            # this producer only when no later producer between start and the
+            # consumer wrote the same address.
+            latest = None
+            for p in range(c - 1, -1, -1):
+                prod_dl = _dl_op(sdscs_json[p])
+                if any(
+                    _hbm_base(prod_dl, out_idx) == hbm_addr
+                    for out_idx in _producer_output_indices(prod_dl)
+                ):
+                    latest = p
+                    break
+            if latest == start:
                 consumers.append((c, cons, in_idx))
     return consumers
 
@@ -352,6 +427,135 @@ def _iter_sizes_from_dl(dl: dict, shard: dict[str, int]) -> dict[str, int] | Non
             return None
         iter_sizes[key] = int(sizes[key])
     return iter_sizes
+
+
+def detect_attention_score_handoff(
+    sdscs_json: list[dict],
+    min_handoff_bytes: int = 1 << 20,
+):
+    """Find stock SDPA's same-stick QK^T score handoff fanout.
+
+    The score matrix feeds both the softmax max and sub nodes.  If the producer
+    is flipped to LX, both consumers must be fed from LX too; realizing only one
+    fanout leg would leave the other consumer reading a stale HBM address.
+
+    The producer and consumers use different internal dim labels for the same
+    logical score matrix.  We use the consumer geometry for the STCDP data-op,
+    matching the proven attention splice: same stick, same linear byte shape,
+    and the consumer's native split/layout.
+    """
+    for p, prod in enumerate(sdscs_json):
+        if _op_name(prod) != "batchmatmul":
+            continue
+        prod_dl = _dl_op(prod)
+        out_indices = _producer_output_indices(prod_dl)
+        if len(out_indices) != 1:
+            continue
+        out_idx = out_indices[0]
+        prod_addr = _hbm_base(prod_dl, out_idx)
+        if prod_addr is None:
+            continue
+
+        consumers = _future_consumers(sdscs_json, p, prod_addr)
+        max_edges = [edge for edge in consumers if _op_name(edge[1]) == "max"]
+        sub_edges = [edge for edge in consumers if _op_name(edge[1]) == "sub"]
+        if len(max_edges) != 1 or len(sub_edges) != 1:
+            continue
+        if any(_op_name(edge[1]) not in {"max", "sub"} for edge in consumers):
+            continue
+
+        prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
+        if prod_stick is None:
+            continue
+        bridged_edges = [max_edges[0], sub_edges[0]]
+        if any(_stick_dim_for_lds(_dl_op(cons), in_idx) != prod_stick
+               for _c, cons, in_idx in bridged_edges):
+            continue
+
+        # Use the sub input as the canonical softmax score geometry; max has
+        # the same score input layout in stock SDPA.
+        _sub_c, sub_cons, sub_in_idx = sub_edges[0]
+        sub_dl = _dl_op(sub_cons)
+        layout = _layout_for_lds(sub_dl, sub_in_idx)
+        if layout is None:
+            continue
+        shard = _body(sub_cons).get("numWkSlicesPerDim_", {})
+        split_dim = _single_split_dim(shard)
+        if split_dim is None:
+            continue
+        num_cores = int(_body(sub_cons).get("numCoresUsed_", 0))
+        if num_cores <= 0:
+            continue
+        iter_sizes = _iter_sizes_for_layout(sub_dl, layout)
+        if iter_sizes is None:
+            continue
+        if split_dim not in iter_sizes or iter_sizes[split_dim] % num_cores != 0:
+            continue
+        lds = _lds_by_idx(prod_dl, out_idx)
+        word_length = int((lds or {}).get("wordLength", 2))
+        handoff_bytes = _handoff_bytes(iter_sizes, word_length)
+        if handoff_bytes < min_handoff_bytes:
+            continue
+        slice_bytes = per_core_slice_bytes(
+            iter_sizes, split_dim, STICK_SIZE, num_cores, word_length
+        )
+        try:
+            bases = allocate_lx_bases(2, slice_bytes, region0=0)
+        except ValueError:
+            continue
+        return {
+            "producer": prod,
+            "producer_out_idx": out_idx,
+            "consumers": bridged_edges,
+            "iter_sizes": iter_sizes,
+            "layout": layout,
+            "stick_dim": prod_stick,
+            "split_dim": split_dim,
+            "num_cores": num_cores,
+            "word_length": word_length,
+            "handoff_bytes": handoff_bytes,
+            "slice_bytes": slice_bytes,
+            "producer_base": bases[0],
+            "consumer_base": bases[1],
+        }
+    return None
+
+
+def realize_attention_score_handoff(
+    sdscs_json: list[dict],
+    min_handoff_bytes: int = 1 << 20,
+) -> bool:
+    edge = detect_attention_score_handoff(sdscs_json, min_handoff_bytes)
+    if edge is None:
+        return False
+
+    prod = edge["producer"]
+    apply_lx_flip(
+        prod,
+        LxFlip(edge["producer_out_idx"], edge["producer_base"], "producer-output"),
+    )
+    for _c, cons, in_idx in edge["consumers"]:
+        apply_lx_flip(cons, LxFlip(in_idx, edge["consumer_base"], "consumer-input"))
+        datadscs, opfuncs, sched = build_same_stick_bridge(
+            dim_pool=edge["layout"],
+            iter_sizes=edge["iter_sizes"],
+            stick_size=STICK_SIZE,
+            num_cores=edge["num_cores"],
+            lx_size=DATAOP_LX_SIZE,
+            src_base=edge["producer_base"],
+            dst_base=edge["consumer_base"],
+            src_layout=edge["layout"],
+            dst_layout=edge["layout"],
+            stick_dim=edge["stick_dim"],
+            src_split_dim=edge["split_dim"],
+            dst_split_dim=edge["split_dim"],
+        )
+        body = _body(cons)
+        body["coreIdToDscSchedule"] = sched
+        body["datadscs_"] = datadscs
+        body["opFuncsUsed_"] = opfuncs
+        _dl_op(cons)["numCoreletsUsed_DSC2_"] = 1
+    return True
 
 
 def detect_onchip_edge(sdscs_json: list[dict]):
@@ -387,14 +591,26 @@ def detect_onchip_edge(sdscs_json: list[dict]):
     return None
 
 
-def realize_onchip_handoff(sdscs_json: list[dict]) -> bool:
+def realize_onchip_handoff(
+    sdscs_json: list[dict],
+    *,
+    attention_score_handoff: bool = False,
+    min_handoff_bytes: int = 1 << 20,
+) -> bool:
     """Realize the eligible same-core handoff edge in place; fail-closed.
 
-    Detects the add->add edge, builds a same-layout bridge with the same
-    size-aware LX allocation as the standalone realization helpers, flips
-    producer-output + consumer-input to LX, and folds the bridge into the
+    When requested, stock SDPA score fanout is handled first because its
+    producer feeds both max and sub.  Otherwise, or if that fails closed, detect
+    the original pointwise edge, build a same-layout bridge with the same
+    size-aware LX allocation as the standalone realization helpers, flip
+    producer-output + consumer-input to LX, and fold the bridge into the
     consumer (mixed DL+data-op SuperDSC).
     """
+    if attention_score_handoff and realize_attention_score_handoff(
+        sdscs_json, min_handoff_bytes
+    ):
+        return True
+
     edge = detect_onchip_edge(sdscs_json)
     if edge is None:
         return False
@@ -441,7 +657,7 @@ def realize_onchip_handoff(sdscs_json: list[dict]) -> bool:
         return False
     apply_lx_flip(prod, realization.producer_flip)
     apply_lx_flip(cons, realization.consumer_flip)
-    body = cons[next(iter(cons))]
+    body = _body(cons)
     body["coreIdToDscSchedule"] = realization.schedule
     body["datadscs_"] = realization.datadscs
     body["opFuncsUsed_"] = realization.opfuncs

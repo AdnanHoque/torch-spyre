@@ -87,5 +87,11 @@ onchip_handoff_telemetry_jsonl: str = os.environ.get(
 onchip_handoff_realize: bool = (
     os.environ.get("SPYRE_ONCHIP_HANDOFF_REALIZE", "0") == "1"
 )
+onchip_attention_score_handoff: bool = (
+    os.environ.get("SPYRE_ONCHIP_ATTENTION_SCORE_HANDOFF", "0") == "1"
+)
+onchip_handoff_min_bytes: int = int(
+    os.environ.get("SPYRE_ONCHIP_HANDOFF_MIN_BYTES", str(1 << 20))
+)
 
 install_config_module(sys.modules[__name__])

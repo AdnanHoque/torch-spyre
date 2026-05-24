@@ -55,8 +55,12 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     # Default off -> output byte-identical to before. Needs the deeptools
     # Foundation gate + a device build to execute, so default fail-closed.
     if config.onchip_handoff_realize:
-        if realize_onchip_handoff(sdscs_json):
-            logger.info("Realized on-chip same-core handoff")
+        if realize_onchip_handoff(
+            sdscs_json,
+            attention_score_handoff=config.onchip_attention_score_handoff,
+            min_handoff_bytes=config.onchip_handoff_min_bytes,
+        ):
+            logger.info("Realized on-chip handoff")
 
     # Write JSON SDSCs to file system
     files = []

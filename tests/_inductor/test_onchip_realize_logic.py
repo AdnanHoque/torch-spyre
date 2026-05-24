@@ -108,6 +108,154 @@ def test_is_same_shard_diff_shard_false():
     assert not rz.is_same_shard({"mb": 32}, {"out": 32}, {"out": "out", "mb": "mb"})
 
 
+def _fake_sdsc(
+    idx,
+    op,
+    shard,
+    n_sizes,
+    inputs,
+    outputs,
+    pdi,
+):
+    def lds(label, role):
+        i = int(label.rsplit("-idx", 1)[1])
+        return {
+            "ldsIdx_": i,
+            "dsName_": f"Tensor{i}",
+            "dsType_": role,
+            "wordLength": 2,
+            "dataFormat_": "SEN169_FP16",
+            "memOrg_": {"hbm": {"isPresent": 1}, "lx": {"isPresent": 1}},
+        }
+
+    def alloc(label, addr):
+        i = int(label.rsplit("-idx", 1)[1])
+        return {
+            "nodeType_": "allocate",
+            "name_": f"allocate-Tensor{i}_hbm",
+            "ldsIdx_": i,
+            "component_": "hbm",
+            "startAddressCoreCorelet_": {
+                "data_": {f"[{c}, 0, 0]": str(addr) for c in range(32)}
+            },
+        }
+
+    labels = {}
+    for label, role, addr in inputs + outputs:
+        labels[label] = (role, addr)
+    dl = {
+        "numCoresUsed_": 32,
+        "N_": {"name_": "n", **n_sizes},
+        "primaryDsInfo_": pdi,
+        "labeledDs_": [lds(label, role) for label, (role, _addr) in labels.items()],
+        "scheduleTree_": [alloc(label, addr) for label, (_role, addr) in labels.items()],
+        "computeOp_": [
+            {
+                "inputLabeledDs": [label for label, _role, _addr in inputs],
+                "outputLabeledDs": [label for label, _role, _addr in outputs],
+            }
+        ],
+    }
+    return {
+        f"{idx}_{op}": {
+            "numCoresUsed_": 32,
+            "numWkSlicesPerDim_": shard,
+            "coreIdToDscSchedule": {},
+            "dscs_": [{op: dl}],
+        }
+    }
+
+
+def _fake_attention_sdscs(include_max=True):
+    score_addr = 4096
+    score_pdi = {
+        "OUTPUT": {
+            "layoutDimOrder_": ["out", "x", "mb"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["x", "mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    producer_pdi = {
+        "OUTPUT": {
+            "layoutDimOrder_": ["out", "mb", "x"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        }
+    }
+    bmm = _fake_sdsc(
+        0,
+        "batchmatmul",
+        {"x": 1, "mb": 32, "out": 1, "in": 1},
+        {"x_": 32, "mb_": 64, "out_": 64, "in_": 128},
+        [],
+        [("Tensor2-idx2", "OUTPUT", score_addr)],
+        producer_pdi,
+    )
+    sdscs = [bmm]
+    if include_max:
+        sdscs.append(
+            _fake_sdsc(
+                1,
+                "max",
+                {"mb": 1, "x": 32, "out": 1},
+                {"x_": 64, "mb_": 32, "out_": 64},
+                [("Tensor0-idx0", "OUTPUT", score_addr)],
+                [("Tensor1-idx1", "KERNEL", 8192)],
+                score_pdi,
+            )
+        )
+    sdscs.append(
+        _fake_sdsc(
+            2,
+            "sub",
+            {"mb": 1, "x": 32, "out": 1},
+            {"x_": 64, "mb_": 32, "out_": 64},
+            [("Tensor0-idx0", "OUTPUT", score_addr), ("Tensor1-idx1", "KERNEL", 8192)],
+            [("Tensor2-idx2", "OUTPUT", 12288)],
+            score_pdi,
+        )
+    )
+    return sdscs
+
+
+def test_attention_score_handoff_realizes_max_and_sub_fanout():
+    sdscs = _fake_attention_sdscs()
+    assert rz.realize_onchip_handoff(
+        sdscs, attention_score_handoff=True, min_handoff_bytes=0
+    )
+    bmm, max_sdsc, sub_sdsc = sdscs
+    bmm_out = rz._dl_op(bmm)["labeledDs_"][0]
+    assert bmm_out["hbmSize_"] == 0
+    for consumer in (max_sdsc, sub_sdsc):
+        body = consumer[next(iter(consumer))]
+        assert body["opFuncsUsed_"] == ["STCDPOpLx"]
+        assert len(body["datadscs_"]) == 1
+        dataop = body["datadscs_"][0]["0_STCDPOpLx_dataop"]
+        assert dataop["labeledDs_"][0]["hbmSize_"] == 0
+        assert dataop["labeledDs_"][1]["hbmSize_"] == 0
+        assert rz._dl_op(consumer)["labeledDs_"][0]["hbmSize_"] == 0
+
+
+def test_attention_score_handoff_respects_min_size_gate():
+    sdscs = _fake_attention_sdscs()
+    assert not rz.realize_onchip_handoff(
+        sdscs, attention_score_handoff=True, min_handoff_bytes=1 << 40
+    )
+    assert "datadscs_" not in sdscs[1][next(iter(sdscs[1]))]
+
+
+def test_attention_score_handoff_requires_full_score_fanout():
+    sdscs = _fake_attention_sdscs(include_max=False)
+    assert not rz.realize_onchip_handoff(
+        sdscs, attention_score_handoff=True, min_handoff_bytes=0
+    )
+
+
 def _run_all():
     tests = sorted(
         (n, o) for n, o in globals().items()

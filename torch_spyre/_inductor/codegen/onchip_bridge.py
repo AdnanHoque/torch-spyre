@@ -307,6 +307,28 @@ def build_same_layout_bridge(
     return [stcdp], ["STCDPOpLx"], mixed_schedule(1, num_cores)
 
 
+def build_same_stick_bridge(
+    dim_pool, iter_sizes, stick_size, num_cores, lx_size,
+    src_base, dst_base, src_layout, dst_layout, stick_dim,
+    src_split_dim, dst_split_dim,
+):
+    """Tier-1 bridge: one STCDPOpLx between same-stick endpoints.
+
+    Unlike build_same_layout_bridge, this accepts different source/destination
+    layoutDimOrder_ values. This is needed for stock SDPA score handoffs:
+    QK^T and softmax both keep the score matrix on the same stick dim, but
+    their non-stick dimension order and core split dim differ.
+    """
+    stcdp = make_datadsc(
+        "0_STCDPOpLx_dataop", _stcdp_op(), dim_pool,
+        src=Endpoint(src_layout, stick_dim, src_split_dim, src_base),
+        dst=Endpoint(dst_layout, stick_dim, dst_split_dim, dst_base),
+        iter_sizes=iter_sizes, stick_size=stick_size, num_cores=num_cores,
+        lx_size=lx_size,
+    )
+    return [stcdp], ["STCDPOpLx"], mixed_schedule(1, num_cores)
+
+
 def build_roundtrip_bridge(
     dim_pool, iter_sizes, stick_size, num_cores, lx_size,
     producer_base, scratch_base, consumer_base, layout, stick_dim, split_dim,
