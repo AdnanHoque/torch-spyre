@@ -30,8 +30,12 @@ import dataclasses
 
 from .codegen.onchip_bridge import (
     LX_CAPACITY_BYTES,
+    STREAM_TILE_BYTES,
     allocate_lx_bases,
+    allocate_stream_bases,
     build_same_layout_bridge,
+    build_streamed_bridge,
+    num_stream_tiles,
     per_core_slice_bytes,
 )
 
@@ -45,6 +49,10 @@ DL_LX_SENTINEL = 2147483647
 PRODUCER_LX_BASE = 16384
 CONSUMER_LX_BASE = 8192
 STICK_SIZE = 64
+
+# Tier select: stream once the single 2-region move would consume more than half
+# the 2 MB LX, leaving no headroom for the DL op. Below it the single move fits.
+STREAM_THRESHOLD = LX_CAPACITY_BYTES // 2
 
 
 @dataclasses.dataclass(frozen=True)
@@ -114,6 +122,86 @@ def realize_same_core_handoff(
         producer_base=producer_base,
         consumer_base=consumer_base,
         slice_bytes=slice_bytes,
+        producer_flip=LxFlip(producer_ldsidx, producer_base, "producer-output"),
+        consumer_flip=LxFlip(consumer_ldsidx, consumer_base, "consumer-input"),
+        datadscs=datadscs,
+        opfuncs=opfuncs,
+        schedule=sched,
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class StreamedRealization:
+    """A realized streamed handoff: 2 fixed tile bases + K-tile mixed-DSC parts."""
+
+    producer_base: int
+    consumer_base: int
+    slice_bytes: int
+    num_tiles: int
+    tile_bytes: int
+    producer_flip: LxFlip
+    consumer_flip: LxFlip
+    datadscs: list
+    opfuncs: list[str]
+    schedule: dict
+    realizable: bool = True
+
+
+def realize_streamed_handoff(
+    iter_sizes: dict[str, int],
+    layout: list[str],
+    stick_dim: str,
+    split_dim: str,
+    stick_size: int,
+    num_cores: int,
+    producer_ldsidx: int,
+    consumer_ldsidx: int,
+    tile_bytes: int = STREAM_TILE_BYTES,
+    capacity: int = LX_CAPACITY_BYTES,
+) -> StreamedRealization | None:
+    """Stream a >LX/2 slice through 2 fixed tile buffers, or None (fail-closed).
+
+    The single move stays the same-shard same-stick cross-core copy; streaming
+    just tiles it along the non-split row dim so only 2*tile_bytes of LX live at
+    once (vs 2*slice). K = ceil(slice/tile). Returns None if even the 2 fixed
+    tiles don't fit -- the DL op gets the rest of the 2 MB. Single-buffer reuse:
+    device-validate (fallback = double-buffer).
+    """
+    if split_dim not in iter_sizes or iter_sizes[split_dim] % num_cores != 0:
+        return None
+    row_dims = [d for d in layout if d != split_dim]
+    if len(row_dims) != 1:
+        return None
+    row_dim = row_dims[0]
+    slice_bytes = per_core_slice_bytes(iter_sizes, split_dim, stick_size, num_cores)
+    try:
+        bases = allocate_stream_bases(tile_bytes, capacity=capacity)
+    except ValueError:
+        return None
+    producer_base, consumer_base = bases
+    k_tiles = num_stream_tiles(slice_bytes, tile_bytes)
+    datadscs, opfuncs, sched = build_streamed_bridge(
+        dim_pool=layout,
+        iter_sizes=iter_sizes,
+        stick_size=stick_size,
+        num_cores=num_cores,
+        lx_size=DATAOP_LX_SIZE,
+        src_base=producer_base,
+        dst_base=consumer_base,
+        layout=layout,
+        stick_dim=stick_dim,
+        src_split_dim=split_dim,
+        dst_split_dim=split_dim,
+        row_dim=row_dim,
+        slice_bytes=slice_bytes,
+        tile_bytes=tile_bytes,
+    )
+    return StreamedRealization(
+        producer_base=producer_base,
+        consumer_base=consumer_base,
+        slice_bytes=slice_bytes,
+        num_tiles=k_tiles,
+        tile_bytes=tile_bytes,
         producer_flip=LxFlip(producer_ldsidx, producer_base, "producer-output"),
         consumer_flip=LxFlip(consumer_ldsidx, consumer_base, "consumer-input"),
         datadscs=datadscs,
@@ -267,23 +355,50 @@ def realize_onchip_handoff(sdscs_json: list[dict]) -> bool:
     iter_sizes = {f"{d}_": num_cores * STICK_SIZE for d in shard}
     split_dim = f"{split[0]}_"
     slice_bytes = per_core_slice_bytes(iter_sizes, split_dim, STICK_SIZE, num_cores)
-    try:
-        allocate_lx_bases(2, slice_bytes)
-    except ValueError:
-        return False
-    datadscs, opfuncs, sched = build_same_layout_bridge(
-        dim_pool=layout,
-        iter_sizes=iter_sizes,
-        stick_size=STICK_SIZE,
-        num_cores=num_cores,
-        lx_size=DATAOP_LX_SIZE,
-        src_base=PRODUCER_LX_BASE,
-        dst_base=CONSUMER_LX_BASE,
-        layout=layout,
-        stick_dim=split_dim,
-        src_split_dim=split_dim,
-        dst_split_dim=split_dim,
-    )
+    # Tier branch: single 2-region move when 2*slice fits (slice <= half cap);
+    # else stream through 2 fixed tile buffers; else fail-closed. The add->add
+    # 2048 case stays the single move (slice == 256 KB << half cap), byte-identical.
+    if slice_bytes <= STREAM_THRESHOLD:
+        try:
+            allocate_lx_bases(2, slice_bytes)
+        except ValueError:
+            return False
+        datadscs, opfuncs, sched = build_same_layout_bridge(
+            dim_pool=layout,
+            iter_sizes=iter_sizes,
+            stick_size=STICK_SIZE,
+            num_cores=num_cores,
+            lx_size=DATAOP_LX_SIZE,
+            src_base=PRODUCER_LX_BASE,
+            dst_base=CONSUMER_LX_BASE,
+            layout=layout,
+            stick_dim=split_dim,
+            src_split_dim=split_dim,
+            dst_split_dim=split_dim,
+        )
+    else:
+        row_dims = [d for d in layout if d != split_dim]
+        if len(row_dims) != 1:
+            return False
+        try:
+            allocate_stream_bases(STREAM_TILE_BYTES)
+        except ValueError:
+            return False
+        datadscs, opfuncs, sched = build_streamed_bridge(
+            dim_pool=layout,
+            iter_sizes=iter_sizes,
+            stick_size=STICK_SIZE,
+            num_cores=num_cores,
+            lx_size=DATAOP_LX_SIZE,
+            src_base=PRODUCER_LX_BASE,
+            dst_base=CONSUMER_LX_BASE,
+            layout=layout,
+            stick_dim=split_dim,
+            src_split_dim=split_dim,
+            dst_split_dim=split_dim,
+            row_dim=row_dims[0],
+            slice_bytes=slice_bytes,
+        )
     apply_lx_flip(prod, LxFlip(out_idx, PRODUCER_LX_BASE, "producer-output"))
     apply_lx_flip(cons, LxFlip(in_idx, CONSUMER_LX_BASE, "consumer-input"))
     body = cons[next(iter(cons))]

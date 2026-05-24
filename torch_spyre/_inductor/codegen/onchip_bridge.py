@@ -40,6 +40,9 @@ WORD_LENGTH = 2
 LX_CAPACITY_BYTES = 2 << 20  # 2_097_152
 # Stick alignment: a stick is 128 bytes (64 fp16 elements).
 STICK_BYTES = 128
+# Fixed per-side LX buffer for the streamed bridge. Each tile is <= this; in+out
+# = 2 * STREAM_TILE_BYTES, leaving the rest of the 2 MB/core LX for the DL op.
+STREAM_TILE_BYTES = 128 << 10  # 131_072
 
 
 def _align_up(value: int, alignment: int) -> int:
@@ -87,6 +90,30 @@ def allocate_lx_bases(
             f"exceeds per-core LX capacity {capacity} B"
         )
     return bases
+
+
+def num_stream_tiles(slice_bytes: int, tile_bytes: int = STREAM_TILE_BYTES) -> int:
+    """K = ceil(slice / fixed-buffer). 1 MB / 128 KB = 8; 4 MB = 32; >=1."""
+    aligned = _align_up(tile_bytes, STICK_BYTES)
+    return max(1, -(-slice_bytes // aligned))
+
+
+def tile_rows(rows: int, num_tiles: int) -> int:
+    """Rows per tile along the windowed non-stick dim (split dim untouched)."""
+    return -(-rows // num_tiles)
+
+
+def allocate_stream_bases(
+    tile_bytes: int = STREAM_TILE_BYTES,
+    capacity: int = LX_CAPACITY_BYTES, region0: int = 0,
+) -> list[int]:
+    """Two FIXED tile-sized LX bases (in, out) that fit alongside the DL op's LX.
+
+    Streaming pins one in-buffer + one out-buffer of ``tile_bytes`` each; the
+    slice flows through them in K tiles, so the LX footprint stays at 2*T (not
+    2*slice). Raises ValueError if even the two fixed tiles + region0 overflow.
+    """
+    return allocate_lx_bases(2, tile_bytes, capacity=capacity, region0=region0)
 
 
 def _piece_info(
@@ -314,3 +341,118 @@ def build_roundtrip_bridge(
     )
     return ([stcdp1, stcdp2], ["STCDPOpLx", "STCDPOpLx"],
             mixed_schedule(2, num_cores))
+
+
+def _tiled_piece_info(
+    layout_order: Sequence[str],
+    split_dim: str,
+    row_dim: str,
+    iter_sizes: Mapping[str, int],
+    chunk: int,
+    base: int,
+    num_cores: int,
+    row_start: int,
+    n_rows: int,
+    reverse: bool = False,
+) -> list[dict]:
+    """Per-core PieceInfo for one tile: row_dim windowed, split_dim full chunk.
+
+    Same as _piece_info but dimToStartCordinate[row_dim] = row_start and
+    dimToSize_[row_dim] = n_rows so each tile covers a horizontal slab of rows.
+    The split dim keeps its full per-core chunk (sticks stay whole). The fixed
+    base is reused every tile -- the SAME buffer; the dimToSize_ row count is the
+    hardware ring loop bound (L3_MVLOOPCNT), so a smaller tile = smaller loop.
+    """
+    pieces = []
+    for i in range(num_cores):
+        start = {d: 0 for d in layout_order}
+        start[split_dim] = i * chunk
+        start[row_dim] = row_start
+        size = {d: iter_sizes[d] for d in layout_order}
+        size[split_dim] = chunk
+        size[row_dim] = n_rows
+        gap = {d: [[size[d], 0]] for d in layout_order}
+        mem = (num_cores - 1 - i) if reverse else i
+        pieces.append(
+            {
+                "key_": f"p{i + 1}",
+                "dimToStartCordinate": start,
+                "dimToSize_": size,
+                "validGap_": gap,
+                "PlacementInfo": [{"type": "lx", "memId": [mem], "startAddr": [base]}],
+            }
+        )
+    return pieces
+
+
+def _tiled_labeled_ds(
+    pds_name: str, layout_order, stick_dim, split_dim, row_dim, iter_sizes,
+    stick_size, base, num_cores, lx_size, row_start, n_rows, reverse=False,
+) -> dict:
+    """labeledDs for a streamed tile: full layout dims, windowed row dimToSize_."""
+    chunk = iter_sizes[split_dim] // num_cores
+    return {
+        "ldsName_": f"{pds_name}_L0",
+        "pdsName_": pds_name,
+        "wordLength": WORD_LENGTH,
+        "dataformat": DATA_FORMAT,
+        "isExternal_": 0,
+        "segment_": "output",
+        "layoutDimOrder_": list(layout_order),
+        "stickDimOrder_": [stick_dim],
+        "dimToLayoutSize_": {d: iter_sizes[d] for d in layout_order},
+        "dimToStickSize_": {stick_dim: stick_size},
+        "validGap_": {d: [[iter_sizes[d], 0]] for d in layout_order},
+        "totElements": -1,
+        "hbmSize_": 0,
+        "hbmStartAddress_": 0,
+        "lxSize_": lx_size,
+        "lxStartAddress_": {},
+        "PieceInfo": _tiled_piece_info(
+            layout_order, split_dim, row_dim, iter_sizes, chunk, base, num_cores,
+            row_start, n_rows, reverse,
+        ),
+    }
+
+
+def build_streamed_bridge(
+    dim_pool, iter_sizes, stick_size, num_cores, lx_size,
+    src_base, dst_base, layout, stick_dim, src_split_dim, dst_split_dim, row_dim,
+    slice_bytes, tile_bytes=STREAM_TILE_BYTES,
+):
+    """Tiled same-stick cross-core move for slices bigger than the LX buffers.
+
+    The producer->consumer move is split into K = ceil(slice/tile) tiles along
+    the non-stick row dim; each tile is one STCDPOpLx through ONE fixed in+out
+    buffer pair (src_base/dst_base), windowing dimToSize_/dimToStartCordinate[row]
+    so each tile is <= the buffer. src_split_dim -> dst_split_dim carries the same
+    per-core ownership as build_same_layout_bridge (single move), so a streamed
+    bundle's memId mapping mirrors the single-move structure tile by tile.
+
+    The schedule is mixed_schedule(K): K data-op rows then the DL op. Tile k's
+    before-sync + tile k+1's after-sync force buffer reuse -- tile k+1 cannot
+    overwrite the buffer until tile k's consume drains.
+
+    device-validate: single-buffer reuse; fallback = double-buffer (two tile pairs,
+    ping-pong) -- a small change here: alternate two src/dst base pairs per k.
+    """
+    rows = iter_sizes[row_dim]
+    k_tiles = num_stream_tiles(slice_bytes, tile_bytes)
+    tr = tile_rows(rows, k_tiles)
+    datadscs = []
+    for k in range(k_tiles):
+        r0 = k * tr
+        nr = min(tr, rows - r0)
+        in_ld = _tiled_labeled_ds(
+            "dataIN", layout, stick_dim, src_split_dim, row_dim, iter_sizes,
+            stick_size, src_base, num_cores, lx_size, r0, nr,
+        )
+        out_ld = _tiled_labeled_ds(
+            "dataOUT", layout, stick_dim, dst_split_dim, row_dim, iter_sizes,
+            stick_size, dst_base, num_cores, lx_size, r0, nr,
+        )
+        datadscs.append(
+            _datadsc(f"{k}_STCDPOpLx_dataop", _stcdp_op(), dim_pool, in_ld, out_ld,
+                     num_cores)
+        )
+    return datadscs, ["STCDPOpLx"] * k_tiles, mixed_schedule(k_tiles, num_cores)
