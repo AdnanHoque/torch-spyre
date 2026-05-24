@@ -343,6 +343,71 @@ def build_roundtrip_bridge(
             mixed_schedule(2, num_cores))
 
 
+def _partition_pieces(
+    stick_dim: str, owners: Sequence[int], starts: Sequence[int],
+    lengths: Sequence[int], layout_order: Sequence[str],
+    iter_sizes: Mapping[str, int], base: int,
+) -> list[dict]:
+    """Native PieceInfo: piece k owns [starts[k], starts[k]+lengths[k]) on owner k.
+
+    A generalization of _piece_info for ASYMMETRIC reshard: pieces need not be
+    equal-sized nor 1:1 with cores. Piece k covers stick_dim sub-range
+    starts[k]..starts[k]+lengths[k]-1, full on every other dim, and is placed on
+    core owners[k]. N (producer) and M (consumer) partitions need not match -- the
+    same-stick STCDP overlap-cell engine (DCG createSubPieces) gathers each
+    consumer piece from whichever producer pieces overlap it, riding the ring when
+    owners differ. Equal-cell builders are the special case N==M, lengths uniform.
+    """
+    pieces = []
+    for k, owner in enumerate(owners):
+        start = {d: (starts[k] if d == stick_dim else 0) for d in layout_order}
+        size = {d: (lengths[k] if d == stick_dim else iter_sizes[d])
+                for d in layout_order}
+        gap = {d: [[size[d], 0]] for d in layout_order}
+        pieces.append(
+            {
+                "key_": f"p{k + 1}",
+                "dimToStartCordinate": start,
+                "dimToSize_": size,
+                "validGap_": gap,
+                "PlacementInfo": [
+                    {"type": "lx", "memId": [owner], "startAddr": [base]}
+                ],
+            }
+        )
+    return pieces
+
+
+def build_asymmetric_reshard_bridge(
+    dim_pool: Sequence[str], iter_sizes: Mapping[str, int], stick_size: int,
+    num_cores: int, lx_size: int, src_base: int, dst_base: int,
+    layout: Sequence[str], stick_dim: str,
+    prod_owners: Sequence[int], prod_starts: Sequence[int], prod_lens: Sequence[int],
+    cons_owners: Sequence[int], cons_starts: Sequence[int], cons_lens: Sequence[int],
+):
+    """Single STCDPOpLx whose IN is N native producer pieces, OUT is M consumer pieces.
+
+    Same-stick N->M cross-core redistribution where N != M and pieces may have
+    unequal sizes/boundaries. The DCG STCDP overlap-cell engine loops every
+    producer piece x consumer piece, intersects on stick_dim, and rides the ring
+    for any src-owner != dst-owner cell -- no cell math is needed here. Pieces tile
+    stick_dim disjointly on each side; emit producer NATIVE pieces in dataIN,
+    consumer NATIVE pieces in dataOUT. The 8->25 granite bmm-out -> mul-in edge is
+    this; the equal 32x32-cell builder is the special case.
+    """
+    in_ld = _labeled_ds("dataIN", layout, stick_dim, stick_dim, iter_sizes,
+                        stick_size, src_base, num_cores, lx_size)
+    in_ld["PieceInfo"] = _partition_pieces(
+        stick_dim, prod_owners, prod_starts, prod_lens, layout, iter_sizes, src_base)
+    out_ld = _labeled_ds("dataOUT", layout, stick_dim, stick_dim, iter_sizes,
+                         stick_size, dst_base, num_cores, lx_size)
+    out_ld["PieceInfo"] = _partition_pieces(
+        stick_dim, cons_owners, cons_starts, cons_lens, layout, iter_sizes, dst_base)
+    stcdp = _datadsc("0_STCDPOpLx_dataop", _stcdp_op(), dim_pool, in_ld, out_ld,
+                     num_cores)
+    return [stcdp], ["STCDPOpLx"], mixed_schedule(1, num_cores)
+
+
 def _tiled_piece_info(
     layout_order: Sequence[str],
     split_dim: str,

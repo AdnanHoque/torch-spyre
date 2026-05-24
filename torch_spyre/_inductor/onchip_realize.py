@@ -33,6 +33,7 @@ from .codegen.onchip_bridge import (
     STREAM_TILE_BYTES,
     allocate_lx_bases,
     allocate_stream_bases,
+    build_asymmetric_reshard_bridge,
     build_same_layout_bridge,
     build_streamed_bridge,
     num_stream_tiles,
@@ -224,6 +225,71 @@ def is_same_shard(
         if consumer_splits.get(cons_sym, 1) != producer_splits.get(prod_sym, 1):
             return False
     return True
+
+
+def uniform_partition(length: int, n: int, stick: int):
+    """N near-equal whole-stick shards of [0, length): (owners, starts, lengths).
+
+    Shard k = [k*chunk, min(length, (k+1)*chunk)), chunk = ceil(length/n) snapped
+    up to a stick. Owner k = core k. Returns None if any shard isn't whole-stick
+    (fail-closed: STCDP overlap cells must be stick-aligned, DCG :2792). The 8 vs
+    25 granite split is two such partitions of the same stick_dim length.
+    """
+    chunk = ((length + n - 1) // n + stick - 1) // stick * stick
+    owners, starts, lens = [], [], []
+    pos = 0
+    for k in range(n):
+        if pos >= length:
+            break
+        ln = min(chunk, length - pos)
+        if ln % stick:
+            return None
+        owners.append(k)
+        starts.append(pos)
+        lens.append(ln)
+        pos += ln
+    if sum(lens) != length:
+        return None
+    return owners, starts, lens
+
+
+def realize_asymmetric_handoff(
+    iter_sizes: dict[str, int], layout: list[str], stick_dim: str,
+    prod_n: int, cons_n: int, stick_size: int, num_cores: int,
+    producer_ldsidx: int, consumer_ldsidx: int,
+    capacity: int = LX_CAPACITY_BYTES,
+):
+    """Build an N->M same-stick reshard (single STCDP, DCG overlap cells), or None.
+
+    Producer splits stick_dim N ways, consumer M ways, both stick on stick_dim.
+    Each side's pieces are a uniform whole-stick partition; one STCDPOpLx carries
+    every overlap cell, riding the ring whenever owner(p)!=owner(c). Two LX regions
+    must fit per-core; fail-closed otherwise. Generalizes same-shard to N!=M.
+    """
+    length = iter_sizes[stick_dim]
+    prod = uniform_partition(length, prod_n, stick_size)
+    cons = uniform_partition(length, cons_n, stick_size)
+    if prod is None or cons is None:
+        return None
+    slice_bytes = per_core_slice_bytes(iter_sizes, stick_dim, stick_size, num_cores)
+    try:
+        bases = allocate_lx_bases(2, slice_bytes, capacity=capacity)
+    except ValueError:
+        return None
+    src_base, dst_base = bases
+    datadscs, opfuncs, sched = build_asymmetric_reshard_bridge(
+        dim_pool=layout, iter_sizes=iter_sizes, stick_size=stick_size,
+        num_cores=num_cores, lx_size=DATAOP_LX_SIZE, src_base=src_base,
+        dst_base=dst_base, layout=layout, stick_dim=stick_dim,
+        prod_owners=prod[0], prod_starts=prod[1], prod_lens=prod[2],
+        cons_owners=cons[0], cons_starts=cons[1], cons_lens=cons[2],
+    )
+    return OnChipRealization(
+        producer_base=src_base, consumer_base=dst_base, slice_bytes=slice_bytes,
+        producer_flip=LxFlip(producer_ldsidx, src_base, "producer-output"),
+        consumer_flip=LxFlip(consumer_ldsidx, dst_base, "consumer-input"),
+        datadscs=datadscs, opfuncs=opfuncs, schedule=sched,
+    )
 
 
 # --- In-memory SDSC transform: emit the mixed bundle DURING compilation. The
