@@ -58,19 +58,25 @@ device value-correct; negative control clean. No splice, no redirect.
 | config | baseline HBM ms (min) | on-chip ms (min) | max_err | label |
 |---|---|---|---|---|
 | seq=64, bh=32, hd=128 | 0.1811 (0.1754) | 0.1832 (0.1762) | 0.000214 | MEASURED, neutral/slight regression |
-| seq=512, bh=32, hd=128 | 2.5998 (2.5502) | — | 0.000092 | baseline MEASURED; on-chip TODO |
+| seq=512, bh=32, hd=128 | 2.5595 (2.5086) | 1.9778 (1.9587) | 0.000107 | MEASURED, **1.29x** value-correct |
 
 seq=64: score handoff ~256 KB is below the ~1 MB floor and is a 3-region
 round-trip construct. Value-correct cross-core on a REAL attention edge (no
-Compute-CB). seq=512 on-chip A/B is **TODO(pending device run)**.
+Compute-CB). **seq=512: MEASURED on device — baseline 2.5595 ms vs on-chip
+1.9778 ms = 1.29x (−23%), value-correct (max_err 0.000107 vs baseline 0.000092),
+negative control passed.** The 16 MB score-matrix HBM round-trip is a large
+fraction of the attention block at this seq, so the win is bigger than add-mm.
+This is still the 3-region round-trip proof construct (extra ring work) — a
+production single 2-region move would beat it. (An earlier separate compile
+measured baseline 2.5998 ms; same ballpark.)
 
 ## Block baselines
 
 | workload | baseline ms (min) | max_err | label |
 |---|---|---|---|
 | MoE expert FFN (E=8, H=2048, INTER=8192, T=128) | 125.8477 (120.8593) | 0.044922 (high) | MEASURED, on-chip = PROJECTED |
-| transformer block | first run failed to compile (fp32 mean); fp16 fix re-run | — | TODO(pending re-run) |
-| MoE full block | — | — | TODO(pending, compiling) |
+| transformer block | does NOT compile on current Spyre stack | — | FAILED: fp32 mean (fixed -> fp16) then dxp SIGABRT on a fused attn-linear-transpose kernel |
+| MoE full block | does NOT compile on current Spyre stack | — | FAILED: LoweringException AssertionError (routing/dispatch) |
 
 ## Device findings
 
@@ -101,10 +107,23 @@ layout-changing edges. Projections cap the anchor at the physical HBM round-trip
 ceiling (~0.012 ms/MB). All workload projections exclude blocked layout-changing
 handoffs.
 
-## TODO(pending device run) — orchestrator fills
+## Status of the pending device runs (resolved)
 
-- Attention seq=512 on-chip A/B (baseline 2.5998 ms measured).
-- Transformer block baseline re-run (fp16 mean fix).
-- MoE full block baseline.
-- MoE FFN, transformer, MoE-block, mamba2, routing on-chip A/B numbers vs
-  projections above.
+- **Attention seq=512 on-chip A/B — DONE: 2.5595 -> 1.9778 ms = 1.29x, value-correct.**
+- **Transformer block baseline — FAILED to compile** (fp32 mean fixed; then dxp
+  SIGABRT on a fused attn-linear-transpose kernel). No baseline on this stack.
+- **MoE full block baseline — FAILED to compile** (LoweringException). No baseline.
+- **On-chip A/B vs projections for the full blocks (transformer, MoE block,
+  mamba2):** remain PROJECTED — there is no full-block on-chip splice, and the
+  full blocks don't compile, so the only measured on-chip A/B on a real model
+  component is the attention QK^T->softmax edge (1.29x above). MoE FFN has a
+  measured baseline (125.85 ms); its on-chip number is projection.
+
+### What is MEASURED on a real model component vs projected
+
+MEASURED on device: add-mm multi-size (1.13-1.22x same-core), compiler-driven
+e2e on-chip (value-correct), cross-core ring on add-mm AND on the real attention
+QK^T->softmax edge (**seq=512: 1.29x**), MoE expert-FFN baseline. PROJECTED
+(grounded in the 0.029 ms/MB anchor): whole transformer/MoE/mamba block speedups,
+since those blocks either don't compile on the current stack or have no full-block
+on-chip splice.
