@@ -52,6 +52,9 @@ device value-correct; negative control clean. No splice, no redirect.
 - add-mm 2048 round-trip: all 32 cores emit `L3_LDU`+`L3_STU` to mirror core
   `31-i`; degenerate same-core emits 0.
 - Attention QK^T->softmax edge: 64 `L3_LDU` + 64 `L3_STU`, mirror `31-i`.
+- MoE dispatch/combine: 2x `Creating PCFG for DataDsc` with `L3SU : L3LU` on all
+  32 cores, transfer map `0->31, 1->30, … 31->0`; baseline has 0 DataDscs.
+  Negative control passed (remove senprog -> hard load failure) on both directions.
 
 ## Attention A/B
 
@@ -70,6 +73,68 @@ This is still the 3-region round-trip proof construct (extra ring work) — a
 production single 2-region move would beat it. (An earlier separate compile
 measured baseline 2.5998 ms; same ballpark.)
 
+## MoE dispatch/combine A/B (MEASURED) — the activation-dominated win
+
+The clearest on-chip win measured to date. The MoE routing handoff (dispatch =
+gather tokens to their expert's core; combine = scatter results back) is a large
+fraction of the op's HBM traffic with no weight matrix to dwarf it, so
+eliminating the HBM round-trip pays off directly. All rows MEASURED on device
+(N=50, torch.profiler PrivateUse1; `spyre_ms == kernel_ms` — these ops are pure
+compute with no memcpy events, so the STCDP cross-core move time is counted
+*inside* the on-chip number).
+
+| op | E | T | H | handoff MB | HBM dev ms | on-chip dev ms | **dev speedup** | max_err |
+|---|---|---|---|---|---|---|---|---|
+| dispatch | 8 | 512 | 2048 | 2.0 | 0.2746 | 0.2094 | **1.31x** | 0.00171 |
+| dispatch | 8 | 512 | 4096 | 4.0 | 0.9425 | 0.6725 | **1.40x** | 0.00244 |
+| dispatch | 8 | 1024 | 2048 | 4.0 | 0.4465 | 0.3225 | **1.38x** | 0.00195 |
+| dispatch | 8 | 2048 | 2048 | 8.0 | 1.3323 | 0.6865 | **1.94x** | 0.00171 |
+| dispatch | 64 | 512 | 4096 | 4.0 | 0.9417 | 0.6724 | **1.40x** | 0.00244 |
+| dispatch | 64 | 1024 | 2048 | 4.0 | 0.4478 | 0.3229 | **1.39x** | 0.00195 |
+| combine | 8 | 512 | 2048 | 2.0 | 0.2760 | 0.2093 | **1.32x** | 0.00124 |
+
+### Why this wins where the dense block did not (the theory)
+
+- **Activation-dominated vs weight-bound.** A dense transformer/decode block is
+  weight-bandwidth-bound: its HBM traffic is dominated by streaming the weight
+  matrices, and the activation handoff is a tiny slice (<1% in decode), so an
+  on-chip handoff is within-noise at the block level. MoE routing has *no* big
+  weight read in the dispatch/combine itself — the handoff IS the dominant
+  traffic. That is the regime on-chip is built for.
+- **Bandwidth-bound signature: the win scales with handoff bytes.** 1.31x @ 2 MB
+  -> 1.94x @ 8 MB. If the saving were a fixed setup cost it would shrink in
+  relative terms as the op grows; instead it grows, which is the fingerprint of
+  eliminating HBM bytes proportional to the handoff.
+- **E-invariance.** At matched EC×H, expert count does not move the result
+  (E=8 vs E=64: 1.40x vs 1.40x, 1.38x vs 1.39x). Handoff bytes depend on
+  tokens×hidden, not on the number of experts — exactly as a data-movement (not
+  compute) optimization should behave.
+- **The measurement is conservative.** The natural `(perm@x)@wexp` edge compiles
+  to a degenerate same-stick / same-shard *same-core* handoff (nothing to move
+  cross-core). Genuine cross-core ring traffic was forced with the round-trip
+  bridge (i -> 31-i -> i), and its STCDP move time is inside the on-chip number —
+  so on-chip wins *despite* paying for a full cross-core round-trip it does not
+  strictly need. A co-located production single-move would beat these figures.
+
+### Load-bearing caveat: fixed routing (upper bound, not yet deployable)
+
+The splice rests on a **fixed round-robin permutation**, which makes the
+token->core placement static and therefore statically splice-able via
+`STCDPOpLx`. Real MoE routing is **dynamic** (the router selects experts per
+token at runtime), which needs a runtime-index-driven `memId` — the
+dynamic-addressing frontier, which does not exist today. So these numbers measure
+the true data-movement physics and give the **upper bound** a future
+dynamic-addressing mechanism would target; they are not a deployable MoE
+optimization on their own. (Also flagged: `derive_placement` returned None for
+this edge because its sub-stick guard assumes `split_dim == stick_dim`, but the
+edge splits on `mb` while the stick is the hidden axis — a decouple-split
+generalization would handle it directly.)
+
+The measured per-MB device saving here (0.031–0.081 ms/MB) exceeds the 0.029
+ms/MB anchor, consistent with the on-chip path also removing restickify and
+scheduling overhead beyond the pure HBM bytes; the largest 8 MB shape saturates
+the HBM-vs-on-chip gap most (0.081 ms/MB, 1.94x).
+
 ## Block baselines
 
 | workload | baseline ms (min) | max_err | label |
@@ -85,7 +150,9 @@ measured baseline 2.5998 ms; same ballpark.)
   edge is a real same-stick cross-core handoff.
 - Two on-chip frontiers: (A) layout-changing transpose (Compute-CB fault); (B)
   dynamic addressing (MoE routing same-stick but needs runtime memId). Tier-1
-  proven = same-stick + static addressing.
+  proven = same-stick + static addressing. The MoE dispatch/combine A/B above
+  measures frontier (B)'s upper bound under FIXED routing — real dynamic routing
+  still needs the runtime-index-driven `memId` that does not exist today.
 
 ## Projected speedups (PROJECTED, from `reproduction/workloads/*/projection.md`)
 
@@ -96,7 +163,7 @@ measured baseline 2.5998 ms; same ballpark.)
 | MoE block | mid H 1k-2k, 128-512 tok | 1.11x .. 1.39x | `moe_block/projection.md` |
 | MoE block | prefill 4096/14336 | 1.06x .. 1.10x | `moe_block/projection.md` |
 | MoE block | decode 1 token | ~0.95x, gate OFF | `moe_block/projection.md` |
-| MoE routing | dispatch/combine, MB-scale | +0.23 to +1.85 ms/op saved | `moe_routing/projection.md` |
+| MoE routing | dispatch/combine, MB-scale | now MEASURED 1.3-1.9x (see MoE A/B above) | `moe_routing/projection.md` |
 | mamba2 | prefill in-proj 4.2 MB | +0.117 ms; decode net-neg | `mamba2/projection.md` |
 | attention | prefill seq=512 (16 MB) | +0.459 ms/layer | `attention/projection.md` |
 | attention | prefill seq=2048 (256 MB) | +7.42 ms/layer | `attention/projection.md` |
@@ -135,7 +202,10 @@ would fail on endpoint overlap, not the buffer-reuse risk it was meant to test).
 
 MEASURED on device: add-mm multi-size (1.13-1.22x same-core), compiler-driven
 e2e on-chip (value-correct), cross-core ring on add-mm AND on the real attention
-QK^T->softmax edge (**seq=512: 1.29x**), MoE expert-FFN baseline. PROJECTED
-(grounded in the 0.029 ms/MB anchor): whole transformer/MoE/mamba block speedups,
-since those blocks either don't compile on the current stack or have no full-block
-on-chip splice.
+QK^T->softmax edge (**seq=512: 1.29x**), **MoE dispatch/combine A/B
+(1.3-1.9x, fixed routing)**, MoE expert-FFN baseline. PROJECTED (grounded in the
+0.029 ms/MB anchor): whole transformer/MoE/mamba block speedups, since those
+blocks either don't compile on the current stack or have no full-block on-chip
+splice. The two regimes are now both measured: activation-dominated edges
+(attention prefill, MoE routing) win; the weight-bound dense block is
+within-noise.
