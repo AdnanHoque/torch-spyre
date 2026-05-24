@@ -15,9 +15,11 @@
 import json
 import os
 
+from torch_spyre._inductor import config
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
+from torch_spyre._inductor.onchip_realize import realize_onchip_handoff
 
 
 logger = get_inductor_logger("sdsc_compile")
@@ -47,11 +49,14 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     for idx, ks in enumerate(specs):
         sdsc_json = compile_op_spec(idx, ks)
         sdscs_json.append(sdsc_json)
-    # TODO(onchip-realize): when SPYRE_ONCHIP_HANDOFF_REALIZE is on, fold the
-    # planner's OnChipRealization into the consumer SDSC via fold_onchip_handoff
-    # and flip the producer-output labeledDs_ to LX. The plan must reach here
-    # through op_spec.op_info (pre-scheduling stamps it); seam only -- needs the
-    # deeptools Foundation gate and a device build to validate, so default-off.
+    # When SPYRE_ONCHIP_HANDOFF_REALIZE is on, detect the eligible same-stick
+    # same-shard producer->consumer edge among the SDSCs and turn the consumer
+    # into a mixed DL+data-op SuperDSC (LX-resident handoff, no HBM round trip).
+    # Default off -> output byte-identical to before. Needs the deeptools
+    # Foundation gate + a device build to execute, so default fail-closed.
+    if config.onchip_handoff_realize:
+        if realize_onchip_handoff(sdscs_json):
+            logger.info("Realized on-chip same-core handoff")
 
     # Write JSON SDSCs to file system
     files = []
