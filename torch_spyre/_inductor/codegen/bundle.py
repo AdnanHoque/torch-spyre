@@ -23,6 +23,22 @@ from torch_spyre._inductor.logging_utils import get_inductor_logger
 logger = get_inductor_logger("sdsc_compile")
 
 
+def fold_onchip_handoff(sdsc_json: dict, realization) -> dict:
+    """Fold a same-layout on-chip handoff into the consumer SDSC body in place.
+
+    Installs the synthesized datadscs_/coreIdToDscSchedule/opFuncsUsed_ from
+    ``realization`` (an onchip_realize.OnChipRealization) onto the single SDSC
+    body. The producer-output and consumer-input LX flips are descriptors the
+    caller must apply once labeledDs_ scaffolding is present; here we only fold
+    the data-ops. Mirrors splice_2048_stcdp.patch_consumer_to_mixed.
+    """
+    body = sdsc_json[next(iter(sdsc_json))]
+    body["coreIdToDscSchedule"] = realization.schedule
+    body["datadscs_"] = realization.datadscs
+    body["opFuncsUsed_"] = realization.opfuncs
+    return sdsc_json
+
+
 def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     """Output the SDSC Bundle for the OpSpecs in the given output_dir for the OpSpecs"""
 
@@ -31,6 +47,11 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     for idx, ks in enumerate(specs):
         sdsc_json = compile_op_spec(idx, ks)
         sdscs_json.append(sdsc_json)
+    # TODO(onchip-realize): when SPYRE_ONCHIP_HANDOFF_REALIZE is on, fold the
+    # planner's OnChipRealization into the consumer SDSC via fold_onchip_handoff
+    # and flip the producer-output labeledDs_ to LX. The plan must reach here
+    # through op_spec.op_info (pre-scheduling stamps it); seam only -- needs the
+    # deeptools Foundation gate and a device build to validate, so default-off.
 
     # Write JSON SDSCs to file system
     files = []

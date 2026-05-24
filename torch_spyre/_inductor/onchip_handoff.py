@@ -51,6 +51,11 @@ from .restickify_cost import (
     build_transfer_plan,
     materialize_default_core_mapping,
 )
+from .onchip_realize import (
+    OnChipRealization,
+    is_same_shard,
+    realize_same_core_handoff,
+)
 from .restickify_ring import (
     build_consumers_of,
     build_name_to_op_map,
@@ -91,6 +96,7 @@ class OnChipHandoffPlan:
     bytes_moved: int
     realizable: bool = False
     fail_closed_reason: str = FAIL_CLOSED_REASON
+    realization: OnChipRealization | None = None
 
 
 def _producer_write_dep(producer: ComputedBuffer) -> MemoryDep | None:
@@ -167,6 +173,44 @@ def _ownership_identical(
     return True
 
 
+def _plan_same_core(
+    producer: ComputedBuffer,
+    consumer: ComputedBuffer,
+    producer_splits: dict[str, int],
+    consumer_splits: dict[str, int],
+    symbol_map: dict[str, str],
+    producer_coords: list[Any],
+    consumer_coords: list[Any],
+    elem_size_fn: Any,
+) -> OnChipHandoffPlan | None:
+    """First-cut same-core same-shard handoff: HBM-elimination, no ring."""
+    stick = _shared_stick_dim(producer_coords, consumer_coords)
+    sizes = op_iteration_sizes(consumer)
+    realization = _maybe_realize(
+        sizes, producer_splits, consumer_splits, symbol_map, stick
+    )
+    if realization is None:
+        return None
+    elem_size = elem_size_fn(producer)
+    local = math.prod(sizes.values())
+    return OnChipHandoffPlan(
+        producer_name=producer.get_name(),
+        consumer_name=consumer.get_name(),
+        shared_stick_dim=stick,
+        producer_splits={s: v for s, v in producer_splits.items() if v > 1},
+        consumer_splits={s: v for s, v in consumer_splits.items() if v > 1},
+        symbol_map=dict(symbol_map),
+        transfers=math.prod(consumer_splits.values()),
+        local_elements=local,
+        remote_elements=0,
+        total_byte_hops=0,
+        max_hops=0,
+        bytes_moved=local * elem_size,
+        realizable=True,
+        realization=realization,
+    )
+
+
 def _plan_edge(
     producer: ComputedBuffer,
     consumer: ComputedBuffer,
@@ -201,8 +245,15 @@ def _plan_edge(
     producer_splits = decode_op_splits(producer)
     consumer_splits = decode_op_splits(consumer)
 
-    # Identical ownership => already local, nothing to hand off.
+    # Identical ownership => no cross-core ring needed. Still realizable as a
+    # same-core HBM-elimination handoff (single STCDP, 18/40 edges) when realize
+    # is on; otherwise nothing to plan.
     if _ownership_identical(producer_splits, consumer_splits, symbol_map):
+        if config.onchip_handoff_realize:
+            return _plan_same_core(
+                producer, consumer, producer_splits, consumer_splits,
+                symbol_map, producer_coords, consumer_coords, _element_size_bytes
+            )
         return None
 
     producer_sizes = op_iteration_sizes(producer)
@@ -235,10 +286,14 @@ def _plan_edge(
         return None
 
     elem_size = _element_size_bytes(producer)
+    stick = _shared_stick_dim(producer_coords, consumer_coords)
+    realization = _maybe_realize(
+        consumer_sizes, producer_splits, consumer_splits, symbol_map, stick
+    )
     return OnChipHandoffPlan(
         producer_name=producer.get_name(),
         consumer_name=consumer.get_name(),
-        shared_stick_dim=_shared_stick_dim(producer_coords, consumer_coords),
+        shared_stick_dim=stick,
         producer_splits={s: v for s, v in producer_splits.items() if v > 1},
         consumer_splits={s: v for s, v in consumer_splits.items() if v > 1},
         symbol_map=dict(symbol_map),
@@ -248,6 +303,41 @@ def _plan_edge(
         total_byte_hops=summary["total_byte_hops"] * elem_size,
         max_hops=summary["max_hops"],
         bytes_moved=summary["remote_elements"] * elem_size,
+        realizable=realization is not None,
+        realization=realization,
+    )
+
+
+def _maybe_realize(
+    consumer_sizes: Mapping[str, int],
+    producer_splits: Mapping[str, int],
+    consumer_splits: Mapping[str, int],
+    symbol_map: Mapping[str, str],
+    stick_dim: str | None,
+) -> OnChipRealization | None:
+    """Realize the first-cut same-core same-shard case, else None (fail-closed).
+
+    Default off. Only the simplest case is realized: producer and consumer split
+    the SAME single dim the same way (no ring). Anything else stays fail-closed.
+    """
+    if not config.onchip_handoff_realize:
+        return None
+    if stick_dim is None:
+        return None
+    if not is_same_shard(dict(producer_splits), dict(consumer_splits), dict(symbol_map)):
+        return None
+    split = [str(d) for d, v in consumer_splits.items() if v > 1]
+    if len(split) != 1:
+        return None
+    return realize_same_core_handoff(
+        iter_sizes={str(k): int(v) for k, v in consumer_sizes.items()},
+        layout=[str(k) for k in consumer_sizes],
+        stick_dim=str(stick_dim),
+        split_dim=split[0],
+        stick_size=64,
+        num_cores=math.prod(consumer_splits.values()),
+        producer_ldsidx=0,
+        consumer_ldsidx=0,
     )
 
 
@@ -321,7 +411,12 @@ def _plan_to_json(plan: OnChipHandoffPlan) -> dict[str, Any]:
         "byte_hops": plan.total_byte_hops,
         "max_hops": plan.max_hops,
         "realizable": plan.realizable,
-        "fail_closed_reason": plan.fail_closed_reason,
+        "fail_closed_reason": None if plan.realizable else plan.fail_closed_reason,
+        "lx_bases": (
+            None
+            if plan.realization is None
+            else [plan.realization.producer_base, plan.realization.consumer_base]
+        ),
     }
 
 
