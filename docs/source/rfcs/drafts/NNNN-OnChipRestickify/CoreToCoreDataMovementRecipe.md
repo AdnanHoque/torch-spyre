@@ -660,12 +660,20 @@ transfer is cheap relative to the matmul), and is value-correct at 512/1024/2048
   declines at 4096 (1.13×) because the matmul cost grows O(N³) while the handoff grows
   O(N²): the handoff saving becomes a smaller *fraction* of total time even as its
   *absolute* magnitude grows. End-to-end claims must weight by workload share.
-- **(iii) The 4096 round-trip break = LX bases must scale.** Correctness broke
-  (`max_err 6.15`) only on the cross-core round trip at 4096, with the **fixed** LX bases
-  (16384/1048576/8192) and fixed 2 MB span. The per-core slice doubled (`out_` chunk
-  64→128) but the reversed scratch at a fixed base/span overlaps adjacent cores' data →
-  corruption. The same-core STCDP at 4096 stayed correct because it has no reversed
-  intermediate. **Fix:** compute scratch base/span from per-core slice bytes.
+- **(iii) The 4096 round-trip break = LX bases must scale — and a deeper capacity limit.**
+  Correctness broke (`max_err 6.15`) only on the cross-core round trip at 4096. Precise
+  diagnosis (verified): per-core slice = S rows × (S/32) cols × 2 B; at 4096 that is
+  4096×128×2 = **1 MB**, so the producer region at base 16384 ends at 1,064,960 and
+  **overlaps the reversed scratch at 1,048,576** → corruption. (At 2048 the slice is only
+  256 KB, no overlap — which is why 2048 worked.) **Fix implemented**:
+  `per_core_slice_bytes()` + `allocate_lx_bases()` compute stick-aligned, non-overlapping
+  bases from the slice size. **But this also exposed a hard limit:** per-core LX is **2 MB**
+  (`scratchpad.py`), the round trip needs **3 live regions** (producer + reversed scratch +
+  consumer), and at 4096 that is 3 × 1 MB = 3 MB > 2 MB — it **cannot fit regardless of
+  base placement**, so the allocator correctly *rejects* the 4096 round trip (NOFIT). The
+  same-core path (2 regions) and a *real* single cross-core move (also 2 regions:
+  producer + consumer, no scratch) both fit at 4096. The 3-region round trip is a *proof*
+  construct; production cross-core handoffs are single moves and do not hit this wall.
 
 ---
 
@@ -739,8 +747,12 @@ Each has a *why*, not just a *what*.
   `j_,i_,out_,mb_` descriptor ≠ the consumer's 2D LX descriptor → needs a
   consumer-endpoint adapter), `InputFetchNeighbor` (same-stick remote gather). Likely the
   same wall as `sfpring` being psum-only.
-- **(b) Per-size LX allocation for the cross-core path** — fixed bases break at 4096
-  (§9 iii); the scratch base/span must be derived from per-core slice bytes.
+- **(b) Per-size LX allocation for the cross-core path** — *now implemented*
+  (`per_core_slice_bytes()` / `allocate_lx_bases()` in `onchip_bridge.py`): fixed bases
+  broke at 4096 (§9 iii); bases are now derived from per-core slice bytes, stick-aligned
+  and overlap-checked against the 2 MB/core LX. Residual limit: the 3-region *round trip*
+  cannot fit at 4096 (3 MB > 2 MB) — but that is a proof artifact; a production single
+  cross-core move is 2 regions and fits. Validated on device at 512/1024/2048.
 - **(c) Productionizing the binding** — the splice does the producer-writes-LX /
   consumer-reads-LX coordination *post hoc*. A clean version needs **scratchpad/LX
   planning in inductor**: bind the bridge LX output to the specific consumer input,
@@ -763,8 +775,25 @@ inductor team):
 
 This section answers three questions: *what does this buy a real model, which workloads,
 and is it plug-and-play or does it need more work?* It is grounded in actual compiled
-bundles found in the inductor caches (a detailed per-edge classification is produced by
-the real-edge tracer at `/tmp/real_edge_analysis.md`).
+bundles found in the inductor caches; a detailed per-edge classification of **40 real
+producer→consumer handoff edges** (across granite RMSNorm+linear and two SDPA attention
+kernels) is at `/tmp/real_edge_analysis.md`. Headline:
+
+| Class | Count (of 40) | Status |
+|---|---|---|
+| **Same-stick → STCDP today** | **27** | addressable by the proven primitive |
+| ↳ same-shard (same-core, no ring) | 18 | simplest win (LX-resident, no ring) |
+| ↳ different-shard (**genuine cross-core ring**) | 9 | mostly matmul-output → elementwise/softmax |
+| Layout-changing → needs transpose (blocked) | 8 | cluster at matmul-input (`out→in`) + RMSNorm reshape |
+| Graph-input / weight → prelayout bucket | 5 | inductor prelayout, no runtime primitive |
+
+So the proven same-stick move covers the **majority (27/40)** of real activation handoffs —
+broader than the earlier "~4% fundamental" framing, because most HBM handoffs are not
+explicit restickifies; they are plain producer→consumer edges that cross an SDSC boundary
+and preserve stick orientation. (Caveat from the tracer: cached SDSC JSONs lack
+`hbmStartAddress_` — that field appears only post-dxp — so edges were traced via the
+`scheduleTree_` allocate-node per-core HBM base with a latest-prior-producer rule;
+self-consistent but inferred.)
 
 ### 12.1 The handoffs we target exist in real models
 
@@ -828,7 +857,10 @@ speedup, in increasing order of effort:
    the mixed `SuperDsc`, fold the bundle. The Tier-1 planner (`onchip_handoff.py`) already
    *detects* (fail-closed); the *binding* is the missing piece (§11c).
 3. **Per-size LX allocation** (§9 iii / §11b). Mandatory for variable-size workloads — the
-   fixed 2048-derived bases corrupt the cross-core path at 4096.
+   fixed 2048-derived bases corrupt the cross-core path at 4096. **Now implemented**:
+   `per_core_slice_bytes()` + `allocate_lx_bases()` in `onchip_bridge.py` pack
+   stick-aligned, non-overlapping regions and raise if the footprint exceeds the 2 MB/core
+   LX. (This also surfaced a hard limit — see the round-trip note in §9 iii / §11b.)
 4. **Sharding match** — the synthesized bridge must read and match the consumer's actual
    `numWkSlicesPerDim_` (m-split, 2-D co-split for bmm/MoE), not assume `out:32`.
 5. **Transpose support** for the layout-changing bucket — blocked on the Compute-CB fault
@@ -839,6 +871,14 @@ ring, no reversed scratch; value-correct at *every* size including 4096) on a
 **same-layout, same-sharding** residual/norm→linear edge at hidden dim ~1k–2k. That needs
 only items 1+2+4. The cross-core ring (needed when ownerships differ) additionally needs
 item 3. Layout-changing handoffs need item 5.
+
+**Concrete best cross-core target** (from the real-edge tracer): the SDPA
+`batchmatmul(QK^T) → softmax(sub/max)` edge, stick `['out']` — same-stick *and* genuinely
+cross-core (producer shards `{mb:32}`, consumer `{x:32}` → real RIU-ring traffic, not a
+dead-code-eliminated copy), and it recurs in **every attention layer of every roadmap
+model**. Runner-up: granite `batchmatmul → mul` (MLP linear output). A real single
+cross-core move there is two LX regions (producer + consumer), which fits at all sizes —
+unlike the 3-region proof round trip.
 
 ### 12.5 Bottom line
 
