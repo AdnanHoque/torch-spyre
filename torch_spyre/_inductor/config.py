@@ -40,6 +40,16 @@ core_id_k_fast_emission: bool = (
     os.environ.get("SPYRE_CORE_ID_K_FAST_EMISSION", "1") == "1"
 )
 
+# Experimental Inductor-level SDPA prefill decomposition.  This keeps the
+# normal decomposition as the default and, when enabled, emits the blockwise
+# online-softmax form used by the Flash Attention building-block tests.
+flash_attention_prefill: bool = (
+    os.environ.get("SPYRE_FLASH_ATTENTION_PREFILL", "0") == "1"
+)
+flash_attention_prefill_block_size: int = int(
+    os.environ.get("SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE", "128")
+)
+
 # --- Tier 0: ring-aware restickify (telemetry + producer-aligned work division) ---
 # Default-off ring byte-hop telemetry for compiler-inserted restickifies.
 restickify_ring_telemetry: bool = (

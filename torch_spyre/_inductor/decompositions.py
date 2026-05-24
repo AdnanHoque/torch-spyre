@@ -23,6 +23,7 @@ import torch._decomp as decomp
 
 from .constants import DEVICE_NAME
 from .errors import Unsupported
+from . import config
 from . import customops  # noqa: F401
 
 import threading
@@ -55,6 +56,77 @@ _dispatchkey_kernels_registered = False
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+
+def _can_use_flash_attention_prefill(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    attn_bias: torch.Tensor | None,
+    dropout_p: float,
+    is_causal: bool,
+) -> bool:
+    if not config.flash_attention_prefill:
+        return False
+    if dropout_p > 0.0:
+        return False
+    if attn_bias is not None or is_causal:
+        return False
+    if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
+        return False
+    return True
+
+
+def _flash_attention_prefill(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    block_size: int,
+) -> torch.Tensor:
+    if block_size <= 0:
+        raise Unsupported(
+            f"SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE must be positive, got {block_size}"
+        )
+
+    batch_size = query.size(0)
+    num_heads = query.size(1)
+    max_seqlen_q = query.size(2)
+    max_seqlen_kv = key.size(2)
+
+    output = torch.zeros_like(query)
+    max_running = torch.full(
+        (batch_size, num_heads, max_seqlen_q),
+        float("-inf"),
+        device=query.device,
+        dtype=query.dtype,
+    )
+    denominator = torch.zeros(
+        (batch_size, num_heads, max_seqlen_q),
+        device=query.device,
+        dtype=query.dtype,
+    )
+
+    for start in range(0, max_seqlen_kv, block_size):
+        end = min(start + block_size, max_seqlen_kv)
+        key_block = key[:, :, start:end, :]
+        value_block = value[:, :, start:end, :]
+        key_block_t = key_block.transpose(-1, -2).contiguous()
+
+        scores = torch.matmul(query, key_block_t)
+        scores = scores.transpose(-1, -2).contiguous()
+        block_max = torch.amax(scores, dim=-2)
+        next_max = torch.maximum(max_running, block_max)
+
+        exp_scores = torch.exp(scores - next_max.unsqueeze(-2))
+        correction = torch.exp(max_running - next_max)
+        denominator = denominator * correction + exp_scores.sum(dim=-2)
+        output = output * correction.unsqueeze(-1) + torch.bmm(
+            exp_scores.transpose(-1, -2).flatten(0, 1),
+            value_block.flatten(0, 1),
+        ).unflatten(0, (batch_size, num_heads))
+        max_running = next_max
+
+    return output / denominator.unsqueeze(-1)
 
 
 def register_spyre_decomposition(
@@ -533,20 +605,6 @@ def spyre__sdpa_overrideable(
     if expansion != 1:
         key = key.unsqueeze(2).expand(-1, -1, expansion, -1, -1).flatten(1, 2)
         value = value.unsqueeze(2).expand(-1, -1, expansion, -1, -1).flatten(1, 2)
-    key_t = key.transpose(-2, -1)
-
-    attn = torch.matmul(query, key_t)
-
-    if is_causal:
-        assert attn_bias is None
-        attn_bias = torch.full_like(attn, float("-inf"))
-        attn_bias = attn_bias.triu(diagonal=1)
-
-    if attn_bias is not None:
-        attn = attn + attn_bias
-
-    # TODO (aviros): Switch to _safe_softmax
-    attn = torch.softmax(attn, -1)
 
     if dropout_p > 0.0:
         # TODO(aviros): Implement
@@ -559,8 +617,32 @@ def spyre__sdpa_overrideable(
     philox_seed = torch.empty((1,), dtype=torch.float16, device="spyre")
     philox_offset = torch.empty((1,), dtype=torch.float16, device="spyre")
 
-    # B, H, S, E
-    out = torch.matmul(attn, value)
+    if _can_use_flash_attention_prefill(
+        query, key, value, attn_bias, dropout_p, is_causal
+    ):
+        out = _flash_attention_prefill(
+            query,
+            key,
+            value,
+            config.flash_attention_prefill_block_size,
+        )
+    else:
+        key_t = key.transpose(-2, -1)
+        attn = torch.matmul(query, key_t)
+
+        if is_causal:
+            assert attn_bias is None
+            attn_bias = torch.full_like(attn, float("-inf"))
+            attn_bias = attn_bias.triu(diagonal=1)
+
+        if attn_bias is not None:
+            attn = attn + attn_bias
+
+        # TODO (aviros): Switch to _safe_softmax
+        attn = torch.softmax(attn, -1)
+
+        # B, H, S, E
+        out = torch.matmul(attn, value)
 
     # B, S, H, E
     # Do not remove contiguous here.

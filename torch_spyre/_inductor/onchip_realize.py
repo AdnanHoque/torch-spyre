@@ -89,6 +89,7 @@ def realize_same_core_handoff(
     producer_ldsidx: int,
     consumer_ldsidx: int,
     capacity: int = LX_CAPACITY_BYTES,
+    region0: int = 0,
 ) -> OnChipRealization | None:
     """Build a 2-region same-core single-STCDP realization, or None (fail-closed).
 
@@ -101,7 +102,7 @@ def realize_same_core_handoff(
         return None
     slice_bytes = per_core_slice_bytes(iter_sizes, split_dim, stick_size, num_cores)
     try:
-        bases = allocate_lx_bases(2, slice_bytes, capacity=capacity)
+        bases = allocate_lx_bases(2, slice_bytes, capacity=capacity, region0=region0)
     except ValueError:
         return None
     producer_base, consumer_base = bases
@@ -158,6 +159,7 @@ def realize_streamed_handoff(
     consumer_ldsidx: int,
     tile_bytes: int = STREAM_TILE_BYTES,
     capacity: int = LX_CAPACITY_BYTES,
+    region0: int = 0,
 ) -> StreamedRealization | None:
     """Stream a >LX/2 slice through 2 fixed tile buffers, or None (fail-closed).
 
@@ -175,7 +177,11 @@ def realize_streamed_handoff(
     row_dim = row_dims[0]
     slice_bytes = per_core_slice_bytes(iter_sizes, split_dim, stick_size, num_cores)
     try:
-        bases = allocate_stream_bases(tile_bytes, capacity=capacity)
+        bases = allocate_stream_bases(
+            tile_bytes,
+            capacity=capacity,
+            region0=region0,
+        )
     except ValueError:
         return None
     producer_base, consumer_base = bases
@@ -231,11 +237,27 @@ def is_same_shard(
 # dict surgery (torch-free) so generate_bundle and the offline gate share them.
 
 
+_POINTWISE_HANDOFF_OPS = {
+    "add",
+    "exp",
+    "identity",
+    "maximum",
+    "mul",
+    "realdiv",
+    "sub",
+}
+
+
 def _dl_op(sdsc_json: dict) -> dict:
     """Return the single DL op dict of an SDSC body's first dsc."""
     body = sdsc_json[next(iter(sdsc_json))]
     dsc = body["dscs_"][0]
     return dsc[next(iter(dsc))]
+
+
+def _op_name(sdsc_json: dict) -> str:
+    dsc = sdsc_json[next(iter(sdsc_json))]["dscs_"][0]
+    return next(iter(dsc))
 
 
 def _core_state_init_entry(lx_base: int) -> dict:
@@ -298,49 +320,80 @@ def _hbm_base(dl: dict, lds_idx: int) -> str | None:
     return None
 
 
-def detect_onchip_edge(sdscs_json: list[dict]):
-    """Find the eligible same-stick same-shard add->add producer->consumer edge.
+def _label_indices(labels: list[str]) -> list[int]:
+    return [int(lbl.rsplit("-idx", 1)[1]) for lbl in labels]
 
-    Mirrors splice_2048_stcdp: a producer add SDSC whose single output labeledDs
-    HBM base matches a later add SDSC's first input HBM base, both sharding the
-    same way. Returns (producer, consumer, prod_out_idx, cons_in_idx) or None.
+
+def _producer_output_indices(dl: dict) -> list[int]:
+    return _label_indices(dl["computeOp_"][0]["outputLabeledDs"])
+
+
+def _consumer_input_indices(dl: dict) -> list[int]:
+    return _label_indices(dl["computeOp_"][0]["inputLabeledDs"])
+
+
+def _future_consumers(sdscs_json: list[dict], start: int, hbm_addr: str):
+    consumers = []
+    for c in range(start + 1, len(sdscs_json)):
+        cons = sdscs_json[c]
+        cons_dl = _dl_op(cons)
+        for in_idx in _consumer_input_indices(cons_dl):
+            if _hbm_base(cons_dl, in_idx) == hbm_addr:
+                consumers.append((c, cons, in_idx))
+    return consumers
+
+
+def _iter_sizes_from_dl(dl: dict, shard: dict[str, int]) -> dict[str, int] | None:
+    sizes = dl.get("N_", {})
+    iter_sizes: dict[str, int] = {}
+    for dim in shard:
+        key = f"{dim}_"
+        if key not in sizes:
+            return None
+        iter_sizes[key] = int(sizes[key])
+    return iter_sizes
+
+
+def detect_onchip_edge(sdscs_json: list[dict]):
+    """Find an eligible same-stick same-shard producer->consumer edge.
+
+    The original proof matched add->add only.  Keep that production-shaped narrow
+    contract, but allow the same pointwise shape for attention's Inductor-level
+    online-softmax graph.  We require a single future consumer to avoid fanout
+    values that still need the HBM materialization.
     """
     for p in range(len(sdscs_json)):
         prod = sdscs_json[p]
-        if not next(iter(prod)).endswith("_add"):
+        if _op_name(prod) not in _POINTWISE_HANDOFF_OPS:
             continue
         prod_dl = _dl_op(prod)
-        out_labels = prod_dl["computeOp_"][0]["outputLabeledDs"]
-        if len(out_labels) != 1:
+        out_indices = _producer_output_indices(prod_dl)
+        if len(out_indices) != 1:
             continue
-        out_idx = int(out_labels[0].rsplit("-idx", 1)[1])
+        out_idx = out_indices[0]
         prod_addr = _hbm_base(prod_dl, out_idx)
         if prod_addr is None:
             continue
         prod_shard = prod[next(iter(prod))].get("numWkSlicesPerDim_")
-        for c in range(p + 1, len(sdscs_json)):
-            cons = sdscs_json[c]
-            if not next(iter(cons)).endswith("_add"):
-                continue
-            cons_dl = _dl_op(cons)
-            in_lbl = cons_dl["computeOp_"][0]["inputLabeledDs"][0]
-            in_idx = int(in_lbl.rsplit("-idx", 1)[1])
-            if _hbm_base(cons_dl, in_idx) != prod_addr:
-                continue
-            if cons[next(iter(cons))].get("numWkSlicesPerDim_") != prod_shard:
-                continue
-            return prod, cons, out_idx, in_idx
+        consumers = _future_consumers(sdscs_json, p, prod_addr)
+        if len(consumers) != 1:
+            continue
+        _c, cons, in_idx = consumers[0]
+        if _op_name(cons) not in _POINTWISE_HANDOFF_OPS:
+            continue
+        if cons[next(iter(cons))].get("numWkSlicesPerDim_") != prod_shard:
+            continue
+        return prod, cons, out_idx, in_idx
     return None
 
 
 def realize_onchip_handoff(sdscs_json: list[dict]) -> bool:
     """Realize the eligible same-core handoff edge in place; fail-closed.
 
-    Detects the add->add edge, builds a single STCDP same-layout bridge at the
-    device-proven LX bases, flips producer-output + consumer-input to LX, and
-    folds the bridge into the consumer (mixed DL+data-op SuperDSC). Allocator
-    validates the 2 regions fit per-core LX; otherwise returns False. Mirrors
-    splice_2048_stcdp.
+    Detects the add->add edge, builds a same-layout bridge with the same
+    size-aware LX allocation as the standalone realization helpers, flips
+    producer-output + consumer-input to LX, and folds the bridge into the
+    consumer (mixed DL+data-op SuperDSC).
     """
     edge = detect_onchip_edge(sdscs_json)
     if edge is None:
@@ -352,58 +405,45 @@ def realize_onchip_handoff(sdscs_json: list[dict]) -> bool:
         return False
     num_cores = shard[split[0]]
     layout = [f"{d}_" for d in shard]
-    iter_sizes = {f"{d}_": num_cores * STICK_SIZE for d in shard}
+    iter_sizes = _iter_sizes_from_dl(_dl_op(cons), shard)
+    if iter_sizes is None:
+        return False
     split_dim = f"{split[0]}_"
     slice_bytes = per_core_slice_bytes(iter_sizes, split_dim, STICK_SIZE, num_cores)
     # Tier branch: single 2-region move when 2*slice fits (slice <= half cap);
     # else stream through 2 fixed tile buffers; else fail-closed. The add->add
     # 2048 case stays the single move (slice == 256 KB << half cap), byte-identical.
     if slice_bytes <= STREAM_THRESHOLD:
-        try:
-            allocate_lx_bases(2, slice_bytes)
-        except ValueError:
-            return False
-        datadscs, opfuncs, sched = build_same_layout_bridge(
-            dim_pool=layout,
+        realization = realize_same_core_handoff(
             iter_sizes=iter_sizes,
-            stick_size=STICK_SIZE,
-            num_cores=num_cores,
-            lx_size=DATAOP_LX_SIZE,
-            src_base=PRODUCER_LX_BASE,
-            dst_base=CONSUMER_LX_BASE,
             layout=layout,
             stick_dim=split_dim,
-            src_split_dim=split_dim,
-            dst_split_dim=split_dim,
+            split_dim=split_dim,
+            stick_size=STICK_SIZE,
+            num_cores=num_cores,
+            producer_ldsidx=out_idx,
+            consumer_ldsidx=in_idx,
+            region0=PRODUCER_LX_BASE,
         )
     else:
-        row_dims = [d for d in layout if d != split_dim]
-        if len(row_dims) != 1:
-            return False
-        try:
-            allocate_stream_bases(STREAM_TILE_BYTES)
-        except ValueError:
-            return False
-        datadscs, opfuncs, sched = build_streamed_bridge(
-            dim_pool=layout,
+        realization = realize_streamed_handoff(
             iter_sizes=iter_sizes,
-            stick_size=STICK_SIZE,
-            num_cores=num_cores,
-            lx_size=DATAOP_LX_SIZE,
-            src_base=PRODUCER_LX_BASE,
-            dst_base=CONSUMER_LX_BASE,
             layout=layout,
             stick_dim=split_dim,
-            src_split_dim=split_dim,
-            dst_split_dim=split_dim,
-            row_dim=row_dims[0],
-            slice_bytes=slice_bytes,
+            split_dim=split_dim,
+            stick_size=STICK_SIZE,
+            num_cores=num_cores,
+            producer_ldsidx=out_idx,
+            consumer_ldsidx=in_idx,
+            region0=PRODUCER_LX_BASE,
         )
-    apply_lx_flip(prod, LxFlip(out_idx, PRODUCER_LX_BASE, "producer-output"))
-    apply_lx_flip(cons, LxFlip(in_idx, CONSUMER_LX_BASE, "consumer-input"))
+    if realization is None:
+        return False
+    apply_lx_flip(prod, realization.producer_flip)
+    apply_lx_flip(cons, realization.consumer_flip)
     body = cons[next(iter(cons))]
-    body["coreIdToDscSchedule"] = sched
-    body["datadscs_"] = datadscs
-    body["opFuncsUsed_"] = opfuncs
+    body["coreIdToDscSchedule"] = realization.schedule
+    body["datadscs_"] = realization.datadscs
+    body["opFuncsUsed_"] = realization.opfuncs
     _dl_op(cons)["numCoreletsUsed_DSC2_"] = 1
     return True
