@@ -43,6 +43,10 @@ STICK_BYTES = 128
 # Fixed per-side LX buffer for the streamed bridge. Each tile is <= this; in+out
 # = 2 * STREAM_TILE_BYTES, leaving the rest of the 2 MB/core LX for the DL op.
 STREAM_TILE_BYTES = 128 << 10  # 131_072
+# The same-stick/same-split 512 proof used a 2048x2048 data-op frame even when
+# the DL op's logical tensor was 512x512. Smaller frames can compile but hang on
+# device, so preserve that proven lower bound for sub-stick same-stick chunks.
+MIN_SAME_STICK_FRAME_DIM = 2048
 
 
 def _align_up(value: int, alignment: int) -> int:
@@ -67,6 +71,31 @@ def per_core_slice_bytes(
         if d != split_dim:
             rows *= n
     return _align_up(rows * cols * word_length, STICK_BYTES)
+
+
+def per_core_same_stick_slice_bytes(
+    iter_sizes: Mapping[str, int], split_dim: str, stick_dim: str, stick_size: int,
+    num_cores: int, word_length: int = WORD_LENGTH,
+) -> int:
+    """Per-core bytes for same-stick bridges where split and stick may differ.
+
+    ``per_core_slice_bytes`` is the original same-shard helper and assumes the
+    split dimension is also the stick dimension.  Attention score handoffs split
+    the query axis across cores while the key axis is the stick, so padding the
+    split chunk to a whole stick overstates the LX footprint.  This helper pads
+    only the actual stick dimension.
+    """
+    chunk = iter_sizes[split_dim] // num_cores
+    if split_dim == stick_dim:
+        chunk = max(chunk, stick_size)
+    elems = chunk
+    for dim, size in iter_sizes.items():
+        if dim == split_dim:
+            continue
+        if dim == stick_dim:
+            size = _align_up(size, stick_size)
+        elems *= size
+    return _align_up(elems * word_length, STICK_BYTES)
 
 
 def allocate_lx_bases(
@@ -165,6 +194,14 @@ def _labeled_ds(
 ) -> dict:
     """One labeledDs (dataIN_L0 / dataOUT_L0) with its per-core PieceInfo."""
     chunk = iter_sizes[split_dim] // num_cores
+    layout_sizes = dict(iter_sizes)
+    if split_dim == stick_dim:
+        layout_sizes = {
+            dim: max(size, MIN_SAME_STICK_FRAME_DIM)
+            for dim, size in layout_sizes.items()
+        }
+        chunk = max(chunk, stick_size)
+        layout_sizes[split_dim] = max(layout_sizes[split_dim], chunk * num_cores)
     return {
         "ldsName_": f"{pds_name}_L0",
         "pdsName_": pds_name,
@@ -174,16 +211,16 @@ def _labeled_ds(
         "segment_": "output",
         "layoutDimOrder_": list(layout_order),
         "stickDimOrder_": [stick_dim],
-        "dimToLayoutSize_": {d: iter_sizes[d] for d in layout_order},
+        "dimToLayoutSize_": {d: layout_sizes[d] for d in layout_order},
         "dimToStickSize_": {stick_dim: stick_size},
-        "validGap_": {d: [[iter_sizes[d], 0]] for d in layout_order},
+        "validGap_": {d: [[layout_sizes[d], 0]] for d in layout_order},
         "totElements": -1,
         "hbmSize_": 0,
         "hbmStartAddress_": 0,
         "lxSize_": lx_size,
         "lxStartAddress_": {},
         "PieceInfo": _piece_info(
-            layout_order, split_dim, iter_sizes, chunk, base, num_cores, reverse
+            layout_order, split_dim, layout_sizes, chunk, base, num_cores, reverse
         ),
     }
 

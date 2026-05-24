@@ -33,11 +33,12 @@ from .codegen.onchip_bridge import (
     STREAM_TILE_BYTES,
     allocate_lx_bases,
     allocate_stream_bases,
+    build_roundtrip_bridge,
     build_same_layout_bridge,
-    build_same_stick_bridge,
     build_streamed_bridge,
     num_stream_tiles,
     per_core_slice_bytes,
+    per_core_same_stick_slice_bytes,
 )
 
 # Per-core LX byte span declared inside each data-op labeledDs (2 MB, matches
@@ -54,6 +55,14 @@ STICK_SIZE = 64
 # Tier select: stream once the single 2-region move would consume more than half
 # the 2 MB LX, leaving no headroom for the DL op. Below it the single move fits.
 STREAM_THRESHOLD = LX_CAPACITY_BYTES // 2
+# Device-proven 512x512 add and seq64 attention splices reserve at least 256 KiB
+# per LX bridge region. Tighter packing can overlap DL-op private LX scratch even
+# when the logical tensor slice is smaller.
+MIN_BRIDGE_REGION_BYTES = 256 << 10
+
+
+def _reserve_bridge_region_bytes(slice_bytes: int) -> int:
+    return max(slice_bytes, MIN_BRIDGE_REGION_BYTES)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -101,7 +110,9 @@ def realize_same_core_handoff(
     """
     if split_dim not in iter_sizes or iter_sizes[split_dim] % num_cores != 0:
         return None
-    slice_bytes = per_core_slice_bytes(iter_sizes, split_dim, stick_size, num_cores)
+    slice_bytes = _reserve_bridge_region_bytes(
+        per_core_slice_bytes(iter_sizes, split_dim, stick_size, num_cores)
+    )
     try:
         bases = allocate_lx_bases(2, slice_bytes, capacity=capacity, region0=region0)
     except ValueError:
@@ -176,7 +187,9 @@ def realize_streamed_handoff(
     if len(row_dims) != 1:
         return None
     row_dim = row_dims[0]
-    slice_bytes = per_core_slice_bytes(iter_sizes, split_dim, stick_size, num_cores)
+    slice_bytes = _reserve_bridge_region_bytes(
+        per_core_slice_bytes(iter_sizes, split_dim, stick_size, num_cores)
+    )
     try:
         bases = allocate_stream_bases(
             tile_bytes,
@@ -435,14 +448,14 @@ def detect_attention_score_handoff(
 ):
     """Find stock SDPA's same-stick QK^T score handoff fanout.
 
-    The score matrix feeds both the softmax max and sub nodes.  If the producer
+    The score matrix feeds both softmax max and sub.  Once the producer output
     is flipped to LX, both consumers must be fed from LX too; realizing only one
-    fanout leg would leave the other consumer reading a stale HBM address.
+    leg leaves the other consumer reading a stale HBM address.
 
-    The producer and consumers use different internal dim labels for the same
-    logical score matrix.  We use the consumer geometry for the STCDP data-op,
-    matching the proven attention splice: same stick, same linear byte shape,
-    and the consumer's native split/layout.
+    Use the proven splice's same-stick roundtrip geometry for each fanout leg:
+    split dim first, remaining non-stick dims next, stick dim last.  That shape
+    exercises real cross-core L3 traffic and keeps the implementation out of the
+    uncertified PT-LX/ReStickify path.
     """
     for p, prod in enumerate(sdscs_json):
         if _op_name(prod) != "batchmatmul":
@@ -468,21 +481,27 @@ def detect_attention_score_handoff(
         if prod_stick is None:
             continue
         bridged_edges = [max_edges[0], sub_edges[0]]
-        if any(_stick_dim_for_lds(_dl_op(cons), in_idx) != prod_stick
-               for _c, cons, in_idx in bridged_edges):
+        if any(
+            _stick_dim_for_lds(_dl_op(cons), in_idx) != prod_stick
+            for _c, cons, in_idx in bridged_edges
+        ):
             continue
 
-        # Use the sub input as the canonical softmax score geometry; max has
-        # the same score input layout in stock SDPA.
+        # Use the proven splice's data-op geometry: split dim first, remaining
+        # non-stick dims next, stick dim last.  This is not necessarily the DL
+        # primaryDsInfo_ order.
         _sub_c, sub_cons, sub_in_idx = sub_edges[0]
         sub_dl = _dl_op(sub_cons)
-        layout = _layout_for_lds(sub_dl, sub_in_idx)
-        if layout is None:
-            continue
         shard = _body(sub_cons).get("numWkSlicesPerDim_", {})
         split_dim = _single_split_dim(shard)
         if split_dim is None:
             continue
+        layout = [split_dim]
+        for dim in shard:
+            sym = _symbol_dim(dim)
+            if sym not in (split_dim, prod_stick):
+                layout.append(sym)
+        layout.append(prod_stick)
         num_cores = int(_body(sub_cons).get("numCoresUsed_", 0))
         if num_cores <= 0:
             continue
@@ -496,11 +515,13 @@ def detect_attention_score_handoff(
         handoff_bytes = _handoff_bytes(iter_sizes, word_length)
         if handoff_bytes < min_handoff_bytes:
             continue
-        slice_bytes = per_core_slice_bytes(
-            iter_sizes, split_dim, STICK_SIZE, num_cores, word_length
+        slice_bytes = _reserve_bridge_region_bytes(
+            per_core_same_stick_slice_bytes(
+                iter_sizes, split_dim, prod_stick, STICK_SIZE, num_cores, word_length
+            )
         )
         try:
-            bases = allocate_lx_bases(2, slice_bytes, region0=0)
+            bases = allocate_lx_bases(3, slice_bytes, region0=0)
         except ValueError:
             continue
         return {
@@ -516,7 +537,8 @@ def detect_attention_score_handoff(
             "handoff_bytes": handoff_bytes,
             "slice_bytes": slice_bytes,
             "producer_base": bases[0],
-            "consumer_base": bases[1],
+            "scratch_base": bases[1],
+            "consumer_base": bases[2],
         }
     return None
 
@@ -535,20 +557,22 @@ def realize_attention_score_handoff(
         LxFlip(edge["producer_out_idx"], edge["producer_base"], "producer-output"),
     )
     for _c, cons, in_idx in edge["consumers"]:
-        apply_lx_flip(cons, LxFlip(in_idx, edge["consumer_base"], "consumer-input"))
-        datadscs, opfuncs, sched = build_same_stick_bridge(
+        apply_lx_flip(
+            cons,
+            LxFlip(in_idx, edge["consumer_base"], "consumer-input"),
+        )
+        datadscs, opfuncs, sched = build_roundtrip_bridge(
             dim_pool=edge["layout"],
             iter_sizes=edge["iter_sizes"],
             stick_size=STICK_SIZE,
             num_cores=edge["num_cores"],
-            lx_size=DATAOP_LX_SIZE,
-            src_base=edge["producer_base"],
-            dst_base=edge["consumer_base"],
-            src_layout=edge["layout"],
-            dst_layout=edge["layout"],
+            lx_size=edge["slice_bytes"],
+            producer_base=edge["producer_base"],
+            scratch_base=edge["scratch_base"],
+            consumer_base=edge["consumer_base"],
+            layout=edge["layout"],
             stick_dim=edge["stick_dim"],
-            src_split_dim=edge["split_dim"],
-            dst_split_dim=edge["split_dim"],
+            split_dim=edge["split_dim"],
         )
         body = _body(cons)
         body["coreIdToDscSchedule"] = sched
@@ -625,7 +649,9 @@ def realize_onchip_handoff(
     if iter_sizes is None:
         return False
     split_dim = f"{split[0]}_"
-    slice_bytes = per_core_slice_bytes(iter_sizes, split_dim, STICK_SIZE, num_cores)
+    slice_bytes = _reserve_bridge_region_bytes(
+        per_core_slice_bytes(iter_sizes, split_dim, STICK_SIZE, num_cores)
+    )
     # Tier branch: single 2-region move when 2*slice fits (slice <= half cap);
     # else stream through 2 fixed tile buffers; else fail-closed. The add->add
     # 2048 case stays the single move (slice == 256 KB << half cap), byte-identical.

@@ -82,6 +82,28 @@ def test_datadsc_sharding_and_memid_match_consumer():
         assert in_pieces[i]["dimToSize_"]["out_"] == 64
 
 
+def test_substick_split_on_stick_dim_pads_dataop_frame():
+    r = rz.realize_same_core_handoff(
+        iter_sizes={"mb_": 512, "out_": 512}, layout=["mb_", "out_"],
+        stick_dim="out_", split_dim="out_", stick_size=64, num_cores=32,
+        producer_ldsidx=0, consumer_ldsidx=0,
+        region0=rz.PRODUCER_LX_BASE,
+    )
+    dataop = r.datadscs[0]["0_STCDPOpLx_dataop"]
+    in_ld = dataop["labeledDs_"][0]
+    out_ld = dataop["labeledDs_"][1]
+    assert r.slice_bytes == rz.MIN_BRIDGE_REGION_BYTES
+    assert r.consumer_base == rz.PRODUCER_LX_BASE + rz.MIN_BRIDGE_REGION_BYTES
+    assert in_ld["dimToLayoutSize_"]["mb_"] == 2048
+    assert in_ld["dimToLayoutSize_"]["out_"] == 2048
+    assert out_ld["dimToLayoutSize_"]["mb_"] == 2048
+    assert out_ld["dimToLayoutSize_"]["out_"] == 2048
+    assert in_ld["PieceInfo"][0]["dimToSize_"]["mb_"] == 2048
+    assert in_ld["PieceInfo"][0]["dimToSize_"]["out_"] == 64
+    assert out_ld["PieceInfo"][0]["dimToSize_"]["mb_"] == 2048
+    assert out_ld["PieceInfo"][0]["dimToSize_"]["out_"] == 64
+
+
 def test_over_capacity_fails_closed():
     # 2048x(2048/2) cols = 1 MB/region; 2 regions = 2 MB == capacity, but the
     # slice doubles to >1MB at 1-core split -> 2 regions exceed 2 MB.
@@ -223,7 +245,7 @@ def _fake_attention_sdscs(include_max=True):
     return sdscs
 
 
-def test_attention_score_handoff_realizes_max_and_sub_fanout():
+def test_attention_score_handoff_bridges_full_score_fanout():
     sdscs = _fake_attention_sdscs()
     assert rz.realize_onchip_handoff(
         sdscs, attention_score_handoff=True, min_handoff_bytes=0
@@ -231,14 +253,15 @@ def test_attention_score_handoff_realizes_max_and_sub_fanout():
     bmm, max_sdsc, sub_sdsc = sdscs
     bmm_out = rz._dl_op(bmm)["labeledDs_"][0]
     assert bmm_out["hbmSize_"] == 0
-    for consumer in (max_sdsc, sub_sdsc):
-        body = consumer[next(iter(consumer))]
-        assert body["opFuncsUsed_"] == ["STCDPOpLx"]
-        assert len(body["datadscs_"]) == 1
-        dataop = body["datadscs_"][0]["0_STCDPOpLx_dataop"]
-        assert dataop["labeledDs_"][0]["hbmSize_"] == 0
-        assert dataop["labeledDs_"][1]["hbmSize_"] == 0
-        assert rz._dl_op(consumer)["labeledDs_"][0]["hbmSize_"] == 0
+    for sdsc in (max_sdsc, sub_sdsc):
+        body = sdsc[next(iter(sdsc))]
+        assert body["opFuncsUsed_"] == ["STCDPOpLx", "STCDPOpLx"]
+        assert len(body["datadscs_"]) == 2
+        for dataop in body["datadscs_"]:
+            op_body = dataop[next(iter(dataop))]
+            assert op_body["labeledDs_"][0]["hbmSize_"] == 0
+            assert op_body["labeledDs_"][1]["hbmSize_"] == 0
+        assert rz._dl_op(sdsc)["labeledDs_"][0]["hbmSize_"] == 0
 
 
 def test_attention_score_handoff_respects_min_size_gate():
