@@ -384,14 +384,17 @@ Patched binary used for all device proofs:
 
 ---
 
-## 6. The realization recipe — step by step
+## 6. The realization recipe — step by step (manual / debug path)
 
 (Grounded in `splice_2048_roundtrip.py`, `splice_2048_stcdp.py`, `splice_2048_bmm.py`,
 and the verified producer/consumer LX-flip JSON.)
 
-The proof harness *splices* a mixed bundle out of a real compiled baseline. The clean
-production version would synthesize this in inductor (§11), but the splice is the exact
-recipe.
+The proof harness *splices* a mixed bundle out of a real compiled baseline. **This §6
+splice is the manual / debug path** — it hand-edits compiled SDSC JSON post-hoc and is
+how the mechanism was first proven and is still inspected. **§6b documents the
+productionized compiler path**: an inductor realize pass that emits the same mixed
+SuperDSC during `torch.compile` itself. Read §6 to understand the transform; read §6b
+for how the compiler now performs it.
 
 **Worked case:** `f = (a + b.t() + c.t()) @ d`, fp16, size S=2048, 32 cores. Baseline
 bundle (5 SDSCs):
@@ -515,6 +518,125 @@ they do *not* scale with per-core slice size. At S=4096 the per-core slice doubl
 (`out_` chunk 64→128) but the bases stay at 16384/1048576/8192 with the same 2 MB span —
 which is exactly why the 4096 round trip broke correctness (§9). A production version
 must compute LX bases from per-core slice bytes.
+
+---
+
+## 6b. The inductor compiler-pass realization (compiler-driven, not splice)
+
+(Grounded in `onchip_realize.py`, `codegen/bundle.py`, `codegen/onchip_bridge.py`,
+`config.py`, `execution/async_compile.py`, and
+`docs/source/compiler/onchip_realization_design.md` — the realize-pass design doc, now
+copied into this branch and cross-referenced here.)
+
+Everything §6 does by hand-editing compiled SDSC JSON is now performed **inside
+`torch.compile`** by an inductor *realize pass*. The splice (§6) remains the
+manual/debug path for inspecting the transform; §6b is the productionized path that
+emits the mixed SuperDSC during compilation, behind a default-off flag.
+
+### (a) The realize pass — `onchip_realize.py`
+
+`onchip_realize.py` is a torch-free module (unit-tests in a bare worktree, mirrors the
+`restickify_cost.py` split). Four functions do the in-compiler equivalent of the splice
+(each mirrors a step of §6, in-memory dict surgery rather than post-hoc file edits):
+
+- **`detect_onchip_edge(sdscs_json)`** — finds the eligible same-stick same-shard
+  producer→consumer edge. It mirrors the §6a HBM-address trace: an `_add` producer SDSC
+  whose single output `labeledDs` per-core HBM base (read from the `scheduleTree_`
+  allocate node) matches a later `_add` consumer SDSC's first input HBM base, with
+  matching `numWkSlicesPerDim_`. Returns `(producer, consumer, prod_out_idx,
+  cons_in_idx)` or `None`.
+- **`apply_lx_flip(sdsc_json, flip)`** — flips one DL `labeledDs` to LX-resident at the
+  given per-core base, the in-memory mirror of §6b's `_flip_tensor_to_lx`: rewrites
+  `memOrg_ -> {"lx": {...}}`, clears the HBM addr/size, sets the
+  `DL_LX_SENTINEL` (`2147483647`) LX size, rebuilds the per-core `coreStateInit_`
+  (`lbrInit_=[base]`), and rewrites the matching `scheduleTree_` allocate node
+  (`component_="lx"`, per-core LX base). Applied to producer-output and consumer-input.
+- **`fold_onchip_handoff(sdsc_json, realization)`** (in `codegen/bundle.py`) — installs
+  the synthesized `datadscs_` / `coreIdToDscSchedule` / `opFuncsUsed_` onto the consumer
+  SDSC body, the §6d "install the mixed-SuperDSC scaffolding" step.
+- **`realize_onchip_handoff(sdscs_json)`** — the orchestrator. Detects the edge, reads
+  the consumer's `numWkSlicesPerDim_` for the split, computes `per_core_slice_bytes`,
+  and **tier-branches**: when `2 × slice` fits (`slice_bytes <= STREAM_THRESHOLD`,
+  half the LX) it builds a single `build_same_layout_bridge` (the proven 2-region move,
+  byte-identical to the 2048 splice); otherwise it builds a `build_streamed_bridge`
+  (the move-tiling partial building block — see the >4k caveat below). It then calls
+  `apply_lx_flip` on both endpoints, folds the bridge into the consumer, and sets
+  `numCoreletsUsed_DSC2_=1`. Returns `True` on success, `False` (fail-closed) on
+  over-capacity, multi-dim split, or no eligible edge.
+
+### (b) The `generate_bundle` integration — `codegen/bundle.py`
+
+`generate_bundle` (the bundle entry point, `codegen/bundle.py:44`; the realize call at
+`bundle.py:57`) runs the pass **after** the per-`OpSpec` `compile_op_spec` loop, before
+the SDSC JSONs and `bundle.mlir` are written:
+
+```python
+if config.onchip_handoff_realize:
+    if realize_onchip_handoff(sdscs_json):
+        logger.info("Realized on-chip same-core handoff")
+```
+
+This is the **only** place mixed SDSCs can be assembled (the on-chip unit is the SDSC,
+not the bundle; LX does not persist across `sdsc_execute`). `bundle.mlir` is unchanged
+for the same-core / same-stick path — all SDSCs are kept; the consumer SDSC simply
+becomes mixed in place.
+
+### (c) The `SPYRE_ONCHIP_HANDOFF_REALIZE` flag — `config.py`
+
+The pass is gated default-off:
+
+```python
+onchip_handoff_realize: bool = (
+    os.environ.get("SPYRE_ONCHIP_HANDOFF_REALIZE", "0") == "1"
+)
+```
+
+With the flag **off**, `generate_bundle` output is byte-identical to before (no
+`datadscs_`, the baseline pure-DL bundle). With it **on**, the consumer SDSC carries the
+synthesized mixed scaffolding. Default-off + fail-closed is deliberate: executing a
+mixed bundle still needs the deeptools Foundation gate (§5), so the pass plans the value
+flow but only emits it when explicitly enabled.
+
+### (d) The patched-dxp PATH setup
+
+torch-spyre invokes the backend compiler **by name**: `async_compile.py:54` runs
+`subprocess.run(["dxp_standalone", "--bundle", "-d", output_dir], check=True)`. There is
+no configurable dxp path — the binary is resolved from `PATH`. To compile a mixed bundle
+end-to-end through `torch.compile`, **prepend the patched-dxp directory to `PATH`** so
+`dxp_standalone` resolves to the Foundation-gate build
+(`/home/adnan/dt-inductor/build/deeptools-onchip/dxp/`; the binary itself is
+`reproduction/env.sh`'s `PATCHED_DXP`). Stock dxp on `PATH` rejects the mixed bundle at
+the import gate (§5); the patched dxp on `PATH` accepts it.
+
+### (e) The compiler-driven end-to-end proof (the milestone)
+
+The realize pass was validated end-to-end on the add-mm 2048 case
+(`PerformanceResults.md` "Compiler-driven E2E"): **`torch.compile` itself emits the
+on-chip handoff** — no splice, no runner redirect.
+
+| flag | `compiler_emitted_mixed` | `opFuncsUsed_` | max_err |
+|---|---|---|---|
+| OFF | False (baseline, no `datadscs_`) | (none) | 0.013672 |
+| ON (`SPYRE_ONCHIP_HANDOFF_REALIZE=1`) | True | `['STCDPOpLx']` | 0.013672 |
+
+With the flag off the compiler emits the baseline bundle (no `datadscs_`). With the flag
+on, the compiler emits a **mixed** bundle (`opFuncsUsed_=['STCDPOpLx']`), the patched
+dxp accepts it (the import gate is exercised through the real compile, not a splice), and
+the device run is **value-correct at the baseline error** (`max_err 0.013672`, identical
+to the OFF run). The **negative control is clean** (removing the emitted senprog makes
+the run fail, proving the device executed the compiler-emitted program — §7b). This
+closes the loop from §6's manual splice to a productionized, compiler-driven path.
+
+### (f) The >4k caveat carries over
+
+The streamed tier (`build_streamed_bridge`, the `slice_bytes > STREAM_THRESHOLD`
+branch) is the **move-tiling partial building block**, not a working >4k handoff. It
+tiles the transfer buffer but the producer/consumer DL ops still write/read their full
+per-core slices, which overlap at the 128 KB-spaced buffers → corruption. The real >4k
+work is producer/consumer co-tiling (a fused pipeline) and needs a third deeptools ask —
+see `TiledOnChipPipelineDesign.md` (the tiled >4k design) and
+`StreamingImplementationPlan.md` (CORRECTION). The realize pass therefore fail-closes
+>4k to HBM today.
 
 ---
 
