@@ -134,6 +134,23 @@ def test_realize_asymmetric_two_regions_fit():
     assert r.consumer_base + r.slice_bytes <= rz.LX_CAPACITY_BYTES
 
 
+def test_owner_beyond_consumer_cores_rejected():
+    # granite mul uses 25 cores; native bmm bands on 0,4,..28 overflow -> dxp
+    # rejects (senpcfgs_). build raises so the splice remaps into [0, num_cores).
+    prod = ([0, 4, 8, 12, 16, 20, 24, 28], [1600 * k for k in range(8)], [1600] * 8)
+    cons = (list(range(25)), [512 * k for k in range(25)], [512] * 25)
+    try:
+        ob.build_asymmetric_reshard_bridge(
+            dim_pool=_LAYOUT, iter_sizes={"out_": 12800, "mb_": 64}, stick_size=64,
+            num_cores=25, lx_size=ob.LX_CAPACITY_BYTES, src_base=0, dst_base=1 << 20,
+            layout=_LAYOUT, stick_dim="out_",
+            prod_owners=prod[0], prod_starts=prod[1], prod_lens=prod[2],
+            cons_owners=cons[0], cons_starts=cons[1], cons_lens=cons[2])
+    except ValueError:
+        return
+    raise AssertionError("owner 28 >= 25 cores must be rejected")
+
+
 def _run_all():
     tests = sorted(
         (n, o) for n, o in globals().items()

@@ -394,7 +394,17 @@ def build_asymmetric_reshard_bridge(
     stick_dim disjointly on each side; emit producer NATIVE pieces in dataIN,
     consumer NATIVE pieces in dataOUT. The 8->25 granite bmm-out -> mul-in edge is
     this; the equal 32x32-cell builder is the special case.
+
+    Every owner must be < num_cores: the mixed SuperDSC lives on the consumer, and
+    dxp's PCFGToDataflowIR rejects an STCDP cell sourced from a core outside the
+    consumer's active corelet set (granite: mul uses 25 cores, native bmm bands on
+    0,4,..28 overflow -> remap into [0, num_cores)).
     """
+    if any(o >= num_cores for o in (*prod_owners, *cons_owners)):
+        raise ValueError(
+            f"owners exceed consumer cores {num_cores}: "
+            f"prod {prod_owners} cons {cons_owners}"
+        )
     in_ld = _labeled_ds("dataIN", layout, stick_dim, stick_dim, iter_sizes,
                         stick_size, src_base, num_cores, lx_size)
     in_ld["PieceInfo"] = _partition_pieces(
