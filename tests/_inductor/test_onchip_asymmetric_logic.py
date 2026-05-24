@@ -83,11 +83,21 @@ def test_asymmetric_emits_single_stcdp_with_n_and_m_pieces():
     prod = rz.uniform_partition(1600, 8, 64)
     cons = rz.uniform_partition(1600, 25, 64)
     datadscs, opfuncs, sched = ob.build_asymmetric_reshard_bridge(
-        dim_pool=_LAYOUT, iter_sizes=_ITER, stick_size=64, num_cores=32,
-        lx_size=ob.LX_CAPACITY_BYTES, src_base=0, dst_base=1 << 20,
-        layout=_LAYOUT, stick_dim="out_",
-        prod_owners=prod[0], prod_starts=prod[1], prod_lens=prod[2],
-        cons_owners=cons[0], cons_starts=cons[1], cons_lens=cons[2],
+        dim_pool=_LAYOUT,
+        iter_sizes=_ITER,
+        stick_size=64,
+        num_cores=32,
+        lx_size=ob.LX_CAPACITY_BYTES,
+        src_base=0,
+        dst_base=1 << 20,
+        layout=_LAYOUT,
+        stick_dim="out_",
+        prod_owners=prod[0],
+        prod_starts=prod[1],
+        prod_lens=prod[2],
+        cons_owners=cons[0],
+        cons_starts=cons[1],
+        cons_lens=cons[2],
     )
     assert opfuncs == ["STCDPOpLx"] and len(datadscs) == 1
     dd = datadscs[0]["0_STCDPOpLx_dataop"]
@@ -100,11 +110,21 @@ def test_emitted_pieces_tile_tensor_and_cross_cores():
     prod = rz.uniform_partition(1600, 8, 64)
     cons = rz.uniform_partition(1600, 25, 64)
     datadscs, _, _ = ob.build_asymmetric_reshard_bridge(
-        dim_pool=_LAYOUT, iter_sizes=_ITER, stick_size=64, num_cores=32,
-        lx_size=ob.LX_CAPACITY_BYTES, src_base=0, dst_base=1 << 20,
-        layout=_LAYOUT, stick_dim="out_",
-        prod_owners=prod[0], prod_starts=prod[1], prod_lens=prod[2],
-        cons_owners=cons[0], cons_starts=cons[1], cons_lens=cons[2],
+        dim_pool=_LAYOUT,
+        iter_sizes=_ITER,
+        stick_size=64,
+        num_cores=32,
+        lx_size=ob.LX_CAPACITY_BYTES,
+        src_base=0,
+        dst_base=1 << 20,
+        layout=_LAYOUT,
+        stick_dim="out_",
+        prod_owners=prod[0],
+        prod_starts=prod[1],
+        prod_lens=prod[2],
+        cons_owners=cons[0],
+        cons_starts=cons[1],
+        cons_lens=cons[2],
     )
     dd = datadscs[0]["0_STCDPOpLx_dataop"]
     for side in dd["labeledDs_"]:
@@ -116,17 +136,26 @@ def test_emitted_pieces_tile_tensor_and_cross_cores():
             assert s == exp  # no gap/overlap
             exp = s + ln
         assert exp == 1600  # full tensor
-    cons_owner = {p["PlacementInfo"][0]["memId"][0]
-                  for p in dd["labeledDs_"][1]["PieceInfo"]}
-    prod_owner = {p["PlacementInfo"][0]["memId"][0]
-                  for p in dd["labeledDs_"][0]["PieceInfo"]}
+    cons_owner = {
+        p["PlacementInfo"][0]["memId"][0] for p in dd["labeledDs_"][1]["PieceInfo"]
+    }
+    prod_owner = {
+        p["PlacementInfo"][0]["memId"][0] for p in dd["labeledDs_"][0]["PieceInfo"]
+    }
     assert cons_owner != prod_owner  # genuine cross-core gather
 
 
 def test_realize_asymmetric_two_regions_fit():
     r = rz.realize_asymmetric_handoff(
-        iter_sizes=_ITER, layout=_LAYOUT, stick_dim="out_", prod_n=8, cons_n=25,
-        stick_size=64, num_cores=32, producer_ldsidx=2, consumer_ldsidx=1,
+        iter_sizes=_ITER,
+        layout=_LAYOUT,
+        stick_dim="out_",
+        prod_n=8,
+        cons_n=25,
+        stick_size=64,
+        num_cores=32,
+        producer_ldsidx=2,
+        consumer_ldsidx=1,
     )
     assert r is not None and r.realizable
     assert r.opfuncs == ["STCDPOpLx"]
@@ -141,20 +170,94 @@ def test_owner_beyond_consumer_cores_rejected():
     cons = (list(range(25)), [512 * k for k in range(25)], [512] * 25)
     try:
         ob.build_asymmetric_reshard_bridge(
-            dim_pool=_LAYOUT, iter_sizes={"out_": 12800, "mb_": 64}, stick_size=64,
-            num_cores=25, lx_size=ob.LX_CAPACITY_BYTES, src_base=0, dst_base=1 << 20,
-            layout=_LAYOUT, stick_dim="out_",
-            prod_owners=prod[0], prod_starts=prod[1], prod_lens=prod[2],
-            cons_owners=cons[0], cons_starts=cons[1], cons_lens=cons[2])
+            dim_pool=_LAYOUT,
+            iter_sizes={"out_": 12800, "mb_": 64},
+            stick_size=64,
+            num_cores=25,
+            lx_size=ob.LX_CAPACITY_BYTES,
+            src_base=0,
+            dst_base=1 << 20,
+            layout=_LAYOUT,
+            stick_dim="out_",
+            prod_owners=prod[0],
+            prod_starts=prod[1],
+            prod_lens=prod[2],
+            cons_owners=cons[0],
+            cons_starts=cons[1],
+            cons_lens=cons[2],
+        )
     except ValueError:
         return
     raise AssertionError("owner 28 >= 25 cores must be rejected")
 
 
+def _alloc_node(lds_idx, cores_to_base, extent, core_fold, split="out"):
+    return {
+        "scheduleTree_": [
+            {
+                "nodeType_": "allocate",
+                "ldsIdx_": lds_idx,
+                "startAddressCoreCorelet_": {
+                    "data_": {f"[{c}, 0, 0]": str(b) for c, b in cores_to_base.items()}
+                },
+                "coordinates_": {
+                    "coordInfo": {
+                        split: {
+                            "folds": {
+                                "dim_prop_attr": [
+                                    {"label_": "core_fold", "factor_": core_fold},
+                                    {
+                                        "label_": "elem_arr_0",
+                                        "factor_": extent // core_fold,
+                                    },
+                                ]
+                            }
+                        }
+                    }
+                },
+            }
+        ]
+    }
+
+
+def test_derive_placement_matches_known_owners():
+    # 8 bands replicated 4 cores each (band b -> cores 4b..4b+3, owner 4b).
+    bases = {c: (c // 4) * 1024 for c in range(32)}
+    dl = _alloc_node(2, bases, extent=512, core_fold=8)
+    owners, starts, lens = rz.derive_placement(dl, 2, "out", stick_size=64)
+    assert owners == [0, 4, 8, 12, 16, 20, 24, 28]
+    assert starts == [0, 64, 128, 192, 256, 320, 384, 448]
+    assert lens == [64] * 8
+
+
+def test_emit_matches_derived_placement():
+    prod = ([0, 4, 8, 12, 16, 20, 24, 28], [64 * k for k in range(8)], [64] * 8)
+    cons = (list(range(8)), [64 * k for k in range(8)], [64] * 8)
+    dd, _, _ = ob.build_asymmetric_reshard_bridge(
+        dim_pool=_LAYOUT,
+        iter_sizes={"out_": 512, "mb_": 64},
+        stick_size=64,
+        num_cores=32,
+        lx_size=ob.LX_CAPACITY_BYTES,
+        src_base=0,
+        dst_base=1 << 20,
+        layout=_LAYOUT,
+        stick_dim="out_",
+        prod_owners=prod[0],
+        prod_starts=prod[1],
+        prod_lens=prod[2],
+        cons_owners=cons[0],
+        cons_starts=cons[1],
+        cons_lens=cons[2],
+    )
+    in_p = dd[0]["0_STCDPOpLx_dataop"]["labeledDs_"][0]["PieceInfo"]
+    assert [p["PlacementInfo"][0]["memId"][0] for p in in_p] == prod[0]
+    assert [p["dimToStartCordinate"]["out_"] for p in in_p] == prod[1]
+
+
 def _run_all():
     tests = sorted(
-        (n, o) for n, o in globals().items()
-        if n.startswith("test_") and callable(o)
+        (n, o) for n, o in globals().items() if n.startswith("test_") and callable(o)
     )
     fails = []
     for n, fn in tests:

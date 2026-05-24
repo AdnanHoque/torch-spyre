@@ -254,9 +254,15 @@ def uniform_partition(length: int, n: int, stick: int):
 
 
 def realize_asymmetric_handoff(
-    iter_sizes: dict[str, int], layout: list[str], stick_dim: str,
-    prod_n: int, cons_n: int, stick_size: int, num_cores: int,
-    producer_ldsidx: int, consumer_ldsidx: int,
+    iter_sizes: dict[str, int],
+    layout: list[str],
+    stick_dim: str,
+    prod_n: int,
+    cons_n: int,
+    stick_size: int,
+    num_cores: int,
+    producer_ldsidx: int,
+    consumer_ldsidx: int,
     capacity: int = LX_CAPACITY_BYTES,
 ):
     """Build an N->M same-stick reshard (single STCDP, DCG overlap cells), or None.
@@ -278,17 +284,134 @@ def realize_asymmetric_handoff(
         return None
     src_base, dst_base = bases
     datadscs, opfuncs, sched = build_asymmetric_reshard_bridge(
-        dim_pool=layout, iter_sizes=iter_sizes, stick_size=stick_size,
-        num_cores=num_cores, lx_size=DATAOP_LX_SIZE, src_base=src_base,
-        dst_base=dst_base, layout=layout, stick_dim=stick_dim,
-        prod_owners=prod[0], prod_starts=prod[1], prod_lens=prod[2],
-        cons_owners=cons[0], cons_starts=cons[1], cons_lens=cons[2],
+        dim_pool=layout,
+        iter_sizes=iter_sizes,
+        stick_size=stick_size,
+        num_cores=num_cores,
+        lx_size=DATAOP_LX_SIZE,
+        src_base=src_base,
+        dst_base=dst_base,
+        layout=layout,
+        stick_dim=stick_dim,
+        prod_owners=prod[0],
+        prod_starts=prod[1],
+        prod_lens=prod[2],
+        cons_owners=cons[0],
+        cons_starts=cons[1],
+        cons_lens=cons[2],
     )
     return OnChipRealization(
-        producer_base=src_base, consumer_base=dst_base, slice_bytes=slice_bytes,
+        producer_base=src_base,
+        consumer_base=dst_base,
+        slice_bytes=slice_bytes,
         producer_flip=LxFlip(producer_ldsidx, src_base, "producer-output"),
         consumer_flip=LxFlip(consumer_ldsidx, dst_base, "consumer-input"),
-        datadscs=datadscs, opfuncs=opfuncs, schedule=sched,
+        datadscs=datadscs,
+        opfuncs=opfuncs,
+        schedule=sched,
+    )
+
+
+def derive_placement(dl: dict, lds_idx: int, split_dim: str, stick_size: int = 64):
+    """Per-core placement of labeledDs ``lds_idx``, DERIVED from the alloc node.
+
+    No guessing: reads the DL op's scheduleTree allocate node for ``lds_idx`` --
+    its startAddressCoreCorelet_ exposes which cores hold which band (distinct
+    bases = bands; cores sharing a base = one band; lowest core = owner), and
+    coordInfo.folds gives the split-dim core_fold (band count) + total extent.
+    Pieces tile split_dim uniformly (extent/core_fold each) in ascending-base
+    order. Returns (owners, starts, lens) ready for build_asymmetric_reshard_bridge,
+    or None for a sub-stick chunk (fail-closed). Mirrors derive_edge.py.
+    """
+    node = next(
+        (
+            n
+            for n in dl["scheduleTree_"]
+            if n.get("nodeType_") == "allocate" and n.get("ldsIdx_") == lds_idx
+        ),
+        None,
+    )
+    if node is None:
+        return None
+    bases = {}
+    for k, v in node["startAddressCoreCorelet_"]["data_"].items():
+        bases[int(k.strip("[]").split(",")[0])] = int(v)
+    folds = node["coordinates_"]["coordInfo"][split_dim]["folds"]["dim_prop_attr"]
+    extent = 1
+    n_pieces = 1
+    for a in folds:
+        extent *= a["factor_"]
+        if a["label_"] == "core_fold":
+            n_pieces = a["factor_"]
+    chunk = extent // n_pieces
+    if chunk % stick_size:
+        return None
+    base_to_cores: dict[int, list[int]] = {}
+    for c in sorted(bases):
+        base_to_cores.setdefault(bases[c], []).append(c)
+    ordered = sorted(base_to_cores)
+    if len(ordered) != n_pieces:
+        return None
+    owners = [base_to_cores[b][0] for b in ordered]
+    starts = [band * chunk for band in range(n_pieces)]
+    lens = [chunk] * n_pieces
+    return owners, starts, lens
+
+
+def realize_asymmetric_from_placement(
+    iter_sizes: dict[str, int],
+    layout: list[str],
+    stick_dim: str,
+    prod_owners,
+    prod_starts,
+    prod_lens,
+    cons_owners,
+    cons_starts,
+    cons_lens,
+    stick_size: int,
+    num_cores: int,
+    producer_ldsidx: int,
+    consumer_ldsidx: int,
+    capacity: int = LX_CAPACITY_BYTES,
+):
+    """N->M reshard from DERIVED placement (owners/starts/lens), not guessed.
+
+    Owners come from derive_placement reading both DL ops' alloc nodes, so dataIN
+    = the producer's real write and dataOUT = the consumer's real read. None on
+    over-capacity (fail-closed). The guessed (uniform) path is realize_asymmetric_
+    handoff; this is the one to wire into the splice.
+    """
+    slice_bytes = per_core_slice_bytes(iter_sizes, stick_dim, stick_size, num_cores)
+    try:
+        src_base, dst_base = allocate_lx_bases(2, slice_bytes, capacity=capacity)
+    except ValueError:
+        return None
+    datadscs, opfuncs, sched = build_asymmetric_reshard_bridge(
+        dim_pool=layout,
+        iter_sizes=iter_sizes,
+        stick_size=stick_size,
+        num_cores=num_cores,
+        lx_size=DATAOP_LX_SIZE,
+        src_base=src_base,
+        dst_base=dst_base,
+        layout=layout,
+        stick_dim=stick_dim,
+        prod_owners=prod_owners,
+        prod_starts=prod_starts,
+        prod_lens=prod_lens,
+        cons_owners=cons_owners,
+        cons_starts=cons_starts,
+        cons_lens=cons_lens,
+    )
+    return OnChipRealization(
+        producer_base=src_base,
+        consumer_base=dst_base,
+        slice_bytes=slice_bytes,
+        producer_flip=LxFlip(producer_ldsidx, src_base, "producer-output"),
+        consumer_flip=LxFlip(consumer_ldsidx, dst_base, "consumer-input"),
+        datadscs=datadscs,
+        opfuncs=opfuncs,
+        schedule=sched,
     )
 
 

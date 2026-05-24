@@ -105,8 +105,9 @@ def _core_state_init_entry(lx_base: int) -> dict:
     }
 
 
-def _flip_tensor_to_lx(dl: dict, lds_idx: int, lx_base: int,
-                       num_cores: int | None = None) -> str:
+def _flip_tensor_to_lx(
+    dl: dict, lds_idx: int, lx_base: int, num_cores: int | None = None
+) -> str:
     lds = next((e for e in dl["labeledDs_"] if e["ldsIdx_"] == lds_idx), None)
     if lds is None:
         raise ValueError(f"no labeledDs ldsIdx_={lds_idx}")
@@ -114,8 +115,11 @@ def _flip_tensor_to_lx(dl: dict, lds_idx: int, lx_base: int,
     if num_cores is None:
         num_cores = dl["numCoresUsed_"]
     node = next(
-        (n for n in dl["scheduleTree_"]
-         if n.get("nodeType_") == "allocate" and n.get("ldsIdx_") == lds_idx),
+        (
+            n
+            for n in dl["scheduleTree_"]
+            if n.get("nodeType_") == "allocate" and n.get("ldsIdx_") == lds_idx
+        ),
         None,
     )
     if node is None:
@@ -130,9 +134,7 @@ def _flip_tensor_to_lx(dl: dict, lds_idx: int, lx_base: int,
     lds["hbmSize_"] = 0
     lds["lxSize_"] = DL_LX_SENTINEL
     lds["lxBufferSize_"] = DL_LX_SENTINEL
-    lds["coreStateInit_"] = [
-        _core_state_init_entry(lx_base) for _ in range(num_cores)
-    ]
+    lds["coreStateInit_"] = [_core_state_init_entry(lx_base) for _ in range(num_cores)]
     return alloc_node
 
 
@@ -151,9 +153,12 @@ def clean_stale_artifacts(out_dir: Path) -> list[str]:
             shutil.rmtree(p)
             removed.append(d + "/")
     for f in (
-        "segment_size.json", "execute_dsg.txt",
-        "loadmodel_to_device_dsg.txt", "loadmodel_to_spad_dsg.txt",
-        "loadprogram_to_device_dsg.txt", "loadprogram_to_spad_dsg.txt",
+        "segment_size.json",
+        "execute_dsg.txt",
+        "loadmodel_to_device_dsg.txt",
+        "loadmodel_to_spad_dsg.txt",
+        "loadprogram_to_device_dsg.txt",
+        "loadprogram_to_spad_dsg.txt",
     ):
         p = out_dir / f
         if p.exists():
@@ -170,8 +175,13 @@ def splice(baseline_dir: Path, out_dir: Path, bridge_path: str) -> dict:
 
     # 1. DERIVE the geometry from the (copied) bundle's scheduleTree.
     prod, cons = derive_granite_edge(
-        out_dir, PRODUCER_FILE, PRODUCER_OUT_IDX,
-        CONSUMER_FILE, CONSUMER_IN_IDX, SPLIT_DIM)
+        out_dir,
+        PRODUCER_FILE,
+        PRODUCER_OUT_IDX,
+        CONSUMER_FILE,
+        CONSUMER_IN_IDX,
+        SPLIT_DIM,
+    )
 
     out_total = prod["out_total"]
     row_total = prod["row_total"]  # x on producer == mb on consumer
@@ -183,7 +193,14 @@ def splice(baseline_dir: Path, out_dir: Path, bridge_path: str) -> dict:
     # num_cores = consumer cores; producer bands map into that range.
     cons_body = _load_json(out_dir / CONSUMER_FILE)
     num_cores = cons_body[next(iter(cons_body))]["numCoresUsed_"]
-    prod_owners = [k * (num_cores // prod["n_pieces"]) for k in range(prod["n_pieces"])]
+    # DERIVED owners: producer bands sit on derive_edge's real owner cores. Only
+    # if those cores fall outside the consumer's [0, num_cores) do we remap (dxp
+    # rejects out-of-set sources); otherwise feed the real placement through.
+    prod_owners = prod["owners"]
+    if any(o >= num_cores for o in prod_owners):
+        prod_owners = [
+            k * (num_cores // prod["n_pieces"]) for k in range(prod["n_pieces"])
+        ]
 
     # 2. LX bases: two regions (producer 8 bands, consumer 25 pieces). The
     # per-core slice is the LARGEST single piece (whole-stick padded). Producer
@@ -198,19 +215,27 @@ def splice(baseline_dir: Path, out_dir: Path, bridge_path: str) -> dict:
     dst_base = aligned
     if dst_base + aligned > LX_CAPACITY_BYTES:
         raise ValueError(
-            f"2 regions x {aligned} B = {2 * aligned} > {LX_CAPACITY_BYTES}")
+            f"2 regions x {aligned} B = {2 * aligned} > {LX_CAPACITY_BYTES}"
+        )
 
     # 3. Build the asymmetric reshard bridge. STCDP spans the consumer's cores;
     # producer bands map within [0, num_cores) (native owners 0,4,..28 exceed the
     # 25-core consumer set, which dxp rejects at PCFGToDataflowIR senpcfgs_).
     datadscs, opfuncs, sched = bridge.build_asymmetric_reshard_bridge(
-        dim_pool=layout, iter_sizes=iter_sizes, stick_size=STICK_SIZE,
-        num_cores=num_cores, lx_size=DATAOP_LX_SIZE,
-        src_base=src_base, dst_base=dst_base,
-        layout=layout, stick_dim=SPLIT_DIM,
-        prod_owners=prod_owners, prod_starts=prod["starts"],
+        dim_pool=layout,
+        iter_sizes=iter_sizes,
+        stick_size=STICK_SIZE,
+        num_cores=num_cores,
+        lx_size=DATAOP_LX_SIZE,
+        src_base=src_base,
+        dst_base=dst_base,
+        layout=layout,
+        stick_dim=SPLIT_DIM,
+        prod_owners=prod_owners,
+        prod_starts=prod["starts"],
         prod_lens=prod["lens"],
-        cons_owners=cons["owners"], cons_starts=cons["starts"],
+        cons_owners=cons["owners"],
+        cons_starts=cons["starts"],
         cons_lens=cons["lens"],
     )
 
@@ -237,27 +262,41 @@ def splice(baseline_dir: Path, out_dir: Path, bridge_path: str) -> dict:
         "baseline_dir": str(baseline_dir),
         "out_dir": str(out_dir),
         "derived": {
-            "out_total": out_total, "row": row_total,
+            "out_total": out_total,
+            "row": row_total,
             "producer": {
-                "n_bands": prod["n_pieces"], "chunk_sticks": prod["chunk_sticks"],
-                "owners": prod["owners"], "starts": prod["starts"],
+                "n_bands": prod["n_pieces"],
+                "chunk_sticks": prod["chunk_sticks"],
+                "owners": prod["owners"],
+                "starts": prod["starts"],
                 "lens": prod["lens"],
             },
             "consumer": {
-                "n_pieces": cons["n_pieces"], "chunk_sticks": cons["chunk_sticks"],
-                "owners": cons["owners"], "starts": cons["starts"],
+                "n_pieces": cons["n_pieces"],
+                "chunk_sticks": cons["chunk_sticks"],
+                "owners": cons["owners"],
+                "starts": cons["starts"],
                 "lens": cons["lens"],
             },
         },
         "lx_bases": {"src": src_base, "dst": dst_base},
         "per_core_slice_bytes": aligned,
         "lx_footprint_bytes": dst_base + aligned,
-        "producer": {"sdsc": PRODUCER_FILE, "op": prod_op,
-                     "out_idx": PRODUCER_OUT_IDX, "alloc": prod_alloc},
-        "consumer": {"sdsc": CONSUMER_FILE, "op": cons_op,
-                     "in_idx": CONSUMER_IN_IDX, "alloc": cons_alloc,
-                     "num_dataops": len(datadscs), "opFuncsUsed_": opfuncs,
-                     "numWkSlicesPerDim_": cons_body.get("numWkSlicesPerDim_")},
+        "producer": {
+            "sdsc": PRODUCER_FILE,
+            "op": prod_op,
+            "out_idx": PRODUCER_OUT_IDX,
+            "alloc": prod_alloc,
+        },
+        "consumer": {
+            "sdsc": CONSUMER_FILE,
+            "op": cons_op,
+            "in_idx": CONSUMER_IN_IDX,
+            "alloc": cons_alloc,
+            "num_dataops": len(datadscs),
+            "opFuncsUsed_": opfuncs,
+            "numWkSlicesPerDim_": cons_body.get("numWkSlicesPerDim_"),
+        },
         "removed_stale": removed,
     }
 
@@ -276,8 +315,8 @@ def parse_args():
 def main() -> int:
     a = parse_args()
     summary = splice(
-        Path(a.baseline_dir).resolve(), Path(a.out_dir).resolve(),
-        a.onchip_bridge)
+        Path(a.baseline_dir).resolve(), Path(a.out_dir).resolve(), a.onchip_bridge
+    )
     print(json.dumps(summary, indent=2))
     return 0
 
