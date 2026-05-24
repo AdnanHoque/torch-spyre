@@ -1,5 +1,21 @@
 # Implementation plan: streaming/tiled cross-core handoff for >2 MB/core slices
 
+> **CORRECTION (2026-05-24, post-implementation code analysis).** The plan below
+> tiles the *move* through a fixed 2×128 KB buffer, and `build_streamed_bridge`
+> was implemented + offline-validated on that basis (commit `ea98321`). But a
+> code-level review of the realize path found an **endpoint-residency gap**: an
+> on-chip handoff also needs the producer's *output* and consumer's *input* to be
+> LX-resident, and `realize_streamed_handoff` flips them (via `apply_lx_flip`,
+> `lxSize_=DL_LX_SENTINEL`) to buffers spaced only 128 KB apart while the producer
+> DL op still writes its **full slice** (256 KB @2048, 4 MB @8192) — so the
+> consumer buffer is overwritten → corruption. **Move-tiling alone does NOT solve
+> >4k**: it only reduces LX if the producer/consumer are *also* tiled
+> (produce/consume tile-by-tile, a fused/pipelined megakernel). `build_streamed_bridge`
+> is therefore a **partial building block** (the move-tiling piece), NOT a working
+> >4k handoff. It was deliberately NOT device-validated because a naive test would
+> fail on endpoint overlap, not buffer reuse. The real >4k work is producer/consumer
+> tiling co-design; treat the plan below as the move-tiling sub-component only.
+
 Scope: what it takes to **implement** the streaming/tiled cross-core data-movement
 scheme so on-chip same-stick handoffs work for activation slices larger than the
 2 MB/core LX (the >4k/>6k regime). Design + implementation plan only. No device,

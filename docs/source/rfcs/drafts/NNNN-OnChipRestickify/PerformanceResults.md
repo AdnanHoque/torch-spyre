@@ -119,6 +119,18 @@ handoffs.
   component is the attention QK^T->softmax edge (1.29x above). MoE FFN has a
   measured baseline (125.85 ms); its on-chip number is projection.
 
+### Streaming (>4k) status
+
+The streamed cross-core bridge (`build_streamed_bridge`, commit `ea98321`) is
+built + offline-validated (20 tests) but **NOT device-validated and NOT yet a
+working >4k handoff**. A code-level review found an endpoint-residency gap:
+move-tiling shrinks the staging buffer but the producer/consumer activations
+(4 MB/core @8192) still need full LX residency, and the realize path flips them
+to 128 KB-spaced buffers -> overlap/corruption. **Move-tiling alone does not solve
+>4k; it needs producer/consumer tiling (a fused pipeline).** See
+`StreamingImplementationPlan.md` CORRECTION. No device test was run (a naive one
+would fail on endpoint overlap, not the buffer-reuse risk it was meant to test).
+
 ### What is MEASURED on a real model component vs projected
 
 MEASURED on device: add-mm multi-size (1.13-1.22x same-core), compiler-driven

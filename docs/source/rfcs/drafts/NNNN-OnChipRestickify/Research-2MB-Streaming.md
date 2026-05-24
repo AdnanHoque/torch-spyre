@@ -1,5 +1,13 @@
 # Streaming large cross-core activation slices through the fixed 2 MB LX budget
 
+> **CORRECTION (2026-05-24).** This doc's "stream through a fixed ~2×128 KB buffer"
+> recommendation addresses only the *move* staging. A later code review (see
+> `StreamingImplementationPlan.md` CORRECTION + `PerformanceResults.md`) found the
+> on-chip handoff also needs the producer *output* and consumer *input* LX-resident,
+> which at >4k exceed 2 MB regardless of the move buffer. So move-tiling is necessary
+> but **not sufficient** — genuine >4k needs producer/consumer tiling (a fused
+> pipeline). Read the recommendation here as the move-tiling sub-component only.
+
 Design document. Research + design only: **no device, no code run; files read only.** Every
 hardware/code claim is grounded in a file that was read; inferences are flagged **[INFER]**.
 
