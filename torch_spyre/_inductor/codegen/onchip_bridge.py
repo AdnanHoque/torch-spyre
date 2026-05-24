@@ -35,6 +35,59 @@ from collections.abc import Mapping, Sequence
 DATA_FORMAT = "SEN169_FP16"
 WORD_LENGTH = 2
 
+# Per-core LX scratchpad capacity in bytes (2 MB, AIU 1.0). Source of truth:
+# torch_spyre/_inductor/scratchpad.py ("scratch pad is 2MB = 2<<20 bytes").
+LX_CAPACITY_BYTES = 2 << 20  # 2_097_152
+# Stick alignment: a stick is 128 bytes (64 fp16 elements).
+STICK_BYTES = 128
+
+
+def _align_up(value: int, alignment: int) -> int:
+    """Round ``value`` up to the next multiple of ``alignment``."""
+    return ((value + alignment - 1) // alignment) * alignment
+
+
+def per_core_slice_bytes(
+    iter_sizes: Mapping[str, int], split_dim: str, stick_size: int,
+    num_cores: int, word_length: int = WORD_LENGTH,
+) -> int:
+    """Per-core LX bytes for one bridge buffer (rows * stick-padded chunk cols).
+
+    Each core owns rows = product of the non-split dims, cols = the split-dim
+    chunk (split_dim / num_cores), padded up to a full stick. Sub-stick chunks
+    still occupy a whole stick. Result is rounded up to the 128-byte stick.
+    """
+    chunk = iter_sizes[split_dim] // num_cores
+    cols = max(chunk, stick_size)
+    rows = 1
+    for d, n in iter_sizes.items():
+        if d != split_dim:
+            rows *= n
+    return _align_up(rows * cols * word_length, STICK_BYTES)
+
+
+def allocate_lx_bases(
+    num_regions: int, slice_bytes: int,
+    capacity: int = LX_CAPACITY_BYTES, region0: int = 0,
+) -> list[int]:
+    """Non-overlapping, stick-aligned LX bases for ``num_regions`` buffers.
+
+    Packs regions back-to-back: base[k] = region0 + k * aligned_slice. Each gets
+    ``slice_bytes`` (already a stick multiple). Raises ValueError if the total
+    footprint exceeds the per-core LX capacity -- e.g. a 3-region round trip at
+    1 MB/slice needs 3 MB > 2 MB and cannot fit. region0 leaves headroom at the
+    bottom for the DL op's own LX tensors.
+    """
+    aligned = _align_up(slice_bytes, STICK_BYTES)
+    bases = [region0 + k * aligned for k in range(num_regions)]
+    footprint = bases[-1] + aligned if bases else region0
+    if footprint > capacity:
+        raise ValueError(
+            f"{num_regions} regions x {aligned} B + {region0} = {footprint} B "
+            f"exceeds per-core LX capacity {capacity} B"
+        )
+    return bases
+
 
 def _piece_info(
     layout_order: Sequence[str],
