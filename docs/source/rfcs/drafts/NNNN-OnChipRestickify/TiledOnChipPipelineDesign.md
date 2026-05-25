@@ -74,6 +74,15 @@ double-buffering data in the L1 scratchpad overlapped in time with computation"
 schedule already streams K/V through LX with `numBuffers_=-1`
 (`kbib_arch.md` §5, `schedule-ir-spec.md`). See the GPU mapping table in §11.
 
+**On cross-op overlap.** The double-buffer above is *intra-op*. Across ops,
+cross-SDSC execution is **serial by default** (`STRICT_ORDERING`; measured
+`time(M+C)=time(M)+time(C)`); the runtime has 3 pipelines
+(`COMPUTE`/`ASYNC_DMAI`/`ASYNC_DMAO`) + an `OP_ORDERING` mode, but it is unplumbed.
+Producer→move→consumer **overlap** therefore has two routes: a co-scheduled mixed
+SuperDSC (compile-time; the warp-specialization analog — this is Ask 3A), or
+plumbing `OP_ORDERING` for separate SDSCs (runtime). The mixed SuperDSC is
+*sufficient* but not the *only* overlap path.
+
 ## 3. The building blocks already exist in the Schedule IR
 
 The authoritative current-source view (`kbib_schedule.md`, `kbib_arch.md`) is that the
@@ -202,9 +211,14 @@ So torch-spyre would emit the **multi-op tiled plan** (the fused handoff block) 
 do it**: emitting the plan is necessary, but executing a tiled, windowed,
 multi-DL-op-per-core fused block needs Ask 3A in deeptools (§4-5). Note the docs flag a
 documented-but-unimplemented alternative for cross-bundle LX persistence —
-"non-terminal kernel" hints (`scratchpad_planning.md` §7.4) — but the conservative,
-device-validated position is that LX does not persist across an `sdsc_execute`
-boundary, so the handoff must stay inside one SuperDSC (`kb_scour_docs.md` §1.3).
+"non-terminal kernel" hints (`scratchpad_planning.md` §7.4). The measured position is
+that **LX persists across an `sdsc_execute` boundary in PF / single-user VF (the de-facto
+mode)**; the earlier "LX is wiped" was the *planner* conservatively evicting to HBM and
+resetting its LX tracking at SDSC boundaries, not a hardware wipe. So keeping the handoff
+on-chip is a scheduling choice — realized today via the mixed SuperDSC, or (for a
+same-shard handoff) via an LX-planner change (don't-evict + coordinate LX addresses
+across consecutive OpSpecs, measured to work on stock dxp); the cross-core re-shard still
+needs the move (`kb_scour_docs.md` §1.3).
 
 ## 8. Strategic recommendation (the honest headline)
 

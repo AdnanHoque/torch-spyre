@@ -159,13 +159,21 @@ since it changes the stick.)
 - producer and consumer can be co-scheduled into one SuperDSC (see Realization).
 
 **Out of scope.** Stick-changing edges (Tier 2); graph-input / weight /
-constant / persistent-state sources (prelayout); cross-bundle edges where LX
-cannot persist.
+constant / persistent-state sources (prelayout); cross-*bundle* (separate
+runtime-launch) edges — see the rejected-alternatives note, where split launches
+were observed to fault the Compute CB.
 
 **Architecture — a planner, in two stages.** The on-chip realization is *not*
-self-contained in one inductor pass, because the on-chip unit is the **SDSC**,
-not the bundle: `generate_bundle` emits one SDSC per op, and LX does not persist
-across `sdsc_execute`, so even same-*bundle* op-to-op handoff goes through HBM.
+self-contained in one inductor pass: `generate_bundle` emits one SDSC per op, and
+even same-*bundle* op-to-op handoff goes through HBM **by default**. Note **LX
+persists across an `sdsc_execute` boundary in PF / single-user VF (the de-facto
+mode) — measured**; the default round-trip is the *planner* conservatively
+evicting to HBM and resetting its LX tracking at SDSC boundaries, not a hardware
+wipe. Keeping the handoff on-chip is therefore a scheduling choice — realized
+today via the mixed SuperDSC, or (for a same-shard handoff) via an LX-planner
+change (don't-evict + coordinate LX addresses across consecutive OpSpecs, measured
+to work on stock dxp); the cross-core re-shard (different sharding) still needs the
+move.
 
 1. *Detection / planning (inductor, after `work_distribution`).* Core ownership
    is known after work division. A new pass — best framed as an **extension of
@@ -319,10 +327,14 @@ probe medians.
   the SFP ring is psum-only (FMA-fused accumulation), not a pure data ring, and
   hand-authoring raw ring templates is brittle and bypasses the scheduler.
   Building on the existing `STCDPOpLx`/`InputFetchNeighbor` ops is more robust.
-- **Cross-bundle LX handoff.** Rejected: LX does not persist across runtime
-  launch boundaries; split launches produce a Compute CB hardware error. The
-  value flow must stay within one bundle, which is why the Foundation contract is
-  about *mixed bundles* rather than separate transport bundles.
+- **Cross-bundle LX handoff.** Rejected: in this experiment, splitting the value
+  flow into separate runtime launches (separate bundles) produced a Compute CB
+  hardware error. (Note this is a distinct observation from LX persistence: LX
+  *does* persist across an `sdsc_execute` boundary in PF / single-user VF —
+  measured — so the same-bundle default HBM round-trip is the planner evicting,
+  not a hardware wipe.) The value flow is kept within one bundle, which is why the
+  Foundation contract is about *mixed bundles* rather than separate transport
+  bundles.
 
 ## Prior Art
 

@@ -110,9 +110,13 @@ cross-op handoff on-chip and tiled. Four crux questions, each challenged:
   (`L3DlOpsScheduler.cpp:388`). Refinement: `isSameDscGroup` itself just returns
   `true` (`:49-52`) — enforcement is **structural**, via `dscs_.at(0)` in
   `createChunkLoops` (`:3559`) and `getCoreSplitDimensions` (`:334-352`).
-- **Q4 — does LX persist across `sdsc_execute`?** **no.** `deeprt.cpp:207` clears
-  `lxTrackPerCore`. The handoff must stay inside one SuperDSC — which
-  independently kills the Q1 cross-bundle route.
+- **Q4 — does LX persist across `sdsc_execute`?** **yes, measured** (PF /
+  single-user VF, the de-facto mode). `deeprt.cpp:207` clears `lxTrackPerCore` —
+  but that is the *planner* resetting its LX tracking and conservatively evicting
+  to HBM at the SDSC boundary, not a hardware wipe. So keeping the handoff on-chip
+  is a scheduling choice: the mixed SuperDSC is *one* route, and (for a same-shard
+  handoff) an LX-planner change (don't-evict + coordinate LX addresses across
+  consecutive OpSpecs, measured to work on stock dxp) is cleaner.
 
 The temporal/double-buffer machinery and LX residency are computed *inside* the
 deeptools scheduler, are intra-op only, and stage through HBM. Inductor's SuperDSC
@@ -131,7 +135,7 @@ Both levers reduce to the same missing primitive:
 |---|---|---|
 | Two ops, one region (prior) | `seenDLDsc` + structural same-group (multi-DSC is data-parallel only) | `dcg_manager.cpp:821`; `L3DlOpsScheduler.cpp:334,3559` |
 | One fused op (Lever 1) | one compute function per op; multi-`computeOp_` is epilogue-only; no windowed DL; single `ownerDsc` | `designSpaceConfig.h:190`; `dlOps.cpp:98-110,277`; `dsc2.h:470` |
-| Existing machinery (Lever 2) | temporal/`numBuffers_` are scheduler-computed + intra-op + HBM-staged; LX wiped across SDSC; persistence hint unimplemented | `compute_ops.py:90,143`; `L3DlOpsScheduler.cpp:450`; `deeprt.cpp:207`; `scratchpad_planning.md:226-235` |
+| Existing machinery (Lever 2) | temporal/`numBuffers_` are scheduler-computed + intra-op + HBM-staged; planner evicts LX to HBM across SDSC (LX itself *persists* in PF / single-user VF — measured); persistence hint unimplemented | `compute_ops.py:90,143`; `L3DlOpsScheduler.cpp:450`; `deeprt.cpp:207`; `scratchpad_planning.md:226-235` |
 
 Op-fusion changes *which* assert you hit; the existing-machinery angle finds the
 knobs are scheduler-internal. Neither supplies the windowed-multi-stage-compute
@@ -176,7 +180,9 @@ read against device validation before treating it as final.
   loop / `numBuffers_` / temporal folds are scheduler-internal, HBM-pinned.
 - `dcg_manager.cpp:676,821` — `DT_CHECK(seenDLDsc == false)`, one DL per core.
 - `superdsc.h:29-44,67` — scalar `DscScheduleStep`; `coreIdToDsc_` map.
-- `deeprt.cpp:207` — LX wiped per SDSC; no cross-boundary persistence.
+- `deeprt.cpp:207` — planner clears `lxTrackPerCore` and evicts LX to HBM per
+  SDSC; LX itself *persists* across the boundary in PF / single-user VF (measured),
+  so this is a scheduling choice, not a hardware wipe.
 - `compute_ops.py:53,90,143` — inductor hardcodes `temporal: 0`.
 - `op_spec.py:47-64`, `spyre_kernel.py:414-457`, `superdsc.py:510-609`,
   `compute_ops.py:208-424` — inductor: one node → one OpSpec → one SDSCSpec → one

@@ -16,14 +16,18 @@ Realization reproduces the splice *in-compiler* rather than post-hoc.
 
 ## 1. Hook points
 
-The on-chip unit is the SDSC, not the bundle (LX does not persist across
-`sdsc_execute`). A bundle is a list of SDSCs: `codegen/bundle.py
+LX persists across an `sdsc_execute` boundary in PF / single-user VF (the
+de-facto mode) — measured; the default HBM round-trip is the planner
+conservatively evicting to HBM and resetting its LX tracking at SDSC boundaries,
+not a hardware wipe. A bundle is a list of SDSCs: `codegen/bundle.py
 generate_bundle` calls `compile_op_spec(idx, ks)` (`codegen/superdsc.py:612`)
 per `OpSpec`, then writes one `sdsc_{name}.json` per SDSC plus `bundle.mlir`.
 `generate_sdsc` (`codegen/compute_ops.py:208`) builds each SDSC dict: the DL op
 in `dscs_`, a degenerate `coreIdToDscSchedule` of `[[-1,0,0,0]]`, and `numWkSlicesPerDim_`
-(the consumer sharding). The realize fold is the **only** place mixed SDSCs can
-be assembled.
+(the consumer sharding). The realize fold assembles the mixed SDSC — *one* way
+to keep the handoff on-chip; for a same-shard handoff the LX-planner path
+(don't-evict + coordinate LX addresses across consecutive OpSpecs) is cleaner,
+and the cross-core re-shard (different sharding) still needs the move.
 
 - Producer of realization output: `onchip_handoff.py` (planner). Today it
   returns fail-closed `OnChipHandoffPlan`s. Realize adds a pure function

@@ -51,7 +51,7 @@ exchange.**
 | **Shared HBM bus (LPDDR5, 166 GB/s, shared across all 32 cores)** | **Global memory (HBM) + L2** | The off-chip pool. On Spyre it's a *single shared 166 GB/s pipe* — the binding bottleneck. GPU HBM is far higher BW (H100 HBM3 ≈ 3.35 TB/s) and there's a large L2 (~50 MB) the AIU has no equivalent of. |
 | **SFP UniRing (35.2 GB/s, intra-corelet)** | on-SM datapath between sub-partitions | **NOT** an inter-core fabric — easy to confuse with the RIU ring. Don't map this to NVLink. |
 | **The HBM round trip we eliminate** (producer writes activation to HBM, consumer reads it back, in a separate SDSC) | **Writing an activation to global memory in kernel *k* and reading it back in kernel *k+1*** | The exact thing kernel fusion / FlashAttention exists to avoid. |
-| **SDSC** (the on-chip unit; LX does *not* persist across an `sdsc_execute` boundary) | **a kernel launch** (shared memory does not persist across kernel boundaries) | Tight analogy. "On-chip handoff needs producer+consumer in one SuperDSC" ≡ "to keep the intermediate in SMEM you must fuse the two kernels (or use a persistent kernel)." |
+| **SDSC** (the runtime launch unit; LX *does* persist across an `sdsc_execute` boundary in PF / single-user VF — measured; the default HBM round-trip is the planner evicting to HBM, not a hardware wipe) | **a kernel launch** (shared memory genuinely does not persist across kernel boundaries) | Looser than it looks. On the GPU the SMEM wipe is a hardware fact; on Spyre the default HBM round-trip is a *scheduling choice* (the planner evicts at SDSC boundaries), so the handoff can be kept on-chip via a mixed SuperDSC *or* an LX-planner change (same-shard) without fusing. |
 | **Mixed SuperDSC** (`dscs_` consumer DL op + `datadscs_` data-ops + `coreIdToDscSchedule`) | **a fused / persistent kernel with a producer→consumer pipeline** | The data-ops are the explicit SM-to-SM copies inserted before the consumer op; `coreIdToDscSchedule` is the per-SM step schedule with barriers (like cluster-wide `barrier.cluster.arrive/wait`). |
 | **`STCDPOpLx`** (same-stick LX→LX move; rides the ring) | **a `cp.async` / TMA bulk copy whose source is a peer SM's DSM address** | The actual data-movement instruction. Same-stick ⇒ same layout ⇒ a plain async copy, no swizzle. |
 | **`L3_MVLOOPCNT` over `L3_LDU`/`L3_STU` (hardware streaming loop)** | **looped `cp.async` / `cp.async.bulk` (TMA) tiling loop** | The microcode streaming loop that pumps sticks across the ring ≈ the async-copy pipeline loop in a CUTLASS mainloop. |
@@ -68,13 +68,18 @@ Two distinct GPU techniques together describe what we built. Keep them separate.
 
 ### 3a. Eliminating the HBM round trip ≡ kernel fusion / SMEM-resident producer→consumer
 
-On Spyre, a *bundle* is a sequential list of SDSCs, and **LX does not survive an SDSC
-boundary** — so a producer in SDSC *k* and a consumer in SDSC *k+1* can only communicate
-through HBM (the stock pipeline literally inserts a `ReStickifyOpHBM` SDSC between them).
-This is *exactly* the CUDA fact that **shared memory does not persist across kernel
-launches**: if you want the intermediate to stay in SMEM, you must **fuse the two kernels
-into one** (or run a **persistent kernel** that holds the data in SRAM across the
-producer→consumer edge).
+On Spyre, a *bundle* is a sequential list of SDSCs. **LX persists across an
+`sdsc_execute` boundary in PF / single-user VF (the de-facto mode) — measured**; the
+earlier "LX is wiped" was the *planner* conservatively evicting to HBM and resetting its
+LX tracking at SDSC boundaries, not a hardware wipe. So a producer in SDSC *k* and a
+consumer in SDSC *k+1* communicate through HBM **by default** (the stock pipeline inserts
+a `ReStickifyOpHBM` SDSC between them) — but keeping it on-chip is a scheduling choice.
+The GPU analogy is *looser* than a hardware equivalence: on CUDA **shared memory genuinely
+does not persist across kernel launches**, so to keep the intermediate in SMEM you must
+**fuse the two kernels into one** (or run a **persistent kernel**). On Spyre the same
+on-chip handoff is realized today via the mixed SuperDSC, or — for a same-shard handoff —
+via an LX-planner change (don't-evict + coordinate LX addresses across consecutive
+OpSpecs, measured to work on stock dxp), which needs no fusion.
 
 The canonical CUDA instance is **FlashAttention** \[Dao 2022\]: instead of materializing
 the N×N attention-score / softmax matrix to HBM between the QKᵀ matmul and the softmax·V
@@ -131,6 +136,14 @@ runs many fused stages keeping data resident in SRAM) is the same spirit at larg
 The difference: CUTLASS expresses this with **warp specialization decided at runtime by
 the scheduler**; Spyre spells out **a fixed per-core schedule at compile time** in the
 senprog (see §4).
+
+**On overlap.** Cross-SDSC execution is **serial by default** (`STRICT_ORDERING`;
+measured `time(M+C)=time(M)+time(C)`); the runtime has 3 pipelines
+(`COMPUTE`/`ASYNC_DMAI`/`ASYNC_DMAO`) + an `OP_ORDERING` mode, but it is unplumbed.
+Producer→move→consumer **overlap** therefore has two routes: a co-scheduled mixed
+SuperDSC (compile-time; the warp-specialization analog above), or plumbing `OP_ORDERING`
+for separate SDSCs (runtime; the CUDA-streams analog). The mixed SuperDSC is *sufficient*
+but not the *only* overlap path.
 
 ### 3d. The hardware streaming loop ≡ TMA / `cp.async`, looped
 

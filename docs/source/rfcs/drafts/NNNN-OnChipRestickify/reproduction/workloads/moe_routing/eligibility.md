@@ -164,8 +164,10 @@ These are two different things and the projection (`projection.md`) labels them.
 ## 5. SDSC boundary / HBM round-trip — the thing Tier-1 eliminates
 
 Tier-1 eliminates a producer→consumer handoff that crosses an **SDSC boundary** and
-therefore round-trips through HBM (recipe §2: LX does not persist across
-`sdsc_execute`). Routing creates exactly such boundaries:
+therefore round-trips through HBM by default (recipe §2: LX *does* persist across
+`sdsc_execute` in PF / single-user VF — measured; the round-trip is the planner
+conservatively evicting to HBM at SDSC boundaries, a scheduling choice, not a hardware
+wipe). Routing creates exactly such boundaries:
 
 ```
 router GEMM  ->  [HBM]  ->  dispatch (gather)  ->  [HBM]  ->  expert FFN (bmm)

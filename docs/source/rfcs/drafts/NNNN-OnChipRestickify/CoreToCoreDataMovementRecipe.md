@@ -16,10 +16,15 @@ On the Spyre AIU, "core-to-core data movement" means moving an activation slice 
 one core's private LX scratchpad to another core's LX **over the RIU bidirectional
 ring**, with **zero HBM traffic**, using the existing deeptools data-op `STCDPOpLx`
 (same-stick move) which lowers to the `l3lu`/`l3su` RIU ring units (`L3_LDU`/`L3_STU`
-microcode). Because LX does **not** persist across SDSC boundaries inside a bundle,
-the only way to keep a producer→consumer handoff in LX is to put the consumer's DL op
-and the data-op(s) that feed it into **one mixed `SuperDsc`** (`dscs_` + `datadscs_` +
-`coreIdToDscSchedule`). The five-step path: **(1)** compile the baseline graph and find
+microcode). **LX persists across an `sdsc_execute` boundary in PF / single-user VF
+(the de-facto mode) — measured.** The earlier "LX is wiped" was the *planner*
+conservatively evicting to HBM and resetting its LX tracking at SDSC boundaries, not a
+hardware wipe. The default path still round-trips the cross-op handoff through HBM, so
+keeping it on-chip is a scheduling choice — one way to do it is to put the consumer's DL
+op and the data-op(s) that feed it into **one mixed `SuperDsc`** (`dscs_` + `datadscs_` +
+`coreIdToDscSchedule`); for a same-shard handoff the LX-planner path (don't-evict +
+coordinate LX addresses across consecutive OpSpecs, measured to work on stock dxp) is
+cleaner, and the cross-core re-shard (different sharding) still needs the move. The five-step path: **(1)** compile the baseline graph and find
 the producer/consumer SDSC files and the HBM-bridged `labeledDs`; **(2)** flip producer
 output + consumer input to LX-resident; **(3)** synthesize `datadscs_` STCDP blocks whose
 per-core `PieceInfo.PlacementInfo.memId` encodes the source→destination core ownership
@@ -99,20 +104,26 @@ module {
 }
 ```
 
-Each `sdsc_execute` is a separate runtime launch (`sdsc_execute`). Two facts force HBM:
+Each `sdsc_execute` is a separate runtime launch (`sdsc_execute`). Why the default path
+goes through HBM:
 
 1. A bundle = multiple SDSCs (one per `OpSpec` via `compile_op_spec`), run sequentially.
-2. **LX does NOT persist across an `sdsc_execute` boundary.** A value an SDSC leaves in
-   LX is gone when the next SDSC starts.
+2. **LX persists across an `sdsc_execute` boundary in PF / single-user VF (the de-facto
+   mode) — measured.** The earlier "LX is wiped" was the *planner* conservatively
+   evicting to HBM and resetting its LX tracking at SDSC boundaries, not a hardware wipe.
 
-Therefore the **on-chip unit is the SDSC, not the bundle.** A producer in SDSC *k* and a
-consumer in SDSC *k+1* can only communicate through HBM, which is exactly what the stock
-pipeline does via an explicit `ReStickifyOpHBM` SDSC between them. Stock-baseline evidence
-(Stage 203): `sdsc_0_add` / `sdsc_1_ReStickifyOpHBM` / `sdsc_2_add` were all in one
-`bundle.mlir` and **still** used HBM for the intermediate.
+So the default path still round-trips the cross-op handoff through HBM — a producer in
+SDSC *k* and a consumer in SDSC *k+1* communicate through HBM via an explicit
+`ReStickifyOpHBM` SDSC between them — but keeping it on-chip is a **scheduling choice**,
+not a hardware constraint. Stock-baseline evidence (Stage 203): `sdsc_0_add` /
+`sdsc_1_ReStickifyOpHBM` / `sdsc_2_add` were all in one `bundle.mlir` and **still** used
+HBM for the intermediate.
 
-**Conclusion:** to keep a handoff in LX you must place **producer-output + the data-op
-move + consumer DL op into a single `SuperDsc`.** Fusion alone does not help —
+**Conclusion:** to keep a handoff on-chip you can place **producer-output + the data-op
+move + consumer DL op into a single `SuperDsc`**; for a same-shard handoff the
+LX-planner path (don't-evict + coordinate LX addresses across consecutive OpSpecs,
+measured to work on stock dxp) is cleaner, while the cross-core re-shard (different
+sharding) still needs the move. Fusion alone does not help —
 `fusion.py spyre_fuse_nodes` has no restickify barrier; matmul/bmm become
 `Reduction.create` SchedulerNodes; the only fusion boundary drivers are the ~6
 non-intermediate tensor-segment budget and genuine non-SchedulerNodes. None of that
@@ -576,8 +587,12 @@ if config.onchip_handoff_realize:
         logger.info("Realized on-chip same-core handoff")
 ```
 
-This is the **only** place mixed SDSCs can be assembled (the on-chip unit is the SDSC,
-not the bundle; LX does not persist across `sdsc_execute`). `bundle.mlir` is unchanged
+This is the place mixed SDSCs are assembled. The mixed SuperDSC is *one* way to keep the
+handoff on-chip; for a same-shard handoff the LX-planner path (don't-evict + coordinate
+LX addresses across consecutive OpSpecs) is cleaner, and the cross-core re-shard
+(different sharding) still needs the move. (LX *does* persist across `sdsc_execute` in PF
+/ single-user VF — measured; the default HBM round-trip is the planner's eviction, not a
+hardware wipe.) `bundle.mlir` is unchanged
 for the same-core / same-stick path — all SDSCs are kept; the consumer SDSC simply
 becomes mixed in place.
 
