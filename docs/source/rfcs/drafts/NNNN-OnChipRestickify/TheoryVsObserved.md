@@ -128,51 +128,74 @@ Handoff size `S` per workload: MoE dispatch/combine `S = EC·H·2` bytes; attent
 **The model has the right sign and order of magnitude, but it under-predicts the
 saving by 1.4×–6.5×.** Observed savings are always ≥ the peak-BW floor, and the
 implied effective HBM bandwidth is **26–124 GB/s — i.e. 15–73% of the 170 GB/s
-peak.**
+peak.** §3b measures the clean fabric rates directly to explain why.
+
+## 3b. Measured effective bandwidths (isolation microbenchmark)
+
+The §3 `B_eff` column is *backed out* of op-level ΔT, which conflates the handoff
+with the op's compute and access pattern. Two isolation microbenchmarks measure
+the fabrics directly (device, N=50).
+
+**HBM round-trip** — a pure pointwise `y = x*2` (fp16, one kernel, traffic = 2S),
+`B_hbm_eff = 2S / kernel_ms`:
+
+| S (MB) | kernel_ms | B_hbm_eff (GB/s) | % of 170 peak |
+|---|---|---|---|
+| 1 | 0.0318 | 66.0 | 38.8% |
+| 2 | 0.0387 | 108.3 | 63.7% |
+| 4 | 0.0801 | 104.8 | 61.6% |
+| 8 | 0.1649 | 101.8 | 59.9% |
+| 16 | 0.3383 | 99.2 | 58.3% |
+| 32 | 0.6626 | 101.3 | 59.6% |
+
+**Realized HBM is ~100 GB/s and FLAT** from 2 MB to 32 MB (~59% of peak), with only
+a small-S setup floor (66 GB/s at 1 MB). It does **not** degrade with size. So the
+corrected anchor for a *clean* handoff is **ΔT ≈ 2S / 100 GB/s ≈ 0.021 ms/MB** —
+~1.7× the peak-model figure (0.0123 ms/MB).
+
+**Ring move** — below A/B resolution: `2S/B_hbm_eff − ΔT` comes out negative at
+every size (the ring move is ~0.0006–0.004 ms at multi-TB/s aggregate, 2–3 orders
+below ΔT). The ring is confirmed **effectively free vs HBM** — exactly the §2
+assumption — so on-chip handoffs are modeled as **pure HBM elimination (ring ≈ 0)**.
+(B_ring_eff is bounded/inferred, not directly inverted.)
 
 ---
 
 ## 4. The delta: why observed beats the peak model
 
-The expected gain assumed HBM runs at 170 GB/s. The observations say it does not —
-the baseline HBM path runs **well below peak**, and that is precisely the traffic
-the on-chip path removes. Four compounding causes, in order of evidence:
+The peak model assumed HBM at 170 GB/s. The microbenchmark (§3b) shows the clean,
+contiguous HBM round-trip realizes only **~100 GB/s — a flat ~1.7× shortfall vs
+peak**, so even the best-case handoff saves ~1.7× more than the peak model. The
+*remaining* spread (op-level implied `B_eff` of 26–124 GB/s straddles the clean
+100) is **access-pattern** — the dominant cause:
 
-1. **Scattered / sub-burst HBM access (the dominant cause for MoE).** Routing
-   dispatch/combine is a gather/scatter — a permutation. HBM is bursty (L3 burst =
-   4 KB, `schedule-ir-spec.md:295`); scattered per-token accesses below the burst
-   quantum fetch whole bursts to use a fraction, so realized bytes ≫ logical
-   bytes and effective BW collapses. The implied `B_eff` for MoE (26–68 GB/s)
-   sits **below even the contiguous `ReStickifyOpHBM` anchor (~107 GB/s)**,
-   consistent with scatter amplification. The same-stick on-chip path moves whole
-   sticks contiguously over the ring and pays none of this.
+1. **Scattered / sub-burst HBM access (dominant for MoE).** Routing
+   dispatch/combine is a gather/scatter. HBM is bursty (L3 burst = 4 KB,
+   `schedule-ir-spec.md:295`); scattered accesses below the burst quantum fetch
+   whole bursts to use a fraction, so realized bytes ≫ logical bytes and effective
+   throughput falls *below* the clean ~100 GB/s (MoE implied 26–68). The same-stick
+   on-chip path moves whole sticks contiguously over the ring and pays none of this.
 
 2. **Restickify staging the same-stick path skips.** The attention bundle contains
-   a `2_ReStickifyOpHBM` (`dxp_attn512_verbose.log:4302`) — a layout staging that
-   routes through HBM (`…OpHBM` uses `hbmBw`; `…OpLx` stays on-ring,
-   `restickifyOp.cpp:18-20`). The baseline pays this HBM traffic on top of the
-   logical handoff; the on-chip path keeps it on-chip. This inflates the eliminated
-   bytes beyond the nominal `S`.
+   a `2_ReStickifyOpHBM` (`dxp_attn512_verbose.log:4302`) routing through HBM
+   (`…OpHBM` uses `hbmBw`; `…OpLx` stays on-ring, `restickifyOp.cpp:18-20`). The
+   baseline pays this on top of the logical handoff; the on-chip path keeps it
+   on-chip — inflating the eliminated bytes beyond the nominal `S`.
 
-3. **Super-linear HMI contention.** A single shared pipe degrades as it saturates.
-   The implied `B_eff` **falls as the handoff grows**: 64 GB/s @ 2 MB → 26 GB/s
-   @ 8 MB. So the per-MB saving *grows* with size (0.033 → 0.081 ms/MB) — the
-   linear `bytes/BW` model cannot capture this; the on-chip win is largest exactly
-   where HBM is most congested.
+3. **Shape / access-footprint dependence.** Two 4 MB handoffs, same logical bytes,
+   differ 2.2× in saving: `T512 H4096` (implied 31) vs `T1024 H2048` (implied 68).
+   A single scalar bandwidth cannot predict this — it is an access-pattern effect.
 
-4. **Layout / shape dependence.** Two 4 MB handoffs, same logical bytes, differ
-   2.2× in saving: `T512 H4096` (B_eff 31) vs `T1024 H2048` (B_eff 68). The wider
-   hidden axis (the stick dimension) yields a worse HBM access footprint. A single
-   scalar bandwidth cannot predict this — it is an access-pattern effect.
-
-**The control that proves the theory:** the **clean, contiguous** attention
-handoff (Q512 KV4096, bh=1) lands at **1.4× of the peak model (B_eff ≈ 124 GB/s ≈
-73% of peak)** — the closest to prediction of any row. Where the handoff is
-contiguous and large-per-core, HBM runs near peak and the model is accurate; where
-it is scattered (MoE) or restickified (attention seq=512), HBM collapses and the
-on-chip advantage balloons. **The model is right; the delta is the gap between HBM's
-peak spec and its realized bandwidth, and the on-chip handoff wins biggest in
-exactly the regime where that gap is widest.**
+**Correction to the earlier draft (this doc, pre-microbenchmark).** An earlier
+version listed a fourth cause — *super-linear HMI contention* — reading the size
+trend (implied `B_eff` 64 → 26 GB/s as the handoff grows 2 → 8 MB) as HBM
+saturating. **The microbenchmark refutes that:** the clean HBM round-trip is flat
+from 2 to 32 MB. The size-correlation in the op-level data is access-pattern, not
+bandwidth-vs-size — the 8 MB op is a strided matmul handoff with a measured
+baseline knee (1.32 ms in the ring A/B), not HBM degrading with size. **Net: model
+on-chip handoffs as pure HBM elimination at the realized ~100 GB/s; the
+strided/scattered cases save more because their baseline HBM throughput is even
+lower than the clean rate.**
 
 ---
 
@@ -191,21 +214,19 @@ exactly the regime where that gap is widest.**
   `S = EC·H·2` has no expert-count term, and E=8 vs E=64 at matched EC·H measure
   identically. Match.
 
-## 6. Caveats and how to tighten this
+## 6. Caveats (the microbenchmark resolved the main one)
 
-- The model uses **peak** bandwidths; the delta analysis backs out **effective**
-  HBM BW from op-level ΔT, which conflates the handoff with restickify and any
-  compute non-overlap. The numbers are internally consistent but the per-cause
-  attribution in §4 is reasoned from the access pattern, not isolated.
-- **The decisive next measurement** (device, ~15 min, currently un-run) is two
-  isolated microbenchmarks: (a) a pure HBM store→load of `S` (no compute) to
-  measure realized HBM round-trip BW directly, and (b) a pure `STCDPOpLx` move of
-  `S` (no compute) to measure realized ring BW. With those two measured constants
-  the model becomes predictive rather than bounding, and §4's "effective ≪ peak"
-  claim is validated head-on instead of inferred.
+- The decisive measurement is now **done** (§3b): realized HBM ≈ 100 GB/s flat
+  (~59% of peak), ring ≈ free. The peak-BW model is a ~1.7× lower bound on the
+  clean case; §4's per-cause attribution (scatter / restickify / shape) is still
+  reasoned from access pattern, not separated per-cause.
+- **`B_ring_eff` is bounded/inferred, not directly inverted:** the ring move is
+  below A/B time resolution (sub-0.005 ms), so we can only say it is multi-TB/s and
+  negligible vs HBM — which is all the model needs.
 - All on-chip numbers include the **2× round-trip construct**; a production
-  single-move handoff would save marginally more (ring cost is ~5%, so the
-  difference is within noise).
+  single-move would save marginally more (ring cost is in the noise).
+- Reproduce: the isolation microbenchmark scripts (`bw_hbm_micro.py`,
+  `run_microA.sh`, `run_microB.sh`, `neg_control.sh`) and raw device logs.
 
 ## Source index
 
