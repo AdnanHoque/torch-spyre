@@ -49,6 +49,18 @@ flash_attention_prefill: bool = (
 flash_attention_prefill_block_size: int = int(
     os.environ.get("SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE", "128")
 )
+# Default-off proof path for a mixed-SDSC, double-buffered flash-attention
+# prefill pipeline.  The first implementation only builds descriptor/scheduler
+# proof artifacts; compiler promotion remains gated until device overlap is
+# proven.
+flash_attention_mixed_pipeline: bool = (
+    os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE", "0") == "1"
+)
+# Conservative default is serial double buffering.  Set only when validating a
+# Foundation/DXP build that accepts rows containing both data-op and DL-op work.
+flash_attention_mixed_pipeline_overlap: bool = (
+    os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_OVERLAP", "0") == "1"
+)
 
 # --- Tier 0: ring-aware restickify (telemetry + producer-aligned work division) ---
 # Default-off ring byte-hop telemetry for compiler-inserted restickifies.

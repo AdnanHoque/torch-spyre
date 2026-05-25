@@ -43,6 +43,11 @@ STICK_BYTES = 128
 # Fixed per-side LX buffer for the streamed bridge. Each tile is <= this; in+out
 # = 2 * STREAM_TILE_BYTES, leaving the rest of the 2 MB/core LX for the DL op.
 STREAM_TILE_BYTES = 128 << 10  # 131_072
+# Default tile footprint for the mixed-SDSC flash-attention pipeline proof.  The
+# v0 proof uses the same conservative tile size as streamed same-stick handoffs:
+# two K/V double buffers plus a small number of scratch regions still fit in the
+# 2 MB/core LX budget.
+FLASH_PIPELINE_TILE_BYTES = STREAM_TILE_BYTES
 # The same-stick/same-split 512 proof used a 2048x2048 data-op frame even when
 # the DL op's logical tensor was 512x512. Smaller frames can compile but hang on
 # device, so preserve that proven lower bound for sub-stick same-stick chunks.
@@ -143,6 +148,61 @@ def allocate_stream_bases(
     2*slice). Raises ValueError if even the two fixed tiles + region0 overflow.
     """
     return allocate_lx_bases(2, tile_bytes, capacity=capacity, region0=region0)
+
+
+def allocate_flash_attention_pipeline_bases(
+    num_lanes: int = 2,
+    tile_bytes: int = FLASH_PIPELINE_TILE_BYTES,
+    scratch_regions: int = 2,
+    capacity: int = LX_CAPACITY_BYTES,
+    region0: int = 0,
+    include_source_regions: bool = True,
+) -> dict:
+    """Allocate LX regions for the flash-attention mixed-SDSC pipeline proof.
+
+    ``num_lanes`` is the number of independent payload streams.  The intended
+    attention use is two lanes, K and V, but the helper is generic so the first
+    proof can exercise one-lane score staging as well.  Each lane gets two
+    destination buffers for ping-pong/double buffering.  Optional source regions
+    model LX-resident producer outputs in unit tests; production callers may use
+    externally allocated producer bases instead.
+    """
+    if num_lanes <= 0:
+        raise ValueError(f"num_lanes must be positive, got {num_lanes}")
+    if tile_bytes <= 0:
+        raise ValueError(f"tile_bytes must be positive, got {tile_bytes}")
+    if scratch_regions < 0:
+        raise ValueError(
+            f"scratch_regions must be non-negative, got {scratch_regions}"
+        )
+
+    aligned_tile = _align_up(tile_bytes, STICK_BYTES)
+    source_count = num_lanes if include_source_regions else 0
+    region_count = source_count + num_lanes * 2 + scratch_regions
+    bases = allocate_lx_bases(
+        region_count,
+        aligned_tile,
+        capacity=capacity,
+        region0=region0,
+    )
+
+    idx = 0
+    source_bases = []
+    if include_source_regions:
+        source_bases = bases[:num_lanes]
+        idx = num_lanes
+    lane_bases = [bases[idx + 2 * lane: idx + 2 * lane + 2]
+                  for lane in range(num_lanes)]
+    idx += num_lanes * 2
+    scratch_bases = bases[idx:]
+    footprint = bases[-1] + aligned_tile if bases else region0
+    return {
+        "source_bases": source_bases,
+        "lane_bases": lane_bases,
+        "scratch_bases": scratch_bases,
+        "tile_bytes": aligned_tile,
+        "footprint": footprint,
+    }
 
 
 def _piece_info(
@@ -292,6 +352,62 @@ def mixed_schedule(num_dataops: int, num_cores: int) -> dict:
         rows.append([k, -1, 1 if k > 0 else 0, 1])
     rows.append([-1, 0, 1, 0])
     return {str(c): [list(r) for r in rows] for c in range(num_cores)}
+
+
+def _schedule_rows_for_all_cores(rows: Sequence[Sequence[int]],
+                                 num_cores: int) -> dict:
+    """Attach local dependency bits and duplicate the schedule to every core."""
+    normalized = [
+        [
+            int(row[0]),
+            int(row[1]),
+            1 if idx > 0 else 0,
+            1 if idx < len(rows) - 1 else 0,
+        ]
+        for idx, row in enumerate(rows)
+    ]
+    return {str(c): [list(r) for r in normalized] for c in range(num_cores)}
+
+
+def flash_pipeline_schedule(
+    num_tiles: int,
+    num_lanes: int,
+    num_cores: int,
+    overlap: bool = False,
+) -> dict:
+    """Schedule rows for a tiled mixed-SDSC flash-attention pipeline proof.
+
+    Serial mode is the conservative Foundation-safe control: prefetch all lanes
+    for tile ``t`` and then run compute DSC ``t``.  Overlap mode is the
+    warp-specialized candidate: prefetch tile 0 as a prologue, then pair compute
+    DSC ``t`` with the first prefetch data-op for tile ``t + 1``.  The remaining
+    lanes for the next tile are emitted as data-op-only rows, avoiding duplicate
+    compute dispatch.
+    """
+    if num_tiles <= 0:
+        raise ValueError(f"num_tiles must be positive, got {num_tiles}")
+    if num_lanes <= 0:
+        raise ValueError(f"num_lanes must be positive, got {num_lanes}")
+
+    rows: list[list[int]] = []
+    if not overlap:
+        for tile in range(num_tiles):
+            dataop_base = tile * num_lanes
+            for lane in range(num_lanes):
+                rows.append([dataop_base + lane, -1])
+            rows.append([-1, tile])
+        return _schedule_rows_for_all_cores(rows, num_cores)
+
+    # Prologue: tile 0 must be resident before compute can start.
+    for lane in range(num_lanes):
+        rows.append([lane, -1])
+    for tile in range(num_tiles - 1):
+        next_dataop_base = (tile + 1) * num_lanes
+        rows.append([next_dataop_base, tile])
+        for lane in range(1, num_lanes):
+            rows.append([next_dataop_base + lane, -1])
+    rows.append([-1, num_tiles - 1])
+    return _schedule_rows_for_all_cores(rows, num_cores)
 
 
 def build_transpose_bridge(
@@ -472,6 +588,113 @@ def _tiled_labeled_ds(
             row_start, n_rows, reverse,
         ),
     }
+
+
+def build_flash_attention_pipeline_bridge(
+    dim_pool,
+    iter_sizes,
+    stick_size,
+    num_cores,
+    lx_size,
+    src_bases,
+    dst_lane_bases,
+    layout,
+    stick_dim,
+    split_dim,
+    row_dim,
+    lane_names=None,
+    tile_bytes=FLASH_PIPELINE_TILE_BYTES,
+    overlap=False,
+):
+    """Build the data-op side of a double-buffered flash-attention pipeline.
+
+    This is a descriptor/scheduler proof helper.  It stages one or more
+    LX-resident payload lanes through ping-pong buffers using ``STCDPOpLx``.
+    For attention, lanes are typically K and V.  The helper intentionally does
+    not model HBM->LX loads; it only uses the same certified LX->LX primitive as
+    the existing core-to-core handoff work.
+    """
+    if row_dim == split_dim:
+        raise ValueError("row_dim must differ from split_dim for tiled staging")
+    if row_dim not in iter_sizes:
+        raise ValueError(f"row_dim {row_dim!r} missing from iter_sizes")
+    if split_dim not in iter_sizes or iter_sizes[split_dim] % num_cores != 0:
+        raise ValueError("split_dim must be present and divisible by num_cores")
+
+    num_lanes = len(src_bases)
+    if num_lanes == 0:
+        raise ValueError("at least one pipeline lane is required")
+    if len(dst_lane_bases) != num_lanes:
+        raise ValueError("dst_lane_bases must match src_bases length")
+    for bases in dst_lane_bases:
+        if len(bases) != 2:
+            raise ValueError("each lane needs exactly two destination bases")
+    if lane_names is None:
+        lane_names = [f"lane{lane}" for lane in range(num_lanes)]
+    if len(lane_names) != num_lanes:
+        raise ValueError("lane_names must match src_bases length")
+
+    slice_bytes = per_core_same_stick_slice_bytes(
+        iter_sizes,
+        split_dim,
+        stick_dim,
+        stick_size,
+        num_cores,
+    )
+    num_tiles = num_stream_tiles(slice_bytes, tile_bytes)
+    rows_per_tile = tile_rows(iter_sizes[row_dim], num_tiles)
+
+    datadscs = []
+    for tile in range(num_tiles):
+        row_start = tile * rows_per_tile
+        n_rows = min(rows_per_tile, iter_sizes[row_dim] - row_start)
+        for lane, lane_name in enumerate(lane_names):
+            dataop_idx = tile * num_lanes + lane
+            dst_base = dst_lane_bases[lane][tile % 2]
+            in_ld = _tiled_labeled_ds(
+                "dataIN",
+                layout,
+                stick_dim,
+                split_dim,
+                row_dim,
+                iter_sizes,
+                stick_size,
+                src_bases[lane],
+                num_cores,
+                lx_size,
+                row_start,
+                n_rows,
+            )
+            out_ld = _tiled_labeled_ds(
+                "dataOUT",
+                layout,
+                stick_dim,
+                split_dim,
+                row_dim,
+                iter_sizes,
+                stick_size,
+                dst_base,
+                num_cores,
+                lx_size,
+                row_start,
+                n_rows,
+            )
+            datadscs.append(
+                _datadsc(
+                    f"{dataop_idx}_STCDPOpLx_prefetch_{lane_name}_tile{tile}",
+                    _stcdp_op(),
+                    dim_pool,
+                    in_ld,
+                    out_ld,
+                    num_cores,
+                )
+            )
+
+    return (
+        datadscs,
+        ["STCDPOpLx"] * len(datadscs),
+        flash_pipeline_schedule(num_tiles, num_lanes, num_cores, overlap=overlap),
+    )
 
 
 def build_streamed_bridge(
