@@ -327,6 +327,44 @@ def _iter_sizes_for_layout(dl: dict, layout: list[str]) -> dict[str, int] | None
     return out
 
 
+def _dim_size(dl: dict, dim: str) -> int | None:
+    value = dl.get("N_", {}).get(dim)
+    return int(value) if value is not None else None
+
+
+def _split_factor(shard: dict[str, int], split_dim: str) -> int:
+    return int(shard.get(split_dim.removesuffix("_"), 1))
+
+
+def _same_physical_stick_layout(
+    prod_dl: dict,
+    prod_layout: list[str],
+    prod_stick: str,
+    cons_dl: dict,
+    cons_layout: list[str],
+    cons_stick: str,
+) -> bool:
+    """True when producer/consumer layouts differ only by stick dim naming.
+
+    Matmul producer outputs name the hidden stick axis ``out_`` while a following
+    matmul consumer names that same physical axis ``in_``.  Treat that as
+    same-stick only when the stick appears in the same layout position, all
+    non-stick dims have the same names, and paired extents match.
+    """
+    if len(prod_layout) != len(cons_layout):
+        return False
+    for p_dim, c_dim in zip(prod_layout, cons_layout):
+        if p_dim == prod_stick and c_dim == cons_stick:
+            pass
+        elif p_dim != c_dim:
+            return False
+        p_size = _dim_size(prod_dl, p_dim)
+        c_size = _dim_size(cons_dl, c_dim)
+        if p_size is None or c_size is None or p_size != c_size:
+            return False
+    return True
+
+
 def _handoff_bytes(iter_sizes: dict[str, int], word_length: int) -> int:
     size = word_length
     for n in iter_sizes.values():
@@ -582,6 +620,143 @@ def realize_attention_score_handoff(
     return True
 
 
+def detect_static_matmul_handoff(
+    sdscs_json: list[dict],
+    min_handoff_bytes: int = 1 << 20,
+):
+    """Find a static same-stick ``batchmatmul -> batchmatmul`` handoff.
+
+    This targets the MoE static routing proxy: ``(perm @ x) @ w`` and
+    ``(perm_w @ y) @ w``.  The routed activation is a single HBM-backed producer
+    output consumed by one later matmul input.  Producer and consumer may name
+    the hidden stick axis differently (``out_`` vs ``in_``), but the physical
+    layout must preserve the stick position and split the same token/slot dim.
+    """
+    for p, prod in enumerate(sdscs_json):
+        if _op_name(prod) != "batchmatmul":
+            continue
+        prod_dl = _dl_op(prod)
+        out_indices = _producer_output_indices(prod_dl)
+        if len(out_indices) != 1:
+            continue
+        out_idx = out_indices[0]
+        prod_addr = _hbm_base(prod_dl, out_idx)
+        if prod_addr is None:
+            continue
+
+        consumers = _future_consumers(sdscs_json, p, prod_addr)
+        if len(consumers) != 1:
+            continue
+        _c, cons, in_idx = consumers[0]
+        if _op_name(cons) != "batchmatmul":
+            continue
+        cons_dl = _dl_op(cons)
+
+        prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
+        cons_stick = _stick_dim_for_lds(cons_dl, in_idx)
+        prod_layout = _layout_for_lds(prod_dl, out_idx)
+        cons_layout = _layout_for_lds(cons_dl, in_idx)
+        if (
+            prod_stick is None
+            or cons_stick is None
+            or prod_layout is None
+            or cons_layout is None
+        ):
+            continue
+        if not _same_physical_stick_layout(
+            prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
+        ):
+            continue
+
+        prod_shard = _body(prod).get("numWkSlicesPerDim_", {})
+        cons_shard = _body(cons).get("numWkSlicesPerDim_", {})
+        prod_split = _single_split_dim(prod_shard)
+        cons_split = _single_split_dim(cons_shard)
+        if prod_split is None or cons_split is None or prod_split != cons_split:
+            continue
+        num_cores = int(_body(cons).get("numCoresUsed_", 0))
+        split_factor = _split_factor(cons_shard, cons_split)
+        if num_cores <= 0 or split_factor != num_cores:
+            continue
+        if _split_factor(prod_shard, prod_split) != split_factor:
+            continue
+
+        iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
+        if iter_sizes is None:
+            continue
+        if cons_split not in iter_sizes or iter_sizes[cons_split] % num_cores != 0:
+            continue
+        lds = _lds_by_idx(prod_dl, out_idx)
+        word_length = int((lds or {}).get("wordLength", 2))
+        handoff_bytes = _handoff_bytes(iter_sizes, word_length)
+        if handoff_bytes < min_handoff_bytes:
+            continue
+        slice_bytes = per_core_same_stick_slice_bytes(
+            iter_sizes, cons_split, cons_stick, STICK_SIZE, num_cores, word_length
+        )
+        try:
+            bases = allocate_lx_bases(3, slice_bytes, region0=0)
+        except ValueError:
+            continue
+        return {
+            "producer": prod,
+            "producer_out_idx": out_idx,
+            "consumer": cons,
+            "consumer_in_idx": in_idx,
+            "iter_sizes": iter_sizes,
+            "layout": cons_layout,
+            "stick_dim": cons_stick,
+            "split_dim": cons_split,
+            "num_cores": num_cores,
+            "word_length": word_length,
+            "handoff_bytes": handoff_bytes,
+            "slice_bytes": slice_bytes,
+            "producer_base": bases[0],
+            "scratch_base": bases[1],
+            "consumer_base": bases[2],
+        }
+    return None
+
+
+def realize_static_matmul_handoff(
+    sdscs_json: list[dict],
+    min_handoff_bytes: int = 1 << 20,
+) -> bool:
+    edge = detect_static_matmul_handoff(sdscs_json, min_handoff_bytes)
+    if edge is None:
+        return False
+
+    prod = edge["producer"]
+    cons = edge["consumer"]
+    apply_lx_flip(
+        prod,
+        LxFlip(edge["producer_out_idx"], edge["producer_base"], "producer-output"),
+    )
+    apply_lx_flip(
+        cons,
+        LxFlip(edge["consumer_in_idx"], edge["consumer_base"], "consumer-input"),
+    )
+    datadscs, opfuncs, sched = build_roundtrip_bridge(
+        dim_pool=edge["layout"],
+        iter_sizes=edge["iter_sizes"],
+        stick_size=STICK_SIZE,
+        num_cores=edge["num_cores"],
+        lx_size=edge["slice_bytes"],
+        producer_base=edge["producer_base"],
+        scratch_base=edge["scratch_base"],
+        consumer_base=edge["consumer_base"],
+        layout=edge["layout"],
+        stick_dim=edge["stick_dim"],
+        split_dim=edge["split_dim"],
+    )
+    body = _body(cons)
+    body["coreIdToDscSchedule"] = sched
+    body["datadscs_"] = datadscs
+    body["opFuncsUsed_"] = opfuncs
+    _dl_op(cons)["numCoreletsUsed_DSC2_"] = 1
+    return True
+
+
 def detect_onchip_edge(sdscs_json: list[dict]):
     """Find an eligible same-stick same-shard producer->consumer edge.
 
@@ -619,6 +794,7 @@ def realize_onchip_handoff(
     sdscs_json: list[dict],
     *,
     attention_score_handoff: bool = False,
+    static_matmul_handoff: bool = False,
     min_handoff_bytes: int = 1 << 20,
 ) -> bool:
     """Realize the eligible same-core handoff edge in place; fail-closed.
@@ -631,6 +807,10 @@ def realize_onchip_handoff(
     consumer (mixed DL+data-op SuperDSC).
     """
     if attention_score_handoff and realize_attention_score_handoff(
+        sdscs_json, min_handoff_bytes
+    ):
+        return True
+    if static_matmul_handoff and realize_static_matmul_handoff(
         sdscs_json, min_handoff_bytes
     ):
         return True

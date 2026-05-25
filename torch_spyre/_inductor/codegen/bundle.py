@@ -58,6 +58,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         if realize_onchip_handoff(
             sdscs_json,
             attention_score_handoff=config.onchip_attention_score_handoff,
+            static_matmul_handoff=config.onchip_static_matmul_handoff,
             min_handoff_bytes=config.onchip_handoff_min_bytes,
         ):
             logger.info("Realized on-chip handoff")

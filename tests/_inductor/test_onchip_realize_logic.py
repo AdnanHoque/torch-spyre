@@ -245,6 +245,67 @@ def _fake_attention_sdscs(include_max=True):
     return sdscs
 
 
+def _fake_static_matmul_sdscs(stick_position="last", extra_consumer=False):
+    shared_addr = 4096
+    producer_pdi = {
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        }
+    }
+    consumer_layout = ["mb", "in"] if stick_position == "last" else ["in", "mb"]
+    consumer_pdi = {
+        "INPUT": {
+            "layoutDimOrder_": consumer_layout,
+            "stickDimOrder_": ["in"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["out", "in"],
+            "stickDimOrder_": ["in"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    producer = _fake_sdsc(
+        0,
+        "batchmatmul",
+        {"mb": 32, "out": 1},
+        {"mb_": 512, "out_": 1024, "in_": 512},
+        [],
+        [("Tensor2-idx2", "OUTPUT", shared_addr)],
+        producer_pdi,
+    )
+    consumer = _fake_sdsc(
+        1,
+        "batchmatmul",
+        {"mb": 32, "out": 1, "in": 1},
+        {"mb_": 512, "in_": 1024, "out_": 256},
+        [("Tensor0-idx0", "INPUT", shared_addr), ("Tensor1-idx1", "KERNEL", 8192)],
+        [("Tensor2-idx2", "OUTPUT", 12288)],
+        consumer_pdi,
+    )
+    sdscs = [producer, consumer]
+    if extra_consumer:
+        sdscs.append(
+            _fake_sdsc(
+                2,
+                "identity",
+                {"mb": 32, "in": 1},
+                {"mb_": 512, "in_": 1024},
+                [("Tensor0-idx0", "INPUT", shared_addr)],
+                [("Tensor1-idx1", "OUTPUT", 16384)],
+                consumer_pdi,
+            )
+        )
+    return sdscs
+
+
 def test_attention_score_handoff_bridges_full_score_fanout():
     sdscs = _fake_attention_sdscs()
     assert rz.realize_onchip_handoff(
@@ -276,6 +337,57 @@ def test_attention_score_handoff_requires_full_score_fanout():
     sdscs = _fake_attention_sdscs(include_max=False)
     assert not rz.realize_onchip_handoff(
         sdscs, attention_score_handoff=True, min_handoff_bytes=0
+    )
+
+
+def test_static_matmul_handoff_detects_same_stick_layout():
+    sdscs = _fake_static_matmul_sdscs()
+    edge = rz.detect_static_matmul_handoff(sdscs, min_handoff_bytes=0)
+    assert edge is not None
+    assert edge["layout"] == ["mb_", "in_"]
+    assert edge["stick_dim"] == "in_"
+    assert edge["split_dim"] == "mb_"
+    assert edge["slice_bytes"] == 512 // 32 * 1024 * 2
+
+
+def test_static_matmul_handoff_realizes_roundtrip_consumer():
+    sdscs = _fake_static_matmul_sdscs()
+    assert rz.realize_onchip_handoff(
+        sdscs, static_matmul_handoff=True, min_handoff_bytes=0
+    )
+    prod, cons = sdscs[:2]
+    assert rz._lds_by_idx(rz._dl_op(prod), 2)["hbmSize_"] == 0
+    assert rz._lds_by_idx(rz._dl_op(cons), 0)["hbmSize_"] == 0
+    body = cons[next(iter(cons))]
+    assert body["opFuncsUsed_"] == ["STCDPOpLx", "STCDPOpLx"]
+    assert len(body["datadscs_"]) == 2
+    assert rz._dl_op(cons)["numCoreletsUsed_DSC2_"] == 1
+    for dataop in body["datadscs_"]:
+        op_body = dataop[next(iter(dataop))]
+        assert op_body["labeledDs_"][0]["hbmSize_"] == 0
+        assert op_body["labeledDs_"][1]["hbmSize_"] == 0
+
+
+def test_static_matmul_handoff_respects_min_size_gate():
+    sdscs = _fake_static_matmul_sdscs()
+    assert not rz.realize_onchip_handoff(
+        sdscs, static_matmul_handoff=True, min_handoff_bytes=1 << 40
+    )
+    assert "datadscs_" not in sdscs[1][next(iter(sdscs[1]))]
+
+
+def test_static_matmul_handoff_rejects_layout_change_and_fanout():
+    assert (
+        rz.detect_static_matmul_handoff(
+            _fake_static_matmul_sdscs(stick_position="first"), min_handoff_bytes=0
+        )
+        is None
+    )
+    assert (
+        rz.detect_static_matmul_handoff(
+            _fake_static_matmul_sdscs(extra_consumer=True), min_handoff_bytes=0
+        )
+        is None
     )
 
 
