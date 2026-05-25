@@ -81,24 +81,37 @@ A producer→consumer handoff of `S` bytes:
 
 - **HBM baseline:** producer stores `S` to HBM, consumer loads `S` from HBM →
   `2S` through the shared pipe → `T_hbm = 2S / 170 GB/s`.
-- **On-chip:** producer's output already sits in LX; the ring moves it core→core;
-  the consumer reads it from LX → `T_onchip = S/ring_agg + 2·S/lx_agg`.
+- **On-chip:** the producer's output stays in LX; the ring moves each core's slice
+  to the consumer's core; the consumer reads from LX. The deeptools cost model
+  charges this as a **busiest-link MAX**, not a sum: it sums cycles for every slice
+  routed onto a given ring link (`perfmodel.cpp:643-647`) and takes the MAX across
+  links (`:730-733`). For a genuine cross-core move there is **no additive LX term**
+  (the in-LX `lxCoreletBw` charge applies only to same-core copies,
+  `perfmodel.cpp:1896-1921`) and no HBM term → `T_onchip = T_ring` (the busiest link).
 
-Because ring/LX are ~40–60× HBM, `T_onchip` is negligible. Concretely, for the
-**largest (8 MB) handoff, using the measured 2× round-trip construct** (two ring
-moves, `i→31−i→i`):
+The busiest link depends on the **pattern**. The full ring aggregate
+(`ringBw × 2 × numSegments ≈ 6.5 TB/s`, `spadprefetch.cpp:89-91`) is a *separate*
+prefetch estimator and is **not** on the STCDP cost path — using it under-counts the
+move by ~13×. For the mirror **reversal** `i→31−i` (the proof construct), every core
+sends to the opposite half, so traffic funnels through the ring's **bisection**;
+routed across both directions the busiest link carries `S/4` (not `S/2`). At the
+largest (8 MB) handoff:
 
 ```
-ring  : 2·8 MB / 6.55 TB/s  ≈ 0.0026 ms
-LX r/w: 2·8 MB / 6.1  TB/s  ≈ 0.0028 ms
-T_onchip ≈ 0.005 ms   vs   T_hbm = 2·8 MB / 170 GB/s ≈ 0.099 ms   (~5%)
+                       reversal construct        balanced near-neighbour
+                       (busiest link = S/4)      (busiest link = 1 slice)
+T_ring per move     :  ~0.0164 ms                ~0.002 ms
+T_ring round trip   :  ~0.033 ms  (~4.1 us/MB)   ~0.004 ms  (~8x cheaper)
+   vs  T_hbm        =  2*8 MB / 170 GB/s ~= 0.099 ms (peak) / ~0.17 ms (effective)
 ```
 
-So even with the round-trip construct's doubled ring traffic, the on-chip side is
-~5% of the eliminated HBM time. The **expected saving** is therefore, to within a
-few percent:
+So the ring is cheap but **not "free": for the measured reversal it is
+busiest-link-limited at ~0.033 ms — roughly a fifth of the eliminated HBM saving (at
+the effective ~100 GB/s), not ~3%.** A production (near-neighbour) handoff spreads
+across links and is ~8× cheaper. The peak-HBM **expected saving** is a lower bound:
 
-> **ΔT_expected ≈ 2S / 170 GB/s = 0.01234 ms per MB of handoff** (peak HBM BW).
+> **ΔT_expected ≈ 2S / 170 GB/s = 0.01234 ms per MB of handoff** (peak HBM BW),
+> less the ring cost above (~20% of the saving for the reversal construct).
 
 This is the prediction. Note it is a prediction of the **saving (ΔT)**, not of the
 full op time or the speedup ratio — the model does not include the matmul compute
@@ -153,11 +166,15 @@ a small-S setup floor (66 GB/s at 1 MB). It does **not** degrade with size. So t
 corrected anchor for a *clean* handoff is **ΔT ≈ 2S / 100 GB/s ≈ 0.021 ms/MB** —
 ~1.7× the peak-model figure (0.0123 ms/MB).
 
-**Ring move** — below A/B resolution: `2S/B_hbm_eff − ΔT` comes out negative at
-every size (the ring move is ~0.0006–0.004 ms at multi-TB/s aggregate, 2–3 orders
-below ΔT). The ring is confirmed **effectively free vs HBM** — exactly the §2
-assumption — so on-chip handoffs are modeled as **pure HBM elimination (ring ≈ 0)**.
-(B_ring_eff is bounded/inferred, not directly inverted.)
+**Ring move** — the microbench could **not** isolate it: `2S/B_hbm_eff − ΔT` goes
+negative at every size. That is *not* because the move is sub-resolution — against
+the correct busiest-link figure (~0.033 ms round trip, §2) it is 6–7× above the A/B
+resolution. Two things hide it: (1) the ring cost is a critical-path **MAX** that
+overlaps the HBM/compute phases — it is never *added* to them; and (2) the HBM term's
+own modelling uncertainty (`2S/170` = 0.099 ms vs `2S/107` = 0.157 ms, ±0.058 ms) is
+~1.8× the whole ring cost, so a 0.033 ms signal flips the residual negative.
+**Model and device are consistent — the move is confounded, not absent.** (B_ring_eff
+is bounded/inferred, not directly isolated; the analytic busiest-link cost is §2.)
 
 ---
 
@@ -203,10 +220,11 @@ lower than the clean rate.**
 
 - **Sign and scaling.** Every above-floor handoff wins, and the saving scales with
   handoff bytes (the bandwidth-bound signature) — predicted and observed.
-- **Ring/LX cost is negligible → the round-trip construct still wins.** The model
-  says `T_onchip` is ~5% of the eliminated HBM even with the doubled ring traffic;
-  observed: the round-trip construct (which a production single-move would beat)
-  wins by 1.3–1.9× anyway. Confirmed.
+- **The round-trip construct still wins despite the ring cost.** For the reversal the
+  ring is busiest-link-limited (~0.033 ms RT, ~20% of the saving, §2), not free — yet
+  the round-trip construct (which a production single-move would beat) still wins by
+  1.3–1.9× on device, because that ring cost is a critical-path MAX already inside the
+  on-chip number. Confirmed.
 - **Sub-MB neutrality.** seq=64 (256 KB) has expected gain 0.003 ms — below the
   STCDP setup + the 3-region construct overhead + measurement noise — so the model
   predicts no usable win, and the measurement is neutral/slight regression. Match.
