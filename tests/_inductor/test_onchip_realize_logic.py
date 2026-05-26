@@ -491,6 +491,25 @@ def test_flash_pipeline_artifact_returns_none_without_batchmatmul_tiles():
     assert rz.build_flash_attention_pipeline_artifact([]) is None
 
 
+def test_flash_pipeline_tile_artifacts_are_one_compute_each():
+    artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
+        _fake_flash_pipeline_sdscs(num_tiles=3)
+    )
+    assert len(artifacts) == 3
+    for idx, artifact in enumerate(artifacts):
+        name = f"mixed_flash_pipeline_tile_{idx}"
+        root = artifact[name]
+        assert len(root["dscs_"]) == 1
+        assert len(root["datadscs_"]) == 2
+        assert root["flashAttentionPipeline_"]["tile_count"] == 1
+        assert root["flashAttentionPipeline_"]["tile_index"] == idx
+        assert root["coreIdToDscSchedule"]["0"] == [
+            [0, -1, 0, 1],
+            [1, -1, 1, 1],
+            [-1, 0, 1, 0],
+        ]
+
+
 def _run_all():
     tests = sorted(
         (n, o) for n, o in globals().items()

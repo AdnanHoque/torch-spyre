@@ -21,6 +21,7 @@ from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.onchip_realize import (
     build_flash_attention_pipeline_artifact,
+    build_flash_attention_pipeline_tile_artifacts,
     realize_onchip_handoff,
 )
 
@@ -70,9 +71,13 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         config.flash_attention_mixed_pipeline
         and config.flash_attention_mixed_pipeline_artifact
     ):
+        sidecar_sdscs.extend(
+            build_flash_attention_pipeline_tile_artifacts(sdscs_json)
+        )
         artifact = build_flash_attention_pipeline_artifact(
             sdscs_json,
             overlap=config.flash_attention_mixed_pipeline_overlap,
+            name="mixed_flash_pipeline_full_artifact",
         )
         if artifact is not None:
             sidecar_sdscs.append(artifact)

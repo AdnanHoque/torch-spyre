@@ -889,6 +889,31 @@ def build_flash_attention_pipeline_artifact(
     return artifact
 
 
+def build_flash_attention_pipeline_tile_artifacts(
+    sdscs_json: list[dict],
+    *,
+    name_prefix: str = "mixed_flash_pipeline_tile",
+) -> list[dict]:
+    """Build DXP-compatible one-compute mixed sidecars for flash-prefill tiles."""
+    artifacts = []
+    tile_index = 0
+    for sdsc in sdscs_json:
+        if _op_name(sdsc) != "batchmatmul":
+            continue
+        artifact = build_flash_attention_pipeline_artifact(
+            [sdsc],
+            overlap=False,
+            name=f"{name_prefix}_{tile_index}",
+        )
+        if artifact is None:
+            continue
+        root = artifact[next(iter(artifact))]
+        root["flashAttentionPipeline_"]["tile_index"] = tile_index
+        artifacts.append(artifact)
+        tile_index += 1
+    return artifacts
+
+
 def detect_onchip_edge(sdscs_json: list[dict]):
     """Find an eligible same-stick same-shard producer->consumer edge.
 
