@@ -174,6 +174,7 @@ class Shape:
     measured_us: float | None = None
 
 VALIDATED = [
+    # ---- Original high-LX validated wins (LX_FRAC=0.8, m x n co-split regime) ----
     Shape("QO bs=1",   1,  512,  4096,  4096, (1, 8, 4, 1), measured_us=326),
     Shape("KV bs=1",   1,  512,  4096,  1024, (1, 8, 4, 1), measured_us=114),
     Shape("MLP bs=1",  1,  512,  4096, 12800, (1, 8, 4, 1), measured_us=1453),
@@ -181,6 +182,17 @@ VALIDATED = [
     Shape("MoE down",    8,  128, 8192,  2048, (1, 4, 8, 1), measured_us=1986),
     Shape("bmm large-K", 8,  512, 4096,  512,  (1, 8, 4, 1), measured_us=827),
     Shape("bmm small-K", 8,  512,   64,  512,  (1, 8, 4, 1), measured_us=83),
+    # ---- k_fast regime (small M, wants m=1 + n,k split to use all cores) ----
+    # Format from the user: shape (M, N, K), split (m, n, k) -> here (1, m, n, k).
+    Shape("down_proj M=128",  1, 128, 12800,  4096, (1, 1, 16, 2)),
+    Shape("q_proj M=128",     1, 128,  4096,  4096, (1, 1, 16, 2)),
+    Shape("o_proj M=128",     1, 128,  4096,  4096, (1, 1, 16, 2)),
+    Shape("kv_proj M=32",     1,  32,  4096,  2048, (1, 1, 16, 2)),
+    Shape("kv_proj M=128",    1, 128,  4096,  2048, (1, 1, 16, 2)),
+    Shape("o_proj M=32",      1,  32,  4096,  4096, (1, 1, 16, 2)),
+    Shape("gate_proj M=32",   1,  32,  4096, 12800, (1, 1,  8, 4)),
+    Shape("q_proj M=32",      1,  32,  4096,  4096, (1, 1, 16, 2)),
+    Shape("gate_proj M=128",  1, 128,  4096, 12800, (1, 1,  8, 4)),
 ]
 
 
