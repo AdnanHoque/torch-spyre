@@ -569,6 +569,7 @@ _COST_PSUM_PER_ELEM_US = 4e-4                       # fit: MoE k=2 added ~3.4ms 
 _COST_COHORT_LIMIT = 8                              # cohort sizes > this incur HBM broadcast contention
 _COST_BATCH_SPLIT_PENALTY = 0.6                     # mult. penalty per b-step (large-K bmm fit)
 _COST_TARGET_M_PENALTY_US = 50.0                    # per log2 step from target_m_split
+_COST_REDISTRIBUTION_US_PER_BYTE = 1e-4             # mlp [512,4096] bundle +14% (~1.5ms / 16MB output)
 
 
 def _matmuls_fused_with_nonmatmul(operations: list[Operation]) -> set[str]:
@@ -613,6 +614,7 @@ def _matmul_split_cost(
     B: int, M: int, K: int, N: int,
     b: int, m: int, n: int, k: int,
     max_cores: int,
+    redistribution_us: float = 0.0,
 ) -> float:
     """Estimate kernel cost (us) for a matmul ``[B,M,K]@[B,K,N]`` under the
     given (b, m, n, k) split. Lower is better. Fit + validated against
@@ -620,12 +622,18 @@ def _matmul_split_cost(
     tests/cost_model_offline.py.
 
     Cost terms (additive, multiplied by batch-split penalty):
-      compute_us : per-core MACs / peak; derated by PT-pipeline efficiency
-                   when per-core M can't sustain TARGET_PT_PASSES passes.
-      hbm_us     : total unique LHS+RHS+OUT bytes / HBM_BW; multiplied by a
-                   cohort penalty when max(m, n) exceeds the broadcast limit.
-      psum_us    : (k-1) ring hops over the output element count.
-      target_m_us: log2-distance penalty around the shape-aware sweet spot.
+      compute_us       : per-core MACs / peak; derated by PT-pipeline
+                         efficiency when per-core M can't sustain
+                         TARGET_PT_PASSES passes.
+      hbm_us           : total unique LHS+RHS+OUT bytes / HBM_BW;
+                         multiplied by a cohort penalty when max(m, n)
+                         exceeds the broadcast limit.
+      psum_us          : (k-1) ring hops over the output element count.
+      target_m_us      : log2-distance penalty around the shape-aware
+                         sweet spot.
+      redistribution_us: caller-supplied fusion-redistribution cost when
+                         this split diverges from the partner non-matmul
+                         op's layout (forces cross-core data movement).
     """
     cores_used = b * m * n * k
     if cores_used == 0 or cores_used > max_cores:
@@ -660,7 +668,10 @@ def _matmul_split_cost(
     # Batch-split penalty (multiplicative, fits bmm regression data)
     batch_penalty = 1.0 + _COST_BATCH_SPLIT_PENALTY * max(0, b - 1)
 
-    return (compute_us + hbm_us + psum_us + target_m_us) * batch_penalty
+    return (
+        (compute_us + hbm_us + psum_us + target_m_us) * batch_penalty
+        + redistribution_us
+    )
 
 
 def _cost_model_matmul_planner(
@@ -686,9 +697,14 @@ def _cost_model_matmul_planner(
     heuristic's empirically-best split is the cost-model argmin.
 
     Replaces _maybe_mn_cosplit as the matmul work-division policy.
+
+    Fusion-redistribution awareness: when ``op`` shares a fusion bundle
+    with a non-matmul partner, any candidate that diverges from the
+    default (mb, out) split forces cross-core data movement inside the
+    bundle. The cost model adds a redistribution penalty proportional to
+    output_bytes so the optimizer only rewrites when the kernel savings
+    outweigh the bundle penalty.
     """
-    if op.get_name() in fused_with_nonmatmul:
-        return splits
     if not isinstance(op.data, Reduction):
         return splits
     if op.data.reduction_type != BATCH_MATMUL_OP:
@@ -754,6 +770,18 @@ def _cost_model_matmul_planner(
     n_divs = [int(d) for d in divisors(n_sticks)]
     k_divs = [int(d) for d in divisors(k_sticks)]
 
+    # Default split tuple (what the caller would emit without any rewrite).
+    # Any candidate that differs from this forces cross-core redistribution
+    # when the matmul is bundled with a non-matmul partner.
+    default_m = int(splits.get(m_dim, 1))
+    default_n = int(splits.get(n_dim, 1))
+    default_k = int(splits.get(k_dim, 1))
+    default_b_combo = tuple(int(splits.get(bd, 1)) for bd, _ in batch_per_dim)
+    fused = op.get_name() in fused_with_nonmatmul
+    redistribution_cost = (
+        B_total * M_e * N_e * _COST_DTYPE_BYTES * _COST_REDISTRIBUTION_US_PER_BYTE
+    )
+
     best_cost = float("inf")
     best = None
     for b_combo in b_combos:
@@ -765,8 +793,21 @@ def _cost_model_matmul_planner(
                 for kk in k_divs:
                     if b_prod * mm * nn * kk > max_cores:
                         continue
+                    diverges_from_default = (
+                        mm != default_m
+                        or nn != default_n
+                        or kk != default_k
+                        or b_combo != default_b_combo
+                    )
+                    redist = (
+                        redistribution_cost
+                        if fused and diverges_from_default
+                        else 0.0
+                    )
                     c = _matmul_split_cost(
-                        B_total, M_e, K_e, N_e, b_prod, mm, nn, kk, max_cores
+                        B_total, M_e, K_e, N_e,
+                        b_prod, mm, nn, kk, max_cores,
+                        redistribution_us=redist,
                     )
                     if c < best_cost:
                         best_cost = c
