@@ -39,6 +39,11 @@ scheduling, not the silicon.
 - **Chosen route:** extend the existing double-buffered, mixed-SuperDSC scheduling
   to span the cross-core move (vs. a runtime multi-stream alternative that can't see
   the intra-bundle ops without bundle-splitting + an unverified hop).
+- **Phase 1A — delivered.** The LX-resident softmax-chain pass is built and
+  device-measured at **1.88×** vs production torch-spyre SDPA on stock dxp
+  (production 2.557 ms → pass-on 1.358 ms), value-correct, automated. Commit
+  `935fd62` on this branch. Phase 1B (the cross-move double-buffer extension) is
+  the backend co-design piece and remains in iteration.
 
 ## Next steps (torch-spyre side)
 

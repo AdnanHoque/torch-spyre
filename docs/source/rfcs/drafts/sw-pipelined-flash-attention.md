@@ -1,9 +1,11 @@
 # SW-pipelined flash attention on Spyre — design & build plan (Phase 1)
 
 *Working design for overlapping attention's data movement with its compute via a
-co-scheduled mixed SuperDSC. Phase 0 verdict: GO, Route A, intra-op pipeline
-overlap device-confirmed, combined upside ceiling ~1.7–2.3× at seq512 (compounds
-the on-chip handoff). This doc turns that into a concrete build.*
+co-scheduled mixed SuperDSC. **Phase 1A delivered**: the LX-resident softmax-chain
+pass is built and device-measured at **1.88× vs production torch-spyre SDPA** on
+stock dxp, value-correct, automated, on the `attention-overlap` branch (commit
+`935fd62`). See §6. Phase 1B (the deeptools overlap co-design) is in-flight on
+the `deeptools-overlap` branch.*
 
 ## 1. The pipeline structure (what overlaps what)
 
@@ -82,3 +84,33 @@ broader scope; that's why Phase 0 favored Route A over OP_ORDERING.
 - Tiling granularity vs the 2 MB/core LX budget (per-tile Q/K/V/score residency).
 - Phase-1A still materializes each tile's score (O(tile·seq) memory); the O(seq)
   win needs Phase-2 online softmax.
+
+## 6. Phase 1A — delivered
+
+The LX-resident softmax-chain pass is built, measured, and committed on this
+branch.
+
+- **Headline.** production SDPA **2.557 ms** → pass-on **1.358 ms** = **1.88×**
+  on stock dxp, value-correct (max_err 7.6e-5 vs CPU reference, both legs
+  VALIDATE_OK). Best of three runs each, harness-native A/B.
+- **Mechanism.** A new pass (`torch_spyre/_inductor/onchip_softmax_chain.py`)
+  detects maximal same-shard same-core activation chains (identical
+  work-division *and* identical per-core HBM bases) and flips producer-output
+  *and* every consumer-input LX-resident at coordinated bases, with a
+  liveness-aware first-fit packer over the usable LX window. Sibling of
+  `onchip_realize` — pure persistence, no data-op, stock dxp.
+- **Wire-in.** Runs after `realize_onchip_handoff` in
+  `torch_spyre/_inductor/codegen/bundle.py`. Gated by
+  `config.onchip_softmax_chain`, env `SPYRE_ONCHIP_SOFTMAX_CHAIN=1`, default off.
+- **Commit.** `935fd62` "Realize same-core SDSC chain LX persistence" (3 files,
+  +353 lines).
+- **Env caveat.** The validation harness used an editable install + a
+  `PYTHONPATH=/tmp/attn-boot` shim to pick up the worktree's `torch_spyre/`
+  ahead of the installed copy in `/home/adnan/dt-inductor/.venv`. This is
+  environment plumbing for the shared single-accelerator setup, not a pass
+  limitation — a fresh `pip install -e .` from this worktree fires the pass
+  automatically with `SPYRE_ONCHIP_SOFTMAX_CHAIN=1`.
+- **Next step (Phase 1B).** The deeptools overlap co-design — extend
+  double-buffering across the cross-core move so loads + handoff overlap the
+  prior tile's compute. In iteration on `deeptools-overlap`; framed as
+  in-flight, not delivered.
