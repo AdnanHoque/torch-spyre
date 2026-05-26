@@ -692,12 +692,6 @@ def _cost_model_matmul_planner(
     (divisors of each dim, product <= max_cores), scores each by
     _matmul_split_cost, and returns the argmin.
 
-    Validated against device-measured kernel times for QO/KV/MLP/MoE
-    gate-up/MoE down/bmm large-K/bmm small-K -- in every case the
-    heuristic's empirically-best split is the cost-model argmin.
-
-    Replaces _maybe_mn_cosplit as the matmul work-division policy.
-
     Fusion-redistribution awareness: when ``op`` shares a fusion bundle
     with a non-matmul partner, any candidate that diverges from the
     default (mb, out) split forces cross-core data movement inside the
