@@ -23,6 +23,7 @@ from torch_spyre._inductor.onchip_realize import (
     build_flash_attention_pipeline_artifact,
     build_flash_attention_pipeline_tile_artifacts,
     build_flash_attention_value_flow_tile_artifact,
+    flash_attention_value_flow_tile_rejection_reasons,
     realize_flash_attention_pointwise_handoffs,
     realize_onchip_handoff,
 )
@@ -81,6 +82,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     sidecar_sdscs = []
     sidecar_replacements = {}
     value_flow_tile = config.flash_attention_mixed_pipeline_value_flow_tile
+    value_flow_rejections = {}
     if (
         config.flash_attention_mixed_pipeline
         and (
@@ -103,6 +105,12 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                     "Executing mixed flash attention value-flow tile sidecar"
                 )
             else:
+                value_flow_rejections[value_flow_tile] = (
+                    flash_attention_value_flow_tile_rejection_reasons(
+                        sdscs_json,
+                        value_flow_tile,
+                    )
+                )
                 logger.warning(
                     "Requested mixed flash attention value-flow tile was not "
                     "realizable; keeping generated HBM-backed SDSC"
@@ -121,6 +129,15 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             replaced = meta.get("replaces_sdsc")
             if replaced is not None and replaced not in sidecar_replacements:
                 sidecar_replacements[replaced] = sidecar_name
+        for artifact in tile_artifacts:
+            _sidecar_name, sidecar_body = next(iter(artifact.items()))
+            meta = sidecar_body.get("flashAttentionPipeline_", {})
+            tile_index = meta.get("tile_index")
+            if tile_index in value_flow_rejections:
+                meta["value_flow_requested"] = True
+                meta["value_flow_rejection_reasons"] = (
+                    value_flow_rejections[tile_index]
+                )
         if config.flash_attention_mixed_pipeline_artifact:
             artifact = build_flash_attention_pipeline_artifact(
                 sdscs_json,

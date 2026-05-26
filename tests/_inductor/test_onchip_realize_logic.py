@@ -708,6 +708,28 @@ def test_flash_value_flow_tile_requires_latest_single_consumer_producer():
     ) is None
 
 
+def test_flash_value_flow_tile_reports_rejection_reasons():
+    assert rz.flash_attention_value_flow_tile_rejection_reasons(
+        _fake_static_matmul_sdscs(),
+        tile_index=1,
+    ) == []
+    assert rz.flash_attention_value_flow_tile_rejection_reasons(
+        _fake_static_matmul_sdscs(extra_consumer=True),
+        tile_index=1,
+    ) == [
+        "input0:not_single_consumer:1_batchmatmul:input0,2_identity:input0",
+        "input1:no_latest_producer",
+    ]
+    assert rz.flash_attention_value_flow_tile_rejection_reasons(
+        _fake_flash_pipeline_sdscs(num_tiles=1),
+        tile_index=0,
+    ) == ["input0:no_latest_producer"]
+    assert rz.flash_attention_value_flow_tile_rejection_reasons(
+        _fake_flash_pipeline_sdscs(num_tiles=1),
+        tile_index=3,
+    ) == ["tile_not_found"]
+
+
 def test_flash_pipeline_artifact_wraps_generated_batchmatmul_tiles():
     artifact = rz.build_flash_attention_pipeline_artifact(
         _fake_flash_pipeline_sdscs(num_tiles=3),

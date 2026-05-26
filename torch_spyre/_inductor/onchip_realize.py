@@ -1379,6 +1379,112 @@ def _renumber_datadscs(datadscs: list[dict], start: int) -> list[dict]:
     return renamed
 
 
+def _flash_value_flow_tile(sdscs_json: list[dict], tile_index: int):
+    batch_seen = -1
+    for c, cons in enumerate(sdscs_json):
+        if _op_name(cons) != "batchmatmul":
+            continue
+        batch_seen += 1
+        if batch_seen == tile_index:
+            return c, cons
+    return None
+
+
+def flash_attention_value_flow_tile_rejection_reasons(
+    sdscs_json: list[dict],
+    tile_index: int,
+) -> list[str]:
+    """Explain why a requested real value-flow flash tile fails closed."""
+    tile = _flash_value_flow_tile(sdscs_json, tile_index)
+    if tile is None:
+        return ["tile_not_found"]
+
+    c, cons = tile
+    cons_dl = _dl_op(cons)
+    cons_body = _body(cons)
+    num_cores = int(cons_body.get("numCoresUsed_", 0))
+    if num_cores <= 0:
+        return ["invalid_num_cores"]
+
+    reasons: list[str] = []
+    for in_idx in _consumer_input_indices(cons_dl):
+        prefix = f"input{in_idx}"
+        addr = _hbm_base(cons_dl, in_idx)
+        if addr is None:
+            reasons.append(f"{prefix}:not_hbm_backed")
+            continue
+        producer = _latest_producer_of_hbm(sdscs_json, c, addr)
+        if producer is None:
+            reasons.append(f"{prefix}:no_latest_producer")
+            continue
+
+        _p, prod, out_idx = producer
+        future = _future_consumers(sdscs_json, _p, addr)
+        if len(future) != 1 or future[0][0] != c or future[0][2] != in_idx:
+            future_names = [
+                f"{next(iter(fcons))}:input{fin_idx}"
+                for _fc, fcons, fin_idx in future
+            ]
+            reasons.append(
+                f"{prefix}:not_single_consumer:{','.join(future_names)}"
+            )
+            continue
+
+        prod_dl = _dl_op(prod)
+        prod_layout = _layout_for_lds(prod_dl, out_idx)
+        prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
+        cons_layout = _layout_for_lds(cons_dl, in_idx)
+        cons_stick = _stick_dim_for_lds(cons_dl, in_idx)
+        split_dim = _single_split_dim(cons_body.get("numWkSlicesPerDim_", {}))
+        if (
+            prod_layout is None
+            or prod_stick is None
+            or cons_layout is None
+            or cons_stick is None
+            or split_dim is None
+        ):
+            reasons.append(f"{prefix}:missing_layout_stick_or_split")
+            continue
+
+        if not _same_physical_stick_layout(
+            prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
+        ):
+            reasons.append(
+                f"{prefix}:physical_layout_mismatch:"
+                f"producer={prod_layout}/{prod_stick}:"
+                f"consumer={cons_layout}/{cons_stick}"
+            )
+            continue
+
+        iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
+        if iter_sizes is None:
+            reasons.append(f"{prefix}:missing_iter_sizes")
+            continue
+        if split_dim not in iter_sizes or iter_sizes[split_dim] % num_cores != 0:
+            reasons.append(f"{prefix}:invalid_split:{split_dim}")
+            continue
+
+        slice_bytes = _reserve_bridge_region_bytes(
+            per_core_same_stick_slice_bytes(
+                iter_sizes,
+                split_dim,
+                cons_stick,
+                STICK_SIZE,
+                num_cores,
+            )
+        )
+        try:
+            allocate_lx_bases(3, slice_bytes, region0=PRODUCER_LX_BASE)
+        except ValueError:
+            reasons.append(f"{prefix}:lx_allocation_exceeds_capacity")
+            continue
+
+        # At least one input is eligible.  The requested tile can be realized.
+        return []
+
+    return reasons or ["no_candidate_inputs"]
+
+
 def build_flash_attention_value_flow_tile_artifact(
     sdscs_json: list[dict],
     tile_index: int,
@@ -1386,164 +1492,160 @@ def build_flash_attention_value_flow_tile_artifact(
     name_prefix: str = "mixed_flash_value_flow_tile",
 ) -> tuple[dict, str] | None:
     """Mutate one flash tile to consume real producer LX values via STCDPOpLx."""
-    batch_seen = -1
-    for c, cons in enumerate(sdscs_json):
-        if _op_name(cons) != "batchmatmul":
+    tile = _flash_value_flow_tile(sdscs_json, tile_index)
+    if tile is None:
+        return None
+    c, cons = tile
+
+    cons_dl = _dl_op(cons)
+    cons_body = _body(cons)
+    num_cores = int(cons_body.get("numCoresUsed_", 0))
+    if num_cores <= 0:
+        return None
+    edges = []
+    for in_idx in _consumer_input_indices(cons_dl):
+        addr = _hbm_base(cons_dl, in_idx)
+        if addr is None:
             continue
-        batch_seen += 1
-        if batch_seen != tile_index:
+        producer = _latest_producer_of_hbm(sdscs_json, c, addr)
+        if producer is None:
             continue
-
-        cons_dl = _dl_op(cons)
-        cons_body = _body(cons)
-        num_cores = int(cons_body.get("numCoresUsed_", 0))
-        if num_cores <= 0:
-            return None
-        edges = []
-        for in_idx in _consumer_input_indices(cons_dl):
-            addr = _hbm_base(cons_dl, in_idx)
-            if addr is None:
-                continue
-            producer = _latest_producer_of_hbm(sdscs_json, c, addr)
-            if producer is None:
-                continue
-            _p, prod, out_idx = producer
-            future = _future_consumers(sdscs_json, _p, addr)
-            if len(future) != 1 or future[0][0] != c or future[0][2] != in_idx:
-                continue
-            prod_dl = _dl_op(prod)
-            prod_layout = _layout_for_lds(prod_dl, out_idx)
-            prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
-            cons_layout = _layout_for_lds(cons_dl, in_idx)
-            cons_stick = _stick_dim_for_lds(cons_dl, in_idx)
-            split_dim = _single_split_dim(cons_body.get("numWkSlicesPerDim_", {}))
-            if (
-                prod_layout is None
-                or prod_stick is None
-                or cons_layout is None
-                or cons_stick is None
-                or split_dim is None
-            ):
-                continue
-            if not _same_physical_stick_layout(
-                prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
-            ):
-                continue
-            iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
-            if iter_sizes is None:
-                continue
-            if split_dim not in iter_sizes or iter_sizes[split_dim] % num_cores != 0:
-                continue
-            slice_bytes = _reserve_bridge_region_bytes(
-                per_core_same_stick_slice_bytes(
-                    iter_sizes,
-                    split_dim,
-                    cons_stick,
-                    STICK_SIZE,
-                    num_cores,
-                )
-            )
-            edges.append(
-                {
-                    "producer": prod,
-                    "producer_idx": out_idx,
-                    "consumer_idx": in_idx,
-                    "layout": cons_layout,
-                    "stick_dim": cons_stick,
-                    "split_dim": split_dim,
-                    "iter_sizes": iter_sizes,
-                    "slice_bytes": slice_bytes,
-                }
-            )
-        if not edges:
-            return None
-
-        max_slice = max(edge["slice_bytes"] for edge in edges)
-        try:
-            bases = allocate_lx_bases(
-                len(edges) * 3,
-                max_slice,
-                region0=PRODUCER_LX_BASE,
-            )
-        except ValueError:
-            return None
-
-        datadscs = []
-        opfuncs = []
-        edge_meta = []
-        for edge_idx, edge in enumerate(edges):
-            producer_base, scratch_base, consumer_base = bases[
-                edge_idx * 3: edge_idx * 3 + 3
-            ]
-            apply_lx_flip(
-                edge["producer"],
-                LxFlip(edge["producer_idx"], producer_base, "producer-output"),
-            )
-            apply_lx_flip(
-                cons,
-                LxFlip(edge["consumer_idx"], consumer_base, "consumer-input"),
-            )
-            bridge_datadscs, bridge_opfuncs, _sched = build_roundtrip_bridge(
-                dim_pool=edge["layout"],
-                iter_sizes=edge["iter_sizes"],
-                stick_size=STICK_SIZE,
-                num_cores=num_cores,
-                lx_size=edge["slice_bytes"],
-                producer_base=producer_base,
-                scratch_base=scratch_base,
-                consumer_base=consumer_base,
-                layout=edge["layout"],
-                stick_dim=edge["stick_dim"],
-                split_dim=edge["split_dim"],
-            )
-            datadscs.extend(_renumber_datadscs(bridge_datadscs, len(datadscs)))
-            opfuncs.extend(bridge_opfuncs)
-            edge_meta.append(
-                {
-                    "producer": next(iter(edge["producer"])),
-                    "producer_idx": edge["producer_idx"],
-                    "consumer_idx": edge["consumer_idx"],
-                    "layout": edge["layout"],
-                    "stick_dim": edge["stick_dim"],
-                    "split_dim": edge["split_dim"],
-                    "slice_bytes": edge["slice_bytes"],
-                    "producer_base": producer_base,
-                    "scratch_base": scratch_base,
-                    "consumer_base": consumer_base,
-                }
-            )
-
-        name = f"{name_prefix}_{tile_index}"
-        artifact = build_flash_attention_pipeline_mixed_sdsc(
-            name,
-            datadscs,
-            opfuncs,
-            mixed_schedule(len(datadscs), num_cores),
-            [copy.deepcopy(_body(cons)["dscs_"][0])],
-            num_cores,
-        )
-        root = artifact[name]
-        for key in (
-            "sdscFoldProps_",
-            "sdscFolds_",
-            "coreFoldProp_",
-            "coreletFoldProp_",
-            "coreIdToDsc_",
-            "numWkSlicesPerDim_",
-            "coreIdToWkSlice_",
+        _p, prod, out_idx = producer
+        future = _future_consumers(sdscs_json, _p, addr)
+        if len(future) != 1 or future[0][0] != c or future[0][2] != in_idx:
+            continue
+        prod_dl = _dl_op(prod)
+        prod_layout = _layout_for_lds(prod_dl, out_idx)
+        prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
+        cons_layout = _layout_for_lds(cons_dl, in_idx)
+        cons_stick = _stick_dim_for_lds(cons_dl, in_idx)
+        split_dim = _single_split_dim(cons_body.get("numWkSlicesPerDim_", {}))
+        if (
+            prod_layout is None
+            or prod_stick is None
+            or cons_layout is None
+            or cons_stick is None
+            or split_dim is None
         ):
-            if key in cons_body:
-                root[key] = copy.deepcopy(cons_body[key])
-        root["flashAttentionPipeline_"].update(
+            continue
+        if not _same_physical_stick_layout(
+            prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
+        ):
+            continue
+        iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
+        if iter_sizes is None:
+            continue
+        if split_dim not in iter_sizes or iter_sizes[split_dim] % num_cores != 0:
+            continue
+        slice_bytes = _reserve_bridge_region_bytes(
+            per_core_same_stick_slice_bytes(
+                iter_sizes,
+                split_dim,
+                cons_stick,
+                STICK_SIZE,
+                num_cores,
+            )
+        )
+        edges.append(
             {
-                "source": "generated-flash-prefill-real-value-flow",
-                "tile_index": tile_index,
-                "replaces_sdsc": next(iter(cons)),
-                "edges": edge_meta,
+                "producer": prod,
+                "producer_idx": out_idx,
+                "consumer_idx": in_idx,
+                "layout": cons_layout,
+                "stick_dim": cons_stick,
+                "split_dim": split_dim,
+                "iter_sizes": iter_sizes,
+                "slice_bytes": slice_bytes,
             }
         )
-        return artifact, next(iter(cons))
-    return None
+    if not edges:
+        return None
+
+    max_slice = max(edge["slice_bytes"] for edge in edges)
+    try:
+        bases = allocate_lx_bases(
+            len(edges) * 3,
+            max_slice,
+            region0=PRODUCER_LX_BASE,
+        )
+    except ValueError:
+        return None
+
+    datadscs = []
+    opfuncs = []
+    edge_meta = []
+    for edge_idx, edge in enumerate(edges):
+        producer_base, scratch_base, consumer_base = bases[
+            edge_idx * 3: edge_idx * 3 + 3
+        ]
+        apply_lx_flip(
+            edge["producer"],
+            LxFlip(edge["producer_idx"], producer_base, "producer-output"),
+        )
+        apply_lx_flip(
+            cons,
+            LxFlip(edge["consumer_idx"], consumer_base, "consumer-input"),
+        )
+        bridge_datadscs, bridge_opfuncs, _sched = build_roundtrip_bridge(
+            dim_pool=edge["layout"],
+            iter_sizes=edge["iter_sizes"],
+            stick_size=STICK_SIZE,
+            num_cores=num_cores,
+            lx_size=edge["slice_bytes"],
+            producer_base=producer_base,
+            scratch_base=scratch_base,
+            consumer_base=consumer_base,
+            layout=edge["layout"],
+            stick_dim=edge["stick_dim"],
+            split_dim=edge["split_dim"],
+        )
+        datadscs.extend(_renumber_datadscs(bridge_datadscs, len(datadscs)))
+        opfuncs.extend(bridge_opfuncs)
+        edge_meta.append(
+            {
+                "producer": next(iter(edge["producer"])),
+                "producer_idx": edge["producer_idx"],
+                "consumer_idx": edge["consumer_idx"],
+                "layout": edge["layout"],
+                "stick_dim": edge["stick_dim"],
+                "split_dim": edge["split_dim"],
+                "slice_bytes": edge["slice_bytes"],
+                "producer_base": producer_base,
+                "scratch_base": scratch_base,
+                "consumer_base": consumer_base,
+            }
+        )
+
+    name = f"{name_prefix}_{tile_index}"
+    artifact = build_flash_attention_pipeline_mixed_sdsc(
+        name,
+        datadscs,
+        opfuncs,
+        mixed_schedule(len(datadscs), num_cores),
+        [copy.deepcopy(_body(cons)["dscs_"][0])],
+        num_cores,
+    )
+    root = artifact[name]
+    for key in (
+        "sdscFoldProps_",
+        "sdscFolds_",
+        "coreFoldProp_",
+        "coreletFoldProp_",
+        "numWkSlicesPerDim_",
+        "coreIdToDsc_",
+        "coreIdToWkSlice_",
+    ):
+        if key in cons_body:
+            root[key] = copy.deepcopy(cons_body[key])
+    root["flashAttentionPipeline_"].update(
+        {
+            "source": "generated-flash-prefill-real-value-flow",
+            "tile_index": tile_index,
+            "replaces_sdsc": next(iter(cons)),
+            "edges": edge_meta,
+        }
+    )
+    return artifact, next(iter(cons))
 
 
 def detect_pointwise_handoff(sdscs_json: list[dict]):
