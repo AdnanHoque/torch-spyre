@@ -571,14 +571,16 @@ _COST_BATCH_SPLIT_PENALTY = 0.6                     # mult. penalty per b-step (
 _COST_TARGET_M_PENALTY_US = 50.0                    # per log2 step from target_m_split
 
 
-def _matmul_names_unsafe_for_2d(operations: list[Operation]) -> set[str]:
+def _matmuls_fused_with_nonmatmul(operations: list[Operation]) -> set[str]:
     """Matmul output buf names that share a fusion group with a non-matmul op.
 
-    A 2D m×n split on a matmul whose output is read by a non-matmul (or whose
-    input is written by a non-matmul) forces cross-core data redistribution
-    inside the resulting fused bundle (the non-matmul stays on default
-    (mb, out) split). Measured cost on mlp [512,4096]: kernel +14% despite
-    each standalone matmul winning 1.26-1.49x.
+    Any cost-model rewrite (m x n co-split, K-split, batch-iterated bmm, ...)
+    that diverges from the default (mb, out) split forces cross-core data
+    redistribution inside the fused bundle, since the non-matmul partner
+    stays on the default layout. Measured cost on mlp [512,4096]: bundle
+    kernel +14% despite each standalone matmul winning 1.26-1.49x with the
+    2D rewrite. The cost-model planner uses this set to add a fusion-
+    redistribution cost term to its score (see _matmul_split_cost).
     """
     matmul_names: set[str] = set()
     matmul_input_names: dict[str, set[str]] = {}
@@ -669,7 +671,7 @@ def _cost_model_matmul_planner(
     stick_vars: dict[Symbol, int],
     committed_splits: dict[Symbol, int],
     max_cores: int,
-    unsafe_for_2d: set[str],
+    fused_with_nonmatmul: set[str],
     input_tds: list[TensorDep],
 ) -> dict[Symbol, int]:
     """Pick the minimum-cost feasible (b, m, n, k) split for a matmul / bmm.
@@ -685,7 +687,7 @@ def _cost_model_matmul_planner(
 
     Replaces _maybe_mn_cosplit as the matmul work-division policy.
     """
-    if op.get_name() in unsafe_for_2d:
+    if op.get_name() in fused_with_nonmatmul:
         return splits
     if not isinstance(op.data, Reduction):
         return splits
@@ -797,7 +799,7 @@ def work_distribution_pass(
     op: ComputedBuffer,
     args: list[SchedNodeArg],
     max_cores: int,
-    unsafe_for_2d: set[str] | None = None,
+    fused_with_nonmatmul: set[str] | None = None,
 ) -> None:
     """Optional per-op pass: distribute remaining cores to maximize parallelism.
 
@@ -862,7 +864,7 @@ def work_distribution_pass(
             stick_vars,
             committed_splits,
             max_cores,
-            unsafe_for_2d if unsafe_for_2d is not None else set(),
+            fused_with_nonmatmul if fused_with_nonmatmul is not None else set(),
             input_tds,
         )
 
@@ -954,12 +956,12 @@ def work_distribution(operations: list[Operation]) -> None:
     former k_fast / mn-cosplit / 2D-rule heuristics into a single search.
     """
     max_cores = _validate_max_cores()
-    unsafe_for_2d = (
-        _matmul_names_unsafe_for_2d(operations) if config.two_d_mn_split else set()
+    fused_with_nonmatmul = (
+        _matmuls_fused_with_nonmatmul(operations) if config.two_d_mn_split else set()
     )
 
     def pass_fn(op_, args_, max_cores_):
-        work_distribution_pass(op_, args_, max_cores_, unsafe_for_2d)
+        work_distribution_pass(op_, args_, max_cores_, fused_with_nonmatmul)
 
     for op in _iter_computed_buffers(operations):
         rw = op.get_read_writes()
