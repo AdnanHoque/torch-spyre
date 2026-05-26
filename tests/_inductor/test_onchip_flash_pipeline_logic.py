@@ -84,6 +84,17 @@ def _dataop_body(dataop):
     return dataop[next(iter(dataop))]
 
 
+def _compute_dscs(count=4):
+    return [
+        {
+            f"flash_tile_{tile}": {
+                "computeOp_": [{"opFuncName": f"flash_tile_{tile}"}],
+            }
+        }
+        for tile in range(count)
+    ]
+
+
 def test_allocate_flash_attention_pipeline_bases_fits_double_buffered_kv():
     bases = _alloc()
     assert len(bases["source_bases"]) == 2
@@ -171,6 +182,48 @@ def test_flash_pipeline_overlap_schedule_pairs_prefetch_with_compute():
         [7, -1, 1, 1],
         [-1, 3, 1, 0],
     ]
+
+
+def test_flash_pipeline_mixed_sdsc_wraps_compute_tiles():
+    datadscs, opfuncs, sched = _bridge(overlap=True)
+    mixed = ob.build_flash_attention_pipeline_mixed_sdsc(
+        "flash_pipeline",
+        datadscs,
+        opfuncs,
+        sched,
+        _compute_dscs(),
+        num_cores=32,
+    )
+    root = mixed["flash_pipeline"]
+    assert root["numCoresUsed_"] == 32
+    assert len(root["datadscs_"]) == 8
+    assert len(root["dscs_"]) == 4
+    assert root["opFuncsUsed_"] == ["STCDPOpLx"] * 8
+    assert root["flashAttentionPipeline_"] == {
+        "tile_count": 4,
+        "dataop_count": 8,
+        "overlap_candidate": True,
+    }
+    assert root["coreIdToDscSchedule"]["0"][2] == [2, 0, 1, 1]
+
+
+def test_flash_pipeline_mixed_sdsc_rejects_bad_schedule_refs():
+    datadscs, opfuncs, sched = _bridge(overlap=False)
+    bad = {core: [list(row) for row in rows] for core, rows in sched.items()}
+    bad["0"][-1] = [-1, 99, 1, 0]
+    try:
+        ob.build_flash_attention_pipeline_mixed_sdsc(
+            "flash_pipeline",
+            datadscs,
+            opfuncs,
+            bad,
+            _compute_dscs(),
+            num_cores=32,
+        )
+    except ValueError as exc:
+        assert "compute DSC index out of range" in str(exc)
+    else:
+        raise AssertionError("expected invalid compute DSC reference to fail")
 
 
 def test_flash_pipeline_rejects_row_dim_equal_to_split_dim():

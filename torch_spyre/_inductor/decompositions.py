@@ -66,7 +66,10 @@ def _can_use_flash_attention_prefill(
     dropout_p: float,
     is_causal: bool,
 ) -> bool:
-    if not config.flash_attention_prefill:
+    if not (
+        config.flash_attention_prefill
+        or config.flash_attention_mixed_pipeline
+    ):
         return False
     if dropout_p > 0.0:
         return False

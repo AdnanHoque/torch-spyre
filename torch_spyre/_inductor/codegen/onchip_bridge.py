@@ -697,6 +697,66 @@ def build_flash_attention_pipeline_bridge(
     )
 
 
+def build_flash_attention_pipeline_mixed_sdsc(
+    name: str,
+    datadscs: Sequence[dict],
+    opfuncs: Sequence[str],
+    schedule: Mapping[str, Sequence[Sequence[int]]],
+    compute_dscs: Sequence[dict],
+    num_cores: int,
+) -> dict:
+    """Wrap tiled compute DSCs with flash pipeline data-ops as one SuperDSC.
+
+    The bridge builder emits the data movement side; this helper gives the next
+    compiler step a production-shaped artifact with ``datadscs_``, ``dscs_`` and
+    ``coreIdToDscSchedule`` in one body.  It validates that every schedule row
+    references an existing data-op or compute DSC before returning JSON.
+    """
+    if not name:
+        raise ValueError("name is required")
+    if not compute_dscs:
+        raise ValueError("at least one compute DSC is required")
+    if num_cores <= 0:
+        raise ValueError(f"num_cores must be positive, got {num_cores}")
+
+    data_count = len(datadscs)
+    dsc_count = len(compute_dscs)
+    overlap_candidate = False
+    for core_id, rows in schedule.items():
+        int(core_id)
+        for row in rows:
+            if len(row) != 4:
+                raise ValueError(f"schedule row must have 4 fields, got {row}")
+            data_idx, dsc_idx = int(row[0]), int(row[1])
+            if data_idx == -1 and dsc_idx == -1:
+                raise ValueError(f"empty schedule row is invalid: {row}")
+            if data_idx < -1 or data_idx >= data_count:
+                raise ValueError(f"data-op index out of range: {row}")
+            if dsc_idx < -1 or dsc_idx >= dsc_count:
+                raise ValueError(f"compute DSC index out of range: {row}")
+            overlap_candidate = overlap_candidate or (
+                data_idx >= 0 and dsc_idx >= 0
+            )
+
+    return {
+        name: {
+            "numCoresUsed_": num_cores,
+            "coreIdToDscSchedule": {
+                str(core_id): [list(row) for row in rows]
+                for core_id, rows in schedule.items()
+            },
+            "datadscs_": [dict(dataop) for dataop in datadscs],
+            "dscs_": [dict(dsc) for dsc in compute_dscs],
+            "opFuncsUsed_": list(opfuncs),
+            "flashAttentionPipeline_": {
+                "tile_count": dsc_count,
+                "dataop_count": data_count,
+                "overlap_candidate": overlap_candidate,
+            },
+        }
+    }
+
+
 def build_streamed_bridge(
     dim_pool, iter_sizes, stick_size, num_cores, lx_size,
     src_base, dst_base, layout, stick_dim, src_split_dim, dst_split_dim, row_dim,
