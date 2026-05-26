@@ -548,25 +548,27 @@ def span_reduction_pass(
 # Hardware constants
 _PT_ROWS = 8  # PT block rows per corelet
 
-# Heuristic constants for the M x N co-split rule. A pure m-split matmul reads
-# HBM 2-3.7x slower than a 2D m x n co-split (see
-# tests/diag_hbm_bank_aware_findings.md). The optimal split depends on the LX
-# tile-staging budget, so we use two regimes (low LX: N-band limited; high LX:
-# M-pipeline limited). See _target_m_split for the formula; see
-# _maybe_mn_cosplit for the unified 2D/bmm dispatch.
+# Constants for the matmul cost-model planner. Each is either a hardware
+# constant (PT_ROWS, peak MACs/us, HBM bandwidth) or an empirical coefficient
+# fit from device-measured kernel times against split choices (see
+# tests/cost_model_offline.py for the offline validator + the fit).
 #
-# TODO: replace this two-regime heuristic with a cost-model search. Given
-#   (M, N, K, max_cores, LX_FRAC, HBM_BW, _PT_ROWS), enumerate splits
-#   (m_split, n_split, k_split) with each dividing its dim and product
-#   <= max_cores, score by
-#       cost = HBM_bytes / HBM_BW + PT_passes * PT_pass_cycles + PSUM_hops
-#   subject to per-core tile fitting LX_FRAC * LX_TOTAL_BYTES, and pick the
-#   minimum. That replaces _maybe_mn_cosplit + _try_k_fast_split with one
-#   unified search and makes the constants below derivable rather than tuned.
+# The cost-model planner replaces the prior _maybe_mn_cosplit heuristic for
+# matmul/bmm ops: it enumerates feasible (b, m, n, k) splits and picks the
+# argmin of _matmul_split_cost. See _cost_model_matmul_planner below.
 _MN_SPLIT_M_MIN = _PT_ROWS // 2                 # one half PT pass = smallest useful m-split
 _MN_SPLIT_LOWLX_TARGET_N_STICKS = 8             # low-LX:  per-core N-band target (sticks)
 _MN_SPLIT_HIGHLX_TARGET_PT_PASSES = 8           # high-LX: per-core M = target * _PT_ROWS rows
-_MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD = 0.5         # LX_FRAC regime gate
+_MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD = 0.5        # LX_FRAC regime gate
+
+# Cost-model coefficients (empirical fit, see cost_model_offline.py)
+_COST_PEAK_MACS_US_CORE = (300e12 / 2 / 32) / 1e6   # AIU 1.0: ~4.7M MACs/us/core
+_COST_HBM_BW_GBS = 166.0                            # AIU 1.0 aggregate HBM bandwidth
+_COST_DTYPE_BYTES = 2                               # fp16
+_COST_PSUM_PER_ELEM_US = 4e-4                       # fit: MoE k=2 added ~3.4ms / 8.4M elems / 1 hop
+_COST_COHORT_LIMIT = 8                              # cohort sizes > this incur HBM broadcast contention
+_COST_BATCH_SPLIT_PENALTY = 0.6                     # mult. penalty per b-step (large-K bmm fit)
+_COST_TARGET_M_PENALTY_US = 50.0                    # per log2 step from target_m_split
 
 
 def _matmul_names_unsafe_for_2d(operations: list[Operation]) -> set[str]:
@@ -614,11 +616,11 @@ def _mn_cosplit_would_fire_2d(
     max_cores: int,
     unsafe_for_2d: set[str],
 ) -> bool:
-    """True if _maybe_mn_cosplit would fire on this op (2D matmul case).
+    """True if _cost_model_matmul_planner would fire on this op (2D case).
 
-    Used by k_fast to defer to the mn-cosplit when both could fire. Only the
-    2D-matmul case is checked here because k_fast's own gate (output_dims==2)
-    already bails for bmm, so the bmm-cosplit path is moot for that caller.
+    Used by k_fast to defer to the cost-model planner when both could fire.
+    Only the 2D-matmul case is checked here because k_fast's own gate
+    (output_dims==2) already bails for bmm.
     """
     if not config.two_d_mn_split:
         return False
@@ -648,46 +650,61 @@ def _mn_cosplit_would_fire_2d(
     return True
 
 
-def _target_m_split(
-    m_size: int, n_sticks: int, lx_frac: float, cores: int
-) -> int:
-    """LX-budget-aware target m-split for the M x N co-split.
+def _matmul_split_cost(
+    B: int, M: int, K: int, N: int,
+    b: int, m: int, n: int, k: int,
+    max_cores: int,
+) -> float:
+    """Estimate kernel cost (us) for a matmul ``[B,M,K]@[B,K,N]`` under the
+    given (b, m, n, k) split. Lower is better. Fit + validated against
+    device-measured kernel times for the 7 perf-suite shapes; see
+    tests/cost_model_offline.py.
 
-    Two regimes (see the heuristic block above for the cost-model TODO):
-      - High LX: per-core M = TARGET_PT_PASSES * _PT_ROWS rows (deeper tiles).
-      - Low LX:  per-core N-band = TARGET_N_STICKS sticks (narrower bands).
-    The result is clamped to [_MN_SPLIT_M_MIN, cores // 2].
+    Cost terms (additive, multiplied by batch-split penalty):
+      compute_us : per-core MACs / peak; derated by PT-pipeline efficiency
+                   when per-core M can't sustain TARGET_PT_PASSES passes.
+      hbm_us     : total unique LHS+RHS+OUT bytes / HBM_BW; multiplied by a
+                   cohort penalty when max(m, n) exceeds the broadcast limit.
+      psum_us    : (k-1) ring hops over the output element count.
+      target_m_us: log2-distance penalty around the shape-aware sweet spot.
     """
-    if lx_frac >= _MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD:
-        target = max(
-            1, m_size // (_MN_SPLIT_HIGHLX_TARGET_PT_PASSES * _PT_ROWS)
-        )
-    else:
-        target = n_sticks // _MN_SPLIT_LOWLX_TARGET_N_STICKS
-    return max(_MN_SPLIT_M_MIN, min(cores // 2, target))
+    cores_used = b * m * n * k
+    if cores_used == 0 or cores_used > max_cores:
+        return float("inf")
 
+    # Compute (PT-pipeline efficiency)
+    m_t = M // m if m else 1
+    pt_passes = max(1.0, m_t / _PT_ROWS)
+    pt_eff = min(1.0, pt_passes / _MN_SPLIT_HIGHLX_TARGET_PT_PASSES)
+    effective_peak = _COST_PEAK_MACS_US_CORE * pt_eff
+    compute_us = (B * M * N * K / cores_used) / effective_peak
 
-def _mn_cosplit(m_size: int, n_sticks: int, cores: int) -> tuple[int, int]:
-    """Co-split ``cores`` between M and N. Returns (m_split, n_split) or (0, 0).
+    # HBM with cohort-broadcast penalty
+    bytes_total = (B * M * K + B * K * N + B * M * N) * _COST_DTYPE_BYTES
+    cohort = max(m, n)
+    cohort_penalty = max(1.0, cohort / _COST_COHORT_LIMIT)
+    hbm_us = bytes_total / (_COST_HBM_BW_GBS * 1000) * cohort_penalty
 
-    Walks divisors of ``cores`` from the LX-aware target_m_split, picking the
-    first that divides M cleanly and leaves a complementary n_split dividing
-    n_sticks. The candidate set is ``divisors(cores)`` so the rule generalises
-    over ``cores`` rather than hard-coding the SENCORES=32 divisors.
-    """
-    target = _target_m_split(m_size, n_sticks, config.dxp_lx_frac_avail, cores)
-    cands = sorted(
-        (int(d) for d in divisors(cores) if d >= _MN_SPLIT_M_MIN),
-        key=lambda d: (abs(d - target), -d),
+    # PSUM (scales with output elements per ring hop)
+    psum_us = max(0, k - 1) * (B * M * N) * _COST_PSUM_PER_ELEM_US
+
+    # Target-m_split tie-break (heuristic-aware): empirical fit shows m_split
+    # close to ``clamp(M_MIN, cores//2, M / (TARGET_PT_PASSES * PT_ROWS))``
+    # is the PT-pipeline sweet spot. Penalize log2-distance from that target.
+    target_m = max(
+        _MN_SPLIT_M_MIN,
+        min(max_cores // 2, max(1, M // (_MN_SPLIT_HIGHLX_TARGET_PT_PASSES * _PT_ROWS))),
     )
-    for cand in cands:
-        cand_n = cores // cand
-        if m_size % cand == 0 and n_sticks % cand_n == 0:
-            return cand, cand_n
-    return 0, 0
+    m_dist = abs(math.log2(max(1, m) / target_m))
+    target_m_us = m_dist * _COST_TARGET_M_PENALTY_US
+
+    # Batch-split penalty (multiplicative, fits bmm regression data)
+    batch_penalty = 1.0 + _COST_BATCH_SPLIT_PENALTY * max(0, b - 1)
+
+    return (compute_us + hbm_us + psum_us + target_m_us) * batch_penalty
 
 
-def _maybe_mn_cosplit(
+def _cost_model_matmul_planner(
     op: ComputedBuffer,
     splits: dict[Symbol, int],
     it_space_adjusted: dict[Symbol, Expr],
@@ -698,21 +715,18 @@ def _maybe_mn_cosplit(
     unsafe_for_2d: set[str],
     input_tds: list[TensorDep],
 ) -> dict[Symbol, int]:
-    """Replace a matmul's pure-M default split with an M x N co-split.
+    """Pick the minimum-cost feasible (b, m, n, k) split for a matmul / bmm.
 
-    A pure m-split is HBM-slow; co-splitting M and N runs 2-3.7x faster on 2D
-    matmul (see tests/diag_hbm_bank_aware_findings.md) and ~1.5-3x on bmm
-    (where the default also wastes the batch dim by iterating).
+    Identifies M/N/K/batch dims via **input deps** (M appears in one input,
+    batch in both, K is the reduction), enumerates feasible splits
+    (divisors of each dim, product <= max_cores), scores each by
+    _matmul_split_cost, and returns the argmin.
 
-    M is identified by **input deps**: it is the non-stick output dim that
-    appears in exactly one input (the LHS). For 2D matmul this is the single
-    non-stick dim; for a true bmm this distinguishes M from the batch dim
-    (which appears in both inputs). Batch dims are left iterated within
-    cores -- the default planner pipelines that well.
+    Validated against device-measured kernel times for QO/KV/MLP/MoE
+    gate-up/MoE down/bmm large-K/bmm small-K -- in every case the
+    heuristic's empirically-best split is the cost-model argmin.
 
-    Fires only when the default planner produced a pure single-dim split on
-    M itself (the HBM-slow pattern). Otherwise leaves ``splits`` untouched.
-    Never reduces total core utilisation vs the default.
+    Replaces _maybe_mn_cosplit as the matmul work-division policy.
     """
     if op.get_name() in unsafe_for_2d:
         return splits
@@ -732,7 +746,8 @@ def _maybe_mn_cosplit(
         return splits
     n_dim = n_dims[0]
 
-    # Identify M via input deps (works uniformly for 2D and bmm).
+    # M = output dim that appears in exactly one input (the LHS).
+    # Batch dims (if any) appear in both inputs.
     def _n_inputs(dim: Symbol) -> int:
         return sum(
             1
@@ -744,39 +759,79 @@ def _maybe_mn_cosplit(
     if len(m_candidates) != 1:
         return splits  # can't identify M unambiguously
     m_dim = m_candidates[0]
+    batch_dims = [d for d in m_dims if d is not m_dim]
 
-    # Only fire when the default planner pure-split M (the HBM-slow pattern).
-    # If it split a batch dim (e.g. decode M=1) or nothing/multiple dims,
-    # leave it alone.
-    split_dims = [d for d, v in splits.items() if v > 1]
-    if len(split_dims) != 1 or split_dims[0] is not m_dim:
+    # K: the single reduction dim. (Multi-K matmul not handled here.)
+    reduction = [d for d in it_space_adjusted if d not in output_coord_vars]
+    if len(reduction) != 1:
+        return splits
+    k_dim = reduction[0]
+
+    # Sizes. M is already in elements; N and K are in sticks (the planner's
+    # iteration_space view), so convert back for the cost calculation.
+    M_e = concretize_expr(it_space_adjusted[m_dim])
+    n_sticks = concretize_expr(it_space_adjusted[n_dim])
+    k_sticks = concretize_expr(it_space_adjusted[k_dim])
+    elems_per_stick = output_td.layout.device_layout.device_dtype.elems_per_stick()
+    N_e = n_sticks * elems_per_stick
+    K_e = k_sticks * elems_per_stick
+
+    # Batch dims: track per-dim size for split enumeration; cost model only
+    # sees the total batch count.
+    batch_per_dim = [
+        (bd, concretize_expr(it_space_adjusted[bd])) for bd in batch_dims
+    ]
+    B_total = 1
+    for _, s in batch_per_dim:
+        B_total *= s
+
+    # Enumerate feasible splits.
+    if batch_per_dim:
+        bd_divs = [[int(d) for d in divisors(s)] for _, s in batch_per_dim]
+        b_combos = list(itertools.product(*bd_divs))
+    else:
+        b_combos = [()]
+    m_divs = [int(d) for d in divisors(M_e)]
+    n_divs = [int(d) for d in divisors(n_sticks)]
+    k_divs = [int(d) for d in divisors(k_sticks)]
+
+    best_cost = float("inf")
+    best = None
+    for b_combo in b_combos:
+        b_prod = 1
+        for bs in b_combo:
+            b_prod *= bs
+        for mm in m_divs:
+            for nn in n_divs:
+                for kk in k_divs:
+                    if b_prod * mm * nn * kk > max_cores:
+                        continue
+                    c = _matmul_split_cost(
+                        B_total, M_e, K_e, N_e, b_prod, mm, nn, kk, max_cores
+                    )
+                    if c < best_cost:
+                        best_cost = c
+                        best = (b_combo, mm, nn, kk)
+
+    if best is None:
         return splits
 
-    n_sticks = concretize_expr(it_space_adjusted[n_dim])
-    m_size = concretize_expr(it_space_adjusted[m_dim])
-
-    m_split, n_split = _mn_cosplit(m_size, n_sticks, max_cores)
-    if n_split <= 1 or m_split <= 1:
-        # Fallback: cap N-band at 8 sticks and split M with whatever cores
-        # remain. Same shape as the divisor-walk failure path the original
-        # 2D rule used.
-        n_split = core_split(n_sticks, min(8, max_cores))
-        if n_split <= 1:
-            return splits
-        m_split = core_split(m_size, max_cores // n_split)
-
+    b_combo, m_s, n_s, k_s = best
     new_splits = dict(splits)
-    new_splits[m_dim] = m_split
-    new_splits[n_dim] = n_split
+    for (bd, _sz), bs in zip(batch_per_dim, b_combo):
+        new_splits[bd] = int(bs)
+    new_splits[m_dim] = m_s
+    new_splits[n_dim] = n_s
+    new_splits[k_dim] = k_s
+
     # Sanity: never use fewer cores than the default split.
     if math.prod(new_splits.values()) < math.prod(splits.values()):
         return splits
 
     logger.debug(
-        f"mn_cosplit work_division {op.get_name()}"
-        f"{' (bmm)' if len(m_dims) > 1 else ''}: "
-        f"m-split {splits[m_dim]} -> ({m_split}, {n_split}) (m x n) "
-        f"[m_size={m_size} n_sticks={n_sticks}]"
+        f"cost_model work_division {op.get_name()}: "
+        f"b={b_combo} m={m_s} n={n_s} k={k_s} cost={best_cost:.1f}us "
+        f"[B={B_total} M={M_e} K={K_e} N={N_e}]"
     )
     return new_splits
 
@@ -842,7 +897,7 @@ def work_distribution_pass(
         committed_splits,
     )
     if config.two_d_mn_split:
-        splits = _maybe_mn_cosplit(
+        splits = _cost_model_matmul_planner(
             op,
             splits,
             it_space_adjusted,
