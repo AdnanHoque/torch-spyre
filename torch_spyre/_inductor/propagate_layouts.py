@@ -655,18 +655,21 @@ def propagate_spyre_tensor_layouts(
                         # will resolve it post-scheduler.
                         continue
                     candidates = compute_layouts(op, target_layout, output_dep, args)
-                    # Feasibility (Blocker 2): the producer must be able to
-                    # emit the target's STL. SpyreTensorLayout equality is by
-                    # content (device_size, stride_map, device_dtype).
-                    if target_stl not in candidates:
-                        raise Unsupported(
-                            f"copy-back elision: producer {op.get_name()} cannot "
-                            f"emit target {target_buf.get_name()} STL {target_stl}; "
-                            f"candidates were {list(candidates)}"
-                        )
-                    # Pinning (Blocker 1): with a single candidate, neither
-                    # the beam nor the greedy optimizer can deviate from the
-                    # target's STL when committing.
+                    # Feasibility check. ``spyre_copy_`` (lowering.py) proved
+                    # the producer can emit the target's STL before aliasing,
+                    # so this should never fail in well-formed graphs. If it
+                    # does, the lowering pre-check missed a case — raise an
+                    # internal-bug error instead of a user-facing Unsupported.
+                    assert target_stl in candidates, (
+                        f"copy-back elision invariant: producer {op.get_name()} "
+                        f"was retargeted to {target_buf.get_name()} at lowering "
+                        f"time but STL {target_stl} is not in candidates "
+                        f"{list(candidates)}. The lowering feasibility check "
+                        f"(spyre_copy_) is too permissive — please report."
+                    )
+                    # Pinning (Blocker 1, see PR review): with a single
+                    # candidate, neither the beam nor the greedy optimizer can
+                    # deviate from the target's STL when committing.
                     op.layouts = [target_stl]
                     # The beam optimizer deliberately skips writing
                     # committed_stl for mutation ops, so set it here.
@@ -730,13 +733,22 @@ def propagate_mutation_layouts(
                 layouts = list(compute_layouts(n.node, output, output_dep, args))
                 n.node.layout = layouts[0]
             else:
-                logger.warning(
+                # A Reduction (or other compute) mutation op whose target has
+                # no committed FixedTiledLayout. This is unreachable for
+                # spyre_copy_-retargeted producers (their target is a graph
+                # input finalised in finalize_layouts), but we raise rather
+                # than warn-and-leak: leaving MutationLayoutSHOULDREMOVE in
+                # place causes confusing crashes much later in codegen.
+                raise Unsupported(
                     "propagate_mutation_layouts: mutation target of "
-                    f"{n.node.get_name()} has no committed FixedTiledLayout"
+                    f"{n.node.get_name()} ({type(n.node.data).__name__}) has "
+                    "no committed FixedTiledLayout — please report this with "
+                    "the offending graph."
                 )
         else:
-            logger.warning(
-                f"propagate_mutation_layouts: unhandled mutation op {type(n.node.data)}"
+            raise Unsupported(
+                f"propagate_mutation_layouts: unhandled mutation op type "
+                f"{type(n.node.data).__name__} on {n.node.get_name()}"
             )
 
     return nodes

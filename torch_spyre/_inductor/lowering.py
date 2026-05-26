@@ -21,6 +21,7 @@ from torch._inductor.dependencies import MemoryDep
 from torch._inductor.ir import ComputedBuffer, Reduction, Pointwise, Scatter, StorageBox
 import torch._inductor.lowering as lowering
 import torch._inductor.ir as ir
+from torch_spyre._C import SpyreTensorLayout
 from .ir import SpyreConstantFallback, SpyreEmptyFallback
 
 from typing import Any, Callable, Union
@@ -727,36 +728,126 @@ def lower_empty(size, device, dtype=None):
     )
 
 
+def _peel(node):
+    """Unwrap TensorBox/StorageBox/MutableBox layers to reach the underlying Buffer."""
+    while isinstance(node, ir.MutableBox):
+        node = node.data
+    while isinstance(node, ir.StorageBox):
+        node = node.data
+    return node
+
+
+def _is_dst_returned_by_graph(dst_name: str) -> bool:
+    """Whether ``dst_name`` is reachable as a graph output.
+
+    ``V.graph.graph_outputs`` is not populated until the end of FX-to-IR
+    lowering, so for an in-flight ``copy_`` we scan the FX graph's ``output``
+    node directly. Two return forms appear in functionalised graphs:
+
+    - The placeholder itself, e.g. ``return (arg2_1,)``.
+    - The ``copy_`` node whose first arg (mutation target) is the placeholder,
+      e.g. ``return (copy_(arg2_1, mm),)`` — the canonical form when the user
+      wrote ``mm(out=z); return z``.
+
+    Both indicate the caller will observe the mutated input, which means we
+    must keep the explicit copy kernel rather than aliasing src → dst.
+    """
+    fx_graph = getattr(V.graph, "graph", None)
+    if fx_graph is None:
+        return False
+    for node in fx_graph.nodes:
+        if node.op != "output":
+            continue
+        args = node.args
+        if len(args) == 1 and isinstance(args[0], (list, tuple)):
+            args = args[0]
+        for arg in args:
+            if not isinstance(arg, torch.fx.Node):
+                continue
+            if arg.name == dst_name:
+                return True
+            if arg.op == "call_function" and "copy_" in str(arg.target):
+                if arg.args and isinstance(arg.args[0], torch.fx.Node):
+                    if arg.args[0].name == dst_name:
+                        return True
+        return False
+    return False
+
+
+def _target_already_mutated(dst_name: str) -> bool:
+    """Whether any already-realized op carries ``MutationLayoutSHOULDREMOVE``
+    pointing at ``dst_name`` — guards against retargeting two producers onto
+    the same graph input.
+    """
+    for op in V.graph.operations:
+        op_layout = getattr(op, "layout", None)
+        if isinstance(op_layout, ir.MutationLayoutSHOULDREMOVE):
+            try:
+                if op_layout.get_buffer().get_name() == dst_name:
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+def _target_has_default_device_layout(dst_name: str, dst_buf) -> bool:
+    """Whether the target's actual on-device layout is the default tiling.
+
+    The retargeted producer will naturally emit a default-tiled STL for its
+    host layout. If the user constructed ``dst`` with a non-default device
+    layout (e.g. a transposed view, custom stick orientation), the producer's
+    natural STL would not match the target's — aliasing would silently write
+    wrong data. We verify here instead of failing later in propagation.
+    """
+    try:
+        input_idx = list(V.graph.graph_input_names).index(dst_name)
+    except ValueError:
+        return False
+    real_inputs = V.get_real_inputs()
+    if input_idx >= len(real_inputs):
+        return False
+    real_input = real_inputs[input_idx]
+    if not isinstance(real_input, torch.Tensor):
+        return False
+    target_stl = real_input.device_tensor_layout()
+    if target_stl is None:
+        return False
+    # Default tiling for this host layout (stick on last dim, row-major dims).
+    size = [int(s) for s in dst_buf.layout.size]
+    stride = [int(s) for s in dst_buf.layout.stride]
+    default_stl = SpyreTensorLayout(
+        size, stride, dst_buf.layout.dtype, list(range(len(size)))
+    )
+    return target_stl == default_stl
+
+
 def _can_elide_copy_back_at_lowering(dst, src) -> bool:
     """Return True if ``copy_(dst, src)`` can be folded into the producer.
 
     A safe case lets us take ``mutate_to``'s ``unsafe_alias=True`` path: the
-    producer's freshly-realized buffer is retargeted to mutate ``dst``, so there
-    is no separate intermediate buffer and no copy kernel. Safe when:
+    producer's freshly-realized buffer is retargeted to mutate ``dst``, so
+    there is no separate intermediate buffer and no copy kernel. The check
+    answers David's review by proving feasibility at the lowering layer — if
+    any condition fails we fall through to the default ``copy_`` lowering,
+    preserving the copy rather than turning an optimization miss into a
+    compile-time error.
 
-    - ``dst`` is a graph input (mutation target).
-    - ``dst`` is not also a graph output.
-    - No already-lowered op has read ``dst``; functionalization guarantees no
-      future reads of the old value, so scanning past reads is sufficient.
-    - ``src``'s producer is a realized ``ComputedBuffer`` whose layout is still
-      ``FlexibleLayout`` (a frozen layout means the producer cannot be retargeted).
-    - No device/dtype/shape conversion is needed (host layouts match), otherwise
-      ``copy_``'s default to_device/to_dtype/expand wrappers would introduce a
-      genuine pointwise copy that must not be aliased away.
+    Restricted to graph-input targets on purpose: ``mutate_to``'s upstream
+    fast path (lowering.py: ``changed_data.data = val.data``) already aliases
+    for non-input destinations. Inputs are excluded there because pointer
+    swinging would orphan the caller's storage. ``unsafe_alias=True`` goes
+    through ``MutationLayoutSHOULDREMOVE`` instead — the producer writes the
+    caller's storage — so this lowering plugs *exactly* the input-buffer gap.
     """
-    def _peel(node):
-        # TensorBox -> StorageBox -> Buffer
-        while isinstance(node, ir.MutableBox):
-            node = node.data
-        while isinstance(node, ir.StorageBox):
-            node = node.data
-        return node
-
     dst_buf = _peel(dst)
     if not isinstance(dst_buf, ir.InputBuffer):
         return False
     dst_name = dst_buf.get_name()
     if dst_name not in V.graph.graph_input_names:
+        return False
+    if _is_dst_returned_by_graph(dst_name):
+        return False
+    if _target_already_mutated(dst_name):
         return False
 
     if dst.get_device() != src.get_device():
@@ -769,11 +860,18 @@ def _can_elide_copy_back_at_lowering(dst, src) -> bool:
     src_buf = _peel(src)
     if not isinstance(src_buf, ir.ComputedBuffer):
         return False
+    # A frozen layout means the producer cannot be retargeted.
     if not isinstance(src_buf.layout, ir.FlexibleLayout):
         return False
     if tuple(dst_buf.layout.stride) != tuple(src_buf.layout.stride):
         return False
+    # The target's actual device STL must match the producer's natural one.
+    if not _target_has_default_device_layout(dst_name, dst_buf):
+        return False
 
+    # Functionalisation guarantees no later op reads ``dst``'s old value, so a
+    # scan over already-lowered ops is sufficient to catch the unsafe pattern
+    # ``read(dst); copy_(dst, ...)``.
     for op in V.graph.operations:
         for dep in op.get_read_writes().reads:
             if isinstance(dep, MemoryDep) and dep.name == dst_name:
