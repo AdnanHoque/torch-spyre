@@ -334,6 +334,21 @@ def compute_restickify_target_layout(
     host_size = [concretize_expr(s) for s in host_layout.size]
     host_stride = [concretize_expr(s) for s in host_layout.stride]
     old_sd = matching_dim(ic, idc[-1])
+    if old_sd is None and idc[-1] == sympy.S.Zero:
+        old_stride_map = list(stl.stride_map)
+        new_var = next(iter(target_stick_expr.free_symbols))
+        stick_size = get_elem_in_stick(host_layout.dtype)
+        candidates = [j for j in range(len(idc) - 1) if new_var in idc[j].free_symbols]
+        if len(candidates) != 1 or host_size[new_sd] % stick_size != 0:
+            return None
+        new_sd_outer_dim = candidates[0]
+        device_size = list(stl.device_size)
+        device_size[-1] = stick_size
+        device_size[new_sd_outer_dim] = host_size[new_sd] // stick_size
+        stride_map = list(old_stride_map)
+        stride_map[-1] = host_stride[new_sd]
+        stride_map[new_sd_outer_dim] = host_stride[new_sd] * stick_size
+        return SpyreTensorLayout(device_size, stride_map, stl.device_dtype)
     if old_sd is None:
         return None
     old_stick_expr = idc[-1]

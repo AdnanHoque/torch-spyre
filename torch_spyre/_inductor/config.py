@@ -109,6 +109,13 @@ flash_attention_score_scale_handoff: bool = (
     flash_attention_onchip_sdpa
     or os.environ.get("SPYRE_FLASH_ATTENTION_SCORE_SCALE_HANDOFF", "0") == "1"
 )
+# Natural score layout keeps flash-prefill scores as [B, H, Q, K-block], avoiding
+# the transpose before PV matmul.  It needs singleton-stick reduction outputs to
+# be restickifiable into the running-vector layout, so the master gate owns it.
+flash_attention_natural_score_layout: bool = (
+    flash_attention_onchip_sdpa
+    or os.environ.get("SPYRE_FLASH_ATTENTION_NATURAL_SCORE_LAYOUT", "0") == "1"
+)
 
 # --- Tier 0: ring-aware restickify (telemetry + producer-aligned work division) ---
 # Default-off ring byte-hop telemetry for compiler-inserted restickifies.

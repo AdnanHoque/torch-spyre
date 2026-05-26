@@ -31,7 +31,6 @@ import torch
 from torch._inductor.virtualized import V
 
 import torch_spyre._inductor.optimize_restickify as _optimize_restickify
-from torch._inductor.exc import InductorError
 from utils_inductor import _compile_and_run, compare_with_cpu
 
 DEVICE = torch.device("spyre")
@@ -763,17 +762,11 @@ def test_wrong_optimal_cost_fails():
         _compare(func, a, b, c, d, e, optimal_cost=0)
 
 
-# ------- Unsupported stick configurations ---------
+# ------- Singleton-stick reduction outputs ---------
 
 
-def test_sparse_dense_pointwise_unsupported():
-    """a.sum(1) + b - pointwise of sparse and dense tensors not yet supported.
-
-    There is no restickify resolution for this configuration so we must catch this and report error
-    """
+def test_singleton_stick_reduction_pointwise_restickifies():
+    """a.sum(1) + b needs to gather singleton-stick reduction output into b's stick."""
     a = torch.randn((S, S), dtype=torch.float16).to(DEVICE)
     b = torch.randn((S, S), dtype=torch.float16).to(DEVICE)
-    with pytest.raises(
-        InductorError, match="No mechanism to gather elements from multiple sticks"
-    ):
-        _compare(lambda a, b: a.sum(1) + b, a, b)
+    _compare(lambda a, b: a.sum(1) + b, a, b)
