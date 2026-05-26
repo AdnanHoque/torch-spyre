@@ -355,10 +355,23 @@ def _fake_flash_pipeline_sdscs(
     *,
     lx_pinned=False,
     input_neighbor_transfer=False,
+    ij_input_layout=False,
 ):
+    input_layout = ["i", "j", "in"] if ij_input_layout else ["mb", "x", "in"]
+    output_layout = ["i", "j", "out"] if ij_input_layout else ["mb", "x", "out"]
+    n_sizes = (
+        {"i_": 64, "j_": 2, "x_": 2, "out_": 192, "in_": 64}
+        if ij_input_layout
+        else {"x_": 2, "mb_": 96, "out_": 192, "in_": 64}
+    )
+    shard = (
+        {"i": 32, "j": 1, "out": 1, "in": 1}
+        if ij_input_layout
+        else {"x": 1, "mb": 32, "out": 1, "in": 1}
+    )
     pdi = {
         "INPUT": {
-            "layoutDimOrder_": ["mb", "x", "in"],
+            "layoutDimOrder_": input_layout,
             "stickDimOrder_": ["in"],
             "stickSize_": [64],
         },
@@ -368,7 +381,7 @@ def _fake_flash_pipeline_sdscs(
             "stickSize_": [64],
         },
         "OUTPUT": {
-            "layoutDimOrder_": ["mb", "x", "out"],
+            "layoutDimOrder_": output_layout,
             "stickDimOrder_": ["out"],
             "stickSize_": [64],
         },
@@ -379,8 +392,8 @@ def _fake_flash_pipeline_sdscs(
             _fake_sdsc(
                 idx,
                 "batchmatmul",
-                {"x": 1, "mb": 32, "out": 1, "in": 1},
-                {"x_": 2, "mb_": 96, "out_": 192, "in_": 64},
+                shard,
+                n_sizes,
                 [("Tensor0-idx0", "INPUT", 4096 + idx * 4096)],
                 [("Tensor2-idx2", "OUTPUT", 8192 + idx * 4096)],
                 pdi,
@@ -773,6 +786,7 @@ def test_flash_pipeline_overlap_prefix_tile_artifacts_overlap_one_compute():
             num_tiles=3,
             lx_pinned=True,
             input_neighbor_transfer=True,
+            ij_input_layout=True,
         ),
         overlap_prefix=True,
     )
@@ -829,11 +843,28 @@ def test_flash_pipeline_overlap_prefix_rejects_lx_compute_without_transfer():
     assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
 
 
+def test_flash_pipeline_overlap_prefix_rejects_non_ij_input_neighbor_shape():
+    artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
+        _fake_flash_pipeline_sdscs(
+            num_tiles=3,
+            lx_pinned=True,
+            input_neighbor_transfer=True,
+        ),
+        overlap_prefix=True,
+    )
+    root0 = artifacts[0]["mixed_flash_pipeline_tile_0"]
+    assert len(root0["dscs_"]) == 1
+    assert len(root0["datadscs_"]) == 2
+    assert root0["flashAttentionPipeline_"]["overlap_prefix"] is False
+    assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
+
+
 def test_flash_pipeline_overlap_prefix_rejects_mismatched_next_tile():
     sdscs = _fake_flash_pipeline_sdscs(
         num_tiles=3,
         lx_pinned=True,
         input_neighbor_transfer=True,
+        ij_input_layout=True,
     )
     sdscs[1]["1_batchmatmul"]["dscs_"][0]["batchmatmul"]["N_"]["out_"] = 128
     artifacts = rz.build_flash_attention_pipeline_tile_artifacts(

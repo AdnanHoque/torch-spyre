@@ -490,7 +490,7 @@ def _pinned_component(lds: dict) -> str | None:
 
 
 def _input_fetch_neighbor_compute_eligible(compute_dsc: dict) -> bool:
-    """True when a compute DSC satisfies DXP's InputFetchNeighbor pin guard."""
+    """True when a compute DSC satisfies DXP's InputFetchNeighbor contract."""
     if not isinstance(compute_dsc, dict) or not compute_dsc:
         return False
     dl = next(iter(compute_dsc.values()))
@@ -520,7 +520,17 @@ def _input_fetch_neighbor_compute_eligible(compute_dsc: dict) -> bool:
     )
     if input_lds is None or _pinned_component(input_lds) != "lx":
         return False
+    if not _input_fetch_neighbor_ij_order_supported(dl, first_input_idx):
+        return False
     return _has_input_fetch_neighbor_transfer(dl, first_input_idx)
+
+
+def _input_fetch_neighbor_ij_order_supported(dl: dict, lds_idx: int) -> bool:
+    """Current Foundation InputFetchNeighbor ordering assumes i/j coordinates."""
+    layout = _layout_for_lds(dl, lds_idx)
+    if layout is None:
+        return False
+    return {"i_", "j_"}.issubset(set(layout))
 
 
 def _has_input_fetch_neighbor_transfer(dl: dict, lds_idx: int) -> bool:
