@@ -159,6 +159,7 @@ def _run_child(args: argparse.Namespace) -> int:
     import torch
     import torch.nn.functional as F
     import torch_spyre  # noqa: F401
+    from torch_spyre._inductor import config as spyre_config
 
     torch.manual_seed(args.seed)
     try:
@@ -219,7 +220,10 @@ def _run_child(args: argparse.Namespace) -> int:
             "length": args.length,
             "dim": args.dim,
         },
-        "block_size": int(os.environ.get("SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE", "0")),
+        "block_size": spyre_config.flash_attention_prefill_block_size,
+        "block_size_env": os.environ.get(
+            "SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE", ""
+        ),
         "cache_dir": str(cache_dir),
         "compile_run_ms": compile_run_ms,
         "warmup": args.warmup,
@@ -239,7 +243,10 @@ def _run_child(args: argparse.Namespace) -> int:
 def _child_env(args: argparse.Namespace, variant: str, length: int) -> dict[str, str]:
     env = os.environ.copy()
     env.update(VARIANT_ENV[variant])
-    env["SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE"] = str(args.block_size)
+    if args.block_size > 0:
+        env["SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE"] = str(args.block_size)
+    else:
+        env.pop("SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE", None)
     env["DXP_DEBUG"] = "1" if args.dxp_debug else "0"
     nonce = random.randint(0, 999999)
     cache_prefix = args.cache_prefix.rstrip("/")
@@ -382,7 +389,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--length", type=int, default=128)
     parser.add_argument("--lengths", default="128,256")
     parser.add_argument("--dim", type=int, default=64)
-    parser.add_argument("--block-size", type=int, default=64)
+    parser.add_argument(
+        "--block-size",
+        type=int,
+        default=64,
+        help="flash prefill block size; 0 leaves the environment unset",
+    )
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--iters", type=int, default=10)
     parser.add_argument("--seed", type=int, default=0xA771)
