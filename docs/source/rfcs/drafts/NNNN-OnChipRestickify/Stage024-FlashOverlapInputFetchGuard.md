@@ -88,6 +88,64 @@ py_compile(onchip_realize.py, onchip_bridge.py, test_onchip_realize_logic.py) pa
 git diff --check passed
 ```
 
+Pod static:
+
+```text
+pod: adnan-cdx-spyre-dev-pf
+DTI_PROJECT_ROOT=/home/adnan-cdx/dt-inductor-mixed
+
+tests/_inductor/test_onchip_realize_logic.py          28/28 passed
+tests/_inductor/test_onchip_flash_pipeline_logic.py   10/10 passed
+py_compile(onchip_realize.py, onchip_bridge.py, test_onchip_realize_logic.py) passed
+git diff --check passed
+```
+
+Device guard check:
+
+```sh
+export SPYRE_FLASH_ATTENTION_MIXED_PIPELINE=1
+export SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_EXECUTE_TILE=0
+export SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_OVERLAP=1
+export SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF=0
+export SPYRE_FLASH_ATTENTION_SCORE_SCALE_HANDOFF=0
+export DXP_DEBUG=1
+export TORCHINDUCTOR_CACHE_DIR=/tmp/sdpa-stage024-overlap-guard-1779826672
+"$PYTHON" -m pytest tests/inductor/test_building_blocks.py \
+  -k "flash_attention_mixed_pipeline_selects_prefill" -q -s
+```
+
+Result:
+
+```text
+1 passed, 7 deselected in 24.36s
+```
+
+Generated tile metadata for both emitted SDPA bundles confirmed the requested
+overlap path failed closed to serial:
+
+```text
+source=generated-flash-prefill-batchmatmul-tiles
+overlap_prefix=false
+overlap_candidate=false
+dataop_count=2
+tile_count=1
+
+core 0 schedule:
+[
+  [0, -1, 0, 1],
+  [1, -1, 1, 1],
+  [-1, 0, 1, 0],
+]
+```
+
+Mixed-tile `senprog.txt` counts stayed on-chip and matched the Stage 023 serial
+control:
+
+```text
+bundle 0 sdsc_mixed_flash_pipeline_tile_0: HBM=0 L3_LDU=0 L3_STU=0 LX_LDSTU=192
+bundle 1 sdsc_mixed_flash_pipeline_tile_0: HBM=0 L3_LDU=0 L3_STU=0 LX_LDSTU=160
+```
+
 ## Interpretation
 
 This is a production guard, not a performance win by itself.  The overlap
@@ -102,4 +160,3 @@ does not accept those in the paired-row `InputFetchNeighbor` path.  Until we can
 legally produce all-LX/ring/SFP-ring compute descriptors, use a two-SDSC
 input-fetch contract, or get Foundation support for regular data-op plus DL
 overlap rows, production SDPA must stay on the serial mixed-tile path.
-
