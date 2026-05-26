@@ -410,6 +410,29 @@ def flash_pipeline_schedule(
     return _schedule_rows_for_all_cores(rows, num_cores)
 
 
+def flash_pipeline_overlap_prefix_schedule(
+    num_lanes: int,
+    num_cores: int,
+) -> dict:
+    """One-compute overlap prefix schedule for Foundation's current contract.
+
+    DXP currently accepts mixed SuperDSCs with one DL compute DSC.  This schedule
+    exercises the warp-specialized row shape inside that limit: prefetch tile 0
+    as a prologue, then pair compute tile 0 with the first lane of tile 1.
+    Remaining tile-1 lanes run as data-op-only rows.
+    """
+    if num_lanes <= 0:
+        raise ValueError(f"num_lanes must be positive, got {num_lanes}")
+
+    rows: list[list[int]] = []
+    for lane in range(num_lanes):
+        rows.append([lane, -1])
+    rows.append([num_lanes, 0])
+    for lane in range(1, num_lanes):
+        rows.append([num_lanes + lane, -1])
+    return _schedule_rows_for_all_cores(rows, num_cores)
+
+
 def build_transpose_bridge(
     dim_pool: Sequence[str], iter_sizes: Mapping[str, int], stick_size: int,
     num_cores: int, lx_size: int,

@@ -732,6 +732,54 @@ def test_flash_pipeline_tile_artifacts_are_one_compute_each():
         ]
 
 
+def test_flash_pipeline_overlap_prefix_tile_artifacts_overlap_one_compute():
+    artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
+        _fake_flash_pipeline_sdscs(num_tiles=3),
+        overlap_prefix=True,
+    )
+    assert len(artifacts) == 3
+
+    root0 = artifacts[0]["mixed_flash_pipeline_tile_0"]
+    assert len(root0["dscs_"]) == 1
+    assert len(root0["datadscs_"]) == 4
+    assert root0["opFuncsUsed_"] == ["STCDPOpLx"] * 4
+    meta0 = root0["flashAttentionPipeline_"]
+    assert meta0["source"] == "generated-flash-prefill-overlap-prefix-tile"
+    assert meta0["tile_count"] == 1
+    assert meta0["dataop_count"] == 4
+    assert meta0["prefetch_tile_count"] == 2
+    assert meta0["compute_tile_count"] == 1
+    assert meta0["overlap_prefix"] is True
+    assert meta0["overlap_candidate"] is True
+    assert meta0["tile_index"] == 0
+    assert meta0["replaces_sdsc"] == "0_batchmatmul"
+    assert root0["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [2, 0, 1, 1],
+        [3, -1, 1, 0],
+    ]
+
+    root2 = artifacts[2]["mixed_flash_pipeline_tile_2"]
+    assert len(root2["dscs_"]) == 1
+    assert len(root2["datadscs_"]) == 2
+    assert root2["flashAttentionPipeline_"]["overlap_prefix"] is False
+
+
+def test_flash_pipeline_overlap_prefix_rejects_mismatched_next_tile():
+    sdscs = _fake_flash_pipeline_sdscs(num_tiles=3)
+    sdscs[1]["1_batchmatmul"]["dscs_"][0]["batchmatmul"]["N_"]["out_"] = 128
+    artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
+        sdscs,
+        overlap_prefix=True,
+    )
+    root0 = artifacts[0]["mixed_flash_pipeline_tile_0"]
+    assert len(root0["dscs_"]) == 1
+    assert len(root0["datadscs_"]) == 2
+    assert root0["flashAttentionPipeline_"]["overlap_prefix"] is False
+    assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
+
+
 def _run_all():
     tests = sorted(
         (n, o) for n, o in globals().items()

@@ -38,6 +38,7 @@ from .codegen.onchip_bridge import (
     allocate_stream_bases,
     build_flash_attention_pipeline_bridge,
     build_flash_attention_pipeline_mixed_sdsc,
+    flash_pipeline_overlap_prefix_schedule,
     mixed_schedule,
     build_roundtrip_bridge,
     build_same_layout_bridge,
@@ -904,6 +905,7 @@ def build_flash_attention_pipeline_artifact(
     iter_sizes = _iter_sizes_for_layout(first_dl, layout)
     if iter_sizes is None:
         return None
+
     row_dim = _flash_pipeline_row_dim(layout, split_dim, iter_sizes)
     if row_dim is None:
         return None
@@ -983,26 +985,168 @@ def build_flash_attention_pipeline_tile_artifacts(
     sdscs_json: list[dict],
     *,
     name_prefix: str = "mixed_flash_pipeline_tile",
+    overlap_prefix: bool = False,
 ) -> list[dict]:
     """Build DXP-compatible one-compute mixed sidecars for flash-prefill tiles."""
     artifacts = []
-    tile_index = 0
-    for sdsc in sdscs_json:
-        if _op_name(sdsc) != "batchmatmul":
-            continue
-        artifact = build_flash_attention_pipeline_artifact(
-            [sdsc],
-            overlap=False,
-            name=f"{name_prefix}_{tile_index}",
-        )
+    tile_sdscs = [sdsc for sdsc in sdscs_json if _op_name(sdsc) == "batchmatmul"]
+    for tile_index, sdsc in enumerate(tile_sdscs):
+        artifact = None
+        if overlap_prefix and tile_index + 1 < len(tile_sdscs):
+            artifact = build_flash_attention_pipeline_overlap_prefix_tile_artifact(
+                tile_sdscs[tile_index: tile_index + 2],
+                tile_index,
+                name_prefix=name_prefix,
+            )
+        if artifact is None:
+            artifact = build_flash_attention_pipeline_artifact(
+                [sdsc],
+                overlap=False,
+                name=f"{name_prefix}_{tile_index}",
+            )
         if artifact is None:
             continue
         root = artifact[next(iter(artifact))]
         root["flashAttentionPipeline_"]["tile_index"] = tile_index
         root["flashAttentionPipeline_"]["replaces_sdsc"] = next(iter(sdsc))
+        root["flashAttentionPipeline_"].setdefault("overlap_prefix", False)
         artifacts.append(artifact)
-        tile_index += 1
     return artifacts
+
+
+def build_flash_attention_pipeline_overlap_prefix_tile_artifact(
+    tile_sdscs: list[dict],
+    tile_index: int,
+    *,
+    name_prefix: str = "mixed_flash_pipeline_tile",
+) -> dict | None:
+    """Build a one-compute sidecar that overlaps next-tile prefetch with compute.
+
+    This is the executable prefix of the full overlap schedule.  It keeps the
+    current Foundation one-DL-DSC contract by copying only the first compute DSC,
+    while staging two K/V prefetch tiles and scheduling the first next-tile
+    prefetch row together with compute tile 0.
+    """
+    if len(tile_sdscs) < 2:
+        return None
+
+    first = tile_sdscs[0]
+    first_body = _body(first)
+    num_cores = int(first_body.get("numCoresUsed_", 0))
+    if num_cores <= 0:
+        return None
+    first_dl = _dl_op(first)
+    out_indices = _producer_output_indices(first_dl)
+    if len(out_indices) != 1:
+        return None
+    out_idx = out_indices[0]
+    layout = _layout_for_lds(first_dl, out_idx)
+    stick_dim = _stick_dim_for_lds(first_dl, out_idx)
+    split_dim = _single_split_dim(first_body.get("numWkSlicesPerDim_", {}))
+    if layout is None or stick_dim is None or split_dim is None:
+        return None
+    iter_sizes = _iter_sizes_for_layout(first_dl, layout)
+    if iter_sizes is None:
+        return None
+
+    second = tile_sdscs[1]
+    second_body = _body(second)
+    if int(second_body.get("numCoresUsed_", 0)) != num_cores:
+        return None
+    second_dl = _dl_op(second)
+    second_out_indices = _producer_output_indices(second_dl)
+    if len(second_out_indices) != 1:
+        return None
+    second_out_idx = second_out_indices[0]
+    if (
+        _layout_for_lds(second_dl, second_out_idx) != layout
+        or _stick_dim_for_lds(second_dl, second_out_idx) != stick_dim
+        or _single_split_dim(second_body.get("numWkSlicesPerDim_", {}))
+        != split_dim
+        or _iter_sizes_for_layout(second_dl, layout) != iter_sizes
+    ):
+        return None
+
+    row_dim = _flash_pipeline_row_dim(layout, split_dim, iter_sizes)
+    if row_dim is None:
+        return None
+    slice_bytes = per_core_same_stick_slice_bytes(
+        iter_sizes,
+        split_dim,
+        stick_dim,
+        STICK_SIZE,
+        num_cores,
+    )
+    tile_bytes = _exact_tile_bytes_for_tiles(slice_bytes, 2)
+    if tile_bytes is None:
+        return None
+    try:
+        bases = allocate_flash_attention_pipeline_bases(
+            num_lanes=2,
+            tile_bytes=tile_bytes,
+            scratch_regions=2,
+            region0=PRODUCER_LX_BASE,
+        )
+    except ValueError:
+        return None
+
+    datadscs, opfuncs, _schedule = build_flash_attention_pipeline_bridge(
+        dim_pool=layout,
+        iter_sizes=iter_sizes,
+        stick_size=STICK_SIZE,
+        num_cores=num_cores,
+        lx_size=DATAOP_LX_SIZE,
+        src_bases=bases["source_bases"],
+        dst_lane_bases=bases["lane_bases"],
+        layout=layout,
+        stick_dim=stick_dim,
+        split_dim=split_dim,
+        row_dim=row_dim,
+        lane_names=["k", "v"],
+        tile_bytes=tile_bytes,
+        overlap=False,
+    )
+    if len(datadscs) < 4:
+        return None
+
+    name = f"{name_prefix}_{tile_index}"
+    artifact = build_flash_attention_pipeline_mixed_sdsc(
+        name,
+        datadscs[:4],
+        opfuncs[:4],
+        flash_pipeline_overlap_prefix_schedule(num_lanes=2, num_cores=num_cores),
+        [copy.deepcopy(first_body["dscs_"][0])],
+        num_cores,
+    )
+    root = artifact[name]
+    for key in (
+        "sdscFoldProps_",
+        "sdscFolds_",
+        "coreFoldProp_",
+        "coreletFoldProp_",
+        "coreIdToDsc_",
+        "numWkSlicesPerDim_",
+        "coreIdToWkSlice_",
+    ):
+        if key in first_body:
+            root[key] = copy.deepcopy(first_body[key])
+    root["flashAttentionPipeline_"].update(
+        {
+            "source": "generated-flash-prefill-overlap-prefix-tile",
+            "row_dim": row_dim,
+            "split_dim": split_dim,
+            "stick_dim": stick_dim,
+            "layout": layout,
+            "iter_sizes": iter_sizes,
+            "tile_bytes": tile_bytes,
+            "tile_index": tile_index,
+            "replaces_sdsc": next(iter(first)),
+            "prefetch_tile_count": 2,
+            "compute_tile_count": 1,
+            "overlap_prefix": True,
+        }
+    )
+    return artifact
 
 
 def _latest_producer_of_hbm(

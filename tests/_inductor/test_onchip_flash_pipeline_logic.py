@@ -184,6 +184,16 @@ def test_flash_pipeline_overlap_schedule_pairs_prefetch_with_compute():
     ]
 
 
+def test_flash_pipeline_overlap_prefix_schedule_stays_one_compute():
+    sched = ob.flash_pipeline_overlap_prefix_schedule(num_lanes=2, num_cores=32)
+    assert sched["0"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [2, 0, 1, 1],
+        [3, -1, 1, 0],
+    ]
+
+
 def test_flash_pipeline_mixed_sdsc_wraps_compute_tiles():
     datadscs, opfuncs, sched = _bridge(overlap=True)
     mixed = ob.build_flash_attention_pipeline_mixed_sdsc(
