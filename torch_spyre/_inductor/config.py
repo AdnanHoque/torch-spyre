@@ -78,4 +78,13 @@ onchip_handoff_realize: bool = (
     os.environ.get("SPYRE_ONCHIP_HANDOFF_REALIZE", "0") == "1"
 )
 
+# Detect maximal same-shard same-core SDSC chains in the realized bundle and
+# keep their activation intermediates LX-resident (producer-output + every
+# consumer-input flipped to the same LX base), with a liveness-aware first-fit
+# packer over the usable LX window. Buffers that do not fit fall back to HBM
+# (edge untouched, correct just not accelerated). Default off; this is the
+# pure-persistence sibling of onchip_handoff_realize (no move, no data-op,
+# stock dxp) and runs after it in the same realization pass.
+onchip_softmax_chain: bool = os.environ.get("SPYRE_ONCHIP_SOFTMAX_CHAIN", "0") == "1"
+
 install_config_module(sys.modules[__name__])

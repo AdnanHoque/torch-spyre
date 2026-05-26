@@ -20,6 +20,7 @@ from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.onchip_realize import realize_onchip_handoff
+from torch_spyre._inductor.onchip_softmax_chain import realize_softmax_chain
 
 
 logger = get_inductor_logger("sdsc_compile")
@@ -57,6 +58,20 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     if config.onchip_handoff_realize:
         if realize_onchip_handoff(sdscs_json):
             logger.info("Realized on-chip same-core handoff")
+
+    # When SPYRE_ONCHIP_SOFTMAX_CHAIN is on, detect maximal same-shard same-core
+    # SDSC chains (the softmax tail in fused SDPA, etc.) and flip their
+    # activation intermediates LX-resident on coordinated bases -- pure
+    # persistence (stock dxp, no data-op). Liveness-aware first-fit over the
+    # usable LX window; buffers that do not fit stay HBM (edge untouched).
+    # Default off -> output byte-identical to before.
+    if config.onchip_softmax_chain:
+        flipped = realize_softmax_chain(sdscs_json)
+        if flipped:
+            logger.info(
+                "Realized on-chip softmax-chain LX persistence (%d endpoints flipped)",
+                flipped,
+            )
 
     # Write JSON SDSCs to file system
     files = []
