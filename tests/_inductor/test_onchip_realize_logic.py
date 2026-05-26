@@ -180,8 +180,24 @@ def _fake_sdsc(
     }
     return {
         f"{idx}_{op}": {
+            "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],
+            "sdscFolds_": {
+                "dim_prop_func": [{"Affine": {"alpha_": 1, "beta_": 0}}],
+                "dim_prop_attr": [{"factor_": 1, "label_": "time"}],
+                "data_": {"[0]": "0"},
+            },
+            "coreFoldProp_": {"factor_": 32, "label_": "core"},
+            "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
             "numCoresUsed_": 32,
+            "coreIdToDsc_": {str(c): 0 for c in range(32)},
             "numWkSlicesPerDim_": shard,
+            "coreIdToWkSlice_": {
+                str(c): {
+                    dim: c if factor == 32 else 0
+                    for dim, factor in shard.items()
+                }
+                for c in range(32)
+            },
             "coreIdToDscSchedule": {},
             "dscs_": [{op: dl}],
         }
@@ -435,6 +451,10 @@ def test_flash_pipeline_artifact_wraps_generated_batchmatmul_tiles():
     assert len(root["dscs_"]) == 3
     assert len(root["datadscs_"]) == 6
     assert root["opFuncsUsed_"] == ["STCDPOpLx"] * 6
+    assert root["numWkSlicesPerDim_"] == {"x": 1, "mb": 32, "out": 1, "in": 1}
+    assert root["coreIdToDsc_"] == _fake_flash_pipeline_sdscs()[0][
+        "0_batchmatmul"
+    ]["coreIdToDsc_"]
     meta = root["flashAttentionPipeline_"]
     assert meta["tile_count"] == 3
     assert meta["dataop_count"] == 6

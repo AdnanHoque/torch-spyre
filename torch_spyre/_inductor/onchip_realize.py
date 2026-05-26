@@ -864,6 +864,17 @@ def build_flash_attention_pipeline_artifact(
         num_cores,
     )
     root = artifact[name]
+    for key in (
+        "sdscFoldProps_",
+        "sdscFolds_",
+        "coreFoldProp_",
+        "coreletFoldProp_",
+        "coreIdToDsc_",
+        "numWkSlicesPerDim_",
+        "coreIdToWkSlice_",
+    ):
+        if key in first_body:
+            root[key] = copy.deepcopy(first_body[key])
     root["flashAttentionPipeline_"].update(
         {
             "source": "generated-flash-prefill-batchmatmul-tiles",
