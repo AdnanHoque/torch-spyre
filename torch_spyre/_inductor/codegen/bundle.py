@@ -91,6 +91,11 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                 logger.info(
                     "Executing mixed flash attention value-flow tile sidecar"
                 )
+            else:
+                logger.warning(
+                    "Requested mixed flash attention value-flow tile was not "
+                    "realizable; keeping generated HBM-backed SDSC"
+                )
         tile_artifacts = build_flash_attention_pipeline_tile_artifacts(sdscs_json)
         sidecar_sdscs.extend(tile_artifacts)
         execute_tile = config.flash_attention_mixed_pipeline_execute_tile
