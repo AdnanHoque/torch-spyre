@@ -1,0 +1,187 @@
+# Stage 015: Flash Pointwise Value-Flow Handoff
+
+Date: 2026-05-26
+
+## Purpose
+
+Stage 014 proved that the first real flash-prefill `batchmatmul` input
+value-flow target is not a Tier 1 same-stick edge.  The next aligned step was to
+look for value-flow that is already legal under the certified `STCDPOpLx`
+contract inside the flash-prefill graph, while keeping the layout-changing
+`batchmatmul` inputs fail-closed.
+
+This stage adds an explicit flash-prefill pointwise handoff gate and fixes the
+generic pointwise realizer so it uses the actual producer/consumer descriptor
+layout and stick dimension instead of assuming the core split dimension is also
+the stick dimension.
+
+## Implementation
+
+New gate:
+
+```sh
+SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF=1
+```
+
+This gate is only active with:
+
+```sh
+SPYRE_FLASH_ATTENTION_MIXED_PIPELINE=1
+```
+
+Code changes:
+
+- `torch_spyre/_inductor/config.py`
+  - Added `SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF`.
+- `torch_spyre/_inductor/codegen/bundle.py`
+  - Allows the existing Tier 1 realizer to run for flash-prefill pointwise
+    edges without requiring the broader `SPYRE_ONCHIP_HANDOFF_REALIZE` flag.
+- `torch_spyre/_inductor/onchip_realize.py`
+  - Added `realize_same_layout_handoff`, which handles same-layout `STCDPOpLx`
+    when the physical stick dimension differs from the split dimension.
+  - Tightened the generic pointwise realization to require:
+    - same physical producer/consumer layout;
+    - one split dimension;
+    - split factor equal to `numCoresUsed_`;
+    - actual consumer layout/stick from `primaryDsInfo_`;
+    - fail-closed behavior for multi-split flash edges.
+- `tests/_inductor/test_onchip_realize_logic.py`
+  - Added a positive synthetic flash pointwise case where layout is
+    `[mb_, x_, out_]`, stick is `x_`, and split is `out_`.
+  - Added a negative multi-split case.
+
+## Bug Found
+
+Before the fix, running flash-prefill with the generic handoff flag:
+
+```sh
+SPYRE_FLASH_ATTENTION_MIXED_PIPELINE=1
+SPYRE_ONCHIP_HANDOFF_REALIZE=1
+SPYRE_ONCHIP_HANDOFF_MIN_BYTES=0
+```
+
+patched a pointwise edge in the second flash bundle but generated an invalid
+data-op descriptor.  DXP failed with:
+
+```text
+DtException: Program verification failed for core 0 node 10_mul
+Error message: Immediate value out of boundary in instruction:
+LX_MVLOOPCNT :: imm:4194304
+```
+
+Root cause: the old generic pointwise realizer built the data-op layout from
+`numWkSlicesPerDim_` and used the split dim as the stick dim.  The real flash
+edge has split `out_` but stick `x_`, so the descriptor took the sub-stick
+2048-frame path and overflowed the immediate field.
+
+## Validation
+
+Local:
+
+```text
+tests/_inductor/test_onchip_realize_logic.py         21/21 passed
+tests/_inductor/test_onchip_flash_pipeline_logic.py   9/9 passed
+tests/_inductor/test_onchip_streaming_logic.py        9/9 passed
+tests/_inductor/test_onchip_handoff_logic.py          3/3 passed
+py_compile(config.py, onchip_realize.py, bundle.py)   passed
+git diff --check                                      passed
+```
+
+Pod:
+
+```text
+adnan-cdx-spyre-dev-pf
+DTI_PROJECT_ROOT=/home/adnan-cdx/dt-inductor-mixed
+PATCHED_DXP=/home/adnan-cdx/dt-inductor-mixed/build/deeptools-onchip-foundation-clean/dxp/dxp_standalone
+worktree=/home/adnan-cdx/dt-inductor-mixed/torch-spyre-core-to-core-primitive
+commit=d6cb1f2
+```
+
+Pod standalone tests:
+
+```text
+tests/_inductor/test_onchip_realize_logic.py         21/21 passed
+tests/_inductor/test_onchip_flash_pipeline_logic.py   9/9 passed
+tests/_inductor/test_onchip_streaming_logic.py        9/9 passed
+tests/_inductor/test_onchip_handoff_logic.py          3/3 passed
+```
+
+Device command:
+
+```sh
+export SPYRE_FLASH_ATTENTION_MIXED_PIPELINE=1
+export SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF=1
+export SPYRE_ONCHIP_HANDOFF_MIN_BYTES=0
+export DXP_DEBUG=1
+export TORCHINDUCTOR_CACHE_DIR=/tmp/sdpa-flash-pointwise-fixed-1779820304
+"$PYTHON" -m pytest tests/inductor/test_building_blocks.py \
+  -k "flash_attention_mixed_pipeline_selects_prefill" -q -s
+```
+
+Result:
+
+```text
+1 passed, 6 deselected in 12.64s
+```
+
+Realized mixed SDSC:
+
+```text
+bundle: sdsc_fused__scaled_dot_product_fused_attention_overrideable_1__fdcgo73
+mixed:  sdsc_10_mul.json
+opFuncsUsed_: ["STCDPOpLx"]
+datadscs_: 1
+```
+
+Value-flow descriptor evidence:
+
+```text
+sdsc_2_add Tensor2 OUTPUT:
+  hbmSize_=0
+  lxSize_=2147483647
+
+sdsc_10_mul Tensor0 input:
+  hbmSize_=0
+  lxSize_=2147483647
+
+dataop:
+  op=STCDPOpLx
+  layoutDimOrder_=[mb_, x_, out_]
+  stickDimOrder_=[x_]
+  dimToLayoutSize_={mb_: 2, x_: 128, out_: 64}
+```
+
+DXP debug evidence:
+
+```text
+debug/sdsc_10_mul/senprog.txt:
+  HBM=0
+  L3_LDU=0
+  L3_STU=0
+  LX_LDSTU=64
+```
+
+The zero L3 counts are expected for this particular pointwise edge: producer and
+consumer ownership already match, so the data-op is an on-core LX materialization
+rather than a remote-core transfer.
+
+## Interpretation
+
+This is not full flash attention yet.  It is the first real value-flow handoff
+inside the flash-prefill graph that is both generated by Torch-Spyre lowering
+and value-correct on hardware under the flash-prefill gate.
+
+The important architectural result is the tightened legality boundary:
+
+- same-layout, same-stick pointwise flash edges can now use `STCDPOpLx` with the
+  actual descriptor stick;
+- multi-split flash pointwise edges fail closed;
+- layout-changing `batchmatmul` inputs remain rejected until PT-LX/restickify or
+  upstream same-layout matmul input production is certified.
+
+The next production SDPA step should attack the Stage 014 `batchmatmul` input
+blocker directly.  The old first-principles branch shows a narrow allocator
+backed `ReStickifyOpWithPTLx -> STCDPOpLx` success for a 2048 fixture, but that
+contract is not yet ported into this branch's SDPA realizer.  For flash-prefill,
+the cleaner next slice is still to make the lowering emit matmul-input-shaped
+Q/K producers before enabling any PT-LX path.
