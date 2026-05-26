@@ -181,6 +181,56 @@ py_compile(onchip_realize.py, test_onchip_realize_logic.py) passed
 git diff --check passed
 ```
 
+## Pod Validation
+
+```text
+pod: adnan-cdx-spyre-dev-pf
+DTI_PROJECT_ROOT=/home/adnan-cdx/dt-inductor-mixed
+
+tests/_inductor/test_onchip_realize_logic.py          30/30 passed
+tests/_inductor/test_onchip_flash_pipeline_logic.py   10/10 passed
+py_compile(onchip_realize.py, test_onchip_realize_logic.py) passed
+git diff --check passed
+```
+
+Device smoke with the overlap flag and the locally patched DXP build still
+failed closed to the serial mixed tile:
+
+```sh
+export SPYRE_FLASH_ATTENTION_MIXED_PIPELINE=1
+export SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_EXECUTE_TILE=0
+export SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_OVERLAP=1
+export SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF=0
+export SPYRE_FLASH_ATTENTION_SCORE_SCALE_HANDOFF=0
+export DXP_DEBUG=1
+export TORCHINDUCTOR_CACHE_DIR=/tmp/sdpa-stage026-overlap-ij-guard-1779828304
+"$PYTHON" -m pytest tests/inductor/test_building_blocks.py \
+  -k "flash_attention_mixed_pipeline_selects_prefill" -q -s
+```
+
+Result:
+
+```text
+1 passed, 7 deselected in 20.52s
+```
+
+Both emitted SDPA bundles stayed serial:
+
+```text
+source=generated-flash-prefill-batchmatmul-tiles
+overlap_prefix=false
+overlap_candidate=false
+dataop_count=2
+tile_count=1
+```
+
+Mixed-tile `senprog.txt` counts:
+
+```text
+bundle 0 sdsc_mixed_flash_pipeline_tile_0: HBM=0 L3_LDU=0 L3_STU=0 LX_LDSTU=192
+bundle 1 sdsc_mixed_flash_pipeline_tile_0: HBM=0 L3_LDU=0 L3_STU=0 LX_LDSTU=160
+```
+
 ## Interpretation
 
 Current Foundation has three separate gaps for using InputFetchNeighbor as the
@@ -198,4 +248,3 @@ mixed tile plus same-stick pointwise/value-flow handoffs.  True flash prefetch
 overlap needs either a generalized Foundation InputFetchNeighbor path for
 batchmatmul/SDPA geometry or a non-InputFetch scheduler contract for overlapping
 ordinary `STCDPOpLx` rows with DL compute rows.
-
