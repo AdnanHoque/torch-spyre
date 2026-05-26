@@ -85,6 +85,7 @@ def _flash_attention_prefill(
     key: torch.Tensor,
     value: torch.Tensor,
     block_size: int,
+    score_scale: float,
 ) -> torch.Tensor:
     if block_size <= 0:
         raise Unsupported(
@@ -116,6 +117,8 @@ def _flash_attention_prefill(
         key_block_t = key_block.transpose(-1, -2).contiguous()
 
         scores = torch.matmul(query, key_block_t)
+        if score_scale != 1.0:
+            scores = scores * score_scale
         scores = scores.transpose(-1, -2).contiguous()
         block_max = torch.amax(scores, dim=-2)
         next_max = torch.maximum(max_running, block_max)
@@ -596,13 +599,9 @@ def spyre__sdpa_overrideable(
     max_seqlen_q = query.size(2)
     max_seqlen_kv = key.size(2)
 
-    scaling_factor = scale
-    if scaling_factor is None:
-        scaling_factor = 1.0 / math.sqrt(query.shape[-1])
-    scaling_factor = math.sqrt(scaling_factor)
-
-    query = query * scaling_factor
-    key = key * scaling_factor
+    score_scale = scale
+    if score_scale is None:
+        score_scale = 1.0 / math.sqrt(query.shape[-1])
 
     expansion = num_heads // num_kvheads
     if expansion != 1:
@@ -628,8 +627,12 @@ def spyre__sdpa_overrideable(
             key,
             value,
             config.flash_attention_prefill_block_size,
+            score_scale,
         )
     else:
+        scaling_factor = math.sqrt(score_scale)
+        query = query * scaling_factor
+        key = key * scaling_factor
         key_t = key.transpose(-2, -1)
         attn = torch.matmul(query, key_t)
 
