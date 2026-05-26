@@ -38,6 +38,7 @@ def _read_flash_config(extra_env=None):
     for key in list(env):
         if key.startswith("SPYRE_FLASH_ATTENTION_"):
             env.pop(key)
+    env["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
     if extra_env:
         env.update(extra_env)
 
