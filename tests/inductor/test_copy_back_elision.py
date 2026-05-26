@@ -25,6 +25,7 @@ import torch
 from torch._inductor.utils import run_and_get_code
 
 import torch_spyre  # noqa: F401
+from torch_spyre._inductor import config as spyre_inductor_config
 
 
 DEVICE = torch.device("spyre")
@@ -101,21 +102,40 @@ def test_required_copy_backs_are_preserved():
         torch.mm(x, y, out=z)
         return z
 
-    for fn in (reads_old_destination, returns_destination):
+    def returns_producer_alongside_copy(x, y, z):
+        # ``m`` is returned as well as copied into ``z``. Aliasing src -> dst
+        # would silently make the returned tensor share storage with ``z``.
+        m = torch.mm(x, y)
+        z.copy_(m)
+        return m, z + 1.0
+
+    for fn in (
+        reads_old_destination,
+        returns_destination,
+        returns_producer_alongside_copy,
+    ):
         expected_z = z.clone()
         expected = fn(x, y, expected_z)
         actual, source, device_args = _compile_and_source(fn, x, y, z)
 
-        torch.testing.assert_close(actual.cpu(), expected, atol=0.1, rtol=0.1)
+        if isinstance(expected, tuple):
+            torch.testing.assert_close(
+                tuple(t.cpu() for t in actual), expected, atol=0.1, rtol=0.1
+            )
+        else:
+            torch.testing.assert_close(actual.cpu(), expected, atol=0.1, rtol=0.1)
         torch.testing.assert_close(device_args[2].cpu(), expected_z, atol=0.1, rtol=0.1)
         assert "sdsc_fused_copy" in source
 
 
 def test_mm_out_copy_back_elided_with_greedy_optimizer(monkeypatch):
-    # GLOBAL_STICK_OPTIMIZER=0 exercises greedy_local_min_cost, which commits
-    # the producer's STL unconditionally (no mutation-op guard). The pass pins
+    # Exercise greedy_local_min_cost, which commits the producer's STL
+    # unconditionally (no mutation-op guard like beam has). The pass pins
     # ``op.layouts = [target_stl]`` precisely so this path commits the right STL.
-    monkeypatch.setenv("GLOBAL_STICK_OPTIMIZER", "0")
+    # ``config.global_stick_optimizer`` is materialised from GLOBAL_STICK_OPTIMIZER
+    # at module import time; patch the loaded attribute directly so the change
+    # is observed by the running compile.
+    monkeypatch.setattr(spyre_inductor_config, "global_stick_optimizer", False)
 
     torch.manual_seed(0xAFFE)
     x = torch.randn(SIZE, SIZE, dtype=torch.float16)

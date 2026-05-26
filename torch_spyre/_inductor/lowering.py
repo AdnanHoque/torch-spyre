@@ -737,20 +737,20 @@ def _peel(node):
     return node
 
 
-def _is_dst_returned_by_graph(dst_name: str) -> bool:
-    """Whether ``dst_name`` is reachable as a graph output.
+def _is_returned_by_graph(dst_name: str, src_fx_node) -> bool:
+    """Whether ``dst`` or ``src`` is reachable as a graph output.
 
     ``V.graph.graph_outputs`` is not populated until the end of FX-to-IR
     lowering, so for an in-flight ``copy_`` we scan the FX graph's ``output``
-    node directly. Two return forms appear in functionalised graphs:
+    node directly. Three return forms must reject elision:
 
-    - The placeholder itself, e.g. ``return (arg2_1,)``.
+    - The dst placeholder itself, e.g. ``return (arg2_1,)``.
     - The ``copy_`` node whose first arg (mutation target) is the placeholder,
       e.g. ``return (copy_(arg2_1, mm),)`` — the canonical form when the user
       wrote ``mm(out=z); return z``.
-
-    Both indicate the caller will observe the mutated input, which means we
-    must keep the explicit copy kernel rather than aliasing src → dst.
+    - The ``src`` FX node directly, e.g. ``return (mm,)`` alongside the
+      ``copy_(arg2_1, mm)`` epilogue. Aliasing src → dst would silently make
+      the returned tensor share storage with ``dst``.
     """
     fx_graph = getattr(V.graph, "graph", None)
     if fx_graph is None:
@@ -765,6 +765,8 @@ def _is_dst_returned_by_graph(dst_name: str) -> bool:
             if not isinstance(arg, torch.fx.Node):
                 continue
             if arg.name == dst_name:
+                return True
+            if src_fx_node is not None and arg is src_fx_node:
                 return True
             if arg.op == "call_function" and "copy_" in str(arg.target):
                 if arg.args and isinstance(arg.args[0], torch.fx.Node):
@@ -845,7 +847,17 @@ def _can_elide_copy_back_at_lowering(dst, src) -> bool:
     dst_name = dst_buf.get_name()
     if dst_name not in V.graph.graph_input_names:
         return False
-    if _is_dst_returned_by_graph(dst_name):
+    # The src FX node — second arg of the in-flight copy_ — is checked
+    # against graph outputs so we don't silently alias a returned tensor.
+    current_node = getattr(V.graph, "current_node", None)
+    src_fx_node = (
+        current_node.args[1]
+        if current_node is not None and len(current_node.args) >= 2
+        else None
+    )
+    if not isinstance(src_fx_node, torch.fx.Node):
+        src_fx_node = None
+    if _is_returned_by_graph(dst_name, src_fx_node):
         return False
     if _target_already_mutated(dst_name):
         return False
