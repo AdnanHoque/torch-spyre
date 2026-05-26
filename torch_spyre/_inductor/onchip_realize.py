@@ -149,6 +149,60 @@ def realize_same_core_handoff(
     )
 
 
+def realize_same_layout_handoff(
+    iter_sizes: dict[str, int],
+    layout: list[str],
+    stick_dim: str,
+    split_dim: str,
+    stick_size: int,
+    num_cores: int,
+    producer_ldsidx: int,
+    consumer_ldsidx: int,
+    capacity: int = LX_CAPACITY_BYTES,
+    region0: int = 0,
+) -> OnChipRealization | None:
+    """Build a same-layout STCDP handoff when split and stick can differ."""
+    if split_dim not in iter_sizes or iter_sizes[split_dim] % num_cores != 0:
+        return None
+    slice_bytes = _reserve_bridge_region_bytes(
+        per_core_same_stick_slice_bytes(
+            iter_sizes,
+            split_dim,
+            stick_dim,
+            stick_size,
+            num_cores,
+        )
+    )
+    try:
+        bases = allocate_lx_bases(2, slice_bytes, capacity=capacity, region0=region0)
+    except ValueError:
+        return None
+    producer_base, consumer_base = bases
+    datadscs, opfuncs, sched = build_same_layout_bridge(
+        dim_pool=layout,
+        iter_sizes=iter_sizes,
+        stick_size=stick_size,
+        num_cores=num_cores,
+        lx_size=DATAOP_LX_SIZE,
+        src_base=producer_base,
+        dst_base=consumer_base,
+        layout=layout,
+        stick_dim=stick_dim,
+        src_split_dim=split_dim,
+        dst_split_dim=split_dim,
+    )
+    return OnChipRealization(
+        producer_base=producer_base,
+        consumer_base=consumer_base,
+        slice_bytes=slice_bytes,
+        producer_flip=LxFlip(producer_ldsidx, producer_base, "producer-output"),
+        consumer_flip=LxFlip(consumer_ldsidx, consumer_base, "consumer-input"),
+        datadscs=datadscs,
+        opfuncs=opfuncs,
+        schedule=sched,
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class StreamedRealization:
     """A realized streamed handoff: 2 fixed tile bases + K-tile mixed-DSC parts."""
@@ -1168,27 +1222,53 @@ def realize_onchip_handoff(
     if edge is None:
         return False
     prod, cons, out_idx, in_idx = edge
-    shard = cons[next(iter(cons))]["numWkSlicesPerDim_"]
-    split = [d for d, v in shard.items() if v > 1]
-    if len(split) != 1:
+    prod_dl = _dl_op(prod)
+    cons_dl = _dl_op(cons)
+    prod_layout = _layout_for_lds(prod_dl, out_idx)
+    prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
+    cons_layout = _layout_for_lds(cons_dl, in_idx)
+    cons_stick = _stick_dim_for_lds(cons_dl, in_idx)
+    if (
+        prod_layout is None
+        or prod_stick is None
+        or cons_layout is None
+        or cons_stick is None
+        or not _same_physical_stick_layout(
+            prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
+        )
+    ):
         return False
-    num_cores = shard[split[0]]
-    layout = [f"{d}_" for d in shard]
-    iter_sizes = _iter_sizes_from_dl(_dl_op(cons), shard)
+
+    shard = cons[next(iter(cons))]["numWkSlicesPerDim_"]
+    split_dim = _single_split_dim(shard)
+    if split_dim is None:
+        return False
+    num_cores = int(_body(cons).get("numCoresUsed_", 0))
+    split_factor = _split_factor(shard, split_dim)
+    if num_cores <= 0 or split_factor != num_cores:
+        return False
+    layout = cons_layout
+    stick_dim = cons_stick
+    iter_sizes = _iter_sizes_for_layout(cons_dl, layout)
     if iter_sizes is None:
         return False
-    split_dim = f"{split[0]}_"
     slice_bytes = _reserve_bridge_region_bytes(
-        per_core_slice_bytes(iter_sizes, split_dim, STICK_SIZE, num_cores)
+        per_core_same_stick_slice_bytes(
+            iter_sizes,
+            split_dim,
+            stick_dim,
+            STICK_SIZE,
+            num_cores,
+        )
     )
     # Tier branch: single 2-region move when 2*slice fits (slice <= half cap);
     # else stream through 2 fixed tile buffers; else fail-closed. The add->add
     # 2048 case stays the single move (slice == 256 KB << half cap), byte-identical.
     if slice_bytes <= STREAM_THRESHOLD:
-        realization = realize_same_core_handoff(
+        realization = realize_same_layout_handoff(
             iter_sizes=iter_sizes,
             layout=layout,
-            stick_dim=split_dim,
+            stick_dim=stick_dim,
             split_dim=split_dim,
             stick_size=STICK_SIZE,
             num_cores=num_cores,
@@ -1196,11 +1276,13 @@ def realize_onchip_handoff(
             consumer_ldsidx=in_idx,
             region0=PRODUCER_LX_BASE,
         )
+    elif stick_dim != split_dim:
+        return False
     else:
         realization = realize_streamed_handoff(
             iter_sizes=iter_sizes,
             layout=layout,
-            stick_dim=split_dim,
+            stick_dim=stick_dim,
             split_dim=split_dim,
             stick_size=STICK_SIZE,
             num_cores=num_cores,

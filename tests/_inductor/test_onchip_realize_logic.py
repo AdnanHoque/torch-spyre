@@ -356,6 +356,52 @@ def _fake_flash_pipeline_sdscs(num_tiles=3):
     return sdscs
 
 
+def _fake_flash_pointwise_sdscs(multisplit=False):
+    shared_addr = 4096
+    shard = {"mb": 1, "x": 1, "out": 32}
+    if multisplit:
+        shard = {"mb": 2, "x": 1, "out": 16}
+    pdi = {
+        "INPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["x"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["x"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["x"],
+            "stickSize_": [64],
+        },
+    }
+    producer = _fake_sdsc(
+        0,
+        "add",
+        shard,
+        {"mb_": 2, "x_": 128, "out_": 64},
+        [("Tensor0-idx0", "INPUT", 1024)],
+        [("Tensor2-idx2", "OUTPUT", shared_addr)],
+        pdi,
+    )
+    consumer = _fake_sdsc(
+        1,
+        "mul",
+        shard,
+        {"mb_": 2, "x_": 128, "out_": 64},
+        [
+            ("Tensor0-idx0", "INPUT", shared_addr),
+            ("Tensor1-idx1", "KERNEL", 8192),
+        ],
+        [("Tensor2-idx2", "OUTPUT", 12288)],
+        pdi,
+    )
+    return [producer, consumer]
+
+
 def test_attention_score_handoff_bridges_full_score_fanout():
     sdscs = _fake_attention_sdscs()
     assert rz.realize_onchip_handoff(
@@ -439,6 +485,23 @@ def test_static_matmul_handoff_rejects_layout_change_and_fanout():
         )
         is None
     )
+
+
+def test_pointwise_handoff_uses_actual_stick_when_split_differs():
+    sdscs = _fake_flash_pointwise_sdscs()
+    assert rz.realize_onchip_handoff(sdscs, min_handoff_bytes=0)
+    root = sdscs[1]["1_mul"]
+    dataop = root["datadscs_"][0]["0_STCDPOpLx_dataop"]
+    in_ld = dataop["labeledDs_"][0]
+    assert root["opFuncsUsed_"] == ["STCDPOpLx"]
+    assert in_ld["layoutDimOrder_"] == ["mb_", "x_", "out_"]
+    assert in_ld["stickDimOrder_"] == ["x_"]
+    assert in_ld["dimToLayoutSize_"] == {"mb_": 2, "x_": 128, "out_": 64}
+
+
+def test_pointwise_handoff_rejects_multisplit_flash_edge():
+    sdscs = _fake_flash_pointwise_sdscs(multisplit=True)
+    assert not rz.realize_onchip_handoff(sdscs, min_handoff_bytes=0)
 
 
 def test_flash_value_flow_tile_flips_real_single_consumer_edge():

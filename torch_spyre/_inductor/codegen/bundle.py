@@ -59,7 +59,13 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     # into a mixed DL+data-op SuperDSC (LX-resident handoff, no HBM round trip).
     # Default off -> output byte-identical to before. Needs the deeptools
     # Foundation gate + a device build to execute, so default fail-closed.
-    if config.onchip_handoff_realize:
+    if (
+        config.onchip_handoff_realize
+        or (
+            config.flash_attention_mixed_pipeline
+            and config.flash_attention_pointwise_handoff
+        )
+    ):
         if realize_onchip_handoff(
             sdscs_json,
             attention_score_handoff=config.onchip_attention_score_handoff,

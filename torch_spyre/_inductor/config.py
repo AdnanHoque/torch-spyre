@@ -80,6 +80,12 @@ flash_attention_mixed_pipeline_execute_tile: int = int(
 flash_attention_mixed_pipeline_value_flow_tile: int = int(
     os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_VALUE_FLOW_TILE", "-1")
 )
+# Default-off production-shaped bridge for same-stick pointwise edges that appear
+# inside the flash-prefill graph. This keeps the attention experiment off the
+# generic add/add handoff flag while reusing the same fail-closed Tier 1 realizer.
+flash_attention_pointwise_handoff: bool = (
+    os.environ.get("SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF", "0") == "1"
+)
 
 # --- Tier 0: ring-aware restickify (telemetry + producer-aligned work division) ---
 # Default-off ring byte-hop telemetry for compiler-inserted restickifies.
