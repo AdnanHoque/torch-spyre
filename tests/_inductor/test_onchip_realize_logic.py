@@ -574,7 +574,13 @@ def test_flash_score_scale_handoff_realizes_batchmatmul_to_mul():
     assert edge["layout"] == ["mb_", "x_", "out_"]
     assert edge["stick_dim"] == "out_"
     assert edge["split_dim"] == "mb_"
-    assert rz.realize_flash_attention_pointwise_handoffs(sdscs) == 1
+    assert (
+        rz.realize_flash_attention_pointwise_handoffs(
+            sdscs,
+            score_scale_handoff=True,
+        )
+        == 1
+    )
     assert rz._lds_by_idx(rz._dl_op(sdscs[0]), 2)["hbmSize_"] == 0
     assert rz._lds_by_idx(rz._dl_op(sdscs[1]), 0)["hbmSize_"] == 0
     body = sdscs[1]["1_mul"]
@@ -582,6 +588,16 @@ def test_flash_score_scale_handoff_realizes_batchmatmul_to_mul():
     dataop = body["datadscs_"][0]["0_STCDPOpLx_dataop"]
     assert dataop["labeledDs_"][0]["layoutDimOrder_"] == ["mb_", "x_", "out_"]
     assert dataop["labeledDs_"][0]["stickDimOrder_"] == ["out_"]
+
+
+def test_flash_score_scale_handoff_is_default_disabled():
+    sdscs = _fake_flash_score_scale_sdscs()
+    assert rz.realize_flash_attention_pointwise_handoffs(sdscs) == 0
+    assert rz._hbm_base(rz._dl_op(sdscs[0]), 2) == "4096"
+    assert rz._hbm_base(rz._dl_op(sdscs[1]), 0) == "4096"
+    assert "coreStateInit_" not in rz._lds_by_idx(rz._dl_op(sdscs[0]), 2)
+    assert "coreStateInit_" not in rz._lds_by_idx(rz._dl_op(sdscs[1]), 0)
+    assert "datadscs_" not in sdscs[1]["1_mul"]
 
 
 def test_flash_value_flow_tile_flips_real_single_consumer_edge():

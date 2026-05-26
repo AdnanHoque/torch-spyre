@@ -86,6 +86,14 @@ flash_attention_mixed_pipeline_value_flow_tile: int = int(
 flash_attention_pointwise_handoff: bool = (
     os.environ.get("SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF", "0") == "1"
 )
+# Experimental diagnostic for the flash score-scale edge:
+#     PT batchmatmul score output -> scalar SFP mul input.
+# Stage 019 proves that the compiler can emit a same-layout STCDPOpLx bridge for
+# this edge, but device value flow is not yet certified, so keep it separate
+# from the working pointwise-chain handoff flag.
+flash_attention_score_scale_handoff: bool = (
+    os.environ.get("SPYRE_FLASH_ATTENTION_SCORE_SCALE_HANDOFF", "0") == "1"
+)
 
 # --- Tier 0: ring-aware restickify (telemetry + producer-aligned work division) ---
 # Default-off ring byte-hop telemetry for compiler-inserted restickifies.

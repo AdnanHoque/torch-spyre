@@ -1410,13 +1410,17 @@ def realize_flash_score_scale_handoff(sdscs_json: list[dict]) -> bool:
     return _realize_handoff_edge(edge)
 
 
-def realize_flash_attention_pointwise_handoffs(sdscs_json: list[dict]) -> int:
+def realize_flash_attention_pointwise_handoffs(
+    sdscs_json: list[dict],
+    *,
+    score_scale_handoff: bool = False,
+) -> int:
     """Realize every legal same-layout flash handoff in one flash bundle."""
     count = 0
     # One realization mutates the graph by turning an HBM producer output into an
     # LX endpoint, so at most one new edge can disappear per SDSC iteration.
     for _ in range(len(sdscs_json)):
-        if realize_flash_score_scale_handoff(sdscs_json):
+        if score_scale_handoff and realize_flash_score_scale_handoff(sdscs_json):
             count += 1
             continue
         if not realize_pointwise_handoff(sdscs_json):

@@ -72,7 +72,10 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         config.flash_attention_mixed_pipeline
         and config.flash_attention_pointwise_handoff
     ):
-        count = realize_flash_attention_pointwise_handoffs(sdscs_json)
+        count = realize_flash_attention_pointwise_handoffs(
+            sdscs_json,
+            score_scale_handoff=config.flash_attention_score_scale_handoff,
+        )
         if count:
             logger.info(f"Realized {count} flash pointwise on-chip handoffs")
     sidecar_sdscs = []
