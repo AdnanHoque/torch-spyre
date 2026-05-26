@@ -159,6 +159,62 @@ py_compile(onchip_realize.py, test_onchip_realize_logic.py) passed
 git diff --check passed
 ```
 
+## Pod Validation
+
+```text
+pod: adnan-cdx-spyre-dev-pf
+DTI_PROJECT_ROOT=/home/adnan-cdx/dt-inductor-mixed
+
+tests/_inductor/test_onchip_realize_logic.py          29/29 passed
+tests/_inductor/test_onchip_flash_pipeline_logic.py   10/10 passed
+py_compile(onchip_realize.py, test_onchip_realize_logic.py) passed
+git diff --check passed
+```
+
+Device smoke with the overlap flag still fails closed to the serial mixed tile:
+
+```sh
+export SPYRE_FLASH_ATTENTION_MIXED_PIPELINE=1
+export SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_EXECUTE_TILE=0
+export SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_OVERLAP=1
+export SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF=0
+export SPYRE_FLASH_ATTENTION_SCORE_SCALE_HANDOFF=0
+export DXP_DEBUG=1
+export TORCHINDUCTOR_CACHE_DIR=/tmp/sdpa-stage025-overlap-transfer-guard-1779827660
+"$PYTHON" -m pytest tests/inductor/test_building_blocks.py \
+  -k "flash_attention_mixed_pipeline_selects_prefill" -q -s
+```
+
+Result:
+
+```text
+1 passed, 7 deselected in 18.73s
+```
+
+Both emitted SDPA bundles stayed on the serial one-compute schedule:
+
+```text
+source=generated-flash-prefill-batchmatmul-tiles
+overlap_prefix=false
+overlap_candidate=false
+dataop_count=2
+tile_count=1
+
+core 0 schedule:
+[
+  [0, -1, 0, 1],
+  [1, -1, 1, 1],
+  [-1, 0, 1, 0],
+]
+```
+
+Mixed-tile `senprog.txt` counts:
+
+```text
+bundle 0 sdsc_mixed_flash_pipeline_tile_0: HBM=0 L3_LDU=0 L3_STU=0 LX_LDSTU=192
+bundle 1 sdsc_mixed_flash_pipeline_tile_0: HBM=0 L3_LDU=0 L3_STU=0 LX_LDSTU=160
+```
+
 ## Interpretation
 
 The current mixed-SDSC overlap route is not simply missing an LX flip.  It needs
@@ -174,4 +230,3 @@ The next real implementation path is one of:
    lowering, with valid DSC2 loop-node context;
 3. get Foundation support for ordinary `STCDPOpLx` data-op rows overlapped with
    DL compute rows without routing through InputFetchNeighbor.
-
