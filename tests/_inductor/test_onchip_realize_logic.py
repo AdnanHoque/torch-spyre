@@ -841,47 +841,31 @@ def test_flash_pipeline_overlap_prefix_tile_artifacts_overlap_one_compute():
     assert root2["flashAttentionPipeline_"]["overlap_prefix"] is False
 
 
-def test_flash_pipeline_overlap_prefix_rejects_hbm_backed_compute():
+def test_flash_pipeline_overlap_prefix_allows_hbm_backed_compute():
     artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
         _fake_flash_pipeline_sdscs(num_tiles=3),
         overlap_prefix=True,
     )
     root0 = artifacts[0]["mixed_flash_pipeline_tile_0"]
     assert len(root0["dscs_"]) == 1
-    assert len(root0["datadscs_"]) == 2
-    assert root0["flashAttentionPipeline_"]["overlap_prefix"] is False
-    assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
-    assert root0["flashAttentionPipeline_"]["overlap_prefix_requested"] is True
-    reasons = root0["flashAttentionPipeline_"][
-        "overlap_prefix_rejection_reasons"
-    ]
-    assert set(reasons) >= {
-        "compute_dsc:lds0_pinned_hbm",
-        "compute_dsc:input_lds0_pinned_hbm",
-        "compute_dsc:input_layout_missing_i_j",
-        "compute_dsc:missing_no_component_to_lx_transfer_lds0",
-    }
+    assert len(root0["datadscs_"]) == 4
+    assert root0["flashAttentionPipeline_"]["overlap_prefix"] is True
+    assert root0["flashAttentionPipeline_"]["overlap_candidate"] is True
 
 
-def test_flash_pipeline_overlap_prefix_rejects_lx_compute_without_transfer():
+def test_flash_pipeline_overlap_prefix_allows_lx_compute_without_transfer():
     artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
         _fake_flash_pipeline_sdscs(num_tiles=3, lx_pinned=True),
         overlap_prefix=True,
     )
     root0 = artifacts[0]["mixed_flash_pipeline_tile_0"]
     assert len(root0["dscs_"]) == 1
-    assert len(root0["datadscs_"]) == 2
-    assert root0["flashAttentionPipeline_"]["overlap_prefix"] is False
-    assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
-    assert root0["flashAttentionPipeline_"][
-        "overlap_prefix_rejection_reasons"
-    ] == [
-        "compute_dsc:input_layout_missing_i_j",
-        "compute_dsc:missing_no_component_to_lx_transfer_lds0",
-    ]
+    assert len(root0["datadscs_"]) == 4
+    assert root0["flashAttentionPipeline_"]["overlap_prefix"] is True
+    assert root0["flashAttentionPipeline_"]["overlap_candidate"] is True
 
 
-def test_flash_pipeline_overlap_prefix_rejects_non_ij_input_neighbor_shape():
+def test_flash_pipeline_overlap_prefix_allows_non_ij_shape():
     artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
         _fake_flash_pipeline_sdscs(
             num_tiles=3,
@@ -892,12 +876,9 @@ def test_flash_pipeline_overlap_prefix_rejects_non_ij_input_neighbor_shape():
     )
     root0 = artifacts[0]["mixed_flash_pipeline_tile_0"]
     assert len(root0["dscs_"]) == 1
-    assert len(root0["datadscs_"]) == 2
-    assert root0["flashAttentionPipeline_"]["overlap_prefix"] is False
-    assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
-    assert root0["flashAttentionPipeline_"][
-        "overlap_prefix_rejection_reasons"
-    ] == ["compute_dsc:input_layout_missing_i_j"]
+    assert len(root0["datadscs_"]) == 4
+    assert root0["flashAttentionPipeline_"]["overlap_prefix"] is True
+    assert root0["flashAttentionPipeline_"]["overlap_candidate"] is True
 
 
 def test_flash_pipeline_overlap_prefix_rejects_mismatched_next_tile():

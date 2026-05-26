@@ -1210,11 +1210,7 @@ def flash_attention_overlap_prefix_rejection_reasons(
     except ValueError:
         return ["lx_allocation_exceeds_capacity"]
 
-    compute_dsc = copy.deepcopy(first_body["dscs_"][0])
-    return [
-        f"compute_dsc:{reason}"
-        for reason in _input_fetch_neighbor_rejection_reasons(compute_dsc)
-    ]
+    return []
 
 
 def build_flash_attention_pipeline_overlap_prefix_tile_artifact(
@@ -1314,8 +1310,6 @@ def build_flash_attention_pipeline_overlap_prefix_tile_artifact(
 
     name = f"{name_prefix}_{tile_index}"
     compute_dsc = copy.deepcopy(first_body["dscs_"][0])
-    if not _input_fetch_neighbor_compute_eligible(compute_dsc):
-        return None
 
     artifact = build_flash_attention_pipeline_mixed_sdsc(
         name,
