@@ -605,7 +605,7 @@ def _matmul_names_unsafe_for_2d(operations: list[Operation]) -> set[str]:
     return unsafe
 
 
-def _2d_split_would_fire(
+def _mn_cosplit_would_fire_2d(
     op: ComputedBuffer,
     it_space_adjusted: dict[Symbol, Expr],
     output_td: TensorDep,
@@ -614,7 +614,12 @@ def _2d_split_would_fire(
     max_cores: int,
     unsafe_for_2d: set[str],
 ) -> bool:
-    """True if _maybe_2d_mn_split would produce a 2D split for this op."""
+    """True if _maybe_mn_cosplit would fire on this op (2D matmul case).
+
+    Used by k_fast to defer to the mn-cosplit when both could fire. Only the
+    2D-matmul case is checked here because k_fast's own gate (output_dims==2)
+    already bails for bmm, so the bmm-cosplit path is moot for that caller.
+    """
     if not config.two_d_mn_split:
         return False
     if op.get_name() in unsafe_for_2d:
@@ -682,7 +687,7 @@ def _mn_cosplit(m_size: int, n_sticks: int, cores: int) -> tuple[int, int]:
     return 0, 0
 
 
-def _maybe_2d_mn_split(
+def _maybe_mn_cosplit(
     op: ComputedBuffer,
     splits: dict[Symbol, int],
     it_space_adjusted: dict[Symbol, Expr],
@@ -691,19 +696,23 @@ def _maybe_2d_mn_split(
     committed_splits: dict[Symbol, int],
     max_cores: int,
     unsafe_for_2d: set[str],
-    input_tds: list[TensorDep] | None = None,
+    input_tds: list[TensorDep],
 ) -> dict[Symbol, int]:
-    """Replace a matmul's pure-m work-split with a 2D m x n co-split.
+    """Replace a matmul's pure-M default split with an M x N co-split.
 
-    A pure m-split (m split, n and k not) is HBM-slow; co-splitting n
-    instead runs ~2-3.7x faster (verified). Only fires on a pure m-split
-    BATCH_MATMUL_OP with no span_reduction commitments and no non-matmul
-    fusion neighbour (see _matmul_names_unsafe_for_2d).
+    A pure m-split is HBM-slow; co-splitting M and N runs 2-3.7x faster on 2D
+    matmul (see tests/diag_hbm_bank_aware_findings.md) and ~1.5-3x on bmm
+    (where the default also wastes the batch dim by iterating).
 
-    For a true bmm (a batch dim present), the batch is left iterated within
-    cores (the default planner pipelines that well) and M x N is co-split
-    across all cores, mirroring the 2D rule (~1.5x on large-K bmm, parity
-    otherwise). M is identified by input deps, not by size.
+    M is identified by **input deps**: it is the non-stick output dim that
+    appears in exactly one input (the LHS). For 2D matmul this is the single
+    non-stick dim; for a true bmm this distinguishes M from the batch dim
+    (which appears in both inputs). Batch dims are left iterated within
+    cores -- the default planner pipelines that well.
+
+    Fires only when the default planner produced a pure single-dim split on
+    M itself (the HBM-slow pattern). Otherwise leaves ``splits`` untouched.
+    Never reduces total core utilisation vs the default.
     """
     if op.get_name() in unsafe_for_2d:
         return splits
@@ -713,51 +722,17 @@ def _maybe_2d_mn_split(
         return splits
     if committed_splits:
         return splits
-    # Of the two output coord vars, the n dim is also a stick var; m is not.
+
     output_coord_vars = {
         v for e in output_td.device_coords[:-1] for v in e.free_symbols
     }
     n_dims = [d for d in output_coord_vars if d in stick_vars]
     m_dims = [d for d in output_coord_vars if d not in stick_vars]
-    # One stick (N) dim required. A 2D matmul has exactly one non-stick output
-    # dim (M); a true bmm has extra non-stick output dim(s) — the batch.
     if len(n_dims) != 1 or not m_dims:
         return splits
     n_dim = n_dims[0]
 
-    if len(m_dims) == 1:
-        # ===== 2D matmul: unchanged behaviour =====
-        m_dim = m_dims[0]
-        # verified regime is a *pure* m-split: m split, nothing else
-        if splits.get(m_dim, 1) <= 1:
-            return splits
-        if any(v > 1 for d, v in splits.items() if d is not m_dim):
-            return splits
-        n_sticks = concretize_expr(it_space_adjusted[n_dim])
-        m_size = concretize_expr(it_space_adjusted[m_dim])
-        m_split, n_split = _mn_cosplit(m_size, n_sticks, max_cores)
-        if n_split <= 1 or m_split <= 1:
-            # Fallback to the prior cap-style rule
-            n_split = core_split(n_sticks, min(8, max_cores))
-            if n_split <= 1:
-                return splits
-            m_split = core_split(m_size, max_cores // n_split)
-        logger.debug(
-            f"2d_mn_split work_division {op.get_name()}: "
-            f"m-split {splits[m_dim]} -> ({m_split}, {n_split}) (m x n) "
-            f"[n_sticks={n_sticks} target_m={m_split}]"
-        )
-        splits = dict(splits)
-        splits[m_dim] = m_split
-        splits[n_dim] = n_split
-        return splits
-
-    # ===== true bmm: co-split M x N, leave batch iterated =====
-    if not input_tds:
-        return splits
-    # M is the non-stick output dim that appears in exactly one input (the LHS);
-    # batch dims appear in both inputs. Identify M by deps, not by size, so a
-    # decode shape (batch > M) is never mistaken for an M to co-split.
+    # Identify M via input deps (works uniformly for 2D and bmm).
     def _n_inputs(dim: Symbol) -> int:
         return sum(
             1
@@ -767,26 +742,40 @@ def _maybe_2d_mn_split(
 
     m_candidates = [d for d in m_dims if _n_inputs(d) == 1]
     if len(m_candidates) != 1:
-        return splits  # can't identify M unambiguously — leave to default
+        return splits  # can't identify M unambiguously
     m_dim = m_candidates[0]
-    # Only fire when the default planner pure-split M itself (the HBM-slow
-    # pattern). If it split a batch dim (e.g. decode M=1), leave it alone.
+
+    # Only fire when the default planner pure-split M (the HBM-slow pattern).
+    # If it split a batch dim (e.g. decode M=1) or nothing/multiple dims,
+    # leave it alone.
     split_dims = [d for d, v in splits.items() if v > 1]
     if len(split_dims) != 1 or split_dims[0] is not m_dim:
         return splits
+
     n_sticks = concretize_expr(it_space_adjusted[n_dim])
     m_size = concretize_expr(it_space_adjusted[m_dim])
+
     m_split, n_split = _mn_cosplit(m_size, n_sticks, max_cores)
     if n_split <= 1 or m_split <= 1:
-        return splits
+        # Fallback: cap N-band at 8 sticks and split M with whatever cores
+        # remain. Same shape as the divisor-walk failure path the original
+        # 2D rule used.
+        n_split = core_split(n_sticks, min(8, max_cores))
+        if n_split <= 1:
+            return splits
+        m_split = core_split(m_size, max_cores // n_split)
+
     new_splits = dict(splits)
     new_splits[m_dim] = m_split
     new_splits[n_dim] = n_split
+    # Sanity: never use fewer cores than the default split.
     if math.prod(new_splits.values()) < math.prod(splits.values()):
         return splits
+
     logger.debug(
-        f"2d_mn_split work_division {op.get_name()} (bmm): "
-        f"m-split {splits.get(m_dim, 1)} -> ({m_split}, {n_split}) (m x n) "
+        f"mn_cosplit work_division {op.get_name()}"
+        f"{' (bmm)' if len(m_dims) > 1 else ''}: "
+        f"m-split {splits[m_dim]} -> ({m_split}, {n_split}) (m x n) "
         f"[m_size={m_size} n_sticks={n_sticks}]"
     )
     return new_splits
@@ -853,7 +842,7 @@ def work_distribution_pass(
         committed_splits,
     )
     if config.two_d_mn_split:
-        splits = _maybe_2d_mn_split(
+        splits = _maybe_mn_cosplit(
             op,
             splits,
             it_space_adjusted,
@@ -1098,7 +1087,7 @@ def _k_fast_divide_op(
     # Defer to the 2D m×n rule when it would fire on this op: 2D beats k_fast
     # by 1.2-3.6x in the m-split regime (verified across n=256..2048 at m=512).
     # See tests/diag_hbm_bank_aware_findings.md.
-    if _2d_split_would_fire(
+    if _mn_cosplit_would_fire_2d(
         op, it_space_adjusted, output_td, stick_vars, span_committed,
         max_cores, unsafe_for_2d,
     ):
