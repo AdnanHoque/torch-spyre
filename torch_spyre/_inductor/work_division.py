@@ -545,43 +545,31 @@ def span_reduction_pass(
         )
 
 
-# Hardware constants
-_PT_ROWS = 8  # PT block rows per corelet
+# Hardware and empirical constants for the matmul cost-model planner.
+# See _cost_model_matmul_planner. Each constant is either a hardware
+# limit or a coefficient measured from device kernel times.
+_PT_ROWS = 8                                        # PT block rows per corelet
+_TARGET_PT_PASSES = 8                               # per-core M target = this * _PT_ROWS rows
+_M_MIN = _PT_ROWS // 2                              # smallest useful m-split (half a PT pass)
 
-# Constants for the matmul cost-model planner. Each is either a hardware
-# constant (PT_ROWS, peak MACs/us, HBM bandwidth) or an empirical coefficient
-# fit from device-measured kernel times against split choices (see
-# tests/cost_model_offline.py for the offline validator + the fit).
-#
-# The cost-model planner replaces the prior _maybe_mn_cosplit heuristic for
-# matmul/bmm ops: it enumerates feasible (b, m, n, k) splits and picks the
-# argmin of _matmul_split_cost. See _cost_model_matmul_planner below.
-_MN_SPLIT_M_MIN = _PT_ROWS // 2                 # one half PT pass = smallest useful m-split
-_MN_SPLIT_LOWLX_TARGET_N_STICKS = 8             # low-LX:  per-core N-band target (sticks)
-_MN_SPLIT_HIGHLX_TARGET_PT_PASSES = 8           # high-LX: per-core M = target * _PT_ROWS rows
-_MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD = 0.5        # LX_FRAC regime gate
-
-# Cost-model coefficients (empirical fit, see cost_model_offline.py)
 _COST_PEAK_MACS_US_CORE = (300e12 / 2 / 32) / 1e6   # AIU 1.0: ~4.7M MACs/us/core
 _COST_HBM_BW_GBS = 166.0                            # AIU 1.0 aggregate HBM bandwidth
 _COST_DTYPE_BYTES = 2                               # fp16
-_COST_PSUM_PER_ELEM_US = 4e-4                       # fit: MoE k=2 added ~3.4ms / 8.4M elems / 1 hop
-_COST_COHORT_LIMIT = 8                              # cohort sizes > this incur HBM broadcast contention
-_COST_BATCH_SPLIT_PENALTY = 0.6                     # mult. penalty per b-step (large-K bmm fit)
-_COST_TARGET_M_PENALTY_US = 50.0                    # per log2 step from target_m_split
-_COST_REDISTRIBUTION_US_PER_BYTE = 1e-4             # mlp [512,4096] bundle +14% (~1.5ms / 16MB output)
+_COST_PSUM_PER_ELEM_US = 4e-4                       # per output element, per K-split ring hop
+_COST_COHORT_LIMIT = 8                              # broadcast contention kicks in above this
+_COST_BATCH_SPLIT_PENALTY = 0.6                     # multiplicative penalty per extra batch core
+_COST_TARGET_M_PENALTY_US = 50.0                    # tie-break: per log2 step from target m-split
+_COST_REDISTRIBUTION_US_PER_BYTE = 1e-4             # cost of moving output bytes across cores
 
 
 def _matmuls_fused_with_nonmatmul(operations: list[Operation]) -> set[str]:
-    """Matmul output buf names that share a fusion group with a non-matmul op.
+    """Names of matmul outputs that share a fusion bundle with a non-matmul op.
 
-    Any cost-model rewrite (m x n co-split, K-split, batch-iterated bmm, ...)
-    that diverges from the default (mb, out) split forces cross-core data
-    redistribution inside the fused bundle, since the non-matmul partner
-    stays on the default layout. Measured cost on mlp [512,4096]: bundle
-    kernel +14% despite each standalone matmul winning 1.26-1.49x with the
-    2D rewrite. The cost-model planner uses this set to add a fusion-
-    redistribution cost term to its score (see _matmul_split_cost).
+    When a matmul is bundled with a non-matmul partner, any split that
+    differs from the default forces the matmul output to be reshuffled
+    across cores before the partner can consume it. The cost-model
+    planner charges this redistribution cost so it only rewrites when
+    the kernel savings outweigh the bundle penalty.
     """
     matmul_names: set[str] = set()
     matmul_input_names: dict[str, set[str]] = {}
@@ -616,56 +604,54 @@ def _matmul_split_cost(
     max_cores: int,
     redistribution_us: float = 0.0,
 ) -> float:
-    """Estimate kernel cost (us) for a matmul ``[B,M,K]@[B,K,N]`` under the
-    given (b, m, n, k) split. Lower is better. Fit + validated against
-    device-measured kernel times for the 7 perf-suite shapes; see
-    tests/cost_model_offline.py.
+    """Estimate kernel time in microseconds for a matmul ``[B,M,K]@[B,K,N]``
+    run with the given (b, m, n, k) split. Lower is better.
 
-    Cost terms (additive, multiplied by batch-split penalty):
-      compute_us       : per-core MACs / peak; derated by PT-pipeline
-                         efficiency when per-core M can't sustain
-                         TARGET_PT_PASSES passes.
-      hbm_us           : total unique LHS+RHS+OUT bytes / HBM_BW;
-                         multiplied by a cohort penalty when max(m, n)
-                         exceeds the broadcast limit.
-      psum_us          : (k-1) ring hops over the output element count.
-      target_m_us      : log2-distance penalty around the shape-aware
-                         sweet spot.
-      redistribution_us: caller-supplied fusion-redistribution cost when
-                         this split diverges from the partner non-matmul
-                         op's layout (forces cross-core data movement).
+    Cost terms (see implementation for the formulas):
+      compute_us       : per-core MAC work, derated when M can't keep
+                         the PT pipeline full.
+      hbm_us           : input + output bytes over HBM bandwidth, with
+                         a cohort penalty for broadcast contention.
+      psum_us          : reduction hops added by a K-split.
+      target_m_us      : tie-breaker that prefers m-splits near the
+                         PT-pipeline sweet spot.
+      redistribution_us: cost of moving the output across cores when
+                         the matmul is bundled with a non-matmul partner
+                         and this split differs from the partner's layout.
     """
     cores_used = b * m * n * k
     if cores_used == 0 or cores_used > max_cores:
         return float("inf")
 
-    # Compute (PT-pipeline efficiency)
+    # Compute time: per-core MACs / peak, derated when per-core M is too
+    # small to keep the PT pipeline full.
     m_t = M // m if m else 1
     pt_passes = max(1.0, m_t / _PT_ROWS)
-    pt_eff = min(1.0, pt_passes / _MN_SPLIT_HIGHLX_TARGET_PT_PASSES)
+    pt_eff = min(1.0, pt_passes / _TARGET_PT_PASSES)
     effective_peak = _COST_PEAK_MACS_US_CORE * pt_eff
     compute_us = (B * M * N * K / cores_used) / effective_peak
 
-    # HBM with cohort-broadcast penalty
+    # HBM time: each input row/column is broadcast to a cohort of cores;
+    # past the cohort limit the broadcast contends for shared bandwidth.
     bytes_total = (B * M * K + B * K * N + B * M * N) * _COST_DTYPE_BYTES
     cohort = max(m, n)
     cohort_penalty = max(1.0, cohort / _COST_COHORT_LIMIT)
     hbm_us = bytes_total / (_COST_HBM_BW_GBS * 1000) * cohort_penalty
 
-    # PSUM (scales with output elements per ring hop)
+    # PSUM ring hops: K-split adds (k - 1) reductions across the output.
     psum_us = max(0, k - 1) * (B * M * N) * _COST_PSUM_PER_ELEM_US
 
-    # Target-m_split tie-break (heuristic-aware): empirical fit shows m_split
-    # close to ``clamp(M_MIN, cores//2, M / (TARGET_PT_PASSES * PT_ROWS))``
-    # is the PT-pipeline sweet spot. Penalize log2-distance from that target.
+    # Tie-break: prefer m-splits that keep per-core M near the PT-pipeline
+    # sweet spot. Penalty grows with log2-distance from that target.
     target_m = max(
-        _MN_SPLIT_M_MIN,
-        min(max_cores // 2, max(1, M // (_MN_SPLIT_HIGHLX_TARGET_PT_PASSES * _PT_ROWS))),
+        _M_MIN,
+        min(max_cores // 2, max(1, M // (_TARGET_PT_PASSES * _PT_ROWS))),
     )
     m_dist = abs(math.log2(max(1, m) / target_m))
     target_m_us = m_dist * _COST_TARGET_M_PENALTY_US
 
-    # Batch-split penalty (multiplicative, fits bmm regression data)
+    # Splitting batch over multiple cores costs more per core than tiling
+    # batch sequentially (each batch item is independent work).
     batch_penalty = 1.0 + _COST_BATCH_SPLIT_PENALTY * max(0, b - 1)
 
     return (
@@ -685,19 +671,16 @@ def _cost_model_matmul_planner(
     fused_with_nonmatmul: set[str],
     input_tds: list[TensorDep],
 ) -> dict[Symbol, int]:
-    """Pick the minimum-cost feasible (b, m, n, k) split for a matmul / bmm.
+    """Pick the lowest-cost feasible (b, m, n, k) split for a matmul / bmm.
 
-    Identifies M/N/K/batch dims via **input deps** (M appears in one input,
-    batch in both, K is the reduction), enumerates feasible splits
-    (divisors of each dim, product <= max_cores), scores each by
-    _matmul_split_cost, and returns the argmin.
+    Identifies the M, N, K, and batch dims from the op's inputs (M appears
+    in only the LHS, batch in both, K is the reduction), enumerates every
+    feasible split (each dim split by one of its divisors, product within
+    max_cores), and returns the one with the smallest _matmul_split_cost.
 
-    Fusion-redistribution awareness: when ``op`` shares a fusion bundle
-    with a non-matmul partner, any candidate that diverges from the
-    default (mb, out) split forces cross-core data movement inside the
-    bundle. The cost model adds a redistribution penalty proportional to
-    output_bytes so the optimizer only rewrites when the kernel savings
-    outweigh the bundle penalty.
+    When the matmul is bundled with a non-matmul partner, candidates that
+    diverge from the default split are charged a redistribution penalty
+    so the planner only rewrites when the kernel savings are worth it.
     """
     if not isinstance(op.data, Reduction):
         return splits
@@ -715,8 +698,8 @@ def _cost_model_matmul_planner(
         return splits
     n_dim = n_dims[0]
 
-    # M = output dim that appears in exactly one input (the LHS).
-    # Batch dims (if any) appear in both inputs.
+    # The M dim is the output dim that appears in only one input (the LHS);
+    # batch dims appear in both inputs.
     def _n_inputs(dim: Symbol) -> int:
         return sum(
             1
@@ -726,18 +709,18 @@ def _cost_model_matmul_planner(
 
     m_candidates = [d for d in m_dims if _n_inputs(d) == 1]
     if len(m_candidates) != 1:
-        return splits  # can't identify M unambiguously
+        return splits
     m_dim = m_candidates[0]
     batch_dims = [d for d in m_dims if d is not m_dim]
 
-    # K: the single reduction dim. (Multi-K matmul not handled here.)
+    # K is the single reduction dim (multi-K matmul not handled here).
     reduction = [d for d in it_space_adjusted if d not in output_coord_vars]
     if len(reduction) != 1:
         return splits
     k_dim = reduction[0]
 
-    # Sizes. M is already in elements; N and K are in sticks (the planner's
-    # iteration_space view), so convert back for the cost calculation.
+    # The iteration space measures N and K in sticks; convert back to
+    # elements so the cost model sees real bytes and FLOPs.
     M_e = concretize_expr(it_space_adjusted[m_dim])
     n_sticks = concretize_expr(it_space_adjusted[n_dim])
     k_sticks = concretize_expr(it_space_adjusted[k_dim])
@@ -745,8 +728,6 @@ def _cost_model_matmul_planner(
     N_e = n_sticks * elems_per_stick
     K_e = k_sticks * elems_per_stick
 
-    # Batch dims: track per-dim size for split enumeration; cost model only
-    # sees the total batch count.
     batch_per_dim = [
         (bd, concretize_expr(it_space_adjusted[bd])) for bd in batch_dims
     ]
@@ -754,7 +735,6 @@ def _cost_model_matmul_planner(
     for _, s in batch_per_dim:
         B_total *= s
 
-    # Enumerate feasible splits.
     if batch_per_dim:
         bd_divs = [[int(d) for d in divisors(s)] for _, s in batch_per_dim]
         b_combos = list(itertools.product(*bd_divs))
@@ -764,9 +744,9 @@ def _cost_model_matmul_planner(
     n_divs = [int(d) for d in divisors(n_sticks)]
     k_divs = [int(d) for d in divisors(k_sticks)]
 
-    # Default split tuple (what the caller would emit without any rewrite).
-    # Any candidate that differs from this forces cross-core redistribution
-    # when the matmul is bundled with a non-matmul partner.
+    # Charge a redistribution cost to any candidate that changes the split
+    # from what the caller would have emitted, but only when the matmul is
+    # bundled with a non-matmul partner that stays on the default layout.
     default_m = int(splits.get(m_dim, 1))
     default_n = int(splits.get(n_dim, 1))
     default_k = int(splits.get(k_dim, 1))
@@ -818,7 +798,7 @@ def _cost_model_matmul_planner(
     new_splits[n_dim] = n_s
     new_splits[k_dim] = k_s
 
-    # Sanity: never use fewer cores than the default split.
+    # Never use fewer cores than the caller's default split.
     if math.prod(new_splits.values()) < math.prod(splits.values()):
         return splits
 
