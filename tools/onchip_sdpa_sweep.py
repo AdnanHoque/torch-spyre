@@ -76,6 +76,12 @@ VARIANT_ENV = {
         "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA": "1",
         "SPYRE_ONCHIP_HANDOFF_MIN_BYTES": "0",
     },
+    "warp_overlap_probe": {
+        **BASE_VARIANT_ENV,
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE": "1",
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_EXECUTE_TILE": "0",
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_OVERLAP": "1",
+    },
 }
 
 
@@ -113,6 +119,7 @@ def _summarize_cache(cache_dir: Path) -> dict:
         datadscs = body.get("datadscs_", []) or []
         if not opfuncs and not datadscs:
             continue
+        flash_pipeline = body.get("flashAttentionPipeline_")
         first_dataop = None
         if datadscs:
             dataop_name, dataop_body = next(iter(datadscs[0].items()))
@@ -133,6 +140,7 @@ def _summarize_cache(cache_dir: Path) -> dict:
                 "opFuncsUsed": opfuncs,
                 "datadscs": len(datadscs),
                 "first_dataop": first_dataop,
+                "flash_pipeline": flash_pipeline,
             }
         )
 

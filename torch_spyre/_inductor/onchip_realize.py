@@ -489,40 +489,57 @@ def _pinned_component(lds: dict) -> str | None:
     return None
 
 
-def _input_fetch_neighbor_compute_eligible(compute_dsc: dict) -> bool:
-    """True when a compute DSC satisfies DXP's InputFetchNeighbor contract."""
+def _input_fetch_neighbor_rejection_reasons(compute_dsc: dict) -> list[str]:
+    """Return DXP InputFetchNeighbor contract gaps for a compute DSC."""
+    reasons: list[str] = []
     if not isinstance(compute_dsc, dict) or not compute_dsc:
-        return False
+        return ["invalid_compute_dsc"]
     dl = next(iter(compute_dsc.values()))
     if not isinstance(dl, dict):
-        return False
+        return ["invalid_compute_dl"]
     labeled_ds = dl.get("labeledDs_", [])
     if not labeled_ds:
-        return False
-    if not all(
-        _pinned_component(lds) not in INPUT_FETCH_NEIGHBOR_DISALLOWED_PINS
-        for lds in labeled_ds
-    ):
-        return False
+        return ["missing_labeled_ds"]
+    for lds in labeled_ds:
+        pinned = _pinned_component(lds)
+        if pinned in INPUT_FETCH_NEIGHBOR_DISALLOWED_PINS:
+            idx = lds.get("ldsIdx_", "?")
+            reasons.append(f"lds{idx}_pinned_{pinned or 'none'}")
 
     compute_ops = dl.get("computeOp_", [])
     if not compute_ops:
-        return False
+        reasons.append("missing_compute_op")
+        return reasons
     input_labels = compute_ops[0].get("inputLabeledDs", [])
     if not input_labels:
-        return False
+        reasons.append("missing_input_labeled_ds")
+        return reasons
     first_input_idx = int(input_labels[0].rsplit("-idx", 1)[1])
     if first_input_idx != INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX:
-        return False
+        reasons.append(f"first_input_not_lds{INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX}")
     input_lds = next(
         (lds for lds in labeled_ds if lds.get("ldsIdx_") == first_input_idx),
         None,
     )
-    if input_lds is None or _pinned_component(input_lds) != "lx":
-        return False
+    if input_lds is None:
+        reasons.append(f"missing_input_lds{first_input_idx}")
+    elif _pinned_component(input_lds) != "lx":
+        reasons.append(
+            f"input_lds{first_input_idx}_pinned_"
+            f"{_pinned_component(input_lds) or 'none'}"
+        )
     if not _input_fetch_neighbor_ij_order_supported(dl, first_input_idx):
-        return False
-    return _has_input_fetch_neighbor_transfer(dl, first_input_idx)
+        reasons.append("input_layout_missing_i_j")
+    if not _has_input_fetch_neighbor_transfer(dl, first_input_idx):
+        reasons.append(
+            f"missing_no_component_to_lx_transfer_lds{first_input_idx}"
+        )
+    return reasons
+
+
+def _input_fetch_neighbor_compute_eligible(compute_dsc: dict) -> bool:
+    """True when a compute DSC satisfies DXP's InputFetchNeighbor contract."""
+    return not _input_fetch_neighbor_rejection_reasons(compute_dsc)
 
 
 def _input_fetch_neighbor_ij_order_supported(dl: dict, lds_idx: int) -> bool:
@@ -1090,7 +1107,13 @@ def build_flash_attention_pipeline_tile_artifacts(
     tile_sdscs = [sdsc for sdsc in sdscs_json if _op_name(sdsc) == "batchmatmul"]
     for tile_index, sdsc in enumerate(tile_sdscs):
         artifact = None
+        overlap_reasons: list[str] = []
         if overlap_prefix and tile_index + 1 < len(tile_sdscs):
+            overlap_reasons = (
+                flash_attention_overlap_prefix_rejection_reasons(
+                    tile_sdscs[tile_index: tile_index + 2],
+                )
+            )
             artifact = build_flash_attention_pipeline_overlap_prefix_tile_artifact(
                 tile_sdscs[tile_index: tile_index + 2],
                 tile_index,
@@ -1108,8 +1131,90 @@ def build_flash_attention_pipeline_tile_artifacts(
         root["flashAttentionPipeline_"]["tile_index"] = tile_index
         root["flashAttentionPipeline_"]["replaces_sdsc"] = next(iter(sdsc))
         root["flashAttentionPipeline_"].setdefault("overlap_prefix", False)
+        if overlap_prefix and not root["flashAttentionPipeline_"]["overlap_prefix"]:
+            root["flashAttentionPipeline_"]["overlap_prefix_requested"] = True
+            root["flashAttentionPipeline_"][
+                "overlap_prefix_rejection_reasons"
+            ] = overlap_reasons or ["not_enough_following_tiles"]
         artifacts.append(artifact)
     return artifacts
+
+
+def flash_attention_overlap_prefix_rejection_reasons(
+    tile_sdscs: list[dict],
+) -> list[str]:
+    """Explain why an overlap-prefix sidecar would fail closed for these tiles."""
+    if len(tile_sdscs) < 2:
+        return ["needs_two_batchmatmul_tiles"]
+
+    first = tile_sdscs[0]
+    first_body = _body(first)
+    num_cores = int(first_body.get("numCoresUsed_", 0))
+    if num_cores <= 0:
+        return ["invalid_num_cores"]
+    first_dl = _dl_op(first)
+    out_indices = _producer_output_indices(first_dl)
+    if len(out_indices) != 1:
+        return ["first_tile_output_count_not_one"]
+    out_idx = out_indices[0]
+    layout = _layout_for_lds(first_dl, out_idx)
+    stick_dim = _stick_dim_for_lds(first_dl, out_idx)
+    split_dim = _single_split_dim(first_body.get("numWkSlicesPerDim_", {}))
+    if layout is None:
+        return ["missing_first_output_layout"]
+    if stick_dim is None:
+        return ["missing_first_output_stick_dim"]
+    if split_dim is None:
+        return ["missing_single_split_dim"]
+    iter_sizes = _iter_sizes_for_layout(first_dl, layout)
+    if iter_sizes is None:
+        return ["missing_iter_sizes"]
+
+    second = tile_sdscs[1]
+    second_body = _body(second)
+    if int(second_body.get("numCoresUsed_", 0)) != num_cores:
+        return ["next_tile_num_cores_mismatch"]
+    second_dl = _dl_op(second)
+    second_out_indices = _producer_output_indices(second_dl)
+    if len(second_out_indices) != 1:
+        return ["next_tile_output_count_not_one"]
+    second_out_idx = second_out_indices[0]
+    if _layout_for_lds(second_dl, second_out_idx) != layout:
+        return ["next_tile_output_layout_mismatch"]
+    if _stick_dim_for_lds(second_dl, second_out_idx) != stick_dim:
+        return ["next_tile_output_stick_dim_mismatch"]
+    if _single_split_dim(second_body.get("numWkSlicesPerDim_", {})) != split_dim:
+        return ["next_tile_split_dim_mismatch"]
+    if _iter_sizes_for_layout(second_dl, layout) != iter_sizes:
+        return ["next_tile_iter_sizes_mismatch"]
+
+    row_dim = _flash_pipeline_row_dim(layout, split_dim, iter_sizes)
+    if row_dim is None:
+        return ["missing_row_dim"]
+    slice_bytes = per_core_same_stick_slice_bytes(
+        iter_sizes,
+        split_dim,
+        stick_dim,
+        STICK_SIZE,
+        num_cores,
+    )
+    if _exact_tile_bytes_for_tiles(slice_bytes, 2) is None:
+        return ["cannot_make_two_prefetch_tiles"]
+    try:
+        allocate_flash_attention_pipeline_bases(
+            num_lanes=2,
+            tile_bytes=_exact_tile_bytes_for_tiles(slice_bytes, 2),
+            scratch_regions=2,
+            region0=PRODUCER_LX_BASE,
+        )
+    except ValueError:
+        return ["lx_allocation_exceeds_capacity"]
+
+    compute_dsc = copy.deepcopy(first_body["dscs_"][0])
+    return [
+        f"compute_dsc:{reason}"
+        for reason in _input_fetch_neighbor_rejection_reasons(compute_dsc)
+    ]
 
 
 def build_flash_attention_pipeline_overlap_prefix_tile_artifact(

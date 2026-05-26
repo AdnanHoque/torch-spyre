@@ -829,6 +829,16 @@ def test_flash_pipeline_overlap_prefix_rejects_hbm_backed_compute():
     assert len(root0["datadscs_"]) == 2
     assert root0["flashAttentionPipeline_"]["overlap_prefix"] is False
     assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
+    assert root0["flashAttentionPipeline_"]["overlap_prefix_requested"] is True
+    reasons = root0["flashAttentionPipeline_"][
+        "overlap_prefix_rejection_reasons"
+    ]
+    assert set(reasons) >= {
+        "compute_dsc:lds0_pinned_hbm",
+        "compute_dsc:input_lds0_pinned_hbm",
+        "compute_dsc:input_layout_missing_i_j",
+        "compute_dsc:missing_no_component_to_lx_transfer_lds0",
+    }
 
 
 def test_flash_pipeline_overlap_prefix_rejects_lx_compute_without_transfer():
@@ -841,6 +851,12 @@ def test_flash_pipeline_overlap_prefix_rejects_lx_compute_without_transfer():
     assert len(root0["datadscs_"]) == 2
     assert root0["flashAttentionPipeline_"]["overlap_prefix"] is False
     assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
+    assert root0["flashAttentionPipeline_"][
+        "overlap_prefix_rejection_reasons"
+    ] == [
+        "compute_dsc:input_layout_missing_i_j",
+        "compute_dsc:missing_no_component_to_lx_transfer_lds0",
+    ]
 
 
 def test_flash_pipeline_overlap_prefix_rejects_non_ij_input_neighbor_shape():
@@ -857,6 +873,9 @@ def test_flash_pipeline_overlap_prefix_rejects_non_ij_input_neighbor_shape():
     assert len(root0["datadscs_"]) == 2
     assert root0["flashAttentionPipeline_"]["overlap_prefix"] is False
     assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
+    assert root0["flashAttentionPipeline_"][
+        "overlap_prefix_rejection_reasons"
+    ] == ["compute_dsc:input_layout_missing_i_j"]
 
 
 def test_flash_pipeline_overlap_prefix_rejects_mismatched_next_tile():
@@ -876,6 +895,9 @@ def test_flash_pipeline_overlap_prefix_rejects_mismatched_next_tile():
     assert len(root0["datadscs_"]) == 2
     assert root0["flashAttentionPipeline_"]["overlap_prefix"] is False
     assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
+    assert root0["flashAttentionPipeline_"][
+        "overlap_prefix_rejection_reasons"
+    ] == ["next_tile_iter_sizes_mismatch"]
 
 
 def _run_all():
