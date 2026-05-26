@@ -870,7 +870,7 @@ def work_distribution_pass(
         reduction_dims,
         committed_splits,
     )
-    if config.two_d_mn_split:
+    if config.cost_model_matmul_planner:
         splits = _cost_model_matmul_planner(
             op,
             splits,
@@ -966,13 +966,12 @@ def span_reduction(operations: list[Operation]) -> None:
 def work_distribution(operations: list[Operation]) -> None:
     """Pass 3: distribute cores across ops via the cost-model planner (matmul)
     or the default multi-dim distributor (pointwise / non-matmul reductions).
-
-    The cost-model planner (``_cost_model_matmul_planner``) subsumes the
-    former k_fast / mn-cosplit / 2D-rule heuristics into a single search.
     """
     max_cores = _validate_max_cores()
     fused_with_nonmatmul = (
-        _matmuls_fused_with_nonmatmul(operations) if config.two_d_mn_split else set()
+        _matmuls_fused_with_nonmatmul(operations)
+        if config.cost_model_matmul_planner
+        else set()
     )
 
     def pass_fn(op_, args_, max_cores_):

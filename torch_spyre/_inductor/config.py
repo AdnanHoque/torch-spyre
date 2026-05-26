@@ -51,8 +51,11 @@ core_id_k_fast_emission: bool = (
     os.environ.get("SPYRE_CORE_ID_K_FAST_EMISSION", "1") == "1"
 )
 
-# When set, replace a matmul's pure-m work-split with a 2D m x n co-split
-# (see tests/diag_hbm_bank_aware_findings.md). Off by default.
-two_d_mn_split: bool = os.environ.get("SPYRE_2D_MN_SPLIT", "0") == "1"
+# When set, override the default per-dim work split for matmul/bmm ops
+# with the lowest-cost (b, m, n, k) split chosen by the cost-model
+# planner in work_division.py. Off by default.
+cost_model_matmul_planner: bool = (
+    os.environ.get("SPYRE_COST_MODEL_MATMUL_PLANNER", "0") == "1"
+)
 
 install_config_module(sys.modules[__name__])
