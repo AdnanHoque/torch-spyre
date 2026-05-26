@@ -560,6 +560,8 @@ _COST_COHORT_LIMIT = 8                              # broadcast contention kicks
 _COST_BATCH_SPLIT_PENALTY = 0.6                     # multiplicative penalty per extra batch core
 _COST_TARGET_M_PENALTY_US = 50.0                    # tie-break: per log2 step from target m-split
 _COST_REDISTRIBUTION_US_PER_BYTE = 1e-4             # cost of moving output bytes across cores
+_LX_BYTES_PER_CORE = 2 * 1024 * 1024                # on-core scratchpad capacity
+_COST_LX_PRESSURE_US_PER_BYTE = 5e-6                # per byte of per-core RHS over scratchpad
 
 
 def _matmuls_fused_with_nonmatmul(operations: list[Operation]) -> set[str]:
@@ -615,6 +617,9 @@ def _matmul_split_cost(
       psum_us          : reduction hops added by a K-split.
       target_m_us      : tie-breaker that prefers m-splits near the
                          PT-pipeline sweet spot.
+      lx_pressure_us   : when per-core RHS doesn't fit in scratchpad it
+                         has to stream from HBM. Prefers wider n-splits
+                         for wide-N shapes where the RHS dominates.
       redistribution_us: cost of moving the output across cores when
                          the matmul is bundled with a non-matmul partner
                          and this split differs from the partner's layout.
@@ -650,12 +655,19 @@ def _matmul_split_cost(
     m_dist = abs(math.log2(max(1, m) / target_m))
     target_m_us = m_dist * _COST_TARGET_M_PENALTY_US
 
+    # LX-pressure: when the per-core RHS slice exceeds the on-core
+    # scratchpad it must be streamed from HBM, which favors wider
+    # n-splits (smaller per-core N -> smaller per-core RHS).
+    per_core_rhs_bytes = K * (N // max(1, n)) * _COST_DTYPE_BYTES
+    lx_excess = max(0, per_core_rhs_bytes - _LX_BYTES_PER_CORE)
+    lx_pressure_us = lx_excess * _COST_LX_PRESSURE_US_PER_BYTE
+
     # Splitting batch over multiple cores costs more per core than tiling
     # batch sequentially (each batch item is independent work).
     batch_penalty = 1.0 + _COST_BATCH_SPLIT_PENALTY * max(0, b - 1)
 
     return (
-        (compute_us + hbm_us + psum_us + target_m_us) * batch_penalty
+        (compute_us + hbm_us + psum_us + target_m_us + lx_pressure_us) * batch_penalty
         + redistribution_us
     )
 
