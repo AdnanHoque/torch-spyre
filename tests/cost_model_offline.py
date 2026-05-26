@@ -28,7 +28,9 @@ HBM_BW_GBS = 166             # aggregate HBM BW
 LX_TOTAL_BYTES_PER_CORE = 2 * 1024 * 1024   # 2MB LX scratchpad per core (placeholder; refine)
 # Peak MACs/us per core: 300 TOPS aggregate / 2 (ops per MAC) / 32 cores / 1e6 us/s
 PEAK_MACS_PER_US_PER_CORE = (300e12 / 2 / MAX_CORES) / 1e6      # ~4.7M MACs/us/core
-PSUM_HOP_US = 50.0               # cost per ring hop; empirically fit so pure-K loses to 2D
+PSUM_PER_ELEM_US = 4e-4          # PSUM cost per output element per ring hop (fit from MoE: k=2 added ~3.4ms / 8.4M elems / 1 hop)
+M_SPLIT_MIN = 4                  # smallest useful m-split (heuristic M_MIN; under it, PT array under-fed)
+TARGET_M_PENALTY_US = 50.0       # per log2 step away from the shape-aware target m_split (fit from QO: 6% gap m=8 vs m=4)
 TARGET_PT_PASSES = 8             # per-core PT passes for full pipeline utilisation
 COHORT_BROADCAST_LIMIT = 8       # cohort sizes <= this broadcast cheaply; beyond, contention grows
 BATCH_SPLIT_PENALTY = 0.6        # multiplicative penalty per batch-split step (empirical, large-K bmm fit)
@@ -45,10 +47,12 @@ class Hw:
     hbm_bw_gbs: float = HBM_BW_GBS
     lx_per_core: int = LX_TOTAL_BYTES_PER_CORE
     peak_macs_us_core: float = PEAK_MACS_PER_US_PER_CORE
-    psum_hop_us: float = PSUM_HOP_US
+    psum_per_elem_us: float = PSUM_PER_ELEM_US
     target_pt_passes: int = TARGET_PT_PASSES
     cohort_broadcast_limit: int = COHORT_BROADCAST_LIMIT
     batch_split_penalty: float = BATCH_SPLIT_PENALTY
+    m_split_min: int = M_SPLIT_MIN
+    target_m_penalty_us: float = TARGET_M_PENALTY_US
     lx_frac: float = 0.8       # DXP_LX_FRAC_AVAIL
 
 
@@ -101,9 +105,12 @@ def split_cost(B, M, K, N, b, m, n, k, hw: Hw) -> float:
     hbm_us *= cohort_penalty
 
     # ---- PSUM ring ----
-    # (k - 1) reductions per output element, ring-adjacent k_fast emission gives
-    # one ring hop per reduction.
-    psum_us = max(0, k - 1) * hw.psum_hop_us
+    # Each k-step adds a ring-hop PSUM reduction over the *output elements*
+    # (M x N per (b, m, n) tile). Fit from MoE data: k=2 added ~3.4ms over 8.4M
+    # output elems with 1 hop -> ~4e-4 us per elem per hop. Assumes ring-adjacent
+    # k_fast emission (1 hop per k-step); without it, hops scale as m * n.
+    output_elems = (B // b) * (M // m) * (N // n) * b * m * n  # i.e. B*M*N total
+    psum_us = max(0, k - 1) * output_elems * hw.psum_per_elem_us
 
     # ---- Batch-split penalty ----
     # Empirically (measured on bmm shapes): b_split > 1 regresses kernel time
@@ -112,7 +119,19 @@ def split_cost(B, M, K, N, b, m, n, k, hw: Hw) -> float:
     # preferred mode here.
     batch_penalty = 1.0 + hw.batch_split_penalty * max(0, b - 1)
 
-    return (compute_us + hbm_us + psum_us) * batch_penalty
+    # ---- Shape-aware m_split target (empirical) ----
+    # The PT-array sweet spot for m_split depends on M and LX budget. Device data
+    # (QO: m=8 vs m=4 is 6% faster; MoE: m=4 vs m=2 is 75% faster) shows the rule
+    # ``target_m = clamp(M_MIN, max_cores//2, M / (TARGET_PT_PASSES * PT_ROWS))``
+    # tracks the optimum. Penalize log2-distance from that target.
+    target_m = max(
+        hw.m_split_min,
+        min(hw.max_cores // 2, max(1, M // (hw.target_pt_passes * hw.pt_rows))),
+    )
+    m_distance = abs(math.log2(max(1, m) / target_m))
+    target_m_us = m_distance * hw.target_m_penalty_us
+
+    return (compute_us + hbm_us + psum_us + target_m_us) * batch_penalty
 
 
 # =============================================================================
