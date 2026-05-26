@@ -87,6 +87,30 @@ def run(shape: str, force_spec: str, runs: int = 8):
         Bm = torch.randn(B, K, N, dtype=torch.float16).to(d)
         fn = lambda a, b: torch.bmm(a, b)
         args = (A, Bm)
+    elif shape == "q_proj_M128":
+        M, K, N = 128, 4096, 4096
+        x = torch.randn(1, M, K, dtype=torch.float16).to(d)
+        W = torch.empty(K, N, dtype=torch.float16); torch.nn.init.kaiming_uniform_(W); W = W.to(d)
+        fn = lambda a, b: torch.nn.functional.linear(a, b.T)
+        args = (x, W)
+    elif shape == "q_proj_M32":
+        M, K, N = 32, 4096, 4096
+        x = torch.randn(1, M, K, dtype=torch.float16).to(d)
+        W = torch.empty(K, N, dtype=torch.float16); torch.nn.init.kaiming_uniform_(W); W = W.to(d)
+        fn = lambda a, b: torch.nn.functional.linear(a, b.T)
+        args = (x, W)
+    elif shape == "down_proj_M128":
+        M, K, N = 128, 12800, 4096
+        x = torch.randn(1, M, K, dtype=torch.float16).to(d)
+        W = torch.empty(K, N, dtype=torch.float16); torch.nn.init.kaiming_uniform_(W); W = W.to(d)
+        fn = lambda a, b: torch.nn.functional.linear(a, b.T)
+        args = (x, W)
+    elif shape == "kv_proj_M32":
+        M, K, N = 32, 4096, 2048
+        x = torch.randn(1, M, K, dtype=torch.float16).to(d)
+        W = torch.empty(K, N, dtype=torch.float16); torch.nn.init.kaiming_uniform_(W); W = W.to(d)
+        fn = lambda a, b: torch.nn.functional.linear(a, b.T)
+        args = (x, W)
     else:
         sys.exit(f"unknown shape {shape}")
 
