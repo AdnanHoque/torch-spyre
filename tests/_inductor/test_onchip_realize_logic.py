@@ -417,6 +417,43 @@ def _fake_flash_pointwise_sdscs(multisplit=False, chain=False):
     return [producer, consumer]
 
 
+def _fake_flash_score_scale_sdscs():
+    shared_addr = 4096
+    producer_pdi = {
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        }
+    }
+    consumer_pdi = {
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        }
+    }
+    producer = _fake_sdsc(
+        0,
+        "batchmatmul",
+        {"x": 1, "mb": 32, "out": 1, "in": 1},
+        {"x_": 2, "mb_": 128, "out_": 64, "in_": 64},
+        [],
+        [("Tensor2-idx2", "OUTPUT", shared_addr)],
+        producer_pdi,
+    )
+    consumer = _fake_sdsc(
+        1,
+        "mul",
+        {"x": 1, "out": 1, "mb": 32},
+        {"x_": 2, "mb_": 128, "out_": 64},
+        [("Tensor0-idx0", "OUTPUT", shared_addr), ("Tensor1-idx1", "OUTPUT", 8192)],
+        [("Tensor2-idx2", "OUTPUT", 12288)],
+        consumer_pdi,
+    )
+    return [producer, consumer]
+
+
 def test_attention_score_handoff_bridges_full_score_fanout():
     sdscs = _fake_attention_sdscs()
     assert rz.realize_onchip_handoff(
@@ -528,6 +565,23 @@ def test_flash_pointwise_handoffs_realize_eligible_chain():
     assert rz._lds_by_idx(rz._dl_op(sdscs[2]), 0)["hbmSize_"] == 0
     assert sdscs[1]["1_mul"]["opFuncsUsed_"] == ["STCDPOpLx"]
     assert sdscs[2]["2_add"]["opFuncsUsed_"] == ["STCDPOpLx"]
+
+
+def test_flash_score_scale_handoff_realizes_batchmatmul_to_mul():
+    sdscs = _fake_flash_score_scale_sdscs()
+    edge = rz.detect_flash_score_scale_handoff(sdscs)
+    assert edge is not None
+    assert edge["layout"] == ["mb_", "x_", "out_"]
+    assert edge["stick_dim"] == "out_"
+    assert edge["split_dim"] == "mb_"
+    assert rz.realize_flash_attention_pointwise_handoffs(sdscs) == 1
+    assert rz._lds_by_idx(rz._dl_op(sdscs[0]), 2)["hbmSize_"] == 0
+    assert rz._lds_by_idx(rz._dl_op(sdscs[1]), 0)["hbmSize_"] == 0
+    body = sdscs[1]["1_mul"]
+    assert body["opFuncsUsed_"] == ["STCDPOpLx"]
+    dataop = body["datadscs_"][0]["0_STCDPOpLx_dataop"]
+    assert dataop["labeledDs_"][0]["layoutDimOrder_"] == ["mb_", "x_", "out_"]
+    assert dataop["labeledDs_"][0]["stickDimOrder_"] == ["out_"]
 
 
 def test_flash_value_flow_tile_flips_real_single_consumer_edge():

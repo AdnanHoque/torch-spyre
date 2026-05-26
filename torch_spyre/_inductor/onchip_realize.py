@@ -396,6 +396,24 @@ def _split_factor(shard: dict[str, int], split_dim: str) -> int:
     return int(shard.get(split_dim.removesuffix("_"), 1))
 
 
+def _same_shard_on_layout(
+    producer_shard: dict[str, int],
+    consumer_shard: dict[str, int],
+    layout: list[str],
+) -> bool:
+    layout_dims = {dim.removesuffix("_") for dim in layout}
+    for dim in layout_dims:
+        if int(producer_shard.get(dim, 1)) != int(consumer_shard.get(dim, 1)):
+            return False
+    for dim, factor in producer_shard.items():
+        if dim not in layout_dims and int(factor) != 1:
+            return False
+    for dim, factor in consumer_shard.items():
+        if dim not in layout_dims and int(factor) != 1:
+            return False
+    return True
+
+
 def _same_physical_stick_layout(
     prod_dl: dict,
     prod_layout: list[str],
@@ -1238,6 +1256,88 @@ def detect_pointwise_handoff(sdscs_json: list[dict]):
     return None
 
 
+def detect_flash_score_scale_handoff(sdscs_json: list[dict]):
+    """Find a legal flash score ``batchmatmul -> scalar mul`` LX handoff edge."""
+    for p in range(len(sdscs_json)):
+        prod = sdscs_json[p]
+        if _op_name(prod) != "batchmatmul":
+            continue
+        prod_dl = _dl_op(prod)
+        out_indices = _producer_output_indices(prod_dl)
+        if len(out_indices) != 1:
+            continue
+        out_idx = out_indices[0]
+        prod_addr = _hbm_base(prod_dl, out_idx)
+        if prod_addr is None:
+            continue
+        consumers = _future_consumers(sdscs_json, p, prod_addr)
+        if len(consumers) != 1:
+            continue
+        _c, cons, in_idx = consumers[0]
+        if _op_name(cons) != "mul":
+            continue
+        prod_layout = _layout_for_lds(prod_dl, out_idx)
+        prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
+        cons_dl = _dl_op(cons)
+        cons_layout = _layout_for_lds(cons_dl, in_idx)
+        cons_stick = _stick_dim_for_lds(cons_dl, in_idx)
+        if (
+            prod_layout is None
+            or prod_stick is None
+            or cons_layout is None
+            or cons_stick is None
+            or not _same_physical_stick_layout(
+                prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
+            )
+        ):
+            continue
+
+        prod_shard = _body(prod).get("numWkSlicesPerDim_", {})
+        cons_shard = _body(cons).get("numWkSlicesPerDim_", {})
+        if not _same_shard_on_layout(prod_shard, cons_shard, cons_layout):
+            continue
+        split_dim = _single_split_dim(cons_shard)
+        if split_dim is None:
+            continue
+        num_cores = int(_body(cons).get("numCoresUsed_", 0))
+        if num_cores <= 0:
+            continue
+        if (
+            _split_factor(cons_shard, split_dim) != num_cores
+            or _split_factor(prod_shard, split_dim) != num_cores
+        ):
+            continue
+        iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
+        if iter_sizes is None:
+            continue
+        if split_dim not in iter_sizes or iter_sizes[split_dim] % num_cores != 0:
+            continue
+        slice_bytes = _reserve_bridge_region_bytes(
+            per_core_same_stick_slice_bytes(
+                iter_sizes,
+                split_dim,
+                cons_stick,
+                STICK_SIZE,
+                num_cores,
+            )
+        )
+        if slice_bytes > STREAM_THRESHOLD and cons_stick != split_dim:
+            continue
+        return {
+            "producer": prod,
+            "consumer": cons,
+            "producer_idx": out_idx,
+            "consumer_idx": in_idx,
+            "iter_sizes": iter_sizes,
+            "layout": cons_layout,
+            "stick_dim": cons_stick,
+            "split_dim": split_dim,
+            "num_cores": num_cores,
+            "slice_bytes": slice_bytes,
+        }
+    return None
+
+
 def detect_onchip_edge(sdscs_json: list[dict]):
     """Find an eligible same-stick same-shard producer->consumer edge.
 
@@ -1261,7 +1361,10 @@ def realize_pointwise_handoff(sdscs_json: list[dict]) -> bool:
     edge = detect_pointwise_handoff(sdscs_json)
     if edge is None:
         return False
+    return _realize_handoff_edge(edge)
 
+
+def _realize_handoff_edge(edge: dict) -> bool:
     if edge["slice_bytes"] <= STREAM_THRESHOLD:
         realization = realize_same_layout_handoff(
             iter_sizes=edge["iter_sizes"],
@@ -1300,12 +1403,22 @@ def realize_pointwise_handoff(sdscs_json: list[dict]) -> bool:
     return True
 
 
+def realize_flash_score_scale_handoff(sdscs_json: list[dict]) -> bool:
+    edge = detect_flash_score_scale_handoff(sdscs_json)
+    if edge is None:
+        return False
+    return _realize_handoff_edge(edge)
+
+
 def realize_flash_attention_pointwise_handoffs(sdscs_json: list[dict]) -> int:
-    """Realize every legal same-layout pointwise handoff in one flash bundle."""
+    """Realize every legal same-layout flash handoff in one flash bundle."""
     count = 0
     # One realization mutates the graph by turning an HBM producer output into an
     # LX endpoint, so at most one new edge can disappear per SDSC iteration.
     for _ in range(len(sdscs_json)):
+        if realize_flash_score_scale_handoff(sdscs_json):
+            count += 1
+            continue
         if not realize_pointwise_handoff(sdscs_json):
             break
         count += 1
