@@ -468,7 +468,13 @@ def _core_state_init_entry(lx_base: int) -> dict:
     }
 
 
-def apply_lx_flip(sdsc_json: dict, flip: LxFlip) -> None:
+def apply_lx_flip(
+    sdsc_json: dict,
+    flip: LxFlip,
+    *,
+    core_state_init: bool = True,
+    num_corelets: int | None = None,
+) -> None:
     """Flip the DL labeledDs at ``flip.ldsidx`` to LX-resident @ ``flip.lx_base``.
 
     Mirrors splice_2048_stcdp._flip_tensor_to_lx exactly: rewrites the labeledDs
@@ -480,6 +486,9 @@ def apply_lx_flip(sdsc_json: dict, flip: LxFlip) -> None:
     lds = next(e for e in dl["labeledDs_"] if e["ldsIdx_"] == flip.ldsidx)
     alloc_node = f"allocate-{lds['dsName_']}_lx"
     num_cores = dl["numCoresUsed_"]
+    if num_corelets is not None:
+        dl["numCoreletsUsed_"] = num_corelets
+        dl["numCoreletsUsed_DSC2_"] = num_corelets
     node = next(
         n
         for n in dl["scheduleTree_"]
@@ -495,9 +504,12 @@ def apply_lx_flip(sdsc_json: dict, flip: LxFlip) -> None:
     lds["hbmSize_"] = 0
     lds["lxSize_"] = DL_LX_SENTINEL
     lds["lxBufferSize_"] = DL_LX_SENTINEL
-    lds["coreStateInit_"] = [
-        _core_state_init_entry(flip.lx_base) for _ in range(num_cores)
-    ]
+    if core_state_init:
+        lds["coreStateInit_"] = [
+            _core_state_init_entry(flip.lx_base) for _ in range(num_cores)
+        ]
+    else:
+        lds.pop("coreStateInit_", None)
 
 
 def _hbm_base(dl: dict, lds_idx: int) -> str | None:
@@ -1364,7 +1376,13 @@ def realize_pointwise_handoff(sdscs_json: list[dict]) -> bool:
     return _realize_handoff_edge(edge)
 
 
-def _realize_handoff_edge(edge: dict) -> bool:
+def _realize_handoff_edge(
+    edge: dict,
+    *,
+    region0: int = PRODUCER_LX_BASE,
+    producer_core_state_init: bool = True,
+    producer_num_corelets: int | None = None,
+) -> bool:
     if edge["slice_bytes"] <= STREAM_THRESHOLD:
         realization = realize_same_layout_handoff(
             iter_sizes=edge["iter_sizes"],
@@ -1375,7 +1393,7 @@ def _realize_handoff_edge(edge: dict) -> bool:
             num_cores=edge["num_cores"],
             producer_ldsidx=edge["producer_idx"],
             consumer_ldsidx=edge["consumer_idx"],
-            region0=PRODUCER_LX_BASE,
+            region0=region0,
         )
     else:
         realization = realize_streamed_handoff(
@@ -1387,13 +1405,18 @@ def _realize_handoff_edge(edge: dict) -> bool:
             num_cores=edge["num_cores"],
             producer_ldsidx=edge["producer_idx"],
             consumer_ldsidx=edge["consumer_idx"],
-            region0=PRODUCER_LX_BASE,
+            region0=region0,
         )
     if realization is None:
         return False
     prod = edge["producer"]
     cons = edge["consumer"]
-    apply_lx_flip(prod, realization.producer_flip)
+    apply_lx_flip(
+        prod,
+        realization.producer_flip,
+        core_state_init=producer_core_state_init,
+        num_corelets=producer_num_corelets,
+    )
     apply_lx_flip(cons, realization.consumer_flip)
     body = _body(cons)
     body["coreIdToDscSchedule"] = realization.schedule
@@ -1407,7 +1430,15 @@ def realize_flash_score_scale_handoff(sdscs_json: list[dict]) -> bool:
     edge = detect_flash_score_scale_handoff(sdscs_json)
     if edge is None:
         return False
-    return _realize_handoff_edge(edge)
+    # PT producers use the same allocator-shaped endpoint contract as the
+    # value-correct first-principles PT-LX bridge: base 0, explicit corelet
+    # count, and no producer-side coreStateInit_ injection.
+    return _realize_handoff_edge(
+        edge,
+        region0=0,
+        producer_core_state_init=False,
+        producer_num_corelets=1,
+    )
 
 
 def realize_flash_attention_pointwise_handoffs(

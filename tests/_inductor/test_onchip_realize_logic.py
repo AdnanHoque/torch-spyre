@@ -583,9 +583,17 @@ def test_flash_score_scale_handoff_realizes_batchmatmul_to_mul():
     )
     assert rz._lds_by_idx(rz._dl_op(sdscs[0]), 2)["hbmSize_"] == 0
     assert rz._lds_by_idx(rz._dl_op(sdscs[1]), 0)["hbmSize_"] == 0
+    assert "coreStateInit_" not in rz._lds_by_idx(rz._dl_op(sdscs[0]), 2)
+    assert rz._dl_op(sdscs[0])["numCoreletsUsed_DSC2_"] == 1
     body = sdscs[1]["1_mul"]
     assert body["opFuncsUsed_"] == ["STCDPOpLx"]
     dataop = body["datadscs_"][0]["0_STCDPOpLx_dataop"]
+    assert dataop["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"][0][
+        "startAddr"
+    ] == [0]
+    assert dataop["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"][0][
+        "startAddr"
+    ] == [rz.MIN_BRIDGE_REGION_BYTES]
     assert dataop["labeledDs_"][0]["layoutDimOrder_"] == ["mb_", "x_", "out_"]
     assert dataop["labeledDs_"][0]["stickDimOrder_"] == ["out_"]
 
