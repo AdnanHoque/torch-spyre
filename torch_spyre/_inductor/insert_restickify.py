@@ -17,7 +17,7 @@ from collections import defaultdict
 
 import torch
 
-from .copy_back_elision import ELIDED_COPY_BACK_ATTR
+from .constants import ELIDED_COPY_BACK_ATTR
 from .ir import FixedTiledLayout
 from .logging_utils import get_inductor_logger
 from .pass_utils import host_coordinates, device_coordinates, stick_compatible

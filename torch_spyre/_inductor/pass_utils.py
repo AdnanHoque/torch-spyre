@@ -33,7 +33,7 @@ from torch._inductor.virtualized import V
 from torch_spyre._C import SpyreTensorLayout, get_elem_in_stick
 from torch_spyre._inductor.errors import Unsupported
 
-from .copy_back_elision import ELIDED_COPY_BACK_ATTR
+from .constants import ELIDED_COPY_BACK_ATTR
 from .ir import FixedTiledLayout
 from .views import compute_coordinates, matching_dim
 

@@ -41,7 +41,7 @@ from torch_spyre._C import (
     get_elem_in_stick,
 )
 from .errors import Unsupported
-from .constants import BATCH_MATMUL_OP, TOPK_OPS
+from .constants import BATCH_MATMUL_OP, ELIDED_COPY_BACK_ATTR, TOPK_OPS
 from .ir import FixedTiledLayout, SpyreConstantFallback
 from .pass_utils import (
     compute_restickify_target_layout,
@@ -625,6 +625,54 @@ def propagate_spyre_tensor_layouts(
             op.restick_cost_fn = AnyInNode.from_args()
         elif isinstance(op, ComputedBuffer):
             if isinstance(op.layout, MutationLayoutSHOULDREMOVE):
+                # spyre_copy_ retargets safe ``copy_(graph_input, producer)``
+                # epilogues at lowering time, leaving the producer with a
+                # MutationLayoutSHOULDREMOVE pointing at the graph input. Such
+                # a "compute mutation op" still needs layouts + restick_cost_fn
+                # so its inputs get the right restickify analysis. We compute
+                # those using the target's host layout as the output, then pin
+                # op.layouts to the target's STL so every optimizer (beam or
+                # greedy) commits the correct STL.
+                if getattr(op, ELIDED_COPY_BACK_ATTR, False) and isinstance(
+                    op.data, (Pointwise, Reduction)
+                ):
+                    target_buf = op.layout.get_buffer()
+                    target_layout = target_buf.layout
+                    target_tb = V.graph.graph_inputs.get(target_buf.get_name())
+                    target_stl = (
+                        next(iter(target_tb.layouts))
+                        if target_tb is not None
+                        and hasattr(target_tb, "layouts")
+                        and target_tb.layouts
+                        else None
+                    )
+                    rw = op.get_read_writes()
+                    output_dep = next(iter(rw.writes))
+                    args = _get_prop_args(rw.reads)
+                    if not args or target_stl is None:
+                        # Nothing to constrain or no STL available; leave the
+                        # mutation layout alone — propagate_mutation_layouts
+                        # will resolve it post-scheduler.
+                        continue
+                    candidates = compute_layouts(op, target_layout, output_dep, args)
+                    # Feasibility (Blocker 2): the producer must be able to
+                    # emit the target's STL. SpyreTensorLayout equality is by
+                    # content (device_size, stride_map, device_dtype).
+                    if target_stl not in candidates:
+                        raise Unsupported(
+                            f"copy-back elision: producer {op.get_name()} cannot "
+                            f"emit target {target_buf.get_name()} STL {target_stl}; "
+                            f"candidates were {list(candidates)}"
+                        )
+                    # Pinning (Blocker 1): with a single candidate, neither
+                    # the beam nor the greedy optimizer can deviate from the
+                    # target's STL when committing.
+                    op.layouts = [target_stl]
+                    # The beam optimizer deliberately skips writing
+                    # committed_stl for mutation ops, so set it here.
+                    # required_input_stls(committed=None) crashes downstream
+                    # for AllSameNode (Pointwise) producers.
+                    op.committed_stl = target_stl
                 continue
             op.decide_layout()
             rw = op.get_read_writes()

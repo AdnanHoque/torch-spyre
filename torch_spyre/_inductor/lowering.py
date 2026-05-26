@@ -17,6 +17,7 @@ from contextlib import contextmanager
 
 import torch
 
+from torch._inductor.dependencies import MemoryDep
 from torch._inductor.ir import ComputedBuffer, Reduction, Pointwise, Scatter, StorageBox
 import torch._inductor.lowering as lowering
 import torch._inductor.ir as ir
@@ -24,7 +25,7 @@ from .ir import SpyreConstantFallback, SpyreEmptyFallback
 
 from typing import Any, Callable, Union
 
-from .constants import BATCH_MATMUL_OP
+from .constants import BATCH_MATMUL_OP, ELIDED_COPY_BACK_ATTR
 import torch_spyre._inductor.customops  # noqa: F401
 from torch_spyre.ops.fallbacks import fallback_ops
 from .ir import SpyreReduction
@@ -724,3 +725,84 @@ def lower_empty(size, device, dtype=None):
     return ir.TensorBox.create(
         SpyreEmptyFallback(op_overload, list(size), device, dtype)
     )
+
+
+def _can_elide_copy_back_at_lowering(dst, src) -> bool:
+    """Return True if ``copy_(dst, src)`` can be folded into the producer.
+
+    A safe case lets us take ``mutate_to``'s ``unsafe_alias=True`` path: the
+    producer's freshly-realized buffer is retargeted to mutate ``dst``, so there
+    is no separate intermediate buffer and no copy kernel. Safe when:
+
+    - ``dst`` is a graph input (mutation target).
+    - ``dst`` is not also a graph output.
+    - No already-lowered op has read ``dst``; functionalization guarantees no
+      future reads of the old value, so scanning past reads is sufficient.
+    - ``src``'s producer is a realized ``ComputedBuffer`` whose layout is still
+      ``FlexibleLayout`` (a frozen layout means the producer cannot be retargeted).
+    - No device/dtype/shape conversion is needed (host layouts match), otherwise
+      ``copy_``'s default to_device/to_dtype/expand wrappers would introduce a
+      genuine pointwise copy that must not be aliased away.
+    """
+    def _peel(node):
+        # TensorBox -> StorageBox -> Buffer
+        while isinstance(node, ir.MutableBox):
+            node = node.data
+        while isinstance(node, ir.StorageBox):
+            node = node.data
+        return node
+
+    dst_buf = _peel(dst)
+    if not isinstance(dst_buf, ir.InputBuffer):
+        return False
+    dst_name = dst_buf.get_name()
+    if dst_name not in V.graph.graph_input_names:
+        return False
+
+    if dst.get_device() != src.get_device():
+        return False
+    if dst.get_dtype() != src.get_dtype():
+        return False
+    if tuple(dst.get_size()) != tuple(src.get_size()):
+        return False
+
+    src_buf = _peel(src)
+    if not isinstance(src_buf, ir.ComputedBuffer):
+        return False
+    if not isinstance(src_buf.layout, ir.FlexibleLayout):
+        return False
+    if tuple(dst_buf.layout.stride) != tuple(src_buf.layout.stride):
+        return False
+
+    for op in V.graph.operations:
+        for dep in op.get_read_writes().reads:
+            if isinstance(dep, MemoryDep) and dep.name == dst_name:
+                return False
+
+    logger.info("eliding copy_back into graph input %s", dst_name)
+    return True
+
+
+@register_spyre_lowering(torch.ops.aten.copy_.default, type_promotion_kind=None)
+def spyre_copy_(dst, src, non_blocking=False):
+    """Elide ``copy_(graph_input, producer)`` epilogues at lowering time.
+
+    For the safe case, retarget the producer's buffer to mutate ``dst`` directly
+    via ``mutate_to(..., unsafe_alias=True)`` — eliminating the intermediate
+    buffer and the standalone copy kernel. Falls back to the default ``copy_``
+    lowering otherwise.
+    """
+    if dst is src:
+        return dst
+    if _can_elide_copy_back_at_lowering(dst, src):
+        src_buf = src.data if hasattr(src, "data") else src
+        if hasattr(src_buf, "data"):
+            src_buf = src_buf.data
+        # Mark so finalize_layouts' pure-copy mutation rule skips this op and
+        # propagate_spyre_tensor_layouts knows to assign it layouts coherently.
+        setattr(src_buf, ELIDED_COPY_BACK_ATTR, True)
+        return lowering.mutate_to(dst, src, unsafe_alias=True)
+    src = lowering.to_device(src, dst.get_device())
+    src = lowering.to_dtype(src, dst.get_dtype())
+    src = lowering.expand(src, dst.get_size())
+    return lowering.mutate_to(dst, src)

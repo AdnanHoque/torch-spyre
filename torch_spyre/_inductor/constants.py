@@ -22,6 +22,12 @@ FP32TODL16_OP = "fp32todl16"
 
 DEVICE_NAME = "spyre"
 
+# Marker on a ComputedBuffer whose layout was retargeted by ``spyre_copy_`` (see
+# ``lowering.py``) so that the producer writes a graph input directly. Used by
+# downstream passes to distinguish a compute mutation op (retargeted producer)
+# from a pure-copy mutation op (the standard ``copy_`` epilogue).
+ELIDED_COPY_BACK_ATTR = "_spyre_writes_copy_back_target"
+
 
 SEGMENT_OFFSETS = [
     0x0,
