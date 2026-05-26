@@ -818,11 +818,19 @@ def test_flash_pipeline_overlap_prefix_tile_artifacts_overlap_one_compute():
     assert len(root0["dscs_"]) == 1
     assert len(root0["datadscs_"]) == 4
     assert root0["opFuncsUsed_"] == ["STCDPOpLx"] * 4
+    assert all(
+        next(iter(dataop.values()))["op"] == {
+            "name": "STCDPOpLx",
+            "coreletId": 1,
+        }
+        for dataop in root0["datadscs_"]
+    )
     meta0 = root0["flashAttentionPipeline_"]
     assert meta0["source"] == "generated-flash-prefill-overlap-prefix-tile"
     assert meta0["tile_count"] == 1
     assert meta0["dataop_count"] == 4
     assert meta0["prefetch_tile_count"] == 2
+    assert meta0["prefetch_corelet_id"] == 1
     assert meta0["compute_tile_count"] == 1
     assert meta0["overlap_prefix"] is True
     assert meta0["overlap_candidate"] is True

@@ -80,6 +80,25 @@ def _bridge(overlap=False):
     )
 
 
+def _bridge_on_corelet(corelet_id):
+    bases = _alloc()
+    return ob.build_flash_attention_pipeline_bridge(
+        dim_pool=_LAYOUT,
+        iter_sizes=_ITER,
+        src_bases=bases["source_bases"],
+        dst_lane_bases=bases["lane_bases"],
+        layout=_LAYOUT,
+        stick_dim="kv_",
+        split_dim="q_",
+        row_dim="kv_",
+        lane_names=["k", "v"],
+        tile_bytes=_TILE_BYTES,
+        overlap=True,
+        stcdp_corelet_id=corelet_id,
+        **_KW,
+    )
+
+
 def _dataop_body(dataop):
     return dataop[next(iter(dataop))]
 
@@ -127,6 +146,16 @@ def test_build_flash_attention_pipeline_bridge_emits_kv_prefetch_dataops():
     assert "0_STCDPOpLx_prefetch_k_tile0" in datadscs[0]
     assert "1_STCDPOpLx_prefetch_v_tile0" in datadscs[1]
     assert "2_STCDPOpLx_prefetch_k_tile1" in datadscs[2]
+    assert "coreletId" not in _dataop_body(datadscs[0])["op"]
+
+
+def test_build_flash_attention_pipeline_bridge_can_target_prefetch_corelet():
+    datadscs, _, _ = _bridge_on_corelet(1)
+    assert _dataop_body(datadscs[0])["op"] == {
+        "name": "STCDPOpLx",
+        "coreletId": 1,
+    }
+    assert _dataop_body(datadscs[-1])["op"]["coreletId"] == 1
 
 
 def test_flash_pipeline_tiles_partition_row_dim_and_alternate_buffers():

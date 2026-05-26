@@ -314,8 +314,11 @@ class Endpoint:
         self.reverse = reverse
 
 
-def _stcdp_op() -> dict:
-    return {"name": "STCDPOpLx"}
+def _stcdp_op(corelet_id: int | None = None) -> dict:
+    op = {"name": "STCDPOpLx"}
+    if corelet_id is not None:
+        op["coreletId"] = int(corelet_id)
+    return op
 
 
 def _restickify_op() -> dict:
@@ -628,6 +631,7 @@ def build_flash_attention_pipeline_bridge(
     lane_names=None,
     tile_bytes=FLASH_PIPELINE_TILE_BYTES,
     overlap=False,
+    stcdp_corelet_id=None,
 ):
     """Build the data-op side of a double-buffered flash-attention pipeline.
 
@@ -705,7 +709,7 @@ def build_flash_attention_pipeline_bridge(
             datadscs.append(
                 _datadsc(
                     f"{dataop_idx}_STCDPOpLx_prefetch_{lane_name}_tile{tile}",
-                    _stcdp_op(),
+                    _stcdp_op(stcdp_corelet_id),
                     dim_pool,
                     in_ld,
                     out_ld,

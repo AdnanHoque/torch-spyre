@@ -1304,6 +1304,7 @@ def build_flash_attention_pipeline_overlap_prefix_tile_artifact(
         lane_names=["k", "v"],
         tile_bytes=tile_bytes,
         overlap=False,
+        stcdp_corelet_id=1,
     )
     if len(datadscs) < 4:
         return None
@@ -1343,6 +1344,7 @@ def build_flash_attention_pipeline_overlap_prefix_tile_artifact(
             "tile_index": tile_index,
             "replaces_sdsc": next(iter(first)),
             "prefetch_tile_count": 2,
+            "prefetch_corelet_id": 1,
             "compute_tile_count": 1,
             "overlap_prefix": True,
         }
