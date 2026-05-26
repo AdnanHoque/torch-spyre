@@ -81,6 +81,7 @@ def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
     cfg = _read_flash_config({"SPYRE_FLASH_ATTENTION_ONCHIP_SDPA": "1"})
 
     assert cfg["flash_attention_onchip_sdpa"] is True
+    assert cfg["flash_attention_prefill_block_size"] == 512
     assert cfg["flash_attention_mixed_pipeline"] is True
     assert cfg["flash_attention_pointwise_handoff"] is True
     assert cfg["flash_attention_score_scale_handoff"] is True
@@ -90,6 +91,18 @@ def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
     assert cfg["flash_attention_mixed_pipeline_artifact"] is False
     assert cfg["flash_attention_mixed_pipeline_execute_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_value_flow_tile"] == -1
+
+
+def test_flash_attention_onchip_sdpa_master_gate_respects_block_size_override():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA": "1",
+            "SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE": "128",
+        }
+    )
+
+    assert cfg["flash_attention_onchip_sdpa"] is True
+    assert cfg["flash_attention_prefill_block_size"] == 128
 
 
 def test_flash_attention_onchip_sdpa_master_gate_preserves_individual_flags():

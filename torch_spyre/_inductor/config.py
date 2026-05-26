@@ -46,9 +46,6 @@ core_id_k_fast_emission: bool = (
 flash_attention_prefill: bool = (
     os.environ.get("SPYRE_FLASH_ATTENTION_PREFILL", "0") == "1"
 )
-flash_attention_prefill_block_size: int = int(
-    os.environ.get("SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE", "128")
-)
 # Production-candidate umbrella for the certified on-chip SDPA path.  This
 # enables the generated flash-prefill decomposition plus fail-closed same-stick
 # handoffs inside that graph.  It intentionally does not enable overlap,
@@ -56,6 +53,12 @@ flash_attention_prefill_block_size: int = int(
 # probe/debug gates.
 flash_attention_onchip_sdpa: bool = (
     os.environ.get("SPYRE_FLASH_ATTENTION_ONCHIP_SDPA", "0") == "1"
+)
+flash_attention_prefill_block_size: int = int(
+    os.environ.get(
+        "SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE",
+        "512" if flash_attention_onchip_sdpa else "128",
+    )
 )
 # Default-off proof path for a mixed-SDSC, double-buffered flash-attention
 # prefill pipeline.  The first implementation only builds descriptor/scheduler
