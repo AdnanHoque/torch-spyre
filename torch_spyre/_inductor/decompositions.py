@@ -118,7 +118,9 @@ def _flash_attention_prefill(
 
         scores = torch.matmul(query, key_block_t)
         if score_scale != 1.0:
-            scores = (scores * score_scale).contiguous()
+            scores = (scores * score_scale).clone(
+                memory_format=torch.contiguous_format
+            )
         scores = scores.transpose(-1, -2).contiguous()
         block_max = torch.amax(scores, dim=-2)
         next_max = torch.maximum(max_running, block_max)
