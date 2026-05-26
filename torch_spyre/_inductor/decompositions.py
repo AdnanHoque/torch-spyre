@@ -117,9 +117,9 @@ def _flash_attention_prefill(
         key_block_t = key_block.transpose(-1, -2).contiguous()
 
         scores = torch.matmul(query, key_block_t)
+        scores = scores.transpose(-1, -2).contiguous()
         if score_scale != 1.0:
             scores = scores * score_scale
-        scores = scores.transpose(-1, -2).contiguous()
         block_max = torch.amax(scores, dim=-2)
         next_max = torch.maximum(max_running, block_max)
 
