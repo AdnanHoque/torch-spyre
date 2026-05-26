@@ -128,8 +128,9 @@ def _flash_attention_prefill(
         exp_scores = torch.exp(scores - next_max.unsqueeze(-2))
         correction = torch.exp(max_running - next_max)
         denominator = denominator * correction + exp_scores.sum(dim=-2)
+        pv_scores = exp_scores.transpose(-1, -2).contiguous()
         output = output * correction.unsqueeze(-1) + torch.bmm(
-            exp_scores.transpose(-1, -2).flatten(0, 1),
+            pv_scores.flatten(0, 1),
             value_block.flatten(0, 1),
         ).unflatten(0, (batch_size, num_heads))
         max_running = next_max
