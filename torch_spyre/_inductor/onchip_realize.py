@@ -27,12 +27,17 @@ same-core same-shard case: a single STCDPOpLx, 2 LX regions, no ring.
 from __future__ import annotations
 
 import dataclasses
+import copy
 
 from .codegen.onchip_bridge import (
     LX_CAPACITY_BYTES,
+    STICK_BYTES,
     STREAM_TILE_BYTES,
+    allocate_flash_attention_pipeline_bases,
     allocate_lx_bases,
     allocate_stream_bases,
+    build_flash_attention_pipeline_bridge,
+    build_flash_attention_pipeline_mixed_sdsc,
     build_roundtrip_bridge,
     build_same_layout_bridge,
     build_streamed_bridge,
@@ -755,6 +760,122 @@ def realize_static_matmul_handoff(
     body["opFuncsUsed_"] = opfuncs
     _dl_op(cons)["numCoreletsUsed_DSC2_"] = 1
     return True
+
+
+def _exact_tile_bytes_for_tiles(slice_bytes: int, num_tiles: int) -> int | None:
+    """Return a stick-aligned tile size that yields exactly ``num_tiles``."""
+    if slice_bytes <= 0 or num_tiles <= 0:
+        return None
+    for tile_bytes in range(STICK_BYTES, slice_bytes + STICK_BYTES, STICK_BYTES):
+        if num_stream_tiles(slice_bytes, tile_bytes) == num_tiles:
+            return tile_bytes
+    return None
+
+
+def _flash_pipeline_row_dim(layout: list[str], split_dim: str, iter_sizes: dict):
+    candidates = [dim for dim in layout if dim != split_dim]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda dim: int(iter_sizes.get(dim, 0)))
+
+
+def build_flash_attention_pipeline_artifact(
+    sdscs_json: list[dict],
+    *,
+    overlap: bool = False,
+    name: str = "mixed_flash_pipeline_artifact",
+) -> dict | None:
+    """Build a non-executed mixed-SDSC proof from real flash-prefill compute SDSCs.
+
+    The artifact combines the generated batchmatmul compute DSCs from one
+    flash-prefill bundle with the Stage009 double-buffered STCDPOpLx schedule.
+    It is intentionally sidecar-only: no producer/consumer descriptors are
+    flipped and bundle.mlir should not execute it yet.
+    """
+    tile_sdscs = [sdsc for sdsc in sdscs_json if _op_name(sdsc) == "batchmatmul"]
+    if not tile_sdscs:
+        return None
+
+    first = tile_sdscs[0]
+    first_body = _body(first)
+    num_cores = int(first_body.get("numCoresUsed_", 0))
+    if num_cores <= 0:
+        return None
+    first_dl = _dl_op(first)
+    out_indices = _producer_output_indices(first_dl)
+    if len(out_indices) != 1:
+        return None
+    out_idx = out_indices[0]
+    layout = _layout_for_lds(first_dl, out_idx)
+    stick_dim = _stick_dim_for_lds(first_dl, out_idx)
+    split_dim = _single_split_dim(first_body.get("numWkSlicesPerDim_", {}))
+    if layout is None or stick_dim is None or split_dim is None:
+        return None
+    iter_sizes = _iter_sizes_for_layout(first_dl, layout)
+    if iter_sizes is None:
+        return None
+    row_dim = _flash_pipeline_row_dim(layout, split_dim, iter_sizes)
+    if row_dim is None:
+        return None
+    num_tiles = len(tile_sdscs)
+    slice_bytes = per_core_same_stick_slice_bytes(
+        iter_sizes,
+        split_dim,
+        stick_dim,
+        STICK_SIZE,
+        num_cores,
+    )
+    tile_bytes = _exact_tile_bytes_for_tiles(slice_bytes, num_tiles)
+    if tile_bytes is None:
+        return None
+    try:
+        bases = allocate_flash_attention_pipeline_bases(
+            num_lanes=2,
+            tile_bytes=tile_bytes,
+            scratch_regions=2,
+            region0=PRODUCER_LX_BASE,
+        )
+    except ValueError:
+        return None
+
+    datadscs, opfuncs, schedule = build_flash_attention_pipeline_bridge(
+        dim_pool=layout,
+        iter_sizes=iter_sizes,
+        stick_size=STICK_SIZE,
+        num_cores=num_cores,
+        lx_size=DATAOP_LX_SIZE,
+        src_bases=bases["source_bases"],
+        dst_lane_bases=bases["lane_bases"],
+        layout=layout,
+        stick_dim=stick_dim,
+        split_dim=split_dim,
+        row_dim=row_dim,
+        lane_names=["k", "v"],
+        tile_bytes=tile_bytes,
+        overlap=overlap,
+    )
+    compute_dscs = [copy.deepcopy(_body(sdsc)["dscs_"][0]) for sdsc in tile_sdscs]
+    artifact = build_flash_attention_pipeline_mixed_sdsc(
+        name,
+        datadscs,
+        opfuncs,
+        schedule,
+        compute_dscs,
+        num_cores,
+    )
+    root = artifact[name]
+    root["flashAttentionPipeline_"].update(
+        {
+            "source": "generated-flash-prefill-batchmatmul-tiles",
+            "row_dim": row_dim,
+            "split_dim": split_dim,
+            "stick_dim": stick_dim,
+            "layout": layout,
+            "iter_sizes": iter_sizes,
+            "tile_bytes": tile_bytes,
+        }
+    )
+    return artifact
 
 
 def detect_onchip_edge(sdscs_json: list[dict]):

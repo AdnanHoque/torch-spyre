@@ -61,6 +61,13 @@ flash_attention_mixed_pipeline: bool = (
 flash_attention_mixed_pipeline_overlap: bool = (
     os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_OVERLAP", "0") == "1"
 )
+# Emit a compiler-produced mixed-SDSC flash pipeline proof artifact next to the
+# normal SDSCs, but do not add it to bundle.mlir execution. This lets DXP/senprog
+# validation target the real generated flash-prefill graph before the production
+# path replaces any executed SDSCs.
+flash_attention_mixed_pipeline_artifact: bool = (
+    os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_ARTIFACT", "0") == "1"
+)
 
 # --- Tier 0: ring-aware restickify (telemetry + producer-aligned work division) ---
 # Default-off ring byte-hop telemetry for compiler-inserted restickifies.

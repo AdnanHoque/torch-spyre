@@ -19,7 +19,10 @@ from torch_spyre._inductor import config
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
-from torch_spyre._inductor.onchip_realize import realize_onchip_handoff
+from torch_spyre._inductor.onchip_realize import (
+    build_flash_attention_pipeline_artifact,
+    realize_onchip_handoff,
+)
 
 
 logger = get_inductor_logger("sdsc_compile")
@@ -62,6 +65,18 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             min_handoff_bytes=config.onchip_handoff_min_bytes,
         ):
             logger.info("Realized on-chip handoff")
+    sidecar_sdscs = []
+    if (
+        config.flash_attention_mixed_pipeline
+        and config.flash_attention_mixed_pipeline_artifact
+    ):
+        artifact = build_flash_attention_pipeline_artifact(
+            sdscs_json,
+            overlap=config.flash_attention_mixed_pipeline_overlap,
+        )
+        if artifact is not None:
+            sidecar_sdscs.append(artifact)
+            logger.info("Emitted mixed flash attention pipeline sidecar artifact")
 
     # Write JSON SDSCs to file system
     files = []
@@ -71,6 +86,12 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         files.append(file_name)
         with open(os.path.join(output_dir, file_name), "w") as file:
             logger.info(f"Generating {file.name}")
+            json.dump(sdsc_json, file, indent=2)
+    for sdsc_json in sidecar_sdscs:
+        sdsc_name = next(iter(sdsc_json))
+        file_name = f"sdsc_{sdsc_name}.json"
+        with open(os.path.join(output_dir, file_name), "w") as file:
+            logger.info(f"Generating sidecar {file.name}")
             json.dump(sdsc_json, file, indent=2)
 
     # Generate bundle.mlir

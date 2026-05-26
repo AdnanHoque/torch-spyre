@@ -306,6 +306,40 @@ def _fake_static_matmul_sdscs(stick_position="last", extra_consumer=False):
     return sdscs
 
 
+def _fake_flash_pipeline_sdscs(num_tiles=3):
+    pdi = {
+        "INPUT": {
+            "layoutDimOrder_": ["mb", "x", "in"],
+            "stickDimOrder_": ["in"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["in", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    sdscs = []
+    for idx in range(num_tiles):
+        sdscs.append(
+            _fake_sdsc(
+                idx,
+                "batchmatmul",
+                {"x": 1, "mb": 32, "out": 1, "in": 1},
+                {"x_": 2, "mb_": 96, "out_": 192, "in_": 64},
+                [("Tensor0-idx0", "INPUT", 4096 + idx * 4096)],
+                [("Tensor2-idx2", "OUTPUT", 8192 + idx * 4096)],
+                pdi,
+            )
+        )
+    return sdscs
+
+
 def test_attention_score_handoff_bridges_full_score_fanout():
     sdscs = _fake_attention_sdscs()
     assert rz.realize_onchip_handoff(
@@ -389,6 +423,52 @@ def test_static_matmul_handoff_rejects_layout_change_and_fanout():
         )
         is None
     )
+
+
+def test_flash_pipeline_artifact_wraps_generated_batchmatmul_tiles():
+    artifact = rz.build_flash_attention_pipeline_artifact(
+        _fake_flash_pipeline_sdscs(num_tiles=3),
+        overlap=False,
+    )
+    assert artifact is not None
+    root = artifact["mixed_flash_pipeline_artifact"]
+    assert len(root["dscs_"]) == 3
+    assert len(root["datadscs_"]) == 6
+    assert root["opFuncsUsed_"] == ["STCDPOpLx"] * 6
+    meta = root["flashAttentionPipeline_"]
+    assert meta["tile_count"] == 3
+    assert meta["dataop_count"] == 6
+    assert meta["overlap_candidate"] is False
+    assert meta["source"] == "generated-flash-prefill-batchmatmul-tiles"
+    assert meta["layout"] == ["mb_", "x_", "out_"]
+    assert meta["split_dim"] == "mb_"
+    assert meta["stick_dim"] == "out_"
+    assert meta["row_dim"] == "out_"
+    assert root["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [-1, 0, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 1],
+        [-1, 1, 1, 1],
+        [4, -1, 1, 1],
+        [5, -1, 1, 1],
+        [-1, 2, 1, 0],
+    ]
+
+
+def test_flash_pipeline_artifact_overlap_marks_candidate_rows():
+    artifact = rz.build_flash_attention_pipeline_artifact(
+        _fake_flash_pipeline_sdscs(num_tiles=3),
+        overlap=True,
+    )
+    root = artifact["mixed_flash_pipeline_artifact"]
+    assert root["flashAttentionPipeline_"]["overlap_candidate"] is True
+    assert [2, 0, 1, 1] in root["coreIdToDscSchedule"]["0"]
+
+
+def test_flash_pipeline_artifact_returns_none_without_batchmatmul_tiles():
+    assert rz.build_flash_attention_pipeline_artifact([]) is None
 
 
 def _run_all():
