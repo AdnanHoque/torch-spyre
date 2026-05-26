@@ -441,6 +441,44 @@ def test_static_matmul_handoff_rejects_layout_change_and_fanout():
     )
 
 
+def test_flash_value_flow_tile_flips_real_single_consumer_edge():
+    sdscs = _fake_static_matmul_sdscs()
+    artifact, replaced = rz.build_flash_attention_value_flow_tile_artifact(
+        sdscs,
+        tile_index=1,
+    )
+
+    assert replaced == "1_batchmatmul"
+    assert rz._lds_by_idx(rz._dl_op(sdscs[0]), 2)["hbmSize_"] == 0
+    assert rz._lds_by_idx(rz._dl_op(sdscs[1]), 0)["hbmSize_"] == 0
+
+    root = artifact["mixed_flash_value_flow_tile_1"]
+    assert len(root["dscs_"]) == 1
+    assert len(root["datadscs_"]) == 2
+    assert root["opFuncsUsed_"] == ["STCDPOpLx", "STCDPOpLx"]
+    assert root["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    meta = root["flashAttentionPipeline_"]
+    assert meta["source"] == "generated-flash-prefill-real-value-flow"
+    assert meta["tile_index"] == 1
+    assert meta["replaces_sdsc"] == "1_batchmatmul"
+    assert len(meta["edges"]) == 1
+
+
+def test_flash_value_flow_tile_requires_latest_single_consumer_producer():
+    assert rz.build_flash_attention_value_flow_tile_artifact(
+        _fake_flash_pipeline_sdscs(num_tiles=1),
+        tile_index=0,
+    ) is None
+    assert rz.build_flash_attention_value_flow_tile_artifact(
+        _fake_static_matmul_sdscs(extra_consumer=True),
+        tile_index=1,
+    ) is None
+
+
 def test_flash_pipeline_artifact_wraps_generated_batchmatmul_tiles():
     artifact = rz.build_flash_attention_pipeline_artifact(
         _fake_flash_pipeline_sdscs(num_tiles=3),

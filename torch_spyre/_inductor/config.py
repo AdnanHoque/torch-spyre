@@ -74,6 +74,12 @@ flash_attention_mixed_pipeline_artifact: bool = (
 flash_attention_mixed_pipeline_execute_tile: int = int(
     os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_EXECUTE_TILE", "-1")
 )
+# Stronger diagnostic than EXECUTE_TILE: flip eligible single-consumer producer
+# outputs and matching flash-tile batchmatmul inputs to LX, then execute the
+# mixed tile sidecar with real STCDPOpLx value flow. -1 disables.
+flash_attention_mixed_pipeline_value_flow_tile: int = int(
+    os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_VALUE_FLOW_TILE", "-1")
+)
 
 # --- Tier 0: ring-aware restickify (telemetry + producer-aligned work division) ---
 # Default-off ring byte-hop telemetry for compiler-inserted restickifies.

@@ -22,6 +22,7 @@ from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.onchip_realize import (
     build_flash_attention_pipeline_artifact,
     build_flash_attention_pipeline_tile_artifacts,
+    build_flash_attention_value_flow_tile_artifact,
     realize_onchip_handoff,
 )
 
@@ -68,13 +69,28 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             logger.info("Realized on-chip handoff")
     sidecar_sdscs = []
     sidecar_replacements = {}
+    value_flow_tile = config.flash_attention_mixed_pipeline_value_flow_tile
     if (
         config.flash_attention_mixed_pipeline
         and (
             config.flash_attention_mixed_pipeline_artifact
             or config.flash_attention_mixed_pipeline_execute_tile >= 0
+            or value_flow_tile >= 0
         )
     ):
+        if value_flow_tile >= 0:
+            value_flow = build_flash_attention_value_flow_tile_artifact(
+                sdscs_json,
+                value_flow_tile,
+            )
+            if value_flow is not None:
+                artifact, replaced = value_flow
+                sidecar_name = next(iter(artifact))
+                sidecar_sdscs.append(artifact)
+                sidecar_replacements[replaced] = sidecar_name
+                logger.info(
+                    "Executing mixed flash attention value-flow tile sidecar"
+                )
         tile_artifacts = build_flash_attention_pipeline_tile_artifacts(sdscs_json)
         sidecar_sdscs.extend(tile_artifacts)
         execute_tile = config.flash_attention_mixed_pipeline_execute_tile
@@ -84,7 +100,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             if meta.get("tile_index") != execute_tile:
                 continue
             replaced = meta.get("replaces_sdsc")
-            if replaced is not None:
+            if replaced is not None and replaced not in sidecar_replacements:
                 sidecar_replacements[replaced] = sidecar_name
         if config.flash_attention_mixed_pipeline_artifact:
             artifact = build_flash_attention_pipeline_artifact(
