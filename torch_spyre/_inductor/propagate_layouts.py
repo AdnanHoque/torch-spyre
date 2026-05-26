@@ -189,11 +189,12 @@ def _single_arg_op_layout(
             if (
                 in_coords == out_coords
                 and in_layout.size == output.size
-                and dep.index == output_dep.index
                 and same_device_size(in_layout.dtype, output.dtype)
             ):
-                # Input and output tensors are being accessed identically and elem size is the same.
-                # We can simply propagate the device_layout.
+                # Input and output tensors have the same logical coordinates and
+                # element size.  Scalar pointwise ops can use different loop
+                # symbols for the same coordinates, so do not require literal
+                # index-expression equality here.
                 return SpyreTensorLayout(
                     stl.device_size,
                     stl.stride_map,
