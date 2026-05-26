@@ -122,13 +122,12 @@ def _flash_attention_prefill(
                 memory_format=torch.contiguous_format
             )
         if config.flash_attention_natural_score_layout:
-            block_max = torch.amax(scores, dim=-1).contiguous()
+            block_max = torch.amax(scores, dim=-1)
             next_max = torch.maximum(max_running, block_max)
 
             exp_scores = torch.exp(scores - next_max.unsqueeze(-1))
             correction = torch.exp(max_running - next_max)
-            exp_sum = exp_scores.sum(dim=-1).contiguous()
-            denominator = denominator * correction + exp_sum
+            denominator = denominator * correction + exp_scores.sum(dim=-1)
             output = output * correction.unsqueeze(-1) + torch.bmm(
                 exp_scores.flatten(0, 1),
                 value_block.flatten(0, 1),
