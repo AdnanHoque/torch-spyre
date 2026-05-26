@@ -140,6 +140,7 @@ def _fake_sdsc(
     pdi,
     *,
     lx_pinned=False,
+    input_neighbor_transfer=False,
 ):
     def lds(label, role):
         i = int(label.rsplit("-idx", 1)[1])
@@ -184,6 +185,27 @@ def _fake_sdsc(
             }
         ],
     }
+    if input_neighbor_transfer:
+        dl["scheduleTree_"].append(
+            {
+                "nodeType_": "transfer",
+                "name_": "dummy_transfer_to_lx_neighbor_input",
+                "src_": {
+                    "unit_": "no_component",
+                    "storage_": "no_component",
+                },
+                "dstVias_": [
+                    {
+                        "loc_": {
+                            "unit_": "no_component",
+                            "storage_": "lx",
+                        },
+                        "via_": [],
+                    }
+                ],
+                "dstLdsAndLoopOffsets_": [{"myLdsIdx_": 0}],
+            }
+        )
     return {
         f"{idx}_{op}": {
             "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],
@@ -328,7 +350,12 @@ def _fake_static_matmul_sdscs(stick_position="last", extra_consumer=False):
     return sdscs
 
 
-def _fake_flash_pipeline_sdscs(num_tiles=3, *, lx_pinned=False):
+def _fake_flash_pipeline_sdscs(
+    num_tiles=3,
+    *,
+    lx_pinned=False,
+    input_neighbor_transfer=False,
+):
     pdi = {
         "INPUT": {
             "layoutDimOrder_": ["mb", "x", "in"],
@@ -358,6 +385,7 @@ def _fake_flash_pipeline_sdscs(num_tiles=3, *, lx_pinned=False):
                 [("Tensor2-idx2", "OUTPUT", 8192 + idx * 4096)],
                 pdi,
                 lx_pinned=lx_pinned,
+                input_neighbor_transfer=input_neighbor_transfer,
             )
         )
     return sdscs
@@ -741,7 +769,11 @@ def test_flash_pipeline_tile_artifacts_are_one_compute_each():
 
 def test_flash_pipeline_overlap_prefix_tile_artifacts_overlap_one_compute():
     artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
-        _fake_flash_pipeline_sdscs(num_tiles=3, lx_pinned=True),
+        _fake_flash_pipeline_sdscs(
+            num_tiles=3,
+            lx_pinned=True,
+            input_neighbor_transfer=True,
+        ),
         overlap_prefix=True,
     )
     assert len(artifacts) == 3
@@ -785,8 +817,24 @@ def test_flash_pipeline_overlap_prefix_rejects_hbm_backed_compute():
     assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
 
 
+def test_flash_pipeline_overlap_prefix_rejects_lx_compute_without_transfer():
+    artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
+        _fake_flash_pipeline_sdscs(num_tiles=3, lx_pinned=True),
+        overlap_prefix=True,
+    )
+    root0 = artifacts[0]["mixed_flash_pipeline_tile_0"]
+    assert len(root0["dscs_"]) == 1
+    assert len(root0["datadscs_"]) == 2
+    assert root0["flashAttentionPipeline_"]["overlap_prefix"] is False
+    assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
+
+
 def test_flash_pipeline_overlap_prefix_rejects_mismatched_next_tile():
-    sdscs = _fake_flash_pipeline_sdscs(num_tiles=3, lx_pinned=True)
+    sdscs = _fake_flash_pipeline_sdscs(
+        num_tiles=3,
+        lx_pinned=True,
+        input_neighbor_transfer=True,
+    )
     sdscs[1]["1_batchmatmul"]["dscs_"][0]["batchmatmul"]["N_"]["out_"] = 128
     artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
         sdscs,

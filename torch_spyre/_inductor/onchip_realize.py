@@ -72,6 +72,7 @@ MIN_BRIDGE_REGION_BYTES = 256 << 10
 # pointwise handoffs.
 FLASH_SCORE_SCALE_MAX_STICK_ELEMS = 128
 INPUT_FETCH_NEIGHBOR_DISALLOWED_PINS = {"hbm", None}
+INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX = 0
 PINNED_COMPONENT_ORDER = (
     "hbm",
     "ring",
@@ -498,10 +499,49 @@ def _input_fetch_neighbor_compute_eligible(compute_dsc: dict) -> bool:
     labeled_ds = dl.get("labeledDs_", [])
     if not labeled_ds:
         return False
-    return all(
+    if not all(
         _pinned_component(lds) not in INPUT_FETCH_NEIGHBOR_DISALLOWED_PINS
         for lds in labeled_ds
+    ):
+        return False
+
+    compute_ops = dl.get("computeOp_", [])
+    if not compute_ops:
+        return False
+    input_labels = compute_ops[0].get("inputLabeledDs", [])
+    if not input_labels:
+        return False
+    first_input_idx = int(input_labels[0].rsplit("-idx", 1)[1])
+    if first_input_idx != INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX:
+        return False
+    input_lds = next(
+        (lds for lds in labeled_ds if lds.get("ldsIdx_") == first_input_idx),
+        None,
     )
+    if input_lds is None or _pinned_component(input_lds) != "lx":
+        return False
+    return _has_input_fetch_neighbor_transfer(dl, first_input_idx)
+
+
+def _has_input_fetch_neighbor_transfer(dl: dict, lds_idx: int) -> bool:
+    """DXP later expects a NO_COMPONENT -> LX transfer node for the neighbor."""
+    for node in dl.get("scheduleTree_", []):
+        if node.get("nodeType_") != "transfer":
+            continue
+        src = node.get("src_", {})
+        if src.get("storage_") != "no_component":
+            continue
+        if not any(
+            (via.get("loc_", {}) or {}).get("storage_") == "lx"
+            for via in node.get("dstVias_", [])
+        ):
+            continue
+        if any(
+            dst.get("myLdsIdx_") == lds_idx
+            for dst in node.get("dstLdsAndLoopOffsets_", [])
+        ):
+            return True
+    return False
 
 
 def _core_state_init_entry(lx_base: int) -> dict:
