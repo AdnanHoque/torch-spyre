@@ -552,8 +552,8 @@ _PT_ROWS = 8                                        # PT block rows per corelet
 _TARGET_PT_PASSES = 8                               # per-core M target = this * _PT_ROWS rows
 _M_MIN = _PT_ROWS // 2                              # smallest useful m-split (half a PT pass)
 
-_COST_PEAK_MACS_US_CORE = (300e12 / 2 / 32) / 1e6   # AIU 1.0: ~4.7M MACs/us/core
-_COST_HBM_BW_GBS = 166.0                            # AIU 1.0 aggregate HBM bandwidth
+_COST_PEAK_MACS_US_CORE = (300e12 / 2 / 32) / 1e6   # 300 TOPS / 32 cores, in MACs/us/core
+_COST_HBM_BW_GBS = 166.0                            # aggregate device-memory bandwidth
 _COST_DTYPE_BYTES = 2                               # fp16
 _COST_PSUM_PER_ELEM_US = 4e-4                       # per output element, per K-split ring hop
 _COST_COHORT_LIMIT = 8                              # broadcast contention kicks in above this
