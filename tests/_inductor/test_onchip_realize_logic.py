@@ -417,7 +417,7 @@ def _fake_flash_pointwise_sdscs(multisplit=False, chain=False):
     return [producer, consumer]
 
 
-def _fake_flash_score_scale_sdscs():
+def _fake_flash_score_scale_sdscs(score_block=64):
     shared_addr = 4096
     producer_pdi = {
         "OUTPUT": {
@@ -437,7 +437,7 @@ def _fake_flash_score_scale_sdscs():
         0,
         "batchmatmul",
         {"x": 1, "mb": 32, "out": 1, "in": 1},
-        {"x_": 2, "mb_": 128, "out_": 64, "in_": 64},
+        {"x_": 2, "mb_": 128, "out_": score_block, "in_": 64},
         [],
         [("Tensor2-idx2", "OUTPUT", shared_addr)],
         producer_pdi,
@@ -446,7 +446,7 @@ def _fake_flash_score_scale_sdscs():
         1,
         "mul",
         {"x": 1, "out": 1, "mb": 32},
-        {"x_": 2, "mb_": 128, "out_": 64},
+        {"x_": 2, "mb_": 128, "out_": score_block},
         [("Tensor0-idx0", "OUTPUT", shared_addr), ("Tensor1-idx1", "OUTPUT", 8192)],
         [("Tensor2-idx2", "OUTPUT", 12288)],
         consumer_pdi,
@@ -606,6 +606,20 @@ def test_flash_score_scale_handoff_is_default_disabled():
     assert "coreStateInit_" not in rz._lds_by_idx(rz._dl_op(sdscs[0]), 2)
     assert "coreStateInit_" not in rz._lds_by_idx(rz._dl_op(sdscs[1]), 0)
     assert "datadscs_" not in sdscs[1]["1_mul"]
+
+
+def test_flash_score_scale_handoff_rejects_wide_score_block():
+    sdscs = _fake_flash_score_scale_sdscs(score_block=256)
+    assert rz.detect_flash_score_scale_handoff(sdscs) is None
+    assert (
+        rz.realize_flash_attention_pointwise_handoffs(
+            sdscs,
+            score_scale_handoff=True,
+        )
+        == 0
+    )
+    assert rz._hbm_base(rz._dl_op(sdscs[0]), 2) == "4096"
+    assert rz._hbm_base(rz._dl_op(sdscs[1]), 0) == "4096"
 
 
 def test_flash_value_flow_tile_flips_real_single_consumer_edge():

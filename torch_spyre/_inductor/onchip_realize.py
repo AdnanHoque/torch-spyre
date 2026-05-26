@@ -65,6 +65,11 @@ STREAM_THRESHOLD = LX_CAPACITY_BYTES // 2
 # per LX bridge region. Tighter packing can overlap DL-op private LX scratch even
 # when the logical tensor slice is smaller.
 MIN_BRIDGE_REGION_BYTES = 256 << 10
+# Stage022 device sweep: score-scale PT->SFP handoff is value-correct through
+# 128-wide score blocks, but 256-wide score blocks corrupt values. Keep larger
+# blocks fail-closed to the HBM score-scale path while retaining later SFP
+# pointwise handoffs.
+FLASH_SCORE_SCALE_MAX_STICK_ELEMS = 128
 
 
 def _reserve_bridge_region_bytes(slice_bytes: int) -> int:
@@ -1321,6 +1326,8 @@ def detect_flash_score_scale_handoff(sdscs_json: list[dict]):
             continue
         iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
         if iter_sizes is None:
+            continue
+        if int(iter_sizes.get(cons_stick, 0)) > FLASH_SCORE_SCALE_MAX_STICK_ELEMS:
             continue
         if split_dim not in iter_sizes or iter_sizes[split_dim] % num_cores != 0:
             continue
