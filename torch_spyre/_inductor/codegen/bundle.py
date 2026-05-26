@@ -23,6 +23,7 @@ from torch_spyre._inductor.onchip_realize import (
     build_flash_attention_pipeline_artifact,
     build_flash_attention_pipeline_tile_artifacts,
     build_flash_attention_value_flow_tile_artifact,
+    realize_flash_attention_pointwise_handoffs,
     realize_onchip_handoff,
 )
 
@@ -59,13 +60,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     # into a mixed DL+data-op SuperDSC (LX-resident handoff, no HBM round trip).
     # Default off -> output byte-identical to before. Needs the deeptools
     # Foundation gate + a device build to execute, so default fail-closed.
-    if (
-        config.onchip_handoff_realize
-        or (
-            config.flash_attention_mixed_pipeline
-            and config.flash_attention_pointwise_handoff
-        )
-    ):
+    if config.onchip_handoff_realize:
         if realize_onchip_handoff(
             sdscs_json,
             attention_score_handoff=config.onchip_attention_score_handoff,
@@ -73,6 +68,13 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             min_handoff_bytes=config.onchip_handoff_min_bytes,
         ):
             logger.info("Realized on-chip handoff")
+    if (
+        config.flash_attention_mixed_pipeline
+        and config.flash_attention_pointwise_handoff
+    ):
+        count = realize_flash_attention_pointwise_handoffs(sdscs_json)
+        if count:
+            logger.info(f"Realized {count} flash pointwise on-chip handoffs")
     sidecar_sdscs = []
     sidecar_replacements = {}
     value_flow_tile = config.flash_attention_mixed_pipeline_value_flow_tile

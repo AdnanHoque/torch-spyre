@@ -1160,14 +1160,8 @@ def build_flash_attention_value_flow_tile_artifact(
     return None
 
 
-def detect_onchip_edge(sdscs_json: list[dict]):
-    """Find an eligible same-stick same-shard producer->consumer edge.
-
-    The original proof matched add->add only.  Keep that production-shaped narrow
-    contract, but allow the same pointwise shape for attention's Inductor-level
-    online-softmax graph.  We require a single future consumer to avoid fanout
-    values that still need the HBM materialization.
-    """
+def detect_pointwise_handoff(sdscs_json: list[dict]):
+    """Find a fully legal same-layout pointwise LX handoff edge."""
     for p in range(len(sdscs_json)):
         prod = sdscs_json[p]
         if _op_name(prod) not in _POINTWISE_HANDOFF_OPS:
@@ -1187,10 +1181,135 @@ def detect_onchip_edge(sdscs_json: list[dict]):
         _c, cons, in_idx = consumers[0]
         if _op_name(cons) not in _POINTWISE_HANDOFF_OPS:
             continue
-        if cons[next(iter(cons))].get("numWkSlicesPerDim_") != prod_shard:
+        cons_shard = cons[next(iter(cons))].get("numWkSlicesPerDim_")
+        if cons_shard != prod_shard:
             continue
-        return prod, cons, out_idx, in_idx
+        prod_layout = _layout_for_lds(prod_dl, out_idx)
+        prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
+        cons_dl = _dl_op(cons)
+        cons_layout = _layout_for_lds(cons_dl, in_idx)
+        cons_stick = _stick_dim_for_lds(cons_dl, in_idx)
+        if (
+            prod_layout is None
+            or prod_stick is None
+            or cons_layout is None
+            or cons_stick is None
+            or not _same_physical_stick_layout(
+                prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
+            )
+        ):
+            continue
+
+        split_dim = _single_split_dim(cons_shard)
+        if split_dim is None:
+            continue
+        num_cores = int(_body(cons).get("numCoresUsed_", 0))
+        split_factor = _split_factor(cons_shard, split_dim)
+        if num_cores <= 0 or split_factor != num_cores:
+            continue
+        iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
+        if iter_sizes is None:
+            continue
+        if split_dim not in iter_sizes or iter_sizes[split_dim] % num_cores != 0:
+            continue
+        slice_bytes = _reserve_bridge_region_bytes(
+            per_core_same_stick_slice_bytes(
+                iter_sizes,
+                split_dim,
+                cons_stick,
+                STICK_SIZE,
+                num_cores,
+            )
+        )
+        if slice_bytes > STREAM_THRESHOLD and cons_stick != split_dim:
+            continue
+        return {
+            "producer": prod,
+            "consumer": cons,
+            "producer_idx": out_idx,
+            "consumer_idx": in_idx,
+            "iter_sizes": iter_sizes,
+            "layout": cons_layout,
+            "stick_dim": cons_stick,
+            "split_dim": split_dim,
+            "num_cores": num_cores,
+            "slice_bytes": slice_bytes,
+        }
     return None
+
+
+def detect_onchip_edge(sdscs_json: list[dict]):
+    """Find an eligible same-stick same-shard producer->consumer edge.
+
+    The original proof matched add->add only.  Keep that production-shaped narrow
+    contract, but allow the same pointwise shape for attention's Inductor-level
+    online-softmax graph.  We require a single future consumer to avoid fanout
+    values that still need the HBM materialization.
+    """
+    edge = detect_pointwise_handoff(sdscs_json)
+    if edge is None:
+        return None
+    return (
+        edge["producer"],
+        edge["consumer"],
+        edge["producer_idx"],
+        edge["consumer_idx"],
+    )
+
+
+def realize_pointwise_handoff(sdscs_json: list[dict]) -> bool:
+    edge = detect_pointwise_handoff(sdscs_json)
+    if edge is None:
+        return False
+
+    if edge["slice_bytes"] <= STREAM_THRESHOLD:
+        realization = realize_same_layout_handoff(
+            iter_sizes=edge["iter_sizes"],
+            layout=edge["layout"],
+            stick_dim=edge["stick_dim"],
+            split_dim=edge["split_dim"],
+            stick_size=STICK_SIZE,
+            num_cores=edge["num_cores"],
+            producer_ldsidx=edge["producer_idx"],
+            consumer_ldsidx=edge["consumer_idx"],
+            region0=PRODUCER_LX_BASE,
+        )
+    else:
+        realization = realize_streamed_handoff(
+            iter_sizes=edge["iter_sizes"],
+            layout=edge["layout"],
+            stick_dim=edge["stick_dim"],
+            split_dim=edge["split_dim"],
+            stick_size=STICK_SIZE,
+            num_cores=edge["num_cores"],
+            producer_ldsidx=edge["producer_idx"],
+            consumer_ldsidx=edge["consumer_idx"],
+            region0=PRODUCER_LX_BASE,
+        )
+    if realization is None:
+        return False
+    prod = edge["producer"]
+    cons = edge["consumer"]
+    apply_lx_flip(prod, realization.producer_flip)
+    apply_lx_flip(cons, realization.consumer_flip)
+    body = _body(cons)
+    body["coreIdToDscSchedule"] = realization.schedule
+    body["datadscs_"] = realization.datadscs
+    body["opFuncsUsed_"] = realization.opfuncs
+    _dl_op(cons)["numCoreletsUsed_DSC2_"] = 1
+    return True
+
+
+def realize_flash_attention_pointwise_handoffs(sdscs_json: list[dict]) -> int:
+    """Realize every legal same-layout pointwise handoff in one flash bundle."""
+    count = 0
+    # One realization mutates the graph by turning an HBM producer output into an
+    # LX endpoint, so at most one new edge can disappear per SDSC iteration.
+    for _ in range(len(sdscs_json)):
+        if not realize_pointwise_handoff(sdscs_json):
+            break
+        count += 1
+    return count
 
 
 def realize_onchip_handoff(
@@ -1218,85 +1337,4 @@ def realize_onchip_handoff(
     ):
         return True
 
-    edge = detect_onchip_edge(sdscs_json)
-    if edge is None:
-        return False
-    prod, cons, out_idx, in_idx = edge
-    prod_dl = _dl_op(prod)
-    cons_dl = _dl_op(cons)
-    prod_layout = _layout_for_lds(prod_dl, out_idx)
-    prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
-    cons_layout = _layout_for_lds(cons_dl, in_idx)
-    cons_stick = _stick_dim_for_lds(cons_dl, in_idx)
-    if (
-        prod_layout is None
-        or prod_stick is None
-        or cons_layout is None
-        or cons_stick is None
-        or not _same_physical_stick_layout(
-            prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
-        )
-    ):
-        return False
-
-    shard = cons[next(iter(cons))]["numWkSlicesPerDim_"]
-    split_dim = _single_split_dim(shard)
-    if split_dim is None:
-        return False
-    num_cores = int(_body(cons).get("numCoresUsed_", 0))
-    split_factor = _split_factor(shard, split_dim)
-    if num_cores <= 0 or split_factor != num_cores:
-        return False
-    layout = cons_layout
-    stick_dim = cons_stick
-    iter_sizes = _iter_sizes_for_layout(cons_dl, layout)
-    if iter_sizes is None:
-        return False
-    slice_bytes = _reserve_bridge_region_bytes(
-        per_core_same_stick_slice_bytes(
-            iter_sizes,
-            split_dim,
-            stick_dim,
-            STICK_SIZE,
-            num_cores,
-        )
-    )
-    # Tier branch: single 2-region move when 2*slice fits (slice <= half cap);
-    # else stream through 2 fixed tile buffers; else fail-closed. The add->add
-    # 2048 case stays the single move (slice == 256 KB << half cap), byte-identical.
-    if slice_bytes <= STREAM_THRESHOLD:
-        realization = realize_same_layout_handoff(
-            iter_sizes=iter_sizes,
-            layout=layout,
-            stick_dim=stick_dim,
-            split_dim=split_dim,
-            stick_size=STICK_SIZE,
-            num_cores=num_cores,
-            producer_ldsidx=out_idx,
-            consumer_ldsidx=in_idx,
-            region0=PRODUCER_LX_BASE,
-        )
-    elif stick_dim != split_dim:
-        return False
-    else:
-        realization = realize_streamed_handoff(
-            iter_sizes=iter_sizes,
-            layout=layout,
-            stick_dim=stick_dim,
-            split_dim=split_dim,
-            stick_size=STICK_SIZE,
-            num_cores=num_cores,
-            producer_ldsidx=out_idx,
-            consumer_ldsidx=in_idx,
-            region0=PRODUCER_LX_BASE,
-        )
-    if realization is None:
-        return False
-    apply_lx_flip(prod, realization.producer_flip)
-    apply_lx_flip(cons, realization.consumer_flip)
-    body = _body(cons)
-    body["coreIdToDscSchedule"] = realization.schedule
-    body["datadscs_"] = realization.datadscs
-    body["opFuncsUsed_"] = realization.opfuncs
-    _dl_op(cons)["numCoreletsUsed_DSC2_"] = 1
-    return True
+    return realize_pointwise_handoff(sdscs_json)

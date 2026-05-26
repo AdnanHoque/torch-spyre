@@ -356,8 +356,9 @@ def _fake_flash_pipeline_sdscs(num_tiles=3):
     return sdscs
 
 
-def _fake_flash_pointwise_sdscs(multisplit=False):
+def _fake_flash_pointwise_sdscs(multisplit=False, chain=False):
     shared_addr = 4096
+    second_addr = 12288
     shard = {"mb": 1, "x": 1, "out": 32}
     if multisplit:
         shard = {"mb": 2, "x": 1, "out": 16}
@@ -396,9 +397,23 @@ def _fake_flash_pointwise_sdscs(multisplit=False):
             ("Tensor0-idx0", "INPUT", shared_addr),
             ("Tensor1-idx1", "KERNEL", 8192),
         ],
-        [("Tensor2-idx2", "OUTPUT", 12288)],
+        [("Tensor2-idx2", "OUTPUT", second_addr)],
         pdi,
     )
+    if chain:
+        downstream = _fake_sdsc(
+            2,
+            "add",
+            shard,
+            {"mb_": 2, "x_": 128, "out_": 64},
+            [
+                ("Tensor0-idx0", "INPUT", second_addr),
+                ("Tensor1-idx1", "KERNEL", 16384),
+            ],
+            [("Tensor2-idx2", "OUTPUT", 20480)],
+            pdi,
+        )
+        return [producer, consumer, downstream]
     return [producer, consumer]
 
 
@@ -502,6 +517,17 @@ def test_pointwise_handoff_uses_actual_stick_when_split_differs():
 def test_pointwise_handoff_rejects_multisplit_flash_edge():
     sdscs = _fake_flash_pointwise_sdscs(multisplit=True)
     assert not rz.realize_onchip_handoff(sdscs, min_handoff_bytes=0)
+
+
+def test_flash_pointwise_handoffs_realize_eligible_chain():
+    sdscs = _fake_flash_pointwise_sdscs(chain=True)
+    assert rz.realize_flash_attention_pointwise_handoffs(sdscs) == 2
+    assert rz._lds_by_idx(rz._dl_op(sdscs[0]), 2)["hbmSize_"] == 0
+    assert rz._lds_by_idx(rz._dl_op(sdscs[1]), 0)["hbmSize_"] == 0
+    assert rz._lds_by_idx(rz._dl_op(sdscs[1]), 2)["hbmSize_"] == 0
+    assert rz._lds_by_idx(rz._dl_op(sdscs[2]), 0)["hbmSize_"] == 0
+    assert sdscs[1]["1_mul"]["opFuncsUsed_"] == ["STCDPOpLx"]
+    assert sdscs[2]["2_add"]["opFuncsUsed_"] == ["STCDPOpLx"]
 
 
 def test_flash_value_flow_tile_flips_real_single_consumer_edge():
