@@ -295,6 +295,37 @@ def _get_op_dim_labels(ndim: int, is_matmul: bool) -> list[str]:
         return INPUT_DIM_LABELS[: ndim - 1] + OUTPUT_DIM_LABELS[:1]
 
 
+def _is_scalar_arg(arg: TensorArg) -> bool:
+    return all(coord == 0 for coord in arg.device_coordinates)
+
+
+def _is_scalar_score_scale_mul(op_spec: OpSpec, ndim: int) -> bool:
+    """True for flash SDPA score scaling: one score tensor times one scalar.
+
+    The 4D score tensor has a size-1 leading batch dimension elided from the
+    loop nest, so generic pointwise labels would map the surviving axes as
+    ``mb,x,out``.  For the score path these axes are really the matmul output
+    axes ``x,out,mb``: heads, key-block, query-row.  Keeping those labels makes
+    the score-scale op preserve the batchmatmul score layout and core split.
+    """
+    if op_spec.op != "mul" or op_spec.is_reduction or ndim != 3:
+        return False
+    if len(op_spec.args) != 3:
+        return False
+    inputs = list(op_spec.args[:-1])
+    tensor_inputs = [arg for arg in inputs if not _is_scalar_arg(arg)]
+    scalar_inputs = [arg for arg in inputs if _is_scalar_arg(arg)]
+    if len(tensor_inputs) != 1 or len(scalar_inputs) != 1:
+        return False
+    tensor_arg = tensor_inputs[0]
+    output_arg = op_spec.args[-1]
+    return (
+        len(tensor_arg.device_size) == 4
+        and tensor_arg.device_size == output_arg.device_size
+        and tensor_arg.device_coordinates == output_arg.device_coordinates
+    )
+
+
 def _create_sdsc_tensors(
     op_spec: OpSpec,
     symbol_mapping: dict,
@@ -512,6 +543,8 @@ def parse_op_spec(op_spec: OpSpec) -> SDSCSpec:
     ndim = len(op_spec.iteration_space)
 
     dim_labels = _get_op_dim_labels(ndim, is_matmul)
+    if _is_scalar_score_scale_mul(op_spec, ndim):
+        dim_labels = ["x", "out", "mb"]
     symbol_mapping = {
         sym: Symbol(dim_labels[i]) for i, sym in enumerate(op_spec.iteration_space)
     }
