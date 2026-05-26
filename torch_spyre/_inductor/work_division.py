@@ -545,29 +545,28 @@ def span_reduction_pass(
         )
 
 
-# A pure m-split matmul reads HBM ~2-3.7x slower than a 2D m x n co-split
-# (see tests/diag_hbm_bank_aware_findings.md). The optimal (m_split, n_split)
-# depends on dxp_lx_frac_avail (how much LX DDC has for tile staging):
+# Hardware constants
+_PT_ROWS = 8  # PT block rows per corelet
+
+# Heuristic constants for the M x N co-split rule. A pure m-split matmul reads
+# HBM 2-3.7x slower than a 2D m x n co-split (see
+# tests/diag_hbm_bank_aware_findings.md). The optimal split depends on the LX
+# tile-staging budget, so we use two regimes (low LX: N-band limited; high LX:
+# M-pipeline limited). See _target_m_split for the formula; see
+# _maybe_mn_cosplit for the unified 2D/bmm dispatch.
 #
-#   At low LX_FRAC (<= 0.2): kernels can only stage small tiles. Per-core
-#   N-band size dominates; the rule targets _MN_SPLIT_LOWLX_TARGET_N_STICKS
-#   sticks per core. Optimal splits at m=512 are:
-#     n_sticks=16   (matmul_KV  ): (4, 8, 1) — 126 us
-#     n_sticks=64   (matmul_QO  ): (8, 4, 1) — 760 us
-#     n_sticks=200  (matmul_MLP ): (16,2, 1) — 3078 us
-#
-#   At high LX_FRAC (>= 0.5): bigger tiles unlock per-core compute throughput.
-#   Per-core M-band size dominates; the rule targets at least
-#   _MN_SPLIT_HIGHLX_TARGET_PT_PASSES PT-passes worth of M rows. At m=512,
-#   target_per_core_m = 8 * _PT_ROWS = 64, so target_m_split = 512/64 = 8.
-#   (8, 4, 1) wins universally for the three shapes at LX_FRAC=0.8:
-#     KV  114 us (was 126)   QO 326 us (was 760)   MLP 1186 us (was 3078)
-#
-# Both rules generalize: target_m_split scales with M and respects max_cores.
-_MN_SPLIT_M_MIN = 4                            # don't fragment past this
-_MN_SPLIT_LOWLX_TARGET_N_STICKS = 8            # low-LX: per-core N target
-_MN_SPLIT_HIGHLX_TARGET_PT_PASSES = 8          # high-LX: per-core M = target * _PT_ROWS rows
-_MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD = 0.5       # LX_FRAC regime gate
+# TODO: replace this two-regime heuristic with a cost-model search. Given
+#   (M, N, K, max_cores, LX_FRAC, HBM_BW, _PT_ROWS), enumerate splits
+#   (m_split, n_split, k_split) with each dividing its dim and product
+#   <= max_cores, score by
+#       cost = HBM_bytes / HBM_BW + PT_passes * PT_pass_cycles + PSUM_hops
+#   subject to per-core tile fitting LX_FRAC * LX_TOTAL_BYTES, and pick the
+#   minimum. That replaces _maybe_mn_cosplit + _try_k_fast_split with one
+#   unified search and makes the constants below derivable rather than tuned.
+_MN_SPLIT_M_MIN = _PT_ROWS // 2                 # one half PT pass = smallest useful m-split
+_MN_SPLIT_LOWLX_TARGET_N_STICKS = 8             # low-LX:  per-core N-band target (sticks)
+_MN_SPLIT_HIGHLX_TARGET_PT_PASSES = 8           # high-LX: per-core M = target * _PT_ROWS rows
+_MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD = 0.5         # LX_FRAC regime gate
 
 
 def _matmul_names_unsafe_for_2d(operations: list[Operation]) -> set[str]:
@@ -644,31 +643,41 @@ def _2d_split_would_fire(
     return True
 
 
+def _target_m_split(
+    m_size: int, n_sticks: int, lx_frac: float, cores: int
+) -> int:
+    """LX-budget-aware target m-split for the M x N co-split.
+
+    Two regimes (see the heuristic block above for the cost-model TODO):
+      - High LX: per-core M = TARGET_PT_PASSES * _PT_ROWS rows (deeper tiles).
+      - Low LX:  per-core N-band = TARGET_N_STICKS sticks (narrower bands).
+    The result is clamped to [_MN_SPLIT_M_MIN, cores // 2].
+    """
+    if lx_frac >= _MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD:
+        target = max(
+            1, m_size // (_MN_SPLIT_HIGHLX_TARGET_PT_PASSES * _PT_ROWS)
+        )
+    else:
+        target = n_sticks // _MN_SPLIT_LOWLX_TARGET_N_STICKS
+    return max(_MN_SPLIT_M_MIN, min(cores // 2, target))
+
+
 def _mn_cosplit(m_size: int, n_sticks: int, cores: int) -> tuple[int, int]:
     """Co-split ``cores`` between M and N. Returns (m_split, n_split) or (0, 0).
 
-    Walks divisors of ``cores`` from the LX-aware target_m_split down to
-    _MN_SPLIT_M_MIN, picking the first that divides both M and N cleanly.
+    Walks divisors of ``cores`` from the LX-aware target_m_split, picking the
+    first that divides M cleanly and leaves a complementary n_split dividing
+    n_sticks. The candidate set is ``divisors(cores)`` so the rule generalises
+    over ``cores`` rather than hard-coding the SENCORES=32 divisors.
     """
-    if config.dxp_lx_frac_avail >= _MN_SPLIT_HIGHLX_LX_FRAC_THRESHOLD:
-        # High LX: target per-core M = N_PT_PASSES * _PT_ROWS rows.
-        target_per_core_m = _MN_SPLIT_HIGHLX_TARGET_PT_PASSES * _PT_ROWS
-        target_m_split = max(
-            _MN_SPLIT_M_MIN,
-            min(cores // 2, max(1, m_size // target_per_core_m)),
-        )
-    else:
-        # Low LX: target per-core N-band = target sticks.
-        target_m_split = max(
-            _MN_SPLIT_M_MIN,
-            min(cores // 2, n_sticks // _MN_SPLIT_LOWLX_TARGET_N_STICKS),
-        )
-    for cand in sorted(
-        (d for d in (1, 2, 4, 8, 16, 32) if d <= cores and d >= _MN_SPLIT_M_MIN),
-        key=lambda d: (abs(d - target_m_split), -d),
-    ):
+    target = _target_m_split(m_size, n_sticks, config.dxp_lx_frac_avail, cores)
+    cands = sorted(
+        (int(d) for d in divisors(cores) if d >= _MN_SPLIT_M_MIN),
+        key=lambda d: (abs(d - target), -d),
+    )
+    for cand in cands:
         cand_n = cores // cand
-        if m_size % cand == 0 and n_sticks % cand_n == 0 and cand_n >= 1:
+        if m_size % cand == 0 and n_sticks % cand_n == 0:
             return cand, cand_n
     return 0, 0
 
@@ -867,9 +876,6 @@ def work_distribution_pass(
         )
 
     warn_if_per_core_overflow(all_tds, it_space, splits, op.get_name())
-
-
-_PT_ROWS = 8  # PT block rows per corelet
 
 
 def _try_k_fast_split(
