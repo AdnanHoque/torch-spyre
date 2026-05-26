@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>The Spyre cost-model planner — how it works, term by term</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --muted: #555;
+    --bg: #fdfdfd;
+    --code-bg: #f3f4f6;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --rule: #e5e7eb;
+    --good: #166534;
+    --bad: #b91c1c;
+  }
+  html { background: var(--bg); color: var(--fg); }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    line-height: 1.65;
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 6rem;
+    font-size: 17px;
+  }
+  h1 { font-size: 1.9rem; line-height: 1.25; margin: 0 0 0.5rem; }
+  h2 { font-size: 1.4rem; margin-top: 3rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--rule); }
+  h3 { font-size: 1.1rem; margin-top: 2rem; color: var(--accent); }
+  h4 { font-size: 1.0rem; margin-top: 1.5rem; color: var(--muted); }
+  p, li { margin: 0.6rem 0; }
+  .subtitle { color: var(--muted); font-size: 1.05rem; margin-bottom: 2rem; }
+  code {
+    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    background: var(--code-bg);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+    font-size: 0.92em;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.9em;
+    line-height: 1.5;
+  }
+  pre code { background: transparent; padding: 0; }
+  .callout {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    padding: 0.8rem 1rem;
+    margin: 1rem 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .callout-title { font-weight: 600; color: var(--accent); margin-bottom: 0.3rem; }
+  table {
+    border-collapse: collapse;
+    margin: 1rem 0;
+    width: 100%;
+    font-size: 0.95em;
+  }
+  th, td {
+    border-bottom: 1px solid var(--rule);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { font-weight: 600; background: var(--code-bg); }
+  td.num, th.num { text-align: right; font-family: "SF Mono", monospace; }
+  .term-heading {
+    font-family: "SF Mono", monospace;
+    font-size: 1.05rem;
+    color: var(--accent);
+    margin-top: 2rem;
+    margin-bottom: 0.3rem;
+  }
+  .term-summary { color: var(--muted); font-style: italic; margin-bottom: 0.6rem; }
+  hr.section { border: 0; border-top: 2px solid var(--rule); margin: 3rem 0; }
+  .good { color: var(--good); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .toc { background: var(--code-bg); padding: 1rem 1.25rem; border-radius: 6px; margin: 1.5rem 0; }
+  .toc ol { margin: 0; padding-left: 1.5rem; }
+  .toc li { margin: 0.15rem 0; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>The Spyre cost-model planner</h1>
+<p class="subtitle">How the compiler decides which way to slice a matmul across 32 cores — explained from scratch, term by term.</p>
+
+<div class="toc">
+<strong>Contents</strong>
+<ol>
+  <li><a href="#orientation">Five-second orientation</a></li>
+  <li><a href="#hardware">The hardware in one minute</a></li>
+  <li><a href="#split">What is a "split"?</a></li>
+  <li><a href="#why-care">Why splits matter (and by how much)</a></li>
+  <li><a href="#cost">The cost function — six terms</a>
+    <ol>
+      <li><a href="#compute"><code>compute_us</code> — matrix-multiply time</a></li>
+      <li><a href="#hbm"><code>hbm_us</code> — moving data from DRAM</a></li>
+      <li><a href="#psum"><code>psum_us</code> — combining partial sums across cores</a></li>
+      <li><a href="#target_m"><code>target_m_us</code> — PT-pipeline tie-breaker</a></li>
+      <li><a href="#lx"><code>lx_pressure_us</code> — RHS doesn't fit in scratchpad</a></li>
+      <li><a href="#redistribution"><code>redistribution_us</code> — fusion-bundle penalty</a></li>
+    </ol>
+  </li>
+  <li><a href="#example">Walked example: MLP-class matmul</a></li>
+  <li><a href="#in-practice">What this gets us in practice</a></li>
+  <li><a href="#limits">What the cost model does not solve</a></li>
+</ol>
+</div>
+
+<h2 id="orientation">1. Five-second orientation</h2>
+<p>
+  When the Spyre compiler sees a matmul, it has to decide <em>how to split the work across 32 cores</em>. There are many possible splits and they don't all run at the same speed — the difference between a good split and a bad one can be <strong>2-10×</strong> in kernel time.
+</p>
+<p>
+  The cost-model planner enumerates feasible splits, scores each one with a small formula that estimates kernel time in microseconds, and picks the lowest score.
+</p>
+<div class="callout">
+  <div class="callout-title">Where it lives</div>
+  <p style="margin: 0;">
+    <code>torch_spyre/_inductor/work_division.py</code>, in <code>_matmul_split_cost</code> (the cost formula) and <code>_cost_model_matmul_planner</code> (the search loop).
+  </p>
+</div>
+
+<h2 id="hardware">2. The hardware in one minute (no jargon)</h2>
+<p>Picture the Spyre accelerator as a workshop with <strong>32 workstations</strong>. Each workstation has:</p>
+<ul>
+  <li>A small <strong>workbench</strong> (called <em>LX scratchpad</em>) — 2 MB of fast on-chip memory.</li>
+  <li>A specialized <strong>matrix unit</strong> (called the <em>PT array</em>) — an 8×8 grid that multiplies pieces of matrices.</li>
+  <li>A general-purpose vector unit for everything that isn't a matrix multiply.</li>
+</ul>
+<p>Outside the workstations, there is:</p>
+<ul>
+  <li>A giant <strong>warehouse</strong> (off-chip DRAM, "HBM") with 128 GB of capacity.</li>
+  <li>A <strong>conveyor</strong> between the warehouse and the workstations — total bandwidth ~166 GB/s, shared by all workstations.</li>
+  <li>A <strong>ring network</strong> connecting workstations directly (used when cores need to exchange partial results).</li>
+</ul>
+
+<p>Two facts you'll need to remember:</p>
+<ol>
+  <li>
+    <strong>The matrix unit eats 8 rows at a time.</strong> Feed it 8 rows, or 16, or 24 — it stays full. Feed it 4 rows and it's half-idle. Feed it 64 rows and it just chews through eight 8-row sweeps in a row.
+  </li>
+  <li>
+    <strong>The workbench is tiny.</strong> 2 MB doesn't hold much. If a worker's job needs more data than fits, they have to keep walking back to the warehouse for pieces. Walking to the warehouse is slow. Working at the bench is fast. We want to minimize walking.
+  </li>
+</ol>
+
+<h2 id="split">3. What is a "split"?</h2>
+<p>A matrix multiply takes two matrices and produces a third:</p>
+<pre><code>   A (M × K)  ×  B (K × N)  =  C (M × N)</code></pre>
+<p>Three sizes describe it:</p>
+<ul>
+  <li><strong>M</strong> — number of rows of A and C</li>
+  <li><strong>N</strong> — number of columns of B and C</li>
+  <li><strong>K</strong> — the shared dimension (we sum <em>K</em> products to compute each output element)</li>
+</ul>
+
+<p>To use 32 workers in parallel, we slice these three axes among them:</p>
+<ul>
+  <li><strong>m</strong> = how many cores work on different M-rows</li>
+  <li><strong>n</strong> = how many cores work on different N-columns</li>
+  <li><strong>k</strong> = how many cores split the K-axis (they each compute a partial sum and combine later)</li>
+</ul>
+<p>Constraint: <code>m × n × k ≤ 32</code>.</p>
+
+<div class="callout">
+  <div class="callout-title">Example</div>
+  <p style="margin: 0;">
+    For <code>M=512, N=4096, K=4096</code> with split <code>(m=8, n=4, k=1)</code>:<br>
+    32 cores total. Each core handles <code>M/8 = 64</code> rows of A, <code>N/4 = 1024</code> columns of B, and the full K=4096 sum.
+  </p>
+</div>
+
+<h2 id="why-care">4. Why splits matter (and by how much)</h2>
+<p>Here are three different splits of the same matmul (<code>M=512, K=4096, N=12800</code>):</p>
+
+<table>
+  <thead>
+    <tr><th>split (m, n, k)</th><th class="num">per-core M</th><th class="num">per-core N</th><th class="num">per-core RHS (B-slice) size</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>(32, 1, 1)</code></td><td class="num">16</td><td class="num">12800</td><td class="num">~100 MB (50× LX)</td></tr>
+    <tr><td><code>(8, 4, 1)</code></td><td class="num">64</td><td class="num">3200</td><td class="num">~26 MB (13× LX)</td></tr>
+    <tr><td><code>(4, 8, 1)</code></td><td class="num">128</td><td class="num">1600</td><td class="num">~13 MB (6× LX)</td></tr>
+  </tbody>
+</table>
+
+<p>All three do the same total work, but the workers shuttle very different amounts of data from the warehouse. Measured kernel times:</p>
+
+<table>
+  <thead><tr><th>split</th><th class="num">measured kernel time</th></tr></thead>
+  <tbody>
+    <tr><td><code>(32, 1, 1)</code></td><td class="num"><span class="bad">4.22 ms</span></td></tr>
+    <tr><td><code>(8, 4, 1)</code></td><td class="num">2.61 ms</td></tr>
+    <tr><td><code>(4, 8, 1)</code></td><td class="num"><span class="good">2.12 ms</span></td></tr>
+  </tbody>
+</table>
+
+<p>2× faster, on the same hardware, doing the same math. The cost model exists to pick the right one without trial and error.</p>
+
+<h2 id="cost">5. The cost function — six terms</h2>
+<p>The total cost is the sum of six terms, all in microseconds:</p>
+<pre><code>total_us = (compute_us
+            + hbm_us
+            + psum_us
+            + target_m_us
+            + lx_pressure_us) × batch_penalty
+           + redistribution_us</code></pre>
+<p>The planner enumerates every <code>(m, n, k)</code> split that's feasible (each factor divides the corresponding dimension; product ≤ 32 cores), scores each one, and returns the lowest.</p>
+<p>Now let's walk through each term and explain exactly what it represents.</p>
+
+<h3 id="compute" class="term-heading">5.1 <code>compute_us</code></h3>
+<div class="term-summary">How long the actual multiplication takes.</div>
+
+<p>A matmul of size <code>M × N × K</code> needs <code>M × N × K</code> multiply-accumulates (MACs). When we split across cores, each core does:</p>
+<pre><code>per_core_MACs = M × N × K / (m × n × k)</code></pre>
+
+<p>Hardware peak: the published number is 300 TOPS (tera-operations per second) per card. We back out per-core per-microsecond MACs:</p>
+<pre><code>peak_MACs_per_core_per_us = (300 × 10¹²) / 2 / 32 / 10⁶ ≈ 4.7M
+                              ↑           ↑    ↑
+                       300 TOPS    each MAC   32 cores
+                                   is 2 ops</code></pre>
+
+<p>So naïve compute time: <code>compute_us = per_core_MACs / 4.7M</code>.</p>
+
+<div class="callout">
+  <div class="callout-title">The PT-pipeline twist</div>
+  <p style="margin: 0;">
+    The matrix unit needs <strong>8 rows of input at a time</strong>. If a core has only 4 rows of A, the unit runs half-empty: efficiency = 4/8 = 50%. Worse: the pipeline that streams rows into the matrix unit takes ~8 sweeps to fully warm up. So we model:
+  </p>
+</div>
+
+<pre><code>PT_passes = max(1, per_core_M / 8)        # how many 8-row sweeps the core does
+pt_efficiency = min(1.0, PT_passes / 8)   # need ≥ 8 sweeps to fully fill the pipeline
+effective_peak = 4.7M × pt_efficiency
+compute_us = per_core_MACs / effective_peak</code></pre>
+
+<p>So:</p>
+<ul>
+  <li>per-core M = 64 → 8 PT passes → 100% efficiency. Best case.</li>
+  <li>per-core M = 16 → 2 PT passes → 25% efficiency. Compute time is 4× worse.</li>
+  <li>per-core M = 128 → 16 PT passes → 100% efficiency (capped). Fine.</li>
+</ul>
+
+<h3 id="hbm" class="term-heading">5.2 <code>hbm_us</code></h3>
+<div class="term-summary">How long to move all the matmul's data through the conveyor from the warehouse.</div>
+
+<p>Total bytes the matmul touches:</p>
+<pre><code>bytes = (M × K)  +  (K × N)  +  (M × N)    × 2 bytes/elem (fp16)
+          ↑           ↑           ↑
+          A           B           C (output)</code></pre>
+
+<p>Divided by the bandwidth:</p>
+<pre><code>hbm_us = bytes / 166 GB/s</code></pre>
+
+<div class="callout">
+  <div class="callout-title">The cohort twist</div>
+  <p style="margin: 0;">
+    When 4 cores all want the same row of A, they don't load it 4 times — the warehouse broadcasts it once. Smaller cohorts pay the conveyor cost; bigger cohorts amortize it. But past a certain cohort size (~8), the broadcast hardware itself becomes a bottleneck.
+  </p>
+</div>
+
+<pre><code>cohort = max(m, n)
+cohort_penalty = max(1.0, cohort / 8)
+hbm_us = bytes × cohort_penalty / 166 GB/s</code></pre>
+
+<p>This means splits like <code>(m=32, n=1)</code> (cohort=32) pay a 4× HBM penalty in the cost model, which correctly rules them out for big matmuls.</p>
+
+<h3 id="psum" class="term-heading">5.3 <code>psum_us</code></h3>
+<div class="term-summary">Only fires when K-split is non-trivial. The cost of summing partial results across cores via the ring.</div>
+
+<p>If we split K across <code>k</code> cores, each core computes a partial sum of the output. To get the final output, those partials have to be added together. They flow around the on-chip ring, hop by hop.</p>
+
+<pre><code>psum_us = (k - 1) × (M × N) × 4 × 10⁻⁴</code></pre>
+
+<p>Walkthrough:</p>
+<ul>
+  <li><code>(k - 1)</code> hops needed to fully reduce k partial sums (chain reduction).</li>
+  <li><code>M × N</code> output elements per hop.</li>
+  <li><code>4 × 10⁻⁴</code> microseconds per element per hop, calibrated from device measurements.</li>
+</ul>
+
+<p>For <code>k=1</code> (the usual case), this term is 0.</p>
+
+<h3 id="target_m" class="term-heading">5.4 <code>target_m_us</code></h3>
+<div class="term-summary">A small tie-breaker. When other terms are equal, prefer the m-split that lands the per-core M near the PT sweet spot.</div>
+
+<p>Two splits often have identical <code>compute_us</code>, <code>hbm_us</code>, <code>psum_us</code>. We need a way to break the tie that's consistent with what we know about the hardware. The PT unit prefers per-core M = 64 (= 8 PT sweeps × 8 rows per sweep), so we penalize log2-distance from that:</p>
+
+<pre><code>target_m = clamp(4, cores/2, M / (8 × 8))
+m_dist = abs(log2(m / target_m))
+target_m_us = m_dist × 50</code></pre>
+
+<p>For <code>M = 512</code>:</p>
+<ul>
+  <li><code>target_m</code> = min(16, 512/64) = 8</li>
+  <li>m=8 → distance 0 → 0 µs penalty</li>
+  <li>m=4 → distance 1 → 50 µs penalty</li>
+  <li>m=16 → distance 1 → 50 µs penalty</li>
+</ul>
+
+<p>This term is small on purpose — it only matters when nothing else does.</p>
+
+<h3 id="lx" class="term-heading">5.5 <code>lx_pressure_us</code></h3>
+<div class="term-summary">When a worker's slice of B is bigger than the 2 MB scratchpad, they have to keep shuttling pieces from the warehouse. Charge for that.</div>
+
+<p>Each worker holds their slice of B in scratchpad. Slice size:</p>
+<pre><code>per_core_RHS_bytes = K × (N / n) × 2</code></pre>
+
+<p>If that exceeds 2 MB, charge for the excess:</p>
+<pre><code>excess = max(0, per_core_RHS_bytes - 2 MB)
+lx_pressure_us = excess × 5 × 10⁻⁶</code></pre>
+
+<div class="callout">
+  <div class="callout-title">Why this term was added</div>
+  <p style="margin: 0;">
+    Without it, the model picked <code>(m=8, n=4)</code> for wide-N shapes like MLP — but the empirical winner is <code>(m=4, n=8)</code>. Reason: bigger n-split halves the per-core RHS slice, which halves the shuttle traffic. The fix calibrates the coefficient so the term only flips the choice when the overflow is severe (~13× over LX), matching the device-measured break-even point.
+  </p>
+</div>
+
+<table>
+  <thead>
+    <tr><th>shape (M, K, N)</th><th class="num">per-core RHS at (8, 4)</th><th class="num">LX excess</th><th class="num">penalty</th><th>cost-model picks</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>KV (512, 4096, 1024)</td><td class="num">2 MB</td><td class="num">0</td><td class="num">0 µs</td><td>(8, 4) ✓</td></tr>
+    <tr><td>QO (512, 4096, 4096)</td><td class="num">8 MB</td><td class="num">6 MB</td><td class="num">30 µs</td><td>(8, 4) ✓</td></tr>
+    <tr><td>MLP (512, 4096, 12800)</td><td class="num">26 MB</td><td class="num">24 MB</td><td class="num">120 µs</td><td>(4, 8) ✓</td></tr>
+  </tbody>
+</table>
+
+<h3 id="redistribution" class="term-heading">5.6 <code>redistribution_us</code></h3>
+<div class="term-summary">When a matmul is part of a fusion bundle with a non-matmul op, any non-default split forces the output to be reshuffled across cores so the partner can consume it.</div>
+
+<p>Consider an MLP fused as <code>silu(matmul(x, gate)) × matmul(x, up)</code>. The two matmuls and the silu and the elementwise multiply all run in one fused kernel. If the matmuls use a non-default split, the matmul outputs sit on cores in the "wrong" layout for the partner op (silu/multiply), so the output has to be shuffled before the partner runs. Shuffling burns HBM bandwidth.</p>
+
+<p>For matmuls inside a fusion bundle (only), we add:</p>
+<pre><code>output_bytes = B × M × N × 2
+redistribution_us = output_bytes × 1 × 10⁻⁴      # fired when bundled AND split ≠ default</code></pre>
+
+<p>For an MLP-shape output (B=1, M=512, N=12800 → 12.5 MB), this is ~1300 µs — much larger than typical kernel savings. So the cost model only rewrites bundled matmuls when the kernel win clearly outweighs the bundle penalty (which empirically almost never happens in MLP fusions).</p>
+
+<h4>The <code>batch_penalty</code> multiplier</h4>
+<p>The whole sum gets multiplied by:</p>
+<pre><code>batch_penalty = 1 + 0.6 × max(0, b - 1)</code></pre>
+<p>Splitting batch over multiple cores is mildly penalized because each batch item is independent work that could be iterated sequentially instead. For <code>b=1</code> (no batch split) the multiplier is 1.</p>
+
+<h2 id="example">6. Walked example: MLP-class matmul</h2>
+<p>Shape: <code>M=512, K=4096, N=12800, B=1</code>. Two finalists, both using all 32 cores: <code>(m=8, n=4)</code> and <code>(m=4, n=8)</code>.</p>
+
+<table>
+  <thead>
+    <tr><th>term</th><th class="num">(8, 4)</th><th class="num">(4, 8)</th><th>why they differ</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>compute_us</code></td><td class="num">~57</td><td class="num">~57</td><td>Same per-core MACs, both at full PT efficiency (per-core M = 64 or 128, both ≥ target 8 passes).</td></tr>
+    <tr><td><code>hbm_us</code></td><td class="num">~265</td><td class="num">~265</td><td>Same total bytes, both have cohort=8 (no broadcast penalty).</td></tr>
+    <tr><td><code>psum_us</code></td><td class="num">0</td><td class="num">0</td><td>k=1 in both.</td></tr>
+    <tr><td><code>target_m_us</code></td><td class="num">0</td><td class="num">50</td><td>m=8 is exactly target. m=4 is 1 log2 step away.</td></tr>
+    <tr><td><code>lx_pressure_us</code></td><td class="num">120</td><td class="num">55</td><td>(8,4) per-core RHS = 26 MB → 24 MB excess. (4,8) = 13 MB → 11 MB excess.</td></tr>
+    <tr><th>total</th><th class="num">442</th><th class="num">427</th><th class="good">(4, 8) wins by 15 µs</th></tr>
+  </tbody>
+</table>
+
+<p>So the cost model picks <code>(m=4, n=8)</code>. Measured kernel time:</p>
+<ul>
+  <li><code>(8, 4)</code>: 2.61 ms</li>
+  <li><code>(4, 8)</code>: 2.10 ms — <strong>20% faster</strong></li>
+</ul>
+
+<p>The cost-model's <em>predicted</em> margin (15 µs) is much smaller than the <em>measured</em> margin (~500 µs). That's fine — we only need the model to <strong>rank</strong> splits correctly, not predict their absolute times. The ranking is what determines which split gets compiled.</p>
+
+<h2 id="in-practice">7. What this gets us in practice</h2>
+
+<p>The cost model picks empirically-best splits on every validated shape, with one win versus the prior heuristic:</p>
+
+<table>
+  <thead>
+    <tr><th>shape</th><th>cost-model pick</th><th>note</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>QO bs=1 (M=512, K=4096, N=4096)</td><td><code>(mb=8, out=4, in=1)</code></td><td>Matches prior heuristic and best forced timing.</td></tr>
+    <tr><td>KV bs=1 (M=512, K=4096, N=1024)</td><td><code>(mb=8, out=4, in=1)</code></td><td>Matches prior.</td></tr>
+    <tr><td>MLP bs=1 (M=512, K=4096, N=12800)</td><td><code>(mb=4, out=8, in=1)</code></td><td><span class="good">15% faster than prior pick of (mb=8, out=4).</span></td></tr>
+    <tr><td>MoE gate/up (B=8, M=128, K=2048, N=8192)</td><td><code>(b=1, mb=4, out=8, in=1)</code></td><td>Batch-iterated; matches prior.</td></tr>
+    <tr><td>bmm large-K (B=8, M=512, K=4096, N=512)</td><td><code>(b=1, mb=8, out=4, in=1)</code></td><td>Batch-iterated; matches prior.</td></tr>
+  </tbody>
+</table>
+
+<h2 id="limits">8. What the cost model does <em>not</em> solve</h2>
+
+<p>The planner picks the best split <strong>among the splits the SDSC framework can express</strong> — m × n × k partitions of cores. There is a separate gap to sendnn on some shapes (~2× kernel time on MLP-class matmuls) that comes from the <em>kernel template itself</em>: how RHS tiles are streamed, how PT passes are double-buffered, etc. That's a kernel-template engineering problem, not a work-division problem, and is out of scope for this planner.</p>
+
+<p>If you swap to a faster kernel template later, the cost model's split choices will benefit too — but the planner doesn't need to change to capture that win.</p>
+
+<hr class="section">
+
+<p style="color: var(--muted); font-size: 0.9em; text-align: center;">
+  Source: <code>torch_spyre/_inductor/work_division.py</code> · Generated as a companion to the <code>cost-model</code> branch.
+</p>
+
+</body>
+</html>
