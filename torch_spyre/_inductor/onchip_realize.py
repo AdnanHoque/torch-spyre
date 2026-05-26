@@ -71,6 +71,20 @@ MIN_BRIDGE_REGION_BYTES = 256 << 10
 # blocks fail-closed to the HBM score-scale path while retaining later SFP
 # pointwise handoffs.
 FLASH_SCORE_SCALE_MAX_STICK_ELEMS = 128
+INPUT_FETCH_NEIGHBOR_DISALLOWED_PINS = {"hbm", None}
+PINNED_COMPONENT_ORDER = (
+    "hbm",
+    "ring",
+    "sfpring",
+    "lx",
+    "pt",
+    "ptxrf",
+    "ptarf",
+    "sfplrf",
+    "pelrf",
+    "l0",
+    "ptirf",
+)
 
 
 def _reserve_bridge_region_bytes(slice_bytes: int) -> int:
@@ -454,6 +468,40 @@ def _handoff_bytes(iter_sizes: dict[str, int], word_length: int) -> int:
     for n in iter_sizes.values():
         size *= n
     return size
+
+
+def _memorg_is_present(mem_org: dict, component: str) -> bool:
+    entry = mem_org.get(component) or mem_org.get(component.upper())
+    if not isinstance(entry, dict):
+        return False
+    return bool(entry.get("isPresent", 0))
+
+
+def _pinned_component(lds: dict) -> str | None:
+    """Return Foundation's first present pinned component for a labeledDs."""
+    mem_org = lds.get("memOrg_", {})
+    if not isinstance(mem_org, dict):
+        return None
+    for component in PINNED_COMPONENT_ORDER:
+        if _memorg_is_present(mem_org, component):
+            return component
+    return None
+
+
+def _input_fetch_neighbor_compute_eligible(compute_dsc: dict) -> bool:
+    """True when a compute DSC satisfies DXP's InputFetchNeighbor pin guard."""
+    if not isinstance(compute_dsc, dict) or not compute_dsc:
+        return False
+    dl = next(iter(compute_dsc.values()))
+    if not isinstance(dl, dict):
+        return False
+    labeled_ds = dl.get("labeledDs_", [])
+    if not labeled_ds:
+        return False
+    return all(
+        _pinned_component(lds) not in INPUT_FETCH_NEIGHBOR_DISALLOWED_PINS
+        for lds in labeled_ds
+    )
 
 
 def _core_state_init_entry(lx_base: int) -> dict:
@@ -1110,12 +1158,16 @@ def build_flash_attention_pipeline_overlap_prefix_tile_artifact(
         return None
 
     name = f"{name_prefix}_{tile_index}"
+    compute_dsc = copy.deepcopy(first_body["dscs_"][0])
+    if not _input_fetch_neighbor_compute_eligible(compute_dsc):
+        return None
+
     artifact = build_flash_attention_pipeline_mixed_sdsc(
         name,
         datadscs[:4],
         opfuncs[:4],
         flash_pipeline_overlap_prefix_schedule(num_lanes=2, num_cores=num_cores),
-        [copy.deepcopy(first_body["dscs_"][0])],
+        [compute_dsc],
         num_cores,
     )
     root = artifact[name]

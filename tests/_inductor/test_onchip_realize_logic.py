@@ -138,25 +138,31 @@ def _fake_sdsc(
     inputs,
     outputs,
     pdi,
+    *,
+    lx_pinned=False,
 ):
     def lds(label, role):
         i = int(label.rsplit("-idx", 1)[1])
+        mem_org = {"lx": {"isPresent": 1}}
+        if not lx_pinned:
+            mem_org = {"hbm": {"isPresent": 1}, "lx": {"isPresent": 1}}
         return {
             "ldsIdx_": i,
             "dsName_": f"Tensor{i}",
             "dsType_": role,
             "wordLength": 2,
             "dataFormat_": "SEN169_FP16",
-            "memOrg_": {"hbm": {"isPresent": 1}, "lx": {"isPresent": 1}},
+            "memOrg_": mem_org,
         }
 
     def alloc(label, addr):
         i = int(label.rsplit("-idx", 1)[1])
+        component = "lx" if lx_pinned else "hbm"
         return {
             "nodeType_": "allocate",
-            "name_": f"allocate-Tensor{i}_hbm",
+            "name_": f"allocate-Tensor{i}_{component}",
             "ldsIdx_": i,
-            "component_": "hbm",
+            "component_": component,
             "startAddressCoreCorelet_": {
                 "data_": {f"[{c}, 0, 0]": str(addr) for c in range(32)}
             },
@@ -322,7 +328,7 @@ def _fake_static_matmul_sdscs(stick_position="last", extra_consumer=False):
     return sdscs
 
 
-def _fake_flash_pipeline_sdscs(num_tiles=3):
+def _fake_flash_pipeline_sdscs(num_tiles=3, *, lx_pinned=False):
     pdi = {
         "INPUT": {
             "layoutDimOrder_": ["mb", "x", "in"],
@@ -351,6 +357,7 @@ def _fake_flash_pipeline_sdscs(num_tiles=3):
                 [("Tensor0-idx0", "INPUT", 4096 + idx * 4096)],
                 [("Tensor2-idx2", "OUTPUT", 8192 + idx * 4096)],
                 pdi,
+                lx_pinned=lx_pinned,
             )
         )
     return sdscs
@@ -734,7 +741,7 @@ def test_flash_pipeline_tile_artifacts_are_one_compute_each():
 
 def test_flash_pipeline_overlap_prefix_tile_artifacts_overlap_one_compute():
     artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
-        _fake_flash_pipeline_sdscs(num_tiles=3),
+        _fake_flash_pipeline_sdscs(num_tiles=3, lx_pinned=True),
         overlap_prefix=True,
     )
     assert len(artifacts) == 3
@@ -766,8 +773,20 @@ def test_flash_pipeline_overlap_prefix_tile_artifacts_overlap_one_compute():
     assert root2["flashAttentionPipeline_"]["overlap_prefix"] is False
 
 
+def test_flash_pipeline_overlap_prefix_rejects_hbm_backed_compute():
+    artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
+        _fake_flash_pipeline_sdscs(num_tiles=3),
+        overlap_prefix=True,
+    )
+    root0 = artifacts[0]["mixed_flash_pipeline_tile_0"]
+    assert len(root0["dscs_"]) == 1
+    assert len(root0["datadscs_"]) == 2
+    assert root0["flashAttentionPipeline_"]["overlap_prefix"] is False
+    assert root0["flashAttentionPipeline_"]["overlap_candidate"] is False
+
+
 def test_flash_pipeline_overlap_prefix_rejects_mismatched_next_tile():
-    sdscs = _fake_flash_pipeline_sdscs(num_tiles=3)
+    sdscs = _fake_flash_pipeline_sdscs(num_tiles=3, lx_pinned=True)
     sdscs[1]["1_batchmatmul"]["dscs_"][0]["batchmatmul"]["N_"]["out_"] = 128
     artifacts = rz.build_flash_attention_pipeline_tile_artifacts(
         sdscs,
