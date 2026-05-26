@@ -121,29 +121,17 @@ def _flash_attention_prefill(
             scores = (scores * score_scale).clone(
                 memory_format=torch.contiguous_format
             )
-        if config.flash_attention_natural_score_layout:
-            block_max = torch.amax(scores, dim=-1)
-            next_max = torch.maximum(max_running, block_max)
+        scores = scores.transpose(-1, -2).contiguous()
+        block_max = torch.amax(scores, dim=-2)
+        next_max = torch.maximum(max_running, block_max)
 
-            exp_scores = torch.exp(scores - next_max.unsqueeze(-1))
-            correction = torch.exp(max_running - next_max)
-            denominator = denominator * correction + exp_scores.sum(dim=-1)
-            output = output * correction.unsqueeze(-1) + torch.bmm(
-                exp_scores.flatten(0, 1),
-                value_block.flatten(0, 1),
-            ).unflatten(0, (batch_size, num_heads))
-        else:
-            scores = scores.transpose(-1, -2).contiguous()
-            block_max = torch.amax(scores, dim=-2)
-            next_max = torch.maximum(max_running, block_max)
-
-            exp_scores = torch.exp(scores - next_max.unsqueeze(-2))
-            correction = torch.exp(max_running - next_max)
-            denominator = denominator * correction + exp_scores.sum(dim=-2)
-            output = output * correction.unsqueeze(-1) + torch.bmm(
-                exp_scores.transpose(-1, -2).flatten(0, 1),
-                value_block.flatten(0, 1),
-            ).unflatten(0, (batch_size, num_heads))
+        exp_scores = torch.exp(scores - next_max.unsqueeze(-2))
+        correction = torch.exp(max_running - next_max)
+        denominator = denominator * correction + exp_scores.sum(dim=-2)
+        output = output * correction.unsqueeze(-1) + torch.bmm(
+            exp_scores.transpose(-1, -2).flatten(0, 1),
+            value_block.flatten(0, 1),
+        ).unflatten(0, (batch_size, num_heads))
         max_running = next_max
 
     return output / denominator.unsqueeze(-1)

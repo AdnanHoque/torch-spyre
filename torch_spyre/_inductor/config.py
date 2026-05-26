@@ -109,13 +109,6 @@ flash_attention_score_scale_handoff: bool = (
     flash_attention_onchip_sdpa
     or os.environ.get("SPYRE_FLASH_ATTENTION_SCORE_SCALE_HANDOFF", "0") == "1"
 )
-# Natural score layout keeps flash-prefill scores as [B, H, Q, K-block], reducing
-# the transpose/restickify traffic in the online-softmax body.  The master gate
-# uses it by default; explicit probes can still turn it on without the master.
-flash_attention_natural_score_layout: bool = (
-    flash_attention_onchip_sdpa
-    or os.environ.get("SPYRE_FLASH_ATTENTION_NATURAL_SCORE_LAYOUT", "0") == "1"
-)
 
 # --- Tier 0: ring-aware restickify (telemetry + producer-aligned work division) ---
 # Default-off ring byte-hop telemetry for compiler-inserted restickifies.
