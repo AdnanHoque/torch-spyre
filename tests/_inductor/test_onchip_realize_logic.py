@@ -503,6 +503,9 @@ def test_flash_pipeline_tile_artifacts_are_one_compute_each():
         assert len(root["datadscs_"]) == 2
         assert root["flashAttentionPipeline_"]["tile_count"] == 1
         assert root["flashAttentionPipeline_"]["tile_index"] == idx
+        assert root["flashAttentionPipeline_"]["replaces_sdsc"] == (
+            f"{idx}_batchmatmul"
+        )
         assert root["coreIdToDscSchedule"]["0"] == [
             [0, -1, 0, 1],
             [1, -1, 1, 1],

@@ -909,6 +909,7 @@ def build_flash_attention_pipeline_tile_artifacts(
             continue
         root = artifact[next(iter(artifact))]
         root["flashAttentionPipeline_"]["tile_index"] = tile_index
+        root["flashAttentionPipeline_"]["replaces_sdsc"] = next(iter(sdsc))
         artifacts.append(artifact)
         tile_index += 1
     return artifacts

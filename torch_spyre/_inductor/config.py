@@ -68,6 +68,12 @@ flash_attention_mixed_pipeline_overlap: bool = (
 flash_attention_mixed_pipeline_artifact: bool = (
     os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_ARTIFACT", "0") == "1"
 )
+# Execute one generated flash-prefill batchmatmul tile through its mixed sidecar
+# instead of the original SDSC.  -1 keeps sidecars non-executed.  0 executes the
+# first batchmatmul tile in each generated flash-prefill bundle, etc.
+flash_attention_mixed_pipeline_execute_tile: int = int(
+    os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_EXECUTE_TILE", "-1")
+)
 
 # --- Tier 0: ring-aware restickify (telemetry + producer-aligned work division) ---
 # Default-off ring byte-hop telemetry for compiler-inserted restickifies.

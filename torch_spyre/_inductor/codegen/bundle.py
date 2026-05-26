@@ -67,28 +67,43 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         ):
             logger.info("Realized on-chip handoff")
     sidecar_sdscs = []
+    sidecar_replacements = {}
     if (
         config.flash_attention_mixed_pipeline
-        and config.flash_attention_mixed_pipeline_artifact
+        and (
+            config.flash_attention_mixed_pipeline_artifact
+            or config.flash_attention_mixed_pipeline_execute_tile >= 0
+        )
     ):
-        sidecar_sdscs.extend(
-            build_flash_attention_pipeline_tile_artifacts(sdscs_json)
-        )
-        artifact = build_flash_attention_pipeline_artifact(
-            sdscs_json,
-            overlap=config.flash_attention_mixed_pipeline_overlap,
-            name="mixed_flash_pipeline_full_artifact",
-        )
-        if artifact is not None:
-            sidecar_sdscs.append(artifact)
-            logger.info("Emitted mixed flash attention pipeline sidecar artifact")
+        tile_artifacts = build_flash_attention_pipeline_tile_artifacts(sdscs_json)
+        sidecar_sdscs.extend(tile_artifacts)
+        execute_tile = config.flash_attention_mixed_pipeline_execute_tile
+        for artifact in tile_artifacts:
+            sidecar_name, sidecar_body = next(iter(artifact.items()))
+            meta = sidecar_body.get("flashAttentionPipeline_", {})
+            if meta.get("tile_index") != execute_tile:
+                continue
+            replaced = meta.get("replaces_sdsc")
+            if replaced is not None:
+                sidecar_replacements[replaced] = sidecar_name
+        if config.flash_attention_mixed_pipeline_artifact:
+            artifact = build_flash_attention_pipeline_artifact(
+                sdscs_json,
+                overlap=config.flash_attention_mixed_pipeline_overlap,
+                name="mixed_flash_pipeline_full_artifact",
+            )
+            if artifact is not None:
+                sidecar_sdscs.append(artifact)
+                logger.info("Emitted mixed flash attention pipeline sidecar artifact")
 
     # Write JSON SDSCs to file system
     files = []
     for sdsc_json in sdscs_json:
         sdsc_name = next(iter(sdsc_json))
-        file_name = f"sdsc_{sdsc_name}.json"
+        bundle_sdsc_name = sidecar_replacements.get(sdsc_name, sdsc_name)
+        file_name = f"sdsc_{bundle_sdsc_name}.json"
         files.append(file_name)
+        file_name = f"sdsc_{sdsc_name}.json"
         with open(os.path.join(output_dir, file_name), "w") as file:
             logger.info(f"Generating {file.name}")
             json.dump(sdsc_json, file, indent=2)
