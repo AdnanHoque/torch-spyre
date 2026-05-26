@@ -49,12 +49,21 @@ flash_attention_prefill: bool = (
 flash_attention_prefill_block_size: int = int(
     os.environ.get("SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE", "128")
 )
+# Production-candidate umbrella for the certified on-chip SDPA path.  This
+# enables the generated flash-prefill decomposition plus fail-closed same-stick
+# handoffs inside that graph.  It intentionally does not enable overlap,
+# sidecar artifact emission, or tile replacement; those are still individual
+# probe/debug gates.
+flash_attention_onchip_sdpa: bool = (
+    os.environ.get("SPYRE_FLASH_ATTENTION_ONCHIP_SDPA", "0") == "1"
+)
 # Default-off proof path for a mixed-SDSC, double-buffered flash-attention
 # prefill pipeline.  The first implementation only builds descriptor/scheduler
 # proof artifacts; compiler promotion remains gated until device overlap is
 # proven.
 flash_attention_mixed_pipeline: bool = (
-    os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE", "0") == "1"
+    flash_attention_onchip_sdpa
+    or os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE", "0") == "1"
 )
 # Conservative default is serial double buffering. Set only for Foundation/DXP
 # contract probes that intentionally emit rows containing both data-op and DL-op
@@ -85,7 +94,8 @@ flash_attention_mixed_pipeline_value_flow_tile: int = int(
 # inside the flash-prefill graph. This keeps the attention experiment off the
 # generic add/add handoff flag while reusing the same fail-closed Tier 1 realizer.
 flash_attention_pointwise_handoff: bool = (
-    os.environ.get("SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF", "0") == "1"
+    flash_attention_onchip_sdpa
+    or os.environ.get("SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF", "0") == "1"
 )
 # Experimental production-candidate gate for the flash score-scale edge:
 #     PT batchmatmul score output -> scalar SFP mul input.
@@ -93,7 +103,8 @@ flash_attention_pointwise_handoff: bool = (
 # Wider blocks still fail closed in the realizer until value correctness is
 # proven.
 flash_attention_score_scale_handoff: bool = (
-    os.environ.get("SPYRE_FLASH_ATTENTION_SCORE_SCALE_HANDOFF", "0") == "1"
+    flash_attention_onchip_sdpa
+    or os.environ.get("SPYRE_FLASH_ATTENTION_SCORE_SCALE_HANDOFF", "0") == "1"
 )
 
 # --- Tier 0: ring-aware restickify (telemetry + producer-aligned work division) ---
