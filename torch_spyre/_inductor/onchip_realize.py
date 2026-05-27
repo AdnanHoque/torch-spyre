@@ -1732,7 +1732,7 @@ def build_flash_attention_ifn_pair_tile_artifacts(
             edge["layout"],
             edge["stick_dim"],
             edge["split_dim"],
-            CONSUMER_LX_BASE,
+            PRODUCER_LX_BASE,
         ),
         dst=Endpoint(
             edge["layout"],
@@ -1746,7 +1746,7 @@ def build_flash_attention_ifn_pair_tile_artifacts(
         lx_size=DATAOP_LX_SIZE,
     )
     schedule = {
-        str(core_id): [[0, 0, 0, 0]]
+        str(core_id): [[0, -1, 0, 1], [-1, 0, 1, 0]]
         for core_id in range(int(_body(edge["consumer"]).get("numCoresUsed_", 0)))
     }
     consumer_artifact = build_flash_attention_pipeline_mixed_sdsc(
@@ -1773,7 +1773,7 @@ def build_flash_attention_ifn_pair_tile_artifacts(
     consumer_root["flashAttentionPipeline_"].update(
         {
             "source": "generated-flash-prefill-predecessor-ifn-pair-consumer",
-            "ifn_mode": "predecessor_backed_pair",
+            "ifn_mode": "predecessor_backed_lx_copy_pair",
             "ifn_pair_role": "consumer",
             "ifn_runtime_safe": True,
             "ifn_predecessor_sdsc": prod_name,
@@ -1804,13 +1804,7 @@ def build_flash_attention_ifn_pair_tile_artifacts(
             prod_name: pred_sidecar,
             cons_name: cons_sidecar,
         },
-        "bundle_attrs": {
-            f"sdsc_{cons_sidecar}.json": {
-                "ifn_enable": None,
-                "ifn_predecessor": "prev_sibling",
-                "ifn_predecessor_sdsc_filename": f"sdsc_{pred_sidecar}.json",
-            }
-        },
+        "bundle_attrs": {},
         "rejection_reasons": reasons,
     }
 

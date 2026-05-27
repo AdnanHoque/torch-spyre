@@ -743,25 +743,22 @@ def test_flash_ifn_pair_tile_builds_predecessor_backed_sidecars():
         "0_batchmatmul": "mixed_flash_ifn_pair_tile_1_predecessor",
         "1_batchmatmul": "mixed_flash_ifn_pair_tile_1_consumer",
     }
-    assert result["bundle_attrs"] == {
-        "sdsc_mixed_flash_ifn_pair_tile_1_consumer.json": {
-            "ifn_enable": None,
-            "ifn_predecessor": "prev_sibling",
-            "ifn_predecessor_sdsc_filename": (
-                "sdsc_mixed_flash_ifn_pair_tile_1_predecessor.json"
-            ),
-        }
-    }
+    assert result["bundle_attrs"] == {}
 
     pred_dl = rz._dl_op({"p": pred})
     cons_dl = rz._dl_op({"c": cons})
     assert rz._lds_by_idx(pred_dl, 2)["hbmSize_"] == 0
     assert rz._lds_by_idx(cons_dl, 0)["hbmSize_"] == 0
     assert rz._has_input_fetch_neighbor_transfer(cons_dl, 0)
-    assert cons["coreIdToDscSchedule"]["0"] == [[0, 0, 0, 0]]
+    assert cons["coreIdToDscSchedule"]["0"] == [[0, -1, 0, 1], [-1, 0, 1, 0]]
     dataop_name = next(iter(cons["datadscs_"][0]))
     assert dataop_name == "0_STCDPOpLx_predecessor_fetch_Tensor0_idx0_tile1"
     assert "STCDPOpLx_ifn_Tensor" not in dataop_name
+    dataop = next(iter(cons["datadscs_"][0].values()))
+    src_piece = dataop["labeledDs_"][0]["PieceInfo"][0]
+    dst_piece = dataop["labeledDs_"][1]["PieceInfo"][0]
+    assert src_piece["PlacementInfo"][0]["startAddr"] == [rz.PRODUCER_LX_BASE]
+    assert dst_piece["PlacementInfo"][0]["startAddr"] == [rz.CONSUMER_LX_BASE]
 
     pred_meta = pred["flashAttentionPipeline_"]
     assert pred_meta["ifn_pair_role"] == "predecessor"
@@ -770,7 +767,7 @@ def test_flash_ifn_pair_tile_builds_predecessor_backed_sidecars():
     assert cons_meta["source"] == (
         "generated-flash-prefill-predecessor-ifn-pair-consumer"
     )
-    assert cons_meta["ifn_mode"] == "predecessor_backed_pair"
+    assert cons_meta["ifn_mode"] == "predecessor_backed_lx_copy_pair"
     assert cons_meta["ifn_runtime_safe"] is True
     assert cons_meta["ifn_predecessor_sdsc"] == "0_batchmatmul"
     assert cons_meta["ifn_consumer_sdsc"] == "1_batchmatmul"

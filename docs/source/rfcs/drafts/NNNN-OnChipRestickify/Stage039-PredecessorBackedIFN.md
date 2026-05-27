@@ -8,10 +8,18 @@ predecessor producer.  Stage039 adds an explicit two-SDSC contract for the next
 probe:
 
 - a predecessor sidecar with the producer output LX-pinned;
-- a consumer sidecar with input `lds0` LX-pinned and the IFN marker transfer;
-- bundle attrs on the consumer:
-  `ifn_enable`, `ifn_predecessor="prev_sibling"`, and
-  `ifn_predecessor_sdsc_filename=...`.
+- a consumer sidecar with input `lds0` LX-pinned;
+- a Torch-authored `STCDPOpLx` copy from the predecessor LX output region to
+  the consumer LX input region;
+- an explicit copy-then-compute consumer schedule:
+  `[[0, -1, 0, 1], [-1, 0, 1, 0]]`.
+
+The first DXP predecessor-backed IFN lowering experiment used bundle attrs on
+the consumer:
+`ifn_enable`, `ifn_predecessor="prev_sibling"`, and
+`ifn_predecessor_sdsc_filename=...`.  That lowered, but did not produce correct
+data.  The working Stage039 path intentionally does not emit those attrs; bundle
+order plus the explicit STCDP copy carries the predecessor value.
 
 The Torch gate is default-off:
 
@@ -70,8 +78,8 @@ def chain(a, b, c):
     return torch.matmul(torch.matmul(a, b), c)
 ```
 
-With `SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PAIR_TILE=1`, DXP generated the
-predecessor-backed branch:
+With `SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PAIR_TILE=1`, the first DXP
+predecessor-backed branch generated:
 
 ```text
 sdsc_mixed_flash_ifn_pair_tile_1_consumer-LxInputNeighborFetch
@@ -81,17 +89,31 @@ sync_soft_receive_lxlu_from_l3lu
 ```
 
 The compile/codegen/DCC path completed, then runtime timed out at
-`RuntimeStream::synchronize`.  This is progress relative to Stage038: the
-timeout now comes after a real predecessor-backed IFN data-op is generated, not
-from the single-SDSC placeholder path.
+`RuntimeStream::synchronize`.  Adding the missing consumer L3 PCFG made the
+program return, but the result was incorrect because the generated IFN transfer
+did not materialize a correct LX-to-LX copy for the same-core predecessor edge.
+
+The working cache used the same two sidecars but compiled the consumer as an
+ordinary two-step mixed SDSC:
+
+```text
+sdsc_mixed_flash_ifn_pair_tile_1_predecessor
+sdsc_mixed_flash_ifn_pair_tile_1_consumer
+  step 0: STCDPOpLx copy producer LX 16384 -> consumer LX 8192
+  step 1: batchmatmul consumes lds0 from LX 8192
+```
+
+Synthetic chained-matmul correctness matched the non-IFN baseline:
+
+```text
+max_err=1.5 mean_err=0.23056954145431519 allclose_loose=True
+```
 
 ## Next
 
 The next useful split is:
 
-- inspect the generated chained-matmul IFN PCFG/senprog for unmatched soft sync
-  or missing producer/consumer ordering;
-- decide whether IFN needs bundle-level runtime dependency metadata beyond
-  lowering the consumer data-op;
+- upstream the explicit LX-copy sidecar path as the default-off safe probe;
+- keep the DXP predecessor-generated IFN path as a separate Deeptools follow-up;
 - keep SDPA fail-closed until a same-physical producer edge exists or a
   deliberate layout-transforming IFN path is designed.
