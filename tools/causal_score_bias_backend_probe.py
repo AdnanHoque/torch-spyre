@@ -70,30 +70,101 @@ def _summarize_tensor(tensor, *, print_values: bool) -> dict:
     return summary
 
 
+def _constant_names(dsc: dict) -> list[str]:
+    constant_info = dsc.get("constantInfo_", {})
+    if not isinstance(constant_info, dict):
+        return []
+    return [
+        const.get("name_")
+        for const in constant_info.values()
+        if isinstance(const, dict)
+    ]
+
+
+def _causal_score_bias_contract(sdsc: dict, dsc: dict) -> dict:
+    """Extract the backend contract from a generated causal-bias SDSC.
+
+    This is intentionally JSON-only so it can run even when the backend aborts
+    before execution. The values describe what a DeepTools implementation must
+    honor for the score-layout-anchored primitive.
+    """
+    compute_op = dsc.get("computeOp_", [{}])[0]
+    output_name = (compute_op.get("outputLabeledDs") or [""])[0].split("-")[0]
+    output_lds = None
+    for lds in dsc.get("labeledDs_", []):
+        if lds.get("dsName_") == output_name:
+            output_lds = lds
+            break
+
+    output_layout = {}
+    if output_lds is not None:
+        output_layout = dsc.get("primaryDsInfo_", {}).get(
+            output_lds.get("dsType_"), {}
+        )
+
+    layout_dim_order = output_layout.get("layoutDimOrder_", [])
+    stick_dim_order = output_layout.get("stickDimOrder_", [])
+    work_slices = sdsc.get("numWkSlicesPerDim_", {})
+    split_dims = {dim: split for dim, split in work_slices.items() if split != 1}
+    supported_score_layout = (
+        "x" in layout_dim_order
+        and stick_dim_order == ["out"]
+        and "keyStart" in _constant_names(dsc)
+    )
+
+    return {
+        "opfunc": compute_op.get("opFuncName"),
+        "input_count": len(compute_op.get("inputLabeledDs", [])),
+        "output_count": len(compute_op.get("outputLabeledDs", [])),
+        "constants": _constant_names(dsc),
+        "num_cores": dsc.get("numCoresUsed_"),
+        "iteration_sizes": dsc.get("N_", {}),
+        "work_slices": work_slices,
+        "split_dims": split_dims,
+        "core_id_to_work_slice": sdsc.get("coreIdToWkSlice_", {}),
+        "output_layout": {
+            "labeled_ds": output_name,
+            "layout_dim_order": layout_dim_order,
+            "stick_dim_order": stick_dim_order,
+            "stick_size": output_layout.get("stickSize_", []),
+        },
+        "inferred_query_dim": "x" if "x" in layout_dim_order else None,
+        "inferred_key_dim": "out" if stick_dim_order == ["out"] else None,
+        "supported_score_layout": supported_score_layout,
+    }
+
+
+def _metadata_from_sdsc_payload(path: Path, payload: dict) -> dict:
+    sdsc = next(iter(payload.values()))
+    dsc = next(iter(sdsc["dscs_"][0].values()))
+    compute_ops = dsc.get("computeOp_", [])
+    opfuncs = [op.get("opFuncName") for op in compute_ops]
+    metadata = {
+        "path": str(path),
+        "opfuncs": opfuncs,
+        "constants": _constant_names(dsc),
+        "inputs": compute_ops[0].get("inputLabeledDs", []) if compute_ops else [],
+        "outputs": compute_ops[0].get("outputLabeledDs", []) if compute_ops else [],
+    }
+    if "causal_score_bias_like" in opfuncs:
+        metadata["causal_score_bias_contract"] = _causal_score_bias_contract(
+            sdsc, dsc
+        )
+    return metadata
+
+
 def _collect_sdsc_metadata(cache_dir: Path) -> list[dict]:
     metadata = []
     for path in sorted(cache_dir.rglob("sdsc_*.json")):
         try:
             payload = json.loads(path.read_text())
-            root = next(iter(payload.values()))
-            dsc = next(iter(root["dscs_"][0].values()))
         except Exception as exc:  # noqa: BLE001
             metadata.append({"path": str(path), "error": repr(exc)})
             continue
-        constants = []
-        for const in dsc.get("constantInfo_", {}).values():
-            constants.append(const.get("name_"))
-        metadata.append(
-            {
-                "path": str(path),
-                "opfuncs": [
-                    op.get("opFuncName") for op in dsc.get("computeOp_", [])
-                ],
-                "constants": constants,
-                "inputs": dsc.get("computeOp_", [{}])[0].get("inputLabeledDs", []),
-                "outputs": dsc.get("computeOp_", [{}])[0].get("outputLabeledDs", []),
-            }
-        )
+        try:
+            metadata.append(_metadata_from_sdsc_payload(path, payload))
+        except Exception as exc:  # noqa: BLE001
+            metadata.append({"path": str(path), "error": repr(exc)})
     return metadata
 
 
