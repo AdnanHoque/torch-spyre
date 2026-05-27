@@ -1288,7 +1288,9 @@ def _ifn_prefix_tile_artifact():
                 "ifn_runtime_safe": False,
             },
             "dscs_": [{"batchmatmul": {"computeOp_": []}}],
-            "datadscs_": [{"0_STCDPOpLx_ifn_Tensor0_idx0_tile0": {}}],
+            "datadscs_": [
+                {"0_STCDPOpLx_prefetch_ifn_Tensor0_idx0_tile0": {}}
+            ],
             "opFuncsUsed_": ["STCDPOpLx"],
         }
     }
@@ -1657,7 +1659,7 @@ def test_flash_pipeline_overlap_prefix_tile_artifacts_overlap_one_compute():
     assert len(root0["datadscs_"]) == 1
     assert root0["opFuncsUsed_"] == ["STCDPOpLx"]
     dataop_name, dataop = next(iter(root0["datadscs_"][0].items()))
-    assert dataop_name == "0_STCDPOpLx_ifn_Tensor0_idx0_tile0"
+    assert dataop_name == "0_STCDPOpLx_prefetch_ifn_Tensor0_idx0_tile0"
     assert dataop["op"] == {"name": "STCDPOpLx"}
     meta0 = root0["flashAttentionPipeline_"]
     assert meta0["source"] == "generated-flash-prefill-overlap-prefix-ifn-tile"

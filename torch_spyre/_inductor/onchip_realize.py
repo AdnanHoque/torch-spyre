@@ -1621,7 +1621,7 @@ def build_flash_attention_pipeline_ifn_prefix_tile_artifact(
     )
 
     datadsc = make_datadsc(
-        f"0_STCDPOpLx_ifn_Tensor0_idx{input_idx}_tile{tile_index}",
+        f"0_STCDPOpLx_prefetch_ifn_Tensor0_idx{input_idx}_tile{tile_index}",
         _stcdp_op(),
         layout,
         src=Endpoint(layout, stick_dim, split_dim, CONSUMER_LX_BASE),
