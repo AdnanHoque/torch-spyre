@@ -152,6 +152,34 @@ median=0.363024ms mean=0.363024ms max_err=0.00292969 mixed=9
 cache=/tmp/sdpa-stage039-layout-xform-auto-layout_xform_pair_auto-B1-H2-L256-D64-593935-357238
 ```
 
+The isolated mechanisms are value-correct, but the raw composition of
+pointwise handoffs plus the layout-transform pair is not certified.  A patched
+DXP sweep showed `pointwise_only`, `onchip`, and `layout_xform_pair_auto` each
+passing at `L=128` and `L=256`; enabling pointwise handoffs and the layout pair
+in the same bundle produced wrong values:
+
+```text
+L=128 pointwise+layout max_err=0.7080078125
+L=128 onchip_layout_xform max_err=0.4833984375
+L=256 onchip_layout_xform max_err=0.335693359375
+```
+
+Until that composition is certified, bundle generation skips flash pointwise
+handoffs in any bundle where the layout-transform pair is emitted.  Bundles
+where the layout pair fails closed still keep their normal pointwise handoff
+path.  With that guard, the `onchip_layout_xform` sweep keeps the layout pair
+and remains value-correct:
+
+```text
+L=128 onchip_layout_xform status=ok
+median=0.280591ms mean=0.280591ms max_err=0.00341797 mixed=6
+cache=/tmp/sdpa-stage039-onchip-layout-xform-bundleguard-onchip_layout_xform-B1-H2-L128-D64-597805-935971
+
+L=256 onchip_layout_xform status=ok
+median=0.356502ms mean=0.356502ms max_err=0.00292969 mixed=10
+cache=/tmp/sdpa-stage039-onchip-layout-xform-bundleguard-onchip_layout_xform-B1-H2-L256-D64-597805-156967
+```
+
 Synthetic chained matmul probe:
 
 ```python
@@ -198,5 +226,5 @@ The next useful split is:
 - keep the DXP predecessor-generated IFN path as a separate Deeptools follow-up;
 - use `layout_xform_pair_auto` for a broader sweep across more lengths, block
   sizes, and batch/head shapes;
-- decide whether the now-proven layout-transforming pair should feed the
-  `onchip_layout_xform` promotion path or remain an explicit probe gate.
+- certify the pointwise-handoff plus layout-pair composition before promoting
+  `onchip_layout_xform` beyond the guarded layout-pair path.

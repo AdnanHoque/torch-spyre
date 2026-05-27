@@ -73,26 +73,16 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             min_handoff_bytes=config.onchip_handoff_min_bytes,
         ):
             logger.info("Realized on-chip handoff")
-    if (
-        config.flash_attention_mixed_pipeline
-        and config.flash_attention_pointwise_handoff
-    ):
-        count = realize_flash_attention_pointwise_handoffs(
-            sdscs_json,
-            score_scale_handoff=config.flash_attention_score_scale_handoff,
-        )
-        if count:
-            logger.info(f"Realized {count} flash pointwise on-chip handoffs")
-    sidecar_sdscs = []
-    sidecar_replacements = {}
-    bundle_attrs_by_file = {}
     value_flow_tile = config.flash_attention_mixed_pipeline_value_flow_tile
     ifn_pair_tile = config.flash_attention_mixed_pipeline_ifn_pair_tile
     layout_xform_pair_tile = (
         config.flash_attention_mixed_pipeline_layout_xform_pair_tile
     )
+    sidecar_sdscs = []
+    sidecar_replacements = {}
+    bundle_attrs_by_file = {}
     value_flow_rejections = {}
-    if (
+    emit_mixed_sidecars = (
         config.flash_attention_mixed_pipeline
         and (
             config.flash_attention_mixed_pipeline_artifact
@@ -101,7 +91,41 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             or ifn_pair_tile >= 0
             or layout_xform_pair_tile != -1
         )
+    )
+    layout_xform_pair = None
+    layout_xform_pair_rejections = None
+    if emit_mixed_sidecars and layout_xform_pair_tile != -1:
+        layout_xform_pair = (
+            build_flash_attention_layout_xform_pair_tile_artifacts(
+                sdscs_json,
+                layout_xform_pair_tile,
+            )
+        )
+        if layout_xform_pair is None:
+            layout_xform_pair_rejections = (
+                flash_attention_layout_xform_pair_rejection_reasons(
+                    sdscs_json,
+                    layout_xform_pair_tile,
+                )
+            )
+    if (
+        config.flash_attention_mixed_pipeline
+        and config.flash_attention_pointwise_handoff
     ):
+        if layout_xform_pair is not None:
+            logger.warning(
+                "Skipping flash pointwise on-chip handoffs while the "
+                "layout-transform pair probe is active; this composition is "
+                "not value-certified yet"
+            )
+        else:
+            count = realize_flash_attention_pointwise_handoffs(
+                sdscs_json,
+                score_scale_handoff=config.flash_attention_score_scale_handoff,
+            )
+            if count:
+                logger.info(f"Realized {count} flash pointwise on-chip handoffs")
+    if emit_mixed_sidecars:
         if ifn_pair_tile >= 0:
             ifn_pair = build_flash_attention_ifn_pair_tile_artifacts(
                 sdscs_json,
@@ -124,12 +148,6 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                     ),
                 )
         if layout_xform_pair_tile != -1:
-            layout_xform_pair = (
-                build_flash_attention_layout_xform_pair_tile_artifacts(
-                    sdscs_json,
-                    layout_xform_pair_tile,
-                )
-            )
             if layout_xform_pair is not None:
                 sidecar_sdscs.extend(layout_xform_pair["artifacts"])
                 sidecar_replacements.update(layout_xform_pair["replacements"])
@@ -142,10 +160,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                 logger.warning(
                     "Requested layout-transform flash attention pair was not "
                     "realizable; keeping generated HBM-backed SDSCs: %s",
-                    flash_attention_layout_xform_pair_rejection_reasons(
-                        sdscs_json,
-                        layout_xform_pair_tile,
-                    ),
+                    layout_xform_pair_rejections,
                 )
         if value_flow_tile >= 0:
             value_flow = build_flash_attention_value_flow_tile_artifact(

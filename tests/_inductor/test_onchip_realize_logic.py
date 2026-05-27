@@ -65,8 +65,16 @@ class _Logger:
         pass
 
 
-def _install_bundle_stubs():
-    calls = []
+def _install_bundle_stubs(
+    *,
+    pointwise_handoff=False,
+    layout_xform_pair_tile=None,
+    layout_xform_pair_result=True,
+):
+    calls = {
+        "layout_xform": [],
+        "pointwise": [],
+    }
 
     config = types.ModuleType("torch_spyre._inductor.config")
     config.onchip_handoff_realize = False
@@ -74,13 +82,17 @@ def _install_bundle_stubs():
     config.onchip_static_matmul_handoff = False
     config.onchip_handoff_min_bytes = 1
     config.flash_attention_mixed_pipeline = True
-    config.flash_attention_pointwise_handoff = False
+    config.flash_attention_pointwise_handoff = pointwise_handoff
     config.flash_attention_score_scale_handoff = False
     config.flash_attention_mixed_pipeline_artifact = False
     config.flash_attention_mixed_pipeline_execute_tile = -1
     config.flash_attention_mixed_pipeline_value_flow_tile = -1
     config.flash_attention_mixed_pipeline_ifn_pair_tile = -1
-    config.flash_attention_mixed_pipeline_layout_xform_pair_tile = -2
+    if layout_xform_pair_tile is None:
+        layout_xform_pair_tile = rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+    config.flash_attention_mixed_pipeline_layout_xform_pair_tile = (
+        layout_xform_pair_tile
+    )
     config.flash_attention_mixed_pipeline_overlap = False
 
     superdsc = types.ModuleType("torch_spyre._inductor.codegen.superdsc")
@@ -95,7 +107,9 @@ def _install_bundle_stubs():
     onchip_realize = types.ModuleType("torch_spyre._inductor.onchip_realize")
 
     def build_flash_attention_layout_xform_pair_tile_artifacts(_sdscs, tile_index):
-        calls.append(tile_index)
+        calls["layout_xform"].append(tile_index)
+        if not layout_xform_pair_result:
+            return None
         return {
             "artifacts": [
                 {
@@ -146,8 +160,13 @@ def _install_bundle_stubs():
     onchip_realize.flash_attention_value_flow_tile_rejection_reasons = (
         lambda *_args, **_kwargs: []
     )
+
+    def realize_flash_attention_pointwise_handoffs(*_args, **_kwargs):
+        calls["pointwise"].append(_kwargs)
+        return 1
+
     onchip_realize.realize_flash_attention_pointwise_handoffs = (
-        lambda *_args, **_kwargs: 0
+        realize_flash_attention_pointwise_handoffs
     )
     onchip_realize.realize_onchip_handoff = lambda *_args, **_kwargs: False
 
@@ -169,7 +188,12 @@ def _install_bundle_stubs():
     return calls
 
 
-def _load_bundle_with_stubs():
+def _load_bundle_with_stubs(
+    *,
+    pointwise_handoff=False,
+    layout_xform_pair_tile=None,
+    layout_xform_pair_result=True,
+):
     names = [
         "torch_spyre",
         "torch_spyre._inductor",
@@ -182,7 +206,11 @@ def _load_bundle_with_stubs():
         "_test_bundle_under_test",
     ]
     saved = {name: sys.modules.get(name, _MISSING) for name in names}
-    calls = _install_bundle_stubs()
+    calls = _install_bundle_stubs(
+        pointwise_handoff=pointwise_handoff,
+        layout_xform_pair_tile=layout_xform_pair_tile,
+        layout_xform_pair_result=layout_xform_pair_result,
+    )
     spec = importlib.util.spec_from_file_location("_test_bundle_under_test", _BUNDLE)
     module = importlib.util.module_from_spec(spec)
     sys.modules["_test_bundle_under_test"] = module
@@ -1131,7 +1159,8 @@ def test_bundle_executes_layout_xform_pair_auto_gate():
         with tempfile.TemporaryDirectory() as output_dir:
             bundle.generate_bundle("kernel", output_dir, specs)
 
-            assert calls == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["layout_xform"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["pointwise"] == []
             with open(os.path.join(output_dir, "bundle.mlir")) as file:
                 bundle_mlir = file.read()
             assert (
@@ -1154,6 +1183,60 @@ def test_bundle_executes_layout_xform_pair_auto_gate():
             ]
             assert meta["tile_index"] == 2
             assert meta["requested_tile_index"] == rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_skips_pointwise_handoffs_when_layout_xform_pair_is_active():
+    bundle, calls, saved = _load_bundle_with_stubs(pointwise_handoff=True)
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+        assert calls["layout_xform"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+        assert calls["pointwise"] == []
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_keeps_pointwise_handoffs_when_layout_xform_pair_fails_closed():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        pointwise_handoff=True,
+        layout_xform_pair_result=False,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+        assert calls["layout_xform"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+        assert calls["pointwise"] == [{"score_scale_handoff": False}]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_keeps_pointwise_handoffs_when_layout_xform_pair_is_disabled():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        pointwise_handoff=True,
+        layout_xform_pair_tile=-1,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+        assert calls["layout_xform"] == []
+        assert calls["pointwise"] == [{"score_scale_handoff": False}]
     finally:
         _restore_modules(saved)
 
