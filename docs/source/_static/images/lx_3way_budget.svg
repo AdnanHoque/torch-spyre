@@ -1,0 +1,49 @@
+<svg viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, BlinkMacSystemFont, sans-serif">
+  <text x="380" y="25" text-anchor="middle" font-size="14" font-weight="bold">Per-core LX scratchpad (2 MB) — three working tiles must coexist</text>
+
+  <!-- Outer LX boundary -->
+  <rect x="80" y="55" width="600" height="320" rx="8" fill="#fdfdfd" stroke="#475569" stroke-width="2"/>
+  <text x="70" y="220" text-anchor="end" font-size="11" fill="#475569" transform="rotate(-90 70 220)">2 MB</text>
+
+  <!-- Activation tile (top, blue, small) -->
+  <rect x="100" y="75" width="560" height="60" rx="5" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="120" y="100" font-size="13" font-weight="bold" fill="#2563eb">activation tile</text>
+  <text x="120" y="118" font-size="10" fill="#475569">small rolling buffer — rows of x flow through, each used once and discarded</text>
+  <text x="640" y="100" text-anchor="end" font-size="11" font-weight="bold" fill="#2563eb">~few KB</text>
+  <!-- streaming arrows -->
+  <g stroke="#2563eb" stroke-width="1.2" fill="none">
+    <path d="M 100,105 L 660,105" stroke-dasharray="4,3" opacity="0.5"/>
+    <polygon points="660,100 670,105 660,110" fill="#2563eb" opacity="0.7"/>
+  </g>
+
+  <!-- Weight tile (middle, yellow, large) -->
+  <rect x="100" y="155" width="560" height="130" rx="5" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="120" y="180" font-size="13" font-weight="bold" fill="#92400e">weight tile</text>
+  <text x="120" y="198" font-size="10" fill="#475569">columns of W staged from HBM — must stay resident across all K iterations</text>
+  <text x="120" y="214" font-size="10" fill="#475569">if it fits → one HBM load, reused K times (free per use)</text>
+  <text x="120" y="230" font-size="10" fill="#475569" font-style="italic">if it overflows → kernel re-streams the per-core slice from HBM</text>
+  <text x="640" y="180" text-anchor="end" font-size="11" font-weight="bold" fill="#92400e">~MB-scale</text>
+  <!-- reuse loop arrow -->
+  <g stroke="#d97706" stroke-width="1.2" fill="none">
+    <path d="M 580,250 C 620,255 620,275 580,272 L 580,275" marker-end="url(#aw)"/>
+  </g>
+  <text x="615" y="270" font-size="9" fill="#92400e" font-style="italic">reused</text>
+  <text x="615" y="280" font-size="9" fill="#92400e" font-style="italic">K times</text>
+
+  <!-- Output accumulator (bottom, green, medium) -->
+  <rect x="100" y="305" width="560" height="55" rx="5" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="120" y="328" font-size="13" font-weight="bold" fill="#166534">output accumulator</text>
+  <text x="120" y="346" font-size="10" fill="#475569">slice of y being built up — partial sums grow over the K loop, must hold the whole slice</text>
+  <text x="640" y="328" text-anchor="end" font-size="11" font-weight="bold" fill="#166534">M/m × N/n</text>
+  <!-- accumulation arrow -->
+  <g stroke="#16a34a" stroke-width="1.2" fill="none" opacity="0.7">
+    <path d="M 200,340 L 220,340 M 260,340 L 280,340 M 320,340 L 340,340 M 380,340 L 400,340 M 440,340 L 460,340"/>
+    <polygon points="460,335 470,340 460,345" fill="#16a34a" opacity="0.7"/>
+  </g>
+
+  <defs>
+    <marker id="aw" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto">
+      <polygon points="0 0, 6 3, 0 6" fill="#d97706"/>
+    </marker>
+  </defs>
+</svg>

@@ -1,0 +1,79 @@
+<svg viewBox="0 0 760 460" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, BlinkMacSystemFont, sans-serif">
+  <text x="380" y="22" text-anchor="middle" font-size="14" font-weight="bold">Corner-stress sweep: which per-core pressure costs the most?</text>
+  <text x="380" y="40" text-anchor="middle" font-size="11" fill="#475569" font-style="italic">5 kernels at fixed (m=4, n=8), N=8192. Varying M and K to push different pressures.</text>
+
+  <!-- Axes -->
+  <line x1="80" y1="380" x2="700" y2="380" stroke="#475569" stroke-width="1.5"/>
+  <line x1="80" y1="380" x2="80" y2="80" stroke="#475569" stroke-width="1.5"/>
+
+  <!-- Y-axis labels (log scale: 0.1, 1, 10, 100) -->
+  <g font-size="10" fill="#475569">
+    <text x="70" y="384" text-anchor="end">0</text>
+    <text x="70" y="320" text-anchor="end">2</text>
+    <text x="70" y="260" text-anchor="end">4</text>
+    <text x="70" y="200" text-anchor="end">6</text>
+    <text x="70" y="140" text-anchor="end">8</text>
+    <text x="70" y="100" text-anchor="end">10</text>
+  </g>
+  <text x="40" y="240" text-anchor="middle" font-size="11" fill="#475569" transform="rotate(-90 40 240)">kernel_ms</text>
+
+  <!-- Bars (only showing up to 12 ms, "both heavy" gets a separate annotation since 146 ms breaks the scale) -->
+  <!-- Cell 1: both small (0.62 ms) -->
+  <g transform="translate(110, 0)">
+    <rect x="0" y="361" width="80" height="19" fill="#e5e7eb" stroke="#475569" stroke-width="1"/>
+    <text x="40" y="395" text-anchor="middle" font-size="10" font-weight="bold">both small</text>
+    <text x="40" y="409" text-anchor="middle" font-size="9" fill="#475569">0.62 ms</text>
+    <text x="40" y="423" text-anchor="middle" font-size="8" fill="#475569">M,K = 1024</text>
+    <text x="40" y="435" text-anchor="middle" font-size="8" fill="#475569">OUT=128KB, W=2MB</text>
+  </g>
+
+  <!-- Cell 2: weights-only heavy (4.77 ms) -->
+  <g transform="translate(220, 0)">
+    <rect x="0" y="237" width="80" height="143" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+    <text x="40" y="231" text-anchor="middle" font-size="10" fill="#92400e" font-weight="bold">4.77 ms</text>
+    <text x="40" y="395" text-anchor="middle" font-size="10" font-weight="bold" fill="#92400e">weights only</text>
+    <text x="40" y="409" text-anchor="middle" font-size="9" fill="#475569">K=16384</text>
+    <text x="40" y="423" text-anchor="middle" font-size="8" fill="#475569">W=32MB (16× over)</text>
+    <text x="40" y="435" text-anchor="middle" font-size="8" fill="#475569">OUT=128KB</text>
+  </g>
+
+  <!-- Cell 3: output-only heavy (10.37 ms) ← BIG -->
+  <g transform="translate(330, 0)">
+    <rect x="0" y="69" width="80" height="311" fill="#fee2e2" stroke="#dc2626" stroke-width="2"/>
+    <text x="40" y="63" text-anchor="middle" font-size="11" font-weight="bold" fill="#b91c1c">10.37 ms</text>
+    <text x="40" y="395" text-anchor="middle" font-size="10" font-weight="bold" fill="#b91c1c">output only ★</text>
+    <text x="40" y="409" text-anchor="middle" font-size="9" fill="#475569">M=16384</text>
+    <text x="40" y="423" text-anchor="middle" font-size="8" fill="#b91c1c" font-weight="bold">OUT=8MB (4× over)</text>
+    <text x="40" y="435" text-anchor="middle" font-size="8" fill="#475569">W=2MB</text>
+  </g>
+
+  <!-- Cell 4: both medium (6.14 ms) -->
+  <g transform="translate(440, 0)">
+    <rect x="0" y="196" width="80" height="184" fill="#fed7aa" stroke="#ea580c" stroke-width="1.5"/>
+    <text x="40" y="190" text-anchor="middle" font-size="10" font-weight="bold" fill="#9a3412">6.14 ms</text>
+    <text x="40" y="395" text-anchor="middle" font-size="10" font-weight="bold" fill="#9a3412">both medium</text>
+    <text x="40" y="409" text-anchor="middle" font-size="9" fill="#475569">M,K = 4096</text>
+    <text x="40" y="423" text-anchor="middle" font-size="8" fill="#475569">OUT=2MB, W=8MB</text>
+  </g>
+
+  <!-- Cell 5: both heavy (146 ms) — annotation only, off-scale -->
+  <g transform="translate(550, 0)">
+    <rect x="0" y="100" width="80" height="280" fill="#7f1d1d" stroke="#450a0a" stroke-width="2"/>
+    <text x="40" y="245" text-anchor="middle" font-size="11" font-weight="bold" fill="#fee2e2">146 ms</text>
+    <text x="40" y="261" text-anchor="middle" font-size="9" fill="#fee2e2">(off-scale)</text>
+    <text x="40" y="395" text-anchor="middle" font-size="10" font-weight="bold" fill="#450a0a">both heavy</text>
+    <text x="40" y="409" text-anchor="middle" font-size="9" fill="#475569">M,K = 16384</text>
+    <text x="40" y="423" text-anchor="middle" font-size="8" fill="#475569">OUT=8MB, W=32MB</text>
+    <text x="40" y="435" text-anchor="middle" font-size="8" fill="#475569">(16× compute too)</text>
+  </g>
+
+  <!-- legend at top -->
+  <g transform="translate(450, 75)" font-size="9">
+    <rect x="0" y="0" width="12" height="12" fill="#e5e7eb" stroke="#475569"/>
+    <text x="18" y="10">baseline</text>
+    <rect x="80" y="0" width="12" height="12" fill="#fef3c7" stroke="#d97706"/>
+    <text x="98" y="10">weight overflow</text>
+    <rect x="200" y="0" width="12" height="12" fill="#fee2e2" stroke="#dc2626"/>
+    <text x="218" y="10">output overflow</text>
+  </g>
+</svg>

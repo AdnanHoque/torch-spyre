@@ -10,14 +10,7 @@ This is a deep-dive companion to [`cost_model_equation.md`](cost_model_equation.
 
 Each Spyre core has a 2 MB on-chip LX scratchpad. During the inner loop of a matmul, that scratchpad has to hold three working sets at the same time:
 
-```
-                  Per-core LX (2 MB)
-        ┌─────────────────────────────────────┐
-        │  activation tile  (rows of x)       │  streaming
-        │  weight tile      (cols of W)       │  resident
-        │  output accumulator (slice of y)    │  accumulating
-        └─────────────────────────────────────┘
-```
+![LX 3-way budget](images/lx_3way_budget.svg)
 
 The three behave very differently:
 
@@ -43,24 +36,19 @@ Once the matmul starts looping over K, every K-step needs **the same column of W
 
 ### Output: must accumulate, forcing chunking when too big
 
-The output accumulator is special. The whole `(M/m) × (N/n)` slice has to *exist somewhere* during the K loop because we're adding to it at every K step. If the slice is too big to fit in LX alongside the working weight + activation tiles, the kernel **has no choice but to chunk the output**:
+The output accumulator is special. The whole `(M/m) × (N/n)` slice has to *exist somewhere* during the K loop because we're adding to it at every K step. If the slice is too big to fit in LX alongside the working weight + activation tiles, the kernel **has no choice but to chunk the output** — and each chunk re-loads the per-core weights:
 
-```
-   K-loop, output chunked N_chunks ways:
-   ┌──────── for each chunk c in [0..N_chunks) ────────┐
-   │   load chunk-c's weight slice into LX             │  HBM read
-   │   run K-loop accumulating chunk-c's output        │  compute
-   │   write chunk-c's output to HBM                   │  HBM write
-   └───────────────────────────────────────────────────┘
-```
+![Output chunking comparison](images/output_chunking.svg)
 
-Notice that **each chunk re-loads the per-core weights** — the same weights that the previous chunk just loaded. So output overflow is far costlier than weight overflow, because it multiplies the weight bandwidth by the chunk count.
+The same weights get loaded `N_chunks` times instead of once. That's why output overflow is far costlier than weight overflow.
 
 ---
 
 ## 3. The corner-stress sweep
 
 To verify this picture, we ran 5 kernels at fixed `(m=4, n=8)`, `N=8192`, sweeping M and K to put each pressure source in extreme regimes independently:
+
+![Corner-stress sweep: kernel_ms across 5 cells](images/corner_stress_sweep.svg)
 
 | cell | M | K | per-core activations | per-core weights | per-core output | per-core MACs | kernel_ms |
 |---|---|---|---|---|---|---|---|
