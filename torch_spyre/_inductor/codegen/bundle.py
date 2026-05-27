@@ -28,6 +28,7 @@ from torch_spyre._inductor.onchip_realize import (
     flash_attention_ifn_pair_tile_rejection_reasons,
     flash_attention_layout_xform_pair_rejection_reasons,
     flash_attention_value_flow_tile_rejection_reasons,
+    LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE,
     realize_flash_attention_pointwise_handoffs,
     realize_onchip_handoff,
 )
@@ -112,19 +113,23 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         config.flash_attention_mixed_pipeline
         and config.flash_attention_pointwise_handoff
     ):
+        pointwise_kwargs = {
+            "score_scale_handoff": config.flash_attention_score_scale_handoff,
+        }
         if layout_xform_pair is not None:
-            logger.warning(
-                "Skipping flash pointwise on-chip handoffs while the "
-                "layout-transform pair probe is active; this composition is "
-                "not value-certified yet"
+            pointwise_kwargs["pointwise_region0"] = (
+                LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE
             )
-        else:
-            count = realize_flash_attention_pointwise_handoffs(
-                sdscs_json,
-                score_scale_handoff=config.flash_attention_score_scale_handoff,
+            logger.info(
+                "Realizing flash pointwise handoffs in a disjoint LX region "
+                "while the layout-transform pair probe is active"
             )
-            if count:
-                logger.info(f"Realized {count} flash pointwise on-chip handoffs")
+        count = realize_flash_attention_pointwise_handoffs(
+            sdscs_json,
+            **pointwise_kwargs,
+        )
+        if count:
+            logger.info(f"Realized {count} flash pointwise on-chip handoffs")
     if emit_mixed_sidecars:
         if ifn_pair_tile >= 0:
             ifn_pair = build_flash_attention_ifn_pair_tile_artifacts(

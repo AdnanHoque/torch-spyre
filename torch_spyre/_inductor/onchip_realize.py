@@ -69,6 +69,9 @@ STREAM_THRESHOLD = LX_CAPACITY_BYTES // 2
 # per LX bridge region. Tighter packing can overlap DL-op private LX scratch even
 # when the logical tensor slice is smaller.
 MIN_BRIDGE_REGION_BYTES = 256 << 10
+LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE = (
+    PRODUCER_LX_BASE + 2 * MIN_BRIDGE_REGION_BYTES
+)
 # Stage022 device sweep: score-scale PT->SFP handoff is value-correct through
 # 128-wide score blocks, but 256-wide score blocks corrupt values. Keep larger
 # blocks fail-closed to the HBM score-scale path while retaining later SFP
@@ -2901,11 +2904,15 @@ def detect_onchip_edge(sdscs_json: list[dict]):
     )
 
 
-def realize_pointwise_handoff(sdscs_json: list[dict]) -> bool:
+def realize_pointwise_handoff(
+    sdscs_json: list[dict],
+    *,
+    region0: int = PRODUCER_LX_BASE,
+) -> bool:
     edge = detect_pointwise_handoff(sdscs_json)
     if edge is None:
         return False
-    return _realize_handoff_edge(edge)
+    return _realize_handoff_edge(edge, region0=region0)
 
 
 def _realize_handoff_edge(
@@ -2977,6 +2984,7 @@ def realize_flash_attention_pointwise_handoffs(
     sdscs_json: list[dict],
     *,
     score_scale_handoff: bool = False,
+    pointwise_region0: int = PRODUCER_LX_BASE,
 ) -> int:
     """Realize every legal same-layout flash handoff in one flash bundle."""
     count = 0
@@ -2986,7 +2994,7 @@ def realize_flash_attention_pointwise_handoffs(
         if score_scale_handoff and realize_flash_score_scale_handoff(sdscs_json):
             count += 1
             continue
-        if not realize_pointwise_handoff(sdscs_json):
+        if not realize_pointwise_handoff(sdscs_json, region0=pointwise_region0):
             break
         count += 1
     return count

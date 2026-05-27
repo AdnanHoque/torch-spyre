@@ -105,6 +105,9 @@ def _install_bundle_stubs(
     logging_utils.get_inductor_logger = lambda _name: _Logger()
 
     onchip_realize = types.ModuleType("torch_spyre._inductor.onchip_realize")
+    onchip_realize.LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE = (
+        rz.LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE
+    )
 
     def build_flash_attention_layout_xform_pair_tile_artifacts(_sdscs, tile_index):
         calls["layout_xform"].append(tile_index)
@@ -859,6 +862,30 @@ def test_flash_pointwise_handoffs_realize_eligible_chain():
     assert sdscs[2]["2_add"]["opFuncsUsed_"] == ["STCDPOpLx"]
 
 
+def test_flash_pointwise_handoffs_accept_disjoint_region():
+    def alloc_base(sdsc, lds_idx):
+        for node in rz._dl_op(sdsc).get("scheduleTree_", []):
+            if node.get("nodeType_") == "allocate" and node.get("ldsIdx_") == lds_idx:
+                data = node["startAddressCoreCorelet_"]["data_"]
+                return int(next(iter(data.values())))
+        raise AssertionError(f"missing allocate node for lds{lds_idx}")
+
+    sdscs = _fake_flash_pointwise_sdscs(chain=True)
+    region0 = rz.LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE
+
+    assert (
+        rz.realize_flash_attention_pointwise_handoffs(
+            sdscs,
+            pointwise_region0=region0,
+        )
+        == 2
+    )
+    assert alloc_base(sdscs[0], 2) == region0
+    assert alloc_base(sdscs[1], 0) == region0 + rz.MIN_BRIDGE_REGION_BYTES
+    assert alloc_base(sdscs[1], 2) == region0
+    assert alloc_base(sdscs[2], 0) == region0 + rz.MIN_BRIDGE_REGION_BYTES
+
+
 def test_flash_score_scale_handoff_realizes_batchmatmul_to_mul():
     sdscs = _fake_flash_score_scale_sdscs()
     edge = rz.detect_flash_score_scale_handoff(sdscs)
@@ -1187,7 +1214,7 @@ def test_bundle_executes_layout_xform_pair_auto_gate():
         _restore_modules(saved)
 
 
-def test_bundle_skips_pointwise_handoffs_when_layout_xform_pair_is_active():
+def test_bundle_shifts_pointwise_handoffs_when_layout_xform_pair_is_active():
     bundle, calls, saved = _load_bundle_with_stubs(pointwise_handoff=True)
     try:
         specs = [
@@ -1198,7 +1225,12 @@ def test_bundle_skips_pointwise_handoffs_when_layout_xform_pair_is_active():
             bundle.generate_bundle("kernel", output_dir, specs)
 
         assert calls["layout_xform"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
-        assert calls["pointwise"] == []
+        assert calls["pointwise"] == [
+            {
+                "score_scale_handoff": False,
+                "pointwise_region0": rz.LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE,
+            }
+        ]
     finally:
         _restore_modules(saved)
 
