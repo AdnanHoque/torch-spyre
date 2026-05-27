@@ -1107,6 +1107,16 @@ redistribution_us = output_bytes × 1 × 10⁻⁶      # fired when bundled AND 
 
 <p>If you swap to a faster kernel template later, the cost model's split choices will benefit too — but the planner doesn't need to change to capture that win.</p>
 
+<h3>Known limits of <code>cohort_penalty</code> + <code>lx_pressure_us</code></h3>
+
+<p>Two known shortcomings remain in the two HBM/scratchpad terms:</p>
+<ul>
+  <li><strong>cohort_penalty is symmetric in (m, n).</strong> Empirically, m-heavy splits run ~2-3× faster than n-heavy splits at the same nominal cohort — e.g. <code>(m=16, n=2)</code> is faster than <code>(m=2, n=16)</code> even though both have <code>max(m,n) = 16</code>. Physical reason: B (RHS) is reused across the K reduction loop and stays on chip, so broadcasting it to many cores is cheap; A (LHS) is streamed once per row, so broadcasting it is expensive. The model treats both directions identically.</li>
+  <li><strong>lx_pressure models only per-core RHS overflow.</strong> When N is very wide (e.g. N=20480), shrinking n to reduce per-core RHS makes per-core LHS grow (since m must compensate to keep cores=32). At that scale the LHS overflow becomes the dominant cost, but the model doesn't account for it. The planner consequently picks <code>(m=4, n=8)</code> for N=20480 when <code>(m=8, n=4)</code> is actually ~40% faster.</li>
+</ul>
+
+<p>A 7-parameter rework was attempted with a calibration sweep but the fit was degenerate against the available data, and a linear-in-excess RHS term cannot reproduce the empirically observed N=12800 → N=20480 winner-flip. A future revision will need a saturating RHS penalty + additional M-varying measurements.</p>
+
 <hr class="section">
 
 <p style="color: var(--muted); font-size: 0.9em; text-align: center;">
