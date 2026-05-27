@@ -52,7 +52,7 @@ def _ok_row(case, length, *, layout_xform=True):
         mixed.append({"name": "mixed_pointwise", "flash_pipeline": {}})
     return {
         "status": "ok",
-        "variant": "onchip_layout_xform",
+        "variant": "onchip_master_layout_xform",
         "shape": {
             "batch": case.batch,
             "heads": case.heads,
@@ -90,7 +90,7 @@ def test_gate_validation_requires_layout_consumer_and_mixed_floor():
     assert gate.validate_rows(
         rows,
         case=case,
-        variant="onchip_layout_xform",
+        variant="onchip_master_layout_xform",
         max_error=0.01,
     ) == []
 
@@ -98,7 +98,7 @@ def test_gate_validation_requires_layout_consumer_and_mixed_floor():
     errors = gate.validate_rows(
         rows,
         case=case,
-        variant="onchip_layout_xform",
+        variant="onchip_master_layout_xform",
         max_error=0.01,
     )
     assert "mixed=0 expected>=9" in "\n".join(errors)
@@ -115,7 +115,7 @@ def test_gate_validation_allows_no_layout_consumer_when_no_pair_expected():
     assert gate.validate_rows(
         rows,
         case=case,
-        variant="onchip_layout_xform",
+        variant="onchip_master_layout_xform",
         max_error=0.01,
     ) == []
 
@@ -130,7 +130,7 @@ def test_gate_validation_rejects_wrong_shape_status_and_error():
     errors = gate.validate_rows(
         rows,
         case=case,
-        variant="onchip_layout_xform",
+        variant="onchip_master_layout_xform",
         max_error=0.01,
     )
 
@@ -146,7 +146,7 @@ def test_sweep_command_uses_case_shape_and_output_path():
         output_json = Path(tmpdir) / "case.json"
         cmd = gate.sweep_command(
             python="pythonX",
-            variant="onchip_layout_xform",
+            variant="onchip_master_layout_xform",
             case=case,
             warmup=1,
             iters=2,
@@ -160,6 +160,7 @@ def test_sweep_command_uses_case_shape_and_output_path():
 
     assert cmd[0] == "pythonX"
     assert os.path.basename(cmd[1]) == "onchip_sdpa_sweep.py"
+    assert cmd[cmd.index("--variants") + 1] == "onchip_master_layout_xform"
     assert cmd[cmd.index("--lengths") + 1] == "128,256"
     assert cmd[cmd.index("--batch") + 1] == "1"
     assert cmd[cmd.index("--heads") + 1] == "2"

@@ -23,6 +23,7 @@ _FLASH_CONFIG_KEYS = [
     "flash_attention_prefill",
     "flash_attention_prefill_block_size",
     "flash_attention_onchip_sdpa",
+    "flash_attention_onchip_sdpa_layout_xform",
     "flash_attention_mixed_pipeline",
     "flash_attention_mixed_pipeline_overlap",
     "flash_attention_mixed_pipeline_artifact",
@@ -94,6 +95,7 @@ def test_flash_attention_onchip_sdpa_master_gate_defaults_off():
     assert cfg["flash_attention_prefill"] is False
     assert cfg["flash_attention_prefill_block_size"] == 128
     assert cfg["flash_attention_onchip_sdpa"] is False
+    assert cfg["flash_attention_onchip_sdpa_layout_xform"] is False
     assert cfg["flash_attention_mixed_pipeline"] is False
     assert cfg["flash_attention_pointwise_handoff"] is False
     assert cfg["flash_attention_score_scale_handoff"] is False
@@ -109,6 +111,7 @@ def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
     cfg = _read_flash_config({"SPYRE_FLASH_ATTENTION_ONCHIP_SDPA": "1"})
 
     assert cfg["flash_attention_onchip_sdpa"] is True
+    assert cfg["flash_attention_onchip_sdpa_layout_xform"] is False
     assert cfg["flash_attention_prefill_block_size"] == 512
     assert cfg["flash_attention_mixed_pipeline"] is True
     assert cfg["flash_attention_pointwise_handoff"] is True
@@ -120,6 +123,32 @@ def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
     assert cfg["flash_attention_mixed_pipeline_execute_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_value_flow_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_ifn_pair_tile"] == -1
+    assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_tile"] == -1
+
+
+def test_flash_attention_onchip_sdpa_layout_xform_adjunct_enables_auto_pair():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA": "1",
+            "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM": "1",
+        }
+    )
+
+    assert cfg["flash_attention_onchip_sdpa"] is True
+    assert cfg["flash_attention_onchip_sdpa_layout_xform"] is True
+    assert cfg["flash_attention_mixed_pipeline"] is True
+    assert cfg["flash_attention_pointwise_handoff"] is True
+    assert cfg["flash_attention_score_scale_handoff"] is True
+    assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_tile"] == -2
+
+
+def test_flash_attention_onchip_sdpa_layout_xform_adjunct_requires_master_gate():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM": "1"}
+    )
+
+    assert cfg["flash_attention_onchip_sdpa"] is False
+    assert cfg["flash_attention_onchip_sdpa_layout_xform"] is False
     assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_tile"] == -1
 
 
@@ -146,6 +175,7 @@ def test_flash_attention_onchip_sdpa_master_gate_preserves_individual_flags():
     )
 
     assert cfg["flash_attention_onchip_sdpa"] is False
+    assert cfg["flash_attention_onchip_sdpa_layout_xform"] is False
     assert cfg["flash_attention_mixed_pipeline"] is True
     assert cfg["flash_attention_pointwise_handoff"] is True
     assert cfg["flash_attention_score_scale_handoff"] is False
@@ -160,3 +190,26 @@ def test_flash_attention_layout_xform_pair_accepts_concrete_tile():
     )
 
     assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_tile"] == 2
+
+
+def _run_all():
+    tests = sorted(
+        (name, obj)
+        for name, obj in globals().items()
+        if name.startswith("test_") and callable(obj)
+    )
+    fails = []
+    for name, fn in tests:
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001
+            fails.append(name)
+            print(f"FAIL {name}: {type(exc).__name__}: {exc}")
+        else:
+            print(f"PASS {name}")
+    print(f"\n{len(tests) - len(fails)}/{len(tests)} passed")
+    return 1 if fails else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_run_all())

@@ -304,7 +304,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gate", choices=sorted(GATES), default="onchip_layout_xform")
     parser.add_argument("--cases", default="all", help="'all' or comma-separated case names")
-    parser.add_argument("--variant", default="onchip_layout_xform")
+    parser.add_argument("--variant", default="onchip_master_layout_xform")
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--iters", type=int, default=2)

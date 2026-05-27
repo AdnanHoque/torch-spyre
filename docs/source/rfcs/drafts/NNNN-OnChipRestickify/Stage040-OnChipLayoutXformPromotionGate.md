@@ -36,6 +36,7 @@ Default command:
 ```sh
 python3 tools/onchip_sdpa_promotion_gate.py \
   --gate onchip_layout_xform \
+  --variant onchip_layout_xform \
   --case-output-dir /tmp/sdpa-stage040-layout-xform-gate-json \
   --cache-prefix /tmp/sdpa-stage040-layout-xform-gate \
   --output-json /tmp/sdpa-stage040-layout-xform-gate.json
@@ -69,6 +70,7 @@ rows explicitly, the saved per-case JSON files revalidated cleanly:
 ```sh
 "$PYTHON" tools/onchip_sdpa_promotion_gate.py \
   --gate onchip_layout_xform \
+  --variant onchip_layout_xform \
   --reuse-existing \
   --case-output-dir /tmp/sdpa-stage040-layout-xform-gate-json \
   --cache-prefix /tmp/sdpa-stage040-layout-xform-gate \

@@ -49,10 +49,15 @@ flash_attention_prefill: bool = (
 # Production-candidate umbrella for the certified on-chip SDPA path.  This
 # enables the generated flash-prefill decomposition plus fail-closed same-stick
 # handoffs inside that graph.  It intentionally does not enable overlap,
-# sidecar artifact emission, or tile replacement; those are still individual
-# probe/debug gates.
+# sidecar artifact emission, or tile replacement by default; those are still
+# individual probe/debug gates.
 flash_attention_onchip_sdpa: bool = (
     os.environ.get("SPYRE_FLASH_ATTENTION_ONCHIP_SDPA", "0") == "1"
+)
+flash_attention_onchip_sdpa_layout_xform: bool = (
+    flash_attention_onchip_sdpa
+    and os.environ.get("SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM", "0")
+    == "1"
 )
 flash_attention_prefill_block_size: int = int(
     os.environ.get(
@@ -104,10 +109,15 @@ flash_attention_mixed_pipeline_ifn_pair_tile: int = int(
 # Experimental Stage039 follow-up for real SDPA edges that have a strict
 # producer->single-consumer relation but require a same-dim layout transform
 # before the consumer can read the predecessor LX payload. -1 disables; -2 scans
-# for the first eligible tile; non-negative values request a concrete tile.
+# for the first eligible tile; non-negative values request a concrete tile.  The
+# production-shaped master adjunct selects auto mode only when both
+# SPYRE_FLASH_ATTENTION_ONCHIP_SDPA=1 and
+# SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM=1 are set; the explicit tile env
+# remains the lower-level override for probe work.
 flash_attention_mixed_pipeline_layout_xform_pair_tile: int = int(
     os.environ.get(
-        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE", "-1"
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE",
+        "-2" if flash_attention_onchip_sdpa_layout_xform else "-1",
     )
 )
 # Default-off production-shaped bridge for same-stick pointwise edges that appear

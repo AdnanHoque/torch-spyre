@@ -38,6 +38,7 @@ from pathlib import Path
 BASE_VARIANT_ENV = {
     "SPYRE_FLASH_ATTENTION_PREFILL": "0",
     "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA": "0",
+    "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM": "0",
     "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE": "0",
     "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_OVERLAP": "0",
     "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_ARTIFACT": "0",
@@ -76,6 +77,13 @@ VARIANT_ENV = {
     "onchip_master": {
         **BASE_VARIANT_ENV,
         "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA": "1",
+        "SPYRE_ONCHIP_HANDOFF_MIN_BYTES": "0",
+    },
+    "onchip_master_layout_xform": {
+        **BASE_VARIANT_ENV,
+        "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA": "1",
+        "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM": "1",
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE": None,
         "SPYRE_ONCHIP_HANDOFF_MIN_BYTES": "0",
     },
     "warp_overlap_probe": {
@@ -300,7 +308,11 @@ def _run_child(args: argparse.Namespace) -> int:
 
 def _child_env(args: argparse.Namespace, variant: str, length: int) -> dict[str, str]:
     env = os.environ.copy()
-    env.update(VARIANT_ENV[variant])
+    for key, value in VARIANT_ENV[variant].items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
     if args.block_size > 0:
         env["SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE"] = str(args.block_size)
     else:
