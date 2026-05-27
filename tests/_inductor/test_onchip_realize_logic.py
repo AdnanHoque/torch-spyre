@@ -945,6 +945,89 @@ def _fake_flash_layout_xform_hoist_sdscs(
     ]
 
 
+def _fake_flash_layout_xform_kv_repack_sdscs():
+    future_addr = 12288
+    producer_pdi = {
+        "INPUT": {
+            "layoutDimOrder_": ["out", "mb", "x"],
+            "stickDimOrder_": ["x"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["x", "mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    current_pdi = {
+        "INPUT": {
+            "layoutDimOrder_": ["x", "mb", "in"],
+            "stickDimOrder_": ["in"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["in", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    future_pdi = {
+        "INPUT": {
+            "layoutDimOrder_": ["mb", "x", "in"],
+            "stickDimOrder_": ["in"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["in", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    return [
+        _fake_sdsc(
+            0,
+            "batchmatmul",
+            {"x": 1, "mb": 32, "out": 1, "in": 1},
+            {"x_": 2, "mb_": 128, "out_": 64, "in_": 64},
+            [("Tensor0-idx0", "INPUT", 4096), ("Tensor1-idx1", "KERNEL", 5120)],
+            [("Tensor2-idx2", "OUTPUT", 8192)],
+            current_pdi,
+        ),
+        _fake_sdsc(
+            1,
+            "ReStickifyOpHBM",
+            {"mb": 2, "x": 1, "out": 1},
+            {"x_": 64, "mb_": 2, "out_": 64},
+            [("Tensor0-idx0", "INPUT", 24576)],
+            [("Tensor1-idx1", "KERNEL", future_addr)],
+            producer_pdi,
+            num_cores=2,
+        ),
+        _fake_sdsc(
+            2,
+            "batchmatmul",
+            {"x": 1, "mb": 32, "out": 1, "in": 1},
+            {"x_": 2, "mb_": 128, "out_": 64, "in_": 64},
+            [
+                ("Tensor0-idx0", "INPUT", 32768),
+                ("Tensor1-idx1", "KERNEL", future_addr),
+            ],
+            [("Tensor2-idx2", "OUTPUT", 16384)],
+            future_pdi,
+        ),
+    ]
+
+
 def _fake_flash_pointwise_sdscs(multisplit=False, chain=False):
     shared_addr = 4096
     second_addr = 12288
@@ -1620,6 +1703,41 @@ def test_flash_layout_xform_hoist_rejects_non_restickify_producer():
     assert reasons == [
         "future_tile1:input0:no_latest_producer",
         "future_tile1:input1:producer_not_restickify_hbm:add",
+    ]
+
+
+def test_flash_layout_xform_hoist_reports_kv_repack_boundary():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    edge, reasons = rz._flash_attention_layout_xform_pair_edge(
+        sdscs,
+        tile_index=1,
+        input_idx=1,
+        allow_nonzero_input=True,
+    )
+
+    assert edge is None
+    assert reasons == [
+        (
+            "input1:requires_kv_repack_broadcast:"
+            "producer_split=mb_:mapped_split=x_:consumer_split=mb_:"
+            "producer_cores=2:consumer_cores=32"
+        ),
+    ]
+    assert rz.build_flash_attention_layout_xform_hoist_tile_artifacts(
+        sdscs,
+        tile_index=0,
+    ) is None
+    assert rz.flash_attention_layout_xform_hoist_rejection_reasons(
+        sdscs,
+        tile_index=0,
+    ) == [
+        "future_tile1:input0:no_latest_producer",
+        (
+            "future_tile1:input1:requires_kv_repack_broadcast:"
+            "producer_split=mb_:mapped_split=x_:consumer_split=mb_:"
+            "producer_cores=2:consumer_cores=32"
+        ),
     ]
 
 

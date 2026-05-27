@@ -1901,6 +1901,26 @@ def _flash_attention_layout_xform_pair_edge(
         or xform_split not in iter_sizes
         or iter_sizes[xform_split] % num_cores != 0
     ):
+        prod_num_cores = int(_body(prod).get("numCoresUsed_", 0))
+        if (
+            input_idx != INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX
+            and prod_split is not None
+            and xform_split == dim_map.get(prod_split)
+            and xform_split in iter_sizes
+            and cons_split not in iter_sizes
+            and prod_num_cores > 0
+            and iter_sizes[xform_split] % prod_num_cores == 0
+        ):
+            return (
+                None,
+                [
+                    f"input{input_idx}:requires_kv_repack_broadcast:"
+                    f"producer_split={prod_split}:mapped_split={xform_split}:"
+                    f"consumer_split={cons_split}:"
+                    f"producer_cores={prod_num_cores}:"
+                    f"consumer_cores={num_cores}"
+                ],
+            )
         return None, [f"input{input_idx}:invalid_split:{cons_split}"]
 
     slice_bytes = _reserve_bridge_region_bytes(
