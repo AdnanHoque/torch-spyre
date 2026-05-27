@@ -166,6 +166,39 @@ flash_attention_kv_repack_broadcast_plan_artifact: bool = (
     os.environ.get("SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PLAN_ARTIFACT", "0")
     == "1"
 )
+# Default-off executable-facing probe for the same low-core K/V boundary.  This
+# emits and selects a predecessor+consumer sidecar pair with an STCDPOpLx
+# repack/broadcast before the future batchmatmul.  -1 disables; -2 scans for the
+# first candidate.
+flash_attention_kv_repack_broadcast_pair_tile: int = int(
+    os.environ.get("SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_TILE", "-1")
+)
+# Keep the initial executable K/V pair shape compatible with the existing
+# predecessor-backed IFN probes by default, but allow A/B runs without the
+# synthetic NO_COMPONENT -> LX transfer marker on nonzero K/V inputs.
+flash_attention_kv_repack_broadcast_pair_ifn_transfer: bool = (
+    os.environ.get(
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_IFN_TRANSFER", "1"
+    )
+    == "1"
+)
+# A/B knob for STCDPOpLx source subpiece merging on the executable K/V pair.
+# Disabling this can split a high-fanout K/V broadcast into separate producer
+# subpieces if Deeptools multicast/subpiece reuse is the value-corruption source.
+flash_attention_kv_repack_broadcast_pair_subpiece_reuse: bool = (
+    os.environ.get(
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_SUBPIECE_REUSE", "1"
+    )
+    == "1"
+)
+# A/B knob for splitting the executable K/V fanout into smaller STCDPOpLx data
+# ops. 0 keeps the single 32-core fanout. A value such as 16 emits two 16-core
+# copy data-ops so each producer piece has fewer consumers.
+flash_attention_kv_repack_broadcast_pair_group_size: int = int(
+    os.environ.get(
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_GROUP_SIZE", "0"
+    )
+)
 # Default-off production-shaped bridge for same-stick pointwise edges that appear
 # inside the flash-prefill graph. This keeps the attention experiment off the
 # generic add/add handoff flag while reusing the same fail-closed Tier 1 realizer.

@@ -25,6 +25,7 @@ from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.onchip_realize import (
     build_flash_attention_ifn_pair_tile_artifacts,
+    build_flash_attention_kv_repack_broadcast_pair_artifacts,
     build_flash_attention_kv_repack_broadcast_plan_artifact,
     build_flash_attention_layout_xform_hoist_tile_artifacts,
     build_flash_attention_layout_xform_lookahead_tile_artifacts,
@@ -33,6 +34,7 @@ from torch_spyre._inductor.onchip_realize import (
     build_flash_attention_pipeline_tile_artifacts,
     build_flash_attention_value_flow_tile_artifact,
     flash_attention_ifn_pair_tile_rejection_reasons,
+    flash_attention_kv_repack_broadcast_pair_rejection_reasons,
     flash_attention_layout_xform_hoist_rejection_reasons,
     flash_attention_layout_xform_lookahead_rejection_reasons,
     flash_attention_layout_xform_pair_rejection_reasons,
@@ -136,6 +138,26 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         "flash_attention_mixed_pipeline_layout_xform_hoist_tile",
         -1,
     )
+    kv_repack_pair_tile = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_tile",
+        -1,
+    )
+    kv_repack_pair_ifn_transfer = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_ifn_transfer",
+        True,
+    )
+    kv_repack_pair_subpiece_reuse = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_subpiece_reuse",
+        True,
+    )
+    kv_repack_pair_group_size = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_group_size",
+        0,
+    )
     sidecar_sdscs = []
     sidecar_replacements = {}
     sidecar_omissions = set()
@@ -172,11 +194,33 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             or layout_xform_pair_tile != -1
             or layout_xform_lookahead_tile != -1
             or layout_xform_hoist_tile != -1
+            or kv_repack_pair_tile != -1
         )
     )
+    kv_repack_pair = None
+    kv_repack_pair_rejections = None
+    if emit_mixed_sidecars and kv_repack_pair_tile != -1:
+        kv_repack_pair = build_flash_attention_kv_repack_broadcast_pair_artifacts(
+            sdscs_json,
+            kv_repack_pair_tile,
+            include_input_fetch_transfer=kv_repack_pair_ifn_transfer,
+            stcdp_subpiece_reuse=kv_repack_pair_subpiece_reuse,
+            broadcast_group_size=kv_repack_pair_group_size,
+        )
+        if kv_repack_pair is None:
+            kv_repack_pair_rejections = (
+                flash_attention_kv_repack_broadcast_pair_rejection_reasons(
+                    sdscs_json,
+                    kv_repack_pair_tile,
+                )
+            )
     layout_xform_hoist = None
     layout_xform_hoist_rejections = None
-    if emit_mixed_sidecars and layout_xform_hoist_tile != -1:
+    if (
+        emit_mixed_sidecars
+        and layout_xform_hoist_tile != -1
+        and kv_repack_pair is None
+    ):
         layout_xform_hoist = (
             build_flash_attention_layout_xform_hoist_tile_artifacts(
                 sdscs_json,
@@ -195,6 +239,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     if (
         emit_mixed_sidecars
         and layout_xform_lookahead_tile != -1
+        and kv_repack_pair is None
         and layout_xform_hoist is None
     ):
         layout_xform_lookahead = (
@@ -215,6 +260,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     if (
         emit_mixed_sidecars
         and layout_xform_pair_tile != -1
+        and kv_repack_pair is None
         and layout_xform_hoist is None
         and layout_xform_lookahead is None
     ):
@@ -251,6 +297,14 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             logger.info(
                 "Realizing flash pointwise handoffs in a disjoint LX region "
                 "while the layout-transform hoist probe is active"
+            )
+        elif kv_repack_pair is not None:
+            pointwise_kwargs["pointwise_region0"] = kv_repack_pair[
+                "pointwise_lx_region0"
+            ]
+            logger.info(
+                "Realizing flash pointwise handoffs in a disjoint LX region "
+                "while the K/V repack broadcast pair probe is active"
             )
         elif layout_xform_pair is not None:
             pointwise_kwargs["pointwise_region0"] = layout_xform_pair[
@@ -296,7 +350,22 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                         ifn_pair_tile,
                     ),
                 )
-        if layout_xform_hoist_tile != -1:
+        if kv_repack_pair_tile != -1:
+            if kv_repack_pair is not None:
+                sidecar_sdscs.extend(kv_repack_pair["artifacts"])
+                sidecar_replacements.update(kv_repack_pair["replacements"])
+                bundle_attrs_by_file.update(kv_repack_pair["bundle_attrs"])
+                logger.info(
+                    "Executing experimental K/V repack broadcast flash attention "
+                    "pair sidecars"
+                )
+            else:
+                logger.warning(
+                    "Requested K/V repack broadcast flash attention pair was "
+                    "not realizable; keeping generated HBM-backed SDSCs: %s",
+                    kv_repack_pair_rejections,
+                )
+        if layout_xform_hoist_tile != -1 and kv_repack_pair is None:
             if layout_xform_hoist is not None:
                 sidecar_sdscs.extend(layout_xform_hoist["artifacts"])
                 sidecar_replacements.update(layout_xform_hoist["replacements"])
@@ -313,7 +382,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                     "SDSCs: %s",
                     layout_xform_hoist_rejections,
                 )
-        if layout_xform_lookahead_tile != -1:
+        if layout_xform_lookahead_tile != -1 and kv_repack_pair is None:
             if layout_xform_lookahead is not None:
                 sidecar_sdscs.extend(layout_xform_lookahead["artifacts"])
                 sidecar_replacements.update(layout_xform_lookahead["replacements"])
@@ -330,6 +399,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                 )
         if (
             layout_xform_pair_tile != -1
+            and kv_repack_pair is None
             and layout_xform_hoist is None
             and layout_xform_lookahead is None
         ):

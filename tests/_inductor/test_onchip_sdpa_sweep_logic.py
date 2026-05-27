@@ -15,10 +15,13 @@
 from __future__ import annotations
 
 import argparse
+import io
 import importlib.util
 import json
 import os
 import sys
+import tempfile
+import types
 from pathlib import Path
 from unittest import mock
 
@@ -37,6 +40,16 @@ _LAYOUT_HOIST_ENV = (
     "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_HOIST_TILE"
 )
 _KV_REPACK_PLAN_ENV = "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PLAN_ARTIFACT"
+_KV_REPACK_PAIR_ENV = "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_TILE"
+_KV_REPACK_PAIR_IFN_ENV = (
+    "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_IFN_TRANSFER"
+)
+_KV_REPACK_PAIR_REUSE_ENV = (
+    "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_SUBPIECE_REUSE"
+)
+_KV_REPACK_PAIR_GROUP_ENV = (
+    "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_GROUP_SIZE"
+)
 
 
 def _load_sweep():
@@ -48,6 +61,12 @@ def _load_sweep():
 
 
 sweep = _load_sweep()
+
+
+def test_sweep_script_bootstraps_repo_root_on_import_path():
+    repo_root = str(_SWEEP.parents[1])
+
+    assert repo_root in sys.path
 
 
 def _args():
@@ -70,6 +89,138 @@ def _args():
         is_causal=False,
         forbid_fallbacks=False,
     )
+
+
+def test_child_explicitly_autoloads_spyre_before_fallbacks_or_devices():
+    args = _args()
+    args.variant = "onchip_master_layout_xform"
+    args.length = 128
+    args.warmup = 0
+    args.iters = 1
+    events = []
+    state = {"autoloaded": False}
+
+    class FakeTensor:
+        def __init__(self, device):
+            self.device = types.SimpleNamespace(type=device)
+
+        def to(self, device=None, dtype=None):
+            if device == "spyre":
+                events.append(("to_spyre", state["autoloaded"]))
+                assert state["autoloaded"]
+            if device is None:
+                device = self.device.type
+            return FakeTensor(str(device).split(":")[0])
+
+        def cpu(self):
+            return FakeTensor("cpu")
+
+        def __sub__(self, other):
+            return self
+
+        def abs(self):
+            return self
+
+        def max(self):
+            return self
+
+        def item(self):
+            return 0.0
+
+    fake_torch = types.ModuleType("torch")
+    fake_torch.__path__ = []
+    fake_torch.float16 = object()
+    fake_torch.manual_seed = lambda seed: None
+    fake_torch.randn = lambda shape, dtype: FakeTensor("cpu")
+    fake_torch.compile = lambda fn, backend: fn
+    fake_torch.testing = types.SimpleNamespace(assert_close=lambda *args, **kwargs: None)
+    fake_torch._dynamo = types.SimpleNamespace(reset_code_caches=lambda: None)
+    fake_torch._inductor = types.SimpleNamespace(
+        codecache=types.SimpleNamespace(
+            FxGraphCache=types.SimpleNamespace(clear=lambda: None)
+        )
+    )
+
+    fake_nn = types.ModuleType("torch.nn")
+    fake_nn.__path__ = []
+    fake_functional = types.ModuleType("torch.nn.functional")
+
+    def fake_sdpa(q, k, v, *, is_causal):
+        return FakeTensor(q.device.type)
+
+    fake_functional.scaled_dot_product_attention = fake_sdpa
+    fake_nn.functional = fake_functional
+    fake_torch.nn = fake_nn
+
+    fake_spyre = types.ModuleType("torch_spyre")
+    fake_spyre.__path__ = []
+
+    def fake_autoload():
+        events.append("autoload")
+        state["autoloaded"] = True
+        fake_torch.spyre = types.SimpleNamespace(synchronize=lambda: None)
+
+    fake_spyre._autoload = fake_autoload
+
+    fake_inductor = types.ModuleType("torch_spyre._inductor")
+    fake_inductor.__path__ = []
+    fake_config = types.ModuleType("torch_spyre._inductor.config")
+    fake_config.flash_attention_prefill_block_size = 64
+    fake_inductor.config = fake_config
+
+    fake_ops = types.ModuleType("torch_spyre.ops")
+    fake_ops.__path__ = []
+
+    class FallbackLoader:
+        def find_spec(self, fullname, path=None, target=None):
+            if fullname == "torch_spyre.ops.fallbacks":
+                return importlib.util.spec_from_loader(fullname, self)
+            return None
+
+        def create_module(self, spec):
+            return None
+
+        def exec_module(self, module):
+            events.append(("fallbacks", state["autoloaded"]))
+            assert state["autoloaded"]
+
+            class FallbackWarning(UserWarning):
+                pass
+
+            module.FallbackWarning = FallbackWarning
+
+    fake_modules = {
+        "torch": fake_torch,
+        "torch.nn": fake_nn,
+        "torch.nn.functional": fake_functional,
+        "torch_spyre": fake_spyre,
+        "torch_spyre._inductor": fake_inductor,
+        "torch_spyre._inductor.config": fake_config,
+        "torch_spyre.ops": fake_ops,
+    }
+    fallback_loader = FallbackLoader()
+
+    with tempfile.TemporaryDirectory() as cache_dir:
+        with (
+            mock.patch.dict(sys.modules, fake_modules),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "TORCH_DEVICE_BACKEND_AUTOLOAD": "0",
+                    "TORCHINDUCTOR_CACHE_DIR": cache_dir,
+                },
+            ),
+            mock.patch("sys.stdout", new=io.StringIO()),
+        ):
+            sys.modules.pop("torch_spyre.ops.fallbacks", None)
+            sys.meta_path.insert(0, fallback_loader)
+            try:
+                assert sweep._run_child(args) == 0
+            finally:
+                sys.meta_path.remove(fallback_loader)
+
+    assert events.index("autoload") < events.index(("fallbacks", True))
+    assert events.index("autoload") < events.index(("to_spyre", True))
 
 
 def test_master_layout_xform_variant_uses_config_adjunct_default():
@@ -178,9 +329,60 @@ def test_layout_xform_hoist_kv_repack_plan_variant_emits_descriptor_only():
     assert env[_LAYOUT_PAIR_ENV] == "-2"
     assert env[_LAYOUT_HOIST_ENV] == "-2"
     assert env[_KV_REPACK_PLAN_ENV] == "1"
+    assert env[_KV_REPACK_PAIR_ENV] == "-1"
+    assert env[_KV_REPACK_PAIR_IFN_ENV] == "1"
+    assert env[_KV_REPACK_PAIR_REUSE_ENV] == "1"
+    assert env[_KV_REPACK_PAIR_GROUP_ENV] == "0"
     assert "layout_xform_hoist_kv_repack_plan_auto" in env[
         "TORCHINDUCTOR_CACHE_DIR"
     ]
+
+
+def test_kv_repack_pair_auto_enables_executable_probe():
+    env = sweep._child_env(_args(), "kv_repack_pair_auto", 128)
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE"] == "1"
+    assert env[_LAYOUT_PAIR_ENV] == "-1"
+    assert env[_LAYOUT_HOIST_ENV] == "-1"
+    assert env[_KV_REPACK_PLAN_ENV] == "0"
+    assert env[_KV_REPACK_PAIR_ENV] == "-2"
+    assert env[_KV_REPACK_PAIR_IFN_ENV] == "1"
+    assert env[_KV_REPACK_PAIR_REUSE_ENV] == "1"
+    assert env[_KV_REPACK_PAIR_GROUP_ENV] == "0"
+    assert "kv_repack_pair_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_kv_repack_pair_no_ifn_auto_disables_transfer_marker():
+    env = sweep._child_env(_args(), "kv_repack_pair_no_ifn_auto", 128)
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE"] == "1"
+    assert env[_KV_REPACK_PAIR_ENV] == "-2"
+    assert env[_KV_REPACK_PAIR_IFN_ENV] == "0"
+    assert env[_KV_REPACK_PAIR_REUSE_ENV] == "1"
+    assert env[_KV_REPACK_PAIR_GROUP_ENV] == "0"
+    assert "kv_repack_pair_no_ifn_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_kv_repack_pair_no_reuse_auto_disables_subpiece_reuse():
+    env = sweep._child_env(_args(), "kv_repack_pair_no_reuse_auto", 128)
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE"] == "1"
+    assert env[_KV_REPACK_PAIR_ENV] == "-2"
+    assert env[_KV_REPACK_PAIR_IFN_ENV] == "1"
+    assert env[_KV_REPACK_PAIR_REUSE_ENV] == "0"
+    assert env[_KV_REPACK_PAIR_GROUP_ENV] == "0"
+    assert "kv_repack_pair_no_reuse_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_kv_repack_pair_group16_auto_splits_broadcast_groups():
+    env = sweep._child_env(_args(), "kv_repack_pair_group16_auto", 128)
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE"] == "1"
+    assert env[_KV_REPACK_PAIR_ENV] == "-2"
+    assert env[_KV_REPACK_PAIR_IFN_ENV] == "1"
+    assert env[_KV_REPACK_PAIR_REUSE_ENV] == "1"
+    assert env[_KV_REPACK_PAIR_GROUP_ENV] == "16"
+    assert "kv_repack_pair_group16_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
 
 
 def test_layout_xform_hoist_auto_clears_parent_kv_repack_plan_probe():
@@ -196,6 +398,21 @@ def test_layout_xform_hoist_auto_clears_parent_kv_repack_plan_probe():
 
     assert env[_LAYOUT_HOIST_ENV] == "-2"
     assert env[_KV_REPACK_PLAN_ENV] == "0"
+
+
+def test_layout_xform_hoist_auto_clears_parent_kv_repack_pair_probe():
+    old = os.environ.get(_KV_REPACK_PAIR_ENV)
+    os.environ[_KV_REPACK_PAIR_ENV] = "-2"
+    try:
+        env = sweep._child_env(_args(), "layout_xform_hoist_auto", 128)
+    finally:
+        if old is None:
+            os.environ.pop(_KV_REPACK_PAIR_ENV, None)
+        else:
+            os.environ[_KV_REPACK_PAIR_ENV] = old
+
+    assert env[_LAYOUT_HOIST_ENV] == "-2"
+    assert env[_KV_REPACK_PAIR_ENV] == "-1"
 
 
 def test_layout_xform_pair_auto_clears_parent_lookahead_probe():

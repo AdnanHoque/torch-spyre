@@ -36,6 +36,10 @@ _FLASH_CONFIG_KEYS = [
     "flash_attention_mixed_pipeline_layout_xform_lookahead_tile",
     "flash_attention_mixed_pipeline_layout_xform_hoist_tile",
     "flash_attention_kv_repack_broadcast_plan_artifact",
+    "flash_attention_kv_repack_broadcast_pair_tile",
+    "flash_attention_kv_repack_broadcast_pair_ifn_transfer",
+    "flash_attention_kv_repack_broadcast_pair_subpiece_reuse",
+    "flash_attention_kv_repack_broadcast_pair_group_size",
     "flash_attention_pointwise_handoff",
     "flash_attention_score_scale_handoff",
     "causal_idx_to_mask_plan_artifact",
@@ -118,6 +122,10 @@ def test_flash_attention_onchip_sdpa_master_gate_defaults_off():
     assert cfg["flash_attention_mixed_pipeline_layout_xform_lookahead_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_layout_xform_hoist_tile"] == -1
     assert cfg["flash_attention_kv_repack_broadcast_plan_artifact"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_pair_tile"] == -1
+    assert cfg["flash_attention_kv_repack_broadcast_pair_ifn_transfer"] is True
+    assert cfg["flash_attention_kv_repack_broadcast_pair_subpiece_reuse"] is True
+    assert cfg["flash_attention_kv_repack_broadcast_pair_group_size"] == 0
     assert cfg["causal_idx_to_mask_plan_artifact"] is False
 
 
@@ -143,7 +151,45 @@ def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
     assert cfg["flash_attention_mixed_pipeline_layout_xform_lookahead_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_layout_xform_hoist_tile"] == -1
     assert cfg["flash_attention_kv_repack_broadcast_plan_artifact"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_pair_tile"] == -1
+    assert cfg["flash_attention_kv_repack_broadcast_pair_ifn_transfer"] is True
+    assert cfg["flash_attention_kv_repack_broadcast_pair_subpiece_reuse"] is True
+    assert cfg["flash_attention_kv_repack_broadcast_pair_group_size"] == 0
     assert cfg["causal_idx_to_mask_plan_artifact"] is False
+
+
+def test_flash_attention_kv_repack_pair_ifn_transfer_can_be_disabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_IFN_TRANSFER": "0"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_pair_ifn_transfer"] is False
+
+
+def test_flash_attention_kv_repack_pair_subpiece_reuse_can_be_disabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_SUBPIECE_REUSE": "0"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_pair_subpiece_reuse"] is False
+
+
+def test_flash_attention_kv_repack_pair_group_size_accepts_concrete_value():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_GROUP_SIZE": "16"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_pair_group_size"] == 16
+
+
+def test_flash_attention_kv_repack_pair_accepts_concrete_tile():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_TILE": "2"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_pair_tile"] == 2
+    assert cfg["flash_attention_onchip_sdpa"] is False
+    assert cfg["flash_attention_mixed_pipeline"] is False
 
 
 def test_flash_attention_kv_repack_plan_artifact_is_independently_gated():

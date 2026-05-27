@@ -78,6 +78,11 @@ def _install_bundle_stubs(
     layout_xform_pointwise_region0=None,
     causal_plan_artifact=False,
     kv_repack_plan_artifact=False,
+    kv_repack_pair_tile=-1,
+    kv_repack_pair_ifn_transfer=True,
+    kv_repack_pair_subpiece_reuse=True,
+    kv_repack_pair_group_size=0,
+    kv_repack_pair_result=True,
     ifn_prefix_force=False,
     execute_tile=-1,
     tile_artifacts=None,
@@ -88,6 +93,10 @@ def _install_bundle_stubs(
         "layout_xform_lookahead": [],
         "layout_xform_hoist": [],
         "kv_repack_plan": [],
+        "kv_repack_pair": [],
+        "kv_repack_pair_ifn_transfer": [],
+        "kv_repack_pair_subpiece_reuse": [],
+        "kv_repack_pair_group_size": [],
         "pointwise": [],
     }
 
@@ -124,6 +133,16 @@ def _install_bundle_stubs(
     config.causal_idx_to_mask_plan_artifact = causal_plan_artifact
     config.flash_attention_kv_repack_broadcast_plan_artifact = (
         kv_repack_plan_artifact
+    )
+    config.flash_attention_kv_repack_broadcast_pair_tile = kv_repack_pair_tile
+    config.flash_attention_kv_repack_broadcast_pair_ifn_transfer = (
+        kv_repack_pair_ifn_transfer
+    )
+    config.flash_attention_kv_repack_broadcast_pair_subpiece_reuse = (
+        kv_repack_pair_subpiece_reuse
+    )
+    config.flash_attention_kv_repack_broadcast_pair_group_size = (
+        kv_repack_pair_group_size
     )
 
     superdsc = types.ModuleType("torch_spyre._inductor.codegen.superdsc")
@@ -278,6 +297,40 @@ def _install_bundle_stubs(
     onchip_realize.build_flash_attention_kv_repack_broadcast_plan_artifact = (
         build_flash_attention_kv_repack_broadcast_plan_artifact
     )
+
+    def build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        _sdscs,
+        tile_index,
+        *,
+        name_prefix="mixed_flash_kv_repack_broadcast_pair",
+        include_input_fetch_transfer=True,
+        stcdp_subpiece_reuse=True,
+        broadcast_group_size=0,
+    ):
+        calls["kv_repack_pair"].append(tile_index)
+        calls["kv_repack_pair_ifn_transfer"].append(include_input_fetch_transfer)
+        calls["kv_repack_pair_subpiece_reuse"].append(stcdp_subpiece_reuse)
+        calls["kv_repack_pair_group_size"].append(broadcast_group_size)
+        if not kv_repack_pair_result:
+            return None
+        pred_name = f"{name_prefix}_1_input1_producer"
+        cons_name = f"{name_prefix}_1_input1_consumer"
+        return {
+            "artifacts": [
+                {pred_name: {"flashAttentionPipeline_": {}}},
+                {cons_name: {"flashAttentionPipeline_": {}}},
+            ],
+            "replacements": {
+                "1_ReStickifyOpHBM": pred_name,
+                "2_batchmatmul": cons_name,
+            },
+            "bundle_attrs": {},
+            "pointwise_lx_region0": layout_xform_pointwise_region0,
+        }
+
+    onchip_realize.build_flash_attention_kv_repack_broadcast_pair_artifacts = (
+        build_flash_attention_kv_repack_broadcast_pair_artifacts
+    )
     onchip_realize.build_flash_attention_ifn_pair_tile_artifacts = (
         lambda *_args, **_kwargs: None
     )
@@ -300,6 +353,9 @@ def _install_bundle_stubs(
         lambda *_args, **_kwargs: []
     )
     onchip_realize.flash_attention_layout_xform_hoist_rejection_reasons = (
+        lambda *_args, **_kwargs: []
+    )
+    onchip_realize.flash_attention_kv_repack_broadcast_pair_rejection_reasons = (
         lambda *_args, **_kwargs: []
     )
     onchip_realize.flash_attention_value_flow_tile_rejection_reasons = (
@@ -350,6 +406,11 @@ def _load_bundle_with_stubs(
     layout_xform_pointwise_region0=None,
     causal_plan_artifact=False,
     kv_repack_plan_artifact=False,
+    kv_repack_pair_tile=-1,
+    kv_repack_pair_ifn_transfer=True,
+    kv_repack_pair_subpiece_reuse=True,
+    kv_repack_pair_group_size=0,
+    kv_repack_pair_result=True,
     ifn_prefix_force=False,
     execute_tile=-1,
     tile_artifacts=None,
@@ -379,6 +440,11 @@ def _load_bundle_with_stubs(
         layout_xform_pointwise_region0=layout_xform_pointwise_region0,
         causal_plan_artifact=causal_plan_artifact,
         kv_repack_plan_artifact=kv_repack_plan_artifact,
+        kv_repack_pair_tile=kv_repack_pair_tile,
+        kv_repack_pair_ifn_transfer=kv_repack_pair_ifn_transfer,
+        kv_repack_pair_subpiece_reuse=kv_repack_pair_subpiece_reuse,
+        kv_repack_pair_group_size=kv_repack_pair_group_size,
+        kv_repack_pair_result=kv_repack_pair_result,
         ifn_prefix_force=ifn_prefix_force,
         execute_tile=execute_tile,
         tile_artifacts=tile_artifacts,
@@ -1867,6 +1933,150 @@ def test_flash_kv_repack_broadcast_plan_fans_out_low_core_input1():
     ]
 
 
+def test_flash_kv_repack_broadcast_pair_wraps_producer_and_consumer():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+    )
+
+    assert result is not None
+    assert result["replacements"] == {
+        "1_ReStickifyOpHBM": "mixed_flash_kv_repack_broadcast_pair_1_input1_producer",
+        "2_batchmatmul": "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer",
+    }
+    pred_name = "mixed_flash_kv_repack_broadcast_pair_1_input1_producer"
+    cons_name = "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer"
+    producer = result["artifacts"][0][pred_name]
+    consumer = result["artifacts"][1][cons_name]
+    prod_meta = producer["flashAttentionPipeline_"]
+    cons_meta = consumer["flashAttentionPipeline_"]
+    assert prod_meta["kv_repack_broadcast_role"] == "producer"
+    assert cons_meta["kv_repack_broadcast_role"] == "consumer"
+    assert cons_meta["kv_repack_broadcast_executable"] is True
+    assert cons_meta["kv_repack_runtime_forced"] is True
+    assert cons_meta["kv_repack_source_sdsc"] == "1_ReStickifyOpHBM"
+    assert cons_meta["kv_repack_consumer_sdsc"] == "2_batchmatmul"
+    assert cons_meta["kv_repack_source_piece_count"] == 2
+    assert cons_meta["kv_repack_destination_piece_count"] == 64
+    assert cons_meta["kv_repack_input_fetch_transfer"] is True
+    assert cons_meta["kv_repack_stcdp_subpiece_reuse"] is True
+    assert cons_meta["kv_repack_broadcast_group_count"] == 1
+    assert cons_meta["kv_repack_broadcast_group_size"] == 0
+    assert cons_meta["kv_repack_source_lx_base"] == rz.PRODUCER_LX_BASE
+    assert cons_meta["kv_repack_consumer_lx_base"] == (
+        rz.PRODUCER_LX_BASE + cons_meta["slice_bytes"]
+    )
+
+    assert rz._lds_by_idx(rz._dl_op({pred_name: producer}), 1)["hbmSize_"] == 0
+    assert len(consumer["dscs_"]) == 1
+    assert len(consumer["datadscs_"]) == 1
+    assert consumer["opFuncsUsed_"] == ["STCDPOpLx"]
+    compute_dl = next(iter(consumer["dscs_"][0].values()))
+    assert rz._has_input_fetch_neighbor_transfer(compute_dl, 1)
+    assert consumer["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert consumer["coreIdToDscSchedule"]["31"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+    dataop_name, dataop = next(iter(consumer["datadscs_"][0].items()))
+    assert dataop_name == "0_STCDPOpLx_kv_repack_broadcast_Tensor0_idx1_tile1"
+    src_ld, dst_ld = dataop["labeledDs_"]
+    assert len(src_ld["PieceInfo"]) == 2
+    assert len(dst_ld["PieceInfo"]) == 64
+    assert "broadcastSourcePieceKey_" not in dst_ld["PieceInfo"][0]
+    assert "broadcastConsumerCore_" not in dst_ld["PieceInfo"][0]
+    assert dst_ld["PieceInfo"][-1]["PlacementInfo"][0]["memId"] == [31]
+    assert dataop["op"] == {"name": "STCDPOpLx"}
+
+
+def test_flash_kv_repack_broadcast_pair_can_omit_ifn_transfer_marker():
+    result = rz.build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        include_input_fetch_transfer=False,
+    )
+
+    assert result is not None
+    consumer = result["artifacts"][1][
+        "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer"
+    ]
+    cons_meta = consumer["flashAttentionPipeline_"]
+    compute_dl = next(iter(consumer["dscs_"][0].values()))
+    assert cons_meta["kv_repack_input_fetch_transfer"] is False
+    assert not rz._has_input_fetch_neighbor_transfer(compute_dl, 1)
+
+
+def test_flash_kv_repack_broadcast_pair_can_disable_subpiece_reuse():
+    result = rz.build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        stcdp_subpiece_reuse=False,
+    )
+
+    assert result is not None
+    consumer = result["artifacts"][1][
+        "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer"
+    ]
+    cons_meta = consumer["flashAttentionPipeline_"]
+    dataop = next(iter(consumer["datadscs_"][0].values()))
+    assert cons_meta["kv_repack_stcdp_subpiece_reuse"] is False
+    assert dataop["op"] == {"name": "STCDPOpLx", "enSubPieceReuse": 0}
+
+
+def test_flash_kv_repack_broadcast_pair_can_split_broadcast_groups():
+    result = rz.build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        broadcast_group_size=16,
+    )
+
+    assert result is not None
+    consumer = result["artifacts"][1][
+        "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer"
+    ]
+    cons_meta = consumer["flashAttentionPipeline_"]
+    assert cons_meta["kv_repack_broadcast_group_size"] == 16
+    assert cons_meta["kv_repack_broadcast_group_count"] == 2
+    assert len(consumer["datadscs_"]) == 2
+    assert consumer["opFuncsUsed_"] == ["STCDPOpLx", "STCDPOpLx"]
+    assert consumer["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert consumer["coreIdToDscSchedule"]["16"] == [
+        [1, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+    first_name, first = next(iter(consumer["datadscs_"][0].items()))
+    second_name, second = next(iter(consumer["datadscs_"][1].items()))
+    assert first_name.endswith("_group0")
+    assert second_name.endswith("_group1")
+    assert first["coreIdsUsed_"] == list(range(16))
+    assert second["coreIdsUsed_"] == list(range(16, 32))
+    assert len(first["labeledDs_"][1]["PieceInfo"]) == 32
+    assert len(second["labeledDs_"][1]["PieceInfo"]) == 32
+    assert first["labeledDs_"][1]["PieceInfo"][-1]["PlacementInfo"][0]["memId"] == [
+        15
+    ]
+    assert second["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"][0]["memId"] == [
+        16
+    ]
+
+
+def test_flash_kv_repack_broadcast_pair_rejections_are_not_double_prefixed():
+    reasons = rz.flash_attention_kv_repack_broadcast_pair_rejection_reasons(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+    )
+
+    assert reasons == ["input1:no_latest_producer", "input2:not_consumer_input"]
+
+
 def test_flash_layout_xform_pair_reports_dynamic_pointwise_region():
     result = rz.build_flash_attention_layout_xform_pair_tile_artifacts(
         _fake_flash_pipeline_sdscs(
@@ -2059,6 +2269,105 @@ def test_bundle_executes_layout_xform_hoist_gate_and_omits_future_producer():
             assert os.path.exists(
                 os.path.join(output_dir, "sdsc_1_ReStickifyOpHBM.json")
             )
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_executes_kv_repack_pair_gate():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_pair_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_pair"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_pair_ifn_transfer"] == [True]
+            assert calls["kv_repack_pair_subpiece_reuse"] == [True]
+            assert calls["kv_repack_pair_group_size"] == [0]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert (
+                "sdsc_mixed_flash_kv_repack_broadcast_pair_1_input1_producer.json"
+                in bundle_mlir
+            )
+            assert (
+                "sdsc_mixed_flash_kv_repack_broadcast_pair_1_input1_consumer.json"
+                in bundle_mlir
+            )
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_disable_kv_repack_pair_ifn_transfer_marker():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_pair_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_pair_ifn_transfer=False,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_pair"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_pair_ifn_transfer"] == [False]
+            assert calls["kv_repack_pair_subpiece_reuse"] == [True]
+            assert calls["kv_repack_pair_group_size"] == [0]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_disable_kv_repack_pair_subpiece_reuse():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_pair_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_pair_subpiece_reuse=False,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_pair"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_pair_ifn_transfer"] == [True]
+            assert calls["kv_repack_pair_subpiece_reuse"] == [False]
+            assert calls["kv_repack_pair_group_size"] == [0]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_split_kv_repack_pair_broadcast_groups():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_pair_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_pair_group_size=16,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_pair"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_pair_group_size"] == [16]
     finally:
         _restore_modules(saved)
 

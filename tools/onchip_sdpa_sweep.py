@@ -36,6 +36,10 @@ import warnings
 from pathlib import Path
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 TAIL_CHARS = 8000
 
 
@@ -55,6 +59,10 @@ BASE_VARIANT_ENV = {
     "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_LOOKAHEAD_TILE": "-1",
     "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_HOIST_TILE": "-1",
     "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PLAN_ARTIFACT": "0",
+    "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_TILE": "-1",
+    "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_IFN_TRANSFER": "1",
+    "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_SUBPIECE_REUSE": "1",
+    "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_GROUP_SIZE": "0",
     "SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF": "0",
     "SPYRE_FLASH_ATTENTION_SCORE_SCALE_HANDOFF": "0",
     "SPYRE_ONCHIP_HANDOFF_REALIZE": "0",
@@ -173,6 +181,29 @@ VARIANT_ENV = {
         "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_HOIST_TILE": "-2",
         "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PLAN_ARTIFACT": "1",
     },
+    "kv_repack_pair_auto": {
+        **BASE_VARIANT_ENV,
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE": "1",
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_TILE": "-2",
+    },
+    "kv_repack_pair_no_ifn_auto": {
+        **BASE_VARIANT_ENV,
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE": "1",
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_TILE": "-2",
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_IFN_TRANSFER": "0",
+    },
+    "kv_repack_pair_no_reuse_auto": {
+        **BASE_VARIANT_ENV,
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE": "1",
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_TILE": "-2",
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_SUBPIECE_REUSE": "0",
+    },
+    "kv_repack_pair_group16_auto": {
+        **BASE_VARIANT_ENV,
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE": "1",
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_TILE": "-2",
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_GROUP_SIZE": "16",
+    },
     "onchip_layout_xform": {
         **BASE_VARIANT_ENV,
         "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE": "1",
@@ -265,7 +296,10 @@ def _summarize_cache(cache_dir: Path) -> dict:
 def _run_child(args: argparse.Namespace) -> int:
     import torch
     import torch.nn.functional as F
-    import torch_spyre  # noqa: F401
+    import torch_spyre
+
+    torch_spyre._autoload()
+
     from torch_spyre._inductor import config as spyre_config
     from torch_spyre.ops.fallbacks import FallbackWarning
 
