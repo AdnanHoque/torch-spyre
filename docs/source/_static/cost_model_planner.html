@@ -122,7 +122,6 @@
       <li><a href="#hbm"><code>hbm_us</code> — moving data from DRAM</a></li>
       <li><a href="#psum"><code>psum_us</code> — combining partial sums</a></li>
       <li><a href="#target_m"><code>target_m_us</code> — PT tie-breaker</a></li>
-      <li><a href="#lx"><code>lx_pressure_us</code> — RHS overflow penalty</a></li>
       <li><a href="#redistribution"><code>redistribution_us</code> — fusion-bundle penalty</a></li>
     </ol>
   </li>
@@ -489,13 +488,12 @@
 <h2 id="why-care">4. Why splits matter (and by how much)</h2>
 <p>From Figure 5 above, the three splits ranged from 2.12 ms (best) to 4.22 ms (worst) — a <strong>2× spread</strong> on the same matmul. Same total math. Same hardware. The cost model exists to pick the fast one without trial and error.</p>
 
-<h2 id="cost">5. The cost function — six terms</h2>
-<p>The total cost is the sum of six terms, all in microseconds:</p>
+<h2 id="cost">5. The cost function — five terms</h2>
+<p>The total cost is the sum of five terms, all in microseconds:</p>
 <pre><code>total_us = (compute_us
             + hbm_us
             + psum_us
-            + target_m_us
-            + lx_pressure_us) × batch_penalty
+            + target_m_us) × batch_penalty
            + redistribution_us</code></pre>
 <p>The planner enumerates every <code>(m, n, k)</code> split that's feasible (each factor divides the corresponding dimension; product ≤ 32 cores), scores each one, and returns the lowest.</p>
 
@@ -525,13 +523,9 @@
     <text x="270" y="154" text-anchor="middle" font-weight="bold" font-size="11" fill="#2563eb">target_m_us</text>
     <text x="270" y="168" text-anchor="middle" font-size="9">log₂ distance from PT sweet spot</text>
 
-    <rect x="180" y="180" width="180" height="34" rx="4" fill="#eff6ff" stroke="#2563eb"/>
-    <text x="270" y="194" text-anchor="middle" font-weight="bold" font-size="11" fill="#2563eb">lx_pressure_us</text>
-    <text x="270" y="208" text-anchor="middle" font-size="9">per-core RHS overflow × coeff</text>
-
-    <rect x="180" y="220" width="180" height="34" rx="4" fill="#fef3c7" stroke="#d97706"/>
-    <text x="270" y="234" text-anchor="middle" font-weight="bold" font-size="11" fill="#92400e">redistribution_us</text>
-    <text x="270" y="248" text-anchor="middle" font-size="9">added outside × batch_penalty</text>
+    <rect x="180" y="180" width="180" height="34" rx="4" fill="#fef3c7" stroke="#d97706"/>
+    <text x="270" y="194" text-anchor="middle" font-weight="bold" font-size="11" fill="#92400e">redistribution_us</text>
+    <text x="270" y="208" text-anchor="middle" font-size="9">added outside × batch_penalty</text>
   </g>
 
   <g stroke="#94a3b8" stroke-width="1" fill="none">
@@ -843,117 +837,7 @@ target_m_us = m_dist × 50</code></pre>
 
 <p>This term is small on purpose — it only matters when nothing else does.</p>
 
-<h3 id="lx" class="term-heading">5.5 <code>lx_pressure_us</code></h3>
-<div class="term-summary">When a worker's slice of B is bigger than the 2 MB scratchpad, they have to keep shuttling pieces from the warehouse. Charge for that.</div>
-
-<p>Each worker holds their slice of B in scratchpad. Slice size:</p>
-<pre><code>per_core_RHS_bytes = K × (N / n) × 2</code></pre>
-
-<p>If that exceeds 2 MB, charge for the excess:</p>
-<pre><code>excess = max(0, per_core_RHS_bytes - 2 MB)
-lx_pressure_us = excess × 5 × 10⁻⁶</code></pre>
-
-<figure>
-<svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" class="svg-text">
-  <text x="380" y="18" text-anchor="middle" font-size="13" font-weight="bold">Per-core RHS slice vs LX scratchpad capacity (drawn to scale)</text>
-
-  <line x1="40" y1="280" x2="720" y2="280" stroke="#16a34a" stroke-width="2" stroke-dasharray="4,3"/>
-  <text x="720" y="277" font-size="10" fill="#16a34a" text-anchor="end">2 MB scratchpad (LX) capacity</text>
-
-  <g transform="translate(80, 0)">
-    <text x="40" y="50" text-anchor="middle" font-size="11" font-weight="bold">KV (8,4)</text>
-    <text x="40" y="64" text-anchor="middle" font-size="10" fill="#475569">N=1024</text>
-    <rect x="10" y="260" width="60" height="20" fill="#16a34a" stroke="#166534" stroke-width="1.5"/>
-    <text x="40" y="295" text-anchor="middle" font-size="10" font-weight="bold">2 MB</text>
-    <text x="40" y="310" text-anchor="middle" font-size="9" fill="#166534">fits! 0 excess</text>
-    <text x="40" y="325" text-anchor="middle" font-size="9" fill="#166534" font-weight="bold">penalty: 0 µs</text>
-  </g>
-
-  <g transform="translate(220, 0)">
-    <text x="40" y="50" text-anchor="middle" font-size="11" font-weight="bold">QO (8,4)</text>
-    <text x="40" y="64" text-anchor="middle" font-size="10" fill="#475569">N=4096</text>
-    <rect x="10" y="200" width="60" height="80" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
-    <text x="40" y="295" text-anchor="middle" font-size="10" font-weight="bold">8 MB</text>
-    <text x="40" y="310" text-anchor="middle" font-size="9" fill="#b45309">6 MB excess</text>
-    <text x="40" y="325" text-anchor="middle" font-size="9" fill="#b45309" font-weight="bold">penalty: 30 µs</text>
-  </g>
-
-  <g transform="translate(360, 0)">
-    <text x="40" y="50" text-anchor="middle" font-size="11" font-weight="bold">QO (4,8)</text>
-    <text x="40" y="64" text-anchor="middle" font-size="10" fill="#475569">N=4096</text>
-    <rect x="10" y="240" width="60" height="40" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
-    <text x="40" y="295" text-anchor="middle" font-size="10" font-weight="bold">4 MB</text>
-    <text x="40" y="310" text-anchor="middle" font-size="9" fill="#b45309">2 MB excess</text>
-    <text x="40" y="325" text-anchor="middle" font-size="9" fill="#b45309" font-weight="bold">penalty: 10 µs</text>
-  </g>
-
-  <g transform="translate(500, 0)">
-    <text x="40" y="50" text-anchor="middle" font-size="11" font-weight="bold">MLP (8,4)</text>
-    <text x="40" y="64" text-anchor="middle" font-size="10" fill="#475569">N=12800</text>
-    <rect x="10" y="60" width="60" height="220" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
-    <text x="40" y="295" text-anchor="middle" font-size="10" font-weight="bold">26 MB</text>
-    <text x="40" y="310" text-anchor="middle" font-size="9" fill="#dc2626">24 MB excess</text>
-    <text x="40" y="325" text-anchor="middle" font-size="9" fill="#dc2626" font-weight="bold">penalty: 120 µs</text>
-  </g>
-
-  <g transform="translate(640, 0)">
-    <text x="40" y="50" text-anchor="middle" font-size="11" font-weight="bold">MLP (4,8)</text>
-    <text x="40" y="64" text-anchor="middle" font-size="10" fill="#475569">N=12800</text>
-    <rect x="10" y="150" width="60" height="130" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
-    <text x="40" y="295" text-anchor="middle" font-size="10" font-weight="bold">13 MB</text>
-    <text x="40" y="310" text-anchor="middle" font-size="9" fill="#b45309">11 MB excess</text>
-    <text x="40" y="325" text-anchor="middle" font-size="9" fill="#b45309" font-weight="bold">penalty: 55 µs</text>
-  </g>
-
-  <text x="32" y="170" text-anchor="middle" font-size="10" fill="#475569" transform="rotate(-90 32 170)">per-core RHS slice size</text>
-</svg>
-<figcaption>Figure 11 — Per-core RHS slice for three shapes at two splits each, drawn to scale. KV fits, QO mildly overflows, MLP overflows hard. The lx_pressure_us term penalizes excess above the 2 MB scratchpad line at 5 µs per MB.</figcaption>
-</figure>
-
-<figure>
-<svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" class="svg-text">
-  <text x="360" y="18" text-anchor="middle" font-size="13" font-weight="bold">Why this matters: streaming overhead</text>
-
-  <rect x="300" y="100" width="120" height="60" fill="#fef3c7" stroke="#d97706" stroke-width="2"/>
-  <text x="360" y="125" text-anchor="middle" font-size="11" font-weight="bold">LX (2 MB)</text>
-  <text x="360" y="143" text-anchor="middle" font-size="10">on-core scratchpad</text>
-
-  <rect x="20" y="50" width="180" height="140" fill="#e5e7eb" stroke="#475569" stroke-width="2"/>
-  <text x="110" y="80" text-anchor="middle" font-size="11" font-weight="bold">HBM</text>
-  <text x="110" y="96" text-anchor="middle" font-size="10">full per-core RHS slice</text>
-  <text x="110" y="110" text-anchor="middle" font-size="10" font-weight="bold">(e.g. 26 MB)</text>
-  <text x="110" y="135" text-anchor="middle" font-size="9" fill="#475569">far too big to fit</text>
-  <text x="110" y="148" text-anchor="middle" font-size="9" fill="#475569">in LX at once</text>
-
-  <rect x="540" y="100" width="120" height="60" fill="#fff" stroke="#475569" stroke-width="2"/>
-  <text x="600" y="125" text-anchor="middle" font-size="11" font-weight="bold">PT array</text>
-  <text x="600" y="143" text-anchor="middle" font-size="10">compute unit</text>
-
-  <g stroke="#dc2626" stroke-width="2" fill="none">
-    <path d="M 200,120 L 300,130" marker-end="url(#aw)"/>
-    <path d="M 420,130 L 540,130" marker-end="url(#aw)"/>
-  </g>
-  <text x="250" y="115" text-anchor="middle" font-size="10" fill="#dc2626" font-weight="bold">stream tile</text>
-  <text x="480" y="115" text-anchor="middle" font-size="10" fill="#dc2626" font-weight="bold">feed PT</text>
-
-  <path d="M 600,165 Q 600,200 110,200 L 110,195" stroke="#dc2626" stroke-width="2" stroke-dasharray="4,3" fill="none" marker-end="url(#aw)"/>
-  <text x="360" y="215" text-anchor="middle" font-size="11" fill="#dc2626" font-weight="bold">repeat each PT pass until full RHS consumed</text>
-
-  <defs>
-    <marker id="aw" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0,8 4,0 8" fill="#dc2626"/></marker>
-  </defs>
-</svg>
-<figcaption>Figure 12 — When per-core RHS doesn&apos;t fit in LX, the kernel streams pieces from HBM repeatedly. Each pass over the matrix unit needs a fresh tile loaded. More LX overflow = more streaming = more HBM bandwidth burned. The lx_pressure_us term captures this.</figcaption>
-</figure>
-
-<div class="callout">
-  <div class="callout-title">Why this term was added</div>
-  <p style="margin: 0;">
-    Without it, the model picked <code>(m=8, n=4)</code> for wide-N shapes like MLP — but the empirical winner is <code>(m=4, n=8)</code>. Reason: bigger n-split halves the per-core RHS slice, which halves the shuttle traffic. The fix calibrates the coefficient so the term only flips the choice when the overflow is severe (~13× over LX), matching the device-measured break-even point.
-  </p>
-</div>
-
-<h3 id="redistribution" class="term-heading">5.6 <code>redistribution_us</code></h3>
+<h3 id="redistribution" class="term-heading">5.5 <code>redistribution_us</code></h3>
 <div class="term-summary">When a matmul is part of a fusion bundle with a non-matmul op, any non-default split forces the output to be reshuffled across cores so the partner can consume it.</div>
 
 <figure>
@@ -1007,82 +891,25 @@ redistribution_us = output_bytes × 1 × 10⁻⁶      # fired when bundled AND 
 <pre><code>batch_penalty = b ^ 1.4</code></pre>
 <p>Splitting batch over multiple cores is penalized because each batch item is independent work that could be iterated sequentially instead. The exponent was fit from a bmm[8,512,4096,512] sweep where measured T(b)/T(1) hit 2.56× (b=2), 7.57× (b=4), 19.0× (b=8) — the power-law exponent fits at 1.36–1.46 across those three points. The old linear form <code>1 + 0.6 × max(0, b - 1)</code> under-predicted by 3–4× at b=8. For <code>b=1</code> (no batch split) the multiplier is 1.</p>
 
-<h2 id="example">6. Walked example: MLP-class matmul</h2>
-<p>Shape: <code>M=512, K=4096, N=12800, B=1</code>. Two finalists, both using all 32 cores: <code>(m=8, n=4)</code> and <code>(m=4, n=8)</code>.</p>
-
-<figure>
-<svg viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" class="svg-text">
-  <text x="380" y="18" text-anchor="middle" font-size="13" font-weight="bold">Cost breakdown: (m=8, n=4) vs (m=4, n=8) on MLP shape</text>
-
-  <line x1="80" y1="320" x2="80" y2="60" stroke="#475569" stroke-width="1.5"/>
-  <line x1="80" y1="320" x2="700" y2="320" stroke="#475569" stroke-width="1.5"/>
-
-  <g font-size="10" fill="#475569">
-    <text x="70" y="324" text-anchor="end">0</text>
-    <text x="70" y="262" text-anchor="end">100</text>
-    <text x="70" y="200" text-anchor="end">200</text>
-    <text x="70" y="138" text-anchor="end">300</text>
-    <text x="70" y="76" text-anchor="end">400</text>
-  </g>
-  <text x="35" y="190" text-anchor="middle" font-size="11" fill="#475569" transform="rotate(-90 35 190)">cost (µs)</text>
-
-  <g transform="translate(180, 0)">
-    <rect x="0" y="284" width="120" height="36" fill="#bfdbfe" stroke="#2563eb"/>
-    <text x="60" y="304" text-anchor="middle" font-size="10">57</text>
-    <text x="125" y="304" font-size="9" fill="#2563eb">compute</text>
-    <rect x="0" y="120" width="120" height="164" fill="#93c5fd" stroke="#2563eb"/>
-    <text x="60" y="208" text-anchor="middle" font-size="11" font-weight="bold">265</text>
-    <text x="125" y="208" font-size="9" fill="#2563eb">hbm</text>
-    <rect x="0" y="46" width="120" height="74" fill="#fca5a5" stroke="#dc2626"/>
-    <text x="60" y="88" text-anchor="middle" font-size="11" font-weight="bold">120</text>
-    <text x="125" y="88" font-size="9" fill="#dc2626">lx_pressure</text>
-
-    <text x="60" y="345" text-anchor="middle" font-size="12" font-weight="bold">(m=8, n=4)</text>
-    <text x="60" y="360" text-anchor="middle" font-size="11" font-weight="bold" fill="#dc2626">total = 442 µs</text>
-  </g>
-
-  <g transform="translate(450, 0)">
-    <rect x="0" y="284" width="120" height="36" fill="#bfdbfe" stroke="#2563eb"/>
-    <text x="60" y="304" text-anchor="middle" font-size="10">57</text>
-    <rect x="0" y="120" width="120" height="164" fill="#93c5fd" stroke="#2563eb"/>
-    <text x="60" y="208" text-anchor="middle" font-size="11" font-weight="bold">265</text>
-    <rect x="0" y="89" width="120" height="31" fill="#fde68a" stroke="#d97706"/>
-    <text x="60" y="106" text-anchor="middle" font-size="10">50</text>
-    <text x="125" y="106" font-size="9" fill="#d97706">target_m</text>
-    <rect x="0" y="55" width="120" height="34" fill="#fca5a5" stroke="#dc2626"/>
-    <text x="60" y="74" text-anchor="middle" font-size="10">55</text>
-
-    <text x="60" y="345" text-anchor="middle" font-size="12" font-weight="bold">(m=4, n=8)</text>
-    <text x="60" y="360" text-anchor="middle" font-size="11" font-weight="bold" fill="#166534">total = 427 µs ✓ winner</text>
-  </g>
-
-  <line x1="305" y1="46" x2="445" y2="55" stroke="#16a34a" stroke-width="1" stroke-dasharray="3,2"/>
-  <text x="375" y="40" text-anchor="middle" font-size="10" fill="#16a34a" font-weight="bold">Δ = 15 µs</text>
-</svg>
-<figcaption>Figure 14 — Stacked cost breakdown for the two candidate splits. Compute and HBM are identical (same work, same total bytes, both have cohort=8). The only differences are target_m_us (favoring (8,4) by 50) and lx_pressure_us (favoring (4,8) by 65). Net: (4,8) wins by 15 µs in the model. Measured kernel time: 2.10 ms vs 2.61 ms.</figcaption>
-</figure>
+<h2 id="example">6. Walked example: QO matmul</h2>
+<p>Shape: <code>M=512, K=4096, N=4096, B=1</code>. Two candidate 32-core splits: <code>(m=8, n=4)</code> and <code>(m=4, n=8)</code>.</p>
 
 <table>
   <thead>
     <tr><th>term</th><th class="num">(8, 4)</th><th class="num">(4, 8)</th><th>why they differ</th></tr>
   </thead>
   <tbody>
-    <tr><td><code>compute_us</code></td><td class="num">~57</td><td class="num">~57</td><td>Same per-core MACs, both at full PT efficiency (per-core M = 64 or 128, both ≥ target 8 passes).</td></tr>
-    <tr><td><code>hbm_us</code></td><td class="num">~265</td><td class="num">~265</td><td>Same total bytes, both have cohort=8 (no broadcast penalty).</td></tr>
+    <tr><td><code>compute_us</code></td><td class="num">~175</td><td class="num">~175</td><td>Same per-core MACs, both at full PT efficiency (per-core M = 64 or 128, both ≥ target 8 passes).</td></tr>
+    <tr><td><code>hbm_us</code></td><td class="num">~205</td><td class="num">~205</td><td>Same total bytes, both have cohort=8 (no broadcast penalty).</td></tr>
     <tr><td><code>psum_us</code></td><td class="num">0</td><td class="num">0</td><td>k=1 in both.</td></tr>
-    <tr><td><code>target_m_us</code></td><td class="num">0</td><td class="num">50</td><td>m=8 is exactly target. m=4 is 1 log2 step away.</td></tr>
-    <tr><td><code>lx_pressure_us</code></td><td class="num">120</td><td class="num">55</td><td>(8,4) per-core RHS = 26 MB → 24 MB excess. (4,8) = 13 MB → 11 MB excess.</td></tr>
-    <tr><th>total</th><th class="num">442</th><th class="num">427</th><th class="good">(4, 8) wins by 15 µs</th></tr>
+    <tr><td><code>target_m_us</code></td><td class="num">0</td><td class="num">50</td><td>m=8 is exactly the target. m=4 is one log₂ step away.</td></tr>
+    <tr><th>total</th><th class="num">380</th><th class="num">430</th><th class="good">(8, 4) wins by 50 µs</th></tr>
   </tbody>
 </table>
 
-<p>So the cost model picks <code>(m=4, n=8)</code>. Measured kernel time:</p>
-<ul>
-  <li><code>(8, 4)</code>: 2.61 ms</li>
-  <li><code>(4, 8)</code>: 2.10 ms — <strong>20% faster</strong></li>
-</ul>
+<p>The planner picks <code>(m=8, n=4)</code>. Measured kernel time: 0.36 ms vs (m=4, n=8) at 0.38 ms — the (8,4) win is real and reproducible at this shape.</p>
 
-<p>The cost-model's <em>predicted</em> margin (15 µs) is much smaller than the <em>measured</em> margin (~500 µs). That's fine — we only need the model to <strong>rank</strong> splits correctly, not predict their absolute times. The ranking is what determines which split gets compiled.</p>
+<p>The model only differentiates the two splits via <code>target_m_us</code>; everything else is identical. The cost-model's <em>predicted</em> margin (50 µs) is larger than the <em>measured</em> margin (~20 µs), which is fine — we only need the model to <strong>rank</strong> splits correctly, not predict their absolute times. The ranking is what determines which split gets compiled.</p>
 
 <h2 id="in-practice">7. What this gets us in practice</h2>
 
@@ -1095,7 +922,7 @@ redistribution_us = output_bytes × 1 × 10⁻⁶      # fired when bundled AND 
   <tbody>
     <tr><td>QO bs=1 (M=512, K=4096, N=4096)</td><td><code>(mb=8, out=4, in=1)</code></td><td>Matches prior heuristic and best forced timing.</td></tr>
     <tr><td>KV bs=1 (M=512, K=4096, N=1024)</td><td><code>(mb=8, out=4, in=1)</code></td><td>Matches prior.</td></tr>
-    <tr><td>MLP bs=1 (M=512, K=4096, N=12800)</td><td><code>(mb=4, out=8, in=1)</code></td><td><span class="good">15% faster than prior pick of (mb=8, out=4).</span></td></tr>
+    <tr><td>MLP bs=1 (M=512, K=4096, N=12800)</td><td><code>(mb=8, out=4, in=1)</code></td><td><span class="bad">~10% slower than empirical optimum <code>(mb=4, out=8)</code>; see known limits.</span></td></tr>
     <tr><td>MoE gate/up (B=8, M=128, K=2048, N=8192)</td><td><code>(b=1, mb=4, out=8, in=1)</code></td><td>Batch-iterated; matches prior.</td></tr>
     <tr><td>bmm large-K (B=8, M=512, K=4096, N=512)</td><td><code>(b=1, mb=8, out=4, in=1)</code></td><td>Batch-iterated; matches prior.</td></tr>
   </tbody>
@@ -1107,12 +934,12 @@ redistribution_us = output_bytes × 1 × 10⁻⁶      # fired when bundled AND 
 
 <p>If you swap to a faster kernel template later, the cost model's split choices will benefit too — but the planner doesn't need to change to capture that win.</p>
 
-<h3>Known limits of <code>cohort_penalty</code> + <code>lx_pressure_us</code></h3>
+<h3>Known limits of <code>cohort_penalty</code></h3>
 
-<p>Two known shortcomings remain in the two HBM/scratchpad terms:</p>
+<p>Two known shortcomings remain:</p>
 <ul>
-  <li><strong>cohort_penalty is symmetric in (m, n).</strong> Empirically, m-heavy splits run ~2-3× faster than n-heavy splits at the same nominal cohort — e.g. <code>(m=16, n=2)</code> is faster than <code>(m=2, n=16)</code> even though both have <code>max(m,n) = 16</code>. Physical reason: B (RHS) is reused across the K reduction loop and stays on chip, so broadcasting it to many cores is cheap; A (LHS) is streamed once per row, so broadcasting it is expensive. The model treats both directions identically.</li>
-  <li><strong>lx_pressure models only per-core RHS overflow.</strong> When N is very wide (e.g. N=20480), shrinking n to reduce per-core RHS makes per-core LHS grow (since m must compensate to keep cores=32). At that scale the LHS overflow becomes the dominant cost, but the model doesn't account for it. The planner consequently picks <code>(m=4, n=8)</code> for N=20480 when <code>(m=8, n=4)</code> is actually ~40% faster.</li>
+  <li><strong><code>cohort_penalty</code> is symmetric in (m, n).</strong> Empirically, m-heavy splits run ~2-3× faster than n-heavy splits at the same nominal cohort — e.g. <code>(m=16, n=2)</code> is faster than <code>(m=2, n=16)</code> even though both have <code>max(m,n) = 16</code>. Physical reason: weights are reused across the K reduction loop and stay on chip, so broadcasting them to many cores is cheap; activations are streamed once per row, so broadcasting them is expensive. The model treats both directions identically.</li>
+  <li><strong>Granite MLP (M=512, K=4096, N=12800) regresses.</strong> The planner picks <code>(mb=8, out=4)</code> but the empirical winner is <code>(mb=4, out=8)</code> by ~120 µs (~10% kernel-time). The win is a kernel-template artifact specific to that one N value — adjacent N values (8192, 10240, 14336, 16384, 20480) all have <code>(mb=8, out=4)</code> as the empirical winner. An earlier <code>lx_pressure_us</code> term captured this single-N artifact at the cost of being theoretically unsound and of being wrong at most other N values. The term was removed; the regression is documented honestly. End-to-end Granite latency impact is well under 1%.</li>
 </ul>
 
 <p>A 7-parameter rework was attempted with a calibration sweep but the fit was degenerate against the available data, and a linear-in-excess RHS term cannot reproduce the empirically observed N=12800 → N=20480 winner-flip. A future revision will need a saturating RHS penalty + additional M-varying measurements.</p>

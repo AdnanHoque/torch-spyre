@@ -32,7 +32,7 @@ So a planner pick like `(mb=8, out=4, in=1)` means: 8 cores split M, 4 cores spl
 ## Equation
 
 ```
-total_us = (compute_us + hbm_us + psum_us + target_m_us + lx_pressure_us) × batch_penalty
+total_us = (compute_us + hbm_us + psum_us + target_m_us) × batch_penalty
            + redistribution_us
 ```
 
@@ -79,15 +79,15 @@ target_m_us     = m_dist × 50                                 # us/log2 step
 
 Small penalty (50 µs/log2 step) that only matters when other terms tie. Magnitude fits big-M well (~48 µs/log2 measured), over-counts small-M by ~4× (real ~12 µs/log2); a scaled-by-`compute_us` variant was attempted but flipped QO so we deferred.
 
-### `lx_pressure_us` — per-core weight-slice overflow penalty
+### ~~`lx_pressure_us`~~ — removed (was a single-shape kludge)
 
-```
-per_core_weights = K × (N / n) × 2
-lx_excess        = max(0, per_core_weights − 2_097_152)       # 2 MB scratchpad
-lx_pressure_us   = lx_excess × 5e-6                           # us/byte
-```
+An earlier version of the model included an `lx_pressure_us = max(0, per_core_weights − 2 MB) × 5e-6` term to capture a measured ~120 µs (4,8) win on Granite MLP (M=512, K=4096, N=12800). Empirical investigation showed:
 
-Charges when the per-core weight slice exceeds the 2 MB on-core scratchpad. **The empirical mechanism is more complex than this formula** — a clean K-sweep up to 16 MB per-core weights shows zero measurable penalty, yet MLP (4,8)-vs-(8,4) clearly has ~120 µs delta the term gets right. Useful kludge, not the underlying physics.
+- A clean K-sweep up to 16 MB per-core weights showed **zero detectable per-byte cost** — the term was fitting kernel-template artifacts, not a physical mechanism.
+- The same coefficient is **wrong at adjacent N values**: at N=16384 it predicts (4,8) wins but empirically (8,4) wins by 40%; at N=20480 same story.
+- The term was tuned to capture exactly one N value (12800) where the kernel template happens to favor (4,8).
+
+Removed in favor of theoretical cleanness, accepting that the Granite-MLP shape regresses from (4,8) to (8,4) (~120 µs / ~10% on that one kernel; well under 1% end-to-end). See "known limits" below.
 
 ### `redistribution_us` — fusion-bundle penalty
 
@@ -121,15 +121,15 @@ For `b=1` (batch iterated) → 1.0. Power-law exponent fitted from a bmm[8,512,4
 
 ## Known limits
 
-After empirical validation, two structural limits remain in the HBM / scratchpad terms:
+After empirical validation, two structural limits remain in the HBM / scratchpad model:
 
-1. **`hbm_us` is symmetric in `(m, n)`** — real cost is asymmetric. Physical mechanism: activations are streamed (touched once per row), weights are reused across the K reduction and stay in LX. Broadcasting weights to many cores is cheap; broadcasting activations is expensive. The model uses `cohort = max(m, n)` and doesn't distinguish.
+1. **`hbm_us` is symmetric in `(m, n)`** — real cost is asymmetric. Physical mechanism: activations are streamed (touched once per row), weights are reused across the K reduction and stay in LX. Broadcasting weights to many cores is cheap; broadcasting activations is expensive. The model uses `cohort = max(m, n)` and doesn't distinguish; cohort-asymmetric splits with identical nominal cohort can have 2-3× kernel-time differences.
 
-2. **`lx_pressure_us` models only per-core weight-slice overflow** — per-core activation-slice overflow and per-core output-slice overflow are unmodeled. For very wide N (e.g. N=20480), shrinking n grows per-core activation slice; at that scale the activation overflow can dominate. The planner picks `(m=4, n=8)` for N=20480 when `(m=8, n=4)` is actually ~40% faster.
+2. **Granite MLP (M=512, K=4096, N=12800) regresses** — the planner picks `(mb=8, out=4)` but empirically `(mb=4, out=8)` is ~120 µs (~10%) faster on that one kernel. The win is a kernel-template artifact specific to that N value: adjacent N values (8192, 10240, 14336, 16384, 20480) all have `(8, 4)` as the correct winner. The earlier `lx_pressure_us` kludge captured this single-N artifact at the cost of being wrong at most other N values. The honest cost is well under 1% of end-to-end Granite latency.
 
-A separate finding from a corner-stress sweep: **per-core output pressure** (a real cost of ~0.75 ms per MB of per-core output, fired when per-core output approaches the LX cap) is also unmodeled. It only fires at large M (≥ 8K) so it doesn't change any planner pick on typical model shapes.
+A separate finding from a corner-stress sweep: **per-core output pressure** (~0.75 ms per MB of per-core output, fired when per-core output approaches the LX cap) is real but only triggers at large M (≥ 8K), so it doesn't change any planner pick on typical model shapes.
 
-A 7-parameter rework (per-tensor cohort + two-sided pressure) was attempted with a calibration sweep. The fit was degenerate against the available data, and a linear-in-excess term cannot reproduce the empirically observed N=12800 → N=20480 winner-flip. Future revision will need a saturating non-linear term + additional measurements that stress per-core output and per-core weights simultaneously.
+A 7-parameter rework (per-tensor cohort + two-sided pressure) was attempted with a calibration sweep. The fit was degenerate against the available data, and a linear-in-excess term cannot reproduce the empirically observed N=12800 → N=20480 winner-flip — because that flip isn't smooth physics, it's kernel-template selection. Future revision would need either a much richer kernel-template model or a queueing simulator.
 
 ## Validation status
 
@@ -139,6 +139,6 @@ The model picks the empirically-best split on every validated shape:
 |---|---|---|
 | Llama-7B QO bs=1 (M=512, K=4096, N=4096) | `(mb=8, out=4, in=1)` | ✓ |
 | Llama-7B KV bs=1 (M=512, K=4096, N=1024) | `(mb=8, out=4, in=1)` | ✓ |
-| Granite MLP bs=1 (M=512, K=4096, N=12800) | `(mb=4, out=8, in=1)` | ✓ (15% faster than the prior heuristic) |
+| Granite MLP bs=1 (M=512, K=4096, N=12800) | `(mb=8, out=4, in=1)` | ✗ (~10% slower than empirical optimum `(mb=4, out=8)`; see known limits) |
 | MoE gate/up (B=8, M=128, K=2048, N=8192) | `(b=1, mb=4, out=8, in=1)` | ✓ |
 | bmm large-K (B=8, M=512, K=4096, N=512) | `(b=1, mb=8, out=4, in=1)` | ✓ |
