@@ -57,6 +57,7 @@ def _args():
         output_json="",
         dxp_debug=True,
         is_causal=False,
+        forbid_fallbacks=False,
     )
 
 
@@ -136,6 +137,72 @@ def test_parent_forwards_causal_flag_to_child_command():
     assert len(calls) == 1
     assert "--is-causal" in calls[0]["cmd"]
     assert "-C1-" in calls[0]["env"]["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_parent_forwards_forbid_fallbacks_to_child_command():
+    args = _args()
+    args.forbid_fallbacks = True
+    calls = []
+
+    def fake_run(cmd, *, env, text, capture_output, timeout):
+        calls.append(cmd)
+        payload = {
+            "status": "ok",
+            "variant": "onchip_master_layout_xform",
+            "shape": {
+                "batch": args.batch,
+                "heads": args.heads,
+                "length": 128,
+                "dim": args.dim,
+            },
+            "cache_dir": env["TORCHINDUCTOR_CACHE_DIR"],
+            "median_ms": 0.1,
+            "mean_ms": 0.1,
+            "max_abs_error": 0.0,
+            "mixed_sdscs": [],
+        }
+        return argparse.Namespace(
+            returncode=0,
+            stdout="RESULT_JSON:" + json.dumps(payload, sort_keys=True),
+            stderr="",
+        )
+
+    with mock.patch.object(sweep.subprocess, "run", side_effect=fake_run):
+        assert sweep._run_parent(args) == 0
+
+    assert len(calls) == 1
+    assert "--forbid-fallbacks" in calls[0]
+
+
+def test_parent_records_fallback_readiness_failure_metadata():
+    args = _args()
+    args.is_causal = True
+    args.forbid_fallbacks = True
+    args.output_json = ""
+
+    def fake_run(cmd, *, env, text, capture_output, timeout):
+        return argparse.Namespace(
+            returncode=1,
+            stdout="",
+            stderr="FallbackWarning: aten.triu.default is falling back to cpu",
+        )
+
+    rows = []
+
+    def fake_print_last_result(row):
+        rows.append(row)
+
+    with (
+        mock.patch.object(sweep.subprocess, "run", side_effect=fake_run),
+        mock.patch.object(sweep, "_print_last_result", side_effect=fake_print_last_result),
+    ):
+        assert sweep._run_parent(args) == 1
+
+    assert len(rows) == 1
+    assert rows[0]["status"] == "failed"
+    assert rows[0]["is_causal"] is True
+    assert rows[0]["fallbacks_forbidden"] is True
+    assert "aten.triu.default" in rows[0]["stderr_tail"]
 
 
 def _run_all():

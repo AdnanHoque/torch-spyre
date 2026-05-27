@@ -32,7 +32,11 @@ import statistics
 import subprocess
 import sys
 import time
+import warnings
 from pathlib import Path
+
+
+TAIL_CHARS = 8000
 
 
 BASE_VARIANT_ENV = {
@@ -226,6 +230,10 @@ def _run_child(args: argparse.Namespace) -> int:
     import torch.nn.functional as F
     import torch_spyre  # noqa: F401
     from torch_spyre._inductor import config as spyre_config
+    from torch_spyre.ops.fallbacks import FallbackWarning
+
+    if args.forbid_fallbacks:
+        warnings.simplefilter("error", FallbackWarning)
 
     torch.manual_seed(args.seed)
     try:
@@ -288,6 +296,7 @@ def _run_child(args: argparse.Namespace) -> int:
         },
         "block_size": spyre_config.flash_attention_prefill_block_size,
         "is_causal": args.is_causal,
+        "fallbacks_forbidden": args.forbid_fallbacks,
         "block_size_env": os.environ.get(
             "SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE", ""
         ),
@@ -366,6 +375,8 @@ def _run_parent(args: argparse.Namespace) -> int:
             ]
             if args.is_causal:
                 cmd.append("--is-causal")
+            if args.forbid_fallbacks:
+                cmd.append("--forbid-fallbacks")
             env = _child_env(args, variant, length)
             started = time.perf_counter()
             try:
@@ -382,6 +393,8 @@ def _run_parent(args: argparse.Namespace) -> int:
                     {
                         "status": "timeout",
                         "variant": variant,
+                        "is_causal": args.is_causal,
+                        "fallbacks_forbidden": args.forbid_fallbacks,
                         "shape": {
                             "batch": args.batch,
                             "heads": args.heads,
@@ -391,8 +404,8 @@ def _run_parent(args: argparse.Namespace) -> int:
                         "cache_dir": env["TORCHINDUCTOR_CACHE_DIR"],
                         "timeout_s": args.timeout_s,
                         "elapsed_s": elapsed_s,
-                        "stdout_tail": (exc.stdout or "")[-4000:],
-                        "stderr_tail": (exc.stderr or "")[-4000:],
+                        "stdout_tail": (exc.stdout or "")[-TAIL_CHARS:],
+                        "stderr_tail": (exc.stderr or "")[-TAIL_CHARS:],
                     }
                 )
                 _print_last_result(results[-1])
@@ -407,6 +420,8 @@ def _run_parent(args: argparse.Namespace) -> int:
                     {
                         "status": "failed",
                         "variant": variant,
+                        "is_causal": args.is_causal,
+                        "fallbacks_forbidden": args.forbid_fallbacks,
                         "shape": {
                             "batch": args.batch,
                             "heads": args.heads,
@@ -416,8 +431,8 @@ def _run_parent(args: argparse.Namespace) -> int:
                         "cache_dir": env["TORCHINDUCTOR_CACHE_DIR"],
                         "returncode": proc.returncode,
                         "elapsed_s": elapsed_s,
-                        "stdout_tail": proc.stdout[-4000:],
-                        "stderr_tail": proc.stderr[-4000:],
+                        "stdout_tail": proc.stdout[-TAIL_CHARS:],
+                        "stderr_tail": proc.stderr[-TAIL_CHARS:],
                     }
                 )
             else:
@@ -474,6 +489,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--atol", type=float, default=0.1)
     parser.add_argument("--rtol", type=float, default=0.1)
     parser.add_argument("--is-causal", action="store_true")
+    parser.add_argument(
+        "--forbid-fallbacks",
+        action="store_true",
+        help=(
+            "treat Torch-Spyre CPU fallback warnings as errors in child runs; "
+            "useful as a readiness gate for removing fallback-only paths"
+        ),
+    )
     parser.add_argument("--timeout-s", type=float, default=180.0)
     parser.add_argument("--cache-prefix", default="/tmp/sdpa-onchip-sweep")
     parser.add_argument("--output-json", default="")
