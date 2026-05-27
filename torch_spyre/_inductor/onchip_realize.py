@@ -76,6 +76,7 @@ MIN_BRIDGE_REGION_BYTES = 256 << 10
 FLASH_SCORE_SCALE_MAX_STICK_ELEMS = 128
 INPUT_FETCH_NEIGHBOR_DISALLOWED_PINS = {"hbm", None}
 INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX = 0
+LAYOUT_XFORM_PAIR_AUTO_TILE = -2
 LEGACY_DATA_STRUCT_DIM_KEYS = (
     "in_",
     "out_",
@@ -1928,10 +1929,50 @@ def flash_attention_layout_xform_pair_tile_rejection_reasons(
     input_idx: int = INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX,
 ) -> list[str]:
     """Explain why a layout-transforming flash pair cannot be emitted."""
+    if (
+        tile_index == LAYOUT_XFORM_PAIR_AUTO_TILE
+        and input_idx == INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX
+    ):
+        return flash_attention_layout_xform_pair_rejection_reasons(
+            sdscs_json,
+            tile_index,
+        )
     _edge, reasons = _flash_attention_layout_xform_pair_edge(
         sdscs_json,
         tile_index,
         input_idx=input_idx,
+    )
+    return reasons
+
+
+def _resolve_flash_attention_layout_xform_pair_edge(
+    sdscs_json: list[dict],
+    tile_index: int,
+) -> tuple[int | None, dict | None, list[str]]:
+    if tile_index != LAYOUT_XFORM_PAIR_AUTO_TILE:
+        edge, reasons = _flash_attention_layout_xform_pair_edge(sdscs_json, tile_index)
+        return (tile_index if edge is not None else None), edge, reasons
+
+    reasons: list[str] = []
+    for candidate in range(_flash_value_flow_tile_count(sdscs_json)):
+        edge, candidate_reasons = _flash_attention_layout_xform_pair_edge(
+            sdscs_json,
+            candidate,
+        )
+        if edge is not None:
+            return candidate, edge, []
+        reasons.extend(f"tile{candidate}:{reason}" for reason in candidate_reasons)
+    return None, None, reasons or ["auto:no_candidate_tiles"]
+
+
+def flash_attention_layout_xform_pair_rejection_reasons(
+    sdscs_json: list[dict],
+    tile_index: int,
+) -> list[str]:
+    """Explain why a requested or auto-selected layout-transform pair failed."""
+    _tile, _edge, reasons = _resolve_flash_attention_layout_xform_pair_edge(
+        sdscs_json,
+        tile_index,
     )
     return reasons
 
@@ -2091,14 +2132,17 @@ def build_flash_attention_layout_xform_pair_tile_artifacts(
     name_prefix: str = "mixed_flash_layout_xform_pair_tile",
 ) -> dict | None:
     """Build an experimental explicit LX-copy pair for a layout-transform edge."""
-    edge, reasons = _flash_attention_layout_xform_pair_edge(sdscs_json, tile_index)
-    if edge is None:
+    selected_tile, edge, reasons = _resolve_flash_attention_layout_xform_pair_edge(
+        sdscs_json,
+        tile_index,
+    )
+    if edge is None or selected_tile is None:
         return None
 
     prod_name = next(iter(edge["producer"]))
     cons_name = next(iter(edge["consumer"]))
-    pred_sidecar = f"{name_prefix}_{tile_index}_predecessor"
-    cons_sidecar = f"{name_prefix}_{tile_index}_consumer"
+    pred_sidecar = f"{name_prefix}_{selected_tile}_predecessor"
+    cons_sidecar = f"{name_prefix}_{selected_tile}_consumer"
     num_cores = int(_body(edge["consumer"]).get("numCoresUsed_", 0))
 
     producer_artifact = {pred_sidecar: copy.deepcopy(_body(edge["producer"]))}
@@ -2124,7 +2168,8 @@ def build_flash_attention_layout_xform_pair_tile_artifacts(
             "layout_xform_shared_hbm_addr": edge["shared_hbm_addr"],
             "layout_xform_predecessor_lx_base": PRODUCER_LX_BASE,
             "replaces_sdsc": prod_name,
-            "tile_index": tile_index,
+            "tile_index": selected_tile,
+            "requested_tile_index": tile_index,
         }
     )
 
@@ -2148,7 +2193,7 @@ def build_flash_attention_layout_xform_pair_tile_artifacts(
     dataop = make_datadsc(
         (
             "0_STCDPOpLx_layout_xform_"
-            f"Tensor0_idx{edge['consumer_idx']}_tile{tile_index}"
+            f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
         ),
         _stcdp_op(),
         edge["dim_pool"],
@@ -2223,7 +2268,8 @@ def build_flash_attention_layout_xform_pair_tile_artifacts(
             "iter_sizes": edge["iter_sizes"],
             "slice_bytes": edge["slice_bytes"],
             "replaces_sdsc": cons_name,
-            "tile_index": tile_index,
+            "tile_index": selected_tile,
+            "requested_tile_index": tile_index,
             "compute_tile_count": 1,
         }
     )
@@ -2410,6 +2456,10 @@ def _flash_value_flow_tile(sdscs_json: list[dict], tile_index: int):
         if batch_seen == tile_index:
             return c, cons
     return None
+
+
+def _flash_value_flow_tile_count(sdscs_json: list[dict]) -> int:
+    return sum(1 for sdsc in sdscs_json if _op_name(sdsc) == "batchmatmul")
 
 
 def flash_attention_value_flow_tile_rejection_reasons(

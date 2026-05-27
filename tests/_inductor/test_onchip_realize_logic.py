@@ -23,8 +23,10 @@ over-capacity / mismatched-shard edges fail closed.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
+import tempfile
 import types
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +36,10 @@ _CODEGEN = os.path.normpath(
 _REAL = os.path.normpath(
     os.path.join(_HERE, "..", "..", "torch_spyre", "_inductor", "onchip_realize.py")
 )
+_BUNDLE = os.path.normpath(
+    os.path.join(_HERE, "..", "..", "torch_spyre", "_inductor", "codegen", "bundle.py")
+)
+_MISSING = object()
 
 
 def _load(name, path):
@@ -49,6 +55,147 @@ for pkg in ("torch_spyre", "torch_spyre._inductor", "torch_spyre._inductor.codeg
     sys.modules.setdefault(pkg, types.ModuleType(pkg))
 _load("torch_spyre._inductor.codegen.onchip_bridge", os.path.join(_CODEGEN, "onchip_bridge.py"))
 rz = _load("torch_spyre._inductor.onchip_realize", _REAL)
+
+
+class _Logger:
+    def info(self, *_args, **_kwargs):
+        pass
+
+    def warning(self, *_args, **_kwargs):
+        pass
+
+
+def _install_bundle_stubs():
+    calls = []
+
+    config = types.ModuleType("torch_spyre._inductor.config")
+    config.onchip_handoff_realize = False
+    config.onchip_attention_score_handoff = False
+    config.onchip_static_matmul_handoff = False
+    config.onchip_handoff_min_bytes = 1
+    config.flash_attention_mixed_pipeline = True
+    config.flash_attention_pointwise_handoff = False
+    config.flash_attention_score_scale_handoff = False
+    config.flash_attention_mixed_pipeline_artifact = False
+    config.flash_attention_mixed_pipeline_execute_tile = -1
+    config.flash_attention_mixed_pipeline_value_flow_tile = -1
+    config.flash_attention_mixed_pipeline_ifn_pair_tile = -1
+    config.flash_attention_mixed_pipeline_layout_xform_pair_tile = -2
+    config.flash_attention_mixed_pipeline_overlap = False
+
+    superdsc = types.ModuleType("torch_spyre._inductor.codegen.superdsc")
+    superdsc.compile_op_spec = lambda _idx, spec: spec
+
+    op_spec = types.ModuleType("torch_spyre._inductor.op_spec")
+    op_spec.OpSpec = object
+
+    logging_utils = types.ModuleType("torch_spyre._inductor.logging_utils")
+    logging_utils.get_inductor_logger = lambda _name: _Logger()
+
+    onchip_realize = types.ModuleType("torch_spyre._inductor.onchip_realize")
+
+    def build_flash_attention_layout_xform_pair_tile_artifacts(_sdscs, tile_index):
+        calls.append(tile_index)
+        return {
+            "artifacts": [
+                {
+                    "mixed_flash_layout_xform_pair_tile_2_predecessor": {
+                        "flashAttentionPipeline_": {
+                            "tile_index": 2,
+                            "requested_tile_index": tile_index,
+                        }
+                    }
+                },
+                {
+                    "mixed_flash_layout_xform_pair_tile_2_consumer": {
+                        "flashAttentionPipeline_": {
+                            "tile_index": 2,
+                            "requested_tile_index": tile_index,
+                        }
+                    }
+                },
+            ],
+            "replacements": {
+                "0_batchmatmul": "mixed_flash_layout_xform_pair_tile_2_predecessor",
+                "1_batchmatmul": "mixed_flash_layout_xform_pair_tile_2_consumer",
+            },
+            "bundle_attrs": {},
+        }
+
+    onchip_realize.build_flash_attention_layout_xform_pair_tile_artifacts = (
+        build_flash_attention_layout_xform_pair_tile_artifacts
+    )
+    onchip_realize.build_flash_attention_ifn_pair_tile_artifacts = (
+        lambda *_args, **_kwargs: None
+    )
+    onchip_realize.build_flash_attention_pipeline_artifact = (
+        lambda *_args, **_kwargs: None
+    )
+    onchip_realize.build_flash_attention_pipeline_tile_artifacts = (
+        lambda *_args, **_kwargs: []
+    )
+    onchip_realize.build_flash_attention_value_flow_tile_artifact = (
+        lambda *_args, **_kwargs: None
+    )
+    onchip_realize.flash_attention_ifn_pair_tile_rejection_reasons = (
+        lambda *_args, **_kwargs: []
+    )
+    onchip_realize.flash_attention_layout_xform_pair_rejection_reasons = (
+        lambda *_args, **_kwargs: []
+    )
+    onchip_realize.flash_attention_value_flow_tile_rejection_reasons = (
+        lambda *_args, **_kwargs: []
+    )
+    onchip_realize.realize_flash_attention_pointwise_handoffs = (
+        lambda *_args, **_kwargs: 0
+    )
+    onchip_realize.realize_onchip_handoff = lambda *_args, **_kwargs: False
+
+    packages = {
+        "torch_spyre": types.ModuleType("torch_spyre"),
+        "torch_spyre._inductor": types.ModuleType("torch_spyre._inductor"),
+        "torch_spyre._inductor.codegen": types.ModuleType(
+            "torch_spyre._inductor.codegen"
+        ),
+        "torch_spyre._inductor.config": config,
+        "torch_spyre._inductor.codegen.superdsc": superdsc,
+        "torch_spyre._inductor.op_spec": op_spec,
+        "torch_spyre._inductor.logging_utils": logging_utils,
+        "torch_spyre._inductor.onchip_realize": onchip_realize,
+    }
+    for name, module in packages.items():
+        sys.modules[name] = module
+
+    return calls
+
+
+def _load_bundle_with_stubs():
+    names = [
+        "torch_spyre",
+        "torch_spyre._inductor",
+        "torch_spyre._inductor.codegen",
+        "torch_spyre._inductor.config",
+        "torch_spyre._inductor.codegen.superdsc",
+        "torch_spyre._inductor.op_spec",
+        "torch_spyre._inductor.logging_utils",
+        "torch_spyre._inductor.onchip_realize",
+        "_test_bundle_under_test",
+    ]
+    saved = {name: sys.modules.get(name, _MISSING) for name in names}
+    calls = _install_bundle_stubs()
+    spec = importlib.util.spec_from_file_location("_test_bundle_under_test", _BUNDLE)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["_test_bundle_under_test"] = module
+    spec.loader.exec_module(module)
+    return module, calls, saved
+
+
+def _restore_modules(saved):
+    for name, module in saved.items():
+        if module is _MISSING:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
 
 
 def test_same_core_same_shard_realizes_two_regions():
@@ -942,6 +1089,87 @@ def test_flash_layout_xform_pair_tile_builds_experimental_sidecars():
         "x_",
         "out_",
     ]
+
+
+def test_flash_layout_xform_pair_auto_selects_first_eligible_tile():
+    result = rz.build_flash_attention_layout_xform_pair_tile_artifacts(
+        _fake_flash_pipeline_sdscs(num_tiles=3, sdpa_layout_transform=True),
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+    )
+
+    assert result is not None
+    pred = result["artifacts"][0]["mixed_flash_layout_xform_pair_tile_1_predecessor"]
+    cons = result["artifacts"][1]["mixed_flash_layout_xform_pair_tile_1_consumer"]
+    assert result["replacements"] == {
+        "0_batchmatmul": "mixed_flash_layout_xform_pair_tile_1_predecessor",
+        "1_batchmatmul": "mixed_flash_layout_xform_pair_tile_1_consumer",
+    }
+    assert (
+        rz.flash_attention_layout_xform_pair_rejection_reasons(
+            _fake_flash_pipeline_sdscs(num_tiles=3, sdpa_layout_transform=True),
+            tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        )
+        == []
+    )
+    assert pred["flashAttentionPipeline_"]["tile_index"] == 1
+    assert pred["flashAttentionPipeline_"]["requested_tile_index"] == (
+        rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+    )
+    assert cons["flashAttentionPipeline_"]["tile_index"] == 1
+    assert cons["flashAttentionPipeline_"]["requested_tile_index"] == (
+        rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+    )
+
+
+def test_bundle_executes_layout_xform_pair_auto_gate():
+    bundle, calls, saved = _load_bundle_with_stubs()
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert (
+                "sdsc_mixed_flash_layout_xform_pair_tile_2_predecessor.json"
+                in bundle_mlir
+            )
+            assert (
+                "sdsc_mixed_flash_layout_xform_pair_tile_2_consumer.json"
+                in bundle_mlir
+            )
+
+            consumer_path = os.path.join(
+                output_dir,
+                "sdsc_mixed_flash_layout_xform_pair_tile_2_consumer.json",
+            )
+            with open(consumer_path) as file:
+                consumer = json.load(file)
+            meta = consumer["mixed_flash_layout_xform_pair_tile_2_consumer"][
+                "flashAttentionPipeline_"
+            ]
+            assert meta["tile_index"] == 2
+            assert meta["requested_tile_index"] == rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+    finally:
+        _restore_modules(saved)
+
+
+def test_flash_layout_xform_pair_auto_reports_rejections():
+    assert rz.flash_attention_layout_xform_pair_rejection_reasons(
+        _fake_static_matmul_sdscs(),
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+    ) == [
+        "tile0:input0:not_consumer_input",
+        "tile1:input0:same_physical_layout_use_ifn_pair",
+    ]
+    assert rz.flash_attention_layout_xform_pair_rejection_reasons(
+        [],
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+    ) == ["auto:no_candidate_tiles"]
 
 
 def test_flash_layout_xform_pair_tile_rejects_same_physical_edge():

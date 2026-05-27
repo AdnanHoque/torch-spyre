@@ -33,6 +33,10 @@ _FLASH_CONFIG_KEYS = [
     "flash_attention_pointwise_handoff",
     "flash_attention_score_scale_handoff",
 ]
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_CONFIG = os.path.normpath(
+    os.path.join(_HERE, "..", "..", "torch_spyre", "_inductor", "config.py")
+)
 
 
 def _read_flash_config(extra_env=None):
@@ -46,8 +50,28 @@ def _read_flash_config(extra_env=None):
 
     script = textwrap.dedent(
         f"""
+        import importlib.util
         import json
-        from torch_spyre._inductor import config
+        import sys
+        import types
+
+        torch = types.ModuleType("torch")
+        torch_utils = types.ModuleType("torch.utils")
+        torch_config_module = types.ModuleType("torch.utils._config_module")
+        torch_config_module.install_config_module = lambda module: None
+        torch.utils = torch_utils
+        torch_utils._config_module = torch_config_module
+        sys.modules["torch"] = torch
+        sys.modules["torch.utils"] = torch_utils
+        sys.modules["torch.utils._config_module"] = torch_config_module
+
+        spec = importlib.util.spec_from_file_location(
+            "torch_spyre._inductor.config",
+            {json.dumps(_CONFIG)},
+        )
+        config = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = config
+        spec.loader.exec_module(config)
 
         keys = {json.dumps(_FLASH_CONFIG_KEYS)}
         print(json.dumps({{key: getattr(config, key) for key in keys}}, sort_keys=True))
@@ -117,7 +141,7 @@ def test_flash_attention_onchip_sdpa_master_gate_preserves_individual_flags():
             "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE": "1",
             "SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF": "1",
             "SPYRE_FLASH_ATTENTION_SCORE_SCALE_HANDOFF": "0",
-            "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE": "2",
+            "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE": "-2",
         }
     )
 
@@ -125,4 +149,14 @@ def test_flash_attention_onchip_sdpa_master_gate_preserves_individual_flags():
     assert cfg["flash_attention_mixed_pipeline"] is True
     assert cfg["flash_attention_pointwise_handoff"] is True
     assert cfg["flash_attention_score_scale_handoff"] is False
+    assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_tile"] == -2
+
+
+def test_flash_attention_layout_xform_pair_accepts_concrete_tile():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE": "2",
+        }
+    )
+
     assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_tile"] == 2

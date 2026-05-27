@@ -28,10 +28,16 @@ SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PAIR_TILE=-1
 SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE=-1
 ```
 
-When enabled, the builder only emits the pair for a strict latest-producer,
-single-consumer, same-physical-layout edge.  The real SDPA `L=128` probe stayed
-fail-closed: tile 2 has the apparent producer relation, but needs a layout
-transform rather than a same-physical copy:
+For the layout-transforming pair gate, `-2` is the opt-in auto selector: it
+scans flash `batchmatmul` tiles in order and emits the first eligible
+predecessor/consumer pair.  Non-negative values still request a concrete tile.
+
+When enabled, the IFN-pair builder only emits a strict latest-producer,
+single-consumer, same-physical-layout edge.  The layout-transforming pair gate
+handles the follow-up case where that strict producer/consumer relation exists
+but the source and consumer layouts must be remapped.  The real SDPA `L=128`
+IFN-pair probe stayed fail-closed: tile 2 has the apparent producer relation,
+but needs a layout transform rather than a same-physical copy:
 
 ```text
 producer=['mb_', 'x_', 'out_']/out_
@@ -72,11 +78,12 @@ tile 1 input0:no_latest_producer
 tile 2 input0:layout_transform_required:producer=['mb_', 'x_', 'out_']/out_:consumer=['x_', 'mb_', 'in_']/in_
 ```
 
-That rejection now has a separate default-off Torch probe:
-`SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE=2`, exposed in
-`tools/onchip_sdpa_sweep.py` as `layout_xform_pair_tile2`.  It emits the same
-two ordered sidecars, but the consumer copy data-op describes the source as the
-producer physical order with the stick dim aliased from `out_` to `in_`:
+That rejection now has a separate default-off Torch probe.  A concrete request
+uses `SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE=2`, exposed in
+`tools/onchip_sdpa_sweep.py` as `layout_xform_pair_tile2`; auto mode uses `-2`,
+exposed as `layout_xform_pair_auto`.  Both emit the same two ordered sidecars,
+but the consumer copy data-op describes the source as the producer physical
+order with the stick dim aliased from `out_` to `in_`:
 
 ```text
 src layout=['mb_', 'x_', 'in_'] stick=in_ LX=16384
@@ -132,6 +139,19 @@ median=0.428628ms mean=0.428628ms max_err=0.00292969 mixed=9
 cache=/tmp/sdpa-stage039-layout-xform-pieces-l256-layout_xform_pair_tile2-B1-H2-L256-D64-593581-25170
 ```
 
+The auto selector picked the same concrete tile on the pod.  Both cache
+metadata files record `tile_index=2` and `requested_tile_index=-2`:
+
+```text
+L=128 layout_xform_pair_auto status=ok
+median=0.267676ms mean=0.267676ms max_err=0.00341797 mixed=5
+cache=/tmp/sdpa-stage039-layout-xform-auto-layout_xform_pair_auto-B1-H2-L128-D64-593935-341042
+
+L=256 layout_xform_pair_auto status=ok
+median=0.363024ms mean=0.363024ms max_err=0.00292969 mixed=9
+cache=/tmp/sdpa-stage039-layout-xform-auto-layout_xform_pair_auto-B1-H2-L256-D64-593935-357238
+```
+
 Synthetic chained matmul probe:
 
 ```python
@@ -176,7 +196,7 @@ The next useful split is:
 
 - upstream the explicit LX-copy sidecar path as the default-off safe probe;
 - keep the DXP predecessor-generated IFN path as a separate Deeptools follow-up;
-- extend the layout-xform sweep across more lengths, block sizes, and batch/head
-  shapes;
-- decide whether the now-proven layout-transforming pair can graduate from
-  explicit probe gate to a production-candidate on-chip SDPA path.
+- use `layout_xform_pair_auto` for a broader sweep across more lengths, block
+  sizes, and batch/head shapes;
+- decide whether the now-proven layout-transforming pair should feed the
+  `onchip_layout_xform` promotion path or remain an explicit probe gate.

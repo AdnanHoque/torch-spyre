@@ -26,7 +26,7 @@ from torch_spyre._inductor.onchip_realize import (
     build_flash_attention_pipeline_tile_artifacts,
     build_flash_attention_value_flow_tile_artifact,
     flash_attention_ifn_pair_tile_rejection_reasons,
-    flash_attention_layout_xform_pair_tile_rejection_reasons,
+    flash_attention_layout_xform_pair_rejection_reasons,
     flash_attention_value_flow_tile_rejection_reasons,
     realize_flash_attention_pointwise_handoffs,
     realize_onchip_handoff,
@@ -99,7 +99,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             or config.flash_attention_mixed_pipeline_execute_tile >= 0
             or value_flow_tile >= 0
             or ifn_pair_tile >= 0
-            or layout_xform_pair_tile >= 0
+            or layout_xform_pair_tile != -1
         )
     ):
         if ifn_pair_tile >= 0:
@@ -123,7 +123,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                         ifn_pair_tile,
                     ),
                 )
-        if layout_xform_pair_tile >= 0:
+        if layout_xform_pair_tile != -1:
             layout_xform_pair = (
                 build_flash_attention_layout_xform_pair_tile_artifacts(
                     sdscs_json,
@@ -142,7 +142,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                 logger.warning(
                     "Requested layout-transform flash attention pair was not "
                     "realizable; keeping generated HBM-backed SDSCs: %s",
-                    flash_attention_layout_xform_pair_tile_rejection_reasons(
+                    flash_attention_layout_xform_pair_rejection_reasons(
                         sdscs_json,
                         layout_xform_pair_tile,
                     ),
