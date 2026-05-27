@@ -93,6 +93,13 @@ flash_attention_mixed_pipeline_execute_tile: int = int(
 flash_attention_mixed_pipeline_value_flow_tile: int = int(
     os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_VALUE_FLOW_TILE", "-1")
 )
+# Strongest IFN experiment: replace a strict producer->single-consumer value-flow
+# pair with two sidecar SDSCs and mark the consumer bundle op with its predecessor
+# so Deeptools can use the predecessor-backed InputFetchNeighbor lowering. -1
+# disables; default remains fail-closed.
+flash_attention_mixed_pipeline_ifn_pair_tile: int = int(
+    os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PAIR_TILE", "-1")
+)
 # Default-off production-shaped bridge for same-stick pointwise edges that appear
 # inside the flash-prefill graph. This keeps the attention experiment off the
 # generic add/add handoff flag while reusing the same fail-closed Tier 1 realizer.

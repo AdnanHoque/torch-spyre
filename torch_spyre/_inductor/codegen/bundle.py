@@ -20,9 +20,11 @@ from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.onchip_realize import (
+    build_flash_attention_ifn_pair_tile_artifacts,
     build_flash_attention_pipeline_artifact,
     build_flash_attention_pipeline_tile_artifacts,
     build_flash_attention_value_flow_tile_artifact,
+    flash_attention_ifn_pair_tile_rejection_reasons,
     flash_attention_value_flow_tile_rejection_reasons,
     realize_flash_attention_pointwise_handoffs,
     realize_onchip_handoff,
@@ -81,7 +83,9 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             logger.info(f"Realized {count} flash pointwise on-chip handoffs")
     sidecar_sdscs = []
     sidecar_replacements = {}
+    bundle_attrs_by_file = {}
     value_flow_tile = config.flash_attention_mixed_pipeline_value_flow_tile
+    ifn_pair_tile = config.flash_attention_mixed_pipeline_ifn_pair_tile
     value_flow_rejections = {}
     if (
         config.flash_attention_mixed_pipeline
@@ -89,8 +93,30 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             config.flash_attention_mixed_pipeline_artifact
             or config.flash_attention_mixed_pipeline_execute_tile >= 0
             or value_flow_tile >= 0
+            or ifn_pair_tile >= 0
         )
     ):
+        if ifn_pair_tile >= 0:
+            ifn_pair = build_flash_attention_ifn_pair_tile_artifacts(
+                sdscs_json,
+                ifn_pair_tile,
+            )
+            if ifn_pair is not None:
+                sidecar_sdscs.extend(ifn_pair["artifacts"])
+                sidecar_replacements.update(ifn_pair["replacements"])
+                bundle_attrs_by_file.update(ifn_pair["bundle_attrs"])
+                logger.info(
+                    "Executing predecessor-backed IFN flash attention pair sidecars"
+                )
+            else:
+                logger.warning(
+                    "Requested predecessor-backed IFN flash attention pair was "
+                    "not realizable; keeping generated HBM-backed SDSCs: %s",
+                    flash_attention_ifn_pair_tile_rejection_reasons(
+                        sdscs_json,
+                        ifn_pair_tile,
+                    ),
+                )
         if value_flow_tile >= 0:
             value_flow = build_flash_attention_value_flow_tile_artifact(
                 sdscs_json,
@@ -100,10 +126,11 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                 artifact, replaced = value_flow
                 sidecar_name = next(iter(artifact))
                 sidecar_sdscs.append(artifact)
-                sidecar_replacements[replaced] = sidecar_name
-                logger.info(
-                    "Executing mixed flash attention value-flow tile sidecar"
-                )
+                if replaced not in sidecar_replacements:
+                    sidecar_replacements[replaced] = sidecar_name
+                    logger.info(
+                        "Executing mixed flash attention value-flow tile sidecar"
+                    )
             else:
                 value_flow_rejections[value_flow_tile] = (
                     flash_attention_value_flow_tile_rejection_reasons(
@@ -186,7 +213,22 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         file.write("module {\n")
         file.write("\tfunc.func @sdsc_bundle() {\n")
         for f in files:
-            file.write('\t\tsdscbundle.sdsc_execute () {sdsc_filename="' + f + '"}\n')
+            attrs = _bundle_attrs(f, bundle_attrs_by_file.get(f, {}))
+            file.write(f"\t\tsdscbundle.sdsc_execute () {{{attrs}}}\n")
         file.write("\t\treturn\n")
         file.write("\t}\n")
         file.write("}\n")
+
+
+def _bundle_attrs(file_name: str, attrs: dict) -> str:
+    parts = [f"sdsc_filename={json.dumps(file_name)}"]
+    for key, value in attrs.items():
+        if value is None:
+            parts.append(key)
+        elif isinstance(value, str):
+            parts.append(f"{key}={json.dumps(value)}")
+        elif isinstance(value, bool):
+            parts.append(f"{key}={'true' if value else 'false'}")
+        else:
+            parts.append(f"{key}={value}")
+    return ", ".join(parts)

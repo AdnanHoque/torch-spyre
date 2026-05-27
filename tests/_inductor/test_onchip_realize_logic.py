@@ -730,6 +730,74 @@ def test_flash_value_flow_tile_reports_rejection_reasons():
     ) == ["tile_not_found"]
 
 
+def test_flash_ifn_pair_tile_builds_predecessor_backed_sidecars():
+    result = rz.build_flash_attention_ifn_pair_tile_artifacts(
+        _fake_static_matmul_sdscs(),
+        tile_index=1,
+    )
+
+    assert result is not None
+    pred = result["artifacts"][0]["mixed_flash_ifn_pair_tile_1_predecessor"]
+    cons = result["artifacts"][1]["mixed_flash_ifn_pair_tile_1_consumer"]
+    assert result["replacements"] == {
+        "0_batchmatmul": "mixed_flash_ifn_pair_tile_1_predecessor",
+        "1_batchmatmul": "mixed_flash_ifn_pair_tile_1_consumer",
+    }
+    assert result["bundle_attrs"] == {
+        "sdsc_mixed_flash_ifn_pair_tile_1_consumer.json": {
+            "ifn_enable": None,
+            "ifn_predecessor": "prev_sibling",
+            "ifn_predecessor_sdsc_filename": (
+                "sdsc_mixed_flash_ifn_pair_tile_1_predecessor.json"
+            ),
+        }
+    }
+
+    pred_dl = rz._dl_op({"p": pred})
+    cons_dl = rz._dl_op({"c": cons})
+    assert rz._lds_by_idx(pred_dl, 2)["hbmSize_"] == 0
+    assert rz._lds_by_idx(cons_dl, 0)["hbmSize_"] == 0
+    assert rz._has_input_fetch_neighbor_transfer(cons_dl, 0)
+    assert cons["coreIdToDscSchedule"]["0"] == [[0, 0, 0, 0]]
+    dataop_name = next(iter(cons["datadscs_"][0]))
+    assert dataop_name == "0_STCDPOpLx_predecessor_fetch_Tensor0_idx0_tile1"
+    assert "STCDPOpLx_ifn_Tensor" not in dataop_name
+
+    pred_meta = pred["flashAttentionPipeline_"]
+    assert pred_meta["ifn_pair_role"] == "predecessor"
+    assert pred_meta["ifn_runtime_safe"] is True
+    cons_meta = cons["flashAttentionPipeline_"]
+    assert cons_meta["source"] == (
+        "generated-flash-prefill-predecessor-ifn-pair-consumer"
+    )
+    assert cons_meta["ifn_mode"] == "predecessor_backed_pair"
+    assert cons_meta["ifn_runtime_safe"] is True
+    assert cons_meta["ifn_predecessor_sdsc"] == "0_batchmatmul"
+    assert cons_meta["ifn_consumer_sdsc"] == "1_batchmatmul"
+    assert cons_meta["ifn_predecessor_output_idx"] == 2
+    assert cons_meta["ifn_attached_input_idx"] == 0
+    assert cons_meta["ifn_shared_hbm_addr"] == "4096"
+    assert cons_meta["ifn_predecessor_lx_base"] == rz.PRODUCER_LX_BASE
+    assert cons_meta["ifn_input_lx_base"] == rz.CONSUMER_LX_BASE
+
+
+def test_flash_ifn_pair_tile_rejects_not_physically_equivalent_edge():
+    sdscs = _fake_flash_pipeline_sdscs(num_tiles=3)
+
+    assert rz.build_flash_attention_ifn_pair_tile_artifacts(
+        sdscs,
+        tile_index=1,
+    ) is None
+    assert rz.flash_attention_ifn_pair_tile_rejection_reasons(
+        sdscs,
+        tile_index=1,
+    ) == [
+        "input0:physical_layout_mismatch:"
+        "producer=['mb_', 'x_', 'out_']/out_:"
+        "consumer=['mb_', 'x_', 'in_']/in_"
+    ]
+
+
 def test_flash_pipeline_artifact_wraps_generated_batchmatmul_tiles():
     artifact = rz.build_flash_attention_pipeline_artifact(
         _fake_flash_pipeline_sdscs(num_tiles=3),

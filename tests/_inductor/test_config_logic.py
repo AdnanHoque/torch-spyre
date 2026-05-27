@@ -28,6 +28,7 @@ _FLASH_CONFIG_KEYS = [
     "flash_attention_mixed_pipeline_artifact",
     "flash_attention_mixed_pipeline_execute_tile",
     "flash_attention_mixed_pipeline_value_flow_tile",
+    "flash_attention_mixed_pipeline_ifn_pair_tile",
     "flash_attention_pointwise_handoff",
     "flash_attention_score_scale_handoff",
 ]
@@ -75,6 +76,7 @@ def test_flash_attention_onchip_sdpa_master_gate_defaults_off():
     assert cfg["flash_attention_mixed_pipeline_artifact"] is False
     assert cfg["flash_attention_mixed_pipeline_execute_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_value_flow_tile"] == -1
+    assert cfg["flash_attention_mixed_pipeline_ifn_pair_tile"] == -1
 
 
 def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
@@ -91,6 +93,7 @@ def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
     assert cfg["flash_attention_mixed_pipeline_artifact"] is False
     assert cfg["flash_attention_mixed_pipeline_execute_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_value_flow_tile"] == -1
+    assert cfg["flash_attention_mixed_pipeline_ifn_pair_tile"] == -1
 
 
 def test_flash_attention_onchip_sdpa_master_gate_respects_block_size_override():

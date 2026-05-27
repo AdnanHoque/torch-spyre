@@ -1531,6 +1531,290 @@ def build_flash_attention_pipeline_ifn_prefix_tile_artifact(
     return artifact
 
 
+def _flash_attention_ifn_pair_edge(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    input_idx: int = INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX,
+) -> tuple[dict | None, list[str]]:
+    tile = _flash_value_flow_tile(sdscs_json, tile_index)
+    if tile is None:
+        return None, ["tile_not_found"]
+    c, cons = tile
+    cons_dl = _dl_op(cons)
+    if input_idx not in _consumer_input_indices(cons_dl):
+        return None, [f"input{input_idx}:not_consumer_input"]
+    if input_idx != INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX:
+        return None, [f"input{input_idx}:not_supported_ifn_input"]
+
+    cons_body = _body(cons)
+    num_cores = int(cons_body.get("numCoresUsed_", 0))
+    if num_cores <= 0:
+        return None, ["invalid_num_cores"]
+    addr = _hbm_base(cons_dl, input_idx)
+    if addr is None:
+        return None, [f"input{input_idx}:not_hbm_backed"]
+
+    producer = _latest_producer_of_hbm(sdscs_json, c, addr)
+    if producer is None:
+        return None, [f"input{input_idx}:no_latest_producer"]
+    p, prod, out_idx = producer
+
+    future = _future_consumers(sdscs_json, p, addr)
+    if len(future) != 1 or future[0][0] != c or future[0][2] != input_idx:
+        future_names = [
+            f"{next(iter(fcons))}:input{fin_idx}"
+            for _fc, fcons, fin_idx in future
+        ]
+        return (
+            None,
+            [
+                f"input{input_idx}:not_single_consumer:"
+                f"{','.join(future_names)}"
+            ],
+        )
+
+    prod_dl = _dl_op(prod)
+    prod_layout = _layout_for_lds(prod_dl, out_idx)
+    prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
+    cons_layout = _layout_for_lds(cons_dl, input_idx)
+    cons_stick = _stick_dim_for_lds(cons_dl, input_idx)
+    split_dim = _single_split_dim(cons_body.get("numWkSlicesPerDim_", {}))
+    if (
+        prod_layout is None
+        or prod_stick is None
+        or cons_layout is None
+        or cons_stick is None
+        or split_dim is None
+    ):
+        return None, [f"input{input_idx}:missing_layout_stick_or_split"]
+    if not _same_physical_stick_layout(
+        prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
+    ):
+        return (
+            None,
+            [
+                f"input{input_idx}:physical_layout_mismatch:"
+                f"producer={prod_layout}/{prod_stick}:"
+                f"consumer={cons_layout}/{cons_stick}"
+            ],
+        )
+
+    iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
+    if iter_sizes is None:
+        return None, [f"input{input_idx}:missing_iter_sizes"]
+    if split_dim not in iter_sizes or iter_sizes[split_dim] % num_cores != 0:
+        return None, [f"input{input_idx}:invalid_split:{split_dim}"]
+
+    slice_bytes = _reserve_bridge_region_bytes(
+        per_core_same_stick_slice_bytes(
+            iter_sizes,
+            split_dim,
+            cons_stick,
+            STICK_SIZE,
+            num_cores,
+        )
+    )
+    try:
+        allocate_lx_bases(2, slice_bytes, region0=CONSUMER_LX_BASE)
+    except ValueError:
+        return None, [f"input{input_idx}:lx_allocation_exceeds_capacity"]
+
+    return (
+        {
+            "producer_index": p,
+            "consumer_index": c,
+            "producer": prod,
+            "consumer": cons,
+            "producer_idx": out_idx,
+            "consumer_idx": input_idx,
+            "shared_hbm_addr": addr,
+            "layout": cons_layout,
+            "stick_dim": cons_stick,
+            "split_dim": split_dim,
+            "iter_sizes": iter_sizes,
+            "slice_bytes": slice_bytes,
+            "producer_layout": prod_layout,
+            "producer_stick_dim": prod_stick,
+        },
+        [],
+    )
+
+
+def flash_attention_ifn_pair_tile_rejection_reasons(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    input_idx: int = INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX,
+) -> list[str]:
+    """Explain why a predecessor-backed IFN pair cannot be emitted."""
+    _edge, reasons = _flash_attention_ifn_pair_edge(
+        sdscs_json,
+        tile_index,
+        input_idx=input_idx,
+    )
+    return reasons
+
+
+def build_flash_attention_ifn_pair_tile_artifacts(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    name_prefix: str = "mixed_flash_ifn_pair_tile",
+) -> dict | None:
+    """Build an explicit predecessor+consumer IFN pair for one real edge.
+
+    The consumer sidecar keeps a placeholder data-op row only to make DXP take
+    its IFN lowering branch.  When bundle metadata passes a real predecessor SDSC
+    to Deeptools, that branch synthesizes the actual LxInputNeighborFetch data-op.
+    """
+    edge, reasons = _flash_attention_ifn_pair_edge(sdscs_json, tile_index)
+    if edge is None:
+        return None
+
+    prod_name = next(iter(edge["producer"]))
+    cons_name = next(iter(edge["consumer"]))
+    pred_sidecar = f"{name_prefix}_{tile_index}_predecessor"
+    cons_sidecar = f"{name_prefix}_{tile_index}_consumer"
+
+    producer_artifact = {pred_sidecar: copy.deepcopy(_body(edge["producer"]))}
+    apply_lx_flip(
+        producer_artifact,
+        LxFlip(
+            edge["producer_idx"],
+            PRODUCER_LX_BASE,
+            "ifn-predecessor-output",
+        ),
+    )
+    producer_artifact[pred_sidecar].setdefault("flashAttentionPipeline_", {}).update(
+        {
+            "source": "generated-flash-prefill-predecessor-ifn-pair-producer",
+            "ifn_mode": "predecessor_backed_pair",
+            "ifn_pair_role": "predecessor",
+            "ifn_runtime_safe": True,
+            "ifn_predecessor_sdsc": prod_name,
+            "ifn_predecessor_sidecar": pred_sidecar,
+            "ifn_consumer_sdsc": cons_name,
+            "ifn_consumer_sidecar": cons_sidecar,
+            "ifn_predecessor_output_idx": edge["producer_idx"],
+            "ifn_shared_hbm_addr": edge["shared_hbm_addr"],
+            "ifn_predecessor_lx_base": PRODUCER_LX_BASE,
+            "replaces_sdsc": prod_name,
+            "tile_index": tile_index,
+        }
+    )
+
+    compute_dsc = copy.deepcopy(_body(edge["consumer"])["dscs_"][0])
+    compute_root = {cons_name: {"dscs_": [compute_dsc]}}
+    apply_lx_flip(
+        compute_root,
+        LxFlip(
+            edge["consumer_idx"],
+            CONSUMER_LX_BASE,
+            "ifn-consumer-input",
+        ),
+    )
+    compute_dl = next(iter(compute_dsc.values()))
+    _add_input_fetch_neighbor_transfer(compute_dl, edge["consumer_idx"])
+    _add_input_fetch_neighbor_legacy_dims(
+        compute_dl,
+        _body(edge["consumer"]).get("numWkSlicesPerDim_", {}),
+    )
+
+    placeholder = make_datadsc(
+        (
+            "0_STCDPOpLx_predecessor_fetch_"
+            f"Tensor0_idx{edge['consumer_idx']}_tile{tile_index}"
+        ),
+        _stcdp_op(),
+        edge["layout"],
+        src=Endpoint(
+            edge["layout"],
+            edge["stick_dim"],
+            edge["split_dim"],
+            CONSUMER_LX_BASE,
+        ),
+        dst=Endpoint(
+            edge["layout"],
+            edge["stick_dim"],
+            edge["split_dim"],
+            CONSUMER_LX_BASE,
+        ),
+        iter_sizes=edge["iter_sizes"],
+        stick_size=STICK_SIZE,
+        num_cores=int(_body(edge["consumer"]).get("numCoresUsed_", 0)),
+        lx_size=DATAOP_LX_SIZE,
+    )
+    schedule = {
+        str(core_id): [[0, 0, 0, 0]]
+        for core_id in range(int(_body(edge["consumer"]).get("numCoresUsed_", 0)))
+    }
+    consumer_artifact = build_flash_attention_pipeline_mixed_sdsc(
+        cons_sidecar,
+        [placeholder],
+        ["STCDPOpLx"],
+        schedule,
+        [compute_dsc],
+        int(_body(edge["consumer"]).get("numCoresUsed_", 0)),
+    )
+    consumer_root = consumer_artifact[cons_sidecar]
+    cons_body = _body(edge["consumer"])
+    for key in (
+        "sdscFoldProps_",
+        "sdscFolds_",
+        "coreFoldProp_",
+        "coreletFoldProp_",
+        "coreIdToDsc_",
+        "numWkSlicesPerDim_",
+        "coreIdToWkSlice_",
+    ):
+        if key in cons_body:
+            consumer_root[key] = copy.deepcopy(cons_body[key])
+    consumer_root["flashAttentionPipeline_"].update(
+        {
+            "source": "generated-flash-prefill-predecessor-ifn-pair-consumer",
+            "ifn_mode": "predecessor_backed_pair",
+            "ifn_pair_role": "consumer",
+            "ifn_runtime_safe": True,
+            "ifn_predecessor_sdsc": prod_name,
+            "ifn_predecessor_sidecar": pred_sidecar,
+            "ifn_consumer_sdsc": cons_name,
+            "ifn_consumer_sidecar": cons_sidecar,
+            "ifn_predecessor_output_idx": edge["producer_idx"],
+            "ifn_attached_input_idx": edge["consumer_idx"],
+            "ifn_shared_hbm_addr": edge["shared_hbm_addr"],
+            "ifn_predecessor_lx_base": PRODUCER_LX_BASE,
+            "ifn_input_lx_base": CONSUMER_LX_BASE,
+            "ifn_predecessor_layout": edge["producer_layout"],
+            "ifn_consumer_layout": edge["layout"],
+            "ifn_predecessor_stick_dim": edge["producer_stick_dim"],
+            "ifn_consumer_stick_dim": edge["stick_dim"],
+            "split_dim": edge["split_dim"],
+            "iter_sizes": edge["iter_sizes"],
+            "slice_bytes": edge["slice_bytes"],
+            "replaces_sdsc": cons_name,
+            "tile_index": tile_index,
+            "compute_tile_count": 1,
+        }
+    )
+
+    return {
+        "artifacts": [producer_artifact, consumer_artifact],
+        "replacements": {
+            prod_name: pred_sidecar,
+            cons_name: cons_sidecar,
+        },
+        "bundle_attrs": {
+            f"sdsc_{cons_sidecar}.json": {
+                "ifn_enable": None,
+                "ifn_predecessor": "prev_sibling",
+                "ifn_predecessor_sdsc_filename": f"sdsc_{pred_sidecar}.json",
+            }
+        },
+        "rejection_reasons": reasons,
+    }
+
+
 def build_flash_attention_pipeline_overlap_prefix_tile_artifact(
     tile_sdscs: list[dict],
     tile_index: int,
