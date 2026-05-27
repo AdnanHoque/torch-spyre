@@ -596,13 +596,13 @@
 <div class="callout">
   <div class="callout-title">The PT-pipeline twist</div>
   <p style="margin: 0;">
-    The matrix unit needs <strong>8 rows of input at a time</strong>. If a core has only 4 rows of A, the unit runs half-empty: efficiency = 4/8 = 50%. Worse: the pipeline that streams rows into the matrix unit takes ~8 sweeps to fully warm up. So we model:
+    The matrix unit needs <strong>8 rows of input at a time</strong>. If a core has only 4 rows of A, the unit runs half-empty: efficiency = 4/8 = 50%. The pipeline that streams rows into the matrix unit also takes ~8 sweeps to fully warm up. We model derate as a square-root curve below the knee — calibration showed the linear ramp was too pessimistic: at 4 PT passes the empirical derate is ~10-30%, not 50%.
   </p>
 </div>
 
-<pre><code>PT_passes = max(1, per_core_M / 8)        # how many 8-row sweeps the core does
-pt_efficiency = min(1.0, PT_passes / 8)   # need ≥ 8 sweeps to fully fill the pipeline
-effective_peak = 4.7M × pt_efficiency
+<pre><code>PT_passes = max(1, per_core_M / 8)              # how many 8-row sweeps the core does
+pt_efficiency = min(1.0, (PT_passes / 8) ** 0.5)  # sqrt curve below knee, clamps at 1.0
+effective_peak = 1.53M × pt_efficiency
 compute_us = per_core_MACs / effective_peak</code></pre>
 
 <figure>
@@ -984,23 +984,23 @@ lx_pressure_us = excess × 5 × 10⁻⁶</code></pre>
   <path d="M 420,120 L 458,120" stroke="#475569" stroke-width="1.5" marker-end="url(#af)"/>
 
   <text x="360" y="200" text-anchor="middle" font-size="11" fill="#92400e" font-weight="bold" font-family="monospace">
-    redistribution_us = output_bytes × 10⁻⁴   (only when split differs from partner default)
+    redistribution_us = output_bytes × 10⁻⁶   (only when split differs from partner default)
   </text>
 
   <defs>
     <marker id="af" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><polygon points="0 0,7 3.5,0 7" fill="#475569"/></marker>
   </defs>
 </svg>
-<figcaption>Figure 13 — When a matmul shares a fusion bundle with a non-matmul op, choosing a non-default matmul split means the matmul output has to be shuffled across cores before the partner can consume it. The cost model charges this overhead so it only rewrites when the kernel savings clearly beat the bundle penalty.</figcaption>
+<figcaption>Figure 13 — When a matmul shares a fusion bundle with a non-matmul op, the planner formerly assumed any non-default split would force an expensive cross-core shuffle. Device measurement showed this overhead is essentially zero in practice — the cost model now applies a small (tie-breaker) penalty so bundled rewrites are no longer blocked.</figcaption>
 </figure>
 
 <p>Consider an MLP fused as <code>silu(matmul(x, gate)) × matmul(x, up)</code>. The two matmuls and the silu and the elementwise multiply all run in one fused kernel. If the matmuls use a non-default split, the matmul outputs sit on cores in the "wrong" layout for the partner op (silu/multiply), so the output has to be shuffled before the partner runs. Shuffling burns HBM bandwidth.</p>
 
 <p>For matmuls inside a fusion bundle (only), we add:</p>
 <pre><code>output_bytes = B × M × N × 2
-redistribution_us = output_bytes × 1 × 10⁻⁴      # fired when bundled AND split differs from default</code></pre>
+redistribution_us = output_bytes × 1 × 10⁻⁶      # fired when bundled AND split differs from default</code></pre>
 
-<p>For an MLP-shape output (B=1, M=512, N=12800 → 12.5 MB), this is ~1300 µs — much larger than typical kernel savings. So the cost model only rewrites bundled matmuls when the kernel win clearly outweighs the bundle penalty (which empirically almost never happens in MLP fusions).</p>
+<p>For an MLP-shape output (B=1, M=512, N=12800 → 12.5 MB), this is ~13 µs — small enough to act as a tie-breaker but not a hard gate. An earlier coefficient of <code>1 × 10⁻⁴</code> over-penalized rewrites by ~100×: direct device measurement of fused <code>silu(linear)</code> bundles showed the "silu + any-redistribution" cost is essentially identical regardless of split choice. Empirical redistribution cost is ≈ 0; the term remains in the formula at a much smaller scale so it still nudges bundled matmuls toward the default when other costs are truly tied.</p>
 
 <h4>The <code>batch_penalty</code> multiplier</h4>
 <p>The whole sum gets multiplied by:</p>

@@ -559,7 +559,7 @@ _COST_PSUM_PER_ELEM_US = 1.4e-4                     # per output element, per K-
 _COST_COHORT_LIMIT = 8                              # broadcast contention kicks in above this
 _COST_BATCH_SPLIT_EXPONENT = 1.4                    # batch-split penalty: total ∝ b ^ exponent
 _COST_TARGET_M_PENALTY_US = 50.0                    # tie-break: per log2 step from target m-split
-_COST_REDISTRIBUTION_US_PER_BYTE = 1e-4             # cost of moving output bytes across cores
+_COST_REDISTRIBUTION_US_PER_BYTE = 1e-6             # cost of moving output bytes across cores
 _LX_BYTES_PER_CORE = 2 * 1024 * 1024                # on-core scratchpad capacity
 _COST_LX_PRESSURE_US_PER_BYTE = 5e-6                # per byte of per-core RHS over scratchpad
 
@@ -632,7 +632,7 @@ def _matmul_split_cost(
     # small to keep the PT pipeline full.
     m_t = M // m if m else 1
     pt_passes = max(1.0, m_t / _PT_ROWS)
-    pt_eff = min(1.0, pt_passes / _TARGET_PT_PASSES)
+    pt_eff = min(1.0, (pt_passes / _TARGET_PT_PASSES) ** 0.5)
     effective_peak = _COST_PEAK_MACS_US_CORE * pt_eff
     compute_us = (B * M * N * K / cores_used) / effective_peak
 
