@@ -16,6 +16,10 @@ import json
 import os
 
 from torch_spyre._inductor import config
+from torch_spyre._inductor.codegen.causal_mask_dataop import (
+    build_causal_idx_to_mask_emission_plan,
+    causal_score_bias_contract_from_payload,
+)
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
@@ -34,6 +38,26 @@ from torch_spyre._inductor.onchip_realize import (
 
 
 logger = get_inductor_logger("sdsc_compile")
+
+
+def _causal_idx_to_mask_plan_artifacts(specs: list[OpSpec], sdscs_json: list[dict]):
+    artifacts = []
+    for idx, (op_spec, sdsc_json) in enumerate(zip(specs, sdscs_json)):
+        if getattr(op_spec, "op", None) != "causal_score_bias_like":
+            continue
+        constants = getattr(op_spec, "op_info", {}).get("constants", {})
+        key_start = constants.get("keyStart")
+        if key_start is None:
+            continue
+        contract = causal_score_bias_contract_from_payload(sdsc_json)
+        artifacts.append(
+            build_causal_idx_to_mask_emission_plan(
+                contract,
+                key_start=key_start,
+                name=f"causal_idx_to_mask_plan_{idx}",
+            )
+        )
+    return artifacts
 
 
 def fold_onchip_handoff(sdsc_json: dict, realization) -> dict:
@@ -82,6 +106,17 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     sidecar_replacements = {}
     bundle_attrs_by_file = {}
     value_flow_rejections = {}
+    causal_plan_artifacts = []
+    if getattr(config, "causal_idx_to_mask_plan_artifact", False):
+        causal_plan_artifacts = _causal_idx_to_mask_plan_artifacts(
+            specs,
+            sdscs_json,
+        )
+        if causal_plan_artifacts:
+            logger.info(
+                "Emitted %d causal IdxToMask plan artifact(s)",
+                len(causal_plan_artifacts),
+            )
     emit_mixed_sidecars = (
         config.flash_attention_mixed_pipeline
         and (
@@ -255,6 +290,12 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         with open(os.path.join(output_dir, file_name), "w") as file:
             logger.info(f"Generating sidecar {file.name}")
             json.dump(sdsc_json, file, indent=2)
+    for artifact in causal_plan_artifacts:
+        artifact_name = next(iter(artifact))
+        file_name = f"{artifact_name}.json"
+        with open(os.path.join(output_dir, file_name), "w") as file:
+            logger.info(f"Generating causal plan {file.name}")
+            json.dump(artifact, file, indent=2)
 
     # Generate bundle.mlir
     with open(os.path.join(output_dir, "bundle.mlir"), "w") as file:

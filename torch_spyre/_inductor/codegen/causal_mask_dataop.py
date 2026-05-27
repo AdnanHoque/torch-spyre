@@ -52,6 +52,75 @@ def _iteration_size(contract: Mapping[str, Any], dim: str | None) -> int | None:
     return None
 
 
+def constant_names_from_dsc(dsc: Mapping[str, Any]) -> list[str]:
+    constant_info = dsc.get("constantInfo_", {})
+    if not isinstance(constant_info, Mapping):
+        return []
+    return [
+        const.get("name_")
+        for const in constant_info.values()
+        if isinstance(const, Mapping)
+    ]
+
+
+def causal_score_bias_contract_from_sdsc(
+    sdsc: Mapping[str, Any], dsc: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Extract the score-layout contract from a generated causal-bias SDSC."""
+
+    compute_op = dsc.get("computeOp_", [{}])[0]
+    output_name = (compute_op.get("outputLabeledDs") or [""])[0].split("-")[0]
+    output_lds = None
+    for lds in dsc.get("labeledDs_", []):
+        if lds.get("dsName_") == output_name:
+            output_lds = lds
+            break
+
+    output_layout = {}
+    if output_lds is not None:
+        output_layout = dsc.get("primaryDsInfo_", {}).get(
+            output_lds.get("dsType_"), {}
+        )
+
+    layout_dim_order = output_layout.get("layoutDimOrder_", [])
+    stick_dim_order = output_layout.get("stickDimOrder_", [])
+    work_slices = sdsc.get("numWkSlicesPerDim_", {})
+    split_dims = {dim: split for dim, split in work_slices.items() if split != 1}
+    constants = constant_names_from_dsc(dsc)
+    supported_score_layout = (
+        "x" in layout_dim_order
+        and stick_dim_order == ["out"]
+        and "keyStart" in constants
+    )
+
+    return {
+        "opfunc": compute_op.get("opFuncName"),
+        "input_count": len(compute_op.get("inputLabeledDs", [])),
+        "output_count": len(compute_op.get("outputLabeledDs", [])),
+        "constants": constants,
+        "num_cores": dsc.get("numCoresUsed_"),
+        "iteration_sizes": dsc.get("N_", {}),
+        "work_slices": work_slices,
+        "split_dims": split_dims,
+        "core_id_to_work_slice": sdsc.get("coreIdToWkSlice_", {}),
+        "output_layout": {
+            "labeled_ds": output_name,
+            "layout_dim_order": layout_dim_order,
+            "stick_dim_order": stick_dim_order,
+            "stick_size": output_layout.get("stickSize_", []),
+        },
+        "inferred_query_dim": "x" if "x" in layout_dim_order else None,
+        "inferred_key_dim": "out" if stick_dim_order == ["out"] else None,
+        "supported_score_layout": supported_score_layout,
+    }
+
+
+def causal_score_bias_contract_from_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    sdsc = next(iter(payload.values()))
+    dsc = next(iter(sdsc["dscs_"][0].values()))
+    return causal_score_bias_contract_from_sdsc(sdsc, dsc)
+
+
 def _dim_index(layout_dim_order: list[str], dim: str | None) -> int | None:
     if not dim:
         return None

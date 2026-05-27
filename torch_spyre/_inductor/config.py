@@ -136,6 +136,12 @@ flash_attention_score_scale_handoff: bool = (
     flash_attention_onchip_sdpa
     or os.environ.get("SPYRE_FLASH_ATTENTION_SCORE_SCALE_HANDOFF", "0") == "1"
 )
+# Default-off debug artifact for the causal SDPA mask bring-up. When enabled,
+# bundle generation writes a non-executed IdxToMask+where3 candidate plan next
+# to generated SDSCs for causal_score_bias_like. It does not alter bundle.mlir.
+causal_idx_to_mask_plan_artifact: bool = (
+    os.environ.get("SPYRE_CAUSAL_IDX_TO_MASK_PLAN_ARTIFACT", "0") == "1"
+)
 
 # --- Tier 0: ring-aware restickify (telemetry + producer-aligned work division) ---
 # Default-off ring byte-hop telemetry for compiler-inserted restickifies.

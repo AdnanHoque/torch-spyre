@@ -71,6 +71,7 @@ def _install_bundle_stubs(
     layout_xform_pair_tile=None,
     layout_xform_pair_result=True,
     layout_xform_pointwise_region0=None,
+    causal_plan_artifact=False,
 ):
     calls = {
         "layout_xform": [],
@@ -97,9 +98,10 @@ def _install_bundle_stubs(
         layout_xform_pair_tile
     )
     config.flash_attention_mixed_pipeline_overlap = False
+    config.causal_idx_to_mask_plan_artifact = causal_plan_artifact
 
     superdsc = types.ModuleType("torch_spyre._inductor.codegen.superdsc")
-    superdsc.compile_op_spec = lambda _idx, spec: spec
+    superdsc.compile_op_spec = lambda _idx, spec: getattr(spec, "sdsc_json", spec)
 
     op_spec = types.ModuleType("torch_spyre._inductor.op_spec")
     op_spec.OpSpec = object
@@ -191,6 +193,10 @@ def _install_bundle_stubs(
     }
     for name, module in packages.items():
         sys.modules[name] = module
+    _load(
+        "torch_spyre._inductor.codegen.causal_mask_dataop",
+        os.path.join(_CODEGEN, "causal_mask_dataop.py"),
+    )
 
     return calls
 
@@ -201,6 +207,7 @@ def _load_bundle_with_stubs(
     layout_xform_pair_tile=None,
     layout_xform_pair_result=True,
     layout_xform_pointwise_region0=None,
+    causal_plan_artifact=False,
 ):
     names = [
         "torch_spyre",
@@ -208,6 +215,7 @@ def _load_bundle_with_stubs(
         "torch_spyre._inductor.codegen",
         "torch_spyre._inductor.config",
         "torch_spyre._inductor.codegen.superdsc",
+        "torch_spyre._inductor.codegen.causal_mask_dataop",
         "torch_spyre._inductor.op_spec",
         "torch_spyre._inductor.logging_utils",
         "torch_spyre._inductor.onchip_realize",
@@ -219,6 +227,7 @@ def _load_bundle_with_stubs(
         layout_xform_pair_tile=layout_xform_pair_tile,
         layout_xform_pair_result=layout_xform_pair_result,
         layout_xform_pointwise_region0=layout_xform_pointwise_region0,
+        causal_plan_artifact=causal_plan_artifact,
     )
     spec = importlib.util.spec_from_file_location("_test_bundle_under_test", _BUNDLE)
     module = importlib.util.module_from_spec(spec)
@@ -1315,6 +1324,107 @@ def test_bundle_keeps_pointwise_handoffs_when_layout_xform_pair_is_disabled():
 
         assert calls["layout_xform"] == []
         assert calls["pointwise"] == [{"score_scale_handoff": False}]
+    finally:
+        _restore_modules(saved)
+
+
+def _fake_causal_score_bias_sdsc():
+    return {
+        "0_causal_score_bias_like": {
+            "numWkSlicesPerDim_": {"mb": 2, "x": 4, "out": 1},
+            "coreIdToWkSlice_": {
+                "0": {"mb": 0, "x": 0, "out": 0},
+                "1": {"mb": 1, "x": 0, "out": 0},
+                "2": {"mb": 0, "x": 1, "out": 0},
+                "3": {"mb": 1, "x": 1, "out": 0},
+                "4": {"mb": 0, "x": 2, "out": 0},
+                "5": {"mb": 1, "x": 2, "out": 0},
+                "6": {"mb": 0, "x": 3, "out": 0},
+                "7": {"mb": 1, "x": 3, "out": 0},
+            },
+            "dscs_": [
+                {
+                    "causal_score_bias_like": {
+                        "numCoresUsed_": 8,
+                        "N_": {"name_": "n", "mb_": 2, "x_": 4, "out_": 64},
+                        "primaryDsInfo_": {
+                            "OUTPUT": {
+                                "layoutDimOrder_": ["x", "mb", "out"],
+                                "stickDimOrder_": ["out"],
+                                "stickSize_": [64],
+                            }
+                        },
+                        "labeledDs_": [
+                            {
+                                "ldsIdx_": 0,
+                                "dsName_": "Tensor0",
+                                "dsType_": "OUTPUT",
+                            },
+                            {
+                                "ldsIdx_": 1,
+                                "dsName_": "Tensor1",
+                                "dsType_": "OUTPUT",
+                            },
+                        ],
+                        "constantInfo_": {
+                            "0": {
+                                "dataFormat_": "SEN169_FP16",
+                                "name_": "keyStart",
+                            }
+                        },
+                        "computeOp_": [
+                            {
+                                "opFuncName": "causal_score_bias_like",
+                                "inputLabeledDs": ["Tensor0-idx0"],
+                                "outputLabeledDs": ["Tensor1-idx1"],
+                            }
+                        ],
+                    }
+                }
+            ],
+        }
+    }
+
+
+def test_bundle_emits_non_executed_causal_idx_to_mask_plan_artifact():
+    class FakeCausalSpec:
+        op = "causal_score_bias_like"
+        op_info = {"constants": {"keyStart": 2}}
+        sdsc_json = _fake_causal_score_bias_sdsc()
+
+    bundle, _calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        causal_plan_artifact=True,
+    )
+    try:
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, [FakeCausalSpec()])
+
+            plan_path = os.path.join(output_dir, "causal_idx_to_mask_plan_0.json")
+            assert os.path.exists(plan_path)
+            with open(plan_path) as file:
+                plan = json.load(file)
+            body = plan["causal_idx_to_mask_plan_0"]
+            dataop = body["datadscs_"][0]["0_IdxToMask_dataop"]
+            assert dataop["op"] == {
+                "name": "IdxToMask",
+                "idxToMaskDimIdx": 2,
+                "idxToMaskValidElementOffset": -2,
+                "invertedMask": 0,
+                "reversedMask": 0,
+                "causalMask": 1,
+            }
+            assert body["coreIdToDscSchedule"]["0"] == [
+                [0, -1, 0, 1],
+                [-1, 0, 1, 0],
+            ]
+            assert body["where3_compute_fragment"]["computeOp_"][0][
+                "opFuncName"
+            ] == "where3"
+
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert "causal_idx_to_mask_plan_0.json" not in bundle_mlir
     finally:
         _restore_modules(saved)
 

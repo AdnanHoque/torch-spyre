@@ -197,6 +197,15 @@ fragment. It is intentionally marked `runtime_status = "not_emitted"` until the
 DeepTools data-op parser accepts `IdxToMask` and Torch-Spyre has real tensor
 sources for the `where3` true/false inputs.
 
+The same non-executed plan can be emitted by normal bundle generation with:
+
+```sh
+SPYRE_CAUSAL_IDX_TO_MASK_PLAN_ARTIFACT=1
+```
+
+This writes `causal_idx_to_mask_plan_<idx>.json` next to the generated SDSCs but
+does not add that file to `bundle.mlir`.
+
 This keeps the backend contract executable and visible in the same probe that
 will later prove semantic correctness with `matches_expected=true`.
 

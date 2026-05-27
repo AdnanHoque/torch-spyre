@@ -33,6 +33,7 @@ _FLASH_CONFIG_KEYS = [
     "flash_attention_mixed_pipeline_layout_xform_pair_tile",
     "flash_attention_pointwise_handoff",
     "flash_attention_score_scale_handoff",
+    "causal_idx_to_mask_plan_artifact",
 ]
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _CONFIG = os.path.normpath(
@@ -43,7 +44,9 @@ _CONFIG = os.path.normpath(
 def _read_flash_config(extra_env=None):
     env = os.environ.copy()
     for key in list(env):
-        if key.startswith("SPYRE_FLASH_ATTENTION_"):
+        if key.startswith("SPYRE_FLASH_ATTENTION_") or key.startswith(
+            "SPYRE_CAUSAL_"
+        ):
             env.pop(key)
     env["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
     if extra_env:
@@ -105,6 +108,7 @@ def test_flash_attention_onchip_sdpa_master_gate_defaults_off():
     assert cfg["flash_attention_mixed_pipeline_value_flow_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_ifn_pair_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_tile"] == -1
+    assert cfg["causal_idx_to_mask_plan_artifact"] is False
 
 
 def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
@@ -124,6 +128,15 @@ def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
     assert cfg["flash_attention_mixed_pipeline_value_flow_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_ifn_pair_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_tile"] == -1
+    assert cfg["causal_idx_to_mask_plan_artifact"] is False
+
+
+def test_causal_idx_to_mask_plan_artifact_is_independently_gated():
+    cfg = _read_flash_config({"SPYRE_CAUSAL_IDX_TO_MASK_PLAN_ARTIFACT": "1"})
+
+    assert cfg["causal_idx_to_mask_plan_artifact"] is True
+    assert cfg["flash_attention_onchip_sdpa"] is False
+    assert cfg["flash_attention_mixed_pipeline"] is False
 
 
 def test_flash_attention_onchip_sdpa_layout_xform_adjunct_enables_auto_pair():
