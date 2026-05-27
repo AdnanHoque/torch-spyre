@@ -2140,6 +2140,7 @@ def build_flash_attention_layout_xform_pair_tile_artifacts(
     tile_index: int,
     *,
     name_prefix: str = "mixed_flash_layout_xform_pair_tile",
+    overlap_consumer: bool = False,
 ) -> dict | None:
     """Build an experimental explicit LX-copy pair for a layout-transform edge."""
     selected_tile, edge, reasons = _resolve_flash_attention_layout_xform_pair_edge(
@@ -2166,10 +2167,15 @@ def build_flash_attention_layout_xform_pair_tile_artifacts(
     )
     producer_artifact[pred_sidecar].setdefault("flashAttentionPipeline_", {}).update(
         {
-            "source": "generated-flash-prefill-layout-xform-pair-producer",
+            "source": (
+                "generated-flash-prefill-layout-xform-overlap-pair-producer"
+                if overlap_consumer
+                else "generated-flash-prefill-layout-xform-pair-producer"
+            ),
             "layout_xform_mode": "same_dim_lx_copy_pair",
             "layout_xform_pair_role": "predecessor",
             "layout_xform_experimental": True,
+            "layout_xform_overlap_consumer": overlap_consumer,
             "layout_xform_predecessor_sdsc": prod_name,
             "layout_xform_predecessor_sidecar": pred_sidecar,
             "layout_xform_consumer_sdsc": cons_name,
@@ -2200,11 +2206,13 @@ def build_flash_attention_layout_xform_pair_tile_artifacts(
         _body(edge["consumer"]).get("numWkSlicesPerDim_", {}),
     )
 
+    dataop_prefix = (
+        "0_STCDPOpLx_prefetch_layout_xform_"
+        if overlap_consumer
+        else "0_STCDPOpLx_layout_xform_"
+    )
     dataop = make_datadsc(
-        (
-            "0_STCDPOpLx_layout_xform_"
-            f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
-        ),
+        f"{dataop_prefix}Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}",
         _stcdp_op(),
         edge["dim_pool"],
         src=Endpoint(
@@ -2227,8 +2235,13 @@ def build_flash_attention_layout_xform_pair_tile_artifacts(
     next(iter(dataop.values()))["labeledDs_"][0]["PieceInfo"] = edge[
         "source_pieces"
     ]
+    rows = (
+        [[0, 0, 0, 0]]
+        if overlap_consumer
+        else [[0, -1, 0, 1], [-1, 0, 1, 0]]
+    )
     schedule = {
-        str(core_id): [[0, -1, 0, 1], [-1, 0, 1, 0]]
+        str(core_id): [list(row) for row in rows]
         for core_id in range(num_cores)
     }
     consumer_artifact = build_flash_attention_pipeline_mixed_sdsc(
@@ -2254,10 +2267,17 @@ def build_flash_attention_layout_xform_pair_tile_artifacts(
             consumer_root[key] = copy.deepcopy(cons_body[key])
     consumer_root["flashAttentionPipeline_"].update(
         {
-            "source": "generated-flash-prefill-layout-xform-pair-consumer",
+            "source": (
+                "generated-flash-prefill-layout-xform-overlap-pair-consumer"
+                if overlap_consumer
+                else "generated-flash-prefill-layout-xform-pair-consumer"
+            ),
             "layout_xform_mode": "same_dim_lx_copy_pair",
             "layout_xform_pair_role": "consumer",
             "layout_xform_experimental": True,
+            "layout_xform_overlap_consumer": overlap_consumer,
+            "layout_xform_runtime_safe": not overlap_consumer,
+            "layout_xform_runtime_forced": overlap_consumer,
             "layout_xform_predecessor_sdsc": prod_name,
             "layout_xform_predecessor_sidecar": pred_sidecar,
             "layout_xform_consumer_sdsc": cons_name,

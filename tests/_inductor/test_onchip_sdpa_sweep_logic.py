@@ -27,6 +27,9 @@ _HERE = Path(__file__).resolve().parent
 _SWEEP = _HERE.parents[1] / "tools" / "onchip_sdpa_sweep.py"
 _LAYOUT_PAIR_ENV = "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE"
 _IFN_PREFIX_FORCE_ENV = "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PREFIX_FORCE"
+_LAYOUT_PAIR_OVERLAP_ENV = (
+    "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_OVERLAP"
+)
 
 
 def _load_sweep():
@@ -110,6 +113,30 @@ def test_warp_overlap_probe_clears_parent_ifn_prefix_force():
 
     assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_OVERLAP"] == "1"
     assert env[_IFN_PREFIX_FORCE_ENV] == "0"
+
+
+def test_layout_xform_pair_overlap_auto_enables_overlap_probe():
+    env = sweep._child_env(_args(), "layout_xform_pair_overlap_auto", 128)
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE"] == "1"
+    assert env[_LAYOUT_PAIR_ENV] == "-2"
+    assert env[_LAYOUT_PAIR_OVERLAP_ENV] == "1"
+    assert "layout_xform_pair_overlap_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_layout_xform_pair_auto_clears_parent_overlap_probe():
+    old = os.environ.get(_LAYOUT_PAIR_OVERLAP_ENV)
+    os.environ[_LAYOUT_PAIR_OVERLAP_ENV] = "1"
+    try:
+        env = sweep._child_env(_args(), "layout_xform_pair_auto", 128)
+    finally:
+        if old is None:
+            os.environ.pop(_LAYOUT_PAIR_OVERLAP_ENV, None)
+        else:
+            os.environ[_LAYOUT_PAIR_OVERLAP_ENV] = old
+
+    assert env[_LAYOUT_PAIR_ENV] == "-2"
+    assert env[_LAYOUT_PAIR_OVERLAP_ENV] == "0"
 
 
 def test_causal_flag_is_reflected_in_cache_key():

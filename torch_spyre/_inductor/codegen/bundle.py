@@ -102,6 +102,11 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     layout_xform_pair_tile = (
         config.flash_attention_mixed_pipeline_layout_xform_pair_tile
     )
+    layout_xform_pair_overlap = getattr(
+        config,
+        "flash_attention_mixed_pipeline_layout_xform_pair_overlap",
+        False,
+    )
     sidecar_sdscs = []
     sidecar_replacements = {}
     bundle_attrs_by_file = {}
@@ -134,6 +139,12 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             build_flash_attention_layout_xform_pair_tile_artifacts(
                 sdscs_json,
                 layout_xform_pair_tile,
+                name_prefix=(
+                    "mixed_flash_pipeline_tile_layout_xform_pair"
+                    if layout_xform_pair_overlap
+                    else "mixed_flash_layout_xform_pair_tile"
+                ),
+                overlap_consumer=layout_xform_pair_overlap,
             )
         )
         if layout_xform_pair is None:

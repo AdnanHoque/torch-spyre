@@ -69,6 +69,7 @@ def _install_bundle_stubs(
     *,
     pointwise_handoff=False,
     layout_xform_pair_tile=None,
+    layout_xform_pair_overlap=False,
     layout_xform_pair_result=True,
     layout_xform_pointwise_region0=None,
     causal_plan_artifact=False,
@@ -78,6 +79,7 @@ def _install_bundle_stubs(
 ):
     calls = {
         "layout_xform": [],
+        "layout_xform_overlap": [],
         "pointwise": [],
     }
 
@@ -101,6 +103,9 @@ def _install_bundle_stubs(
     config.flash_attention_mixed_pipeline_layout_xform_pair_tile = (
         layout_xform_pair_tile
     )
+    config.flash_attention_mixed_pipeline_layout_xform_pair_overlap = (
+        layout_xform_pair_overlap
+    )
     config.flash_attention_mixed_pipeline_overlap = False
     config.causal_idx_to_mask_plan_artifact = causal_plan_artifact
 
@@ -118,32 +123,43 @@ def _install_bundle_stubs(
         rz.LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE
     )
 
-    def build_flash_attention_layout_xform_pair_tile_artifacts(_sdscs, tile_index):
+    def build_flash_attention_layout_xform_pair_tile_artifacts(
+        _sdscs,
+        tile_index,
+        *,
+        name_prefix="mixed_flash_layout_xform_pair_tile",
+        overlap_consumer=False,
+    ):
         calls["layout_xform"].append(tile_index)
+        calls["layout_xform_overlap"].append(overlap_consumer)
         if not layout_xform_pair_result:
             return None
+        pred_name = f"{name_prefix}_2_predecessor"
+        cons_name = f"{name_prefix}_2_consumer"
         return {
             "artifacts": [
                 {
-                    "mixed_flash_layout_xform_pair_tile_2_predecessor": {
+                    pred_name: {
                         "flashAttentionPipeline_": {
                             "tile_index": 2,
                             "requested_tile_index": tile_index,
+                            "layout_xform_overlap_consumer": overlap_consumer,
                         }
                     }
                 },
                 {
-                    "mixed_flash_layout_xform_pair_tile_2_consumer": {
+                    cons_name: {
                         "flashAttentionPipeline_": {
                             "tile_index": 2,
                             "requested_tile_index": tile_index,
+                            "layout_xform_overlap_consumer": overlap_consumer,
                         }
                     }
                 },
             ],
             "replacements": {
-                "0_batchmatmul": "mixed_flash_layout_xform_pair_tile_2_predecessor",
-                "1_batchmatmul": "mixed_flash_layout_xform_pair_tile_2_consumer",
+                "0_batchmatmul": pred_name,
+                "1_batchmatmul": cons_name,
             },
             "bundle_attrs": {},
             "pointwise_lx_region0": layout_xform_pointwise_region0,
@@ -209,6 +225,7 @@ def _load_bundle_with_stubs(
     *,
     pointwise_handoff=False,
     layout_xform_pair_tile=None,
+    layout_xform_pair_overlap=False,
     layout_xform_pair_result=True,
     layout_xform_pointwise_region0=None,
     causal_plan_artifact=False,
@@ -232,6 +249,7 @@ def _load_bundle_with_stubs(
     calls = _install_bundle_stubs(
         pointwise_handoff=pointwise_handoff,
         layout_xform_pair_tile=layout_xform_pair_tile,
+        layout_xform_pair_overlap=layout_xform_pair_overlap,
         layout_xform_pair_result=layout_xform_pair_result,
         layout_xform_pointwise_region0=layout_xform_pointwise_region0,
         causal_plan_artifact=causal_plan_artifact,
@@ -1185,6 +1203,44 @@ def test_flash_layout_xform_pair_tile_builds_experimental_sidecars():
     ]
 
 
+def test_flash_layout_xform_pair_overlap_schedules_copy_with_compute():
+    result = rz.build_flash_attention_layout_xform_pair_tile_artifacts(
+        _fake_flash_pipeline_sdscs(num_tiles=3, sdpa_layout_transform=True),
+        tile_index=1,
+        name_prefix="mixed_flash_pipeline_tile_layout_xform_pair",
+        overlap_consumer=True,
+    )
+
+    assert result is not None
+    pred = result["artifacts"][0][
+        "mixed_flash_pipeline_tile_layout_xform_pair_1_predecessor"
+    ]
+    cons = result["artifacts"][1][
+        "mixed_flash_pipeline_tile_layout_xform_pair_1_consumer"
+    ]
+    assert result["replacements"] == {
+        "0_batchmatmul": "mixed_flash_pipeline_tile_layout_xform_pair_1_predecessor",
+        "1_batchmatmul": "mixed_flash_pipeline_tile_layout_xform_pair_1_consumer",
+    }
+    assert cons["coreIdToDscSchedule"]["0"] == [[0, 0, 0, 0]]
+    dataop_name = next(iter(cons["datadscs_"][0]))
+    assert dataop_name == "0_STCDPOpLx_prefetch_layout_xform_Tensor0_idx0_tile1"
+
+    pred_meta = pred["flashAttentionPipeline_"]
+    assert pred_meta["source"] == (
+        "generated-flash-prefill-layout-xform-overlap-pair-producer"
+    )
+    assert pred_meta["layout_xform_overlap_consumer"] is True
+    cons_meta = cons["flashAttentionPipeline_"]
+    assert cons_meta["source"] == (
+        "generated-flash-prefill-layout-xform-overlap-pair-consumer"
+    )
+    assert cons_meta["layout_xform_overlap_consumer"] is True
+    assert cons_meta["layout_xform_runtime_safe"] is False
+    assert cons_meta["layout_xform_runtime_forced"] is True
+    assert cons_meta["layout_xform_attached_input_idx"] == 0
+
+
 def test_flash_layout_xform_pair_reports_dynamic_pointwise_region():
     result = rz.build_flash_attention_layout_xform_pair_tile_artifacts(
         _fake_flash_pipeline_sdscs(
@@ -1271,6 +1327,45 @@ def test_bundle_executes_layout_xform_pair_auto_gate():
             ]
             assert meta["tile_index"] == 2
             assert meta["requested_tile_index"] == rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_executes_layout_xform_pair_overlap_gate():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_overlap=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["layout_xform"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["layout_xform_overlap"] == [True]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert (
+                "sdsc_mixed_flash_pipeline_tile_layout_xform_pair_2_predecessor.json"
+                in bundle_mlir
+            )
+            assert (
+                "sdsc_mixed_flash_pipeline_tile_layout_xform_pair_2_consumer.json"
+                in bundle_mlir
+            )
+
+            consumer_path = os.path.join(
+                output_dir,
+                "sdsc_mixed_flash_pipeline_tile_layout_xform_pair_2_consumer.json",
+            )
+            with open(consumer_path) as file:
+                consumer = json.load(file)
+            meta = consumer[
+                "mixed_flash_pipeline_tile_layout_xform_pair_2_consumer"
+            ]["flashAttentionPipeline_"]
+            assert meta["layout_xform_overlap_consumer"] is True
     finally:
         _restore_modules(saved)
 

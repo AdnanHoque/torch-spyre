@@ -128,6 +128,16 @@ flash_attention_mixed_pipeline_layout_xform_pair_tile: int = int(
         "-2" if flash_attention_onchip_sdpa_layout_xform else "-1",
     )
 )
+# Default-off diagnostic follow-up for the layout-transform pair: schedule the
+# predecessor-backed STCDPOpLx copy in the same row as the consumer DL compute.
+# This is the closest current Torch-side shape to AIU warp-overlap, but remains
+# probe-only until value correctness is proven.
+flash_attention_mixed_pipeline_layout_xform_pair_overlap: bool = (
+    os.environ.get(
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_OVERLAP", "0"
+    )
+    == "1"
+)
 # Default-off production-shaped bridge for same-stick pointwise edges that appear
 # inside the flash-prefill graph. This keeps the attention experiment off the
 # generic add/add handoff flag while reusing the same fail-closed Tier 1 realizer.
