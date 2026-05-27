@@ -72,6 +72,9 @@ def _install_bundle_stubs(
     layout_xform_pair_result=True,
     layout_xform_pointwise_region0=None,
     causal_plan_artifact=False,
+    ifn_prefix_force=False,
+    execute_tile=-1,
+    tile_artifacts=None,
 ):
     calls = {
         "layout_xform": [],
@@ -87,9 +90,10 @@ def _install_bundle_stubs(
     config.flash_attention_pointwise_handoff = pointwise_handoff
     config.flash_attention_score_scale_handoff = False
     config.flash_attention_mixed_pipeline_artifact = False
-    config.flash_attention_mixed_pipeline_execute_tile = -1
+    config.flash_attention_mixed_pipeline_execute_tile = execute_tile
     config.flash_attention_mixed_pipeline_value_flow_tile = -1
     config.flash_attention_mixed_pipeline_ifn_pair_tile = -1
+    config.flash_attention_mixed_pipeline_ifn_prefix_force = ifn_prefix_force
     if layout_xform_pair_tile is None:
         layout_xform_pair_tile = rz.LAYOUT_XFORM_PAIR_AUTO_TILE
     if layout_xform_pointwise_region0 is None:
@@ -155,7 +159,7 @@ def _install_bundle_stubs(
         lambda *_args, **_kwargs: None
     )
     onchip_realize.build_flash_attention_pipeline_tile_artifacts = (
-        lambda *_args, **_kwargs: []
+        lambda *_args, **_kwargs: list(tile_artifacts or [])
     )
     onchip_realize.build_flash_attention_value_flow_tile_artifact = (
         lambda *_args, **_kwargs: None
@@ -208,6 +212,9 @@ def _load_bundle_with_stubs(
     layout_xform_pair_result=True,
     layout_xform_pointwise_region0=None,
     causal_plan_artifact=False,
+    ifn_prefix_force=False,
+    execute_tile=-1,
+    tile_artifacts=None,
 ):
     names = [
         "torch_spyre",
@@ -228,6 +235,9 @@ def _load_bundle_with_stubs(
         layout_xform_pair_result=layout_xform_pair_result,
         layout_xform_pointwise_region0=layout_xform_pointwise_region0,
         causal_plan_artifact=causal_plan_artifact,
+        ifn_prefix_force=ifn_prefix_force,
+        execute_tile=execute_tile,
+        tile_artifacts=tile_artifacts,
     )
     spec = importlib.util.spec_from_file_location("_test_bundle_under_test", _BUNDLE)
     module = importlib.util.module_from_spec(spec)
@@ -1261,6 +1271,74 @@ def test_bundle_executes_layout_xform_pair_auto_gate():
             ]
             assert meta["tile_index"] == 2
             assert meta["requested_tile_index"] == rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+    finally:
+        _restore_modules(saved)
+
+
+def _ifn_prefix_tile_artifact():
+    return {
+        "mixed_flash_pipeline_tile_0": {
+            "flashAttentionPipeline_": {
+                "source": "generated-flash-prefill-overlap-prefix-ifn-tile",
+                "tile_index": 0,
+                "replaces_sdsc": "0_batchmatmul",
+                "overlap_prefix": True,
+                "overlap_candidate": True,
+                "ifn_attached_input_idx": 0,
+                "ifn_runtime_safe": False,
+            },
+            "dscs_": [{"batchmatmul": {"computeOp_": []}}],
+            "datadscs_": [{"0_STCDPOpLx_ifn_Tensor0_idx0_tile0": {}}],
+            "opFuncsUsed_": ["STCDPOpLx"],
+        }
+    }
+
+
+def test_bundle_keeps_ifn_prefix_probe_non_executed_without_force():
+    bundle, _calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        execute_tile=0,
+        tile_artifacts=[_ifn_prefix_tile_artifact()],
+    )
+    try:
+        specs = [{"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}}]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert "sdsc_0_batchmatmul.json" in bundle_mlir
+            assert "sdsc_mixed_flash_pipeline_tile_0.json" not in bundle_mlir
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_force_executes_ifn_prefix_probe():
+    bundle, _calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        ifn_prefix_force=True,
+        execute_tile=0,
+        tile_artifacts=[_ifn_prefix_tile_artifact()],
+    )
+    try:
+        specs = [{"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}}]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert "sdsc_mixed_flash_pipeline_tile_0.json" in bundle_mlir
+
+            sidecar_path = os.path.join(
+                output_dir,
+                "sdsc_mixed_flash_pipeline_tile_0.json",
+            )
+            with open(sidecar_path) as file:
+                sidecar = json.load(file)
+            meta = sidecar["mixed_flash_pipeline_tile_0"][
+                "flashAttentionPipeline_"
+            ]
+            assert meta["ifn_runtime_forced"] is True
     finally:
         _restore_modules(saved)
 

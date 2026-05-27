@@ -26,6 +26,7 @@ from unittest import mock
 _HERE = Path(__file__).resolve().parent
 _SWEEP = _HERE.parents[1] / "tools" / "onchip_sdpa_sweep.py"
 _LAYOUT_PAIR_ENV = "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE"
+_IFN_PREFIX_FORCE_ENV = "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PREFIX_FORCE"
 
 
 def _load_sweep():
@@ -84,6 +85,31 @@ def test_master_variant_keeps_low_level_layout_xform_disabled():
     assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA"] == "1"
     assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM"] == "0"
     assert env[_LAYOUT_PAIR_ENV] == "-1"
+
+
+def test_warp_ifn_prefix_probe_forces_ifn_overlap_tile():
+    env = sweep._child_env(_args(), "warp_ifn_prefix_probe", 128)
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE"] == "1"
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_EXECUTE_TILE"] == "0"
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_OVERLAP"] == "1"
+    assert env[_IFN_PREFIX_FORCE_ENV] == "1"
+    assert "warp_ifn_prefix_probe" in env["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_warp_overlap_probe_clears_parent_ifn_prefix_force():
+    old = os.environ.get(_IFN_PREFIX_FORCE_ENV)
+    os.environ[_IFN_PREFIX_FORCE_ENV] = "1"
+    try:
+        env = sweep._child_env(_args(), "warp_overlap_probe", 128)
+    finally:
+        if old is None:
+            os.environ.pop(_IFN_PREFIX_FORCE_ENV, None)
+        else:
+            os.environ[_IFN_PREFIX_FORCE_ENV] = old
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_OVERLAP"] == "1"
+    assert env[_IFN_PREFIX_FORCE_ENV] == "0"
 
 
 def test_causal_flag_is_reflected_in_cache_key():

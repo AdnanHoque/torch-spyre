@@ -106,6 +106,14 @@ flash_attention_mixed_pipeline_value_flow_tile: int = int(
 flash_attention_mixed_pipeline_ifn_pair_tile: int = int(
     os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PAIR_TILE", "-1")
 )
+# Default-off diagnostic gate for the IFN-attached overlap-prefix tile.  The
+# artifact is normally emitted but not executed because it has no real
+# predecessor-backed input yet; this flag forces execution so pod probes can
+# expose the next Foundation/DXP blocker for AIU warp-specialized prefill.
+flash_attention_mixed_pipeline_ifn_prefix_force: bool = (
+    os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PREFIX_FORCE", "0")
+    == "1"
+)
 # Experimental Stage039 follow-up for real SDPA edges that have a strict
 # producer->single-consumer relation but require a same-dim layout transform
 # before the consumer can read the predecessor LX payload. -1 disables; -2 scans

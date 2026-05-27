@@ -243,12 +243,27 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                     "IFN-attached; keeping generated HBM-backed SDSC"
                 )
                 continue
-            if meta.get("overlap_prefix") and not meta.get("ifn_runtime_safe", False):
+            force_ifn_prefix = getattr(
+                config,
+                "flash_attention_mixed_pipeline_ifn_prefix_force",
+                False,
+            )
+            if (
+                meta.get("overlap_prefix")
+                and not meta.get("ifn_runtime_safe", False)
+                and not force_ifn_prefix
+            ):
                 logger.warning(
                     "Requested mixed flash attention overlap tile is not "
                     "runtime-safe; keeping generated HBM-backed SDSC"
                 )
                 continue
+            if (
+                meta.get("overlap_prefix")
+                and not meta.get("ifn_runtime_safe", False)
+                and force_ifn_prefix
+            ):
+                meta["ifn_runtime_forced"] = True
             if meta.get("overlap_prefix_rejection_reasons"):
                 continue
             replaced = meta.get("replaces_sdsc")
