@@ -23,6 +23,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+STICK_BYTES = 128
+
 
 def _maybe_int(value: Any) -> int | None:
     if isinstance(value, bool):
@@ -57,6 +59,10 @@ def _dim_index(layout_dim_order: list[str], dim: str | None) -> int | None:
         return layout_dim_order.index(dim)
     except ValueError:
         return None
+
+
+def _align_up(value: int, alignment: int) -> int:
+    return ((value + alignment - 1) // alignment) * alignment
 
 
 def _dci_output_shape(
@@ -116,6 +122,169 @@ def _causal_dci_stride_info(
         "continuousMaskElems_": continuous,
         "strideAfterContinuous_": stride,
     }
+
+
+def _sorted_core_items(core_map: Mapping[str, Any]) -> list[tuple[int, Mapping[str, Any]]]:
+    items: list[tuple[int, Mapping[str, Any]]] = []
+    for core, wk_slice in core_map.items():
+        core_id = _maybe_int(core)
+        if core_id is None or not isinstance(wk_slice, Mapping):
+            continue
+        items.append((core_id, wk_slice))
+    return sorted(items)
+
+
+def _piece_infos(
+    layout_dim_order: list[str],
+    layout_sizes: Mapping[str, int],
+    work_slices: Mapping[str, Any],
+    core_map: Mapping[str, Any],
+    broadcast_dims: list[str],
+    *,
+    base: int = 0,
+) -> list[dict[str, Any]]:
+    pieces: list[dict[str, Any]] = []
+    for core_id, wk_slice in _sorted_core_items(core_map):
+        starts: dict[str, int] = {}
+        sizes: dict[str, int] = {}
+        for dim in layout_dim_order:
+            size = _maybe_int(layout_sizes.get(dim))
+            if size is None:
+                continue
+            if dim in broadcast_dims:
+                starts[dim] = 0
+                sizes[dim] = 1
+                continue
+            split = _maybe_int(work_slices.get(dim)) or 1
+            slice_idx = _maybe_int(wk_slice.get(dim)) or 0
+            if split > 1:
+                chunk = max(1, size // split)
+                starts[dim] = slice_idx * chunk
+                sizes[dim] = chunk
+            else:
+                starts[dim] = 0
+                sizes[dim] = size
+        pieces.append(
+            {
+                "key_": f"p{core_id + 1}",
+                "dimToStartCordinate": starts,
+                "dimToSize_": sizes,
+                "validGap_": {dim: [[size, 0]] for dim, size in sizes.items()},
+                "PlacementInfo": [
+                    {
+                        "type": "lx",
+                        "memId": [core_id],
+                        "startAddr": [base],
+                    }
+                ],
+            }
+        )
+    return pieces
+
+
+def _max_piece_bytes(pieces: list[dict[str, Any]], word_length: int) -> int:
+    max_elements = 1
+    for piece in pieces:
+        elements = 1
+        for size in piece.get("dimToSize_", {}).values():
+            elements *= int(size)
+        max_elements = max(max_elements, elements)
+    return _align_up(max_elements * word_length, STICK_BYTES)
+
+
+def _mask_labeled_ds(
+    candidate: Mapping[str, Any],
+    contract: Mapping[str, Any],
+    *,
+    name: str,
+    pds_name: str,
+    base: int,
+) -> dict[str, Any]:
+    layout = candidate["layout"]
+    layout_dim_order = list(layout["layout_dim_order"])
+    mask_layout_sizes = dict(layout["mask_layout_sizes"])
+    stick_dim_order = list(layout["stick_dim_order"])
+    stick_size = {stick_dim_order[0]: list(layout["stick_size"])[0]}
+    work_slices = contract.get("work_slices", {})
+    core_map = contract.get("core_id_to_work_slice", {})
+    pieces = _piece_infos(
+        layout_dim_order,
+        mask_layout_sizes,
+        work_slices if isinstance(work_slices, Mapping) else {},
+        core_map if isinstance(core_map, Mapping) else {},
+        list(layout["broadcast_dims"]),
+        base=base,
+    )
+    return {
+        "ldsName_": name,
+        "pdsName_": pds_name,
+        "wordLength": 2,
+        "dataformat": "SEN169_FP16",
+        "isExternal_": 0,
+        "segment_": "output",
+        "layoutDimOrder_": layout_dim_order,
+        "stickDimOrder_": stick_dim_order,
+        "dimToLayoutSize_": mask_layout_sizes,
+        "dimToStickSize_": stick_size,
+        "validGap_": {dim: [[size, 0]] for dim, size in mask_layout_sizes.items()},
+        "totElements": -1,
+        "hbmSize_": 0,
+        "hbmStartAddress_": 0,
+        "lxSize_": _max_piece_bytes(pieces, 2),
+        "lxStartAddress_": {},
+        "PieceInfo": pieces,
+    }
+
+
+def _scalar_labeled_ds(
+    contract: Mapping[str, Any],
+    *,
+    name: str,
+    pds_name: str,
+    base: int,
+) -> dict[str, Any]:
+    core_map = contract.get("core_id_to_work_slice", {})
+    pieces = []
+    if isinstance(core_map, Mapping):
+        for core_id, _wk_slice in _sorted_core_items(core_map):
+            pieces.append(
+                {
+                    "key_": f"p{core_id + 1}",
+                    "dimToStartCordinate": {},
+                    "dimToSize_": {},
+                    "validGap_": {},
+                    "PlacementInfo": [
+                        {
+                            "type": "lx",
+                            "memId": [core_id],
+                            "startAddr": [base],
+                        }
+                    ],
+                }
+            )
+    return {
+        "ldsName_": name,
+        "pdsName_": pds_name,
+        "wordLength": 8,
+        "dataformat": "IEEE_INT64",
+        "isExternal_": 0,
+        "segment_": "output",
+        "layoutDimOrder_": [],
+        "stickDimOrder_": [],
+        "dimToLayoutSize_": {},
+        "dimToStickSize_": {},
+        "validGap_": {},
+        "totElements": 1,
+        "hbmSize_": 0,
+        "hbmStartAddress_": 0,
+        "lxSize_": STICK_BYTES,
+        "lxStartAddress_": {},
+        "PieceInfo": pieces,
+    }
+
+
+def _mixed_schedule(num_cores: int) -> dict[str, list[list[int]]]:
+    return {str(core): [[0, -1, 0, 1], [-1, 0, 1, 0]] for core in range(num_cores)}
 
 
 def build_causal_idx_to_mask_candidate(
@@ -228,6 +397,7 @@ def build_causal_idx_to_mask_candidate(
             "key_dim": key_dim,
             "layout_dim_order": layout_dim_order,
             "stick_dim_order": stick_dim_order,
+            "stick_size": stick_size,
             "query_length": query_len,
             "key_length": key_len,
             "score_layout_sizes": score_layout_sizes,
@@ -293,4 +463,93 @@ def build_causal_idx_to_mask_candidate(
             "allocate an internal causal-plane mask tensor with non-causal dims set to 1",
             "compose where3(mask, 0, -inf) into the bias output with predicate broadcast",
         ],
+    }
+
+
+def build_causal_idx_to_mask_emission_plan(
+    contract: Mapping[str, Any],
+    *,
+    key_start: int | str | None,
+    name: str = "causal_idx_to_mask_where3_candidate",
+) -> dict[str, Any]:
+    """Build the next Torch-Spyre emission plan for causal score bias.
+
+    This is a deliberately explicit intermediate artifact. It is not installed
+    into bundle generation until DeepTools accepts the IdxToMask data-op
+    extension and Torch-Spyre has a real source for the zero/-inf where3 inputs.
+    """
+
+    candidate = build_causal_idx_to_mask_candidate(contract, key_start=key_start)
+    num_cores = _maybe_int(contract.get("num_cores")) or len(
+        contract.get("core_id_to_work_slice", {}) or {}
+    )
+    output_layout = candidate["layout"]
+    layout_dim_order = list(output_layout["layout_dim_order"])
+    mask_input = _scalar_labeled_ds(
+        contract,
+        name="maskIndex_L0",
+        pds_name="maskIndex",
+        base=0,
+    )
+    mask_output = _mask_labeled_ds(
+        candidate,
+        contract,
+        name="maskOut_L0",
+        pds_name="maskOut",
+        base=STICK_BYTES,
+    )
+    return {
+        name: {
+            "causalIdxToMaskPlan_": {
+                "candidate": candidate,
+                "runtime_status": "not_emitted",
+                "blockers": [
+                    candidate["runtime_emission"]["blocking_reason"],
+                    (
+                        "Torch-Spyre still needs tensor sources for where3 "
+                        "true/false values"
+                    ),
+                ],
+            },
+            "coreIdToDscSchedule": _mixed_schedule(num_cores),
+            "datadscs_": [
+                {
+                    "0_IdxToMask_dataop": {
+                        "coreIdsUsed_": list(range(num_cores)),
+                        "dimPool_": layout_dim_order,
+                        "outDimTodimRelation_": [],
+                        "primaryDs_": [
+                            {"name_": "maskIndex", "dimNames": []},
+                            {"name_": "maskOut", "dimNames": layout_dim_order},
+                        ],
+                        "labeledDs_": [mask_input, mask_output],
+                        "op": candidate["dataop_json_extension"]["op"],
+                    }
+                }
+            ],
+            "where3_compute_fragment": {
+                "computeOp_": [
+                    {
+                        "exUnit": "sfp",
+                        "opFuncName": "where3",
+                        "attributes_": {
+                            "dataFormat_": "SEN169_FP16",
+                            "fidelity_": "regular",
+                        },
+                        "location": "Inner",
+                        "inputLabeledDs": [
+                            "maskOut-idx0",
+                            "zeroBias-idx1",
+                            "negInfBias-idx2",
+                        ],
+                        "outputLabeledDs": ["causalBias-idx3"],
+                    }
+                ],
+                "predicate_broadcast_dims": output_layout["broadcast_dims"],
+                "required_tensor_inputs": {
+                    "zeroBias": 0.0,
+                    "negInfBias": "-inf",
+                },
+            },
+        }
     }

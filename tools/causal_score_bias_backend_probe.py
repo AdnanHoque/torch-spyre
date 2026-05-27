@@ -50,6 +50,14 @@ def _parse_args() -> argparse.Namespace:
         default="",
         help="TORCHINDUCTOR_CACHE_DIR to use. A temporary directory is used by default.",
     )
+    parser.add_argument(
+        "--candidate-plan-json",
+        default="",
+        help=(
+            "Optional path to write the causal IdxToMask+where3 emission plan "
+            "derived from generated causal_score_bias_like SDSCs."
+        ),
+    )
     parser.add_argument("--print-values", action="store_true")
     return parser.parse_args()
 
@@ -199,6 +207,22 @@ def _collect_sdsc_metadata(
     return metadata
 
 
+def _candidate_emission_plans(metadata: list[dict], *, key_start: int) -> list[dict]:
+    helper = _load_causal_mask_dataop_helper()
+    plans = []
+    for item in metadata:
+        contract = item.get("causal_score_bias_contract")
+        if not isinstance(contract, dict):
+            continue
+        plans.append(
+            helper.build_causal_idx_to_mask_emission_plan(
+                contract,
+                key_start=key_start,
+            )
+        )
+    return plans
+
+
 def _expected_bias(torch, scores_cpu, key_start: int):
     q_len = scores_cpu.size(-2)
     k_len = scores_cpu.size(-1)
@@ -258,6 +282,12 @@ def main() -> int:
         result["traceback_tail"] = traceback.format_exc().splitlines()[-20:]
 
     result["sdscs"] = _collect_sdsc_metadata(cache_dir, key_start=args.key_start)
+    if args.candidate_plan_json:
+        plans = _candidate_emission_plans(result["sdscs"], key_start=args.key_start)
+        plan_path = Path(args.candidate_plan_json)
+        plan_path.write_text(json.dumps({"plans": plans}, indent=2, sort_keys=True))
+        result["candidate_plan_json"] = str(plan_path)
+        result["candidate_plan_count"] = len(plans)
     print("RESULT_JSON:" + json.dumps(result, sort_keys=True))
     return 0 if result["status"] == "ok" else 1
 

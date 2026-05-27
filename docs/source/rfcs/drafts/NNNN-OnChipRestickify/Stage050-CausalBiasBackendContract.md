@@ -182,6 +182,21 @@ descriptor, not runtime support: it reports the IdxToMask DCI metadata,
 the collapsed causal-plane mask layout, the `where3` composition, and the
 current `datadscs_` parser blocker.
 
+For parser bring-up, the probe can now materialize the next Torch-Spyre emission
+plan without enabling it in runtime bundle generation:
+
+```sh
+"$PYTHON" tools/causal_score_bias_backend_probe.py \
+  --cache-dir /tmp/stage050-plan-probe \
+  --candidate-plan-json /tmp/stage050-causal-idx-to-mask-plan.json
+```
+
+The plan contains the proposed mixed-SuperDSC schedule, an `IdxToMask` data-op
+fragment with per-core causal-plane mask pieces, and the `where3` compute
+fragment. It is intentionally marked `runtime_status = "not_emitted"` until the
+DeepTools data-op parser accepts `IdxToMask` and Torch-Spyre has real tensor
+sources for the `where3` true/false inputs.
+
 This keeps the backend contract executable and visible in the same probe that
 will later prove semantic correctness with `matches_expected=true`.
 

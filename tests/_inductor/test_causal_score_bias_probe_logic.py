@@ -94,6 +94,13 @@ def test_metadata_records_causal_score_bias_layout_contract():
     assert candidate["dci"]["output_shape_"] == [64, 4, 1, 1]
     assert candidate["where3"]["opFuncName"] == "where3"
 
+    plans = probe._candidate_emission_plans([metadata], key_start=2)
+    body = plans[0]["causal_idx_to_mask_where3_candidate"]
+    dataop = body["datadscs_"][0]["0_IdxToMask_dataop"]
+    assert dataop["op"]["name"] == "IdxToMask"
+    assert dataop["op"]["idxToMaskValidElementOffset"] == -2
+    assert body["where3_compute_fragment"]["computeOp_"][0]["opFuncName"] == "where3"
+
 
 def _run_all():
     tests = sorted(
