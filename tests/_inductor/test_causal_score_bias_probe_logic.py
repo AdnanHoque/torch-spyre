@@ -68,7 +68,11 @@ def test_metadata_records_causal_score_bias_layout_contract():
         }
     }
 
-    metadata = probe._metadata_from_sdsc_payload(Path("sdsc.json"), payload)
+    metadata = probe._metadata_from_sdsc_payload(
+        Path("sdsc.json"),
+        payload,
+        key_start=2,
+    )
 
     assert metadata["opfuncs"] == ["causal_score_bias_like"]
     assert metadata["constants"] == ["keyStart"]
@@ -80,6 +84,15 @@ def test_metadata_records_causal_score_bias_layout_contract():
     assert contract["inferred_query_dim"] == "x"
     assert contract["inferred_key_dim"] == "out"
     assert contract["supported_score_layout"] is True
+    candidate = metadata["causal_idx_to_mask_candidate"]
+    assert candidate["feasible"] is True
+    assert candidate["runtime_emission"]["datadsc_json_accepts_idx_to_mask"] is False
+    assert candidate["layout"]["mask_layout_sizes"] == {"x": 4, "mb": 1, "out": 64}
+    assert candidate["layout"]["broadcast_dims"] == ["mb"]
+    assert candidate["idx_to_mask"]["idxToMaskDimIdx"] == 2
+    assert candidate["idx_to_mask"]["idxToMaskValidElementOffset"] == -2
+    assert candidate["dci"]["output_shape_"] == [64, 4, 1, 1]
+    assert candidate["where3"]["opFuncName"] == "where3"
 
 
 def _run_all():

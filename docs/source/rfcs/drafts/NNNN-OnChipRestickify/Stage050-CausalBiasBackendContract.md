@@ -103,7 +103,7 @@ DeepTools already has a causal `IdxToMask` data-convert path. It produces a
 block start `key_start`, the useful setting is:
 
 ```text
-scalar input = Q
+length-one INT64 input = [Q]
 idxToMaskValidElementOffset = -key_start
 causalMask = true
 ```
@@ -135,6 +135,36 @@ Torch-Spyre's current `SDSCSpec` and pointwise `computeOp_` generation have no
 surface for that metadata, so this is a new codegen path, not a remap of the
 existing pointwise custom op.
 
+There is also an imported-SuperDSC parser gap on the DeepTools side: current
+`datadscs_` JSON accepts copy/restickify-style data ops, but not
+`op.name = "IdxToMask"`. The schema extension Torch-Spyre would need to emit is
+shaped like:
+
+```json
+"op": {
+  "name": "IdxToMask",
+  "idxToMaskDimIdx": 2,
+  "idxToMaskValidElementOffset": -2,
+  "invertedMask": 0,
+  "reversedMask": 0,
+  "causalMask": 1
+}
+```
+
+The DSM/host DCI path also constrains causal masks to a single causal plane:
+the mask dimension must be the stick dimension, exactly one non-mask causal
+dimension may be greater than one, and all other dimensions must be size one.
+For the current probe layout:
+
+```text
+score layout sizes: x=4, mb=2, out=64
+mask layout sizes:  x=4, mb=1, out=64
+DCI output_shape_:  [64, 4, 1, 1]
+```
+
+The following `where3` must therefore broadcast the mask predicate across the
+score tensor's `mb` dimension.
+
 ## Probe update
 
 `tools/causal_score_bias_backend_probe.py` now records a
@@ -146,6 +176,11 @@ DeepTools aborts before execution. This captures:
   and `coreIdToWkSlice_`;
 - output `layoutDimOrder_`, `stickDimOrder_`, and stick size;
 - inferred query/key dimensions for the current score layout.
+
+It also records a `causal_idx_to_mask_candidate` block. That block is a
+descriptor, not runtime support: it reports the IdxToMask DCI metadata,
+the collapsed causal-plane mask layout, the `where3` composition, and the
+current `datadscs_` parser blocker.
 
 This keeps the backend contract executable and visible in the same probe that
 will later prove semantic correctness with `matches_expected=true`.

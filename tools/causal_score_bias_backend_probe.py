@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import tempfile
@@ -81,6 +82,23 @@ def _constant_names(dsc: dict) -> list[str]:
     ]
 
 
+def _load_causal_mask_dataop_helper():
+    helper = (
+        Path(__file__).resolve().parents[1]
+        / "torch_spyre"
+        / "_inductor"
+        / "codegen"
+        / "causal_mask_dataop.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "_causal_mask_dataop_helper", helper
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
 def _causal_score_bias_contract(sdsc: dict, dsc: dict) -> dict:
     """Extract the backend contract from a generated causal-bias SDSC.
 
@@ -134,7 +152,9 @@ def _causal_score_bias_contract(sdsc: dict, dsc: dict) -> dict:
     }
 
 
-def _metadata_from_sdsc_payload(path: Path, payload: dict) -> dict:
+def _metadata_from_sdsc_payload(
+    path: Path, payload: dict, *, key_start: int | None = None
+) -> dict:
     sdsc = next(iter(payload.values()))
     dsc = next(iter(sdsc["dscs_"][0].values()))
     compute_ops = dsc.get("computeOp_", [])
@@ -147,13 +167,22 @@ def _metadata_from_sdsc_payload(path: Path, payload: dict) -> dict:
         "outputs": compute_ops[0].get("outputLabeledDs", []) if compute_ops else [],
     }
     if "causal_score_bias_like" in opfuncs:
-        metadata["causal_score_bias_contract"] = _causal_score_bias_contract(
-            sdsc, dsc
-        )
+        contract = _causal_score_bias_contract(sdsc, dsc)
+        metadata["causal_score_bias_contract"] = contract
+        if key_start is not None:
+            helper = _load_causal_mask_dataop_helper()
+            metadata["causal_idx_to_mask_candidate"] = (
+                helper.build_causal_idx_to_mask_candidate(
+                    contract,
+                    key_start=key_start,
+                )
+            )
     return metadata
 
 
-def _collect_sdsc_metadata(cache_dir: Path) -> list[dict]:
+def _collect_sdsc_metadata(
+    cache_dir: Path, *, key_start: int | None = None
+) -> list[dict]:
     metadata = []
     for path in sorted(cache_dir.rglob("sdsc_*.json")):
         try:
@@ -162,7 +191,9 @@ def _collect_sdsc_metadata(cache_dir: Path) -> list[dict]:
             metadata.append({"path": str(path), "error": repr(exc)})
             continue
         try:
-            metadata.append(_metadata_from_sdsc_payload(path, payload))
+            metadata.append(
+                _metadata_from_sdsc_payload(path, payload, key_start=key_start)
+            )
         except Exception as exc:  # noqa: BLE001
             metadata.append({"path": str(path), "error": repr(exc)})
     return metadata
@@ -226,7 +257,7 @@ def main() -> int:
         result["error"] = str(exc)
         result["traceback_tail"] = traceback.format_exc().splitlines()[-20:]
 
-    result["sdscs"] = _collect_sdsc_metadata(cache_dir)
+    result["sdscs"] = _collect_sdsc_metadata(cache_dir, key_start=args.key_start)
     print("RESULT_JSON:" + json.dumps(result, sort_keys=True))
     return 0 if result["status"] == "ok" else 1
 
