@@ -194,7 +194,7 @@
 <p>Outside the workstations, there is:</p>
 <ul>
   <li>A giant <strong>warehouse</strong> (off-chip DRAM, "HBM") with 128 GB of capacity.</li>
-  <li>A <strong>conveyor</strong> between the warehouse and the workstations — total bandwidth ~166 GB/s, shared by all workstations.</li>
+  <li>A <strong>conveyor</strong> between the warehouse and the workstations — total bandwidth ~204.8 GB/s, shared by all workstations.</li>
   <li>A <strong>ring network</strong> connecting workstations directly (used when cores need to exchange partial results).</li>
 </ul>
 
@@ -202,9 +202,9 @@
 <svg viewBox="0 0 760 420" xmlns="http://www.w3.org/2000/svg" class="svg-text">
   <rect x="40" y="20" width="680" height="60" rx="6" fill="#e5e7eb" stroke="#475569" stroke-width="2"/>
   <text x="380" y="46" text-anchor="middle" font-size="14" font-weight="bold">HBM (off-chip DRAM)</text>
-  <text x="380" y="64" text-anchor="middle" font-size="11" fill="#475569">128 GB capacity · ~166 GB/s shared bandwidth</text>
+  <text x="380" y="64" text-anchor="middle" font-size="11" fill="#475569">128 GB capacity · ~204.8 GB/s shared bandwidth</text>
 
-  <text x="740" y="115" text-anchor="end" font-size="10" fill="#475569" font-style="italic">conveyor: 166 GB/s shared</text>
+  <text x="740" y="115" text-anchor="end" font-size="10" fill="#475569" font-style="italic">conveyor: 204.8 GB/s shared</text>
 
   <g stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="3,2">
     <line x1="100" y1="80" x2="100" y2="130"/>
@@ -286,7 +286,7 @@
     <text x="450" y="11">on-chip ring (cross-core)</text>
   </g>
 </svg>
-<figcaption>Figure 2 — The Spyre accelerator. 32 cores, each with a 2 MB LX scratchpad and an 8×8 PT matrix unit, share a 166 GB/s pipe to off-chip HBM and a ring for direct core-to-core exchange.</figcaption>
+<figcaption>Figure 2 — The Spyre accelerator. 32 cores, each with a 2 MB LX scratchpad and an 8×8 PT matrix unit, share a 204.8 GB/s pipe to off-chip HBM and a ring for direct core-to-core exchange.</figcaption>
 </figure>
 
 <p>Two facts you'll need to remember:</p>
@@ -581,13 +581,17 @@
 <p>A matmul of size <code>M × N × K</code> needs <code>M × N × K</code> multiply-accumulates (MACs). When we split across cores, each core does:</p>
 <pre><code>per_core_MACs = M × N × K / (m × n × k)</code></pre>
 
-<p>Hardware peak: the published number is 300 TOPS (tera-operations per second) per card. We back out per-core per-microsecond MACs:</p>
-<pre><code>peak_MACs_per_core_per_us = (300 × 10¹²) / 2 / 32 / 10⁶ ≈ 4.7M
-                              ↑           ↑    ↑
-                       300 TOPS    each MAC   32 cores
-                                   is 2 ops</code></pre>
+<p>Hardware peak (DL16, the 16-bit float format the matrix unit uses): <strong>98.304 TFLOPS</strong> per card. This is what the matrix unit can do back-to-back when fully fed. The 300+ TOPS marketing number you see on press materials is the INT8 peak; the fp16 peak is ~4× lower because each fp16 op consumes more of the SIMD lane width than an int8 op. The 98.304 figure comes straight from the hardware parameters:</p>
+<pre><code>32 cores × 2 corelets × 8 rows × 8 cols × 8 SIMD × 1.5 GHz × 2 FLOPs/MAC
+  = 98.304 × 10¹² FLOPs/s
+  = 98.304 TFLOPS</code></pre>
+<p>Per-core, per-microsecond MACs:</p>
+<pre><code>peak_MACs_per_core_per_us = (98.304 × 10¹²) / 2 / 32 / 10⁶ ≈ 1.53M
+                               ↑              ↑    ↑
+                       98.3 TFLOPS    each MAC    32 cores
+                       (DL16, dense)  is 2 ops</code></pre>
 
-<p>So naïve compute time: <code>compute_us = per_core_MACs / 4.7M</code>.</p>
+<p>So naïve compute time: <code>compute_us = per_core_MACs / 1.53M</code>.</p>
 
 <div class="callout">
   <div class="callout-title">The PT-pipeline twist</div>
@@ -659,7 +663,7 @@ compute_us = per_core_MACs / effective_peak</code></pre>
           A           B           C (output)</code></pre>
 
 <p>Divided by the bandwidth:</p>
-<pre><code>hbm_us = bytes / 166 GB/s</code></pre>
+<pre><code>hbm_us = bytes / 204.8 GB/s</code></pre>
 
 <div class="callout">
   <div class="callout-title">The cohort twist</div>
