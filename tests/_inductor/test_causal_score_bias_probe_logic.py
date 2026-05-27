@@ -1,4 +1,7 @@
+import inspect
 import importlib.util
+import json
+import tempfile
 from pathlib import Path
 
 
@@ -16,9 +19,8 @@ def _load_probe():
     return module
 
 
-def test_metadata_records_causal_score_bias_layout_contract():
-    probe = _load_probe()
-    payload = {
+def _payload():
+    return {
         "0_causal_score_bias_like": {
             "numWkSlicesPerDim_": {"mb": 2, "x": 4, "out": 1},
             "coreIdToWkSlice_": {
@@ -68,6 +70,80 @@ def test_metadata_records_causal_score_bias_layout_contract():
         }
     }
 
+
+def _parser_probe_bundle_writer(probe):
+    for name in (
+        "_write_causal_idx_to_mask_parser_probe_bundle",
+        "write_causal_idx_to_mask_parser_probe_bundle",
+        "_emit_candidate_parser_probe_bundle",
+        "_write_parser_probe_bundle",
+        "write_parser_probe_bundle",
+    ):
+        writer = getattr(probe, name, None)
+        if callable(writer):
+            return writer
+    return None
+
+
+def _invoke_parser_probe_bundle_writer(writer, tmp_path, payload):
+    signature = inspect.signature(writer)
+    cache_dir = tmp_path / "cache"
+    bundle_dir = tmp_path / "bundle"
+    if "cache_dir" in signature.parameters:
+        cache_dir.mkdir()
+        (cache_dir / "sdsc_0_causal_score_bias_like.json").write_text(
+            json.dumps(payload)
+        )
+    args = []
+    kwargs = {}
+    for name, parameter in signature.parameters.items():
+        if parameter.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+        if name == "cache_dir":
+            value = cache_dir
+        elif name in ("output_dir", "out_dir", "bundle_dir", "directory"):
+            value = bundle_dir
+        elif name in ("payload", "sdsc_payload", "sdsc_json"):
+            value = payload
+        elif name == "key_start":
+            value = 2
+        elif name in ("name", "probe_name"):
+            value = "causal_idx_to_mask_parser_probe"
+        elif name == "run":
+            value = False
+        elif parameter.default is not inspect.Parameter.empty:
+            continue
+        else:
+            raise AssertionError(f"unsupported writer parameter: {name}")
+
+        if parameter.kind is inspect.Parameter.KEYWORD_ONLY:
+            kwargs[name] = value
+        else:
+            args.append(value)
+    return writer(*args, **kwargs), bundle_dir
+
+
+def _assert_parser_probe_body(body):
+    dataop = body["datadscs_"][0]["0_IdxToMask_dataop"]
+    assert dataop["op"]["name"] == "IdxToMask"
+    assert body["coreIdToDscSchedule"]["0"] == [[0, -1, 0, 1], [-1, 0, 1, 0]]
+    assert body["coreIdToDscSchedule"]["7"] == [[0, -1, 0, 1], [-1, 0, 1, 0]]
+    assert body["opFuncsUsed_"] == []
+
+    dsc_name, dsc = next(iter(body["dscs_"][0].items()))
+    assert dsc_name == "identity"
+    compute_op = dsc["computeOp_"][0]
+    assert compute_op["opFuncName"] == "identity"
+    assert compute_op["opFuncName"] != "causal_score_bias_like"
+
+
+def test_metadata_records_causal_score_bias_layout_contract():
+    probe = _load_probe()
+    payload = _payload()
+
     metadata = probe._metadata_from_sdsc_payload(
         Path("sdsc.json"),
         payload,
@@ -102,6 +178,29 @@ def test_metadata_records_causal_score_bias_layout_contract():
     assert body["where3_compute_fragment"]["computeOp_"][0]["opFuncName"] == "where3"
 
 
+def test_parser_probe_bundle_writer_writes_bundle_without_running_dxp(tmp_path):
+    probe = _load_probe()
+    writer = _parser_probe_bundle_writer(probe)
+    assert writer is not None
+
+    result, bundle_dir = _invoke_parser_probe_bundle_writer(
+        writer,
+        tmp_path,
+        _payload(),
+    )
+    if isinstance(result, dict) and "status" in result:
+        assert result["status"] == "emitted"
+
+    sdsc_paths = sorted(bundle_dir.glob("sdsc_*.json"))
+    assert len(sdsc_paths) == 1
+    payload = json.loads(sdsc_paths[0].read_text())
+    body = payload["causal_idx_to_mask_parser_probe"]
+    _assert_parser_probe_body(body)
+
+    bundle_mlir = (bundle_dir / "bundle.mlir").read_text()
+    assert f"sdsc_filename=\"{sdsc_paths[0].name}\"" in bundle_mlir
+
+
 def _run_all():
     tests = sorted(
         (name, obj)
@@ -111,7 +210,12 @@ def _run_all():
     fails = []
     for name, fn in tests:
         try:
-            fn()
+            parameters = inspect.signature(fn).parameters
+            if "tmp_path" in parameters:
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    fn(Path(tmp_dir))
+            else:
+                fn()
         except Exception as exc:  # noqa: BLE001
             fails.append(name)
             print(f"FAIL {name}: {type(exc).__name__}: {exc}")

@@ -197,6 +197,21 @@ fragment. It is intentionally marked `runtime_status = "not_emitted"` until the
 DeepTools data-op parser accepts `IdxToMask` and Torch-Spyre has real tensor
 sources for the `where3` true/false inputs.
 
+For a sharper imported-SuperDSC parser check, the probe can also write a
+single-SDSC executable mini-bundle:
+
+```sh
+"$PYTHON" tools/causal_score_bias_backend_probe.py \
+  --cache-dir /tmp/stage050-parser-probe \
+  --candidate-parser-probe-dir /tmp/stage050-parser-probe-bundle \
+  --run-candidate-parser-probe
+```
+
+That artifact rewrites the generated compute op to `identity`, leaves
+`opFuncsUsed_` empty, and places `IdxToMask` only in `datadscs_[].op.name`.
+Its expected near-term failure is therefore the DeepTools data-op parser
+boundary, not the original `causal_score_bias_like` opFunc import.
+
 The same non-executed plan can be emitted by normal bundle generation with:
 
 ```sh

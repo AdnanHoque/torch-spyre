@@ -20,6 +20,7 @@ and no-torch tests can use it even when the backend aborts during compilation.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Mapping
 from typing import Any
 
@@ -622,3 +623,54 @@ def build_causal_idx_to_mask_emission_plan(
             },
         }
     }
+
+
+def build_causal_idx_to_mask_parser_probe_sdsc(
+    payload: Mapping[str, Any],
+    key_start: int | str | None,
+    name: str = "causal_idx_to_mask_parser_probe",
+) -> dict[str, Any]:
+    """Build an executable-shaped IdxToMask parser probe from a causal SDSC.
+
+    The probe keeps the generated causal score-bias descriptor layout intact,
+    installs the synthesized IdxToMask data-op schedule, and rewrites the DL
+    compute op to ``identity`` so backend failures isolate the datadsc parser.
+    """
+
+    source_name, source_body = next(iter(payload.items()))
+    contract = causal_score_bias_contract_from_payload(payload)
+    plan = build_causal_idx_to_mask_emission_plan(
+        contract,
+        key_start=key_start,
+        name=f"{name}_plan",
+    )
+    plan_body = next(iter(plan.values()))
+
+    probe_body = copy.deepcopy(source_body)
+    probe_body["coreIdToDscSchedule"] = copy.deepcopy(
+        plan_body["coreIdToDscSchedule"]
+    )
+    probe_body["datadscs_"] = copy.deepcopy(plan_body["datadscs_"])
+
+    dscs = probe_body.get("dscs_", [])
+    if dscs:
+        dsc_entry = dscs[0]
+        dsc_name, dsc = next(iter(dsc_entry.items()))
+        for compute_op in dsc.get("computeOp_", []):
+            compute_op["opFuncName"] = "identity"
+        if dsc_name != "identity":
+            dscs[0] = {"identity": dsc}
+
+    probe_body["opFuncsUsed_"] = []
+
+    candidate = plan_body["causalIdxToMaskPlan_"]["candidate"]
+    probe_body["causalIdxToMaskParserProbe_"] = {
+        "source_sdsc": source_name,
+        "source_compute_op": contract.get("opfunc"),
+        "probe_compute_op": "identity",
+        "dataop": "IdxToMask",
+        "key_start": _maybe_int(key_start),
+        "candidate_feasible": candidate["feasible"],
+        "rejection_reasons": list(candidate["rejection_reasons"]),
+    }
+    return {name: probe_body}

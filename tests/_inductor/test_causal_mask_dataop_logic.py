@@ -55,6 +55,62 @@ def _contract(**overrides):
     return contract
 
 
+def _payload():
+    return {
+        "0_causal_score_bias_like": {
+            "numWkSlicesPerDim_": {"mb": 2, "x": 4, "out": 1},
+            "coreIdToWkSlice_": {
+                str(core): {
+                    "mb": core % 2,
+                    "x": core // 2,
+                    "out": 0,
+                }
+                for core in range(8)
+            },
+            "dscs_": [
+                {
+                    "causal_score_bias_like": {
+                        "numCoresUsed_": 8,
+                        "N_": {"name_": "n", "mb_": 2, "x_": 4, "out_": 64},
+                        "primaryDsInfo_": {
+                            "OUTPUT": {
+                                "layoutDimOrder_": ["x", "mb", "out"],
+                                "stickDimOrder_": ["out"],
+                                "stickSize_": [64],
+                            }
+                        },
+                        "labeledDs_": [
+                            {
+                                "ldsIdx_": 0,
+                                "dsName_": "Tensor0",
+                                "dsType_": "OUTPUT",
+                            },
+                            {
+                                "ldsIdx_": 1,
+                                "dsName_": "Tensor1",
+                                "dsType_": "OUTPUT",
+                            },
+                        ],
+                        "constantInfo_": {
+                            "0": {
+                                "dataFormat_": "SEN169_FP16",
+                                "name_": "keyStart",
+                            }
+                        },
+                        "computeOp_": [
+                            {
+                                "opFuncName": "causal_score_bias_like",
+                                "inputLabeledDs": ["Tensor0-idx0"],
+                                "outputLabeledDs": ["Tensor1-idx1"],
+                            }
+                        ],
+                    }
+                }
+            ],
+        }
+    }
+
+
 def test_causal_idx_to_mask_candidate_records_backend_metadata():
     helper = _load_helper()
 
@@ -220,6 +276,30 @@ def test_causal_idx_to_mask_emission_plan_materializes_dataop_shape():
         "zeroBias": 0.0,
         "negInfBias": "-inf",
     }
+
+
+def test_causal_idx_to_mask_parser_probe_sdsc_uses_native_dataop_schedule():
+    helper = _load_helper()
+
+    probe = helper.build_causal_idx_to_mask_parser_probe_sdsc(
+        _payload(),
+        key_start=2,
+        name="idx_to_mask_parser_probe_test",
+    )
+
+    body = probe["idx_to_mask_parser_probe_test"]
+    dataop = body["datadscs_"][0]["0_IdxToMask_dataop"]
+    assert dataop["op"]["name"] == "IdxToMask"
+    assert dataop["op"]["idxToMaskValidElementOffset"] == -2
+    assert body["coreIdToDscSchedule"]["0"] == [[0, -1, 0, 1], [-1, 0, 1, 0]]
+    assert body["coreIdToDscSchedule"]["7"] == [[0, -1, 0, 1], [-1, 0, 1, 0]]
+    assert body["opFuncsUsed_"] == []
+
+    dsc_name, dsc = next(iter(body["dscs_"][0].items()))
+    assert dsc_name == "identity"
+    compute_op = dsc["computeOp_"][0]
+    assert compute_op["opFuncName"] == "identity"
+    assert compute_op["opFuncName"] != "causal_score_bias_like"
 
 
 def test_causal_idx_to_mask_candidate_rejects_split_key_stick_dim():

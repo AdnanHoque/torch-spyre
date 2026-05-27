@@ -19,6 +19,7 @@ import argparse
 import importlib.util
 import json
 import os
+import subprocess
 import tempfile
 import traceback
 from pathlib import Path
@@ -58,8 +59,38 @@ def _parse_args() -> argparse.Namespace:
             "derived from generated causal_score_bias_like SDSCs."
         ),
     )
+    parser.add_argument(
+        "--candidate-parser-probe-dir",
+        default="",
+        help=(
+            "Optional directory where a parser-probe SDSC bundle for the "
+            "candidate causal IdxToMask data-op should be written."
+        ),
+    )
+    parser.add_argument(
+        "--candidate-parser-probe-name",
+        default="causal_idx_to_mask_parser_probe",
+        help=(
+            "SDSC name to request from the candidate parser-probe helper. "
+            "The emitted file is sdsc_<name>.json."
+        ),
+    )
+    parser.add_argument(
+        "--run-candidate-parser-probe",
+        action="store_true",
+        help=(
+            "After emitting --candidate-parser-probe-dir, run "
+            "dxp_standalone --bundle -d <dir> and record the return code plus "
+            "stdout/stderr tails in RESULT_JSON."
+        ),
+    )
     parser.add_argument("--print-values", action="store_true")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.run_candidate_parser_probe and not args.candidate_parser_probe_dir:
+        parser.error(
+            "--run-candidate-parser-probe requires --candidate-parser-probe-dir"
+        )
+    return args
 
 
 def _summarize_tensor(tensor, *, print_values: bool) -> dict:
@@ -143,6 +174,153 @@ def _collect_sdsc_metadata(
     return metadata
 
 
+def _causal_score_bias_payload(cache_dir: Path) -> tuple[Path | None, dict | None]:
+    for path in sorted(cache_dir.rglob("sdsc_*.json")):
+        try:
+            payload = json.loads(path.read_text())
+            sdsc = next(iter(payload.values()))
+            dsc = next(iter(sdsc["dscs_"][0].values()))
+            compute_ops = dsc.get("computeOp_", [])
+        except Exception:  # noqa: BLE001
+            continue
+        opfuncs = [op.get("opFuncName") for op in compute_ops]
+        if "causal_score_bias_like" in opfuncs:
+            return path, payload
+    return None, None
+
+
+def _validate_sdsc_name(name: str) -> None:
+    if not name:
+        raise ValueError("candidate parser-probe SDSC name must be non-empty")
+    if Path(name).name != name or "/" in name or "\\" in name:
+        raise ValueError(
+            "candidate parser-probe SDSC name must not contain path separators"
+        )
+
+
+def _write_single_sdsc_bundle(bundle_dir: Path, sdsc_payload: dict) -> dict:
+    if not isinstance(sdsc_payload, dict) or len(sdsc_payload) != 1:
+        raise ValueError("parser-probe helper must return a single SDSC payload")
+
+    sdsc_name = next(iter(sdsc_payload))
+    _validate_sdsc_name(sdsc_name)
+    file_name = f"sdsc_{sdsc_name}.json"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+
+    sdsc_path = bundle_dir / file_name
+    bundle_path = bundle_dir / "bundle.mlir"
+    sdsc_path.write_text(json.dumps(sdsc_payload, indent=2, sort_keys=True))
+    bundle_path.write_text(
+        "\n".join(
+            [
+                "module {",
+                "\tfunc.func @sdsc_bundle() {",
+                "\t\tsdscbundle.sdsc_execute () "
+                f"{{sdsc_filename={json.dumps(file_name)}}}",
+                "\t\treturn",
+                "\t}",
+                "}",
+                "",
+            ]
+        )
+    )
+    return {
+        "name": sdsc_name,
+        "sdsc_json": str(sdsc_path),
+        "bundle_mlir": str(bundle_path),
+    }
+
+
+def _write_causal_idx_to_mask_parser_probe_bundle(
+    bundle_dir: Path,
+    payload: dict,
+    *,
+    key_start: int,
+    name: str = "causal_idx_to_mask_parser_probe",
+) -> dict:
+    helper = _load_causal_mask_dataop_helper()
+    builder = getattr(
+        helper,
+        "build_causal_idx_to_mask_parser_probe_sdsc",
+        None,
+    )
+    if builder is None:
+        raise AttributeError(
+            "causal_mask_dataop.py does not expose "
+            "build_causal_idx_to_mask_parser_probe_sdsc"
+        )
+    sdsc_payload = builder(payload, key_start=key_start, name=name)
+    if isinstance(sdsc_payload, dict) and len(sdsc_payload) == 1:
+        returned_name = next(iter(sdsc_payload))
+        if returned_name != name:
+            raise ValueError(
+                "parser-probe helper returned SDSC name "
+                f"{returned_name!r}, expected {name!r}"
+            )
+    return _write_single_sdsc_bundle(bundle_dir, sdsc_payload)
+
+
+def _tail_lines(text: str, *, limit: int = 80) -> list[str]:
+    return text.splitlines()[-limit:]
+
+
+def _emit_candidate_parser_probe_bundle(
+    cache_dir: Path,
+    bundle_dir: Path,
+    *,
+    key_start: int,
+    name: str,
+    run: bool,
+) -> dict:
+    result = {
+        "dir": str(bundle_dir),
+        "requested_name": name,
+        "run_requested": run,
+    }
+    try:
+        _validate_sdsc_name(name)
+        source_path, source_payload = _causal_score_bias_payload(cache_dir)
+        if source_payload is None:
+            result["status"] = "failed"
+            result["error"] = "no generated causal_score_bias_like SDSC found"
+            return result
+
+        written = _write_causal_idx_to_mask_parser_probe_bundle(
+            bundle_dir,
+            source_payload,
+            key_start=key_start,
+            name=name,
+        )
+        result.update(written)
+        result["source_sdsc"] = str(source_path)
+        result["status"] = "emitted"
+
+        if run:
+            cmd = ["dxp_standalone", "--bundle", "-d", str(bundle_dir)]
+            completed = subprocess.run(
+                cmd,
+                capture_output=True,
+                check=False,
+                text=True,
+            )
+            result["run"] = {
+                "cmd": cmd,
+                "rc": completed.returncode,
+                "returncode": completed.returncode,
+                "stdout_tail": _tail_lines(completed.stdout),
+                "stderr_tail": _tail_lines(completed.stderr),
+            }
+            result["status"] = (
+                "run_ok" if completed.returncode == 0 else "run_failed"
+            )
+    except Exception as exc:  # noqa: BLE001
+        result["status"] = "failed"
+        result["error_type"] = type(exc).__name__
+        result["error"] = str(exc)
+        result["traceback_tail"] = traceback.format_exc().splitlines()[-20:]
+    return result
+
+
 def _candidate_emission_plans(metadata: list[dict], *, key_start: int) -> list[dict]:
     helper = _load_causal_mask_dataop_helper()
     plans = []
@@ -224,6 +402,14 @@ def main() -> int:
         plan_path.write_text(json.dumps({"plans": plans}, indent=2, sort_keys=True))
         result["candidate_plan_json"] = str(plan_path)
         result["candidate_plan_count"] = len(plans)
+    if args.candidate_parser_probe_dir:
+        result["candidate_parser_probe"] = _emit_candidate_parser_probe_bundle(
+            cache_dir,
+            Path(args.candidate_parser_probe_dir),
+            key_start=args.key_start,
+            name=args.candidate_parser_probe_name,
+            run=args.run_candidate_parser_probe,
+        )
     print("RESULT_JSON:" + json.dumps(result, sort_keys=True))
     return 0 if result["status"] == "ok" else 1
 
