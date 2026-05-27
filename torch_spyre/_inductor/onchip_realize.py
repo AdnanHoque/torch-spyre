@@ -43,9 +43,12 @@ from .codegen.onchip_bridge import (
     build_roundtrip_bridge,
     build_same_layout_bridge,
     build_streamed_bridge,
+    Endpoint,
+    make_datadsc,
     num_stream_tiles,
     per_core_slice_bytes,
     per_core_same_stick_slice_bytes,
+    _stcdp_op,
 )
 
 # Per-core LX byte span declared inside each data-op labeledDs (2 MB, matches
@@ -73,6 +76,29 @@ MIN_BRIDGE_REGION_BYTES = 256 << 10
 FLASH_SCORE_SCALE_MAX_STICK_ELEMS = 128
 INPUT_FETCH_NEIGHBOR_DISALLOWED_PINS = {"hbm", None}
 INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX = 0
+LEGACY_DATA_STRUCT_DIM_KEYS = (
+    "in_",
+    "out_",
+    "mb_",
+    "i_",
+    "j_",
+    "ki_",
+    "kj_",
+    "x_",
+    "x1_",
+    "y_",
+    "r_",
+    "c_",
+    "ij_",
+    "rc_",
+    "kij_",
+    "sij_",
+    "zij_",
+    "si_",
+    "sj_",
+    "zi_",
+    "zj_",
+)
 PINNED_COMPONENT_ORDER = (
     "hbm",
     "ring",
@@ -550,25 +576,196 @@ def _input_fetch_neighbor_ij_order_supported(dl: dict, lds_idx: int) -> bool:
     return {"i_", "j_"}.issubset(set(layout))
 
 
-def _has_input_fetch_neighbor_transfer(dl: dict, lds_idx: int) -> bool:
+def _is_input_fetch_neighbor_transfer_node(node: dict, lds_idx: int) -> bool:
     """DXP later expects a NO_COMPONENT -> LX transfer node for the neighbor."""
+    if node.get("nodeType_") != "transfer":
+        return False
+    src = node.get("src_", {})
+    if src.get("unit_") != "no_component":
+        return False
+    if src.get("storage_") != "no_component":
+        return False
+    if not any(
+        (via.get("loc_", {}) or {}).get("unit_") == "no_component"
+        and (via.get("loc_", {}) or {}).get("storage_") == "lx"
+        for via in node.get("dstVias_", [])
+    ):
+        return False
+    return any(
+        dst.get("myLdsIdx_") == lds_idx
+        for dst in node.get("dstLdsAndLoopOffsets_", [])
+    )
+
+
+def _has_input_fetch_neighbor_transfer(dl: dict, lds_idx: int) -> bool:
+    """True when the DSC has the NO_COMPONENT -> LX neighbor marker."""
+    return any(
+        _is_input_fetch_neighbor_transfer_node(node, lds_idx)
+        for node in dl.get("scheduleTree_", [])
+    )
+
+
+def _input_fetch_neighbor_transfer_offsets(lds_idx: int) -> dict:
+    return {
+        "myLdsIdx_": lds_idx,
+        "startAddr_": "0",
+        "isStartAddrSymbolic_": 0,
+        "latchDataId_": -1,
+        "constantId_": -1,
+        "constEleOffsets_": {},
+        "loopEleOffsets_": {},
+        "bufferAddrOffset_": {},
+        "bufferSwitchPosition_": "",
+        "dataConnect_": "",
+    }
+
+
+def _normalize_input_fetch_neighbor_transfer(node: dict, lds_idx: int) -> None:
+    node.setdefault("name_", f"input_fetch_neighbor_transfer_lds{lds_idx}")
+    node["prev_"] = node.get("prev_") if isinstance(node.get("prev_"), str) else ""
+    node.setdefault("relevantComps_", {})
+    node.setdefault(
+        "src_",
+        {
+            "unit_": "no_component",
+            "storage_": "no_component",
+        },
+    )
+    node.setdefault("srcLdsAndLoopOffsets_", _input_fetch_neighbor_transfer_offsets(-1))
+    node.setdefault("dstVias_", [])
+    if not node["dstVias_"]:
+        node["dstVias_"].append(
+            {
+                "loc_": {
+                    "unit_": "no_component",
+                    "storage_": "lx",
+                },
+                "via_": [],
+            }
+        )
+    node.setdefault("dstLdsAndLoopOffsets_", [])
+    for dst in node["dstLdsAndLoopOffsets_"]:
+        if dst.get("myLdsIdx_") == lds_idx:
+            dst.update(
+                {
+                    key: value
+                    for key, value in _input_fetch_neighbor_transfer_offsets(
+                        lds_idx
+                    ).items()
+                    if key not in dst
+                }
+            )
+            break
+    else:
+        node["dstLdsAndLoopOffsets_"].append(
+            _input_fetch_neighbor_transfer_offsets(lds_idx)
+        )
+    node.setdefault("lastFusableParentLoopSrc_", "")
+    node.setdefault("lastFusableParentLoopDst_", [])
+    node.setdefault("replicationFactor_", 1)
+    node.setdefault("unitTimeTransferChunkSize_", [])
+    node.setdefault("unitTimeTransferNumChunks_", 1)
+    node.setdefault("unitTimeTransferChunkStride_", [])
+    node.setdefault("rotateNumElements_", 0)
+    node.setdefault("coreIdToGTRInfo_", {})
+    node.setdefault("transferSize_", {})
+    node.setdefault("coreletViews_", {})
+
+
+def _link_input_fetch_neighbor_allocate(dl: dict, lds_idx: int, transfer_name: str) -> None:
     for node in dl.get("scheduleTree_", []):
-        if node.get("nodeType_") != "transfer":
-            continue
-        src = node.get("src_", {})
-        if src.get("storage_") != "no_component":
-            continue
-        if not any(
-            (via.get("loc_", {}) or {}).get("storage_") == "lx"
-            for via in node.get("dstVias_", [])
+        if (
+            node.get("nodeType_") == "allocate"
+            and node.get("ldsIdx_") == lds_idx
+            and node.get("component_") == "lx"
         ):
+            node.setdefault("allocUsers_", {})[transfer_name] = 1
+            return
+
+
+def _legacy_data_struct_dims(name: str, values: dict[str, int]) -> dict:
+    dims = {
+        "name_": name,
+        **{key: -1 for key in LEGACY_DATA_STRUCT_DIM_KEYS},
+        "symbolicDimInfo_": {},
+        "maxSymbolicVolume_": {},
+        "coreletSplit_": {},
+        "rowSplit_": {},
+        "peSfpSplit_": {},
+        "paddingSizes_": {},
+    }
+    for key, value in values.items():
+        if key in LEGACY_DATA_STRUCT_DIM_KEYS:
+            dims[key] = int(value)
+    return dims
+
+
+def _core_data_stage_dims(dl: dict, shard: dict | None = None) -> dict[str, int]:
+    core_stage = (
+        dl.get("dataStageParam_", {})
+        .get("0", {})
+        .get("ss_", {})
+    )
+    dims = {
+        key: int(value)
+        for key, value in core_stage.items()
+        if key in LEGACY_DATA_STRUCT_DIM_KEYS
+    }
+    if dims:
+        return dims
+    sizes = dl.get("N_", {})
+    shard = shard or {}
+    for dim, size in sizes.items():
+        if dim not in LEGACY_DATA_STRUCT_DIM_KEYS:
             continue
-        if any(
-            dst.get("myLdsIdx_") == lds_idx
-            for dst in node.get("dstLdsAndLoopOffsets_", [])
-        ):
-            return True
-    return False
+        split_factor = int(shard.get(dim.rstrip("_"), 1) or 1)
+        dims[dim] = int(size) // split_factor
+    return dims
+
+
+def _add_input_fetch_neighbor_legacy_dims(dl: dict, shard: dict | None = None) -> None:
+    dims = _core_data_stage_dims(dl, shard)
+    if not dims:
+        return
+    dl.setdefault("CoreD_", _legacy_data_struct_dims("d", dims))
+    dl.setdefault("CoreletD_", _legacy_data_struct_dims("coreletd", dims))
+    dl.setdefault("B_", _legacy_data_struct_dims("b", dims))
+
+
+def _add_input_fetch_neighbor_transfer(dl: dict, lds_idx: int) -> None:
+    """Add the minimal NO_COMPONENT -> LX transfer marker for IFN lowering."""
+    schedule_tree = dl.setdefault("scheduleTree_", [])
+    for node in schedule_tree:
+        if _is_input_fetch_neighbor_transfer_node(node, lds_idx):
+            _normalize_input_fetch_neighbor_transfer(node, lds_idx)
+            _link_input_fetch_neighbor_allocate(dl, lds_idx, node["name_"])
+            return
+    transfer_name = f"input_fetch_neighbor_transfer_lds{lds_idx}"
+    transfer = {
+        "nodeType_": "transfer",
+        "name_": transfer_name,
+        "src_": {
+            "unit_": "no_component",
+            "storage_": "no_component",
+        },
+        "dstVias_": [
+            {
+                "loc_": {
+                    "unit_": "no_component",
+                    "storage_": "lx",
+                },
+                "via_": [],
+            }
+        ],
+        "dstLdsAndLoopOffsets_": [
+            _input_fetch_neighbor_transfer_offsets(lds_idx)
+        ],
+    }
+    _normalize_input_fetch_neighbor_transfer(transfer, lds_idx)
+    schedule_tree.append(
+        transfer
+    )
+    _link_input_fetch_neighbor_allocate(dl, lds_idx, transfer_name)
 
 
 def _core_state_init_entry(lx_base: int) -> dict:
@@ -1114,11 +1311,18 @@ def build_flash_attention_pipeline_tile_artifacts(
                     tile_sdscs[tile_index: tile_index + 2],
                 )
             )
-            artifact = build_flash_attention_pipeline_overlap_prefix_tile_artifact(
-                tile_sdscs[tile_index: tile_index + 2],
-                tile_index,
-                name_prefix=name_prefix,
-            )
+            if not overlap_reasons:
+                artifact = build_flash_attention_pipeline_ifn_prefix_tile_artifact(
+                    tile_sdscs[tile_index: tile_index + 2],
+                    tile_index,
+                    name_prefix=name_prefix,
+                )
+            if artifact is None:
+                artifact = build_flash_attention_pipeline_overlap_prefix_tile_artifact(
+                    tile_sdscs[tile_index: tile_index + 2],
+                    tile_index,
+                    name_prefix=name_prefix,
+                )
         if artifact is None:
             artifact = build_flash_attention_pipeline_artifact(
                 [sdsc],
@@ -1211,6 +1415,120 @@ def flash_attention_overlap_prefix_rejection_reasons(
         return ["lx_allocation_exceeds_capacity"]
 
     return []
+
+
+def build_flash_attention_pipeline_ifn_prefix_tile_artifact(
+    tile_sdscs: list[dict],
+    tile_index: int,
+    *,
+    name_prefix: str = "mixed_flash_pipeline_tile",
+) -> dict | None:
+    """Build a one-row InputFetchNeighbor-shaped flash overlap probe.
+
+    This attaches one data-op to the first batchmatmul input and rewrites that
+    input LX-resident, so Deeptools can lower it through its paired-row
+    InputFetchNeighbor path instead of the independent synthetic sidecar path.
+    The first probe intentionally targets lds0 only; K/V streaming needs broader
+    descriptor and Deeptools support for non-split-dim inputs.
+    """
+    if len(tile_sdscs) < 2:
+        return None
+
+    first = tile_sdscs[0]
+    first_body = _body(first)
+    num_cores = int(first_body.get("numCoresUsed_", 0))
+    if num_cores <= 0:
+        return None
+
+    first_dl = _dl_op(first)
+    input_indices = _consumer_input_indices(first_dl)
+    if not input_indices:
+        return None
+    input_idx = input_indices[0]
+    if input_idx != INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX:
+        return None
+
+    layout = _layout_for_lds(first_dl, input_idx)
+    stick_dim = _stick_dim_for_lds(first_dl, input_idx)
+    split_dim = _single_split_dim(first_body.get("numWkSlicesPerDim_", {}))
+    if layout is None or stick_dim is None or split_dim is None:
+        return None
+    if split_dim not in layout:
+        return None
+    iter_sizes = _iter_sizes_for_layout(first_dl, layout)
+    if iter_sizes is None:
+        return None
+    if iter_sizes[split_dim] % num_cores != 0:
+        return None
+
+    compute_dsc = copy.deepcopy(first_body["dscs_"][0])
+    compute_root = {next(iter(first)): {"dscs_": [compute_dsc]}}
+    apply_lx_flip(
+        compute_root,
+        LxFlip(input_idx, CONSUMER_LX_BASE, "ifn-consumer-input"),
+    )
+    compute_dl = next(iter(compute_dsc.values()))
+    _add_input_fetch_neighbor_transfer(compute_dl, input_idx)
+    _add_input_fetch_neighbor_legacy_dims(
+        compute_dl,
+        first_body.get("numWkSlicesPerDim_", {}),
+    )
+
+    datadsc = make_datadsc(
+        f"0_STCDPOpLx_ifn_Tensor0_idx{input_idx}_tile{tile_index}",
+        _stcdp_op(),
+        layout,
+        src=Endpoint(layout, stick_dim, split_dim, CONSUMER_LX_BASE),
+        dst=Endpoint(layout, stick_dim, split_dim, CONSUMER_LX_BASE),
+        iter_sizes=iter_sizes,
+        stick_size=STICK_SIZE,
+        num_cores=num_cores,
+        lx_size=DATAOP_LX_SIZE,
+    )
+    schedule = {
+        str(core_id): [[0, 0, 0, 0]]
+        for core_id in range(num_cores)
+    }
+
+    name = f"{name_prefix}_{tile_index}"
+    artifact = build_flash_attention_pipeline_mixed_sdsc(
+        name,
+        [datadsc],
+        ["STCDPOpLx"],
+        schedule,
+        [compute_dsc],
+        num_cores,
+    )
+    root = artifact[name]
+    for key in (
+        "sdscFoldProps_",
+        "sdscFolds_",
+        "coreFoldProp_",
+        "coreletFoldProp_",
+        "coreIdToDsc_",
+        "numWkSlicesPerDim_",
+        "coreIdToWkSlice_",
+    ):
+        if key in first_body:
+            root[key] = copy.deepcopy(first_body[key])
+    root["flashAttentionPipeline_"].update(
+        {
+            "source": "generated-flash-prefill-overlap-prefix-ifn-tile",
+            "split_dim": split_dim,
+            "stick_dim": stick_dim,
+            "layout": layout,
+            "iter_sizes": iter_sizes,
+            "tile_index": tile_index,
+            "replaces_sdsc": next(iter(first)),
+            "ifn_attached_input_idx": input_idx,
+            "ifn_input_lx_base": CONSUMER_LX_BASE,
+            "ifn_runtime_safe": False,
+            "ifn_runtime_rejection_reason": "single_sdsc_ifn_no_real_predecessor",
+            "compute_tile_count": 1,
+            "overlap_prefix": True,
+        }
+    )
+    return artifact
 
 
 def build_flash_attention_pipeline_overlap_prefix_tile_artifact(

@@ -816,32 +816,59 @@ def test_flash_pipeline_overlap_prefix_tile_artifacts_overlap_one_compute():
 
     root0 = artifacts[0]["mixed_flash_pipeline_tile_0"]
     assert len(root0["dscs_"]) == 1
-    assert len(root0["datadscs_"]) == 4
-    assert root0["opFuncsUsed_"] == ["STCDPOpLx"] * 4
-    assert all(
-        next(iter(dataop.values()))["op"] == {
-            "name": "STCDPOpLx",
-            "coreletId": 1,
-        }
-        for dataop in root0["datadscs_"]
-    )
+    assert len(root0["datadscs_"]) == 1
+    assert root0["opFuncsUsed_"] == ["STCDPOpLx"]
+    dataop_name, dataop = next(iter(root0["datadscs_"][0].items()))
+    assert dataop_name == "0_STCDPOpLx_ifn_Tensor0_idx0_tile0"
+    assert dataop["op"] == {"name": "STCDPOpLx"}
     meta0 = root0["flashAttentionPipeline_"]
-    assert meta0["source"] == "generated-flash-prefill-overlap-prefix-tile"
+    assert meta0["source"] == "generated-flash-prefill-overlap-prefix-ifn-tile"
     assert meta0["tile_count"] == 1
-    assert meta0["dataop_count"] == 4
-    assert meta0["prefetch_tile_count"] == 2
-    assert meta0["prefetch_corelet_id"] == 1
+    assert meta0["dataop_count"] == 1
+    assert meta0["ifn_attached_input_idx"] == 0
+    assert meta0["ifn_input_lx_base"] == rz.CONSUMER_LX_BASE
+    assert meta0["ifn_runtime_safe"] is False
+    assert meta0["ifn_runtime_rejection_reason"] == (
+        "single_sdsc_ifn_no_real_predecessor"
+    )
     assert meta0["compute_tile_count"] == 1
     assert meta0["overlap_prefix"] is True
     assert meta0["overlap_candidate"] is True
     assert meta0["tile_index"] == 0
     assert meta0["replaces_sdsc"] == "0_batchmatmul"
     assert root0["coreIdToDscSchedule"]["0"] == [
-        [0, -1, 0, 1],
-        [1, -1, 1, 1],
-        [2, 0, 1, 1],
-        [3, -1, 1, 0],
+        [0, 0, 0, 0],
     ]
+    compute = next(iter(root0["dscs_"][0].values()))
+    input_lds = next(lds for lds in compute["labeledDs_"] if lds["ldsIdx_"] == 0)
+    assert input_lds["memOrg_"] == {"lx": {"isPresent": 1, "allocateNode_": "allocate-Tensor0_lx"}}
+    assert rz._has_input_fetch_neighbor_transfer(compute, 0)
+    transfer = next(
+        node
+        for node in compute["scheduleTree_"]
+        if rz._is_input_fetch_neighbor_transfer_node(node, 0)
+    )
+    assert transfer["prev_"] == ""
+    assert transfer["src_"] == {
+        "unit_": "no_component",
+        "storage_": "no_component",
+    }
+    assert transfer["srcLdsAndLoopOffsets_"]["myLdsIdx_"] == -1
+    assert transfer["dstLdsAndLoopOffsets_"][0]["myLdsIdx_"] == 0
+    assert transfer["dstLdsAndLoopOffsets_"][0]["startAddr_"] == "0"
+    alloc = next(
+        node
+        for node in compute["scheduleTree_"]
+        if node.get("nodeType_") == "allocate"
+        and node.get("ldsIdx_") == 0
+        and node.get("component_") == "lx"
+    )
+    assert alloc["allocUsers_"][transfer["name_"]] == 1
+    assert compute["CoreD_"]["i_"] == 2
+    assert compute["CoreD_"]["j_"] == 2
+    assert compute["CoreD_"]["in_"] == 64
+    assert compute["CoreletD_"]["i_"] == 2
+    assert compute["B_"]["i_"] == 2
 
     root2 = artifacts[2]["mixed_flash_pipeline_tile_2"]
     assert len(root2["dscs_"]) == 1
@@ -856,7 +883,7 @@ def test_flash_pipeline_overlap_prefix_allows_hbm_backed_compute():
     )
     root0 = artifacts[0]["mixed_flash_pipeline_tile_0"]
     assert len(root0["dscs_"]) == 1
-    assert len(root0["datadscs_"]) == 4
+    assert len(root0["datadscs_"]) == 1
     assert root0["flashAttentionPipeline_"]["overlap_prefix"] is True
     assert root0["flashAttentionPipeline_"]["overlap_candidate"] is True
 
@@ -868,7 +895,7 @@ def test_flash_pipeline_overlap_prefix_allows_lx_compute_without_transfer():
     )
     root0 = artifacts[0]["mixed_flash_pipeline_tile_0"]
     assert len(root0["dscs_"]) == 1
-    assert len(root0["datadscs_"]) == 4
+    assert len(root0["datadscs_"]) == 1
     assert root0["flashAttentionPipeline_"]["overlap_prefix"] is True
     assert root0["flashAttentionPipeline_"]["overlap_candidate"] is True
 
@@ -884,7 +911,7 @@ def test_flash_pipeline_overlap_prefix_allows_non_ij_shape():
     )
     root0 = artifacts[0]["mixed_flash_pipeline_tile_0"]
     assert len(root0["dscs_"]) == 1
-    assert len(root0["datadscs_"]) == 4
+    assert len(root0["datadscs_"]) == 1
     assert root0["flashAttentionPipeline_"]["overlap_prefix"] is True
     assert root0["flashAttentionPipeline_"]["overlap_candidate"] is True
 

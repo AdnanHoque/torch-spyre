@@ -126,6 +126,20 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             meta = sidecar_body.get("flashAttentionPipeline_", {})
             if meta.get("tile_index") != execute_tile:
                 continue
+            if meta.get("overlap_prefix") and meta.get("ifn_attached_input_idx") != 0:
+                logger.warning(
+                    "Requested mixed flash attention overlap tile is not "
+                    "IFN-attached; keeping generated HBM-backed SDSC"
+                )
+                continue
+            if meta.get("overlap_prefix") and not meta.get("ifn_runtime_safe", False):
+                logger.warning(
+                    "Requested mixed flash attention overlap tile is not "
+                    "runtime-safe; keeping generated HBM-backed SDSC"
+                )
+                continue
+            if meta.get("overlap_prefix_rejection_reasons"):
+                continue
             replaced = meta.get("replaces_sdsc")
             if replaced is not None and replaced not in sidecar_replacements:
                 sidecar_replacements[replaced] = sidecar_name
