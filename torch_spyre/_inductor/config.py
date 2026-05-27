@@ -148,6 +148,16 @@ flash_attention_mixed_pipeline_layout_xform_lookahead_tile: int = int(
         "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_LOOKAHEAD_TILE", "-1"
     )
 )
+# Default-off real-graph probe for the common case where a future layout-transform
+# producer appears after the current batchmatmul but depends only on external or
+# already-available inputs.  The future producer is hoisted into the current
+# sidecar as a prologue, then its LX output is copied into the future consumer's
+# input buffer while the current batchmatmul computes.
+flash_attention_mixed_pipeline_layout_xform_hoist_tile: int = int(
+    os.environ.get(
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_HOIST_TILE", "-1"
+    )
+)
 # Default-off production-shaped bridge for same-stick pointwise edges that appear
 # inside the flash-prefill graph. This keeps the attention experiment off the
 # generic add/add handoff flag while reusing the same fail-closed Tier 1 realizer.

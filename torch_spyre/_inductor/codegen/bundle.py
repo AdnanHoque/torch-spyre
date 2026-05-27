@@ -25,12 +25,14 @@ from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.onchip_realize import (
     build_flash_attention_ifn_pair_tile_artifacts,
+    build_flash_attention_layout_xform_hoist_tile_artifacts,
     build_flash_attention_layout_xform_lookahead_tile_artifacts,
     build_flash_attention_layout_xform_pair_tile_artifacts,
     build_flash_attention_pipeline_artifact,
     build_flash_attention_pipeline_tile_artifacts,
     build_flash_attention_value_flow_tile_artifact,
     flash_attention_ifn_pair_tile_rejection_reasons,
+    flash_attention_layout_xform_hoist_rejection_reasons,
     flash_attention_layout_xform_lookahead_rejection_reasons,
     flash_attention_layout_xform_pair_rejection_reasons,
     flash_attention_value_flow_tile_rejection_reasons,
@@ -114,8 +116,14 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         "flash_attention_mixed_pipeline_layout_xform_lookahead_tile",
         -1,
     )
+    layout_xform_hoist_tile = getattr(
+        config,
+        "flash_attention_mixed_pipeline_layout_xform_hoist_tile",
+        -1,
+    )
     sidecar_sdscs = []
     sidecar_replacements = {}
+    sidecar_omissions = set()
     bundle_attrs_by_file = {}
     value_flow_rejections = {}
     causal_plan_artifacts = []
@@ -138,11 +146,32 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             or ifn_pair_tile >= 0
             or layout_xform_pair_tile != -1
             or layout_xform_lookahead_tile != -1
+            or layout_xform_hoist_tile != -1
         )
     )
+    layout_xform_hoist = None
+    layout_xform_hoist_rejections = None
+    if emit_mixed_sidecars and layout_xform_hoist_tile != -1:
+        layout_xform_hoist = (
+            build_flash_attention_layout_xform_hoist_tile_artifacts(
+                sdscs_json,
+                layout_xform_hoist_tile,
+            )
+        )
+        if layout_xform_hoist is None:
+            layout_xform_hoist_rejections = (
+                flash_attention_layout_xform_hoist_rejection_reasons(
+                    sdscs_json,
+                    layout_xform_hoist_tile,
+                )
+            )
     layout_xform_lookahead = None
     layout_xform_lookahead_rejections = None
-    if emit_mixed_sidecars and layout_xform_lookahead_tile != -1:
+    if (
+        emit_mixed_sidecars
+        and layout_xform_lookahead_tile != -1
+        and layout_xform_hoist is None
+    ):
         layout_xform_lookahead = (
             build_flash_attention_layout_xform_lookahead_tile_artifacts(
                 sdscs_json,
@@ -161,6 +190,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     if (
         emit_mixed_sidecars
         and layout_xform_pair_tile != -1
+        and layout_xform_hoist is None
         and layout_xform_lookahead is None
     ):
         layout_xform_pair = (
@@ -189,7 +219,15 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         pointwise_kwargs = {
             "score_scale_handoff": config.flash_attention_score_scale_handoff,
         }
-        if layout_xform_pair is not None:
+        if layout_xform_hoist is not None:
+            pointwise_kwargs["pointwise_region0"] = layout_xform_hoist[
+                "pointwise_lx_region0"
+            ]
+            logger.info(
+                "Realizing flash pointwise handoffs in a disjoint LX region "
+                "while the layout-transform hoist probe is active"
+            )
+        elif layout_xform_pair is not None:
             pointwise_kwargs["pointwise_region0"] = layout_xform_pair[
                 "pointwise_lx_region0"
             ]
@@ -233,6 +271,23 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                         ifn_pair_tile,
                     ),
                 )
+        if layout_xform_hoist_tile != -1:
+            if layout_xform_hoist is not None:
+                sidecar_sdscs.extend(layout_xform_hoist["artifacts"])
+                sidecar_replacements.update(layout_xform_hoist["replacements"])
+                sidecar_omissions.update(layout_xform_hoist.get("omissions", ()))
+                bundle_attrs_by_file.update(layout_xform_hoist["bundle_attrs"])
+                logger.info(
+                    "Executing experimental layout-transform flash attention "
+                    "hoisted-future sidecars"
+                )
+            else:
+                logger.warning(
+                    "Requested layout-transform hoisted-future flash attention "
+                    "pair was not realizable; keeping generated HBM-backed "
+                    "SDSCs: %s",
+                    layout_xform_hoist_rejections,
+                )
         if layout_xform_lookahead_tile != -1:
             if layout_xform_lookahead is not None:
                 sidecar_sdscs.extend(layout_xform_lookahead["artifacts"])
@@ -248,7 +303,11 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                     "was not realizable; keeping generated HBM-backed SDSCs: %s",
                     layout_xform_lookahead_rejections,
                 )
-        if layout_xform_pair_tile != -1 and layout_xform_lookahead is None:
+        if (
+            layout_xform_pair_tile != -1
+            and layout_xform_hoist is None
+            and layout_xform_lookahead is None
+        ):
             if layout_xform_pair is not None:
                 sidecar_sdscs.extend(layout_xform_pair["artifacts"])
                 sidecar_replacements.update(layout_xform_pair["replacements"])
@@ -350,13 +409,23 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                 sidecar_sdscs.append(artifact)
                 logger.info("Emitted mixed flash attention pipeline sidecar artifact")
 
+    replacement_omission_conflicts = set(sidecar_replacements).intersection(
+        sidecar_omissions
+    )
+    if replacement_omission_conflicts:
+        raise ValueError(
+            "SDSC sidecar replacement/omission conflict: "
+            f"{sorted(replacement_omission_conflicts)}"
+        )
+
     # Write JSON SDSCs to file system
     files = []
     for sdsc_json in sdscs_json:
         sdsc_name = next(iter(sdsc_json))
-        bundle_sdsc_name = sidecar_replacements.get(sdsc_name, sdsc_name)
-        file_name = f"sdsc_{bundle_sdsc_name}.json"
-        files.append(file_name)
+        if sdsc_name not in sidecar_omissions:
+            bundle_sdsc_name = sidecar_replacements.get(sdsc_name, sdsc_name)
+            file_name = f"sdsc_{bundle_sdsc_name}.json"
+            files.append(file_name)
         file_name = f"sdsc_{sdsc_name}.json"
         with open(os.path.join(output_dir, file_name), "w") as file:
             logger.info(f"Generating {file.name}")

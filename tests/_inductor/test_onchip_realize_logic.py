@@ -73,6 +73,8 @@ def _install_bundle_stubs(
     layout_xform_pair_result=True,
     layout_xform_lookahead_tile=-1,
     layout_xform_lookahead_result=True,
+    layout_xform_hoist_tile=-1,
+    layout_xform_hoist_result=True,
     layout_xform_pointwise_region0=None,
     causal_plan_artifact=False,
     ifn_prefix_force=False,
@@ -83,6 +85,7 @@ def _install_bundle_stubs(
         "layout_xform": [],
         "layout_xform_overlap": [],
         "layout_xform_lookahead": [],
+        "layout_xform_hoist": [],
         "pointwise": [],
     }
 
@@ -111,6 +114,9 @@ def _install_bundle_stubs(
     )
     config.flash_attention_mixed_pipeline_layout_xform_lookahead_tile = (
         layout_xform_lookahead_tile
+    )
+    config.flash_attention_mixed_pipeline_layout_xform_hoist_tile = (
+        layout_xform_hoist_tile
     )
     config.flash_attention_mixed_pipeline_overlap = False
     config.causal_idx_to_mask_plan_artifact = causal_plan_artifact
@@ -208,6 +214,35 @@ def _install_bundle_stubs(
     onchip_realize.build_flash_attention_layout_xform_lookahead_tile_artifacts = (
         build_flash_attention_layout_xform_lookahead_tile_artifacts
     )
+
+    def build_flash_attention_layout_xform_hoist_tile_artifacts(
+        _sdscs,
+        tile_index,
+        *,
+        name_prefix="mixed_flash_pipeline_tile_layout_xform_hoist",
+    ):
+        calls["layout_xform_hoist"].append(tile_index)
+        if not layout_xform_hoist_result:
+            return None
+        current_cons = f"{name_prefix}_0_current_consumer"
+        future_cons = f"{name_prefix}_0_future_consumer"
+        return {
+            "artifacts": [
+                {current_cons: {"flashAttentionPipeline_": {}}},
+                {future_cons: {"flashAttentionPipeline_": {}}},
+            ],
+            "replacements": {
+                "0_batchmatmul": current_cons,
+                "2_batchmatmul": future_cons,
+            },
+            "omissions": {"1_ReStickifyOpHBM"},
+            "bundle_attrs": {},
+            "pointwise_lx_region0": layout_xform_pointwise_region0,
+        }
+
+    onchip_realize.build_flash_attention_layout_xform_hoist_tile_artifacts = (
+        build_flash_attention_layout_xform_hoist_tile_artifacts
+    )
     onchip_realize.build_flash_attention_ifn_pair_tile_artifacts = (
         lambda *_args, **_kwargs: None
     )
@@ -227,6 +262,9 @@ def _install_bundle_stubs(
         lambda *_args, **_kwargs: []
     )
     onchip_realize.flash_attention_layout_xform_lookahead_rejection_reasons = (
+        lambda *_args, **_kwargs: []
+    )
+    onchip_realize.flash_attention_layout_xform_hoist_rejection_reasons = (
         lambda *_args, **_kwargs: []
     )
     onchip_realize.flash_attention_value_flow_tile_rejection_reasons = (
@@ -272,6 +310,8 @@ def _load_bundle_with_stubs(
     layout_xform_pair_result=True,
     layout_xform_lookahead_tile=-1,
     layout_xform_lookahead_result=True,
+    layout_xform_hoist_tile=-1,
+    layout_xform_hoist_result=True,
     layout_xform_pointwise_region0=None,
     causal_plan_artifact=False,
     ifn_prefix_force=False,
@@ -298,6 +338,8 @@ def _load_bundle_with_stubs(
         layout_xform_pair_result=layout_xform_pair_result,
         layout_xform_lookahead_tile=layout_xform_lookahead_tile,
         layout_xform_lookahead_result=layout_xform_lookahead_result,
+        layout_xform_hoist_tile=layout_xform_hoist_tile,
+        layout_xform_hoist_result=layout_xform_hoist_result,
         layout_xform_pointwise_region0=layout_xform_pointwise_region0,
         causal_plan_artifact=causal_plan_artifact,
         ifn_prefix_force=ifn_prefix_force,
@@ -807,6 +849,96 @@ def _fake_flash_layout_xform_lookahead_sdscs():
             shard,
             sizes,
             [("Tensor0-idx0", "INPUT", future_addr)],
+            [("Tensor2-idx2", "OUTPUT", 16384)],
+            consumer_pdi,
+        ),
+    ]
+
+
+def _fake_flash_layout_xform_hoist_sdscs(
+    dependent_future=False,
+    future_producer_op="ReStickifyOpHBM",
+):
+    future_addr = 12288
+    future_input_addr = 24576
+    if dependent_future:
+        future_input_addr = 8192
+    producer_pdi = {
+        "INPUT": {
+            "layoutDimOrder_": ["mb", "x", "in"],
+            "stickDimOrder_": ["in"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    consumer_pdi = {
+        "INPUT": {
+            "layoutDimOrder_": ["x", "mb", "in"],
+            "stickDimOrder_": ["in"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["in", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    current_pdi = {
+        "INPUT": {
+            "layoutDimOrder_": ["mb", "x", "in"],
+            "stickDimOrder_": ["in"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["in", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    shard = {"x": 1, "mb": 32, "out": 1, "in": 1}
+    sizes = {"x_": 2, "mb_": 64, "out_": 64, "in_": 64}
+    return [
+        _fake_sdsc(
+            0,
+            "batchmatmul",
+            shard,
+            sizes,
+            [("Tensor0-idx0", "INPUT", 4096), ("Tensor1-idx1", "KERNEL", 5120)],
+            [("Tensor2-idx2", "OUTPUT", 8192)],
+            current_pdi,
+        ),
+        _fake_sdsc(
+            1,
+            future_producer_op,
+            shard,
+            sizes,
+            [("Tensor0-idx0", "INPUT", future_input_addr)],
+            [("Tensor1-idx1", "KERNEL", future_addr)],
+            producer_pdi,
+        ),
+        _fake_sdsc(
+            2,
+            "batchmatmul",
+            shard,
+            sizes,
+            [
+                ("Tensor0-idx0", "INPUT", 32768),
+                ("Tensor1-idx1", "KERNEL", future_addr),
+            ],
             [("Tensor2-idx2", "OUTPUT", 16384)],
             consumer_pdi,
         ),
@@ -1413,6 +1545,84 @@ def test_flash_layout_xform_lookahead_rejects_future_producer_not_ready():
     ]
 
 
+def test_flash_layout_xform_hoist_runs_future_producer_then_prefetches_input1():
+    result = rz.build_flash_attention_layout_xform_hoist_tile_artifacts(
+        _fake_flash_layout_xform_hoist_sdscs(),
+        tile_index=0,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_pipeline_tile_layout_xform_hoist_0"
+    current = result["artifacts"][0][f"{prefix}_current_consumer"]
+    future = result["artifacts"][1][f"{prefix}_future_consumer"]
+    assert result["replacements"] == {
+        "0_batchmatmul": f"{prefix}_current_consumer",
+        "2_batchmatmul": f"{prefix}_future_consumer",
+    }
+    assert result["omissions"] == {"1_ReStickifyOpHBM"}
+    assert len(current["dscs_"]) == 2
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [-1, 0, 0, 1],
+        [0, 1, 1, 0],
+    ]
+    dataop_name = next(iter(current["datadscs_"][0]))
+    assert dataop_name == (
+        "0_STCDPOpLx_prefetch_layout_xform_hoisted_future_"
+        "Tensor0_idx1_tile1"
+    )
+    future_dl = rz._dl_op({"future": future})
+    assert rz._hbm_base(future_dl, 1) is None
+    assert rz._lds_by_idx(future_dl, 1)["hbmSize_"] == 0
+
+    meta = current["flashAttentionPipeline_"]
+    assert meta["layout_xform_hoist_role"] == "current_consumer"
+    assert meta["layout_xform_future_predecessor_sdsc"] == "1_ReStickifyOpHBM"
+    assert (
+        meta["layout_xform_omitted_future_predecessor_sdsc"]
+        == "1_ReStickifyOpHBM"
+    )
+    assert meta["layout_xform_future_consumer_sdsc"] == "2_batchmatmul"
+    assert meta["layout_xform_prefetch_input_idx"] == 1
+    assert meta["layout_xform_runtime_safe"] is False
+    assert meta["layout_xform_runtime_forced"] is True
+    assert future["flashAttentionPipeline_"][
+        "layout_xform_future_input_lx_base"
+    ] == meta["layout_xform_future_input_lx_base"]
+
+
+def test_flash_layout_xform_hoist_rejects_future_dependency_not_ready():
+    assert rz.build_flash_attention_layout_xform_hoist_tile_artifacts(
+        _fake_flash_layout_xform_hoist_sdscs(dependent_future=True),
+        tile_index=0,
+    ) is None
+    reasons = rz.flash_attention_layout_xform_hoist_rejection_reasons(
+        _fake_flash_layout_xform_hoist_sdscs(dependent_future=True),
+        tile_index=0,
+    )
+    assert reasons == [
+        "future_tile1:input0:no_latest_producer",
+        (
+            "future_tile1:input1:producer_input0:"
+            "dependency_not_ready:producer=0:before=0"
+        ),
+    ]
+
+
+def test_flash_layout_xform_hoist_rejects_non_restickify_producer():
+    assert rz.build_flash_attention_layout_xform_hoist_tile_artifacts(
+        _fake_flash_layout_xform_hoist_sdscs(future_producer_op="add"),
+        tile_index=0,
+    ) is None
+    reasons = rz.flash_attention_layout_xform_hoist_rejection_reasons(
+        _fake_flash_layout_xform_hoist_sdscs(future_producer_op="add"),
+        tile_index=0,
+    )
+    assert reasons == [
+        "future_tile1:input0:no_latest_producer",
+        "future_tile1:input1:producer_not_restickify_hbm:add",
+    ]
+
+
 def test_flash_layout_xform_pair_reports_dynamic_pointwise_region():
     result = rz.build_flash_attention_layout_xform_pair_tile_artifacts(
         _fake_flash_pipeline_sdscs(
@@ -1570,6 +1780,41 @@ def test_bundle_executes_layout_xform_lookahead_gate():
                 "sdsc_mixed_flash_pipeline_tile_layout_xform_lookahead_0_"
                 "future_consumer.json"
             ) in bundle_mlir
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_executes_layout_xform_hoist_gate_and_omits_future_producer():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        layout_xform_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["layout_xform_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert (
+                "sdsc_mixed_flash_pipeline_tile_layout_xform_hoist_0_"
+                "current_consumer.json"
+            ) in bundle_mlir
+            assert (
+                "sdsc_mixed_flash_pipeline_tile_layout_xform_hoist_0_"
+                "future_consumer.json"
+            ) in bundle_mlir
+            assert "sdsc_1_ReStickifyOpHBM.json" not in bundle_mlir
+            assert os.path.exists(
+                os.path.join(output_dir, "sdsc_1_ReStickifyOpHBM.json")
+            )
     finally:
         _restore_modules(saved)
 

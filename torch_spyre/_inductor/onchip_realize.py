@@ -1802,6 +1802,7 @@ def _flash_attention_layout_xform_pair_edge(
     tile_index: int,
     *,
     input_idx: int = INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX,
+    allow_nonzero_input: bool = False,
 ) -> tuple[dict | None, list[str]]:
     tile = _flash_value_flow_tile(sdscs_json, tile_index)
     if tile is None:
@@ -1810,7 +1811,7 @@ def _flash_attention_layout_xform_pair_edge(
     cons_dl = _dl_op(cons)
     if input_idx not in _consumer_input_indices(cons_dl):
         return None, [f"input{input_idx}:not_consumer_input"]
-    if input_idx != INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX:
+    if input_idx != INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX and not allow_nonzero_input:
         return None, [f"input{input_idx}:not_supported_layout_xform_input"]
 
     cons_body = _body(cons)
@@ -1846,6 +1847,7 @@ def _flash_attention_layout_xform_pair_edge(
     cons_layout = _layout_for_lds(cons_dl, input_idx)
     cons_stick = _stick_dim_for_lds(cons_dl, input_idx)
     cons_split = _single_split_dim(cons_body.get("numWkSlicesPerDim_", {}))
+    prod_split = _single_split_dim(_body(prod).get("numWkSlicesPerDim_", {}))
     if (
         prod_layout is None
         or prod_stick is None
@@ -1882,6 +1884,9 @@ def _flash_attention_layout_xform_pair_edge(
     iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
     if iter_sizes is None or any(dim not in iter_sizes for dim in source_layout):
         return None, [f"input{input_idx}:missing_iter_sizes"]
+    xform_split = cons_split
+    if xform_split not in iter_sizes and prod_split is not None:
+        xform_split = dim_map.get(prod_split)
     source_pieces = _mapped_work_slice_piece_info(
         _body(prod),
         prod_layout,
@@ -1891,13 +1896,17 @@ def _flash_attention_layout_xform_pair_edge(
     )
     if source_pieces is None:
         return None, [f"input{input_idx}:producer_piece_map_missing"]
-    if cons_split not in iter_sizes or iter_sizes[cons_split] % num_cores != 0:
+    if (
+        xform_split is None
+        or xform_split not in iter_sizes
+        or iter_sizes[xform_split] % num_cores != 0
+    ):
         return None, [f"input{input_idx}:invalid_split:{cons_split}"]
 
     slice_bytes = _reserve_bridge_region_bytes(
         per_core_same_stick_slice_bytes(
             iter_sizes,
-            cons_split,
+            xform_split,
             cons_stick,
             STICK_SIZE,
             num_cores,
@@ -1923,7 +1932,7 @@ def _flash_attention_layout_xform_pair_edge(
             "consumer_layout": cons_layout,
             "dim_pool": source_layout,
             "stick_dim": cons_stick,
-            "split_dim": cons_split,
+            "split_dim": xform_split,
             "iter_sizes": iter_sizes,
             "slice_bytes": slice_bytes,
             "producer_layout": prod_layout,
@@ -2728,6 +2737,333 @@ def build_flash_attention_layout_xform_lookahead_tile_artifacts(
         "bundle_attrs": {},
         "pointwise_lx_region0": lookahead["future_consumer_base"]
         + lookahead["slice_bytes"],
+        "rejection_reasons": reasons,
+    }
+
+
+def _hoistable_before(
+    sdscs_json: list[dict],
+    producer_index: int,
+    before_index: int,
+) -> list[str]:
+    prod = sdscs_json[producer_index]
+    reasons: list[str] = []
+    for in_idx in _consumer_input_indices(_dl_op(prod)):
+        addr = _hbm_base(_dl_op(prod), in_idx)
+        if addr is None:
+            reasons.append(f"producer_input{in_idx}:not_hbm_backed")
+            continue
+        latest = _latest_producer_of_hbm(sdscs_json, producer_index, addr)
+        if latest is not None and latest[0] >= before_index:
+            reasons.append(
+                f"producer_input{in_idx}:dependency_not_ready:"
+                f"producer={latest[0]}:before={before_index}"
+            )
+    return reasons
+
+
+def _flash_attention_layout_xform_hoist_edges(
+    sdscs_json: list[dict],
+    current_tile: int,
+) -> tuple[dict | None, list[str]]:
+    current = _flash_value_flow_tile(sdscs_json, current_tile)
+    if current is None:
+        return None, ["current:tile_not_found"]
+    current_consumer_index, current_consumer = current
+    current_num_cores = int(_body(current_consumer).get("numCoresUsed_", 0))
+    if current_num_cores <= 0:
+        return None, ["current:invalid_num_cores"]
+
+    reasons: list[str] = []
+    for future_tile in range(current_tile + 1, _flash_value_flow_tile_count(sdscs_json)):
+        future = _flash_value_flow_tile(sdscs_json, future_tile)
+        if future is None:
+            reasons.append(f"future_tile{future_tile}:tile_not_found")
+            continue
+        _future_consumer_index, future_consumer = future
+        future_reasons: list[str] = []
+        for input_idx in _consumer_input_indices(_dl_op(future_consumer)):
+            candidate_edge, candidate_reasons = (
+                _flash_attention_layout_xform_pair_edge(
+                    sdscs_json,
+                    future_tile,
+                    input_idx=input_idx,
+                    allow_nonzero_input=True,
+                )
+            )
+            if candidate_edge is None:
+                future_reasons.extend(candidate_reasons)
+                continue
+            candidate_prod_op = _op_name(candidate_edge["producer"])
+            if candidate_prod_op != "ReStickifyOpHBM":
+                future_reasons.append(
+                    f"input{input_idx}:producer_not_restickify_hbm:"
+                    f"{candidate_prod_op}"
+                )
+                continue
+
+            future_producer_index = candidate_edge["producer_index"]
+            future_consumer_index = candidate_edge["consumer_index"]
+            if future_producer_index <= current_consumer_index:
+                future_reasons.append(
+                    f"input{input_idx}:producer_already_ready:"
+                    f"producer={future_producer_index}:"
+                    f"current={current_consumer_index}"
+                )
+                continue
+            if future_consumer_index <= future_producer_index:
+                future_reasons.append(
+                    f"input{input_idx}:consumer_not_after_producer:"
+                    f"consumer={future_consumer_index}:"
+                    f"producer={future_producer_index}"
+                )
+                continue
+            future_num_cores = int(
+                _body(candidate_edge["consumer"]).get("numCoresUsed_", 0)
+            )
+            future_prod_cores = int(
+                _body(candidate_edge["producer"]).get("numCoresUsed_", 0)
+            )
+            if (
+                future_num_cores != current_num_cores
+                or future_prod_cores != current_num_cores
+            ):
+                future_reasons.append(
+                    f"input{input_idx}:num_cores_mismatch:"
+                    f"current={current_num_cores}:producer={future_prod_cores}:"
+                    f"future={future_num_cores}"
+                )
+                continue
+            hoist_reasons = _hoistable_before(
+                sdscs_json,
+                future_producer_index,
+                current_consumer_index,
+            )
+            if hoist_reasons:
+                future_reasons.extend(
+                    f"input{input_idx}:{reason}" for reason in hoist_reasons
+                )
+                continue
+            participant_names = [
+                next(iter(current_consumer)),
+                next(iter(candidate_edge["producer"])),
+                next(iter(candidate_edge["consumer"])),
+            ]
+            if len(set(participant_names)) != len(participant_names):
+                future_reasons.append(
+                    f"input{input_idx}:duplicate_participants:"
+                    f"{','.join(participant_names)}"
+                )
+                continue
+            try:
+                bases = allocate_lx_bases(
+                    2,
+                    candidate_edge["slice_bytes"],
+                    region0=CONSUMER_LX_BASE,
+                )
+            except ValueError:
+                future_reasons.append(
+                    f"input{input_idx}:lx_allocation_exceeds_capacity"
+                )
+                continue
+            return (
+                {
+                    "current_tile": current_tile,
+                    "future_tile": future_tile,
+                    "current_consumer_index": current_consumer_index,
+                    "current_consumer": current_consumer,
+                    "future_edge": candidate_edge,
+                    "num_cores": current_num_cores,
+                    "future_producer_base": bases[0],
+                    "future_consumer_base": bases[1],
+                    "slice_bytes": candidate_edge["slice_bytes"],
+                },
+                [],
+            )
+        reasons.extend(
+            f"future_tile{future_tile}:{reason}" for reason in future_reasons
+        )
+    return None, reasons or ["hoist:no_future_candidate"]
+
+
+def _resolve_flash_attention_layout_xform_hoist_edges(
+    sdscs_json: list[dict],
+    tile_index: int,
+) -> tuple[dict | None, list[str]]:
+    if tile_index != LAYOUT_XFORM_PAIR_AUTO_TILE:
+        return _flash_attention_layout_xform_hoist_edges(sdscs_json, tile_index)
+
+    reasons: list[str] = []
+    for candidate in range(_flash_value_flow_tile_count(sdscs_json)):
+        result, candidate_reasons = _flash_attention_layout_xform_hoist_edges(
+            sdscs_json,
+            candidate,
+        )
+        if result is not None:
+            return result, []
+        reasons.extend(
+            f"tile{candidate}:{reason}" for reason in candidate_reasons
+        )
+    return None, reasons or ["auto:no_candidate_tiles"]
+
+
+def flash_attention_layout_xform_hoist_rejection_reasons(
+    sdscs_json: list[dict],
+    tile_index: int,
+) -> list[str]:
+    """Explain why a hoisted future layout-transform prefetch failed closed."""
+    _result, reasons = _resolve_flash_attention_layout_xform_hoist_edges(
+        sdscs_json,
+        tile_index,
+    )
+    return reasons
+
+
+def build_flash_attention_layout_xform_hoist_tile_artifacts(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    name_prefix: str = "mixed_flash_pipeline_tile_layout_xform_hoist",
+) -> dict | None:
+    """Hoist an independent future producer and prefetch it during current compute."""
+    hoist, reasons = _resolve_flash_attention_layout_xform_hoist_edges(
+        sdscs_json,
+        tile_index,
+    )
+    if hoist is None:
+        return None
+
+    current = hoist["current_consumer"]
+    future_edge = hoist["future_edge"]
+    num_cores = hoist["num_cores"]
+    current_tile = hoist["current_tile"]
+    future_tile = hoist["future_tile"]
+
+    current_name = next(iter(current))
+    future_prod_name = next(iter(future_edge["producer"]))
+    future_cons_name = next(iter(future_edge["consumer"]))
+    current_sidecar = f"{name_prefix}_{current_tile}_current_consumer"
+    future_cons_sidecar = f"{name_prefix}_{current_tile}_future_consumer"
+
+    future_compute_dsc = copy.deepcopy(_body(future_edge["producer"])["dscs_"][0])
+    future_compute_root = {future_prod_name: {"dscs_": [future_compute_dsc]}}
+    apply_lx_flip(
+        future_compute_root,
+        LxFlip(
+            future_edge["producer_idx"],
+            hoist["future_producer_base"],
+            "layout-xform-hoist-future-producer-output",
+        ),
+    )
+
+    current_compute_dsc = copy.deepcopy(_body(current)["dscs_"][0])
+    future_prefetch = _make_layout_xform_dataop(
+        (
+            "0_STCDPOpLx_prefetch_layout_xform_hoisted_future_"
+            f"Tensor0_idx{future_edge['consumer_idx']}_tile{future_tile}"
+        ),
+        future_edge,
+        producer_base=hoist["future_producer_base"],
+        consumer_base=hoist["future_consumer_base"],
+        num_cores=num_cores,
+    )
+    schedule = {
+        str(core_id): [[-1, 0, 0, 1], [0, 1, 1, 0]]
+        for core_id in range(num_cores)
+    }
+    current_artifact = build_flash_attention_pipeline_mixed_sdsc(
+        current_sidecar,
+        [future_prefetch],
+        ["STCDPOpLx"],
+        schedule,
+        [future_compute_dsc, current_compute_dsc],
+        num_cores,
+    )
+    current_root = current_artifact[current_sidecar]
+    current_body = _body(current)
+    for key in (
+        "sdscFoldProps_",
+        "sdscFolds_",
+        "coreFoldProp_",
+        "coreletFoldProp_",
+        "coreIdToDsc_",
+        "numWkSlicesPerDim_",
+        "coreIdToWkSlice_",
+    ):
+        if key in current_body:
+            current_root[key] = copy.deepcopy(current_body[key])
+    current_root["flashAttentionPipeline_"].update(
+        {
+            "source": "generated-flash-prefill-layout-xform-hoisted-future",
+            "layout_xform_mode": "hoisted_future_producer_prefetch",
+            "layout_xform_hoist_role": "current_consumer",
+            "layout_xform_experimental": True,
+            "layout_xform_runtime_safe": False,
+            "layout_xform_runtime_forced": True,
+            "layout_xform_current_tile": current_tile,
+            "layout_xform_future_tile": future_tile,
+            "layout_xform_future_predecessor_sdsc": future_prod_name,
+            "layout_xform_omitted_future_predecessor_sdsc": future_prod_name,
+            "layout_xform_future_consumer_sdsc": future_cons_name,
+            "layout_xform_future_consumer_sidecar": future_cons_sidecar,
+            "layout_xform_prefetch_input_idx": future_edge["consumer_idx"],
+            "layout_xform_future_producer_lx_base": hoist[
+                "future_producer_base"
+            ],
+            "layout_xform_future_input_lx_base": hoist[
+                "future_consumer_base"
+            ],
+            "slice_bytes": hoist["slice_bytes"],
+            "replaces_sdsc": current_name,
+            "tile_index": current_tile,
+            "requested_tile_index": tile_index,
+            "compute_tile_count": 2,
+        }
+    )
+
+    future_consumer_artifact = {
+        future_cons_sidecar: copy.deepcopy(_body(future_edge["consumer"]))
+    }
+    apply_lx_flip(
+        future_consumer_artifact,
+        LxFlip(
+            future_edge["consumer_idx"],
+            hoist["future_consumer_base"],
+            "layout-xform-hoist-future-consumer-input",
+        ),
+    )
+    future_consumer_artifact[future_cons_sidecar].setdefault(
+        "flashAttentionPipeline_", {}
+    ).update(
+        {
+            "source": "generated-flash-prefill-layout-xform-hoisted-future-consumer",
+            "layout_xform_mode": "hoisted_future_producer_prefetch",
+            "layout_xform_hoist_role": "future_consumer",
+            "layout_xform_experimental": True,
+            "layout_xform_runtime_safe": False,
+            "layout_xform_runtime_forced": True,
+            "layout_xform_current_tile": current_tile,
+            "layout_xform_future_tile": future_tile,
+            "layout_xform_prefetch_input_idx": future_edge["consumer_idx"],
+            "layout_xform_future_input_lx_base": hoist[
+                "future_consumer_base"
+            ],
+            "replaces_sdsc": future_cons_name,
+            "tile_index": future_tile,
+            "requested_tile_index": tile_index,
+        }
+    )
+
+    return {
+        "artifacts": [current_artifact, future_consumer_artifact],
+        "replacements": {
+            current_name: current_sidecar,
+            future_cons_name: future_cons_sidecar,
+        },
+        "omissions": {future_prod_name},
+        "bundle_attrs": {},
+        "pointwise_lx_region0": hoist["future_consumer_base"]
+        + hoist["slice_bytes"],
         "rejection_reasons": reasons,
     }
 
