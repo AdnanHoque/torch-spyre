@@ -21,6 +21,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch_spyre._inductor import config as spyre_config
+from torch_spyre._inductor import decompositions as spyre_decompositions
 from utils_inductor import compare_with_cpu, compare_with_pytorch
 
 
@@ -246,6 +247,47 @@ class TestBuildingBlocks(unittest.TestCase):
             mock.patch.object(spyre_config, "flash_attention_prefill_block_size", 64),
         ):
             compare_with_pytorch(sdpa, sdpa, Q, K, V, atol=0.1, rtol=0.1)
+
+    def test_sdpa_flash_attention_mixed_pipeline_causal_prefill(self):
+        B, H, L, D = 1, 2, 128, 64
+
+        Q = torch.randn(B, H, L, D, dtype=torch.float16)
+        K = torch.randn(B, H, L, D, dtype=torch.float16)
+        V = torch.randn(B, H, L, D, dtype=torch.float16)
+
+        def sdpa(Q, K, V):
+            return F.scaled_dot_product_attention(Q, K, V, is_causal=True)
+
+        with (
+            mock.patch.object(spyre_config, "flash_attention_prefill", False),
+            mock.patch.object(spyre_config, "flash_attention_mixed_pipeline", True),
+            mock.patch.object(spyre_config, "flash_attention_prefill_block_size", 64),
+        ):
+            self.assertTrue(
+                spyre_decompositions._can_use_flash_attention_prefill(
+                    Q, K, V, None, 0.0, True
+                )
+            )
+            compare_with_pytorch(sdpa, sdpa, Q, K, V, atol=0.1, rtol=0.1)
+
+    def test_flash_attention_prefill_causal_tail_block(self):
+        B, H, L, D = 1, 2, 96, 64
+
+        Q = torch.randn(B, H, L, D, dtype=torch.float32)
+        K = torch.randn(B, H, L, D, dtype=torch.float32)
+        V = torch.randn(B, H, L, D, dtype=torch.float32)
+
+        actual = spyre_decompositions._flash_attention_prefill(
+            Q,
+            K,
+            V,
+            block_size=64,
+            score_scale=1.0 / math.sqrt(D),
+            is_causal=True,
+        )
+        expected = F.scaled_dot_product_attention(Q, K, V, is_causal=True)
+
+        torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
 
     def test_sdpa_flash_attention_score_scale_handoff(self):
         B, H, L, D = 1, 2, 128, 64

@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
+from unittest import mock
 
 
 _HERE = Path(__file__).resolve().parent
@@ -43,8 +45,18 @@ def _args():
         heads=2,
         dim=64,
         block_size=64,
+        lengths="128",
+        variants="onchip_master_layout_xform",
+        warmup=1,
+        iters=2,
+        seed=0xA771,
+        atol=0.1,
+        rtol=0.1,
+        timeout_s=480.0,
         cache_prefix="/tmp/sdpa-sweep-test",
+        output_json="",
         dxp_debug=True,
+        is_causal=False,
     )
 
 
@@ -71,6 +83,59 @@ def test_master_variant_keeps_low_level_layout_xform_disabled():
     assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA"] == "1"
     assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM"] == "0"
     assert env[_LAYOUT_PAIR_ENV] == "-1"
+
+
+def test_causal_flag_is_reflected_in_cache_key():
+    args = _args()
+    args.is_causal = True
+
+    env = sweep._child_env(args, "onchip_master_layout_xform", 128)
+
+    assert "-C1-" in env["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_parent_forwards_causal_flag_to_child_command():
+    args = _args()
+    args.is_causal = True
+    calls = []
+
+    def fake_run(cmd, *, env, text, capture_output, timeout):
+        calls.append(
+            {
+                "cmd": cmd,
+                "env": env,
+                "text": text,
+                "capture_output": capture_output,
+                "timeout": timeout,
+            }
+        )
+        payload = {
+            "status": "ok",
+            "variant": "onchip_master_layout_xform",
+            "shape": {
+                "batch": args.batch,
+                "heads": args.heads,
+                "length": 128,
+                "dim": args.dim,
+            },
+            "cache_dir": env["TORCHINDUCTOR_CACHE_DIR"],
+            "median_ms": 0.1,
+            "mean_ms": 0.1,
+            "max_abs_error": 0.0,
+            "mixed_sdscs": [],
+        }
+        return argparse.Namespace(
+            returncode=0,
+            stdout="RESULT_JSON:" + json.dumps(payload, sort_keys=True),
+            stderr="",
+        )
+
+    with mock.patch.object(sweep.subprocess, "run", side_effect=fake_run):
+        assert sweep._run_parent(args) == 0
+
+    assert len(calls) == 1
+    assert "--is-causal" in calls[0]["cmd"]
+    assert "-C1-" in calls[0]["env"]["TORCHINDUCTOR_CACHE_DIR"]
 
 
 def _run_all():

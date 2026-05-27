@@ -60,29 +60,36 @@ def _ok_row(case, length, *, layout_xform=True):
             "dim": case.dim,
         },
         "block_size": case.block_size,
+        "is_causal": case.is_causal,
         "max_abs_error": 0.003,
         "mixed_sdscs": mixed,
     }
 
 
-def test_onchip_layout_xform_gate_matrix_matches_stage039():
+def test_onchip_layout_xform_gate_matrix_matches_stage043():
     cases = gate.select_cases("onchip_layout_xform", "all")
 
     assert [case.name for case in cases] == [
         "b1h2d64_block64",
         "b2h2d64_block64",
+        "b1h2d64_block64_causal",
         "b2h4d128_block64",
         "b1h4d64_block64",
         "b1h2d128_block64",
         "b1h2d64_block128",
         "b1h2d64_block64_long",
     ]
-    assert sum(len(case.lengths) for case in cases) == 18
+    assert sum(len(case.lengths) for case in cases) == 20
     assert cases[0].lengths == (64, 128, 256, 384, 512)
     assert cases[0].layout_xform_lengths == (128, 256, 384, 512)
-    assert cases[2].batch == 2
-    assert cases[2].heads == 4
-    assert cases[2].dim == 128
+    assert cases[0].is_causal is False
+    assert cases[2].is_causal is True
+    assert cases[2].lengths == (128, 256)
+    assert cases[2].min_mixed_by_length == {128: 8, 256: 16}
+    assert cases[2].layout_xform_lengths == (128, 256)
+    assert cases[3].batch == 2
+    assert cases[3].heads == 4
+    assert cases[3].dim == 128
     assert cases[-2].block_size == 128
     assert cases[-2].lengths == (128, 256, 512)
     assert cases[-2].layout_xform_lengths == (256, 512)
@@ -147,6 +154,24 @@ def test_gate_validation_rejects_wrong_shape_status_and_error():
     assert "max_abs_error=0.25" in joined
 
 
+def test_gate_validation_rejects_missing_or_wrong_causal_flag():
+    case = gate.select_cases("onchip_layout_xform", "b1h2d64_block64_causal")[0]
+    rows = [_ok_row(case, length) for length in case.lengths]
+    del rows[0]["is_causal"]
+    rows[1]["is_causal"] = False
+
+    errors = gate.validate_rows(
+        rows,
+        case=case,
+        variant="onchip_master_layout_xform",
+        max_error=0.01,
+    )
+
+    joined = "\n".join(errors)
+    assert "is_causal=None expected=True" in joined
+    assert "is_causal=False expected=True" in joined
+
+
 def test_sweep_command_uses_case_shape_and_output_path():
     case = gate.select_cases("onchip_layout_xform", "b1h2d128_block64")[0]
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -174,6 +199,29 @@ def test_sweep_command_uses_case_shape_and_output_path():
     assert cmd[cmd.index("--dim") + 1] == "128"
     assert cmd[cmd.index("--block-size") + 1] == "64"
     assert cmd[cmd.index("--output-json") + 1].endswith("case.json")
+    assert "--is-causal" not in cmd
+
+
+def test_sweep_command_adds_causal_flag_for_causal_case():
+    case = gate.select_cases("onchip_layout_xform", "b1h2d64_block64_causal")[0]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_json = Path(tmpdir) / "case.json"
+        cmd = gate.sweep_command(
+            python="pythonX",
+            variant="onchip_master_layout_xform",
+            case=case,
+            warmup=1,
+            iters=2,
+            timeout_s=480.0,
+            cache_prefix="/tmp/cache-prefix",
+            output_json=output_json,
+            seed=123,
+            atol=0.1,
+            rtol=0.2,
+        )
+
+    assert cmd[cmd.index("--lengths") + 1] == "128,256"
+    assert "--is-causal" in cmd
 
 
 def _run_all():

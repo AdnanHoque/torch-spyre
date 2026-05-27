@@ -40,6 +40,7 @@ class GateCase:
     lengths: tuple[int, ...]
     min_mixed_by_length: dict[int, int]
     layout_xform_lengths: tuple[int, ...]
+    is_causal: bool = False
 
 
 ONCHIP_LAYOUT_XFORM_CASES = (
@@ -62,6 +63,17 @@ ONCHIP_LAYOUT_XFORM_CASES = (
         lengths=(128, 256),
         min_mixed_by_length={128: 7, 256: 15},
         layout_xform_lengths=(128, 256),
+    ),
+    GateCase(
+        name="b1h2d64_block64_causal",
+        batch=1,
+        heads=2,
+        dim=64,
+        block_size=64,
+        lengths=(128, 256),
+        min_mixed_by_length={128: 8, 256: 16},
+        layout_xform_lengths=(128, 256),
+        is_causal=True,
     ),
     GateCase(
         name="b2h4d128_block64",
@@ -156,7 +168,7 @@ def sweep_command(
     atol: float,
     rtol: float,
 ) -> list[str]:
-    return [
+    cmd = [
         python,
         str(SWEEP_SCRIPT),
         "--lengths",
@@ -188,6 +200,9 @@ def sweep_command(
         "--rtol",
         str(rtol),
     ]
+    if case.is_causal:
+        cmd.append("--is-causal")
+    return cmd
 
 
 def _has_layout_xform_consumer(row: dict) -> bool:
@@ -233,6 +248,11 @@ def validate_rows(
             errors.append(
                 f"{case.name}: L={length} block_size={row.get('block_size')} "
                 f"expected={case.block_size}"
+            )
+        if row.get("is_causal") != case.is_causal:
+            errors.append(
+                f"{case.name}: L={length} is_causal={row.get('is_causal')} "
+                f"expected={case.is_causal}"
             )
         max_abs_error = row.get("max_abs_error")
         if max_abs_error is None or max_abs_error > max_error:

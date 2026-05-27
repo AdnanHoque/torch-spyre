@@ -73,9 +73,11 @@ def _can_use_flash_attention_prefill(
         return False
     if dropout_p > 0.0:
         return False
-    if attn_bias is not None or is_causal:
+    if attn_bias is not None:
         return False
     if query.dim() != 4 or key.dim() != 4 or value.dim() != 4:
+        return False
+    if is_causal and query.size(2) != key.size(2):
         return False
     return True
 
@@ -86,6 +88,7 @@ def _flash_attention_prefill(
     value: torch.Tensor,
     block_size: int,
     score_scale: float,
+    is_causal: bool = False,
 ) -> torch.Tensor:
     if block_size <= 0:
         raise Unsupported(
@@ -109,6 +112,15 @@ def _flash_attention_prefill(
         device=query.device,
         dtype=query.dtype,
     )
+    causal_bias = None
+    if is_causal:
+        causal_bias = torch.full(
+            (max_seqlen_q, max_seqlen_kv),
+            float("-inf"),
+            device=query.device,
+            dtype=query.dtype,
+        )
+        causal_bias = causal_bias.triu(diagonal=1)
 
     for start in range(0, max_seqlen_kv, block_size):
         end = min(start + block_size, max_seqlen_kv)
@@ -121,6 +133,8 @@ def _flash_attention_prefill(
             scores = (scores * score_scale).clone(
                 memory_format=torch.contiguous_format
             )
+        if causal_bias is not None:
+            scores = scores + causal_bias[:, start:end]
         scores = scores.transpose(-1, -2).contiguous()
         block_max = torch.amax(scores, dim=-2)
         next_max = torch.maximum(max_running, block_max)
@@ -630,6 +644,7 @@ def spyre__sdpa_overrideable(
             value,
             config.flash_attention_prefill_block_size,
             score_scale,
+            is_causal,
         )
     else:
         scaling_factor = math.sqrt(score_scale)

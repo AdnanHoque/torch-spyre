@@ -240,7 +240,7 @@ def _run_child(args: argparse.Namespace) -> int:
     v_cpu = torch.randn(shape, dtype=torch.float16)
 
     def sdpa(q, k, v):
-        return F.scaled_dot_product_attention(q, k, v)
+        return F.scaled_dot_product_attention(q, k, v, is_causal=args.is_causal)
 
     reference = sdpa(q_cpu, k_cpu, v_cpu)
     q_dev = q_cpu.to("spyre")
@@ -287,6 +287,7 @@ def _run_child(args: argparse.Namespace) -> int:
             "dim": args.dim,
         },
         "block_size": spyre_config.flash_attention_prefill_block_size,
+        "is_causal": args.is_causal,
         "block_size_env": os.environ.get(
             "SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE", ""
         ),
@@ -322,7 +323,7 @@ def _child_env(args: argparse.Namespace, variant: str, length: int) -> dict[str,
     cache_prefix = args.cache_prefix.rstrip("/")
     env["TORCHINDUCTOR_CACHE_DIR"] = (
         f"{cache_prefix}-{variant}-B{args.batch}-H{args.heads}"
-        f"-L{length}-D{args.dim}-{os.getpid()}-{nonce}"
+        f"-L{length}-D{args.dim}-C{int(args.is_causal)}-{os.getpid()}-{nonce}"
     )
     return env
 
@@ -363,6 +364,8 @@ def _run_parent(args: argparse.Namespace) -> int:
                 "--rtol",
                 str(args.rtol),
             ]
+            if args.is_causal:
+                cmd.append("--is-causal")
             env = _child_env(args, variant, length)
             started = time.perf_counter()
             try:
@@ -470,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=0xA771)
     parser.add_argument("--atol", type=float, default=0.1)
     parser.add_argument("--rtol", type=float, default=0.1)
+    parser.add_argument("--is-causal", action="store_true")
     parser.add_argument("--timeout-s", type=float, default=180.0)
     parser.add_argument("--cache-prefix", default="/tmp/sdpa-onchip-sweep")
     parser.add_argument("--output-json", default="")
