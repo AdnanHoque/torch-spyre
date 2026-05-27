@@ -50,6 +50,15 @@ _KV_REPACK_PAIR_REUSE_ENV = (
 _KV_REPACK_PAIR_GROUP_ENV = (
     "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_GROUP_SIZE"
 )
+_KV_REPACK_PAIR_SELF_RESIDENT_ENV = (
+    "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_SELF_RESIDENT_SOURCE"
+)
+_KV_REPACK_PAIR_USE_UNICAST_ENV = (
+    "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_USE_UNICAST"
+)
+_KV_REPACK_PAIR_FORCE_MC_ENV = (
+    "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_FORCE_MC_MODE"
+)
 
 
 def _load_sweep():
@@ -349,6 +358,9 @@ def test_kv_repack_pair_auto_enables_executable_probe():
     assert env[_KV_REPACK_PAIR_IFN_ENV] == "1"
     assert env[_KV_REPACK_PAIR_REUSE_ENV] == "1"
     assert env[_KV_REPACK_PAIR_GROUP_ENV] == "0"
+    assert env[_KV_REPACK_PAIR_SELF_RESIDENT_ENV] == "0"
+    assert env[_KV_REPACK_PAIR_USE_UNICAST_ENV] == "-1"
+    assert env[_KV_REPACK_PAIR_FORCE_MC_ENV] == "-1"
     assert "kv_repack_pair_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
 
 
@@ -382,7 +394,51 @@ def test_kv_repack_pair_group16_auto_splits_broadcast_groups():
     assert env[_KV_REPACK_PAIR_IFN_ENV] == "1"
     assert env[_KV_REPACK_PAIR_REUSE_ENV] == "1"
     assert env[_KV_REPACK_PAIR_GROUP_ENV] == "16"
+    assert env[_KV_REPACK_PAIR_SELF_RESIDENT_ENV] == "0"
+    assert env[_KV_REPACK_PAIR_FORCE_MC_ENV] == "-1"
     assert "kv_repack_pair_group16_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_kv_repack_pair_group8_auto_splits_broadcast_groups_further():
+    env = sweep._child_env(_args(), "kv_repack_pair_group8_auto", 128)
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE"] == "1"
+    assert env[_KV_REPACK_PAIR_ENV] == "-2"
+    assert env[_KV_REPACK_PAIR_GROUP_ENV] == "8"
+    assert env[_KV_REPACK_PAIR_SELF_RESIDENT_ENV] == "0"
+    assert env[_KV_REPACK_PAIR_FORCE_MC_ENV] == "-1"
+    assert "kv_repack_pair_group8_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_kv_repack_pair_group4_auto_splits_broadcast_groups_further():
+    env = sweep._child_env(_args(), "kv_repack_pair_group4_auto", 128)
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE"] == "1"
+    assert env[_KV_REPACK_PAIR_ENV] == "-2"
+    assert env[_KV_REPACK_PAIR_GROUP_ENV] == "4"
+    assert env[_KV_REPACK_PAIR_SELF_RESIDENT_ENV] == "0"
+    assert env[_KV_REPACK_PAIR_FORCE_MC_ENV] == "-1"
+    assert "kv_repack_pair_group4_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_kv_repack_pair_self_resident_auto_skips_producer_self_copy():
+    env = sweep._child_env(_args(), "kv_repack_pair_self_resident_auto", 128)
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE"] == "1"
+    assert env[_KV_REPACK_PAIR_ENV] == "-2"
+    assert env[_KV_REPACK_PAIR_SELF_RESIDENT_ENV] == "1"
+    assert env[_KV_REPACK_PAIR_FORCE_MC_ENV] == "-1"
+    assert "kv_repack_pair_self_resident_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_kv_repack_pair_force_mc3_auto_forces_replication_mode():
+    env = sweep._child_env(_args(), "kv_repack_pair_force_mc3_auto", 128)
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE"] == "1"
+    assert env[_KV_REPACK_PAIR_ENV] == "-2"
+    assert env[_KV_REPACK_PAIR_SELF_RESIDENT_ENV] == "0"
+    assert env[_KV_REPACK_PAIR_FORCE_MC_ENV] == "3"
+    assert "kv_repack_pair_force_mc3_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
 
 
 def test_layout_xform_hoist_auto_clears_parent_kv_repack_plan_probe():

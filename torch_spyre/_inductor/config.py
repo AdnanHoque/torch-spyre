@@ -199,6 +199,30 @@ flash_attention_kv_repack_broadcast_pair_group_size: int = int(
         "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_GROUP_SIZE", "0"
     )
 )
+# A/B knob for the high-fanout K/V pair: keep the producer-owned copies already
+# resident at the consumer LX base and omit those producer-self destinations from
+# the STCDPOpLx fanout. This avoids the full-ring multicast entries that include
+# the producer core as one of its own consumers.
+flash_attention_kv_repack_broadcast_pair_self_resident_source: bool = (
+    os.environ.get(
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_SELF_RESIDENT_SOURCE", "0"
+    )
+    == "1"
+)
+# Tri-state A/B knob for STCDPOpLx unicast selection on the executable K/V pair.
+# -1 preserves Deeptools' inferred default; 0/1 writes useUnicast explicitly.
+flash_attention_kv_repack_broadcast_pair_use_unicast: int = int(
+    os.environ.get(
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_USE_UNICAST", "-1"
+    )
+)
+# Descriptor-only A/B knob for Deeptools multicast mode selection on the K/V
+# fanout. -1 preserves inferred mode selection; 1/2/3 force CCW/CW/replication.
+flash_attention_kv_repack_broadcast_pair_force_mc_mode: int = int(
+    os.environ.get(
+        "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_FORCE_MC_MODE", "-1"
+    )
+)
 # Default-off production-shaped bridge for same-stick pointwise edges that appear
 # inside the flash-prefill graph. This keeps the attention experiment off the
 # generic add/add handoff flag while reusing the same fail-closed Tier 1 realizer.

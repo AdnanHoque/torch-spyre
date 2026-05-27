@@ -2410,6 +2410,7 @@ def _kv_repack_broadcast_dst_pieces(
     *,
     include_broadcast_metadata: bool = True,
     consumer_core_ids: list[int] | None = None,
+    skip_source_core_destinations: bool = False,
 ) -> list[dict]:
     pieces = []
     ordinal = 1
@@ -2420,6 +2421,10 @@ def _kv_repack_broadcast_dst_pieces(
     )
     for core_id in core_ids:
         for source_piece in source_pieces:
+            if skip_source_core_destinations and core_id in _piece_lx_mem_ids(
+                source_piece
+            ):
+                continue
             start = copy.deepcopy(source_piece["dimToStartCordinate"])
             size = copy.deepcopy(source_piece["dimToSize_"])
             piece = {
@@ -2443,6 +2448,50 @@ def _kv_repack_broadcast_dst_pieces(
     return pieces
 
 
+def _piece_lx_mem_ids(piece: dict) -> set[int]:
+    mem_ids = set()
+    for placement in piece.get("PlacementInfo", []):
+        if placement.get("type") == "lx":
+            mem_ids.update(int(mem_id) for mem_id in placement.get("memId", []))
+    return mem_ids
+
+
+def _move_lx_piece_start_addrs(pieces: list[dict], lx_base: int) -> None:
+    for piece in pieces:
+        for placement in piece.get("PlacementInfo", []):
+            if placement.get("type") == "lx":
+                placement["startAddr"] = [lx_base]
+
+
+def _kv_repack_broadcast_dst_piece_count(
+    edge: dict,
+    *,
+    consumer_core_ids: list[int] | None = None,
+    skip_source_core_destinations: bool = False,
+) -> int:
+    core_ids = (
+        list(range(edge["consumer_num_cores"]))
+        if consumer_core_ids is None
+        else list(consumer_core_ids)
+    )
+    count = 0
+    for core_id in core_ids:
+        for source_piece in edge["source_pieces"]:
+            if skip_source_core_destinations and core_id in _piece_lx_mem_ids(
+                source_piece
+            ):
+                continue
+            count += 1
+    return count
+
+
+def _kv_repack_source_core_ids(edge: dict) -> list[int]:
+    core_ids = set()
+    for source_piece in edge["source_pieces"]:
+        core_ids.update(_piece_lx_mem_ids(source_piece))
+    return sorted(core_ids)
+
+
 def _make_kv_repack_broadcast_dataop(
     name: str,
     edge: dict,
@@ -2450,6 +2499,10 @@ def _make_kv_repack_broadcast_dataop(
     include_broadcast_metadata: bool = True,
     stcdp_subpiece_reuse: bool = True,
     consumer_core_ids: list[int] | None = None,
+    dataop_core_ids: list[int] | None = None,
+    skip_source_core_destinations: bool = False,
+    stcdp_use_unicast: int = -1,
+    stcdp_force_mc_mode: int = -1,
 ) -> dict:
     source_pieces = edge["source_pieces"]
     dst_pieces = _kv_repack_broadcast_dst_pieces(
@@ -2458,11 +2511,12 @@ def _make_kv_repack_broadcast_dataop(
         edge["consumer_lx_base"],
         include_broadcast_metadata=include_broadcast_metadata,
         consumer_core_ids=consumer_core_ids,
+        skip_source_core_destinations=skip_source_core_destinations,
     )
     core_ids = (
         list(range(edge["consumer_num_cores"]))
-        if consumer_core_ids is None
-        else list(consumer_core_ids)
+        if dataop_core_ids is None
+        else list(dataop_core_ids)
     )
     in_ld = _kv_repack_labeled_ds(
         "dataIN",
@@ -2481,6 +2535,10 @@ def _make_kv_repack_broadcast_dataop(
     op = _stcdp_op()
     if not stcdp_subpiece_reuse:
         op["enSubPieceReuse"] = 0
+    if stcdp_use_unicast in (0, 1):
+        op["useUnicast"] = stcdp_use_unicast
+    if stcdp_force_mc_mode >= 0:
+        op["forceModeMC"] = {"force": 1, "val": stcdp_force_mc_mode}
     return {
         name: {
             "coreIdsUsed_": core_ids,
@@ -2798,6 +2856,7 @@ def _kv_repack_broadcast_meta(
     input_idx: int,
     executable: bool,
     runtime_forced: bool,
+    skip_source_core_destinations: bool = False,
 ) -> dict:
     return {
         "source": source,
@@ -2823,8 +2882,9 @@ def _kv_repack_broadcast_meta(
         "kv_repack_source_lx_base": edge["source_lx_base"],
         "kv_repack_consumer_lx_base": edge["consumer_lx_base"],
         "kv_repack_source_piece_count": len(edge["source_pieces"]),
-        "kv_repack_destination_piece_count": (
-            len(edge["source_pieces"]) * edge["consumer_num_cores"]
+        "kv_repack_destination_piece_count": _kv_repack_broadcast_dst_piece_count(
+            edge,
+            skip_source_core_destinations=skip_source_core_destinations,
         ),
         "slice_bytes": edge["slice_bytes"],
         "tile_index": tile_index,
@@ -2852,6 +2912,9 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
     include_input_fetch_transfer: bool = True,
     stcdp_subpiece_reuse: bool = True,
     broadcast_group_size: int = 0,
+    self_resident_source: bool = False,
+    stcdp_use_unicast: int = -1,
+    stcdp_force_mc_mode: int = -1,
 ) -> dict | None:
     """Build a default-off executable-facing K/V repack producer+consumer pair."""
     selected_tile, selected_input, edge, reasons = (
@@ -2862,6 +2925,13 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
     )
     if edge is None or selected_tile is None or selected_input is None:
         return None
+    edge = copy.deepcopy(edge)
+    if self_resident_source:
+        edge["source_lx_base"] = edge["consumer_lx_base"]
+        _move_lx_piece_start_addrs(
+            edge["source_pieces"],
+            edge["source_lx_base"],
+        )
 
     prod_name = next(iter(edge["producer"]))
     cons_name = next(iter(edge["consumer"]))
@@ -2887,10 +2957,14 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
                 input_idx=selected_input,
                 executable=True,
                 runtime_forced=True,
+                skip_source_core_destinations=self_resident_source,
             ),
             "kv_repack_broadcast_role": "producer",
             "kv_repack_producer_sidecar": pred_sidecar,
             "kv_repack_consumer_sidecar": cons_sidecar,
+            "kv_repack_self_resident_source": self_resident_source,
+            "kv_repack_stcdp_use_unicast": stcdp_use_unicast,
+            "kv_repack_stcdp_force_mc_mode": stcdp_force_mc_mode,
             "replaces_sdsc": prod_name,
         }
     )
@@ -2917,7 +2991,9 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
         edge["consumer_num_cores"],
         broadcast_group_size,
     )
+    source_core_ids = _kv_repack_source_core_ids(edge)
     dataops = []
+    group_dataop_core_ids = []
     for group_idx, core_ids in enumerate(core_groups):
         group_suffix = "" if len(core_groups) == 1 else f"_group{group_idx}"
         dataop_name = (
@@ -2925,6 +3001,8 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
             f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
             f"{group_suffix}"
         )
+        dataop_core_ids = sorted(set(core_ids).union(source_core_ids))
+        group_dataop_core_ids.append(dataop_core_ids)
         dataops.append(
             _make_kv_repack_broadcast_dataop(
                 dataop_name,
@@ -2932,12 +3010,20 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
                 include_broadcast_metadata=False,
                 stcdp_subpiece_reuse=stcdp_subpiece_reuse,
                 consumer_core_ids=core_ids,
+                dataop_core_ids=dataop_core_ids,
+                skip_source_core_destinations=self_resident_source,
+                stcdp_use_unicast=stcdp_use_unicast,
+                stcdp_force_mc_mode=stcdp_force_mc_mode,
             )
         )
     schedule = {}
-    for group_idx, core_ids in enumerate(core_groups):
-        for core_id in core_ids:
-            schedule[str(core_id)] = [[group_idx, -1, 0, 1], [-1, 0, 1, 0]]
+    for core_id in range(edge["consumer_num_cores"]):
+        schedule_rows = []
+        for group_idx, dataop_core_ids in enumerate(group_dataop_core_ids):
+            if core_id in dataop_core_ids:
+                schedule_rows.append([group_idx, -1, 1 if schedule_rows else 0, 1])
+        schedule_rows.append([-1, 0, 1, 0])
+        schedule[str(core_id)] = schedule_rows
     consumer_artifact = build_flash_attention_pipeline_mixed_sdsc(
         cons_sidecar,
         dataops,
@@ -2969,6 +3055,7 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
                 input_idx=selected_input,
                 executable=True,
                 runtime_forced=True,
+                skip_source_core_destinations=self_resident_source,
             ),
             "kv_repack_broadcast_role": "consumer",
             "kv_repack_producer_sidecar": pred_sidecar,
@@ -2977,6 +3064,9 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
             "kv_repack_stcdp_subpiece_reuse": stcdp_subpiece_reuse,
             "kv_repack_broadcast_group_size": broadcast_group_size,
             "kv_repack_broadcast_group_count": len(core_groups),
+            "kv_repack_self_resident_source": self_resident_source,
+            "kv_repack_stcdp_use_unicast": stcdp_use_unicast,
+            "kv_repack_stcdp_force_mc_mode": stcdp_force_mc_mode,
             "replaces_sdsc": cons_name,
             "compute_tile_count": 1,
         }

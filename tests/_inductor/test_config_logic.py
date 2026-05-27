@@ -40,6 +40,9 @@ _FLASH_CONFIG_KEYS = [
     "flash_attention_kv_repack_broadcast_pair_ifn_transfer",
     "flash_attention_kv_repack_broadcast_pair_subpiece_reuse",
     "flash_attention_kv_repack_broadcast_pair_group_size",
+    "flash_attention_kv_repack_broadcast_pair_self_resident_source",
+    "flash_attention_kv_repack_broadcast_pair_use_unicast",
+    "flash_attention_kv_repack_broadcast_pair_force_mc_mode",
     "flash_attention_pointwise_handoff",
     "flash_attention_score_scale_handoff",
     "causal_idx_to_mask_plan_artifact",
@@ -126,6 +129,9 @@ def test_flash_attention_onchip_sdpa_master_gate_defaults_off():
     assert cfg["flash_attention_kv_repack_broadcast_pair_ifn_transfer"] is True
     assert cfg["flash_attention_kv_repack_broadcast_pair_subpiece_reuse"] is True
     assert cfg["flash_attention_kv_repack_broadcast_pair_group_size"] == 0
+    assert cfg["flash_attention_kv_repack_broadcast_pair_self_resident_source"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_pair_use_unicast"] == -1
+    assert cfg["flash_attention_kv_repack_broadcast_pair_force_mc_mode"] == -1
     assert cfg["causal_idx_to_mask_plan_artifact"] is False
 
 
@@ -180,6 +186,30 @@ def test_flash_attention_kv_repack_pair_group_size_accepts_concrete_value():
     )
 
     assert cfg["flash_attention_kv_repack_broadcast_pair_group_size"] == 16
+
+
+def test_flash_attention_kv_repack_pair_self_resident_source_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_SELF_RESIDENT_SOURCE": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_pair_self_resident_source"] is True
+
+
+def test_flash_attention_kv_repack_pair_use_unicast_accepts_concrete_value():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_USE_UNICAST": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_pair_use_unicast"] == 1
+
+
+def test_flash_attention_kv_repack_pair_force_mc_accepts_concrete_value():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_FORCE_MC_MODE": "3"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_pair_force_mc_mode"] == 3
 
 
 def test_flash_attention_kv_repack_pair_accepts_concrete_tile():

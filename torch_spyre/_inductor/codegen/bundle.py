@@ -158,6 +158,21 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         "flash_attention_kv_repack_broadcast_pair_group_size",
         0,
     )
+    kv_repack_pair_self_resident_source = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_self_resident_source",
+        False,
+    )
+    kv_repack_pair_use_unicast = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_use_unicast",
+        -1,
+    )
+    kv_repack_pair_force_mc_mode = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_force_mc_mode",
+        -1,
+    )
     sidecar_sdscs = []
     sidecar_replacements = {}
     sidecar_omissions = set()
@@ -206,6 +221,9 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             include_input_fetch_transfer=kv_repack_pair_ifn_transfer,
             stcdp_subpiece_reuse=kv_repack_pair_subpiece_reuse,
             broadcast_group_size=kv_repack_pair_group_size,
+            self_resident_source=kv_repack_pair_self_resident_source,
+            stcdp_use_unicast=kv_repack_pair_use_unicast,
+            stcdp_force_mc_mode=kv_repack_pair_force_mc_mode,
         )
         if kv_repack_pair is None:
             kv_repack_pair_rejections = (
