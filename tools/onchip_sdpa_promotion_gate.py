@@ -64,6 +64,16 @@ ONCHIP_LAYOUT_XFORM_CASES = (
         layout_xform_lengths=(128, 256),
     ),
     GateCase(
+        name="b2h4d128_block64",
+        batch=2,
+        heads=4,
+        dim=128,
+        block_size=64,
+        lengths=(128, 256),
+        min_mixed_by_length={128: 7, 256: 15},
+        layout_xform_lengths=(128, 256),
+    ),
+    GateCase(
         name="b1h4d64_block64",
         batch=1,
         heads=4,
@@ -92,6 +102,16 @@ ONCHIP_LAYOUT_XFORM_CASES = (
         lengths=(128, 256, 512),
         min_mixed_by_length={128: 3, 256: 9, 512: 19},
         layout_xform_lengths=(256, 512),
+    ),
+    GateCase(
+        name="b1h2d64_block64_long",
+        batch=1,
+        heads=2,
+        dim=64,
+        block_size=64,
+        lengths=(768, 1024),
+        min_mixed_by_length={768: 59, 1024: 78},
+        layout_xform_lengths=(768, 1024),
     ),
 )
 

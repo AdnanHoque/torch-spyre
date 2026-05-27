@@ -71,16 +71,23 @@ def test_onchip_layout_xform_gate_matrix_matches_stage039():
     assert [case.name for case in cases] == [
         "b1h2d64_block64",
         "b2h2d64_block64",
+        "b2h4d128_block64",
         "b1h4d64_block64",
         "b1h2d128_block64",
         "b1h2d64_block128",
+        "b1h2d64_block64_long",
     ]
-    assert sum(len(case.lengths) for case in cases) == 14
+    assert sum(len(case.lengths) for case in cases) == 18
     assert cases[0].lengths == (64, 128, 256, 384, 512)
     assert cases[0].layout_xform_lengths == (128, 256, 384, 512)
-    assert cases[-1].block_size == 128
-    assert cases[-1].lengths == (128, 256, 512)
-    assert cases[-1].layout_xform_lengths == (256, 512)
+    assert cases[2].batch == 2
+    assert cases[2].heads == 4
+    assert cases[2].dim == 128
+    assert cases[-2].block_size == 128
+    assert cases[-2].lengths == (128, 256, 512)
+    assert cases[-2].layout_xform_lengths == (256, 512)
+    assert cases[-1].lengths == (768, 1024)
+    assert cases[-1].min_mixed_by_length[1024] == 78
 
 
 def test_gate_validation_requires_layout_consumer_and_mixed_floor():
