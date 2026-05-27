@@ -523,11 +523,106 @@ def _layout_mismatch_reason(
     reason = "physical_layout_mismatch"
     if prod_sig is not None and prod_sig == cons_sig:
         reason = "layout_transform_required"
+    elif _layout_transform_dim_map(
+        prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
+    ) is not None:
+        reason = "layout_transform_required"
     return (
         f"{prefix}:{reason}:"
         f"producer={prod_layout}/{prod_stick}:"
         f"consumer={cons_layout}/{cons_stick}"
     )
+
+
+def _stick_aliased_layout(
+    layout: list[str],
+    old_stick: str,
+    new_stick: str,
+) -> list[str]:
+    return [new_stick if dim == old_stick else dim for dim in layout]
+
+
+def _layout_transform_dim_map(
+    prod_dl: dict,
+    prod_layout: list[str],
+    prod_stick: str,
+    cons_dl: dict,
+    cons_layout: list[str],
+    cons_stick: str,
+) -> dict[str, str] | None:
+    source_layout = _stick_aliased_layout(prod_layout, prod_stick, cons_stick)
+    if set(source_layout) == set(cons_layout):
+        out: dict[str, str] = {}
+        for p_dim, c_dim in zip(prod_layout, source_layout):
+            p_size = _dim_size(prod_dl, p_dim)
+            c_size = _dim_size(cons_dl, c_dim)
+            if p_size is None or c_size is None or p_size != c_size:
+                break
+            out[p_dim] = c_dim
+        else:
+            return out
+
+    if len(prod_layout) != len(cons_layout):
+        return None
+    out = {}
+    seen = set()
+    for p_dim, c_dim in zip(prod_layout, cons_layout):
+        if c_dim in seen:
+            return None
+        p_size = _dim_size(prod_dl, p_dim)
+        c_size = _dim_size(cons_dl, c_dim)
+        if p_size is None or c_size is None or p_size != c_size:
+            return None
+        out[p_dim] = c_dim
+        seen.add(c_dim)
+    return out
+
+
+def _mapped_work_slice_piece_info(
+    body: dict,
+    producer_layout: list[str],
+    dim_map: dict[str, str],
+    iter_sizes: dict[str, int],
+    base: int,
+) -> list[dict] | None:
+    shard = body.get("numWkSlicesPerDim_", {})
+    core_slices = body.get("coreIdToWkSlice_", {})
+    if not isinstance(core_slices, dict) or not core_slices:
+        return None
+    pieces = []
+    for ordinal, core_id_str in enumerate(sorted(core_slices, key=lambda k: int(k))):
+        wk_slice = core_slices[core_id_str]
+        start = {target_dim: 0 for target_dim in dim_map.values()}
+        size = {target_dim: iter_sizes[target_dim] for target_dim in dim_map.values()}
+        for prod_dim in producer_layout:
+            target_dim = dim_map.get(prod_dim)
+            if target_dim is None or target_dim not in iter_sizes:
+                return None
+            factor = int(shard.get(prod_dim.removesuffix("_"), 1))
+            if factor <= 0 or iter_sizes[target_dim] % factor != 0:
+                return None
+            coord = int(wk_slice.get(prod_dim.removesuffix("_"), 0))
+            if coord < 0 or coord >= factor:
+                return None
+            chunk = iter_sizes[target_dim] // factor
+            start[target_dim] = coord * chunk
+            size[target_dim] = chunk
+        pieces.append(
+            {
+                "key_": f"p{ordinal + 1}",
+                "dimToStartCordinate": start,
+                "dimToSize_": size,
+                "validGap_": {dim: [[size[dim], 0]] for dim in size},
+                "PlacementInfo": [
+                    {
+                        "type": "lx",
+                        "memId": [int(core_id_str)],
+                        "startAddr": [base],
+                    }
+                ],
+            }
+        )
+    return pieces
 
 
 def _handoff_bytes(iter_sizes: dict[str, int], word_length: int) -> int:
@@ -1682,8 +1777,158 @@ def flash_attention_ifn_pair_tile_rejection_reasons(
     *,
     input_idx: int = INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX,
 ) -> list[str]:
-    """Explain why a predecessor-backed IFN pair cannot be emitted."""
+    """Explain why an explicit same-physical LX-copy pair cannot be emitted."""
     _edge, reasons = _flash_attention_ifn_pair_edge(
+        sdscs_json,
+        tile_index,
+        input_idx=input_idx,
+    )
+    return reasons
+
+
+def _flash_attention_layout_xform_pair_edge(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    input_idx: int = INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX,
+) -> tuple[dict | None, list[str]]:
+    tile = _flash_value_flow_tile(sdscs_json, tile_index)
+    if tile is None:
+        return None, ["tile_not_found"]
+    c, cons = tile
+    cons_dl = _dl_op(cons)
+    if input_idx not in _consumer_input_indices(cons_dl):
+        return None, [f"input{input_idx}:not_consumer_input"]
+    if input_idx != INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX:
+        return None, [f"input{input_idx}:not_supported_layout_xform_input"]
+
+    cons_body = _body(cons)
+    num_cores = int(cons_body.get("numCoresUsed_", 0))
+    if num_cores <= 0:
+        return None, ["invalid_num_cores"]
+    addr = _hbm_base(cons_dl, input_idx)
+    if addr is None:
+        return None, [f"input{input_idx}:not_hbm_backed"]
+
+    producer = _latest_producer_of_hbm(sdscs_json, c, addr)
+    if producer is None:
+        return None, [f"input{input_idx}:no_latest_producer"]
+    p, prod, out_idx = producer
+
+    future = _future_consumers(sdscs_json, p, addr)
+    if len(future) != 1 or future[0][0] != c or future[0][2] != input_idx:
+        future_names = [
+            f"{next(iter(fcons))}:input{fin_idx}"
+            for _fc, fcons, fin_idx in future
+        ]
+        return (
+            None,
+            [
+                f"input{input_idx}:not_single_consumer:"
+                f"{','.join(future_names)}"
+            ],
+        )
+
+    prod_dl = _dl_op(prod)
+    prod_layout = _layout_for_lds(prod_dl, out_idx)
+    prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
+    cons_layout = _layout_for_lds(cons_dl, input_idx)
+    cons_stick = _stick_dim_for_lds(cons_dl, input_idx)
+    cons_split = _single_split_dim(cons_body.get("numWkSlicesPerDim_", {}))
+    if (
+        prod_layout is None
+        or prod_stick is None
+        or cons_layout is None
+        or cons_stick is None
+        or cons_split is None
+    ):
+        return None, [f"input{input_idx}:missing_layout_stick_or_split"]
+
+    mismatch_reason = _layout_mismatch_reason(
+        f"input{input_idx}",
+        prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
+    )
+    if mismatch_reason is None:
+        return None, [f"input{input_idx}:same_physical_layout_use_ifn_pair"]
+    if not mismatch_reason.startswith(f"input{input_idx}:layout_transform_required:"):
+        return None, [mismatch_reason]
+
+    dim_map = _layout_transform_dim_map(
+        prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
+    )
+    if dim_map is None:
+        return None, [f"input{input_idx}:layout_transform_dim_map_missing"]
+    source_layout = [dim_map[dim] for dim in prod_layout]
+    if set(source_layout) != set(cons_layout):
+        return (
+            None,
+            [
+                f"input{input_idx}:layout_transform_dim_set_mismatch:"
+                f"producer={source_layout}:consumer={cons_layout}"
+            ],
+        )
+
+    iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
+    if iter_sizes is None or any(dim not in iter_sizes for dim in source_layout):
+        return None, [f"input{input_idx}:missing_iter_sizes"]
+    source_pieces = _mapped_work_slice_piece_info(
+        _body(prod),
+        prod_layout,
+        dim_map,
+        iter_sizes,
+        PRODUCER_LX_BASE,
+    )
+    if source_pieces is None:
+        return None, [f"input{input_idx}:producer_piece_map_missing"]
+    if cons_split not in iter_sizes or iter_sizes[cons_split] % num_cores != 0:
+        return None, [f"input{input_idx}:invalid_split:{cons_split}"]
+
+    slice_bytes = _reserve_bridge_region_bytes(
+        per_core_same_stick_slice_bytes(
+            iter_sizes,
+            cons_split,
+            cons_stick,
+            STICK_SIZE,
+            num_cores,
+        )
+    )
+    try:
+        allocate_lx_bases(2, slice_bytes, region0=CONSUMER_LX_BASE)
+    except ValueError:
+        return None, [f"input{input_idx}:lx_allocation_exceeds_capacity"]
+
+    return (
+        {
+            "producer_index": p,
+            "consumer_index": c,
+            "producer": prod,
+            "consumer": cons,
+            "producer_idx": out_idx,
+            "consumer_idx": input_idx,
+            "shared_hbm_addr": addr,
+            "source_layout": source_layout,
+            "source_pieces": source_pieces,
+            "consumer_layout": cons_layout,
+            "dim_pool": source_layout,
+            "stick_dim": cons_stick,
+            "split_dim": cons_split,
+            "iter_sizes": iter_sizes,
+            "slice_bytes": slice_bytes,
+            "producer_layout": prod_layout,
+            "producer_stick_dim": prod_stick,
+        },
+        [],
+    )
+
+
+def flash_attention_layout_xform_pair_tile_rejection_reasons(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    input_idx: int = INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX,
+) -> list[str]:
+    """Explain why a layout-transforming flash pair cannot be emitted."""
+    _edge, reasons = _flash_attention_layout_xform_pair_edge(
         sdscs_json,
         tile_index,
         input_idx=input_idx,
@@ -1697,12 +1942,7 @@ def build_flash_attention_ifn_pair_tile_artifacts(
     *,
     name_prefix: str = "mixed_flash_ifn_pair_tile",
 ) -> dict | None:
-    """Build an explicit predecessor+consumer IFN pair for one real edge.
-
-    The consumer sidecar keeps a placeholder data-op row only to make DXP take
-    its IFN lowering branch.  When bundle metadata passes a real predecessor SDSC
-    to Deeptools, that branch synthesizes the actual LxInputNeighborFetch data-op.
-    """
+    """Build an explicit predecessor+consumer LX-copy pair for one real edge."""
     edge, reasons = _flash_attention_ifn_pair_edge(sdscs_json, tile_index)
     if edge is None:
         return None
@@ -1824,6 +2064,161 @@ def build_flash_attention_ifn_pair_tile_artifacts(
             "ifn_consumer_layout": edge["layout"],
             "ifn_predecessor_stick_dim": edge["producer_stick_dim"],
             "ifn_consumer_stick_dim": edge["stick_dim"],
+            "split_dim": edge["split_dim"],
+            "iter_sizes": edge["iter_sizes"],
+            "slice_bytes": edge["slice_bytes"],
+            "replaces_sdsc": cons_name,
+            "tile_index": tile_index,
+            "compute_tile_count": 1,
+        }
+    )
+
+    return {
+        "artifacts": [producer_artifact, consumer_artifact],
+        "replacements": {
+            prod_name: pred_sidecar,
+            cons_name: cons_sidecar,
+        },
+        "bundle_attrs": {},
+        "rejection_reasons": reasons,
+    }
+
+
+def build_flash_attention_layout_xform_pair_tile_artifacts(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    name_prefix: str = "mixed_flash_layout_xform_pair_tile",
+) -> dict | None:
+    """Build an experimental explicit LX-copy pair for a layout-transform edge."""
+    edge, reasons = _flash_attention_layout_xform_pair_edge(sdscs_json, tile_index)
+    if edge is None:
+        return None
+
+    prod_name = next(iter(edge["producer"]))
+    cons_name = next(iter(edge["consumer"]))
+    pred_sidecar = f"{name_prefix}_{tile_index}_predecessor"
+    cons_sidecar = f"{name_prefix}_{tile_index}_consumer"
+    num_cores = int(_body(edge["consumer"]).get("numCoresUsed_", 0))
+
+    producer_artifact = {pred_sidecar: copy.deepcopy(_body(edge["producer"]))}
+    apply_lx_flip(
+        producer_artifact,
+        LxFlip(
+            edge["producer_idx"],
+            PRODUCER_LX_BASE,
+            "layout-xform-predecessor-output",
+        ),
+    )
+    producer_artifact[pred_sidecar].setdefault("flashAttentionPipeline_", {}).update(
+        {
+            "source": "generated-flash-prefill-layout-xform-pair-producer",
+            "layout_xform_mode": "same_dim_lx_copy_pair",
+            "layout_xform_pair_role": "predecessor",
+            "layout_xform_experimental": True,
+            "layout_xform_predecessor_sdsc": prod_name,
+            "layout_xform_predecessor_sidecar": pred_sidecar,
+            "layout_xform_consumer_sdsc": cons_name,
+            "layout_xform_consumer_sidecar": cons_sidecar,
+            "layout_xform_predecessor_output_idx": edge["producer_idx"],
+            "layout_xform_shared_hbm_addr": edge["shared_hbm_addr"],
+            "layout_xform_predecessor_lx_base": PRODUCER_LX_BASE,
+            "replaces_sdsc": prod_name,
+            "tile_index": tile_index,
+        }
+    )
+
+    compute_dsc = copy.deepcopy(_body(edge["consumer"])["dscs_"][0])
+    compute_root = {cons_name: {"dscs_": [compute_dsc]}}
+    apply_lx_flip(
+        compute_root,
+        LxFlip(
+            edge["consumer_idx"],
+            CONSUMER_LX_BASE,
+            "layout-xform-consumer-input",
+        ),
+    )
+    compute_dl = next(iter(compute_dsc.values()))
+    _add_input_fetch_neighbor_transfer(compute_dl, edge["consumer_idx"])
+    _add_input_fetch_neighbor_legacy_dims(
+        compute_dl,
+        _body(edge["consumer"]).get("numWkSlicesPerDim_", {}),
+    )
+
+    dataop = make_datadsc(
+        (
+            "0_STCDPOpLx_layout_xform_"
+            f"Tensor0_idx{edge['consumer_idx']}_tile{tile_index}"
+        ),
+        _stcdp_op(),
+        edge["dim_pool"],
+        src=Endpoint(
+            edge["source_layout"],
+            edge["stick_dim"],
+            edge["split_dim"],
+            PRODUCER_LX_BASE,
+        ),
+        dst=Endpoint(
+            edge["consumer_layout"],
+            edge["stick_dim"],
+            edge["split_dim"],
+            CONSUMER_LX_BASE,
+        ),
+        iter_sizes=edge["iter_sizes"],
+        stick_size=STICK_SIZE,
+        num_cores=num_cores,
+        lx_size=DATAOP_LX_SIZE,
+    )
+    next(iter(dataop.values()))["labeledDs_"][0]["PieceInfo"] = edge[
+        "source_pieces"
+    ]
+    schedule = {
+        str(core_id): [[0, -1, 0, 1], [-1, 0, 1, 0]]
+        for core_id in range(num_cores)
+    }
+    consumer_artifact = build_flash_attention_pipeline_mixed_sdsc(
+        cons_sidecar,
+        [dataop],
+        ["STCDPOpLx"],
+        schedule,
+        [compute_dsc],
+        num_cores,
+    )
+    consumer_root = consumer_artifact[cons_sidecar]
+    cons_body = _body(edge["consumer"])
+    for key in (
+        "sdscFoldProps_",
+        "sdscFolds_",
+        "coreFoldProp_",
+        "coreletFoldProp_",
+        "coreIdToDsc_",
+        "numWkSlicesPerDim_",
+        "coreIdToWkSlice_",
+    ):
+        if key in cons_body:
+            consumer_root[key] = copy.deepcopy(cons_body[key])
+    consumer_root["flashAttentionPipeline_"].update(
+        {
+            "source": "generated-flash-prefill-layout-xform-pair-consumer",
+            "layout_xform_mode": "same_dim_lx_copy_pair",
+            "layout_xform_pair_role": "consumer",
+            "layout_xform_experimental": True,
+            "layout_xform_predecessor_sdsc": prod_name,
+            "layout_xform_predecessor_sidecar": pred_sidecar,
+            "layout_xform_consumer_sdsc": cons_name,
+            "layout_xform_consumer_sidecar": cons_sidecar,
+            "layout_xform_predecessor_output_idx": edge["producer_idx"],
+            "layout_xform_attached_input_idx": edge["consumer_idx"],
+            "layout_xform_shared_hbm_addr": edge["shared_hbm_addr"],
+            "layout_xform_predecessor_lx_base": PRODUCER_LX_BASE,
+            "layout_xform_input_lx_base": CONSUMER_LX_BASE,
+            "layout_xform_original_predecessor_layout": edge["producer_layout"],
+            "layout_xform_source_layout": edge["source_layout"],
+            "layout_xform_consumer_layout": edge["consumer_layout"],
+            "layout_xform_original_predecessor_stick_dim": (
+                edge["producer_stick_dim"]
+            ),
+            "layout_xform_stick_dim": edge["stick_dim"],
             "split_dim": edge["split_dim"],
             "iter_sizes": edge["iter_sizes"],
             "slice_bytes": edge["slice_bytes"],

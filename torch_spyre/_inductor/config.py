@@ -101,6 +101,14 @@ flash_attention_mixed_pipeline_value_flow_tile: int = int(
 flash_attention_mixed_pipeline_ifn_pair_tile: int = int(
     os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PAIR_TILE", "-1")
 )
+# Experimental Stage039 follow-up for real SDPA edges that have a strict
+# producer->single-consumer relation but require a same-dim layout transform
+# before the consumer can read the predecessor LX payload. -1 disables.
+flash_attention_mixed_pipeline_layout_xform_pair_tile: int = int(
+    os.environ.get(
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE", "-1"
+    )
+)
 # Default-off production-shaped bridge for same-stick pointwise edges that appear
 # inside the flash-prefill graph. This keeps the attention experiment off the
 # generic add/add handoff flag while reusing the same fail-closed Tier 1 realizer.

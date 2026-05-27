@@ -29,6 +29,7 @@ _FLASH_CONFIG_KEYS = [
     "flash_attention_mixed_pipeline_execute_tile",
     "flash_attention_mixed_pipeline_value_flow_tile",
     "flash_attention_mixed_pipeline_ifn_pair_tile",
+    "flash_attention_mixed_pipeline_layout_xform_pair_tile",
     "flash_attention_pointwise_handoff",
     "flash_attention_score_scale_handoff",
 ]
@@ -77,6 +78,7 @@ def test_flash_attention_onchip_sdpa_master_gate_defaults_off():
     assert cfg["flash_attention_mixed_pipeline_execute_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_value_flow_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_ifn_pair_tile"] == -1
+    assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_tile"] == -1
 
 
 def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
@@ -94,6 +96,7 @@ def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
     assert cfg["flash_attention_mixed_pipeline_execute_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_value_flow_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_ifn_pair_tile"] == -1
+    assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_tile"] == -1
 
 
 def test_flash_attention_onchip_sdpa_master_gate_respects_block_size_override():
@@ -114,6 +117,7 @@ def test_flash_attention_onchip_sdpa_master_gate_preserves_individual_flags():
             "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE": "1",
             "SPYRE_FLASH_ATTENTION_POINTWISE_HANDOFF": "1",
             "SPYRE_FLASH_ATTENTION_SCORE_SCALE_HANDOFF": "0",
+            "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE": "2",
         }
     )
 
@@ -121,3 +125,4 @@ def test_flash_attention_onchip_sdpa_master_gate_preserves_individual_flags():
     assert cfg["flash_attention_mixed_pipeline"] is True
     assert cfg["flash_attention_pointwise_handoff"] is True
     assert cfg["flash_attention_score_scale_handoff"] is False
+    assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_tile"] == 2

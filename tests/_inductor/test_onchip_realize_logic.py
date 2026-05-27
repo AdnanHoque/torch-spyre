@@ -141,6 +141,8 @@ def _fake_sdsc(
     *,
     lx_pinned=False,
     input_neighbor_transfer=False,
+    num_cores=32,
+    core_slices=None,
 ):
     def lds(label, role):
         i = int(label.rsplit("-idx", 1)[1])
@@ -165,7 +167,7 @@ def _fake_sdsc(
             "ldsIdx_": i,
             "component_": component,
             "startAddressCoreCorelet_": {
-                "data_": {f"[{c}, 0, 0]": str(addr) for c in range(32)}
+                "data_": {f"[{c}, 0, 0]": str(addr) for c in range(num_cores)}
             },
         }
 
@@ -206,6 +208,16 @@ def _fake_sdsc(
                 "dstLdsAndLoopOffsets_": [{"myLdsIdx_": 0}],
             }
         )
+    if core_slices is None:
+        core_slices = {
+            str(c): {
+                dim: c if factor == num_cores else 0
+                for dim, factor in shard.items()
+            }
+            for c in range(num_cores)
+        }
+    else:
+        core_slices = {str(c): dict(slices) for c, slices in core_slices.items()}
     return {
         f"{idx}_{op}": {
             "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],
@@ -214,18 +226,12 @@ def _fake_sdsc(
                 "dim_prop_attr": [{"factor_": 1, "label_": "time"}],
                 "data_": {"[0]": "0"},
             },
-            "coreFoldProp_": {"factor_": 32, "label_": "core"},
+            "coreFoldProp_": {"factor_": num_cores, "label_": "core"},
             "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
-            "numCoresUsed_": 32,
-            "coreIdToDsc_": {str(c): 0 for c in range(32)},
+            "numCoresUsed_": num_cores,
+            "coreIdToDsc_": {str(c): 0 for c in range(num_cores)},
             "numWkSlicesPerDim_": shard,
-            "coreIdToWkSlice_": {
-                str(c): {
-                    dim: c if factor == 32 else 0
-                    for dim, factor in shard.items()
-                }
-                for c in range(32)
-            },
+            "coreIdToWkSlice_": core_slices,
             "coreIdToDscSchedule": {},
             "dscs_": [{op: dl}],
         }
@@ -411,6 +417,60 @@ def _fake_flash_pipeline_sdscs(
             )
         )
     return sdscs
+
+
+def _fake_flash_layout_xform_relation_sdscs():
+    shared_addr = 4096
+    producer_pdi = {
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        }
+    }
+    consumer_pdi = {
+        "INPUT": {
+            "layoutDimOrder_": ["x", "mb", "in"],
+            "stickDimOrder_": ["in"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["in", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    producer = _fake_sdsc(
+        0,
+        "ReStickifyOpHBM",
+        {"mb": 2, "x": 2, "out": 1},
+        {"mb_": 2, "x_": 128, "out_": 64},
+        [],
+        [("Tensor1-idx1", "OUTPUT", shared_addr)],
+        producer_pdi,
+        num_cores=4,
+        core_slices={
+            0: {"mb": 0, "x": 0, "out": 0},
+            1: {"mb": 1, "x": 0, "out": 0},
+            2: {"mb": 0, "x": 1, "out": 0},
+            3: {"mb": 1, "x": 1, "out": 0},
+        },
+    )
+    consumer = _fake_sdsc(
+        1,
+        "batchmatmul",
+        {"x": 1, "mb": 32, "out": 1, "in": 1},
+        {"x_": 2, "mb_": 128, "out_": 64, "in_": 64},
+        [("Tensor0-idx0", "INPUT", shared_addr)],
+        [("Tensor2-idx2", "OUTPUT", 8192)],
+        consumer_pdi,
+    )
+    return [producer, consumer]
 
 
 def _fake_flash_pointwise_sdscs(multisplit=False, chain=False):
@@ -822,6 +882,113 @@ def test_flash_ifn_pair_tile_reports_layout_transform_required_edge():
         "producer=['mb_', 'x_', 'out_']/out_:"
         "consumer=['x_', 'mb_', 'in_']/in_"
     ]
+
+
+def test_flash_layout_xform_pair_tile_builds_experimental_sidecars():
+    result = rz.build_flash_attention_layout_xform_pair_tile_artifacts(
+        _fake_flash_pipeline_sdscs(num_tiles=3, sdpa_layout_transform=True),
+        tile_index=1,
+    )
+
+    assert result is not None
+    pred = result["artifacts"][0]["mixed_flash_layout_xform_pair_tile_1_predecessor"]
+    cons = result["artifacts"][1]["mixed_flash_layout_xform_pair_tile_1_consumer"]
+    assert result["replacements"] == {
+        "0_batchmatmul": "mixed_flash_layout_xform_pair_tile_1_predecessor",
+        "1_batchmatmul": "mixed_flash_layout_xform_pair_tile_1_consumer",
+    }
+    assert result["bundle_attrs"] == {}
+    assert (
+        rz.flash_attention_layout_xform_pair_tile_rejection_reasons(
+            _fake_flash_pipeline_sdscs(num_tiles=3, sdpa_layout_transform=True),
+            tile_index=1,
+        )
+        == []
+    )
+
+    pred_dl = rz._dl_op({"p": pred})
+    cons_dl = rz._dl_op({"c": cons})
+    assert rz._lds_by_idx(pred_dl, 2)["hbmSize_"] == 0
+    assert rz._lds_by_idx(cons_dl, 0)["hbmSize_"] == 0
+    assert rz._has_input_fetch_neighbor_transfer(cons_dl, 0)
+    assert cons["coreIdToDscSchedule"]["0"] == [[0, -1, 0, 1], [-1, 0, 1, 0]]
+    dataop_name = next(iter(cons["datadscs_"][0]))
+    assert dataop_name == "0_STCDPOpLx_layout_xform_Tensor0_idx0_tile1"
+    dataop = next(iter(cons["datadscs_"][0].values()))
+    src_ld = dataop["labeledDs_"][0]
+    dst_ld = dataop["labeledDs_"][1]
+    assert dataop["dimPool_"] == ["mb_", "x_", "in_"]
+    assert src_ld["layoutDimOrder_"] == ["mb_", "x_", "in_"]
+    assert src_ld["stickDimOrder_"] == ["in_"]
+    assert dst_ld["layoutDimOrder_"] == ["x_", "mb_", "in_"]
+    assert dst_ld["stickDimOrder_"] == ["in_"]
+    assert src_ld["PieceInfo"][0]["PlacementInfo"][0]["startAddr"] == [
+        rz.PRODUCER_LX_BASE
+    ]
+    assert dst_ld["PieceInfo"][0]["PlacementInfo"][0]["startAddr"] == [
+        rz.CONSUMER_LX_BASE
+    ]
+
+    pred_meta = pred["flashAttentionPipeline_"]
+    assert pred_meta["layout_xform_pair_role"] == "predecessor"
+    assert pred_meta["layout_xform_experimental"] is True
+    cons_meta = cons["flashAttentionPipeline_"]
+    assert cons_meta["layout_xform_mode"] == "same_dim_lx_copy_pair"
+    assert cons_meta["layout_xform_pair_role"] == "consumer"
+    assert cons_meta["layout_xform_source_layout"] == ["mb_", "x_", "in_"]
+    assert cons_meta["layout_xform_consumer_layout"] == ["x_", "mb_", "in_"]
+    assert cons_meta["layout_xform_original_predecessor_layout"] == [
+        "mb_",
+        "x_",
+        "out_",
+    ]
+
+
+def test_flash_layout_xform_pair_tile_rejects_same_physical_edge():
+    assert rz.build_flash_attention_layout_xform_pair_tile_artifacts(
+        _fake_static_matmul_sdscs(),
+        tile_index=1,
+    ) is None
+    assert rz.flash_attention_layout_xform_pair_tile_rejection_reasons(
+        _fake_static_matmul_sdscs(),
+        tile_index=1,
+    ) == ["input0:same_physical_layout_use_ifn_pair"]
+
+
+def test_flash_layout_xform_pair_tile_maps_producer_work_slices():
+    result = rz.build_flash_attention_layout_xform_pair_tile_artifacts(
+        _fake_flash_layout_xform_relation_sdscs(),
+        tile_index=0,
+    )
+
+    assert result is not None
+    cons = result["artifacts"][1]["mixed_flash_layout_xform_pair_tile_0_consumer"]
+    dataop = next(iter(cons["datadscs_"][0].values()))
+    src_ld = dataop["labeledDs_"][0]
+    dst_ld = dataop["labeledDs_"][1]
+    assert src_ld["layoutDimOrder_"] == ["x_", "mb_", "in_"]
+    assert dst_ld["layoutDimOrder_"] == ["x_", "mb_", "in_"]
+    src_pieces = src_ld["PieceInfo"]
+    assert len(src_pieces) == 4
+    assert len(dst_ld["PieceInfo"]) == 32
+    assert src_pieces[0]["dimToStartCordinate"] == {
+        "x_": 0,
+        "mb_": 0,
+        "in_": 0,
+    }
+    assert src_pieces[1]["dimToStartCordinate"] == {
+        "x_": 1,
+        "mb_": 0,
+        "in_": 0,
+    }
+    assert src_pieces[2]["dimToStartCordinate"] == {
+        "x_": 0,
+        "mb_": 64,
+        "in_": 0,
+    }
+    assert src_pieces[0]["dimToSize_"] == {"x_": 1, "mb_": 64, "in_": 64}
+    assert src_pieces[0]["PlacementInfo"][0]["memId"] == [0]
+    assert src_pieces[3]["PlacementInfo"][0]["memId"] == [3]
 
 
 def test_flash_pipeline_artifact_wraps_generated_batchmatmul_tiles():
