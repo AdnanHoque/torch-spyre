@@ -138,6 +138,16 @@ flash_attention_mixed_pipeline_layout_xform_pair_overlap: bool = (
     )
     == "1"
 )
+# Default-off value-plausible successor to the same-input overlap diagnostic:
+# copy the current layout-transform input before compute, then overlap current
+# compute with a prefetch for a different future input whose producer is already
+# available in bundle order. ``-2`` means auto-select the first legal current
+# tile/future tile pair.
+flash_attention_mixed_pipeline_layout_xform_lookahead_tile: int = int(
+    os.environ.get(
+        "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_LOOKAHEAD_TILE", "-1"
+    )
+)
 # Default-off production-shaped bridge for same-stick pointwise edges that appear
 # inside the flash-prefill graph. This keeps the attention experiment off the
 # generic add/add handoff flag while reusing the same fail-closed Tier 1 realizer.

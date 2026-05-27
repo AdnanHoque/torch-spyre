@@ -25,11 +25,13 @@ from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.onchip_realize import (
     build_flash_attention_ifn_pair_tile_artifacts,
+    build_flash_attention_layout_xform_lookahead_tile_artifacts,
     build_flash_attention_layout_xform_pair_tile_artifacts,
     build_flash_attention_pipeline_artifact,
     build_flash_attention_pipeline_tile_artifacts,
     build_flash_attention_value_flow_tile_artifact,
     flash_attention_ifn_pair_tile_rejection_reasons,
+    flash_attention_layout_xform_lookahead_rejection_reasons,
     flash_attention_layout_xform_pair_rejection_reasons,
     flash_attention_value_flow_tile_rejection_reasons,
     realize_flash_attention_pointwise_handoffs,
@@ -107,6 +109,11 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         "flash_attention_mixed_pipeline_layout_xform_pair_overlap",
         False,
     )
+    layout_xform_lookahead_tile = getattr(
+        config,
+        "flash_attention_mixed_pipeline_layout_xform_lookahead_tile",
+        -1,
+    )
     sidecar_sdscs = []
     sidecar_replacements = {}
     bundle_attrs_by_file = {}
@@ -130,11 +137,32 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             or value_flow_tile >= 0
             or ifn_pair_tile >= 0
             or layout_xform_pair_tile != -1
+            or layout_xform_lookahead_tile != -1
         )
     )
+    layout_xform_lookahead = None
+    layout_xform_lookahead_rejections = None
+    if emit_mixed_sidecars and layout_xform_lookahead_tile != -1:
+        layout_xform_lookahead = (
+            build_flash_attention_layout_xform_lookahead_tile_artifacts(
+                sdscs_json,
+                layout_xform_lookahead_tile,
+            )
+        )
+        if layout_xform_lookahead is None:
+            layout_xform_lookahead_rejections = (
+                flash_attention_layout_xform_lookahead_rejection_reasons(
+                    sdscs_json,
+                    layout_xform_lookahead_tile,
+                )
+            )
     layout_xform_pair = None
     layout_xform_pair_rejections = None
-    if emit_mixed_sidecars and layout_xform_pair_tile != -1:
+    if (
+        emit_mixed_sidecars
+        and layout_xform_pair_tile != -1
+        and layout_xform_lookahead is None
+    ):
         layout_xform_pair = (
             build_flash_attention_layout_xform_pair_tile_artifacts(
                 sdscs_json,
@@ -169,6 +197,14 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                 "Realizing flash pointwise handoffs in a disjoint LX region "
                 "while the layout-transform pair probe is active"
             )
+        elif layout_xform_lookahead is not None:
+            pointwise_kwargs["pointwise_region0"] = layout_xform_lookahead[
+                "pointwise_lx_region0"
+            ]
+            logger.info(
+                "Realizing flash pointwise handoffs in a disjoint LX region "
+                "while the layout-transform lookahead probe is active"
+            )
         count = realize_flash_attention_pointwise_handoffs(
             sdscs_json,
             **pointwise_kwargs,
@@ -197,7 +233,22 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                         ifn_pair_tile,
                     ),
                 )
-        if layout_xform_pair_tile != -1:
+        if layout_xform_lookahead_tile != -1:
+            if layout_xform_lookahead is not None:
+                sidecar_sdscs.extend(layout_xform_lookahead["artifacts"])
+                sidecar_replacements.update(layout_xform_lookahead["replacements"])
+                bundle_attrs_by_file.update(layout_xform_lookahead["bundle_attrs"])
+                logger.info(
+                    "Executing experimental layout-transform flash attention "
+                    "lookahead sidecars"
+                )
+            else:
+                logger.warning(
+                    "Requested layout-transform lookahead flash attention pair "
+                    "was not realizable; keeping generated HBM-backed SDSCs: %s",
+                    layout_xform_lookahead_rejections,
+                )
+        if layout_xform_pair_tile != -1 and layout_xform_lookahead is None:
             if layout_xform_pair is not None:
                 sidecar_sdscs.extend(layout_xform_pair["artifacts"])
                 sidecar_replacements.update(layout_xform_pair["replacements"])

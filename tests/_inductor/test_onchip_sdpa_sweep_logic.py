@@ -30,6 +30,9 @@ _IFN_PREFIX_FORCE_ENV = "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PREFIX_FORCE"
 _LAYOUT_PAIR_OVERLAP_ENV = (
     "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_OVERLAP"
 )
+_LAYOUT_LOOKAHEAD_ENV = (
+    "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_LOOKAHEAD_TILE"
+)
 
 
 def _load_sweep():
@@ -137,6 +140,31 @@ def test_layout_xform_pair_auto_clears_parent_overlap_probe():
 
     assert env[_LAYOUT_PAIR_ENV] == "-2"
     assert env[_LAYOUT_PAIR_OVERLAP_ENV] == "0"
+
+
+def test_layout_xform_lookahead_auto_enables_lookahead_probe():
+    env = sweep._child_env(_args(), "layout_xform_lookahead_auto", 128)
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE"] == "1"
+    assert env[_LAYOUT_PAIR_ENV] == "-2"
+    assert env[_LAYOUT_PAIR_OVERLAP_ENV] == "0"
+    assert env[_LAYOUT_LOOKAHEAD_ENV] == "-2"
+    assert "layout_xform_lookahead_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_layout_xform_pair_auto_clears_parent_lookahead_probe():
+    old = os.environ.get(_LAYOUT_LOOKAHEAD_ENV)
+    os.environ[_LAYOUT_LOOKAHEAD_ENV] = "-2"
+    try:
+        env = sweep._child_env(_args(), "layout_xform_pair_auto", 128)
+    finally:
+        if old is None:
+            os.environ.pop(_LAYOUT_LOOKAHEAD_ENV, None)
+        else:
+            os.environ[_LAYOUT_LOOKAHEAD_ENV] = old
+
+    assert env[_LAYOUT_PAIR_ENV] == "-2"
+    assert env[_LAYOUT_LOOKAHEAD_ENV] == "-1"
 
 
 def test_causal_flag_is_reflected_in_cache_key():
