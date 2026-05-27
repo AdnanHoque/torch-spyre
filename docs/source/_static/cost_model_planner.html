@@ -545,7 +545,7 @@
 
   <rect x="400" y="80" width="120" height="80" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
   <text x="460" y="105" text-anchor="middle" font-size="12" font-weight="bold" fill="#166534">sum × batch_penalty</text>
-  <text x="460" y="125" text-anchor="middle" font-size="10">(1 + 0.6 × (b - 1))</text>
+  <text x="460" y="125" text-anchor="middle" font-size="10">(b ^ 1.4)</text>
   <text x="460" y="148" text-anchor="middle" font-size="9" fill="#475569">first 5 terms only</text>
 
   <text x="540" y="240" text-anchor="middle" font-size="14" font-weight="bold">+</text>
@@ -766,7 +766,7 @@ compute_us = per_core_MACs / effective_peak</code></pre>
   </g>
 
   <rect x="40" y="240" width="640" height="20" fill="#eff6ff" stroke="#2563eb" rx="4"/>
-  <text x="360" y="254" text-anchor="middle" font-size="11" font-family="monospace">psum_us = (k − 1) × (M × N) × 4 × 10⁻⁴  (k=1 means no PSUM, zero cost)</text>
+  <text x="360" y="254" text-anchor="middle" font-size="11" font-family="monospace">psum_us = (k − 1) × (M × N) × 1.4 × 10⁻⁴  (k=1 means no PSUM, zero cost)</text>
 
   <defs>
     <marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0,8 4,0 8" fill="#16a34a"/></marker>
@@ -775,13 +775,13 @@ compute_us = per_core_MACs / effective_peak</code></pre>
 <figcaption>Figure 9 — K-split (k=4) means each of 4 cores computes a partial sum. The ring chains them with k−1 = 3 hops to produce the final output. Most splits use k=1 so this term is 0.</figcaption>
 </figure>
 
-<pre><code>psum_us = (k - 1) × (M × N) × 4 × 10⁻⁴</code></pre>
+<pre><code>psum_us = (k - 1) × (M × N) × 1.4 × 10⁻⁴</code></pre>
 
 <p>Walkthrough:</p>
 <ul>
   <li><code>(k - 1)</code> hops needed to fully reduce k partial sums (chain reduction).</li>
   <li><code>M × N</code> output elements per hop.</li>
-  <li><code>4 × 10⁻⁴</code> microseconds per element per hop, calibrated from device measurements.</li>
+  <li><code>1.4 × 10⁻⁴</code> microseconds per element per hop, calibrated from a 7-shape sweep across model-class matmuls (Llama-7B QO/KV/Down, Granite MLP, Mistral MLP, Llama-70B QO, wideN); fitted coefficients cluster in 1.1–1.4 × 10⁻⁴ us/elem/hop.</li>
 </ul>
 
 <h3 id="target_m" class="term-heading">5.4 <code>target_m_us</code></h3>
@@ -1004,8 +1004,8 @@ redistribution_us = output_bytes × 1 × 10⁻⁴      # fired when bundled AND 
 
 <h4>The <code>batch_penalty</code> multiplier</h4>
 <p>The whole sum gets multiplied by:</p>
-<pre><code>batch_penalty = 1 + 0.6 × max(0, b - 1)</code></pre>
-<p>Splitting batch over multiple cores is mildly penalized because each batch item is independent work that could be iterated sequentially instead. For <code>b=1</code> (no batch split) the multiplier is 1.</p>
+<pre><code>batch_penalty = b ^ 1.4</code></pre>
+<p>Splitting batch over multiple cores is penalized because each batch item is independent work that could be iterated sequentially instead. The exponent was fit from a bmm[8,512,4096,512] sweep where measured T(b)/T(1) hit 2.56× (b=2), 7.57× (b=4), 19.0× (b=8) — the power-law exponent fits at 1.36–1.46 across those three points. The old linear form <code>1 + 0.6 × max(0, b - 1)</code> under-predicted by 3–4× at b=8. For <code>b=1</code> (no batch split) the multiplier is 1.</p>
 
 <h2 id="example">6. Walked example: MLP-class matmul</h2>
 <p>Shape: <code>M=512, K=4096, N=12800, B=1</code>. Two finalists, both using all 32 cores: <code>(m=8, n=4)</code> and <code>(m=4, n=8)</code>.</p>

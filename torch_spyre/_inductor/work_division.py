@@ -555,9 +555,9 @@ _M_MIN = _PT_ROWS // 2                              # smallest useful m-split (h
 _COST_PEAK_MACS_US_CORE = (98.304e12 / 2 / 32) / 1e6   # DL16 peak / 32 cores, in MACs/us/core
 _COST_HBM_BW_GBS = 204.8                               # LPDDR5 aggregate peak
 _COST_DTYPE_BYTES = 2                               # fp16
-_COST_PSUM_PER_ELEM_US = 4e-4                       # per output element, per K-split ring hop
+_COST_PSUM_PER_ELEM_US = 1.4e-4                     # per output element, per K-split ring hop
 _COST_COHORT_LIMIT = 8                              # broadcast contention kicks in above this
-_COST_BATCH_SPLIT_PENALTY = 0.6                     # multiplicative penalty per extra batch core
+_COST_BATCH_SPLIT_EXPONENT = 1.4                    # batch-split penalty: total ∝ b ^ exponent
 _COST_TARGET_M_PENALTY_US = 50.0                    # tie-break: per log2 step from target m-split
 _COST_REDISTRIBUTION_US_PER_BYTE = 1e-4             # cost of moving output bytes across cores
 _LX_BYTES_PER_CORE = 2 * 1024 * 1024                # on-core scratchpad capacity
@@ -663,8 +663,9 @@ def _matmul_split_cost(
     lx_pressure_us = lx_excess * _COST_LX_PRESSURE_US_PER_BYTE
 
     # Splitting batch over multiple cores costs more per core than tiling
-    # batch sequentially (each batch item is independent work).
-    batch_penalty = 1.0 + _COST_BATCH_SPLIT_PENALTY * max(0, b - 1)
+    # batch sequentially (each batch item is independent work). Empirically
+    # fits a power law b^exponent across measured bmm batch sweeps.
+    batch_penalty = b ** _COST_BATCH_SPLIT_EXPONENT
 
     return (
         (compute_us + hbm_us + psum_us + target_m_us + lx_pressure_us) * batch_penalty
