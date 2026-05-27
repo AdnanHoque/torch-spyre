@@ -70,6 +70,7 @@ def _install_bundle_stubs(
     pointwise_handoff=False,
     layout_xform_pair_tile=None,
     layout_xform_pair_result=True,
+    layout_xform_pointwise_region0=None,
 ):
     calls = {
         "layout_xform": [],
@@ -90,6 +91,8 @@ def _install_bundle_stubs(
     config.flash_attention_mixed_pipeline_ifn_pair_tile = -1
     if layout_xform_pair_tile is None:
         layout_xform_pair_tile = rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+    if layout_xform_pointwise_region0 is None:
+        layout_xform_pointwise_region0 = rz.LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE
     config.flash_attention_mixed_pipeline_layout_xform_pair_tile = (
         layout_xform_pair_tile
     )
@@ -137,6 +140,7 @@ def _install_bundle_stubs(
                 "1_batchmatmul": "mixed_flash_layout_xform_pair_tile_2_consumer",
             },
             "bundle_attrs": {},
+            "pointwise_lx_region0": layout_xform_pointwise_region0,
         }
 
     onchip_realize.build_flash_attention_layout_xform_pair_tile_artifacts = (
@@ -196,6 +200,7 @@ def _load_bundle_with_stubs(
     pointwise_handoff=False,
     layout_xform_pair_tile=None,
     layout_xform_pair_result=True,
+    layout_xform_pointwise_region0=None,
 ):
     names = [
         "torch_spyre",
@@ -213,6 +218,7 @@ def _load_bundle_with_stubs(
         pointwise_handoff=pointwise_handoff,
         layout_xform_pair_tile=layout_xform_pair_tile,
         layout_xform_pair_result=layout_xform_pair_result,
+        layout_xform_pointwise_region0=layout_xform_pointwise_region0,
     )
     spec = importlib.util.spec_from_file_location("_test_bundle_under_test", _BUNDLE)
     module = importlib.util.module_from_spec(spec)
@@ -541,6 +547,7 @@ def _fake_flash_pipeline_sdscs(
     input_neighbor_transfer=False,
     ij_input_layout=False,
     sdpa_layout_transform=False,
+    size_overrides=None,
 ):
     if ij_input_layout:
         input_layout = ["i", "j", "in"]
@@ -557,6 +564,8 @@ def _fake_flash_pipeline_sdscs(
         n_sizes = {"x_": 2, "mb_": 96, "out_": 64, "in_": 64}
     else:
         n_sizes = {"x_": 2, "mb_": 96, "out_": 192, "in_": 64}
+    if size_overrides:
+        n_sizes.update(size_overrides)
     shard = (
         {"i": 32, "j": 1, "out": 1, "in": 1}
         if ij_input_layout
@@ -886,6 +895,17 @@ def test_flash_pointwise_handoffs_accept_disjoint_region():
     assert alloc_base(sdscs[2], 0) == region0 + rz.MIN_BRIDGE_REGION_BYTES
 
 
+def test_layout_xform_compose_pointwise_lx_base_tracks_layout_footprint():
+    assert (
+        rz.layout_xform_compose_pointwise_lx_base(rz.MIN_BRIDGE_REGION_BYTES)
+        == rz.LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE
+    )
+    larger_slice = rz.MIN_BRIDGE_REGION_BYTES * 3
+    assert rz.layout_xform_compose_pointwise_lx_base(larger_slice) == (
+        rz.PRODUCER_LX_BASE + 2 * larger_slice
+    )
+
+
 def test_flash_score_scale_handoff_realizes_batchmatmul_to_mul():
     sdscs = _fake_flash_score_scale_sdscs()
     edge = rz.detect_flash_score_scale_handoff(sdscs)
@@ -1146,6 +1166,28 @@ def test_flash_layout_xform_pair_tile_builds_experimental_sidecars():
     ]
 
 
+def test_flash_layout_xform_pair_reports_dynamic_pointwise_region():
+    result = rz.build_flash_attention_layout_xform_pair_tile_artifacts(
+        _fake_flash_pipeline_sdscs(
+            num_tiles=3,
+            sdpa_layout_transform=True,
+            size_overrides={"mb_": 65536},
+        ),
+        tile_index=1,
+    )
+
+    assert result is not None
+    cons = result["artifacts"][1]["mixed_flash_layout_xform_pair_tile_1_consumer"]
+    cons_meta = cons["flashAttentionPipeline_"]
+    assert cons_meta["slice_bytes"] == 512 << 10
+    assert result["pointwise_lx_region0"] == (
+        rz.layout_xform_compose_pointwise_lx_base(cons_meta["slice_bytes"])
+    )
+    assert result["pointwise_lx_region0"] > (
+        rz.LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE
+    )
+
+
 def test_flash_layout_xform_pair_auto_selects_first_eligible_tile():
     result = rz.build_flash_attention_layout_xform_pair_tile_artifacts(
         _fake_flash_pipeline_sdscs(num_tiles=3, sdpa_layout_transform=True),
@@ -1215,7 +1257,11 @@ def test_bundle_executes_layout_xform_pair_auto_gate():
 
 
 def test_bundle_shifts_pointwise_handoffs_when_layout_xform_pair_is_active():
-    bundle, calls, saved = _load_bundle_with_stubs(pointwise_handoff=True)
+    region0 = rz.LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE + rz.MIN_BRIDGE_REGION_BYTES
+    bundle, calls, saved = _load_bundle_with_stubs(
+        pointwise_handoff=True,
+        layout_xform_pointwise_region0=region0,
+    )
     try:
         specs = [
             {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
@@ -1228,7 +1274,7 @@ def test_bundle_shifts_pointwise_handoffs_when_layout_xform_pair_is_active():
         assert calls["pointwise"] == [
             {
                 "score_scale_handoff": False,
-                "pointwise_region0": rz.LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE,
+                "pointwise_region0": region0,
             }
         ]
     finally:

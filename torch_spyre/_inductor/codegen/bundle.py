@@ -28,7 +28,6 @@ from torch_spyre._inductor.onchip_realize import (
     flash_attention_ifn_pair_tile_rejection_reasons,
     flash_attention_layout_xform_pair_rejection_reasons,
     flash_attention_value_flow_tile_rejection_reasons,
-    LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE,
     realize_flash_attention_pointwise_handoffs,
     realize_onchip_handoff,
 )
@@ -117,9 +116,9 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             "score_scale_handoff": config.flash_attention_score_scale_handoff,
         }
         if layout_xform_pair is not None:
-            pointwise_kwargs["pointwise_region0"] = (
-                LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE
-            )
+            pointwise_kwargs["pointwise_region0"] = layout_xform_pair[
+                "pointwise_lx_region0"
+            ]
             logger.info(
                 "Realizing flash pointwise handoffs in a disjoint LX region "
                 "while the layout-transform pair probe is active"

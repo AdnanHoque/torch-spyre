@@ -69,8 +69,15 @@ STREAM_THRESHOLD = LX_CAPACITY_BYTES // 2
 # per LX bridge region. Tighter packing can overlap DL-op private LX scratch even
 # when the logical tensor slice is smaller.
 MIN_BRIDGE_REGION_BYTES = 256 << 10
-LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE = (
-    PRODUCER_LX_BASE + 2 * MIN_BRIDGE_REGION_BYTES
+
+
+def layout_xform_compose_pointwise_lx_base(layout_slice_bytes: int) -> int:
+    # Keep composed pointwise handoffs above the layout pair's bridge footprint.
+    return PRODUCER_LX_BASE + 2 * max(layout_slice_bytes, MIN_BRIDGE_REGION_BYTES)
+
+
+LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE = layout_xform_compose_pointwise_lx_base(
+    MIN_BRIDGE_REGION_BYTES
 )
 # Stage022 device sweep: score-scale PT->SFP handoff is value-correct through
 # 128-wide score blocks, but 256-wide score blocks corrupt values. Keep larger
@@ -2284,6 +2291,9 @@ def build_flash_attention_layout_xform_pair_tile_artifacts(
             cons_name: cons_sidecar,
         },
         "bundle_attrs": {},
+        "pointwise_lx_region0": layout_xform_compose_pointwise_lx_base(
+            edge["slice_bytes"]
+        ),
         "rejection_reasons": reasons,
     }
 

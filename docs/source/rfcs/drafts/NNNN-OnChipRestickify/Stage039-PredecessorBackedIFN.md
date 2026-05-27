@@ -167,18 +167,36 @@ L=256 onchip_layout_xform max_err=0.335693359375
 
 The fix keeps the layout-transform pair on its proven LX addresses and realizes
 flash pointwise handoffs in a disjoint region when a layout pair is emitted.
-The composed `onchip_layout_xform` path now keeps the layout pair, keeps
-pointwise handoffs, and remains value-correct:
+The pointwise base is computed from the layout pair's reserved `slice_bytes`, so
+larger layout-transform slices shift the pointwise handoffs beyond the actual
+pair footprint.  The composed `onchip_layout_xform` path now keeps the layout
+pair, keeps pointwise handoffs, and remains value-correct:
 
 ```text
 L=128 onchip_layout_xform status=ok
-median=0.259536ms mean=0.259536ms max_err=0.00341797 mixed=9
-cache=/tmp/sdpa-stage039-onchip-layout-xform-disjoint-onchip_layout_xform-B1-H2-L128-D64-598229-331254
+median=0.249662ms mean=0.249662ms max_err=0.00341797 mixed=9
+cache=/tmp/sdpa-stage039-dynamic-region-smoke-onchip_layout_xform-B1-H2-L128-D64-600875-489578
 
 L=256 onchip_layout_xform status=ok
-median=0.362031ms mean=0.362031ms max_err=0.00292969 mixed=19
-cache=/tmp/sdpa-stage039-onchip-layout-xform-disjoint-onchip_layout_xform-B1-H2-L256-D64-598229-658132
+median=0.354596ms mean=0.354596ms max_err=0.00292969 mixed=19
+cache=/tmp/sdpa-stage039-dynamic-region-smoke-onchip_layout_xform-B1-H2-L256-D64-600875-822777
 ```
+
+A broader patched-DXP sweep kept the composed path value-correct across the
+current promotion matrix:
+
+| Shape | Block | Lengths | Result |
+| --- | --- | --- | --- |
+| B1 H2 D64 | 64 | 64, 128, 256, 384, 512 | all ok; max_err <= 0.00732422 |
+| B2 H2 D64 | 64 | 128, 256 | all ok; max_err <= 0.00585938 |
+| B1 H4 D64 | 64 | 128, 256 | all ok; max_err <= 0.00585938 |
+| B1 H2 D128 | 64 | 128, 256 | all ok; max_err <= 0.00585938 |
+| B1 H2 D64 | 128 | 128, 256, 512 | all ok; max_err <= 0.00341797 |
+
+Those runs used `/tmp/sdpa-stage039-broad-*` caches.  The length sweep median
+range was `0.222107ms` to `0.702018ms`; the `block=128` median range was
+`0.255452ms` to `0.570182ms`.  Mixed SDSC coverage scaled with length, reaching
+`39` mixed regions at `L=512, block=64`.
 
 Synthetic chained matmul probe:
 
@@ -224,7 +242,8 @@ The next useful split is:
 
 - upstream the explicit LX-copy sidecar path as the default-off safe probe;
 - keep the DXP predecessor-generated IFN path as a separate Deeptools follow-up;
-- use `layout_xform_pair_auto` for a broader sweep across more lengths, block
-  sizes, and batch/head shapes;
-- certify the disjoint-LX pointwise/layout composition across more shapes before
-  promoting `onchip_layout_xform` beyond an explicit probe path.
+- add the broad `onchip_layout_xform` matrix to the controlled promotion gate
+  once CI/device coverage can run it reliably;
+- keep expanding beyond the current matrix (causal/masking variants if relevant,
+  larger D/batch/head shapes, and longer L) before defaulting the path under
+  `SPYRE_FLASH_ATTENTION_ONCHIP_SDPA`.
