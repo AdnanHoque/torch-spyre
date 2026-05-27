@@ -4,6 +4,20 @@ Companion to [`docs/source/_static/cost_model_planner.html`](docs/source/_static
 
 The planner enumerates every feasible `(b, m, n, k)` split (each factor divides its dimension; product ≤ 32 cores), scores each one with the formula below, and picks the lowest score.
 
+## Naming
+
+For a matmul `outputs = activations × weights`:
+
+| symbol | meaning | shape |
+|---|---|---|
+| activations / inputs | `x` in `y = x @ W.T` | `[M, K]` |
+| weights / parameters | `W` | `[K, N]` |
+| outputs | `y` | `[M, N]` |
+| M | rows of activations and outputs | — |
+| N | columns of weights and outputs | — |
+| K | the reduction dimension (shared between activations and weights) | — |
+| `b`, `m`, `n`, `k` | cores assigned to batch / M / N / K respectively | — |
+
 ## Equation
 
 ```
@@ -34,15 +48,15 @@ cohort_penalty  = max(1.0, cohort / 8)
 hbm_us          = bytes_total × cohort_penalty / 204_800      # 204.8 GB/s
 ```
 
-Linear penalty above a cohort knee of 8. **Known limit:** symmetric in `(m, n)` but real cost is asymmetric — m-heavy splits run ~2–3× faster than n-heavy at the same nominal cohort because B is LX-reusable while A is streamed. See "known limits" below.
+Linear penalty above a cohort knee of 8. **Known limit:** symmetric in `(m, n)` but real cost is asymmetric — splits that broadcast weights to many cores run ~2–3× faster than splits that broadcast activations to many cores, at the same nominal cohort. Weights are reused across the K reduction (stays on chip in LX); activations are streamed once per row. See "known limits" below.
 
 ### `psum_us` — K-split reduction across the ring
 
 ```
-psum_us         = (k - 1) × (B × M × N) × 1.4e-4              # us/elem/hop
+psum_us         = (k - 1) × (B × M × N) × 1.4e-4              # us/output-element/hop
 ```
 
-Each K-split adds one ring hop per output element. Coefficient fitted from a 7-shape sweep (Llama-7B QO/KV/Down, Granite MLP, Mistral MLP, Llama-70B QO, wideN) — implied coefficients cluster at 1.1–1.4e-4. For k=1 this term is 0.
+Each K-split adds one ring hop per output element. Coefficient fitted from a 7-shape sweep (Llama-7B QO/KV/Down, Granite MLP, Mistral MLP, Llama-70B QO, wide-N) — implied coefficients cluster at 1.1–1.4e-4. For k=1 this term is 0.
 
 ### `target_m_us` — tie-breaker near PT-pipeline sweet spot
 
@@ -54,15 +68,15 @@ target_m_us     = m_dist × 50                                 # us/log2 step
 
 Small penalty (50 µs/log2 step) that only matters when other terms tie. Magnitude fits big-M well (~48 µs/log2 measured), over-counts small-M by ~4× (real ~12 µs/log2); a scaled-by-`compute_us` variant was attempted but flipped QO so we deferred.
 
-### `lx_pressure_us` — per-core RHS overflow penalty
+### `lx_pressure_us` — per-core weight-slice overflow penalty
 
 ```
-per_core_RHS    = K × (N / n) × 2
-lx_excess       = max(0, per_core_RHS − 2_097_152)            # 2 MB scratchpad
-lx_pressure_us  = lx_excess × 5e-6                            # us/byte
+per_core_weights = K × (N / n) × 2
+lx_excess        = max(0, per_core_weights − 2_097_152)       # 2 MB scratchpad
+lx_pressure_us   = lx_excess × 5e-6                           # us/byte
 ```
 
-Charges when per-core RHS slice exceeds the 2 MB on-core scratchpad. **The empirical mechanism is more complex than this formula** — a clean K-sweep up to 16 MB per-core RHS shows zero measurable penalty, yet MLP (4,8)-vs-(8,4) clearly has ~120 µs delta the term gets right. Useful kludge, not the underlying physics.
+Charges when the per-core weight slice exceeds the 2 MB on-core scratchpad. **The empirical mechanism is more complex than this formula** — a clean K-sweep up to 16 MB per-core weights shows zero measurable penalty, yet MLP (4,8)-vs-(8,4) clearly has ~120 µs delta the term gets right. Useful kludge, not the underlying physics.
 
 ### `redistribution_us` — fusion-bundle penalty
 
@@ -72,7 +86,7 @@ redistribution_us = B × M × N × 2 × 1e-6                      # us/byte
                                                               # AND matmul is in a fusion bundle)
 ```
 
-When a matmul shares a fusion bundle with a non-matmul op (silu, add, etc.), a non-default split was previously assumed to incur an HBM round-trip to reshuffle output. Device measurement of fused `silu(linear)` bundles shows the actual cost is ≈ 0; the coefficient is kept at `1e-6` as a tie-breaker, not a hard gate. (Original `1e-4` over-penalized by ~100× and was blocking bundled matmul rewrites.)
+When a matmul shares a fusion bundle with a non-matmul op (silu, add, etc.), a non-default split was previously assumed to incur an HBM round-trip to reshuffle the output. Device measurement of fused `silu(linear)` bundles shows the actual cost is ≈ 0; the coefficient is kept at `1e-6` as a tie-breaker, not a hard gate. (Original `1e-4` over-penalized by ~100× and was blocking bundled matmul rewrites.)
 
 ### `batch_penalty` — multiplicative penalty for splitting batch across cores
 
@@ -96,13 +110,15 @@ For `b=1` (batch iterated) → 1.0. Power-law exponent fitted from a bmm[8,512,4
 
 ## Known limits
 
-After empirical validation, two structural limits remain:
+After empirical validation, two structural limits remain in the HBM / scratchpad terms:
 
-1. **`hbm_us` is symmetric in (m, n)** — real cost is asymmetric. Physical mechanism: A (LHS) is streaming, B (RHS) is reused across the K reduction and stays in LX. Broadcasting B is cheap, broadcasting A is expensive. The model uses `cohort = max(m, n)` and doesn't distinguish.
+1. **`hbm_us` is symmetric in `(m, n)`** — real cost is asymmetric. Physical mechanism: activations are streamed (touched once per row), weights are reused across the K reduction and stay in LX. Broadcasting weights to many cores is cheap; broadcasting activations is expensive. The model uses `cohort = max(m, n)` and doesn't distinguish.
 
-2. **`lx_pressure_us` models only per-core RHS overflow** — per-core LHS overflow is unmodeled. For very wide N (e.g. N=20480), shrinking n grows per-core LHS, and at that scale the LHS overflow dominates. The planner picks `(m=4, n=8)` for N=20480 when `(m=8, n=4)` is actually ~40% faster.
+2. **`lx_pressure_us` models only per-core weight-slice overflow** — per-core activation-slice overflow and per-core output-slice overflow are unmodeled. For very wide N (e.g. N=20480), shrinking n grows per-core activation slice; at that scale the activation overflow can dominate. The planner picks `(m=4, n=8)` for N=20480 when `(m=8, n=4)` is actually ~40% faster.
 
-A 7-parameter rework (per-tensor cohort + two-sided LX pressure) was attempted. The fit was degenerate against the available data, and a linear-in-excess RHS term cannot reproduce the empirically observed N=12800 → N=20480 winner-flip. Future revision will need a saturating RHS formulation + additional M-varying measurements.
+A separate finding from a corner-stress sweep: **per-core output pressure** (a real cost of ~0.75 ms per MB of per-core output, fired when per-core output approaches the LX cap) is also unmodeled. It only fires at large M (≥ 8K) so it doesn't change any planner pick on typical model shapes.
+
+A 7-parameter rework (per-tensor cohort + two-sided pressure) was attempted with a calibration sweep. The fit was degenerate against the available data, and a linear-in-excess term cannot reproduce the empirically observed N=12800 → N=20480 winner-flip. Future revision will need a saturating non-linear term + additional measurements that stress per-core output and per-core weights simultaneously.
 
 ## Validation status
 
