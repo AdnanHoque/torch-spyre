@@ -36,7 +36,7 @@ def _load_gate():
 gate = _load_gate()
 
 
-def _ok_row(case, length, *, layout_xform=True):
+def _ok_row(case, length, *, layout_xform=True, fallbacks_forbidden=False):
     mixed = [
         {"name": f"mixed_{idx}", "flash_pipeline": {}}
         for idx in range(case.min_mixed_by_length[length] - 1)
@@ -61,6 +61,7 @@ def _ok_row(case, length, *, layout_xform=True):
         },
         "block_size": case.block_size,
         "is_causal": case.is_causal,
+        "fallbacks_forbidden": fallbacks_forbidden,
         "max_abs_error": 0.003,
         "mixed_sdscs": mixed,
     }
@@ -172,6 +173,25 @@ def test_gate_validation_rejects_missing_or_wrong_causal_flag():
     assert "is_causal=False expected=True" in joined
 
 
+def test_gate_validation_rejects_missing_or_wrong_fallback_readiness_flag():
+    case = gate.select_cases("onchip_layout_xform", "b1h2d64_block64")[0]
+    rows = [_ok_row(case, length) for length in case.lengths]
+    del rows[0]["fallbacks_forbidden"]
+    rows[1]["fallbacks_forbidden"] = False
+
+    errors = gate.validate_rows(
+        rows,
+        case=case,
+        variant="onchip_master_layout_xform",
+        max_error=0.01,
+        forbid_fallbacks=True,
+    )
+
+    joined = "\n".join(errors)
+    assert "fallbacks_forbidden=None expected=True" in joined
+    assert "fallbacks_forbidden=False expected=True" in joined
+
+
 def test_sweep_command_uses_case_shape_and_output_path():
     case = gate.select_cases("onchip_layout_xform", "b1h2d128_block64")[0]
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -188,6 +208,7 @@ def test_sweep_command_uses_case_shape_and_output_path():
             seed=123,
             atol=0.1,
             rtol=0.2,
+            forbid_fallbacks=False,
         )
 
     assert cmd[0] == "pythonX"
@@ -200,6 +221,7 @@ def test_sweep_command_uses_case_shape_and_output_path():
     assert cmd[cmd.index("--block-size") + 1] == "64"
     assert cmd[cmd.index("--output-json") + 1].endswith("case.json")
     assert "--is-causal" not in cmd
+    assert "--forbid-fallbacks" not in cmd
 
 
 def test_sweep_command_adds_causal_flag_for_causal_case():
@@ -222,6 +244,28 @@ def test_sweep_command_adds_causal_flag_for_causal_case():
 
     assert cmd[cmd.index("--lengths") + 1] == "128,256"
     assert "--is-causal" in cmd
+
+
+def test_sweep_command_adds_forbid_fallbacks_flag_when_requested():
+    case = gate.select_cases("onchip_layout_xform", "b1h2d64_block64")[0]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_json = Path(tmpdir) / "case.json"
+        cmd = gate.sweep_command(
+            python="pythonX",
+            variant="onchip_master_layout_xform",
+            case=case,
+            warmup=1,
+            iters=2,
+            timeout_s=480.0,
+            cache_prefix="/tmp/cache-prefix",
+            output_json=output_json,
+            seed=123,
+            atol=0.1,
+            rtol=0.2,
+            forbid_fallbacks=True,
+        )
+
+    assert "--forbid-fallbacks" in cmd
 
 
 def _run_all():

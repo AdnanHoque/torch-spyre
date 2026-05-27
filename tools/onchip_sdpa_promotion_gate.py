@@ -167,6 +167,7 @@ def sweep_command(
     seed: int,
     atol: float,
     rtol: float,
+    forbid_fallbacks: bool = False,
 ) -> list[str]:
     cmd = [
         python,
@@ -202,6 +203,8 @@ def sweep_command(
     ]
     if case.is_causal:
         cmd.append("--is-causal")
+    if forbid_fallbacks:
+        cmd.append("--forbid-fallbacks")
     return cmd
 
 
@@ -220,6 +223,7 @@ def validate_rows(
     variant: str,
     max_error: float,
     require_layout_xform: bool = True,
+    forbid_fallbacks: bool = False,
 ) -> list[str]:
     errors = []
     by_length = {}
@@ -253,6 +257,11 @@ def validate_rows(
             errors.append(
                 f"{case.name}: L={length} is_causal={row.get('is_causal')} "
                 f"expected={case.is_causal}"
+            )
+        if forbid_fallbacks and row.get("fallbacks_forbidden") is not True:
+            errors.append(
+                f"{case.name}: L={length} fallbacks_forbidden="
+                f"{row.get('fallbacks_forbidden')} expected=True"
             )
         max_abs_error = row.get("max_abs_error")
         if max_abs_error is None or max_abs_error > max_error:
@@ -300,6 +309,7 @@ def _run_gate(args: argparse.Namespace) -> int:
             seed=args.seed,
             atol=args.atol,
             rtol=args.rtol,
+            forbid_fallbacks=args.forbid_fallbacks,
         )
         print(shlex.join(cmd), flush=True)
         if args.dry_run:
@@ -320,6 +330,7 @@ def _run_gate(args: argparse.Namespace) -> int:
                 variant=args.variant,
                 max_error=args.max_error,
                 require_layout_xform=not args.no_require_layout_xform,
+                forbid_fallbacks=args.forbid_fallbacks,
             )
         )
 
@@ -366,6 +377,14 @@ def main(argv: list[str] | None = None) -> int:
         help="validate existing per-case JSON files instead of rerunning sweeps",
     )
     parser.add_argument("--no-require-layout-xform", action="store_true")
+    parser.add_argument(
+        "--forbid-fallbacks",
+        action="store_true",
+        help=(
+            "forward --forbid-fallbacks to the sweep harness and require "
+            "successful rows to record fallbacks_forbidden=true"
+        ),
+    )
     args = parser.parse_args(argv)
     return _run_gate(args)
 
