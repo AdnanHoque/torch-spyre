@@ -190,6 +190,30 @@ def _(
     return input.new_empty(input.size())
 
 
+@torch.library.custom_op(
+    "spyre::causal_score_bias_like", mutates_args=(), device_types="spyre"
+)
+def causal_score_bias_like(scores: torch.Tensor, key_start: int) -> torch.Tensor:
+    pass
+
+
+@causal_score_bias_like.register_fake
+def _(scores: torch.Tensor, key_start: int):
+    return scores.new_empty(scores.size())
+
+
+@torch.library.register_kernel("spyre::causal_score_bias_like", ["cpu"])
+def causal_score_bias_like_cpu(
+    scores: torch.Tensor, key_start: int
+) -> torch.Tensor:
+    q_len = scores.size(-2)
+    k_len = scores.size(-1)
+    q = torch.arange(q_len, device=scores.device).unsqueeze(-1)
+    k = torch.arange(k_len, device=scores.device).unsqueeze(0) + key_start
+    bias = torch.zeros_like(scores)
+    return bias.masked_fill(k > q, float("-inf"))
+
+
 @torch.library.custom_op("spyre::empty", mutates_args=(), device_types="spyre")
 def spyre_empty(
     size: Sequence[int],

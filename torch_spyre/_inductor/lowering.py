@@ -601,6 +601,26 @@ def lower_clamp(x, min=None, max=None):
     return pw
 
 
+@register_spyre_lowering(torch.ops.spyre.causal_score_bias_like)
+def lower_causal_score_bias_like(scores, key_start: int):
+    fn = lowering.ops_wrapper(torch.ops.spyre.causal_score_bias_like.__name__)
+    loader = scores.make_loader()
+
+    def inner_fn(index):
+        return fn(loader(index), key_start)
+
+    pw = Pointwise.create(
+        device=scores.get_device(),
+        dtype=scores.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=scores.get_size(),
+        origin_node=scores.get_origin_node(),
+        traceback=scores.get_traceback(),
+    )
+    pw.realize()
+    return pw
+
+
 @register_spyre_lowering(torch.ops.aten.clone.default, type_promotion_kind=None)
 def clone(x, *, memory_format=None):
     from torch._inductor.ir import FlexibleLayout, get_stride_order

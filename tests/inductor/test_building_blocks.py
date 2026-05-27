@@ -289,6 +289,33 @@ class TestBuildingBlocks(unittest.TestCase):
 
         torch.testing.assert_close(actual, expected, atol=1e-4, rtol=1e-4)
 
+    def test_causal_score_bias_like_cpu(self):
+        scores = torch.empty(1, 2, 4, 3, dtype=torch.float32)
+
+        actual = torch.ops.spyre.causal_score_bias_like(scores, 2)
+
+        expected = torch.tensor(
+            [
+                [
+                    [
+                        [float("-inf"), float("-inf"), float("-inf")],
+                        [float("-inf"), float("-inf"), float("-inf")],
+                        [0.0, float("-inf"), float("-inf")],
+                        [0.0, 0.0, float("-inf")],
+                    ],
+                    [
+                        [float("-inf"), float("-inf"), float("-inf")],
+                        [float("-inf"), float("-inf"), float("-inf")],
+                        [0.0, float("-inf"), float("-inf")],
+                        [0.0, 0.0, float("-inf")],
+                    ],
+                ]
+            ],
+            dtype=scores.dtype,
+        )
+
+        torch.testing.assert_close(actual, expected)
+
     def test_sdpa_flash_attention_score_scale_handoff(self):
         B, H, L, D = 1, 2, 128, 64
 

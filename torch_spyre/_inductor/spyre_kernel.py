@@ -147,6 +147,11 @@ class SpyreOpFuncs:
         return PointwiseOp("add", [a, b])
 
     @staticmethod
+    def causal_score_bias_like(scores, key_start):
+        op_info = {"constants": {"keyStart": key_start}}
+        return PointwiseOp("causal_score_bias_like", [scores], op_info)
+
+    @staticmethod
     def clamp(x, min, max):
         op_info = {
             "constants": {

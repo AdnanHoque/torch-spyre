@@ -47,6 +47,7 @@ SPYRE_FP32_OPS = [
     "layernormscale",
     "abs",
     "neg",
+    "causal_score_bias_like",
     "exp",
     "sigmoid",
     "exx2",
