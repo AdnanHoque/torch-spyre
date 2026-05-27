@@ -114,6 +114,9 @@ def _flash_attention_prefill(
     )
     causal_bias = None
     if is_causal:
+        # Stage047: keep this fallback until Spyre has a score-layout-anchored
+        # causal bias primitive. Graph-level arange/cat/slice rewrites have
+        # already failed on layout and stick-expression constraints.
         causal_bias = torch.full(
             (max_seqlen_q, max_seqlen_kv),
             float("-inf"),
