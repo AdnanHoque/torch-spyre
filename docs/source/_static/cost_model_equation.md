@@ -18,6 +18,17 @@ For a matmul `outputs = activations × weights`:
 | K | the reduction dimension (shared between activations and weights) | — |
 | `b`, `m`, `n`, `k` | cores assigned to batch / M / N / K respectively | — |
 
+Inside the SDSC kernel descriptor the same dimensions are labelled differently — that's the notation you'll see in the planner-pick output and in this doc's example splits:
+
+| SDSC label | what it is | math dim |
+|---|---|---|
+| `mb` | rows of activations / outputs (often "minibatch + M" fused) | M |
+| `out` | columns of weights / outputs | N |
+| `in` | the reduction dimension (shared with weights' rows) | K |
+| `x` | batch dim (for batched matmul / bmm) | B |
+
+So a planner pick like `(mb=8, out=4, in=1)` means: 8 cores split M, 4 cores split N, 1 core handles K (no K-split). That's the same as the formula notation `(m=8, n=4, k=1)`.
+
 ## Equation
 
 ```
