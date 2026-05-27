@@ -93,10 +93,11 @@ flash_attention_mixed_pipeline_execute_tile: int = int(
 flash_attention_mixed_pipeline_value_flow_tile: int = int(
     os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_VALUE_FLOW_TILE", "-1")
 )
-# Strongest IFN experiment: replace a strict producer->single-consumer value-flow
-# pair with two sidecar SDSCs and mark the consumer bundle op with its predecessor
-# so Deeptools can use the predecessor-backed InputFetchNeighbor lowering. -1
-# disables; default remains fail-closed.
+# Strongest Stage039 value-flow experiment: replace a strict
+# producer->single-consumer, same-physical-layout edge with two ordered sidecar
+# SDSCs.  The producer leaves its output in LX, and the consumer runs an explicit
+# STCDPOpLx copy into its input LX before compute. -1 disables; layout-changing
+# edges remain fail-closed.
 flash_attention_mixed_pipeline_ifn_pair_tile: int = int(
     os.environ.get("SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PAIR_TILE", "-1")
 )

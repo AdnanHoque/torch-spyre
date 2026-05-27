@@ -356,14 +356,23 @@ def _fake_flash_pipeline_sdscs(
     lx_pinned=False,
     input_neighbor_transfer=False,
     ij_input_layout=False,
+    sdpa_layout_transform=False,
 ):
-    input_layout = ["i", "j", "in"] if ij_input_layout else ["mb", "x", "in"]
-    output_layout = ["i", "j", "out"] if ij_input_layout else ["mb", "x", "out"]
-    n_sizes = (
-        {"i_": 64, "j_": 2, "x_": 2, "out_": 192, "in_": 64}
-        if ij_input_layout
-        else {"x_": 2, "mb_": 96, "out_": 192, "in_": 64}
-    )
+    if ij_input_layout:
+        input_layout = ["i", "j", "in"]
+        output_layout = ["i", "j", "out"]
+    elif sdpa_layout_transform:
+        input_layout = ["x", "mb", "in"]
+        output_layout = ["mb", "x", "out"]
+    else:
+        input_layout = ["mb", "x", "in"]
+        output_layout = ["mb", "x", "out"]
+    if ij_input_layout:
+        n_sizes = {"i_": 64, "j_": 2, "x_": 2, "out_": 192, "in_": 64}
+    elif sdpa_layout_transform:
+        n_sizes = {"x_": 2, "mb_": 96, "out_": 64, "in_": 64}
+    else:
+        n_sizes = {"x_": 2, "mb_": 96, "out_": 192, "in_": 64}
     shard = (
         {"i": 32, "j": 1, "out": 1, "in": 1}
         if ij_input_layout
@@ -792,6 +801,26 @@ def test_flash_ifn_pair_tile_rejects_not_physically_equivalent_edge():
         "input0:physical_layout_mismatch:"
         "producer=['mb_', 'x_', 'out_']/out_:"
         "consumer=['mb_', 'x_', 'in_']/in_"
+    ]
+
+
+def test_flash_ifn_pair_tile_reports_layout_transform_required_edge():
+    sdscs = _fake_flash_pipeline_sdscs(
+        num_tiles=3,
+        sdpa_layout_transform=True,
+    )
+
+    assert rz.build_flash_attention_ifn_pair_tile_artifacts(
+        sdscs,
+        tile_index=1,
+    ) is None
+    assert rz.flash_attention_ifn_pair_tile_rejection_reasons(
+        sdscs,
+        tile_index=1,
+    ) == [
+        "input0:layout_transform_required:"
+        "producer=['mb_', 'x_', 'out_']/out_:"
+        "consumer=['x_', 'mb_', 'in_']/in_"
     ]
 
 

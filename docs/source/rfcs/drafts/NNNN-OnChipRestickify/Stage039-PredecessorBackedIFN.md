@@ -29,8 +29,8 @@ SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PAIR_TILE=-1
 
 When enabled, the builder only emits the pair for a strict latest-producer,
 single-consumer, same-physical-layout edge.  The real SDPA `L=128` probe stayed
-fail-closed: tile 2 has the apparent producer relation, but the physical layouts
-are ordered differently:
+fail-closed: tile 2 has the apparent producer relation, but needs a layout
+transform rather than a same-physical copy:
 
 ```text
 producer=['mb_', 'x_', 'out_']/out_
@@ -68,7 +68,7 @@ No IFN pair sidecars were emitted for that run.  Cache-side rejection scan:
 ```text
 tile 0 input0:no_latest_producer
 tile 1 input0:no_latest_producer
-tile 2 input0:physical_layout_mismatch:producer=['mb_', 'x_', 'out_']/out_:consumer=['x_', 'mb_', 'in_']/in_
+tile 2 input0:layout_transform_required:producer=['mb_', 'x_', 'out_']/out_:consumer=['x_', 'mb_', 'in_']/in_
 ```
 
 Synthetic chained matmul probe:
@@ -116,4 +116,4 @@ The next useful split is:
 - upstream the explicit LX-copy sidecar path as the default-off safe probe;
 - keep the DXP predecessor-generated IFN path as a separate Deeptools follow-up;
 - keep SDPA fail-closed until a same-physical producer edge exists or a
-  deliberate layout-transforming IFN path is designed.
+  deliberate layout-transforming copy/IFN contract is designed and certified.

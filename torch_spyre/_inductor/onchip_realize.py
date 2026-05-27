@@ -490,6 +490,46 @@ def _same_physical_stick_layout(
     return True
 
 
+def _physical_layout_signature(
+    dl: dict,
+    layout: list[str],
+    stick_dim: str,
+) -> list[tuple[str, int]] | None:
+    signature: list[tuple[str, int]] = []
+    for dim in layout:
+        key = "<stick>" if dim == stick_dim else dim
+        size = _dim_size(dl, dim)
+        if size is None:
+            return None
+        signature.append((key, size))
+    return sorted(signature)
+
+
+def _layout_mismatch_reason(
+    prefix: str,
+    prod_dl: dict,
+    prod_layout: list[str],
+    prod_stick: str,
+    cons_dl: dict,
+    cons_layout: list[str],
+    cons_stick: str,
+) -> str | None:
+    if _same_physical_stick_layout(
+        prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
+    ):
+        return None
+    prod_sig = _physical_layout_signature(prod_dl, prod_layout, prod_stick)
+    cons_sig = _physical_layout_signature(cons_dl, cons_layout, cons_stick)
+    reason = "physical_layout_mismatch"
+    if prod_sig is not None and prod_sig == cons_sig:
+        reason = "layout_transform_required"
+    return (
+        f"{prefix}:{reason}:"
+        f"producer={prod_layout}/{prod_stick}:"
+        f"consumer={cons_layout}/{cons_stick}"
+    )
+
+
 def _handoff_bytes(iter_sizes: dict[str, int], word_length: int) -> int:
     size = word_length
     for n in iter_sizes.values():
@@ -1588,17 +1628,12 @@ def _flash_attention_ifn_pair_edge(
         or split_dim is None
     ):
         return None, [f"input{input_idx}:missing_layout_stick_or_split"]
-    if not _same_physical_stick_layout(
+    mismatch_reason = _layout_mismatch_reason(
+        f"input{input_idx}",
         prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
-    ):
-        return (
-            None,
-            [
-                f"input{input_idx}:physical_layout_mismatch:"
-                f"producer={prod_layout}/{prod_stick}:"
-                f"consumer={cons_layout}/{cons_stick}"
-            ],
-        )
+    )
+    if mismatch_reason is not None:
+        return None, [mismatch_reason]
 
     iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
     if iter_sizes is None:
@@ -2038,14 +2073,12 @@ def flash_attention_value_flow_tile_rejection_reasons(
             reasons.append(f"{prefix}:missing_layout_stick_or_split")
             continue
 
-        if not _same_physical_stick_layout(
+        mismatch_reason = _layout_mismatch_reason(
+            prefix,
             prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
-        ):
-            reasons.append(
-                f"{prefix}:physical_layout_mismatch:"
-                f"producer={prod_layout}/{prod_stick}:"
-                f"consumer={cons_layout}/{cons_stick}"
-            )
+        )
+        if mismatch_reason is not None:
+            reasons.append(mismatch_reason)
             continue
 
         iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
@@ -2120,9 +2153,11 @@ def build_flash_attention_value_flow_tile_artifact(
             or split_dim is None
         ):
             continue
-        if not _same_physical_stick_layout(
+        mismatch_reason = _layout_mismatch_reason(
+            f"input{in_idx}",
             prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
-        ):
+        )
+        if mismatch_reason is not None:
             continue
         iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
         if iter_sizes is None:

@@ -106,11 +106,11 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                 sidecar_replacements.update(ifn_pair["replacements"])
                 bundle_attrs_by_file.update(ifn_pair["bundle_attrs"])
                 logger.info(
-                    "Executing predecessor-backed IFN flash attention pair sidecars"
+                    "Executing explicit LX-copy flash attention pair sidecars"
                 )
             else:
                 logger.warning(
-                    "Requested predecessor-backed IFN flash attention pair was "
+                    "Requested explicit LX-copy flash attention pair was "
                     "not realizable; keeping generated HBM-backed SDSCs: %s",
                     flash_attention_ifn_pair_tile_rejection_reasons(
                         sdscs_json,
