@@ -35,6 +35,7 @@ _FLASH_CONFIG_KEYS = [
     "flash_attention_mixed_pipeline_layout_xform_pair_overlap",
     "flash_attention_mixed_pipeline_layout_xform_lookahead_tile",
     "flash_attention_mixed_pipeline_layout_xform_hoist_tile",
+    "flash_attention_kv_repack_broadcast_plan_artifact",
     "flash_attention_pointwise_handoff",
     "flash_attention_score_scale_handoff",
     "causal_idx_to_mask_plan_artifact",
@@ -116,6 +117,7 @@ def test_flash_attention_onchip_sdpa_master_gate_defaults_off():
     assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_overlap"] is False
     assert cfg["flash_attention_mixed_pipeline_layout_xform_lookahead_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_layout_xform_hoist_tile"] == -1
+    assert cfg["flash_attention_kv_repack_broadcast_plan_artifact"] is False
     assert cfg["causal_idx_to_mask_plan_artifact"] is False
 
 
@@ -140,7 +142,18 @@ def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
     assert cfg["flash_attention_mixed_pipeline_layout_xform_pair_overlap"] is False
     assert cfg["flash_attention_mixed_pipeline_layout_xform_lookahead_tile"] == -1
     assert cfg["flash_attention_mixed_pipeline_layout_xform_hoist_tile"] == -1
+    assert cfg["flash_attention_kv_repack_broadcast_plan_artifact"] is False
     assert cfg["causal_idx_to_mask_plan_artifact"] is False
+
+
+def test_flash_attention_kv_repack_plan_artifact_is_independently_gated():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PLAN_ARTIFACT": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_plan_artifact"] is True
+    assert cfg["flash_attention_onchip_sdpa"] is False
+    assert cfg["flash_attention_mixed_pipeline"] is False
 
 
 def test_causal_idx_to_mask_plan_artifact_is_independently_gated():

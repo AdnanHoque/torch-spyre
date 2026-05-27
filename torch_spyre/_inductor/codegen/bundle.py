@@ -25,6 +25,7 @@ from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.onchip_realize import (
     build_flash_attention_ifn_pair_tile_artifacts,
+    build_flash_attention_kv_repack_broadcast_plan_artifact,
     build_flash_attention_layout_xform_hoist_tile_artifacts,
     build_flash_attention_layout_xform_lookahead_tile_artifacts,
     build_flash_attention_layout_xform_pair_tile_artifacts,
@@ -61,6 +62,20 @@ def _causal_idx_to_mask_plan_artifacts(specs: list[OpSpec], sdscs_json: list[dic
                 name=f"causal_idx_to_mask_plan_{idx}",
             )
         )
+    return artifacts
+
+
+def _flash_attention_kv_repack_broadcast_plan_artifacts(sdscs_json: list[dict]):
+    artifacts = []
+    for tile_index in range(len(sdscs_json)):
+        for input_idx in (1, 2):
+            artifact = build_flash_attention_kv_repack_broadcast_plan_artifact(
+                sdscs_json,
+                tile_index,
+                input_idx=input_idx,
+            )
+            if artifact is not None:
+                artifacts.append(artifact)
     return artifacts
 
 
@@ -127,6 +142,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     bundle_attrs_by_file = {}
     value_flow_rejections = {}
     causal_plan_artifacts = []
+    kv_repack_plan_artifacts = []
     if getattr(config, "causal_idx_to_mask_plan_artifact", False):
         causal_plan_artifacts = _causal_idx_to_mask_plan_artifacts(
             specs,
@@ -136,6 +152,15 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             logger.info(
                 "Emitted %d causal IdxToMask plan artifact(s)",
                 len(causal_plan_artifacts),
+            )
+    if getattr(config, "flash_attention_kv_repack_broadcast_plan_artifact", False):
+        kv_repack_plan_artifacts = (
+            _flash_attention_kv_repack_broadcast_plan_artifacts(sdscs_json)
+        )
+        if kv_repack_plan_artifacts:
+            logger.info(
+                "Emitted %d flash attention K/V repack broadcast plan artifact(s)",
+                len(kv_repack_plan_artifacts),
             )
     emit_mixed_sidecars = (
         config.flash_attention_mixed_pipeline
@@ -441,6 +466,12 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         file_name = f"{artifact_name}.json"
         with open(os.path.join(output_dir, file_name), "w") as file:
             logger.info(f"Generating causal plan {file.name}")
+            json.dump(artifact, file, indent=2)
+    for artifact in kv_repack_plan_artifacts:
+        artifact_name = next(iter(artifact))
+        file_name = f"sdsc_{artifact_name}.json"
+        with open(os.path.join(output_dir, file_name), "w") as file:
+            logger.info(f"Generating K/V repack plan {file.name}")
             json.dump(artifact, file, indent=2)
 
     # Generate bundle.mlir

@@ -30,9 +30,11 @@ import dataclasses
 import copy
 
 from .codegen.onchip_bridge import (
+    DATA_FORMAT,
     LX_CAPACITY_BYTES,
     STICK_BYTES,
     STREAM_TILE_BYTES,
+    WORD_LENGTH,
     allocate_flash_attention_pipeline_bases,
     allocate_lx_bases,
     allocate_stream_bases,
@@ -48,6 +50,7 @@ from .codegen.onchip_bridge import (
     num_stream_tiles,
     per_core_slice_bytes,
     per_core_same_stick_slice_bytes,
+    _align_up,
     _stcdp_op,
 )
 
@@ -2356,6 +2359,363 @@ def _layout_xform_source_pieces(edge: dict, producer_base: int) -> list[dict] | 
         edge["iter_sizes"],
         producer_base,
     )
+
+
+def _operand_region_bytes(
+    iter_sizes: dict[str, int],
+    stick_dim: str,
+    stick_size: int,
+    word_length: int = WORD_LENGTH,
+) -> int:
+    elems = 1
+    for dim, size in iter_sizes.items():
+        if dim == stick_dim:
+            size = _align_up(size, stick_size)
+        elems *= size
+    return _align_up(elems * word_length, STICK_BYTES)
+
+
+def _kv_repack_labeled_ds(
+    pds_name: str,
+    layout: list[str],
+    stick_dim: str,
+    iter_sizes: dict[str, int],
+    pieces: list[dict],
+) -> dict:
+    return {
+        "ldsName_": f"{pds_name}_L0",
+        "pdsName_": pds_name,
+        "wordLength": WORD_LENGTH,
+        "dataformat": DATA_FORMAT,
+        "isExternal_": 0,
+        "segment_": "output",
+        "layoutDimOrder_": list(layout),
+        "stickDimOrder_": [stick_dim],
+        "dimToLayoutSize_": {dim: iter_sizes[dim] for dim in layout},
+        "dimToStickSize_": {stick_dim: STICK_SIZE},
+        "validGap_": {dim: [[iter_sizes[dim], 0]] for dim in layout},
+        "totElements": -1,
+        "hbmSize_": 0,
+        "hbmStartAddress_": 0,
+        "lxSize_": DATAOP_LX_SIZE,
+        "lxStartAddress_": {},
+        "PieceInfo": pieces,
+    }
+
+
+def _kv_repack_broadcast_dst_pieces(
+    source_pieces: list[dict],
+    consumer_num_cores: int,
+    consumer_base: int,
+) -> list[dict]:
+    pieces = []
+    ordinal = 1
+    for core_id in range(consumer_num_cores):
+        for source_piece in source_pieces:
+            start = copy.deepcopy(source_piece["dimToStartCordinate"])
+            size = copy.deepcopy(source_piece["dimToSize_"])
+            pieces.append(
+                {
+                    "key_": f"p{ordinal}",
+                    "dimToStartCordinate": start,
+                    "dimToSize_": size,
+                    "validGap_": copy.deepcopy(source_piece["validGap_"]),
+                    "broadcastSourcePieceKey_": source_piece.get("key_"),
+                    "broadcastConsumerCore_": core_id,
+                    "PlacementInfo": [
+                        {
+                            "type": "lx",
+                            "memId": [core_id],
+                            "startAddr": [consumer_base],
+                        }
+                    ],
+                }
+            )
+            ordinal += 1
+    return pieces
+
+
+def _make_kv_repack_broadcast_dataop(
+    name: str,
+    edge: dict,
+) -> dict:
+    source_pieces = edge["source_pieces"]
+    dst_pieces = _kv_repack_broadcast_dst_pieces(
+        source_pieces,
+        edge["consumer_num_cores"],
+        edge["consumer_lx_base"],
+    )
+    in_ld = _kv_repack_labeled_ds(
+        "dataIN",
+        edge["source_layout"],
+        edge["stick_dim"],
+        edge["iter_sizes"],
+        source_pieces,
+    )
+    out_ld = _kv_repack_labeled_ds(
+        "dataOUT",
+        edge["consumer_layout"],
+        edge["stick_dim"],
+        edge["iter_sizes"],
+        dst_pieces,
+    )
+    return {
+        name: {
+            "coreIdsUsed_": list(range(edge["consumer_num_cores"])),
+            "dimPool_": list(edge["source_layout"]),
+            "outDimTodimRelation_": [],
+            "primaryDs_": [
+                {"name_": "dataIN", "dimNames": list(edge["source_layout"])},
+                {"name_": "dataOUT", "dimNames": list(edge["consumer_layout"])},
+            ],
+            "labeledDs_": [in_ld, out_ld],
+            "op": _stcdp_op(),
+        }
+    }
+
+
+def _flash_attention_kv_repack_broadcast_edge(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    input_idx: int,
+) -> tuple[dict | None, list[str]]:
+    if input_idx == INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX:
+        return None, [f"input{input_idx}:not_kv_operand"]
+    tile = _flash_value_flow_tile(sdscs_json, tile_index)
+    if tile is None:
+        return None, ["tile_not_found"]
+    c, cons = tile
+    cons_dl = _dl_op(cons)
+    if input_idx not in _consumer_input_indices(cons_dl):
+        return None, [f"input{input_idx}:not_consumer_input"]
+
+    cons_body = _body(cons)
+    consumer_num_cores = int(cons_body.get("numCoresUsed_", 0))
+    if consumer_num_cores <= 0:
+        return None, ["invalid_num_cores"]
+    addr = _hbm_base(cons_dl, input_idx)
+    if addr is None:
+        return None, [f"input{input_idx}:not_hbm_backed"]
+    producer = _latest_producer_of_hbm(sdscs_json, c, addr)
+    if producer is None:
+        return None, [f"input{input_idx}:no_latest_producer"]
+    p, prod, out_idx = producer
+
+    future = _future_consumers(sdscs_json, p, addr)
+    if len(future) != 1 or future[0][0] != c or future[0][2] != input_idx:
+        future_names = [
+            f"{next(iter(fcons))}:input{fin_idx}"
+            for _fc, fcons, fin_idx in future
+        ]
+        return (
+            None,
+            [
+                f"input{input_idx}:not_single_consumer:"
+                f"{','.join(future_names)}"
+            ],
+        )
+    if _op_name(prod) != "ReStickifyOpHBM":
+        return None, [f"input{input_idx}:producer_not_restickify_hbm:{_op_name(prod)}"]
+
+    prod_dl = _dl_op(prod)
+    prod_layout = _layout_for_lds(prod_dl, out_idx)
+    prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
+    cons_layout = _layout_for_lds(cons_dl, input_idx)
+    cons_stick = _stick_dim_for_lds(cons_dl, input_idx)
+    prod_split = _single_split_dim(_body(prod).get("numWkSlicesPerDim_", {}))
+    cons_split = _single_split_dim(cons_body.get("numWkSlicesPerDim_", {}))
+    producer_num_cores = int(_body(prod).get("numCoresUsed_", 0))
+    if (
+        prod_layout is None
+        or prod_stick is None
+        or cons_layout is None
+        or cons_stick is None
+        or prod_split is None
+        or cons_split is None
+        or producer_num_cores <= 0
+    ):
+        return None, [f"input{input_idx}:missing_layout_stick_or_split"]
+    if prod_stick != cons_stick:
+        return (
+            None,
+            [
+                f"input{input_idx}:stick_transform_required:"
+                f"producer={prod_stick}:consumer={cons_stick}"
+            ],
+        )
+
+    dim_map = _layout_transform_dim_map(
+        prod_dl, prod_layout, prod_stick, cons_dl, cons_layout, cons_stick
+    )
+    if dim_map is None:
+        return None, [f"input{input_idx}:layout_transform_dim_map_missing"]
+    mapped_split = dim_map.get(prod_split)
+    iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
+    source_layout = [dim_map[dim] for dim in prod_layout]
+    if (
+        iter_sizes is None
+        or mapped_split is None
+        or mapped_split not in iter_sizes
+        or any(dim not in iter_sizes for dim in source_layout)
+    ):
+        return None, [f"input{input_idx}:missing_iter_sizes"]
+    if cons_split in iter_sizes:
+        return None, [f"input{input_idx}:consumer_split_present:{cons_split}"]
+    if iter_sizes[mapped_split] % producer_num_cores != 0:
+        return (
+            None,
+            [
+                f"input{input_idx}:invalid_producer_split:"
+                f"{mapped_split}:cores={producer_num_cores}"
+            ],
+        )
+    if producer_num_cores >= consumer_num_cores:
+        return (
+            None,
+            [
+                f"input{input_idx}:not_low_core_to_consumer:"
+                f"producer={producer_num_cores}:consumer={consumer_num_cores}"
+            ],
+        )
+
+    slice_bytes = _reserve_bridge_region_bytes(
+        _operand_region_bytes(iter_sizes, cons_stick, STICK_SIZE)
+    )
+    try:
+        source_lx_base, consumer_lx_base = allocate_lx_bases(
+            2,
+            slice_bytes,
+            region0=PRODUCER_LX_BASE,
+        )
+    except ValueError:
+        return None, [f"input{input_idx}:lx_allocation_exceeds_capacity"]
+    source_pieces = _mapped_work_slice_piece_info(
+        _body(prod),
+        prod_layout,
+        dim_map,
+        iter_sizes,
+        source_lx_base,
+    )
+    if source_pieces is None:
+        return None, [f"input{input_idx}:producer_piece_map_missing"]
+
+    return (
+        {
+            "producer_index": p,
+            "consumer_index": c,
+            "producer": prod,
+            "consumer": cons,
+            "producer_idx": out_idx,
+            "consumer_idx": input_idx,
+            "shared_hbm_addr": addr,
+            "producer_layout": prod_layout,
+            "producer_stick_dim": prod_stick,
+            "consumer_layout": cons_layout,
+            "source_layout": source_layout,
+            "stick_dim": cons_stick,
+            "producer_split": prod_split,
+            "mapped_split": mapped_split,
+            "consumer_split": cons_split,
+            "dim_map": dim_map,
+            "iter_sizes": iter_sizes,
+            "slice_bytes": slice_bytes,
+            "source_lx_base": source_lx_base,
+            "consumer_lx_base": consumer_lx_base,
+            "producer_num_cores": producer_num_cores,
+            "consumer_num_cores": consumer_num_cores,
+            "source_pieces": source_pieces,
+        },
+        [],
+    )
+
+
+def flash_attention_kv_repack_broadcast_rejection_reasons(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    input_idx: int,
+) -> list[str]:
+    """Explain why a K/V low-core-to-32-core repack descriptor cannot be planned."""
+    _edge, reasons = _flash_attention_kv_repack_broadcast_edge(
+        sdscs_json,
+        tile_index,
+        input_idx=input_idx,
+    )
+    return reasons
+
+
+def build_flash_attention_kv_repack_broadcast_plan_artifact(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    input_idx: int,
+    name_prefix: str = "flash_kv_repack_broadcast_plan",
+) -> dict | None:
+    """Build a non-executed descriptor artifact for low-core K/V fanout."""
+    edge, reasons = _flash_attention_kv_repack_broadcast_edge(
+        sdscs_json,
+        tile_index,
+        input_idx=input_idx,
+    )
+    if edge is None:
+        return None
+    name = f"{name_prefix}_{tile_index}_input{input_idx}"
+    dataop_name = f"0_STCDPOpLx_kv_repack_broadcast_tile{tile_index}_input{input_idx}"
+    dataop = _make_kv_repack_broadcast_dataop(
+        dataop_name,
+        edge,
+    )
+    dataop_body = dataop[dataop_name]
+    dst_piece_count = len(dataop_body["labeledDs_"][1]["PieceInfo"])
+    return {
+        name: {
+            "numCoresUsed_": edge["consumer_num_cores"],
+            "coreIdToDscSchedule": {
+                str(core_id): [[0, -1, 0, 0]]
+                for core_id in range(edge["consumer_num_cores"])
+            },
+            "datadscs_": [dataop],
+            "dscs_": [],
+            "opFuncsUsed_": ["STCDPOpLx"],
+            "kvRepackBroadcastPlan_": {
+                "runtime_status": "not_executed",
+                "blockers": [
+                    "Torch-Spyre still needs an executable mixed SDSC owner "
+                    "for this producer/consumer boundary",
+                    "DXP one-to-many PieceInfo broadcast support is unproven",
+                ],
+            },
+            "flashAttentionPipeline_": {
+                "source": "generated-flash-prefill-kv-repack-broadcast-plan",
+                "kv_repack_broadcast_plan": True,
+                "kv_repack_broadcast_executable": False,
+                "kv_repack_runtime_status": "not_executed",
+                "kv_repack_source_sdsc": next(iter(edge["producer"])),
+                "kv_repack_consumer_sdsc": next(iter(edge["consumer"])),
+                "kv_repack_input_idx": edge["consumer_idx"],
+                "kv_repack_producer_idx": edge["producer_idx"],
+                "kv_repack_consumer_idx": edge["consumer_idx"],
+                "kv_repack_shared_hbm_addr": edge["shared_hbm_addr"],
+                "kv_repack_producer_cores": edge["producer_num_cores"],
+                "kv_repack_consumer_cores": edge["consumer_num_cores"],
+                "kv_repack_source_layout": edge["source_layout"],
+                "kv_repack_consumer_layout": edge["consumer_layout"],
+                "kv_repack_iter_sizes": edge["iter_sizes"],
+                "kv_repack_stick_dim": edge["stick_dim"],
+                "kv_repack_producer_split": edge["producer_split"],
+                "kv_repack_mapped_split": edge["mapped_split"],
+                "kv_repack_consumer_split": edge["consumer_split"],
+                "kv_repack_source_lx_base": edge["source_lx_base"],
+                "kv_repack_consumer_lx_base": edge["consumer_lx_base"],
+                "kv_repack_source_piece_count": len(edge["source_pieces"]),
+                "kv_repack_destination_piece_count": dst_piece_count,
+                "slice_bytes": edge["slice_bytes"],
+                "tile_index": tile_index,
+                "rejection_reasons": reasons,
+            },
+        }
+    }
 
 
 def _flash_attention_layout_xform_lookahead_edges(

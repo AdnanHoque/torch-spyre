@@ -36,6 +36,7 @@ _LAYOUT_LOOKAHEAD_ENV = (
 _LAYOUT_HOIST_ENV = (
     "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_HOIST_TILE"
 )
+_KV_REPACK_PLAN_ENV = "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PLAN_ARTIFACT"
 
 
 def _load_sweep():
@@ -162,7 +163,39 @@ def test_layout_xform_hoist_auto_enables_hoist_probe():
     assert env[_LAYOUT_PAIR_ENV] == "-2"
     assert env[_LAYOUT_LOOKAHEAD_ENV] == "-1"
     assert env[_LAYOUT_HOIST_ENV] == "-2"
+    assert env[_KV_REPACK_PLAN_ENV] == "0"
     assert "layout_xform_hoist_auto" in env["TORCHINDUCTOR_CACHE_DIR"]
+
+
+def test_layout_xform_hoist_kv_repack_plan_variant_emits_descriptor_only():
+    env = sweep._child_env(
+        _args(),
+        "layout_xform_hoist_kv_repack_plan_auto",
+        128,
+    )
+
+    assert env["SPYRE_FLASH_ATTENTION_MIXED_PIPELINE"] == "1"
+    assert env[_LAYOUT_PAIR_ENV] == "-2"
+    assert env[_LAYOUT_HOIST_ENV] == "-2"
+    assert env[_KV_REPACK_PLAN_ENV] == "1"
+    assert "layout_xform_hoist_kv_repack_plan_auto" in env[
+        "TORCHINDUCTOR_CACHE_DIR"
+    ]
+
+
+def test_layout_xform_hoist_auto_clears_parent_kv_repack_plan_probe():
+    old = os.environ.get(_KV_REPACK_PLAN_ENV)
+    os.environ[_KV_REPACK_PLAN_ENV] = "1"
+    try:
+        env = sweep._child_env(_args(), "layout_xform_hoist_auto", 128)
+    finally:
+        if old is None:
+            os.environ.pop(_KV_REPACK_PLAN_ENV, None)
+        else:
+            os.environ[_KV_REPACK_PLAN_ENV] = old
+
+    assert env[_LAYOUT_HOIST_ENV] == "-2"
+    assert env[_KV_REPACK_PLAN_ENV] == "0"
 
 
 def test_layout_xform_pair_auto_clears_parent_lookahead_probe():

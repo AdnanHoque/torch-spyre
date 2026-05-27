@@ -158,6 +158,14 @@ flash_attention_mixed_pipeline_layout_xform_hoist_tile: int = int(
         "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_HOIST_TILE", "-1"
     )
 )
+# Default-off descriptor-only probe for the low-core K/V ReStickify -> 32-core
+# batchmatmul boundary exposed by the layout-transform hoist diagnostics.  When
+# enabled, bundle generation writes a non-executed STCDPOpLx repack/broadcast
+# plan artifact next to generated SDSCs; it does not alter bundle.mlir.
+flash_attention_kv_repack_broadcast_plan_artifact: bool = (
+    os.environ.get("SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PLAN_ARTIFACT", "0")
+    == "1"
+)
 # Default-off production-shaped bridge for same-stick pointwise edges that appear
 # inside the flash-prefill graph. This keeps the attention experiment off the
 # generic add/add handoff flag while reusing the same fail-closed Tier 1 realizer.

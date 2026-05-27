@@ -77,6 +77,7 @@ def _install_bundle_stubs(
     layout_xform_hoist_result=True,
     layout_xform_pointwise_region0=None,
     causal_plan_artifact=False,
+    kv_repack_plan_artifact=False,
     ifn_prefix_force=False,
     execute_tile=-1,
     tile_artifacts=None,
@@ -86,6 +87,7 @@ def _install_bundle_stubs(
         "layout_xform_overlap": [],
         "layout_xform_lookahead": [],
         "layout_xform_hoist": [],
+        "kv_repack_plan": [],
         "pointwise": [],
     }
 
@@ -120,6 +122,9 @@ def _install_bundle_stubs(
     )
     config.flash_attention_mixed_pipeline_overlap = False
     config.causal_idx_to_mask_plan_artifact = causal_plan_artifact
+    config.flash_attention_kv_repack_broadcast_plan_artifact = (
+        kv_repack_plan_artifact
+    )
 
     superdsc = types.ModuleType("torch_spyre._inductor.codegen.superdsc")
     superdsc.compile_op_spec = lambda _idx, spec: getattr(spec, "sdsc_json", spec)
@@ -243,6 +248,36 @@ def _install_bundle_stubs(
     onchip_realize.build_flash_attention_layout_xform_hoist_tile_artifacts = (
         build_flash_attention_layout_xform_hoist_tile_artifacts
     )
+
+    def build_flash_attention_kv_repack_broadcast_plan_artifact(
+        _sdscs,
+        tile_index,
+        *,
+        input_idx,
+        name_prefix="flash_kv_repack_broadcast_plan",
+    ):
+        calls["kv_repack_plan"].append((tile_index, input_idx))
+        if not kv_repack_plan_artifact or tile_index != 1 or input_idx != 1:
+            return None
+        name = f"{name_prefix}_{tile_index}_input{input_idx}"
+        return {
+            name: {
+                "numCoresUsed_": 32,
+                "coreIdToDscSchedule": {"0": [[0, -1, 0, 0]]},
+                "datadscs_": [],
+                "dscs_": [],
+                "opFuncsUsed_": ["STCDPOpLx"],
+                "flashAttentionPipeline_": {
+                    "kv_repack_broadcast_plan": True,
+                    "kv_repack_broadcast_executable": False,
+                    "tile_index": tile_index,
+                },
+            }
+        }
+
+    onchip_realize.build_flash_attention_kv_repack_broadcast_plan_artifact = (
+        build_flash_attention_kv_repack_broadcast_plan_artifact
+    )
     onchip_realize.build_flash_attention_ifn_pair_tile_artifacts = (
         lambda *_args, **_kwargs: None
     )
@@ -314,6 +349,7 @@ def _load_bundle_with_stubs(
     layout_xform_hoist_result=True,
     layout_xform_pointwise_region0=None,
     causal_plan_artifact=False,
+    kv_repack_plan_artifact=False,
     ifn_prefix_force=False,
     execute_tile=-1,
     tile_artifacts=None,
@@ -342,6 +378,7 @@ def _load_bundle_with_stubs(
         layout_xform_hoist_result=layout_xform_hoist_result,
         layout_xform_pointwise_region0=layout_xform_pointwise_region0,
         causal_plan_artifact=causal_plan_artifact,
+        kv_repack_plan_artifact=kv_repack_plan_artifact,
         ifn_prefix_force=ifn_prefix_force,
         execute_tile=execute_tile,
         tile_artifacts=tile_artifacts,
@@ -1741,6 +1778,95 @@ def test_flash_layout_xform_hoist_reports_kv_repack_boundary():
     ]
 
 
+def test_flash_kv_repack_broadcast_plan_fans_out_low_core_input1():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    plan = rz.build_flash_attention_kv_repack_broadcast_plan_artifact(
+        sdscs,
+        tile_index=1,
+        input_idx=1,
+    )
+
+    assert plan is not None
+    root = plan["flash_kv_repack_broadcast_plan_1_input1"]
+    meta = root["flashAttentionPipeline_"]
+    assert meta["kv_repack_broadcast_executable"] is False
+    assert meta["kv_repack_source_sdsc"] == "1_ReStickifyOpHBM"
+    assert meta["kv_repack_consumer_sdsc"] == "2_batchmatmul"
+    assert meta["kv_repack_input_idx"] == 1
+    assert meta["kv_repack_producer_cores"] == 2
+    assert meta["kv_repack_consumer_cores"] == 32
+    assert meta["kv_repack_source_layout"] == ["in_", "x_", "out_"]
+    assert meta["kv_repack_consumer_layout"] == ["in_", "x_", "out_"]
+    assert meta["kv_repack_iter_sizes"] == {"in_": 64, "x_": 2, "out_": 64}
+    assert meta["kv_repack_stick_dim"] == "out_"
+    assert meta["kv_repack_producer_split"] == "mb_"
+    assert meta["kv_repack_mapped_split"] == "x_"
+    assert meta["kv_repack_consumer_split"] == "mb_"
+    assert meta["kv_repack_source_lx_base"] == rz.PRODUCER_LX_BASE
+    assert meta["kv_repack_consumer_lx_base"] == (
+        rz.PRODUCER_LX_BASE + meta["slice_bytes"]
+    )
+    assert meta["kv_repack_source_piece_count"] == 2
+    assert meta["kv_repack_destination_piece_count"] == 64
+    assert root["kvRepackBroadcastPlan_"]["runtime_status"] == "not_executed"
+
+    assert root["numCoresUsed_"] == 32
+    assert root["opFuncsUsed_"] == ["STCDPOpLx"]
+    assert root["dscs_"] == []
+    assert root["coreIdToDscSchedule"]["0"] == [[0, -1, 0, 0]]
+    assert root["coreIdToDscSchedule"]["31"] == [[0, -1, 0, 0]]
+    dataop = root["datadscs_"][0][
+        "0_STCDPOpLx_kv_repack_broadcast_tile1_input1"
+    ]
+    assert dataop["coreIdsUsed_"] == list(range(32))
+    assert dataop["primaryDs_"] == [
+        {"name_": "dataIN", "dimNames": ["in_", "x_", "out_"]},
+        {"name_": "dataOUT", "dimNames": ["in_", "x_", "out_"]},
+    ]
+    src_ld, dst_ld = dataop["labeledDs_"]
+    assert src_ld["layoutDimOrder_"] == ["in_", "x_", "out_"]
+    assert dst_ld["layoutDimOrder_"] == ["in_", "x_", "out_"]
+    src_pieces = src_ld["PieceInfo"]
+    dst_pieces = dst_ld["PieceInfo"]
+    assert len(src_pieces) == 2
+    assert len(dst_pieces) == 64
+    assert src_pieces[0]["dimToStartCordinate"] == {
+        "in_": 0,
+        "x_": 0,
+        "out_": 0,
+    }
+    assert src_pieces[1]["dimToStartCordinate"] == {
+        "in_": 0,
+        "x_": 1,
+        "out_": 0,
+    }
+    assert src_pieces[0]["PlacementInfo"][0]["memId"] == [0]
+    assert src_pieces[1]["PlacementInfo"][0]["memId"] == [1]
+    assert src_pieces[0]["PlacementInfo"][0]["startAddr"] == [
+        meta["kv_repack_source_lx_base"]
+    ]
+    assert src_pieces[1]["PlacementInfo"][0]["startAddr"] == [
+        meta["kv_repack_source_lx_base"]
+    ]
+    assert dst_pieces[0]["PlacementInfo"][0]["memId"] == [0]
+    assert dst_pieces[1]["PlacementInfo"][0]["memId"] == [0]
+    assert dst_pieces[2]["PlacementInfo"][0]["memId"] == [1]
+    assert dst_pieces[-1]["PlacementInfo"][0]["memId"] == [31]
+    assert dst_pieces[0]["PlacementInfo"][0]["startAddr"] == [
+        meta["kv_repack_consumer_lx_base"]
+    ]
+    assert dst_pieces[0]["broadcastSourcePieceKey_"] == src_pieces[0]["key_"]
+    assert dst_pieces[1]["broadcastSourcePieceKey_"] == src_pieces[1]["key_"]
+    assert dst_pieces[-1]["broadcastConsumerCore_"] == 31
+    assert dst_pieces[0]["dimToStartCordinate"] == src_pieces[0][
+        "dimToStartCordinate"
+    ]
+    assert dst_pieces[1]["dimToStartCordinate"] == src_pieces[1][
+        "dimToStartCordinate"
+    ]
+
+
 def test_flash_layout_xform_pair_reports_dynamic_pointwise_region():
     result = rz.build_flash_attention_layout_xform_pair_tile_artifacts(
         _fake_flash_pipeline_sdscs(
@@ -2194,6 +2320,43 @@ def test_bundle_emits_non_executed_causal_idx_to_mask_plan_artifact():
             with open(os.path.join(output_dir, "bundle.mlir")) as file:
                 bundle_mlir = file.read()
             assert "causal_idx_to_mask_plan_0.json" not in bundle_mlir
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_emits_non_executed_kv_repack_plan_artifact():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_plan_artifact=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert (1, 1) in calls["kv_repack_plan"]
+            plan_path = os.path.join(
+                output_dir,
+                "sdsc_flash_kv_repack_broadcast_plan_1_input1.json",
+            )
+            assert os.path.exists(plan_path)
+            with open(plan_path) as file:
+                plan = json.load(file)
+            body = plan["flash_kv_repack_broadcast_plan_1_input1"]
+            meta = body["flashAttentionPipeline_"]
+            assert meta["kv_repack_broadcast_plan"] is True
+            assert meta["kv_repack_broadcast_executable"] is False
+            assert body["opFuncsUsed_"] == ["STCDPOpLx"]
+
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert "sdsc_flash_kv_repack_broadcast_plan_1_input1.json" not in (
+                bundle_mlir
+            )
     finally:
         _restore_modules(saved)
 
