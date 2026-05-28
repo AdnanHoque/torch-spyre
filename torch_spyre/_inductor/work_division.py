@@ -561,6 +561,7 @@ _COST_COHORT_LIMIT = 8                              # broadcast contention kicks
 _COST_BATCH_SPLIT_EXPONENT = 1.4                    # batch-split penalty: total ∝ b ^ exponent
 _COST_TARGET_M_PENALTY_US = 50.0                    # tie-break: per log2 step from target m-split
 _COST_REDISTRIBUTION_US_PER_BYTE = 1e-6             # cost of moving output bytes across cores
+_COST_STICK_FRAG_US_PER_BYTE = 4.5e-7               # per-byte stick-dim split tax
 
 
 def _matmuls_fused_with_nonmatmul(operations: list[Operation]) -> set[str]:
@@ -667,12 +668,14 @@ def _pointwise_split_cost(
     input_fanouts: list[int],
     out_size: int,
     cores_used: int,
+    stick_split: int = 1,
     redistribution_us: float = 0.0,
 ) -> float:
     """Estimate kernel time in microseconds for a pointwise op under a given
     per-dim core split. Lower is better.
 
-    Roofline over HBM and per-core SFP compute:
+    Roofline over HBM and per-core SFP compute, plus a stick-fragmentation
+    penalty when the inner (stick) dim is split:
 
       hbm_us           : total bytes moved over HBM bandwidth. Each input is
                          charged numel * fanout bytes, where fanout = product
@@ -688,6 +691,13 @@ def _pointwise_split_cost(
       cost             : max(compute_us, hbm_us) — pointwise is HBM-bound
                          once the per-core slice is large, compute-bound
                          once it shrinks past the SFP roofline.
+      stick_penalty_us : per-core partial-stick / HBM bank-conflict cost when
+                         the stick (innermost) dim is split across cores. The
+                         heuristic naturally avoids splitting the stick dim;
+                         the roofline alone is flat for non-broadcast inputs,
+                         so without this term the planner systematically picks
+                         the last-enumerated stick-dim split and regresses
+                         100-1000 us. Scales (stick_split - 1) * out_bytes.
       redistribution_us: cost of moving the output across cores when this
                          pointwise op is bundled with a partner that stays
                          on the default layout.
@@ -700,7 +710,16 @@ def _pointwise_split_cost(
     hbm_us = bytes_total / (_COST_HBM_BW_GBS * 1000)
     per_core_elements = out_size / cores_used
     compute_us = per_core_elements / _COST_PEAK_ELEMENTS_US_CORE
-    return max(compute_us, hbm_us) + redistribution_us
+    if stick_split > 1:
+        stick_penalty_us = (
+            _COST_STICK_FRAG_US_PER_BYTE
+            * (stick_split - 1)
+            * out_size
+            * _COST_DTYPE_BYTES
+        )
+    else:
+        stick_penalty_us = 0.0
+    return max(compute_us, hbm_us) + stick_penalty_us + redistribution_us
 
 
 def _cost_model_matmul_planner(
@@ -902,6 +921,14 @@ def _cost_model_pointwise_planner(
     # Enumerate every per-dim divisor combination with product <= max_cores.
     dim_divs = [[int(d) for d in divisors(sz)] for sz in dim_sizes]
 
+    # Identify the stick (innermost) dim of the output so we can charge a
+    # fragmentation penalty to candidates that split it. stick_vars is keyed
+    # by the iteration variable that indexes a tensor's stick dimension; the
+    # output's stick dim is the unique dim that lives in stick_vars.
+    stick_dim_idx = next(
+        (i for i, d in enumerate(dims) if d in stick_vars), None
+    )
+
     # Order key: (cost, -cores_used) — on a tie, prefer the candidate that
     # uses more cores (better parallelism, more room for downstream fusion).
     best_key: tuple[float, int] = (float("inf"), 0)
@@ -920,7 +947,11 @@ def _cost_model_pointwise_planner(
                 if d not in dim_set:
                     f *= s
             fanouts.append(f)
-        c = _pointwise_split_cost(input_numels, fanouts, out_numel, cores_used)
+        stick_split = combo[stick_dim_idx] if stick_dim_idx is not None else 1
+        c = _pointwise_split_cost(
+            input_numels, fanouts, out_numel, cores_used,
+            stick_split=stick_split,
+        )
         key = (c, -cores_used)
         if key < best_key:
             best_key = key
