@@ -57,7 +57,14 @@ def _baseline_row(case, length, *, variant="flash_hbm", median_ms=2.0):
     }
 
 
-def _target_row(case, length, *, median_ms=1.0):
+def _target_row(
+    case,
+    length,
+    *,
+    median_ms=1.0,
+    variant=None,
+    route_selected_variant="",
+):
     mixed = [
         {
             "name": "17_add",
@@ -81,9 +88,9 @@ def _target_row(case, length, *, median_ms=1.0):
         {"name": f"mixed_{idx}", "flash_pipeline": {}}
         for idx in range(case.min_mixed_by_length[length] - len(mixed))
     )
-    return {
+    row = {
         "status": "ok",
-        "variant": perf.gate.DEFAULT_WARPSPEC_DECOUPLED_VARIANT,
+        "variant": variant or perf.gate.DEFAULT_WARPSPEC_DECOUPLED_VARIANT,
         "shape": {
             "batch": case.batch,
             "heads": case.heads,
@@ -97,6 +104,38 @@ def _target_row(case, length, *, median_ms=1.0):
         "mean_ms": median_ms,
         "max_abs_error": 0.003,
         "mixed_sdscs": mixed,
+    }
+    if route_selected_variant:
+        row["route_policy"] = perf.sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_NAME
+        row["route_selected_variant"] = route_selected_variant
+    return row
+
+
+def _route_policy_fallback_row(case, length, *, median_ms=1.0):
+    return {
+        "status": "ok",
+        "variant": perf.sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT,
+        "route_policy": perf.sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_NAME,
+        "route_selected_variant": "onchip_master",
+        "shape": {
+            "batch": case.batch,
+            "heads": case.heads,
+            "length": length,
+            "dim": case.dim,
+        },
+        "block_size": case.block_size,
+        "is_causal": case.is_causal,
+        "fallbacks_forbidden": False,
+        "median_ms": median_ms,
+        "mean_ms": median_ms,
+        "max_abs_error": 0.003,
+        "mixed_sdscs": [
+            {
+                "name": "17_add",
+                "opFuncsUsed": ["STCDPOpLx"],
+                "flash_pipeline": {},
+            },
+        ],
     }
 
 
@@ -239,6 +278,76 @@ def test_reuse_existing_compare_validates_target_and_writes_summary():
         assert payload["target_variant"] == perf.gate.DEFAULT_WARPSPEC_DECOUPLED_VARIANT
         assert payload["summary"]["flash_hbm"]["ok_pairs"] == 2
         assert payload["summary"]["flash_hbm"]["geomean_speedup"] == 2.0
+
+
+def test_route_policy_validation_allows_selected_warpspec_row():
+    case = perf.gate.select_cases(
+        "onchip_warpspec_decoupled",
+        "b1h4d64_block64_long_decoupled_loader_core31",
+    )[0]
+    rows = [
+        _target_row(
+            case,
+            length,
+            variant=perf.sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT,
+            route_selected_variant=perf.sweep.WARPSPEC_DECOUPLED_VARIANT,
+        )
+        for length in case.lengths
+    ]
+
+    errors = perf.validate_target_rows(
+        rows,
+        case=case,
+        target_variant=perf.sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT,
+        max_error=0.01,
+        forbid_fallbacks=False,
+    )
+
+    assert not errors
+
+
+def test_route_policy_validation_allows_fallback_row_without_warpspec():
+    case = perf.gate.select_cases(
+        "onchip_warpspec_decoupled",
+        "b1h8d64_block64_mid_decoupled_loader_core31",
+    )[0]
+    rows = [_route_policy_fallback_row(case, length) for length in case.lengths]
+
+    errors = perf.validate_target_rows(
+        rows,
+        case=case,
+        target_variant=perf.sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT,
+        max_error=0.01,
+        forbid_fallbacks=False,
+    )
+
+    assert not errors
+
+
+def test_route_policy_validation_rejects_unexpected_route_selection():
+    case = perf.gate.select_cases(
+        "onchip_warpspec_decoupled",
+        "b1h8d64_block64_mid_decoupled_loader_core31",
+    )[0]
+    rows = [
+        _route_policy_fallback_row(case, 384),
+        _target_row(
+            case,
+            512,
+            variant=perf.sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT,
+            route_selected_variant=perf.sweep.WARPSPEC_DECOUPLED_VARIANT,
+        ),
+    ]
+
+    errors = perf.validate_target_rows(
+        rows,
+        case=case,
+        target_variant=perf.sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT,
+        max_error=0.01,
+        forbid_fallbacks=False,
+    )
+
+    assert any("route_selected_variant" in error for error in errors)
 
 
 def test_min_speedup_failure_is_reported():

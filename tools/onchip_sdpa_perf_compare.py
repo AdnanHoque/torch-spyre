@@ -31,6 +31,7 @@ if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
 import onchip_sdpa_promotion_gate as gate  # noqa: E402
+import onchip_sdpa_sweep as sweep  # noqa: E402
 
 
 def _parse_csv(values: str) -> list[str]:
@@ -158,6 +159,10 @@ def build_comparisons(
                     "target_variant": target_variant,
                     "baseline_status": baseline.get("status", "missing"),
                     "target_status": target.get("status", "missing"),
+                    "target_route_policy": target.get("route_policy", ""),
+                    "target_route_selected_variant": target.get(
+                        "route_selected_variant", ""
+                    ),
                     "baseline_median_ms": baseline_median,
                     "target_median_ms": target_median,
                     "speedup": speedup,
@@ -166,6 +171,132 @@ def build_comparisons(
                 }
             )
     return comparisons
+
+
+def _single_length_case(
+    case: gate.GateCase,
+    *,
+    length: int,
+    min_mixed: int,
+    allow_kv_repack: bool,
+    require_warpspec_loader_prefetch: bool,
+    expected_loader_core: int | None,
+) -> gate.GateCase:
+    return gate.GateCase(
+        name=case.name,
+        batch=case.batch,
+        heads=case.heads,
+        dim=case.dim,
+        block_size=case.block_size,
+        lengths=(length,),
+        min_mixed_by_length={length: min_mixed},
+        layout_xform_lengths=(),
+        is_causal=case.is_causal,
+        allow_kv_repack=allow_kv_repack,
+        require_warpspec_loader_prefetch=require_warpspec_loader_prefetch,
+        expected_loader_core=expected_loader_core,
+    )
+
+
+def _route_policy_expected_selected_variant(
+    case: gate.GateCase,
+    length: int,
+) -> str:
+    shape_key = (
+        case.batch,
+        case.heads,
+        case.dim,
+        case.block_size,
+        case.is_causal,
+        length,
+    )
+    if shape_key in sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_TARGET_SHAPES:
+        return sweep.WARPSPEC_DECOUPLED_VARIANT
+    return sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_FALLBACK_VARIANT
+
+
+def validate_route_policy_target_rows(
+    rows: list[dict],
+    *,
+    case: gate.GateCase,
+    target_variant: str,
+    max_error: float,
+    forbid_fallbacks: bool,
+) -> list[str]:
+    errors = []
+    by_length = {}
+    for row in rows:
+        shape = row.get("shape") or {}
+        if row.get("variant") == target_variant:
+            by_length[shape.get("length")] = row
+
+    for length in case.lengths:
+        row = by_length.get(length)
+        if row is None:
+            errors.append(f"{case.name}: missing {target_variant} row for L={length}")
+            continue
+        if row.get("route_policy") != sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_NAME:
+            errors.append(
+                f"{case.name}: L={length} route_policy={row.get('route_policy')!r} "
+                f"expected={sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_NAME!r}"
+            )
+        expected_selected = _route_policy_expected_selected_variant(case, length)
+        actual_selected = row.get("route_selected_variant")
+        if actual_selected != expected_selected:
+            errors.append(
+                f"{case.name}: L={length} route_selected_variant={actual_selected!r} "
+                f"expected={expected_selected!r}"
+            )
+        if expected_selected == sweep.WARPSPEC_DECOUPLED_VARIANT:
+            single_case = _single_length_case(
+                case,
+                length=length,
+                min_mixed=case.min_mixed_by_length[length],
+                allow_kv_repack=case.allow_kv_repack,
+                require_warpspec_loader_prefetch=(
+                    case.require_warpspec_loader_prefetch
+                ),
+                expected_loader_core=case.expected_loader_core,
+            )
+            errors.extend(
+                gate.validate_rows(
+                    rows,
+                    case=single_case,
+                    variant=target_variant,
+                    max_error=max_error,
+                    forbid_kv_repack=not single_case.allow_kv_repack,
+                    require_warpspec_loader_prefetch=(
+                        single_case.require_warpspec_loader_prefetch
+                    ),
+                    expected_loader_core=single_case.expected_loader_core,
+                    forbid_fallbacks=forbid_fallbacks,
+                )
+            )
+            continue
+
+        single_case = _single_length_case(
+            case,
+            length=length,
+            min_mixed=1,
+            allow_kv_repack=False,
+            require_warpspec_loader_prefetch=False,
+            expected_loader_core=None,
+        )
+        errors.extend(
+            gate.validate_rows(
+                rows,
+                case=single_case,
+                variant=target_variant,
+                max_error=max_error,
+                require_layout_xform=False,
+                require_pointwise_handoff=True,
+                forbid_kv_repack=True,
+                require_warpspec_loader_prefetch=False,
+                expected_loader_core=None,
+                forbid_fallbacks=forbid_fallbacks,
+            )
+        )
+    return errors
 
 
 def summarize_comparisons(comparisons: list[dict]) -> dict[str, dict]:
@@ -209,6 +340,14 @@ def validate_target_rows(
     max_error: float,
     forbid_fallbacks: bool,
 ) -> list[str]:
+    if target_variant == sweep.WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT:
+        return validate_route_policy_target_rows(
+            rows,
+            case=case,
+            target_variant=target_variant,
+            max_error=max_error,
+            forbid_fallbacks=forbid_fallbacks,
+        )
     return gate.validate_rows(
         rows,
         case=case,
@@ -223,10 +362,12 @@ def validate_target_rows(
 
 def _print_comparison(comparison: dict) -> None:
     shape = comparison["shape"]
+    selected_route = comparison.get("target_route_selected_variant")
+    route_text = f" route={selected_route}" if selected_route else ""
     prefix = (
         f"PERF_ROW case={comparison['case']} L={shape['length']} "
         f"baseline={comparison['baseline_variant']} "
-        f"target={comparison['target_variant']}"
+        f"target={comparison['target_variant']}{route_text}"
     )
     if comparison["speedup"] is None:
         print(
