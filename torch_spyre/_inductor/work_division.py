@@ -661,6 +661,36 @@ def _matmul_split_cost(
     )
 
 
+def _pointwise_split_cost(
+    input_sizes: list[int],
+    input_fanouts: list[int],
+    out_size: int,
+    max_cohort: int,
+    redistribution_us: float = 0.0,
+) -> float:
+    """Estimate kernel time in microseconds for a pointwise op under a given
+    per-dim core split. Lower is better.
+
+    Cost terms:
+      hbm_us           : total bytes moved over HBM bandwidth. Each input is
+                         charged numel * fanout bytes, where fanout = product
+                         of splits over dims the input lacks (broadcast). The
+                         output is always charged once.
+      cohort_penalty   : broadcast contention. Past the cohort limit a shared
+                         input row/column has to be re-fetched against the
+                         shared HBM bandwidth.
+      redistribution_us: cost of moving the output across cores when this
+                         pointwise op is bundled with a partner that stays
+                         on the default layout.
+    """
+    bytes_total = (
+        sum(s * f for s, f in zip(input_sizes, input_fanouts)) + out_size
+    ) * _COST_DTYPE_BYTES
+    cohort_penalty = max(1.0, max_cohort / _COST_COHORT_LIMIT)
+    hbm_us = bytes_total / (_COST_HBM_BW_GBS * 1000) * cohort_penalty
+    return hbm_us + redistribution_us
+
+
 def _cost_model_matmul_planner(
     op: ComputedBuffer,
     splits: dict[Symbol, int],
@@ -811,6 +841,96 @@ def _cost_model_matmul_planner(
     return new_splits
 
 
+def _cost_model_pointwise_planner(
+    op: ComputedBuffer,
+    splits: dict[Symbol, int],
+    it_space_adjusted: dict[Symbol, Expr],
+    output_td: TensorDep,
+    stick_vars: dict[Symbol, int],
+    committed_splits: dict[Symbol, int],
+    max_cores: int,
+    input_tds: list[TensorDep],
+) -> dict[Symbol, int]:
+    """Pick the lowest-cost feasible per-dim split for a pointwise op.
+
+    Enumerates divisor combinations across the output iteration dims (no
+    reduction dims, since this is a pointwise op), computes per-input fanout
+    (= product of splits over dims the input is broadcast against), and
+    returns the assignment with the smallest _pointwise_split_cost.
+
+    Never reduces total core count below the caller's default split.
+    """
+    if not isinstance(op.data, Pointwise):
+        return splits
+    if committed_splits:
+        return splits
+
+    # Pointwise ops have no reduction dims: iteration space == output coord vars.
+    # Order dims so the per-dim divisor lists line up deterministically.
+    dims = list(it_space_adjusted.keys())
+    if not dims:
+        return splits
+
+    dim_sizes = [concretize_expr(it_space_adjusted[d]) for d in dims]
+    if any(sz <= 0 for sz in dim_sizes):
+        return splits
+
+    # For each input, the set of iteration dims it carries (read from its
+    # device_coords). Dims NOT in this set are broadcast for that input — a
+    # split along such a dim multiplies its bytes by the fanout factor.
+    input_dim_sets: list[set[Symbol]] = [
+        {v for e in td.device_coords for v in e.free_symbols} for td in input_tds
+    ]
+    input_numels = [
+        math.prod(sz for d, sz in zip(dims, dim_sizes) if d in input_dim_sets[i])
+        for i in range(len(input_tds))
+    ]
+    out_numel = math.prod(dim_sizes)
+
+    # Enumerate every per-dim divisor combination with product <= max_cores.
+    dim_divs = [[int(d) for d in divisors(sz)] for sz in dim_sizes]
+
+    best_cost = float("inf")
+    best_combo: tuple[int, ...] | None = None
+    for combo in itertools.product(*dim_divs):
+        cores_used = 1
+        for s in combo:
+            cores_used *= s
+        if cores_used > max_cores:
+            continue
+        # Per-input fanout: product of splits over dims the input lacks.
+        fanouts: list[int] = []
+        for dim_set in input_dim_sets:
+            f = 1
+            for d, s in zip(dims, combo):
+                if d not in dim_set:
+                    f *= s
+            fanouts.append(f)
+        max_cohort = max(combo) if combo else 1
+        c = _pointwise_split_cost(input_numels, fanouts, out_numel, max_cohort)
+        if c < best_cost:
+            best_cost = c
+            best_combo = combo
+
+    if best_combo is None:
+        return splits
+
+    new_splits = dict(splits)
+    for d, s in zip(dims, best_combo):
+        new_splits[d] = int(s)
+
+    # Never use fewer cores than the caller's default split.
+    if math.prod(new_splits.values()) < math.prod(splits.values()):
+        return splits
+
+    logger.debug(
+        f"cost_model work_division {op.get_name()}: "
+        f"pointwise split={dict(zip(dims, best_combo))} "
+        f"cost={best_cost:.1f}us dims={dim_sizes}"
+    )
+    return new_splits
+
+
 def work_distribution_pass(
     op: ComputedBuffer,
     args: list[SchedNodeArg],
@@ -881,6 +1001,17 @@ def work_distribution_pass(
             committed_splits,
             max_cores,
             fused_with_nonmatmul if fused_with_nonmatmul is not None else set(),
+            input_tds,
+        )
+    if config.cost_model_pointwise_planner and isinstance(op.data, Pointwise):
+        splits = _cost_model_pointwise_planner(
+            op,
+            splits,
+            it_space_adjusted,
+            output_td,
+            stick_vars,
+            committed_splits,
+            max_cores,
             input_tds,
         )
 
