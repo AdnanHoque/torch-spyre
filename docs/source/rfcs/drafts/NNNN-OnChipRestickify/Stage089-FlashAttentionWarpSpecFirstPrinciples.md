@@ -1,19 +1,23 @@
-# Stage089 - FlashAttention Warpspec First Principles
+# Stage089 - FlashAttention Warp-Specialized AIU Design
 
 ## Scope
 
-This note explains the current FlashAttention-on-AIU design from first
-principles, then maps the branch's "warpspec" work onto the actual Torch-Spyre
-compiler and AIU execution mechanisms. The term "warpspec" is used here as a
-loose shorthand for a loader-specialized attention schedule. It is not a claim
-that AIU exposes CUDA warp semantics.
+This note explains the current FlashAttention-on-AIU work from first
+principles and then maps the branch's "warpspec" terminology onto the actual
+Torch-Spyre compiler mechanisms. The term "warpspec" is convenient shorthand
+for a loader-specialized attention schedule. It is not a claim that AIU exposes
+CUDA warp semantics or that this branch contains a literal CUDA-style
+warp-specialized kernel.
 
-The evidence below is limited to the gated experimental subset recorded in
-Stages079-088. It is not production-general coverage, and the timing numbers
-are diagnostic medians from short hardware sweeps, not repeatable performance
-benchmarks.
+The current result is a gated experimental loader-specialized path. It is not
+production-general coverage. The branch has a real promotion gate for selected
+shapes, repeated short-run performance evidence for the layout-decoupled gate
+island, and exploratory A/B lanes for fanout tuning. The gate says "this
+specific shape emitted the expected serialized loader-core K/V prefetch
+artifact and was value-correct." It does not say "all SDPA shapes should route
+through this path by default."
 
-## FlashAttention From First Principles
+## First Principles: Why FlashAttention Tiles Matter
 
 Scaled dot-product attention computes:
 
@@ -23,16 +27,24 @@ P = softmax(S)
 O = P V
 ```
 
-The direct implementation materializes `S` and usually `P`, both shaped
-approximately `[B, H, Lq, Lk]`. For prefill where `Lq == Lk == L`, those
-intermediates are `O(L^2)` elements per batch/head. The input and output tensors
-are only `O(L * D)` each. For example, at `L=1024, D=64`, one score matrix is
-1,048,576 elements per head, while Q, K, V, and O together are 262,144 elements.
-If the score/probability matrices are written to and reread from HBM, memory
-traffic can dominate even though the math is still `O(L^2 * D)`.
+For prefill, where `Lq == Lk == L`, `S` and `P` are shaped approximately
+`[B, H, L, L]`. The input and output tensors are shaped `[B, H, L, D]`. That
+matters because the score and probability matrices are quadratic in sequence
+length, while Q, K, V, and O are linear in sequence length.
 
-FlashAttention avoids the `L x L` HBM intermediates. It tiles Q rows and streams
-K/V blocks through an online softmax state:
+For one batch/head at `L=1024, D=64`:
+
+```text
+Q + K + V + O elements = 4 * 1024 * 64 = 262144
+one score matrix       = 1024 * 1024     = 1048576
+```
+
+Materializing `S` and `P` into HBM creates large temporary tensors and extra
+HBM traffic. FlashAttention avoids those HBM intermediates by processing one
+query tile against a stream of K/V tiles while maintaining an online softmax
+state.
+
+For a query tile `Q_i` and K/V tile `K_j, V_j`:
 
 ```text
 for each Q tile i:
@@ -52,13 +64,14 @@ for each Q tile i:
   O_i = acc_i / l_i
 ```
 
-The key invariant is that `m_i`, `l_i`, and `acc_i` summarize all previous K/V
-tiles for the current Q rows. That lets each score tile be consumed immediately
-by the softmax update and value accumulation instead of being committed to HBM.
+The invariant is simple: `m_i`, `l_i`, and `acc_i` summarize all previous K/V
+tiles for the current Q rows. Therefore each score tile can be consumed
+immediately by the softmax update and value accumulation instead of being
+stored as an `L x L` HBM tensor.
 
 ```mermaid
 flowchart TD
-    QHBM["Q in HBM"] --> QT["Q tile Q_i in LX/native input"]
+    QHBM["Q in HBM"] --> QT["Q tile Q_i"]
     KHBM["K in HBM"] --> KT["K tile K_j"]
     VHBM["V in HBM"] --> VT["V tile V_j"]
 
@@ -86,147 +99,189 @@ flowchart TD
     LOOP -->|no| OUT["O_i = acc_i / l_i<br/>write O tile"]
 ```
 
-On Spyre, the generated flash-prefill graph is not a single monolithic kernel.
-It is a sequence of SDSCs for batchmatmul and pointwise/reduction operations,
-with selected edges replaced by mixed SDSC sidecars that keep data in LX or
-prefetch/fan out future K/V tiles.
+This makes Q/K/V/O tiling central to the implementation:
 
-## Warp Specialization, Loosely Mapped
+- Q tiling controls the rows whose online softmax state is live.
+- K tiling controls the score tile width and the sequence of softmax updates.
+- V tiling must align with the K tile stream because each probability tile is
+  immediately multiplied by the matching V tile.
+- O tiling follows the Q tile because the final normalized accumulator is
+  written once per Q tile.
+- The on-chip implementation is useful only when these tile boundaries let
+  generated SDSCs exchange intermediate data in LX rather than repeatedly
+  spilling and reloading through HBM.
 
-On GPUs, "warp specialization" usually means assigning different warps in a
-cooperative thread array to different roles. Producer warps issue asynchronous
-global-memory loads into shared-memory pipeline buffers. Consumer warps run
-matrix math on the already-loaded buffers. Barriers and buffer indices keep the
-producer and consumer roles ordered.
+## AIU Concepts Used By This Work
 
-The AIU/Spyre mapping is conceptual only:
+The implementation is not a single monolithic handwritten kernel. It is a
+generated flash-prefill graph made of SDSCs and mixed SDSC sidecars.
 
-| GPU concept | AIU/Spyre analogue in this branch | Important difference |
-| --- | --- | --- |
-| Producer warp | A selected loader core, currently core 31 | It is a core-level schedule role, not a CUDA warp |
-| Shared-memory staging | LX buffers plus explicit `STCDPOpHBM` and `STCDPOpLx` dataops | The compiler must describe address, layout, and per-core pieces explicitly |
-| Consumer warps | The remaining AIU cores running current attention DL compute | The loader core's own compute slice is locally serialized, not redistributed |
-| Async copy/barrier pipeline | Mixed SDSC schedule rows, `nop` rendezvous rows, and sidecar ordering | Ordering is encoded in SDSC schedules and bundle replacement/insertion |
-| Future tile prefetch | Hoisted future K/V producer, HBM load to loader LX, fanout to consumer LX | The future consumer is rewritten to read a prefilled LX input |
+### SDSC
 
-The correctness invariant found in Stage078 is the practical core of the
-current design:
+An SDSC is a scheduled descriptor for one generated operation or a small
+scheduled group. In these notes it is useful to think of SDSCs as the compiler's
+unit of device scheduling. A flash attention graph contains batchmatmul SDSCs,
+pointwise/reduction SDSCs, and mixed SDSCs that combine data movement with
+compute.
+
+### Mixed SDSC
+
+A mixed SDSC carries one or more dataops plus one or more DL compute ops under
+an explicit per-core schedule. This branch uses mixed SDSCs for:
+
+- LX handoffs between generated flash attention ops.
+- HBM-to-LX K/V prefetches with `STCDPOpHBM`.
+- LX-to-LX K/V fanout with `STCDPOpLx`.
+- `nop` rows that act as schedule rendezvous points.
+- metadata under `flashAttentionPipeline_` so tests and gates can verify which
+  artifact actually selected.
+
+### STCDP Dataops
+
+The names that show up in generated metadata are important:
+
+```text
+STCDPOpHBM  HBM <-> LX data movement
+STCDPOpLx   LX <-> LX data movement / fanout
+nop         explicit schedule row without data movement
+```
+
+The loader-specialized path is specifically looking for a current-tile mixed
+SDSC that contains an `STCDPOpHBM` load for a future K/V tile and later an
+`STCDPOpLx` fanout before the future consumer reads that K/V tile from LX.
+
+### Current And Future Tile Flows
+
+The branch uses "current" and "future" relative to a current attention compute
+tile:
+
+```text
+current tile:
+  the QK/PV work currently being computed
+
+future tile:
+  a later K/V consumer whose K or V input can be prepared while non-loader
+  cores continue current-tile compute
+```
+
+The key sidecar is named like this in generated artifacts:
+
+```text
+mixed_flash_kv_repack_hbm_prefetch_hoist_<tile>_current_prefetch
+```
+
+Its role metadata is:
+
+```text
+kv_repack_hbm_prefetch_hoist_role == "current_prefetch"
+```
+
+### HBM-Backed K/V Restickify
+
+The K/V path starts from a K/V producer that restickifies or repacks data into
+the layout needed by a future batchmatmul consumer. Earlier paths were
+HBM-backed: the producer wrote an HBM address and future consumers read that
+address. The loader-specialized path keeps that original HBM write when needed,
+but also hoists a future K/V producer and creates a sidecar that pulls that
+future K/V tile into LX ahead of the future consumer.
+
+Preserving the original HBM address matters because the target future
+batchmatmul is not always the only consumer. For example, max/sum reductions
+may still need the original HBM-backed value. The current implementation can
+redirect the selected future batchmatmul to a prefilled LX input while keeping
+additional HBM consumers valid.
+
+### Corelets, Cores, And Loader Core 31
+
+The tested AIU schedule uses 32 consumer cores. Earlier probes tried corelet
+routing and broader sync changes, but Stage078 isolated the practical
+correctness rule:
 
 ```text
 Do not overlap the loader core's HBM prefetch data movement with that same
 core's current attention compute slice. Other cores may keep computing.
 ```
 
-```mermaid
-sequenceDiagram
-    participant HBM as HBM
-    participant All as Baseline all compute cores
-    participant C0 as Loader-specialized cores 0-30
-    participant L31 as Loader core 31
-    participant LX as LX buffers
-    participant Fut as Future attention consumer
+The certified variants choose core 31 as the loader core:
 
-    Note over All,HBM: Unspecialized schedule
-    All->>HBM: Native HBM input loads for current tile
-    All->>All: Current QK or PV batchmatmul compute
-    All->>HBM: Later native HBM input loads for future K/V
-    All->>All: Future batchmatmul consumes HBM-backed K/V
-
-    Note over C0,Fut: Loader-specialized AIU schedule
-    HBM-->>HBM: Hoisted future K/V producer writes original HBM address
-    C0->>HBM: Current tile native input-load prologue
-    L31->>HBM: Current tile native input-load prologue
-    par overlap on non-loader cores
-        C0->>C0: Current attention compute continues
-    and serialize loader core locally
-        L31->>HBM: STCDPOpHBM loads future K/V tile
-        L31->>L31: Then runs its current compute slice
-    end
-    L31->>LX: Future K/V tile is resident in loader LX
-    C0->>LX: Rendezvous and STCDPOpLx fanout to consumer cores
-    L31->>LX: Participates in rendezvous and fanout
-    Fut->>LX: Future consumer reads prefilled LX K/V input
+```text
+SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LOADER_CORE=31
 ```
 
-## Current AIU Design
+That does not remove core 31 from the computation globally. It means the
+current mixed SDSC gives core 31 a loader role for the HBM prefetch and
+serializes that core's own current compute slice around the prefetch rows.
+Other cores can still compute current-tile work while core 31 performs the
+loader-side HBM movement.
 
-The production-shaped umbrella starts with:
+## Three Attention Paths
+
+The branch currently distinguishes three useful mental models.
+
+### 1. Baseline Flash HBM Path
+
+The baseline flash path still has FlashAttention's online softmax structure,
+but K/V and intermediate boundaries can remain HBM-backed between generated
+ops. It avoids materializing full `S` and `P`, but it does not force the
+branch's on-chip handoff and loader-prefetch artifacts to select.
+
+```mermaid
+flowchart LR
+    Q["Q HBM"] --> QK["QK batchmatmul tile"]
+    K["K HBM"] --> QK
+    QK --> PW["scale/mask/softmax state ops"]
+    PW --> PV["P*V batchmatmul tile"]
+    V["V HBM"] --> PV
+    PV --> O["O HBM"]
+
+    subgraph Boundary["Generated op boundaries"]
+        H1["some inputs from HBM"]
+        H2["some outputs through HBM-backed storage"]
+    end
+    QK -.-> H1
+    PW -.-> H2
+```
+
+In the performance tool this baseline appears as:
+
+```text
+flash_hbm
+```
+
+### 2. On-Chip Master Path
+
+The on-chip master path enables the main on-chip SDPA umbrella. It realizes
+pointwise handoffs and, when enabled, layout-transform pair artifacts so more
+of the generated flash graph can communicate through LX.
+
+```mermaid
+flowchart LR
+    Q["Q HBM"] --> QK["QK batchmatmul"]
+    K["K HBM"] --> QK
+    QK --> LX1["LX handoff<br/>mixed SDSC STCDPOpLx"]
+    LX1 --> PW["scale/mask/reduction/softmax state"]
+    PW --> LX2["LX handoff<br/>pointwise sidecar"]
+    LX2 --> PV["P*V batchmatmul"]
+    V["V HBM or transformed K/V path"] --> PV
+    PV --> O["O HBM"]
+
+    CFG["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA=1"] --> QK
+```
+
+This path is already strong. Stage226 showed the layout-decoupled warpspec
+gate island was effectively tied with `onchip_master`, not dramatically faster
+than it.
+
+### 3. Decoupled Loader-Specialized Path
+
+The loader-specialized path adds a future-K/V prefetch role on top of the
+on-chip flash graph. The stable decoupled variant disables the layout-transform
+adjunct and certifies the loader-core K/V prefetch invariant directly:
 
 ```text
 SPYRE_FLASH_ATTENTION_ONCHIP_SDPA=1
-```
-
-That enables the generated flash-prefill decomposition, the mixed-pipeline
-machinery, score-scale and pointwise handoff gates, and a larger default
-prefill block size. It does not by itself turn every diagnostic overlap probe
-into production behavior.
-
-The current implementation has four relevant layers.
-
-### 1. Mixed SDSCs
-
-A mixed SDSC combines one or more dataops with a DL compute op under an explicit
-per-core schedule. In this branch, mixed sidecars are used to:
-
-- execute an `STCDPOpLx` copy before a consumer reads an LX input;
-- execute an `STCDPOpHBM` HBM-to-LX prefetch before a future consumer;
-- combine current compute with future prefetch where safe;
-- record `flashAttentionPipeline_` metadata for gate validation.
-
-The sidecars are inserted into or substituted for the generated bundle by
-`torch_spyre/_inductor/codegen/bundle.py`. The sidecar builders live in
-`torch_spyre/_inductor/onchip_realize.py`.
-
-### 2. Pointwise And Score-Scale Handoffs
-
-`realize_flash_attention_pointwise_handoffs` repeatedly finds legal flash
-attention pointwise edges and rewrites the producer/consumer boundary to use LX
-instead of HBM. When score-scale handoff is enabled, the score-scale edge is
-handled first, then regular pointwise edges are realized until no more legal
-edges remain.
-
-The promotion gates check for these pointwise mixed sidecars, so a row cannot
-pass only by generating a K/V prefetch artifact while falling back to the older
-HBM-heavy pointwise path.
-
-### 3. Layout-Transform Pair
-
-The layout-transform pair handles a same-dimension layout conversion on the
-query-side batchmatmul input. The layout-coupled path enables:
-
-```text
-SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM=1
-SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE=-2
-```
-
-Auto mode scans for a legal layout-transform pair. This path was important for
-the earlier on-chip SDPA island, but Stages086-088 showed that it can also hide
-valid loader-prefetch rows behind layout-transform numerical failures.
-
-### 4. K/V HBM Repack, Prefetch, And Loader Fanout
-
-The K/V path is deliberately different from the query-side layout pair. The
-candidate detector looks for a low-core `ReStickifyOpHBM` producer feeding a
-future K/V input of a higher-core batchmatmul consumer. The branch extended this
-detector so the producer split can be one dimension or multiple dimensions, for
-example `["mb_", "x_"]`, as long as the mapped split factors divide the
-consumer iteration space and match the producer core count.
-
-The loader-prefetch sidecar does this:
-
-1. Hoist the future K/V producer before the current attention tile.
-2. Preserve the original HBM write so other future consumers, such as max/sum
-   reductions, can still read the original address.
-3. Load the future K/V HBM tile into one loader core's LX buffer with
-   `STCDPOpHBM`.
-4. Use an all-core rendezvous before fanout.
-5. Fan the loader-core LX copy out to future consumer cores with `STCDPOpLx`.
-6. Replace the future batchmatmul consumer with a compute-only sidecar whose
-   K/V input is marked as prefilled LX.
-
-The certified warpspec aliases request the stable loader-specialized shape:
-
-```text
+SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM=0
+SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE=-1
 SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_HOIST_TILE=-2
 SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LOADER_CORE=31
 SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT=1
@@ -235,130 +290,382 @@ SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_SERIALIZE_LOADER_CORE=1
 SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_TAIL_CURRENT=0
 ```
 
-`onchip_warpspec_kv_hbm_prefetch_loader_core31` keeps the layout-transform pair
-enabled. `onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled` disables the
-layout-transform adjunct and requests only the serialized loader-core K/V HBM
-prefetch schedule:
+```mermaid
+sequenceDiagram
+    participant HBM as HBM
+    participant C as Cores 0-30
+    participant L as Loader core 31
+    participant LX as LX
+    participant F as Future K/V consumer
+
+    HBM->>HBM: Hoisted future K/V producer preserves original HBM output
+    C->>C: Current attention compute starts
+    L->>HBM: Current native-load prologue / schedule setup
+    par non-loader cores continue current tile
+        C->>C: QK/PV compute on current tile
+    and loader core prefetches future tile
+        L->>HBM: STCDPOpHBM loads future K/V tile
+        L->>L: Loader core compute slice is serialized locally
+    end
+    L->>LX: Future K/V tile resident in loader LX
+    C->>LX: nop rendezvous, then STCDPOpLx fanout
+    L->>LX: participates in fanout/rendezvous
+    F->>LX: Future batchmatmul reads prefilled LX K/V input
+```
+
+An ASCII view of the same schedule:
 
 ```text
-SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM=0
-SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE=-1
+time ->
+
+cores 0-30:  native-load/prologue | current compute continues | fanout sync | future compute
+core 31:     native-load/prologue | HBM load future K/V       | own compute | fanout sync | future compute
+                                      STCDPOpHBM                 serialized    STCDPOpLx
+```
+
+The current design pays the cost of serializing one core's compute slice. The
+bet is that earlier K/V availability and reduced HBM pressure can compensate on
+some shapes. Today that bet is true versus `flash_hbm` on the decoupled gate
+island, and roughly break-even versus `onchip_master`.
+
+## Why This Is An Analogue, Not Literal CUDA Warp Specialization
+
+CUDA warp specialization commonly means producer warps issue asynchronous
+global-memory copies into shared memory while consumer warps run tensor-core
+math. Barriers and stage indices coordinate shared-memory buffers.
+
+The AIU mapping is conceptual:
+
+| GPU concept | AIU/Spyre analogue in this branch | Important difference |
+| --- | --- | --- |
+| Producer warp | Loader core 31 | Core-level schedule role, not a CUDA warp |
+| Consumer warps | Remaining AIU cores doing current attention compute | The loader core still has a compute slice, serialized locally |
+| Shared memory | LX buffers | Addressing, layout, and per-core pieces are compiler artifacts |
+| Async copy | `STCDPOpHBM` inside a mixed SDSC | Ordered by generated SDSC schedules, not CUDA async-copy APIs |
+| Warp barrier | `nop` rendezvous rows and mixed SDSC schedule ordering | No CUDA warp/barrier semantics are exposed |
+| Future stage | Hoisted future K/V producer plus prefilled-LX future consumer | Selection depends on graph candidates and layout legality |
+| Multicast/unicast transfer | `STCDPOpLx` fanout knob | A tuning lane, not the core correctness invariant |
+
+The phrase "warp-specialized" should therefore be read as:
+
+```text
+logical producer/loader role + logical compute role + explicit on-chip staging
+```
+
+It should not be read as:
+
+```text
+CUDA warp groups, CUDA shared memory, or a handwritten GPU kernel
+```
+
+## How The Compiler Builds The Loader-Specialized Path
+
+The implementation has four relevant layers.
+
+### 1. Config Knobs
+
+The low-level controls live in:
+
+```text
+torch_spyre/_inductor/config.py
+```
+
+Important default-off K/V prefetch controls include:
+
+```text
+SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_HOIST_TILE
+SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LOADER_CORE
+SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LOADER_LX_BASE
+SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT
+SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT_FULL_TILE_PIECES
+SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_FANOUT_USE_UNICAST
+SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_SERIALIZE_LOADER_CORE
+SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_TAIL_CURRENT
+SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_CORELET1
+```
+
+The production-shaped umbrella is separate:
+
+```text
+SPYRE_FLASH_ATTENTION_ONCHIP_SDPA=1
+```
+
+That umbrella enables the generated on-chip SDPA machinery. It does not by
+itself certify every diagnostic K/V prefetch probe as production behavior.
+
+### 2. Variant Selection And Sweeps
+
+The sweep aliases live in:
+
+```text
+tools/onchip_sdpa_sweep.py
+```
+
+The two primary warpspec aliases are:
+
+```text
+onchip_warpspec_kv_hbm_prefetch_loader_core31
+onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled
+```
+
+The coupled alias keeps the layout-transform pair enabled. The decoupled alias
+turns layout-transform off and requests only the serialized loader-core K/V
+HBM prefetch schedule.
+
+Stage090 added a controlled fanout A/B alias:
+
+```text
+onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled_unicast
+```
+
+That alias differs from the decoupled default only by:
+
+```text
+SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_FANOUT_USE_UNICAST=1
+```
+
+It is not the promotion-gate default.
+
+### 3. Bundle Selection
+
+The codegen bundle layer lives in:
+
+```text
+torch_spyre/_inductor/codegen/bundle.py
+```
+
+It reads the config knobs, selects the requested flash attention sidecar
+builders, and inserts or replaces generated SDSCs with mixed SDSC artifacts.
+For this design, the key builder call is:
+
+```text
+build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(...)
+```
+
+### 4. Realization
+
+The sidecar builders and candidate detectors live in:
+
+```text
+torch_spyre/_inductor/onchip_realize.py
+```
+
+The K/V HBM prefetch builder:
+
+1. Finds a current attention consumer and a future K/V consumer.
+2. Finds a K/V producer feeding that future consumer.
+3. Validates producer and consumer core layouts, including multi-dimensional
+   producer splits such as `["mb_", "x_"]`.
+4. Hoists the future K/V producer before the current tile.
+5. Preserves the original HBM-backed producer output when other consumers need
+   it.
+6. Builds a current-prefetch mixed SDSC containing loader `STCDPOpHBM`,
+   rendezvous `nop`, and loader fanout `STCDPOpLx`.
+7. Rewrites the selected future consumer to read a prefilled LX input.
+8. Emits metadata so gates can prove the intended artifact selected.
+
+```mermaid
+flowchart TB
+    A["Generated flash-prefill SDSCs"] --> B["Find current attention tile"]
+    B --> C["Find future K/V consumer"]
+    C --> D{"legal K/V producer?"}
+    D -->|no| R["record candidate rejection<br/>no sidecar"]
+    D -->|yes| E["hoist future K/V producer"]
+    E --> F["preserve HBM output for extra consumers"]
+    F --> G["current_prefetch mixed SDSC<br/>STCDPOpHBM + nop + STCDPOpLx"]
+    G --> H["future consumer compute-only sidecar<br/>K/V input prefilled in LX"]
+    H --> I["flashAttentionPipeline_ metadata"]
+    I --> J["sweep JSON and promotion gate"]
+```
+
+## Promotion Gate Decision Flow
+
+Promotion gates live in:
+
+```text
+tools/onchip_sdpa_promotion_gate.py
+```
+
+The current gates are:
+
+```text
+onchip_layout_xform
+onchip_warpspec
+onchip_warpspec_decoupled
+```
+
+The warpspec gates do not merely check that a row ran successfully. They check
+that the row emitted the specific serialized loader-core prefetch artifact.
+
+Required loader-prefetch metadata includes:
+
+```text
+kv_repack_hbm_prefetch_hoist_role == "current_prefetch"
+kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout == true
+kv_repack_hbm_prefetch_hoist_prefetch_loader_core_id == 31
+kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout_full_tile_pieces == true
+kv_repack_hbm_prefetch_hoist_serialize_loader_core_prefetch == true
+opFuncsUsed contains STCDPOpHBM
 ```
 
 ```mermaid
-flowchart LR
-    Shape["SDPA shape<br/>B,H,L,D,block,causal"] --> Sweep["tools/onchip_sdpa_sweep.py<br/>one child per shape x variant"]
-    Sweep --> Env["Variant env<br/>SPYRE_* knobs"]
-    Env --> Config["torch_spyre/_inductor/config.py<br/>default-off config gates"]
-    Config --> Bundle["codegen/bundle.py<br/>selects sidecar builders"]
-    Bundle --> Realize["onchip_realize.py<br/>detects edges and builds mixed SDSCs"]
-    Realize --> Sidecars["Generated mixed SDSCs<br/>STCDPOpLx, STCDPOpHBM, nop, DL compute"]
-    Sidecars --> Device["Device execution<br/>correctness and medians"]
-    Device --> JSON["Sweep JSON<br/>status, max_abs_error, mixed_sdscs"]
-    JSON --> Gate["tools/onchip_sdpa_promotion_gate.py<br/>shape, metadata, error, and coverage checks"]
-    Gate --> RFC["Stage docs<br/>evidence and promotion boundaries"]
+flowchart TD
+    S["Run sweep row<br/>shape x variant"] --> OK{"status ok?"}
+    OK -->|no| FAIL["gate fail"]
+    OK -->|yes| ERR{"max abs error <= tolerance?"}
+    ERR -->|no| FAIL
+    ERR -->|yes| MIX{"mixed SDSC count >= case minimum?"}
+    MIX -->|no| FAIL
+    MIX -->|yes| PW{"required pointwise/on-chip handoffs present?"}
+    PW -->|no| FAIL
+    PW -->|yes| WS{"warpspec gate?"}
+    WS -->|no| PASS["gate pass"]
+    WS -->|yes| ROLE{"current_prefetch sidecar found?"}
+    ROLE -->|no| FAIL
+    ROLE -->|yes| CORE{"loader core == 31?"}
+    CORE -->|no| FAIL
+    CORE -->|yes| FAN{"loader fanout + full-tile pieces?"}
+    FAN -->|no| FAIL
+    FAN -->|yes| SER{"serialize loader-core prefetch?"}
+    SER -->|no| FAIL
+    SER -->|yes| HBM{"STCDPOpHBM present?"}
+    HBM -->|no| FAIL
+    HBM -->|yes| PASS
 ```
 
-## What Changed In This Branch
+The repeated performance comparison tool lives in:
 
-The branch turned the loader-specialized attention idea from a set of one-off
-probes into gated experimental coverage.
+```text
+tools/onchip_sdpa_perf_compare.py
+```
 
-Compiler/config changes:
+It runs a gated target variant beside one or more baselines, validates the
+target against the same promotion invariants, and reports per-row plus
+geometric-mean speedups.
 
-- Added default-off K/V HBM prefetch controls for hoist selection, source
-  fanout, loader fanout, loader core selection, loader LX base selection,
-  fanout transport, fanout copyback, full-tile fanout pieces, current/tail
-  scheduling, corelet routing, and loader-core serialization.
-- Added layout-coupled and layout-decoupled on-chip SDPA selection through
-  `SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM` and the low-level
-  layout-transform pair tile knob.
-- Kept the production-shaped `SPYRE_FLASH_ATTENTION_ONCHIP_SDPA` umbrella
-  separate from the individual diagnostic probes.
+## Code, Test, And Tool Inventory
 
-Codegen and realizer changes:
+This is the current branch inventory for the loader-specialized FlashAttention
+work. It is intentionally file-path based so future readers can verify each
+claim in code.
 
-- Plumbed the K/V prefetch controls through `bundle.py` into
-  `build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts`.
-- Added K/V edge detection for multi-dimensional producer splits and preserved
-  the older single-split metadata shape for compatibility.
-- Allowed the prefetch hoist to preserve additional HBM consumers while still
-  redirecting the target future batchmatmul to prefilled LX.
-- Added the loader-core fanout schedule and the important
-  `serialize_loader_core_prefetch` mode, where loader-core HBM movement and that
-  same core's compute slice run in separate rows.
-- Emitted metadata needed by the gates, including loader core id, full-tile
-  fanout, serialization, current/future tile ids, additional consumers, and
-  `STCDPOpHBM`/`STCDPOpLx` op usage.
+Compiler/config:
 
-Tooling and gate changes:
+- `torch_spyre/_inductor/config.py`
+  - Added default-off K/V HBM prefetch controls.
+  - Added loader core, loader LX base, fanout, unicast, copyback, full-tile
+    fanout pieces, tail/current scheduling, corelet, and loader-core
+    serialization controls.
+  - Kept the main on-chip SDPA umbrella separate from individual probes.
 
-- Added sweep aliases for the exploratory K/V repack, HBM prefetch, loader
-  fanout, copyback, full-tile fanout, serialized loader-core, layout-coupled
-  warpspec, and layout-decoupled warpspec variants.
-- Extended the sweep harness to summarize mixed SDSCs, flash pipeline metadata,
-  layout-transform candidate diagnostics, max error, medians, and fallback
-  status.
-- Added promotion gates:
-  - `onchip_warpspec`, defaulting to
-    `onchip_warpspec_kv_hbm_prefetch_loader_core31`;
-  - `onchip_warpspec_decoupled`, defaulting to
-    `onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled`.
-- Added gate checks for the serialized loader-core K/V prefetch artifact:
-  current-prefetch role, loader fanout, loader core 31, full-tile fanout pieces,
-  loader-core serialization, and `STCDPOpHBM` usage.
-- Added `tools/onchip_sdpa_perf_compare.py` to run a gated target variant beside
-  one or more baselines, validate the target against the same promotion
-  invariants, and report per-row plus geometric-mean speedups.
-- Recorded the branch history in Stages060-088, with Stages079-088 defining the
-  current promotion boundary.
+- `torch_spyre/_inductor/codegen/bundle.py`
+  - Plumbs K/V prefetch controls into the flash attention sidecar builders.
+  - Selects K/V broadcast, HBM-staged, HBM-prefetch, layout-coupled, and
+    layout-decoupled artifact paths.
+  - Passes loader core, fanout, unicast, and serialization options into
+    `build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts`.
 
-## Gate And Coverage Evidence
+- `torch_spyre/_inductor/onchip_realize.py`
+  - Detects K/V repack broadcast and HBM prefetch hoist candidates.
+  - Supports multi-dimensional producer splits.
+  - Builds `STCDPOpHBM` loader prefetch dataops.
+  - Builds `STCDPOpLx` source or loader fanout dataops.
+  - Builds serialized loader-core current-prefetch schedules.
+  - Preserves additional HBM consumers when redirecting the selected future
+    batchmatmul to prefilled LX.
+  - Emits `flashAttentionPipeline_` metadata consumed by tests and gates.
 
-The latest layout-coupled warpspec promotion gate recorded before Stage088 was:
+Tools:
+
+- `tools/onchip_sdpa_sweep.py`
+  - Defines `flash_hbm`, `onchip_master`, layout-xform, K/V prefetch, coupled
+    warpspec, decoupled warpspec, and unicast A/B variants.
+  - Runs shape/variant sweeps and writes JSON with status, medians, max error,
+    mixed SDSC summaries, metadata, and candidate diagnostics.
+
+- `tools/onchip_sdpa_promotion_gate.py`
+  - Defines the promotion matrices for `onchip_layout_xform`,
+    `onchip_warpspec`, and `onchip_warpspec_decoupled`.
+  - Requires loader-prefetch metadata for warpspec gates.
+  - Tracks minimum mixed-SDSC counts by shape and length.
+
+- `tools/onchip_sdpa_perf_compare.py`
+  - Runs a gated target beside baselines.
+  - Reuses promotion-gate validation on the target.
+  - Reports per-row timings and geometric-mean speedups.
+
+Tests:
+
+- `tests/_inductor/test_config_logic.py`
+  - Covers config/env parsing for the new controls.
+
+- `tests/_inductor/test_onchip_realize_logic.py`
+  - Covers K/V candidate selection, split mapping, sidecar metadata, and
+    schedule construction logic.
+
+- `tests/_inductor/test_onchip_sdpa_sweep_logic.py`
+  - Covers sweep aliases and their environment settings, including the
+    decoupled and decoupled-unicast variants.
+
+- `tests/_inductor/test_onchip_sdpa_promotion_gate_logic.py`
+  - Covers gate case selection and required warpspec metadata checks.
+
+- `tests/_inductor/test_onchip_sdpa_perf_compare_logic.py`
+  - Covers performance comparison command construction, target selection,
+    parsing, and summary logic.
+
+Documentation:
+
+- `docs/source/rfcs/drafts/NNNN-OnChipRestickify/Stage060-...Stage088-...`
+  - Records the probe sequence that led to the current serialized-loader
+    invariant and gate boundaries.
+
+- `docs/source/rfcs/drafts/NNNN-OnChipRestickify/Stage090-WarpspecFanoutTuning.md`
+  - Records the fanout/unicast tuning A/B lane.
+
+## Gate Coverage And Correctness Evidence
+
+The latest layout-coupled warpspec gate recorded before layout decoupling was:
 
 ```text
 PROMOTION_GATE_PASSED gate=onchip_warpspec cases=8 rows=25
 ```
 
-Stage088 then added the layout-decoupled gate:
+This gate covers:
+
+```text
+B1 H2 D64  block64  L128,L256,L384,L512,L768,L1024
+B1 H2 D64  causal   L128,L256
+B1 H2 D64  block128 L256,L384,L512
+B2 H2 D64  block64  L128,L256
+B1 H2 D128 block64  L128,L256,L384,L512,L768,L1024
+B2 H4 D128 block64  L128,L256
+B1 H4 D64  block64  L128,L256,L384,L512
+B1 H8 D64  block64  L128,L256
+```
+
+Stage088 added the layout-decoupled gate:
 
 ```text
 PROMOTION_GATE_PASSED gate=onchip_warpspec_decoupled cases=2 rows=6
 ```
 
-The gates validate shape, block size, causal flag, row status, max absolute
-error, minimum mixed-SDSC count, pointwise handoff presence, and the loader-core
-prefetch metadata. The default gate tolerance is a maximum absolute error of
-`0.01`. The default timing sample is short (`warmup=1`, `iters=2`), so these
-medians are correctness-gate diagnostics, not benchmark claims.
+This decoupled gate covers:
 
-```mermaid
-flowchart TB
-    subgraph Coupled["onchip_warpspec gate<br/>layout-transform pair enabled"]
-        C1["B1 H2 D64 block64<br/>L128,256,384,512,768,1024"]
-        C2["B1 H2 D64 causal block64<br/>L128,256"]
-        C3["B1 H2 D64 block128<br/>L256,384,512"]
-        C4["B2 H2 D64 block64<br/>L128,256"]
-        C5["B1 H2 D128 block64<br/>L128,256,384,512,768,1024"]
-        C6["B2 H4 D128 block64<br/>L128,256"]
-        C7["B1 H4 D64 block64<br/>L128,256,384,512"]
-        C8["B1 H8 D64 block64<br/>L128,256"]
-    end
-
-    subgraph Decoupled["onchip_warpspec_decoupled gate<br/>layout-transform pair disabled"]
-        D1["B1 H4 D64 block64<br/>L768,1024"]
-        D2["B2 H4 D128 block64<br/>L384,512,768,1024"]
-    end
-
-    Invariant["Required loader-prefetch invariant<br/>core 31, loader fanout, full-tile pieces,<br/>serialized loader-core prefetch, STCDPOpHBM"] --> Coupled
-    Invariant --> Decoupled
+```text
+B1 H4 D64  block64 L768,L1024
+B2 H4 D128 block64 L384,L512,L768,L1024
 ```
 
-Stage088 key row medians for the decoupled gate:
+The key point is separability. The loader-core K/V prefetch path can be
+certified independently from the layout-transform pair. Stages086-088 showed
+that some long rows failed when layout-transform was coupled in, while the same
+loader-prefetch rows passed after disabling the layout pair.
 
-| Gate | Shape | Lengths | Median ms | Max abs error | Mixed SDSCs |
-| --- | --- | --- | ---: | ---: | ---: |
+Stage088 decoupled gate medians:
+
+| Gate | Shape | L | Median ms | Max abs error | Mixed SDSCs |
+| --- | --- | ---: | ---: | ---: | ---: |
 | `onchip_warpspec_decoupled` | B1 H4 D64 block64 | 768 | 1.781614 | 0.00195312 | 59 |
 | `onchip_warpspec_decoupled` | B1 H4 D64 block64 | 1024 | 2.518849 | 0.00268555 | 78 |
 | `onchip_warpspec_decoupled` | B2 H4 D128 block64 | 384 | 1.339696 | 0.00390625 | 22 |
@@ -366,18 +673,15 @@ Stage088 key row medians for the decoupled gate:
 | `onchip_warpspec_decoupled` | B2 H4 D128 block64 | 768 | 3.318368 | 0.00366211 | 47 |
 | `onchip_warpspec_decoupled` | B2 H4 D128 block64 | 1024 | 5.053475 | 0.00219727 | 63 |
 
-The important interpretation is not that the decoupled path is globally better.
-It is that the loader-core K/V prefetch invariant can be certified independently
-from the layout-transform pair. Stages086-088 showed that some long rows failed
-when the layout-transform pair was coupled in, while the same loader-prefetch
-rows passed after the layout pair was disabled.
+The default promotion-gate tolerance is currently a maximum absolute error of
+`0.01`. The gate timing samples are short and should be treated as diagnostic
+medians, not production benchmark results.
 
-## Repeated Performance Comparison
+## Performance Evidence
 
 Stage226 used `tools/onchip_sdpa_perf_compare.py` with `warmup=2` and `iters=7`
-to compare the decoupled warpspec gate against `flash_hbm` and `onchip_master`.
-This is still a short engineering benchmark, but it is stronger evidence than
-the one-iteration promotion-gate medians.
+to compare the decoupled warpspec gate against `flash_hbm` and
+`onchip_master`:
 
 ```text
 PERF_COMPARE_PASSED gate=onchip_warpspec_decoupled cases=2 comparisons=12
@@ -396,57 +700,173 @@ Per-row medians:
 | B2 H4 D128 block64 | 768 | 3.716771 | 3.101267 | 3.116855 | 1.1925x | 0.9950x |
 | B2 H4 D128 block64 | 1024 | 6.056340 | 4.818441 | 4.802847 | 1.2610x | 1.0032x |
 
-The current performance read is therefore precise but modest: the
-loader-specialized path is consistently faster than `flash_hbm` on the
-decoupled gate island, while it is effectively tied with `onchip_master`. This
-suggests the next performance work should focus on finding where the
-loader-core schedule can reduce work or hide more latency beyond the already
-strong on-chip master schedule, not merely on proving that the sidecar exists.
+Interpretation:
 
-## Open Gaps And Next Steps
+- The decoupled loader-specialized path is consistently faster than
+  `flash_hbm` on this six-row gate island.
+- It is effectively tied with `onchip_master`.
+- That means the work is real, but the current schedule is not yet a clear
+  production performance win over the best on-chip baseline.
 
-Production readiness:
+Stage090 recorded the fanout tuning work. Its Stage229 full-island check tested
+the `fanout_use_unicast=1` alias across the six-row decoupled island, and every
+row remained value-correct:
 
-- The loader-specialized path is still selected by explicit variants and gates.
-  It should not be treated as a default production SDPA path.
-- The mixed SDSC metadata still marks much of the prefetch path as experimental
-  and runtime-forced.
-- The current implementation serializes the loader core's own compute slice
-  instead of redistributing that work across the remaining cores.
+| Shape | Unicast ms | Previous default ms |
+| --- | ---: | ---: |
+| B1 H4 L768 D64 | 1.565760 | 1.567068 |
+| B1 H4 L1024 D64 | 2.181850 | 2.182102 |
+| B2 H4 L384 D128 | 1.118608 | 1.121148 |
+| B2 H4 L512 D128 | 1.493568 | 1.495212 |
+| B2 H4 L768 D128 | 3.105724 | 3.116855 |
+| B2 H4 L1024 D128 | 4.810600 | 4.802847 |
 
-Coverage:
+The approximate geomean speedup over the previous decoupled default was
+`1.002x`, with one row slightly slower. That is useful A/B signal, not enough
+to make unicast the default. The production-facing decoupled gate should remain
+on the simpler default until a larger and more stable performance delta appears.
 
-- Broader batch, head, head-dim, block-size, causal, and long-sequence matrices
-  need promotion gates before the path can be generalized.
-- `B1 H2 D64 block128` at L768/L1024 remains excluded because the non-warpspec
-  HBM-KV layout-transform baseline shows the same numerical failures.
-- Causal long-sequence coverage and mask/bias interactions remain separate
-  hazards from the non-causal loader-prefetch rows.
+## Production-Ready Status
 
-Layout hazards:
+The current loader-specialized FlashAttention path is not production ready as a
+general AIU SDPA kernel.
 
-- The layout-transform pair is useful but independently risky. The
-  layout-decoupled gate proves the loader-prefetch invariant without claiming
-  the layout pair is fixed for the long failing shapes.
-- Future promotion should keep layout-transform and loader-prefetch evidence
-  separable so one path does not hide failures in the other.
+What is ready:
 
-Benchmarking:
+- A reproducible experimental gate for selected shapes.
+- Correctness metadata that proves the intended serialized loader-core artifact
+  emitted instead of silently falling back.
+- A layout-decoupled lane that isolates loader-prefetch correctness from
+  layout-transform correctness.
+- A performance comparison tool that validates the target before reporting
+  timings.
+- A controlled unicast fanout A/B alias for future tuning.
 
-- The Stage226 medians are repeated short-run engineering data, not a final
-  production benchmark. A stronger performance claim still needs more repeated
-  runs, stable warmup/iteration policy, comparison against `flash_hbm`,
-  `onchip_master`, and relevant layout-transform variants, fallback-forbidden
-  runs, and cache/compile/run separation.
-- The next benchmark should report distributions, not only medians, and should
-  keep correctness summaries beside timing rows.
+What is not ready:
 
-Near-term engineering steps:
+- It is not the default production SDPA route.
+- Coverage is a selected island, not the full batch/head/dim/length/causal
+  space.
+- The loader core's compute slice is serialized locally rather than
+  redistributed.
+- Performance versus `onchip_master` is roughly break-even on the repeated
+  six-row island.
+- Some adjacent long/head shapes still fail or lack a clean promotion story.
 
-- Keep `onchip_warpspec_decoupled` as the direct certification lane for the
-  loader-core K/V prefetch invariant.
-- Add promotion rows only when they both pass value checks and emit the required
-  serialized loader-core metadata.
-- Investigate the layout-transform long-row failures independently.
-- Decide whether to accept one-core local serialization as the first supported
-  AIU schedule or pursue redistribution of core 31's compute slice.
+## Current Limitations And Next Work
+
+### B1/H8/D64 Long Boundary
+
+The checked-in gate currently covers `B1 H8 D64 block64` only at L128 and L256
+for the layout-coupled warpspec path. Current exploratory context should make
+us conservative about expanding that gate.
+
+Stage231 tested exact decoupled `B1 H8 D64 block64` rows with seed 42865:
+
+```text
+L384:  ok
+L512:  ok
+L768:  failed
+L1024: failed
+```
+
+Stage232 then ran a layer probe for `B1 H8 D64 block64 L768`, seed 42865,
+`warmup=0`, `iters=1`:
+
+| Variant | Result | Median ms |
+| --- | --- | ---: |
+| `flash_hbm` | ok | 3.1902976334095 |
+| `onchip_master` | failed | n/a |
+| `onchip_hbm_kv_layout_xform` | failed | n/a |
+| `onchip_warpspec_kv_hbm_prefetch_loader_core31` | failed | n/a |
+| `onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled` | failed | n/a |
+| `onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled_unicast` | failed | n/a |
+
+Interpretation: B1/H8/L768 is a broader on-chip long-H8 boundary, not evidence
+that only decoupled loader specialization is broken. The H8 long rows should
+not be promoted yet. The likely work is candidate-selection, layout, and fanout
+analysis for higher-head long rows, especially around K/V producer and consumer
+split compatibility.
+
+### Layout-Transform Coupling
+
+The layout-transform pair is useful for earlier on-chip SDPA coverage, but it
+is independently risky. Stages086-088 showed rows where the layout-coupled path
+failed with the same mismatch pattern as `onchip_hbm_kv_layout_xform`, while
+the layout-decoupled loader-prefetch path passed.
+
+Future gates should keep these evidence streams separate:
+
+```text
+layout-transform correctness
+loader-core K/V prefetch correctness
+combined layout + loader schedule correctness
+```
+
+### Loader Core Serialization Cost
+
+The correctness-critical rule is now clear: do not overlap the loader core's
+HBM prefetch with that same core's current compute slice. The cost is also
+clear: one core's compute slice is serialized locally. Next work can either:
+
+- accept this as the first supported AIU schedule and find shapes where it wins;
+- redistribute or avoid core 31's compute slice;
+- make the future K/V prefetch hide more latency without violating the
+  serialization invariant; or
+- reduce extra mixed-SDSC and fanout rows relative to `onchip_master`.
+
+### Broader Coverage
+
+The gate still needs broader coverage before the path can be generalized:
+
+- more batch sizes;
+- more head counts;
+- more head dimensions;
+- more sequence lengths;
+- block128 long rows;
+- causal long rows;
+- mask/bias interactions;
+- fallback-forbidden performance runs with stable compile/cache/run separation.
+
+### Benchmark Quality
+
+The Stage226 and Stage090 numbers are useful engineering evidence, but they are
+not final production benchmarks. A stronger claim should include:
+
+- more repetitions;
+- explicit warmup/iteration policy;
+- distributions in addition to medians;
+- stable cache handling;
+- comparison against `flash_hbm`, `onchip_master`, layout-coupled warpspec, and
+  decoupled warpspec;
+- correctness summaries beside every timing row;
+- fallback-forbidden runs so timing rows cannot hide artifact selection
+  failures.
+
+## Practical Mental Model
+
+The branch has converted a rough idea into a measurable compiler feature:
+
+```text
+Before:
+  generated flash graph with K/V consumers often reading HBM-backed future data
+
+After:
+  selected current tile contains a serialized loader-core HBM prefetch for a
+  future K/V tile; future consumer reads that tile from LX; promotion gates
+  verify the exact sidecar metadata
+```
+
+The AIU "warpspec" design is therefore best described as:
+
+```text
+loader-specialized K/V prefetch sidecar
++ serialized loader-core safety invariant
++ LX fanout to future attention consumers
++ shape-limited promotion gates
+```
+
+That is a measurable step toward warp-specialized FlashAttention on AIU. It is
+not yet a production-ready general-purpose kernel, and the next performance
+target is to move from "beats flash_hbm and ties onchip_master" to "clearly
+improves on the strongest on-chip baseline for a documented shape island."
