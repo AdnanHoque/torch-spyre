@@ -366,7 +366,12 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="variant override; defaults to the gate's certified candidate",
     )
-    parser.add_argument("--baseline-variants", default="flash_hbm")
+    parser.add_argument(
+        "--baseline-variants",
+        "--baselines",
+        dest="baseline_variants",
+        default="flash_hbm",
+    )
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--iters", type=int, default=10)

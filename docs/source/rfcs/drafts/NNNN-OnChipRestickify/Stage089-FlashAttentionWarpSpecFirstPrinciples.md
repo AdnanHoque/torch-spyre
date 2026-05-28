@@ -627,6 +627,10 @@ Documentation:
   - Records the narrow B1/H8/D64 mid-length decoupled gate extension and the
     H8 long-row boundary.
 
+- `docs/source/rfcs/drafts/NNNN-OnChipRestickify/Stage092-DecoupledWarpspec8RowPerf.md`
+  - Records the expanded eight-row decoupled performance comparison against
+    `flash_hbm` and `onchip_master`.
+
 ## Gate Coverage And Correctness Evidence
 
 The latest layout-coupled warpspec gate recorded before layout decoupling was:
@@ -693,7 +697,7 @@ medians, not production benchmark results.
 ## Performance Evidence
 
 Stage226 used `tools/onchip_sdpa_perf_compare.py` with `warmup=2` and `iters=7`
-to compare the decoupled warpspec gate against `flash_hbm` and
+to compare the initial six-row decoupled warpspec gate against `flash_hbm` and
 `onchip_master`:
 
 ```text
@@ -740,6 +744,20 @@ The approximate geomean speedup over the previous decoupled default was
 `1.002x`, with one row slightly slower. That is useful A/B signal, not enough
 to make unicast the default. The production-facing decoupled gate should remain
 on the simpler default until a larger and more stable performance delta appears.
+
+Stage092 reran the performance comparison after the H8 mid rows were added to
+the decoupled gate:
+
+```text
+PERF_COMPARE_PASSED gate=onchip_warpspec_decoupled cases=3 comparisons=16
+PERF_SUMMARY baseline=flash_hbm ok_pairs=8/8 geomean_speedup=1.1518x
+PERF_SUMMARY baseline=onchip_master ok_pairs=8/8 geomean_speedup=0.9929x
+```
+
+That run showed row-level wins over `onchip_master` on the longer promoted rows
+and row-level losses on the shorter/mid rows. The current performance story is
+therefore precise: the decoupled loader-specialized path consistently beats
+`flash_hbm`, but is not yet a blanket replacement for `onchip_master`.
 
 ## Production-Ready Status
 

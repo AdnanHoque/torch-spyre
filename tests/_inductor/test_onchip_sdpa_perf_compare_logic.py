@@ -135,6 +135,24 @@ def test_target_variant_defaults_to_gate_certified_variant():
     assert perf.target_variant_for("onchip_warpspec_decoupled", "custom") == "custom"
 
 
+def test_main_accepts_baselines_alias():
+    seen = {}
+
+    def fake_run_compare(args):
+        seen["baseline_variants"] = args.baseline_variants
+        return 0
+
+    original = perf.run_compare
+    try:
+        perf.run_compare = fake_run_compare
+        rc = perf.main(["--baselines", "flash_hbm,onchip_master"])
+    finally:
+        perf.run_compare = original
+
+    assert rc == 0
+    assert seen["baseline_variants"] == "flash_hbm,onchip_master"
+
+
 def test_sweep_command_uses_combined_variants():
     case = perf.gate.select_cases(
         "onchip_warpspec_decoupled",
