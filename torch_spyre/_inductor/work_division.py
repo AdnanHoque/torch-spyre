@@ -553,6 +553,7 @@ _TARGET_PT_PASSES = 8                               # per-core M target = this *
 _M_MIN = _PT_ROWS // 2                              # smallest useful m-split (half a PT pass)
 
 _COST_PEAK_MACS_US_CORE = (98.304e12 / 2 / 32) / 1e6   # DL16 peak / 32 cores, in MACs/us/core
+_COST_PEAK_ELEMENTS_US_CORE = 192e3                 # placeholder; calibrate against SFP elementwise ops
 _COST_HBM_BW_GBS = 204.8                               # LPDDR5 aggregate peak
 _COST_DTYPE_BYTES = 2                               # fp16
 _COST_PSUM_PER_ELEM_US = 1.4e-4                     # per output element, per K-split ring hop
@@ -665,30 +666,41 @@ def _pointwise_split_cost(
     input_sizes: list[int],
     input_fanouts: list[int],
     out_size: int,
-    max_cohort: int,
+    cores_used: int,
     redistribution_us: float = 0.0,
 ) -> float:
     """Estimate kernel time in microseconds for a pointwise op under a given
     per-dim core split. Lower is better.
 
-    Cost terms:
+    Roofline over HBM and per-core SFP compute:
+
       hbm_us           : total bytes moved over HBM bandwidth. Each input is
                          charged numel * fanout bytes, where fanout = product
-                         of splits over dims the input lacks (broadcast). The
-                         output is always charged once.
-      cohort_penalty   : broadcast contention. Past the cohort limit a shared
-                         input row/column has to be re-fetched against the
-                         shared HBM bandwidth.
+                         of splits over dims the input lacks. fanout == 1 for
+                         a partitioned input (read once per core, slices sum
+                         to numel); fanout > 1 for a broadcast input, where
+                         the (fanout - 1) extra reads are the cohort tax.
+                         The output is partitioned across cores → charged
+                         out_size once.
+      compute_us       : per-core element work over the SFP elementwise rate.
+                         Bounds the cost from below: sub-cohort-knee splits
+                         don't go free once the per-core slice is tiny.
+      cost             : max(compute_us, hbm_us) — pointwise is HBM-bound
+                         once the per-core slice is large, compute-bound
+                         once it shrinks past the SFP roofline.
       redistribution_us: cost of moving the output across cores when this
                          pointwise op is bundled with a partner that stays
                          on the default layout.
     """
+    if cores_used <= 0:
+        return float("inf")
     bytes_total = (
         sum(s * f for s, f in zip(input_sizes, input_fanouts)) + out_size
     ) * _COST_DTYPE_BYTES
-    cohort_penalty = max(1.0, max_cohort / _COST_COHORT_LIMIT)
-    hbm_us = bytes_total / (_COST_HBM_BW_GBS * 1000) * cohort_penalty
-    return hbm_us + redistribution_us
+    hbm_us = bytes_total / (_COST_HBM_BW_GBS * 1000)
+    per_core_elements = out_size / cores_used
+    compute_us = per_core_elements / _COST_PEAK_ELEMENTS_US_CORE
+    return max(compute_us, hbm_us) + redistribution_us
 
 
 def _cost_model_matmul_planner(
@@ -890,7 +902,9 @@ def _cost_model_pointwise_planner(
     # Enumerate every per-dim divisor combination with product <= max_cores.
     dim_divs = [[int(d) for d in divisors(sz)] for sz in dim_sizes]
 
-    best_cost = float("inf")
+    # Order key: (cost, -cores_used) — on a tie, prefer the candidate that
+    # uses more cores (better parallelism, more room for downstream fusion).
+    best_key: tuple[float, int] = (float("inf"), 0)
     best_combo: tuple[int, ...] | None = None
     for combo in itertools.product(*dim_divs):
         cores_used = 1
@@ -906,10 +920,10 @@ def _cost_model_pointwise_planner(
                 if d not in dim_set:
                     f *= s
             fanouts.append(f)
-        max_cohort = max(combo) if combo else 1
-        c = _pointwise_split_cost(input_numels, fanouts, out_numel, max_cohort)
-        if c < best_cost:
-            best_cost = c
+        c = _pointwise_split_cost(input_numels, fanouts, out_numel, cores_used)
+        key = (c, -cores_used)
+        if key < best_key:
+            best_key = key
             best_combo = combo
 
     if best_combo is None:
@@ -919,14 +933,10 @@ def _cost_model_pointwise_planner(
     for d, s in zip(dims, best_combo):
         new_splits[d] = int(s)
 
-    # Never use fewer cores than the caller's default split.
-    if math.prod(new_splits.values()) < math.prod(splits.values()):
-        return splits
-
     logger.debug(
         f"cost_model work_division {op.get_name()}: "
         f"pointwise split={dict(zip(dims, best_combo))} "
-        f"cost={best_cost:.1f}us dims={dim_sizes}"
+        f"cost={best_key[0]:.1f}us dims={dim_sizes}"
     )
     return new_splits
 

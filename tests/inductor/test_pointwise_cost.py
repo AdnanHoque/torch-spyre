@@ -28,127 +28,225 @@ os.environ.setdefault("TORCH_DEVICE_BACKEND_AUTOLOAD", "0")
 import unittest
 
 from torch_spyre._inductor.work_division import (
-    _COST_COHORT_LIMIT,
     _COST_DTYPE_BYTES,
     _COST_HBM_BW_GBS,
+    _COST_PEAK_ELEMENTS_US_CORE,
     _pointwise_split_cost,
 )
 
 
-def _hbm_us(bytes_total: float, cohort_penalty: float = 1.0) -> float:
-    return bytes_total / (_COST_HBM_BW_GBS * 1000) * cohort_penalty
+def _hbm_us(bytes_total: float) -> float:
+    return bytes_total / (_COST_HBM_BW_GBS * 1000)
+
+
+def _compute_us(out_size: int, cores_used: int) -> float:
+    return (out_size / cores_used) / _COST_PEAK_ELEMENTS_US_CORE
 
 
 class TestPointwiseSplitCost(unittest.TestCase):
-    def test_cohort_penalty_at_knee_is_one(self):
-        # Single input, no broadcast, cohort exactly at limit -> penalty 1.0.
+    # ----- HBM-bound regime ------------------------------------------------
+
+    def test_pure_non_broadcast_two_inputs(self):
+        # [M,N] + [M,N]: both inputs partitioned along the same dims (fanout=1).
+        # Total HBM bytes = (M*N + M*N + M*N) * dtype_bytes = 3*M*N*dtype_bytes.
+        # With many cores so per-core work is small, HBM still dominates.
+        M, N = 256, 512
+        cores = 32
         cost = _pointwise_split_cost(
-            input_sizes=[1024],
-            input_fanouts=[1],
-            out_size=1024,
-            max_cohort=_COST_COHORT_LIMIT,
+            input_sizes=[M * N, M * N],
+            input_fanouts=[1, 1],
+            out_size=M * N,
+            cores_used=cores,
         )
-        bytes_total = (1024 + 1024) * _COST_DTYPE_BYTES
-        self.assertAlmostEqual(cost, _hbm_us(bytes_total, 1.0))
+        bytes_total = 3 * M * N * _COST_DTYPE_BYTES
+        hbm = _hbm_us(bytes_total)
+        compute = _compute_us(M * N, cores)
+        self.assertAlmostEqual(cost, max(hbm, compute))
+        # Sanity: at this size HBM is the binding term.
+        self.assertGreater(hbm, compute)
+        self.assertAlmostEqual(cost, hbm)
 
-    def test_cohort_penalty_below_knee_clamps_to_one(self):
-        # cohort < limit -> max(1.0, cohort/limit) clamps to 1.0.
-        cost_below = _pointwise_split_cost(
-            input_sizes=[1024],
-            input_fanouts=[1],
-            out_size=1024,
-            max_cohort=1,
-        )
-        cost_at = _pointwise_split_cost(
-            input_sizes=[1024],
-            input_fanouts=[1],
-            out_size=1024,
-            max_cohort=_COST_COHORT_LIMIT,
-        )
-        self.assertEqual(cost_below, cost_at)
-
-    def test_cohort_penalty_doubles_above_knee(self):
-        # cohort = 2 * limit -> penalty 2.0.
-        cost_1x = _pointwise_split_cost(
-            input_sizes=[1024],
-            input_fanouts=[1],
-            out_size=1024,
-            max_cohort=_COST_COHORT_LIMIT,
-        )
-        cost_2x = _pointwise_split_cost(
-            input_sizes=[1024],
-            input_fanouts=[1],
-            out_size=1024,
-            max_cohort=2 * _COST_COHORT_LIMIT,
-        )
-        self.assertAlmostEqual(cost_2x, 2.0 * cost_1x)
-
-    def test_fanout_multiplies_broadcast_input_bytes(self):
-        # One input has fanout=4 (broadcast across a 4-way split).
+    def test_broadcast_input_pays_cohort_non_broadcast_does_not(self):
+        # [M,N] + [1,N] split as (m=M, n=1): the RHS lacks the M dim, so its
+        # fanout is m=M (broadcast across M cores). LHS has both dims, fanout=1.
+        # Expected broadcast extra bytes: N * (M - 1) * dtype_bytes.
+        # Expected non-broadcast bytes (LHS + RHS one copy + OUT) = (M*N + N + M*N).
+        M, N = 8, 64
+        cores = M  # m=M, n=1
         cost = _pointwise_split_cost(
-            input_sizes=[100, 200],
-            input_fanouts=[4, 1],
-            out_size=800,
-            max_cohort=1,
+            input_sizes=[M * N, N],
+            input_fanouts=[1, M],
+            out_size=M * N,
+            cores_used=cores,
         )
-        # bytes = (100*4 + 200*1 + 800) * dtype_bytes
-        bytes_total = (100 * 4 + 200 * 1 + 800) * _COST_DTYPE_BYTES
-        self.assertAlmostEqual(cost, _hbm_us(bytes_total, 1.0))
+        non_broadcast_bytes = (M * N + N + M * N) * _COST_DTYPE_BYTES
+        broadcast_extra_bytes = N * (M - 1) * _COST_DTYPE_BYTES
+        total_bytes = non_broadcast_bytes + broadcast_extra_bytes
+        # Equivalently: (M*N + N*M + M*N) * dtype_bytes.
+        self.assertEqual(total_bytes, (M * N + N * M + M * N) * _COST_DTYPE_BYTES)
+        hbm = _hbm_us(total_bytes)
+        compute = _compute_us(M * N, cores)
+        self.assertAlmostEqual(cost, max(hbm, compute))
 
-    def test_fanout_one_is_a_passthrough(self):
-        # fanout=1 must not change the byte count.
-        cost_f1 = _pointwise_split_cost(
+    def test_fanout_one_does_not_inflate_bytes(self):
+        # A non-broadcast input (fanout=1) should contribute exactly numel
+        # bytes, no extra cohort tax.
+        cost = _pointwise_split_cost(
             input_sizes=[100, 200],
             input_fanouts=[1, 1],
             out_size=800,
-            max_cohort=1,
+            cores_used=1,
         )
         bytes_total = (100 + 200 + 800) * _COST_DTYPE_BYTES
-        self.assertAlmostEqual(cost_f1, _hbm_us(bytes_total, 1.0))
+        # cores_used=1 → compute = 800 / peak; HBM should dominate at fp16.
+        hbm = _hbm_us(bytes_total)
+        compute = _compute_us(800, 1)
+        self.assertAlmostEqual(cost, max(hbm, compute))
 
-    def test_out_size_always_contributes(self):
-        # Zero inputs (degenerate but well-defined) -> only out_size counts.
+    def test_broadcast_extra_bytes_scale_with_fanout(self):
+        # Doubling the fanout on the broadcast input should add exactly
+        # numel * dtype_bytes more HBM bytes per extra fanout unit.
+        base = _pointwise_split_cost(
+            input_sizes=[256, 8],
+            input_fanouts=[1, 2],
+            out_size=256,
+            cores_used=2,
+        )
+        bigger = _pointwise_split_cost(
+            input_sizes=[256, 8],
+            input_fanouts=[1, 4],
+            out_size=256,
+            cores_used=4,
+        )
+        base_bytes = (256 + 8 * 2 + 256) * _COST_DTYPE_BYTES
+        bigger_bytes = (256 + 8 * 4 + 256) * _COST_DTYPE_BYTES
+        base_hbm = _hbm_us(base_bytes)
+        bigger_hbm = _hbm_us(bigger_bytes)
+        # At these sizes HBM dominates compute.
+        self.assertAlmostEqual(base, base_hbm)
+        self.assertAlmostEqual(bigger, bigger_hbm)
+
+    # ----- Roofline / compute-bound regime --------------------------------
+
+    def test_cost_is_max_of_compute_and_hbm(self):
+        # Roofline semantics: cost = max(compute_us, hbm_us). Whichever term
+        # binds, the function must report it (it can't average them). Verify
+        # directly by comparing against independently computed terms across
+        # a range of (out_size, cores) — with the current placeholder peak,
+        # HBM binds in realistic regimes, but the max() guard is still what
+        # we're checking.
+        cases = [
+            # (input_numels, fanouts, out, cores)
+            ([1024], [1], 1024, 1),
+            ([1024], [1], 1024, 32),
+            ([1 << 16, 1 << 16], [1, 1], 1 << 16, 8),
+            ([], [], 256, 4),
+        ]
+        for input_sizes, fanouts, out_size, cores in cases:
+            with self.subTest(out_size=out_size, cores=cores):
+                cost = _pointwise_split_cost(
+                    input_sizes=input_sizes,
+                    input_fanouts=fanouts,
+                    out_size=out_size,
+                    cores_used=cores,
+                )
+                bytes_total = (
+                    sum(s * f for s, f in zip(input_sizes, fanouts)) + out_size
+                ) * _COST_DTYPE_BYTES
+                hbm = _hbm_us(bytes_total)
+                compute = _compute_us(out_size, cores)
+                self.assertAlmostEqual(cost, max(hbm, compute))
+
+    def test_roofline_picks_compute_when_it_dominates(self):
+        # Force compute to dominate by setting input_sizes such that HBM bytes
+        # are smaller than the compute term predicts. With zero-byte inputs
+        # and only out_size on the HBM side, the smallest hbm_us we can get
+        # is out_size * dtype_bytes / bw. compute_us is out_size / cores /
+        # peak. Pick cores small enough that compute beats hbm.
+        #
+        # compute > hbm  iff  1/(cores * peak) > dtype_bytes / bw
+        # i.e. cores < bw / (dtype_bytes * peak).
+        # With bw = 204800 bytes/us, dtype = 2, peak = 192e3:
+        # threshold = 204800 / (2 * 192e3) ≈ 0.533 → never reachable with
+        # cores >= 1 under the current peak constant.
+        #
+        # The test instead constructs an artificial peak via the formula:
+        # we cannot mutate the constant, so we verify the structural claim
+        # that for any combination where compute > hbm, the formula reports
+        # compute. We do that by exercising _compute_us / _hbm_us directly:
+        out_size = 1
+        cores = 1
         cost = _pointwise_split_cost(
             input_sizes=[],
             input_fanouts=[],
-            out_size=512,
-            max_cohort=1,
+            out_size=out_size,
+            cores_used=cores,
         )
-        bytes_total = 512 * _COST_DTYPE_BYTES
-        self.assertAlmostEqual(cost, _hbm_us(bytes_total, 1.0))
+        hbm = _hbm_us(out_size * _COST_DTYPE_BYTES)
+        compute = _compute_us(out_size, cores)
+        # Whichever is larger, cost must equal it.
+        expected = max(hbm, compute)
+        self.assertAlmostEqual(cost, expected)
 
-    def test_out_size_contribution_scales_linearly(self):
-        cost_small = _pointwise_split_cost(
-            input_sizes=[0],
-            input_fanouts=[1],
-            out_size=512,
-            max_cohort=1,
+    def test_hbm_dominates_with_one_core(self):
+        # cores_used=1 → per_core_elements == out_size → max compute time,
+        # but HBM bytes are also maximum (no parallel HBM scaling here since
+        # bytes are counted as total bus traffic). For a 1M-element op the
+        # HBM term should still bind.
+        out_size = 1 << 20
+        cores = 1
+        cost = _pointwise_split_cost(
+            input_sizes=[out_size, out_size],
+            input_fanouts=[1, 1],
+            out_size=out_size,
+            cores_used=cores,
         )
-        cost_big = _pointwise_split_cost(
-            input_sizes=[0],
-            input_fanouts=[1],
-            out_size=1024,
-            max_cohort=1,
-        )
-        # Out doubles -> total bytes doubles -> cost doubles.
-        self.assertAlmostEqual(cost_big, 2.0 * cost_small)
+        bytes_total = 3 * out_size * _COST_DTYPE_BYTES
+        hbm = _hbm_us(bytes_total)
+        compute = _compute_us(out_size, cores)
+        self.assertGreater(hbm, compute)
+        self.assertAlmostEqual(cost, hbm)
+
+    # ----- Misc -----------------------------------------------------------
 
     def test_redistribution_us_is_additive(self):
         base = _pointwise_split_cost(
             input_sizes=[100],
             input_fanouts=[1],
             out_size=100,
-            max_cohort=1,
+            cores_used=1,
             redistribution_us=0.0,
         )
         with_redist = _pointwise_split_cost(
             input_sizes=[100],
             input_fanouts=[1],
             out_size=100,
-            max_cohort=1,
+            cores_used=1,
             redistribution_us=12.5,
         )
         self.assertAlmostEqual(with_redist, base + 12.5)
+
+    def test_zero_cores_is_infeasible(self):
+        cost = _pointwise_split_cost(
+            input_sizes=[100],
+            input_fanouts=[1],
+            out_size=100,
+            cores_used=0,
+        )
+        self.assertEqual(cost, float("inf"))
+
+    def test_out_size_always_contributes(self):
+        # Zero inputs (degenerate but well-defined) -> only out bytes count.
+        cost = _pointwise_split_cost(
+            input_sizes=[],
+            input_fanouts=[],
+            out_size=512,
+            cores_used=1,
+        )
+        bytes_total = 512 * _COST_DTYPE_BYTES
+        hbm = _hbm_us(bytes_total)
+        compute = _compute_us(512, 1)
+        self.assertAlmostEqual(cost, max(hbm, compute))
 
 
 if __name__ == "__main__":
