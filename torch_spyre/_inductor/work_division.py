@@ -669,13 +669,15 @@ def _pointwise_split_cost(
     out_size: int,
     cores_used: int,
     stick_split: int = 1,
+    batch_split: int = 1,
     redistribution_us: float = 0.0,
 ) -> float:
     """Estimate kernel time in microseconds for a pointwise op under a given
     per-dim core split. Lower is better.
 
     Roofline over HBM and per-core SFP compute, plus a stick-fragmentation
-    penalty when the inner (stick) dim is split:
+    penalty when the inner (stick) dim is split and a batch-split penalty
+    when outer "batch-like" dims (non-stick, non-largest) are split:
 
       hbm_us           : total bytes moved over HBM bandwidth. Each input is
                          charged numel * fanout bytes, where fanout = product
@@ -698,6 +700,16 @@ def _pointwise_split_cost(
                          so without this term the planner systematically picks
                          the last-enumerated stick-dim split and regresses
                          100-1000 us. Scales (stick_split - 1) * out_bytes.
+      batch_penalty    : multiplicative b^_COST_BATCH_SPLIT_EXPONENT tax on
+                         splitting a batch-like outer dim (i.e. one that is
+                         not the stick dim and not the largest non-stick
+                         "main work" dim). Mirrors the matmul planner's
+                         b**1.4 form: each batch unit is independent kernel
+                         work, so splitting it across cores adds per-batch
+                         launch / HBM-banking overhead that tiling does not.
+                         Without this term the roofline ties on shapes like
+                         add [4,2048,4096] + [4,1,4096], where B-split shrinks
+                         the broadcast-input fanout and regresses ~1.6 ms.
       redistribution_us: cost of moving the output across cores when this
                          pointwise op is bundled with a partner that stays
                          on the default layout.
@@ -719,7 +731,11 @@ def _pointwise_split_cost(
         )
     else:
         stick_penalty_us = 0.0
-    return max(compute_us, hbm_us) + stick_penalty_us + redistribution_us
+    batch_penalty = batch_split ** _COST_BATCH_SPLIT_EXPONENT
+    return (
+        (max(compute_us, hbm_us) + stick_penalty_us) * batch_penalty
+        + redistribution_us
+    )
 
 
 def _cost_model_matmul_planner(
@@ -929,6 +945,22 @@ def _cost_model_pointwise_planner(
         (i for i, d in enumerate(dims) if d in stick_vars), None
     )
 
+    # Identify "batch-like" dims: output dims that are neither the stick dim
+    # nor the largest non-stick dim. The largest non-stick dim is the main
+    # work axis (analogous to matmul's M); splitting it parallelizes the bulk
+    # of the work cleanly. Splitting any remaining outer dim instead carries
+    # the same per-batch-unit launch/banking overhead as the matmul planner's
+    # b**1.4 batch penalty. For 1D / pure-stick shapes there are no batch-like
+    # dims; for shapes with all batch-like dims of size 1 the penalty is 1.
+    non_stick_idx = [
+        i for i in range(len(dims)) if i != stick_dim_idx
+    ]
+    if non_stick_idx:
+        main_idx = max(non_stick_idx, key=lambda i: dim_sizes[i])
+        batch_like_idx = [i for i in non_stick_idx if i != main_idx]
+    else:
+        batch_like_idx = []
+
     # Order key: (cost, -cores_used) — on a tie, prefer the candidate that
     # uses more cores (better parallelism, more room for downstream fusion).
     best_key: tuple[float, int] = (float("inf"), 0)
@@ -948,9 +980,13 @@ def _cost_model_pointwise_planner(
                     f *= s
             fanouts.append(f)
         stick_split = combo[stick_dim_idx] if stick_dim_idx is not None else 1
+        batch_split = 1
+        for i in batch_like_idx:
+            batch_split *= combo[i]
         c = _pointwise_split_cost(
             input_numels, fanouts, out_numel, cores_used,
             stick_split=stick_split,
+            batch_split=batch_split,
         )
         key = (c, -cores_used)
         if key < best_key:
