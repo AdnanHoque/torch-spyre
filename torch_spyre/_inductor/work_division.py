@@ -553,7 +553,7 @@ _TARGET_PT_PASSES = 8                               # per-core M target = this *
 _M_MIN = _PT_ROWS // 2                              # smallest useful m-split (half a PT pass)
 
 _COST_PEAK_MACS_US_CORE = (98.304e12 / 2 / 32) / 1e6   # DL16 peak / 32 cores, in MACs/us/core
-_COST_PEAK_ELEMENTS_US_CORE = 192e3                 # placeholder; calibrate against SFP elementwise ops
+_COST_PEAK_ELEMENTS_US_CORE = 1.76e3                # per-core SFP elementwise rate; fit from silu sweep (asymptote ~1760 elem/us/core)
 _COST_HBM_BW_GBS = 204.8                               # LPDDR5 aggregate peak
 _COST_DTYPE_BYTES = 2                               # fp16
 _COST_PSUM_PER_ELEM_US = 1.4e-4                     # per output element, per K-split ring hop
