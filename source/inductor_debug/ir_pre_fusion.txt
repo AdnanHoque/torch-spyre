@@ -1,0 +1,33 @@
+op0: SchedulerNode(ComputedBuffer)
+op0.writes = [MemoryDep('buf0', 12800*c0 + c1, {c0: 512, c1: 12800})]
+op0.unmet_dependencies = []
+op0.met_dependencies = 
+    [   MemoryDep('arg0_1', c1 + 12800*c2, {c0: 512, c1: 12800, c2: 4096}),
+        MemoryDep('arg1_1', 4096*c0 + c2, {c0: 512, c1: 12800, c2: 4096})]
+op0.outputs = [
+    buf0: ComputedBuffer
+    buf0.layout = FixedTiledLayout('spyre:0', torch.float16, size=[1, 512, 12800], stride=[6553600, 12800, 1], device_layout=SpyreTensorLayout(device_size=[512, 200, 1, 64], stride_map =[12800, 64, -1, 1], device_dtype=DataFormats.SEN169_FP16))
+    buf0.users = [NodeUser(node=OUTPUT, can_inplace=False, is_weak=False)]
+]
+op0.group.device = spyre:0
+op0.group.iteration = (6553600, 4096)
+op0.sizes = ([512, 12800], [4096])
+arg1_1_layout = FixedTiledLayout('spyre:0', torch.float16, size=[1, 512, 4096], stride=[2097152, 4096, 1], device_layout=SpyreTensorLayout(device_size=[512, 64, 1, 64], stride_map =[4096, 64, -1, 1], device_dtype=DataFormats.SEN169_FP16))
+arg0_1_layout = FixedTiledLayout('spyre:0', torch.float16, size=[4096, 12800], stride=[12800, 1], device_layout=SpyreTensorLayout(device_size=[200, 4096, 64], stride_map =[64, 12800, 1], device_dtype=DataFormats.SEN169_FP16))
+buf0_layout = FixedTiledLayout('spyre:0', torch.float16, size=[1, 512, 12800], stride=[6553600, 12800, 1], device_layout=SpyreTensorLayout(device_size=[512, 200, 1, 64], stride_map =[12800, 64, -1, 1], device_dtype=DataFormats.SEN169_FP16))
+class op0_loop_body:
+    var_ranges = {p0: 512, p1: 12800, p2: 4096}
+    index0 = 4096*p0 + p2
+    index1 = p1 + 12800*p2
+    index2 = 12800*p0 + p1
+    def body(self, ops):
+        get_index = self.get_index('index0')
+        load = ops.load('arg1_1', get_index)
+        get_index_1 = self.get_index('index1')
+        load_1 = ops.load('arg0_1', get_index_1)
+        reduction = ops.reduction(torch.float16, torch.float16, 'batchmatmul', (load, load_1))
+        get_index_2 = self.get_index('index2')
+        store_reduction = ops.store_reduction('buf0', get_index_2, reduction)
+        return None
+
+
