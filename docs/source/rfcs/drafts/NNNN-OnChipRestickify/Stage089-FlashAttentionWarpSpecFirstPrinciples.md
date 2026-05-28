@@ -579,7 +579,8 @@ Tools:
 
 - `tools/onchip_sdpa_sweep.py`
   - Defines `flash_hbm`, `onchip_master`, layout-xform, K/V prefetch, coupled
-    warpspec, decoupled warpspec, and unicast A/B variants.
+    warpspec, decoupled warpspec, and decoupled A/B variants such as unicast,
+    safe-source, no-after-sync, and corelet1.
   - Runs shape/variant sweeps and writes JSON with status, medians, max error,
     mixed SDSC summaries, metadata, and candidate diagnostics.
 
@@ -630,6 +631,10 @@ Documentation:
 - `docs/source/rfcs/drafts/NNNN-OnChipRestickify/Stage092-DecoupledWarpspec8RowPerf.md`
   - Records the expanded eight-row decoupled performance comparison against
     `flash_hbm` and `onchip_master`.
+
+- `docs/source/rfcs/drafts/NNNN-OnChipRestickify/Stage093-DecoupledWarpspecKnobScreen.md`
+  - Records the decoupled safe-source, no-after-sync, and corelet1 A/B tuning
+    aliases and explains why none replaces the default gate target yet.
 
 ## Gate Coverage And Correctness Evidence
 
@@ -758,6 +763,16 @@ That run showed row-level wins over `onchip_master` on the longer promoted rows
 and row-level losses on the shorter/mid rows. The current performance story is
 therefore precise: the decoupled loader-specialized path consistently beats
 `flash_hbm`, but is not yet a blanket replacement for `onchip_master`.
+
+Stage093 added decoupled safe-source, no-after-sync, and corelet1 A/B aliases.
+The most promising knob, safe-source, remained value-correct but did not beat
+the default decoupled target across the full eight-row island:
+
+```text
+PERF_SUMMARY baseline=onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled ok_pairs=8/8 geomean_speedup=0.9904x
+```
+
+Those aliases are therefore diagnostic lanes, not production defaults.
 
 ## Production-Ready Status
 
