@@ -562,9 +562,13 @@ _COST_TARGET_M_PENALTY_US = 50.0                    # tie-break: per log2 step f
 _COST_REDISTRIBUTION_US_PER_BYTE = 1e-6             # cost of moving output bytes across cores
 
 # Per-core throughput for simple element-wise reductions (sum/mean/max/...).
-# Placeholder; calibrate against device measurements before turning the
-# reduction planner on by default.
-_COST_REDUCE_ELEM_PER_US_CORE = 2.5e6
+# Calibrated 2026-05-28 from device timings of forced-split sum reductions
+# on shapes [1, 32, 512, 4096] and [1, 512, 4096] across cores in {1, 2, 4}:
+# the closed-form fit (compute_us = elems_in / cores / K) yielded
+# K = 1.20e4 elem/us/core (R^2 = 0.97). softmax fits ~1.4e3 because its
+# compound amax+exp+sum+div lowering does ~8x more per-element work; the
+# constant tracks the simple-reduction target.
+_COST_REDUCE_ELEM_PER_US_CORE = 1.2e4
 
 # Reduction types eligible for the cost-model sibling planner. Excludes
 # matmul (handled by the matmul planner), topk (single-core path), and
