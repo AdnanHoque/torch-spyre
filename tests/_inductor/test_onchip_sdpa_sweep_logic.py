@@ -937,6 +937,31 @@ def test_warpspec_kv_hbm_prefetch_loader_core31_decoupled_sets_gate():
     )
 
 
+def test_warpspec_kv_hbm_prefetch_loader_core31_decoupled_unicast_sets_gate():
+    env = sweep._child_env(
+        _args(),
+        "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled_unicast",
+        128,
+    )
+
+    assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA"] == "1"
+    assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM"] == "0"
+    assert env[_LAYOUT_PAIR_ENV] == "-1"
+    assert env[_KV_REPACK_PAIR_ENV] == "-1"
+    assert env[_KV_REPACK_HBM_PREFETCH_HOIST_ENV] == "-2"
+    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT_ENV] == "1"
+    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_CORE_ENV] == "31"
+    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT_FULL_TILE_PIECES_ENV] == "1"
+    assert env[_KV_REPACK_HBM_PREFETCH_FANOUT_USE_UNICAST_ENV] == "1"
+    assert env[_KV_REPACK_HBM_PREFETCH_SERIALIZE_LOADER_CORE_ENV] == "1"
+    assert env[_KV_REPACK_HBM_PREFETCH_TAIL_CURRENT_ENV] == "0"
+    assert env[_KV_REPACK_COPYBACK_ENV] == "-1"
+    assert (
+        "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled_unicast"
+        in env["TORCHINDUCTOR_CACHE_DIR"]
+    )
+
+
 def test_hbm_kv_layout_xform_kv_hbm_prefetch_loader_fanout_fulltile_overlap_safesrc_probe_sets_gate():
     env = sweep._child_env(
         _args(),
