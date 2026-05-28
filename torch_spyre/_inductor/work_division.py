@@ -561,6 +561,16 @@ _COST_BATCH_SPLIT_EXPONENT = 1.4                    # batch-split penalty: total
 _COST_TARGET_M_PENALTY_US = 50.0                    # tie-break: per log2 step from target m-split
 _COST_REDISTRIBUTION_US_PER_BYTE = 1e-6             # cost of moving output bytes across cores
 
+# Per-core throughput for simple element-wise reductions (sum/mean/max/...).
+# Placeholder; calibrate against device measurements before turning the
+# reduction planner on by default.
+_COST_REDUCE_ELEM_PER_US_CORE = 2.5e6
+
+# Reduction types eligible for the cost-model sibling planner. Excludes
+# matmul (handled by the matmul planner), topk (single-core path), and
+# the unimplemented ops listed in spyre_kernel.reduction().
+_SIMPLE_REDUCE_TYPES = {"exx2", "mean", "sum", "max", "amax", "min", "amin"}
+
 
 def _matmuls_fused_with_nonmatmul(operations: list[Operation]) -> set[str]:
     """Names of matmul outputs that share a fusion bundle with a non-matmul op.
@@ -811,6 +821,138 @@ def _cost_model_matmul_planner(
     return new_splits
 
 
+def _reduction_split_cost(
+    elems_in: int,
+    elems_out: int,
+    d_splits: list[int],
+    r_splits: list[int],
+    max_cores: int,
+    redistribution_us: float = 0.0,
+) -> float:
+    """Estimate kernel time in microseconds for a simple reduction split.
+
+    Cost terms:
+      compute_us : per-core element work over per-core throughput.
+      hbm_us     : input + output bytes over HBM bandwidth, with a cohort
+                   penalty for broadcast contention on the output dims.
+      psum_us    : reduction hops added when r_splits introduce a
+                   cross-core PSUM ring.
+    """
+    cores = math.prod(d_splits) * math.prod(r_splits)
+    if cores == 0 or cores > max_cores:
+        return float("inf")
+
+    bytes_total = (elems_in + elems_out) * _COST_DTYPE_BYTES
+    compute_us = (elems_in / cores) / _COST_REDUCE_ELEM_PER_US_CORE
+    cohort = max(d_splits) if d_splits else 1
+    cohort_pen = max(1.0, cohort / _COST_COHORT_LIMIT)
+    hbm_us = bytes_total / (_COST_HBM_BW_GBS * 1000) * cohort_pen
+    r_prod = math.prod(r_splits) if r_splits else 1
+    psum_us = max(0, r_prod - 1) * elems_out * _COST_PSUM_PER_ELEM_US
+    return compute_us + hbm_us + psum_us + redistribution_us
+
+
+def _cost_model_reduction_planner(
+    op: ComputedBuffer,
+    splits: dict[Symbol, int],
+    it_space_adjusted: dict[Symbol, Expr],
+    output_td: TensorDep,
+    stick_vars: dict[Symbol, int],
+    committed_splits: dict[Symbol, int],
+    max_cores: int,
+) -> dict[Symbol, int]:
+    """Pick the lowest-cost feasible (d_splits, r_splits) for a simple reduction.
+
+    Identifies output dims and reduction dims via prioritize_dimensions,
+    enumerates every feasible per-dim divisor combo with total cores
+    within max_cores, and returns the split with the smallest
+    _reduction_split_cost. Falls back to the caller's splits if no
+    candidate uses more cores than the default.
+    """
+    if not isinstance(op.data, Reduction):
+        return splits
+    if op.data.reduction_type not in _SIMPLE_REDUCE_TYPES:
+        return splits
+    if committed_splits:
+        return splits
+
+    output_dims, reduction_dims = prioritize_dimensions(
+        output_td, it_space_adjusted
+    )
+    if not output_dims and not reduction_dims:
+        return splits
+
+    d_sizes = [concretize_expr(it_space_adjusted[d]) for d in output_dims]
+    r_sizes = [concretize_expr(it_space_adjusted[d]) for d in reduction_dims]
+
+    elems_per_stick = output_td.layout.device_layout.device_dtype.elems_per_stick()
+
+    def _elems(dim: Symbol, size: int) -> int:
+        # Stick-counted dims need expansion back to elements so the cost
+        # model sees real byte counts.
+        return size * elems_per_stick if dim in stick_vars else size
+
+    d_elem_sizes = [_elems(d, s) for d, s in zip(output_dims, d_sizes)]
+    r_elem_sizes = [_elems(d, s) for d, s in zip(reduction_dims, r_sizes)]
+
+    elems_out = 1
+    for s in d_elem_sizes:
+        elems_out *= s
+    elems_red = 1
+    for s in r_elem_sizes:
+        elems_red *= s
+    elems_in = elems_out * elems_red
+
+    d_divs = [[int(x) for x in divisors(s)] for s in d_sizes]
+    r_divs = [[int(x) for x in divisors(s)] for s in r_sizes]
+    d_combos = list(itertools.product(*d_divs)) if d_divs else [()]
+    r_combos = list(itertools.product(*r_divs)) if r_divs else [()]
+
+    best_cost = float("inf")
+    best = None
+    for d_combo in d_combos:
+        d_prod = 1
+        for x in d_combo:
+            d_prod *= x
+        for r_combo in r_combos:
+            r_prod = 1
+            for x in r_combo:
+                r_prod *= x
+            if d_prod * r_prod > max_cores:
+                continue
+            c = _reduction_split_cost(
+                elems_in,
+                elems_out,
+                list(d_combo),
+                list(r_combo),
+                max_cores,
+            )
+            if c < best_cost:
+                best_cost = c
+                best = (d_combo, r_combo)
+
+    if best is None:
+        return splits
+
+    d_combo, r_combo = best
+    new_splits = dict(splits)
+    for d, s in zip(output_dims, d_combo):
+        new_splits[d] = int(s)
+    for d, s in zip(reduction_dims, r_combo):
+        new_splits[d] = int(s)
+
+    # Never use fewer cores than the caller's default split.
+    if math.prod(new_splits.values()) < math.prod(splits.values()):
+        return splits
+
+    logger.debug(
+        f"cost_model reduction work_division {op.get_name()}: "
+        f"d={d_combo} r={r_combo} cost={best_cost:.1f}us "
+        f"[elems_in={elems_in} elems_out={elems_out}]"
+    )
+    return new_splits
+
+
 def work_distribution_pass(
     op: ComputedBuffer,
     args: list[SchedNodeArg],
@@ -882,6 +1024,20 @@ def work_distribution_pass(
             max_cores,
             fused_with_nonmatmul if fused_with_nonmatmul is not None else set(),
             input_tds,
+        )
+    if (
+        config.cost_model_reduction_planner
+        and isinstance(op.data, Reduction)
+        and op.data.reduction_type in _SIMPLE_REDUCE_TYPES
+    ):
+        splits = _cost_model_reduction_planner(
+            op,
+            splits,
+            it_space_adjusted,
+            output_td,
+            stick_vars,
+            committed_splits,
+            max_cores,
         )
 
     apply_splits(op, splits, output_td)
