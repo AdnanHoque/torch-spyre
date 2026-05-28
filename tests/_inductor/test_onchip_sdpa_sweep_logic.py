@@ -28,6 +28,16 @@ from unittest import mock
 
 _HERE = Path(__file__).resolve().parent
 _SWEEP = _HERE.parents[1] / "tools" / "onchip_sdpa_sweep.py"
+_WARPSPEC_DECOUPLED_VARIANT = (
+    "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled"
+)
+_WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT = (
+    "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled_route_policy"
+)
+_ROUTE_POLICY_ENV = "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_POLICY"
+_ROUTE_SELECTED_VARIANT_ENV = (
+    "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_SELECTED_VARIANT"
+)
 _LAYOUT_PAIR_ENV = "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_LAYOUT_XFORM_PAIR_TILE"
 _IFN_PREFIX_FORCE_ENV = "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_IFN_PREFIX_FORCE"
 _LAYOUT_PAIR_OVERLAP_ENV = (
@@ -935,6 +945,63 @@ def test_warpspec_kv_hbm_prefetch_loader_core31_decoupled_sets_gate():
         "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled"
         in env["TORCHINDUCTOR_CACHE_DIR"]
     )
+
+
+def test_warpspec_decoupled_route_policy_selects_target_shape():
+    args = _args()
+    args.batch = 1
+    args.heads = 4
+    args.dim = 64
+    args.block_size = 64
+    args.is_causal = False
+    env = sweep._child_env(args, _WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT, 768)
+
+    assert env[_ROUTE_POLICY_ENV] == "stage234_min_speedup_1p0"
+    assert env[_ROUTE_SELECTED_VARIANT_ENV] == _WARPSPEC_DECOUPLED_VARIANT
+    assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA"] == "1"
+    assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM"] == "0"
+    assert env[_LAYOUT_PAIR_ENV] == "-1"
+    assert env[_KV_REPACK_HBM_PREFETCH_HOIST_ENV] == "-2"
+    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT_ENV] == "1"
+    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_CORE_ENV] == "31"
+    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT_FULL_TILE_PIECES_ENV] == "1"
+    assert env[_KV_REPACK_HBM_PREFETCH_SERIALIZE_LOADER_CORE_ENV] == "1"
+    assert (
+        _WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT
+        in env["TORCHINDUCTOR_CACHE_DIR"]
+    )
+
+
+def test_warpspec_decoupled_route_policy_falls_back_on_mid_shape():
+    args = _args()
+    args.batch = 1
+    args.heads = 8
+    args.dim = 64
+    args.block_size = 64
+    args.is_causal = False
+    env = sweep._child_env(args, _WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT, 512)
+
+    assert env[_ROUTE_POLICY_ENV] == "stage234_min_speedup_1p0"
+    assert env[_ROUTE_SELECTED_VARIANT_ENV] == "onchip_master"
+    assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA"] == "1"
+    assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM"] == "0"
+    assert env[_KV_REPACK_HBM_PREFETCH_HOIST_ENV] == "-1"
+    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT_ENV] == "0"
+    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_CORE_ENV] == "0"
+    assert env[_KV_REPACK_HBM_PREFETCH_SERIALIZE_LOADER_CORE_ENV] == "0"
+
+
+def test_warpspec_decoupled_route_policy_falls_back_on_causal_shape():
+    args = _args()
+    args.batch = 1
+    args.heads = 4
+    args.dim = 64
+    args.block_size = 64
+    args.is_causal = True
+    env = sweep._child_env(args, _WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT, 768)
+
+    assert env[_ROUTE_SELECTED_VARIANT_ENV] == "onchip_master"
+    assert env[_KV_REPACK_HBM_PREFETCH_HOIST_ENV] == "-1"
 
 
 def test_warpspec_kv_hbm_prefetch_loader_core31_decoupled_unicast_sets_gate():

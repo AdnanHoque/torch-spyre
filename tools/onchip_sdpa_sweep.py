@@ -115,6 +115,23 @@ BASE_VARIANT_ENV = {
     "SPYRE_ONCHIP_ATTENTION_SCORE_HANDOFF": "0",
 }
 
+WARPSPEC_DECOUPLED_VARIANT = (
+    "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled"
+)
+WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT = (
+    "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled_route_policy"
+)
+WARPSPEC_DECOUPLED_ROUTE_POLICY_NAME = "stage234_min_speedup_1p0"
+WARPSPEC_DECOUPLED_ROUTE_POLICY_TARGET_SHAPES = frozenset(
+    (
+        (1, 4, 64, 64, False, 768),
+        (1, 4, 64, 64, False, 1024),
+        (2, 4, 128, 64, False, 768),
+        (2, 4, 128, 64, False, 1024),
+    )
+)
+WARPSPEC_DECOUPLED_ROUTE_POLICY_FALLBACK_VARIANT = "onchip_master"
+
 
 VARIANT_ENV = {
     "vanilla": {
@@ -378,7 +395,7 @@ VARIANT_ENV = {
         "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_TILE": "-1",
         "SPYRE_ONCHIP_HANDOFF_MIN_BYTES": "0",
     },
-    "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled": {
+    WARPSPEC_DECOUPLED_VARIANT: {
         **BASE_VARIANT_ENV,
         "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA": "1",
         "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM": "0",
@@ -393,6 +410,9 @@ VARIANT_ENV = {
         "SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_TAIL_CURRENT": "0",
         "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_TILE": "-1",
         "SPYRE_ONCHIP_HANDOFF_MIN_BYTES": "0",
+    },
+    WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT: {
+        **BASE_VARIANT_ENV,
     },
     "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled_unicast": {
         **BASE_VARIANT_ENV,
@@ -1051,6 +1071,35 @@ VARIANT_ENV = {
 }
 
 
+def _warpspec_decoupled_route_policy_base_variant(
+    args: argparse.Namespace,
+    length: int,
+) -> str:
+    shape_key = (
+        args.batch,
+        args.heads,
+        args.dim,
+        args.block_size,
+        bool(args.is_causal),
+        length,
+    )
+    if shape_key in WARPSPEC_DECOUPLED_ROUTE_POLICY_TARGET_SHAPES:
+        return WARPSPEC_DECOUPLED_VARIANT
+    return WARPSPEC_DECOUPLED_ROUTE_POLICY_FALLBACK_VARIANT
+
+
+def _variant_env(args: argparse.Namespace, variant: str, length: int) -> dict[str, str]:
+    if variant != WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT:
+        return VARIANT_ENV[variant]
+    base_variant = _warpspec_decoupled_route_policy_base_variant(args, length)
+    env = dict(VARIANT_ENV[base_variant])
+    env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_POLICY"] = (
+        WARPSPEC_DECOUPLED_ROUTE_POLICY_NAME
+    )
+    env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_SELECTED_VARIANT"] = base_variant
+    return env
+
+
 def _parse_csv(values: str) -> list[str]:
     return [value.strip() for value in values.split(",") if value.strip()]
 
@@ -1273,6 +1322,12 @@ def _run_child(args: argparse.Namespace) -> int:
     payload = {
         "status": "ok",
         "variant": args.variant,
+        "route_policy": os.environ.get(
+            "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_POLICY", ""
+        ),
+        "route_selected_variant": os.environ.get(
+            "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_SELECTED_VARIANT", ""
+        ),
         "shape": {
             "batch": args.batch,
             "heads": args.heads,
@@ -1303,7 +1358,7 @@ def _run_child(args: argparse.Namespace) -> int:
 
 def _child_env(args: argparse.Namespace, variant: str, length: int) -> dict[str, str]:
     env = os.environ.copy()
-    for key, value in VARIANT_ENV[variant].items():
+    for key, value in _variant_env(args, variant, length).items():
         if value is None:
             env.pop(key, None)
         else:
