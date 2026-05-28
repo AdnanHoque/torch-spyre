@@ -58,4 +58,19 @@ cost_model_matmul_planner: bool = (
     os.environ.get("SPYRE_COST_MODEL_MATMUL_PLANNER", "0") == "1"
 )
 
+# When set, override the default per-dim work split for pointwise ops with
+# the lowest-cost split chosen by the cost-model planner in
+# work_division.py. Off by default.
+cost_model_pointwise_planner: bool = (
+    os.environ.get("SPYRE_COST_MODEL_POINTWISE_PLANNER", "0") == "1"
+)
+
+# When set, override the default per-dim work split for simple reduction
+# ops (sum, mean, max, min, amax, amin, exx2) with the lowest-cost
+# (d_splits, r_splits) choice from the reduction sibling cost-model
+# planner in work_division.py. Off by default.
+cost_model_reduction_planner: bool = (
+    os.environ.get("SPYRE_COST_MODEL_REDUCTION_PLANNER", "0") == "1"
+)
+
 install_config_module(sys.modules[__name__])
