@@ -41,8 +41,50 @@ _FLASH_CONFIG_KEYS = [
     "flash_attention_kv_repack_broadcast_pair_subpiece_reuse",
     "flash_attention_kv_repack_broadcast_pair_group_size",
     "flash_attention_kv_repack_broadcast_pair_self_resident_source",
+    "flash_attention_kv_repack_broadcast_pair_hbm_source",
+    "flash_attention_kv_repack_broadcast_pair_hbm_direct_load",
+    "flash_attention_kv_repack_broadcast_pair_hbm_staged",
+    "flash_attention_kv_repack_broadcast_pair_consumer_core_state_init",
+    "flash_attention_kv_repack_broadcast_pair_consumer_ds_type",
+    "flash_attention_kv_repack_broadcast_pair_consumer_lx_alloc_style",
     "flash_attention_kv_repack_broadcast_pair_use_unicast",
     "flash_attention_kv_repack_broadcast_pair_force_mc_mode",
+    "flash_attention_kv_repack_hbm_staged_hoist_tile",
+    "flash_attention_kv_repack_hbm_prefetch_hoist_tile",
+    "flash_attention_kv_repack_hbm_prefetch_lx_base",
+    "flash_attention_kv_repack_hbm_prefetch_serial",
+    "flash_attention_kv_repack_hbm_prefetch_prefill_current",
+    "flash_attention_kv_repack_hbm_prefetch_redundant_future",
+    "flash_attention_kv_repack_hbm_prefetch_serialize_current",
+    "flash_attention_kv_repack_hbm_prefetch_external_future",
+    "flash_attention_kv_repack_hbm_prefetch_overlap_after_sync",
+    "flash_attention_kv_repack_hbm_prefetch_tail_current",
+    "flash_attention_kv_repack_hbm_prefetch_source_fanout",
+    "flash_attention_kv_repack_hbm_prefetch_loader_fanout",
+    "flash_attention_kv_repack_hbm_prefetch_loader_core",
+    "flash_attention_kv_repack_hbm_prefetch_loader_lx_base",
+    "flash_attention_kv_repack_hbm_prefetch_fanout_use_unicast",
+    "flash_attention_kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers",
+    "flash_attention_kv_repack_hbm_prefetch_fanout_copyback_core",
+    "flash_attention_kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core",
+    "flash_attention_kv_repack_hbm_prefetch_loader_copyback_without_fanout",
+    "flash_attention_kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces",
+    "flash_attention_kv_repack_hbm_prefetch_serialize_loader_core",
+    "flash_attention_kv_repack_hbm_prefetch_lx_roundtrip",
+    "flash_attention_kv_repack_hbm_prefetch_corelet1",
+    "flash_attention_kv_repack_broadcast_copyback_tile",
+    "flash_attention_kv_repack_broadcast_copyback_core",
+    "flash_attention_kv_repack_broadcast_copyback_direct_source",
+    "flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip",
+    "flash_attention_kv_repack_broadcast_copyback_hbm_source_fanout",
+    "flash_attention_kv_repack_broadcast_copyback_hbm_direct_load",
+    "flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip_load_only",
+    "flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip_barrier_only",
+    "flash_attention_kv_repack_broadcast_copyback_data_only",
+    "flash_attention_kv_repack_broadcast_copyback_replace_consumer",
+    "flash_attention_kv_repack_broadcast_copyback_compute_only",
+    "flash_attention_kv_repack_broadcast_copyback_exact_clone",
+    "flash_attention_kv_repack_broadcast_copyback_preserve_consumer_name",
     "flash_attention_pointwise_handoff",
     "flash_attention_score_scale_handoff",
     "causal_idx_to_mask_plan_artifact",
@@ -130,8 +172,102 @@ def test_flash_attention_onchip_sdpa_master_gate_defaults_off():
     assert cfg["flash_attention_kv_repack_broadcast_pair_subpiece_reuse"] is True
     assert cfg["flash_attention_kv_repack_broadcast_pair_group_size"] == 0
     assert cfg["flash_attention_kv_repack_broadcast_pair_self_resident_source"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_pair_hbm_source"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_pair_hbm_direct_load"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_pair_hbm_staged"] is False
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_pair_consumer_core_state_init"]
+        is True
+    )
+    assert cfg["flash_attention_kv_repack_broadcast_pair_consumer_ds_type"] == ""
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_pair_consumer_lx_alloc_style"]
+        == ""
+    )
     assert cfg["flash_attention_kv_repack_broadcast_pair_use_unicast"] == -1
     assert cfg["flash_attention_kv_repack_broadcast_pair_force_mc_mode"] == -1
+    assert cfg["flash_attention_kv_repack_hbm_staged_hoist_tile"] == -1
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_hoist_tile"] == -1
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_lx_base"] == -1
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_serial"] is False
+    assert (
+        cfg["flash_attention_kv_repack_hbm_prefetch_prefill_current"] is False
+    )
+    assert (
+        cfg["flash_attention_kv_repack_hbm_prefetch_redundant_future"] is False
+    )
+    assert (
+        cfg["flash_attention_kv_repack_hbm_prefetch_serialize_current"] is False
+    )
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_external_future"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_overlap_after_sync"] is True
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_tail_current"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_source_fanout"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_loader_fanout"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_loader_core"] == 0
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_loader_lx_base"] == -1
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_fanout_use_unicast"] == -1
+    assert (
+        cfg[
+            "flash_attention_kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers"
+        ]
+        == -1
+    )
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_fanout_copyback_core"] == -2
+    assert (
+        cfg[
+            "flash_attention_kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core"
+        ]
+        is False
+    )
+    assert (
+        cfg[
+            "flash_attention_kv_repack_hbm_prefetch_loader_copyback_without_fanout"
+        ]
+        is False
+    )
+    assert (
+        cfg[
+            "flash_attention_kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces"
+        ]
+        is False
+    )
+    assert (
+        cfg["flash_attention_kv_repack_hbm_prefetch_serialize_loader_core"]
+        is False
+    )
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_lx_roundtrip"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_corelet1"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_tile"] == -1
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_core"] == -1
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_direct_source"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip"] is False
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_hbm_source_fanout"]
+        is False
+    )
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_hbm_direct_load"]
+        is False
+    )
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip_load_only"]
+        is False
+    )
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip_barrier_only"]
+        is False
+    )
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_data_only"] is False
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_replace_consumer"] is False
+    )
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_compute_only"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_exact_clone"] is False
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_preserve_consumer_name"]
+        is False
+    )
     assert cfg["causal_idx_to_mask_plan_artifact"] is False
 
 
@@ -161,6 +297,94 @@ def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
     assert cfg["flash_attention_kv_repack_broadcast_pair_ifn_transfer"] is True
     assert cfg["flash_attention_kv_repack_broadcast_pair_subpiece_reuse"] is True
     assert cfg["flash_attention_kv_repack_broadcast_pair_group_size"] == 0
+    assert cfg["flash_attention_kv_repack_broadcast_pair_hbm_source"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_pair_hbm_direct_load"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_pair_hbm_staged"] is False
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_pair_consumer_core_state_init"]
+        is True
+    )
+    assert cfg["flash_attention_kv_repack_broadcast_pair_consumer_ds_type"] == ""
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_pair_consumer_lx_alloc_style"]
+        == ""
+    )
+    assert cfg["flash_attention_kv_repack_hbm_staged_hoist_tile"] == -1
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_hoist_tile"] == -1
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_lx_base"] == -1
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_serial"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_prefill_current"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_redundant_future"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_serialize_current"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_external_future"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_overlap_after_sync"] is True
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_tail_current"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_source_fanout"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_loader_fanout"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_loader_core"] == 0
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_loader_lx_base"] == -1
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_fanout_use_unicast"] == -1
+    assert (
+        cfg[
+            "flash_attention_kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers"
+        ]
+        == -1
+    )
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_fanout_copyback_core"] == -2
+    assert (
+        cfg[
+            "flash_attention_kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core"
+        ]
+        is False
+    )
+    assert (
+        cfg[
+            "flash_attention_kv_repack_hbm_prefetch_loader_copyback_without_fanout"
+        ]
+        is False
+    )
+    assert (
+        cfg[
+            "flash_attention_kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces"
+        ]
+        is False
+    )
+    assert (
+        cfg["flash_attention_kv_repack_hbm_prefetch_serialize_loader_core"]
+        is False
+    )
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_lx_roundtrip"] is False
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_corelet1"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_tile"] == -1
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_core"] == -1
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_direct_source"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip"] is False
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_hbm_source_fanout"]
+        is False
+    )
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_hbm_direct_load"]
+        is False
+    )
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip_load_only"]
+        is False
+    )
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip_barrier_only"]
+        is False
+    )
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_data_only"] is False
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_replace_consumer"] is False
+    )
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_compute_only"] is False
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_exact_clone"] is False
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_preserve_consumer_name"]
+        is False
+    )
     assert cfg["causal_idx_to_mask_plan_artifact"] is False
 
 
@@ -196,12 +420,306 @@ def test_flash_attention_kv_repack_pair_self_resident_source_can_be_enabled():
     assert cfg["flash_attention_kv_repack_broadcast_pair_self_resident_source"] is True
 
 
+def test_flash_attention_kv_repack_pair_hbm_source_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_HBM_SOURCE": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_pair_hbm_source"] is True
+
+
+def test_flash_attention_kv_repack_pair_hbm_direct_load_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_HBM_DIRECT_LOAD": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_pair_hbm_direct_load"] is True
+
+
+def test_flash_attention_kv_repack_pair_hbm_staged_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_HBM_STAGED": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_pair_hbm_staged"] is True
+
+
+def test_flash_attention_kv_repack_pair_consumer_core_state_init_can_be_disabled():
+    cfg = _read_flash_config(
+        {
+            (
+                "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_"
+                "CONSUMER_CORE_STATE_INIT"
+            ): "0"
+        }
+    )
+
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_pair_consumer_core_state_init"]
+        is False
+    )
+
+
+def test_flash_attention_kv_repack_pair_consumer_ds_type_can_be_overridden():
+    cfg = _read_flash_config(
+        {
+            (
+                "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_"
+                "CONSUMER_DS_TYPE"
+            ): "INPUT"
+        }
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_pair_consumer_ds_type"] == "INPUT"
+
+
+def test_flash_attention_kv_repack_pair_consumer_lx_alloc_style_can_be_overridden():
+    cfg = _read_flash_config(
+        {
+            (
+                "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_"
+                "CONSUMER_LX_ALLOC_STYLE"
+            ): "canonical_loop"
+        }
+    )
+
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_pair_consumer_lx_alloc_style"]
+        == "canonical_loop"
+    )
+
+
 def test_flash_attention_kv_repack_pair_use_unicast_accepts_concrete_value():
     cfg = _read_flash_config(
         {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_PAIR_USE_UNICAST": "1"}
     )
 
     assert cfg["flash_attention_kv_repack_broadcast_pair_use_unicast"] == 1
+
+
+def test_flash_attention_kv_repack_hbm_staged_hoist_tile_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_STAGED_HOIST_TILE": "-2"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_staged_hoist_tile"] == -2
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_hoist_tile_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_HOIST_TILE": "-2"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_hoist_tile"] == -2
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_lx_base_can_be_overridden():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LX_BASE": "1625344"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_lx_base"] == 1625344
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_serial_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_SERIAL": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_serial"] is True
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_prefill_current_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_PREFILL_CURRENT": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_prefill_current"] is True
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_redundant_future_can_be_enabled():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_REDUNDANT_FUTURE": "1"
+        }
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_redundant_future"] is True
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_serialize_current_can_be_enabled():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_SERIALIZE_CURRENT": "1"
+        }
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_serialize_current"] is True
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_external_future_can_be_enabled():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_EXTERNAL_FUTURE": "1"
+        }
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_external_future"] is True
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_overlap_after_sync_can_be_disabled():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_OVERLAP_AFTER_SYNC": "0"
+        }
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_overlap_after_sync"] is False
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_tail_current_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_TAIL_CURRENT": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_tail_current"] is True
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_source_fanout_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_SOURCE_FANOUT": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_source_fanout"] is True
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_loader_fanout_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_loader_fanout"] is True
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_loader_core_can_be_forced():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LOADER_CORE": "31"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_loader_core"] == 31
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_loader_lx_base_can_be_forced():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LOADER_LX_BASE": "-2"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_loader_lx_base"] == -2
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_fanout_use_unicast_can_be_forced():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_FANOUT_USE_UNICAST": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_fanout_use_unicast"] == 1
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers_can_be_forced():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_FANOUT_USE_LXSFP_LX_TRANSFERS": "0"
+        }
+    )
+
+    assert (
+        cfg[
+            "flash_attention_kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers"
+        ]
+        == 0
+    )
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_fanout_copyback_core_can_be_forced():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_FANOUT_COPYBACK_CORE": "0"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_fanout_copyback_core"] == 0
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core_can_be_enabled():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_FANOUT_RESTRICT_TO_COPYBACK_CORE": "1"
+        }
+    )
+
+    assert (
+        cfg[
+            "flash_attention_kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core"
+        ]
+        is True
+    )
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_loader_copyback_without_fanout_can_be_enabled():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LOADER_COPYBACK_WITHOUT_FANOUT": "1"
+        }
+    )
+
+    assert (
+        cfg[
+            "flash_attention_kv_repack_hbm_prefetch_loader_copyback_without_fanout"
+        ]
+        is True
+    )
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces_can_be_enabled():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT_FULL_TILE_PIECES": "1"
+        }
+    )
+
+    assert (
+        cfg[
+            "flash_attention_kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces"
+        ]
+        is True
+    )
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_serialize_loader_core_can_be_enabled():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_SERIALIZE_LOADER_CORE": "1"
+        }
+    )
+
+    assert (
+        cfg["flash_attention_kv_repack_hbm_prefetch_serialize_loader_core"]
+        is True
+    )
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_corelet1_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_CORELET1": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_corelet1"] is True
+
+
+def test_flash_attention_kv_repack_hbm_prefetch_lx_roundtrip_can_be_enabled():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_HBM_PREFETCH_LX_ROUNDTRIP": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_hbm_prefetch_lx_roundtrip"] is True
 
 
 def test_flash_attention_kv_repack_pair_force_mc_accepts_concrete_value():
@@ -220,6 +738,148 @@ def test_flash_attention_kv_repack_pair_accepts_concrete_tile():
     assert cfg["flash_attention_kv_repack_broadcast_pair_tile"] == 2
     assert cfg["flash_attention_onchip_sdpa"] is False
     assert cfg["flash_attention_mixed_pipeline"] is False
+
+
+def test_flash_attention_kv_repack_copyback_accepts_concrete_tile_and_core():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_TILE": "2",
+            "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_CORE": "31",
+        }
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_tile"] == 2
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_core"] == 31
+
+
+def test_flash_attention_kv_repack_copyback_direct_source_is_gated():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_DIRECT_SOURCE": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_direct_source"] is True
+
+
+def test_flash_attention_kv_repack_copyback_hbm_roundtrip_is_gated():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_HBM_ROUNDTRIP": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip"] is True
+
+
+def test_flash_attention_kv_repack_copyback_hbm_source_fanout_is_gated():
+    cfg = _read_flash_config(
+        {
+            (
+                "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_"
+                "HBM_SOURCE_FANOUT"
+            ): "1"
+        }
+    )
+
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_hbm_source_fanout"]
+        is True
+    )
+
+
+def test_flash_attention_kv_repack_copyback_hbm_direct_load_is_gated():
+    cfg = _read_flash_config(
+        {
+            (
+                "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_"
+                "HBM_DIRECT_LOAD"
+            ): "1"
+        }
+    )
+
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_hbm_direct_load"]
+        is True
+    )
+
+
+def test_flash_attention_kv_repack_copyback_hbm_roundtrip_load_only_is_gated():
+    cfg = _read_flash_config(
+        {
+            (
+                "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_"
+                "HBM_ROUNDTRIP_LOAD_ONLY"
+            ): "1"
+        }
+    )
+
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip_load_only"]
+        is True
+    )
+
+
+def test_flash_attention_kv_repack_copyback_hbm_roundtrip_barrier_only_is_gated():
+    cfg = _read_flash_config(
+        {
+            (
+                "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_"
+                "HBM_ROUNDTRIP_BARRIER_ONLY"
+            ): "1"
+        }
+    )
+
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip_barrier_only"]
+        is True
+    )
+
+
+def test_flash_attention_kv_repack_copyback_data_only_is_gated():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_DATA_ONLY": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_data_only"] is True
+
+
+def test_flash_attention_kv_repack_copyback_replace_consumer_is_gated():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_REPLACE_CONSUMER": "1"}
+    )
+
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_replace_consumer"] is True
+    )
+
+
+def test_flash_attention_kv_repack_copyback_compute_only_is_gated():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_COMPUTE_ONLY": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_compute_only"] is True
+
+
+def test_flash_attention_kv_repack_copyback_exact_clone_is_gated():
+    cfg = _read_flash_config(
+        {"SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_EXACT_CLONE": "1"}
+    )
+
+    assert cfg["flash_attention_kv_repack_broadcast_copyback_exact_clone"] is True
+
+
+def test_flash_attention_kv_repack_copyback_preserve_consumer_name_is_gated():
+    cfg = _read_flash_config(
+        {
+            (
+                "SPYRE_FLASH_ATTENTION_KV_REPACK_BROADCAST_COPYBACK_"
+                "PRESERVE_CONSUMER_NAME"
+            ): "1"
+        }
+    )
+
+    assert (
+        cfg["flash_attention_kv_repack_broadcast_copyback_preserve_consumer_name"]
+        is True
+    )
 
 
 def test_flash_attention_kv_repack_plan_artifact_is_independently_gated():

@@ -57,6 +57,11 @@ _load("torch_spyre._inductor.codegen.onchip_bridge", os.path.join(_CODEGEN, "onc
 rz = _load("torch_spyre._inductor.onchip_realize", _REAL)
 
 
+def _hbm_dataop_addr(byte_addr):
+    assert byte_addr % rz.STICK_BYTES == 0
+    return byte_addr // rz.STICK_BYTES
+
+
 class _Logger:
     def info(self, *_args, **_kwargs):
         pass
@@ -83,9 +88,53 @@ def _install_bundle_stubs(
     kv_repack_pair_subpiece_reuse=True,
     kv_repack_pair_group_size=0,
     kv_repack_pair_self_resident_source=False,
+    kv_repack_pair_hbm_source=False,
+    kv_repack_pair_hbm_direct_load=False,
+    kv_repack_pair_hbm_staged=False,
+    kv_repack_pair_consumer_core_state_init=True,
+    kv_repack_pair_consumer_ds_type="",
+    kv_repack_pair_consumer_lx_alloc_style="",
     kv_repack_pair_use_unicast=-1,
     kv_repack_pair_force_mc_mode=-1,
+    kv_repack_hbm_staged_hoist_tile=-1,
+    kv_repack_hbm_staged_hoist_result=True,
+    kv_repack_hbm_prefetch_hoist_tile=-1,
+    kv_repack_hbm_prefetch_lx_base=-1,
+    kv_repack_hbm_prefetch_serial=False,
+    kv_repack_hbm_prefetch_prefill_current=False,
+    kv_repack_hbm_prefetch_redundant_future=False,
+    kv_repack_hbm_prefetch_serialize_current=False,
+    kv_repack_hbm_prefetch_external_future=False,
+    kv_repack_hbm_prefetch_overlap_after_sync=True,
+    kv_repack_hbm_prefetch_tail_current=False,
+    kv_repack_hbm_prefetch_source_fanout=False,
+    kv_repack_hbm_prefetch_loader_fanout=False,
+    kv_repack_hbm_prefetch_loader_core=0,
+    kv_repack_hbm_prefetch_loader_lx_base=-1,
+    kv_repack_hbm_prefetch_fanout_use_unicast=-1,
+    kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers=-1,
+    kv_repack_hbm_prefetch_fanout_copyback_core=-2,
+    kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core=False,
+    kv_repack_hbm_prefetch_loader_copyback_without_fanout=False,
+    kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces=False,
+    kv_repack_hbm_prefetch_serialize_loader_core=False,
+    kv_repack_hbm_prefetch_lx_roundtrip=False,
+    kv_repack_hbm_prefetch_corelet1=False,
+    kv_repack_hbm_prefetch_hoist_result=True,
     kv_repack_pair_result=True,
+    kv_repack_copyback_tile=-1,
+    kv_repack_copyback_core=-1,
+    kv_repack_copyback_hbm_roundtrip=False,
+    kv_repack_copyback_hbm_source_fanout=False,
+    kv_repack_copyback_hbm_direct_load=False,
+    kv_repack_copyback_hbm_roundtrip_load_only=False,
+    kv_repack_copyback_hbm_roundtrip_barrier_only=False,
+    kv_repack_copyback_data_only=False,
+    kv_repack_copyback_replace_consumer=False,
+    kv_repack_copyback_compute_only=False,
+    kv_repack_copyback_exact_clone=False,
+    kv_repack_copyback_preserve_consumer_name=False,
+    kv_repack_copyback_result=True,
     ifn_prefix_force=False,
     execute_tile=-1,
     tile_artifacts=None,
@@ -101,8 +150,49 @@ def _install_bundle_stubs(
         "kv_repack_pair_subpiece_reuse": [],
         "kv_repack_pair_group_size": [],
         "kv_repack_pair_self_resident_source": [],
+        "kv_repack_pair_hbm_source": [],
+        "kv_repack_pair_hbm_direct_load": [],
+        "kv_repack_pair_hbm_staged": [],
+        "kv_repack_pair_consumer_core_state_init": [],
+        "kv_repack_pair_consumer_ds_type": [],
+        "kv_repack_pair_consumer_lx_alloc_style": [],
         "kv_repack_pair_use_unicast": [],
         "kv_repack_pair_force_mc_mode": [],
+        "kv_repack_hbm_staged_hoist": [],
+        "kv_repack_hbm_prefetch_hoist": [],
+        "kv_repack_hbm_prefetch_lx_base": [],
+        "kv_repack_hbm_prefetch_serial": [],
+        "kv_repack_hbm_prefetch_prefill_current": [],
+        "kv_repack_hbm_prefetch_redundant_future": [],
+        "kv_repack_hbm_prefetch_serialize_current": [],
+        "kv_repack_hbm_prefetch_external_future": [],
+        "kv_repack_hbm_prefetch_overlap_after_sync": [],
+        "kv_repack_hbm_prefetch_tail_current": [],
+        "kv_repack_hbm_prefetch_source_fanout": [],
+        "kv_repack_hbm_prefetch_loader_fanout": [],
+        "kv_repack_hbm_prefetch_loader_core": [],
+        "kv_repack_hbm_prefetch_loader_lx_base": [],
+        "kv_repack_hbm_prefetch_fanout_use_unicast": [],
+        "kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers": [],
+        "kv_repack_hbm_prefetch_fanout_copyback_core": [],
+        "kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core": [],
+        "kv_repack_hbm_prefetch_loader_copyback_without_fanout": [],
+        "kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces": [],
+        "kv_repack_hbm_prefetch_serialize_loader_core": [],
+        "kv_repack_hbm_prefetch_lx_roundtrip": [],
+        "kv_repack_hbm_prefetch_corelet_id": [],
+        "kv_repack_copyback": [],
+        "kv_repack_copyback_core": [],
+        "kv_repack_copyback_hbm_roundtrip": [],
+        "kv_repack_copyback_hbm_source_fanout": [],
+        "kv_repack_copyback_hbm_direct_load": [],
+        "kv_repack_copyback_hbm_roundtrip_load_only": [],
+        "kv_repack_copyback_hbm_roundtrip_barrier_only": [],
+        "kv_repack_copyback_data_only": [],
+        "kv_repack_copyback_replace_consumer": [],
+        "kv_repack_copyback_compute_only": [],
+        "kv_repack_copyback_exact_clone": [],
+        "kv_repack_copyback_preserve_consumer_name": [],
         "pointwise": [],
     }
 
@@ -153,11 +243,134 @@ def _install_bundle_stubs(
     config.flash_attention_kv_repack_broadcast_pair_self_resident_source = (
         kv_repack_pair_self_resident_source
     )
+    config.flash_attention_kv_repack_broadcast_pair_hbm_source = (
+        kv_repack_pair_hbm_source
+    )
+    config.flash_attention_kv_repack_broadcast_pair_hbm_direct_load = (
+        kv_repack_pair_hbm_direct_load
+    )
+    config.flash_attention_kv_repack_broadcast_pair_hbm_staged = (
+        kv_repack_pair_hbm_staged
+    )
+    config.flash_attention_kv_repack_broadcast_pair_consumer_core_state_init = (
+        kv_repack_pair_consumer_core_state_init
+    )
+    config.flash_attention_kv_repack_broadcast_pair_consumer_ds_type = (
+        kv_repack_pair_consumer_ds_type
+    )
+    config.flash_attention_kv_repack_broadcast_pair_consumer_lx_alloc_style = (
+        kv_repack_pair_consumer_lx_alloc_style
+    )
     config.flash_attention_kv_repack_broadcast_pair_use_unicast = (
         kv_repack_pair_use_unicast
     )
     config.flash_attention_kv_repack_broadcast_pair_force_mc_mode = (
         kv_repack_pair_force_mc_mode
+    )
+    config.flash_attention_kv_repack_hbm_staged_hoist_tile = (
+        kv_repack_hbm_staged_hoist_tile
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_hoist_tile = (
+        kv_repack_hbm_prefetch_hoist_tile
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_lx_base = (
+        kv_repack_hbm_prefetch_lx_base
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_serial = (
+        kv_repack_hbm_prefetch_serial
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_prefill_current = (
+        kv_repack_hbm_prefetch_prefill_current
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_redundant_future = (
+        kv_repack_hbm_prefetch_redundant_future
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_serialize_current = (
+        kv_repack_hbm_prefetch_serialize_current
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_external_future = (
+        kv_repack_hbm_prefetch_external_future
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_overlap_after_sync = (
+        kv_repack_hbm_prefetch_overlap_after_sync
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_tail_current = (
+        kv_repack_hbm_prefetch_tail_current
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_source_fanout = (
+        kv_repack_hbm_prefetch_source_fanout
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_loader_fanout = (
+        kv_repack_hbm_prefetch_loader_fanout
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_loader_core = (
+        kv_repack_hbm_prefetch_loader_core
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_loader_lx_base = (
+        kv_repack_hbm_prefetch_loader_lx_base
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_fanout_use_unicast = (
+        kv_repack_hbm_prefetch_fanout_use_unicast
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers = (
+        kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_fanout_copyback_core = (
+        kv_repack_hbm_prefetch_fanout_copyback_core
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core = (
+        kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_loader_copyback_without_fanout = (
+        kv_repack_hbm_prefetch_loader_copyback_without_fanout
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces = (
+        kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_serialize_loader_core = (
+        kv_repack_hbm_prefetch_serialize_loader_core
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_lx_roundtrip = (
+        kv_repack_hbm_prefetch_lx_roundtrip
+    )
+    config.flash_attention_kv_repack_hbm_prefetch_corelet1 = (
+        kv_repack_hbm_prefetch_corelet1
+    )
+    config.flash_attention_kv_repack_broadcast_copyback_tile = (
+        kv_repack_copyback_tile
+    )
+    config.flash_attention_kv_repack_broadcast_copyback_core = (
+        kv_repack_copyback_core
+    )
+    config.flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip = (
+        kv_repack_copyback_hbm_roundtrip
+    )
+    config.flash_attention_kv_repack_broadcast_copyback_hbm_source_fanout = (
+        kv_repack_copyback_hbm_source_fanout
+    )
+    config.flash_attention_kv_repack_broadcast_copyback_hbm_direct_load = (
+        kv_repack_copyback_hbm_direct_load
+    )
+    config.flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip_load_only = (
+        kv_repack_copyback_hbm_roundtrip_load_only
+    )
+    config.flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip_barrier_only = (
+        kv_repack_copyback_hbm_roundtrip_barrier_only
+    )
+    config.flash_attention_kv_repack_broadcast_copyback_data_only = (
+        kv_repack_copyback_data_only
+    )
+    config.flash_attention_kv_repack_broadcast_copyback_replace_consumer = (
+        kv_repack_copyback_replace_consumer
+    )
+    config.flash_attention_kv_repack_broadcast_copyback_compute_only = (
+        kv_repack_copyback_compute_only
+    )
+    config.flash_attention_kv_repack_broadcast_copyback_exact_clone = (
+        kv_repack_copyback_exact_clone
+    )
+    config.flash_attention_kv_repack_broadcast_copyback_preserve_consumer_name = (
+        kv_repack_copyback_preserve_consumer_name
     )
 
     superdsc = types.ModuleType("torch_spyre._inductor.codegen.superdsc")
@@ -322,6 +535,12 @@ def _install_bundle_stubs(
         stcdp_subpiece_reuse=True,
         broadcast_group_size=0,
         self_resident_source=False,
+        hbm_source=False,
+        hbm_direct_load=False,
+        hbm_staged=False,
+        consumer_core_state_init=True,
+        consumer_ds_type="",
+        consumer_lx_alloc_style="",
         stcdp_use_unicast=-1,
         stcdp_force_mc_mode=-1,
     ):
@@ -330,27 +549,248 @@ def _install_bundle_stubs(
         calls["kv_repack_pair_subpiece_reuse"].append(stcdp_subpiece_reuse)
         calls["kv_repack_pair_group_size"].append(broadcast_group_size)
         calls["kv_repack_pair_self_resident_source"].append(self_resident_source)
+        calls["kv_repack_pair_hbm_source"].append(hbm_source)
+        calls["kv_repack_pair_hbm_direct_load"].append(hbm_direct_load)
+        calls["kv_repack_pair_hbm_staged"].append(hbm_staged)
+        calls["kv_repack_pair_consumer_core_state_init"].append(
+            consumer_core_state_init
+        )
+        calls["kv_repack_pair_consumer_ds_type"].append(consumer_ds_type)
+        calls["kv_repack_pair_consumer_lx_alloc_style"].append(
+            consumer_lx_alloc_style
+        )
         calls["kv_repack_pair_use_unicast"].append(stcdp_use_unicast)
         calls["kv_repack_pair_force_mc_mode"].append(stcdp_force_mc_mode)
         if not kv_repack_pair_result:
             return None
         pred_name = f"{name_prefix}_1_input1_producer"
         cons_name = f"{name_prefix}_1_input1_consumer"
-        return {
-            "artifacts": [
-                {pred_name: {"flashAttentionPipeline_": {}}},
-                {cons_name: {"flashAttentionPipeline_": {}}},
-            ],
-            "replacements": {
+        artifacts = [{cons_name: {"flashAttentionPipeline_": {}}}]
+        replacements = {"2_batchmatmul": cons_name}
+        if not (hbm_source or hbm_direct_load or hbm_staged):
+            artifacts.insert(0, {pred_name: {"flashAttentionPipeline_": {}}})
+            replacements = {
                 "1_ReStickifyOpHBM": pred_name,
-                "2_batchmatmul": cons_name,
-            },
+                **replacements,
+            }
+        return {
+            "artifacts": artifacts,
+            "replacements": replacements,
             "bundle_attrs": {},
             "pointwise_lx_region0": layout_xform_pointwise_region0,
         }
 
     onchip_realize.build_flash_attention_kv_repack_broadcast_pair_artifacts = (
         build_flash_attention_kv_repack_broadcast_pair_artifacts
+    )
+
+    def build_flash_attention_kv_repack_hbm_staged_hoist_tile_artifacts(
+        _sdscs,
+        tile_index,
+        *,
+        name_prefix="mixed_flash_kv_repack_hbm_staged_hoist",
+    ):
+        calls["kv_repack_hbm_staged_hoist"].append(tile_index)
+        if not kv_repack_hbm_staged_hoist_result:
+            return None
+        producer_name = f"{name_prefix}_0_future_producer"
+        future_name = f"{name_prefix}_0_future_kv_1_input1_consumer"
+        return {
+            "artifacts": [
+                {producer_name: {"flashAttentionPipeline_": {}}},
+                {future_name: {"flashAttentionPipeline_": {}}},
+            ],
+            "replacements": {
+                "2_batchmatmul": future_name,
+            },
+            "insertions_before": {"0_batchmatmul": [producer_name]},
+            "omissions": {"1_ReStickifyOpHBM"},
+            "bundle_attrs": {},
+            "pointwise_lx_region0": layout_xform_pointwise_region0,
+        }
+
+    onchip_realize.build_flash_attention_kv_repack_hbm_staged_hoist_tile_artifacts = (
+        build_flash_attention_kv_repack_hbm_staged_hoist_tile_artifacts
+    )
+
+    def build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _sdscs,
+        tile_index,
+        *,
+        name_prefix="mixed_flash_kv_repack_hbm_prefetch_hoist",
+        prefetch_lx_base=None,
+        serial_prefetch=False,
+        prefill_current_input=False,
+        redundant_future_prefetch=False,
+        serialize_current_prefetch=False,
+        external_future_prefetch=False,
+        overlap_after_sync=True,
+        tail_current_prefetch=False,
+        prefetch_source_fanout=False,
+        prefetch_loader_fanout=False,
+        prefetch_loader_core_id=0,
+        prefetch_loader_lx_base=-1,
+        prefetch_fanout_use_unicast=-1,
+        prefetch_fanout_use_lxsfp_lx_transfers=-1,
+        prefetch_fanout_copyback_core=-2,
+        prefetch_fanout_restrict_to_copyback_core=False,
+        prefetch_loader_copyback_without_fanout=False,
+        prefetch_loader_fanout_full_tile_pieces=False,
+        serialize_loader_core_prefetch=False,
+        prefetch_lx_roundtrip=False,
+        prefetch_corelet_id=None,
+    ):
+        calls["kv_repack_hbm_prefetch_hoist"].append(tile_index)
+        calls["kv_repack_hbm_prefetch_lx_base"].append(prefetch_lx_base)
+        calls["kv_repack_hbm_prefetch_serial"].append(serial_prefetch)
+        calls["kv_repack_hbm_prefetch_prefill_current"].append(
+            prefill_current_input
+        )
+        calls["kv_repack_hbm_prefetch_redundant_future"].append(
+            redundant_future_prefetch
+        )
+        calls["kv_repack_hbm_prefetch_serialize_current"].append(
+            serialize_current_prefetch
+        )
+        calls["kv_repack_hbm_prefetch_external_future"].append(
+            external_future_prefetch
+        )
+        calls["kv_repack_hbm_prefetch_overlap_after_sync"].append(
+            overlap_after_sync
+        )
+        calls["kv_repack_hbm_prefetch_tail_current"].append(
+            tail_current_prefetch
+        )
+        calls["kv_repack_hbm_prefetch_source_fanout"].append(
+            prefetch_source_fanout
+        )
+        calls["kv_repack_hbm_prefetch_loader_fanout"].append(
+            prefetch_loader_fanout
+        )
+        calls["kv_repack_hbm_prefetch_loader_core"].append(
+            prefetch_loader_core_id
+        )
+        calls["kv_repack_hbm_prefetch_loader_lx_base"].append(
+            prefetch_loader_lx_base
+        )
+        calls["kv_repack_hbm_prefetch_fanout_use_unicast"].append(
+            prefetch_fanout_use_unicast
+        )
+        calls["kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers"].append(
+            prefetch_fanout_use_lxsfp_lx_transfers
+        )
+        calls["kv_repack_hbm_prefetch_fanout_copyback_core"].append(
+            prefetch_fanout_copyback_core
+        )
+        calls["kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core"].append(
+            prefetch_fanout_restrict_to_copyback_core
+        )
+        calls["kv_repack_hbm_prefetch_loader_copyback_without_fanout"].append(
+            prefetch_loader_copyback_without_fanout
+        )
+        calls["kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces"].append(
+            prefetch_loader_fanout_full_tile_pieces
+        )
+        calls["kv_repack_hbm_prefetch_serialize_loader_core"].append(
+            serialize_loader_core_prefetch
+        )
+        calls["kv_repack_hbm_prefetch_lx_roundtrip"].append(
+            prefetch_lx_roundtrip
+        )
+        calls["kv_repack_hbm_prefetch_corelet_id"].append(prefetch_corelet_id)
+        if not kv_repack_hbm_prefetch_hoist_result:
+            return None
+        producer_name = f"{name_prefix}_0_future_producer"
+        current_name = f"{name_prefix}_0_current_prefetch"
+        future_name = f"{name_prefix}_0_future_consumer"
+        return {
+            "artifacts": [
+                {producer_name: {"flashAttentionPipeline_": {}}},
+                {current_name: {"flashAttentionPipeline_": {}}},
+                {future_name: {"flashAttentionPipeline_": {}}},
+            ],
+            "replacements": {
+                "0_batchmatmul": current_name,
+                "2_batchmatmul": future_name,
+            },
+            "insertions_before": {"0_batchmatmul": [producer_name]},
+            "omissions": {"1_ReStickifyOpHBM"},
+            "bundle_attrs": {},
+            "pointwise_lx_region0": layout_xform_pointwise_region0,
+        }
+
+    onchip_realize.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts = (
+        build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts
+    )
+
+    def build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        _sdscs,
+        tile_index,
+        *,
+        name_prefix="mixed_flash_kv_repack_broadcast_copyback",
+        stcdp_subpiece_reuse=True,
+        broadcast_group_size=0,
+        self_resident_source=False,
+        stcdp_use_unicast=-1,
+        stcdp_force_mc_mode=-1,
+        readback_core=-1,
+        direct_source=False,
+        hbm_roundtrip=False,
+        hbm_source_fanout=False,
+        hbm_direct_load=False,
+        hbm_roundtrip_load_only=False,
+        hbm_roundtrip_barrier_only=False,
+        data_only=False,
+        replace_consumer=False,
+        compute_only=False,
+        exact_clone=False,
+        preserve_consumer_name=False,
+    ):
+        calls["kv_repack_copyback"].append(tile_index)
+        calls["kv_repack_pair_subpiece_reuse"].append(stcdp_subpiece_reuse)
+        calls["kv_repack_pair_group_size"].append(broadcast_group_size)
+        calls["kv_repack_pair_self_resident_source"].append(self_resident_source)
+        calls["kv_repack_pair_use_unicast"].append(stcdp_use_unicast)
+        calls["kv_repack_pair_force_mc_mode"].append(stcdp_force_mc_mode)
+        calls["kv_repack_copyback_core"].append(readback_core)
+        calls.setdefault("kv_repack_copyback_direct_source", []).append(
+            direct_source
+        )
+        calls["kv_repack_copyback_hbm_roundtrip"].append(hbm_roundtrip)
+        calls["kv_repack_copyback_hbm_source_fanout"].append(hbm_source_fanout)
+        calls["kv_repack_copyback_hbm_direct_load"].append(hbm_direct_load)
+        calls["kv_repack_copyback_hbm_roundtrip_load_only"].append(
+            hbm_roundtrip_load_only
+        )
+        calls["kv_repack_copyback_hbm_roundtrip_barrier_only"].append(
+            hbm_roundtrip_barrier_only
+        )
+        calls["kv_repack_copyback_data_only"].append(data_only)
+        calls["kv_repack_copyback_replace_consumer"].append(replace_consumer)
+        calls["kv_repack_copyback_compute_only"].append(compute_only)
+        calls["kv_repack_copyback_exact_clone"].append(exact_clone)
+        calls["kv_repack_copyback_preserve_consumer_name"].append(
+            preserve_consumer_name
+        )
+        if not kv_repack_copyback_result:
+            return None
+        pred_name = f"{name_prefix}_1_input1_producer"
+        copyback_name = f"{name_prefix}_1_input1_copyback"
+        return {
+            "artifacts": [
+                {pred_name: {"flashAttentionPipeline_": {}}},
+                {copyback_name: {"flashAttentionPipeline_": {}}},
+            ],
+            "replacements": {
+                "1_ReStickifyOpHBM": pred_name,
+            },
+            "insertions_before": {"2_batchmatmul": [copyback_name]},
+            "bundle_attrs": {},
+            "pointwise_lx_region0": layout_xform_pointwise_region0,
+        }
+
+    onchip_realize.build_flash_attention_kv_repack_broadcast_copyback_artifacts = (
+        build_flash_attention_kv_repack_broadcast_copyback_artifacts
     )
     onchip_realize.build_flash_attention_ifn_pair_tile_artifacts = (
         lambda *_args, **_kwargs: None
@@ -377,6 +817,15 @@ def _install_bundle_stubs(
         lambda *_args, **_kwargs: []
     )
     onchip_realize.flash_attention_kv_repack_broadcast_pair_rejection_reasons = (
+        lambda *_args, **_kwargs: []
+    )
+    onchip_realize.flash_attention_kv_repack_hbm_staged_hoist_rejection_reasons = (
+        lambda *_args, **_kwargs: []
+    )
+    onchip_realize.flash_attention_kv_repack_hbm_prefetch_hoist_rejection_reasons = (
+        lambda *_args, **_kwargs: []
+    )
+    onchip_realize.flash_attention_kv_repack_broadcast_copyback_rejection_reasons = (
         lambda *_args, **_kwargs: []
     )
     onchip_realize.flash_attention_value_flow_tile_rejection_reasons = (
@@ -432,9 +881,53 @@ def _load_bundle_with_stubs(
     kv_repack_pair_subpiece_reuse=True,
     kv_repack_pair_group_size=0,
     kv_repack_pair_self_resident_source=False,
+    kv_repack_pair_hbm_source=False,
+    kv_repack_pair_hbm_direct_load=False,
+    kv_repack_pair_hbm_staged=False,
+    kv_repack_pair_consumer_core_state_init=True,
+    kv_repack_pair_consumer_ds_type="",
+    kv_repack_pair_consumer_lx_alloc_style="",
     kv_repack_pair_use_unicast=-1,
     kv_repack_pair_force_mc_mode=-1,
+    kv_repack_hbm_staged_hoist_tile=-1,
+    kv_repack_hbm_staged_hoist_result=True,
+    kv_repack_hbm_prefetch_hoist_tile=-1,
+    kv_repack_hbm_prefetch_lx_base=-1,
+    kv_repack_hbm_prefetch_serial=False,
+    kv_repack_hbm_prefetch_prefill_current=False,
+    kv_repack_hbm_prefetch_redundant_future=False,
+    kv_repack_hbm_prefetch_serialize_current=False,
+    kv_repack_hbm_prefetch_external_future=False,
+    kv_repack_hbm_prefetch_overlap_after_sync=True,
+    kv_repack_hbm_prefetch_tail_current=False,
+    kv_repack_hbm_prefetch_source_fanout=False,
+    kv_repack_hbm_prefetch_loader_fanout=False,
+    kv_repack_hbm_prefetch_loader_core=0,
+    kv_repack_hbm_prefetch_loader_lx_base=-1,
+    kv_repack_hbm_prefetch_fanout_use_unicast=-1,
+    kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers=-1,
+    kv_repack_hbm_prefetch_fanout_copyback_core=-2,
+    kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core=False,
+    kv_repack_hbm_prefetch_loader_copyback_without_fanout=False,
+    kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces=False,
+    kv_repack_hbm_prefetch_serialize_loader_core=False,
+    kv_repack_hbm_prefetch_lx_roundtrip=False,
+    kv_repack_hbm_prefetch_corelet1=False,
+    kv_repack_hbm_prefetch_hoist_result=True,
     kv_repack_pair_result=True,
+    kv_repack_copyback_tile=-1,
+    kv_repack_copyback_core=-1,
+    kv_repack_copyback_hbm_roundtrip=False,
+    kv_repack_copyback_hbm_source_fanout=False,
+    kv_repack_copyback_hbm_direct_load=False,
+    kv_repack_copyback_hbm_roundtrip_load_only=False,
+    kv_repack_copyback_hbm_roundtrip_barrier_only=False,
+    kv_repack_copyback_data_only=False,
+    kv_repack_copyback_replace_consumer=False,
+    kv_repack_copyback_compute_only=False,
+    kv_repack_copyback_exact_clone=False,
+    kv_repack_copyback_preserve_consumer_name=False,
+    kv_repack_copyback_result=True,
     ifn_prefix_force=False,
     execute_tile=-1,
     tile_artifacts=None,
@@ -469,9 +962,99 @@ def _load_bundle_with_stubs(
         kv_repack_pair_subpiece_reuse=kv_repack_pair_subpiece_reuse,
         kv_repack_pair_group_size=kv_repack_pair_group_size,
         kv_repack_pair_self_resident_source=kv_repack_pair_self_resident_source,
+        kv_repack_pair_hbm_source=kv_repack_pair_hbm_source,
+        kv_repack_pair_hbm_direct_load=kv_repack_pair_hbm_direct_load,
+        kv_repack_pair_hbm_staged=kv_repack_pair_hbm_staged,
+        kv_repack_pair_consumer_core_state_init=(
+            kv_repack_pair_consumer_core_state_init
+        ),
+        kv_repack_pair_consumer_ds_type=kv_repack_pair_consumer_ds_type,
+        kv_repack_pair_consumer_lx_alloc_style=(
+            kv_repack_pair_consumer_lx_alloc_style
+        ),
         kv_repack_pair_use_unicast=kv_repack_pair_use_unicast,
         kv_repack_pair_force_mc_mode=kv_repack_pair_force_mc_mode,
+        kv_repack_hbm_staged_hoist_tile=kv_repack_hbm_staged_hoist_tile,
+        kv_repack_hbm_staged_hoist_result=kv_repack_hbm_staged_hoist_result,
+        kv_repack_hbm_prefetch_hoist_tile=kv_repack_hbm_prefetch_hoist_tile,
+        kv_repack_hbm_prefetch_lx_base=kv_repack_hbm_prefetch_lx_base,
+        kv_repack_hbm_prefetch_serial=kv_repack_hbm_prefetch_serial,
+        kv_repack_hbm_prefetch_prefill_current=(
+            kv_repack_hbm_prefetch_prefill_current
+        ),
+        kv_repack_hbm_prefetch_redundant_future=(
+            kv_repack_hbm_prefetch_redundant_future
+        ),
+        kv_repack_hbm_prefetch_serialize_current=(
+            kv_repack_hbm_prefetch_serialize_current
+        ),
+        kv_repack_hbm_prefetch_external_future=(
+            kv_repack_hbm_prefetch_external_future
+        ),
+        kv_repack_hbm_prefetch_overlap_after_sync=(
+            kv_repack_hbm_prefetch_overlap_after_sync
+        ),
+        kv_repack_hbm_prefetch_tail_current=(
+            kv_repack_hbm_prefetch_tail_current
+        ),
+        kv_repack_hbm_prefetch_source_fanout=(
+            kv_repack_hbm_prefetch_source_fanout
+        ),
+        kv_repack_hbm_prefetch_loader_fanout=(
+            kv_repack_hbm_prefetch_loader_fanout
+        ),
+        kv_repack_hbm_prefetch_loader_core=kv_repack_hbm_prefetch_loader_core,
+        kv_repack_hbm_prefetch_loader_lx_base=(
+            kv_repack_hbm_prefetch_loader_lx_base
+        ),
+        kv_repack_hbm_prefetch_fanout_use_unicast=(
+            kv_repack_hbm_prefetch_fanout_use_unicast
+        ),
+        kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers=(
+            kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers
+        ),
+        kv_repack_hbm_prefetch_fanout_copyback_core=(
+            kv_repack_hbm_prefetch_fanout_copyback_core
+        ),
+        kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core=(
+            kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core
+        ),
+        kv_repack_hbm_prefetch_loader_copyback_without_fanout=(
+            kv_repack_hbm_prefetch_loader_copyback_without_fanout
+        ),
+        kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces=(
+            kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces
+        ),
+        kv_repack_hbm_prefetch_serialize_loader_core=(
+            kv_repack_hbm_prefetch_serialize_loader_core
+        ),
+        kv_repack_hbm_prefetch_lx_roundtrip=(
+            kv_repack_hbm_prefetch_lx_roundtrip
+        ),
+        kv_repack_hbm_prefetch_corelet1=kv_repack_hbm_prefetch_corelet1,
+        kv_repack_hbm_prefetch_hoist_result=kv_repack_hbm_prefetch_hoist_result,
         kv_repack_pair_result=kv_repack_pair_result,
+        kv_repack_copyback_tile=kv_repack_copyback_tile,
+        kv_repack_copyback_core=kv_repack_copyback_core,
+        kv_repack_copyback_hbm_roundtrip=kv_repack_copyback_hbm_roundtrip,
+        kv_repack_copyback_hbm_source_fanout=(
+            kv_repack_copyback_hbm_source_fanout
+        ),
+        kv_repack_copyback_hbm_direct_load=kv_repack_copyback_hbm_direct_load,
+        kv_repack_copyback_hbm_roundtrip_load_only=(
+            kv_repack_copyback_hbm_roundtrip_load_only
+        ),
+        kv_repack_copyback_hbm_roundtrip_barrier_only=(
+            kv_repack_copyback_hbm_roundtrip_barrier_only
+        ),
+        kv_repack_copyback_data_only=kv_repack_copyback_data_only,
+        kv_repack_copyback_replace_consumer=kv_repack_copyback_replace_consumer,
+        kv_repack_copyback_compute_only=kv_repack_copyback_compute_only,
+        kv_repack_copyback_exact_clone=kv_repack_copyback_exact_clone,
+        kv_repack_copyback_preserve_consumer_name=(
+            kv_repack_copyback_preserve_consumer_name
+        ),
+        kv_repack_copyback_result=kv_repack_copyback_result,
         ifn_prefix_force=ifn_prefix_force,
         execute_tile=execute_tile,
         tile_artifacts=tile_artifacts,
@@ -1156,6 +1739,69 @@ def _fake_flash_layout_xform_kv_repack_sdscs():
             future_pdi,
         ),
     ]
+
+
+def _fake_flash_layout_xform_kv_repack_multisplit_sdscs():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+    producer = rz._body(sdscs[1])
+    producer["numCoresUsed_"] = 4
+    producer["coreFoldProp_"] = {"factor_": 4, "label_": "core"}
+    producer["coreIdToDsc_"] = {str(c): 0 for c in range(4)}
+    producer["numWkSlicesPerDim_"] = {"mb": 2, "x": 2, "out": 1}
+    producer["coreIdToWkSlice_"] = {
+        "0": {"mb": 0, "x": 0, "out": 0},
+        "1": {"mb": 1, "x": 0, "out": 0},
+        "2": {"mb": 0, "x": 1, "out": 0},
+        "3": {"mb": 1, "x": 1, "out": 0},
+    }
+    for dsc in producer["dscs_"]:
+        dl = next(iter(dsc.values()))
+        for node in dl.get("scheduleTree_", []):
+            data = node.get("startAddressCoreCorelet_", {}).get("data_")
+            if isinstance(data, dict):
+                first = next(iter(data.values()))
+                node["startAddressCoreCorelet_"]["data_"] = {
+                    f"[{c}, 0, 0]": first for c in range(4)
+                }
+    return sdscs
+
+
+def _fake_flash_layout_xform_kv_repack_extra_consumer_sdscs():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+    future_addr = 12288
+    extra_pdi = {
+        "INPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "KERNEL": {
+            "layoutDimOrder_": ["x", "mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "x", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    sdscs.append(
+        _fake_sdsc(
+            3,
+            "maxnonstick",
+            {"mb": 2, "x": 1, "out": 1},
+            {"mb_": 2, "x_": 128, "out_": 64},
+            [
+                ("Tensor0-idx0", "INPUT", 49152),
+                ("Tensor1-idx1", "KERNEL", future_addr),
+            ],
+            [("Tensor2-idx2", "OUTPUT", 57344)],
+            extra_pdi,
+            num_cores=2,
+        )
+    )
+    return sdscs
 
 
 def _fake_flash_pointwise_sdscs(multisplit=False, chain=False):
@@ -1871,6 +2517,1248 @@ def test_flash_layout_xform_hoist_reports_kv_repack_boundary():
     ]
 
 
+def test_flash_kv_repack_hbm_staged_hoist_runs_future_producer_before_current():
+    result = rz.build_flash_attention_kv_repack_hbm_staged_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_staged_hoist_0"
+    producer_name = f"{prefix}_future_producer"
+    future_name = f"{prefix}_future_kv_1_input1_consumer"
+    producer = result["artifacts"][0][producer_name]
+    future = result["artifacts"][1][future_name]
+    assert result["replacements"] == {
+        "2_batchmatmul": future_name,
+    }
+    assert result["insertions_before"] == {"0_batchmatmul": [producer_name]}
+    assert result["omissions"] == {"1_ReStickifyOpHBM"}
+    assert len(producer["dscs_"]) == 1
+    assert producer["coreIdToDscSchedule"] == rz._body(
+        _fake_flash_layout_xform_kv_repack_sdscs()[1]
+    )["coreIdToDscSchedule"]
+    meta = producer["flashAttentionPipeline_"]
+    assert meta["kv_repack_hbm_staged_hoist_role"] == "future_producer"
+    assert meta["kv_repack_hbm_staged_hoist_future_tile"] == 1
+    assert meta["kv_repack_hbm_staged_hoist_future_input_idx"] == 1
+    assert meta["kv_repack_hbm_staged_hoist_source_core_ids"] == [0, 1]
+
+    future_meta = future["flashAttentionPipeline_"]
+    assert future_meta["kv_repack_hbm_staged"] is True
+    assert future_meta["kv_repack_hbm_source"] is True
+    future_dl = rz._dl_op({"future": future})
+    assert "hbm" in rz._lds_by_idx(future_dl, 1)["memOrg_"]
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_prefetches_during_current_compute():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+    current_dl = rz._dl_op(sdscs[0])
+    current_dl["dataStageParam_"] = {
+        "0": {
+            "ss_": {
+                "name_": "core",
+                "x_": 2,
+                "mb_": 4,
+                "in_": 64,
+                "out_": 64,
+            },
+            "el_": {
+                "name_": "core",
+                "x_": 2,
+                "mb_": 4,
+                "in_": 64,
+                "out_": 64,
+            },
+        }
+    }
+    current_k_alloc = next(
+        node
+        for node in current_dl["scheduleTree_"]
+        if node.get("nodeType_") == "allocate" and node.get("ldsIdx_") == 1
+    )
+    current_k_alloc["backGapCore_"] = {"in": {"-1": "192"}}
+    current_k_alloc["gapStickSpread_"] = {"in": 4}
+
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        sdscs,
+        tile_index=0,
+        prefill_current_input=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    producer_name = f"{prefix}_future_producer"
+    current_name = f"{prefix}_current_prefetch"
+    future_name = f"{prefix}_future_consumer"
+    producer = result["artifacts"][0][producer_name]
+    current = result["artifacts"][1][current_name]
+    future = result["artifacts"][2][future_name]
+    assert result["replacements"] == {
+        "0_batchmatmul": current_name,
+        "2_batchmatmul": future_name,
+    }
+    assert result["insertions_before"] == {"0_batchmatmul": [producer_name]}
+    assert result["omissions"] == {"1_ReStickifyOpHBM"}
+    assert producer["flashAttentionPipeline_"][
+        "kv_repack_hbm_prefetch_hoist_role"
+    ] == "future_producer"
+
+    current_meta = current["flashAttentionPipeline_"]
+    assert current_meta["kv_repack_hbm_prefetch_hoist_role"] == "current_prefetch"
+    assert current_meta["kv_repack_hbm_prefetch_hoist_future_tile"] == 1
+    assert current_meta["kv_repack_hbm_prefetch_hoist_dataop_count"] == 1
+    assert current_meta["kv_repack_hbm_prefetch_hoist_prefetch_corelet_id"] is None
+    assert (
+        current_meta["kv_repack_hbm_prefetch_hoist_prefetch_lx_roundtrip"]
+        is False
+    )
+    assert (
+        current_meta["kv_repack_hbm_prefetch_hoist_tail_current_prefetch"]
+        is False
+    )
+    assert (
+        current_meta["kv_repack_hbm_prefetch_hoist_prefetch_source_fanout"]
+        is False
+    )
+    assert current_meta["kv_repack_hbm_prefetch_hoist_prefilled_current_inputs"] == [
+        {"lds_idx": 0, "lx_base": 540672},
+        {"lds_idx": 1, "lx_base": 802816},
+    ]
+    assert current["opFuncsUsed_"] == ["STCDPOpHBM", "STCDPOpHBM", "STCDPOpHBM"]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [2, 0, 1, 1],
+    ]
+    current_dl = rz._dl_op({"current": current})
+    current_k_alloc = next(
+        node
+        for node in current_dl["scheduleTree_"]
+        if node.get("nodeType_") == "allocate" and node.get("ldsIdx_") == 1
+    )
+    assert current_k_alloc["component_"] == "lx"
+    assert "backGapCore_" not in current_k_alloc
+    assert "gapStickSpread_" not in current_k_alloc
+    current_q_prefill = next(iter(current["datadscs_"][0].values()))
+    assert current_q_prefill["labeledDs_"][0]["PieceInfo"][0]["dimToSize_"] == {
+        "x_": 2,
+        "mb_": 4,
+        "in_": 64,
+    }
+    first_load_name, first_load = next(iter(current["datadscs_"][-1].items()))
+    assert first_load_name == (
+        "0_STCDPOpHBM_kv_repack_hbm_prefetch_Tensor0_idx1_tile1_piece0_load"
+    )
+    first_hbm = next(
+        placement
+        for placement in first_load["labeledDs_"][0]["PieceInfo"][0][
+            "PlacementInfo"
+        ]
+        if placement["type"] == "hbm"
+    )
+    assert first_hbm["startAddr"] == [
+        _hbm_dataop_addr(
+            int(current_meta["kv_repack_hbm_prefetch_hoist_source_hbm_addr"])
+        )
+    ]
+    assert first_load["primaryDs_"] == [
+        {"name_": "dataIN", "dimNames": ["in_", "x_", "out_"]}
+    ]
+    assert first_load["labeledDs_"][1]["pdsName_"] == "dataIN"
+    assert first_load["labeledDs_"][1]["PieceInfo"] == []
+    assert first_load["coreIdsUsed_"] == list(range(32))
+    assert first_load["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"][0] == {
+        "type": "lx",
+        "memId": [0],
+        "startAddr": [current_meta["kv_repack_hbm_prefetch_hoist_consumer_lx_base"]],
+    }
+    assert first_load["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [current_meta["kv_repack_hbm_prefetch_hoist_consumer_lx_base"]],
+        },
+        first_hbm,
+    ]
+
+    future_meta = future["flashAttentionPipeline_"]
+    assert future_meta["kv_repack_hbm_prefetch_hoist_role"] == "future_consumer"
+    assert future_meta["kv_repack_hbm_prefetch_hoist_prefetch_corelet_id"] is None
+    assert (
+        future_meta["kv_repack_hbm_prefetch_hoist_prefetch_lx_roundtrip"]
+        is False
+    )
+    assert (
+        future_meta["kv_repack_hbm_prefetch_hoist_tail_current_prefetch"]
+        is False
+    )
+    assert (
+        future_meta["kv_repack_hbm_prefetch_hoist_prefetch_source_fanout"]
+        is False
+    )
+    assert future["opFuncsUsed_"] == []
+    assert future["datadscs_"] == []
+    assert future["coreIdToDscSchedule"]["0"] == [[-1, 0, 0, 0]]
+    future_dl = rz._dl_op({"future": future})
+    future_lds = rz._lds_by_idx(future_dl, 1)
+    assert "lx" in future_lds["memOrg_"]
+    assert "hbm" not in future_lds["memOrg_"]
+    assert "isExternal_" not in future_lds
+    assert "isFirstUse_" not in future_lds
+    assert not any(
+        node.get("name_") == "input_fetch_neighbor_transfer_lds1"
+        for node in future_dl["scheduleTree_"]
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_allows_preserved_extra_hbm_consumer():
+    sdscs = _fake_flash_layout_xform_kv_repack_extra_consumer_sdscs()
+
+    assert (
+        rz.build_flash_attention_kv_repack_broadcast_plan_artifact(
+            sdscs,
+            tile_index=1,
+            input_idx=1,
+        )
+        is None
+    )
+    assert rz.flash_attention_kv_repack_broadcast_rejection_reasons(
+        sdscs,
+        1,
+        input_idx=1,
+    ) == ["input1:not_single_consumer:2_batchmatmul:input1,3_maxnonstick:input1"]
+
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        sdscs,
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        prefetch_loader_core_id=31,
+        prefetch_loader_fanout_full_tile_pieces=True,
+        serialize_loader_core_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    assert result["insertions_before"] == {"0_batchmatmul": [f"{prefix}_future_producer"]}
+    assert result["omissions"] == {"1_ReStickifyOpHBM"}
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    current_meta = current["flashAttentionPipeline_"]
+    future_meta = future["flashAttentionPipeline_"]
+    assert current_meta["kv_repack_hbm_prefetch_hoist_future_tile"] == 1
+    assert current_meta["kv_repack_hbm_prefetch_hoist_future_consumer_sdsc"] == (
+        "2_batchmatmul"
+    )
+    assert current_meta["kv_repack_additional_consumers"] == [
+        "3_maxnonstick:input1"
+    ]
+    assert future_meta["kv_repack_additional_consumers"] == [
+        "3_maxnonstick:input1"
+    ]
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_force_lx_base_probe():
+    forced_lx_base = 1625344
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_lx_base=forced_lx_base,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    current_meta = current["flashAttentionPipeline_"]
+    future_meta = future["flashAttentionPipeline_"]
+    assert current_meta["kv_repack_hbm_prefetch_hoist_native_load_prologue"] is True
+    assert current["opFuncsUsed_"] == ["nop", "STCDPOpHBM"]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, 0, 1, 1],
+    ]
+    prologue = next(iter(current["datadscs_"][0].values()))
+    assert prologue["op"]["name"] == "nop"
+    assert "dldsc_native_load_prologue" in next(iter(current["datadscs_"][0]))
+    assert (
+        current_meta["kv_repack_hbm_prefetch_hoist_consumer_lx_base"]
+        == forced_lx_base
+    )
+    assert (
+        future_meta["kv_repack_hbm_prefetch_hoist_input_lx_base"]
+        == forced_lx_base
+    )
+    assert current_meta[
+        "kv_repack_hbm_prefetch_hoist_original_consumer_lx_base"
+    ] != forced_lx_base
+    first_load = next(iter(current["datadscs_"][-1].values()))
+    assert first_load["labeledDs_"][1]["PieceInfo"] == []
+    assert first_load["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"][0][
+        "startAddr"
+    ] == [forced_lx_base]
+    future_dl = rz._dl_op({"future": future})
+    future_lds = rz._lds_by_idx(future_dl, 1)
+    assert future_lds["coreStateInit_"][0]["lbrInit_"] == [
+        forced_lx_base
+    ]
+    assert "isExternal_" not in future_lds
+    assert "isFirstUse_" not in future_lds
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_disable_overlap_after_sync():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        overlap_after_sync=False,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, 0, 1, 0],
+    ]
+    current_meta = current["flashAttentionPipeline_"]
+    assert (
+        current_meta["kv_repack_hbm_prefetch_hoist_overlap_after_sync"]
+        is False
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_tail_current_prefetch():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        tail_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [1, -1, 1, 0],
+    ]
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_tail_current_prefetch"
+        ]
+        is True
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_tail_current_prefetch"
+        ]
+        is True
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_overlap_source_fanout_loads():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_source_fanout=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    assert current["opFuncsUsed_"] == [
+        "nop",
+        "STCDPOpHBM",
+        "STCDPOpHBM",
+        "nop",
+        "STCDPOpLx",
+    ]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, 0, 1, 1],
+        [3, -1, 1, 1],
+        [4, -1, 1, 0],
+    ]
+    assert current["coreIdToDscSchedule"]["2"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [3, -1, 1, 1],
+        [4, -1, 1, 0],
+    ]
+    first_load = next(iter(current["datadscs_"][1].values()))
+    fanout = next(iter(current["datadscs_"][-1].values()))
+    assert first_load["op"]["name"] == "STCDPOpHBM"
+    assert len(first_load["labeledDs_"][1]["PieceInfo"]) == 0
+    assert fanout["op"]["name"] == "STCDPOpLx"
+    assert len(fanout["labeledDs_"][1]["PieceInfo"]) == 64
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_source_fanout"
+        ]
+        is True
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_source_fanout"
+        ]
+        is True
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_tail_source_fanout_loads():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_source_fanout=True,
+        tail_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    assert current["opFuncsUsed_"] == [
+        "nop",
+        "STCDPOpHBM",
+        "STCDPOpHBM",
+        "nop",
+        "STCDPOpLx",
+    ]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [1, -1, 1, 1],
+        [3, -1, 1, 1],
+        [4, -1, 1, 0],
+    ]
+    assert current["coreIdToDscSchedule"]["2"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [3, -1, 1, 1],
+        [4, -1, 1, 0],
+    ]
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_source_fanout"
+        ]
+        is True
+    )
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_tail_current_prefetch"
+        ]
+        is True
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_source_fanout"
+        ]
+        is True
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_tail_current_prefetch"
+        ]
+        is True
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_tail_loader_fanout_load():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        tail_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    assert current["opFuncsUsed_"] == [
+        "nop",
+        "STCDPOpHBM",
+        "nop",
+        "STCDPOpLx",
+    ]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 0],
+    ]
+    assert current["coreIdToDscSchedule"]["2"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 0],
+    ]
+    load = next(iter(current["datadscs_"][1].values()))
+    fanout = next(iter(current["datadscs_"][-1].values()))
+    current_meta = current["flashAttentionPipeline_"]
+    assert load["coreIdsUsed_"] == [0]
+    assert len(load["labeledDs_"][1]["PieceInfo"]) == 0
+    assert fanout["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {"type": "lx", "memId": [0], "startAddr": [rz.PRODUCER_LX_BASE]}
+    ]
+    assert fanout["labeledDs_"][0]["PieceInfo"][1]["PlacementInfo"] == [
+        {"type": "lx", "memId": [0], "startAddr": [rz.PRODUCER_LX_BASE + 128]}
+    ]
+    assert fanout["labeledDs_"][0]["PieceInfo"][1]["validGap_"]["x_"] == [[2, 0]]
+    assert fanout["labeledDs_"][1]["PieceInfo"][1]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [
+                current_meta["kv_repack_hbm_prefetch_hoist_consumer_lx_base"] + 128
+            ],
+        }
+    ]
+    assert fanout["labeledDs_"][1]["PieceInfo"][1]["validGap_"]["x_"] == [[2, 0]]
+    assert (
+        current_meta["kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout"]
+        is True
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout"
+        ]
+        is True
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_force_fanout_unicast():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        prefetch_fanout_use_unicast=1,
+        tail_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    fanout = next(iter(current["datadscs_"][-1].values()))
+    assert fanout["op"]["useUnicast"] == 1
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_fanout_use_unicast"
+        ]
+        == 1
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_fanout_use_unicast"
+        ]
+        == 1
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_force_fanout_lxsfp_lx_transfer_mode():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        prefetch_fanout_use_lxsfp_lx_transfers=0,
+        tail_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    fanout = next(iter(current["datadscs_"][-1].values()))
+    assert fanout["op"]["useLXSFPLXTransfers"] == 0
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_fanout_use_lxsfp_lx_transfers"
+        ]
+        == 0
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_fanout_use_lxsfp_lx_transfers"
+        ]
+        == 0
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_copyback_fanout_to_hbm():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        prefetch_fanout_copyback_core=0,
+        tail_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    assert current["opFuncsUsed_"] == [
+        "nop",
+        "STCDPOpHBM",
+        "nop",
+        "STCDPOpLx",
+        "STCDPOpHBM",
+    ]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 1],
+        [4, -1, 1, 0],
+    ]
+    assert current["coreIdToDscSchedule"]["2"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 0],
+    ]
+    copyback = next(iter(current["datadscs_"][-1].values()))
+    assert copyback["op"]["name"] == "STCDPOpHBM"
+    assert copyback["coreIdsUsed_"] == [0]
+    assert copyback["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [
+                current["flashAttentionPipeline_"][
+                    "kv_repack_hbm_prefetch_hoist_consumer_lx_base"
+                ]
+            ],
+        }
+    ]
+    assert copyback["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"][-1] == {
+        "type": "hbm",
+        "memId": [-1],
+        "startAddr": [_hbm_dataop_addr(12288)],
+    }
+    assert future["opFuncsUsed_"] == []
+    assert future["datadscs_"] == []
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_fanout_copyback_core"
+        ]
+        == 0
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_restrict_fanout_to_copyback_core():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        prefetch_fanout_copyback_core=0,
+        prefetch_fanout_restrict_to_copyback_core=True,
+        tail_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    assert current["opFuncsUsed_"] == [
+        "nop",
+        "STCDPOpHBM",
+        "nop",
+        "STCDPOpLx",
+        "STCDPOpHBM",
+    ]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 1],
+        [4, -1, 1, 0],
+    ]
+    assert current["coreIdToDscSchedule"]["2"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [2, -1, 1, 0],
+    ]
+    fanout = next(iter(current["datadscs_"][3].values()))
+    assert fanout["coreIdsUsed_"] == [0]
+    dst_pieces = fanout["labeledDs_"][1]["PieceInfo"]
+    assert len(dst_pieces) == 2
+    assert dst_pieces[0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [
+                current["flashAttentionPipeline_"][
+                    "kv_repack_hbm_prefetch_hoist_consumer_lx_base"
+                ]
+            ],
+        }
+    ]
+    assert dst_pieces[1]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [
+                current["flashAttentionPipeline_"][
+                    "kv_repack_hbm_prefetch_hoist_consumer_lx_base"
+                ]
+                + 128
+            ],
+        }
+    ]
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_fanout_restrict_to_copyback_core"
+        ]
+        is True
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_fanout_restrict_to_copyback_core"
+        ]
+        is True
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_copyback_loader_without_fanout():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        prefetch_fanout_copyback_core=0,
+        prefetch_loader_copyback_without_fanout=True,
+        tail_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    assert current["opFuncsUsed_"] == [
+        "nop",
+        "STCDPOpHBM",
+        "nop",
+        "STCDPOpHBM",
+    ]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 0],
+    ]
+    assert current["coreIdToDscSchedule"]["2"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [2, -1, 1, 0],
+    ]
+    copyback = next(iter(current["datadscs_"][-1].values()))
+    assert copyback["op"]["name"] == "STCDPOpHBM"
+    assert copyback["coreIdsUsed_"] == [0]
+    assert copyback["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [rz.PRODUCER_LX_BASE],
+        }
+    ]
+    assert copyback["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"][-1] == {
+        "type": "hbm",
+        "memId": [-1],
+        "startAddr": [_hbm_dataop_addr(12288)],
+    }
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_copyback_without_fanout"
+        ]
+        is True
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_copyback_without_fanout"
+        ]
+        is True
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_direct_copyback_uses_loader_lx_base():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        prefetch_loader_lx_base=-2,
+        prefetch_fanout_copyback_core=0,
+        prefetch_loader_copyback_without_fanout=True,
+        tail_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    loader_lx_base = (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_consumer_lx_base"
+        ]
+        + (256 << 10)
+    )
+    copyback = next(iter(current["datadscs_"][-1].values()))
+    assert copyback["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {"type": "lx", "memId": [0], "startAddr": [loader_lx_base]}
+    ]
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_lx_base"
+        ]
+        == loader_lx_base
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_loader_copyback_can_disable_overlap_after_sync():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        prefetch_fanout_copyback_core=0,
+        prefetch_loader_copyback_without_fanout=True,
+        overlap_after_sync=False,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, 0, 1, 0],
+        [2, -1, 1, 1],
+        [3, -1, 1, 0],
+    ]
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_overlap_after_sync"
+        ]
+        is False
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_fanout_full_tile_piece():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        prefetch_fanout_copyback_core=0,
+        prefetch_fanout_restrict_to_copyback_core=True,
+        prefetch_loader_fanout_full_tile_pieces=True,
+        tail_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    assert current["opFuncsUsed_"] == [
+        "nop",
+        "STCDPOpHBM",
+        "nop",
+        "STCDPOpLx",
+        "STCDPOpHBM",
+    ]
+    fanout = next(iter(current["datadscs_"][3].values()))
+    assert fanout["coreIdsUsed_"] == [0]
+    src_pieces = fanout["labeledDs_"][0]["PieceInfo"]
+    dst_pieces = fanout["labeledDs_"][1]["PieceInfo"]
+    assert len(src_pieces) == 1
+    assert len(dst_pieces) == 1
+    assert src_pieces[0]["dimToSize_"]["x_"] == 2
+    assert dst_pieces[0]["dimToSize_"]["x_"] == 2
+    assert src_pieces[0]["PlacementInfo"] == [
+        {"type": "lx", "memId": [0], "startAddr": [rz.PRODUCER_LX_BASE]}
+    ]
+    assert dst_pieces[0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [
+                current["flashAttentionPipeline_"][
+                    "kv_repack_hbm_prefetch_hoist_consumer_lx_base"
+                ]
+            ],
+        }
+    ]
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout_full_tile_pieces"
+        ]
+        is True
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout_full_tile_pieces"
+        ]
+        is True
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_select_loader_core():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        prefetch_loader_core_id=31,
+        prefetch_fanout_copyback_core=31,
+        prefetch_fanout_restrict_to_copyback_core=True,
+        prefetch_loader_fanout_full_tile_pieces=True,
+        tail_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [2, -1, 1, 0],
+    ]
+    assert current["coreIdToDscSchedule"]["31"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 1],
+        [4, -1, 1, 0],
+    ]
+    load = next(iter(current["datadscs_"][1].values()))
+    fanout = next(iter(current["datadscs_"][3].values()))
+    assert load["coreIdsUsed_"] == [31]
+    assert fanout["coreIdsUsed_"] == [31]
+    assert fanout["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {"type": "lx", "memId": [31], "startAddr": [rz.PRODUCER_LX_BASE]}
+    ]
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_core_id"
+        ]
+        == 31
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_core_id"
+        ]
+        == 31
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_serialize_loader_core_compute():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        prefetch_loader_core_id=31,
+        prefetch_loader_fanout_full_tile_pieces=True,
+        serialize_loader_core_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 0],
+    ]
+    assert current["coreIdToDscSchedule"]["31"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [-1, 0, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 0],
+    ]
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_serialize_loader_core_prefetch"
+        ]
+        is True
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_serialize_loader_core_prefetch"
+        ]
+        is True
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_move_loader_source_lx_base():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_loader_fanout=True,
+        prefetch_loader_lx_base=-2,
+        prefetch_fanout_copyback_core=0,
+        prefetch_fanout_restrict_to_copyback_core=True,
+        prefetch_loader_fanout_full_tile_pieces=True,
+        tail_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    loader_lx_base = (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_consumer_lx_base"
+        ]
+        + (256 << 10)
+    )
+    load = next(iter(current["datadscs_"][1].values()))
+    fanout = next(iter(current["datadscs_"][3].values()))
+    copyback = next(iter(current["datadscs_"][4].values()))
+    assert load["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"][0] == {
+        "type": "lx",
+        "memId": [0],
+        "startAddr": [loader_lx_base],
+    }
+    assert fanout["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {"type": "lx", "memId": [0], "startAddr": [loader_lx_base]}
+    ]
+    assert copyback["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [
+                current["flashAttentionPipeline_"][
+                    "kv_repack_hbm_prefetch_hoist_consumer_lx_base"
+                ]
+            ],
+        }
+    ]
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_lx_base"
+        ]
+        == loader_lx_base
+    )
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_lx_base_request"
+        ]
+        == -2
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_lx_base"
+        ]
+        == loader_lx_base
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_route_prefetch_corelet1():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_corelet_id=1,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    first_load = next(iter(current["datadscs_"][-1].values()))
+
+    assert first_load["op"]["coreletId"] == 1
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_corelet_id"
+        ]
+        == 1
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_corelet_id"
+        ]
+        == 1
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_emit_lx_roundtrip_prefetch():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        prefetch_lx_roundtrip=True,
+        prefetch_corelet_id=1,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    first_load = next(iter(current["datadscs_"][-1].values()))
+
+    assert first_load["op"]["coreletId"] == 1
+    assert (
+        current["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_lx_roundtrip"
+        ]
+        is True
+    )
+    assert (
+        future["flashAttentionPipeline_"][
+            "kv_repack_hbm_prefetch_hoist_prefetch_lx_roundtrip"
+        ]
+        is True
+    )
+    assert len(first_load["labeledDs_"][1]["PieceInfo"]) == 32
+    assert first_load["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"] == [
+        first_load["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"][0]
+    ]
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_serialize_prefetch_probe():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        serial_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    future_name = f"{prefix}_future_consumer"
+    future = result["artifacts"][1][future_name]
+    assert result["replacements"] == {
+        "2_batchmatmul": future_name,
+    }
+    assert result["insertions_before"] == {
+        "0_batchmatmul": [f"{prefix}_future_producer"],
+    }
+    assert len(result["artifacts"]) == 2
+    assert len(future["dscs_"]) == 1
+    assert future["opFuncsUsed_"] == ["STCDPOpHBM"]
+    assert future["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+    future_meta = future["flashAttentionPipeline_"]
+    assert future_meta["kv_repack_hbm_prefetch_hoist_serial_prefetch"] is True
+    assert future_meta["kv_repack_hbm_prefetch_hoist_dataop_count"] == 1
+    assert future_meta["compute_tile_count"] == 1
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_keep_redundant_future_prefetch():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        redundant_future_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current_name = f"{prefix}_current_prefetch"
+    future_name = f"{prefix}_future_consumer"
+    current = result["artifacts"][1][current_name]
+    future = result["artifacts"][2][future_name]
+    assert result["replacements"] == {
+        "0_batchmatmul": current_name,
+        "2_batchmatmul": future_name,
+    }
+    assert current["opFuncsUsed_"] == ["nop", "STCDPOpHBM"]
+    assert future["opFuncsUsed_"] == ["STCDPOpHBM"]
+    assert future["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+    future_meta = future["flashAttentionPipeline_"]
+    assert future_meta["kv_repack_hbm_prefetch_hoist_serial_prefetch"] is False
+    assert (
+        future_meta["kv_repack_hbm_prefetch_hoist_redundant_future_prefetch"]
+        is True
+    )
+    assert future_meta["kv_repack_hbm_prefetch_hoist_dataop_count"] == 1
+    future_load_name = next(iter(future["datadscs_"][0]))
+    assert future_load_name.startswith("future_redundant_")
+    future_dl = rz._dl_op({"future": future})
+    future_lds = rz._lds_by_idx(future_dl, 1)
+    assert "isExternal_" not in future_lds
+    assert "isFirstUse_" not in future_lds
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_serialize_current_prefetch():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        redundant_future_prefetch=True,
+        serialize_current_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    current = result["artifacts"][1][f"{prefix}_current_prefetch"]
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    assert current["opFuncsUsed_"] == ["nop", "STCDPOpHBM"]
+    assert current["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    current_meta = current["flashAttentionPipeline_"]
+    assert (
+        current_meta["kv_repack_hbm_prefetch_hoist_serialize_current_prefetch"]
+        is True
+    )
+    future_meta = future["flashAttentionPipeline_"]
+    assert (
+        future_meta["kv_repack_hbm_prefetch_hoist_serialize_current_prefetch"]
+        is True
+    )
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_uses_lx_local_future_marker_by_default():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    future_meta = future["flashAttentionPipeline_"]
+    assert (
+        future_meta["kv_repack_hbm_prefetch_hoist_external_future_prefetch"]
+        is False
+    )
+    future_dl = rz._dl_op({"future": future})
+    future_lds = rz._lds_by_idx(future_dl, 1)
+    assert "isExternal_" not in future_lds
+    assert "isFirstUse_" not in future_lds
+
+
+def test_flash_kv_repack_hbm_prefetch_hoist_can_force_external_future_marker():
+    result = rz.build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+        _fake_flash_layout_xform_kv_repack_sdscs(),
+        tile_index=0,
+        external_future_prefetch=True,
+    )
+
+    assert result is not None
+    prefix = "mixed_flash_kv_repack_hbm_prefetch_hoist_0"
+    future = result["artifacts"][2][f"{prefix}_future_consumer"]
+    future_meta = future["flashAttentionPipeline_"]
+    assert (
+        future_meta["kv_repack_hbm_prefetch_hoist_external_future_prefetch"]
+        is True
+    )
+    future_dl = rz._dl_op({"future": future})
+    future_lds = rz._lds_by_idx(future_dl, 1)
+    assert future_lds["isExternal_"] == 1
+    assert future_lds["isFirstUse_"] == 0
+
+
 def test_flash_kv_repack_broadcast_plan_fans_out_low_core_input1():
     sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
 
@@ -1949,6 +3837,11 @@ def test_flash_kv_repack_broadcast_plan_fans_out_low_core_input1():
     assert dst_pieces[0]["PlacementInfo"][0]["startAddr"] == [
         meta["kv_repack_consumer_lx_base"]
     ]
+    assert dst_pieces[1]["PlacementInfo"][0]["startAddr"] == [
+        meta["kv_repack_consumer_lx_base"] + 64 * rz.WORD_LENGTH
+    ]
+    assert src_pieces[1]["validGap_"]["x_"] == [[1, 0]]
+    assert dst_pieces[1]["validGap_"]["x_"] == [[2, 0]]
     assert dst_pieces[0]["broadcastSourcePieceKey_"] == src_pieces[0]["key_"]
     assert dst_pieces[1]["broadcastSourcePieceKey_"] == src_pieces[1]["key_"]
     assert dst_pieces[-1]["broadcastConsumerCore_"] == 31
@@ -1957,6 +3850,35 @@ def test_flash_kv_repack_broadcast_plan_fans_out_low_core_input1():
     ]
     assert dst_pieces[1]["dimToStartCordinate"] == src_pieces[1][
         "dimToStartCordinate"
+    ]
+
+
+def test_flash_kv_repack_broadcast_plan_accepts_multisplit_low_core_input1():
+    sdscs = _fake_flash_layout_xform_kv_repack_multisplit_sdscs()
+
+    plan = rz.build_flash_attention_kv_repack_broadcast_plan_artifact(
+        sdscs,
+        tile_index=1,
+        input_idx=1,
+    )
+
+    assert plan is not None
+    root = plan["flash_kv_repack_broadcast_plan_1_input1"]
+    meta = root["flashAttentionPipeline_"]
+    assert meta["kv_repack_producer_cores"] == 4
+    assert meta["kv_repack_consumer_cores"] == 32
+    assert meta["kv_repack_producer_split"] == ["mb_", "x_"]
+    assert meta["kv_repack_mapped_split"] == ["x_", "in_"]
+    assert meta["kv_repack_source_piece_count"] == 4
+    dataop = root["datadscs_"][0][
+        "0_STCDPOpLx_kv_repack_broadcast_tile1_input1"
+    ]
+    src_pieces = dataop["labeledDs_"][0]["PieceInfo"]
+    assert [piece["dimToStartCordinate"] for piece in src_pieces] == [
+        {"in_": 0, "x_": 0, "out_": 0},
+        {"in_": 0, "x_": 1, "out_": 0},
+        {"in_": 32, "x_": 0, "out_": 0},
+        {"in_": 32, "x_": 1, "out_": 0},
     ]
 
 
@@ -2019,6 +3941,1106 @@ def test_flash_kv_repack_broadcast_pair_wraps_producer_and_consumer():
     assert "broadcastConsumerCore_" not in dst_ld["PieceInfo"][0]
     assert dst_ld["PieceInfo"][-1]["PlacementInfo"][0]["memId"] == [31]
     assert dataop["op"] == {"name": "STCDPOpLx"}
+
+
+def test_flash_kv_repack_broadcast_pair_hbm_source_keeps_original_producer():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_source=True,
+    )
+
+    assert result is not None
+    assert result["replacements"] == {
+        "2_batchmatmul": "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer",
+    }
+    assert len(result["artifacts"]) == 1
+    cons_name = "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer"
+    consumer = result["artifacts"][0][cons_name]
+    cons_meta = consumer["flashAttentionPipeline_"]
+    assert cons_meta["kv_repack_broadcast_role"] == "consumer"
+    assert cons_meta["kv_repack_producer_sidecar"] is None
+    assert cons_meta["kv_repack_hbm_source"] is True
+    assert cons_meta["kv_repack_broadcast_group_count"] == 1
+    assert cons_meta["kv_repack_source_piece_count"] == 2
+    assert cons_meta["kv_repack_destination_piece_count"] == 64
+    assert len(consumer["dscs_"]) == 1
+    assert len(consumer["datadscs_"]) == 4
+    assert consumer["opFuncsUsed_"] == [
+        "STCDPOpHBM",
+        "STCDPOpHBM",
+        "STCDPOpLx",
+        "nop",
+    ]
+    assert consumer["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert consumer["coreIdToDscSchedule"]["1"] == [
+        [1, -1, 0, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert consumer["coreIdToDscSchedule"]["31"] == [
+        [2, -1, 0, 1],
+        [3, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+
+    compute_dl = next(iter(consumer["dscs_"][0].values()))
+    assert rz._has_input_fetch_neighbor_transfer(compute_dl, 1)
+
+    load0_name, load0 = next(iter(consumer["datadscs_"][0].items()))
+    load1_name, load1 = next(iter(consumer["datadscs_"][1].items()))
+    fanout_name, fanout = next(iter(consumer["datadscs_"][2].items()))
+    nop_name, nop = next(iter(consumer["datadscs_"][3].items()))
+    assert load0_name == (
+        "0_STCDPOpHBM_kv_repack_broadcast_"
+        "Tensor0_idx1_tile1_hbm_source_piece0_load"
+    )
+    assert load1_name == (
+        "1_STCDPOpHBM_kv_repack_broadcast_"
+        "Tensor0_idx1_tile1_hbm_source_piece1_load"
+    )
+    assert fanout_name == "2_STCDPOpLx_kv_repack_broadcast_Tensor0_idx1_tile1"
+    assert load0["coreIdsUsed_"] == [0]
+    assert load1["coreIdsUsed_"] == [1]
+    assert load0["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [cons_meta["kv_repack_source_lx_base"]],
+        },
+        {"type": "hbm", "memId": [-1], "startAddr": [_hbm_dataop_addr(12288)]},
+    ]
+    assert load0["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [cons_meta["kv_repack_source_lx_base"]],
+        },
+    ]
+    assert load1["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"][1] == {
+        "type": "hbm",
+        "memId": [-1],
+        "startAddr": [_hbm_dataop_addr(12416)],
+    }
+    assert fanout["op"] == {"name": "STCDPOpLx"}
+    assert nop_name == "3_nop_kv_repack_broadcast_barrier_Tensor0_idx1_tile1"
+    assert nop["coreIdsUsed_"] == list(range(32))
+    assert nop["op"] == {"name": "nop"}
+
+
+def test_flash_kv_repack_broadcast_pair_hbm_direct_load_skips_fanout():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_direct_load=True,
+    )
+
+    assert result is not None
+    assert result["replacements"] == {
+        "2_batchmatmul": "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer",
+    }
+    assert len(result["artifacts"]) == 1
+    cons_name = "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer"
+    consumer = result["artifacts"][0][cons_name]
+    cons_meta = consumer["flashAttentionPipeline_"]
+    assert cons_meta["kv_repack_broadcast_role"] == "consumer"
+    assert cons_meta["kv_repack_producer_sidecar"] is None
+    assert cons_meta["kv_repack_hbm_source"] is True
+    assert cons_meta["kv_repack_hbm_direct_load"] is True
+    assert cons_meta["kv_repack_broadcast_group_count"] == 0
+    assert cons_meta["kv_repack_source_piece_count"] == 2
+    assert cons_meta["kv_repack_destination_piece_count"] == 64
+    assert len(consumer["dscs_"]) == 1
+    assert len(consumer["datadscs_"]) == 3
+    assert consumer["opFuncsUsed_"] == ["STCDPOpHBM", "STCDPOpHBM", "nop"]
+    assert consumer["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert consumer["coreIdToDscSchedule"]["31"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+
+    compute_dl = next(iter(consumer["dscs_"][0].values()))
+    assert rz._has_input_fetch_neighbor_transfer(compute_dl, 1)
+
+    load0_name, load0 = next(iter(consumer["datadscs_"][0].items()))
+    load1_name, load1 = next(iter(consumer["datadscs_"][1].items()))
+    nop_name, nop = next(iter(consumer["datadscs_"][2].items()))
+    assert load0_name == (
+        "0_STCDPOpHBM_kv_repack_broadcast_"
+        "Tensor0_idx1_tile1_hbm_direct_piece0_load"
+    )
+    assert load1_name == (
+        "1_STCDPOpHBM_kv_repack_broadcast_"
+        "Tensor0_idx1_tile1_hbm_direct_piece1_load"
+    )
+    assert load0["coreIdsUsed_"] == list(range(32))
+    assert load1["coreIdsUsed_"] == list(range(32))
+    assert load0["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [cons_meta["kv_repack_consumer_lx_base"]],
+        },
+        {"type": "hbm", "memId": [-1], "startAddr": [_hbm_dataop_addr(12288)]},
+    ]
+    assert load0["labeledDs_"][0]["PieceInfo"][-1]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [31],
+            "startAddr": [cons_meta["kv_repack_consumer_lx_base"]],
+        },
+        {"type": "hbm", "memId": [-1], "startAddr": [_hbm_dataop_addr(12288)]},
+    ]
+    assert load0["labeledDs_"][1]["PieceInfo"][-1]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [31],
+            "startAddr": [cons_meta["kv_repack_consumer_lx_base"]],
+        },
+    ]
+    assert load1["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"][1] == {
+        "type": "hbm",
+        "memId": [-1],
+        "startAddr": [_hbm_dataop_addr(12416)],
+    }
+    assert nop_name == "2_nop_kv_repack_broadcast_barrier_Tensor0_idx1_tile1"
+    assert nop["coreIdsUsed_"] == list(range(32))
+    assert nop["op"] == {"name": "nop"}
+
+
+def test_flash_kv_repack_broadcast_pair_hbm_direct_load_can_omit_ifn_transfer():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_direct_load=True,
+        include_input_fetch_transfer=False,
+    )
+
+    assert result is not None
+    cons_name = "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer"
+    consumer = result["artifacts"][0][cons_name]
+    cons_meta = consumer["flashAttentionPipeline_"]
+    assert cons_meta["kv_repack_hbm_direct_load"] is True
+    assert cons_meta["kv_repack_input_fetch_transfer"] is False
+    assert consumer["opFuncsUsed_"] == ["STCDPOpHBM", "STCDPOpHBM", "nop"]
+    compute_dl = next(iter(consumer["dscs_"][0].values()))
+    assert not rz._has_input_fetch_neighbor_transfer(compute_dl, 1)
+
+
+def test_flash_kv_repack_broadcast_pair_hbm_staged_keeps_hbm_pinned_consumer():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_staged=True,
+        consumer_core_state_init=False,
+        consumer_ds_type="INPUT",
+        consumer_lx_alloc_style="canonical_loop",
+    )
+
+    assert result is not None
+    assert result["replacements"] == {
+        "2_batchmatmul": "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer",
+    }
+    assert len(result["artifacts"]) == 1
+    cons_name = "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer"
+    consumer = result["artifacts"][0][cons_name]
+    cons_meta = consumer["flashAttentionPipeline_"]
+    assert cons_meta["kv_repack_producer_sidecar"] is None
+    assert cons_meta["kv_repack_hbm_source"] is True
+    assert cons_meta["kv_repack_hbm_direct_load"] is False
+    assert cons_meta["kv_repack_hbm_staged"] is True
+    assert cons_meta["kv_repack_broadcast_group_count"] == 0
+    assert consumer["opFuncsUsed_"] == ["nop"]
+    assert len(consumer["datadscs_"]) == 1
+    assert consumer["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert consumer["coreIdToDscSchedule"]["31"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+
+    compute_dl = next(iter(consumer["dscs_"][0].values()))
+    consumer_lds = rz._lds_by_idx(compute_dl, 1)
+    assert consumer_lds["dsType_"] == "KERNEL"
+    assert "hbm" in consumer_lds["memOrg_"]
+    assert consumer_lds["memOrg_"]["hbm"]["isPresent"] == 1
+    assert "coreStateInit_" not in consumer_lds
+    assert not rz._has_input_fetch_neighbor_transfer(compute_dl, 1)
+    alloc_node = next(
+        node
+        for node in compute_dl["scheduleTree_"]
+        if node.get("nodeType_") == "allocate" and node.get("ldsIdx_") == 1
+    )
+    assert alloc_node["component_"] == "hbm"
+    assert alloc_node["name_"] == "allocate-Tensor1_hbm"
+
+
+def test_flash_kv_repack_broadcast_pair_can_omit_consumer_core_state_init():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_direct_load=True,
+        consumer_core_state_init=False,
+    )
+
+    assert result is not None
+    cons_name = "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer"
+    consumer = result["artifacts"][0][cons_name]
+    cons_meta = consumer["flashAttentionPipeline_"]
+    assert cons_meta["kv_repack_hbm_direct_load"] is True
+    assert cons_meta["kv_repack_consumer_core_state_init"] is False
+    compute_dl = next(iter(consumer["dscs_"][0].values()))
+    consumer_lds = rz._lds_by_idx(compute_dl, 1)
+    assert "coreStateInit_" not in consumer_lds
+    assert consumer_lds["hbmSize_"] == 0
+    assert consumer_lds["memOrg_"]["lx"]["allocateNode_"] == "allocate-Tensor1_lx"
+
+
+def test_flash_kv_repack_broadcast_pair_can_override_consumer_ds_type():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_direct_load=True,
+        consumer_ds_type="INPUT",
+    )
+
+    assert result is not None
+    cons_name = "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer"
+    consumer = result["artifacts"][0][cons_name]
+    cons_meta = consumer["flashAttentionPipeline_"]
+    assert cons_meta["kv_repack_hbm_direct_load"] is True
+    assert cons_meta["kv_repack_consumer_ds_type"] == "INPUT"
+    compute_dl = next(iter(consumer["dscs_"][0].values()))
+    consumer_lds = rz._lds_by_idx(compute_dl, 1)
+    assert consumer_lds["dsType_"] == "INPUT"
+
+
+def test_flash_kv_repack_broadcast_pair_can_retarget_consumer_lx_alloc_style():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+    consumer_dl = rz._dl_op(sdscs[2])
+    consumer_dl["scheduleTree_"].append(
+        {
+            "nodeType_": "loop",
+            "name_": "loop_ds0_ds1_in",
+            "next_": ["lx_below_schedule"],
+        }
+    )
+
+    result = rz.build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_direct_load=True,
+        consumer_lx_alloc_style="canonical_loop",
+    )
+
+    assert result is not None
+    cons_name = "mixed_flash_kv_repack_broadcast_pair_1_input1_consumer"
+    consumer = result["artifacts"][0][cons_name]
+    cons_meta = consumer["flashAttentionPipeline_"]
+    assert cons_meta["kv_repack_consumer_lx_alloc_style"] == "canonical_loop"
+    compute_dl = next(iter(consumer["dscs_"][0].values()))
+    consumer_lds = rz._lds_by_idx(compute_dl, 1)
+    assert consumer_lds["memOrg_"]["lx"]["allocateNode_"] == "allocate_lds1_lx"
+    alloc_node = next(
+        node
+        for node in compute_dl["scheduleTree_"]
+        if node.get("nodeType_") == "allocate" and node.get("ldsIdx_") == 1
+    )
+    loop_node = next(
+        node
+        for node in compute_dl["scheduleTree_"]
+        if node.get("name_") == "loop_ds0_ds1_in"
+    )
+    assert alloc_node["name_"] == "allocate_lds1_lx"
+    assert alloc_node["prev_"] == "loop_ds0_ds1_in"
+    assert alloc_node["numBuffers_"] == 2
+    assert loop_node["next_"] == ["allocate_lds1_lx", "lx_below_schedule"]
+
+
+def test_flash_kv_repack_broadcast_copyback_inserts_before_original_consumer():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+    )
+
+    assert result is not None
+    assert result["replacements"] == {
+        "1_ReStickifyOpHBM": "mixed_flash_kv_repack_broadcast_copyback_1_input1_producer",
+    }
+    assert result["insertions_before"] == {
+        "2_batchmatmul": [
+            "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+        ],
+    }
+    copyback = result["artifacts"][1][
+        "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+    ]
+    meta = copyback["flashAttentionPipeline_"]
+    assert meta["kv_repack_broadcast_role"] == "copyback"
+    assert meta["kv_repack_copyback_readback_core"] == 31
+    assert meta["kv_repack_copyback_original_consumer"] == "2_batchmatmul"
+    assert meta["kv_repack_copyback_replaces_consumer"] is False
+    assert meta["kv_repack_copyback_inserts_before_consumer"] is True
+    assert len(copyback["dscs_"]) == 1
+    assert copyback["opFuncsUsed_"] == [
+        "STCDPOpLx",
+        "STCDPOpHBM",
+        "STCDPOpHBM",
+        "nop",
+    ]
+    assert copyback["coreIdToDscSchedule"]["31"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [3, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+
+    stcdp_name, stcdp = next(iter(copyback["datadscs_"][0].items()))
+    assert stcdp_name == "0_STCDPOpLx_kv_repack_copyback_Tensor0_idx1_tile1"
+    assert stcdp["op"] == {"name": "STCDPOpLx"}
+
+    hbm_name, hbm = next(iter(copyback["datadscs_"][1].items()))
+    assert (
+        hbm_name
+        == "1_STCDPOpHBM_kv_repack_copyback_Tensor0_idx1_tile1_piece0_core31"
+    )
+    assert hbm["coreIdsUsed_"] == [31]
+    assert hbm["op"]["name"] == "STCDPOpHBM"
+    assert hbm["op"]["coreIDtoANInfo"]["31"]["isAnalyticalMode"] == 0
+    assert sorted(hbm["op"]["coreIDtoANInfo"].keys(), key=int) == ["31"]
+    in_pieces = hbm["labeledDs_"][0]["PieceInfo"]
+    out_pieces = hbm["labeledDs_"][1]["PieceInfo"]
+    assert len(in_pieces) == 1
+    assert len(out_pieces) == 1
+    assert in_pieces[0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [31],
+            "startAddr": [meta["kv_repack_consumer_lx_base"]],
+        },
+    ]
+    assert out_pieces[0]["dimToSize_"]["x_"] == 1
+    assert out_pieces[0]["dimToStartCordinate"]["x_"] == 0
+    assert out_pieces[0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [31],
+            "startAddr": [meta["kv_repack_consumer_lx_base"]],
+        },
+        {"type": "hbm", "memId": [-1], "startAddr": [_hbm_dataop_addr(12288)]},
+    ]
+    hbm1_name, hbm1 = next(iter(copyback["datadscs_"][2].items()))
+    assert (
+        hbm1_name
+        == "2_STCDPOpHBM_kv_repack_copyback_Tensor0_idx1_tile1_piece1_core31"
+    )
+    out1_pieces = hbm1["labeledDs_"][1]["PieceInfo"]
+    assert len(out1_pieces) == 1
+    assert out1_pieces[0]["dimToStartCordinate"]["x_"] == 1
+    assert out1_pieces[0]["PlacementInfo"][1] == {
+        "type": "hbm",
+        "memId": [-1],
+        "startAddr": [_hbm_dataop_addr(12416)],
+    }
+    nop_name, nop = next(iter(copyback["datadscs_"][3].items()))
+    assert nop_name == "3_nop_kv_repack_copyback_barrier_Tensor0_idx1_tile1"
+    assert nop["coreIdsUsed_"] == list(range(32))
+    assert nop["op"] == {"name": "nop"}
+
+
+def test_flash_kv_repack_copyback_hbm_roundtrip_keeps_original_producer():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_roundtrip=True,
+    )
+
+    assert result is not None
+    assert result["replacements"] == {}
+    assert len(result["artifacts"]) == 1
+    assert result["insertions_before"] == {
+        "2_batchmatmul": [
+            "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+        ],
+    }
+    copyback = result["artifacts"][0][
+        "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+    ]
+    meta = copyback["flashAttentionPipeline_"]
+    assert meta["kv_repack_broadcast_role"] == "copyback"
+    assert meta["kv_repack_broadcast_group_count"] == 0
+    assert meta["kv_repack_copyback_direct_source"] is False
+    assert meta["kv_repack_copyback_hbm_roundtrip"] is True
+    assert copyback["opFuncsUsed_"] == [
+        "STCDPOpHBM",
+        "STCDPOpHBM",
+        "STCDPOpHBM",
+        "STCDPOpHBM",
+        "nop",
+    ]
+    assert copyback["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [4, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["1"] == [
+        [2, -1, 0, 1],
+        [3, -1, 1, 1],
+        [4, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["31"] == [
+        [4, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+
+    load0_name, load0 = next(iter(copyback["datadscs_"][0].items()))
+    assert (
+        load0_name
+        == "0_STCDPOpHBM_kv_repack_copyback_"
+        "Tensor0_idx1_tile1_roundtrip_source_piece0_load"
+    )
+    assert load0["coreIdsUsed_"] == [0]
+    assert load0["op"]["coreIDtoANInfo"] == {
+        "0": {
+            "isAnalyticalMode": 0,
+            "inpPieceOrder": ["p1"],
+            "outPieceOrder": ["p1"],
+        }
+    }
+    piece0 = load0["labeledDs_"][0]["PieceInfo"][0]
+    assert piece0["dimToStartCordinate"]["x_"] == 0
+    assert piece0["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [meta["kv_repack_source_lx_base"]],
+        },
+        {"type": "hbm", "memId": [-1], "startAddr": [_hbm_dataop_addr(12288)]},
+    ]
+    assert load0["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [meta["kv_repack_source_lx_base"]],
+        },
+    ]
+
+    store0_name, store0 = next(iter(copyback["datadscs_"][1].items()))
+    assert (
+        store0_name
+        == "1_STCDPOpHBM_kv_repack_copyback_"
+        "Tensor0_idx1_tile1_roundtrip_source_piece0_store"
+    )
+    assert store0["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [meta["kv_repack_source_lx_base"]],
+        },
+    ]
+    assert store0["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"] == piece0[
+        "PlacementInfo"
+    ]
+
+    load1_name, load1 = next(iter(copyback["datadscs_"][2].items()))
+    assert (
+        load1_name
+        == "2_STCDPOpHBM_kv_repack_copyback_"
+        "Tensor0_idx1_tile1_roundtrip_source_piece1_load"
+    )
+    piece1 = load1["labeledDs_"][0]["PieceInfo"][0]
+    assert load1["coreIdsUsed_"] == [1]
+    assert piece1["dimToStartCordinate"]["x_"] == 1
+    assert piece1["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [1],
+            "startAddr": [meta["kv_repack_source_lx_base"]],
+        },
+        {"type": "hbm", "memId": [-1], "startAddr": [_hbm_dataop_addr(12416)]},
+    ]
+    store1_name, store1 = next(iter(copyback["datadscs_"][3].items()))
+    assert (
+        store1_name
+        == "3_STCDPOpHBM_kv_repack_copyback_"
+        "Tensor0_idx1_tile1_roundtrip_source_piece1_store"
+    )
+    assert store1["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"] == piece1[
+        "PlacementInfo"
+    ]
+
+
+def test_flash_kv_repack_copyback_hbm_source_fanout_loads_before_fanout():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_source_fanout=True,
+    )
+
+    assert result is not None
+    assert result["replacements"] == {}
+    assert len(result["artifacts"]) == 1
+    assert result["insertions_before"] == {
+        "2_batchmatmul": [
+            "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+        ],
+    }
+    copyback = result["artifacts"][0][
+        "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+    ]
+    meta = copyback["flashAttentionPipeline_"]
+    assert meta["kv_repack_broadcast_role"] == "copyback"
+    assert meta["kv_repack_broadcast_group_count"] == 1
+    assert meta["kv_repack_copyback_direct_source"] is False
+    assert meta["kv_repack_copyback_hbm_roundtrip"] is False
+    assert meta["kv_repack_copyback_hbm_source_fanout"] is True
+    assert copyback["opFuncsUsed_"] == [
+        "STCDPOpHBM",
+        "STCDPOpHBM",
+        "STCDPOpLx",
+        "STCDPOpHBM",
+        "STCDPOpHBM",
+        "nop",
+    ]
+    assert copyback["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [2, -1, 1, 1],
+        [5, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["1"] == [
+        [1, -1, 0, 1],
+        [2, -1, 1, 1],
+        [5, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["31"] == [
+        [2, -1, 0, 1],
+        [3, -1, 1, 1],
+        [4, -1, 1, 1],
+        [5, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+
+    load0_name, load0 = next(iter(copyback["datadscs_"][0].items()))
+    load1_name, load1 = next(iter(copyback["datadscs_"][1].items()))
+    fanout_name, fanout = next(iter(copyback["datadscs_"][2].items()))
+    store0_name, store0 = next(iter(copyback["datadscs_"][3].items()))
+    store1_name, store1 = next(iter(copyback["datadscs_"][4].items()))
+    nop_name, nop = next(iter(copyback["datadscs_"][5].items()))
+
+    assert load0_name == (
+        "0_STCDPOpHBM_kv_repack_copyback_"
+        "Tensor0_idx1_tile1_hbm_source_piece0_load"
+    )
+    assert load1_name == (
+        "1_STCDPOpHBM_kv_repack_copyback_"
+        "Tensor0_idx1_tile1_hbm_source_piece1_load"
+    )
+    assert fanout_name == "2_STCDPOpLx_kv_repack_copyback_Tensor0_idx1_tile1"
+    assert store0_name == (
+        "3_STCDPOpHBM_kv_repack_copyback_Tensor0_idx1_tile1_piece0_core31"
+    )
+    assert store1_name == (
+        "4_STCDPOpHBM_kv_repack_copyback_Tensor0_idx1_tile1_piece1_core31"
+    )
+    assert nop_name == "5_nop_kv_repack_copyback_barrier_Tensor0_idx1_tile1"
+    assert load0["coreIdsUsed_"] == [0]
+    assert load1["coreIdsUsed_"] == [1]
+    assert fanout["op"] == {"name": "STCDPOpLx"}
+    assert store0["coreIdsUsed_"] == [31]
+    assert store1["coreIdsUsed_"] == [31]
+    assert nop["coreIdsUsed_"] == list(range(32))
+    assert load0["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [meta["kv_repack_source_lx_base"]],
+        },
+        {"type": "hbm", "memId": [-1], "startAddr": [_hbm_dataop_addr(12288)]},
+    ]
+    assert load0["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [meta["kv_repack_source_lx_base"]],
+        },
+    ]
+    assert store0["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [31],
+            "startAddr": [meta["kv_repack_consumer_lx_base"]],
+        },
+    ]
+    assert store0["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"][1] == {
+        "type": "hbm",
+        "memId": [-1],
+        "startAddr": [_hbm_dataop_addr(12288)],
+    }
+
+
+def test_flash_kv_repack_copyback_hbm_direct_load_reads_consumer_lx():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_direct_load=True,
+    )
+
+    assert result is not None
+    assert result["replacements"] == {}
+    assert len(result["artifacts"]) == 1
+    assert result["insertions_before"] == {
+        "2_batchmatmul": [
+            "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+        ],
+    }
+    copyback = result["artifacts"][0][
+        "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+    ]
+    meta = copyback["flashAttentionPipeline_"]
+    assert meta["kv_repack_broadcast_role"] == "copyback"
+    assert meta["kv_repack_broadcast_group_count"] == 0
+    assert meta["kv_repack_copyback_direct_source"] is False
+    assert meta["kv_repack_copyback_hbm_roundtrip"] is False
+    assert meta["kv_repack_copyback_hbm_source_fanout"] is False
+    assert meta["kv_repack_copyback_hbm_direct_load"] is True
+    assert copyback["opFuncsUsed_"] == [
+        "STCDPOpHBM",
+        "STCDPOpHBM",
+        "STCDPOpHBM",
+        "STCDPOpHBM",
+        "nop",
+    ]
+    assert copyback["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [4, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["31"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 1],
+        [4, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+
+    load0_name, load0 = next(iter(copyback["datadscs_"][0].items()))
+    load1_name, load1 = next(iter(copyback["datadscs_"][1].items()))
+    store0_name, store0 = next(iter(copyback["datadscs_"][2].items()))
+    store1_name, store1 = next(iter(copyback["datadscs_"][3].items()))
+    nop_name, nop = next(iter(copyback["datadscs_"][4].items()))
+    assert load0_name == (
+        "0_STCDPOpHBM_kv_repack_copyback_"
+        "Tensor0_idx1_tile1_hbm_direct_piece0_load"
+    )
+    assert load1_name == (
+        "1_STCDPOpHBM_kv_repack_copyback_"
+        "Tensor0_idx1_tile1_hbm_direct_piece1_load"
+    )
+    assert store0_name == (
+        "2_STCDPOpHBM_kv_repack_copyback_Tensor0_idx1_tile1_piece0_core31"
+    )
+    assert store1_name == (
+        "3_STCDPOpHBM_kv_repack_copyback_Tensor0_idx1_tile1_piece1_core31"
+    )
+    assert nop_name == "4_nop_kv_repack_copyback_barrier_Tensor0_idx1_tile1"
+    assert load0["coreIdsUsed_"] == list(range(32))
+    assert load1["coreIdsUsed_"] == list(range(32))
+    assert store0["coreIdsUsed_"] == [31]
+    assert store1["coreIdsUsed_"] == [31]
+    assert nop["coreIdsUsed_"] == list(range(32))
+    assert load0["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [meta["kv_repack_consumer_lx_base"]],
+        },
+        {"type": "hbm", "memId": [-1], "startAddr": [_hbm_dataop_addr(12288)]},
+    ]
+    assert load0["labeledDs_"][0]["PieceInfo"][-1]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [31],
+            "startAddr": [meta["kv_repack_consumer_lx_base"]],
+        },
+        {"type": "hbm", "memId": [-1], "startAddr": [_hbm_dataop_addr(12288)]},
+    ]
+    assert store0["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [31],
+            "startAddr": [meta["kv_repack_consumer_lx_base"]],
+        },
+    ]
+    assert store0["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"][1] == {
+        "type": "hbm",
+        "memId": [-1],
+        "startAddr": [_hbm_dataop_addr(12288)],
+    }
+
+
+def test_flash_kv_repack_copyback_hbm_direct_load_can_readback_core0():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_direct_load=True,
+        readback_core=0,
+    )
+
+    assert result is not None
+    copyback = result["artifacts"][0][
+        "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+    ]
+    meta = copyback["flashAttentionPipeline_"]
+    assert meta["kv_repack_copyback_hbm_direct_load"] is True
+    assert meta["kv_repack_copyback_readback_core"] == 0
+    assert copyback["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [2, -1, 1, 1],
+        [3, -1, 1, 1],
+        [4, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["31"] == [
+        [0, -1, 0, 1],
+        [1, -1, 1, 1],
+        [4, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    store0_name, store0 = next(iter(copyback["datadscs_"][2].items()))
+    assert store0_name == (
+        "2_STCDPOpHBM_kv_repack_copyback_Tensor0_idx1_tile1_piece0_core0"
+    )
+    assert store0["coreIdsUsed_"] == [0]
+    assert store0["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [meta["kv_repack_consumer_lx_base"]],
+        },
+    ]
+
+
+def test_flash_kv_repack_copyback_hbm_load_only_skips_hbm_store():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_roundtrip=True,
+        hbm_roundtrip_load_only=True,
+    )
+
+    assert result is not None
+    assert result["replacements"] == {}
+    assert len(result["artifacts"]) == 1
+    copyback = result["artifacts"][0][
+        "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+    ]
+    meta = copyback["flashAttentionPipeline_"]
+    assert meta["kv_repack_copyback_hbm_roundtrip"] is True
+    assert meta["kv_repack_copyback_hbm_roundtrip_load_only"] is True
+    assert copyback["opFuncsUsed_"] == ["STCDPOpHBM", "STCDPOpHBM", "nop"]
+    assert copyback["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [2, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["1"] == [
+        [1, -1, 0, 1],
+        [2, -1, 1, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["31"] == [
+        [2, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+
+    assert len(copyback["datadscs_"]) == 3
+    load0_name, load0 = next(iter(copyback["datadscs_"][0].items()))
+    load1_name, load1 = next(iter(copyback["datadscs_"][1].items()))
+    assert load0_name.endswith("_roundtrip_source_piece0_load")
+    assert load1_name.endswith("_roundtrip_source_piece1_load")
+    assert "store" not in "".join(
+        next(iter(dataop)) for dataop in copyback["datadscs_"]
+    )
+    assert load0["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [meta["kv_repack_source_lx_base"]],
+        },
+        {"type": "hbm", "memId": [-1], "startAddr": [_hbm_dataop_addr(12288)]},
+    ]
+    assert load0["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [0],
+            "startAddr": [meta["kv_repack_source_lx_base"]],
+        },
+    ]
+    assert load1["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"] == [
+        {
+            "type": "lx",
+            "memId": [1],
+            "startAddr": [meta["kv_repack_source_lx_base"]],
+        },
+    ]
+
+
+def test_flash_kv_repack_copyback_hbm_barrier_only_skips_hbm_dataops():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_roundtrip=True,
+        hbm_roundtrip_barrier_only=True,
+    )
+
+    assert result is not None
+    assert result["replacements"] == {}
+    assert len(result["artifacts"]) == 1
+    copyback = result["artifacts"][0][
+        "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+    ]
+    meta = copyback["flashAttentionPipeline_"]
+    assert meta["kv_repack_copyback_hbm_roundtrip"] is True
+    assert meta["kv_repack_copyback_hbm_roundtrip_load_only"] is False
+    assert meta["kv_repack_copyback_hbm_roundtrip_barrier_only"] is True
+    assert copyback["opFuncsUsed_"] == ["nop"]
+    assert len(copyback["datadscs_"]) == 1
+    nop_name, nop = next(iter(copyback["datadscs_"][0].items()))
+    assert nop_name == "0_nop_kv_repack_copyback_barrier_Tensor0_idx1_tile1"
+    assert nop["op"] == {"name": "nop"}
+    assert copyback["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["1"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["31"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+
+
+def test_flash_kv_repack_copyback_can_replace_original_consumer():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_roundtrip=True,
+        hbm_roundtrip_barrier_only=True,
+        replace_consumer=True,
+    )
+
+    assert result is not None
+    copyback_name = "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+    assert result["replacements"] == {"2_batchmatmul": copyback_name}
+    assert result["insertions_before"] == {}
+    copyback = result["artifacts"][0][copyback_name]
+    meta = copyback["flashAttentionPipeline_"]
+    assert meta["kv_repack_copyback_replaces_consumer"] is True
+    assert meta["kv_repack_copyback_inserts_before_consumer"] is False
+    assert copyback["opFuncsUsed_"] == ["nop"]
+    assert copyback["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+
+
+def test_flash_kv_repack_copyback_compute_only_wraps_original_consumer():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_roundtrip=True,
+        replace_consumer=True,
+        compute_only=True,
+    )
+
+    assert result is not None
+    copyback_name = "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+    assert result["replacements"] == {"2_batchmatmul": copyback_name}
+    copyback = result["artifacts"][0][copyback_name]
+    meta = copyback["flashAttentionPipeline_"]
+    assert meta["kv_repack_copyback_compute_only"] is True
+    assert meta["compute_tile_count"] == 1
+    assert copyback["datadscs_"] == []
+    assert copyback["opFuncsUsed_"] == []
+    assert len(copyback["dscs_"]) == 1
+    assert copyback["coreIdToDscSchedule"]["0"] == [[-1, 0, 0, 0]]
+    assert copyback["coreIdToDscSchedule"]["31"] == [[-1, 0, 0, 0]]
+
+
+def test_flash_kv_repack_copyback_compute_only_can_preserve_consumer_name():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_roundtrip=True,
+        compute_only=True,
+        preserve_consumer_name=True,
+    )
+
+    assert result is not None
+    assert result["replacements"] == {}
+    assert result["insertions_before"] == {}
+    copyback = result["artifacts"][0]["2_batchmatmul"]
+    meta = copyback["flashAttentionPipeline_"]
+    assert meta["kv_repack_copyback_compute_only"] is True
+    assert meta["kv_repack_copyback_preserve_consumer_name"] is True
+    assert copyback["datadscs_"] == []
+    assert copyback["opFuncsUsed_"] == []
+
+
+def test_flash_kv_repack_copyback_exact_clone_replaces_original_consumer():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_roundtrip=True,
+        exact_clone=True,
+    )
+
+    assert result is not None
+    clone_name = "mixed_flash_kv_repack_broadcast_copyback_1_input1_exact_clone"
+    assert result["replacements"] == {"2_batchmatmul": clone_name}
+    assert result["insertions_before"] == {}
+    assert result["artifacts"] == [{clone_name: rz._body(sdscs[2])}]
+    clone = result["artifacts"][0][clone_name]
+    assert "flashAttentionPipeline_" not in clone
+    assert "datadscs_" not in clone
+    assert "opFuncsUsed_" not in clone
+    assert clone["coreIdToDscSchedule"] == rz._body(sdscs[2])["coreIdToDscSchedule"]
+
+
+def test_flash_kv_repack_copyback_exact_clone_can_preserve_consumer_name():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_roundtrip=True,
+        exact_clone=True,
+        preserve_consumer_name=True,
+    )
+
+    assert result is not None
+    assert result["replacements"] == {}
+    assert result["insertions_before"] == {}
+    assert result["artifacts"] == [{"2_batchmatmul": rz._body(sdscs[2])}]
+
+
+def test_flash_kv_repack_copyback_data_only_omits_copied_compute():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_roundtrip=True,
+        hbm_roundtrip_barrier_only=True,
+        data_only=True,
+    )
+
+    assert result is not None
+    copyback = result["artifacts"][0][
+        "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+    ]
+    meta = copyback["flashAttentionPipeline_"]
+    assert meta["kv_repack_copyback_data_only"] is True
+    assert meta["compute_tile_count"] == 0
+    assert copyback["dscs_"] == []
+    assert copyback["opFuncsUsed_"] == ["nop"]
+    assert "coreIdToDsc_" not in copyback
+    assert copyback["coreIdToDscSchedule"]["0"] == [[0, -1, 0, 0]]
+    assert copyback["coreIdToDscSchedule"]["31"] == [[0, -1, 0, 0]]
+
+
+def test_flash_kv_repack_copyback_hbm_load_data_only_keeps_hbm_loads():
+    sdscs = _fake_flash_layout_xform_kv_repack_sdscs()
+
+    result = rz.build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+        sdscs,
+        tile_index=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        hbm_roundtrip=True,
+        hbm_roundtrip_load_only=True,
+        data_only=True,
+    )
+
+    assert result is not None
+    copyback = result["artifacts"][0][
+        "mixed_flash_kv_repack_broadcast_copyback_1_input1_copyback"
+    ]
+    meta = copyback["flashAttentionPipeline_"]
+    assert meta["kv_repack_copyback_data_only"] is True
+    assert copyback["dscs_"] == []
+    assert copyback["opFuncsUsed_"] == ["STCDPOpHBM", "STCDPOpHBM", "nop"]
+    assert copyback["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [2, -1, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["1"] == [
+        [1, -1, 0, 1],
+        [2, -1, 1, 0],
+    ]
+    assert copyback["coreIdToDscSchedule"]["31"] == [[2, -1, 0, 0]]
 
 
 def test_flash_kv_repack_broadcast_pair_can_omit_ifn_transfer_marker():
@@ -2376,6 +5398,12 @@ def test_bundle_executes_kv_repack_pair_gate():
             assert calls["kv_repack_pair_subpiece_reuse"] == [True]
             assert calls["kv_repack_pair_group_size"] == [0]
             assert calls["kv_repack_pair_self_resident_source"] == [False]
+            assert calls["kv_repack_pair_hbm_source"] == [False]
+            assert calls["kv_repack_pair_hbm_direct_load"] == [False]
+            assert calls["kv_repack_pair_hbm_staged"] == [False]
+            assert calls["kv_repack_pair_consumer_core_state_init"] == [True]
+            assert calls["kv_repack_pair_consumer_ds_type"] == [""]
+            assert calls["kv_repack_pair_consumer_lx_alloc_style"] == [""]
             assert calls["kv_repack_pair_use_unicast"] == [-1]
             assert calls["kv_repack_pair_force_mc_mode"] == [-1]
             with open(os.path.join(output_dir, "bundle.mlir")) as file:
@@ -2388,6 +5416,1128 @@ def test_bundle_executes_kv_repack_pair_gate():
                 "sdsc_mixed_flash_kv_repack_broadcast_pair_1_input1_consumer.json"
                 in bundle_mlir
             )
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_combine_non_conflicting_kv_repack_and_layout_xform_pairs():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        kv_repack_pair_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_pair_hbm_staged=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"1_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_pair"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["layout_xform"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert (
+                "sdsc_mixed_flash_kv_repack_broadcast_pair_1_input1_consumer.json"
+                in bundle_mlir
+            )
+            assert (
+                "sdsc_mixed_flash_layout_xform_pair_tile_2_predecessor.json"
+                in bundle_mlir
+            )
+            assert (
+                "sdsc_mixed_flash_layout_xform_pair_tile_2_consumer.json"
+                in bundle_mlir
+            )
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_rebuilds_kv_repack_pair_after_pointwise_handoff():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        pointwise_handoff=True,
+        layout_xform_pair_tile=-1,
+        kv_repack_pair_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_pair_hbm_staged=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["pointwise"] == [
+                {
+                    "score_scale_handoff": False,
+                    "pointwise_region0": rz.LAYOUT_XFORM_COMPOSE_POINTWISE_LX_BASE,
+                }
+            ]
+            assert calls["kv_repack_pair"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+            ]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert (
+                "sdsc_mixed_flash_kv_repack_broadcast_pair_1_input1_consumer.json"
+                in bundle_mlir
+            )
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_executes_kv_hbm_staged_hoist_gate_and_omits_future_producer():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_staged_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_staged_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert (
+                "sdsc_mixed_flash_kv_repack_hbm_staged_hoist_0_"
+                "future_producer.json"
+            ) in bundle_mlir
+            assert (
+                "sdsc_mixed_flash_kv_repack_hbm_staged_hoist_0_"
+                "future_kv_1_input1_consumer.json"
+            ) in bundle_mlir
+            assert "sdsc_1_ReStickifyOpHBM.json" not in bundle_mlir
+            assert bundle_mlir.index(
+                "sdsc_mixed_flash_kv_repack_hbm_staged_hoist_0_"
+                "future_producer.json"
+            ) < bundle_mlir.index("sdsc_0_batchmatmul.json")
+            assert os.path.exists(
+                os.path.join(output_dir, "sdsc_1_ReStickifyOpHBM.json")
+            )
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_executes_kv_hbm_prefetch_hoist_gate_and_omits_future_producer():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_lx_base"] == [None]
+            assert calls["kv_repack_hbm_prefetch_serial"] == [False]
+            assert calls["kv_repack_hbm_prefetch_prefill_current"] == [False]
+            assert calls["kv_repack_hbm_prefetch_redundant_future"] == [False]
+            assert calls["kv_repack_hbm_prefetch_serialize_current"] == [False]
+            assert calls["kv_repack_hbm_prefetch_external_future"] == [False]
+            assert calls["kv_repack_hbm_prefetch_lx_roundtrip"] == [False]
+            assert calls["kv_repack_hbm_prefetch_tail_current"] == [False]
+            assert calls["kv_repack_hbm_prefetch_source_fanout"] == [False]
+            assert calls["kv_repack_hbm_prefetch_loader_fanout"] == [False]
+            assert calls["kv_repack_hbm_prefetch_loader_core"] == [0]
+            assert calls["kv_repack_hbm_prefetch_loader_lx_base"] == [-1]
+            assert calls["kv_repack_hbm_prefetch_fanout_use_unicast"] == [-1]
+            assert (
+                calls[
+                    "kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers"
+                ]
+                == [-1]
+            )
+            assert calls["kv_repack_hbm_prefetch_fanout_copyback_core"] == [-2]
+            assert (
+                calls[
+                    "kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core"
+                ]
+                == [False]
+            )
+            assert (
+                calls[
+                    "kv_repack_hbm_prefetch_loader_copyback_without_fanout"
+                ]
+                == [False]
+            )
+            assert (
+                calls[
+                    "kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces"
+                ]
+                == [False]
+            )
+            assert (
+                calls["kv_repack_hbm_prefetch_serialize_loader_core"]
+                == [False]
+            )
+            assert calls["kv_repack_hbm_prefetch_corelet_id"] == [None]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert (
+                "sdsc_mixed_flash_kv_repack_hbm_prefetch_hoist_0_"
+                "future_producer.json"
+            ) in bundle_mlir
+            assert (
+                "sdsc_mixed_flash_kv_repack_hbm_prefetch_hoist_0_"
+                "current_prefetch.json"
+            ) in bundle_mlir
+            assert (
+                "sdsc_mixed_flash_kv_repack_hbm_prefetch_hoist_0_"
+                "future_consumer.json"
+            ) in bundle_mlir
+            assert "sdsc_1_ReStickifyOpHBM.json" not in bundle_mlir
+            assert bundle_mlir.index(
+                "sdsc_mixed_flash_kv_repack_hbm_prefetch_hoist_0_"
+                "future_producer.json"
+            ) < bundle_mlir.index(
+                "sdsc_mixed_flash_kv_repack_hbm_prefetch_hoist_0_"
+                "current_prefetch.json"
+            )
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_lx_base_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_lx_base=1625344,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_lx_base"] == [1625344]
+            assert calls["kv_repack_hbm_prefetch_serial"] == [False]
+            assert calls["kv_repack_hbm_prefetch_prefill_current"] == [False]
+            assert calls["kv_repack_hbm_prefetch_redundant_future"] == [False]
+            assert calls["kv_repack_hbm_prefetch_serialize_current"] == [False]
+            assert calls["kv_repack_hbm_prefetch_external_future"] == [False]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_serial_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_serial=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_lx_base"] == [None]
+            assert calls["kv_repack_hbm_prefetch_serial"] == [True]
+            assert calls["kv_repack_hbm_prefetch_prefill_current"] == [False]
+            assert calls["kv_repack_hbm_prefetch_redundant_future"] == [False]
+            assert calls["kv_repack_hbm_prefetch_serialize_current"] == [False]
+            assert calls["kv_repack_hbm_prefetch_external_future"] == [False]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_prefill_current_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_prefill_current=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_prefill_current"] == [True]
+            assert calls["kv_repack_hbm_prefetch_redundant_future"] == [False]
+            assert calls["kv_repack_hbm_prefetch_serialize_current"] == [False]
+            assert calls["kv_repack_hbm_prefetch_external_future"] == [False]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_redundant_future_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_redundant_future=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_serial"] == [False]
+            assert calls["kv_repack_hbm_prefetch_prefill_current"] == [False]
+            assert calls["kv_repack_hbm_prefetch_redundant_future"] == [True]
+            assert calls["kv_repack_hbm_prefetch_serialize_current"] == [False]
+            assert calls["kv_repack_hbm_prefetch_external_future"] == [False]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_serialize_current_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_redundant_future=True,
+        kv_repack_hbm_prefetch_serialize_current=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_redundant_future"] == [True]
+            assert calls["kv_repack_hbm_prefetch_serialize_current"] == [True]
+            assert calls["kv_repack_hbm_prefetch_external_future"] == [False]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_external_future_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_external_future=False,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_external_future"] == [False]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_tail_current_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_tail_current=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_tail_current"] == [True]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_source_fanout_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_source_fanout=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_source_fanout"] == [True]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_loader_fanout_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_loader_fanout=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_loader_fanout"] == [True]
+            assert calls["kv_repack_hbm_prefetch_loader_core"] == [0]
+            assert calls["kv_repack_hbm_prefetch_loader_lx_base"] == [-1]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_loader_core_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_loader_fanout=True,
+        kv_repack_hbm_prefetch_loader_core=31,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_loader_fanout"] == [True]
+            assert calls["kv_repack_hbm_prefetch_loader_core"] == [31]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_loader_lx_base_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_loader_fanout=True,
+        kv_repack_hbm_prefetch_loader_lx_base=-2,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_loader_fanout"] == [True]
+            assert calls["kv_repack_hbm_prefetch_loader_lx_base"] == [-2]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_serialize_loader_core_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_loader_fanout=True,
+        kv_repack_hbm_prefetch_serialize_loader_core=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_loader_fanout"] == [True]
+            assert calls["kv_repack_hbm_prefetch_serialize_loader_core"] == [
+                True
+            ]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_fanout_unicast_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_fanout_use_unicast=1,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_fanout_use_unicast"] == [1]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_fanout_lxsfp_lx_transfer_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers=0,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert (
+                calls[
+                    "kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers"
+                ]
+                == [0]
+            )
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_fanout_copyback_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_fanout_copyback_core=0,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_fanout_copyback_core"] == [0]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_fanout_restrict_to_copyback_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_fanout_copyback_core=0,
+        kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert (
+                calls[
+                    "kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core"
+                ]
+                == [True]
+            )
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_loader_copyback_without_fanout_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_fanout_copyback_core=0,
+        kv_repack_hbm_prefetch_loader_copyback_without_fanout=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert (
+                calls[
+                    "kv_repack_hbm_prefetch_loader_copyback_without_fanout"
+                ]
+                == [True]
+            )
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_loader_fanout_full_tile_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert (
+                calls[
+                    "kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces"
+                ]
+                == [True]
+            )
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_forwards_kv_hbm_prefetch_roundtrip_corelet1_probe():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_hbm_prefetch_hoist_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_hbm_prefetch_lx_roundtrip=True,
+        kv_repack_hbm_prefetch_corelet1=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_hbm_prefetch_hoist"] == [
+                rz.LAYOUT_XFORM_PAIR_AUTO_TILE
+            ]
+            assert calls["kv_repack_hbm_prefetch_lx_roundtrip"] == [True]
+            assert calls["kv_repack_hbm_prefetch_corelet_id"] == [1]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_pair_hbm_source():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_pair_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_pair_hbm_source=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_pair"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_pair_hbm_source"] == [True]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert (
+                "sdsc_mixed_flash_kv_repack_broadcast_pair_1_input1_producer.json"
+                not in bundle_mlir
+            )
+            assert (
+                "sdsc_mixed_flash_kv_repack_broadcast_pair_1_input1_consumer.json"
+                in bundle_mlir
+            )
+            assert "sdsc_1_ReStickifyOpHBM.json" in bundle_mlir
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_pair_hbm_direct_load():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_pair_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_pair_hbm_direct_load=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_pair"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_pair_hbm_direct_load"] == [True]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert (
+                "sdsc_mixed_flash_kv_repack_broadcast_pair_1_input1_producer.json"
+                not in bundle_mlir
+            )
+            assert (
+                "sdsc_mixed_flash_kv_repack_broadcast_pair_1_input1_consumer.json"
+                in bundle_mlir
+            )
+            assert "sdsc_1_ReStickifyOpHBM.json" in bundle_mlir
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_pair_hbm_staged():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_pair_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_pair_hbm_staged=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_pair"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_pair_hbm_staged"] == [True]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert (
+                "sdsc_mixed_flash_kv_repack_broadcast_pair_1_input1_producer.json"
+                not in bundle_mlir
+            )
+            assert (
+                "sdsc_mixed_flash_kv_repack_broadcast_pair_1_input1_consumer.json"
+                in bundle_mlir
+            )
+            assert "sdsc_1_ReStickifyOpHBM.json" in bundle_mlir
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_disable_kv_repack_pair_consumer_core_state_init():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_pair_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_pair_consumer_core_state_init=False,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_pair"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_pair_consumer_core_state_init"] == [False]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_override_kv_repack_pair_consumer_ds_type():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_pair_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_pair_consumer_ds_type="INPUT",
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_pair"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_pair_consumer_ds_type"] == ["INPUT"]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_override_kv_repack_pair_consumer_lx_alloc_style():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_pair_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_pair_consumer_lx_alloc_style="canonical_loop",
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_pair"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_pair_consumer_lx_alloc_style"] == [
+                "canonical_loop"
+            ]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_executes_kv_repack_copyback_before_original_consumer():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_copyback_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_copyback"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_copyback_core"] == [-1]
+            assert calls["kv_repack_copyback_direct_source"] == [False]
+            assert calls["kv_repack_copyback_hbm_roundtrip"] == [False]
+            assert calls["kv_repack_copyback_hbm_source_fanout"] == [False]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            producer = (
+                "sdsc_mixed_flash_kv_repack_broadcast_copyback_"
+                "1_input1_producer.json"
+            )
+            copyback = (
+                "sdsc_mixed_flash_kv_repack_broadcast_copyback_"
+                "1_input1_copyback.json"
+            )
+            consumer = "sdsc_2_batchmatmul.json"
+            assert producer in bundle_mlir
+            assert copyback in bundle_mlir
+            assert consumer in bundle_mlir
+            assert bundle_mlir.index(producer) < bundle_mlir.index(copyback)
+            assert bundle_mlir.index(copyback) < bundle_mlir.index(consumer)
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_copyback_hbm_roundtrip():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_copyback_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_copyback_hbm_roundtrip=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_copyback"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_copyback_hbm_roundtrip"] == [True]
+            with open(os.path.join(output_dir, "bundle.mlir")) as file:
+                bundle_mlir = file.read()
+            assert (
+                "sdsc_mixed_flash_kv_repack_broadcast_copyback_"
+                "1_input1_copyback.json"
+            ) in bundle_mlir
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_copyback_hbm_source_fanout():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_copyback_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_copyback_hbm_source_fanout=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_copyback"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_copyback_hbm_roundtrip"] == [False]
+            assert calls["kv_repack_copyback_hbm_source_fanout"] == [True]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_copyback_hbm_direct_load():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_copyback_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_copyback_hbm_direct_load=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_copyback"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_copyback_hbm_roundtrip"] == [False]
+            assert calls["kv_repack_copyback_hbm_source_fanout"] == [False]
+            assert calls["kv_repack_copyback_hbm_direct_load"] == [True]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_copyback_hbm_load_only():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_copyback_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_copyback_hbm_roundtrip=True,
+        kv_repack_copyback_hbm_roundtrip_load_only=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_copyback"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_copyback_hbm_roundtrip"] == [True]
+            assert calls["kv_repack_copyback_hbm_roundtrip_load_only"] == [True]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_copyback_hbm_barrier_only():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_copyback_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_copyback_hbm_roundtrip=True,
+        kv_repack_copyback_hbm_roundtrip_barrier_only=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_copyback"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_copyback_hbm_roundtrip"] == [True]
+            assert calls["kv_repack_copyback_hbm_roundtrip_barrier_only"] == [True]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_copyback_data_only():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_copyback_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_copyback_hbm_roundtrip=True,
+        kv_repack_copyback_data_only=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_copyback"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_copyback_hbm_roundtrip"] == [True]
+            assert calls["kv_repack_copyback_data_only"] == [True]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_copyback_replace_consumer():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_copyback_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_copyback_hbm_roundtrip=True,
+        kv_repack_copyback_replace_consumer=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_copyback"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_copyback_hbm_roundtrip"] == [True]
+            assert calls["kv_repack_copyback_replace_consumer"] == [True]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_copyback_compute_only():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_copyback_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_copyback_hbm_roundtrip=True,
+        kv_repack_copyback_replace_consumer=True,
+        kv_repack_copyback_compute_only=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_copyback"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_copyback_replace_consumer"] == [True]
+            assert calls["kv_repack_copyback_compute_only"] == [True]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_copyback_exact_clone():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_copyback_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_copyback_hbm_roundtrip=True,
+        kv_repack_copyback_exact_clone=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_copyback"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_copyback_hbm_roundtrip"] == [True]
+            assert calls["kv_repack_copyback_exact_clone"] == [True]
+    finally:
+        _restore_modules(saved)
+
+
+def test_bundle_can_enable_kv_repack_copyback_preserve_consumer_name():
+    bundle, calls, saved = _load_bundle_with_stubs(
+        layout_xform_pair_tile=-1,
+        kv_repack_copyback_tile=rz.LAYOUT_XFORM_PAIR_AUTO_TILE,
+        kv_repack_copyback_hbm_roundtrip=True,
+        kv_repack_copyback_exact_clone=True,
+        kv_repack_copyback_preserve_consumer_name=True,
+    )
+    try:
+        specs = [
+            {"0_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+            {"1_ReStickifyOpHBM": {"dscs_": [{"ReStickifyOpHBM": {}}]}},
+            {"2_batchmatmul": {"dscs_": [{"batchmatmul": {}}]}},
+        ]
+        with tempfile.TemporaryDirectory() as output_dir:
+            bundle.generate_bundle("kernel", output_dir, specs)
+
+            assert calls["kv_repack_copyback"] == [rz.LAYOUT_XFORM_PAIR_AUTO_TILE]
+            assert calls["kv_repack_copyback_exact_clone"] == [True]
+            assert calls["kv_repack_copyback_preserve_consumer_name"] == [True]
     finally:
         _restore_modules(saved)
 

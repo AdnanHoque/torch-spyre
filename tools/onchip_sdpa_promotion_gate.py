@@ -28,6 +28,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SWEEP_SCRIPT = REPO_ROOT / "tools" / "onchip_sdpa_sweep.py"
+DEFAULT_VARIANT = "onchip_hbm_kv_layout_xform"
+DEFAULT_WARPSPEC_VARIANT = "onchip_warpspec_kv_hbm_prefetch_loader_core31"
+DEFAULT_WARPSPEC_DECOUPLED_VARIANT = (
+    "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled"
+)
+DEFAULT_VARIANTS_BY_GATE = {
+    "onchip_layout_xform": DEFAULT_VARIANT,
+    "onchip_warpspec": DEFAULT_WARPSPEC_VARIANT,
+    "onchip_warpspec_decoupled": DEFAULT_WARPSPEC_DECOUPLED_VARIANT,
+}
 
 
 @dataclass(frozen=True)
@@ -41,6 +51,9 @@ class GateCase:
     min_mixed_by_length: dict[int, int]
     layout_xform_lengths: tuple[int, ...]
     is_causal: bool = False
+    allow_kv_repack: bool = False
+    require_warpspec_loader_prefetch: bool = False
+    expected_loader_core: int | None = None
 
 
 ONCHIP_LAYOUT_XFORM_CASES = (
@@ -106,6 +119,16 @@ ONCHIP_LAYOUT_XFORM_CASES = (
         layout_xform_lengths=(128, 256),
     ),
     GateCase(
+        name="b1h8d64_block64_hbmkv",
+        batch=1,
+        heads=8,
+        dim=64,
+        block_size=64,
+        lengths=(256,),
+        min_mixed_by_length={256: 19},
+        layout_xform_lengths=(256,),
+    ),
+    GateCase(
         name="b1h2d64_block128",
         batch=1,
         heads=2,
@@ -127,9 +150,162 @@ ONCHIP_LAYOUT_XFORM_CASES = (
     ),
 )
 
+ONCHIP_WARPSPEC_CASES = (
+    GateCase(
+        name="b1h2d64_block64_loader_core31",
+        batch=1,
+        heads=2,
+        dim=64,
+        block_size=64,
+        lengths=(128, 256, 384, 512, 768, 1024),
+        min_mixed_by_length={
+            128: 10,
+            256: 20,
+            384: 30,
+            512: 40,
+            768: 60,
+            1024: 79,
+        },
+        layout_xform_lengths=(128, 256, 384, 512, 768, 1024),
+        allow_kv_repack=True,
+        require_warpspec_loader_prefetch=True,
+        expected_loader_core=31,
+    ),
+    GateCase(
+        name="b1h2d64_block64_causal_loader_core31",
+        batch=1,
+        heads=2,
+        dim=64,
+        block_size=64,
+        lengths=(128, 256),
+        min_mixed_by_length={128: 8, 256: 16},
+        layout_xform_lengths=(),
+        is_causal=True,
+        allow_kv_repack=True,
+        require_warpspec_loader_prefetch=True,
+        expected_loader_core=31,
+    ),
+    GateCase(
+        name="b1h2d64_block128_loader_core31",
+        batch=1,
+        heads=2,
+        dim=64,
+        block_size=128,
+        lengths=(256, 384, 512),
+        min_mixed_by_length={256: 10, 384: 15, 512: 20},
+        layout_xform_lengths=(256, 384, 512),
+        allow_kv_repack=True,
+        require_warpspec_loader_prefetch=True,
+        expected_loader_core=31,
+    ),
+    GateCase(
+        name="b2h2d64_block64_loader_core31",
+        batch=2,
+        heads=2,
+        dim=64,
+        block_size=64,
+        lengths=(128, 256),
+        min_mixed_by_length={128: 8, 256: 16},
+        layout_xform_lengths=(128, 256),
+        allow_kv_repack=True,
+        require_warpspec_loader_prefetch=True,
+        expected_loader_core=31,
+    ),
+    GateCase(
+        name="b1h2d128_block64_loader_core31",
+        batch=1,
+        heads=2,
+        dim=128,
+        block_size=64,
+        lengths=(128, 256, 384, 512, 768, 1024),
+        min_mixed_by_length={
+            128: 10,
+            256: 20,
+            384: 29,
+            512: 39,
+            768: 60,
+            1024: 80,
+        },
+        layout_xform_lengths=(128, 256, 384, 512, 768, 1024),
+        allow_kv_repack=True,
+        require_warpspec_loader_prefetch=True,
+        expected_loader_core=31,
+    ),
+    GateCase(
+        name="b2h4d128_block64_loader_core31",
+        batch=2,
+        heads=4,
+        dim=128,
+        block_size=64,
+        lengths=(128, 256),
+        min_mixed_by_length={128: 8, 256: 16},
+        layout_xform_lengths=(128, 256),
+        allow_kv_repack=True,
+        require_warpspec_loader_prefetch=True,
+        expected_loader_core=31,
+    ),
+    GateCase(
+        name="b1h4d64_block64_loader_core31",
+        batch=1,
+        heads=4,
+        dim=64,
+        block_size=64,
+        lengths=(128, 256, 384, 512),
+        min_mixed_by_length={128: 10, 256: 20, 384: 30, 512: 40},
+        layout_xform_lengths=(128, 256, 384, 512),
+        allow_kv_repack=True,
+        require_warpspec_loader_prefetch=True,
+        expected_loader_core=31,
+    ),
+    GateCase(
+        name="b1h8d64_block64_loader_core31",
+        batch=1,
+        heads=8,
+        dim=64,
+        block_size=64,
+        lengths=(128, 256),
+        min_mixed_by_length={128: 10, 256: 20},
+        layout_xform_lengths=(128, 256),
+        allow_kv_repack=True,
+        require_warpspec_loader_prefetch=True,
+        expected_loader_core=31,
+    ),
+)
+
+ONCHIP_WARPSPEC_DECOUPLED_CASES = (
+    GateCase(
+        name="b1h4d64_block64_long_decoupled_loader_core31",
+        batch=1,
+        heads=4,
+        dim=64,
+        block_size=64,
+        lengths=(768, 1024),
+        min_mixed_by_length={768: 59, 1024: 78},
+        layout_xform_lengths=(),
+        allow_kv_repack=True,
+        require_warpspec_loader_prefetch=True,
+        expected_loader_core=31,
+    ),
+    GateCase(
+        name="b2h4d128_block64_long_decoupled_loader_core31",
+        batch=2,
+        heads=4,
+        dim=128,
+        block_size=64,
+        lengths=(384, 512, 768, 1024),
+        min_mixed_by_length={384: 22, 512: 31, 768: 47, 1024: 63},
+        layout_xform_lengths=(),
+        allow_kv_repack=True,
+        require_warpspec_loader_prefetch=True,
+        expected_loader_core=31,
+    ),
+)
+
 
 GATES = {
     "onchip_layout_xform": ONCHIP_LAYOUT_XFORM_CASES,
+    "onchip_warpspec": ONCHIP_WARPSPEC_CASES,
+    "onchip_warpspec_decoupled": ONCHIP_WARPSPEC_DECOUPLED_CASES,
 }
 
 
@@ -216,6 +392,66 @@ def _has_layout_xform_consumer(row: dict) -> bool:
     return False
 
 
+def _has_pointwise_handoff(row: dict) -> bool:
+    pointwise_suffixes = ("_add", "_mul", "_sub", "_exp", "_maxnonstick")
+    for mixed in row.get("mixed_sdscs", []):
+        name = str(mixed.get("name") or "")
+        if name.startswith("mixed_flash_"):
+            continue
+        if not name.endswith(pointwise_suffixes):
+            continue
+        if "STCDPOpLx" not in (mixed.get("opFuncsUsed") or []):
+            continue
+        return True
+    return False
+
+
+def _has_kv_repack_artifact(row: dict) -> bool:
+    for mixed in row.get("mixed_sdscs", []):
+        flash = mixed.get("flash_pipeline") or {}
+        haystack = " ".join(
+            str(value or "")
+            for value in (
+                mixed.get("name"),
+                mixed.get("file"),
+                flash.get("source"),
+            )
+        ).lower()
+        if "kv_repack" in haystack or "kv-repack" in haystack:
+            return True
+    return False
+
+
+def _has_warpspec_loader_prefetch(row: dict, *, loader_core: int | None) -> bool:
+    for mixed in row.get("mixed_sdscs", []):
+        flash = mixed.get("flash_pipeline") or {}
+        if flash.get("kv_repack_hbm_prefetch_hoist_role") != "current_prefetch":
+            continue
+        if flash.get("kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout") is not True:
+            continue
+        if (
+            flash.get(
+                "kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout_full_tile_pieces"
+            )
+            is not True
+        ):
+            continue
+        if (
+            flash.get("kv_repack_hbm_prefetch_hoist_serialize_loader_core_prefetch")
+            is not True
+        ):
+            continue
+        if loader_core is not None and (
+            flash.get("kv_repack_hbm_prefetch_hoist_prefetch_loader_core_id")
+            != loader_core
+        ):
+            continue
+        if "STCDPOpHBM" not in (mixed.get("opFuncsUsed") or []):
+            continue
+        return True
+    return False
+
+
 def validate_rows(
     rows: list[dict],
     *,
@@ -223,6 +459,10 @@ def validate_rows(
     variant: str,
     max_error: float,
     require_layout_xform: bool = True,
+    require_pointwise_handoff: bool = True,
+    forbid_kv_repack: bool = True,
+    require_warpspec_loader_prefetch: bool = False,
+    expected_loader_core: int | None = None,
     forbid_fallbacks: bool = False,
 ) -> list[str]:
     errors = []
@@ -281,6 +521,18 @@ def validate_rows(
             and not _has_layout_xform_consumer(row)
         ):
             errors.append(f"{case.name}: L={length} missing layout-xform consumer")
+        if require_pointwise_handoff and not _has_pointwise_handoff(row):
+            errors.append(f"{case.name}: L={length} missing pointwise handoff")
+        if forbid_kv_repack and _has_kv_repack_artifact(row):
+            errors.append(f"{case.name}: L={length} has K/V repack artifact")
+        if require_warpspec_loader_prefetch and not _has_warpspec_loader_prefetch(
+            row,
+            loader_core=expected_loader_core,
+        ):
+            errors.append(
+                f"{case.name}: L={length} missing serialized loader-core "
+                "K/V prefetch"
+            )
     return errors
 
 
@@ -330,6 +582,12 @@ def _run_gate(args: argparse.Namespace) -> int:
                 variant=args.variant,
                 max_error=args.max_error,
                 require_layout_xform=not args.no_require_layout_xform,
+                require_pointwise_handoff=not args.no_require_pointwise,
+                forbid_kv_repack=not (args.allow_kv_repack or case.allow_kv_repack),
+                require_warpspec_loader_prefetch=(
+                    case.require_warpspec_loader_prefetch
+                ),
+                expected_loader_core=case.expected_loader_core,
                 forbid_fallbacks=args.forbid_fallbacks,
             )
         )
@@ -355,7 +613,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gate", choices=sorted(GATES), default="onchip_layout_xform")
     parser.add_argument("--cases", default="all", help="'all' or comma-separated case names")
-    parser.add_argument("--variant", default="onchip_master_layout_xform")
+    parser.add_argument(
+        "--variant",
+        default="",
+        help="variant override; defaults to the gate's certified candidate",
+    )
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--warmup", type=int, default=1)
     parser.add_argument("--iters", type=int, default=2)
@@ -377,6 +639,8 @@ def main(argv: list[str] | None = None) -> int:
         help="validate existing per-case JSON files instead of rerunning sweeps",
     )
     parser.add_argument("--no-require-layout-xform", action="store_true")
+    parser.add_argument("--no-require-pointwise", action="store_true")
+    parser.add_argument("--allow-kv-repack", action="store_true")
     parser.add_argument(
         "--forbid-fallbacks",
         action="store_true",
@@ -386,6 +650,8 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+    if not args.variant:
+        args.variant = DEFAULT_VARIANTS_BY_GATE[args.gate]
     return _run_gate(args)
 
 

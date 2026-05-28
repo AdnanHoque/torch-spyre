@@ -38,9 +38,19 @@ gate = _load_gate()
 
 def _ok_row(case, length, *, layout_xform=True, fallbacks_forbidden=False):
     mixed = [
-        {"name": f"mixed_{idx}", "flash_pipeline": {}}
-        for idx in range(case.min_mixed_by_length[length] - 1)
+        {
+            "name": "17_add",
+            "opFuncsUsed": ["STCDPOpLx"],
+            "flash_pipeline": {},
+        }
     ]
+    filler_count = case.min_mixed_by_length[length] - len(mixed)
+    if layout_xform:
+        filler_count -= 1
+    mixed.extend(
+        {"name": f"mixed_{idx}", "flash_pipeline": {}}
+        for idx in range(filler_count)
+    )
     if layout_xform:
         mixed.append(
             {
@@ -48,11 +58,9 @@ def _ok_row(case, length, *, layout_xform=True, fallbacks_forbidden=False):
                 "flash_pipeline": {"layout_xform_pair_role": "consumer"},
             }
         )
-    else:
-        mixed.append({"name": "mixed_pointwise", "flash_pipeline": {}})
     return {
         "status": "ok",
-        "variant": "onchip_master_layout_xform",
+        "variant": gate.DEFAULT_VARIANT,
         "shape": {
             "batch": case.batch,
             "heads": case.heads,
@@ -67,7 +75,27 @@ def _ok_row(case, length, *, layout_xform=True, fallbacks_forbidden=False):
     }
 
 
-def test_onchip_layout_xform_gate_matrix_matches_stage043():
+def _warpspec_row(case, length):
+    row = _ok_row(case, length, layout_xform=True)
+    row["variant"] = gate.DEFAULT_WARPSPEC_VARIANT
+    row["mixed_sdscs"].append(
+        {
+            "name": "mixed_flash_kv_repack_hbm_prefetch_hoist_0_current_prefetch",
+            "opFuncsUsed": ["nop", "STCDPOpHBM", "nop", "STCDPOpLx"],
+            "flash_pipeline": {
+                "source": "generated-flash-prefill-kv-hbm-prefetch-current",
+                "kv_repack_hbm_prefetch_hoist_role": "current_prefetch",
+                "kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout": True,
+                "kv_repack_hbm_prefetch_hoist_prefetch_loader_core_id": 31,
+                "kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout_full_tile_pieces": True,
+                "kv_repack_hbm_prefetch_hoist_serialize_loader_core_prefetch": True,
+            },
+        }
+    )
+    return row
+
+
+def test_onchip_layout_xform_gate_matrix_matches_stage064():
     cases = gate.select_cases("onchip_layout_xform", "all")
 
     assert [case.name for case in cases] == [
@@ -77,10 +105,12 @@ def test_onchip_layout_xform_gate_matrix_matches_stage043():
         "b2h4d128_block64",
         "b1h4d64_block64",
         "b1h2d128_block64",
+        "b1h8d64_block64_hbmkv",
         "b1h2d64_block128",
         "b1h2d64_block64_long",
     ]
-    assert sum(len(case.lengths) for case in cases) == 20
+    assert sum(len(case.lengths) for case in cases) == 21
+    assert gate.DEFAULT_VARIANT == "onchip_hbm_kv_layout_xform"
     assert cases[0].lengths == (64, 128, 256, 384, 512)
     assert cases[0].layout_xform_lengths == (128, 256, 384, 512)
     assert cases[0].is_causal is False
@@ -91,11 +121,145 @@ def test_onchip_layout_xform_gate_matrix_matches_stage043():
     assert cases[3].batch == 2
     assert cases[3].heads == 4
     assert cases[3].dim == 128
+    assert cases[-3].name == "b1h8d64_block64_hbmkv"
+    assert cases[-3].heads == 8
+    assert cases[-3].lengths == (256,)
+    assert cases[-3].min_mixed_by_length == {256: 19}
+    assert cases[-3].layout_xform_lengths == (256,)
     assert cases[-2].block_size == 128
     assert cases[-2].lengths == (128, 256, 512)
     assert cases[-2].layout_xform_lengths == (256, 512)
     assert cases[-1].lengths == (768, 1024)
     assert cases[-1].min_mixed_by_length[1024] == 78
+
+
+def test_onchip_warpspec_gate_matrix_tracks_loader_specialized_path():
+    cases = gate.select_cases("onchip_warpspec", "all")
+
+    assert [case.name for case in cases] == [
+        "b1h2d64_block64_loader_core31",
+        "b1h2d64_block64_causal_loader_core31",
+        "b1h2d64_block128_loader_core31",
+        "b2h2d64_block64_loader_core31",
+        "b1h2d128_block64_loader_core31",
+        "b2h4d128_block64_loader_core31",
+        "b1h4d64_block64_loader_core31",
+        "b1h8d64_block64_loader_core31",
+    ]
+    assert gate.DEFAULT_WARPSPEC_VARIANT == "onchip_warpspec_kv_hbm_prefetch_loader_core31"
+    assert gate.DEFAULT_VARIANTS_BY_GATE["onchip_warpspec"] == (
+        gate.DEFAULT_WARPSPEC_VARIANT
+    )
+    assert gate.DEFAULT_VARIANTS_BY_GATE["onchip_warpspec_decoupled"] == (
+        gate.DEFAULT_WARPSPEC_DECOUPLED_VARIANT
+    )
+    assert cases[0].batch == 1
+    assert cases[0].heads == 2
+    assert cases[0].dim == 64
+    assert cases[0].lengths == (128, 256, 384, 512, 768, 1024)
+    assert cases[0].layout_xform_lengths == (128, 256, 384, 512, 768, 1024)
+    assert cases[0].min_mixed_by_length == {
+        128: 10,
+        256: 20,
+        384: 30,
+        512: 40,
+        768: 60,
+        1024: 79,
+    }
+    assert cases[0].allow_kv_repack is True
+    assert cases[0].require_warpspec_loader_prefetch is True
+    assert cases[0].expected_loader_core == 31
+    assert cases[1].is_causal is True
+    assert cases[1].layout_xform_lengths == ()
+    assert cases[1].min_mixed_by_length == {128: 8, 256: 16}
+    assert cases[2].block_size == 128
+    assert cases[2].lengths == (256, 384, 512)
+    assert cases[2].layout_xform_lengths == (256, 384, 512)
+    assert cases[2].min_mixed_by_length == {256: 10, 384: 15, 512: 20}
+    assert cases[3].batch == 2
+    assert cases[3].heads == 2
+    assert cases[3].dim == 64
+    assert cases[3].layout_xform_lengths == (128, 256)
+    assert cases[3].min_mixed_by_length == {128: 8, 256: 16}
+    assert cases[4].batch == 1
+    assert cases[4].heads == 2
+    assert cases[4].dim == 128
+    assert cases[4].lengths == (128, 256, 384, 512, 768, 1024)
+    assert cases[4].layout_xform_lengths == (128, 256, 384, 512, 768, 1024)
+    assert cases[4].min_mixed_by_length == {
+        128: 10,
+        256: 20,
+        384: 29,
+        512: 39,
+        768: 60,
+        1024: 80,
+    }
+    assert cases[5].batch == 2
+    assert cases[5].heads == 4
+    assert cases[5].dim == 128
+    assert cases[5].lengths == (128, 256)
+    assert cases[5].layout_xform_lengths == (128, 256)
+    assert cases[5].min_mixed_by_length == {128: 8, 256: 16}
+    assert cases[6].heads == 4
+    assert cases[6].lengths == (128, 256, 384, 512)
+    assert cases[6].layout_xform_lengths == (128, 256, 384, 512)
+    assert cases[6].min_mixed_by_length == {128: 10, 256: 20, 384: 30, 512: 40}
+    assert cases[7].heads == 8
+
+
+def test_onchip_warpspec_decoupled_gate_tracks_layout_free_recovery_path():
+    cases = gate.select_cases("onchip_warpspec_decoupled", "all")
+
+    assert [case.name for case in cases] == [
+        "b1h4d64_block64_long_decoupled_loader_core31",
+        "b2h4d128_block64_long_decoupled_loader_core31",
+    ]
+    assert gate.DEFAULT_VARIANTS_BY_GATE["onchip_warpspec_decoupled"] == (
+        gate.DEFAULT_WARPSPEC_DECOUPLED_VARIANT
+    )
+    assert cases[0].batch == 1
+    assert cases[0].heads == 4
+    assert cases[0].dim == 64
+    assert cases[0].lengths == (768, 1024)
+    assert cases[0].layout_xform_lengths == ()
+    assert cases[0].min_mixed_by_length == {768: 59, 1024: 78}
+    assert cases[0].require_warpspec_loader_prefetch is True
+    assert cases[0].expected_loader_core == 31
+    assert cases[1].batch == 2
+    assert cases[1].heads == 4
+    assert cases[1].dim == 128
+    assert cases[1].lengths == (384, 512, 768, 1024)
+    assert cases[1].layout_xform_lengths == ()
+    assert cases[1].min_mixed_by_length == {384: 22, 512: 31, 768: 47, 1024: 63}
+
+
+def test_onchip_warpspec_gate_allows_causal_without_layout_xform_consumer():
+    case = gate.select_cases(
+        "onchip_warpspec",
+        "b1h2d64_block64_causal_loader_core31",
+    )[0]
+    rows = [_warpspec_row(case, length) for length in case.lengths]
+    for row in rows:
+        row["is_causal"] = True
+        row["mixed_sdscs"] = [
+            mixed
+            for mixed in row["mixed_sdscs"]
+            if (mixed.get("flash_pipeline") or {}).get("layout_xform_pair_role")
+            != "consumer"
+        ]
+
+    assert (
+        gate.validate_rows(
+            rows,
+            case=case,
+            variant=gate.DEFAULT_WARPSPEC_VARIANT,
+            max_error=0.01,
+            forbid_kv_repack=False,
+            require_warpspec_loader_prefetch=True,
+            expected_loader_core=31,
+        )
+        == []
+    )
 
 
 def test_gate_validation_requires_layout_consumer_and_mixed_floor():
@@ -105,7 +269,7 @@ def test_gate_validation_requires_layout_consumer_and_mixed_floor():
     assert gate.validate_rows(
         rows,
         case=case,
-        variant="onchip_master_layout_xform",
+        variant=gate.DEFAULT_VARIANT,
         max_error=0.01,
     ) == []
 
@@ -113,11 +277,94 @@ def test_gate_validation_requires_layout_consumer_and_mixed_floor():
     errors = gate.validate_rows(
         rows,
         case=case,
-        variant="onchip_master_layout_xform",
+        variant=gate.DEFAULT_VARIANT,
         max_error=0.01,
     )
     assert "mixed=0 expected>=9" in "\n".join(errors)
     assert "missing layout-xform consumer" in "\n".join(errors)
+    assert "missing pointwise handoff" in "\n".join(errors)
+
+
+def test_gate_validation_requires_pointwise_handoff():
+    case = gate.select_cases("onchip_layout_xform", "b1h2d64_block64")[0]
+    rows = [_ok_row(case, length) for length in case.lengths]
+    for mixed in rows[1]["mixed_sdscs"]:
+        mixed["name"] = "mixed_flash_pipeline_tile_0"
+
+    errors = gate.validate_rows(
+        rows,
+        case=case,
+        variant=gate.DEFAULT_VARIANT,
+        max_error=0.01,
+    )
+
+    assert "missing pointwise handoff" in "\n".join(errors)
+
+
+def test_gate_validation_rejects_kv_repack_artifact_by_default():
+    case = gate.select_cases("onchip_layout_xform", "b1h8d64_block64_hbmkv")[0]
+    rows = [_ok_row(case, length) for length in case.lengths]
+    rows[0]["mixed_sdscs"].append(
+        {
+            "name": "mixed_flash_kv_repack_broadcast_pair_3_input1_consumer",
+            "file": "sdsc_mixed_flash_kv_repack_broadcast_pair_3_input1_consumer.json",
+            "flash_pipeline": {
+                "source": "generated-flash-prefill-kv-repack-broadcast-pair",
+            },
+        }
+    )
+
+    errors = gate.validate_rows(
+        rows,
+        case=case,
+        variant=gate.DEFAULT_VARIANT,
+        max_error=0.01,
+    )
+
+    assert "has K/V repack artifact" in "\n".join(errors)
+    assert (
+        gate.validate_rows(
+            rows,
+            case=case,
+            variant=gate.DEFAULT_VARIANT,
+            max_error=0.01,
+            forbid_kv_repack=False,
+        )
+        == []
+    )
+
+
+def test_gate_validation_requires_serialized_loader_prefetch_for_warpspec():
+    case = gate.select_cases("onchip_warpspec", "b1h2d64_block64_loader_core31")[0]
+    rows = [_warpspec_row(case, length) for length in case.lengths]
+
+    assert (
+        gate.validate_rows(
+            rows,
+            case=case,
+            variant=gate.DEFAULT_WARPSPEC_VARIANT,
+            max_error=0.01,
+            forbid_kv_repack=False,
+            require_warpspec_loader_prefetch=True,
+            expected_loader_core=31,
+        )
+        == []
+    )
+
+    rows[0]["mixed_sdscs"][-1]["flash_pipeline"][
+        "kv_repack_hbm_prefetch_hoist_serialize_loader_core_prefetch"
+    ] = False
+    errors = gate.validate_rows(
+        rows,
+        case=case,
+        variant=gate.DEFAULT_WARPSPEC_VARIANT,
+        max_error=0.01,
+        forbid_kv_repack=False,
+        require_warpspec_loader_prefetch=True,
+        expected_loader_core=31,
+    )
+
+    assert "missing serialized loader-core K/V prefetch" in "\n".join(errors)
 
 
 def test_gate_validation_allows_no_layout_consumer_when_no_pair_expected():
@@ -130,7 +377,7 @@ def test_gate_validation_allows_no_layout_consumer_when_no_pair_expected():
     assert gate.validate_rows(
         rows,
         case=case,
-        variant="onchip_master_layout_xform",
+        variant=gate.DEFAULT_VARIANT,
         max_error=0.01,
     ) == []
 
@@ -145,7 +392,7 @@ def test_gate_validation_rejects_wrong_shape_status_and_error():
     errors = gate.validate_rows(
         rows,
         case=case,
-        variant="onchip_master_layout_xform",
+        variant=gate.DEFAULT_VARIANT,
         max_error=0.01,
     )
 
@@ -164,7 +411,7 @@ def test_gate_validation_rejects_missing_or_wrong_causal_flag():
     errors = gate.validate_rows(
         rows,
         case=case,
-        variant="onchip_master_layout_xform",
+        variant=gate.DEFAULT_VARIANT,
         max_error=0.01,
     )
 
@@ -182,7 +429,7 @@ def test_gate_validation_rejects_missing_or_wrong_fallback_readiness_flag():
     errors = gate.validate_rows(
         rows,
         case=case,
-        variant="onchip_master_layout_xform",
+        variant=gate.DEFAULT_VARIANT,
         max_error=0.01,
         forbid_fallbacks=True,
     )
@@ -198,7 +445,7 @@ def test_sweep_command_uses_case_shape_and_output_path():
         output_json = Path(tmpdir) / "case.json"
         cmd = gate.sweep_command(
             python="pythonX",
-            variant="onchip_master_layout_xform",
+            variant=gate.DEFAULT_VARIANT,
             case=case,
             warmup=1,
             iters=2,
@@ -213,7 +460,7 @@ def test_sweep_command_uses_case_shape_and_output_path():
 
     assert cmd[0] == "pythonX"
     assert os.path.basename(cmd[1]) == "onchip_sdpa_sweep.py"
-    assert cmd[cmd.index("--variants") + 1] == "onchip_master_layout_xform"
+    assert cmd[cmd.index("--variants") + 1] == gate.DEFAULT_VARIANT
     assert cmd[cmd.index("--lengths") + 1] == "128,256"
     assert cmd[cmd.index("--batch") + 1] == "1"
     assert cmd[cmd.index("--heads") + 1] == "2"
@@ -230,7 +477,7 @@ def test_sweep_command_adds_causal_flag_for_causal_case():
         output_json = Path(tmpdir) / "case.json"
         cmd = gate.sweep_command(
             python="pythonX",
-            variant="onchip_master_layout_xform",
+            variant=gate.DEFAULT_VARIANT,
             case=case,
             warmup=1,
             iters=2,
@@ -252,7 +499,7 @@ def test_sweep_command_adds_forbid_fallbacks_flag_when_requested():
         output_json = Path(tmpdir) / "case.json"
         cmd = gate.sweep_command(
             python="pythonX",
-            variant="onchip_master_layout_xform",
+            variant=gate.DEFAULT_VARIANT,
             case=case,
             warmup=1,
             iters=2,

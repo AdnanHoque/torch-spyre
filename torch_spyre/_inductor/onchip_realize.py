@@ -438,6 +438,10 @@ def _single_split_dim(shard: dict[str, int]) -> str | None:
     return _symbol_dim(split[0])
 
 
+def _split_dims(shard: dict[str, int]) -> list[str]:
+    return [_symbol_dim(dim) for dim, factor in shard.items() if int(factor) > 1]
+
+
 def _iter_sizes_for_layout(dl: dict, layout: list[str]) -> dict[str, int] | None:
     sizes = dl.get("N_", {})
     out: dict[str, int] = {}
@@ -445,6 +449,22 @@ def _iter_sizes_for_layout(dl: dict, layout: list[str]) -> dict[str, int] | None
         if dim not in sizes:
             return None
         out[dim] = int(sizes[dim])
+    return out
+
+
+def _local_iter_sizes_for_layout(
+    dl: dict,
+    layout: list[str],
+) -> dict[str, int] | None:
+    """Per-core staged tensor sizes for a DL operand layout."""
+    out = _iter_sizes_for_layout(dl, layout)
+    if out is None:
+        return None
+    stage = next(iter(dl.get("dataStageParam_", {}).values()), {})
+    core_sizes = stage.get("ss_", {})
+    for dim in layout:
+        if dim in core_sizes:
+            out[dim] = int(core_sizes[dim])
     return out
 
 
@@ -966,6 +986,11 @@ def apply_lx_flip(
     node["startAddressCoreCorelet_"]["data_"] = {
         f"[{c}, 0, 0]": str(flip.lx_base) for c in range(num_cores)
     }
+    # HBM allocate nodes may carry global back-gap metadata for strided tile
+    # views.  Deeptools only accepts those gaps on HBM allocations; after an
+    # explicit prefill into LX the DL consumer should see a packed LX tile.
+    node.pop("backGapCore_", None)
+    node.pop("gapStickSpread_", None)
     lds["memOrg_"] = {"lx": {"isPresent": 1, "allocateNode_": alloc_node}}
     lds["hbmStartAddress_"] = -1
     lds["hbmSize_"] = 0
@@ -979,6 +1004,79 @@ def apply_lx_flip(
         lds.pop("coreStateInit_", None)
 
 
+def _retarget_lx_allocate_style(
+    sdsc_json: dict,
+    lds_idx: int,
+    style: str,
+) -> None:
+    if not style:
+        return
+    if style not in {"canonical_name", "canonical_loop"}:
+        raise ValueError(f"unsupported LX allocation style: {style}")
+
+    dl = _dl_op(sdsc_json)
+    lds = _lds_by_idx(dl, lds_idx)
+    if lds is None:
+        return
+
+    old_name = lds.get("memOrg_", {}).get("lx", {}).get("allocateNode_")
+    new_name = f"allocate_lds{lds_idx}_lx"
+    lds.setdefault("memOrg_", {}).setdefault("lx", {})["allocateNode_"] = new_name
+
+    alloc_node = None
+    for node in dl.get("scheduleTree_", []):
+        if old_name is not None and node.get("name_") == old_name:
+            alloc_node = node
+            break
+    if alloc_node is None:
+        alloc_node = next(
+            (
+                node
+                for node in dl.get("scheduleTree_", [])
+                if node.get("nodeType_") == "allocate"
+                and node.get("ldsIdx_") == lds_idx
+                and node.get("component_") == "lx"
+            ),
+            None,
+        )
+    if alloc_node is None:
+        return
+
+    alloc_node["name_"] = new_name
+    for node in dl.get("scheduleTree_", []):
+        if node.get("prev_") == old_name:
+            node["prev_"] = new_name
+        if isinstance(node.get("next_"), list):
+            node["next_"] = [
+                new_name if child == old_name else child for child in node["next_"]
+            ]
+
+    if style != "canonical_loop":
+        return
+
+    loop_node = next(
+        (
+            node
+            for node in dl.get("scheduleTree_", [])
+            if node.get("nodeType_") == "loop" and node.get("name_") == "loop_ds0_ds1_in"
+        ),
+        None,
+    )
+    if loop_node is None:
+        return
+
+    alloc_node["prev_"] = loop_node["name_"]
+    alloc_node["numBuffers_"] = 2
+    next_nodes = list(loop_node.get("next_", []))
+    if new_name not in next_nodes:
+        try:
+            insert_at = next_nodes.index("lx_below_schedule")
+        except ValueError:
+            insert_at = len(next_nodes)
+        next_nodes.insert(insert_at, new_name)
+    loop_node["next_"] = next_nodes
+
+
 def _hbm_base(dl: dict, lds_idx: int) -> str | None:
     """Per-core[0] HBM base for the labeledDs allocate node, else None."""
     for node in dl["scheduleTree_"]:
@@ -987,6 +1085,22 @@ def _hbm_base(dl: dict, lds_idx: int) -> str | None:
                 return None
             return next(iter(node["startAddressCoreCorelet_"]["data_"].values()), None)
     return None
+
+
+def _hbm_start_by_core(dl: dict, lds_idx: int) -> dict[int, int]:
+    for node in dl["scheduleTree_"]:
+        if node.get("nodeType_") != "allocate" or node.get("ldsIdx_") != lds_idx:
+            continue
+        if node.get("component_") != "hbm":
+            return {}
+        starts: dict[int, int] = {}
+        for key, value in node.get("startAddressCoreCorelet_", {}).get(
+            "data_", {}
+        ).items():
+            core_id = int(str(key).strip("[]").split(",", 1)[0])
+            starts[core_id] = int(value)
+        return starts
+    return {}
 
 
 def _label_indices(labels: list[str]) -> list[int]:
@@ -2403,10 +2517,18 @@ def _kv_repack_labeled_ds(
     }
 
 
+def _kv_repack_full_valid_gap(edge: dict, layout: list[str]) -> dict:
+    return {
+        dim: [[int(edge["iter_sizes"][dim]), 0]]
+        for dim in layout
+    }
+
+
 def _kv_repack_broadcast_dst_pieces(
     source_pieces: list[dict],
     consumer_num_cores: int,
     consumer_base: int,
+    edge: dict,
     *,
     include_broadcast_metadata: bool = True,
     consumer_core_ids: list[int] | None = None,
@@ -2427,16 +2549,19 @@ def _kv_repack_broadcast_dst_pieces(
                 continue
             start = copy.deepcopy(source_piece["dimToStartCordinate"])
             size = copy.deepcopy(source_piece["dimToSize_"])
+            lx_start_addr = consumer_base + _kv_repack_piece_offset_bytes(edge, start)
             piece = {
                 "key_": f"p{ordinal}",
                 "dimToStartCordinate": start,
                 "dimToSize_": size,
-                "validGap_": copy.deepcopy(source_piece["validGap_"]),
+                "validGap_": _kv_repack_full_valid_gap(
+                    edge, edge["consumer_layout"]
+                ),
                 "PlacementInfo": [
                     {
                         "type": "lx",
                         "memId": [core_id],
-                        "startAddr": [consumer_base],
+                        "startAddr": [lx_start_addr],
                     }
                 ],
             }
@@ -2456,11 +2581,73 @@ def _piece_lx_mem_ids(piece: dict) -> set[int]:
     return mem_ids
 
 
+def _piece_lx_start_by_core(piece: dict) -> dict[int, int]:
+    starts: dict[int, int] = {}
+    for placement in piece.get("PlacementInfo", []):
+        if placement.get("type") != "lx":
+            continue
+        mem_ids = [int(mem_id) for mem_id in placement.get("memId", [])]
+        start_addrs = [int(addr) for addr in placement.get("startAddr", [])]
+        for mem_id, start_addr in zip(mem_ids, start_addrs):
+            starts[mem_id] = start_addr
+    return starts
+
+
 def _move_lx_piece_start_addrs(pieces: list[dict], lx_base: int) -> None:
     for piece in pieces:
         for placement in piece.get("PlacementInfo", []):
             if placement.get("type") == "lx":
                 placement["startAddr"] = [lx_base]
+
+
+def _kv_repack_single_loader_source_pieces(
+    edge: dict,
+    *,
+    loader_core_id: int,
+    lx_base: int,
+) -> list[dict]:
+    pieces = []
+    for source_piece in edge["source_pieces"]:
+        piece = copy.deepcopy(source_piece)
+        lx_start_addr = lx_base + _kv_repack_piece_offset_bytes(
+            edge, piece["dimToStartCordinate"]
+        )
+        piece["validGap_"] = _kv_repack_full_valid_gap(edge, edge["source_layout"])
+        piece["PlacementInfo"] = [
+            {
+                "type": "lx",
+                "memId": [loader_core_id],
+                "startAddr": [lx_start_addr],
+            }
+        ]
+        pieces.append(piece)
+    return pieces
+
+
+def _kv_repack_single_loader_full_tile_source_pieces(
+    edge: dict,
+    *,
+    loader_core_id: int,
+    lx_base: int,
+) -> list[dict]:
+    layout = list(edge["source_layout"])
+    start = {dim: 0 for dim in layout}
+    size = {dim: int(edge["iter_sizes"][dim]) for dim in layout}
+    return [
+        {
+            "key_": "p1",
+            "dimToStartCordinate": start,
+            "dimToSize_": size,
+            "validGap_": {dim: [[size[dim], 0]] for dim in layout},
+            "PlacementInfo": [
+                {
+                    "type": "lx",
+                    "memId": [loader_core_id],
+                    "startAddr": [lx_base],
+                }
+            ],
+        }
+    ]
 
 
 def _kv_repack_broadcast_dst_piece_count(
@@ -2502,6 +2689,7 @@ def _make_kv_repack_broadcast_dataop(
     dataop_core_ids: list[int] | None = None,
     skip_source_core_destinations: bool = False,
     stcdp_use_unicast: int = -1,
+    stcdp_use_lxsfp_lx_transfers: int = -1,
     stcdp_force_mc_mode: int = -1,
 ) -> dict:
     source_pieces = edge["source_pieces"]
@@ -2509,6 +2697,7 @@ def _make_kv_repack_broadcast_dataop(
         source_pieces,
         edge["consumer_num_cores"],
         edge["consumer_lx_base"],
+        edge,
         include_broadcast_metadata=include_broadcast_metadata,
         consumer_core_ids=consumer_core_ids,
         skip_source_core_destinations=skip_source_core_destinations,
@@ -2537,6 +2726,8 @@ def _make_kv_repack_broadcast_dataop(
         op["enSubPieceReuse"] = 0
     if stcdp_use_unicast in (0, 1):
         op["useUnicast"] = stcdp_use_unicast
+    if stcdp_use_lxsfp_lx_transfers in (0, 1):
+        op["useLXSFPLXTransfers"] = stcdp_use_lxsfp_lx_transfers
     if stcdp_force_mc_mode >= 0:
         op["forceModeMC"] = {"force": 1, "val": stcdp_force_mc_mode}
     return {
@@ -2554,11 +2745,535 @@ def _make_kv_repack_broadcast_dataop(
     }
 
 
+def _hbm_dataop_addr_units(byte_addr: int) -> int:
+    """Convert DL HBM byte addresses to STCDPOpHBM 128-byte address units."""
+    if byte_addr % STICK_BYTES != 0:
+        raise ValueError(
+            f"STCDPOpHBM HBM address must be {STICK_BYTES}-byte aligned: "
+            f"{byte_addr}"
+        )
+    return byte_addr // STICK_BYTES
+
+
+def _kv_repack_piece_offset_bytes(edge: dict, start: dict[str, int]) -> int:
+    """Byte offset for a consumer-layout K/V piece inside its allocation."""
+    offset_elems = 0
+    stride = 1
+    for dim in reversed(edge["consumer_layout"]):
+        offset_elems += int(start.get(dim, 0)) * stride
+        extent = int(edge["iter_sizes"][dim])
+        if dim == edge["stick_dim"]:
+            extent = _align_up(extent, STICK_SIZE)
+        stride *= extent
+    return offset_elems * WORD_LENGTH
+
+
+def _kv_repack_hbm_piece_offset_units(edge: dict, start: dict[str, int]) -> int:
+    """STCDPOpHBM address-unit offset for a consumer-layout K/V HBM piece."""
+    return _hbm_dataop_addr_units(_kv_repack_piece_offset_bytes(edge, start))
+
+
+def _kv_repack_hbm_piece_addr(
+    edge: dict,
+    source_piece: dict,
+    *,
+    prefer_source_core_hbm_addr: bool = True,
+) -> int:
+    source_hbm_start_by_core = edge.get("source_hbm_start_by_core", {})
+    source_core_ids = sorted(_piece_lx_mem_ids(source_piece))
+    if (
+        prefer_source_core_hbm_addr
+        and source_core_ids
+        and len(set(source_hbm_start_by_core.values())) > 1
+    ):
+        source_core = source_core_ids[0]
+        if source_core in source_hbm_start_by_core:
+            return _hbm_dataop_addr_units(int(source_hbm_start_by_core[source_core]))
+    start = source_piece["dimToStartCordinate"]
+    return _hbm_dataop_addr_units(
+        int(edge["shared_hbm_addr"])
+    ) + _kv_repack_hbm_piece_offset_units(edge, start)
+
+
+def _make_hbm_direct_fill_dataop(
+    name: str,
+    *,
+    layout: list[str],
+    stick_dim: str,
+    iter_sizes: dict[str, int],
+    hbm_start_by_core: dict[int, int],
+    lx_base: int,
+    core_ids: list[int],
+) -> dict:
+    """Build an STCDPOpHBM direct HBM->LX fill with no LX->LX roundtrip."""
+    input_pieces = []
+    core_id_to_an_info = {}
+    fallback_hbm = next(iter(hbm_start_by_core.values()))
+    size = {dim: int(iter_sizes[dim]) for dim in layout}
+    start = {dim: 0 for dim in layout}
+    gap = {dim: [[size[dim], 0]] for dim in layout}
+    for ordinal, core_id in enumerate(core_ids, start=1):
+        key = f"p{ordinal}"
+        core_id_to_an_info[str(core_id)] = {
+            "isAnalyticalMode": 0,
+            "inpPieceOrder": [key],
+            "outPieceOrder": [key],
+        }
+        input_pieces.append(
+            {
+                "key_": key,
+                "dimToStartCordinate": copy.deepcopy(start),
+                "dimToSize_": copy.deepcopy(size),
+                "validGap_": copy.deepcopy(gap),
+                "PlacementInfo": [
+                    {
+                        "type": "lx",
+                        "memId": [core_id],
+                        "startAddr": [lx_base],
+                    },
+                    {
+                        "type": "hbm",
+                        "memId": [-1],
+                        "startAddr": [
+                            _hbm_dataop_addr_units(
+                                int(hbm_start_by_core.get(core_id, fallback_hbm))
+                            )
+                        ],
+                    },
+                ],
+            }
+        )
+
+    input_ld = _kv_repack_labeled_ds(
+        "dataIN",
+        layout,
+        stick_dim,
+        iter_sizes,
+        input_pieces,
+    )
+    output_ld = _kv_repack_labeled_ds(
+        "dataOUT",
+        layout,
+        stick_dim,
+        iter_sizes,
+        [],
+    )
+    output_ld["pdsName_"] = "dataIN"
+    return {
+        name: {
+            "coreIdsUsed_": list(core_ids),
+            "dimPool_": list(layout),
+            "outDimTodimRelation_": [],
+            "primaryDs_": [
+                {"name_": "dataIN", "dimNames": list(layout)},
+            ],
+            "labeledDs_": [input_ld, output_ld],
+            "op": {
+                "name": "STCDPOpHBM",
+                "reqMulticast": 0,
+                "coreIDtoANInfo": core_id_to_an_info,
+            },
+        }
+    }
+
+
+def _kv_repack_consumer_hbm_prefetch_pieces(edge: dict) -> list[dict]:
+    """Consumer-shaped HBM chunks for K/V prefetch into batchmatmul LX."""
+    layout = list(edge["consumer_layout"])
+    iter_sizes = edge["iter_sizes"]
+    chunk_dim = None
+    chunk_size = 1
+
+    pieces = []
+    starts = [0]
+    if chunk_dim is not None:
+        starts = list(range(0, int(iter_sizes[chunk_dim]), chunk_size))
+    for ordinal, chunk_start in enumerate(starts, start=1):
+        start = {dim: 0 for dim in layout}
+        size = {dim: int(iter_sizes[dim]) for dim in layout}
+        if chunk_dim is not None:
+            start[chunk_dim] = chunk_start
+            size[chunk_dim] = min(chunk_size, int(iter_sizes[chunk_dim]) - chunk_start)
+        lx_start_addr = edge["consumer_lx_base"] + _kv_repack_piece_offset_bytes(
+            edge, start
+        )
+        pieces.append(
+            {
+                "key_": f"p{ordinal}",
+                "dimToStartCordinate": start,
+                "dimToSize_": size,
+                "validGap_": {dim: [[size[dim], 0]] for dim in size},
+                "PlacementInfo": [
+                    {
+                        "type": "lx",
+                        "memId": [0],
+                        "startAddr": [lx_start_addr],
+                    }
+                ],
+            }
+        )
+    return pieces
+
+
+def _kv_repack_copyback_core(edge: dict, requested_core: int) -> int:
+    if requested_core >= 0:
+        if requested_core >= edge["consumer_num_cores"]:
+            raise ValueError(
+                "copyback readback core out of range: "
+                f"{requested_core} >= {edge['consumer_num_cores']}"
+            )
+        return requested_core
+    return edge["consumer_num_cores"] - 1
+
+
+def _make_kv_repack_copyback_hbm_dataop(
+    name: str,
+    edge: dict,
+    *,
+    source_piece: dict,
+    dataop_core_ids: list[int] | None = None,
+    lx_start_by_core: dict[int, int] | None = None,
+) -> dict:
+    """Build an STCDPOpHBM LX->HBM readback for one consumer-core replica."""
+    core_ids = (
+        list(range(edge["consumer_num_cores"]))
+        if dataop_core_ids is None
+        else list(dataop_core_ids)
+    )
+    start = copy.deepcopy(source_piece["dimToStartCordinate"])
+    size = copy.deepcopy(source_piece["dimToSize_"])
+    gap = copy.deepcopy(source_piece["validGap_"])
+    hbm_addr = _kv_repack_hbm_piece_addr(edge, source_piece)
+    input_pieces = []
+    hbm_pieces = []
+    core_piece_order = {}
+    for ordinal, core_id in enumerate(core_ids, start=1):
+        key = f"p{ordinal}"
+        core_piece_order[core_id] = [key]
+        lx_start_addr = (
+            lx_start_by_core.get(core_id)
+            if lx_start_by_core is not None
+            else edge["consumer_lx_base"]
+        )
+        input_pieces.append(
+            {
+                "key_": key,
+                "dimToStartCordinate": copy.deepcopy(start),
+                "dimToSize_": copy.deepcopy(size),
+                "validGap_": copy.deepcopy(gap),
+                "PlacementInfo": [
+                    {
+                        "type": "lx",
+                        "memId": [core_id],
+                        "startAddr": [lx_start_addr],
+                    },
+                ],
+            }
+        )
+        hbm_pieces.append(
+            {
+                "key_": key,
+                "dimToStartCordinate": copy.deepcopy(start),
+                "dimToSize_": copy.deepcopy(size),
+                "validGap_": copy.deepcopy(gap),
+                "PlacementInfo": [
+                    {
+                        "type": "lx",
+                        "memId": [core_id],
+                        "startAddr": [lx_start_addr],
+                    },
+                    {
+                        "type": "hbm",
+                        "memId": [-1],
+                        "startAddr": [hbm_addr],
+                    },
+                ],
+            }
+        )
+
+    input_ld = _kv_repack_labeled_ds(
+        "dataIN",
+        edge["consumer_layout"],
+        edge["stick_dim"],
+        edge["iter_sizes"],
+        input_pieces,
+    )
+    output_ld = _kv_repack_labeled_ds(
+        "dataOUT",
+        edge["consumer_layout"],
+        edge["stick_dim"],
+        edge["iter_sizes"],
+        hbm_pieces,
+    )
+    core_id_to_an_info = {
+        str(core_id): {
+            "isAnalyticalMode": 0,
+            "inpPieceOrder": core_piece_order[core_id],
+            "outPieceOrder": core_piece_order[core_id],
+        }
+        for core_id in core_ids
+    }
+    return {
+        name: {
+            "coreIdsUsed_": core_ids,
+            "dimPool_": list(edge["consumer_layout"]),
+            "outDimTodimRelation_": [],
+            "primaryDs_": [
+                {"name_": "dataIN", "dimNames": list(edge["consumer_layout"])},
+                {"name_": "dataOUT", "dimNames": list(edge["consumer_layout"])},
+            ],
+            "labeledDs_": [input_ld, output_ld],
+            "op": {
+                "name": "STCDPOpHBM",
+                "reqMulticast": 0,
+                "coreIDtoANInfo": core_id_to_an_info,
+            },
+        }
+    }
+
+
+def _make_kv_repack_hbm_roundtrip_dataop(
+    name: str,
+    edge: dict,
+    *,
+    source_piece: dict,
+    phase: str,
+    dataop_core_ids: list[int] | None = None,
+    lx_start_by_core: dict[int, int] | None = None,
+    hbm_piece_addr: bool = True,
+    prefer_source_core_hbm_addr: bool = True,
+    emit_lx_roundtrip: bool = True,
+    corelet_id: int | None = None,
+) -> dict:
+    """Build one ordered STCDPOpHBM phase for a source-piece roundtrip."""
+    if phase not in ("load", "store"):
+        raise ValueError(f"unsupported HBM roundtrip phase: {phase}")
+    if not emit_lx_roundtrip and phase != "load":
+        raise ValueError("direct STCDPOpHBM fill is only valid for load phases")
+    core_ids = (
+        list(range(edge["consumer_num_cores"]))
+        if dataop_core_ids is None
+        else list(dataop_core_ids)
+    )
+    start = copy.deepcopy(source_piece["dimToStartCordinate"])
+    size = copy.deepcopy(source_piece["dimToSize_"])
+    gap = copy.deepcopy(source_piece["validGap_"])
+    hbm_addr = (
+        _kv_repack_hbm_piece_addr(
+            edge,
+            source_piece,
+            prefer_source_core_hbm_addr=prefer_source_core_hbm_addr,
+        )
+        if hbm_piece_addr
+        else _hbm_dataop_addr_units(int(edge["shared_hbm_addr"]))
+    )
+    input_pieces = []
+    output_pieces = []
+    core_piece_order = {}
+    for ordinal, core_id in enumerate(core_ids, start=1):
+        key = f"p{ordinal}"
+        core_piece_order[core_id] = [key]
+        lx_start_addr = (
+            lx_start_by_core.get(core_id)
+            if lx_start_by_core is not None
+            else edge["source_lx_base"]
+        )
+        lx_placement = {
+            "type": "lx",
+            "memId": [core_id],
+            "startAddr": [lx_start_addr],
+        }
+        hbm_placement = {
+            "type": "hbm",
+            "memId": [-1],
+            "startAddr": [hbm_addr],
+        }
+        input_placements = (
+            [lx_placement, hbm_placement] if phase == "load" else [lx_placement]
+        )
+        output_placements = (
+            [lx_placement] if phase == "load" else [lx_placement, hbm_placement]
+        )
+        input_pieces.append(
+            {
+                "key_": key,
+                "dimToStartCordinate": copy.deepcopy(start),
+                "dimToSize_": copy.deepcopy(size),
+                "validGap_": copy.deepcopy(gap),
+                "PlacementInfo": copy.deepcopy(input_placements),
+            }
+        )
+        if emit_lx_roundtrip:
+            output_pieces.append(
+                {
+                    "key_": key,
+                    "dimToStartCordinate": copy.deepcopy(start),
+                    "dimToSize_": copy.deepcopy(size),
+                    "validGap_": copy.deepcopy(gap),
+                    "PlacementInfo": copy.deepcopy(output_placements),
+                }
+            )
+
+    input_ld = _kv_repack_labeled_ds(
+        "dataIN",
+        edge["consumer_layout"],
+        edge["stick_dim"],
+        edge["iter_sizes"],
+        input_pieces,
+    )
+    output_ld = _kv_repack_labeled_ds(
+        "dataOUT",
+        edge["consumer_layout"],
+        edge["stick_dim"],
+        edge["iter_sizes"],
+        output_pieces,
+    )
+    output_ld["pdsName_"] = "dataIN"
+    core_id_to_an_info = {
+        str(core_id): {
+            "isAnalyticalMode": 0,
+            "inpPieceOrder": core_piece_order[core_id],
+            "outPieceOrder": core_piece_order[core_id],
+        }
+        for core_id in core_ids
+    }
+    op = {
+        "name": "STCDPOpHBM",
+        "reqMulticast": 0,
+        "coreIDtoANInfo": core_id_to_an_info,
+    }
+    if corelet_id is not None:
+        if corelet_id not in (0, 1):
+            raise ValueError(f"unsupported STCDPOpHBM corelet_id: {corelet_id}")
+        op["coreletId"] = int(corelet_id)
+
+    return {
+        name: {
+            "coreIdsUsed_": core_ids,
+            "dimPool_": list(edge["consumer_layout"]),
+            "outDimTodimRelation_": [],
+            "primaryDs_": [
+                {"name_": "dataIN", "dimNames": list(edge["consumer_layout"])},
+            ],
+            "labeledDs_": [input_ld, output_ld],
+            "op": op,
+        }
+    }
+
+
+def _make_nop_dataop(name: str, core_ids: list[int]) -> dict:
+    return {
+        name: {
+            "coreIdsUsed_": list(core_ids),
+            "dimPool_": [],
+            "outDimTodimRelation_": [],
+            "primaryDs_": [],
+            "labeledDs_": [],
+            "op": {"name": "nop"},
+        }
+    }
+
+
+def _kv_repack_copyback_schedule(
+    consumer_num_cores: int,
+    group_dataop_core_ids: list[list[int]],
+    *,
+    hbm_dataop_core_ids: list[list[int]],
+    barrier_dataop_core_ids: list[int] | None = None,
+    include_compute: bool = True,
+) -> dict[str, list[list[int]]]:
+    return _kv_repack_copyback_schedule_for_dataops(
+        consumer_num_cores,
+        [*group_dataop_core_ids, *hbm_dataop_core_ids],
+        barrier_dataop_core_ids=barrier_dataop_core_ids,
+        include_compute=include_compute,
+    )
+
+
+def _kv_repack_copyback_schedule_for_dataops(
+    consumer_num_cores: int,
+    dataop_core_ids: list[list[int]],
+    *,
+    barrier_dataop_core_ids: list[int] | None = None,
+    include_compute: bool = True,
+) -> dict[str, list[list[int]]]:
+    dataop_core_sets = [set(core_ids) for core_ids in dataop_core_ids]
+    barrier_idx = len(dataop_core_sets)
+    barrier_cores = (
+        set(barrier_dataop_core_ids)
+        if barrier_dataop_core_ids is not None
+        else set()
+    )
+    schedule: dict[str, list[list[int]]] = {}
+    for core_id in range(consumer_num_cores):
+        local_ops = [
+            (dataop_idx, -1)
+            for dataop_idx, core_ids in enumerate(dataop_core_sets)
+            if core_id in core_ids
+        ]
+        if core_id in barrier_cores:
+            local_ops.append((barrier_idx, -1))
+        if include_compute:
+            local_ops.append((-1, 0))
+        schedule[str(core_id)] = [
+            [
+                dataop_idx,
+                dsc_idx,
+                1 if local_idx > 0 else 0,
+                1 if local_idx < len(local_ops) - 1 else 0,
+            ]
+            for local_idx, (dataop_idx, dsc_idx) in enumerate(local_ops)
+        ]
+    return schedule
+
+
+def _build_flash_attention_dataop_only_sdsc(
+    name: str,
+    datadscs: list[dict],
+    opfuncs: list[str],
+    schedule: dict[str, list[list[int]]],
+    num_cores: int,
+) -> dict:
+    if not name:
+        raise ValueError("name is required")
+    if num_cores <= 0:
+        raise ValueError(f"num_cores must be positive, got {num_cores}")
+    data_count = len(datadscs)
+    for core_id, rows in schedule.items():
+        int(core_id)
+        for row in rows:
+            if len(row) != 4:
+                raise ValueError(f"schedule row must have 4 fields, got {row}")
+            data_idx, dsc_idx = int(row[0]), int(row[1])
+            if dsc_idx != -1:
+                raise ValueError(f"data-only schedule cannot run compute: {row}")
+            if data_idx < 0 or data_idx >= data_count:
+                raise ValueError(f"data-op index out of range: {row}")
+    return {
+        name: {
+            "numCoresUsed_": num_cores,
+            "coreIdToDscSchedule": {
+                str(core_id): [list(row) for row in rows]
+                for core_id, rows in schedule.items()
+            },
+            "datadscs_": [dict(dataop) for dataop in datadscs],
+            "dscs_": [],
+            "opFuncsUsed_": list(opfuncs),
+            "flashAttentionPipeline_": {
+                "tile_count": 0,
+                "dataop_count": data_count,
+                "overlap_candidate": False,
+            },
+        }
+    }
+
+
 def _flash_attention_kv_repack_broadcast_edge(
     sdscs_json: list[dict],
     tile_index: int,
     *,
     input_idx: int,
+    allow_additional_consumers: bool = False,
 ) -> tuple[dict | None, list[str]]:
     if input_idx == INPUT_FETCH_NEIGHBOR_INPUT_LDSIDX:
         return None, [f"input{input_idx}:not_kv_operand"]
@@ -2583,7 +3298,15 @@ def _flash_attention_kv_repack_broadcast_edge(
     p, prod, out_idx = producer
 
     future = _future_consumers(sdscs_json, p, addr)
-    if len(future) != 1 or future[0][0] != c or future[0][2] != input_idx:
+    target_consumers = [
+        (fc, fcons, fin_idx)
+        for fc, fcons, fin_idx in future
+        if fc == c and fin_idx == input_idx
+    ]
+    if (
+        len(target_consumers) != 1
+        or (not allow_additional_consumers and len(future) != 1)
+    ):
         future_names = [
             f"{next(iter(fcons))}:input{fin_idx}"
             for _fc, fcons, fin_idx in future
@@ -2595,6 +3318,11 @@ def _flash_attention_kv_repack_broadcast_edge(
                 f"{','.join(future_names)}"
             ],
         )
+    additional_consumers = [
+        f"{next(iter(fcons))}:input{fin_idx}"
+        for fc, fcons, fin_idx in future
+        if fc != c or fin_idx != input_idx
+    ]
     if _op_name(prod) != "ReStickifyOpHBM":
         return None, [f"input{input_idx}:producer_not_restickify_hbm:{_op_name(prod)}"]
 
@@ -2603,7 +3331,8 @@ def _flash_attention_kv_repack_broadcast_edge(
     prod_stick = _stick_dim_for_lds(prod_dl, out_idx)
     cons_layout = _layout_for_lds(cons_dl, input_idx)
     cons_stick = _stick_dim_for_lds(cons_dl, input_idx)
-    prod_split = _single_split_dim(_body(prod).get("numWkSlicesPerDim_", {}))
+    prod_shard = _body(prod).get("numWkSlicesPerDim_", {})
+    prod_split_dims = _split_dims(prod_shard)
     cons_split = _single_split_dim(cons_body.get("numWkSlicesPerDim_", {}))
     producer_num_cores = int(_body(prod).get("numCoresUsed_", 0))
     if (
@@ -2611,7 +3340,7 @@ def _flash_attention_kv_repack_broadcast_edge(
         or prod_stick is None
         or cons_layout is None
         or cons_stick is None
-        or prod_split is None
+        or not prod_split_dims
         or cons_split is None
         or producer_num_cores <= 0
     ):
@@ -2630,24 +3359,35 @@ def _flash_attention_kv_repack_broadcast_edge(
     )
     if dim_map is None:
         return None, [f"input{input_idx}:layout_transform_dim_map_missing"]
-    mapped_split = dim_map.get(prod_split)
+    mapped_split_dims = [dim_map.get(dim) for dim in prod_split_dims]
     iter_sizes = _iter_sizes_for_layout(cons_dl, cons_layout)
     source_layout = [dim_map[dim] for dim in prod_layout]
     if (
         iter_sizes is None
-        or mapped_split is None
-        or mapped_split not in iter_sizes
+        or any(dim is None or dim not in iter_sizes for dim in mapped_split_dims)
         or any(dim not in iter_sizes for dim in source_layout)
     ):
         return None, [f"input{input_idx}:missing_iter_sizes"]
     if cons_split in iter_sizes:
         return None, [f"input{input_idx}:consumer_split_present:{cons_split}"]
-    if iter_sizes[mapped_split] % producer_num_cores != 0:
+    producer_split_factor = 1
+    for prod_dim, mapped_dim in zip(prod_split_dims, mapped_split_dims):
+        factor = int(prod_shard.get(prod_dim.removesuffix("_"), 1))
+        if factor <= 0 or iter_sizes[mapped_dim] % factor != 0:
+            return (
+                None,
+                [
+                    f"input{input_idx}:invalid_producer_split:"
+                    f"{mapped_dim}:factor={factor}"
+                ],
+            )
+        producer_split_factor *= factor
+    if producer_split_factor != producer_num_cores:
         return (
             None,
             [
-                f"input{input_idx}:invalid_producer_split:"
-                f"{mapped_split}:cores={producer_num_cores}"
+                f"input{input_idx}:producer_split_factor_mismatch:"
+                f"factor={producer_split_factor}:cores={producer_num_cores}"
             ],
         )
     if producer_num_cores >= consumer_num_cores:
@@ -2689,13 +3429,20 @@ def _flash_attention_kv_repack_broadcast_edge(
             "producer_idx": out_idx,
             "consumer_idx": input_idx,
             "shared_hbm_addr": addr,
+            "source_hbm_start_by_core": _hbm_start_by_core(prod_dl, out_idx),
             "producer_layout": prod_layout,
             "producer_stick_dim": prod_stick,
             "consumer_layout": cons_layout,
             "source_layout": source_layout,
             "stick_dim": cons_stick,
-            "producer_split": prod_split,
-            "mapped_split": mapped_split,
+            "producer_split": (
+                prod_split_dims[0] if len(prod_split_dims) == 1 else prod_split_dims
+            ),
+            "mapped_split": (
+                mapped_split_dims[0]
+                if len(mapped_split_dims) == 1
+                else mapped_split_dims
+            ),
             "consumer_split": cons_split,
             "dim_map": dim_map,
             "iter_sizes": iter_sizes,
@@ -2705,6 +3452,7 @@ def _flash_attention_kv_repack_broadcast_edge(
             "producer_num_cores": producer_num_cores,
             "consumer_num_cores": consumer_num_cores,
             "source_pieces": source_pieces,
+            "additional_consumers": additional_consumers,
         },
         [],
     )
@@ -2872,6 +3620,7 @@ def _kv_repack_broadcast_meta(
         "kv_repack_shared_hbm_addr": edge["shared_hbm_addr"],
         "kv_repack_producer_cores": edge["producer_num_cores"],
         "kv_repack_consumer_cores": edge["consumer_num_cores"],
+        "kv_repack_additional_consumers": edge.get("additional_consumers", []),
         "kv_repack_source_layout": edge["source_layout"],
         "kv_repack_consumer_layout": edge["consumer_layout"],
         "kv_repack_iter_sizes": edge["iter_sizes"],
@@ -2913,6 +3662,12 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
     stcdp_subpiece_reuse: bool = True,
     broadcast_group_size: int = 0,
     self_resident_source: bool = False,
+    hbm_source: bool = False,
+    hbm_direct_load: bool = False,
+    hbm_staged: bool = False,
+    consumer_core_state_init: bool = True,
+    consumer_ds_type: str = "",
+    consumer_lx_alloc_style: str = "",
     stcdp_use_unicast: int = -1,
     stcdp_force_mc_mode: int = -1,
 ) -> dict | None:
@@ -2926,6 +3681,9 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
     if edge is None or selected_tile is None or selected_input is None:
         return None
     edge = copy.deepcopy(edge)
+    if hbm_staged:
+        hbm_source = False
+        hbm_direct_load = False
     if self_resident_source:
         edge["source_lx_base"] = edge["consumer_lx_base"]
         _move_lx_piece_start_addrs(
@@ -2938,49 +3696,64 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
     pred_sidecar = f"{name_prefix}_{selected_tile}_input{selected_input}_producer"
     cons_sidecar = f"{name_prefix}_{selected_tile}_input{selected_input}_consumer"
 
-    producer_artifact = {pred_sidecar: copy.deepcopy(_body(edge["producer"]))}
-    apply_lx_flip(
-        producer_artifact,
-        LxFlip(
-            edge["producer_idx"],
-            edge["source_lx_base"],
-            "kv-repack-broadcast-producer-output",
-        ),
-    )
-    producer_artifact[pred_sidecar].setdefault("flashAttentionPipeline_", {}).update(
-        {
-            **_kv_repack_broadcast_meta(
-                edge,
-                source="generated-flash-prefill-kv-repack-broadcast-producer",
-                tile_index=selected_tile,
-                requested_tile_index=tile_index,
-                input_idx=selected_input,
-                executable=True,
-                runtime_forced=True,
-                skip_source_core_destinations=self_resident_source,
+    producer_artifact = None
+    uses_original_hbm_source = hbm_source or hbm_direct_load or hbm_staged
+    if not uses_original_hbm_source:
+        producer_artifact = {pred_sidecar: copy.deepcopy(_body(edge["producer"]))}
+        apply_lx_flip(
+            producer_artifact,
+            LxFlip(
+                edge["producer_idx"],
+                edge["source_lx_base"],
+                "kv-repack-broadcast-producer-output",
             ),
-            "kv_repack_broadcast_role": "producer",
-            "kv_repack_producer_sidecar": pred_sidecar,
-            "kv_repack_consumer_sidecar": cons_sidecar,
-            "kv_repack_self_resident_source": self_resident_source,
-            "kv_repack_stcdp_use_unicast": stcdp_use_unicast,
-            "kv_repack_stcdp_force_mc_mode": stcdp_force_mc_mode,
-            "replaces_sdsc": prod_name,
-        }
-    )
+        )
+        producer_artifact[pred_sidecar].setdefault("flashAttentionPipeline_", {}).update(
+            {
+                **_kv_repack_broadcast_meta(
+                    edge,
+                    source="generated-flash-prefill-kv-repack-broadcast-producer",
+                    tile_index=selected_tile,
+                    requested_tile_index=tile_index,
+                    input_idx=selected_input,
+                    executable=True,
+                    runtime_forced=True,
+                    skip_source_core_destinations=self_resident_source,
+                ),
+                "kv_repack_broadcast_role": "producer",
+                "kv_repack_producer_sidecar": pred_sidecar,
+                "kv_repack_consumer_sidecar": cons_sidecar,
+                "kv_repack_hbm_source": False,
+                "kv_repack_self_resident_source": self_resident_source,
+                "kv_repack_stcdp_use_unicast": stcdp_use_unicast,
+                "kv_repack_stcdp_force_mc_mode": stcdp_force_mc_mode,
+                "replaces_sdsc": prod_name,
+            }
+        )
 
     compute_dsc = copy.deepcopy(_body(edge["consumer"])["dscs_"][0])
     compute_root = {cons_name: {"dscs_": [compute_dsc]}}
-    apply_lx_flip(
-        compute_root,
-        LxFlip(
-            edge["consumer_idx"],
-            edge["consumer_lx_base"],
-            "kv-repack-broadcast-consumer-input",
-        ),
-    )
     compute_dl = next(iter(compute_dsc.values()))
-    if include_input_fetch_transfer:
+    if not hbm_staged:
+        apply_lx_flip(
+            compute_root,
+            LxFlip(
+                edge["consumer_idx"],
+                edge["consumer_lx_base"],
+                "kv-repack-broadcast-consumer-input",
+            ),
+            core_state_init=consumer_core_state_init,
+        )
+        _retarget_lx_allocate_style(
+            compute_root,
+            edge["consumer_idx"],
+            consumer_lx_alloc_style,
+        )
+        if consumer_ds_type:
+            consumer_lds = _lds_by_idx(compute_dl, edge["consumer_idx"])
+            if consumer_lds is not None:
+                consumer_lds["dsType_"] = consumer_ds_type
+    if include_input_fetch_transfer and not hbm_staged:
         _add_input_fetch_neighbor_transfer(compute_dl, edge["consumer_idx"])
         _add_input_fetch_neighbor_legacy_dims(
             compute_dl,
@@ -2993,41 +3766,98 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
     )
     source_core_ids = _kv_repack_source_core_ids(edge)
     dataops = []
+    opfuncs = []
+    ordered_dataop_core_groups = []
     group_dataop_core_ids = []
-    for group_idx, core_ids in enumerate(core_groups):
-        group_suffix = "" if len(core_groups) == 1 else f"_group{group_idx}"
-        dataop_name = (
-            f"{group_idx}_STCDPOpLx_kv_repack_broadcast_"
-            f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
-            f"{group_suffix}"
-        )
-        dataop_core_ids = sorted(set(core_ids).union(source_core_ids))
-        group_dataop_core_ids.append(dataop_core_ids)
-        dataops.append(
-            _make_kv_repack_broadcast_dataop(
-                dataop_name,
-                edge,
-                include_broadcast_metadata=False,
-                stcdp_subpiece_reuse=stcdp_subpiece_reuse,
-                consumer_core_ids=core_ids,
-                dataop_core_ids=dataop_core_ids,
-                skip_source_core_destinations=self_resident_source,
-                stcdp_use_unicast=stcdp_use_unicast,
-                stcdp_force_mc_mode=stcdp_force_mc_mode,
+    if hbm_source and not hbm_direct_load:
+        for piece_idx, source_piece in enumerate(edge["source_pieces"]):
+            hbm_dataop_core_ids = sorted(_piece_lx_mem_ids(source_piece))
+            if not hbm_dataop_core_ids:
+                return None
+            hbm_dataop_name = (
+                f"{len(dataops)}_STCDPOpHBM_kv_repack_broadcast_"
+                f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
+                f"_hbm_source_piece{piece_idx}_load"
             )
+            ordered_dataop_core_groups.append(hbm_dataop_core_ids)
+            opfuncs.append("STCDPOpHBM")
+            dataops.append(
+                _make_kv_repack_hbm_roundtrip_dataop(
+                    hbm_dataop_name,
+                    edge,
+                    source_piece=source_piece,
+                    phase="load",
+                    dataop_core_ids=hbm_dataop_core_ids,
+                    lx_start_by_core=_piece_lx_start_by_core(source_piece),
+                )
+            )
+    if hbm_direct_load:
+        direct_load_cores = list(range(edge["consumer_num_cores"]))
+        direct_lx_start_by_core = {
+            core_id: edge["consumer_lx_base"] for core_id in direct_load_cores
+        }
+        for piece_idx, source_piece in enumerate(edge["source_pieces"]):
+            hbm_dataop_name = (
+                f"{len(dataops)}_STCDPOpHBM_kv_repack_broadcast_"
+                f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
+                f"_hbm_direct_piece{piece_idx}_load"
+            )
+            ordered_dataop_core_groups.append(direct_load_cores)
+            opfuncs.append("STCDPOpHBM")
+            dataops.append(
+                _make_kv_repack_hbm_roundtrip_dataop(
+                    hbm_dataop_name,
+                    edge,
+                    source_piece=source_piece,
+                    phase="load",
+                    dataop_core_ids=direct_load_cores,
+                    lx_start_by_core=direct_lx_start_by_core,
+                )
+            )
+    elif not hbm_staged:
+        for group_idx, core_ids in enumerate(core_groups):
+            group_suffix = "" if len(core_groups) == 1 else f"_group{group_idx}"
+            dataop_name = (
+                f"{len(dataops)}_STCDPOpLx_kv_repack_broadcast_"
+                f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
+                f"{group_suffix}"
+            )
+            dataop_core_ids = sorted(set(core_ids).union(source_core_ids))
+            group_dataop_core_ids.append(dataop_core_ids)
+            ordered_dataop_core_groups.append(dataop_core_ids)
+            opfuncs.append("STCDPOpLx")
+            dataops.append(
+                _make_kv_repack_broadcast_dataop(
+                    dataop_name,
+                    edge,
+                    include_broadcast_metadata=False,
+                    stcdp_subpiece_reuse=stcdp_subpiece_reuse,
+                    consumer_core_ids=core_ids,
+                    dataop_core_ids=dataop_core_ids,
+                    skip_source_core_destinations=self_resident_source,
+                    stcdp_use_unicast=stcdp_use_unicast,
+                    stcdp_force_mc_mode=stcdp_force_mc_mode,
+                )
+            )
+    barrier_dataop_core_ids = None
+    if uses_original_hbm_source:
+        barrier_dataop_core_ids = list(range(edge["consumer_num_cores"]))
+        barrier_dataop_name = (
+            f"{len(dataops)}_nop_kv_repack_broadcast_barrier_"
+            f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
         )
-    schedule = {}
-    for core_id in range(edge["consumer_num_cores"]):
-        schedule_rows = []
-        for group_idx, dataop_core_ids in enumerate(group_dataop_core_ids):
-            if core_id in dataop_core_ids:
-                schedule_rows.append([group_idx, -1, 1 if schedule_rows else 0, 1])
-        schedule_rows.append([-1, 0, 1, 0])
-        schedule[str(core_id)] = schedule_rows
+        dataops.append(_make_nop_dataop(barrier_dataop_name, barrier_dataop_core_ids))
+        opfuncs.append("nop")
+    schedule = _kv_repack_copyback_schedule_for_dataops(
+        edge["consumer_num_cores"],
+        ordered_dataop_core_groups,
+        barrier_dataop_core_ids=barrier_dataop_core_ids,
+        include_compute=True,
+    )
     consumer_artifact = build_flash_attention_pipeline_mixed_sdsc(
         cons_sidecar,
         dataops,
-        ["STCDPOpLx"] * len(dataops),
+        opfuncs,
         schedule,
         [compute_dsc],
         edge["consumer_num_cores"],
@@ -3058,12 +3888,22 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
                 skip_source_core_destinations=self_resident_source,
             ),
             "kv_repack_broadcast_role": "consumer",
-            "kv_repack_producer_sidecar": pred_sidecar,
+            "kv_repack_producer_sidecar": (
+                None if uses_original_hbm_source else pred_sidecar
+            ),
             "kv_repack_consumer_sidecar": cons_sidecar,
             "kv_repack_input_fetch_transfer": include_input_fetch_transfer,
             "kv_repack_stcdp_subpiece_reuse": stcdp_subpiece_reuse,
             "kv_repack_broadcast_group_size": broadcast_group_size,
-            "kv_repack_broadcast_group_count": len(core_groups),
+            "kv_repack_broadcast_group_count": (
+                0 if hbm_direct_load or hbm_staged else len(core_groups)
+            ),
+            "kv_repack_hbm_source": uses_original_hbm_source,
+            "kv_repack_hbm_direct_load": hbm_direct_load,
+            "kv_repack_hbm_staged": hbm_staged,
+            "kv_repack_consumer_core_state_init": consumer_core_state_init,
+            "kv_repack_consumer_ds_type": consumer_ds_type,
+            "kv_repack_consumer_lx_alloc_style": consumer_lx_alloc_style,
             "kv_repack_self_resident_source": self_resident_source,
             "kv_repack_stcdp_use_unicast": stcdp_use_unicast,
             "kv_repack_stcdp_force_mc_mode": stcdp_force_mc_mode,
@@ -3072,16 +3912,1912 @@ def build_flash_attention_kv_repack_broadcast_pair_artifacts(
         }
     )
 
+    artifacts = [consumer_artifact] if producer_artifact is None else [
+        producer_artifact,
+        consumer_artifact,
+    ]
+    replacements = {}
+    if producer_artifact is not None:
+        replacements[prod_name] = pred_sidecar
+    replacements[cons_name] = cons_sidecar
     return {
-        "artifacts": [producer_artifact, consumer_artifact],
-        "replacements": {
-            prod_name: pred_sidecar,
-            cons_name: cons_sidecar,
-        },
+        "artifacts": artifacts,
+        "replacements": replacements,
         "bundle_attrs": {},
         "pointwise_lx_region0": edge["consumer_lx_base"] + edge["slice_bytes"],
         "rejection_reasons": reasons,
     }
+
+
+def _flash_attention_kv_repack_hbm_staged_hoist_edges(
+    sdscs_json: list[dict],
+    current_tile: int,
+) -> tuple[dict | None, list[str]]:
+    current = _flash_value_flow_tile(sdscs_json, current_tile)
+    if current is None:
+        return None, ["current:tile_not_found"]
+    current_consumer_index, current_consumer = current
+    current_num_cores = int(_body(current_consumer).get("numCoresUsed_", 0))
+    if current_num_cores <= 0:
+        return None, ["current:invalid_num_cores"]
+
+    reasons: list[str] = []
+    for future_tile in range(current_tile + 1, _flash_value_flow_tile_count(sdscs_json)):
+        future_reasons: list[str] = []
+        for input_idx in (1, 2):
+            edge, candidate_reasons = _flash_attention_kv_repack_broadcast_edge(
+                sdscs_json,
+                future_tile,
+                input_idx=input_idx,
+                allow_additional_consumers=True,
+            )
+            if edge is None:
+                future_reasons.extend(candidate_reasons)
+                continue
+            future_producer_index = edge["producer_index"]
+            future_consumer_index = edge["consumer_index"]
+            if future_producer_index <= current_consumer_index:
+                future_reasons.append(
+                    f"input{input_idx}:producer_already_ready:"
+                    f"producer={future_producer_index}:"
+                    f"current={current_consumer_index}"
+                )
+                continue
+            if future_consumer_index <= future_producer_index:
+                future_reasons.append(
+                    f"input{input_idx}:consumer_not_after_producer:"
+                    f"consumer={future_consumer_index}:"
+                    f"producer={future_producer_index}"
+                )
+                continue
+            if edge["consumer_num_cores"] != current_num_cores:
+                future_reasons.append(
+                    f"input{input_idx}:consumer_num_cores_mismatch:"
+                    f"current={current_num_cores}:"
+                    f"future={edge['consumer_num_cores']}"
+                )
+                continue
+            hoist_reasons = _hoistable_before(
+                sdscs_json,
+                future_producer_index,
+                current_consumer_index,
+            )
+            if hoist_reasons:
+                future_reasons.extend(
+                    f"input{input_idx}:{reason}" for reason in hoist_reasons
+                )
+                continue
+            participant_names = [
+                next(iter(current_consumer)),
+                next(iter(edge["producer"])),
+                next(iter(edge["consumer"])),
+            ]
+            if len(set(participant_names)) != len(participant_names):
+                future_reasons.append(
+                    f"input{input_idx}:duplicate_participants:"
+                    f"{','.join(participant_names)}"
+                )
+                continue
+            source_core_ids = _kv_repack_source_core_ids(edge)
+            if not source_core_ids:
+                future_reasons.append(f"input{input_idx}:missing_source_cores")
+                continue
+            return (
+                {
+                    "current_tile": current_tile,
+                    "future_tile": future_tile,
+                    "current_consumer_index": current_consumer_index,
+                    "current_consumer": current_consumer,
+                    "future_edge": edge,
+                    "future_input_idx": input_idx,
+                    "num_cores": current_num_cores,
+                    "source_core_ids": source_core_ids,
+                    "slice_bytes": edge["slice_bytes"],
+                },
+                [],
+            )
+        reasons.extend(
+            f"future_tile{future_tile}:{reason}" for reason in future_reasons
+        )
+    return None, reasons or ["hoist:no_future_kv_candidate"]
+
+
+def _resolve_flash_attention_kv_repack_hbm_staged_hoist_edges(
+    sdscs_json: list[dict],
+    tile_index: int,
+) -> tuple[dict | None, list[str]]:
+    if tile_index != LAYOUT_XFORM_PAIR_AUTO_TILE:
+        return _flash_attention_kv_repack_hbm_staged_hoist_edges(
+            sdscs_json,
+            tile_index,
+        )
+
+    reasons: list[str] = []
+    for candidate in range(_flash_value_flow_tile_count(sdscs_json)):
+        result, candidate_reasons = (
+            _flash_attention_kv_repack_hbm_staged_hoist_edges(
+                sdscs_json,
+                candidate,
+            )
+        )
+        if result is not None:
+            return result, []
+        reasons.extend(
+            f"tile{candidate}:{reason}" for reason in candidate_reasons
+        )
+    return None, reasons or ["auto:no_candidate_tiles"]
+
+
+def flash_attention_kv_repack_hbm_staged_hoist_rejection_reasons(
+    sdscs_json: list[dict],
+    tile_index: int,
+) -> list[str]:
+    """Explain why a future K/V HBM-staged hoist failed closed."""
+    _result, reasons = _resolve_flash_attention_kv_repack_hbm_staged_hoist_edges(
+        sdscs_json,
+        tile_index,
+    )
+    return reasons
+
+
+def build_flash_attention_kv_repack_hbm_staged_hoist_tile_artifacts(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    name_prefix: str = "mixed_flash_kv_repack_hbm_staged_hoist",
+) -> dict | None:
+    """Hoist a future low-core K/V producer while keeping HBM-staged consume."""
+    hoist, reasons = _resolve_flash_attention_kv_repack_hbm_staged_hoist_edges(
+        sdscs_json,
+        tile_index,
+    )
+    if hoist is None:
+        return None
+
+    current = hoist["current_consumer"]
+    edge = hoist["future_edge"]
+    current_tile = hoist["current_tile"]
+    future_tile = hoist["future_tile"]
+    current_name = next(iter(current))
+    future_prod_name = next(iter(edge["producer"]))
+    producer_sidecar = f"{name_prefix}_{current_tile}_future_producer"
+
+    producer_artifact = {producer_sidecar: copy.deepcopy(_body(edge["producer"]))}
+    producer_root = producer_artifact[producer_sidecar]
+    producer_root.setdefault("flashAttentionPipeline_", {}).update(
+        {
+            "source": "generated-flash-prefill-kv-hbm-staged-hoisted-producer",
+            "kv_repack_hbm_staged_hoist_role": "future_producer",
+            "kv_repack_hbm_staged_hoist_experimental": True,
+            "kv_repack_hbm_staged_hoist_runtime_safe": True,
+            "kv_repack_hbm_staged_hoist_runtime_forced": True,
+            "kv_repack_hbm_staged_hoist_current_tile": current_tile,
+            "kv_repack_hbm_staged_hoist_future_tile": future_tile,
+            "kv_repack_hbm_staged_hoist_future_input_idx": hoist[
+                "future_input_idx"
+            ],
+            "kv_repack_hbm_staged_hoist_future_predecessor_sdsc": (
+                future_prod_name
+            ),
+            "kv_repack_hbm_staged_hoist_omitted_future_predecessor_sdsc": (
+                future_prod_name
+            ),
+            "kv_repack_hbm_staged_hoist_inserted_before_sdsc": current_name,
+            "kv_repack_hbm_staged_hoist_source_core_ids": (
+                hoist["source_core_ids"]
+            ),
+            "replaces_sdsc": future_prod_name,
+            "tile_index": current_tile,
+            "requested_tile_index": tile_index,
+            "compute_tile_count": 1,
+        }
+    )
+
+    future_consumer = build_flash_attention_kv_repack_broadcast_pair_artifacts(
+        sdscs_json,
+        future_tile,
+        name_prefix=f"{name_prefix}_{current_tile}_future_kv",
+        include_input_fetch_transfer=False,
+        hbm_staged=True,
+    )
+    if future_consumer is None:
+        return None
+
+    return {
+        "artifacts": [producer_artifact, *future_consumer["artifacts"]],
+        "replacements": {
+            **future_consumer["replacements"],
+        },
+        "insertions_before": {current_name: [producer_sidecar]},
+        "omissions": {future_prod_name},
+        "bundle_attrs": {},
+        "pointwise_lx_region0": future_consumer["pointwise_lx_region0"],
+        "rejection_reasons": reasons,
+    }
+
+
+def _kv_repack_hbm_prefetch_overlap_schedule(
+    num_cores: int,
+    dataop_count: int,
+) -> dict[str, list[list[int]]]:
+    """Schedule the first future K/V HBM prefetch concurrently with compute."""
+    if dataop_count <= 0:
+        return {str(core_id): [[-1, 0, 0, 0]] for core_id in range(num_cores)}
+    rows = [[0, 0, 0, 1]]
+    rows.extend(
+        [
+            idx,
+            -1,
+            1,
+            1,
+        ]
+        for idx in range(1, dataop_count)
+    )
+    return {str(core_id): [list(row) for row in rows] for core_id in range(num_cores)}
+
+
+def _kv_repack_hbm_prefetch_native_load_overlap_schedule(
+    num_cores: int,
+    dataop_count: int,
+    *,
+    overlap_after_sync: bool = True,
+) -> dict[str, list[list[int]]]:
+    """Run native DLDSC input loads in a prologue, then overlap prefetch."""
+    if dataop_count <= 1:
+        return {str(core_id): [[0, -1, 0, 0]] for core_id in range(num_cores)}
+    rows = [[0, -1, 0, 1], [1, 0, 1, 1 if overlap_after_sync else 0]]
+    rows.extend(
+        [
+            idx,
+            -1,
+            1,
+            1,
+        ]
+        for idx in range(2, dataop_count)
+    )
+    return {str(core_id): [list(row) for row in rows] for core_id in range(num_cores)}
+
+
+def _kv_repack_hbm_prefetch_tail_current_schedule(
+    num_cores: int,
+    pre_compute_dataop_count: int,
+    tail_dataop_count: int,
+) -> dict[str, list[list[int]]]:
+    """Run current compute before issuing the future K/V prefetch dataops."""
+    rows = [
+        [
+            idx,
+            -1,
+            1 if idx > 0 else 0,
+            1,
+        ]
+        for idx in range(pre_compute_dataop_count)
+    ]
+    rows.append(
+        [
+            -1,
+            0,
+            1 if pre_compute_dataop_count > 0 else 0,
+            1 if tail_dataop_count > 0 else 0,
+        ]
+    )
+    first_tail = pre_compute_dataop_count
+    rows.extend(
+        [
+            first_tail + idx,
+            -1,
+            1,
+            1 if idx < tail_dataop_count - 1 else 0,
+        ]
+        for idx in range(tail_dataop_count)
+    )
+    return {str(core_id): [list(row) for row in rows] for core_id in range(num_cores)}
+
+
+def _kv_repack_hbm_prefetch_source_fanout_schedule(
+    num_cores: int,
+    pre_compute_dataop_count: int,
+    source_load_core_ids: list[list[int]],
+    barrier_dataop_idx: int,
+    fanout_dataop_idx: int,
+    fanout_core_ids: list[int] | None = None,
+    post_fanout_dataop_idx: int | None = None,
+    post_fanout_core_ids: list[int] | None = None,
+    overlap_after_sync: bool = True,
+    serialize_load_core_compute: bool = False,
+) -> dict[str, list[list[int]]]:
+    """Overlap loader-core HBM source loads, then fan out after compute."""
+    source_load_sets = [set(core_ids) for core_ids in source_load_core_ids]
+    fanout_core_set = (
+        set(range(num_cores)) if fanout_core_ids is None else set(fanout_core_ids)
+    )
+    post_fanout_core_set = set(post_fanout_core_ids or [])
+    schedule: dict[str, list[list[int]]] = {}
+    for core_id in range(num_cores):
+        rows = [
+            [
+                idx,
+                -1,
+                1 if idx > 0 else 0,
+                1,
+            ]
+            for idx in range(pre_compute_dataop_count)
+        ]
+        local_loads = [
+            pre_compute_dataop_count + idx
+            for idx, core_ids in enumerate(source_load_sets)
+            if core_id in core_ids
+        ]
+        if serialize_load_core_compute and local_loads:
+            rows.extend(
+                [
+                    load_idx,
+                    -1,
+                    1 if rows or load_idx != local_loads[0] else 0,
+                    1,
+                ]
+                for load_idx in local_loads
+            )
+            rows.append([-1, 0, 1, 1])
+        else:
+            first_load = local_loads[0] if local_loads else -1
+            rows.append(
+                [
+                    first_load,
+                    0,
+                    1 if rows else 0,
+                    1 if overlap_after_sync else 0,
+                ]
+            )
+            rows.extend(
+                [
+                    load_idx,
+                    -1,
+                    1,
+                    1,
+                ]
+                for load_idx in local_loads[1:]
+            )
+        runs_fanout = core_id in fanout_core_set
+        runs_post_fanout = (
+            post_fanout_dataop_idx is not None and core_id in post_fanout_core_set
+        )
+        rows.append([barrier_dataop_idx, -1, 1, 1 if runs_fanout else 0])
+        if runs_fanout:
+            rows.append([fanout_dataop_idx, -1, 1, 1 if runs_post_fanout else 0])
+        if runs_post_fanout:
+            rows.append([post_fanout_dataop_idx, -1, 1, 0])
+        schedule[str(core_id)] = [list(row) for row in rows]
+    return schedule
+
+
+def _kv_repack_hbm_prefetch_source_fanout_tail_schedule(
+    num_cores: int,
+    pre_compute_dataop_count: int,
+    source_load_core_ids: list[list[int]],
+    barrier_dataop_idx: int,
+    fanout_dataop_idx: int,
+    fanout_core_ids: list[int] | None = None,
+    post_fanout_dataop_idx: int | None = None,
+    post_fanout_core_ids: list[int] | None = None,
+) -> dict[str, list[list[int]]]:
+    """Run compute before loader-core HBM source loads and final fanout."""
+    source_load_sets = [set(core_ids) for core_ids in source_load_core_ids]
+    fanout_core_set = (
+        set(range(num_cores)) if fanout_core_ids is None else set(fanout_core_ids)
+    )
+    post_fanout_core_set = set(post_fanout_core_ids or [])
+    schedule: dict[str, list[list[int]]] = {}
+    for core_id in range(num_cores):
+        rows = [
+            [
+                idx,
+                -1,
+                1 if idx > 0 else 0,
+                1,
+            ]
+            for idx in range(pre_compute_dataop_count)
+        ]
+        local_loads = [
+            pre_compute_dataop_count + idx
+            for idx, core_ids in enumerate(source_load_sets)
+            if core_id in core_ids
+        ]
+        rows.append(
+            [
+                -1,
+                0,
+                1 if rows else 0,
+                1,
+            ]
+        )
+        rows.extend(
+            [
+                load_idx,
+                -1,
+                1,
+                1,
+            ]
+            for load_idx in local_loads
+        )
+        runs_fanout = core_id in fanout_core_set
+        runs_post_fanout = (
+            post_fanout_dataop_idx is not None and core_id in post_fanout_core_set
+        )
+        rows.append([barrier_dataop_idx, -1, 1, 1 if runs_fanout else 0])
+        if runs_fanout:
+            rows.append([fanout_dataop_idx, -1, 1, 1 if runs_post_fanout else 0])
+        if runs_post_fanout:
+            rows.append([post_fanout_dataop_idx, -1, 1, 0])
+        schedule[str(core_id)] = [list(row) for row in rows]
+    return schedule
+
+
+def _kv_repack_hbm_prefetch_loader_copyback_schedule(
+    num_cores: int,
+    pre_compute_dataop_count: int,
+    source_load_core_ids: list[list[int]],
+    barrier_dataop_idx: int,
+    copyback_dataop_idx: int,
+    copyback_core_ids: list[int],
+    overlap_after_sync: bool = True,
+    serialize_load_core_compute: bool = False,
+) -> dict[str, list[list[int]]]:
+    """Overlap loader-core HBM source loads, then copy loader LX back to HBM."""
+    source_load_sets = [set(core_ids) for core_ids in source_load_core_ids]
+    copyback_core_set = set(copyback_core_ids)
+    schedule: dict[str, list[list[int]]] = {}
+    for core_id in range(num_cores):
+        rows = [
+            [
+                idx,
+                -1,
+                1 if idx > 0 else 0,
+                1,
+            ]
+            for idx in range(pre_compute_dataop_count)
+        ]
+        local_loads = [
+            pre_compute_dataop_count + idx
+            for idx, core_ids in enumerate(source_load_sets)
+            if core_id in core_ids
+        ]
+        if serialize_load_core_compute and local_loads:
+            rows.extend(
+                [
+                    load_idx,
+                    -1,
+                    1 if rows or load_idx != local_loads[0] else 0,
+                    1,
+                ]
+                for load_idx in local_loads
+            )
+            rows.append([-1, 0, 1, 1])
+        else:
+            first_load = local_loads[0] if local_loads else -1
+            rows.append(
+                [
+                    first_load,
+                    0,
+                    1 if rows else 0,
+                    1 if overlap_after_sync else 0,
+                ]
+            )
+            rows.extend(
+                [
+                    load_idx,
+                    -1,
+                    1,
+                    1,
+                ]
+                for load_idx in local_loads[1:]
+            )
+        runs_copyback = core_id in copyback_core_set
+        rows.append([barrier_dataop_idx, -1, 1, 1 if runs_copyback else 0])
+        if runs_copyback:
+            rows.append([copyback_dataop_idx, -1, 1, 0])
+        schedule[str(core_id)] = [list(row) for row in rows]
+    return schedule
+
+
+def _kv_repack_hbm_prefetch_loader_copyback_tail_schedule(
+    num_cores: int,
+    pre_compute_dataop_count: int,
+    source_load_core_ids: list[list[int]],
+    barrier_dataop_idx: int,
+    copyback_dataop_idx: int,
+    copyback_core_ids: list[int],
+) -> dict[str, list[list[int]]]:
+    """Run compute before loader-core HBM source loads and direct copyback."""
+    source_load_sets = [set(core_ids) for core_ids in source_load_core_ids]
+    copyback_core_set = set(copyback_core_ids)
+    schedule: dict[str, list[list[int]]] = {}
+    for core_id in range(num_cores):
+        rows = [
+            [
+                idx,
+                -1,
+                1 if idx > 0 else 0,
+                1,
+            ]
+            for idx in range(pre_compute_dataop_count)
+        ]
+        local_loads = [
+            pre_compute_dataop_count + idx
+            for idx, core_ids in enumerate(source_load_sets)
+            if core_id in core_ids
+        ]
+        rows.append(
+            [
+                -1,
+                0,
+                1 if rows else 0,
+                1,
+            ]
+        )
+        rows.extend(
+            [
+                load_idx,
+                -1,
+                1,
+                1,
+            ]
+            for load_idx in local_loads
+        )
+        runs_copyback = core_id in copyback_core_set
+        rows.append([barrier_dataop_idx, -1, 1, 1 if runs_copyback else 0])
+        if runs_copyback:
+            rows.append([copyback_dataop_idx, -1, 1, 0])
+        schedule[str(core_id)] = [list(row) for row in rows]
+    return schedule
+
+
+def _kv_repack_hbm_prefetch_prefill_overlap_schedule(
+    num_cores: int,
+    prefill_dataop_count: int,
+    overlap_dataop_count: int,
+) -> dict[str, list[list[int]]]:
+    """Serialize current-input prefill, then overlap future prefetch with compute."""
+    if prefill_dataop_count <= 0:
+        return _kv_repack_hbm_prefetch_overlap_schedule(
+            num_cores,
+            overlap_dataop_count,
+        )
+    if overlap_dataop_count <= 0:
+        rows = [
+            [
+                idx,
+                -1,
+                1 if idx > 0 else 0,
+                1,
+            ]
+            for idx in range(prefill_dataop_count)
+        ]
+        rows.append([-1, 0, 1, 0])
+        return {str(core_id): [list(row) for row in rows] for core_id in range(num_cores)}
+
+    rows = [
+        [
+            idx,
+            -1,
+            1 if idx > 0 else 0,
+            1,
+        ]
+        for idx in range(prefill_dataop_count)
+    ]
+    first_overlap = prefill_dataop_count
+    rows.append(
+        [
+            first_overlap,
+            0,
+            1,
+            1,
+        ]
+    )
+    rows.extend(
+        [
+            first_overlap + idx,
+            -1,
+            1,
+            1,
+        ]
+        for idx in range(1, overlap_dataop_count)
+    )
+    return {str(core_id): [list(row) for row in rows] for core_id in range(num_cores)}
+
+
+def flash_attention_kv_repack_hbm_prefetch_hoist_rejection_reasons(
+    sdscs_json: list[dict],
+    tile_index: int,
+) -> list[str]:
+    """Explain why a future K/V HBM prefetch hoist failed closed."""
+    return flash_attention_kv_repack_hbm_staged_hoist_rejection_reasons(
+        sdscs_json,
+        tile_index,
+    )
+
+
+def build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    name_prefix: str = "mixed_flash_kv_repack_hbm_prefetch_hoist",
+    prefetch_lx_base: int | None = None,
+    serial_prefetch: bool = False,
+    prefill_current_input: bool = False,
+    redundant_future_prefetch: bool = False,
+    serialize_current_prefetch: bool = False,
+    external_future_prefetch: bool = False,
+    overlap_after_sync: bool = True,
+    tail_current_prefetch: bool = False,
+    prefetch_source_fanout: bool = False,
+    prefetch_loader_fanout: bool = False,
+    prefetch_loader_core_id: int = 0,
+    prefetch_loader_lx_base: int = -1,
+    prefetch_fanout_use_unicast: int = -1,
+    prefetch_fanout_use_lxsfp_lx_transfers: int = -1,
+    prefetch_fanout_copyback_core: int = -2,
+    prefetch_fanout_restrict_to_copyback_core: bool = False,
+    prefetch_loader_copyback_without_fanout: bool = False,
+    prefetch_loader_fanout_full_tile_pieces: bool = False,
+    prefetch_lx_roundtrip: bool = False,
+    prefetch_corelet_id: int | None = None,
+    serialize_loader_core_prefetch: bool = False,
+) -> dict | None:
+    """Hoist a future K/V producer and prefetch its HBM result during compute."""
+    hoist, reasons = _resolve_flash_attention_kv_repack_hbm_staged_hoist_edges(
+        sdscs_json,
+        tile_index,
+    )
+    if hoist is None:
+        return None
+
+    current = hoist["current_consumer"]
+    edge = copy.deepcopy(hoist["future_edge"])
+    current_tile = hoist["current_tile"]
+    future_tile = hoist["future_tile"]
+    current_name = next(iter(current))
+    future_prod_name = next(iter(edge["producer"]))
+    future_cons_name = next(iter(edge["consumer"]))
+    producer_sidecar = f"{name_prefix}_{current_tile}_future_producer"
+    current_sidecar = f"{name_prefix}_{current_tile}_current_prefetch"
+    future_cons_sidecar = f"{name_prefix}_{current_tile}_future_consumer"
+    original_consumer_lx_base = edge["consumer_lx_base"]
+    if prefetch_lx_base is not None:
+        edge["consumer_lx_base"] = prefetch_lx_base
+    fanout_copyback_enabled = prefetch_fanout_copyback_core >= -1
+    if prefetch_loader_copyback_without_fanout and not fanout_copyback_enabled:
+        return None
+    fanout_copyback_core = (
+        _kv_repack_copyback_core(edge, prefetch_fanout_copyback_core)
+        if fanout_copyback_enabled
+        else -1
+    )
+    restricted_fanout_core_ids = (
+        [fanout_copyback_core]
+        if fanout_copyback_enabled and prefetch_fanout_restrict_to_copyback_core
+        else None
+    )
+
+    current_prefill_inputs = []
+    if prefill_current_input and not serial_prefetch:
+        current_dl = _dl_op(current)
+        current_region_bytes = edge["slice_bytes"]
+        for lds_idx in _consumer_input_indices(current_dl):
+            hbm_start_by_core = _hbm_start_by_core(current_dl, lds_idx)
+            if not hbm_start_by_core:
+                continue
+            layout = _layout_for_lds(current_dl, lds_idx)
+            stick_dim = _stick_dim_for_lds(current_dl, lds_idx)
+            iter_sizes = (
+                _local_iter_sizes_for_layout(current_dl, layout)
+                if layout is not None
+                else None
+            )
+            if layout is None or stick_dim is None or iter_sizes is None:
+                continue
+            current_region_bytes = max(
+                current_region_bytes,
+                _reserve_bridge_region_bytes(
+                    _operand_region_bytes(iter_sizes, stick_dim, STICK_SIZE)
+                ),
+            )
+            current_prefill_inputs.append(
+                {
+                    "lds_idx": lds_idx,
+                    "layout": layout,
+                    "stick_dim": stick_dim,
+                    "iter_sizes": iter_sizes,
+                    "hbm_start_by_core": hbm_start_by_core,
+                }
+            )
+        if current_prefill_inputs:
+            bases = allocate_lx_bases(
+                len(current_prefill_inputs) + 2,
+                current_region_bytes,
+                region0=PRODUCER_LX_BASE,
+            )
+            if prefetch_lx_base is None:
+                edge["consumer_lx_base"] = bases[1]
+            for item, lx_base in zip(current_prefill_inputs, bases[2:]):
+                item["lx_base"] = lx_base
+
+    producer_artifact = {producer_sidecar: copy.deepcopy(_body(edge["producer"]))}
+    producer_root = producer_artifact[producer_sidecar]
+    producer_root.setdefault("flashAttentionPipeline_", {}).update(
+        {
+            "source": "generated-flash-prefill-kv-hbm-prefetch-hoisted-producer",
+            "kv_repack_hbm_prefetch_hoist_role": "future_producer",
+            "kv_repack_hbm_prefetch_hoist_experimental": True,
+            "kv_repack_hbm_prefetch_hoist_runtime_safe": True,
+            "kv_repack_hbm_prefetch_hoist_runtime_forced": True,
+            "kv_repack_hbm_prefetch_hoist_current_tile": current_tile,
+            "kv_repack_hbm_prefetch_hoist_future_tile": future_tile,
+            "kv_repack_hbm_prefetch_hoist_future_input_idx": hoist[
+                "future_input_idx"
+            ],
+            "kv_repack_hbm_prefetch_hoist_future_predecessor_sdsc": (
+                future_prod_name
+            ),
+            "kv_repack_hbm_prefetch_hoist_omitted_future_predecessor_sdsc": (
+                future_prod_name
+            ),
+            "kv_repack_hbm_prefetch_hoist_inserted_before_sdsc": current_name,
+            "kv_repack_hbm_prefetch_hoist_source_core_ids": (
+                hoist["source_core_ids"]
+            ),
+            "replaces_sdsc": future_prod_name,
+            "tile_index": current_tile,
+            "requested_tile_index": tile_index,
+            "compute_tile_count": 1,
+        }
+    )
+
+    direct_load_cores = list(range(edge["consumer_num_cores"]))
+    dataops = []
+    opfuncs = []
+    source_fanout_load_core_ids = []
+    source_fanout_load_count = 0
+    fanout_copyback_dataop_idx = None
+    fanout_copyback_core_ids = None
+    fanout_core_ids = None
+    loader_lx_base = edge["source_lx_base"]
+    if prefetch_loader_fanout:
+        loader_core_id = int(prefetch_loader_core_id)
+        if loader_core_id < 0 or loader_core_id >= edge["consumer_num_cores"]:
+            raise ValueError(
+                "loader fanout core out of range: "
+                f"{loader_core_id} >= {edge['consumer_num_cores']}"
+            )
+        if prefetch_loader_lx_base == -2:
+            loader_lx_base = edge["consumer_lx_base"] + edge["slice_bytes"]
+        elif prefetch_loader_lx_base >= 0:
+            loader_lx_base = int(prefetch_loader_lx_base)
+        elif prefetch_loader_lx_base != -1:
+            raise ValueError(
+                "unsupported loader fanout LX base selector: "
+                f"{prefetch_loader_lx_base}"
+            )
+        if loader_lx_base + edge["slice_bytes"] > LX_CAPACITY_BYTES:
+            raise ValueError(
+                "loader fanout LX source buffer exceeds capacity: "
+                f"base={loader_lx_base} bytes={edge['slice_bytes']} "
+                f"capacity={LX_CAPACITY_BYTES}"
+            )
+        loader_edge = copy.deepcopy(edge)
+        loader_edge["source_pieces"] = (
+            _kv_repack_single_loader_full_tile_source_pieces(
+                edge,
+                loader_core_id=loader_core_id,
+                lx_base=loader_lx_base,
+            )
+            if prefetch_loader_fanout_full_tile_pieces
+            else _kv_repack_single_loader_source_pieces(
+                edge,
+                loader_core_id=loader_core_id,
+                lx_base=loader_lx_base,
+            )
+        )
+        prefetch_pieces = _kv_repack_consumer_hbm_prefetch_pieces(edge)
+        if not prefetch_pieces:
+            return None
+        hbm_dataop_name = (
+            f"{len(dataops)}_STCDPOpHBM_kv_repack_hbm_prefetch_"
+            f"Tensor0_idx{edge['consumer_idx']}_tile{future_tile}"
+            f"_loader_core{loader_core_id}_load"
+        )
+        dataops.append(
+            _make_kv_repack_hbm_roundtrip_dataop(
+                hbm_dataop_name,
+                edge,
+                source_piece=prefetch_pieces[0],
+                phase="load",
+                dataop_core_ids=[loader_core_id],
+                lx_start_by_core={loader_core_id: loader_lx_base},
+                hbm_piece_addr=True,
+                prefer_source_core_hbm_addr=False,
+                emit_lx_roundtrip=prefetch_lx_roundtrip,
+                corelet_id=prefetch_corelet_id,
+            )
+        )
+        opfuncs.append("STCDPOpHBM")
+        source_fanout_load_core_ids.append([loader_core_id])
+        source_fanout_load_count = len(dataops)
+        barrier_dataop_name = (
+            f"{len(dataops)}_nop_kv_repack_hbm_prefetch_"
+            f"Tensor0_idx{edge['consumer_idx']}_tile{future_tile}"
+            "_loader_fanout_barrier"
+        )
+        dataops.append(
+            _make_nop_dataop(
+                barrier_dataop_name,
+                list(range(edge["consumer_num_cores"])),
+            )
+        )
+        opfuncs.append("nop")
+        if not prefetch_loader_copyback_without_fanout:
+            fanout_core_ids = restricted_fanout_core_ids or list(
+                range(edge["consumer_num_cores"])
+            )
+            fanout_dataop_name = (
+                f"{len(dataops)}_STCDPOpLx_kv_repack_hbm_prefetch_"
+                f"Tensor0_idx{edge['consumer_idx']}_tile{future_tile}"
+                f"_loader_core{loader_core_id}_fanout"
+            )
+            dataops.append(
+                _make_kv_repack_broadcast_dataop(
+                    fanout_dataop_name,
+                    loader_edge,
+                    include_broadcast_metadata=False,
+                    consumer_core_ids=fanout_core_ids,
+                    dataop_core_ids=fanout_core_ids,
+                    stcdp_use_unicast=prefetch_fanout_use_unicast,
+                    stcdp_use_lxsfp_lx_transfers=(
+                        prefetch_fanout_use_lxsfp_lx_transfers
+                    ),
+                )
+            )
+            opfuncs.append("STCDPOpLx")
+    elif prefetch_source_fanout:
+        for piece_idx, source_piece in enumerate(edge["source_pieces"]):
+            hbm_dataop_core_ids = sorted(_piece_lx_mem_ids(source_piece))
+            if not hbm_dataop_core_ids:
+                return None
+            hbm_dataop_name = (
+                f"{len(dataops)}_STCDPOpHBM_kv_repack_hbm_prefetch_"
+                f"Tensor0_idx{edge['consumer_idx']}_tile{future_tile}"
+                f"_source_piece{piece_idx}_load"
+            )
+            dataops.append(
+                _make_kv_repack_hbm_roundtrip_dataop(
+                    hbm_dataop_name,
+                    edge,
+                    source_piece=source_piece,
+                    phase="load",
+                    dataop_core_ids=hbm_dataop_core_ids,
+                    lx_start_by_core=_piece_lx_start_by_core(source_piece),
+                    emit_lx_roundtrip=prefetch_lx_roundtrip,
+                    corelet_id=prefetch_corelet_id,
+                )
+            )
+            opfuncs.append("STCDPOpHBM")
+            source_fanout_load_core_ids.append(hbm_dataop_core_ids)
+        source_fanout_load_count = len(dataops)
+        barrier_dataop_name = (
+            f"{len(dataops)}_nop_kv_repack_hbm_prefetch_"
+            f"Tensor0_idx{edge['consumer_idx']}_tile{future_tile}"
+            "_source_fanout_barrier"
+        )
+        dataops.append(
+            _make_nop_dataop(
+                barrier_dataop_name,
+                list(range(edge["consumer_num_cores"])),
+            )
+        )
+        opfuncs.append("nop")
+        fanout_core_ids = restricted_fanout_core_ids or sorted(
+            set(range(edge["consumer_num_cores"])).union(hoist["source_core_ids"])
+        )
+        fanout_dataop_name = (
+            f"{len(dataops)}_STCDPOpLx_kv_repack_hbm_prefetch_"
+            f"Tensor0_idx{edge['consumer_idx']}_tile{future_tile}"
+            "_source_fanout"
+        )
+        dataops.append(
+            _make_kv_repack_broadcast_dataop(
+                fanout_dataop_name,
+                edge,
+                include_broadcast_metadata=False,
+                consumer_core_ids=fanout_core_ids,
+                dataop_core_ids=fanout_core_ids,
+                stcdp_use_unicast=prefetch_fanout_use_unicast,
+                stcdp_use_lxsfp_lx_transfers=(
+                    prefetch_fanout_use_lxsfp_lx_transfers
+                ),
+            )
+        )
+        opfuncs.append("STCDPOpLx")
+    else:
+        prefetch_pieces = _kv_repack_consumer_hbm_prefetch_pieces(edge)
+        for piece_idx, source_piece in enumerate(prefetch_pieces):
+            piece_lx_start = next(
+                (
+                    int(placement["startAddr"][0])
+                    for placement in source_piece.get("PlacementInfo", [])
+                    if placement.get("type") == "lx"
+                ),
+                edge["consumer_lx_base"],
+            )
+            piece_lx_start_by_core = {
+                core_id: piece_lx_start for core_id in direct_load_cores
+            }
+            hbm_dataop_name = (
+                f"{len(dataops)}_STCDPOpHBM_kv_repack_hbm_prefetch_"
+                f"Tensor0_idx{edge['consumer_idx']}_tile{future_tile}"
+                f"_piece{piece_idx}_load"
+            )
+            dataops.append(
+                _make_kv_repack_hbm_roundtrip_dataop(
+                    hbm_dataop_name,
+                    edge,
+                    source_piece=source_piece,
+                    phase="load",
+                    dataop_core_ids=direct_load_cores,
+                    lx_start_by_core=piece_lx_start_by_core,
+                    hbm_piece_addr=True,
+                    prefer_source_core_hbm_addr=False,
+                    emit_lx_roundtrip=prefetch_lx_roundtrip,
+                    corelet_id=prefetch_corelet_id,
+                )
+            )
+            opfuncs.append("STCDPOpHBM")
+
+    if fanout_copyback_enabled and (prefetch_source_fanout or prefetch_loader_fanout):
+        copyback_pieces = _kv_repack_consumer_hbm_prefetch_pieces(edge)
+        if not copyback_pieces:
+            return None
+        copyback_lx_base = (
+            loader_lx_base
+            if prefetch_loader_fanout and prefetch_loader_copyback_without_fanout
+            else edge["consumer_lx_base"]
+        )
+        copyback_name_suffix = (
+            f"_loader_copyback_core{fanout_copyback_core}"
+            if prefetch_loader_fanout and prefetch_loader_copyback_without_fanout
+            else f"_fanout_copyback_core{fanout_copyback_core}"
+        )
+        copyback_dataop_name = (
+            f"{len(dataops)}_STCDPOpHBM_kv_repack_hbm_prefetch_"
+            f"Tensor0_idx{edge['consumer_idx']}_tile{future_tile}"
+            f"{copyback_name_suffix}"
+        )
+        dataops.append(
+            _make_kv_repack_hbm_roundtrip_dataop(
+                copyback_dataop_name,
+                edge,
+                source_piece=copyback_pieces[0],
+                phase="store",
+                dataop_core_ids=[fanout_copyback_core],
+                lx_start_by_core={
+                    fanout_copyback_core: copyback_lx_base
+                },
+                hbm_piece_addr=True,
+                prefer_source_core_hbm_addr=False,
+                corelet_id=prefetch_corelet_id,
+            )
+        )
+        opfuncs.append("STCDPOpHBM")
+        fanout_copyback_dataop_idx = len(dataops) - 1
+        fanout_copyback_core_ids = [fanout_copyback_core]
+
+    current_artifact = None
+    if not serial_prefetch:
+        current_core_ids = list(range(edge["consumer_num_cores"]))
+        current_prefill_dataops = []
+        current_prefill_opfuncs = []
+        for item in current_prefill_inputs:
+            dataop_name = (
+                f"{len(current_prefill_dataops)}_STCDPOpHBM_"
+                f"kv_repack_hbm_prefetch_current_Tensor0_idx{item['lds_idx']}"
+                f"_tile{current_tile}_load"
+            )
+            current_prefill_dataops.append(
+                _make_hbm_direct_fill_dataop(
+                    dataop_name,
+                    layout=item["layout"],
+                    stick_dim=item["stick_dim"],
+                    iter_sizes=item["iter_sizes"],
+                    hbm_start_by_core=item["hbm_start_by_core"],
+                    lx_base=item["lx_base"],
+                    core_ids=current_core_ids,
+                )
+            )
+            current_prefill_opfuncs.append("STCDPOpHBM")
+        use_native_load_prologue = not current_prefill_dataops
+        native_load_prologue_dataops = []
+        native_load_prologue_opfuncs = []
+        if use_native_load_prologue:
+            native_load_prologue_dataops.append(
+                _make_nop_dataop(
+                    (
+                        "0_nop_kv_repack_hbm_prefetch_"
+                        f"dldsc_native_load_prologue_tile{current_tile}"
+                    ),
+                    current_core_ids,
+                )
+            )
+            native_load_prologue_opfuncs.append("nop")
+        current_compute_dsc = copy.deepcopy(_body(current)["dscs_"][0])
+        current_compute_root = {current_name: {"dscs_": [current_compute_dsc]}}
+        for item in current_prefill_inputs:
+            apply_lx_flip(
+                current_compute_root,
+                LxFlip(
+                    item["lds_idx"],
+                    item["lx_base"],
+                    "kv-repack-hbm-prefetch-current-input",
+                ),
+            )
+            current_compute_dl = next(iter(current_compute_dsc.values()))
+            current_prefill_lds = _lds_by_idx(
+                current_compute_dl,
+                item["lds_idx"],
+            )
+            if current_prefill_lds is not None:
+                current_prefill_lds["isFirstUse_"] = 0
+        current_dataops = [
+            *current_prefill_dataops,
+            *native_load_prologue_dataops,
+            *dataops,
+        ]
+        current_opfuncs = [
+            *current_prefill_opfuncs,
+            *native_load_prologue_opfuncs,
+            *opfuncs,
+        ]
+        current_schedule = (
+            _kv_repack_copyback_schedule_for_dataops(
+                edge["consumer_num_cores"],
+                [current_core_ids for _dataop in current_dataops],
+                include_compute=True,
+            )
+            if serialize_current_prefetch
+            else _kv_repack_hbm_prefetch_loader_copyback_tail_schedule(
+                edge["consumer_num_cores"],
+                len(current_prefill_dataops) + len(native_load_prologue_dataops),
+                source_fanout_load_core_ids,
+                (
+                    len(current_prefill_dataops)
+                    + len(native_load_prologue_dataops)
+                    + source_fanout_load_count
+                ),
+                (
+                    len(current_prefill_dataops)
+                    + len(native_load_prologue_dataops)
+                    + fanout_copyback_dataop_idx
+                ),
+                fanout_copyback_core_ids,
+            )
+            if prefetch_loader_copyback_without_fanout
+            and prefetch_loader_fanout
+            and fanout_copyback_dataop_idx is not None
+            and tail_current_prefetch
+            else _kv_repack_hbm_prefetch_loader_copyback_schedule(
+                edge["consumer_num_cores"],
+                len(current_prefill_dataops) + len(native_load_prologue_dataops),
+                source_fanout_load_core_ids,
+                (
+                    len(current_prefill_dataops)
+                    + len(native_load_prologue_dataops)
+                    + source_fanout_load_count
+                ),
+                (
+                    len(current_prefill_dataops)
+                    + len(native_load_prologue_dataops)
+                    + fanout_copyback_dataop_idx
+                ),
+                fanout_copyback_core_ids,
+                overlap_after_sync=overlap_after_sync,
+                serialize_load_core_compute=(
+                    serialize_loader_core_prefetch and prefetch_loader_fanout
+                ),
+            )
+            if prefetch_loader_copyback_without_fanout
+            and prefetch_loader_fanout
+            and fanout_copyback_dataop_idx is not None
+            else _kv_repack_hbm_prefetch_source_fanout_tail_schedule(
+                edge["consumer_num_cores"],
+                len(current_prefill_dataops) + len(native_load_prologue_dataops),
+                source_fanout_load_core_ids,
+                (
+                    len(current_prefill_dataops)
+                    + len(native_load_prologue_dataops)
+                    + source_fanout_load_count
+                ),
+                (
+                    len(current_prefill_dataops)
+                    + len(native_load_prologue_dataops)
+                    + source_fanout_load_count
+                    + 1
+                ),
+                fanout_core_ids=fanout_core_ids,
+                post_fanout_dataop_idx=(
+                    None
+                    if fanout_copyback_dataop_idx is None
+                    else len(current_prefill_dataops)
+                    + len(native_load_prologue_dataops)
+                    + fanout_copyback_dataop_idx
+                ),
+                post_fanout_core_ids=fanout_copyback_core_ids,
+            )
+            if (prefetch_source_fanout or prefetch_loader_fanout)
+            and tail_current_prefetch
+            else _kv_repack_hbm_prefetch_source_fanout_schedule(
+                edge["consumer_num_cores"],
+                len(current_prefill_dataops) + len(native_load_prologue_dataops),
+                source_fanout_load_core_ids,
+                (
+                    len(current_prefill_dataops)
+                    + len(native_load_prologue_dataops)
+                    + source_fanout_load_count
+                ),
+                (
+                    len(current_prefill_dataops)
+                    + len(native_load_prologue_dataops)
+                    + source_fanout_load_count
+                    + 1
+                ),
+                fanout_core_ids=fanout_core_ids,
+                post_fanout_dataop_idx=(
+                    None
+                    if fanout_copyback_dataop_idx is None
+                    else len(current_prefill_dataops)
+                    + len(native_load_prologue_dataops)
+                    + fanout_copyback_dataop_idx
+                ),
+                post_fanout_core_ids=fanout_copyback_core_ids,
+                overlap_after_sync=overlap_after_sync,
+                serialize_load_core_compute=(
+                    serialize_loader_core_prefetch and prefetch_loader_fanout
+                ),
+            )
+            if prefetch_source_fanout or prefetch_loader_fanout
+            else _kv_repack_hbm_prefetch_tail_current_schedule(
+                edge["consumer_num_cores"],
+                len(current_prefill_dataops) + len(native_load_prologue_dataops),
+                len(dataops),
+            )
+            if tail_current_prefetch
+            else _kv_repack_hbm_prefetch_native_load_overlap_schedule(
+                edge["consumer_num_cores"],
+                len(current_dataops),
+                overlap_after_sync=overlap_after_sync,
+            )
+            if use_native_load_prologue
+            else _kv_repack_hbm_prefetch_prefill_overlap_schedule(
+                edge["consumer_num_cores"],
+                len(current_prefill_dataops),
+                len(dataops),
+            )
+        )
+        current_artifact = build_flash_attention_pipeline_mixed_sdsc(
+            current_sidecar,
+            current_dataops,
+            current_opfuncs,
+            current_schedule,
+            [current_compute_dsc],
+            edge["consumer_num_cores"],
+        )
+        current_root = current_artifact[current_sidecar]
+        current_body = _body(current)
+        for key in (
+            "sdscFoldProps_",
+            "sdscFolds_",
+            "coreFoldProp_",
+            "coreletFoldProp_",
+            "coreIdToDsc_",
+            "numWkSlicesPerDim_",
+            "coreIdToWkSlice_",
+        ):
+            if key in current_body:
+                current_root[key] = copy.deepcopy(current_body[key])
+        current_root["flashAttentionPipeline_"].update(
+            {
+                "source": "generated-flash-prefill-kv-hbm-prefetch-current",
+                "kv_repack_hbm_prefetch_hoist_role": "current_prefetch",
+                "kv_repack_hbm_prefetch_hoist_experimental": True,
+                "kv_repack_hbm_prefetch_hoist_runtime_safe": False,
+                "kv_repack_hbm_prefetch_hoist_runtime_forced": True,
+                "kv_repack_hbm_prefetch_hoist_serial_prefetch": False,
+                "kv_repack_hbm_prefetch_hoist_redundant_future_prefetch": (
+                    redundant_future_prefetch
+                ),
+                "kv_repack_hbm_prefetch_hoist_serialize_current_prefetch": (
+                    serialize_current_prefetch
+                ),
+                "kv_repack_hbm_prefetch_hoist_serialize_loader_core_prefetch": (
+                    serialize_loader_core_prefetch
+                ),
+                "kv_repack_hbm_prefetch_hoist_overlap_after_sync": (
+                    overlap_after_sync
+                ),
+                "kv_repack_hbm_prefetch_hoist_tail_current_prefetch": (
+                    tail_current_prefetch
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_source_fanout": (
+                    prefetch_source_fanout
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout": (
+                    prefetch_loader_fanout
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_loader_core_id": (
+                    loader_core_id if prefetch_loader_fanout else -1
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_loader_lx_base": (
+                    loader_lx_base if prefetch_loader_fanout else -1
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_loader_lx_base_request": (
+                    prefetch_loader_lx_base
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_fanout_use_unicast": (
+                    prefetch_fanout_use_unicast
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_fanout_use_lxsfp_lx_transfers": (
+                    prefetch_fanout_use_lxsfp_lx_transfers
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_fanout_copyback_core": (
+                    fanout_copyback_core if fanout_copyback_enabled else -2
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_fanout_restrict_to_copyback_core": (
+                    prefetch_fanout_restrict_to_copyback_core
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_loader_copyback_without_fanout": (
+                    prefetch_loader_copyback_without_fanout
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout_full_tile_pieces": (
+                    prefetch_loader_fanout_full_tile_pieces
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_lx_roundtrip": (
+                    prefetch_lx_roundtrip
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefetch_corelet_id": (
+                    prefetch_corelet_id
+                ),
+                "kv_repack_hbm_prefetch_hoist_current_tile": current_tile,
+                "kv_repack_hbm_prefetch_hoist_future_tile": future_tile,
+                "kv_repack_hbm_prefetch_hoist_future_input_idx": hoist[
+                    "future_input_idx"
+                ],
+                "kv_repack_hbm_prefetch_hoist_future_predecessor_sdsc": (
+                    future_prod_name
+                ),
+                "kv_repack_hbm_prefetch_hoist_future_consumer_sdsc": (
+                    future_cons_name
+                ),
+                "kv_repack_additional_consumers": edge.get(
+                    "additional_consumers", []
+                ),
+                "kv_repack_hbm_prefetch_hoist_future_consumer_sidecar": (
+                    future_cons_sidecar
+                ),
+                "kv_repack_hbm_prefetch_hoist_source_hbm_addr": (
+                    edge["shared_hbm_addr"]
+                ),
+                "kv_repack_hbm_prefetch_hoist_consumer_lx_base": (
+                    edge["consumer_lx_base"]
+                ),
+                "kv_repack_hbm_prefetch_hoist_original_consumer_lx_base": (
+                    original_consumer_lx_base
+                ),
+                "kv_repack_hbm_prefetch_hoist_dataop_count": len(dataops),
+                "kv_repack_hbm_prefetch_hoist_native_load_prologue": (
+                    use_native_load_prologue
+                ),
+                "kv_repack_hbm_prefetch_hoist_prefilled_current_inputs": [
+                    {
+                        "lds_idx": item["lds_idx"],
+                        "lx_base": item["lx_base"],
+                    }
+                    for item in current_prefill_inputs
+                ],
+                "replaces_sdsc": current_name,
+                "tile_index": current_tile,
+                "requested_tile_index": tile_index,
+                "compute_tile_count": 1,
+                "overlap_candidate": True,
+            }
+        )
+
+    future_compute_dsc = copy.deepcopy(_body(edge["consumer"])["dscs_"][0])
+    future_compute_root = {future_cons_name: {"dscs_": [future_compute_dsc]}}
+    if not fanout_copyback_enabled:
+        apply_lx_flip(
+            future_compute_root,
+            LxFlip(
+                edge["consumer_idx"],
+                edge["consumer_lx_base"],
+                "kv-repack-hbm-prefetch-future-consumer-input",
+            ),
+        )
+    future_compute_dl = next(iter(future_compute_dsc.values()))
+    future_prefetch_lds = _lds_by_idx(future_compute_dl, edge["consumer_idx"])
+    if (
+        future_prefetch_lds is not None
+        and not serial_prefetch
+        and not redundant_future_prefetch
+        and external_future_prefetch
+    ):
+        future_prefetch_lds["isExternal_"] = 1
+        future_prefetch_lds["isFirstUse_"] = 0
+
+    if serial_prefetch or redundant_future_prefetch:
+        if redundant_future_prefetch and not serial_prefetch:
+            future_dataops = []
+            for dataop in dataops:
+                dataop_name, dataop_body = next(iter(dataop.items()))
+                future_dataops.append(
+                    {
+                        f"future_redundant_{dataop_name}": copy.deepcopy(
+                            dataop_body
+                        )
+                    }
+                )
+        else:
+            future_dataops = dataops
+        future_opfuncs = list(opfuncs)
+        future_schedule = _kv_repack_copyback_schedule_for_dataops(
+            edge["consumer_num_cores"],
+            [direct_load_cores for _dataop in future_dataops],
+            include_compute=True,
+        )
+    else:
+        future_dataops = []
+        future_opfuncs = []
+        future_schedule = {
+            str(core_id): [[-1, 0, 0, 0]]
+            for core_id in range(edge["consumer_num_cores"])
+        }
+    future_consumer_artifact = build_flash_attention_pipeline_mixed_sdsc(
+        future_cons_sidecar,
+        future_dataops,
+        future_opfuncs,
+        future_schedule,
+        [future_compute_dsc],
+        edge["consumer_num_cores"],
+    )
+    future_root = future_consumer_artifact[future_cons_sidecar]
+    future_cons_body = _body(edge["consumer"])
+    for key in (
+        "sdscFoldProps_",
+        "sdscFolds_",
+        "coreFoldProp_",
+        "coreletFoldProp_",
+        "coreIdToDsc_",
+        "numWkSlicesPerDim_",
+        "coreIdToWkSlice_",
+    ):
+        if key in future_cons_body:
+            future_root[key] = copy.deepcopy(future_cons_body[key])
+    future_root["flashAttentionPipeline_"].update(
+        {
+            **_kv_repack_broadcast_meta(
+                edge,
+                source="generated-flash-prefill-kv-hbm-prefetch-future-consumer",
+                tile_index=future_tile,
+                requested_tile_index=tile_index,
+                input_idx=hoist["future_input_idx"],
+                executable=True,
+                runtime_forced=True,
+            ),
+            "kv_repack_broadcast_role": "future_consumer",
+            "kv_repack_hbm_prefetch_hoist_role": "future_consumer",
+            "kv_repack_hbm_prefetch_hoist_experimental": True,
+            "kv_repack_hbm_prefetch_hoist_runtime_safe": False,
+            "kv_repack_hbm_prefetch_hoist_runtime_forced": True,
+            "kv_repack_hbm_prefetch_hoist_serial_prefetch": serial_prefetch,
+            "kv_repack_hbm_prefetch_hoist_redundant_future_prefetch": (
+                redundant_future_prefetch
+            ),
+            "kv_repack_hbm_prefetch_hoist_serialize_current_prefetch": (
+                serialize_current_prefetch
+            ),
+            "kv_repack_hbm_prefetch_hoist_serialize_loader_core_prefetch": (
+                serialize_loader_core_prefetch
+            ),
+            "kv_repack_hbm_prefetch_hoist_external_future_prefetch": (
+                external_future_prefetch
+            ),
+            "kv_repack_hbm_prefetch_hoist_overlap_after_sync": (
+                overlap_after_sync
+            ),
+            "kv_repack_hbm_prefetch_hoist_tail_current_prefetch": (
+                tail_current_prefetch
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_source_fanout": (
+                prefetch_source_fanout
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout": (
+                prefetch_loader_fanout
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_core_id": (
+                loader_core_id if prefetch_loader_fanout else -1
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_lx_base": (
+                loader_lx_base if prefetch_loader_fanout else -1
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_lx_base_request": (
+                prefetch_loader_lx_base
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_fanout_use_unicast": (
+                prefetch_fanout_use_unicast
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_fanout_use_lxsfp_lx_transfers": (
+                prefetch_fanout_use_lxsfp_lx_transfers
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_fanout_copyback_core": (
+                fanout_copyback_core if fanout_copyback_enabled else -2
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_fanout_restrict_to_copyback_core": (
+                prefetch_fanout_restrict_to_copyback_core
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_copyback_without_fanout": (
+                prefetch_loader_copyback_without_fanout
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_loader_fanout_full_tile_pieces": (
+                prefetch_loader_fanout_full_tile_pieces
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_lx_roundtrip": (
+                prefetch_lx_roundtrip
+            ),
+            "kv_repack_hbm_prefetch_hoist_prefetch_corelet_id": (
+                prefetch_corelet_id
+            ),
+            "kv_repack_hbm_prefetch_hoist_current_tile": current_tile,
+            "kv_repack_hbm_prefetch_hoist_future_tile": future_tile,
+            "kv_repack_hbm_prefetch_hoist_future_input_idx": hoist[
+                "future_input_idx"
+            ],
+            "kv_repack_hbm_prefetch_hoist_input_lx_base": edge[
+                "consumer_lx_base"
+            ],
+            "kv_repack_hbm_prefetch_hoist_original_input_lx_base": (
+                original_consumer_lx_base
+            ),
+            "kv_repack_hbm_prefetch_hoist_source_hbm_addr": (
+                edge["shared_hbm_addr"]
+            ),
+            "kv_repack_hbm_prefetch_hoist_dataop_count": (
+                len(future_dataops)
+                if serial_prefetch or redundant_future_prefetch
+                else 0
+            ),
+            "replaces_sdsc": future_cons_name,
+            "compute_tile_count": 1,
+        }
+    )
+
+    artifacts = [producer_artifact, future_consumer_artifact]
+    if current_artifact is not None:
+        artifacts.insert(1, current_artifact)
+    return {
+        "artifacts": artifacts,
+        "replacements": (
+            {future_cons_name: future_cons_sidecar}
+            if serial_prefetch
+            else {
+                current_name: current_sidecar,
+                future_cons_name: future_cons_sidecar,
+            }
+        ),
+        "insertions_before": {current_name: [producer_sidecar]},
+        "omissions": {future_prod_name},
+        "bundle_attrs": {},
+        "pointwise_lx_region0": edge["consumer_lx_base"] + edge["slice_bytes"],
+        "rejection_reasons": reasons,
+    }
+
+
+def build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+    sdscs_json: list[dict],
+    tile_index: int,
+    *,
+    name_prefix: str = "mixed_flash_kv_repack_broadcast_copyback",
+    stcdp_subpiece_reuse: bool = True,
+    broadcast_group_size: int = 0,
+    self_resident_source: bool = False,
+    stcdp_use_unicast: int = -1,
+    stcdp_force_mc_mode: int = -1,
+    readback_core: int = -1,
+    direct_source: bool = False,
+    hbm_roundtrip: bool = False,
+    hbm_source_fanout: bool = False,
+    hbm_direct_load: bool = False,
+    hbm_roundtrip_load_only: bool = False,
+    hbm_roundtrip_barrier_only: bool = False,
+    data_only: bool = False,
+    replace_consumer: bool = False,
+    compute_only: bool = False,
+    exact_clone: bool = False,
+    preserve_consumer_name: bool = False,
+) -> dict | None:
+    """Build a K/V repack copyback probe that restores the original HBM input.
+
+    The normal probe replaces the low-core ReStickify producer with an
+    LX-producing sidecar. It then inserts a mixed copyback sidecar before the
+    original batchmatmul: STCDPOpLx copies producer LX into consumer LX,
+    STCDPOpHBM reads one consumer-core replica back to the original HBM input
+    address, and the following original HBM-backed batchmatmul is left in the
+    bundle as the value check behind a real SDSC boundary.
+    """
+    selected_tile, selected_input, edge, reasons = (
+        _resolve_flash_attention_kv_repack_broadcast_edge(
+            sdscs_json,
+            tile_index,
+        )
+    )
+    if edge is None or selected_tile is None or selected_input is None:
+        return None
+    edge = copy.deepcopy(edge)
+    if self_resident_source:
+        edge["source_lx_base"] = edge["consumer_lx_base"]
+        _move_lx_piece_start_addrs(
+            edge["source_pieces"],
+            edge["source_lx_base"],
+        )
+    try:
+        selected_readback_core = _kv_repack_copyback_core(edge, readback_core)
+    except ValueError:
+        return None
+
+    prod_name = next(iter(edge["producer"]))
+    cons_name = next(iter(edge["consumer"]))
+    pred_sidecar = f"{name_prefix}_{selected_tile}_input{selected_input}_producer"
+    copyback_sidecar = f"{name_prefix}_{selected_tile}_input{selected_input}_copyback"
+    clone_sidecar = f"{name_prefix}_{selected_tile}_input{selected_input}_exact_clone"
+    if preserve_consumer_name:
+        copyback_sidecar = cons_name
+        clone_sidecar = cons_name
+
+    if exact_clone:
+        replacements = {} if preserve_consumer_name else {cons_name: clone_sidecar}
+        return {
+            "artifacts": [{clone_sidecar: copy.deepcopy(_body(edge["consumer"]))}],
+            "replacements": replacements,
+            "insertions_before": {},
+            "bundle_attrs": {},
+            "pointwise_lx_region0": edge["consumer_lx_base"] + edge["slice_bytes"],
+            "rejection_reasons": reasons,
+        }
+
+    producer_artifact = None
+    uses_original_hbm_source = (
+        hbm_roundtrip or hbm_source_fanout or hbm_direct_load
+    )
+    if not uses_original_hbm_source:
+        producer_artifact = {pred_sidecar: copy.deepcopy(_body(edge["producer"]))}
+        apply_lx_flip(
+            producer_artifact,
+            LxFlip(
+                edge["producer_idx"],
+                edge["source_lx_base"],
+                "kv-repack-broadcast-copyback-producer-output",
+            ),
+        )
+        producer_artifact[pred_sidecar].setdefault("flashAttentionPipeline_", {}).update(
+            {
+                **_kv_repack_broadcast_meta(
+                    edge,
+                    source=(
+                        "generated-flash-prefill-kv-repack-broadcast-"
+                        "copyback-producer"
+                    ),
+                    tile_index=selected_tile,
+                    requested_tile_index=tile_index,
+                    input_idx=selected_input,
+                    executable=True,
+                    runtime_forced=True,
+                    skip_source_core_destinations=self_resident_source,
+                ),
+                "kv_repack_broadcast_role": "copyback_producer",
+                "kv_repack_producer_sidecar": pred_sidecar,
+                "kv_repack_copyback_sidecar": copyback_sidecar,
+                "kv_repack_copyback_readback_core": selected_readback_core,
+                "kv_repack_copyback_hbm_roundtrip": False,
+                "kv_repack_self_resident_source": self_resident_source,
+                "kv_repack_stcdp_use_unicast": stcdp_use_unicast,
+                "kv_repack_stcdp_force_mc_mode": stcdp_force_mc_mode,
+                "replaces_sdsc": prod_name,
+            }
+        )
+
+    core_groups = _kv_repack_consumer_core_groups(
+        edge["consumer_num_cores"],
+        broadcast_group_size,
+    )
+    source_core_ids = _kv_repack_source_core_ids(edge)
+    dataops = []
+    opfuncs = []
+    ordered_dataop_core_groups = []
+    group_dataop_core_ids = []
+    source_pieces_for_hbm = (
+        []
+        if compute_only or hbm_roundtrip_barrier_only
+        else edge["source_pieces"]
+    )
+    if hbm_source_fanout:
+        for piece_idx, source_piece in enumerate(source_pieces_for_hbm):
+            hbm_dataop_core_ids = sorted(_piece_lx_mem_ids(source_piece))
+            if not hbm_dataop_core_ids:
+                return None
+            lx_start_by_core = _piece_lx_start_by_core(source_piece)
+            hbm_dataop_name = (
+                f"{len(dataops)}_STCDPOpHBM_kv_repack_copyback_"
+                f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
+                f"_hbm_source_piece{piece_idx}_load"
+            )
+            ordered_dataop_core_groups.append(hbm_dataop_core_ids)
+            opfuncs.append("STCDPOpHBM")
+            dataops.append(
+                _make_kv_repack_hbm_roundtrip_dataop(
+                    hbm_dataop_name,
+                    edge,
+                    source_piece=source_piece,
+                    phase="load",
+                    dataop_core_ids=hbm_dataop_core_ids,
+                    lx_start_by_core=lx_start_by_core,
+                )
+            )
+    if hbm_direct_load:
+        direct_load_cores = list(range(edge["consumer_num_cores"]))
+        direct_lx_start_by_core = {
+            core_id: edge["consumer_lx_base"] for core_id in direct_load_cores
+        }
+        for piece_idx, source_piece in enumerate(source_pieces_for_hbm):
+            hbm_dataop_name = (
+                f"{len(dataops)}_STCDPOpHBM_kv_repack_copyback_"
+                f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
+                f"_hbm_direct_piece{piece_idx}_load"
+            )
+            ordered_dataop_core_groups.append(direct_load_cores)
+            opfuncs.append("STCDPOpHBM")
+            dataops.append(
+                _make_kv_repack_hbm_roundtrip_dataop(
+                    hbm_dataop_name,
+                    edge,
+                    source_piece=source_piece,
+                    phase="load",
+                    dataop_core_ids=direct_load_cores,
+                    lx_start_by_core=direct_lx_start_by_core,
+                )
+            )
+
+    if (
+        not compute_only
+        and not direct_source
+        and not hbm_roundtrip
+        and not hbm_direct_load
+        and not (hbm_source_fanout and hbm_roundtrip_barrier_only)
+    ):
+        for group_idx, core_ids in enumerate(core_groups):
+            group_suffix = "" if len(core_groups) == 1 else f"_group{group_idx}"
+            dataop_name = (
+                f"{len(dataops)}_STCDPOpLx_kv_repack_copyback_"
+                f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
+                f"{group_suffix}"
+            )
+            dataop_core_ids = sorted(set(core_ids).union(source_core_ids))
+            group_dataop_core_ids.append(dataop_core_ids)
+            ordered_dataop_core_groups.append(dataop_core_ids)
+            opfuncs.append("STCDPOpLx")
+            dataops.append(
+                _make_kv_repack_broadcast_dataop(
+                    dataop_name,
+                    edge,
+                    include_broadcast_metadata=False,
+                    stcdp_subpiece_reuse=stcdp_subpiece_reuse,
+                    consumer_core_ids=core_ids,
+                    dataop_core_ids=dataop_core_ids,
+                    skip_source_core_destinations=self_resident_source,
+                    stcdp_use_unicast=stcdp_use_unicast,
+                    stcdp_force_mc_mode=stcdp_force_mc_mode,
+                )
+            )
+
+    for piece_idx, source_piece in enumerate(source_pieces_for_hbm):
+        if hbm_source_fanout:
+            hbm_dataop_core_ids = [selected_readback_core]
+            lx_start_by_core = None
+            hbm_suffix = f"_piece{piece_idx}_core{selected_readback_core}"
+            hbm_dataop_name = (
+                f"{len(dataops)}_STCDPOpHBM_kv_repack_copyback_"
+                f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
+                f"{hbm_suffix}"
+            )
+            ordered_dataop_core_groups.append(hbm_dataop_core_ids)
+            opfuncs.append("STCDPOpHBM")
+            dataops.append(
+                _make_kv_repack_copyback_hbm_dataop(
+                    hbm_dataop_name,
+                    edge,
+                    source_piece=source_piece,
+                    dataop_core_ids=hbm_dataop_core_ids,
+                    lx_start_by_core=lx_start_by_core,
+                )
+            )
+            continue
+        if hbm_roundtrip:
+            hbm_dataop_core_ids = sorted(_piece_lx_mem_ids(source_piece))
+            if not hbm_dataop_core_ids:
+                return None
+            lx_start_by_core = _piece_lx_start_by_core(source_piece)
+            phases = ("load",) if hbm_roundtrip_load_only else ("load", "store")
+            for phase in phases:
+                hbm_dataop_name = (
+                    f"{len(dataops)}_STCDPOpHBM_kv_repack_copyback_"
+                    f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
+                    f"_roundtrip_source_piece{piece_idx}_{phase}"
+                )
+                ordered_dataop_core_groups.append(hbm_dataop_core_ids)
+                opfuncs.append("STCDPOpHBM")
+                dataops.append(
+                    _make_kv_repack_hbm_roundtrip_dataop(
+                        hbm_dataop_name,
+                        edge,
+                        source_piece=source_piece,
+                        phase=phase,
+                        dataop_core_ids=hbm_dataop_core_ids,
+                        lx_start_by_core=lx_start_by_core,
+                    )
+                )
+            continue
+        if direct_source:
+            hbm_dataop_core_ids = sorted(_piece_lx_mem_ids(source_piece))
+            lx_start_by_core = _piece_lx_start_by_core(source_piece)
+            hbm_suffix = f"_source_piece{piece_idx}"
+        else:
+            hbm_dataop_core_ids = [selected_readback_core]
+            lx_start_by_core = None
+            hbm_suffix = f"_piece{piece_idx}_core{selected_readback_core}"
+        if not hbm_dataop_core_ids:
+            return None
+        hbm_dataop_name = (
+            f"{len(dataops)}_STCDPOpHBM_kv_repack_copyback_"
+            f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
+            f"{hbm_suffix}"
+        )
+        ordered_dataop_core_groups.append(hbm_dataop_core_ids)
+        opfuncs.append("STCDPOpHBM")
+        dataops.append(
+            _make_kv_repack_copyback_hbm_dataop(
+                hbm_dataop_name,
+                edge,
+                source_piece=source_piece,
+                dataop_core_ids=hbm_dataop_core_ids,
+                lx_start_by_core=lx_start_by_core,
+            )
+        )
+    barrier_dataop_core_ids = None
+    if not compute_only:
+        barrier_dataop_core_ids = list(range(edge["consumer_num_cores"]))
+        barrier_dataop_name = (
+            f"{len(dataops)}_nop_kv_repack_copyback_barrier_"
+            f"Tensor0_idx{edge['consumer_idx']}_tile{selected_tile}"
+        )
+        dataops.append(_make_nop_dataop(barrier_dataop_name, barrier_dataop_core_ids))
+        opfuncs.append("nop")
+
+    cons_body = _body(edge["consumer"])
+    schedule = _kv_repack_copyback_schedule_for_dataops(
+        edge["consumer_num_cores"],
+        ordered_dataop_core_groups,
+        barrier_dataop_core_ids=barrier_dataop_core_ids,
+        include_compute=not data_only,
+    )
+    if data_only:
+        copyback_artifact = _build_flash_attention_dataop_only_sdsc(
+            copyback_sidecar,
+            dataops,
+            opfuncs,
+            schedule,
+            edge["consumer_num_cores"],
+        )
+    else:
+        compute_dsc = copy.deepcopy(cons_body["dscs_"][0])
+        copyback_artifact = build_flash_attention_pipeline_mixed_sdsc(
+            copyback_sidecar,
+            dataops,
+            opfuncs,
+            schedule,
+            [compute_dsc],
+            edge["consumer_num_cores"],
+        )
+    copyback_root = copyback_artifact[copyback_sidecar]
+    copyback_root["flashAttentionPipeline_"].update(
+        {
+            **_kv_repack_broadcast_meta(
+                edge,
+                source="generated-flash-prefill-kv-repack-broadcast-copyback",
+                tile_index=selected_tile,
+                requested_tile_index=tile_index,
+                input_idx=selected_input,
+                executable=True,
+                runtime_forced=True,
+                skip_source_core_destinations=self_resident_source,
+            ),
+            "kv_repack_broadcast_role": "copyback",
+            "kv_repack_producer_sidecar": pred_sidecar,
+            "kv_repack_copyback_sidecar": copyback_sidecar,
+            "kv_repack_copyback_readback_core": selected_readback_core,
+            "kv_repack_copyback_readback_op": "STCDPOpHBM",
+            "kv_repack_copyback_original_consumer": cons_name,
+            "kv_repack_copyback_replaces_consumer": replace_consumer,
+            "kv_repack_copyback_inserts_before_consumer": not replace_consumer,
+            "kv_repack_stcdp_subpiece_reuse": stcdp_subpiece_reuse,
+            "kv_repack_broadcast_group_size": broadcast_group_size,
+            "kv_repack_broadcast_group_count": len(group_dataop_core_ids),
+            "kv_repack_self_resident_source": self_resident_source,
+            "kv_repack_copyback_direct_source": direct_source,
+            "kv_repack_copyback_hbm_roundtrip": hbm_roundtrip,
+            "kv_repack_copyback_hbm_source_fanout": hbm_source_fanout,
+            "kv_repack_copyback_hbm_direct_load": hbm_direct_load,
+            "kv_repack_copyback_hbm_roundtrip_load_only": hbm_roundtrip_load_only,
+            "kv_repack_copyback_hbm_roundtrip_barrier_only": (
+                hbm_roundtrip_barrier_only
+            ),
+            "kv_repack_copyback_data_only": data_only,
+            "kv_repack_copyback_compute_only": compute_only,
+            "kv_repack_copyback_preserve_consumer_name": preserve_consumer_name,
+            "kv_repack_stcdp_use_unicast": stcdp_use_unicast,
+            "kv_repack_stcdp_force_mc_mode": stcdp_force_mc_mode,
+            "replaces_sdsc": cons_name,
+            "compute_tile_count": 0 if data_only else 1,
+        }
+    )
+    if not data_only:
+        for key in (
+            "sdscFoldProps_",
+            "sdscFolds_",
+            "coreFoldProp_",
+            "coreletFoldProp_",
+            "coreIdToDsc_",
+            "numWkSlicesPerDim_",
+            "coreIdToWkSlice_",
+        ):
+            if key in cons_body:
+                copyback_root[key] = copy.deepcopy(cons_body[key])
+
+    artifacts = [copyback_artifact] if producer_artifact is None else [
+        producer_artifact,
+        copyback_artifact,
+    ]
+    replacements = {} if producer_artifact is None else {prod_name: pred_sidecar}
+    insertions_before = {}
+    if preserve_consumer_name:
+        pass
+    elif replace_consumer:
+        replacements[cons_name] = copyback_sidecar
+    else:
+        insertions_before = {cons_name: [copyback_sidecar]}
+
+    return {
+        "artifacts": artifacts,
+        "replacements": replacements,
+        "insertions_before": insertions_before,
+        "bundle_attrs": {},
+        "pointwise_lx_region0": edge["consumer_lx_base"] + edge["slice_bytes"],
+        "rejection_reasons": reasons,
+    }
+
+
+def flash_attention_kv_repack_broadcast_copyback_rejection_reasons(
+    sdscs_json: list[dict],
+    tile_index: int,
+) -> list[str]:
+    """Explain why an executable K/V copyback probe failed closed."""
+    return flash_attention_kv_repack_broadcast_pair_rejection_reasons(
+        sdscs_json,
+        tile_index,
+    )
 
 
 def _flash_attention_layout_xform_lookahead_edges(

@@ -25,8 +25,11 @@ from torch_spyre._inductor.op_spec import OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.onchip_realize import (
     build_flash_attention_ifn_pair_tile_artifacts,
+    build_flash_attention_kv_repack_broadcast_copyback_artifacts,
     build_flash_attention_kv_repack_broadcast_pair_artifacts,
     build_flash_attention_kv_repack_broadcast_plan_artifact,
+    build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts,
+    build_flash_attention_kv_repack_hbm_staged_hoist_tile_artifacts,
     build_flash_attention_layout_xform_hoist_tile_artifacts,
     build_flash_attention_layout_xform_lookahead_tile_artifacts,
     build_flash_attention_layout_xform_pair_tile_artifacts,
@@ -34,7 +37,10 @@ from torch_spyre._inductor.onchip_realize import (
     build_flash_attention_pipeline_tile_artifacts,
     build_flash_attention_value_flow_tile_artifact,
     flash_attention_ifn_pair_tile_rejection_reasons,
+    flash_attention_kv_repack_broadcast_copyback_rejection_reasons,
     flash_attention_kv_repack_broadcast_pair_rejection_reasons,
+    flash_attention_kv_repack_hbm_prefetch_hoist_rejection_reasons,
+    flash_attention_kv_repack_hbm_staged_hoist_rejection_reasons,
     flash_attention_layout_xform_hoist_rejection_reasons,
     flash_attention_layout_xform_lookahead_rejection_reasons,
     flash_attention_layout_xform_pair_rejection_reasons,
@@ -79,6 +85,30 @@ def _flash_attention_kv_repack_broadcast_plan_artifacts(sdscs_json: list[dict]):
             if artifact is not None:
                 artifacts.append(artifact)
     return artifacts
+
+
+def _mixed_sidecar_conflicts(
+    result: dict,
+    replacements: dict[str, str],
+    omissions: set[str],
+) -> list[str]:
+    result_replacements = set(result.get("replacements", {}))
+    result_omissions = set(result.get("omissions", ()))
+    return sorted(
+        result_replacements.intersection(replacements)
+        | result_replacements.intersection(omissions)
+        | result_omissions.intersection(replacements)
+        | result_omissions.intersection(omissions)
+    )
+
+
+def _max_pointwise_lx_region0(*results: dict):
+    regions = [
+        result["pointwise_lx_region0"]
+        for result in results
+        if result is not None and "pointwise_lx_region0" in result
+    ]
+    return max(regions) if regions else None
 
 
 def fold_onchip_handoff(sdsc_json: dict, realization) -> dict:
@@ -163,6 +193,36 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         "flash_attention_kv_repack_broadcast_pair_self_resident_source",
         False,
     )
+    kv_repack_pair_hbm_source = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_hbm_source",
+        False,
+    )
+    kv_repack_pair_hbm_direct_load = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_hbm_direct_load",
+        False,
+    )
+    kv_repack_pair_hbm_staged = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_hbm_staged",
+        False,
+    )
+    kv_repack_pair_consumer_core_state_init = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_consumer_core_state_init",
+        True,
+    )
+    kv_repack_pair_consumer_ds_type = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_consumer_ds_type",
+        "",
+    )
+    kv_repack_pair_consumer_lx_alloc_style = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_pair_consumer_lx_alloc_style",
+        "",
+    )
     kv_repack_pair_use_unicast = getattr(
         config,
         "flash_attention_kv_repack_broadcast_pair_use_unicast",
@@ -173,8 +233,189 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         "flash_attention_kv_repack_broadcast_pair_force_mc_mode",
         -1,
     )
+    kv_repack_hbm_staged_hoist_tile = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_staged_hoist_tile",
+        -1,
+    )
+    kv_repack_hbm_prefetch_hoist_tile = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_hoist_tile",
+        -1,
+    )
+    kv_repack_hbm_prefetch_lx_base = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_lx_base",
+        -1,
+    )
+    kv_repack_hbm_prefetch_serial = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_serial",
+        False,
+    )
+    kv_repack_hbm_prefetch_prefill_current = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_prefill_current",
+        False,
+    )
+    kv_repack_hbm_prefetch_redundant_future = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_redundant_future",
+        False,
+    )
+    kv_repack_hbm_prefetch_serialize_current = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_serialize_current",
+        False,
+    )
+    kv_repack_hbm_prefetch_external_future = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_external_future",
+        False,
+    )
+    kv_repack_hbm_prefetch_overlap_after_sync = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_overlap_after_sync",
+        True,
+    )
+    kv_repack_hbm_prefetch_tail_current = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_tail_current",
+        False,
+    )
+    kv_repack_hbm_prefetch_source_fanout = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_source_fanout",
+        False,
+    )
+    kv_repack_hbm_prefetch_loader_fanout = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_loader_fanout",
+        False,
+    )
+    kv_repack_hbm_prefetch_loader_core = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_loader_core",
+        0,
+    )
+    kv_repack_hbm_prefetch_loader_lx_base = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_loader_lx_base",
+        -1,
+    )
+    kv_repack_hbm_prefetch_fanout_use_unicast = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_fanout_use_unicast",
+        -1,
+    )
+    kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers",
+        -1,
+    )
+    kv_repack_hbm_prefetch_fanout_copyback_core = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_fanout_copyback_core",
+        -2,
+    )
+    kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core",
+        False,
+    )
+    kv_repack_hbm_prefetch_loader_copyback_without_fanout = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_loader_copyback_without_fanout",
+        False,
+    )
+    kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces",
+        False,
+    )
+    kv_repack_hbm_prefetch_serialize_loader_core = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_serialize_loader_core",
+        False,
+    )
+    kv_repack_hbm_prefetch_lx_roundtrip = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_lx_roundtrip",
+        False,
+    )
+    kv_repack_hbm_prefetch_corelet1 = getattr(
+        config,
+        "flash_attention_kv_repack_hbm_prefetch_corelet1",
+        False,
+    )
+    kv_repack_copyback_tile = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_tile",
+        -1,
+    )
+    kv_repack_copyback_core = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_core",
+        -1,
+    )
+    kv_repack_copyback_direct_source = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_direct_source",
+        False,
+    )
+    kv_repack_copyback_hbm_roundtrip = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip",
+        False,
+    )
+    kv_repack_copyback_hbm_source_fanout = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_hbm_source_fanout",
+        False,
+    )
+    kv_repack_copyback_hbm_direct_load = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_hbm_direct_load",
+        False,
+    )
+    kv_repack_copyback_hbm_roundtrip_load_only = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip_load_only",
+        False,
+    )
+    kv_repack_copyback_hbm_roundtrip_barrier_only = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_hbm_roundtrip_barrier_only",
+        False,
+    )
+    kv_repack_copyback_data_only = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_data_only",
+        False,
+    )
+    kv_repack_copyback_replace_consumer = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_replace_consumer",
+        False,
+    )
+    kv_repack_copyback_compute_only = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_compute_only",
+        False,
+    )
+    kv_repack_copyback_exact_clone = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_exact_clone",
+        False,
+    )
+    kv_repack_copyback_preserve_consumer_name = getattr(
+        config,
+        "flash_attention_kv_repack_broadcast_copyback_preserve_consumer_name",
+        False,
+    )
     sidecar_sdscs = []
     sidecar_replacements = {}
+    sidecar_insertions_before = {}
     sidecar_omissions = set()
     bundle_attrs_by_file = {}
     value_flow_rejections = {}
@@ -210,11 +451,55 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             or layout_xform_lookahead_tile != -1
             or layout_xform_hoist_tile != -1
             or kv_repack_pair_tile != -1
+            or kv_repack_hbm_staged_hoist_tile != -1
+            or kv_repack_hbm_prefetch_hoist_tile != -1
+            or kv_repack_copyback_tile != -1
         )
     )
+    kv_repack_copyback = None
+    kv_repack_copyback_rejections = None
+    if emit_mixed_sidecars and kv_repack_copyback_tile != -1:
+        kv_repack_copyback = (
+            build_flash_attention_kv_repack_broadcast_copyback_artifacts(
+                sdscs_json,
+                kv_repack_copyback_tile,
+                stcdp_subpiece_reuse=kv_repack_pair_subpiece_reuse,
+                broadcast_group_size=kv_repack_pair_group_size,
+                self_resident_source=kv_repack_pair_self_resident_source,
+                stcdp_use_unicast=kv_repack_pair_use_unicast,
+                stcdp_force_mc_mode=kv_repack_pair_force_mc_mode,
+                readback_core=kv_repack_copyback_core,
+                direct_source=kv_repack_copyback_direct_source,
+                hbm_roundtrip=kv_repack_copyback_hbm_roundtrip,
+                hbm_source_fanout=kv_repack_copyback_hbm_source_fanout,
+                hbm_direct_load=kv_repack_copyback_hbm_direct_load,
+                hbm_roundtrip_load_only=(
+                    kv_repack_copyback_hbm_roundtrip_load_only
+                ),
+                hbm_roundtrip_barrier_only=(
+                    kv_repack_copyback_hbm_roundtrip_barrier_only
+                ),
+                data_only=kv_repack_copyback_data_only,
+                replace_consumer=kv_repack_copyback_replace_consumer,
+                compute_only=kv_repack_copyback_compute_only,
+                exact_clone=kv_repack_copyback_exact_clone,
+                preserve_consumer_name=kv_repack_copyback_preserve_consumer_name,
+            )
+        )
+        if kv_repack_copyback is None:
+            kv_repack_copyback_rejections = (
+                flash_attention_kv_repack_broadcast_copyback_rejection_reasons(
+                    sdscs_json,
+                    kv_repack_copyback_tile,
+                )
+            )
     kv_repack_pair = None
     kv_repack_pair_rejections = None
-    if emit_mixed_sidecars and kv_repack_pair_tile != -1:
+    if (
+        emit_mixed_sidecars
+        and kv_repack_pair_tile != -1
+        and kv_repack_copyback is None
+    ):
         kv_repack_pair = build_flash_attention_kv_repack_broadcast_pair_artifacts(
             sdscs_json,
             kv_repack_pair_tile,
@@ -222,6 +507,12 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             stcdp_subpiece_reuse=kv_repack_pair_subpiece_reuse,
             broadcast_group_size=kv_repack_pair_group_size,
             self_resident_source=kv_repack_pair_self_resident_source,
+            hbm_source=kv_repack_pair_hbm_source,
+            hbm_direct_load=kv_repack_pair_hbm_direct_load,
+            hbm_staged=kv_repack_pair_hbm_staged,
+            consumer_core_state_init=kv_repack_pair_consumer_core_state_init,
+            consumer_ds_type=kv_repack_pair_consumer_ds_type,
+            consumer_lx_alloc_style=kv_repack_pair_consumer_lx_alloc_style,
             stcdp_use_unicast=kv_repack_pair_use_unicast,
             stcdp_force_mc_mode=kv_repack_pair_force_mc_mode,
         )
@@ -237,6 +528,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     if (
         emit_mixed_sidecars
         and layout_xform_hoist_tile != -1
+        and kv_repack_copyback is None
         and kv_repack_pair is None
     ):
         layout_xform_hoist = (
@@ -257,6 +549,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     if (
         emit_mixed_sidecars
         and layout_xform_lookahead_tile != -1
+        and kv_repack_copyback is None
         and kv_repack_pair is None
         and layout_xform_hoist is None
     ):
@@ -278,7 +571,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     if (
         emit_mixed_sidecars
         and layout_xform_pair_tile != -1
-        and kv_repack_pair is None
+        and kv_repack_copyback is None
         and layout_xform_hoist is None
         and layout_xform_lookahead is None
     ):
@@ -301,6 +594,10 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                     layout_xform_pair_tile,
                 )
             )
+    kv_repack_hbm_staged_hoist = None
+    kv_repack_hbm_staged_hoist_rejections = None
+    kv_repack_hbm_prefetch_hoist = None
+    kv_repack_hbm_prefetch_hoist_rejections = None
     if (
         config.flash_attention_mixed_pipeline
         and config.flash_attention_pointwise_handoff
@@ -308,37 +605,19 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         pointwise_kwargs = {
             "score_scale_handoff": config.flash_attention_score_scale_handoff,
         }
-        if layout_xform_hoist is not None:
-            pointwise_kwargs["pointwise_region0"] = layout_xform_hoist[
-                "pointwise_lx_region0"
-            ]
+        pointwise_region0 = _max_pointwise_lx_region0(
+            layout_xform_hoist,
+            kv_repack_copyback,
+            kv_repack_pair,
+            layout_xform_pair,
+            layout_xform_lookahead,
+            kv_repack_hbm_prefetch_hoist,
+        )
+        if pointwise_region0 is not None:
+            pointwise_kwargs["pointwise_region0"] = pointwise_region0
             logger.info(
                 "Realizing flash pointwise handoffs in a disjoint LX region "
-                "while the layout-transform hoist probe is active"
-            )
-        elif kv_repack_pair is not None:
-            pointwise_kwargs["pointwise_region0"] = kv_repack_pair[
-                "pointwise_lx_region0"
-            ]
-            logger.info(
-                "Realizing flash pointwise handoffs in a disjoint LX region "
-                "while the K/V repack broadcast pair probe is active"
-            )
-        elif layout_xform_pair is not None:
-            pointwise_kwargs["pointwise_region0"] = layout_xform_pair[
-                "pointwise_lx_region0"
-            ]
-            logger.info(
-                "Realizing flash pointwise handoffs in a disjoint LX region "
-                "while the layout-transform pair probe is active"
-            )
-        elif layout_xform_lookahead is not None:
-            pointwise_kwargs["pointwise_region0"] = layout_xform_lookahead[
-                "pointwise_lx_region0"
-            ]
-            logger.info(
-                "Realizing flash pointwise handoffs in a disjoint LX region "
-                "while the layout-transform lookahead probe is active"
+                "while mixed flash attention sidecars are active"
             )
         count = realize_flash_attention_pointwise_handoffs(
             sdscs_json,
@@ -346,6 +625,127 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
         )
         if count:
             logger.info(f"Realized {count} flash pointwise on-chip handoffs")
+            if (
+                kv_repack_pair_tile != -1
+                and kv_repack_pair is not None
+                and kv_repack_copyback is None
+            ):
+                refreshed_kv_repack_pair = (
+                    build_flash_attention_kv_repack_broadcast_pair_artifacts(
+                        sdscs_json,
+                        kv_repack_pair_tile,
+                        include_input_fetch_transfer=kv_repack_pair_ifn_transfer,
+                        stcdp_subpiece_reuse=kv_repack_pair_subpiece_reuse,
+                        broadcast_group_size=kv_repack_pair_group_size,
+                        self_resident_source=kv_repack_pair_self_resident_source,
+                        hbm_source=kv_repack_pair_hbm_source,
+                        hbm_direct_load=kv_repack_pair_hbm_direct_load,
+                        hbm_staged=kv_repack_pair_hbm_staged,
+                        consumer_core_state_init=(
+                            kv_repack_pair_consumer_core_state_init
+                        ),
+                        consumer_ds_type=kv_repack_pair_consumer_ds_type,
+                        consumer_lx_alloc_style=(
+                            kv_repack_pair_consumer_lx_alloc_style
+                        ),
+                        stcdp_use_unicast=kv_repack_pair_use_unicast,
+                        stcdp_force_mc_mode=kv_repack_pair_force_mc_mode,
+                    )
+                )
+                if refreshed_kv_repack_pair is not None:
+                    kv_repack_pair = refreshed_kv_repack_pair
+                    logger.info(
+                        "Rebuilt K/V repack broadcast pair after flash "
+                        "pointwise handoff realization"
+                    )
+                else:
+                    kv_repack_pair = None
+                    kv_repack_pair_rejections = (
+                        flash_attention_kv_repack_broadcast_pair_rejection_reasons(
+                            sdscs_json,
+                            kv_repack_pair_tile,
+                        )
+                    )
+    if (
+        emit_mixed_sidecars
+        and kv_repack_hbm_prefetch_hoist_tile != -1
+        and kv_repack_copyback is None
+    ):
+        kv_repack_hbm_prefetch_hoist = (
+            build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts(
+                sdscs_json,
+                kv_repack_hbm_prefetch_hoist_tile,
+                prefetch_lx_base=(
+                    kv_repack_hbm_prefetch_lx_base
+                    if kv_repack_hbm_prefetch_lx_base >= 0
+                    else None
+                ),
+                serial_prefetch=kv_repack_hbm_prefetch_serial,
+                prefill_current_input=kv_repack_hbm_prefetch_prefill_current,
+                redundant_future_prefetch=(
+                    kv_repack_hbm_prefetch_redundant_future
+                ),
+                serialize_current_prefetch=(
+                    kv_repack_hbm_prefetch_serialize_current
+                ),
+                external_future_prefetch=kv_repack_hbm_prefetch_external_future,
+                overlap_after_sync=kv_repack_hbm_prefetch_overlap_after_sync,
+                tail_current_prefetch=kv_repack_hbm_prefetch_tail_current,
+                prefetch_source_fanout=kv_repack_hbm_prefetch_source_fanout,
+                prefetch_loader_fanout=kv_repack_hbm_prefetch_loader_fanout,
+                prefetch_loader_core_id=kv_repack_hbm_prefetch_loader_core,
+                prefetch_loader_lx_base=kv_repack_hbm_prefetch_loader_lx_base,
+                prefetch_fanout_use_unicast=(
+                    kv_repack_hbm_prefetch_fanout_use_unicast
+                ),
+                prefetch_fanout_use_lxsfp_lx_transfers=(
+                    kv_repack_hbm_prefetch_fanout_use_lxsfp_lx_transfers
+                ),
+                prefetch_fanout_copyback_core=(
+                    kv_repack_hbm_prefetch_fanout_copyback_core
+                ),
+                prefetch_fanout_restrict_to_copyback_core=(
+                    kv_repack_hbm_prefetch_fanout_restrict_to_copyback_core
+                ),
+                prefetch_loader_copyback_without_fanout=(
+                    kv_repack_hbm_prefetch_loader_copyback_without_fanout
+                ),
+                prefetch_loader_fanout_full_tile_pieces=(
+                    kv_repack_hbm_prefetch_loader_fanout_full_tile_pieces
+                ),
+                serialize_loader_core_prefetch=(
+                    kv_repack_hbm_prefetch_serialize_loader_core
+                ),
+                prefetch_lx_roundtrip=kv_repack_hbm_prefetch_lx_roundtrip,
+                prefetch_corelet_id=1 if kv_repack_hbm_prefetch_corelet1 else None,
+            )
+        )
+        if kv_repack_hbm_prefetch_hoist is None:
+            kv_repack_hbm_prefetch_hoist_rejections = (
+                flash_attention_kv_repack_hbm_prefetch_hoist_rejection_reasons(
+                    sdscs_json,
+                    kv_repack_hbm_prefetch_hoist_tile,
+                )
+            )
+    if (
+        emit_mixed_sidecars
+        and kv_repack_hbm_staged_hoist_tile != -1
+        and kv_repack_hbm_prefetch_hoist is None
+        and kv_repack_copyback is None
+    ):
+        kv_repack_hbm_staged_hoist = (
+            build_flash_attention_kv_repack_hbm_staged_hoist_tile_artifacts(
+                sdscs_json,
+                kv_repack_hbm_staged_hoist_tile,
+            )
+        )
+        if kv_repack_hbm_staged_hoist is None:
+            kv_repack_hbm_staged_hoist_rejections = (
+                flash_attention_kv_repack_hbm_staged_hoist_rejection_reasons(
+                    sdscs_json,
+                    kv_repack_hbm_staged_hoist_tile,
+                )
+            )
     if emit_mixed_sidecars:
         if ifn_pair_tile >= 0:
             ifn_pair = build_flash_attention_ifn_pair_tile_artifacts(
@@ -368,7 +768,82 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                         ifn_pair_tile,
                     ),
                 )
-        if kv_repack_pair_tile != -1:
+        if kv_repack_copyback_tile != -1:
+            if kv_repack_copyback is not None:
+                sidecar_sdscs.extend(kv_repack_copyback["artifacts"])
+                sidecar_replacements.update(kv_repack_copyback["replacements"])
+                for key, values in kv_repack_copyback.get(
+                    "insertions_before", {}
+                ).items():
+                    sidecar_insertions_before.setdefault(key, []).extend(values)
+                bundle_attrs_by_file.update(kv_repack_copyback["bundle_attrs"])
+                logger.info(
+                    "Executing experimental K/V repack broadcast copyback "
+                    "sidecars"
+                )
+            else:
+                logger.warning(
+                    "Requested K/V repack broadcast copyback probe was not "
+                    "realizable; keeping generated HBM-backed SDSCs: %s",
+                    kv_repack_copyback_rejections,
+                )
+        if kv_repack_hbm_staged_hoist_tile != -1:
+            if kv_repack_hbm_staged_hoist is not None:
+                sidecar_sdscs.extend(kv_repack_hbm_staged_hoist["artifacts"])
+                sidecar_replacements.update(
+                    kv_repack_hbm_staged_hoist["replacements"]
+                )
+                for key, values in kv_repack_hbm_staged_hoist.get(
+                    "insertions_before", {}
+                ).items():
+                    sidecar_insertions_before.setdefault(key, []).extend(values)
+                sidecar_omissions.update(
+                    kv_repack_hbm_staged_hoist.get("omissions", ())
+                )
+                bundle_attrs_by_file.update(
+                    kv_repack_hbm_staged_hoist["bundle_attrs"]
+                )
+                logger.info(
+                    "Executing experimental K/V HBM-staged hoisted-producer "
+                    "sidecars"
+                )
+            else:
+                logger.warning(
+                    "Requested K/V HBM-staged hoist probe was not realizable; "
+                    "keeping generated HBM-backed SDSCs: %s",
+                    kv_repack_hbm_staged_hoist_rejections,
+                )
+        if kv_repack_hbm_prefetch_hoist_tile != -1:
+            if kv_repack_hbm_prefetch_hoist is not None:
+                sidecar_sdscs.extend(kv_repack_hbm_prefetch_hoist["artifacts"])
+                sidecar_replacements.update(
+                    kv_repack_hbm_prefetch_hoist["replacements"]
+                )
+                for key, values in kv_repack_hbm_prefetch_hoist.get(
+                    "insertions_before", {}
+                ).items():
+                    sidecar_insertions_before.setdefault(key, []).extend(values)
+                sidecar_omissions.update(
+                    kv_repack_hbm_prefetch_hoist.get("omissions", ())
+                )
+                bundle_attrs_by_file.update(
+                    kv_repack_hbm_prefetch_hoist["bundle_attrs"]
+                )
+                logger.info(
+                    "Executing experimental K/V HBM prefetch hoisted-producer "
+                    "sidecars"
+                )
+            else:
+                logger.warning(
+                    "Requested K/V HBM prefetch hoist probe was not realizable; "
+                    "keeping generated HBM-backed SDSCs: %s",
+                    kv_repack_hbm_prefetch_hoist_rejections,
+                )
+        if (
+            kv_repack_pair_tile != -1
+            and kv_repack_hbm_staged_hoist is None
+            and kv_repack_hbm_prefetch_hoist is None
+        ):
             if kv_repack_pair is not None:
                 sidecar_sdscs.extend(kv_repack_pair["artifacts"])
                 sidecar_replacements.update(kv_repack_pair["replacements"])
@@ -383,7 +858,11 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                     "not realizable; keeping generated HBM-backed SDSCs: %s",
                     kv_repack_pair_rejections,
                 )
-        if layout_xform_hoist_tile != -1 and kv_repack_pair is None:
+        if (
+            layout_xform_hoist_tile != -1
+            and kv_repack_copyback is None
+            and kv_repack_pair is None
+        ):
             if layout_xform_hoist is not None:
                 sidecar_sdscs.extend(layout_xform_hoist["artifacts"])
                 sidecar_replacements.update(layout_xform_hoist["replacements"])
@@ -400,7 +879,11 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                     "SDSCs: %s",
                     layout_xform_hoist_rejections,
                 )
-        if layout_xform_lookahead_tile != -1 and kv_repack_pair is None:
+        if (
+            layout_xform_lookahead_tile != -1
+            and kv_repack_copyback is None
+            and kv_repack_pair is None
+        ):
             if layout_xform_lookahead is not None:
                 sidecar_sdscs.extend(layout_xform_lookahead["artifacts"])
                 sidecar_replacements.update(layout_xform_lookahead["replacements"])
@@ -417,18 +900,31 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
                 )
         if (
             layout_xform_pair_tile != -1
-            and kv_repack_pair is None
+            and kv_repack_copyback is None
             and layout_xform_hoist is None
             and layout_xform_lookahead is None
         ):
             if layout_xform_pair is not None:
-                sidecar_sdscs.extend(layout_xform_pair["artifacts"])
-                sidecar_replacements.update(layout_xform_pair["replacements"])
-                bundle_attrs_by_file.update(layout_xform_pair["bundle_attrs"])
-                logger.info(
-                    "Executing experimental layout-transform flash attention "
-                    "pair sidecars"
+                conflicts = _mixed_sidecar_conflicts(
+                    layout_xform_pair,
+                    sidecar_replacements,
+                    sidecar_omissions,
                 )
+                if conflicts:
+                    logger.warning(
+                        "Requested layout-transform flash attention pair "
+                        "conflicts with earlier sidecars for SDSCs %s; keeping "
+                        "those generated HBM-backed SDSCs",
+                        conflicts,
+                    )
+                else:
+                    sidecar_sdscs.extend(layout_xform_pair["artifacts"])
+                    sidecar_replacements.update(layout_xform_pair["replacements"])
+                    bundle_attrs_by_file.update(layout_xform_pair["bundle_attrs"])
+                    logger.info(
+                        "Executing experimental layout-transform flash attention "
+                        "pair sidecars"
+                    )
             else:
                 logger.warning(
                     "Requested layout-transform flash attention pair was not "
@@ -535,6 +1031,8 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
     files = []
     for sdsc_json in sdscs_json:
         sdsc_name = next(iter(sdsc_json))
+        for inserted_name in sidecar_insertions_before.get(sdsc_name, []):
+            files.append(f"sdsc_{inserted_name}.json")
         if sdsc_name not in sidecar_omissions:
             bundle_sdsc_name = sidecar_replacements.get(sdsc_name, sdsc_name)
             file_name = f"sdsc_{bundle_sdsc_name}.json"
