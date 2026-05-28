@@ -1004,15 +1004,15 @@ def test_warpspec_decoupled_route_policy_selects_target_shape():
     env = sweep._child_env(args, _WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT, 768)
 
     assert env[_ROUTE_POLICY_ENV] == "stage234_min_speedup_1p0"
-    assert env[_ROUTE_SELECTED_VARIANT_ENV] == _WARPSPEC_DECOUPLED_VARIANT
-    assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA"] == "1"
+    assert env[_ROUTE_SELECTED_VARIANT_ENV] == ""
+    assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA"] == "0"
     assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM"] == "0"
     assert env[_LAYOUT_PAIR_ENV] == "-1"
-    assert env[_KV_REPACK_HBM_PREFETCH_HOIST_ENV] == "-2"
-    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT_ENV] == "1"
-    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_CORE_ENV] == "31"
-    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT_FULL_TILE_PIECES_ENV] == "1"
-    assert env[_KV_REPACK_HBM_PREFETCH_SERIALIZE_LOADER_CORE_ENV] == "1"
+    assert env[_KV_REPACK_HBM_PREFETCH_HOIST_ENV] == "-1"
+    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT_ENV] == "0"
+    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_CORE_ENV] == "0"
+    assert env[_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT_FULL_TILE_PIECES_ENV] == "0"
+    assert env[_KV_REPACK_HBM_PREFETCH_SERIALIZE_LOADER_CORE_ENV] == "0"
     assert (
         _WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT
         in env["TORCHINDUCTOR_CACHE_DIR"]
@@ -1029,8 +1029,8 @@ def test_warpspec_decoupled_route_policy_falls_back_on_mid_shape():
     env = sweep._child_env(args, _WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT, 512)
 
     assert env[_ROUTE_POLICY_ENV] == "stage234_min_speedup_1p0"
-    assert env[_ROUTE_SELECTED_VARIANT_ENV] == "onchip_master"
-    assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA"] == "1"
+    assert env[_ROUTE_SELECTED_VARIANT_ENV] == ""
+    assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA"] == "0"
     assert env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM"] == "0"
     assert env[_KV_REPACK_HBM_PREFETCH_HOIST_ENV] == "-1"
     assert env[_KV_REPACK_HBM_PREFETCH_LOADER_FANOUT_ENV] == "0"
@@ -1047,7 +1047,8 @@ def test_warpspec_decoupled_route_policy_falls_back_on_causal_shape():
     args.is_causal = True
     env = sweep._child_env(args, _WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT, 768)
 
-    assert env[_ROUTE_SELECTED_VARIANT_ENV] == "onchip_master"
+    assert env[_ROUTE_POLICY_ENV] == "stage234_min_speedup_1p0"
+    assert env[_ROUTE_SELECTED_VARIANT_ENV] == ""
     assert env[_KV_REPACK_HBM_PREFETCH_HOIST_ENV] == "-1"
 
 

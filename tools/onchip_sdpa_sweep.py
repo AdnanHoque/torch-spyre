@@ -25,6 +25,7 @@ summarizes generated mixed SDSCs / senprog tokens from ``TORCHINDUCTOR_CACHE_DIR
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import random
@@ -45,9 +46,31 @@ if str(_REPO_ROOT) not in sys.path:
 TAIL_CHARS = 8000
 
 
+def _load_flash_attention_route_policy():
+    module_path = (
+        _REPO_ROOT
+        / "torch_spyre"
+        / "_inductor"
+        / "flash_attention_route_policy.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "_onchip_sdpa_sweep_flash_attention_route_policy",
+        module_path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_FLASH_ATTENTION_ROUTE_POLICY = _load_flash_attention_route_policy()
+
+
 BASE_VARIANT_ENV = {
     "SPYRE_FLASH_ATTENTION_PREFILL": "0",
     "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA": "0",
+    "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_POLICY": "",
+    "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_SELECTED_VARIANT": "",
     "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM": "0",
     "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE": "0",
     "SPYRE_FLASH_ATTENTION_MIXED_PIPELINE_OVERLAP": "0",
@@ -117,21 +140,20 @@ BASE_VARIANT_ENV = {
 }
 
 WARPSPEC_DECOUPLED_VARIANT = (
-    "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled"
+    _FLASH_ATTENTION_ROUTE_POLICY.WARPSPEC_DECOUPLED_VARIANT
 )
 WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT = (
-    "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled_route_policy"
+    _FLASH_ATTENTION_ROUTE_POLICY.WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT
 )
-WARPSPEC_DECOUPLED_ROUTE_POLICY_NAME = "stage234_min_speedup_1p0"
-WARPSPEC_DECOUPLED_ROUTE_POLICY_TARGET_SHAPES = frozenset(
-    (
-        (1, 4, 64, 64, False, 768),
-        (1, 4, 64, 64, False, 1024),
-        (2, 4, 128, 64, False, 768),
-        (2, 4, 128, 64, False, 1024),
-    )
+WARPSPEC_DECOUPLED_ROUTE_POLICY_NAME = (
+    _FLASH_ATTENTION_ROUTE_POLICY.WARPSPEC_DECOUPLED_ROUTE_POLICY_NAME
 )
-WARPSPEC_DECOUPLED_ROUTE_POLICY_FALLBACK_VARIANT = "onchip_master"
+WARPSPEC_DECOUPLED_ROUTE_POLICY_TARGET_SHAPES = (
+    _FLASH_ATTENTION_ROUTE_POLICY.WARPSPEC_DECOUPLED_ROUTE_POLICY_TARGET_SHAPES
+)
+WARPSPEC_DECOUPLED_ROUTE_POLICY_FALLBACK_VARIANT = (
+    _FLASH_ATTENTION_ROUTE_POLICY.WARPSPEC_DECOUPLED_ROUTE_POLICY_FALLBACK_VARIANT
+)
 
 TIMING_METHOD = "host_perf_counter_synchronized_call"
 TIMING_SCOPE = "compiled_call_plus_torch_spyre_synchronize"
@@ -434,6 +456,9 @@ VARIANT_ENV = {
     },
     WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT: {
         **BASE_VARIANT_ENV,
+        "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_POLICY": (
+            WARPSPEC_DECOUPLED_ROUTE_POLICY_NAME
+        ),
     },
     "onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled_unicast": {
         **BASE_VARIANT_ENV,
@@ -1092,33 +1117,8 @@ VARIANT_ENV = {
 }
 
 
-def _warpspec_decoupled_route_policy_base_variant(
-    args: argparse.Namespace,
-    length: int,
-) -> str:
-    shape_key = (
-        args.batch,
-        args.heads,
-        args.dim,
-        args.block_size,
-        bool(args.is_causal),
-        length,
-    )
-    if shape_key in WARPSPEC_DECOUPLED_ROUTE_POLICY_TARGET_SHAPES:
-        return WARPSPEC_DECOUPLED_VARIANT
-    return WARPSPEC_DECOUPLED_ROUTE_POLICY_FALLBACK_VARIANT
-
-
 def _variant_env(args: argparse.Namespace, variant: str, length: int) -> dict[str, str]:
-    if variant != WARPSPEC_DECOUPLED_ROUTE_POLICY_VARIANT:
-        return VARIANT_ENV[variant]
-    base_variant = _warpspec_decoupled_route_policy_base_variant(args, length)
-    env = dict(VARIANT_ENV[base_variant])
-    env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_POLICY"] = (
-        WARPSPEC_DECOUPLED_ROUTE_POLICY_NAME
-    )
-    env["SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_SELECTED_VARIANT"] = base_variant
-    return env
+    return VARIANT_ENV[variant]
 
 
 def _parse_csv(values: str) -> list[str]:
@@ -1356,11 +1356,17 @@ def _run_child(args: argparse.Namespace) -> int:
         "variant": args.variant,
         **_timing_metadata(),
         **privateuse1_profile,
-        "route_policy": os.environ.get(
-            "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_POLICY", ""
+        "route_policy": getattr(
+            spyre_config,
+            "flash_attention_onchip_sdpa_route_policy",
+            os.environ.get("SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_POLICY", ""),
         ),
-        "route_selected_variant": os.environ.get(
-            "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_SELECTED_VARIANT", ""
+        "route_selected_variant": getattr(
+            spyre_config,
+            "flash_attention_onchip_sdpa_route_selected_variant",
+            os.environ.get(
+                "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_SELECTED_VARIANT", ""
+            ),
         ),
         "shape": {
             "batch": args.batch,

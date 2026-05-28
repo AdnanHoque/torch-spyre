@@ -23,6 +23,8 @@ _FLASH_CONFIG_KEYS = [
     "flash_attention_prefill",
     "flash_attention_prefill_block_size",
     "flash_attention_onchip_sdpa",
+    "flash_attention_onchip_sdpa_route_policy",
+    "flash_attention_onchip_sdpa_route_selected_variant",
     "flash_attention_onchip_sdpa_layout_xform",
     "flash_attention_mixed_pipeline",
     "flash_attention_mixed_pipeline_overlap",
@@ -152,6 +154,8 @@ def test_flash_attention_onchip_sdpa_master_gate_defaults_off():
     assert cfg["flash_attention_prefill"] is False
     assert cfg["flash_attention_prefill_block_size"] == 128
     assert cfg["flash_attention_onchip_sdpa"] is False
+    assert cfg["flash_attention_onchip_sdpa_route_policy"] == ""
+    assert cfg["flash_attention_onchip_sdpa_route_selected_variant"] == ""
     assert cfg["flash_attention_onchip_sdpa_layout_xform"] is False
     assert cfg["flash_attention_mixed_pipeline"] is False
     assert cfg["flash_attention_pointwise_handoff"] is False
@@ -275,6 +279,8 @@ def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
     cfg = _read_flash_config({"SPYRE_FLASH_ATTENTION_ONCHIP_SDPA": "1"})
 
     assert cfg["flash_attention_onchip_sdpa"] is True
+    assert cfg["flash_attention_onchip_sdpa_route_policy"] == ""
+    assert cfg["flash_attention_onchip_sdpa_route_selected_variant"] == ""
     assert cfg["flash_attention_onchip_sdpa_layout_xform"] is False
     assert cfg["flash_attention_prefill_block_size"] == 512
     assert cfg["flash_attention_mixed_pipeline"] is True
@@ -386,6 +392,23 @@ def test_flash_attention_onchip_sdpa_master_gate_enables_certified_path_only():
         is False
     )
     assert cfg["causal_idx_to_mask_plan_artifact"] is False
+
+
+def test_flash_attention_onchip_sdpa_route_policy_defaults_to_onchip_block_size():
+    cfg = _read_flash_config(
+        {
+            "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_POLICY": (
+                "stage234_min_speedup_1p0"
+            )
+        }
+    )
+
+    assert cfg["flash_attention_onchip_sdpa"] is False
+    assert cfg["flash_attention_onchip_sdpa_route_policy"] == (
+        "stage234_min_speedup_1p0"
+    )
+    assert cfg["flash_attention_onchip_sdpa_route_selected_variant"] == ""
+    assert cfg["flash_attention_prefill_block_size"] == 512
 
 
 def test_flash_attention_kv_repack_pair_ifn_transfer_can_be_disabled():

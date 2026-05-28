@@ -25,6 +25,7 @@ from .constants import DEVICE_NAME
 from .errors import Unsupported
 from . import config
 from . import customops  # noqa: F401
+from .flash_attention_route_policy import apply_flash_attention_route_policy
 
 import threading
 
@@ -80,6 +81,31 @@ def _can_use_flash_attention_prefill(
     if is_causal and query.size(2) != key.size(2):
         return False
     return True
+
+
+def _apply_flash_attention_route_policy(
+    query: torch.Tensor,
+    key: torch.Tensor,
+    is_causal: bool,
+) -> None:
+    policy = getattr(config, "flash_attention_onchip_sdpa_route_policy", "")
+    if not policy:
+        return
+    try:
+        apply_flash_attention_route_policy(
+            config,
+            batch=int(query.size(0)),
+            heads=int(query.size(1)),
+            dim=int(query.size(3)),
+            block_size=int(config.flash_attention_prefill_block_size),
+            is_causal=is_causal,
+            length=int(key.size(2)),
+        )
+    except (TypeError, ValueError) as exc:
+        raise Unsupported(
+            "Cannot apply SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_POLICY="
+            f"{policy!r}: {exc}"
+        ) from exc
 
 
 def _flash_attention_prefill(
@@ -637,6 +663,8 @@ def spyre__sdpa_overrideable(
     )
     philox_seed = torch.empty((1,), dtype=torch.float16, device="spyre")
     philox_offset = torch.empty((1,), dtype=torch.float16, device="spyre")
+
+    _apply_flash_attention_route_policy(query, key, is_causal)
 
     if _can_use_flash_attention_prefill(
         query, key, value, attn_bias, dropout_p, is_causal

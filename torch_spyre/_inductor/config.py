@@ -54,6 +54,12 @@ flash_attention_prefill: bool = (
 flash_attention_onchip_sdpa: bool = (
     os.environ.get("SPYRE_FLASH_ATTENTION_ONCHIP_SDPA", "0") == "1"
 )
+flash_attention_onchip_sdpa_route_policy: str = os.environ.get(
+    "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_POLICY", ""
+)
+flash_attention_onchip_sdpa_route_selected_variant: str = os.environ.get(
+    "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_SELECTED_VARIANT", ""
+)
 flash_attention_onchip_sdpa_layout_xform: bool = (
     flash_attention_onchip_sdpa
     and os.environ.get("SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_LAYOUT_XFORM", "0")
@@ -62,7 +68,14 @@ flash_attention_onchip_sdpa_layout_xform: bool = (
 flash_attention_prefill_block_size: int = int(
     os.environ.get(
         "SPYRE_FLASH_ATTENTION_PREFILL_BLOCK_SIZE",
-        "512" if flash_attention_onchip_sdpa else "128",
+        (
+            "512"
+            if (
+                flash_attention_onchip_sdpa
+                or flash_attention_onchip_sdpa_route_policy
+            )
+            else "128"
+        ),
     )
 )
 # Default-off proof path for a mixed-SDSC, double-buffered flash-attention
