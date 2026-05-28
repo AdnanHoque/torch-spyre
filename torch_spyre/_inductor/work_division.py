@@ -14,6 +14,7 @@
 
 
 import dataclasses
+import enum
 import math
 import itertools
 from sympy import Expr, Symbol, divisors
@@ -545,8 +546,14 @@ def span_reduction_pass(
         )
 
 
+# Op classes recognised by the cost-model planner. Each class picks a
+# per-class scorer in _cost_model_planner; today only MATMUL is wired,
+# POINTWISE and REDUCTION are placeholders for future PRs.
+OpClass = enum.Enum("OpClass", ["MATMUL", "POINTWISE", "REDUCTION"])
+
+
 # Hardware and empirical constants for the matmul cost-model planner.
-# See _cost_model_matmul_planner. Each constant is either a hardware
+# See _cost_model_planner. Each constant is either a hardware
 # limit or a coefficient measured from device kernel times.
 _PT_ROWS = 8                                        # PT block rows per corelet
 _TARGET_PT_PASSES = 8                               # per-core M target = this * _PT_ROWS rows
@@ -661,34 +668,42 @@ def _matmul_split_cost(
     )
 
 
-def _cost_model_matmul_planner(
+@dataclasses.dataclass
+class _MatmulDims:
+    """Identified iteration dims of a matmul, with concrete sizes.
+
+    M_e, N_e, K_e are in elements (N and K converted from sticks).
+    batch_per_dim preserves the dim → concrete-size pairing so callers can
+    map enumerated batch-splits back to the original dim symbols.
+    """
+
+    m_dim: Symbol
+    n_dim: Symbol
+    k_dim: Symbol
+    batch_per_dim: list[tuple[Symbol, int]]
+    M_e: int
+    N_e: int
+    K_e: int
+    B_total: int
+
+
+def _identify_matmul_dims(
     op: ComputedBuffer,
-    splits: dict[Symbol, int],
-    it_space_adjusted: dict[Symbol, Expr],
     output_td: TensorDep,
     stick_vars: dict[Symbol, int],
-    committed_splits: dict[Symbol, int],
-    max_cores: int,
-    fused_with_nonmatmul: set[str],
     input_tds: list[TensorDep],
-) -> dict[Symbol, int]:
-    """Pick the lowest-cost feasible (b, m, n, k) split for a matmul / bmm.
+    it_space_adjusted: dict[Symbol, Expr],
+) -> _MatmulDims | None:
+    """Identify the M, N, K, batch dims (with concrete sizes) for a matmul.
 
-    Identifies the M, N, K, and batch dims from the op's inputs (M appears
-    in only the LHS, batch in both, K is the reduction), enumerates every
-    feasible split (each dim split by one of its divisors, product within
-    max_cores), and returns the one with the smallest _matmul_split_cost.
-
-    When the matmul is bundled with a non-matmul partner, candidates that
-    diverge from the default split are charged a redistribution penalty
-    so the planner only rewrites when the kernel savings are worth it.
+    Returns None when ``op`` is not a recognised batched matmul or its
+    dim structure does not fit the (one M, one N, one K, zero-or-more
+    batch) shape the planner expects.
     """
     if not isinstance(op.data, Reduction):
-        return splits
+        return None
     if op.data.reduction_type != BATCH_MATMUL_OP:
-        return splits
-    if committed_splits:
-        return splits
+        return None
 
     output_coord_vars = {
         v for e in output_td.device_coords[:-1] for v in e.free_symbols
@@ -696,7 +711,7 @@ def _cost_model_matmul_planner(
     n_dims = [d for d in output_coord_vars if d in stick_vars]
     m_dims = [d for d in output_coord_vars if d not in stick_vars]
     if len(n_dims) != 1 or not m_dims:
-        return splits
+        return None
     n_dim = n_dims[0]
 
     # The M dim is the output dim that appears in only one input (the LHS);
@@ -710,14 +725,14 @@ def _cost_model_matmul_planner(
 
     m_candidates = [d for d in m_dims if _n_inputs(d) == 1]
     if len(m_candidates) != 1:
-        return splits
+        return None
     m_dim = m_candidates[0]
     batch_dims = [d for d in m_dims if d is not m_dim]
 
     # K is the single reduction dim (multi-K matmul not handled here).
     reduction = [d for d in it_space_adjusted if d not in output_coord_vars]
     if len(reduction) != 1:
-        return splits
+        return None
     k_dim = reduction[0]
 
     # The iteration space measures N and K in sticks; convert back to
@@ -736,79 +751,192 @@ def _cost_model_matmul_planner(
     for _, s in batch_per_dim:
         B_total *= s
 
-    if batch_per_dim:
-        bd_divs = [[int(d) for d in divisors(s)] for _, s in batch_per_dim]
-        b_combos = list(itertools.product(*bd_divs))
-    else:
-        b_combos = [()]
-    m_divs = [int(d) for d in divisors(M_e)]
-    n_divs = [int(d) for d in divisors(n_sticks)]
-    k_divs = [int(d) for d in divisors(k_sticks)]
-
-    # Charge a redistribution cost to any candidate that changes the split
-    # from what the caller would have emitted, but only when the matmul is
-    # bundled with a non-matmul partner that stays on the default layout.
-    default_m = int(splits.get(m_dim, 1))
-    default_n = int(splits.get(n_dim, 1))
-    default_k = int(splits.get(k_dim, 1))
-    default_b_combo = tuple(int(splits.get(bd, 1)) for bd, _ in batch_per_dim)
-    fused = op.get_name() in fused_with_nonmatmul
-    redistribution_cost = (
-        B_total * M_e * N_e * _COST_DTYPE_BYTES * _COST_REDISTRIBUTION_US_PER_BYTE
+    return _MatmulDims(
+        m_dim=m_dim,
+        n_dim=n_dim,
+        k_dim=k_dim,
+        batch_per_dim=batch_per_dim,
+        M_e=M_e,
+        N_e=N_e,
+        K_e=K_e,
+        B_total=B_total,
     )
 
-    best_cost = float("inf")
-    best = None
-    for b_combo in b_combos:
+
+def _enumerate_splits(
+    it_dims: list[Symbol],
+    divisor_lists: list[list[int]],
+    max_cores: int,
+) -> "itertools.chain":
+    """Yield feasible split dicts over ``it_dims``.
+
+    Takes a list of iteration dims and a parallel list of per-dim divisor
+    lists. Yields ``dict[Symbol, int]`` where each value is drawn from the
+    matching divisor list and the product of values is ``<= max_cores``.
+
+    Used by the matmul planner to enumerate (b..., m, n, k) candidates;
+    intended to be reused by pointwise / reduction planners.
+    """
+    assert len(it_dims) == len(divisor_lists)
+    for combo in itertools.product(*divisor_lists):
+        prod = 1
+        for v in combo:
+            prod *= v
+        if prod > max_cores:
+            continue
+        yield dict(zip(it_dims, combo))
+
+
+def _score_split(
+    op_class: "OpClass",
+    candidate: dict[Symbol, int],
+    ctx: dict,
+) -> float:
+    """Score a candidate split for ``op_class``. Lower is better.
+
+    ``ctx`` carries op-class-specific state (sizes, fused-partner info,
+    default splits, etc.). For MATMUL the keys consumed are documented in
+    _cost_model_planner. POINTWISE and REDUCTION are placeholders.
+    """
+    if op_class is OpClass.MATMUL:
+        dims: _MatmulDims = ctx["dims"]
+        max_cores: int = ctx["max_cores"]
+        b_combo = tuple(int(candidate[bd]) for bd, _ in dims.batch_per_dim)
+        mm = int(candidate[dims.m_dim])
+        nn = int(candidate[dims.n_dim])
+        kk = int(candidate[dims.k_dim])
         b_prod = 1
         for bs in b_combo:
             b_prod *= bs
-        for mm in m_divs:
-            for nn in n_divs:
-                for kk in k_divs:
-                    if b_prod * mm * nn * kk > max_cores:
-                        continue
-                    diverges_from_default = (
-                        mm != default_m
-                        or nn != default_n
-                        or kk != default_k
-                        or b_combo != default_b_combo
-                    )
-                    redist = (
-                        redistribution_cost
-                        if fused and diverges_from_default
-                        else 0.0
-                    )
-                    c = _matmul_split_cost(
-                        B_total, M_e, K_e, N_e,
-                        b_prod, mm, nn, kk, max_cores,
-                        redistribution_us=redist,
-                    )
-                    if c < best_cost:
-                        best_cost = c
-                        best = (b_combo, mm, nn, kk)
+        diverges_from_default = (
+            mm != ctx["default_m"]
+            or nn != ctx["default_n"]
+            or kk != ctx["default_k"]
+            or b_combo != ctx["default_b_combo"]
+        )
+        redist = (
+            ctx["redistribution_cost"]
+            if ctx["fused"] and diverges_from_default
+            else 0.0
+        )
+        return _matmul_split_cost(
+            dims.B_total, dims.M_e, dims.K_e, dims.N_e,
+            b_prod, mm, nn, kk, max_cores,
+            redistribution_us=redist,
+        )
+    raise NotImplementedError(f"scorer for {op_class} not implemented")
+
+
+def _cost_model_planner(
+    op: ComputedBuffer,
+    splits: dict[Symbol, int],
+    op_class: "OpClass",
+    it_space_adjusted: dict[Symbol, Expr],
+    output_td: TensorDep,
+    stick_vars: dict[Symbol, int],
+    committed_splits: dict[Symbol, int],
+    max_cores: int,
+    fused_with_nonmatmul: set[str],
+    input_tds: list[TensorDep],
+) -> dict[Symbol, int]:
+    """Pick the lowest-cost feasible split for ``op`` of class ``op_class``.
+
+    Today only ``OpClass.MATMUL`` is wired: it identifies the M/N/K/batch
+    dims, enumerates every (b, m, n, k) split whose product is within
+    ``max_cores``, and returns the one with the smallest
+    ``_matmul_split_cost``.
+
+    When the matmul is bundled with a non-matmul partner, candidates that
+    diverge from the caller's default split are charged a redistribution
+    penalty so the planner only rewrites when the kernel savings are
+    worth it.
+
+    POINTWISE / REDUCTION raise ``NotImplementedError`` — they will be
+    filled in by future PRs.
+    """
+    if op_class is not OpClass.MATMUL:
+        raise NotImplementedError(f"planner for {op_class} not implemented")
+    if committed_splits:
+        return splits
+
+    dims = _identify_matmul_dims(
+        op, output_td, stick_vars, input_tds, it_space_adjusted
+    )
+    if dims is None:
+        return splits
+
+    # The N/K iteration space is measured in sticks; the divisor lists are
+    # over those stick counts so the enumeration matches the original
+    # nested loops exactly.
+    n_sticks = dims.N_e // output_td.layout.device_layout.device_dtype.elems_per_stick()
+    k_sticks = dims.K_e // output_td.layout.device_layout.device_dtype.elems_per_stick()
+
+    it_dims: list[Symbol] = [bd for bd, _ in dims.batch_per_dim] + [
+        dims.m_dim, dims.n_dim, dims.k_dim,
+    ]
+    divisor_lists: list[list[int]] = (
+        [[int(d) for d in divisors(s)] for _, s in dims.batch_per_dim]
+        + [
+            [int(d) for d in divisors(dims.M_e)],
+            [int(d) for d in divisors(n_sticks)],
+            [int(d) for d in divisors(k_sticks)],
+        ]
+    )
+
+    default_b_combo = tuple(
+        int(splits.get(bd, 1)) for bd, _ in dims.batch_per_dim
+    )
+    ctx = {
+        "dims": dims,
+        "max_cores": max_cores,
+        "default_m": int(splits.get(dims.m_dim, 1)),
+        "default_n": int(splits.get(dims.n_dim, 1)),
+        "default_k": int(splits.get(dims.k_dim, 1)),
+        "default_b_combo": default_b_combo,
+        "fused": op.get_name() in fused_with_nonmatmul,
+        "redistribution_cost": (
+            dims.B_total * dims.M_e * dims.N_e
+            * _COST_DTYPE_BYTES * _COST_REDISTRIBUTION_US_PER_BYTE
+        ),
+    }
+
+    best_cost = float("inf")
+    best: dict[Symbol, int] | None = None
+    for candidate in _enumerate_splits(it_dims, divisor_lists, max_cores):
+        c = _score_split(op_class, candidate, ctx)
+        if c < best_cost:
+            best_cost = c
+            best = candidate
 
     if best is None:
         return splits
 
-    b_combo, m_s, n_s, k_s = best
     new_splits = dict(splits)
-    for (bd, _sz), bs in zip(batch_per_dim, b_combo):
-        new_splits[bd] = int(bs)
-    new_splits[m_dim] = m_s
-    new_splits[n_dim] = n_s
-    new_splits[k_dim] = k_s
+    new_splits.update(best)
 
     # Never use fewer cores than the caller's default split.
     if math.prod(new_splits.values()) < math.prod(splits.values()):
         return splits
 
+    b_combo = tuple(int(best[bd]) for bd, _ in dims.batch_per_dim)
     logger.debug(
         f"cost_model work_division {op.get_name()}: "
-        f"b={b_combo} m={m_s} n={n_s} k={k_s} cost={best_cost:.1f}us "
-        f"[B={B_total} M={M_e} K={K_e} N={N_e}]"
+        f"b={b_combo} m={best[dims.m_dim]} n={best[dims.n_dim]} "
+        f"k={best[dims.k_dim]} cost={best_cost:.1f}us "
+        f"[B={dims.B_total} M={dims.M_e} K={dims.K_e} N={dims.N_e}]"
     )
     return new_splits
+
+
+def _classify_op(op: ComputedBuffer) -> "OpClass | None":
+    """Return the cost-model OpClass for ``op`` or None if unclassified."""
+    if isinstance(op.data, Reduction):
+        if op.data.reduction_type == BATCH_MATMUL_OP:
+            return OpClass.MATMUL
+        return OpClass.REDUCTION
+    if isinstance(op.data, Pointwise):
+        return OpClass.POINTWISE
+    return None
 
 
 def work_distribution_pass(
@@ -872,17 +1000,20 @@ def work_distribution_pass(
         committed_splits,
     )
     if config.cost_model_matmul_planner:
-        splits = _cost_model_matmul_planner(
-            op,
-            splits,
-            it_space_adjusted,
-            output_td,
-            stick_vars,
-            committed_splits,
-            max_cores,
-            fused_with_nonmatmul if fused_with_nonmatmul is not None else set(),
-            input_tds,
-        )
+        op_class = _classify_op(op)
+        if op_class is OpClass.MATMUL:
+            splits = _cost_model_planner(
+                op,
+                splits,
+                op_class,
+                it_space_adjusted,
+                output_td,
+                stick_vars,
+                committed_splits,
+                max_cores,
+                fused_with_nonmatmul if fused_with_nonmatmul is not None else set(),
+                input_tds,
+            )
 
     apply_splits(op, splits, output_td)
 
