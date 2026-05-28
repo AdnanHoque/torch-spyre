@@ -1,0 +1,6 @@
+N 0 SenProgSend sdsc_fused_linear_0_6xq_are_-SenProgSend
+A dev_ptr 6 120259084288
+A size 6 11520
+I { }
+O { }
+T { }
