@@ -62,6 +62,13 @@ lengths = 768,1024
 min_mixed_by_length = {768:59, 1024:78}
 ```
 
+The exact final gate passed for these rows:
+
+```text
+B1 H4 L768  D64 block64: 1.781614 ms, max abs 0.00195312, mixed 59
+B1 H4 L1024 D64 block64: 2.518849 ms, max abs 0.00268555, mixed 78
+```
+
 ## Interpretation
 
 The loader-core schedule broadens from two heads to four heads for the full

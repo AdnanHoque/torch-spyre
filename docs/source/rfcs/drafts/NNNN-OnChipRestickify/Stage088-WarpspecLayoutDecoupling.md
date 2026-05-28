@@ -47,3 +47,22 @@ The `onchip_warpspec_decoupled` promotion gate checks for the serialized
 loader-core K/V prefetch artifact directly and does not require a
 layout-transform consumer. The existing `onchip_warpspec` gate remains on the
 layout-coupled default variant for rows that still rely on that path.
+
+## Promotion Result
+
+The exact final variant passed the focused hardware gate:
+
+```text
+PROMOTION_GATE_PASSED gate=onchip_warpspec_decoupled cases=2 rows=6
+```
+
+Per-row medians from the gate:
+
+```text
+B1 H4 L768  D64  block64: 1.781614 ms, max abs 0.00195312, mixed 59
+B1 H4 L1024 D64  block64: 2.518849 ms, max abs 0.00268555, mixed 78
+B2 H4 L384  D128 block64: 1.339696 ms, max abs 0.00390625, mixed 22
+B2 H4 L512  D128 block64: 1.679618 ms, max abs 0.00317383, mixed 31
+B2 H4 L768  D128 block64: 3.318368 ms, max abs 0.00366211, mixed 47
+B2 H4 L1024 D128 block64: 5.053475 ms, max abs 0.00219727, mixed 63
+```
