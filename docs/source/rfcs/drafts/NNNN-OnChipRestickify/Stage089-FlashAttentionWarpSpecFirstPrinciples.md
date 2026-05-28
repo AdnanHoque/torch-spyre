@@ -623,6 +623,10 @@ Documentation:
 - `docs/source/rfcs/drafts/NNNN-OnChipRestickify/Stage090-WarpspecFanoutTuning.md`
   - Records the fanout/unicast tuning A/B lane.
 
+- `docs/source/rfcs/drafts/NNNN-OnChipRestickify/Stage091-H8MidDecoupledWarpspecGate.md`
+  - Records the narrow B1/H8/D64 mid-length decoupled gate extension and the
+    H8 long-row boundary.
+
 ## Gate Coverage And Correctness Evidence
 
 The latest layout-coupled warpspec gate recorded before layout decoupling was:
@@ -644,16 +648,18 @@ B1 H4 D64  block64  L128,L256,L384,L512
 B1 H8 D64  block64  L128,L256
 ```
 
-Stage088 added the layout-decoupled gate:
+Stage088 added the initial layout-decoupled gate, and Stage091 extended it with
+the B1/H8/D64 mid-length rows:
 
 ```text
-PROMOTION_GATE_PASSED gate=onchip_warpspec_decoupled cases=2 rows=6
+PROMOTION_GATE_PASSED gate=onchip_warpspec_decoupled cases=3 rows=8
 ```
 
 This decoupled gate covers:
 
 ```text
 B1 H4 D64  block64 L768,L1024
+B1 H8 D64  block64 L384,L512
 B2 H4 D128 block64 L384,L512,L768,L1024
 ```
 
@@ -672,6 +678,13 @@ Stage088 decoupled gate medians:
 | `onchip_warpspec_decoupled` | B2 H4 D128 block64 | 512 | 1.679618 | 0.00317383 | 31 |
 | `onchip_warpspec_decoupled` | B2 H4 D128 block64 | 768 | 3.318368 | 0.00366211 | 47 |
 | `onchip_warpspec_decoupled` | B2 H4 D128 block64 | 1024 | 5.053475 | 0.00219727 | 63 |
+
+Stage091 added B1/H8/D64 mid-length rows after repeated hardware checks:
+
+| Gate | Shape | L | Repeated median ms | Max abs error | Mixed SDSCs |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `onchip_warpspec_decoupled` | B1 H8 D64 block64 | 384 | 0.960641 | 0.00292969 | 29 |
+| `onchip_warpspec_decoupled` | B1 H8 D64 block64 | 512 | 1.273712 | 0.00305176 | 39 |
 
 The default promotion-gate tolerance is currently a maximum absolute error of
 `0.01`. The gate timing samples are short and should be treated as diagnostic
@@ -699,11 +712,13 @@ Per-row medians:
 | B2 H4 D128 block64 | 512 | 1.770552 | 1.500117 | 1.495212 | 1.1841x | 1.0033x |
 | B2 H4 D128 block64 | 768 | 3.716771 | 3.101267 | 3.116855 | 1.1925x | 0.9950x |
 | B2 H4 D128 block64 | 1024 | 6.056340 | 4.818441 | 4.802847 | 1.2610x | 1.0032x |
+| B1 H8 D64 block64 | 384 | 1.035977 | 0.955282 | 0.960641 | 1.0784x | 0.9944x |
+| B1 H8 D64 block64 | 512 | 1.458632 | 1.275601 | 1.273712 | 1.1452x | 1.0015x |
 
 Interpretation:
 
 - The decoupled loader-specialized path is consistently faster than
-  `flash_hbm` on this six-row gate island.
+  `flash_hbm` on this gate island.
 - It is effectively tied with `onchip_master`.
 - That means the work is real, but the current schedule is not yet a clear
   production performance win over the best on-chip baseline.
@@ -750,16 +765,17 @@ What is not ready:
 - The loader core's compute slice is serialized locally rather than
   redistributed.
 - Performance versus `onchip_master` is roughly break-even on the repeated
-  six-row island.
+  gate island.
 - Some adjacent long/head shapes still fail or lack a clean promotion story.
 
 ## Current Limitations And Next Work
 
 ### B1/H8/D64 Long Boundary
 
-The checked-in gate currently covers `B1 H8 D64 block64` only at L128 and L256
-for the layout-coupled warpspec path. Current exploratory context should make
-us conservative about expanding that gate.
+The checked-in gates now cover `B1 H8 D64 block64` at L128 and L256 for the
+layout-coupled warpspec path, and at L384 and L512 for the layout-decoupled
+loader-specialized path. Current exploratory context should make us
+conservative about expanding beyond those rows.
 
 Stage231 tested exact decoupled `B1 H8 D64 block64` rows with seed 42865:
 
@@ -782,11 +798,15 @@ Stage232 then ran a layer probe for `B1 H8 D64 block64 L768`, seed 42865,
 | `onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled` | failed | n/a |
 | `onchip_warpspec_kv_hbm_prefetch_loader_core31_decoupled_unicast` | failed | n/a |
 
+Stage233 reran the L384/L512 rows with `warmup=2`, `iters=7`; both rows were
+value-correct and emitted the required serialized loader-core prefetch sidecar.
+Those rows are now a narrow decoupled gate extension.
+
 Interpretation: B1/H8/L768 is a broader on-chip long-H8 boundary, not evidence
-that only decoupled loader specialization is broken. The H8 long rows should
-not be promoted yet. The likely work is candidate-selection, layout, and fanout
-analysis for higher-head long rows, especially around K/V producer and consumer
-split compatibility.
+that only decoupled loader specialization is broken. The H8 long rows beyond
+L512 should not be promoted yet. The likely work is candidate-selection,
+layout, and fanout analysis for higher-head long rows, especially around K/V
+producer and consumer split compatibility.
 
 ### Layout-Transform Coupling
 

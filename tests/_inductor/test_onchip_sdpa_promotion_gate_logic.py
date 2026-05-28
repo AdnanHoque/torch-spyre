@@ -212,6 +212,7 @@ def test_onchip_warpspec_decoupled_gate_tracks_layout_free_recovery_path():
 
     assert [case.name for case in cases] == [
         "b1h4d64_block64_long_decoupled_loader_core31",
+        "b1h8d64_block64_mid_decoupled_loader_core31",
         "b2h4d128_block64_long_decoupled_loader_core31",
     ]
     assert gate.DEFAULT_VARIANTS_BY_GATE["onchip_warpspec_decoupled"] == (
@@ -225,12 +226,20 @@ def test_onchip_warpspec_decoupled_gate_tracks_layout_free_recovery_path():
     assert cases[0].min_mixed_by_length == {768: 59, 1024: 78}
     assert cases[0].require_warpspec_loader_prefetch is True
     assert cases[0].expected_loader_core == 31
-    assert cases[1].batch == 2
-    assert cases[1].heads == 4
-    assert cases[1].dim == 128
-    assert cases[1].lengths == (384, 512, 768, 1024)
+    assert cases[1].batch == 1
+    assert cases[1].heads == 8
+    assert cases[1].dim == 64
+    assert cases[1].lengths == (384, 512)
     assert cases[1].layout_xform_lengths == ()
-    assert cases[1].min_mixed_by_length == {384: 22, 512: 31, 768: 47, 1024: 63}
+    assert cases[1].min_mixed_by_length == {384: 29, 512: 39}
+    assert cases[1].require_warpspec_loader_prefetch is True
+    assert cases[1].expected_loader_core == 31
+    assert cases[2].batch == 2
+    assert cases[2].heads == 4
+    assert cases[2].dim == 128
+    assert cases[2].lengths == (384, 512, 768, 1024)
+    assert cases[2].layout_xform_lengths == ()
+    assert cases[2].min_mixed_by_length == {384: 22, 512: 31, 768: 47, 1024: 63}
 
 
 def test_onchip_warpspec_gate_allows_causal_without_layout_xform_consumer():
