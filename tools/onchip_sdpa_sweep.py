@@ -33,6 +33,7 @@ import statistics
 import subprocess
 import sys
 import time
+import traceback
 import warnings
 from pathlib import Path
 
@@ -131,6 +132,26 @@ WARPSPEC_DECOUPLED_ROUTE_POLICY_TARGET_SHAPES = frozenset(
     )
 )
 WARPSPEC_DECOUPLED_ROUTE_POLICY_FALLBACK_VARIANT = "onchip_master"
+
+TIMING_METHOD = "host_perf_counter_synchronized_call"
+TIMING_SCOPE = "compiled_call_plus_torch_spyre_synchronize"
+TIMING_CLOCK = "time.perf_counter"
+TIMING_SYNCHRONIZATION = "torch.spyre.synchronize"
+TIMING_INCLUDES = (
+    "python_compiled_callable_dispatch",
+    "runtime_enqueue_or_launch_overhead",
+    "compiled_graph_device_work",
+    "host_wait_for_torch_spyre_synchronize",
+)
+TIMING_EXCLUDES = (
+    "torch_compile_first_run_compile_in_median_ms",
+    "cpu_reference_attention",
+    "host_to_device_input_copies",
+    "device_to_host_correctness_copy",
+)
+PRIVATEUSE1_TRACE_CATEGORIES = frozenset(
+    ("kernel", "privateuse1_runtime", "privateuse1_driver", "gpu_memset")
+)
 
 
 VARIANT_ENV = {
@@ -1319,9 +1340,22 @@ def _run_child(args: argparse.Namespace) -> int:
 
     ordered = sorted(samples_ms)
     cache_dir = Path(os.environ["TORCHINDUCTOR_CACHE_DIR"])
+    privateuse1_profile = {"privateuse1_profile_status": "not_requested"}
+    if args.profile_privateuse1:
+        profile_iters = args.profile_iters if args.profile_iters > 0 else args.iters
+        privateuse1_profile = _collect_privateuse1_profile(
+            compiled=compiled,
+            q_dev=q_dev,
+            k_dev=k_dev,
+            v_dev=v_dev,
+            trace_path=cache_dir / "privateuse1_trace.json",
+            iters=profile_iters,
+        )
     payload = {
         "status": "ok",
         "variant": args.variant,
+        **_timing_metadata(),
+        **privateuse1_profile,
         "route_policy": os.environ.get(
             "SPYRE_FLASH_ATTENTION_ONCHIP_SDPA_ROUTE_POLICY", ""
         ),
@@ -1334,7 +1368,11 @@ def _run_child(args: argparse.Namespace) -> int:
             "length": args.length,
             "dim": args.dim,
         },
-        "block_size": spyre_config.flash_attention_prefill_block_size,
+        "block_size": getattr(
+            spyre_config,
+            "flash_attention_prefill_block_size",
+            args.block_size if args.block_size > 0 else 0,
+        ),
         "is_causal": args.is_causal,
         "fallbacks_forbidden": args.forbid_fallbacks,
         "block_size_env": os.environ.get(
@@ -1392,6 +1430,127 @@ def _tail_text(value) -> str:
     return str(value)[-TAIL_CHARS:]
 
 
+def _timing_metadata() -> dict:
+    return {
+        "timing_method": TIMING_METHOD,
+        "timing_scope": TIMING_SCOPE,
+        "timing_clock": TIMING_CLOCK,
+        "timing_synchronization": TIMING_SYNCHRONIZATION,
+        "timing_primary_stat": "median_ms",
+        "timing_includes": list(TIMING_INCLUDES),
+        "timing_excludes": list(TIMING_EXCLUDES),
+        "device_event_timing": "not_collected",
+    }
+
+
+def _privateuse1_profile_summary(trace_path: Path) -> dict:
+    data = json.loads(trace_path.read_text())
+    events = data.get("traceEvents", [])
+    by_category: dict[str, list[float]] = {}
+    for event in events:
+        if event.get("ph") != "X":
+            continue
+        category = event.get("cat")
+        if category not in PRIVATEUSE1_TRACE_CATEGORIES:
+            continue
+        duration = event.get("dur", 0)
+        if not isinstance(duration, (int, float)) or duration <= 0:
+            continue
+        by_category.setdefault(category, []).append(float(duration))
+
+    summary = {}
+    for category, durations_us in sorted(by_category.items()):
+        ordered = sorted(durations_us)
+        prefix = f"privateuse1_{category}"
+        summary[f"{prefix}_event_count"] = len(durations_us)
+        summary[f"{prefix}_total_us"] = sum(durations_us)
+        summary[f"{prefix}_median_us"] = statistics.median(durations_us)
+        summary[f"{prefix}_min_us"] = ordered[0]
+        summary[f"{prefix}_max_us"] = ordered[-1]
+        summary[f"{prefix}_p90_us"] = _percentile(ordered, 0.90)
+
+    kernel_durations = by_category.get("kernel", [])
+    if kernel_durations:
+        summary["privateuse1_kernel_total_ms"] = sum(kernel_durations) / 1000.0
+        summary["privateuse1_kernel_median_ms"] = (
+            statistics.median(kernel_durations) / 1000.0
+        )
+    return summary
+
+
+def _collect_privateuse1_profile(
+    *,
+    compiled,
+    q_dev,
+    k_dev,
+    v_dev,
+    trace_path: Path,
+    iters: int,
+) -> dict:
+    if iters <= 0:
+        return {
+            "privateuse1_profile_status": "skipped",
+            "privateuse1_profile_error": "profile iteration count must be positive",
+        }
+    try:
+        import torch
+        from torch.profiler import ProfilerActivity, profile, record_function
+
+        activities = [ProfilerActivity.CPU]
+        if not hasattr(ProfilerActivity, "PrivateUse1"):
+            return {
+                "privateuse1_profile_status": "unavailable",
+                "privateuse1_profile_error": "ProfilerActivity.PrivateUse1 missing",
+            }
+        supported_activities = set(torch.profiler.supported_activities())
+        if ProfilerActivity.PrivateUse1 not in supported_activities:
+            return {
+                "privateuse1_profile_status": "unavailable",
+                "privateuse1_profile_error": (
+                    "ProfilerActivity.PrivateUse1 not in "
+                    "torch.profiler.supported_activities()"
+                ),
+                "privateuse1_supported_activities": sorted(
+                    activity.name for activity in supported_activities
+                ),
+            }
+        activities.append(ProfilerActivity.PrivateUse1)
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        with profile(
+            activities=activities,
+            record_shapes=False,
+            profile_memory=False,
+            acc_events=True,
+        ) as prof:
+            for idx in range(iters):
+                with record_function(f"sdpa_steady_state_{idx}"):
+                    compiled(q_dev, k_dev, v_dev)
+                    torch.spyre.synchronize()
+                prof.step()
+        prof.export_chrome_trace(str(trace_path))
+        summary = _privateuse1_profile_summary(trace_path)
+        if not summary:
+            return {
+                "privateuse1_profile_status": "no_privateuse1_events",
+                "privateuse1_profile_trace": str(trace_path),
+                "privateuse1_profile_iters": iters,
+            }
+        return {
+            "privateuse1_profile_status": "ok",
+            "privateuse1_profile_trace": str(trace_path),
+            "privateuse1_profile_iters": iters,
+            **summary,
+        }
+    except Exception as exc:
+        return {
+            "privateuse1_profile_status": "failed",
+            "privateuse1_profile_error": f"{type(exc).__name__}: {exc}",
+            "privateuse1_profile_traceback_tail": "\n".join(
+                traceback.format_exc().splitlines()[-20:]
+            ),
+        }
+
+
 def _run_parent(args: argparse.Namespace) -> int:
     results = []
     script = Path(__file__).resolve()
@@ -1417,6 +1576,8 @@ def _run_parent(args: argparse.Namespace) -> int:
                 str(length),
                 "--dim",
                 str(args.dim),
+                "--block-size",
+                str(args.block_size),
                 "--warmup",
                 str(args.warmup),
                 "--iters",
@@ -1432,6 +1593,9 @@ def _run_parent(args: argparse.Namespace) -> int:
                 cmd.append("--is-causal")
             if args.forbid_fallbacks:
                 cmd.append("--forbid-fallbacks")
+            if args.profile_privateuse1:
+                cmd.append("--profile-privateuse1")
+                cmd.extend(["--profile-iters", str(args.profile_iters)])
             env = _child_env(args, variant, length)
             started = time.perf_counter()
             try:
@@ -1447,7 +1611,9 @@ def _run_parent(args: argparse.Namespace) -> int:
                 row = {
                     "status": "timeout",
                     "variant": variant,
+                    **_timing_metadata(),
                     "is_causal": args.is_causal,
+                    "block_size": args.block_size if args.block_size > 0 else 0,
                     "fallbacks_forbidden": args.forbid_fallbacks,
                     "shape": {
                         "batch": args.batch,
@@ -1474,7 +1640,9 @@ def _run_parent(args: argparse.Namespace) -> int:
                 row = {
                     "status": "failed",
                     "variant": variant,
+                    **_timing_metadata(),
                     "is_causal": args.is_causal,
+                    "block_size": args.block_size if args.block_size > 0 else 0,
                     "fallbacks_forbidden": args.forbid_fallbacks,
                     "shape": {
                         "batch": args.batch,
@@ -1509,10 +1677,15 @@ def _print_last_result(row: dict) -> None:
     )
     if row.get("status") == "ok":
         mixed = len(row.get("mixed_sdscs", []))
+        profile_text = ""
+        if row.get("privateuse1_profile_status") == "ok":
+            kernel_ms = row.get("privateuse1_kernel_total_ms")
+            if isinstance(kernel_ms, (int, float)):
+                profile_text = f" privateuse1_kernel_total={kernel_ms:.6f}ms"
         print(
             f"{prefix} median={row['median_ms']:.6f}ms "
             f"mean={row['mean_ms']:.6f}ms max_err={row['max_abs_error']:.6g} "
-            f"mixed={mixed} cache={row['cache_dir']}",
+            f"mixed={mixed}{profile_text} cache={row['cache_dir']}",
             flush=True,
         )
     else:
@@ -1540,6 +1713,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--iters", type=int, default=10)
+    parser.add_argument(
+        "--profile-privateuse1",
+        action="store_true",
+        help=(
+            "after normal wall-time measurements, collect a Kineto "
+            "ProfilerActivity.PrivateUse1 trace for the same compiled call"
+        ),
+    )
+    parser.add_argument(
+        "--profile-iters",
+        type=int,
+        default=0,
+        help="PrivateUse1 profiling iterations; 0 reuses --iters",
+    )
     parser.add_argument("--seed", type=int, default=0xA771)
     parser.add_argument("--atol", type=float, default=0.1)
     parser.add_argument("--rtol", type=float, default=0.1)

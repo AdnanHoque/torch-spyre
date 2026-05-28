@@ -37,6 +37,15 @@ def _load_perf():
 perf = _load_perf()
 
 
+def _expect_value_error(fn, contains):
+    try:
+        fn()
+    except ValueError as exc:
+        assert contains in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
 def _baseline_row(case, length, *, variant="flash_hbm", median_ms=2.0):
     return {
         "status": "ok",
@@ -49,6 +58,8 @@ def _baseline_row(case, length, *, variant="flash_hbm", median_ms=2.0):
         },
         "block_size": case.block_size,
         "is_causal": case.is_causal,
+        "timing_method": perf.sweep.TIMING_METHOD,
+        "timing_scope": perf.sweep.TIMING_SCOPE,
         "fallbacks_forbidden": False,
         "median_ms": median_ms,
         "mean_ms": median_ms,
@@ -99,6 +110,8 @@ def _target_row(
         },
         "block_size": case.block_size,
         "is_causal": case.is_causal,
+        "timing_method": perf.sweep.TIMING_METHOD,
+        "timing_scope": perf.sweep.TIMING_SCOPE,
         "fallbacks_forbidden": False,
         "median_ms": median_ms,
         "mean_ms": median_ms,
@@ -145,6 +158,7 @@ def _args(**kwargs):
         "cases": "b1h4d64_block64_long_decoupled_loader_core31",
         "target_variant": "",
         "baseline_variants": "flash_hbm",
+        "external_baseline_json": [],
         "python": "pythonX",
         "warmup": 1,
         "iters": 3,
@@ -278,6 +292,134 @@ def test_reuse_existing_compare_validates_target_and_writes_summary():
         assert payload["target_variant"] == perf.gate.DEFAULT_WARPSPEC_DECOUPLED_VARIANT
         assert payload["summary"]["flash_hbm"]["ok_pairs"] == 2
         assert payload["summary"]["flash_hbm"]["geomean_speedup"] == 2.0
+
+
+def test_reuse_existing_compare_accepts_external_baseline_rows():
+    case = perf.gate.select_cases(
+        "onchip_warpspec_decoupled",
+        "b1h4d64_block64_long_decoupled_loader_core31",
+    )[0]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        output_dir = tmp / "cases"
+        output_dir.mkdir()
+        output_json = tmp / "summary.json"
+        case_json = perf.case_output_path(
+            output_dir,
+            "onchip_warpspec_decoupled",
+            case,
+        )
+        external_json = tmp / "upstream-main.json"
+        case_json.write_text(
+            json.dumps(
+                [_target_row(case, length, median_ms=2.0) for length in case.lengths]
+            )
+        )
+        external_rows = [
+            _baseline_row(case, length, variant="vanilla", median_ms=5.0)
+            for length in case.lengths
+        ]
+        # Same length as a real row but wrong shape; it must not collide with this case.
+        unrelated = dict(external_rows[0])
+        unrelated["shape"] = dict(unrelated["shape"], heads=99)
+        external_rows.append(unrelated)
+        external_json.write_text(json.dumps(external_rows))
+
+        rc = perf.run_compare(
+            _args(
+                baseline_variants="upstream_main_sdpa",
+                external_baseline_json=[f"upstream_main_sdpa={external_json}"],
+                case_output_dir=str(output_dir),
+                output_json=str(output_json),
+                require_all_pairs=True,
+            )
+        )
+
+        assert rc == 0
+        payload = json.loads(output_json.read_text())
+        assert payload["runtime_baseline_variants"] == []
+        assert payload["external_baselines"] == {
+            "upstream_main_sdpa": str(external_json)
+        }
+        assert payload["summary"]["upstream_main_sdpa"]["ok_pairs"] == 2
+        first = payload["comparisons"][0]
+        assert first["baseline_variant"] == "upstream_main_sdpa"
+        assert first["baseline_external"] is True
+        assert first["baseline_source_variant"] == "vanilla"
+        assert first["speedup"] == 2.5
+
+
+def test_external_baseline_rejects_missing_timing_metadata():
+    case = perf.gate.select_cases(
+        "onchip_warpspec_decoupled",
+        "b1h4d64_block64_long_decoupled_loader_core31",
+    )[0]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        external_json = Path(tmpdir) / "upstream-main.json"
+        row = _baseline_row(case, case.lengths[0], variant="vanilla")
+        del row["timing_method"]
+        external_json.write_text(json.dumps([row]))
+
+        _expect_value_error(
+            lambda: perf.load_external_baseline_rows(
+                {"upstream_main_sdpa": external_json}
+            ),
+            "timing_method",
+        )
+
+
+def test_external_baseline_rejects_missing_case_disambiguators():
+    case = perf.gate.select_cases(
+        "onchip_warpspec_decoupled",
+        "b1h4d64_block64_long_decoupled_loader_core31",
+    )[0]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        external_json = Path(tmpdir) / "upstream-main.json"
+        row = _baseline_row(case, case.lengths[0], variant="vanilla")
+        del row["block_size"]
+        external_json.write_text(json.dumps([row]))
+
+        _expect_value_error(
+            lambda: perf.load_external_baseline_rows(
+                {"upstream_main_sdpa": external_json}
+            ),
+            "block_size",
+        )
+
+
+def test_external_baseline_duplicate_rows_are_rejected():
+    case = perf.gate.select_cases(
+        "onchip_warpspec_decoupled",
+        "b1h4d64_block64_long_decoupled_loader_core31",
+    )[0]
+    length = case.lengths[0]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        external_json = Path(tmpdir) / "upstream-main.json"
+        external_json.write_text(
+            json.dumps(
+                [
+                    _baseline_row(case, length, variant="vanilla", median_ms=5.0),
+                    _baseline_row(case, length, variant="vanilla", median_ms=6.0),
+                ]
+            )
+        )
+        external_rows_by_variant = perf.load_external_baseline_rows(
+            {"upstream_main_sdpa": external_json}
+        )
+        rows = [
+            _target_row(case, length, median_ms=2.0),
+            *perf.external_rows_for_case(external_rows_by_variant, case),
+        ]
+
+        _expect_value_error(
+            lambda: perf.build_comparisons(
+                rows,
+                case=case,
+                target_variant=perf.gate.DEFAULT_WARPSPEC_DECOUPLED_VARIANT,
+                baseline_variants=["upstream_main_sdpa"],
+            ),
+            "duplicate rows",
+        )
 
 
 def test_route_policy_validation_allows_selected_warpspec_row():

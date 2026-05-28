@@ -97,11 +97,118 @@ def _read_rows(path: Path) -> list[dict]:
     raise ValueError(f"{path} does not contain a sweep row list")
 
 
+def _parse_external_baseline_specs(values: list[str]) -> dict[str, Path]:
+    specs = {}
+    for value in values:
+        if "=" not in value:
+            raise ValueError(
+                "--external-baseline-json must be VARIANT=PATH, "
+                f"got {value!r}"
+            )
+        variant, path_text = value.split("=", 1)
+        variant = variant.strip()
+        path_text = path_text.strip()
+        if not variant or not path_text:
+            raise ValueError(
+                "--external-baseline-json must include a non-empty variant "
+                f"and path, got {value!r}"
+            )
+        if variant in specs:
+            raise ValueError(f"duplicate external baseline variant {variant!r}")
+        specs[variant] = Path(path_text)
+    return specs
+
+
+def _row_matches_case(row: dict, case: gate.GateCase) -> bool:
+    shape = row.get("shape") or {}
+    if shape.get("batch") != case.batch:
+        return False
+    if shape.get("heads") != case.heads:
+        return False
+    if shape.get("dim") != case.dim:
+        return False
+    if shape.get("length") not in case.lengths:
+        return False
+    if row.get("is_causal") != case.is_causal:
+        return False
+    if row.get("block_size") != case.block_size:
+        return False
+    return True
+
+
+def _validate_external_baseline_row(
+    row: dict,
+    *,
+    variant: str,
+    path: Path,
+    row_index: int,
+) -> None:
+    if row.get("timing_method") != sweep.TIMING_METHOD:
+        raise ValueError(
+            f"{path}: external baseline {variant!r} row {row_index} "
+            f"has timing_method={row.get('timing_method')!r}, "
+            f"expected {sweep.TIMING_METHOD!r}"
+        )
+    if row.get("timing_scope") != sweep.TIMING_SCOPE:
+        raise ValueError(
+            f"{path}: external baseline {variant!r} row {row_index} "
+            f"has timing_scope={row.get('timing_scope')!r}, "
+            f"expected {sweep.TIMING_SCOPE!r}"
+        )
+    if "block_size" not in row:
+        raise ValueError(
+            f"{path}: external baseline {variant!r} row {row_index} "
+            "is missing block_size"
+        )
+    if "is_causal" not in row:
+        raise ValueError(
+            f"{path}: external baseline {variant!r} row {row_index} "
+            "is missing is_causal"
+        )
+
+
+def load_external_baseline_rows(specs: dict[str, Path]) -> dict[str, list[dict]]:
+    rows_by_variant = {}
+    for variant, path in specs.items():
+        rows = []
+        for row_index, row in enumerate(_read_rows(path)):
+            _validate_external_baseline_row(
+                row,
+                variant=variant,
+                path=path,
+                row_index=row_index,
+            )
+            source_variant = row.get("variant", "")
+            relabeled = dict(row)
+            relabeled["variant"] = variant
+            relabeled["external_baseline"] = True
+            relabeled["external_baseline_source_json"] = str(path)
+            relabeled["external_baseline_source_variant"] = source_variant
+            rows.append(relabeled)
+        rows_by_variant[variant] = rows
+    return rows_by_variant
+
+
+def external_rows_for_case(
+    rows_by_variant: dict[str, list[dict]],
+    case: gate.GateCase,
+) -> list[dict]:
+    rows = []
+    for variant_rows in rows_by_variant.values():
+        rows.extend(row for row in variant_rows if _row_matches_case(row, case))
+    return rows
+
+
 def _row_by_variant_length(rows: list[dict]) -> dict[tuple[str, int], dict]:
     by_key = {}
     for row in rows:
         shape = row.get("shape") or {}
-        by_key[(row.get("variant"), shape.get("length"))] = row
+        key = (row.get("variant"), shape.get("length"))
+        if key in by_key:
+            raise ValueError(
+                f"duplicate rows for variant={key[0]!r} length={key[1]!r}"
+            )
+        by_key[key] = row
     return by_key
 
 
@@ -159,6 +266,12 @@ def build_comparisons(
                     "target_variant": target_variant,
                     "baseline_status": baseline.get("status", "missing"),
                     "target_status": target.get("status", "missing"),
+                    "baseline_timing_method": baseline.get("timing_method", ""),
+                    "target_timing_method": target.get("timing_method", ""),
+                    "baseline_external": bool(baseline.get("external_baseline")),
+                    "baseline_source_variant": baseline.get(
+                        "external_baseline_source_variant", ""
+                    ),
                     "target_route_policy": target.get("route_policy", ""),
                     "target_route_selected_variant": target.get(
                         "route_selected_variant", ""
@@ -364,9 +477,11 @@ def _print_comparison(comparison: dict) -> None:
     shape = comparison["shape"]
     selected_route = comparison.get("target_route_selected_variant")
     route_text = f" route={selected_route}" if selected_route else ""
+    source_variant = comparison.get("baseline_source_variant")
+    source_text = f" baseline_source={source_variant}" if source_variant else ""
     prefix = (
         f"PERF_ROW case={comparison['case']} L={shape['length']} "
-        f"baseline={comparison['baseline_variant']} "
+        f"baseline={comparison['baseline_variant']}{source_text} "
         f"target={comparison['target_variant']}{route_text}"
     )
     if comparison["speedup"] is None:
@@ -392,8 +507,24 @@ def run_compare(args: argparse.Namespace) -> int:
     baseline_variants = _parse_csv(args.baseline_variants)
     if not baseline_variants:
         raise ValueError("--baseline-variants must include at least one variant")
+    external_specs = _parse_external_baseline_specs(args.external_baseline_json)
+    external_variants = set(external_specs)
+    missing_external_baselines = external_variants.difference(baseline_variants)
+    if missing_external_baselines:
+        raise ValueError(
+            "external baselines must also appear in --baseline-variants: "
+            f"{sorted(missing_external_baselines)}"
+        )
     target_variant = target_variant_for(args.gate, args.target_variant)
-    variants = _dedupe([*baseline_variants, target_variant])
+    if target_variant in external_variants:
+        raise ValueError("target variant cannot be supplied as an external baseline")
+    runtime_baseline_variants = [
+        variant for variant in baseline_variants if variant not in external_variants
+    ]
+    variants = _dedupe([*runtime_baseline_variants, target_variant])
+    external_rows_by_variant = (
+        {} if args.dry_run else load_external_baseline_rows(external_specs)
+    )
 
     all_rows = []
     all_comparisons = []
@@ -424,11 +555,15 @@ def run_compare(args: argparse.Namespace) -> int:
         if not case_json.exists():
             errors.append(f"{case.name}: missing output json {case_json}")
             continue
-        rows = _read_rows(case_json)
+        case_rows = _read_rows(case_json)
+        rows = [
+            *case_rows,
+            *external_rows_for_case(external_rows_by_variant, case),
+        ]
         all_rows.extend(rows)
         errors.extend(
             validate_target_rows(
-                rows,
+                case_rows,
                 case=case,
                 target_variant=target_variant,
                 max_error=args.max_error,
@@ -468,6 +603,10 @@ def run_compare(args: argparse.Namespace) -> int:
             "cases": [case.name for case in cases],
             "target_variant": target_variant,
             "baseline_variants": baseline_variants,
+            "runtime_baseline_variants": runtime_baseline_variants,
+            "external_baselines": {
+                variant: str(path) for variant, path in external_specs.items()
+            },
             "comparisons": all_comparisons,
             "summary": summary,
         }
@@ -512,6 +651,16 @@ def main(argv: list[str] | None = None) -> int:
         "--baselines",
         dest="baseline_variants",
         default="flash_hbm",
+    )
+    parser.add_argument(
+        "--external-baseline-json",
+        action="append",
+        default=[],
+        metavar="VARIANT=PATH",
+        help=(
+            "add relabeled rows from an existing sweep JSON as a baseline; "
+            "the variant must also appear in --baseline-variants"
+        ),
     )
     parser.add_argument("--python", default=sys.executable)
     parser.add_argument("--warmup", type=int, default=3)

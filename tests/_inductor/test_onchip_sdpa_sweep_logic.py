@@ -298,6 +298,8 @@ def _args():
         variants="onchip_master_layout_xform",
         warmup=1,
         iters=2,
+        profile_privateuse1=False,
+        profile_iters=0,
         seed=0xA771,
         atol=0.1,
         rtol=0.1,
@@ -420,6 +422,7 @@ def test_child_explicitly_autoloads_spyre_before_fallbacks_or_devices():
     }
     fallback_loader = FallbackLoader()
 
+    stdout = io.StringIO()
     with tempfile.TemporaryDirectory() as cache_dir:
         with (
             mock.patch.dict(sys.modules, fake_modules),
@@ -430,7 +433,7 @@ def test_child_explicitly_autoloads_spyre_before_fallbacks_or_devices():
                     "TORCHINDUCTOR_CACHE_DIR": cache_dir,
                 },
             ),
-            mock.patch("sys.stdout", new=io.StringIO()),
+            mock.patch("sys.stdout", new=stdout),
         ):
             sys.modules.pop("torch_spyre.ops.fallbacks", None)
             sys.meta_path.insert(0, fallback_loader)
@@ -441,6 +444,50 @@ def test_child_explicitly_autoloads_spyre_before_fallbacks_or_devices():
 
     assert events.index("autoload") < events.index(("fallbacks", True))
     assert events.index("autoload") < events.index(("to_spyre", True))
+    result_lines = [
+        line
+        for line in stdout.getvalue().splitlines()
+        if line.startswith("RESULT_JSON:")
+    ]
+    assert len(result_lines) == 1
+    payload = json.loads(result_lines[0][len("RESULT_JSON:"):])
+    assert payload["timing_method"] == "host_perf_counter_synchronized_call"
+    assert payload["timing_scope"] == "compiled_call_plus_torch_spyre_synchronize"
+    assert payload["timing_primary_stat"] == "median_ms"
+    assert payload["device_event_timing"] == "not_collected"
+    assert payload["privateuse1_profile_status"] == "not_requested"
+
+
+def test_privateuse1_profile_summary_parses_kernel_trace_events():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        trace = Path(tmpdir) / "trace.json"
+        trace.write_text(
+            json.dumps(
+                {
+                    "traceEvents": [
+                        {"ph": "X", "cat": "kernel", "name": "a", "dur": 10.0},
+                        {"ph": "X", "cat": "kernel", "name": "b", "dur": 30.0},
+                        {
+                            "ph": "X",
+                            "cat": "privateuse1_runtime",
+                            "name": "launch",
+                            "dur": 5.0,
+                        },
+                        {"ph": "X", "cat": "cpu", "name": "ignored", "dur": 99.0},
+                        {"ph": "i", "cat": "kernel", "name": "ignored", "dur": 99.0},
+                    ]
+                }
+            )
+        )
+
+        summary = sweep._privateuse1_profile_summary(trace)
+
+    assert summary["privateuse1_kernel_event_count"] == 2
+    assert summary["privateuse1_kernel_total_us"] == 40.0
+    assert summary["privateuse1_kernel_median_us"] == 20.0
+    assert summary["privateuse1_kernel_total_ms"] == 0.04
+    assert summary["privateuse1_kernel_median_ms"] == 0.02
+    assert summary["privateuse1_privateuse1_runtime_event_count"] == 1
 
 
 def test_master_layout_xform_variant_uses_config_adjunct_default():
@@ -2098,6 +2145,41 @@ def test_parent_forwards_causal_flag_to_child_command():
     assert "-C1-" in calls[0]["env"]["TORCHINDUCTOR_CACHE_DIR"]
 
 
+def test_parent_forwards_block_size_to_child_command():
+    args = _args()
+    args.block_size = 128
+    calls = []
+
+    def fake_run(cmd, *, env, text, capture_output, timeout):
+        calls.append(cmd)
+        payload = {
+            "status": "ok",
+            "variant": "onchip_master_layout_xform",
+            "shape": {
+                "batch": args.batch,
+                "heads": args.heads,
+                "length": 128,
+                "dim": args.dim,
+            },
+            "cache_dir": env["TORCHINDUCTOR_CACHE_DIR"],
+            "median_ms": 0.1,
+            "mean_ms": 0.1,
+            "max_abs_error": 0.0,
+            "mixed_sdscs": [],
+        }
+        return argparse.Namespace(
+            returncode=0,
+            stdout="RESULT_JSON:" + json.dumps(payload, sort_keys=True),
+            stderr="",
+        )
+
+    with mock.patch.object(sweep.subprocess, "run", side_effect=fake_run):
+        assert sweep._run_parent(args) == 0
+
+    assert len(calls) == 1
+    assert calls[0][calls[0].index("--block-size") + 1] == "128"
+
+
 def test_parent_forwards_forbid_fallbacks_to_child_command():
     args = _args()
     args.forbid_fallbacks = True
@@ -2133,6 +2215,43 @@ def test_parent_forwards_forbid_fallbacks_to_child_command():
     assert "--forbid-fallbacks" in calls[0]
 
 
+def test_parent_forwards_privateuse1_profile_to_child_command():
+    args = _args()
+    args.profile_privateuse1 = True
+    args.profile_iters = 3
+    calls = []
+
+    def fake_run(cmd, *, env, text, capture_output, timeout):
+        calls.append(cmd)
+        payload = {
+            "status": "ok",
+            "variant": "onchip_master_layout_xform",
+            "shape": {
+                "batch": args.batch,
+                "heads": args.heads,
+                "length": 128,
+                "dim": args.dim,
+            },
+            "cache_dir": env["TORCHINDUCTOR_CACHE_DIR"],
+            "median_ms": 0.1,
+            "mean_ms": 0.1,
+            "max_abs_error": 0.0,
+            "mixed_sdscs": [],
+        }
+        return argparse.Namespace(
+            returncode=0,
+            stdout="RESULT_JSON:" + json.dumps(payload, sort_keys=True),
+            stderr="",
+        )
+
+    with mock.patch.object(sweep.subprocess, "run", side_effect=fake_run):
+        assert sweep._run_parent(args) == 0
+
+    assert len(calls) == 1
+    assert "--profile-privateuse1" in calls[0]
+    assert calls[0][calls[0].index("--profile-iters") + 1] == "3"
+
+
 def test_parent_records_fallback_readiness_failure_metadata():
     args = _args()
     args.is_causal = True
@@ -2160,6 +2279,7 @@ def test_parent_records_fallback_readiness_failure_metadata():
     assert len(rows) == 1
     assert rows[0]["status"] == "failed"
     assert rows[0]["is_causal"] is True
+    assert rows[0]["block_size"] == args.block_size
     assert rows[0]["fallbacks_forbidden"] is True
     assert "aten.triu.default" in rows[0]["stderr_tail"]
 
@@ -2204,6 +2324,7 @@ def test_parent_failed_row_summarizes_generated_cache():
 
     assert len(rows) == 1
     assert rows[0]["status"] == "failed"
+    assert rows[0]["block_size"] == args.block_size
     assert rows[0]["mixed_sdscs"] == [
         {
             "file": (
@@ -2246,6 +2367,7 @@ def test_parent_timeout_metadata_accepts_bytes_stdout_stderr():
 
     assert len(rows) == 1
     assert rows[0]["status"] == "timeout"
+    assert rows[0]["block_size"] == args.block_size
     assert rows[0]["stdout_tail"] == "partial stdout"
     assert rows[0]["stderr_tail"] == "partial stderr"
 
