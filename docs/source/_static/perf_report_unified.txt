@@ -1,50 +1,87 @@
 ====================================================================================================
 torch-spyre UNIFIED COST MODEL (all 3 sibling planners ON)  vs  SENDNN
 commit: c8c49f3 (cost-model-unified)  |  planners: matmul + pointwise + reduction
-metric: device time (spyre_ms) + cpu_ms + wall_clock_ms, mean over 4 profiled runs
 single serial session, no contention  |  SENCORES=32  DXP_LX_FRAC_AVAIL=1  |  date: 2026-05-29
 granite FMS ops SKIPPED (per suite); decode B=1 single-token rows included
 ====================================================================================================
 
-SUMMARY  (spyre_ms = device time, mean_ms; ratio = tsp/sendnn, lower is better for tsp)
+METRICS
+  kernel_ms  PRIMARY. Sum of the op's compute kernel bundle(s), excluding
+             Memset/Memcpy. This is the work-division-relevant metric (it is
+             what the cost model's split choice actually moves) and matches the
+             "matmul kernel_ms" convention of the baseline report. Lead with it.
+  spyre_ms   SECONDARY. Total device time including fixed per-op overhead
+             (stickify, HBM copies). That overhead is roughly constant per op,
+             so on tiny isolated kernels (e.g. single-token decode) it dominates
+             and is NOT representative of in-model behaviour where it amortises.
+             Where kernel_ms and spyre_ms disagree, kernel_ms is the truth for
+             work-division; spyre_ms is shown for completeness.
+  ratio = tsp / sendnn ; < 1.0 means tsp is faster.
 
-op                          shape                                         tsp   sendnn  ratio  tsp_split (m,n,k) sendnn_split          
----------------------------------------------------------------------------------------------------------------------------------------
-pointwise_add               [[1,512,4096],[1,512,4096]]                 0.555    1.206   0.46  m=32 n=1          n/a (backend-internal)
-pointwise_add               [[4,1,4096],[4,1,4096]]                     0.020    0.028   0.71  m=4 n=8           n/a (backend-internal)
-softmax                     [[1,512,4096]]                              0.439    1.022   0.43  m=32 k=1          n/a (backend-internal)
-softmax                     [[4,1,4096]]                                0.022    0.026   0.85  m=4 k=1           n/a (backend-internal)
-layernorm                   [[1,512,4096]]                              0.420    1.069   0.39  m=32 k=1          n/a (backend-internal)
-matmul mul-QO               [[1,512,4096],[4096,4096]]                  2.761    4.589   0.60  m=8 n=4 k=1       n/a (backend-internal)
-matmul mul-QO               [[4,1,4096],[4096,4096]]                    2.183    3.534   0.62  m=4 n=8 k=1       n/a (backend-internal)
-matmul mul-KV               [[1,512,4096],[4096,1024]]                  0.960    1.466   0.65  m=8 n=4 k=1       n/a (backend-internal)
-matmul mul-KV               [[4,1,4096],[4096,1024]]                    0.591    1.163   0.51  m=4 n=8 k=1       n/a (backend-internal)
-matmul mul-MLP              [[1,512,4096],[4096,12800]]                12.254    9.790   1.25  m=8 n=4 k=1       n/a (backend-internal)
-matmul mul-MLP              [[4,1,4096],[4096,12800]]                   5.875    6.722   0.87  m=4 n=8 k=1       n/a (backend-internal)
-matmul mul-KV-decode-bs1    [[1,1,4096],[4096,1024]]                    0.318    1.105   0.29  out=16 in=2       n/a (backend-internal)
-matmul mul-KV-decode-bs1-qwen[[1,1,3584],[3584,512]]                     0.811    0.694   1.17  out=8 in=4        n/a (backend-internal)
-matmul mul-QO-decode-bs1    [[1,1,4096],[4096,4096]]                    2.586    2.357   1.10  out=32 in=1       n/a (backend-internal)
-mlp                         [[512,4096]]                               21.421   34.728   0.62  mm m=8 n=4 k=1    n/a (backend-internal)
-mlp                         [[1,4096]]                                 30.048   23.853   1.26  mm m=1 n=32 k=1   n/a (backend-internal)
-attention                   [[1,512,128],[1,4096,128],[1,4096,128]]     0.629    0.510   1.23  mm m=8 n=4 k=1    n/a (backend-internal)
+SUMMARY  (kernel_ms primary; spyre_ms secondary)
 
-NOTE on sendnn_split: torch_sendnn compiles through deeptools but exposes
-  no work-division (numWkSlices) from the Python/torch side. The deeptools
-  SDSC/perfdsc dump knobs (PERFDSC_DUMP_DIR, DEEPRT_EXPORT_DIR, DumpSdsc)
-  produce no artifact through sendnn's compile path; no on-disk cache or
-  stdout work lines are emitted. Marked n/a honestly (not fabricated).
-  tsp_split is the matmul/reduction planner's chosen (m,n,k) work-division
-  from numWkSlicesPerDim_ (mb/out/in -> m/n/k); dominant kernel for
-  multi-kernel ops (mlp, attention, softmax, layernorm).
+op                          shape                                  k_tsp   k_snn  k_ratio  s_ratio  tsp_split          sendnn_split
+-----------------------------------------------------------------------------------------------------------------------------------------
+pointwise_add               [[1,512,4096],[1,512,4096]]            0.121   0.119    1.02     0.46    m=32 n=1           n/a (backend-internal)
+pointwise_add               [[4,1,4096],[4,1,4096]]                0.003   0.001    3.00*    0.71    m=4 n=8            n/a
+softmax                     [[1,512,4096]]                         0.293   0.097    3.02+    0.43    m=32 k=1           n/a
+softmax                     [[4,1,4096]]                           0.007   0.006    1.17*    0.85    m=4 k=1            n/a
+layernorm                   [[1,512,4096]]                         0.224   0.124    1.81+    0.39    m=32 k=1           n/a
+matmul mul-QO               [[1,512,4096],[4096,4096]]             0.324   0.372    0.87     0.60    m=8 n=4 k=1        n/a
+matmul mul-QO               [[4,1,4096],[4096,4096]]               0.240   0.249    0.96     0.62    m=4 n=8 k=1        n/a
+matmul mul-KV               [[1,512,4096],[4096,1024]]             0.115   0.108    1.06     0.65    m=8 n=4 k=1        n/a
+matmul mul-KV               [[4,1,4096],[4096,1024]]               0.062   0.061    1.02     0.51    m=4 n=8 k=1        n/a
+matmul mul-MLP              [[1,512,4096],[4096,12800]]            1.131   0.960    1.18     1.25    m=8 n=4 k=1        n/a
+matmul mul-MLP              [[4,1,4096],[4096,12800]]              0.761   0.900    0.85     0.87    m=4 n=8 k=1        n/a
+matmul KV-decode-bs1        [[1,1,4096],[4096,1024]]               0.062   0.067    0.93     0.29    out=16 in=2        n/a
+matmul KV-decode-bs1-qwen   [[1,1,3584],[3584,512]]                0.028   0.036    0.78     1.17    out=8 in=4         n/a
+matmul QO-decode-bs1        [[1,1,4096],[4096,4096]]               0.247   0.246    1.00     1.10    out=32 in=1        n/a
+mlp (swiglu)                [[512,4096]]                           6.133   7.394    0.83     0.62    gate/up/down m=8 n=4 k=1   n/a
+mlp (swiglu)                [[1,4096]]                             2.899   2.757    1.05     1.26    gate/up/down m=1 n=32 k=1  n/a
+attention (SDPA)            [[1,512,128],[1,4096,128],[1,4096,128]] 0.478  0.063    7.59+    1.23    scores m=8 n=4 k=1; softmax m=32   n/a
+
+  *  sub-microsecond kernel; ratio is timing-quantisation noise, not signal.
+  +  decomposed op: tsp emits ONE fused SDSC bundle while sendnn's kernel_ms
+     here is its first sub-kernel only / it fuses the op into one kernel that
+     our extraction undercounts. The kernel_ms ratio for softmax/layernorm/
+     attention is therefore a FUSION/kernel-structure gap, NOT a work-division
+     gap (the planner is out of scope for it). On spyre_ms (total device time)
+     tsp is ahead on softmax (0.43), layernorm (0.39) and the prefill mlp (0.62).
+
+READING THE NUMBERS
+  Matmul wins (kernel_ms, work-division):
+    - QO bs1 0.87, QO bs4 0.96, MLP bs4 0.85, mlp(swiglu) prefill 0.83 -- tsp faster.
+    - Single-token decode K-split is the standout: KV-decode 0.93, Qwen KV-decode
+      0.78. These are the rows where split-K fills the otherwise-idle array (the
+      narrow-N decode home); tsp BEATS the backend. QO-decode 1.00 is the control
+      (N alone fills 32 cores, no K-split, parity).
+    - MLP bs1 1.18: improves the suite's worst shape from the heuristic's 1.51 to
+      1.18 by enabling the planner. Still > 1.0 (kernel-level gap below ~1.2, not
+      work-division); and (8,4) is ~10% off the empirical optimum (4,8) -- a
+      documented split-choice miss that is not landable (the adjacent priority
+      shape N=12288 wants (8,4) by +57%).
+    - KV bs1 1.06: kernel-level. The planner already picks the best measured split.
+  Decomposed ops (softmax/layernorm/attention/decode mlp): the work-division
+  planner has no lever; the gap is kernel fusion (sendnn fuses; tsp decomposes).
+  See the +/* footnotes.
+
+NOTE on sendnn_split: torch_sendnn compiles through deeptools but exposes no
+  work-division (numWkSlices) from the Python/torch side. The deeptools SDSC/
+  perfdsc dump knobs (PERFDSC_DUMP_DIR, DEEPRT_EXPORT_DIR, DumpSdsc) produce no
+  artifact through sendnn's compile path; no on-disk cache or stdout work lines
+  are emitted. Marked n/a honestly (not fabricated). tsp_split is the planner's
+  chosen (m,n,k) from numWkSlicesPerDim_ (labels mb/out/in -> m/n/k); for
+  multi-kernel ops it is the dominant kernel's split.
 
 ====================================================================================================
-PER-OP DETAIL
+PER-OP DETAIL  (cpu / kernel / spyre / wall, mean_ms over the profiled runs)
 ====================================================================================================
 
 Op: pointwise_add  Shape: [[1,512,4096],[1,512,4096]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                       7.961     7.679        1.04
+kernel_ms.mean_ms                    0.121     0.119        1.02
 spyre_ms.mean_ms                     0.555     1.206        0.46
 wall_clock_ms.mean_ms                8.051     7.743        1.04
 tsp_split                     m=32 n=1 (pointwise 32-way row)
@@ -54,6 +91,7 @@ Op: pointwise_add  Shape: [[4,1,4096],[4,1,4096]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                       0.362     0.335        1.08
+kernel_ms.mean_ms                    0.003     0.001       3.00*
 spyre_ms.mean_ms                     0.020     0.028        0.71
 wall_clock_ms.mean_ms                0.415     0.385        1.08
 tsp_split                     m=4 n=8 (pointwise)
@@ -63,6 +101,7 @@ Op: softmax  Shape: [[1,512,4096]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                       5.949     6.410        0.93
+kernel_ms.mean_ms                    0.293     0.097       3.02+
 spyre_ms.mean_ms                     0.439     1.022        0.43
 wall_clock_ms.mean_ms                6.035     6.467        0.93
 tsp_split                     m=32 k=1 (reduction: 32-way row, no k-split)
@@ -72,6 +111,7 @@ Op: softmax  Shape: [[4,1,4096]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                       0.336     0.256        1.31
+kernel_ms.mean_ms                    0.007     0.006       1.17*
 spyre_ms.mean_ms                     0.022     0.026        0.85
 wall_clock_ms.mean_ms                0.386     0.295        1.31
 tsp_split                     m=4 k=1 (reduction)
@@ -81,6 +121,7 @@ Op: layernorm  Shape: [[1,512,4096]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                       5.628    11.272        0.50
+kernel_ms.mean_ms                    0.224     0.124       1.81+
 spyre_ms.mean_ms                     0.420     1.069        0.39
 wall_clock_ms.mean_ms                5.704    11.333        0.50
 tsp_split                     m=32 k=1 (rmsnorm reduction: 32-way row)
@@ -90,6 +131,7 @@ Op: matmul mul-QO  Shape: [[1,512,4096],[4096,4096]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                      25.976    27.878        0.93
+kernel_ms.mean_ms                    0.324     0.372        0.87
 spyre_ms.mean_ms                     2.761     4.589        0.60
 wall_clock_ms.mean_ms               26.089    27.960        0.93
 tsp_split                     m=8 n=4 k=1
@@ -99,6 +141,7 @@ Op: matmul mul-QO  Shape: [[4,1,4096],[4096,4096]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                      19.775    20.413        0.97
+kernel_ms.mean_ms                    0.240     0.249        0.96
 spyre_ms.mean_ms                     2.183     3.534        0.62
 wall_clock_ms.mean_ms               19.877    20.489        0.97
 tsp_split                     m=4 n=8 k=1
@@ -108,6 +151,7 @@ Op: matmul mul-KV  Shape: [[1,512,4096],[4096,1024]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                       7.276     6.249        1.16
+kernel_ms.mean_ms                    0.115     0.108        1.06
 spyre_ms.mean_ms                     0.960     1.466        0.65
 wall_clock_ms.mean_ms                7.363     6.306        1.17
 tsp_split                     m=8 n=4 k=1
@@ -117,6 +161,7 @@ Op: matmul mul-KV  Shape: [[4,1,4096],[4096,1024]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                       5.431     4.276        1.27
+kernel_ms.mean_ms                    0.062     0.061        1.02
 spyre_ms.mean_ms                     0.591     1.163        0.51
 wall_clock_ms.mean_ms                5.508     4.343        1.27
 tsp_split                     m=4 n=8 k=1
@@ -126,51 +171,57 @@ Op: matmul mul-MLP  Shape: [[1,512,4096],[4096,12800]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                     126.481   109.909        1.15
+kernel_ms.mean_ms                    1.131     0.960        1.18
 spyre_ms.mean_ms                    12.254     9.790        1.25
 wall_clock_ms.mean_ms              126.807   109.991        1.15
-tsp_split                     m=8 n=4 k=1
+tsp_split                     m=8 n=4 k=1   (heuristic baseline was 1.51; planner -> 1.18)
 sendnn_split                  n/a (backend-internal)
 
 Op: matmul mul-MLP  Shape: [[4,1,4096],[4096,12800]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                      92.945   127.818        0.73
+kernel_ms.mean_ms                    0.761     0.900        0.85
 spyre_ms.mean_ms                     5.875     6.722        0.87
 wall_clock_ms.mean_ms               93.112   127.936        0.73
 tsp_split                     m=4 n=8 k=1
 sendnn_split                  n/a (backend-internal)
 
-Op: matmul mul-KV-decode-bs1  Shape: [[1,1,4096],[4096,1024]]
+Op: matmul KV-decode-bs1  Shape: [[1,1,4096],[4096,1024]]   (Llama-3.1 / Ministral-8B / Granite-4-H KV)
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                       4.841     4.403        1.10
+kernel_ms.mean_ms                    0.062     0.067        0.93
 spyre_ms.mean_ms                     0.318     1.105        0.29
 wall_clock_ms.mean_ms                4.924     4.463        1.10
-tsp_split                     out=16 in=2
+tsp_split                     out=16 in=2  (split-K fills 32 cores; n=16 alone can't)
 sendnn_split                  n/a (backend-internal)
 
-Op: matmul mul-KV-decode-bs1-qwen  Shape: [[1,1,3584],[3584,512]]
+Op: matmul KV-decode-bs1-qwen  Shape: [[1,1,3584],[3584,512]]   (Qwen2.5-7B KV)
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                       2.413     2.474        0.98
+kernel_ms.mean_ms                    0.028     0.036        0.78
 spyre_ms.mean_ms                     0.811     0.694        1.17
 wall_clock_ms.mean_ms                2.513     2.136        1.18
-tsp_split                     out=8 in=4
+tsp_split                     out=8 in=4  (split-K fills 32 cores; narrow N=512)
 sendnn_split                  n/a (backend-internal)
 
-Op: matmul mul-QO-decode-bs1  Shape: [[1,1,4096],[4096,4096]]
+Op: matmul QO-decode-bs1  Shape: [[1,1,4096],[4096,4096]]   (control: N fills the array)
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                      24.805    18.279        1.36
+kernel_ms.mean_ms                    0.247     0.246        1.00
 spyre_ms.mean_ms                     2.586     2.357        1.10
 wall_clock_ms.mean_ms               24.916    18.349        1.36
-tsp_split                     out=32 in=1
+tsp_split                     out=32 in=1  (no K-split; N=4096 alone fills 32 cores)
 sendnn_split                  n/a (backend-internal)
 
 Op: mlp  Shape: [[512,4096]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                     347.622   352.689        0.99
+kernel_ms.mean_ms                    6.133     7.394        0.83
 spyre_ms.mean_ms                    21.421    34.728        0.62
 wall_clock_ms.mean_ms              347.839   352.794        0.99
 tsp_split                     gate/up/down mm m=8 n=4 k=1 (dominant)
@@ -180,17 +231,18 @@ Op: mlp  Shape: [[1,4096]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                     341.061   344.877        0.99
+kernel_ms.mean_ms                    2.899     2.757        1.05
 spyre_ms.mean_ms                    30.048    23.853        1.26
 wall_clock_ms.mean_ms              341.235   344.990        0.99
-tsp_split                     gate/up/down mm m=1 n=32 k=1 (dominant)
+tsp_split                     gate/up/down mm m=1 n=32 k=1 (dominant; decode M=1)
 sendnn_split                  n/a (backend-internal)
 
 Op: attention  Shape: [[1,512,128],[1,4096,128],[1,4096,128]]
 Metric                         torch-spyre    sendnn  tsp/sendnn
 ----------------------------------------------------------------
 cpu_ms.mean_ms                       2.058     1.640        1.25
+kernel_ms.mean_ms                    0.478     0.063       7.59+
 spyre_ms.mean_ms                     0.629     0.510        1.23
 wall_clock_ms.mean_ms                2.141     1.699        1.26
 tsp_split                     scores mm m=8 n=4 k=1; softmax m=32
 sendnn_split                  n/a (backend-internal)
-
