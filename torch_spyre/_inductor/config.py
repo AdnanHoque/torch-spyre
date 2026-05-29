@@ -44,6 +44,12 @@ core_id_k_fast_emission: bool = (
     os.environ.get("SPYRE_CORE_ID_K_FAST_EMISSION", "1") == "1"
 )
 
+# When set, choose the per-op core split with an analytic hardware cost model
+# instead of the default parallelism-maximising distributor. Covers matmul/bmm,
+# pointwise, and simple reductions, each with its own cost function. Off by
+# default.
+cost_model_planner: bool = os.environ.get("SPYRE_COST_MODEL_PLANNER", "0") == "1"
+
 coarse_tiling: bool = os.environ.get("COARSE_TILING", "0") == "1"
 
 # When True, HBM tensor addresses are emitted as runtime symbols (%sym_N
