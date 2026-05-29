@@ -264,8 +264,12 @@ class CustomPreSchedulingPasses(CustomGraphPass):
                 groups = config.coarse_tiling_groups_fn(operations)
             coarse_tile(operations, groups=groups)
         span_reduction(operations)
+        # The cost-model planner prices K-splits itself via the PSUM ring-hop
+        # term, so it subsumes k_fast; don't let k_fast pre-empt it when on.
         k_fast_ops = (
-            k_fast_division(operations) if config.core_id_k_fast_emission else []
+            k_fast_division(operations)
+            if config.core_id_k_fast_emission and not config.cost_model_planner
+            else []
         )
         work_distribution(operations, k_fast_ops)
         if config.lx_planning:
