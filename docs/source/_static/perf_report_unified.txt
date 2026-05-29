@@ -1,0 +1,196 @@
+====================================================================================================
+torch-spyre UNIFIED COST MODEL (all 3 sibling planners ON)  vs  SENDNN
+commit: c8c49f3 (cost-model-unified)  |  planners: matmul + pointwise + reduction
+metric: device time (spyre_ms) + cpu_ms + wall_clock_ms, mean over 4 profiled runs
+single serial session, no contention  |  SENCORES=32  DXP_LX_FRAC_AVAIL=1  |  date: 2026-05-29
+granite FMS ops SKIPPED (per suite); decode B=1 single-token rows included
+====================================================================================================
+
+SUMMARY  (spyre_ms = device time, mean_ms; ratio = tsp/sendnn, lower is better for tsp)
+
+op                          shape                                         tsp   sendnn  ratio  tsp_split (m,n,k) sendnn_split          
+---------------------------------------------------------------------------------------------------------------------------------------
+pointwise_add               [[1,512,4096],[1,512,4096]]                 0.555    1.206   0.46  m=32 n=1          n/a (backend-internal)
+pointwise_add               [[4,1,4096],[4,1,4096]]                     0.020    0.028   0.71  m=4 n=8           n/a (backend-internal)
+softmax                     [[1,512,4096]]                              0.439    1.022   0.43  m=32 k=1          n/a (backend-internal)
+softmax                     [[4,1,4096]]                                0.022    0.026   0.85  m=4 k=1           n/a (backend-internal)
+layernorm                   [[1,512,4096]]                              0.420    1.069   0.39  m=32 k=1          n/a (backend-internal)
+matmul mul-QO               [[1,512,4096],[4096,4096]]                  2.761    4.589   0.60  m=8 n=4 k=1       n/a (backend-internal)
+matmul mul-QO               [[4,1,4096],[4096,4096]]                    2.183    3.534   0.62  m=4 n=8 k=1       n/a (backend-internal)
+matmul mul-KV               [[1,512,4096],[4096,1024]]                  0.960    1.466   0.65  m=8 n=4 k=1       n/a (backend-internal)
+matmul mul-KV               [[4,1,4096],[4096,1024]]                    0.591    1.163   0.51  m=4 n=8 k=1       n/a (backend-internal)
+matmul mul-MLP              [[1,512,4096],[4096,12800]]                12.254    9.790   1.25  m=8 n=4 k=1       n/a (backend-internal)
+matmul mul-MLP              [[4,1,4096],[4096,12800]]                   5.875    6.722   0.87  m=4 n=8 k=1       n/a (backend-internal)
+matmul mul-KV-decode-bs1    [[1,1,4096],[4096,1024]]                    0.318    1.105   0.29  out=16 in=2       n/a (backend-internal)
+matmul mul-KV-decode-bs1-qwen[[1,1,3584],[3584,512]]                     0.811    0.694   1.17  out=8 in=4        n/a (backend-internal)
+matmul mul-QO-decode-bs1    [[1,1,4096],[4096,4096]]                    2.586    2.357   1.10  out=32 in=1       n/a (backend-internal)
+mlp                         [[512,4096]]                               21.421   34.728   0.62  mm m=8 n=4 k=1    n/a (backend-internal)
+mlp                         [[1,4096]]                                 30.048   23.853   1.26  mm m=1 n=32 k=1   n/a (backend-internal)
+attention                   [[1,512,128],[1,4096,128],[1,4096,128]]     0.629    0.510   1.23  mm m=8 n=4 k=1    n/a (backend-internal)
+
+NOTE on sendnn_split: torch_sendnn compiles through deeptools but exposes
+  no work-division (numWkSlices) from the Python/torch side. The deeptools
+  SDSC/perfdsc dump knobs (PERFDSC_DUMP_DIR, DEEPRT_EXPORT_DIR, DumpSdsc)
+  produce no artifact through sendnn's compile path; no on-disk cache or
+  stdout work lines are emitted. Marked n/a honestly (not fabricated).
+  tsp_split is the matmul/reduction planner's chosen (m,n,k) work-division
+  from numWkSlicesPerDim_ (mb/out/in -> m/n/k); dominant kernel for
+  multi-kernel ops (mlp, attention, softmax, layernorm).
+
+====================================================================================================
+PER-OP DETAIL
+====================================================================================================
+
+Op: pointwise_add  Shape: [[1,512,4096],[1,512,4096]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                       7.961     7.679        1.04
+spyre_ms.mean_ms                     0.555     1.206        0.46
+wall_clock_ms.mean_ms                8.051     7.743        1.04
+tsp_split                     m=32 n=1 (pointwise 32-way row)
+sendnn_split                  n/a (backend-internal)
+
+Op: pointwise_add  Shape: [[4,1,4096],[4,1,4096]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                       0.362     0.335        1.08
+spyre_ms.mean_ms                     0.020     0.028        0.71
+wall_clock_ms.mean_ms                0.415     0.385        1.08
+tsp_split                     m=4 n=8 (pointwise)
+sendnn_split                  n/a (backend-internal)
+
+Op: softmax  Shape: [[1,512,4096]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                       5.949     6.410        0.93
+spyre_ms.mean_ms                     0.439     1.022        0.43
+wall_clock_ms.mean_ms                6.035     6.467        0.93
+tsp_split                     m=32 k=1 (reduction: 32-way row, no k-split)
+sendnn_split                  n/a (backend-internal)
+
+Op: softmax  Shape: [[4,1,4096]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                       0.336     0.256        1.31
+spyre_ms.mean_ms                     0.022     0.026        0.85
+wall_clock_ms.mean_ms                0.386     0.295        1.31
+tsp_split                     m=4 k=1 (reduction)
+sendnn_split                  n/a (backend-internal)
+
+Op: layernorm  Shape: [[1,512,4096]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                       5.628    11.272        0.50
+spyre_ms.mean_ms                     0.420     1.069        0.39
+wall_clock_ms.mean_ms                5.704    11.333        0.50
+tsp_split                     m=32 k=1 (rmsnorm reduction: 32-way row)
+sendnn_split                  n/a (backend-internal)
+
+Op: matmul mul-QO  Shape: [[1,512,4096],[4096,4096]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                      25.976    27.878        0.93
+spyre_ms.mean_ms                     2.761     4.589        0.60
+wall_clock_ms.mean_ms               26.089    27.960        0.93
+tsp_split                     m=8 n=4 k=1
+sendnn_split                  n/a (backend-internal)
+
+Op: matmul mul-QO  Shape: [[4,1,4096],[4096,4096]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                      19.775    20.413        0.97
+spyre_ms.mean_ms                     2.183     3.534        0.62
+wall_clock_ms.mean_ms               19.877    20.489        0.97
+tsp_split                     m=4 n=8 k=1
+sendnn_split                  n/a (backend-internal)
+
+Op: matmul mul-KV  Shape: [[1,512,4096],[4096,1024]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                       7.276     6.249        1.16
+spyre_ms.mean_ms                     0.960     1.466        0.65
+wall_clock_ms.mean_ms                7.363     6.306        1.17
+tsp_split                     m=8 n=4 k=1
+sendnn_split                  n/a (backend-internal)
+
+Op: matmul mul-KV  Shape: [[4,1,4096],[4096,1024]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                       5.431     4.276        1.27
+spyre_ms.mean_ms                     0.591     1.163        0.51
+wall_clock_ms.mean_ms                5.508     4.343        1.27
+tsp_split                     m=4 n=8 k=1
+sendnn_split                  n/a (backend-internal)
+
+Op: matmul mul-MLP  Shape: [[1,512,4096],[4096,12800]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                     126.481   109.909        1.15
+spyre_ms.mean_ms                    12.254     9.790        1.25
+wall_clock_ms.mean_ms              126.807   109.991        1.15
+tsp_split                     m=8 n=4 k=1
+sendnn_split                  n/a (backend-internal)
+
+Op: matmul mul-MLP  Shape: [[4,1,4096],[4096,12800]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                      92.945   127.818        0.73
+spyre_ms.mean_ms                     5.875     6.722        0.87
+wall_clock_ms.mean_ms               93.112   127.936        0.73
+tsp_split                     m=4 n=8 k=1
+sendnn_split                  n/a (backend-internal)
+
+Op: matmul mul-KV-decode-bs1  Shape: [[1,1,4096],[4096,1024]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                       4.841     4.403        1.10
+spyre_ms.mean_ms                     0.318     1.105        0.29
+wall_clock_ms.mean_ms                4.924     4.463        1.10
+tsp_split                     out=16 in=2
+sendnn_split                  n/a (backend-internal)
+
+Op: matmul mul-KV-decode-bs1-qwen  Shape: [[1,1,3584],[3584,512]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                       2.413     2.474        0.98
+spyre_ms.mean_ms                     0.811     0.694        1.17
+wall_clock_ms.mean_ms                2.513     2.136        1.18
+tsp_split                     out=8 in=4
+sendnn_split                  n/a (backend-internal)
+
+Op: matmul mul-QO-decode-bs1  Shape: [[1,1,4096],[4096,4096]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                      24.805    18.279        1.36
+spyre_ms.mean_ms                     2.586     2.357        1.10
+wall_clock_ms.mean_ms               24.916    18.349        1.36
+tsp_split                     out=32 in=1
+sendnn_split                  n/a (backend-internal)
+
+Op: mlp  Shape: [[512,4096]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                     347.622   352.689        0.99
+spyre_ms.mean_ms                    21.421    34.728        0.62
+wall_clock_ms.mean_ms              347.839   352.794        0.99
+tsp_split                     gate/up/down mm m=8 n=4 k=1 (dominant)
+sendnn_split                  n/a (backend-internal)
+
+Op: mlp  Shape: [[1,4096]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                     341.061   344.877        0.99
+spyre_ms.mean_ms                    30.048    23.853        1.26
+wall_clock_ms.mean_ms              341.235   344.990        0.99
+tsp_split                     gate/up/down mm m=1 n=32 k=1 (dominant)
+sendnn_split                  n/a (backend-internal)
+
+Op: attention  Shape: [[1,512,128],[1,4096,128],[1,4096,128]]
+Metric                         torch-spyre    sendnn  tsp/sendnn
+----------------------------------------------------------------
+cpu_ms.mean_ms                       2.058     1.640        1.25
+spyre_ms.mean_ms                     0.629     0.510        1.23
+wall_clock_ms.mean_ms                2.141     1.699        1.26
+tsp_split                     scores mm m=8 n=4 k=1; softmax m=32
+sendnn_split                  n/a (backend-internal)
+
