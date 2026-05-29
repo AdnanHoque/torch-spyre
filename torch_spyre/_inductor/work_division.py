@@ -1297,6 +1297,17 @@ def _pointwise_cost_planner(
     if pdims is None:
         return splits
 
+    # Skip "data-motion" Pointwise ops whose stick variable changes from input
+    # to output — i.e., ReStickifyOpHBM. These ops mirror the codegen check at
+    # spyre_kernel.store(): in_coords[-1].free_symbols != out_coords[-1]. They
+    # are HBM-reshuffle kernels, not arithmetic, so the elementwise SFP-rate /
+    # stick-fragmentation cost model does not apply. The default heuristic
+    # split avoids splitting the output stick dim and is the right pick.
+    out_stick_syms = output_td.device_coords[-1].free_symbols
+    for td in input_tds:
+        if td.device_coords and td.device_coords[-1].free_symbols != out_stick_syms:
+            return splits
+
     dim_divs = [[int(d) for d in divisors(sz)] for sz in pdims.dim_sizes]
     ctx = {"dims": pdims, "max_cores": max_cores}
 
