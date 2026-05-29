@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<!--
+  Warp-Specialized FlashAttention on Spyre (flash-ws branch) — visual explainer.
+  Standalone, self-contained. Open in a browser. Companion to
+  flash-ws-warpspec-explained.md. Synthesized from a four-agent read of the
+  99 stage notes + the two 900-line design docs + the branch source.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Warp-Specialized FlashAttention on Spyre — Visual Explainer</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#171d26; --panel2:#1e2733; --ink:#e6edf3; --muted:#9fb0c0;
+    --line:#2b3947; --accent:#4ea1ff; --accent2:#7ee787; --hot:#ff7b72; --warn:#e3b341;
+    --green:#2ea043; --red:#cf3b3b; --code:#0b0f14; --maxw:1000px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  header.hero{padding:60px 24px 36px;text-align:center;
+    background:radial-gradient(1200px 420px at 50% -120px,#1d3250 0%,var(--bg) 70%);
+    border-bottom:1px solid var(--line)}
+  header.hero h1{font-size:33px;margin:0 0 10px;letter-spacing:-.01em}
+  header.hero p{color:var(--muted);max-width:820px;margin:0 auto;font-size:17px}
+  .tag{display:inline-block;margin-top:18px;padding:5px 13px;border:1px solid var(--line);
+    border-radius:999px;color:var(--warn);font-size:13px;background:var(--panel)}
+  main{max-width:var(--maxw);margin:0 auto;padding:0 24px 80px}
+  section{padding:38px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:25px;margin:0 0 6px;letter-spacing:-.01em}
+  h2 .num{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:10px}
+  h3{font-size:18px;margin:24px 0 8px;color:var(--ink)}
+  .lede{color:var(--muted);font-size:17px;margin:0 0 18px}
+  p{margin:12px 0}
+  .fig{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:20px;margin:22px 0;text-align:center}
+  .fig svg{max-width:100%;height:auto}
+  .cap{color:var(--muted);font-size:13.5px;margin-top:12px;text-align:left}
+  .callout{border-left:3px solid var(--accent);background:var(--panel);
+    padding:14px 18px;border-radius:0 10px 10px 0;margin:18px 0}
+  .callout.key{border-left-color:var(--accent2)}
+  .callout.warn{border-left-color:var(--warn)}
+  .callout.bad{border-left-color:var(--hot)}
+  .callout b{color:var(--ink)}
+  code{background:var(--panel2);padding:1px 6px;border-radius:5px;font-size:13px;
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:10px;
+    padding:14px 16px;overflow:auto;font-size:12.5px;line-height:1.5;
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  table{width:100%;border-collapse:collapse;margin:18px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--ink)}
+  td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+  .win{color:var(--accent2);font-weight:600}
+  .meh{color:var(--warn)} .no{color:var(--hot);font-weight:600}
+  .yes{color:var(--accent2);font-weight:600}
+  nav.toc{position:sticky;top:0;background:rgba(15,20,25,.93);backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--line);z-index:5;padding:10px 24px;font-size:13px}
+  nav.toc div{max-width:var(--maxw);margin:0 auto;display:flex;gap:16px;flex-wrap:wrap}
+  nav.toc a{color:var(--muted)} nav.toc a:hover{color:var(--accent)}
+  footer{max-width:var(--maxw);margin:0 auto;padding:28px 24px 60px;color:var(--muted);font-size:13.5px}
+  .small{font-size:13px;color:var(--muted)}
+  .pill{font-size:11.5px;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
+  .pill.hbm{color:var(--hot);border-color:#5a2a2a;background:#241616}
+  .pill.lx{color:var(--accent2);border-color:#2a5a35;background:#15231a}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <h1>Warp-Specialized FlashAttention on Spyre</h1>
+  <p>A read-once, first-principles guide to the <code>flash-ws</code> branch — what
+  codex built, how it works in the compiler, what is genuinely proven, and whether
+  it is worth iterating on. Synthesized from a four-agent deep read of 99 stage
+  notes, two 900-line design docs, and the source.</p>
+  <div class="tag">Real &amp; numerically sound · ties (not beats) the strong baseline · exploratory, not shippable</div>
+</header>
+
+<nav class="toc"><div>
+  <a href="#truth">0 · The truth</a>
+  <a href="#why">1 · Why K/V streaming</a>
+  <a href="#what">2 · What "warpspec" means</a>
+  <a href="#mech">3 · The mechanism</a>
+  <a href="#lineage">4 · Lineage</a>
+  <a href="#decouple">5 · Layout decoupling</a>
+  <a href="#evidence">6 · The evidence</a>
+  <a href="#bug">7 · Does it inherit our bug?</a>
+  <a href="#outlook">8 · Outlook</a>
+</div></nav>
+
+<main>
+
+<!-- 0 -->
+<section id="truth">
+  <h2><span class="num">0</span>The one-paragraph truth</h2>
+  <p class="lede">Codex's "warp-specialized FlashAttention" is <b>not</b> a GPU
+  warp-group kernel. It is a <b>compiler-generated, loader-specialized K/V prefetch
+  sidecar</b> on top of the existing on-chip SDPA flash-prefill graph.</p>
+  <p>One core (core 31) takes a "loader" role: it issues a direct <b>HBM→LX</b> load
+  of the <i>next</i> K/V tile while the other 31 cores compute the <i>current</i>
+  attention tile, then fans that tile out over the ring into every core's scratchpad
+  so the next matmul reads K/V from LX instead of re-streaming HBM. It is real,
+  value-correct on standard inputs, and honestly fail-closed — but on the verified
+  shape island it only <b>ties</b> the strong <code>onchip_master</code> baseline
+  (geomean <b>0.99×</b>); the "1.15×" headline is against a weak baseline codex
+  itself later disowns. The genuine warp-group overlap was tried and
+  <b>failed value-correctness</b> (NaN, 99% mismatch) and was abandoned for the
+  conservative serialized loader.</p>
+  <div class="callout key"><b>Bottom line.</b> A real, numerically-sound,
+  exploratory probe — not a shippable performance win — and crucially it does
+  <b>not</b> inherit the cross-shard reshard bug that broke our sibling
+  <code>attention-overlap</code> work (§7).</div>
+</section>
+
+<!-- 1 -->
+<section id="why">
+  <h2><span class="num">1</span>First principles: why K/V streaming is the bottleneck</h2>
+  <p class="lede">FlashAttention removes the O(L²) score matrix from HBM. Once that's
+  gone, the next pressure point is the repeated K/V stream — and on Spyre that stream
+  hits the one slow shared pipe.</p>
+
+  <p>Every Q tile must re-see all of K/V, layout-converted for the QKᵀ and PV
+  batchmatmuls. The traffic is <code>≈ 2·L·D·bytes·(L/Bq)</code> — at L=1024, D=64,
+  Bq=64 the K/V stream is re-read across <b>16 Q tiles</b>
+  (<code>Stage094:152-178</code>). The hardware asymmetry is what makes this the
+  lever:</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 860 330" role="img" aria-label="Spyre memory hierarchy asymmetry">
+    <!-- HBM bar -->
+    <rect x="40" y="30" width="780" height="52" rx="8" fill="#241616" stroke="#5a2a2a"/>
+    <text x="430" y="52" fill="#ff7b72" font-size="15" font-weight="bold" text-anchor="middle">HBM — ONE shared pipe</text>
+    <text x="430" y="71" fill="#ff7b72" font-size="12.5" text-anchor="middle">~170 GB/s peak · ~100 GB/s realized · contended by all 32 cores  ◀ THE BOTTLENECK</text>
+
+    <!-- arrows up: every Q tile re-reads -->
+    <text x="430" y="104" fill="#9fb0c0" font-size="12" text-anchor="middle">▲ every Q tile re-reads all K/V through here ▲</text>
+
+    <!-- LX bar -->
+    <rect x="40" y="120" width="780" height="52" rx="8" fill="#15231a" stroke="#2ea043"/>
+    <text x="430" y="142" fill="#7ee787" font-size="15" font-weight="bold" text-anchor="middle">LX scratchpad</text>
+    <text x="430" y="161" fill="#7ee787" font-size="12.5" text-anchor="middle">~2 MB/core · ~51 MB aggregate · ~4.5 TB/s  ◀ ~45× the HBM rate, mostly idle</text>
+
+    <text x="430" y="194" fill="#9fb0c0" font-size="12" text-anchor="middle">▲ RIU ring moves data core↔core: ~166 GB/s/dir/core — also idle ▲</text>
+
+    <!-- cores -->
+    <rect x="40" y="210" width="780" height="86" rx="8" fill="#16202c" stroke="#3a6ea5"/>
+    <text x="430" y="232" fill="#e6edf3" font-size="14" font-weight="bold" text-anchor="middle">32 cores · per-core units run independent programs</text>
+    <g font-size="12" text-anchor="middle">
+      <rect x="120" y="246" width="180" height="34" rx="5" fill="#1a2230" stroke="#4ea1ff"/>
+      <text x="210" y="268" fill="#9ecbff">L3LU / L3SU — ring DMA</text>
+      <rect x="340" y="246" width="180" height="34" rx="5" fill="#1a2230" stroke="#4ea1ff"/>
+      <text x="430" y="268" fill="#9ecbff">PE — matmul</text>
+      <rect x="560" y="246" width="180" height="34" rx="5" fill="#1a2230" stroke="#4ea1ff"/>
+      <text x="650" y="268" fill="#9ecbff">SFP — softmax / act</text>
+    </g>
+
+    <text x="430" y="318" fill="#e3b341" font-size="13" text-anchor="middle">The lever: move the K/V handoff off HBM onto the idle on-chip fabric, and overlap the next fetch behind compute.</text>
+  </svg>
+  <div class="cap">Figure 1. The asymmetry that defines the problem. HBM is one
+  shared ~100 GB/s pipe; LX and the ring are ~45× faster and mostly idle during
+  attention. FlashAttention already removed the O(L²) score traffic; what's left
+  is the K/V stream re-read once per Q tile, all of it through HBM. Source:
+  <code>Stage094:38-41, 152-183</code>.</div>
+  </div>
+</section>
+
+<!-- 2 -->
+<section id="what">
+  <h2><span class="num">2</span>What "warp specialization" means here</h2>
+  <p class="lede">On a GPU, warp specialization = different warp groups in one kernel
+  issue to different units concurrently. The Spyre version is an <i>analogue</i> —
+  codex is repeatedly explicit about that.</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 860 300" role="img" aria-label="GPU vs Spyre mapping">
+    <text x="215" y="24" fill="#9ecbff" font-size="14" font-weight="bold" text-anchor="middle">GPU concept</text>
+    <text x="600" y="24" fill="#7ee787" font-size="14" font-weight="bold" text-anchor="middle">Spyre realization (this branch)</text>
+    <line x1="430" y1="34" x2="430" y2="288" stroke="#2b3947"/>
+    <g font-size="13">
+      <!-- rows -->
+      <text x="60" y="60" fill="#e6edf3">Producer warp</text>
+      <text x="460" y="60" fill="#e6edf3">Loader core 31 <tspan fill="#e3b341">(a schedule role, still serialized)</tspan></text>
+      <text x="60" y="92" fill="#e6edf3">Consumer warps</text>
+      <text x="460" y="92" fill="#e6edf3">Cores 0–30 (current-tile compute)</text>
+      <text x="60" y="124" fill="#e6edf3">Shared memory</text>
+      <text x="460" y="124" fill="#e6edf3">LX regions (compiler PieceInfo)</text>
+      <text x="60" y="156" fill="#e6edf3">Async copy</text>
+      <text x="460" y="156" fill="#e6edf3"><tspan fill="#9ecbff">STCDPOpHBM</tspan> inside a mixed SDSC</text>
+      <text x="60" y="188" fill="#e6edf3">Warp barrier</text>
+      <text x="460" y="188" fill="#e6edf3"><tspan fill="#9ecbff">nop</tspan> rendezvous + schedule order</text>
+      <text x="60" y="220" fill="#e6edf3">Multi-stage buffer</text>
+      <text x="460" y="220" fill="#e6edf3">ONE look-ahead stage <tspan fill="#e3b341">(double-buffer, not deep)</tspan></text>
+      <text x="60" y="252" fill="#e6edf3">Multicast</text>
+      <text x="460" y="252" fill="#e6edf3"><tspan fill="#9ecbff">STCDPOpLx</tspan> fanout (a tuning knob)</text>
+    </g>
+    <line x1="40" y1="72" x2="820" y2="72" stroke="#2b3947" stroke-dasharray="2,3"/>
+    <line x1="40" y1="104" x2="820" y2="104" stroke="#2b3947" stroke-dasharray="2,3"/>
+    <line x1="40" y1="136" x2="820" y2="136" stroke="#2b3947" stroke-dasharray="2,3"/>
+    <line x1="40" y1="168" x2="820" y2="168" stroke="#2b3947" stroke-dasharray="2,3"/>
+    <line x1="40" y1="200" x2="820" y2="200" stroke="#2b3947" stroke-dasharray="2,3"/>
+    <line x1="40" y1="232" x2="820" y2="232" stroke="#2b3947" stroke-dasharray="2,3"/>
+    <text x="430" y="282" fill="#9fb0c0" font-size="12" text-anchor="middle">"warpspec" = a producer/consumer core-role split + explicit on-chip staging — not a hand-written kernel</text>
+  </svg>
+  <div class="cap">Figure 2. The GPU→Spyre mapping (<code>Stage089:331-359</code>).
+  Tellingly, the string <code>warpspec</code> appears <b>nowhere</b> in
+  <code>onchip_realize.py</code> or <code>bundle.py</code> — it is a config-preset
+  name (§3, §6), not a code path.</div>
+  </div>
+</section>
+
+<!-- 3 -->
+<section id="mech">
+  <h2><span class="num">3</span>The mechanism — what the compiled bundle is</h2>
+  <p class="lede">The standard ~11-SDSC SDPA graph, with the K/V-producer SDSC
+  rewritten in place into a loader-specialized mixed SuperDSC, spliced into
+  <code>bundle.mlir</code> — not a separate kernel.</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 860 250" role="img" aria-label="Loader-core pipeline timeline">
+    <text x="40" y="22" fill="#9fb0c0" font-size="13">time ──────────────────────────────────────────────────────────────▶</text>
+
+    <!-- cores 0-30 lane -->
+    <text x="36" y="70" fill="#e6edf3" font-size="13" text-anchor="end" transform="translate(96,0)">cores 0–30</text>
+    <rect x="110" y="50" width="120" height="34" rx="5" fill="#16202c" stroke="#3a6ea5"/><text x="170" y="71" fill="#9fb0c0" font-size="11.5" text-anchor="middle">prologue</text>
+    <rect x="234" y="50" width="250" height="34" rx="5" fill="#15231a" stroke="#2ea043" stroke-width="2"/><text x="359" y="71" fill="#7ee787" font-size="12" text-anchor="middle">COMPUTE current tile</text>
+    <rect x="488" y="50" width="70" height="34" rx="5" fill="#1e2733" stroke="#9fb0c0"/><text x="523" y="71" fill="#9fb0c0" font-size="11" text-anchor="middle">barrier</text>
+    <rect x="562" y="50" width="150" height="34" rx="5" fill="#16202c" stroke="#3a6ea5"/><text x="637" y="71" fill="#9fb0c0" font-size="11" text-anchor="middle">consume fanned K/V</text>
+
+    <!-- core 31 lane -->
+    <text x="36" y="140" fill="#e3b341" font-size="13" text-anchor="end" transform="translate(96,0)">core 31</text>
+    <rect x="110" y="120" width="120" height="34" rx="5" fill="#16202c" stroke="#3a6ea5"/><text x="170" y="141" fill="#9fb0c0" font-size="11.5" text-anchor="middle">prologue</text>
+    <rect x="234" y="120" width="250" height="34" rx="5" fill="#2a2114" stroke="#e3b341" stroke-width="2"/><text x="359" y="136" fill="#e3b341" font-size="11.5" text-anchor="middle">STCDPOpHBM: load</text><text x="359" y="150" fill="#e3b341" font-size="11.5" text-anchor="middle">FUTURE K/V (HBM→LX)</text>
+    <rect x="488" y="120" width="70" height="34" rx="5" fill="#1e2733" stroke="#9fb0c0"/><text x="523" y="141" fill="#9fb0c0" font-size="11" text-anchor="middle">barrier</text>
+    <rect x="562" y="120" width="150" height="34" rx="5" fill="#15231a" stroke="#2ea043"/><text x="637" y="141" fill="#7ee787" font-size="11" text-anchor="middle">STCDPOpLx fanout</text>
+
+    <!-- overlap brace -->
+    <path d="M 234 96 Q 359 110 484 96" stroke="#7ee787" fill="none" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <text x="359" y="106" fill="#7ee787" font-size="11" text-anchor="middle">these two overlap</text>
+
+    <text x="40" y="200" fill="#ff7b72" font-size="12.5">INVARIANT (Stage078 / Stage089:200-216): core 31 must NOT run its own current-tile compute in the same window</text>
+    <text x="40" y="218" fill="#ff7b72" font-size="12.5">as its STCDPOpHBM future load. This is the rule that survived after the "real overlap" variants failed (§6).</text>
+    <text x="40" y="240" fill="#9fb0c0" font-size="12">Buffering depth = ONE look-ahead stage (double-buffer). The loader's own compute slice is serialized — the fixed cost that keeps it at break-even.</text>
+  </svg>
+  <div class="cap">Figure 3. The loader-core pipeline in time. Core 31 prefetches
+  the future K/V tile (HBM→LX direct fill, <code>onchip_realize.py:2808</code>)
+  while cores 0–30 compute; then a ring fanout makes the tile LX-resident for every
+  core's next matmul. Schedule built by
+  <code>_kv_repack_hbm_prefetch_source_fanout_schedule</code>
+  (<code>onchip_realize.py:4217</code>).</div>
+  </div>
+
+  <div class="fig">
+  <svg viewBox="0 0 860 240" role="img" aria-label="Fanout topology">
+    <rect x="350" y="20" width="160" height="36" rx="6" fill="#241616" stroke="#5a2a2a"/>
+    <text x="430" y="43" fill="#ff7b72" font-size="12.5" text-anchor="middle">HBM [ future K/V tile ]</text>
+    <line x1="430" y1="56" x2="430" y2="84" stroke="#e3b341" stroke-width="2" marker-end="url(#ar)"/>
+    <text x="540" y="74" fill="#e3b341" font-size="11.5">STCDPOpHBM — direct HBM→LX fill, no LX→LX roundtrip</text>
+    <rect x="330" y="88" width="200" height="34" rx="6" fill="#2a2114" stroke="#e3b341"/>
+    <text x="430" y="110" fill="#e3b341" font-size="12.5" text-anchor="middle">core 31 LX source buffer</text>
+    <line x1="430" y1="122" x2="430" y2="146" stroke="#7ee787" stroke-width="2"/>
+    <text x="560" y="140" fill="#7ee787" font-size="11.5">STCDPOpLx full-tile-piece fanout (ring multicast)</text>
+    <!-- fan -->
+    <g stroke="#2ea043" stroke-width="1.5">
+      <line x1="430" y1="146" x2="120" y2="170"/><line x1="430" y1="146" x2="270" y2="170"/>
+      <line x1="430" y1="146" x2="430" y2="170"/><line x1="430" y1="146" x2="590" y2="170"/>
+      <line x1="430" y1="146" x2="740" y2="170"/>
+    </g>
+    <g font-size="11" text-anchor="middle">
+      <rect x="80" y="172" width="80" height="30" rx="5" fill="#15231a" stroke="#2ea043"/><text x="120" y="191" fill="#7ee787">core0 LX</text>
+      <rect x="230" y="172" width="80" height="30" rx="5" fill="#15231a" stroke="#2ea043"/><text x="270" y="191" fill="#7ee787">core1 LX</text>
+      <rect x="390" y="172" width="80" height="30" rx="5" fill="#15231a" stroke="#2ea043"/><text x="430" y="191" fill="#7ee787">… LX</text>
+      <rect x="550" y="172" width="80" height="30" rx="5" fill="#15231a" stroke="#2ea043"/><text x="590" y="191" fill="#7ee787">core30 LX</text>
+      <rect x="700" y="172" width="80" height="30" rx="5" fill="#15231a" stroke="#2ea043"/><text x="740" y="191" fill="#7ee787">core31 LX</text>
+    </g>
+    <text x="430" y="226" fill="#9fb0c0" font-size="12" text-anchor="middle">the FUTURE batchmatmul reads its K/V operand from LX — no HBM re-stream</text>
+    <defs><marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#e3b341"/></marker></defs>
+  </svg>
+  <div class="cap">Figure 4. Single-loader fanout topology (not an all-core HBM
+  fill). Three storage identities coexist (<code>Stage094:222-236</code>): the
+  preserved original HBM output (reductions still read it), the loader's LX source
+  buffer, and the per-consumer LX input regions. Builder:
+  <code>build_flash_attention_kv_repack_hbm_prefetch_hoist_tile_artifacts</code>
+  (<code>onchip_realize.py:4540</code>).</div>
+  </div>
+
+  <p><b>Entry / dispatch:</b> <code>_apply_flash_attention_route_policy()</code>
+  (<code>decompositions.py:86</code>, called at <code>:667</code>) — this is the
+  "core selector". The shared field-surgery primitive
+  <code>apply_lx_flip</code> (<code>onchip_realize.py:4953</code>) only
+  <i>redirects an LX base pointer</i>; it does not re-partition a shard — the detail
+  that makes it safe (§7).</p>
+</section>
+
+<!-- 4 -->
+<section id="lineage">
+  <h2><span class="num">4</span>Lineage — warpspec is the last step of a chain</h2>
+  <p class="lede">Not a separate invention — a specialization on top of the on-chip
+  handoff machinery. The crucial jump: Stage008 proved a double-buffered schedule
+  but only LX→LX. Warpspec finally crosses the HBM→LX boundary.</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 880 170" role="img" aria-label="Lineage">
+    <defs><marker id="ln" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#4ea1ff"/></marker></defs>
+    <g font-size="11.5" text-anchor="middle">
+      <rect x="20" y="50" width="140" height="64" rx="7" fill="#16202c" stroke="#3a6ea5"/>
+      <text x="90" y="72" fill="#9ecbff" font-weight="bold">Score handoff</text>
+      <text x="90" y="90" fill="#9fb0c0">Stage002–004</text>
+      <text x="90" y="105" fill="#9fb0c0">QKᵀ kept in LX</text>
+
+      <rect x="195" y="50" width="140" height="64" rx="7" fill="#16202c" stroke="#3a6ea5"/>
+      <text x="265" y="72" fill="#9ecbff" font-weight="bold">On-chip realize</text>
+      <text x="265" y="90" fill="#9fb0c0">any same-layout</text>
+      <text x="265" y="105" fill="#9fb0c0">edge, LX-base bind</text>
+
+      <rect x="370" y="50" width="150" height="64" rx="7" fill="#1e2733" stroke="#e3b341"/>
+      <text x="445" y="72" fill="#e3b341" font-weight="bold">Pipeline proof</text>
+      <text x="445" y="90" fill="#9fb0c0">Stage008: double-</text>
+      <text x="445" y="105" fill="#9fb0c0">buffer, LX→LX ONLY</text>
+
+      <rect x="560" y="44" width="300" height="78" rx="7" fill="#15231a" stroke="#2ea043" stroke-width="2"/>
+      <text x="710" y="66" fill="#7ee787" font-weight="bold">WARPSPEC (Stage079+)</text>
+      <text x="710" y="84" fill="#9fb0c0">adds certified HBM→LX STCDPOpHBM</text>
+      <text x="710" y="99" fill="#9fb0c0">future-K/V prefetch + loader-core role</text>
+      <text x="710" y="114" fill="#9fb0c0">+ ring fanout — crosses the HBM→LX line</text>
+    </g>
+    <line x1="160" y1="82" x2="193" y2="82" stroke="#4ea1ff" stroke-width="1.5" marker-end="url(#ln)"/>
+    <line x1="335" y1="82" x2="368" y2="82" stroke="#4ea1ff" stroke-width="1.5" marker-end="url(#ln)"/>
+    <line x1="520" y1="82" x2="558" y2="82" stroke="#4ea1ff" stroke-width="1.5" marker-end="url(#ln)"/>
+    <text x="445" y="142" fill="#e3b341" font-size="11.5" text-anchor="middle">Stage008 explicitly deferred HBM→LX prefetch (Stage008:65-75) — warpspec is the generalization that delivers it</text>
+  </svg>
+  <div class="cap">Figure 5. The lineage. Warpspec reuses the handoff binding (LX
+  bases, mixed SDSC, preserve-original-HBM-output) wholesale, scoped to the K/V
+  operand of flash prefill.</div>
+  </div>
+</section>
+
+<!-- 5 -->
+<section id="decouple">
+  <h2><span class="num">5</span>Layout decoupling — the turning point (Stage088)</h2>
+  <p class="lede">The single most important engineering decision on the branch — and
+  the reason it avoided the trap our sibling branch fell into.</p>
+
+  <p>Two mechanisms were originally <b>coupled</b>: a layout-transform pair
+  (restickify/repack K/V) and the loader-core prefetch. Codex found that coupling
+  them <i>"hid valid warpspec rows behind layout-pair numerical failures"</i>
+  (<code>Stage088:21-25</code>).</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 860 220" role="img" aria-label="Layout decoupling before/after">
+    <!-- before -->
+    <text x="220" y="24" fill="#ff7b72" font-size="14" font-weight="bold" text-anchor="middle">BEFORE — coupled</text>
+    <rect x="70" y="40" width="300" height="56" rx="7" fill="#241616" stroke="#5a2a2a"/>
+    <text x="220" y="62" fill="#ff7b72" font-size="12.5" text-anchor="middle">layout-transform pair  +  loader prefetch</text>
+    <text x="220" y="82" fill="#ff7b72" font-size="12" text-anchor="middle">long rows BROKEN — max abs 0.21–0.67</text>
+    <text x="220" y="120" fill="#9fb0c0" font-size="11.5" text-anchor="middle">the 0.21–0.67 signature is the SAME failure</text>
+    <text x="220" y="136" fill="#9fb0c0" font-size="11.5" text-anchor="middle">as the bug that broke attention-overlap (§7)</text>
+
+    <!-- arrow -->
+    <text x="430" y="74" fill="#7ee787" font-size="22" text-anchor="middle">→</text>
+    <text x="430" y="94" fill="#9fb0c0" font-size="11" text-anchor="middle">disable</text>
+    <text x="430" y="108" fill="#9fb0c0" font-size="11" text-anchor="middle">LAYOUT_XFORM</text>
+
+    <!-- after -->
+    <text x="650" y="24" fill="#7ee787" font-size="14" font-weight="bold" text-anchor="middle">AFTER — decoupled</text>
+    <rect x="500" y="40" width="300" height="56" rx="7" fill="#15231a" stroke="#2ea043" stroke-width="2"/>
+    <text x="650" y="62" fill="#7ee787" font-size="12.5" text-anchor="middle">loader-core prefetch ONLY</text>
+    <text x="650" y="82" fill="#7ee787" font-size="12" text-anchor="middle">value-correct — long-row island RECOVERED</text>
+    <text x="650" y="120" fill="#9fb0c0" font-size="11.5" text-anchor="middle">LAYOUT_XFORM=0, LAYOUT_XFORM_PAIR_TILE=-1</text>
+    <text x="650" y="136" fill="#9fb0c0" font-size="11.5" text-anchor="middle">recovered B1H4D64 L768/1024 + B2H4D128 island</text>
+
+    <text x="430" y="178" fill="#e3b341" font-size="12.5" text-anchor="middle">Durable lesson (Stage089:851-857): keep THREE evidence streams separate —</text>
+    <text x="430" y="196" fill="#e3b341" font-size="12.5" text-anchor="middle">layout-transform correctness · loader-prefetch correctness · combined correctness</text>
+  </svg>
+  <div class="cap">Figure 6. Decoupling isolated <i>what is being certified</i>. The
+  certified default is now the layout-free loader path. Codex diagnosed the risky
+  reshard and walked away from it — on standard inputs — which is exactly why this
+  branch does not carry our bug.</div>
+  </div>
+</section>
+
+<!-- 6 -->
+<section id="evidence">
+  <h2><span class="num">6</span>What is actually proven</h2>
+  <p class="lede">This is where the headline and the reality diverge. The verified
+  ceiling <b>ties</b> the strong baseline; the real concurrency idea failed.</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 720 200" role="img" aria-label="Verified performance ceiling">
+    <text x="40" y="24" fill="#e6edf3" font-size="14" font-weight="bold">Verified performance ceiling (8-row island, host wall-time, tiny samples)</text>
+    <!-- axis baseline at x=300 = 1.00x; scale 360px = 1.0x -->
+    <g font-size="13">
+      <text x="40" y="62" fill="#e6edf3">onchip_master</text>
+      <rect x="170" y="48" width="360" height="22" rx="3" fill="#1a4275"/>
+      <text x="540" y="64" fill="#9ecbff" font-weight="bold">1.00×  (the bar to beat)</text>
+
+      <text x="40" y="100" fill="#e6edf3">warpspec</text>
+      <rect x="170" y="86" width="357" height="22" rx="3" fill="#15231a" stroke="#2ea043" stroke-width="2"/>
+      <text x="537" y="102" fill="#7ee787" font-weight="bold">0.99×  (ties / slightly under)</text>
+
+      <text x="40" y="138" fill="#e6edf3">flash_hbm</text>
+      <rect x="170" y="124" width="313" height="22" rx="3" fill="#241616" stroke="#5a2a2a"/>
+      <text x="493" y="140" fill="#ff7b72" font-weight="bold">~0.87×  ◀ the weak baseline the "1.15×" is measured against</text>
+    </g>
+    <line x1="530" y1="40" x2="530" y2="150" stroke="#9ecbff" stroke-dasharray="3,3"/>
+    <text x="40" y="184" fill="#e3b341" font-size="12.5">"Does not yet prove a meaningful AIU kernel-time speedup." — codex, Stage098</text>
+  </svg>
+  <div class="cap">Figure 7. The 1.15× geomean is vs <code>flash_hbm</code>, which
+  codex itself later relabels "not equivalent to upstream" (<code>Stage098:200</code>).
+  Against the strong <code>onchip_master</code> the same run is <b>0.9929× — a net
+  loss</b>, 4 of 8 rows winning (<code>Stage092:38-40</code>). The decisive
+  upstream three-way table was never produced — the clean build failed to compile
+  (<code>Stage098:234-250</code>).</div>
+  </div>
+
+  <h3>The real concurrency idea was tried — and failed</h3>
+  <table>
+    <thead><tr><th>Stage</th><th>What</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>052</td><td>Forced same-row IFN-prefix overlap (the real mechanism)</td><td class="no">99.2% mismatch, NaN — no real producer</td></tr>
+      <tr><td>053</td><td>Predecessor-backed same-row overlap</td><td class="no">99.1% mismatch, NaN — read-after-write hazard</td></tr>
+      <tr><td>035/037</td><td>Independent prefetch sidecar in the compute row</td><td class="no">77% mismatch — row shape itself unsafe</td></tr>
+      <tr><td>082</td><td>block128 long rows</td><td class="no">max abs 0.254 / 0.120 — broken</td></tr>
+      <tr><td>086/087</td><td>layout-coupled long rows</td><td class="meh">max abs 0.21–0.67 — fixed only by removing the overlap (§5)</td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><b>The arc is honest.</b> Every "values wrong" result is a
+  default-off probe codex recorded as failed and abandoned. What survived is the
+  conservative serialized-loader retreat — value-correct, but with the loader's own
+  compute slice <i>not</i> overlapped, the fixed cost that keeps it at break-even.</div>
+
+  <h3>Maturity: a probe, not a product</h3>
+  <ul>
+    <li><b>Nothing is default-on</b> — every gate defaults <code>"0"</code>/<code>"-1"</code> (<code>config.py:55,308-489</code>).</li>
+    <li><b>~119 of 217 commits are docs-only</b> stage notes.</li>
+    <li><b>The route policy is a hardcoded 4-shape lookup table</b> (<code>flash_attention_route_policy.py:31-38</code>) — codex admits "no implemented production routing policy" (<code>Stage094:757</code>).</li>
+    <li><b>Causal is plan-artifact-only</b> — <code>causal_mask_dataop.py:456</code> self-reports <code>requires_deeptools_dataop_parser_extension: True</code>; never enters <code>bundle.mlir</code>.</li>
+    <li>The ~7k-line <code>onchip_realize.py</code> growth is ~30 diagnostic A/B knob paths — bring-up scaffolding.</li>
+  </ul>
+</section>
+
+<!-- 7 -->
+<section id="bug">
+  <h2><span class="num">7</span>The question that matters for us: does it inherit our bug?</h2>
+  <p class="lede"><b>No — and this is the most important finding.</b> The certified
+  path uses a different, simpler, safer mechanism than the cross-shard reshard that
+  broke our sibling <code>attention-overlap</code> branch.</p>
+
+  <div class="fig">
+  <svg viewBox="0 0 860 250" role="img" aria-label="Bug inheritance comparison">
+    <!-- ours -->
+    <text x="215" y="22" fill="#ff7b72" font-size="14" font-weight="bold" text-anchor="middle">OUR path (attention-overlap) — BROKEN</text>
+    <rect x="40" y="36" width="350" height="170" rx="8" fill="#241616" stroke="#5a2a2a"/>
+    <text x="215" y="62" fill="#e6edf3" font-size="12.5" text-anchor="middle">realize_asymmetric_onchip_handoff</text>
+    <text x="215" y="88" fill="#ff7b72" font-size="12.5" text-anchor="middle">producer {mb:32}  ─ reshard ─▶  consumer {x:32}</text>
+    <text x="215" y="110" fill="#9fb0c0" font-size="11.5" text-anchor="middle">overlap-cell re-partition in the STCDP engine</text>
+    <text x="215" y="138" fill="#ff7b72" font-size="15" font-weight="bold" text-anchor="middle">MIS-STRIDED → max_err 0.669</text>
+    <text x="215" y="162" fill="#9fb0c0" font-size="11.5" text-anchor="middle">masked for a while by benign randn×0.1 inputs</text>
+    <text x="215" y="188" fill="#ff7b72" font-size="12.5" text-anchor="middle">✗ a real cross-shard reshard, and it broke</text>
+
+    <!-- codex -->
+    <text x="645" y="22" fill="#7ee787" font-size="14" font-weight="bold" text-anchor="middle">CODEX path (flash-ws) — SOUND</text>
+    <rect x="470" y="36" width="350" height="170" rx="8" fill="#15231a" stroke="#2ea043"/>
+    <text x="645" y="62" fill="#e6edf3" font-size="12.5" text-anchor="middle">build_…_hbm_prefetch_hoist_tile</text>
+    <text x="645" y="88" fill="#7ee787" font-size="12.5" text-anchor="middle">STCDPOpHBM: HBM→LX DIRECT FILL</text>
+    <text x="645" y="110" fill="#9fb0c0" font-size="11.5" text-anchor="middle">"no LX→LX roundtrip" — same-layout full-tile fanout</text>
+    <text x="645" y="138" fill="#7ee787" font-size="12.5" text-anchor="middle">apply_lx_flip moves a BASE POINTER only</text>
+    <text x="645" y="162" fill="#9fb0c0" font-size="11.5" text-anchor="middle">no mb→x re-partition occurs anywhere</text>
+    <text x="645" y="188" fill="#7ee787" font-size="12.5" text-anchor="middle">✓ validated on STANDARD randn, gate ≤ 0.01</text>
+  </svg>
+  <div class="cap">Figure 8. The broken function <i>does not exist</i> on
+  <code>flash-ws</code> (grep = 0 hits). The certified path is a same-layout fill +
+  fanout, not a reshard. And codex independently hit the same 0.21–0.67 failure
+  class in the layout-coupled variant (Stage086/087) and <b>disabled the layout
+  transform</b> in response (§5) — diagnosing the risky reshard and walking away,
+  on standard inputs, with a fail-closed gate.</div>
+  </div>
+
+  <div class="callout key"><b>Validation is rigorous.</b> Standard
+  <code>torch.randn</code> (no <code>×0.1</code>), CPU
+  <code>F.scaled_dot_product_attention</code> reference,
+  <code>max_abs_error ≤ 0.01</code> promotion gate
+  (<code>onchip_sdpa_sweep.py:1301-1328</code>,
+  <code>onchip_sdpa_promotion_gate.py:520</code>). Promoted rows report
+  0.002–0.006. This branch avoided the trap that bit us.</div>
+</section>
+
+<!-- 8 -->
+<section id="outlook">
+  <h2><span class="num">8</span>Outlook — should we iterate?</h2>
+  <p class="lede">Iterate for the mechanism, not for the current numbers.</p>
+
+  <table>
+    <thead><tr><th>Dimension</th><th>Assessment</th></tr></thead>
+    <tbody>
+      <tr><td>Mechanism real?</td><td class="yes">Yes — a real mixed SuperDSC, executed on device, spliced into <code>bundle.mlir</code></td></tr>
+      <tr><td>Numerically sound?</td><td class="yes">Yes — standard randn, fail-closed gate, 0.002–0.006 error on certified rows</td></tr>
+      <tr><td>Inherits our cross-shard bug?</td><td class="yes">No — different, simpler, safer mechanism (HBM→LX fill, no reshard)</td></tr>
+      <tr><td>Perf win over the STRONG baseline?</td><td class="no">No — geomean 0.99× vs <code>onchip_master</code>; the 1.15× is vs a weak baseline</td></tr>
+      <tr><td>The real overlap idea?</td><td class="no">Failed (NaN / 99% mismatch), abandoned for a serialized loader</td></tr>
+      <tr><td>Coverage</td><td class="meh">Narrow — 8 rows, block64, non-causal; H8-long broken; causal plan-only</td></tr>
+      <tr><td>Productized?</td><td class="no">No — default-off, lookup-table "policy", scaffold-shaped code</td></tr>
+    </tbody>
+  </table>
+
+  <h3>What would have to become true for iteration to pay off</h3>
+  <ol>
+    <li><b>Beat <code>onchip_master</code>, not <code>flash_hbm</code></b> — on a documented shape island. Today the serialized loader's own compute slice is a fixed cost only long rows amortize; the win is within noise.</li>
+    <li><b>Recover real overlap safely</b> — the same-row concurrency that failed (Stage052/053, read-after-write / no-producer) is <i>the actual idea</i>. The serialized-loader retreat is a correctness workaround, not the destination. High-value, high-risk frontier.</li>
+    <li><b>A real route policy</b> — replace the 4-shape frozenset with a cost model that <i>predicts</i> the crossover L (the first-principles arithmetic the docs narrate but never derive).</li>
+    <li><b>Kernel-time measurement</b> — all current numbers are host wall-time, tiny samples; re-measure on AIU kernel-time before trusting any speedup.</li>
+    <li><b>Generalize</b> past the island: batch&gt;1 D128, H8-long, causal, block128 — each currently fails or is plan-only.</li>
+  </ol>
+
+  <div class="callout key"><b>The recommendation in one line.</b> The loader-core
+  prefetch is a legitimately different and safer design than our asymmetric
+  handoff — building on it does not inherit our bug, and codex's rigor (standard
+  inputs, fail-closed gate, honestly-recorded failures) makes it a trustworthy
+  foundation. <b>But treat the perf as unproven</b>: the certified result ties the
+  strong baseline, the real concurrency idea is still unsolved, and the
+  highest-value next step is exactly the thing codex could not make value-correct —
+  genuine same-row producer/consumer overlap without the read-after-write hazard.</div>
+</section>
+
+</main>
+
+<footer>
+  <p><b>Where to look.</b>
+  Design: <code>Stage089-…FirstPrinciples.md</code>, <code>Stage094-…DeepDive.md</code> ·
+  Layout decoupling: <code>Stage088</code> ·
+  Failures: <code>Stage052/053/035/037/082/086/087</code> ·
+  Perf: <code>Stage092</code>, <code>Stage098</code> ·
+  Route policy: <code>Stage095/099</code>, <code>flash_attention_route_policy.py</code> ·
+  Entry: <code>decompositions.py:86,667</code> ·
+  Builder: <code>onchip_realize.py:4540</code> (schedule <code>:4217</code>, HBM→LX fill <code>:2808</code>, lx-flip <code>:4953</code>) ·
+  Wire-in: <code>bundle.py:114,1030-1073</code> ·
+  Synthesizer: <code>onchip_bridge.py:15-27,317,351</code> ·
+  Causal (plan-only): <code>causal_mask_dataop.py:456-463</code>.</p>
+  <p class="small">Synthesized from a four-facet read-only investigation of
+  <code>flash-ws</code> (design intent · source mechanism · evidence ledger ·
+  adversarial review), the 99 stage notes, and the branch source at tip
+  <code>10ec5a4</code>. Companion to <code>flash-ws-warpspec-explained.md</code>.</p>
+</footer>
+
+</body>
+</html>
