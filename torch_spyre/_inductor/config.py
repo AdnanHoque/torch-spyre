@@ -79,4 +79,13 @@ coarse_tiling_groups_fn: Optional[Callable] = None
 # TODO(isuruf): Change to firstfit when deeptools PR4298 lands
 layout_solver: Literal["greedy", "bestfit", "firstfit"] = "greedy"
 
+# Detect maximal same-shard same-core SDSC chains in the realized bundle and
+# keep their activation intermediates LX-resident (producer-output + every
+# consumer-input flipped to the same LX base), with a liveness-aware first-fit
+# packer over the usable LX window. Buffers that do not fit fall back to HBM
+# (edge untouched, correct just not accelerated). Default off; pure-persistence
+# (no move, no data-op, stock dxp). The classic target is the softmax tail
+# (max -> sub -> exp -> sum -> realdiv) in the materialized-scores SDPA decomp.
+onchip_softmax_chain: bool = os.environ.get("SPYRE_ONCHIP_SOFTMAX_CHAIN", "0") == "1"
+
 install_config_module(sys.modules[__name__])

@@ -24,6 +24,7 @@ from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.codegen.unroll import unroll_loop_specs
 from torch_spyre._inductor.op_spec import LoopSpec, OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
+from torch_spyre._inductor.onchip_softmax_chain import realize_softmax_chain
 
 
 logger = get_inductor_logger("sdsc_compile")
@@ -101,6 +102,27 @@ def generate_bundle(
         output_dir,
         use_symbols=use_symbols,
     )
+
+    # When SPYRE_ONCHIP_SOFTMAX_CHAIN is on, detect maximal same-shard same-core
+    # SDSC chains (the softmax tail in the materialized-scores SDPA decomp, etc.)
+    # and flip their activation intermediates LX-resident on coordinated bases --
+    # pure persistence (stock dxp, no data-op). Liveness-aware first-fit over the
+    # usable LX window; buffers that do not fit stay HBM (edge untouched). The
+    # in-memory SDSC dicts in ``compiled`` are mutated in place, so the affected
+    # ``sdsc_N.json`` files are re-emitted. Default off -> output byte-identical.
+    if _spyre_config.onchip_softmax_chain:
+        sdscs_json = [entry[0] for entry in compiled]
+        flipped = realize_softmax_chain(sdscs_json)
+        if flipped:
+            logger.info(
+                "Realized on-chip softmax-chain LX persistence "
+                "(%d endpoints flipped)",
+                flipped,
+            )
+            for idx, sdsc_json in enumerate(sdscs_json):
+                file_name = f"sdsc_{idx}.json"
+                with open(os.path.join(output_dir, file_name), "w") as f:
+                    json.dump(sdsc_json, f, indent=2)
 
     # -----------------------------------------------------------------------
     # Pass 2: emit bundle.mlir.
