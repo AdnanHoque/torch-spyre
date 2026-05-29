@@ -1,0 +1,1580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Spyre matmul work-division cost model, from first principles</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --muted: #555;
+    --bg: #fdfdfd;
+    --code-bg: #f3f4f6;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --rule: #e5e7eb;
+    --good: #166534;
+    --bad: #b91c1c;
+    --warn: #92400e;
+    --toc-w: 270px;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); color: var(--fg); scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    line-height: 1.65;
+    margin: 0;
+    font-size: 17px;
+  }
+  .layout {
+    display: flex;
+    align-items: flex-start;
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+  /* Sticky table of contents */
+  nav.toc {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    width: var(--toc-w);
+    max-height: 100vh;
+    overflow-y: auto;
+    padding: 1.5rem 1rem 2rem 1.25rem;
+    font-size: 0.84rem;
+    border-right: 1px solid var(--rule);
+    background: var(--bg);
+  }
+  nav.toc strong { display: block; font-size: 0.95rem; margin-bottom: 0.6rem; color: var(--fg); }
+  nav.toc ol { margin: 0; padding-left: 1.1rem; }
+  nav.toc > ol { padding-left: 1.2rem; }
+  nav.toc li { margin: 0.12rem 0; }
+  nav.toc ol ol { padding-left: 1rem; margin: 0.1rem 0; }
+  nav.toc a { color: var(--accent); text-decoration: none; line-height: 1.35; display: block; }
+  nav.toc a:hover { text-decoration: underline; }
+  nav.toc .sub a { color: var(--muted); font-size: 0.95em; }
+
+  main {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 860px;
+    padding: 2.5rem 2rem 6rem;
+  }
+  h1 { font-size: 1.95rem; line-height: 1.22; margin: 0 0 0.5rem; }
+  h2 { font-size: 1.42rem; margin-top: 3rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--rule); scroll-margin-top: 1rem; }
+  h3 { font-size: 1.1rem; margin-top: 2rem; color: var(--accent); scroll-margin-top: 1rem; }
+  h4 { font-size: 1.0rem; margin-top: 1.5rem; color: var(--muted); }
+  p, li { margin: 0.6rem 0; }
+  .subtitle { color: var(--muted); font-size: 1.05rem; margin-bottom: 1.5rem; }
+  code {
+    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    background: var(--code-bg);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  pre {
+    background: var(--code-bg);
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.86em;
+    line-height: 1.5;
+  }
+  pre code { background: transparent; padding: 0; font-size: 1em; }
+  .callout {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    padding: 0.8rem 1rem;
+    margin: 1rem 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .callout-title { font-weight: 600; color: var(--accent); margin-bottom: 0.3rem; }
+  .callout.key { background: #fffbeb; border-left-color: #d97706; }
+  .callout.key .callout-title { color: var(--warn); }
+  table {
+    border-collapse: collapse;
+    margin: 1rem 0;
+    width: 100%;
+    font-size: 0.92em;
+  }
+  th, td {
+    border-bottom: 1px solid var(--rule);
+    padding: 0.5rem 0.7rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { font-weight: 600; background: var(--code-bg); }
+  td.num, th.num { text-align: right; font-family: "SF Mono", monospace; }
+  td.mono, th.mono { font-family: "SF Mono", monospace; font-size: 0.92em; }
+  tr.total th, tr.total td { border-top: 2px solid var(--rule); }
+  .good { color: var(--good); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  hr.section { border: 0; border-top: 2px solid var(--rule); margin: 3rem 0; }
+  figure { margin: 1.5rem 0; text-align: center; }
+  figure svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+  figcaption {
+    color: var(--muted);
+    font-size: 0.86em;
+    margin-top: 0.6rem;
+    font-style: italic;
+    text-align: center;
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .svg-text { font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+  @media (max-width: 900px) {
+    nav.toc { display: none; }
+    main { padding: 2rem 1.25rem 5rem; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#s1">Overview</a></li>
+    <li><a href="#s2">The hardware, from first principles</a></li>
+    <li><a href="#s3">The split space</a></li>
+    <li><a href="#s4">The matmul cost function, term by term</a>
+      <ol class="sub">
+        <li><a href="#s4-1"><code>compute_us</code></a></li>
+        <li><a href="#s4-2"><code>hbm_us</code></a></li>
+        <li><a href="#s4-3"><code>psum_us</code></a></li>
+        <li><a href="#s4-4"><code>target_m_us</code></a></li>
+        <li><a href="#s4-5"><code>batch_penalty</code></a></li>
+        <li><a href="#s4-6"><code>redistribution_us</code></a></li>
+        <li><a href="#s4-7">removed <code>lx_pressure_us</code></a></li>
+      </ol>
+    </li>
+    <li><a href="#s5">The pointwise cost function</a></li>
+    <li><a href="#s6">The reduction cost function</a></li>
+    <li><a href="#s7">The unified architecture</a></li>
+    <li><a href="#s8">Methodology — calibration</a></li>
+    <li><a href="#s9">Validation results</a>
+      <ol class="sub">
+        <li><a href="#s9-1">Matmul prefill / batched</a></li>
+        <li><a href="#s9-2">Single-token decode</a></li>
+        <li><a href="#s9-3">Pointwise / reduction</a></li>
+      </ol>
+    </li>
+    <li><a href="#s10">Known limits</a></li>
+    <li><a href="#s11">Split-K</a></li>
+    <li><a href="#sapp">Appendix: constant reference</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>The Spyre matmul work-division cost model, from first principles</h1>
+<p class="subtitle">
+  A single, self-contained explanation of the cost model that drives work-division on the
+  IBM Spyre AI Accelerator (AIU 1.0) inside the torch-spyre Inductor backend — <em>what</em> it
+  does, <em>why</em> each term exists, <em>how</em> each term is computed, and <em>how</em>
+  each coefficient was calibrated.
+</p>
+<p>
+  Every formula here is traced to its source in
+  <code>torch_spyre/_inductor/work_division.py</code> and
+  <code>torch_spyre/_inductor/config.py</code>. Where a number is quoted, it is the number
+  actually in the code, not an approximation.
+</p>
+
+<!-- ============================ SECTION 1 ============================ -->
+<h2 id="s1">1. Overview</h2>
+<p>
+  When the Spyre backend compiles an operation, it must decide <strong>how to spread that
+  operation's work across the 32 cores of the accelerator</strong>. This is the
+  <em>work-division</em> problem. For a matmul <code>[B, M, K] @ [B, K, N]</code>, the question
+  is: how many cores should split the batch dimension (<code>b</code>), how many should split
+  the output rows <code>M</code> (<code>m</code>), how many should split the output columns
+  <code>N</code> (<code>n</code>), and how many should split the reduction dimension
+  <code>K</code> (<code>k</code>)? The product <code>b·m·n·k</code> must not exceed 32, and each
+  factor must evenly divide its dimension.
+</p>
+<p>
+  The cost model answers this question by <strong>enumeration plus scoring</strong>. It lists
+  every feasible <code>(b, m, n, k)</code> split, assigns each a predicted kernel time in
+  microseconds via a closed-form cost function, and picks the split with the lowest score
+  (<code>argmin</code>). That is the entire control flow: enumerate, score, pick the minimum.
+  There is no search heuristic, no learned model at inference time — just a small analytic
+  function evaluated over a divisor grid.
+</p>
+<p>
+  The model is <strong>unified across three op classes</strong>. A single dispatcher,
+  <code>_classify_op</code> → <code>_score_split</code>, routes each operation to one of three
+  scorers:
+</p>
+<ul>
+  <li><code>_matmul_split_cost</code> for batched matmul / linear / bmm,</li>
+  <li><code>_pointwise_split_cost</code> for elementwise ops (add, silu, mul, ...),</li>
+  <li><code>_reduction_split_cost</code> for simple reductions (sum, mean, max, amax, ...).</li>
+</ul>
+<p>
+  Each scorer is gated by its own config flag, all <strong>off by default</strong>
+  (<code>SPYRE_COST_MODEL_MATMUL_PLANNER</code>, <code>..._POINTWISE_PLANNER</code>,
+  <code>..._REDUCTION_PLANNER</code>). When a flag is off, that op class uses the existing
+  priority-based heuristic distributor.
+</p>
+
+<figure>
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <rect x="14" y="70" width="150" height="80" rx="8" fill="#fff" stroke="#475569" stroke-width="2"/>
+  <text x="89" y="96" text-anchor="middle" font-size="13" font-weight="bold">an op</text>
+  <text x="89" y="114" text-anchor="middle" font-size="10">matmul / pointwise</text>
+  <text x="89" y="128" text-anchor="middle" font-size="10">/ reduction</text>
+
+  <path d="M 168,110 L 210,110" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#a1)"/>
+
+  <rect x="214" y="44" width="220" height="132" rx="8" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="324" y="66" text-anchor="middle" font-size="13" font-weight="bold" fill="#2563eb">unified cost model</text>
+  <text x="324" y="90" text-anchor="middle" font-size="11" font-family="monospace">_classify_op</text>
+  <text x="324" y="110" text-anchor="middle" font-size="11" font-family="monospace">enumerate splits</text>
+  <text x="324" y="130" text-anchor="middle" font-size="11" font-family="monospace">_score_split (argmin)</text>
+  <text x="324" y="158" text-anchor="middle" font-size="10" fill="#475569" font-style="italic">≤ 32 cores total</text>
+
+  <path d="M 438,110 L 480,110" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#a1)"/>
+
+  <rect x="484" y="70" width="150" height="80" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="559" y="96" text-anchor="middle" font-size="13" font-weight="bold">chosen split</text>
+  <text x="559" y="114" text-anchor="middle" font-size="11" font-family="monospace">(b, m, n, k)</text>
+  <text x="559" y="130" text-anchor="middle" font-size="10" fill="#475569">lowest score</text>
+
+  <path d="M 638,110 L 676,110" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#a1)"/>
+
+  <rect x="680" y="80" width="68" height="60" rx="8" fill="#fff" stroke="#475569" stroke-width="2"/>
+  <text x="714" y="106" text-anchor="middle" font-size="11">SDSC</text>
+  <text x="714" y="122" text-anchor="middle" font-size="11">kernel</text>
+
+  <text x="324" y="210" text-anchor="middle" font-size="10" fill="#475569" font-style="italic">
+    one model, three op-class scorers — each independently flag-gated, all off by default
+  </text>
+
+  <defs>
+    <marker id="a1" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <polygon points="0 0, 8 4, 0 8" fill="#475569"/>
+    </marker>
+  </defs>
+</svg>
+<figcaption>Figure 1 — The unified cost model sits between the FX graph and the SDSC kernel emitter. <code>_classify_op</code> routes each op to a class-specific scorer; the scorer enumerates feasible splits and returns the <code>argmin</code>.</figcaption>
+</figure>
+
+<p>The headline result, stated honestly:</p>
+<ul>
+  <li>
+    <strong>Matmul is a real win.</strong> On the validated scorecard the cost-model split
+    matches the empirical best split on ~70% of measured shapes, with clear prefill wins
+    (e.g. QO bs=1 at 0.87× and MLP bs=4 at 0.85× against the production backend) and several
+    other matmul shapes at parity or below. Single-token decode gains a K-split path that, by
+    filling otherwise-idle cores, is up to ~1.7× faster than the same matmul with no K-split —
+    which shows up as a 0.78–0.93× ratio against the production backend (§9.2). The single largest
+    gain is <strong>MLP bs=1 at N=12800 — the worst shape in the suite — improving from 1.51 to 1.20</strong>
+    against the production backend purely by enabling the planner. It still loses to the backend at 1.20×
+    (a kernel-level gap below ~1.2, not work-division), and the model's <code>(8,4)</code> is itself ~10% off
+    the empirical optimum <code>(4,8)</code> — the wide MLP prefill band at <code>N ∈ [12800, 15872]</code> is a
+    documented split-choice miss where the <code>(m,n)</code> winner flips non-monotonically and is not landable
+    without regressing the adjacent priority shape N=12288 (§10).
+  </li>
+  <li>
+    <strong>Pointwise and reduction are parity, not wins.</strong> The two sibling scorers are
+    validated as non-regressive against the heuristic, but they produce no measurable speedup,
+    because the heuristic already makes good work-division choices for those op classes
+    (largest-dim split for pointwise; reduction-dim fallback for reductions). They exist so the
+    <em>one</em> cost model covers the whole graph uniformly, not because they beat the
+    heuristic.
+  </li>
+</ul>
+<p>The rest of this document derives every piece of that machine.</p>
+
+<!-- ============================ SECTION 2 ============================ -->
+<h2 id="s2">2. The hardware, from first principles</h2>
+<p>
+  Every term in the cost model is a consequence of one of these hardware facts. We list the
+  facts first, then in later sections each cost term points back here.
+</p>
+
+<p>
+  <strong>Cores and corelets.</strong> The AIU 1.0 has <strong>32 cores</strong>. Each core has
+  <strong>2 corelets</strong>. Work-division decides how to split an op across the 32 cores;
+  the 2-way corelet split underneath is decided by the downstream scheduler (deeptools), not by
+  this model — but it is why some splits the model treats as equivalent are not equivalent in
+  practice (see "known limits").
+</p>
+<p>
+  <strong>The PT array (the matmul engine).</strong> Each corelet contains an
+  <strong>8×8 systolic array</strong> ("PT" = processing-tile array). A systolic array is a
+  pipeline: it takes several cycles to fill before it produces results at full rate, and the
+  fill cost is amortized only if you feed it enough rows. The array consumes
+  <strong>8 rows per pass</strong> (<code>_PT_ROWS = 8</code>). If a core is given fewer than
+  ~8×8 = 64 rows of <code>M</code>, the pipeline never fully fills and the core runs below peak.
+  This is the entire physical basis for the <code>compute_us</code> derate and the
+  <code>target_m_us</code> tie-break.
+</p>
+<p>
+  <strong>Peak compute.</strong> Dense fp16 ("DL16") peak is <strong>98.304 TFLOPS</strong>.
+  This is <code>32 cores × 2 corelets × 8 rows × 8 cols × 8 SIMD × 1.5 GHz × 2 FLOPs/MAC</code>.
+  Note this is the fp16 figure, <strong>not</strong> the public "300+ TOPS" number (that is
+  INT8). Dividing peak by 2 (FLOPs→MACs) and by 32 (cores) gives the per-core MAC rate the cost
+  model uses:
+</p>
+<pre><code>_COST_PEAK_MACS_US_CORE = (98.304e12 / 2 / 32) / 1e6 = 1.536e6  MACs/us/core</code></pre>
+<p>
+  <strong>XRF (weight register file): 64 KB/corelet.</strong> That is <strong>64 fp16
+  weight-sticks</strong> (a stick = 64 fp16 elements = 128 bytes). XRF caps how much weight can
+  be held resident at the matmul array's input. This is the upstream reason weights have a
+  residency budget at all.
+</p>
+<p>
+  <strong>LX scratchpad: 2 MB/core.</strong> The on-chip scratchpad holds the three working
+  sets of a matmul simultaneously: activations, weights, and the output accumulator. The
+  asymmetry between these three (below) is what makes some splits cheaper than others — and is
+  also where the model's single biggest historical mistake lived (the removed
+  <code>lx_pressure_us</code> term, §4.7).
+</p>
+<p>
+  <strong>HBM bandwidth: 204.8 GB/s</strong> aggregate (LPDDR5). Crucially this is
+  <em>shared</em> across all cores. Per-core effective bandwidth therefore <em>falls</em> as
+  more cores read the same data — this is the basis of the "cohort penalty". The cost model
+  charges HBM traffic against this single aggregate number:
+</p>
+<pre><code>_COST_HBM_BW_GBS = 204.8        # bytes/us = 204.8 * 1000 = 204800</code></pre>
+<p>
+  <strong>One bidirectional ring</strong> connects the 32 cores. When a K-split spreads the
+  reduction across cores, each core computes a partial sum and the partial sums must be combined
+  by passing them around this ring — one "hop" per step. This ring traffic is the basis of the
+  <code>psum_us</code> term and the entire rationale for the <code>k_fast</code> core-id
+  remapping (§11).
+</p>
+
+<p>
+  <strong>The LX 3-way asymmetry (the key insight).</strong> During a matmul's inner K-loop:
+</p>
+<table>
+  <thead>
+    <tr><th>tile</th><th>access pattern</th><th>residency</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>activations</strong></td><td>each row touched <strong>once</strong>, then discarded</td><td>none — small rolling buffer; per-core slice can be many MB and it doesn't matter</td></tr>
+    <tr><td><strong>weights</strong></td><td>each column touched <strong>K times</strong> (once per reduction step)</td><td><strong>must stay resident</strong> or the kernel re-streams from HBM</td></tr>
+    <tr><td><strong>output</strong></td><td>partial sums <strong>accumulate</strong> across the whole K loop</td><td><strong>must fit</strong> or the kernel chunks the output and re-loads weights per chunk</td></tr>
+  </tbody>
+</table>
+
+<figure>
+<svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="360" y="20" text-anchor="middle" font-size="13" font-weight="bold">The LX 3-way asymmetry inside the K-loop</text>
+
+  <!-- activations -->
+  <g transform="translate(30, 50)">
+    <rect width="190" height="200" rx="6" fill="#fff" stroke="#475569" stroke-width="1.5"/>
+    <text x="95" y="24" text-anchor="middle" font-size="12" font-weight="bold" fill="#dc2626">activations</text>
+    <rect x="20" y="40" width="150" height="26" fill="#fee2e2" stroke="#dc2626"/>
+    <text x="95" y="57" text-anchor="middle" font-size="9">row → array → discard</text>
+    <text x="95" y="92" text-anchor="middle" font-size="10">touched <tspan font-weight="bold">once</tspan></text>
+    <text x="95" y="112" text-anchor="middle" font-size="10">then thrown away</text>
+    <rect x="20" y="135" width="150" height="46" rx="4" fill="#dcfce7" stroke="#16a34a"/>
+    <text x="95" y="153" text-anchor="middle" font-size="9" fill="#166534" font-weight="bold">residency: NONE</text>
+    <text x="95" y="170" text-anchor="middle" font-size="9" fill="#166534">streamed, size irrelevant</text>
+  </g>
+
+  <!-- weights -->
+  <g transform="translate(265, 50)">
+    <rect width="190" height="200" rx="6" fill="#fff" stroke="#475569" stroke-width="1.5"/>
+    <text x="95" y="24" text-anchor="middle" font-size="12" font-weight="bold" fill="#2563eb">weights</text>
+    <rect x="20" y="40" width="150" height="26" fill="#dbeafe" stroke="#2563eb"/>
+    <text x="95" y="57" text-anchor="middle" font-size="9">held at array input</text>
+    <text x="95" y="92" text-anchor="middle" font-size="10">touched <tspan font-weight="bold">K times</tspan></text>
+    <text x="95" y="112" text-anchor="middle" font-size="10">(once per K step)</text>
+    <rect x="20" y="135" width="150" height="46" rx="4" fill="#fef3c7" stroke="#d97706"/>
+    <text x="95" y="153" text-anchor="middle" font-size="9" fill="#92400e" font-weight="bold">MUST STAY RESIDENT</text>
+    <text x="95" y="170" text-anchor="middle" font-size="9" fill="#92400e">else re-stream (~cheap, ~9µs/MB)</text>
+  </g>
+
+  <!-- output -->
+  <g transform="translate(500, 50)">
+    <rect width="190" height="200" rx="6" fill="#fff" stroke="#475569" stroke-width="1.5"/>
+    <text x="95" y="24" text-anchor="middle" font-size="12" font-weight="bold" fill="#7c3aed">output</text>
+    <rect x="20" y="40" width="150" height="26" fill="#ede9fe" stroke="#7c3aed"/>
+    <text x="95" y="57" text-anchor="middle" font-size="9">+= partial each K step</text>
+    <text x="95" y="92" text-anchor="middle" font-size="10"><tspan font-weight="bold">accumulates</tspan></text>
+    <text x="95" y="112" text-anchor="middle" font-size="10">over the whole K loop</text>
+    <rect x="20" y="135" width="150" height="46" rx="4" fill="#fee2e2" stroke="#dc2626"/>
+    <text x="95" y="153" text-anchor="middle" font-size="9" fill="#b91c1c" font-weight="bold">MUST FIT</text>
+    <text x="95" y="170" text-anchor="middle" font-size="9" fill="#b91c1c">else chunk + re-load wts (~750µs/MB)</text>
+  </g>
+
+  <text x="360" y="278" text-anchor="middle" font-size="11" fill="#475569" font-style="italic">
+    Weights reused → broadcasting them to many cores is cheap. Activations streamed once → broadcasting them is expensive.
+  </text>
+</svg>
+<figcaption>Figure 2 — The LX 3-way asymmetry, the key hardware insight. Because weights are reused across the K-loop and activations are streamed once, broadcasting <em>weights</em> to many cores (wide <code>n</code>) is cheap while broadcasting <em>activations</em> to many cores (wide <code>m</code>) is expensive. The cost model captures part of this and deliberately ignores part (§4.2, §10).</figcaption>
+</figure>
+
+<p>
+  This asymmetry — weights reused, activations streamed once — is why broadcasting <em>weights</em>
+  to many cores is cheap (they sit in LX) while broadcasting <em>activations</em> to many cores
+  is expensive (each row is streamed fresh). The cost model captures part of this and
+  deliberately ignores part of it; §4.2 and §10 make the boundary explicit.
+</p>
+<p><strong>Default dtype is fp16</strong>, 2 bytes (<code>_COST_DTYPE_BYTES = 2</code>).</p>
+
+<!-- ============================ SECTION 3 ============================ -->
+<h2 id="s3">3. The split space</h2>
+<p>
+  For a matmul, the iteration space has up to four kinds of dimension. We use a consistent
+  <code>(b, m, n, k)</code> convention throughout (the number of <em>cores</em> assigned to each):
+</p>
+<table>
+  <thead>
+    <tr><th>split factor</th><th>splits dimension</th><th>meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="mono">b</td><td>batch <code>B</code></td><td>one core (group) per batch slice</td></tr>
+    <tr><td class="mono">m</td><td>output rows <code>M</code></td><td>one core (group) per row tile</td></tr>
+    <tr><td class="mono">n</td><td>output cols <code>N</code></td><td>one core (group) per column tile</td></tr>
+    <tr><td class="mono">k</td><td>reduction <code>K</code></td><td>cores cooperate on a partial-sum reduction</td></tr>
+  </tbody>
+</table>
+<p>
+  A split is <strong>feasible</strong> iff <code>b·m·n·k ≤ 32</code> and each factor divides its
+  dimension evenly (the enumeration draws each factor from <code>sympy.divisors</code> of the dim
+  size — see <code>_enumerate_splits</code>). The product is the number of cores actually used;
+  using fewer than 32 is allowed but the planner will not pick a split that uses <em>fewer</em>
+  cores than the caller's default (<code>_matmul_cost_planner</code> guards
+  <code>math.prod(new_splits) &lt; math.prod(splits)</code>).
+</p>
+<p>
+  <strong>How cores map to tiles.</strong> Cores are assigned to a Cartesian grid of work
+  slices. With <code>(m=8, n=4)</code> the 32 cores form an 8×4 grid: 8 row-tiles × 4
+  column-tiles, each core owning one <code>(M/8)×(N/4)</code> output block. The
+  <em>assignment</em> of physical core IDs to grid positions is normally row-major; the
+  <code>k_fast</code> path (§11) changes that assignment for K-splits so K-collaborators are
+  adjacent on the ring.
+</p>
+
+<figure>
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="380" y="20" text-anchor="middle" font-size="13" font-weight="bold">The (b, m, n, k) split — 32 cores partition an M×N×K matmul</text>
+
+  <!-- A matrix M x K -->
+  <g transform="translate(40, 60)">
+    <rect width="100" height="170" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+    <text x="50" y="-8" text-anchor="middle" font-size="12" font-weight="bold">A  (M × K)</text>
+    <text x="-12" y="90" text-anchor="middle" font-size="11" font-weight="bold" transform="rotate(-90 -12 90)">M rows → split by m</text>
+    <!-- m=8 horizontal slices -->
+    <g stroke="#1e3a8a" stroke-width="0.8">
+      <line x1="0" y1="21" x2="100" y2="21"/><line x1="0" y1="43" x2="100" y2="43"/>
+      <line x1="0" y1="64" x2="100" y2="64"/><line x1="0" y1="85" x2="100" y2="85"/>
+      <line x1="0" y1="106" x2="100" y2="106"/><line x1="0" y1="128" x2="100" y2="128"/>
+      <line x1="0" y1="149" x2="100" y2="149"/>
+    </g>
+    <text x="50" y="190" text-anchor="middle" font-size="9" fill="#475569">K cols → split by k</text>
+  </g>
+
+  <text x="175" y="150" text-anchor="middle" font-size="22" font-weight="bold">×</text>
+
+  <!-- B matrix K x N -->
+  <g transform="translate(210, 60)">
+    <rect width="170" height="170" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+    <text x="85" y="-8" text-anchor="middle" font-size="12" font-weight="bold">B  (K × N)</text>
+    <text x="85" y="190" text-anchor="middle" font-size="11" font-weight="bold">N cols → split by n</text>
+    <!-- n=4 vertical slices -->
+    <g stroke="#14532d" stroke-width="0.9">
+      <line x1="42" y1="0" x2="42" y2="170"/><line x1="85" y1="0" x2="85" y2="170"/>
+      <line x1="127" y1="0" x2="127" y2="170"/>
+    </g>
+  </g>
+
+  <text x="410" y="150" text-anchor="middle" font-size="22" font-weight="bold">=</text>
+
+  <!-- C grid with cores -->
+  <g transform="translate(445, 60)">
+    <text x="120" y="-8" text-anchor="middle" font-size="12" font-weight="bold">C  (M × N) core grid · (m=8, n=4)</text>
+    <g font-size="8" text-anchor="middle">
+      <!-- 8 rows x 4 cols -->
+    </g>
+    <g>
+      <!-- generate 8x4 grid -->
+      <g>
+        <!-- row 0 -->
+        <rect x="0" y="0" width="60" height="21" fill="#eff6ff" stroke="#2563eb" stroke-width="0.8"/>
+        <rect x="60" y="0" width="60" height="21" fill="#eff6ff" stroke="#2563eb" stroke-width="0.8"/>
+        <rect x="120" y="0" width="60" height="21" fill="#eff6ff" stroke="#2563eb" stroke-width="0.8"/>
+        <rect x="180" y="0" width="60" height="21" fill="#eff6ff" stroke="#2563eb" stroke-width="0.8"/>
+      </g>
+    </g>
+    <!-- Draw the full 8x4 grid programmatically via repeated rects -->
+    <g stroke="#2563eb" stroke-width="0.8" fill="#eff6ff">
+      <rect x="0" y="21" width="60" height="21"/><rect x="60" y="21" width="60" height="21"/><rect x="120" y="21" width="60" height="21"/><rect x="180" y="21" width="60" height="21"/>
+      <rect x="0" y="42" width="60" height="21"/><rect x="60" y="42" width="60" height="21"/><rect x="120" y="42" width="60" height="21"/><rect x="180" y="42" width="60" height="21"/>
+      <rect x="0" y="63" width="60" height="21"/><rect x="60" y="63" width="60" height="21"/><rect x="120" y="63" width="60" height="21"/><rect x="180" y="63" width="60" height="21"/>
+      <rect x="0" y="84" width="60" height="21"/><rect x="60" y="84" width="60" height="21"/><rect x="120" y="84" width="60" height="21"/><rect x="180" y="84" width="60" height="21"/>
+      <rect x="0" y="105" width="60" height="21"/><rect x="60" y="105" width="60" height="21"/><rect x="120" y="105" width="60" height="21"/><rect x="180" y="105" width="60" height="21"/>
+      <rect x="0" y="126" width="60" height="21"/><rect x="60" y="126" width="60" height="21"/><rect x="120" y="126" width="60" height="21"/><rect x="180" y="126" width="60" height="21"/>
+      <rect x="0" y="147" width="60" height="21"/><rect x="60" y="147" width="60" height="21"/><rect x="120" y="147" width="60" height="21"/><rect x="180" y="147" width="60" height="21"/>
+    </g>
+    <text x="30" y="14" text-anchor="middle" font-size="9" fill="#2563eb">c0</text>
+    <text x="90" y="14" text-anchor="middle" font-size="9" fill="#2563eb">c1</text>
+    <text x="150" y="14" text-anchor="middle" font-size="9" fill="#2563eb">c2</text>
+    <text x="210" y="14" text-anchor="middle" font-size="9" fill="#2563eb">c3</text>
+    <text x="120" y="195" text-anchor="middle" font-size="9" fill="#475569">8 row-tiles × 4 col-tiles = 32 cores</text>
+    <text x="120" y="208" text-anchor="middle" font-size="9" fill="#475569">each core owns one (M/8)×(N/4) block</text>
+  </g>
+</svg>
+<figcaption>Figure 3 — A <code>(b, m, n, k)</code> split partitions the work across cores. With <code>(m=8, n=4)</code> the 32 cores form an 8×4 grid over the M×N output; <code>k</code> would further split the K reduction (Figure 6), and <code>b</code> the batch. The product <code>b·m·n·k ≤ 32</code>.</figcaption>
+</figure>
+
+<p>
+  <strong>Sticks.</strong> Memory is tiled into 128-byte sticks (64 fp16 elements). The N and K
+  iteration dimensions are <em>measured in sticks</em> inside the iteration space, so the
+  planner's divisor lists for N and K are divisors of the <em>stick count</em>, not the element
+  count. The cost model converts back to elements (<code>N_e</code>, <code>K_e</code>) so that
+  byte counts and FLOPs are physical. This stick-granularity is also why splitting the innermost
+  ("stick") dimension is penalized for pointwise ops (§5): a split that doesn't land on a stick
+  boundary fragments the access.
+</p>
+<p>
+  <strong>SDSC dim labels.</strong> Inside the SDSC kernel descriptor the same dimensions wear
+  different names. You will see these in planner logs and split dumps:
+</p>
+<table>
+  <thead>
+    <tr><th>SDSC label</th><th>math dim</th><th><code>(b,m,n,k)</code> factor</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="mono">mb</td><td>M (rows)</td><td class="mono">m</td></tr>
+    <tr><td class="mono">out</td><td>N (cols)</td><td class="mono">n</td></tr>
+    <tr><td class="mono">in</td><td>K (reduction)</td><td class="mono">k</td></tr>
+    <tr><td class="mono">x</td><td>B (batch)</td><td class="mono">b</td></tr>
+  </tbody>
+</table>
+<p>
+  So a planner pick logged as <code>(mb=8, out=4, in=1)</code> is exactly
+  <code>(m=8, n=4, k=1)</code>: 8 cores split rows, 4 split columns, no K-split.
+</p>
+
+<!-- ============================ SECTION 4 ============================ -->
+<h2 id="s4">4. The matmul cost function, term by term</h2>
+<p>The whole matmul score (<code>_matmul_split_cost</code>) is:</p>
+<pre><code>total_us = (compute_us + hbm_us + psum_us + target_m_us) * batch_penalty
+           + redistribution_us</code></pre>
+<p>
+  The four terms inside the parentheses are the per-core kernel costs that scale together with
+  batch; <code>batch_penalty</code> multiplies them; <code>redistribution_us</code> is a flat
+  additive fusion tie-break added outside. We take each in turn: the <strong>formula</strong>
+  (verbatim), the <strong>mechanism</strong> (why it exists), the <strong>computation</strong>
+  (how it is evaluated), and the <strong>calibration</strong> (how the coefficient was set).
+</p>
+
+<h3 id="s4-1">4.1 <code>compute_us</code> — per-core MAC work, derated for PT-pipeline fill</h3>
+<p><strong>Formula</strong> (from source):</p>
+<pre><code>m_t            = M // m if m else 1
+pt_passes      = max(1.0, m_t / _PT_ROWS)              # _PT_ROWS = 8
+pt_eff         = min(1.0, (pt_passes / _TARGET_PT_PASSES) ** 0.5)   # _TARGET_PT_PASSES = 8
+effective_peak = _COST_PEAK_MACS_US_CORE * pt_eff      # 1.536e6 * pt_eff
+compute_us     = (B * M * N * K / cores_used) / effective_peak</code></pre>
+<p>
+  <strong>Mechanism.</strong> Each core does <code>B·M·N·K / (b·m·n·k)</code> MACs. At full
+  pipeline fill it runs at the 1.536e6 MACs/us/core peak. But the 8×8 systolic array needs rows
+  to amortize its fill latency. The number of "passes" through the array is the per-core row
+  count <code>M/m</code> divided by the 8 rows the array eats per pass. The pipeline reaches full
+  efficiency at about <code>_TARGET_PT_PASSES = 8</code> passes (i.e. ~64 rows per core). Below
+  that, the array runs below peak and we <em>derate</em>.
+</p>
+<p>
+  <strong>Why the derate is a square root, not linear.</strong> This is the single most
+  important calibration story in the compute term. A naïve linear ramp
+  <code>pt_eff = pt_passes / 8</code> predicts 50% efficiency at 4 passes. Device measurement
+  showed the real loss at 4 passes was only <strong>10–30%</strong>, i.e. efficiency ~0.7–0.9,
+  not 0.5. The sqrt form <code>(pt_passes / 8)**0.5</code> gives exactly 0.71 at 4 passes and
+  0.35 at 1 pass — matching the measured shoulder. The linear form was too pessimistic and would
+  have wrongly pushed the planner toward over-splitting M to chase passes it didn't need.
+</p>
+
+<figure>
+<svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="360" y="18" text-anchor="middle" font-size="13" font-weight="bold">PT-pipeline fill — sqrt derate vs the naïve linear ramp</text>
+
+  <line x1="80" y1="240" x2="690" y2="240" stroke="#475569" stroke-width="1.5"/>
+  <line x1="80" y1="240" x2="80" y2="50" stroke="#475569" stroke-width="1.5"/>
+
+  <text x="80" y="262" text-anchor="middle" font-size="10">0</text>
+  <text x="232" y="262" text-anchor="middle" font-size="10">2</text>
+  <text x="385" y="262" text-anchor="middle" font-size="10">4</text>
+  <text x="537" y="262" text-anchor="middle" font-size="10">6</text>
+  <text x="650" y="262" text-anchor="middle" font-size="10">8 (target)</text>
+  <text x="385" y="284" text-anchor="middle" font-size="11" fill="#475569">PT passes  =  per-core M / 8</text>
+
+  <text x="70" y="244" text-anchor="end" font-size="10">0%</text>
+  <text x="70" y="193" text-anchor="end" font-size="10">25%</text>
+  <text x="70" y="146" text-anchor="end" font-size="10">50%</text>
+  <text x="70" y="98" text-anchor="end" font-size="10">100%</text>
+  <text x="34" y="148" text-anchor="middle" font-size="11" fill="#475569" transform="rotate(-90 34 148)">PT efficiency (pt_eff)</text>
+
+  <!-- linear ramp (too pessimistic) -->
+  <line x1="80" y1="240" x2="650" y2="95" stroke="#dc2626" stroke-width="1.6" stroke-dasharray="5,4"/>
+  <text x="470" y="185" font-size="10" fill="#dc2626">naïve linear (pt/8) — too pessimistic</text>
+
+  <!-- sqrt curve: pt_eff = sqrt(pt/8). points at pt = 0,1,2,3,4,5,6,7,8 -->
+  <!-- y = 240 - 145*sqrt(pt/8). x = 80 + 76.25*pt -->
+  <polyline points="80,240 156.25,189.7 232.5,168.4 308.75,152.2 385,138.7 461.25,127.0 537.5,116.5 613.75,107.0 650,95"
+            fill="none" stroke="#2563eb" stroke-width="2.6"/>
+  <text x="300" y="120" font-size="10" fill="#2563eb" font-weight="bold">sqrt (pt/8)^0.5 — fits measurement</text>
+
+  <!-- markers -->
+  <circle cx="156.25" cy="189.7" r="3.5" fill="#d97706"/>
+  <text x="156" y="178" text-anchor="middle" font-size="9" fill="#92400e">1 pass: 0.35</text>
+
+  <line x1="385" y1="240" x2="385" y2="138.7" stroke="#94a3b8" stroke-width="0.6" stroke-dasharray="2,2"/>
+  <circle cx="385" cy="138.7" r="3.5" fill="#d97706"/>
+  <text x="385" y="128" text-anchor="middle" font-size="9" fill="#92400e">4 passes: 0.71</text>
+  <circle cx="385" cy="167.5" r="3" fill="#dc2626"/>
+  <text x="420" y="210" font-size="9" fill="#dc2626">linear says 0.50</text>
+
+  <circle cx="650" cy="95" r="3.5" fill="#16a34a"/>
+  <text x="640" y="80" text-anchor="end" font-size="9" fill="#166534" font-weight="bold">≥8 passes: 1.0 (clamped)</text>
+</svg>
+<figcaption>Figure 4 — PT-pipeline fill / sqrt derate curve. The square-root form (blue) gives 0.35 at 1 pass and 0.71 at 4 passes, matching the measured 10–30% loss at 4 passes; the linear ramp (red dashed) predicts only 0.50 and is too pessimistic. Both clamp to 1.0 at the 8-pass target (~64 rows/core).</figcaption>
+</figure>
+
+<p>
+  <strong>Computation.</strong> <code>cores_used = b·m·n·k</code>; if it is 0 or
+  <code>&gt; max_cores</code> the score is <code>+inf</code> (infeasible). Otherwise the formula
+  above is a handful of arithmetic ops. <code>compute_us</code> dominates the score for
+  compute-bound shapes (large <code>K·M / cores</code>).
+</p>
+
+<h3 id="s4-2">4.2 <code>hbm_us</code> — bytes over bandwidth, with a broadcast cohort penalty</h3>
+<p><strong>Formula:</strong></p>
+<pre><code>bytes_total    = (B*M*K + B*K*N + B*M*N) * _COST_DTYPE_BYTES   # activations + weights + output, fp16
+cohort         = max(m, n)
+cohort_penalty = max(1.0, cohort / _COST_COHORT_LIMIT)         # _COST_COHORT_LIMIT = 8
+hbm_us         = bytes_total / (_COST_HBM_BW_GBS * 1000) * cohort_penalty</code></pre>
+<p>
+  <strong>Mechanism.</strong> The total bytes touched are the three matrices (read both inputs,
+  write the output) at 2 bytes each. The HBM bus is shared, so the wall-clock to move those bytes
+  is <code>bytes / 204800</code> µs at best. The <strong>cohort penalty</strong> captures
+  contention: when a row or column has to be <em>broadcast</em> to many cores, those cores
+  contend for the shared bus. A "cohort" is the number of cores a given operand is broadcast to.
+  Below a knee of 8 cores the bus absorbs it; above 8, the extra fan-out scales the cost linearly.
+</p>
+
+<figure>
+<svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="360" y="18" text-anchor="middle" font-size="13" font-weight="bold">Cohort broadcast — weights to the m cores, activations to the n cores</text>
+
+  <rect x="250" y="40" width="220" height="36" rx="4" fill="#e5e7eb" stroke="#475569" stroke-width="2"/>
+  <text x="360" y="63" text-anchor="middle" font-size="11" font-weight="bold">HBM (shared 204.8 GB/s)</text>
+
+  <!-- weight broadcast (down a column of the grid) -->
+  <g>
+    <text x="150" y="108" text-anchor="middle" font-size="11" font-weight="bold" fill="#2563eb">weight column → m cores</text>
+    <g font-size="9">
+      <rect x="60" y="120" width="56" height="34" fill="#dbeafe" stroke="#2563eb"/><text x="88" y="141" text-anchor="middle">core (0,j)</text>
+      <rect x="124" y="120" width="56" height="34" fill="#dbeafe" stroke="#2563eb"/><text x="152" y="141" text-anchor="middle">core (1,j)</text>
+      <rect x="60" y="162" width="56" height="34" fill="#dbeafe" stroke="#2563eb"/><text x="88" y="183" text-anchor="middle">core (2,j)</text>
+      <rect x="124" y="162" width="56" height="34" fill="#dbeafe" stroke="#2563eb"/><text x="152" y="183" text-anchor="middle">core (3,j)</text>
+    </g>
+    <g stroke="#2563eb" stroke-width="1.3" fill="none">
+      <path d="M 300,76 L 88,120" marker-end="url(#wb)"/>
+      <path d="M 320,76 L 152,120" marker-end="url(#wb)"/>
+    </g>
+    <text x="150" y="216" text-anchor="middle" font-size="9" fill="#166534">cheap: weights stay resident in LX</text>
+  </g>
+
+  <!-- activation broadcast (across a row of the grid) -->
+  <g>
+    <text x="560" y="108" text-anchor="middle" font-size="11" font-weight="bold" fill="#dc2626">activation row → n cores</text>
+    <g font-size="9">
+      <rect x="470" y="120" width="50" height="34" fill="#fee2e2" stroke="#dc2626"/><text x="495" y="141" text-anchor="middle">(i,0)</text>
+      <rect x="524" y="120" width="50" height="34" fill="#fee2e2" stroke="#dc2626"/><text x="549" y="141" text-anchor="middle">(i,1)</text>
+      <rect x="578" y="120" width="50" height="34" fill="#fee2e2" stroke="#dc2626"/><text x="603" y="141" text-anchor="middle">(i,2)</text>
+      <rect x="632" y="120" width="50" height="34" fill="#fee2e2" stroke="#dc2626"/><text x="657" y="141" text-anchor="middle">(i,3)</text>
+    </g>
+    <g stroke="#dc2626" stroke-width="1.3" fill="none">
+      <path d="M 420,76 L 495,120" marker-end="url(#ab2)"/>
+      <path d="M 440,76 L 549,120" marker-end="url(#ab2)"/>
+      <path d="M 450,76 L 603,120" marker-end="url(#ab2)"/>
+      <path d="M 455,76 L 657,120" marker-end="url(#ab2)"/>
+    </g>
+    <text x="576" y="180" text-anchor="middle" font-size="9" fill="#b91c1c">expensive: each row streamed fresh</text>
+  </g>
+
+  <rect x="60" y="232" width="600" height="34" rx="4" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="360" y="253" text-anchor="middle" font-size="10" font-family="monospace">cohort = max(m, n)   ·   cohort_penalty = max(1, cohort / 8)   ·   knee at 8 cores</text>
+
+  <defs>
+    <marker id="wb" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><polygon points="0 0,6 3,0 6" fill="#2563eb"/></marker>
+    <marker id="ab2" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><polygon points="0 0,6 3,0 6" fill="#dc2626"/></marker>
+  </defs>
+</svg>
+<figcaption>Figure 5 — Cohort broadcast. Each weight column is broadcast to the <code>m</code> cores that share it; each activation row is broadcast to the <code>n</code> cores that share it. The model charges <code>max(m, n)</code> symmetrically, even though weight-broadcast (blue, cheap) and activation-broadcast (red, expensive) are physically asymmetric — a deliberate, documented limitation (§10).</figcaption>
+</figure>
+
+<p>
+  <strong>Computation.</strong> <code>cohort = max(m, n)</code> and
+  <code>cohort_penalty = max(1, cohort/8)</code>. For <code>(8,4)</code> and <code>(4,8)</code>
+  the cohort is 8 in both cases → penalty 1.0; for <code>(16,2)</code> it is 16 → penalty 2.0.
+</p>
+<p>
+  <strong>Calibration / the symmetry limitation.</strong> The knee at 8 is the cohort threshold
+  above which contention is observable. But note the deliberate limitation:
+  <code>cohort = max(m, n)</code> is <strong>symmetric in <code>(m, n)</code></strong>, while the
+  real cost is <strong>asymmetric</strong>. From §2's LX 3-way asymmetry: broadcasting
+  <em>weights</em> to many cores (wide <code>n</code>) is cheap because weights stay resident in
+  LX; broadcasting <em>activations</em> to many cores (wide <code>m</code>) is expensive because
+  each activation row is streamed once. At identical nominal cohort, weight-broadcast splits can
+  run 2–3× faster than activation-broadcast splits. The model does not distinguish them. We
+  tried an asymmetric <code>(cohort_lhs=m, cohort_rhs=n)</code> pair with separate weights, and
+  several other cohort decompositions; under leave-one-out cross-validation <strong>every
+  cohort-aware variant either matched or regressed the symmetric form</strong> on the available
+  data — the calibration was degenerate. So the symmetric form was kept, and the asymmetry is
+  documented as a known limit (§10).
+</p>
+
+<h3 id="s4-3">4.3 <code>psum_us</code> — K-split reduction hops across the ring</h3>
+<p><strong>Formula:</strong></p>
+<pre><code>psum_us = max(0, k - 1) * (B * M * N) * _COST_PSUM_PER_ELEM_US   # 1.4e-4</code></pre>
+<p>
+  <strong>Mechanism.</strong> When <code>k &gt; 1</code>, the reduction over <code>K</code> is
+  spread across <code>k</code> cores, each producing a partial sum of the full
+  <code>B·M·N</code> output. Those partials must be combined over the ring: <code>k - 1</code>
+  reduction steps, each touching every output element. The cost is the number of output elements
+  times the number of extra ring hops times a per-element-per-hop coefficient. For
+  <code>k = 1</code> the term is exactly 0 — no K-split, no ring reduction.
+</p>
+
+<figure>
+<svg viewBox="0 0 720 290" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="360" y="18" text-anchor="middle" font-size="13" font-weight="bold">PSUM ring reduction across a K-split (k=4) — and the k_fast core-adjacency idea</text>
+
+  <!-- left: ring reduction -->
+  <g transform="translate(0,0)">
+    <text x="180" y="42" text-anchor="middle" font-size="11" font-weight="bold" fill="#16a34a">partial sums combine over the ring</text>
+    <circle cx="180" cy="150" r="78" fill="none" stroke="#16a34a" stroke-width="1" stroke-dasharray="4,3"/>
+    <rect x="148" y="80" width="64" height="34" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="180" y="102" text-anchor="middle" font-size="9" font-weight="bold">partial_K0</text>
+    <rect x="220" y="134" width="64" height="34" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="252" y="156" text-anchor="middle" font-size="9" font-weight="bold">partial_K1</text>
+    <rect x="148" y="186" width="64" height="34" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="180" y="208" text-anchor="middle" font-size="9" font-weight="bold">partial_K2</text>
+    <rect x="76" y="134" width="64" height="34" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="108" y="156" text-anchor="middle" font-size="9" font-weight="bold">partial_K3</text>
+    <path d="M 212,98 Q 270,108 256,134" stroke="#16a34a" stroke-width="2" fill="none" marker-end="url(#pr)"/>
+    <text x="268" y="120" font-size="8" fill="#16a34a">hop 1</text>
+    <path d="M 252,168 Q 250,210 212,210" stroke="#16a34a" stroke-width="2" fill="none" marker-end="url(#pr)"/>
+    <text x="262" y="196" font-size="8" fill="#16a34a">hop 2</text>
+    <path d="M 148,210 Q 90,210 108,168" stroke="#16a34a" stroke-width="2" fill="none" marker-end="url(#pr)"/>
+    <text x="82" y="196" font-size="8" fill="#16a34a">hop 3</text>
+    <text x="180" y="153" text-anchor="middle" font-size="10" font-weight="bold" fill="#dc2626">Σ = k−1 hops</text>
+  </g>
+
+  <!-- right: k_fast adjacency -->
+  <g transform="translate(390,0)">
+    <text x="160" y="42" text-anchor="middle" font-size="11" font-weight="bold">k_fast: K-collaborators adjacent on ring</text>
+
+    <text x="80" y="70" text-anchor="middle" font-size="9" fill="#dc2626" font-weight="bold">default (row-major)</text>
+    <g font-size="8">
+      <rect x="20" y="80" width="34" height="26" fill="#fee2e2" stroke="#dc2626"/><text x="37" y="97" text-anchor="middle">K0</text>
+      <rect x="56" y="80" width="34" height="26" fill="#fff" stroke="#94a3b8"/><text x="73" y="97" text-anchor="middle">·</text>
+      <rect x="92" y="80" width="34" height="26" fill="#fff" stroke="#94a3b8"/><text x="109" y="97" text-anchor="middle">·</text>
+      <rect x="128" y="80" width="34" height="26" fill="#fee2e2" stroke="#dc2626"/><text x="145" y="97" text-anchor="middle">K1</text>
+    </g>
+    <text x="91" y="124" text-anchor="middle" font-size="8" fill="#dc2626">scattered → up to m·n hops</text>
+
+    <text x="80" y="158" text-anchor="middle" font-size="9" fill="#166534" font-weight="bold">k_fast (K fastest-varying)</text>
+    <g font-size="8">
+      <rect x="20" y="168" width="34" height="26" fill="#dcfce7" stroke="#16a34a"/><text x="37" y="185" text-anchor="middle">K0</text>
+      <rect x="56" y="168" width="34" height="26" fill="#dcfce7" stroke="#16a34a"/><text x="73" y="185" text-anchor="middle">K1</text>
+      <rect x="92" y="168" width="34" height="26" fill="#dcfce7" stroke="#16a34a"/><text x="109" y="185" text-anchor="middle">K2</text>
+      <rect x="128" y="168" width="34" height="26" fill="#dcfce7" stroke="#16a34a"/><text x="145" y="185" text-anchor="middle">K3</text>
+    </g>
+    <text x="91" y="212" text-anchor="middle" font-size="8" fill="#166534">adjacent → 1 hop per output tile</text>
+  </g>
+
+  <rect x="60" y="252" width="600" height="30" rx="4" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="360" y="271" text-anchor="middle" font-size="10" font-family="monospace">psum_us = (k − 1) × (B·M·N) × 1.4e-4    ·    k=1 → 0 (no PSUM)</text>
+
+  <defs>
+    <marker id="pr" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0,8 4,0 8" fill="#16a34a"/></marker>
+  </defs>
+</svg>
+<figcaption>Figure 6 — PSUM ring reduction across a K-split. With <code>k=4</code> each core holds a partial sum that is chained around the ring in <code>k−1=3</code> hops. The <code>k_fast</code> mapping (§11) treats K as the fastest-varying axis along <code>core_id</code> so K-collaborators land on adjacent ring positions — 1 hop per output tile instead of <code>m·n</code>.</figcaption>
+</figure>
+
+<p>
+  <strong>Computation.</strong> Trivial once <code>k</code> is known. The term grows with
+  <code>B·M·N</code>, so it is large when the output is large and the K-split is deep — which is
+  exactly the regime where K-split should be discouraged.
+</p>
+<p>
+  <strong>Calibration.</strong> <code>_COST_PSUM_PER_ELEM_US = 1.4e-4</code> was fit from a
+  7-shape K-split sweep (Llama-7B QO/KV/Down, Granite MLP, Mistral MLP, Llama-70B QO, plus a
+  wide-N synthetic). The implied per-element-per-hop coefficients across those shapes clustered
+  at 1.1–1.4e-4; the high end was chosen so the term is not under-counted. This term is what
+  correctly keeps extreme-K shapes (e.g. <code>K=32768, M=128, N=512</code>) on <code>k=1</code>
+  even though their raw per-core FLOP counts make a K-split look appealing — the PSUM cost
+  dominates the FLOP saving.
+</p>
+
+<h3 id="s4-4">4.4 <code>target_m_us</code> — the PT sweet-spot tie-break</h3>
+<p><strong>Formula:</strong></p>
+<pre><code>target_m    = max(_M_MIN, min(max_cores // 2, max(1, M // (_TARGET_PT_PASSES * _PT_ROWS))))
+              # _M_MIN = 4, _TARGET_PT_PASSES*_PT_ROWS = 64
+m_dist      = abs(math.log2(max(1, m) / target_m))
+target_m_us = m_dist * _COST_TARGET_M_PENALTY_US                # 50.0 us per log2 step</code></pre>
+<p>
+  <strong>Mechanism.</strong> Two splits can have nearly identical compute and HBM cost (e.g.
+  <code>(8,4)</code> vs <code>(16,2)</code> at M=512), and the model needs a principled
+  tie-break. The PT pipeline runs most efficiently when each core gets about
+  <code>8 passes × 8 rows</code> = 64 rows of M. <code>target_m</code> is the number of M-cores
+  that lands per-core M near that 64-row sweet spot, clamped to
+  <code>[_M_MIN=4, max_cores/2]</code>. The penalty grows with the log2-distance of the
+  candidate's <code>m</code> from that target.
+</p>
+<p>
+  <strong>Computation.</strong> <code>target_m = clamp(4, 16, M/64)</code>. For M=512 that is
+  <code>clamp(4,16,8) = 8</code>, so <code>m=8</code> is the sweet spot (zero penalty),
+  <code>m=16</code> and <code>m=4</code> each cost one log2 step = 50 µs.
+</p>
+<p>
+  <strong>Calibration.</strong> 50 µs/log2-step fits the big-M regime well (~48 µs/log2 measured
+  at M≥256). It over-counts the small-M regime by ~4× (real ~12 µs/log2 there). A variant scaled
+  by <code>compute_us</code> was tried to fix the small-M bias but it flipped the QO shape (a
+  real win) into a miss, so it was deferred. Because this term is only a tie-break — it is small
+  relative to compute and HBM — the small-M over-count rarely changes a pick.
+</p>
+
+<h3 id="s4-5">4.5 <code>batch_penalty</code> — the b^1.4 power law</h3>
+<p><strong>Formula:</strong></p>
+<pre><code>batch_penalty = b ** _COST_BATCH_SPLIT_EXPONENT      # 1.4</code></pre>
+<p>
+  <strong>Mechanism.</strong> Splitting the batch across cores is <em>more</em> expensive per
+  core than tiling the batch sequentially, because each batch item is independent work with its
+  own kernel-launch / HBM-banking overhead; a batch-split pays that overhead <code>b</code> times
+  concurrently and contends. For <code>b=1</code> (batch iterated sequentially) the penalty is
+  1.0 and disappears.
+</p>
+<p>
+  <strong>Calibration.</strong> From a <code>bmm[8,512,4096,512]</code> batch sweep, the measured
+  slowdown <code>T(b)/T(1)</code> was 2.56× at b=2, 7.57× at b=4, 19.0× at b=8. Fitting a power
+  law <code>b^x</code> to those points gives x ≈ 1.36, 1.46, 1.42 — hence the rounded
+  <strong>1.4</strong>. The previously used linear form <code>1 + 0.6·(b-1)</code>
+  under-predicted by 3–4× at b=8 and let the planner pick ruinous batch-splits. The 1.4 power
+  law correctly suppresses batch-split for MoE expert FFNs (the real bmm case), keeping them on
+  <code>b=1</code> with an <code>m×n</code> co-split.
+</p>
+
+<h3 id="s4-6">4.6 <code>redistribution_us</code> — the fusion-bundle tie-break</h3>
+<p><strong>Formula:</strong></p>
+<pre><code>redistribution_us = B * M * N * _COST_DTYPE_BYTES * _COST_REDISTRIBUTION_US_PER_BYTE   # 1e-6 us/byte
+# charged only when the matmul is in a fusion bundle with a non-matmul op
+# AND the candidate split diverges from the bundle's default layout</code></pre>
+<p>
+  <strong>Mechanism.</strong> When a matmul shares a fusion bundle with a non-matmul partner
+  (e.g. <code>silu(linear(x))</code>), a split that differs from the partner's layout would, in
+  principle, force the matmul output to be reshuffled across cores before the partner consumes
+  it. The model charges this so it only rewrites a bundled matmul's split when the kernel savings
+  beat the bundle penalty. The <code>_matmuls_fused_with_nonmatmul</code> helper identifies which
+  matmul outputs are in such bundles; <code>_score_split</code> adds the penalty only when
+  <code>fused</code> and the candidate <code>diverges_from_default</code>.
+</p>
+<p>
+  <strong>Calibration.</strong> Device measurement of fused <code>silu(linear)</code> bundles
+  found the <em>actual</em> reshuffle cost is essentially 0 — the original coefficient
+  <code>1e-4</code> was ~100× too large and was <em>blocking</em> otherwise-beneficial bundled
+  matmul rewrites. It was lowered to <code>1e-6</code>, which keeps it as a gentle tie-break
+  rather than a hard gate.
+</p>
+
+<h3 id="s4-7">4.7 The removed <code>lx_pressure_us</code> term — why it was dropped</h3>
+<p>An earlier model had a sixth term:</p>
+<pre><code>per_core_weights = K * (N / n) * 2
+lx_pressure_us   = max(0, per_core_weights - 2MB) * 5e-6</code></pre>
+<p>
+  It was introduced to capture a measured ~120 µs win for <code>(m=4, n=8)</code> over
+  <code>(m=8, n=4)</code> on the Granite MLP shape (<code>M=512, K=4096, N=12800</code>). It was
+  <strong>removed</strong>, and understanding why is important because it is the model's clearest
+  lesson about overfitting.
+</p>
+<p>
+  The story (from the corner-stress sweep): the term was named for <em>weight</em> overflow but
+  the real cost it tracked was <em>output</em> overflow. The LX 3-way asymmetry (§2) means weight
+  overflow is cheap (~9 µs/MB — weights re-stream from HBM, amortized over the K loop) while
+  output overflow is expensive (~750 µs/MB — the kernel must <em>chunk</em> the output and
+  <strong>re-load the per-core weights for every chunk</strong>). The two correlate at the
+  calibration shape because both per-core weights <code>K·(N/n)</code> and per-core output
+  <code>(M/m)·(N/n)</code> grow with <code>(N/n)</code>, so penalizing weight overflow
+  accidentally tracked the true output cost there. But the proxy is a kludge that breaks away
+  from the calibration regime:
+</p>
+<ul>
+  <li>A clean K-sweep up to 16 MB per-core weights showed <strong>zero detectable per-byte weight cost</strong> — the term was fitting kernel-template artifacts, not physics.</li>
+  <li>The coefficient is <strong>wrong at adjacent N</strong>: at N=16384 and N=20480 the term predicts <code>(4,8)</code> wins, but <code>(8,4)</code> empirically wins by ~40% there.</li>
+  <li>It was tuned to capture exactly <strong>one</strong> N value (12800), where the kernel template happens to favor <code>(4,8)</code>.</li>
+</ul>
+<p>
+  Removing it costs ~120 µs (~10%) on that single Granite-MLP kernel — well under 1% of
+  end-to-end Granite latency — in exchange for theoretical cleanness and not mis-ranking the much
+  larger neighborhood of N values. A physically correct <em>output</em>-pressure term was
+  considered, but per-core output stays small (64–400 KB) at every shape we actually compile, so
+  the term would never fire on a real workload. It was not added. (See §10 for the residual
+  N-flip band this leaves.)
+</p>
+
+<!-- ============================ SECTION 5 ============================ -->
+<h2 id="s5">5. The pointwise cost function</h2>
+<p>
+  <code>_pointwise_split_cost</code> scores elementwise ops (add, mul, silu, ...). These have no
+  reduction dimension; every iteration dim is an output dim.
+</p>
+<p><strong>Formula:</strong></p>
+<pre><code>bytes_total = (sum(s * f for s, f in zip(input_sizes, input_fanouts)) + out_size) * 2
+hbm_us      = bytes_total / (_COST_HBM_BW_GBS * 1000)
+per_core_elements = out_size / cores_used
+compute_us  = per_core_elements / _COST_PEAK_ELEMENTS_US_CORE     # 1.76e3 elem/us/core
+stick_penalty_us = (_COST_STICK_FRAG_US_PER_BYTE * (stick_split - 1)
+                    * out_size * 2)                               # 4.5e-7 us/byte; 0 if stick_split==1
+batch_penalty = batch_split ** _COST_BATCH_SPLIT_EXPONENT         # b ** 1.4
+cost = (max(compute_us, hbm_us) + stick_penalty_us) * batch_penalty + redistribution_us</code></pre>
+
+<figure>
+<svg viewBox="0 0 720 290" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="360" y="18" text-anchor="middle" font-size="13" font-weight="bold">Roofline — pointwise &amp; reduction scorers take max(compute, HBM)</text>
+
+  <line x1="80" y1="230" x2="690" y2="230" stroke="#475569" stroke-width="1.5"/>
+  <line x1="80" y1="230" x2="80" y2="45" stroke="#475569" stroke-width="1.5"/>
+  <text x="385" y="262" text-anchor="middle" font-size="11" fill="#475569">arithmetic intensity →  (per-core work grows; bigger slice)</text>
+  <text x="34" y="140" text-anchor="middle" font-size="11" fill="#475569" transform="rotate(-90 34 140)">kernel time</text>
+
+  <!-- HBM-bound region: flat roof on the right; rising compute ramp on the left -->
+  <!-- compute_us (rises with per-core elements as slice grows) -->
+  <line x1="80" y1="225" x2="690" y2="70" stroke="#16a34a" stroke-width="2.2"/>
+  <text x="600" y="62" font-size="10" fill="#16a34a">compute_us (SFP rate)</text>
+
+  <!-- hbm_us flat -->
+  <line x1="80" y1="120" x2="690" y2="120" stroke="#2563eb" stroke-width="2.2"/>
+  <text x="120" y="110" font-size="10" fill="#2563eb">hbm_us (bytes ÷ BW)</text>
+
+  <!-- the max envelope -->
+  <polyline points="80,120 360,120 690,70" fill="none" stroke="#dc2626" stroke-width="3" stroke-dasharray="6,3"/>
+  <text x="430" y="150" font-size="10" fill="#dc2626" font-weight="bold">cost = max(compute_us, hbm_us)</text>
+
+  <line x1="360" y1="230" x2="360" y2="120" stroke="#94a3b8" stroke-width="0.8" stroke-dasharray="3,3"/>
+  <circle cx="360" cy="120" r="4" fill="#d97706"/>
+  <text x="360" y="246" text-anchor="middle" font-size="9" fill="#92400e">roofline knee</text>
+  <text x="200" y="200" font-size="10" fill="#475569" font-style="italic">HBM-bound</text>
+  <text x="540" y="200" font-size="10" fill="#475569" font-style="italic">compute-bound</text>
+
+  <text x="120" y="135" font-size="9" fill="#2563eb">(compute_us is a floor — stops "split tiny slice 32 ways is free")</text>
+</svg>
+<figcaption>Figure 7 — Roofline for the pointwise/reduction scorers. A kernel spends its time either moving bytes (<code>hbm_us</code>, flat) or doing SFP/reduce math (<code>compute_us</code>, rising), never both serially — so they combine as <code>max</code>. <code>compute_us</code> acts as a floor that stops the planner from believing a tiny per-core slice spread over all 32 cores is free.</figcaption>
+</figure>
+
+<p>
+  <strong>Roofline (max, not sum).</strong> A pointwise kernel spends its time either moving
+  bytes or doing SFP (elementwise) math, whichever is larger — never both serially. So compute
+  and HBM combine as <code>max(compute_us, hbm_us)</code>, a roofline. Once the per-core slice is
+  large the op is HBM-bound; once it shrinks past the SFP roofline it becomes compute-bound.
+  <code>compute_us</code> is a <em>floor</em>: it stops the planner from believing that splitting
+  a tiny slice across all 32 cores is free.
+</p>
+<p>
+  <strong>Broadcast-aware HBM (the fanout).</strong> This is the key difference from a naïve byte
+  count. Each input is charged <code>numel × fanout</code> bytes, where <code>fanout</code> is the
+  product of splits over the dims that input <em>lacks</em>. A <em>partitioned</em> input (one
+  that carries the split dim) has <code>fanout = 1</code> — each core reads its own
+  <code>1/cores</code> slice and the slices sum to <code>numel</code>. A <em>broadcast</em> input
+  (one that is missing the split dim) has <code>fanout &gt; 1</code> — every core in the fan-out
+  must read the whole thing, and the <code>(fanout − 1)</code> extra reads are the cohort tax. The
+  output is always partitioned, charged once. This is the same broadcast-cohort idea as the matmul
+  term, but expressed per-input rather than via <code>max(m,n)</code>.
+</p>
+<p>
+  <strong>Stick-fragmentation penalty.</strong> The innermost ("stick") dim should not be split,
+  because a split that doesn't land on a 64-element stick boundary causes partial-stick reads and
+  HBM bank conflicts. Without this term the roofline is <em>flat</em> for non-broadcast inputs
+  (<code>max(compute, hbm)</code> is identical for all splits that move the same bytes), so the
+  planner would arbitrarily pick the last-enumerated candidate — often a stick-dim split — and
+  regress 100–1000 µs. The penalty scales <code>(stick_split − 1) × out_bytes</code>;
+  <code>4.5e-7 us/byte</code> was tuned to make the planner reliably avoid stick-dim splits.
+</p>
+<p>
+  <strong>Batch penalty.</strong> Same <code>b^1.4</code> form as matmul, applied to
+  "batch-like" dims — output dims that are neither the stick dim nor the largest non-stick dim.
+  The largest non-stick dim is the "main work" axis (analogous to M); splitting it parallelizes
+  cleanly. Splitting a <em>different</em> outer dim instead carries the same per-batch-unit
+  overhead as the matmul batch-split. Without this term the roofline ties on shapes like
+  <code>add([4,2048,4096], [4,1,4096])</code> — where a B-split shrinks the broadcast input's
+  fanout and looks free — and regresses ~1.6 ms.
+</p>
+<p>
+  <strong>Why it ends at parity.</strong> Notice what these terms collectively <em>do</em>: they
+  steer the planner toward splitting the largest non-stick dim, away from the stick dim, and away
+  from batch-like dims. That is exactly what the existing heuristic already does (it splits the
+  largest dim by priority and naturally avoids the stick dim). So the cost model and the
+  heuristic converge on the same pick for ordinary pointwise shapes. The scorer's value is that
+  it <em>also</em> gets the broadcast-fanout cases right via the same machine, and it is validated
+  non-regressive — but it produces no measurable speedup over the heuristic. It is parity by
+  construction.
+</p>
+
+<!-- ============================ SECTION 6 ============================ -->
+<h2 id="s6">6. The reduction cost function</h2>
+<p>
+  <code>_reduction_split_cost</code> scores simple reductions (the
+  <code>_SIMPLE_REDUCE_TYPES</code>: <code>sum, mean, max, amax, min, amin, exx2</code>). Topk,
+  welford, prod, argmax fall back to the default planner.
+</p>
+<p><strong>Formula:</strong></p>
+<pre><code>cores       = prod(d_splits) * prod(r_splits)
+bytes_total = (elems_in + elems_out) * 2
+compute_us  = (elems_in / cores) / _COST_REDUCE_ELEM_PER_US_CORE   # 1.2e4 elem/us/core
+hbm_us      = bytes_total / (_COST_HBM_BW_GBS * 1000)
+r_prod      = prod(r_splits)
+psum_us     = max(0, r_prod - 1) * elems_out * _COST_PSUM_PER_ELEM_US   # 1.4e-4
+cost        = max(compute_us, hbm_us) + psum_us + redistribution_us</code></pre>
+<p>
+  Here <code>d_splits</code> are the core counts on output (kept) dimensions and
+  <code>r_splits</code> are core counts on reduced dimensions.
+</p>
+<p>
+  <strong>Roofline.</strong> Same as pointwise: a reduction kernel is either compute-bound or
+  HBM-bound, so compute and HBM combine as <code>max</code> (see Figure 7). <code>psum_us</code>
+  and <code>redistribution_us</code> add <em>on top</em> because they happen after the local
+  compute.
+</p>
+<p>
+  <strong>No cohort term — and why this differs from matmul.</strong> This is the most important
+  design point of the reduction scorer. A pure reduction has <strong>no broadcast</strong>: each
+  core reads its <code>1/cores</code> slice of the input and writes its slice of the output.
+  Nothing is broadcast to a cohort of cores, so there is no contention to charge. The
+  cohort/broadcast term in the matmul cost model exists specifically because matmul
+  <em>broadcasts weights (and activations) across the cohort dimension</em>; a reduction has no
+  such operand. An earlier draft wrongly inherited a cohort term from the matmul model; it was
+  removed because it modeled a contention that physically does not occur for reductions.
+</p>
+<p>
+  <strong>PSUM for reduction-dim splits.</strong> When <code>r_splits</code> introduce a
+  cross-core split of a <em>reduced</em> dimension, each core produces a partial reduction and the
+  partials must be combined over the ring — exactly the same ring-hop mechanism as the matmul
+  K-split, reusing the same <code>1.4e-4</code> coefficient. The term scales with
+  <code>elems_out</code> (the number of partial results to combine) and <code>(r_prod − 1)</code>
+  (the extra hops).
+</p>
+<p>
+  <strong>Calibration of the reduce rate.</strong> <code>_COST_REDUCE_ELEM_PER_US_CORE = 1.2e4</code>
+  was calibrated 2026-05-28 from device timings of forced-split <code>sum</code> reductions on
+  <code>[1,32,512,4096]</code> and <code>[1,512,4096]</code> across <code>cores ∈ {1,2,4}</code>.
+  The closed-form fit <code>compute_us = elems_in / cores / K</code> yielded
+  <code>K = 1.20e4 elem/us/core</code> with R² = 0.97. (Softmax fits a much lower ~1.4e3 because
+  its compound amax+exp+sum+div lowering does roughly 8× more per-element work; the simple-reduce
+  constant tracks the simple-reduction target, not softmax.)
+</p>
+<p>
+  <strong>Why it ends at parity.</strong> Like pointwise, the reduction scorer steers toward the
+  same answer the heuristic already gives: split the output (kept) dims first, fall back to the
+  most-splittable reduction dim for leftover cores. The roofline plus the PSUM-on-reduction-split
+  penalty reproduce the heuristic's reduction-dim fallback ordering. Validated non-regressive; no
+  measurable win.
+</p>
+
+<!-- ============================ SECTION 7 ============================ -->
+<h2 id="s7">7. The unified architecture</h2>
+<p>
+  There is <strong>one</strong> cost model with three op-class scorers, not three independent
+  models. The flow:
+</p>
+<pre><code>work_distribution_pass(op)
+  → op_class = _classify_op(op)          # MATMUL | POINTWISE | REDUCTION | None
+  → if op_class enabled by its flag:
+        _cost_model_planner(op, ..., op_class, ...)
+            → dispatches to _matmul/_pointwise/_reduction_cost_planner
+                 → _identify_*_dims(op)            # extract M/N/K/batch or dims/fanouts
+                 → _enumerate_splits(dims, divisor_lists, max_cores)
+                 → for each candidate: _score_split(op_class, candidate, ctx)
+                 → pick argmin</code></pre>
+
+<figure>
+<svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="360" y="18" text-anchor="middle" font-size="13" font-weight="bold">The unified dispatch: classify_op → score_split → argmin</text>
+
+  <rect x="20" y="50" width="150" height="60" rx="6" fill="#fff" stroke="#475569" stroke-width="2"/>
+  <text x="95" y="76" text-anchor="middle" font-size="11" font-weight="bold">IR node</text>
+  <text x="95" y="94" text-anchor="middle" font-size="10">Pointwise / Reduction</text>
+
+  <path d="M 170,80 L 205,80" stroke="#475569" stroke-width="2" fill="none" marker-end="url(#ux)"/>
+
+  <rect x="208" y="50" width="150" height="60" rx="6" fill="#eff6ff" stroke="#2563eb" stroke-width="2"/>
+  <text x="283" y="74" text-anchor="middle" font-size="11" font-weight="bold" font-family="monospace" fill="#2563eb">_classify_op</text>
+  <text x="283" y="92" text-anchor="middle" font-size="9">→ MATMUL / PW / RED / None</text>
+
+  <!-- three lanes -->
+  <g>
+    <path d="M 358,68 L 400,60" stroke="#475569" stroke-width="1.5" fill="none" marker-end="url(#ux)"/>
+    <path d="M 358,80 L 400,130" stroke="#475569" stroke-width="1.5" fill="none" marker-end="url(#ux)"/>
+    <path d="M 358,92 L 400,200" stroke="#475569" stroke-width="1.5" fill="none" marker-end="url(#ux)"/>
+  </g>
+
+  <rect x="402" y="40" width="200" height="46" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="502" y="58" text-anchor="middle" font-size="10" font-weight="bold" fill="#2563eb">MATMUL</text>
+  <text x="502" y="74" text-anchor="middle" font-size="8.5" font-family="monospace">_matmul_split_cost · (b,m,n,k)</text>
+
+  <rect x="402" y="110" width="200" height="46" rx="5" fill="#dcfce7" stroke="#16a34a"/>
+  <text x="502" y="128" text-anchor="middle" font-size="10" font-weight="bold" fill="#166534">POINTWISE</text>
+  <text x="502" y="144" text-anchor="middle" font-size="8.5" font-family="monospace">_pointwise_split_cost · fanouts</text>
+
+  <rect x="402" y="180" width="200" height="46" rx="5" fill="#fef3c7" stroke="#d97706"/>
+  <text x="502" y="198" text-anchor="middle" font-size="10" font-weight="bold" fill="#92400e">REDUCTION</text>
+  <text x="502" y="214" text-anchor="middle" font-size="8.5" font-family="monospace">_reduction_split_cost · d/r</text>
+
+  <text x="502" y="248" text-anchor="middle" font-size="9" fill="#475569" font-style="italic">each flag-gated, all off by default</text>
+
+  <!-- score_split funnel + argmin -->
+  <g stroke="#16a34a" stroke-width="1.5" fill="none">
+    <path d="M 602,63 L 640,130" marker-end="url(#uy)"/>
+    <path d="M 602,133 L 640,135" marker-end="url(#uy)"/>
+    <path d="M 602,203 L 640,140" marker-end="url(#uy)"/>
+  </g>
+  <rect x="642" y="108" width="68" height="60" rx="6" fill="#fff" stroke="#16a34a" stroke-width="2.5"/>
+  <text x="676" y="132" text-anchor="middle" font-size="11" font-weight="bold" fill="#16a34a">argmin</text>
+  <text x="676" y="150" text-anchor="middle" font-size="9">chosen split</text>
+
+  <text x="283" y="200" text-anchor="middle" font-size="9.5" fill="#475569" font-style="italic">None → heuristic distributor</text>
+  <path d="M 283,114 L 283,188" stroke="#94a3b8" stroke-width="1" fill="none" stroke-dasharray="3,3" marker-end="url(#ux)"/>
+
+  <defs>
+    <marker id="ux" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><polygon points="0 0,7 3.5,0 7" fill="#475569"/></marker>
+    <marker id="uy" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><polygon points="0 0,7 3.5,0 7" fill="#16a34a"/></marker>
+  </defs>
+</svg>
+<figcaption>Figure 8 — The unified dispatch. <code>_classify_op</code> reads the IR node and routes to one of three flag-gated scorers; each enumerates its own divisor grid and <code>_score_split</code> funnels every candidate to the same <code>argmin</code>. An unclassified op (<code>None</code>) falls back to the heuristic distributor.</figcaption>
+</figure>
+
+<p>
+  <code>_classify_op</code> reads the IR node: a <code>Reduction</code> with
+  <code>reduction_type == BATCH_MATMUL_OP</code> is MATMUL; a <code>Reduction</code> whose type is
+  in <code>_SIMPLE_REDUCE_TYPES</code> is REDUCTION; a <code>Pointwise</code> is POINTWISE;
+  everything else returns <code>None</code> and uses the heuristic.
+</p>
+<p>
+  <code>_score_split</code> is the single dispatch point: given an <code>OpClass</code> and a
+  candidate split dict, it unpacks the class-specific context (<code>ctx</code>) and calls the
+  matching <code>_*_split_cost</code>. Each class enumerates its own divisor grid:
+</p>
+<ul>
+  <li><strong>MATMUL</strong> enumerates <code>(b..., m, n, k)</code> over divisors of <code>(B, M, N-sticks, K-sticks)</code>, scores with <code>_matmul_split_cost</code>, and adds <code>redistribution_us</code> only for fused-bundle candidates that diverge from the default.</li>
+  <li><strong>POINTWISE</strong> enumerates per-output-dim splits over divisors of each dim, computes per-input fanout, and breaks ties by <code>(cost, -cores_used)</code> — on a cost tie it prefers <em>more</em> cores (more parallelism, more downstream-fusion room). It also skips data-motion (ReStickify) pointwise ops, where the SFP-rate model does not apply.</li>
+  <li><strong>REDUCTION</strong> enumerates <code>(d_splits..., r_splits...)</code> and scores with the no-cohort roofline form.</li>
+</ul>
+<p>
+  Each scorer is independently flag-gated (<code>cost_model_matmul_planner</code>,
+  <code>cost_model_pointwise_planner</code>, <code>cost_model_reduction_planner</code>), all
+  default off. You can turn matmul on while leaving the siblings off — which is the recommended
+  configuration, given matmul is the only win.
+</p>
+<p>
+  <strong>Why one model, not three?</strong> Because the three op classes share the <em>same
+  physics and the same constants</em>: the same HBM bandwidth (204.8 GB/s), the same PSUM
+  ring-hop coefficient (1.4e-4), the same <code>b^1.4</code> batch penalty, the same roofline
+  reasoning. Factoring them into one model with three scorers means a calibration improvement to a
+  shared constant improves all three, and the graph is covered uniformly by one mechanism instead
+  of three drifting heuristics.
+</p>
+
+<!-- ============================ SECTION 8 ============================ -->
+<h2 id="s8">8. Methodology — how every term was calibrated</h2>
+<p>
+  Every coefficient in §4–§6 was set by device measurement, not guessed. The methodology:
+</p>
+<p>
+  <strong>The force-split device harness.</strong> A <code>force_split_timing.py</code> harness
+  monkey-patches the planner to inject a <em>chosen</em> <code>(b, m, n, k)</code> split at the IR
+  level for a named op, then runs the rest of the pipeline (parse, layout, clSplit, schedule,
+  emit) unmodified and collects device-side <code>kernel_ms</code> from one warm run plus N timed
+  runs. This is the crucial property: it measures <strong>what the scheduler actually emits</strong>
+  for a candidate, not what we <em>think</em> it emits, so the fitted coefficients absorb the real
+  downstream behavior. (For decode-style forced splits use <code>force_split_dbg.py</code>; the
+  older <code>force_split_timing_2d.py</code> no-ops on the current pipeline.)
+</p>
+<p>
+  <strong>Sweeping <code>(m, n, k)</code> per shape.</strong> For each shape the harness probes:
+  the two co-split candidates around full occupancy <code>(8,4)</code> and <code>(4,8)</code>;
+  pure splits along the larger dim <code>(16,2)</code>, <code>(2,16)</code>, <code>(32,1)</code>,
+  <code>(1,32)</code>; K-splits when K is large (<code>(8,2,2)</code>, <code>(4,4,2)</code>,
+  <code>(4,2,4)</code>, <code>(4,1,8)</code>); and odd-cohort candidates when N has
+  non-power-of-two factors (e.g. <code>(2,15)</code> for N=2880). The empirical winner is the
+  lowest measured <code>kernel_ms</code>, with a 2% margin treated as a tie.
+</p>
+<p>
+  <strong>The ~53-shape validation set.</strong> The shapes come from the 1H-2026 priority models
+  (GPT-OSS 20B, Granite-4 dense and MoE, Mistral-Small 22B, Qwen-2.5-7B, Llama-3.1-8B,
+  Ministral-8B, Mistral-Nemo 12B) plus M-sweep, K-split, and N-landscape synthetics,
+  deduplicated to 53 distinct <code>(B,M,K,N)</code> shapes, each with a dict
+  <code>{(b,m,n,k): kernel_ms}</code> of measured times.
+</p>
+<p>
+  <strong>Leave-one-out cross-validation as the overfitting guard.</strong> Every candidate term
+  and coefficient was scored not just on in-sample fit but under LOO-CV: re-fit the coefficient on
+  52 shapes, predict the 53rd, repeat. A term only ships if it does not regress LOO. This is what
+  killed the non-linear variants (§10) and the <code>lx_pressure_us</code> term (§4.7): they
+  improved in-sample fit but did not generalize.
+</p>
+<p>
+  <strong>Same-session A/B against the production backend.</strong> The validation scorecard (§9)
+  was run in a single clean serial session at one commit, with no device contention and a fresh
+  Inductor cache, comparing torch-spyre (<code>tsp</code>) against the production
+  <code>sendnn</code> backend op-for-op. (The shared accelerator must not be contended during
+  timing, so timing runs are serial, not parallel.)
+</p>
+<p>
+  <strong>LX config held constant.</strong> All sweeps were run at a fixed LX fraction
+  (<code>DXP_LX_FRAC_AVAIL</code>), so LX-allocation differences never confounded the
+  work-division comparison. The cost model is calibrated for that fixed LX budget; changing it
+  would shift the absolute kernel times (though not, in general, the relative split ranking).
+</p>
+
+<!-- ============================ SECTION 9 ============================ -->
+<h2 id="s9">9. Validation results</h2>
+<p>
+  Measured at commit <code>c8c49f3</code>, all three planners on, single clean serial session,
+  fresh cache, no contention. <code>kernel_ms</code> is the sum of non-Memset / Memcpy
+  kernel-bundle mean time over the profiled runs (the production-backend convention).
+  <code>ratio = tsp / sendnn</code>; <strong>lower is better</strong>, ≤ 1.0 is a win.
+</p>
+
+<h3 id="s9-1">9.1 Matmul prefill / batched</h3>
+<table>
+  <thead>
+    <tr><th>shape</th><th class="mono">split (m,n,k)</th><th class="num">tsp ms</th><th class="num">sendnn ms</th><th class="num">ratio</th><th>note</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>QO bs1 <code>[1,512,4096]×[4096,4096]</code></td><td class="mono">8,4,1</td><td class="num">0.324</td><td class="num">0.372</td><td class="num good">0.871</td><td class="good">win</td></tr>
+    <tr><td>QO bs4 <code>[4,1,4096]×[4096,4096]</code></td><td class="mono">4,8,1</td><td class="num">0.240</td><td class="num">0.249</td><td class="num good">0.964</td><td>slight win (bs4 flattens to M=4)</td></tr>
+    <tr><td>KV bs1 <code>[1,512,4096]×[4096,1024]</code></td><td class="mono">8,4,1</td><td class="num">0.115</td><td class="num">0.108</td><td class="num">1.065</td><td>near parity (narrow-N prefill)</td></tr>
+    <tr><td>KV bs4 <code>[4,1,4096]×[4096,1024]</code></td><td class="mono">4,8,1</td><td class="num">0.062</td><td class="num">0.061</td><td class="num">1.016</td><td>parity (was 1.05)</td></tr>
+    <tr><td>MLP bs1 <code>[1,512,4096]×[4096,12800]</code></td><td class="mono">8,4,1</td><td class="num">1.149</td><td class="num">0.960</td><td class="num">1.197</td><td><strong>1.51→1.20 vs heuristic</strong> (headline gain); still &gt;1.0 (kernel-level) and (8,4) is ~10% off optimal (4,8); §10</td></tr>
+    <tr><td>MLP bs4 <code>[4,1,4096]×[4096,12800]</code></td><td class="mono">4,8,1</td><td class="num">0.761</td><td class="num">0.900</td><td class="num good">0.846</td><td class="good">clear win (was 0.97)</td></tr>
+  </tbody>
+</table>
+<p>
+  The clearest prefill wins are <strong>QO bs=1</strong> (<code>(mb=8, out=4)</code> co-split,
+  0.87×) and <strong>MLP bs=4</strong> (<code>(mb=4, out=8)</code>, 0.85×). Note that
+  <code>torch.nn.functional.linear</code> flattens the bs4 <code>[4,1,4096]</code> input to
+  <code>M=4</code>, so the planner sees <code>B=1, M=4</code> and does an <code>m×n</code>
+  co-split, not a batch split.
+</p>
+<p>
+  <strong>MLP bs=1 at N=12800 is simultaneously the headline gain and a documented miss</strong> — both true:
+  <em>vs the heuristic</em> (prior production), a clear win — the cost model takes the worst ratio in the suite from
+  <strong>1.51 to 1.20</strong> (tsp <code>kernel_ms</code> 1.45→1.15, ~22%) via the <code>(mb=8, out=4)</code> co-split;
+  this is the single largest improvement the cost model delivers. <em>Vs the production backend</em>, still a loss at 1.20× —
+  the residual below ~1.2 is <strong>kernel-level</strong> (the backend's N-tiling/PT-column packing), not a split the cost model can choose (§10).
+  <em>Vs the empirical-optimal split</em>, a work-division miss: the optimum is <code>(mb=4, out=8)</code>, ~10% faster than the model's pick.
+  N=12800 sits at the low edge of the <code>N ∈ [12800, 15872]</code> band where the <code>(m,n)</code> winner flips non-monotonically — a discrete
+  kernel-template effect a smooth closed-form cost cannot capture. Closing it would regress the adjacent priority shape N=12288 (wants <code>(8,4)</code> by +57%), so it is not landable.
+  The miss costs ~10% on one kernel, well under 1% end-to-end.
+</p>
+
+<h3 id="s9-2">9.2 Single-token decode (the K-split home)</h3>
+<table>
+  <thead>
+    <tr><th>model</th><th>shape</th><th class="mono">split</th><th class="num">tsp ms</th><th class="num">sendnn ms</th><th class="num">ratio</th><th>K-split fired</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Llama-3.1-8B / Ministral-8B / Granite-4-H KV</td><td><code>[1,1,4096]×[4096,1024]</code></td><td class="mono">n=16, k=2</td><td class="num">0.062</td><td class="num">0.067</td><td class="num good">0.925</td><td>yes</td></tr>
+    <tr><td>Qwen2.5-7B KV</td><td><code>[1,1,3584]×[3584,512]</code></td><td class="mono">n=8, k=4</td><td class="num">0.028</td><td class="num">0.036</td><td class="num good">0.778</td><td>yes</td></tr>
+    <tr><td>QO decode control</td><td><code>[1,1,4096]×[4096,4096]</code></td><td class="mono">n=32, k=1</td><td class="num">0.247</td><td class="num">0.246</td><td class="num">1.004</td><td>no</td></tr>
+  </tbody>
+</table>
+
+<figure>
+<svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="360" y="18" text-anchor="middle" font-size="13" font-weight="bold">The win: narrow-N decode K-split fills the array (B=1, M=1)</text>
+
+  <!-- N-split only: idle cores -->
+  <g transform="translate(20,40)">
+    <text x="160" y="0" text-anchor="middle" font-size="11" font-weight="bold" fill="#dc2626">N-split only — N too narrow</text>
+    <g font-size="8">
+      <!-- 8 busy cores, rest idle -->
+      <rect x="0" y="20" width="36" height="26" fill="#dcfce7" stroke="#16a34a"/><text x="18" y="37" text-anchor="middle">n0</text>
+      <rect x="40" y="20" width="36" height="26" fill="#dcfce7" stroke="#16a34a"/><text x="58" y="37" text-anchor="middle">n1</text>
+      <rect x="80" y="20" width="36" height="26" fill="#dcfce7" stroke="#16a34a"/><text x="98" y="37" text-anchor="middle">n2</text>
+      <rect x="120" y="20" width="36" height="26" fill="#dcfce7" stroke="#16a34a"/><text x="138" y="37" text-anchor="middle">n3</text>
+      <rect x="160" y="20" width="36" height="26" fill="#dcfce7" stroke="#16a34a"/><text x="178" y="37" text-anchor="middle">n4</text>
+      <rect x="200" y="20" width="36" height="26" fill="#dcfce7" stroke="#16a34a"/><text x="218" y="37" text-anchor="middle">n5</text>
+      <rect x="240" y="20" width="36" height="26" fill="#dcfce7" stroke="#16a34a"/><text x="258" y="37" text-anchor="middle">n6</text>
+      <rect x="280" y="20" width="36" height="26" fill="#dcfce7" stroke="#16a34a"/><text x="298" y="37" text-anchor="middle">n7</text>
+      <!-- idle row -->
+      <rect x="0" y="52" width="316" height="40" fill="#f3f4f6" stroke="#cbd5e1" stroke-dasharray="4,3"/>
+      <text x="158" y="76" text-anchor="middle" font-size="11" fill="#94a3b8" font-weight="bold">24 cores IDLE (array starved)</text>
+    </g>
+    <text x="158" y="118" text-anchor="middle" font-size="9" fill="#dc2626">M=1 → no M-split; N/sticks &lt; 32 → cores unused</text>
+  </g>
+
+  <!-- K-split fills -->
+  <g transform="translate(380,40)">
+    <text x="160" y="0" text-anchor="middle" font-size="11" font-weight="bold" fill="#16a34a">+ K-split — idle cores do the reduction</text>
+    <g font-size="8">
+      <rect x="0" y="20" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="18" y="37" text-anchor="middle">n0k0</text>
+      <rect x="40" y="20" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="58" y="37" text-anchor="middle">n1k0</text>
+      <rect x="80" y="20" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="98" y="37" text-anchor="middle">n2k0</text>
+      <rect x="120" y="20" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="138" y="37" text-anchor="middle">n3k0</text>
+      <rect x="160" y="20" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="178" y="37" text-anchor="middle">…</text>
+      <rect x="200" y="20" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="218" y="37" text-anchor="middle">…</text>
+      <rect x="240" y="20" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="258" y="37" text-anchor="middle">…</text>
+      <rect x="280" y="20" width="36" height="26" fill="#dbeafe" stroke="#2563eb"/><text x="298" y="37" text-anchor="middle">n7k0</text>
+      <rect x="0" y="52" width="36" height="26" fill="#bfdbfe" stroke="#2563eb"/><text x="18" y="69" text-anchor="middle">n0k1</text>
+      <rect x="40" y="52" width="36" height="26" fill="#bfdbfe" stroke="#2563eb"/><text x="58" y="69" text-anchor="middle">n1k1</text>
+      <rect x="80" y="52" width="36" height="26" fill="#bfdbfe" stroke="#2563eb"/><text x="98" y="69" text-anchor="middle">n2k1</text>
+      <rect x="120" y="52" width="196" height="26" fill="#bfdbfe" stroke="#2563eb"/><text x="218" y="69" text-anchor="middle">… all 32 cores busy …</text>
+    </g>
+    <text x="158" y="100" text-anchor="middle" font-size="9" fill="#166534" font-weight="bold">psum_us tiny (∝ B·M·N, M=1) → trade is favorable</text>
+    <text x="158" y="118" text-anchor="middle" font-size="9" fill="#16a34a">up to ~1.7× over no-K-split baseline</text>
+  </g>
+
+  <rect x="60" y="186" width="600" height="68" rx="6" fill="#eff6ff" stroke="#2563eb"/>
+  <text x="360" y="208" text-anchor="middle" font-size="10">Measured: KV <code>[4096,1024]</code> → n=16,k=2 @ <tspan font-weight="bold" fill="#166534">0.93×</tspan> ·
+    Qwen <code>[3584,512]</code> → n=8,k=4 @ <tspan font-weight="bold" fill="#166534">0.78×</tspan></text>
+  <text x="360" y="228" text-anchor="middle" font-size="10">QO control N=4096 fills 32 cores via N alone → n=32,k=1, no K-split → parity (1.004×)</text>
+  <text x="360" y="246" text-anchor="middle" font-size="9" fill="#475569" font-style="italic">K-split is chosen only when N is too narrow to fill the array</text>
+</svg>
+<figcaption>Figure 9 — The narrow-N decode K-split, the win. At <code>B=1, M=1</code> with a narrow N, an N-split leaves most cores idle and the array starved. A K-split puts those idle cores to work on the reduction; because <code>psum_us ∝ B·M·N</code> is tiny at <code>M=1</code>, the trade is favorable — up to ~1.7× over a no-K-split baseline. When N alone fills the array (QO control, N=4096) no K-split is taken and the result is parity.</figcaption>
+</figure>
+
+<p>
+  Decode K-split fires <strong>exactly as the heuristic predicts</strong> (§11): on narrow-N
+  single-token decode, K-split fills idle cores and beats the production backend (0.93× and
+  0.78×). On the QO control, N=4096 alone fills all 32 cores via the N-split, so no K-split is
+  taken and the result is parity — validating that K-split is only chosen when N is too narrow to
+  fill the array.
+</p>
+
+<h3 id="s9-3">9.3 Pointwise / reduction — parity, not wins</h3>
+<p>
+  The reduction planner fires on softmax and rms_norm (split <code>mb=32, out=1</code>) and the
+  pointwise planner fires on elementwise bundles, both producing valid splits. They are validated
+  non-regressive but show <strong>no measurable speedup</strong> over the heuristic, because the
+  heuristic already makes good largest-dim choices for these ops. (Separately, on decomposed
+  softmax/rms_norm the <code>kernel_ms</code> metric <em>understates</em> tsp because tsp fuses
+  each into a single SDSC bundle while the production backend decomposes rms_norm into two
+  kernels; on full-device <code>spyre_ms</code> tsp is actually 2.3–2.5× faster on those two ops.
+  That is a fusion/kernel effect, not a work-division effect, and is out of scope for this cost
+  model. The one genuine kernel-level loss is fused SDPA attention, ~1.23× on
+  <code>spyre_ms</code> — again a single-kernel efficiency issue, not work-division.)
+</p>
+
+<!-- ============================ SECTION 10 ============================ -->
+<h2 id="s10">10. Known limits</h2>
+<p>
+  The matmul cost model lands the empirical best split on <strong>37 of 53 measured shapes
+  (~70%)</strong>. The misses are not random — they share one fingerprint and were characterized
+  across four independent investigations.
+</p>
+<p>
+  <strong>The closed-form ceiling (~70%).</strong> Every miss falls in a single failure mode: at
+  <code>M=512, K=4096</code>, the <code>(4,8)</code> split wins at a <em>scattered</em> set of N
+  values (notably a "danger band" roughly <code>N ∈ [12800, 15872]</code>, plus a tight pocket at
+  <code>N=1536</code>) while <code>(8,4)</code> wins at all the <em>other</em> N values. The model
+  picks <code>(8,4)</code> across this whole neighborhood and is right most of the time — which is
+  why the hit rate is 70%, not coin-flip.
+</p>
+
+<figure>
+<svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="360" y="18" text-anchor="middle" font-size="13" font-weight="bold">The non-monotone (m,n) winner band at M=512, K=4096</text>
+
+  <line x1="60" y1="150" x2="690" y2="150" stroke="#475569" stroke-width="1.5"/>
+  <text x="375" y="232" text-anchor="middle" font-size="11" fill="#475569">N (output columns) →</text>
+
+  <!-- axis ticks -->
+  <g font-size="9" fill="#475569" text-anchor="middle">
+    <text x="90" y="168">1536</text>
+    <text x="180" y="168">4096</text>
+    <text x="300" y="168">11264</text>
+    <text x="420" y="168">12800</text>
+    <text x="500" y="168">15872</text>
+    <text x="600" y="168">16384</text>
+    <text x="660" y="168">20480</text>
+  </g>
+
+  <!-- (8,4) wins regions in blue, (4,8) wins in red -->
+  <g>
+    <!-- pocket at 1536: (4,8) -->
+    <rect x="78" y="120" width="24" height="28" fill="#fee2e2" stroke="#dc2626"/>
+    <text x="90" y="112" text-anchor="middle" font-size="9" fill="#dc2626">(4,8)</text>
+    <!-- (8,4) band -->
+    <rect x="110" y="120" width="270" height="28" fill="#dbeafe" stroke="#2563eb"/>
+    <text x="245" y="138" text-anchor="middle" font-size="9" fill="#2563eb">(8,4) wins</text>
+    <!-- danger band (4,8) -->
+    <rect x="384" y="120" width="120" height="28" fill="#fee2e2" stroke="#dc2626"/>
+    <text x="444" y="138" text-anchor="middle" font-size="9" fill="#dc2626">(4,8) — danger band</text>
+    <!-- (8,4) again -->
+    <rect x="508" y="120" width="170" height="28" fill="#dbeafe" stroke="#2563eb"/>
+    <text x="593" y="138" text-anchor="middle" font-size="9" fill="#2563eb">(8,4) wins again</text>
+  </g>
+
+  <!-- model's flat pick -->
+  <line x1="78" y1="90" x2="678" y2="90" stroke="#16a34a" stroke-width="2.5" stroke-dasharray="6,3"/>
+  <text x="378" y="82" text-anchor="middle" font-size="10" fill="#166534" font-weight="bold">model always picks (8,4) — right on the blue, wrong on the red</text>
+
+  <text x="375" y="200" text-anchor="middle" font-size="9.5" fill="#475569" font-style="italic">
+    A smooth closed-form in (B,M,K,N) cannot reproduce a non-monotone flip — it is discrete kernel-template selection.
+  </text>
+</svg>
+<figcaption>Figure 10 — The non-monotone <code>(m,n)</code> winner band. <code>(8,4)</code> wins at most N, but <code>(4,8)</code> wins in the scattered danger band <code>N ∈ [12800, 15872]</code> and the <code>N=1536</code> pocket. The model picks <code>(8,4)</code> everywhere (green dashed) — correct ~70% of the time. A smooth cost function cannot reproduce a non-monotone flip caused by discrete kernel-template choice.</figcaption>
+</figure>
+
+<p>
+  <strong>The non-monotone (m,n) band.</strong> The winner is <em>non-monotone</em> in N:
+  <code>(8,4)</code> wins at N=2560, 4096, 10752, 11264, then <code>(4,8)</code> wins through
+  12800–15872, then <code>(8,4)</code> wins again at 16384+. A smooth closed-form cost function in
+  <code>(B,M,K,N)</code> cannot reproduce a non-monotone winner flip, because the flip is not
+  smooth physics — it is discrete <em>kernel-template selection</em> downstream of work-division.
+</p>
+<p>
+  <strong>The N=1536 pocket is mechanistically understood</strong> (the one exception): at
+  <code>(8,4)</code> the per-core weight slice is <code>4096·384·2 = 3 MB</code>, over the 2 MB LX
+  cap; at <code>(4,8)</code> it is <code>1.5 MB</code>, under the cap. A K-scaling experiment
+  confirmed the flip appears only at K=4096, exactly where the LX cap separates the two candidates
+  (at K=2048 both fit and tie; at K=8192 neither fits and they tie). This is a real mechanism but
+  fires only in a narrow <code>K·(N/n)</code> band, and a one-shape kludge for it (the removed
+  <code>lx_pressure_us</code>) broke adjacent-N picks — so it is accepted as a documented miss.
+</p>
+<p>
+  <strong>The wider danger band is diffuse.</strong> Four investigations ruled out the obvious
+  mechanisms for <code>N ∈ [12800, 15872]</code>: it is <em>not</em> uniform LX overflow (both
+  candidates overflow heavily, yet <code>(8,4)</code> wins at N=16384, 20480); <em>not</em> HMI
+  channel alignment (the flipping N values share no alignment signature); <em>not</em> pure
+  clSplit=1 (counter-examples at adjacent N); <em>not</em> PT tile alignment (no N-dependent
+  flip); <em>not</em> XRF/ring bandwidth (magnitude too small by back-of-envelope). A useful
+  negative result: the production backend's own internal cost function
+  (<code>getCoreEqPerf</code>) is <em>also</em> cohort-blind and HBM-blind — it gets these shapes
+  right only because its downstream <em>scheduler</em> encodes the missing physics implicitly
+  through kernel-template choice, which is not visible to a work-division-level cost model.
+</p>
+<p>
+  <strong>Non-power-of-2 N is handled</strong> by the divisor enumeration: odd-cohort candidates
+  like <code>(2,15)</code> for N=2880 are enumerated and the cohort penalty ranks them correctly
+  (validated on GPT-OSS odd-N shapes).
+</p>
+<p>
+  <strong>Several misses are empirical ties.</strong> A number of the 16 misses are within the
+  ~1–2% tie band — the "miss" is a label artifact of picking a single winner from two
+  statistically indistinguishable candidates.
+</p>
+<p>
+  <strong>Non-linear variants were tried and rejected.</strong> Ten smooth-term variants (sigmoid
+  LX-fit, saturating cohort, asymmetric cohort, roofline re-stream, log-cohort, Gaussian band,
+  ...) plus a decision-tree baseline were fit and evaluated under LOO-CV. <strong>No variant beat
+  baseline:</strong> smooth coefficients collapsed to zero (the optimizer disabled the new term to
+  avoid regressing neighbors), and the decision tree hit 40/53 in-sample but collapsed to 25/53
+  LOO — catastrophic overfitting on 53 points. The honest conclusion is a closed-form ceiling of
+  ~70% on this dataset; the remaining 30% lives in discrete scheduler decisions, costs ~5–15% per
+  affected kernel and well under 1% end-to-end, and would require either a downstream
+  <code>predict_schedule</code>-style simulator or far more measurement data to close.
+</p>
+<p>
+  <strong>Work-division vs kernel-level.</strong> Finally, keep the boundary clear: this cost
+  model only chooses the <em>work split</em>. Fusion decisions, kernel-template choice, clSplit,
+  and single-kernel SDPA efficiency are <em>downstream</em> and not in scope. The
+  softmax/rms_norm <code>kernel_ms</code> "losses" in §9.3 are fusion/measurement artifacts (tsp
+  actually wins on device time), and the SDPA loss is a single-kernel efficiency gap — none of
+  these are work-division and none are addressable by this model.
+</p>
+
+<!-- ============================ SECTION 11 ============================ -->
+<h2 id="s11">11. Split-K</h2>
+<p>
+  K-split (<code>k &gt; 1</code>) is the most misunderstood part of the model, so it gets its own
+  section. The summary: <strong>K-split is never picked for prefill, and its real home is
+  narrow-N single-token decode, where it is the only way to fill the array.</strong>
+</p>
+<p>
+  <strong>Why K-split is never picked for prefill.</strong> Consider any prefill matmul with N
+  large enough to occupy the cores. An N-split and a K-split <em>do the same total compute</em> —
+  both spread the same <code>M·N·K</code> MACs over the same number of cores. But the K-split
+  <em>adds</em> the <code>psum_us</code> ring-reduction cost (§4.3) that the N-split does not pay.
+  So for the <em>same</em> core count, an N-split strictly dominates a K-split whenever N is wide
+  enough to absorb the cores. The cost model encodes exactly this:
+  <code>psum_us = (k−1)·B·M·N·1.4e-4</code> is a pure penalty with no offsetting benefit when N
+  can fill the array. This is why the QO decode control in §9.2 (N=4096) takes
+  <code>n=32, k=1</code> — N alone fills the 32 cores, so K-split only adds cost.
+</p>
+<p>
+  <strong>The real home: narrow-N single-token decode.</strong> Now consider decode:
+  <code>B=1, M=1</code>, and a <em>narrow</em> N (e.g. 1024 or 512). With M=1 there is no M-split,
+  and N is too narrow to occupy 32 cores by itself (<code>N/sticks &lt; 32</code>). The cores that
+  an N-split cannot fill would sit <strong>idle</strong>. A K-split puts those idle cores to work
+  on the reduction. The arithmetic-intensity argument: at M=1 the matmul is deeply
+  <em>memory-bound</em> (one activation row, huge weight matrix), the array is starved, and the
+  only lever to use more cores is K. The trade is favorable precisely because the
+  <code>psum_us</code> term is <em>tiny</em> here — it scales with <code>B·M·N</code>, and with
+  <code>M=1</code> and small N that product is small, so the ring cost of the extra reduction is
+  negligible against the win of filling otherwise-idle cores. Measured (§9.2): KV decode
+  <code>[4096,1024]</code> → <code>n=16, k=2</code> at 0.93×; Qwen <code>[3584,512]</code> →
+  <code>n=8, k=4</code> at 0.78× — the narrower N forces a deeper K-split and yields the biggest
+  decode win, up to ~1.7× over a no-K-split baseline. The heuristic already picks these.
+</p>
+<p>
+  <strong>The <code>k_fast</code> emission layer.</strong> When the planner does pick a K-split,
+  the physical core-id assignment matters for the ring reduction. The default (row-major)
+  assignment scatters the K-collaborators (cores that share a fixed <code>(m,n)</code> tile but
+  differ in <code>k</code>) across the ring, so combining their partial sums takes up to
+  <code>m·n</code> hops. The <code>k_fast</code> mapping
+  (<code>_k_fast_core_to_slice_mapping</code> / <code>_should_use_k_fast_mapping</code> in
+  <code>torch_spyre/_inductor/codegen/superdsc.py</code>) treats the K dim as the
+  <em>fastest-varying</em> axis along <code>core_id</code>, so K-collaborators land on
+  <strong>adjacent</strong> ring positions and the PSUM reduction traverses <strong>1 hop per
+  output tile instead of m·n</strong> (see Figure 6). It fires only when all three hold: the op is
+  a matmul, the <code>SPYRE_CORE_ID_K_FAST_EMISSION</code> flag is on, and the planner chose
+  <code>k &gt; 1</code> (at <code>k=1</code> the mapping is identical to the default).
+</p>
+<p>
+  <strong>Why the k_fast layer has a structural no-home beyond decode.</strong> This is the honest
+  scoping of split-K. The emission layer minimizes ring hops — but ring hops only matter when the
+  K-split actually fires, and the K-split only fires in the narrow-N decode regime above. In that
+  regime the kernel is <em>memory-bound</em> (M=1): wall-clock is set by HBM weight traffic, not
+  by the PSUM ring. So minimizing ring hops, while correct, optimizes a term that is not on the
+  critical path in the only regime where K-split is chosen. K-split implies memory-bound implies
+  ring-hop minimization is second-order. The <code>k_fast</code> layer is retained because it is
+  cheap and correct and shaves the small PSUM term, but it does not unlock a new performance
+  regime on its own — the win in §9.2 comes from <em>filling idle cores</em> via K, not from the
+  hop reduction.
+</p>
+
+<!-- ============================ APPENDIX ============================ -->
+<h2 id="sapp">Appendix: constant reference</h2>
+<table>
+  <thead>
+    <tr><th>constant</th><th class="num">value</th><th>meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr><td class="mono">_PT_ROWS</td><td class="num">8</td><td>PT array rows consumed per pass</td></tr>
+    <tr><td class="mono">_TARGET_PT_PASSES</td><td class="num">8</td><td>passes to fully fill the PT pipeline (~64 rows/core)</td></tr>
+    <tr><td class="mono">_M_MIN</td><td class="num">4</td><td>smallest useful m-split (half a PT pass), floor for <code>target_m</code></td></tr>
+    <tr><td class="mono">_COST_PEAK_MACS_US_CORE</td><td class="num">1.536e6</td><td>per-core peak MACs/us = 98.304e12/2/32/1e6</td></tr>
+    <tr><td class="mono">_COST_PEAK_ELEMENTS_US_CORE</td><td class="num">1.76e3</td><td>per-core SFP elementwise rate (silu sweep asymptote)</td></tr>
+    <tr><td class="mono">_COST_REDUCE_ELEM_PER_US_CORE</td><td class="num">1.2e4</td><td>per-core simple-reduce rate (sum sweep, R²=0.97)</td></tr>
+    <tr><td class="mono">_COST_HBM_BW_GBS</td><td class="num">204.8</td><td>HBM aggregate bandwidth (bytes/us = ×1000)</td></tr>
+    <tr><td class="mono">_COST_DTYPE_BYTES</td><td class="num">2</td><td>fp16</td></tr>
+    <tr><td class="mono">_COST_PSUM_PER_ELEM_US</td><td class="num">1.4e-4</td><td>per output element per K/reduction ring hop</td></tr>
+    <tr><td class="mono">_COST_COHORT_LIMIT</td><td class="num">8</td><td>broadcast-cohort knee (contention above this)</td></tr>
+    <tr><td class="mono">_COST_BATCH_SPLIT_EXPONENT</td><td class="num">1.4</td><td>batch-split power law <code>b^1.4</code></td></tr>
+    <tr><td class="mono">_COST_TARGET_M_PENALTY_US</td><td class="num">50.0</td><td>tie-break, per log2 step from target m</td></tr>
+    <tr><td class="mono">_COST_REDISTRIBUTION_US_PER_BYTE</td><td class="num">1e-6</td><td>fused-bundle reshuffle tie-break</td></tr>
+    <tr><td class="mono">_COST_STICK_FRAG_US_PER_BYTE</td><td class="num">4.5e-7</td><td>pointwise stick-dim split tax</td></tr>
+    <tr><td class="mono">MAX_SPAN_BYTES</td><td class="num">256 MB</td><td>hardware per-core memory-span limit (span-reduction pass)</td></tr>
+    <tr><td class="mono">max cores</td><td class="num">32</td><td><code>SENCORES</code> default; AIU 1.0 core count</td></tr>
+  </tbody>
+</table>
+
+<hr class="section">
+<p style="color: var(--muted); font-size: 0.9em; text-align: center;">
+  Source: <code>torch_spyre/_inductor/work_division.py</code> · <code>torch_spyre/_inductor/config.py</code>
+</p>
+
+</main>
+</div>
+</body>
+</html>
