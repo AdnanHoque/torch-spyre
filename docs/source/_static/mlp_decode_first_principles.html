@@ -100,7 +100,9 @@
     <li><a href="#s9">The LX-frac footnote</a></li>
     <li><a href="#s10">The wide-N matmul: ~20% over sendnn</a></li>
     <li><a href="#s11">Planner A/B across the matmul shapes</a></li>
-    <li><a href="#s12">Takeaways</a></li>
+    <li><a href="#s12">Restickifies &amp; the sendnn gap</a></li>
+    <li><a href="#s13">Roofline: how close to ideal</a></li>
+    <li><a href="#s14">Takeaways</a></li>
   </ol>
 </nav>
 
@@ -819,7 +821,102 @@
 </div>
 
 <!-- ===================== SECTION 12 ===================== -->
-<h2 id="s12">12. Takeaways</h2>
+<h2 id="s12">12. Restickifies, and the real reason sendnn wins the MLP</h2>
+<p>A natural question: is torch-spyre slower on the MLP because it pays <em>restickifies</em>
+  (cross-core relayouts) that sendnn avoids? The answer is no &mdash; <strong>neither stack has a
+  restickify problem on this graph.</strong></p>
+<h3>12.1 The MLP compiles to zero restickifies</h3>
+<p>Run through the real torch-spyre passes, the natural fused MLP
+  (<code>up=x@Wu; gate=x@Wg; h=up&middot;silu(gate); out=h@Wd</code>) produces
+  <strong>0 restickifies</strong>. The structurally suspicious edge is the <code>[512,16384]</code>
+  intermediate <code>h</code> feeding <code>h@Wd</code>: the 16384 axis is a <em>free/N</em> dimension
+  when the front kernel writes it, then becomes the <em>contraction/K</em> dimension for the down
+  matmul. That N&rarr;K flip is exactly the kind of reorientation that <em>could</em> force a
+  restickify &mdash; but it doesn't here; the front-matmul output orientation is already compatible
+  with the down-matmul's contraction. Restickifies only appear when the graph contains an explicit
+  transpose/join, and even then they are graph-input/weight layout boundaries, never
+  producer&rarr;consumer.</p>
+<p><strong>Confirmed empirically at the exact 4096/16384 shape.</strong> Compiling the benchmark MLP
+  and reading the pre-scheduling dump: the optimizer emits <code>restickify plan: (none)</code>, and the
+  whole compiled op set is exactly <strong>8 ops</strong> &mdash; 3 <code>batchmatmul</code> (gate, up,
+  down) plus 5 pointwise (<code>neg, exp, add, realdiv, mul</code>: the SiLU/sigmoid decomposition and
+  the gate&times;up multiply). <strong>Zero restickify, stickify, reorient, or transpose ops</strong>, of
+  either source kind. The down matmul consumes the <code>[512,16384]</code> intermediate's existing
+  <code>out</code> axis directly as its <code>in=16384</code> contraction operand &mdash; no reorientation
+  inserted.</p>
+<h3>12.2 What the 2-kernel split actually costs: a 16.78&nbsp;MB HBM round-trip</h3>
+<p>torch-spyre lowers the FFN to two kernels (front + down); sendnn fuses it to one. The real cost of
+  the split is that the <code>[512,16384]</code> intermediate <code>h</code> (= <strong>16.78&nbsp;MB</strong>
+  fp16) must be handed between them through <strong>HBM</strong>. This is not a heuristic guess &mdash;
+  <code>memory_planning</code> assigns <code>h</code> to the HBM <code>INTERMEDIATES_SEGMENT</code>; it
+  would only live in LX scratchpad under <code>LX_PLANNING=1</code>, which the benchmark does not set.
+  So the front kernel <em>writes</em> 16.78&nbsp;MB to HBM and the down kernel <em>reads</em> it back.
+  sendnn's single fused <code>bmm</code> keeps <code>h</code> tiled on-chip and never spills it.</p>
+<p>The compile dump makes this concrete: the intermediate is <code>buf7</code>, <code>size=16777216</code>
+  bytes (= 512&times;16384&times;2), carrying <code>allocation=[pool=16777216]</code> &mdash; a byte
+  <em>offset</em> into the HBM intermediates segment (<code>INTERMEDIATES_SEGMENT = 0x0</code>), not an LX
+  address. (Weights, by contrast, carry <code>allocation=[hbm=&hellip;]</code> at 16&nbsp;GiB+ absolute
+  addresses &mdash; a different HBM region.) So the HBM round-trip of the 16.78&nbsp;MB intermediate is
+  not inferred, it is in the allocation plan.</p>
+<div class="callout">
+  <div class="callout-title">But the round-trip is small &mdash; utilization is the real gap</div>
+  Quantify it: 2&times;16.78&nbsp;MB / 204.8&nbsp;GB/s &asymp; <strong>0.16&nbsp;ms</strong> &mdash; only
+  ~4% of the 3.76&nbsp;ms prefill gap (tsp 9.53 vs sendnn 5.77&nbsp;ms). The dominant factor is
+  <strong>array utilization</strong>: sendnn's one fused kernel runs the systolic array at
+  <strong>~39% PT-Util</strong>, torch-spyre's two kernels at <strong>21&ndash;31%</strong>. Both stream
+  roughly the same ~400&nbsp;MB of weights; sendnn just fills the array ~1.5&ndash;1.8&times; better and
+  pays one launch/setup instead of two.
+</div>
+<p><strong>So "do they not have this?"</strong> &mdash; correct, but the "this" isn't restickifies (both
+  ~0). sendnn wins by fusing the whole FFN into one kernel, which (a) keeps the 16.78&nbsp;MB intermediate
+  on-chip instead of round-tripping HBM, and (b) more importantly, schedules the array far better
+  (~39% vs ~25% PT-Util) with a single launch.</p>
+
+<!-- ===================== SECTION 13 ===================== -->
+<h2 id="s13">13. Roofline: how close are we to the ideal?</h2>
+<p>Using torch-spyre's own cost-model constants &mdash; peak <strong>98.3&nbsp;TFLOPS</strong> DL16
+  (<code>_PEAK_MACS_US_CORE = 1.536&times;10<sup>6</sup></code> MACs/&micro;s/core &times; 32 cores) and HBM
+  <strong>204.8&nbsp;GB/s</strong> &mdash; the machine balance (roofline knee) is
+  <strong>480&nbsp;FLOP/byte</strong>. That lets us put an <em>ideal</em> floor under each regime and grade
+  both stacks against it.</p>
+<h3>13.1 Prefill is compute-bound; decode is memory-bound</h3>
+<ul>
+  <li><strong>Prefill (M=512):</strong> arithmetic intensity &asymp; <strong>482&nbsp;FLOP/byte</strong>
+    &mdash; right on the knee. Compute floor = <code>1.03&times;10<sup>11</sup> MACs / 98.3&nbsp;TFLOPS</code>
+    = <strong>2.10&nbsp;ms</strong> (the HBM floor, 2.09&nbsp;ms, nearly coincides). Ideal &asymp;
+    <strong>2.10&nbsp;ms</strong>.</li>
+  <li><strong>Decode (M=4):</strong> arithmetic intensity &asymp; <strong>4&nbsp;FLOP/byte</strong> &mdash;
+    120&times; below the knee, deeply memory-bound. The compute floor is a trivial ~16&micro;s; the binding
+    cost is reading the <strong>402.7&nbsp;MB</strong> of weights: <code>402.7&nbsp;MB / 204.8&nbsp;GB/s</code>
+    = <strong>1.97&nbsp;ms</strong>. Ideal &asymp; <strong>1.97&nbsp;ms</strong>.</li>
+</ul>
+<h3>13.2 Where each stack actually lands</h3>
+<table>
+  <thead><tr><th>regime</th><th class="num">ideal (ms)</th><th>binding</th><th class="num">tsp (ms)</th><th class="num">tsp &times;over</th><th class="num">tsp eff</th><th class="num">sendnn (ms)</th><th class="num">sendnn &times;over</th><th class="num">sendnn eff</th></tr></thead>
+  <tbody>
+    <tr><td>Prefill (M=512)</td><td class="num">2.10</td><td>compute</td><td class="num">9.53</td><td class="num">4.54&times;</td><td class="num">22%</td><td class="num">5.77</td><td class="num">2.75&times;</td><td class="num good">36%</td></tr>
+    <tr><td>Decode (M=4)</td><td class="num">1.97</td><td>HBM (weight read)</td><td class="num">12.00</td><td class="num bad">6.10&times;</td><td class="num">16%</td><td class="num">8.49</td><td class="num">4.32&times;</td><td class="num">23%</td></tr>
+  </tbody>
+</table>
+<p class="subtitle" style="font-size:0.9em;margin-top:-0.3rem;">efficiency = ideal/actual; &times;over =
+  actual/ideal. Decode ideal at the alternate 166&nbsp;GB/s HBM figure is 2.43&nbsp;ms (tsp 4.95&times;,
+  sendnn 3.50&times;).</p>
+<div class="callout key">
+  <div class="callout-title">The decode roofline is not the bottleneck &mdash; overhead is</div>
+  Prefill: sendnn runs at <strong>2.75&times;</strong> the compute floor (36% efficient), torch-spyre at
+  <strong>4.54&times;</strong> (22%) &mdash; sendnn is ~1.65&times; faster, so most of the tsp prefill gap is
+  implementation overhead, not a roofline wall.<br><br>
+  Decode is the telling one: the roofline says the FFN <em>could</em> run in ~<strong>2&nbsp;ms</strong>
+  (weight-read-bound), but <strong>both stacks sit 4&ndash;6&times; above even that memory floor</strong>
+  (tsp 6.1&times;, sendnn 4.3&times;). Decode is therefore <em>not</em> hitting the HBM-bandwidth limit
+  &mdash; it is stuck <em>below</em> the roofline, bound by fixed launch/stickify overhead while the array
+  idles at M=1&ndash;4 (the PT-Util collapse of &sect;6&ndash;7). The 402.7&nbsp;MB of weights should stream
+  in ~2&nbsp;ms; neither stack gets there. The lever for decode is killing per-call overhead and keeping
+  the array fed, not faster memory.
+</div>
+
+<!-- ===================== SECTION 14 ===================== -->
+<h2 id="s14">14. Takeaways</h2>
 <ol>
   <li><strong>The op is one SwiGLU FFN block</strong>: gate &amp; up project 4096&rarr;16384, SiLU-gate
     times up, down projects 16384&rarr;4096. Three matmuls, ~2&times;10<sup>8</sup> MACs per token.</li>
@@ -850,6 +947,14 @@
     mlp 2.07&times;) and reaches/beats sendnn on the square ones; decode shapes barely move because the
     array is underfilled regardless of split. Every place it trails sendnn traces to &sect;10 (bandwidth)
     or &sect;6&ndash;7 (underfill), not to a wrong split.</li>
+  <li><strong>The MLP has 0 restickifies</strong> (&sect;12, confirmed in the compile dump) &mdash; the slowdown vs sendnn is not a
+    relayout problem. The 2-kernel split round-trips the 16.78&nbsp;MB intermediate through HBM (~0.16&nbsp;ms,
+    minor); the real gap is array utilization (~25% PT-Util vs sendnn's ~39%) from emitting two
+    under-filled kernels instead of one fused <code>bmm</code>.</li>
+  <li><strong>Distance from the roofline</strong> (&sect;13): prefill is compute-bound with ideal ~2.10&nbsp;ms
+    (sendnn 2.75&times; / tsp 4.54&times; over); decode is memory-bound with ideal ~1.97&nbsp;ms, but both stacks
+    sit 4&ndash;6&times; <em>above</em> even that floor &mdash; decode is overhead-bound below its own roofline,
+    not bandwidth-limited.</li>
 </ol>
 
 </main>
