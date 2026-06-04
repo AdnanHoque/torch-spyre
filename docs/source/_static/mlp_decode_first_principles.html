@@ -102,7 +102,8 @@
     <li><a href="#s11">Planner A/B across the matmul shapes</a></li>
     <li><a href="#s12">Restickifies &amp; the sendnn gap</a></li>
     <li><a href="#s13">Roofline: how close to ideal</a></li>
-    <li><a href="#s14">Takeaways</a></li>
+    <li><a href="#s14">Off the roofline: the gap decomposed</a></li>
+    <li><a href="#s15">Takeaways</a></li>
   </ol>
 </nav>
 
@@ -916,7 +917,104 @@
 </div>
 
 <!-- ===================== SECTION 14 ===================== -->
-<h2 id="s14">14. Takeaways</h2>
+<h2 id="s14">14. Off the roofline: what's the gap really made of?</h2>
+<p>The roofline (&sect;13) said both stacks sit well above the ideal. Four threads pull that gap apart:
+  what is the <em>real</em> bandwidth, would fusing help, why is even sendnn ~2&times; off the compute
+  peak, and where is torch-spyre's actual headroom. The short version: <strong>the "compute peak" was
+  the wrong yardstick</strong> &mdash; at real bandwidth, prefill is memory-leaning and sendnn is nearly
+  optimal; torch-spyre's addressable loss is a handful of specific kernel-level things, not "the matmul
+  can't use the array."</p>
+<h3>14.1 Real HBM bandwidth is ~half the spec</h3>
+<p>The 204.8&nbsp;GB/s in the cost model is the LPDDR5 <em>spec</em> peak. The achieved streaming
+  bandwidth, back-derived from the wide-N matmul (&sect;10, which is HBM-bound: it moves 122&nbsp;MB and
+  the kernel time <em>is</em> bytes/BW), is much lower &mdash; and collapses further at decode:</p>
+<table>
+  <thead><tr><th>case</th><th class="num">bytes</th><th class="num">kernel</th><th class="num">achieved BW</th><th class="num">% of spec</th></tr></thead>
+  <tbody>
+    <tr><td>wide-N, sendnn</td><td class="num">122 MB</td><td class="num">0.962 ms</td><td class="num">127 GB/s</td><td class="num">62%</td></tr>
+    <tr><td>wide-N, tsp</td><td class="num">122 MB</td><td class="num">1.20 ms</td><td class="num">102 GB/s</td><td class="num">50%</td></tr>
+    <tr><td>decode, sendnn (M=4)</td><td class="num">403 MB</td><td class="num">8.49 ms</td><td class="num bad">47 GB/s</td><td class="num">23%</td></tr>
+    <tr><td>decode, tsp (M=4)</td><td class="num">403 MB</td><td class="num">12.0 ms</td><td class="num bad">34 GB/s</td><td class="num">16%</td></tr>
+  </tbody>
+</table>
+<p>So real streaming is ~<strong>100&ndash;127&nbsp;GB/s</strong> at prefill width and <strong>collapses
+  to ~34&ndash;47&nbsp;GB/s at decode</strong> (M=4) &mdash; with one token there is no MAC reuse to hide
+  weight-fetch latency, so the ring can't stay saturated. This one fact reframes the rest.</p>
+<h3>14.2 At real bandwidth, prefill is memory-leaning &mdash; and sendnn is near-optimal</h3>
+<p>Re-grade prefill against achieved BW: the weight read (402.7&nbsp;MB) costs
+  <code>402.7/110 = 3.66&nbsp;ms</code>, which now <em>exceeds</em> the 2.10&nbsp;ms compute floor. The
+  roofline knee has moved &mdash; prefill is no longer compute-bound. If the matmul kernels run compute
+  and memory with little overlap, kernel time tends to their <em>sum</em>:</p>
+<div class="callout key">
+  <div class="callout-title">The number that dissolves the puzzle</div>
+  <code>compute 2.10&nbsp;ms + HBM(@110&nbsp;GB/s) 3.66&nbsp;ms = 5.76&nbsp;ms</code> &nbsp;vs&nbsp;
+  <strong>sendnn measured 5.77&nbsp;ms</strong> &mdash; a 0.2% match. So sendnn's "2.75&times; off the
+  compute peak" is <strong>not</strong> compute inefficiency: it is ~entirely (a) real BW being half of
+  spec, and (b) compute and memory not overlapping. Given the real silicon, <strong>sendnn is essentially
+  at the floor.</strong> Its 38.7% PT-Util is the <em>memory wall</em>, not array underfill &mdash; with
+  no overlap the array cannot exceed <code>2.10/(2.10+3.66) = 36%</code> utilization, which is exactly
+  what sendnn shows.
+</div>
+<p><strong>A distinction that matters for reading these numbers:</strong> the cost model's
+  <code>pt_eff = &radic;(pt_passes/8)</code> compute-derate is <strong>~1.0</strong> at the planner's
+  chosen <code>(8,4)</code>/<code>(4,8)</code> split (64 M-rows/core &rarr; 8 PT passes &rarr; full). That
+  is <em>not</em> the same as the measured "PT-Util" of 21&ndash;39%, which is
+  <code>compute_floor / kernel_time</code> and is dominated by the <em>additive</em> HBM term. <strong>A
+  "PT-Util 21%" does not mean the array is 21% full</strong> &mdash; it means the array is ~full but
+  starved waiting on memory.</p>
+<h3>14.3 Would fusing the two kernels into one (like sendnn) help?</h3>
+<p>Surprisingly little for prefill, a lot for decode &mdash; the opposite of what the "save the
+  intermediate round-trip" intuition predicts:</p>
+<table>
+  <thead><tr><th>regime</th><th>what fusion removes</th><th class="num">saving</th><th class="num">fused tsp</th><th class="num">vs sendnn</th></tr></thead>
+  <tbody>
+    <tr><td>Prefill</td><td>16.78 MB round-trip (~0.31 ms) + one launch/setup</td><td class="num">~0.5&ndash;1.0 ms</td><td class="num">~8.8 ms</td><td class="num bad">still ~1.5&times;</td></tr>
+    <tr><td>Decode</td><td>one whole overhead-bound kernel launch (round-trip negligible at M=4)</td><td class="num good">~2.8 ms</td><td class="num">~9.2 ms</td><td class="num good">~1.08&times;</td></tr>
+  </tbody>
+</table>
+<p>At prefill the intermediate round-trip is small and the gap is utilization, so fusion barely moves
+  it. At decode the kernels are overhead-bound, so collapsing two launches into one removes a whole
+  fixed cost &mdash; nearly closing the gap to sendnn. <strong>Fusion is a decode optimization, not a
+  prefill one.</strong></p>
+<h3>14.4 torch-spyre's actual kernel-level headroom</h3>
+<p>With the BW wall and overlap loss common to both stacks, the <em>addressable</em> tsp loss is the
+  delta to sendnn. The front/down asymmetry is the tell &mdash; the front kernel is
+  <strong>+3.27&nbsp;ms</strong> over its no-overlap floor while the down kernel is only +0.50&nbsp;ms:</p>
+<table>
+  <thead><tr><th>kernel</th><th class="num">no-overlap floor</th><th class="num">measured</th><th class="num">excess</th></tr></thead>
+  <tbody>
+    <tr><td>front (gate+up+SiLU+mul)</td><td class="num">3.84 ms</td><td class="num">7.109 ms</td><td class="num bad">+3.27 ms</td></tr>
+    <tr><td>down</td><td class="num">1.92 ms</td><td class="num">2.423 ms</td><td class="num">+0.50 ms</td></tr>
+  </tbody>
+</table>
+<p>The front kernel is the only one carrying the SiLU chain, which the codegen runs on the
+  <strong>SFP</strong> unit &mdash; a <em>different</em> compute unit from the <strong>PT</strong>
+  systolic array the matmul uses. The most likely cause of the front's excess is the <strong>SiLU/sigmoid
+  chain (neg/exp/add/realdiv/mul) serializing <em>after</em> the matmul instead of overlapping it</strong>
+  on the otherwise-idle SFP unit. <em>(Inferred from the front-vs-down asymmetry, not yet read from a
+  kernel schedule dump &mdash; the highest-probability single cause.)</em> Ranked levers:</p>
+<table>
+  <thead><tr><th>#</th><th>lever</th><th>regime</th><th class="num">est. payoff</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Overlap the SiLU SFP chain with the front matmul (or fuse so SFP runs concurrently)</td><td>prefill</td><td class="num">~2&ndash;3 ms</td></tr>
+    <tr><td>2</td><td>Fuse the decode FFN into one resident-weight kernel + aggressive weight prefetch</td><td>decode</td><td class="num">~3.5 ms &rarr; sendnn</td></tr>
+    <tr><td>3</td><td>Lift achieved HBM BW 102&rarr;127 GB/s (deeper prefetch / better ring scheduling)</td><td>both</td><td class="num">~0.5 ms</td></tr>
+    <tr><td>4</td><td>Cut output-writeback pressure (~0.75 ms/MB per-core slope)</td><td>prefill</td><td class="num">~0.4 ms</td></tr>
+  </tbody>
+</table>
+<h3>14.5 So is it "the matmul kernels not using the hardware"?</h3>
+<p>Mostly no. Decomposed honestly, the "off theoretical" gap is <strong>~1.7&times; from real-vs-spec
+  bandwidth</strong> (a hardware reality no matmul kernel beats), <strong>~1.3&ndash;1.5&times; from
+  imperfect compute/memory overlap</strong> (sendnn already pays most of this and is near-optimal), and
+  for torch-spyre specifically a further <strong>~1.65&times;</strong> that <em>is</em> addressable &mdash;
+  concentrated in <strong>SiLU-serialization (prefill)</strong> and a <strong>non-fused decode path</strong>,
+  both squarely in the Inductor backend's control. One thing it is <em>not</em>: an over-split-M problem
+  &mdash; the planner picks <code>(8,4)</code>/<code>(4,8)</code> with <code>pt_eff = 1.0</code>, so the
+  array is not being needlessly fragmented. Chasing the 98.3-TFLOPS compute peak is chasing a
+  bandwidth-and-overlap ceiling; the real wins are SiLU overlap and a fused decode path.</p>
+
+<!-- ===================== SECTION 15 ===================== -->
+<h2 id="s15">15. Takeaways</h2>
 <ol>
   <li><strong>The op is one SwiGLU FFN block</strong>: gate &amp; up project 4096&rarr;16384, SiLU-gate
     times up, down projects 16384&rarr;4096. Three matmuls, ~2&times;10<sup>8</sup> MACs per token.</li>
@@ -955,6 +1053,12 @@
     (sendnn 2.75&times; / tsp 4.54&times; over); decode is memory-bound with ideal ~1.97&nbsp;ms, but both stacks
     sit 4&ndash;6&times; <em>above</em> even that floor &mdash; decode is overhead-bound below its own roofline,
     not bandwidth-limited.</li>
+  <li><strong>Off the roofline, decomposed</strong> (&sect;14): real HBM BW is ~half spec (~110 GB/s
+    prefill, collapsing to ~34&ndash;47 GB/s at decode); at real BW prefill is memory-leaning and sendnn
+    is near-optimal (<code>compute 2.10 + HBM 3.66 = 5.76&nbsp;ms</code> &asymp; measured 5.77). tsp's
+    addressable loss is the SiLU chain serializing with the front matmul (prefill, ~2&ndash;3&nbsp;ms)
+    and a non-fused decode path (~3.5&nbsp;ms) &mdash; not array underfill or compute-kernel quality.
+    Fusion helps decode (~2.8&nbsp;ms) far more than prefill (~0.5&ndash;1&nbsp;ms).</li>
 </ol>
 
 </main>
