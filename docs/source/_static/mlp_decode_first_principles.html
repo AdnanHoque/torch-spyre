@@ -141,8 +141,8 @@
   do (PT-Util ~0.15%), so the ~2.8&nbsp;ms it spends is the time to stream the FFN's 402.7&nbsp;MB of
   weights in from memory at the bus's real read speed, with essentially zero fixed overhead; and the
   200&nbsp;ms/token figure comes from multiplying an <em>isolated, per-call</em> measurement by a layer
-  count, which double-charges a per-call weight <em>reload</em> (~33&nbsp;ms of Memset/Memcpy) that
-  amortizes away once weights stay resident in a real autoregressive model.</p>
+  count, which double-charges a per-call host&rarr;device weight <em>upload</em> (~33&nbsp;ms of
+  Memset/Memcpy) that amortizes away once weights stay resident in a real autoregressive model.</p>
 
 <!-- ===================== SECTION 2 ===================== -->
 <h2 id="s2">2. The op: a SwiGLU FFN</h2>
@@ -485,13 +485,19 @@
     <tr><td>sendnn</td><td class="mono">Memset</td><td class="num">2.794</td><td class="num">&mdash;</td></tr>
   </tbody>
 </table>
+<p class="subtitle" style="font-size:0.9em;">Note: this profile's decode is the <strong>distinct-weight</strong> <code>bmm</code> form (each of the 4 sequences reads its own copy of the weights); the Dataset-2 canonical probe is the <strong>shared-weight</strong> <code>bmm_expand</code> form (one read). See &sect;14.3 &mdash; they are different kernels, ~B&times; apart.</p>
 
 <h3>Decode &mdash; same op &mdash; Dataset&nbsp;2 (our canonical)</h3>
 <p>The canonical run measures the <em>compute kernel</em> two ways. With weights left resident on the
   device ("persistent"), the decode kernel is <strong>~2.8&nbsp;ms</strong> &mdash; about
-  <strong>4&times; smaller</strong> than Dataset&nbsp;1's 12&nbsp;ms. The difference is entirely the
-  per-call weight reload (the <code>Memset</code>/<code>Memcpy</code> traffic), which the persistent
-  run does not pay. &sect;8 walks through the reconciliation; here are the numbers as measured:</p>
+  <strong>4&times; smaller</strong> than Dataset&nbsp;1's 12&nbsp;ms. The kernel-size gap is because the
+  two runs lower to different kernels: this probe is the <strong>shared-weight</strong>
+  <code>bmm_expand</code> form (weights read once), while Dataset&nbsp;1's profile is the
+  <strong>distinct-weight</strong> <code>bmm</code> form (each batched sequence reads its own copy),
+  which grows with the batch (&sect;14.3). On top of that, the <em>device total</em> (~36&nbsp;ms) is
+  inflated by a per-call host&rarr;device weight upload (the <code>Memset</code>/<code>Memcpy</code>
+  traffic), which the persistent run does not pay. &sect;8 walks through the reconciliation; here are the
+  numbers as measured:</p>
 <table>
   <thead><tr><th>configuration</th><th>stack</th><th class="num">kernel compute (ms)</th><th class="num">device total spyre_ms (ms)</th><th class="num">of which weight reload</th></tr></thead>
   <tbody>
@@ -515,9 +521,11 @@
 <p>The arresting fact: the Dataset&nbsp;1 decode front kernel (<strong>7.979&nbsp;ms</strong>) is
   essentially the same as the prefill front kernel (<strong>7.109&nbsp;ms</strong>) &mdash;
   <em>despite doing 128&times; fewer tokens of work.</em> If the kernel were compute-bound, decode
-  would be ~128&times; faster. It isn't. But notice that Dataset&nbsp;2's persistent decode is much
-  smaller (2.8&nbsp;ms total), which is the first hint that most of Dataset&nbsp;1's decode number is
-  <em>not</em> the matmul at all &mdash; it is weight-reload memory traffic. The next sections pull
+  would be ~128&times; faster. It isn't &mdash; decode is memory-bound, so the kernel time tracks the
+  bytes of weights read, not the arithmetic. Dataset&nbsp;1's larger decode number is the
+  <strong>distinct-weight</strong> <code>bmm</code> kernel (each batched sequence reads its own copy of the
+  weights, &sect;14.3), whereas Dataset&nbsp;2's ~2.8&nbsp;ms is the <strong>shared-weight</strong>
+  <code>bmm_expand</code> kernel that reads them once. The next sections pull
   these apart: &sect;6&ndash;7 explain why the array does almost no math at decode, and why what is
   left is <em>memory streaming</em>, not idle overhead; &sect;8 reconciles the 12&nbsp;ms and the
   2.8&nbsp;ms.</p>
@@ -682,15 +690,17 @@
 </div>
 
 <h3>7.3 So what about the 12&nbsp;ms in Dataset&nbsp;1?</h3>
-<p>If the real compute is 2.8&nbsp;ms, why does Dataset&nbsp;1 show a 12&nbsp;ms decode and a device
-  time near 36&nbsp;ms? Because Dataset&nbsp;1's run <strong>reloads the weights from the host computer
-  on every call</strong>. That reload &mdash; the <code>Memset</code> and <code>Memcpy</code> events
-  &mdash; is a separate, large chunk of memory traffic stacked on top of the 2.8&nbsp;ms of real
-  compute. In the production run of Dataset&nbsp;2 you can see it laid bare: the compute kernel is
-  still ~2.85&nbsp;ms, but the device total balloons to 36.4&nbsp;ms, of which <strong>33.6&nbsp;ms is
-  Memset</strong> (the weight reload). Leave the weights resident on the device &mdash; the way a real
-  model runs &mdash; and that reload drops to ~0, leaving the 2.8&nbsp;ms kernel. &sect;8 walks through
-  this reconciliation step by step.</p>
+<p>If the shared-weight compute is 2.8&nbsp;ms, why does Dataset&nbsp;1 show a 12&nbsp;ms decode kernel and
+  a device time near 36&nbsp;ms? Two separate reasons. The 12&nbsp;ms <em>kernel</em> is a different kernel:
+  Dataset&nbsp;1's profile is the <strong>distinct-weight</strong> <code>bmm</code> form, where each of the
+  batched sequences reads its own copy of the weights, so the streaming cost grows with the batch
+  (&sect;14.3). Our 2.8&nbsp;ms is the <strong>shared-weight</strong> <code>bmm_expand</code> form, which
+  reads the weights once &mdash; same physics, different kernel. The 36&nbsp;ms <em>device total</em> is a
+  third thing again: a per-call host&rarr;device <strong>weight upload</strong> stacked on top of the
+  kernel. In Dataset&nbsp;2's production run you can see it laid bare: the device total balloons to
+  36.4&nbsp;ms, of which <strong>33.6&nbsp;ms is Memset/Memcpy</strong> (the upload). Leave the weights
+  resident on the device &mdash; the way a real model runs &mdash; and that upload drops to ~0.
+  &sect;8 walks through this reconciliation step by step.</p>
 
 <div class="callout key">
   <div class="callout-title">The compute floor, and why the gap to it is memory, not waste</div>
@@ -719,11 +729,12 @@
 <p>The worry: a model has ~40 layers; 5&nbsp;ms/MLP &times; 40 ≈ 200&nbsp;ms/token, which would be a
   disaster. Two things are wrong with that multiplication.</p>
 
-<h3>8.1 It multiplies a per-call weight reload that a real model pays once</h3>
-<p>The big decode numbers &mdash; 12&nbsp;ms kernel, ~36&nbsp;ms device time &mdash; are an
-  <em>isolated</em> single-op measurement, and the bulk of them is <strong>weight-reload memory
-  traffic</strong>, not matmul work. Dataset&nbsp;2's production run measures exactly where the
-  milliseconds go:</p>
+<h3>8.1 It multiplies a per-call weight upload that a real model pays once</h3>
+<p>The big decode device total &mdash; ~36&nbsp;ms <code>spyre_ms</code> &mdash; is an <em>isolated</em>
+  single-op measurement, and the bulk of it is a per-call host&rarr;device <strong>weight upload</strong>
+  (<code>Memcpy</code>/<code>Memset</code> traffic), not matmul work. (The 12&nbsp;ms kernel is a separate
+  story &mdash; a distinct-weight <code>bmm</code> form, &sect;14.3 &mdash; not this upload.)
+  Dataset&nbsp;2's production run measures exactly where the milliseconds go:</p>
 <table>
   <thead><tr><th>stack</th><th class="num">kernel compute (ms)</th><th class="num">device total spyre_ms (ms)</th><th class="num">weight-reload traffic</th></tr></thead>
   <tbody>
@@ -749,7 +760,7 @@
   <thead><tr><th>if you multiply&hellip;</th><th>by 40 layers</th><th>is it real?</th></tr></thead>
   <tbody>
     <tr><td><code>spyre_ms</code> production (~36&nbsp;ms)</td><td class="num">~1440&nbsp;ms</td><td class="bad">No &mdash; ~33&nbsp;ms of it is per-call weight reload (Memset/Memcpy) that is paid once, not per layer</td></tr>
-    <tr><td>Dataset&nbsp;1 kernel_ms sum (~12&nbsp;ms)</td><td class="num">~480&nbsp;ms</td><td class="warn">Overstated &mdash; itself inflated by Dataset&nbsp;1's per-call reload; the real kernel is 2.8&nbsp;ms</td></tr>
+    <tr><td>Dataset&nbsp;1 kernel_ms sum (~12&nbsp;ms)</td><td class="num">~480&nbsp;ms</td><td class="warn">Overstated &mdash; this is the distinct-weight <code>bmm</code> kernel (each sequence re-reads its weights, &sect;14.3); the shared-weight kernel is 2.8&nbsp;ms</td></tr>
     <tr><td>persistent kernel (~2.8&nbsp;ms)</td><td class="num good">~112&nbsp;ms</td><td class="good">Yes &mdash; the real per-layer decode compute, weights resident</td></tr>
     <tr><td>compute floor (~4&micro;s/FFN)</td><td class="num">~0.16&nbsp;ms</td><td>The bare arithmetic; unreachable because decode is memory-bound (&sect;7)</td></tr>
   </tbody>
@@ -1014,9 +1025,11 @@
   bus and the real decode kernel: the persistent-weight decode kernel is ~<strong>2.8&nbsp;ms</strong>,
   which is exactly the 402.7&nbsp;MB of weights streamed at the device's real ~143&nbsp;GB/s
   read-dominated ceiling. So decode is <em>not</em> stuck below its roofline on overhead &mdash; it is
-  <strong>memory-bound weight streaming sitting right on the real memory ceiling</strong>. The big
-  12&nbsp;ms/36&nbsp;ms figures in this table are the isolated benchmark's per-call weight reload
-  (&sect;8), not the kernel. The lever for decode is keeping weights resident, not faster memory.
+  <strong>memory-bound weight streaming sitting right on the real memory ceiling</strong>. The
+  ~36&nbsp;ms total device time in this table is inflated by the benchmark's per-call host&rarr;device
+  weight upload (&sect;8); the 12&nbsp;ms decode kernel is the <em>distinct-weight</em> <code>bmm</code> form,
+  a different kernel from our ~2.8&nbsp;ms <em>shared-weight</em> probe (&sect;14.3). The lever for decode is
+  ensuring batched decode shares one weight read, and keeping weights resident.
 </div>
 <p class="subtitle" style="font-size:0.9em;">These ideals use the 204.8&nbsp;GB/s <em>spec</em>; &sect;14 re-grades them against the <em>measured</em> bus (~113&nbsp;GB/s balanced copy, ~143&nbsp;GB/s read-dominated streaming), which raises the memory-bound ideal and shows the decode kernel already sits on it.</p>
 
@@ -1170,96 +1183,113 @@
   (which is what weight streaming does). Hold onto those two numbers; the rest of this section uses them
   to re-grade everything.</p>
 
-<h3>14.3 Decode, re-told: streaming weights at the memory ceiling</h3>
-<p>Now apply this to decode. Recall from &sect;7 the two measurements we have to reconcile: Dataset&nbsp;2
-  says the real decode <em>compute</em> kernel is ~<strong>2.8&nbsp;ms</strong>, while Dataset&nbsp;1 (and
-  the production run) shows ~<strong>12&nbsp;ms / 36&nbsp;ms</strong>. Which is right? <em>Both are</em>
-  &mdash; they measure different things, and Figure 6 tells us how to read them.</p>
-<p>Take the 2.8&nbsp;ms first. A single token reuses each weight exactly once, so the FFN must drag all
-  <strong>402.7&nbsp;MB</strong> of its weight matrices across the highway. At the read-dominated ceiling
-  of ~143&nbsp;GB/s that is <code>402.7&nbsp;MB / 143&nbsp;GB/s &asymp; 2.8&nbsp;ms</code> &mdash; which is
-  <em>exactly</em> the measured kernel time. The kernel is not idle and it is not doing real arithmetic;
-  it is <strong>streaming weights at the bus's top read speed</strong>, with essentially zero fixed
-  overhead left over. Decode is memory-bound, and torch-spyre and sendnn both sit right on the ceiling
-  (140 and 144&nbsp;GB/s respectively).</p>
-<p>So where do the big 12&nbsp;ms and 36&nbsp;ms come from? From <strong>reloading the weights from the
-  host computer on every benchmark call</strong> &mdash; the <code>Memset</code>/<code>Memcpy</code>
-  traffic. Figure 7 lays the whole decode call out on a single timeline.</p>
-
+<h3>14.3 Decode, re-told: two batched forms, and which one amortizes</h3>
+<p>At decode the FFN does almost no arithmetic &mdash; one token reuses each weight only once &mdash; so the
+  kernel is dominated by <strong>reading the weights from HBM</strong>. One token's FFN reads
+  <strong>402.7&nbsp;MB</strong> of weights; at the ~143&nbsp;GB/s read ceiling that is
+  <code>402.7&nbsp;MB / 143&nbsp;GB/s &asymp; 2.8&nbsp;ms</code> &mdash; the measured single-token cost, and
+  it is pure memory (a single token already saturates the bus on the weight read).</p>
+<p>But a <em>batched</em> decode &mdash; several sequences processed together &mdash; can lower two different
+  ways, and they differ by the batch factor. This, not weight reload, is the source of the
+  "2.8&nbsp;ms vs 12&nbsp;ms" confusion:</p>
+<table>
+  <thead><tr><th>form</th><th>kernel</th><th>weight reads</th><th>kernel time vs batch B</th></tr></thead>
+  <tbody>
+    <tr><td><strong>shared-weight</strong> (the efficient one)</td><td class="mono">bmm_expand</td><td>402.7&nbsp;MB read <strong>once</strong>, broadcast across the batch</td><td class="good">flat: ~2.85&nbsp;ms at B=1,2,4,8</td></tr>
+    <tr><td><strong>distinct-weight</strong></td><td class="mono">bmm</td><td>B&times;402.7&nbsp;MB (each sequence its own copy)</td><td class="bad">grows ~linearly with B</td></tr>
+  </tbody>
+</table>
+<p>Both are genuine, correctly-measured kernel times &mdash; they just compute different things. The
+  shared-weight form is what batching is <em>for</em> on a memory-bound chip: read the weights once and
+  amortize them across every sequence, so per-token cost falls as <code>~2.85&nbsp;ms / B</code>. The
+  distinct-weight form throws that away &mdash; it re-reads the weights for each sequence.</p>
 <figure>
-<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" class="svg-text">
-  <text x="380" y="20" text-anchor="middle" font-size="14" font-weight="bold">What the decode benchmark's 36&nbsp;ms actually contains</text>
-  <text x="380" y="38" text-anchor="middle" font-size="9.5" fill="#475569">one isolated benchmark call, torch-spyre, M=4 &mdash; time flows left to right</text>
-
-  <!-- time axis: x 60..720 maps 0..38 ms -> 17.37 px/ms -->
-  <line x1="60" y1="250" x2="720" y2="250" stroke="#475569" stroke-width="1.2"/>
+<svg viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="360" y="20" text-anchor="middle" font-size="14" font-weight="bold">Batched decode: shared-weight amortizes, distinct-weight does not</text>
+  <text x="360" y="38" text-anchor="middle" font-size="9.5" fill="#475569">FFN kernel time vs batch size B (M=1 per sequence), measured</text>
+  <!-- axes: x 70..680 = B 1..8 ; y 300..56 = 0..16 ms -->
+  <line x1="70" y1="300" x2="680" y2="300" stroke="#475569" stroke-width="1.4"/>
+  <line x1="70" y1="300" x2="70" y2="50" stroke="#475569" stroke-width="1.4"/>
   <g font-size="9" fill="#475569">
-    <text x="60" y="265" text-anchor="middle">0</text>
-    <text x="234" y="265" text-anchor="middle">10</text>
-    <text x="408" y="265" text-anchor="middle">20</text>
-    <text x="581" y="265" text-anchor="middle">30</text>
-    <text x="720" y="265" text-anchor="middle">38 ms</text>
+    <text x="64" y="303" text-anchor="end">0</text>
+    <text x="64" y="240" text-anchor="end">4</text>
+    <text x="64" y="178" text-anchor="end">8</text>
+    <text x="64" y="116" text-anchor="end">12</text>
+    <text x="64" y="56" text-anchor="end">16</text>
   </g>
-
-  <!-- TOP BAR: production/isolated call -->
-  <text x="60" y="78" text-anchor="start" font-size="10" font-weight="bold">Isolated benchmark call (weights reloaded every time):</text>
-  <!-- compute 2.85 ms: width 2.85*17.37=49.5 -->
-  <rect x="60" y="86" width="49.5" height="34" fill="#16a34a" stroke="#166534"/>
-  <text x="84" y="107" text-anchor="middle" font-size="8.5" fill="#fff" font-weight="bold">2.85</text>
-  <!-- reload 33.57 ms: width 33.57*17.37=583 ; start at 109.5 -->
-  <rect x="109.5" y="86" width="583" height="34" fill="#fca5a5" stroke="#b91c1c"/>
-  <text x="401" y="103" text-anchor="middle" font-size="9.5" fill="#7f1d1d" font-weight="bold">weight reload &mdash; Memset / Memcpy &asymp; 33.6 ms</text>
-  <text x="401" y="115" text-anchor="middle" font-size="8.5" fill="#7f1d1d">(re-fetch all 402.7 MB of weights from the host, this call only)</text>
-  <!-- brace = spyre_ms 36.42 -->
-  <text x="376" y="138" text-anchor="middle" font-size="9" fill="#475569">total device time spyre_ms = 36.42 ms</text>
-
-  <!-- legend mid -->
-  <rect x="60" y="158" width="14" height="12" fill="#16a34a"/><text x="80" y="168" text-anchor="start" font-size="9" fill="#475569">actual matmul (weight streaming at the bus ceiling)</text>
-  <rect x="360" y="158" width="14" height="12" fill="#fca5a5" stroke="#b91c1c"/><text x="380" y="168" text-anchor="start" font-size="9" fill="#475569">per-call weight reload (amortizes to ~0 with resident weights)</text>
-
-  <!-- BOTTOM BAR: resident-weight (real model) -->
-  <text x="60" y="200" text-anchor="start" font-size="10" font-weight="bold">Same op in a real model (weights left resident on the device):</text>
-  <rect x="60" y="208" width="49.5" height="34" fill="#16a34a" stroke="#166534"/>
-  <text x="84" y="229" text-anchor="middle" font-size="8.5" fill="#fff" font-weight="bold">2.83</text>
-  <!-- ghost reload removed -->
-  <rect x="109.5" y="208" width="583" height="34" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,3"/>
-  <text x="401" y="229" text-anchor="middle" font-size="9.5" fill="#94a3b8">reload gone &mdash; weights were loaded once, stay on the bench</text>
-  <text x="160" y="290" text-anchor="start" font-size="9" fill="#166534" font-weight="bold">real per-layer decode cost &asymp; 2.8 ms (the green bar only)</text>
+  <text x="28" y="180" text-anchor="middle" font-size="10" fill="#475569" transform="rotate(-90 28 180)">kernel time (ms)</text>
+  <g font-size="9" fill="#475569">
+    <text x="70" y="315" text-anchor="middle">1</text><text x="157" y="315" text-anchor="middle">2</text>
+    <text x="244" y="315" text-anchor="middle">3</text><text x="331" y="315" text-anchor="middle">4</text>
+    <text x="592" y="315" text-anchor="middle">8</text>
+  </g>
+  <text x="375" y="332" text-anchor="middle" font-size="10" fill="#475569">batch size B (sequences, 1 token each)</text>
+  <!-- y scale: y = 300 - ms/16*244 -> 15.25 px/ms -->
+  <!-- shared (flat ~2.85): B=1,2,3,4,8 -> 2.85,2.79,2.84,2.82,2.88 -->
+  <polyline points="70,256.5 157,257.4 244,256.7 331,257.0 592,256.1" fill="none" stroke="#16a34a" stroke-width="2"/>
+  <g fill="#16a34a"><circle cx="70" cy="256.5" r="3.4"/><circle cx="157" cy="257.4" r="3.4"/><circle cx="244" cy="256.7" r="3.4"/><circle cx="331" cy="257.0" r="3.4"/><circle cx="592" cy="256.1" r="3.4"/></g>
+  <text x="600" y="252" text-anchor="start" font-size="9.5" fill="#16a34a" font-weight="bold">shared (bmm_expand): flat ~2.85 ms</text>
+  <!-- distinct (linear): B=1->~2.85, 2->9.27, 3->11.62, 4->14.38 -->
+  <polyline points="70,256.5 157,158.6 244,122.7 331,80.7" fill="none" stroke="#dc2626" stroke-width="2" stroke-dasharray="5,3"/>
+  <g fill="#dc2626"><circle cx="157" cy="158.6" r="3.4"/><circle cx="244" cy="122.7" r="3.4"/><circle cx="331" cy="80.7" r="3.4"/></g>
+  <text x="338" y="74" text-anchor="start" font-size="9.5" fill="#dc2626" font-weight="bold">distinct (bmm): ~linear in B</text>
+  <!-- screenshot marker at ~12ms -->
+  <line x1="331" y1="116" x2="355" y2="116" stroke="#7f1d1d" stroke-width="1"/>
+  <text x="360" y="119" text-anchor="start" font-size="8.5" fill="#7f1d1d">profile's 12&nbsp;ms lands here (distinct, ~B=2.5)</text>
 </svg>
-<figcaption>Figure 7 &mdash; A decode benchmark call decomposed on one timeline. The actual matmul (green,
-  ~2.85&nbsp;ms) is a sliver; the bulk of the 36.42&nbsp;ms device time is the per-call <em>weight reload</em>
-  (red, ~33.6&nbsp;ms of <code>Memset</code>/<code>Memcpy</code>) &mdash; the benchmark re-fetching all
-  402.7&nbsp;MB of weights from the host on this one call. In a real model the weights are loaded once and
-  left resident (bottom bar), so the red reload disappears and the true per-layer decode cost is just the
-  ~2.8&nbsp;ms green sliver. This is the bridge between Dataset&nbsp;1's big numbers and Dataset&nbsp;2's
-  small ones: <strong>the production kernel time (~2.85&nbsp;ms) matches the persistent compute (~2.83&nbsp;ms)
-  to within noise &mdash; the kernel never stalls waiting for weights; the entire gap is reload traffic that
-  amortizes to zero across tokens and layers.</strong></figcaption>
+<figcaption>Figure 7 &mdash; The decode kernel time vs batch size, measured both ways. The <strong>shared-weight</strong>
+  form (green, <code>bmm_expand</code>) is flat at ~2.85&nbsp;ms from B=1 to B=8 &mdash; it reads the 402.7&nbsp;MB
+  of weights once and reuses them for every sequence, so batching is free. The <strong>distinct-weight</strong>
+  form (red, plain <code>bmm</code>) grows roughly linearly &mdash; each sequence re-reads its own copy of the
+  weights. The production profile's ~12&nbsp;ms decode kernel lands on the red line (~B=2.5), i.e. it is the
+  distinct form; our 2.8&nbsp;ms probe is the green form. Same physics, two different kernels.</figcaption>
 </figure>
+<div class="callout key">
+  <div class="callout-title">Reconciling the two datasets &mdash; and an open question</div>
+  The gap was never reload or weight-residency &mdash; it is two different kernels. Our 2.8&nbsp;ms is the
+  <strong>shared-weight</strong> form; the profile's 12&nbsp;ms (<code>sdsc_fused_bmm_mul_silu_0</code>) is the
+  <strong>distinct-weight</strong> form. An MLP's weights <em>are</em> shared across the batch, so it
+  <em>should</em> always lower to the efficient <code>bmm_expand</code>. The profile showing the distinct
+  <code>bmm</code> means the graph materialized a per-batch weight &mdash; and if the real production decode
+  does that, it is reading the weights B&times; when it should read them once: a <strong>B&times;
+  batched-throughput inefficiency</strong>. Which form production actually emits is under active
+  investigation; this section will be updated once it is settled.
+</div>
+<p>One thing this does <em>not</em> change: the benchmark's large total device time
+  (<code>spyre_ms</code> ~36&nbsp;ms) is still inflated by a per-call host&rarr;device <strong>weight
+  upload</strong> (<code>Memcpy</code>/<code>Memset</code>) that amortizes to ~0 once weights stay resident
+  &mdash; but that is a separate event from the kernel, and it is covered in &sect;8.</p>
 
-<h3>14.4 Prefill, re-told: compute-leaning, but the compute runs well under peak</h3>
+<h3>14.4 Prefill, re-told: memory-leaning at the real bus, and no overlap</h3>
 <p>Prefill (M=512) processes 512 tokens at once, so each weight is reused 512 times &mdash; now there is
-  real math to do, and the assembly line has enough work to lean on the <em>compute</em> side rather than
-  pure weight streaming. But "compute-leaning" does not mean "near the compute peak." Two effects keep it
-  far from the 98.3-TFLOPS sticker:</p>
+  real math to do, and you might expect it to be compute-bound and land near the 98.3-TFLOPS peak. Two
+  things stop it, and neither is "the kernel wasting cycles":</p>
 <ul>
-  <li><strong>The highway is still half-speed.</strong> Streaming the 402.7&nbsp;MB of weights at the
-    measured ~113&nbsp;GB/s costs <code>402.7 / 113 &asymp; 3.5&nbsp;ms</code> &mdash; which actually
-    <em>exceeds</em> the 2.10&nbsp;ms the math would take. So even at prefill, memory is a comparable
-    cost to compute, not a negligible one.</li>
-  <li><strong>Compute and memory run with little overlap.</strong> When the two phases do not overlap,
-    the kernel time tends toward their <em>sum</em>, not the larger of the two.</li>
+  <li><strong>At the real bus, memory is the bigger cost, not compute.</strong> The math takes
+    <code>2.10&nbsp;ms</code> (all three matmuls' MACs at peak). Streaming the 402.7&nbsp;MB of weights at
+    the measured ~113&nbsp;GB/s takes <code>402.7 / 113 &asymp; 3.5&nbsp;ms</code> &mdash; <em>more</em>
+    than the compute. So at the real (half-spec) bus, prefill is actually <strong>memory-leaning</strong>,
+    and the proper roofline floor is <code>max(2.10, 3.5) = <strong>3.5&nbsp;ms</strong></code>, set by
+    memory.</li>
+  <li><strong>Compute and memory don't overlap.</strong> A well-pipelined kernel loads the <em>next</em>
+    tile of weights <em>while</em> computing the current one, so it pays only the larger of the two (the
+    <code>max</code>). AIU runs the weight-load step and the matmul step <em>serially</em> (separate
+    SDSCs), so it pays their <strong>sum</strong> instead.</li>
 </ul>
 <div class="callout key">
-  <div class="callout-title">The number that dissolves the "sendnn is 2.75&times; off peak" puzzle</div>
-  <code>compute 2.10&nbsp;ms + weight stream (@~113&nbsp;GB/s) ~3.5&nbsp;ms &asymp; 5.6&nbsp;ms</code>
-  &nbsp;vs&nbsp; <strong>sendnn measured 5.77&nbsp;ms</strong> (Dataset&nbsp;1) and
-  <strong>7.39&nbsp;ms persistent</strong> (Dataset&nbsp;2) &mdash; the lower figure is within ~3% of the
-  sum. So sendnn's apparent "2.75&times; off the compute peak" is <em>not</em> wasted compute: it is
-  (a) the real bus being ~half of spec, and (b) compute and memory not overlapping. Measured against the
-  <em>real</em> silicon, <strong>sendnn's prefill is essentially at the floor</strong>. We keep both
-  datasets' sendnn numbers (5.77 and 7.39&nbsp;ms) rather than pick one: they bracket the run-to-run and
-  configuration spread, and both are consistent with a memory-leaning kernel near the real floor.
+  <div class="callout-title">Why "sendnn is 2.75&times; off peak" dissolves &mdash; and what's left</div>
+  Against the <em>right</em> floor &mdash; <code>max(compute 2.10, memory 3.5) = 3.5&nbsp;ms</code> &mdash;
+  sendnn's <strong>5.77&nbsp;ms</strong> (Dataset&nbsp;1; 7.39 persistent, Dataset&nbsp;2) is
+  ~<strong>1.6&times; over</strong>, not 2.75&times;. The "2.75&times; off the 2.10&nbsp;ms compute peak"
+  was the wrong yardstick twice over: the real binding resource is <em>memory</em>, not compute, and the
+  real bus is ~half its sticker. What remains &mdash; the 1.6&times; &mdash; is <em>not</em> wasted compute;
+  it is the <strong>missing overlap</strong>. AIU pays
+  <code>compute + memory = 2.10 + 3.5 = 5.6&nbsp;ms</code> (serial) instead of <code>max = 3.5&nbsp;ms</code>
+  (overlapped), and the sum landing on the measured 5.77 is the fingerprint of no overlap. A kernel that
+  overlapped them &mdash; GPU-style software pipelining / warp specialization &mdash; would approach the
+  3.5&nbsp;ms floor. So that 1.6&times; is a real <strong>prefill overlap lever</strong>, not a hardware
+  wall. (We keep both sendnn numbers; they bracket run-to-run / config spread, both consistent with a
+  memory-leaning, non-overlapping kernel.)
 </div>
 
 <h3>14.5 Why torch-spyre pays a SiLU tax that sendnn doesn't</h3>
@@ -1361,26 +1391,29 @@
 </div>
 
 <h3>14.7 So where is torch-spyre's real, addressable headroom?</h3>
-<p>Putting the whole section together in plain terms: most of the distance from the paper "peak" is
-  hardware reality that <em>no</em> software can erase &mdash; the highway runs at ~half its spec, and
-  compute and memory do not overlap. sendnn already pays those costs and sits essentially at the real
-  floor on both prefill and decode. So the question "are torch-spyre's matmul kernels failing to use the
-  hardware?" is, mostly, <strong>no</strong> &mdash; the array is full (<code>pt_eff &asymp; 1.0</code>),
-  not fragmented. The genuinely addressable gap is the delta to sendnn, and it lives in two specific,
-  named places:</p>
+<p>Putting the whole section together in plain terms: a large part of the distance from the paper "peak"
+  is hardware reality &mdash; the highway runs at ~half its spec. But not all of it is unaddressable, and
+  the array itself is <em>not</em> the problem (<code>pt_eff &asymp; 1.0</code>, full, not fragmented). Two
+  kinds of lever remain. First, the places torch-spyre trails sendnn <em>specifically</em> &mdash; it can
+  match sendnn here: the serialized SiLU and the batched-decode kernel form. Second, a gap <em>both</em>
+  stacks share: neither overlaps compute with the weight load, so both pay the <em>sum</em> instead of the
+  <em>max</em> (sendnn included &mdash; it sits ~1.6&times; over the real prefill floor for exactly this
+  reason). A GPU-style pipelined / warp-specialized kernel would close that one and lift both stacks:</p>
 <table>
   <thead><tr><th>#</th><th>the real lever</th><th>regime</th><th class="num">est. payoff</th><th>why it is addressable</th></tr></thead>
   <tbody>
     <tr><td>1</td><td>Emit SiLU as a matmul <strong>epilogue</strong> (run it on the SFP worker concurrently, like sendnn) instead of a serial pass after the matmul</td><td>prefill</td><td class="num good">~1.7 ms</td><td>measured directly (&sect;14.5); pure codegen change in the Inductor backend</td></tr>
-    <tr><td>2</td><td>Fuse the decode FFN into one resident-weight kernel (one weight stream, not two)</td><td>decode</td><td class="num good">~reach sendnn</td><td>recovers the 2-kernel structure; the ~2.8&nbsp;ms streaming floor itself is intrinsic</td></tr>
+    <tr><td>2</td><td>Ensure batched decode lowers to the shared-weight <code>bmm_expand</code> form (read weights once, broadcast), not a distinct-weight <code>bmm</code> (B&times; reads)</td><td>decode</td><td class="num good">up to ~B&times; on batched decode throughput</td><td>kernel-form / lowering fix; the ~2.8&nbsp;ms streaming floor itself is intrinsic</td></tr>
+    <tr><td>3</td><td><strong>Overlap</strong> the weight load with the matmul (software pipelining / warp specialization across SDSCs) so the kernel pays <code>max(compute, memory)</code>, not their sum</td><td>prefill</td><td class="num good">~1.6&times; (toward the 3.5&nbsp;ms floor)</td><td>helps <em>both</em> stacks; deeptools/SDSC-level (the harder-to-land kind), the same family as the ring-prefetch / warp-spec work</td></tr>
   </tbody>
 </table>
 <div class="callout">
   <div class="callout-title">The bottom line, in one breath</div>
-  On <strong>decode</strong>, both stacks are already at the memory ceiling &mdash; streaming 402.7&nbsp;MB
-  of weights at ~143&nbsp;GB/s in ~2.8&nbsp;ms &mdash; so there is no big win to chase there beyond fusing
-  the two kernels and keeping weights resident; the huge benchmark numbers were per-call weight reload,
-  not the kernel. On <strong>prefill</strong>, torch-spyre's one clearly fixable loss is the
+  On <strong>decode</strong>, the shared-weight kernel is already at the memory ceiling &mdash; streaming
+  402.7&nbsp;MB of weights at ~143&nbsp;GB/s in ~2.8&nbsp;ms &mdash; so the win there is making sure batched
+  decode lowers to that shared-weight form (one weight read, not B&times;) and keeping weights resident;
+  the huge benchmark device total was a per-call weight upload, not the kernel. On
+  <strong>prefill</strong>, torch-spyre's one clearly fixable loss is the
   <strong>serialized SiLU</strong>: folding it into the matmul epilogue (as sendnn does) puts ~1.7&nbsp;ms
   back. Chasing the 98.3-TFLOPS compute "peak" is chasing a bandwidth-and-overlap ceiling that the real
   silicon and the real bus simply do not allow.
@@ -1401,12 +1434,13 @@
     resident) is ~<strong>2.8&nbsp;ms</strong>, which is exactly the FFN's 402.7&nbsp;MB of weights
     streamed at the bus's real ~143&nbsp;GB/s read ceiling, with ~zero fixed overhead. Both stacks
     (tsp 2.83, sendnn 2.80&nbsp;ms) sit on that ceiling.</li>
-  <li><strong>"200&nbsp;ms/token" is a metric artifact.</strong> The big decode numbers (12&nbsp;ms /
-    36&nbsp;ms) are an isolated benchmark <em>reloading</em> all 402.7&nbsp;MB of weights from the host
+  <li><strong>"200&nbsp;ms/token" is a metric artifact.</strong> The big decode <em>device total</em>
+    (~36&nbsp;ms) is an isolated benchmark <em>uploading</em> all 402.7&nbsp;MB of weights from the host
     every call (~33&nbsp;ms of Memset/Memcpy; in Dataset&nbsp;1 sendnn's HtoD 10.6&nbsp;ms alone exceeds
-    the bmm). Production kernel_ms (~2.85&nbsp;ms) matches persistent compute (~2.83&nbsp;ms) to within
-    noise &mdash; the kernel never stalls on weight arrival. Leave weights resident and the reload is
-    ~0; the right per-layer quantity is ~2.8&nbsp;ms.</li>
+    the bmm). The 12&nbsp;ms <em>kernel</em> is a separate thing &mdash; the distinct-weight <code>bmm</code>
+    form (&sect;14.3), not the upload. Our shared-weight kernel_ms (~2.85&nbsp;ms) matches persistent
+    compute (~2.83&nbsp;ms) to within noise &mdash; the kernel never stalls on weight arrival. Leave
+    weights resident and the upload is ~0; the right per-layer quantity is ~2.8&nbsp;ms.</li>
   <li><strong>The real lever for decode</strong> is filling the idle array: K-split (split the K=16384
     reduction across the otherwise-idle cores) is the only way to put work on more than ~1 row at
     M=1 &mdash; which is exactly where the cost-model's split-K decode path applies.</li>
@@ -1428,18 +1462,22 @@
   <li><strong>Distance from the roofline</strong> (&sect;13): graded against the 204.8&nbsp;GB/s
     <em>spec</em>, both regimes look 4&ndash;6&times; off &mdash; but that floor uses a bandwidth the
     silicon does not deliver. Re-graded against the <em>measured</em> bus (&sect;14), prefill is
-    memory-leaning (sendnn near the real floor) and the persistent decode kernel sits right <em>on</em>
+    memory-leaning (sendnn ~1.6&times; over the real floor &mdash; the gap is the missing compute/memory
+    overlap, &sect;14.4) and the persistent decode kernel sits right <em>on</em>
     the real ~143&nbsp;GB/s read ceiling. Decode is memory-bound at the ceiling, not overhead-stuck
     below its roofline.</li>
   <li><strong>Off the roofline, decomposed</strong> (&sect;14): the measured bus is ~55% of spec
     (~113&nbsp;GB/s balanced copy, ~143&nbsp;GB/s read-dominated streaming) &mdash; it does NOT collapse
-    at decode. At real BW, prefill is memory-leaning and sendnn is near-optimal
-    (<code>compute 2.10 + weight stream ~3.5 = ~5.6&nbsp;ms</code> &asymp; measured 5.77). torch-spyre's
+    at decode. At real BW, prefill is memory-leaning: the roofline floor is
+    <code>max(compute 2.10, memory 3.5) = 3.5&nbsp;ms</code>, and sendnn (5.77) is ~1.6&times; over it
+    because AIU runs compute and memory <em>serially</em> &mdash; it pays their sum
+    (<code>2.10 + 3.5 = 5.6&nbsp;ms</code> &asymp; measured 5.77) where a pipelined GPU kernel pays the max.
+    That 1.6&times; is the prefill overlap lever. torch-spyre's
     one clearly addressable prefill loss is <strong>SiLU serialized after the matmul</strong> (measured
     marginal +1.85&nbsp;ms vs sendnn's ~0, which folds SiLU into the matmul epilogue): emit SiLU as an
-    epilogue to put ~1.7&nbsp;ms back. On decode both stacks are already at the memory ceiling
-    (~2.8&nbsp;ms); the only lever is fusing the two kernels and keeping weights resident, not faster
-    memory.</li>
+    epilogue to put ~1.7&nbsp;ms back. On decode the shared-weight kernel is already at the memory ceiling
+    (~2.8&nbsp;ms); the lever is ensuring batched decode lowers to that shared-weight <code>bmm_expand</code>
+    form (one weight read, not B&times;) and keeping weights resident, not faster memory.</li>
 </ol>
 
 </main>
