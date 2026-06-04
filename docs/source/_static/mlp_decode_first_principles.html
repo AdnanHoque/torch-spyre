@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>What is actually happening in the MLP benchmark on Spyre</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --muted: #555;
+    --bg: #fdfdfd;
+    --code-bg: #f3f4f6;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --rule: #e5e7eb;
+    --good: #166534;
+    --bad: #b91c1c;
+    --warn: #92400e;
+    --toc-w: 270px;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); color: var(--fg); scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    line-height: 1.65;
+    margin: 0;
+    font-size: 17px;
+  }
+  .layout { display: flex; align-items: flex-start; max-width: 1180px; margin: 0 auto; }
+  nav.toc {
+    position: sticky; top: 0; align-self: flex-start; width: var(--toc-w);
+    max-height: 100vh; overflow-y: auto; padding: 1.5rem 1rem 2rem 1.25rem;
+    font-size: 0.84rem; border-right: 1px solid var(--rule); background: var(--bg);
+  }
+  nav.toc strong { display: block; font-size: 0.95rem; margin-bottom: 0.6rem; color: var(--fg); }
+  nav.toc ol { margin: 0; padding-left: 1.1rem; }
+  nav.toc > ol { padding-left: 1.2rem; }
+  nav.toc li { margin: 0.12rem 0; }
+  nav.toc a { color: var(--accent); text-decoration: none; line-height: 1.35; display: block; }
+  nav.toc a:hover { text-decoration: underline; }
+  main { flex: 1 1 auto; min-width: 0; max-width: 860px; padding: 2.5rem 2rem 6rem; }
+  h1 { font-size: 1.95rem; line-height: 1.22; margin: 0 0 0.5rem; }
+  h2 { font-size: 1.42rem; margin-top: 3rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--rule); scroll-margin-top: 1rem; }
+  h3 { font-size: 1.1rem; margin-top: 2rem; color: var(--accent); scroll-margin-top: 1rem; }
+  p, li { margin: 0.6rem 0; }
+  .subtitle { color: var(--muted); font-size: 1.05rem; margin-bottom: 1.5rem; }
+  code {
+    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.9em;
+  }
+  pre {
+    background: var(--code-bg); padding: 1rem 1.25rem; border-radius: 6px;
+    overflow-x: auto; font-size: 0.86em; line-height: 1.5;
+  }
+  pre code { background: transparent; padding: 0; font-size: 1em; }
+  .callout {
+    background: var(--accent-soft); border-left: 3px solid var(--accent);
+    padding: 0.8rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0;
+  }
+  .callout-title { font-weight: 600; color: var(--accent); margin-bottom: 0.3rem; }
+  .callout.key { background: #fffbeb; border-left-color: #d97706; }
+  .callout.key .callout-title { color: var(--warn); }
+  table { border-collapse: collapse; margin: 1rem 0; width: 100%; font-size: 0.92em; }
+  th, td { border-bottom: 1px solid var(--rule); padding: 0.5rem 0.7rem; text-align: left; vertical-align: top; }
+  th { font-weight: 600; background: var(--code-bg); }
+  td.num, th.num { text-align: right; font-family: "SF Mono", monospace; }
+  td.mono, th.mono { font-family: "SF Mono", monospace; font-size: 0.92em; }
+  tr.total th, tr.total td { border-top: 2px solid var(--rule); font-weight: 600; }
+  .good { color: var(--good); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  hr.section { border: 0; border-top: 2px solid var(--rule); margin: 3rem 0; }
+  figure { margin: 1.5rem 0; text-align: center; }
+  figure svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+  figcaption {
+    color: var(--muted); font-size: 0.86em; margin-top: 0.6rem; font-style: italic;
+    text-align: center; max-width: 720px; margin-left: auto; margin-right: auto;
+  }
+  .svg-text { font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+  @media (max-width: 900px) {
+    nav.toc { display: none; }
+    main { padding: 2rem 1.25rem 5rem; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#s1">The questions</a></li>
+    <li><a href="#s2">The op: a SwiGLU FFN</a></li>
+    <li><a href="#s3">How it lowers on Spyre</a></li>
+    <li><a href="#s4">The three metrics, defined</a></li>
+    <li><a href="#s5">The data: prefill vs decode</a></li>
+    <li><a href="#s6">The PT-Util collapse</a></li>
+    <li><a href="#s7">Why decode is overhead-bound</a></li>
+    <li><a href="#s8">The 200&nbsp;ms/token claim, reconciled</a></li>
+    <li><a href="#s9">The LX-frac footnote</a></li>
+    <li><a href="#s10">The wide-N matmul: ~20% over sendnn</a></li>
+    <li><a href="#s11">Planner A/B across the matmul shapes</a></li>
+    <li><a href="#s12">Takeaways</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>What is actually happening in the MLP benchmark on Spyre</h1>
+<p class="subtitle">
+  A first-principles reading of the <code>mlp</code> micro-benchmark in the spyre-perf-suite — what
+  the op is, how it lowers onto the AIU 1.0 array, what each timing number means, and why the
+  decode numbers look the way they do. Written to answer four questions: what's in the MLP, why
+  are the numbers what they are, is 5&ndash;8&nbsp;ms/MLP anomalous (&rarr; ~200&nbsp;ms/token?),
+  and is that wall, spyre, or kernel time &mdash; plus a fifth (&sect;10): why the wide-N
+  <code>[4096,&nbsp;12800]</code> matmul runs ~20% over sendnn, and whether that is a split-choice
+  bug we can fix or a kernel/bandwidth wall.
+</p>
+
+<!-- ===================== SECTION 1 ===================== -->
+<h2 id="s1">1. The questions</h2>
+<p>The benchmark report shows, per MLP call, kernel times in the 2&ndash;8&nbsp;ms range and a
+  device-time (<code>spyre_ms</code>) around 20&ndash;35&nbsp;ms. Three questions follow:</p>
+<ol>
+  <li><strong>What is the "mlp" op?</strong> One FFN block, or a whole layer, or a whole model?</li>
+  <li><strong>Is 5&ndash;8&nbsp;ms per MLP anomalous?</strong> Multiplied by a layer count it implies
+    something like ~200&nbsp;ms/token, which would be far too slow for a decode step.</li>
+  <li><strong>Which clock is that?</strong> Wall-clock, total device time (<code>spyre_ms</code>),
+    or just the matmul kernel time?</li>
+  <li><strong>And the wide-N matmul (&sect;10):</strong> a separate flag &mdash; the standalone
+    <code>[1,512,4096]@[4096,12800]</code> matmul (the MLP's front projection, measured alone) runs
+    ~20% slower than sendnn. Is that the planner picking a bad split, or a kernel/bandwidth wall no
+    split can beat?</li>
+</ol>
+<p>The short answers, derived below: the op is a <em>single</em> SwiGLU FFN (two/three matmuls);
+  the decode kernel time is not anomalous in the sense of "a bug," it is <strong>overhead-bound</strong> —
+  at one token per step the 8&times;8 systolic array is essentially idle (PT-Util ~0.15%), so the
+  time is dominated by fixed launch/stickify cost, not arithmetic; and the 200&nbsp;ms/token figure
+  comes from multiplying an <em>isolated, per-call</em> measurement by a layer count, which
+  double-charges per-call data movement that amortizes away in a real autoregressive model.</p>
+
+<!-- ===================== SECTION 2 ===================== -->
+<h2 id="s2">2. The op: a SwiGLU FFN</h2>
+<p>Straight from the benchmark's op definition (<code>benchmark.py</code>, the <code>mlp</code>
+  function):</p>
+<pre><code>def mlp(x, gate, up, down):
+    gate_out   = x @ gate              # [M, 4096] @ [4096, 16384]
+    up_out     = x @ up                # [M, 4096] @ [4096, 16384]
+    swiglu_out = up_out * silu(gate_out)   # elementwise on [M, 16384]
+    return swiglu_out @ down           # [M, 16384] @ [16384, 4096]</code></pre>
+
+<figure>
+<svg viewBox="0 0 800 360" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <defs>
+    <linearGradient id="ffnBand" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#eff6ff"/>
+      <stop offset="35%" stop-color="#dbeafe"/>
+      <stop offset="65%" stop-color="#dbeafe"/>
+      <stop offset="100%" stop-color="#eff6ff"/>
+    </linearGradient>
+    <marker id="ar" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><polygon points="0 0,8 4,0 8" fill="#475569"/></marker>
+  </defs>
+
+  <text x="400" y="20" text-anchor="middle" font-size="14" font-weight="bold">SwiGLU FFN &mdash; one block: narrow &rarr; 4&times; wide &rarr; narrow</text>
+  <text x="400" y="40" text-anchor="middle" font-size="9.5" fill="#475569">3 matmuls &middot; 67.1M MAC/token each &middot; 201M total &nbsp;&mdash;&nbsp; SiLU &amp; multiply &asymp; free pointwise</text>
+
+  <!-- backdrop FFN width band: 4096 -> 16384 -> 4096 -->
+  <polygon points="95,168 250,86 545,86 700,168 700,212 545,294 250,294 95,212"
+           fill="url(#ffnBand)" stroke="#bfdbfe" stroke-width="1"/>
+  <line x1="95" y1="316" x2="700" y2="316" stroke="#cbd5e1" stroke-width="0.8"/>
+  <text x="120" y="330" text-anchor="middle" font-size="9.5" fill="#475569">4096</text>
+  <text x="397" y="330" text-anchor="middle" font-size="9.5" fill="#1e40af" font-weight="bold">16384 &nbsp;(4&times; expand)</text>
+  <text x="678" y="330" text-anchor="middle" font-size="9.5" fill="#475569">4096</text>
+
+  <!-- input pill -->
+  <rect x="18" y="162" width="74" height="44" rx="8" fill="#fff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="55" y="182" text-anchor="middle" font-size="12" font-weight="bold">x</text>
+  <text x="55" y="197" text-anchor="middle" font-size="8.5" fill="#475569">[M &times; 4096]</text>
+
+  <!-- arrows x -> gate / up -->
+  <path d="M 94,176 L 176,120" stroke="#475569" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+  <path d="M 94,198 L 176,250" stroke="#475569" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+
+  <!-- gate matmul (top) -->
+  <rect x="178" y="98" width="124" height="44" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="240" y="118" text-anchor="middle" font-size="10.5" font-weight="bold">gate = x &middot; Wg</text>
+  <text x="240" y="132" text-anchor="middle" font-size="8.5" fill="#1e3a8a">[4096 &times; 16384]</text>
+
+  <!-- up matmul (bottom) -->
+  <rect x="178" y="228" width="124" height="44" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="240" y="248" text-anchor="middle" font-size="10.5" font-weight="bold">up = x &middot; Wu</text>
+  <text x="240" y="262" text-anchor="middle" font-size="8.5" fill="#1e3a8a">[4096 &times; 16384]</text>
+
+  <!-- SiLU badge on gate path -->
+  <path d="M 302,120 L 326,120" stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
+  <rect x="328" y="104" width="62" height="32" rx="16" fill="#fef3c7" stroke="#d97706"/>
+  <text x="359" y="124" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#92400e">SiLU</text>
+
+  <!-- multiply node -->
+  <path d="M 390,124 C 430,150 448,160 461,171" stroke="#475569" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+  <path d="M 302,250 C 400,250 446,220 461,201" stroke="#475569" stroke-width="1.4" fill="none" marker-end="url(#ar)"/>
+  <text x="424" y="150" text-anchor="middle" font-size="8" fill="#475569">silu(gate)</text>
+  <text x="392" y="242" text-anchor="middle" font-size="8" fill="#475569">up</text>
+  <circle cx="470" cy="185" r="22" fill="#fff" stroke="#16a34a" stroke-width="2"/>
+  <text x="470" y="192" text-anchor="middle" font-size="18" font-weight="bold" fill="#16a34a">&times;</text>
+  <text x="470" y="232" text-anchor="middle" font-size="8.5" fill="#166534" font-weight="bold">h [M &times; 16384]</text>
+
+  <!-- down matmul -->
+  <path d="M 492,185 L 556,185" stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
+  <rect x="558" y="163" width="124" height="44" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="620" y="183" text-anchor="middle" font-size="10.5" font-weight="bold">out = h &middot; Wd</text>
+  <text x="620" y="197" text-anchor="middle" font-size="8.5" fill="#1e3a8a">[16384 &times; 4096]</text>
+
+  <!-- output pill -->
+  <path d="M 682,185 L 706,185" stroke="#475569" stroke-width="1.4" marker-end="url(#ar)"/>
+  <rect x="708" y="163" width="74" height="44" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="745" y="183" text-anchor="middle" font-size="12" font-weight="bold" fill="#166534">out</text>
+  <text x="745" y="198" text-anchor="middle" font-size="8.5" fill="#475569">[M &times; 4096]</text>
+</svg>
+<figcaption>Figure 1 &mdash; The SwiGLU FFN dataflow. Two parallel front projections (<code>Wg</code>, <code>Wu</code>) lift each 4096-wide token into a 4&times;-wider 16384 space; SiLU gates one path, an elementwise multiply fuses the two into <code>h</code>, and the down projection <code>Wd</code> contracts back to 4096. Three matmuls at 67.1M MACs/token each (201M total); SiLU and the multiply are ~free pointwise ops. The band behind traces the characteristic narrow&rarr;wide&rarr;narrow shape of an FFN &mdash; and the 16384 intermediate is exactly the dimension that makes decode stickify/reduction overhead-bound (&sect;7).</figcaption>
+</figure>
+
+<p>The tensor builder fixes the shapes: embedding dimension <code>emb = 4096</code>, and the
+  intermediate ("hidden") dimension is <code>4 * emb = 16384</code>. So the block is:</p>
+<table>
+  <thead><tr><th>step</th><th>shape</th><th>MACs (per token, M=1)</th></tr></thead>
+  <tbody>
+    <tr><td>gate&nbsp;=&nbsp;x@Wg</td><td class="mono">[M,4096]@[4096,16384]</td><td class="num">67.1M</td></tr>
+    <tr><td>up&nbsp;=&nbsp;x@Wu</td><td class="mono">[M,4096]@[4096,16384]</td><td class="num">67.1M</td></tr>
+    <tr><td>h&nbsp;=&nbsp;silu(gate)*up</td><td class="mono">elementwise [M,16384]</td><td class="num">~0 (pointwise)</td></tr>
+    <tr><td>out&nbsp;=&nbsp;h@Wd</td><td class="mono">[M,16384]@[16384,4096]</td><td class="num">67.1M</td></tr>
+    <tr class="total"><td>total</td><td class="mono">&mdash;</td><td class="num">201.3M</td></tr>
+  </tbody>
+</table>
+<p>This is the canonical Llama/Qwen-style SwiGLU MLP: two parallel "front" projections into a 4&times;
+  wider space, a SiLU gate times the up-projection, then one "down" projection back to <code>emb</code>.
+  It is <strong>one FFN block</strong> &mdash; not a layer (no attention, no norms), not a model
+  (no layer stack). Everything below is the cost of that single block, run in isolation.</p>
+
+<figure>
+<svg viewBox="0 0 620 566" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <defs>
+    <marker id="ar2" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><polygon points="0 0,8 4,0 8" fill="#475569"/></marker>
+  </defs>
+
+  <text x="300" y="15" text-anchor="middle" font-size="8.5" fill="#94a3b8" font-style="italic">self-attention sublayer + residual precede this &mdash; shown is the MLP half of one decoder layer</text>
+
+  <!-- residual-stream input -->
+  <rect x="200" y="26" width="200" height="36" rx="8" fill="#fff" stroke="#334155" stroke-width="1.4"/>
+  <text x="300" y="44" text-anchor="middle" font-size="11" font-weight="bold">hidden_states</text>
+  <text x="300" y="56" text-anchor="middle" font-size="8.5" fill="#475569">[M &times; 4096] (residual stream)</text>
+  <path d="M 300,62 L 300,92" stroke="#475569" stroke-width="1.4" marker-end="url(#ar2)"/>
+
+  <!-- pre-MLP norm -->
+  <rect x="240" y="94" width="120" height="34" rx="5" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="300" y="110" text-anchor="middle" font-size="10" font-weight="bold" fill="#5b21b6">RMSNorm</text>
+  <text x="300" y="122" text-anchor="middle" font-size="8" fill="#6d28d9">pre-MLP norm</text>
+  <path d="M 300,128 L 300,156" stroke="#475569" stroke-width="1.4" marker-end="url(#ar2)"/>
+
+  <!-- MLP block container (shaded = the measured op) -->
+  <rect x="140" y="158" width="320" height="288" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="5,3"/>
+  <text x="300" y="174" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#166534">MLP block &mdash; SwiGLU FFN</text>
+  <text x="300" y="187" text-anchor="middle" font-size="8" fill="#475569">nn.Module children: gate_proj &middot; up_proj &middot; act_fn &middot; down_proj</text>
+
+  <!-- fan to the two front projections -->
+  <path d="M 290,193 L 240,200" stroke="#475569" stroke-width="1.3" marker-end="url(#ar2)"/>
+  <path d="M 310,193 L 360,200" stroke="#475569" stroke-width="1.3" marker-end="url(#ar2)"/>
+
+  <!-- gate_proj -->
+  <rect x="158" y="200" width="132" height="40" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="224" y="217" text-anchor="middle" font-size="10" font-weight="bold">gate_proj</text>
+  <text x="224" y="231" text-anchor="middle" font-size="8.5" fill="#1e3a8a">Linear 4096 &rarr; 16384</text>
+
+  <!-- up_proj -->
+  <rect x="310" y="200" width="132" height="40" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="376" y="217" text-anchor="middle" font-size="10" font-weight="bold">up_proj</text>
+  <text x="376" y="231" text-anchor="middle" font-size="8.5" fill="#1e3a8a">Linear 4096 &rarr; 16384</text>
+
+  <!-- SiLU on gate path -->
+  <path d="M 224,240 L 224,256" stroke="#475569" stroke-width="1.3" marker-end="url(#ar2)"/>
+  <rect x="179" y="256" width="90" height="30" rx="15" fill="#fef3c7" stroke="#d97706"/>
+  <text x="224" y="275" text-anchor="middle" font-size="10" font-weight="bold" fill="#92400e">act_fn: SiLU</text>
+
+  <!-- multiply merge -->
+  <path d="M 248,283 C 274,300 282,303 287,309" stroke="#475569" stroke-width="1.3" fill="none" marker-end="url(#ar2)"/>
+  <path d="M 376,240 C 376,285 340,300 318,310" stroke="#475569" stroke-width="1.3" fill="none" marker-end="url(#ar2)"/>
+  <circle cx="300" cy="326" r="20" fill="#fff" stroke="#16a34a" stroke-width="2"/>
+  <text x="300" y="333" text-anchor="middle" font-size="17" font-weight="bold" fill="#16a34a">&times;</text>
+
+  <!-- down_proj -->
+  <path d="M 300,346 L 300,362" stroke="#475569" stroke-width="1.3" marker-end="url(#ar2)"/>
+  <rect x="234" y="362" width="132" height="40" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="300" y="379" text-anchor="middle" font-size="10" font-weight="bold">down_proj</text>
+  <text x="300" y="393" text-anchor="middle" font-size="8.5" fill="#1e3a8a">Linear 16384 &rarr; 4096</text>
+  <path d="M 300,402 L 300,452" stroke="#475569" stroke-width="1.4" marker-end="url(#ar2)"/>
+
+  <!-- residual add -->
+  <circle cx="300" cy="470" r="18" fill="#fff" stroke="#334155" stroke-width="2"/>
+  <text x="300" y="477" text-anchor="middle" font-size="17" font-weight="bold">+</text>
+
+  <!-- residual skip path -->
+  <path d="M 300,80 L 500,80 L 500,470 L 322,470" stroke="#94a3b8" stroke-width="1.4" fill="none" stroke-dasharray="4,3" marker-end="url(#ar2)"/>
+  <text x="508" y="272" text-anchor="start" font-size="8.5" fill="#64748b">residual</text>
+  <text x="508" y="284" text-anchor="start" font-size="8.5" fill="#64748b">skip</text>
+
+  <!-- output -->
+  <path d="M 300,488 L 300,498" stroke="#475569" stroke-width="1.4" marker-end="url(#ar2)"/>
+  <rect x="190" y="500" width="220" height="36" rx="8" fill="#fff" stroke="#334155" stroke-width="1.4"/>
+  <text x="300" y="518" text-anchor="middle" font-size="11" font-weight="bold">hidden_states</text>
+  <text x="300" y="530" text-anchor="middle" font-size="8.5" fill="#475569">[M &times; 4096] &rarr; next decoder layer</text>
+
+  <!-- legend -->
+  <rect x="150" y="548" width="14" height="11" rx="2" fill="#f0fdf4" stroke="#16a34a" stroke-dasharray="3,2"/>
+  <text x="170" y="557" text-anchor="start" font-size="8" fill="#475569">shaded = the benchmark op <tspan font-family="monospace">mlp(x, gate, up, down)</tspan>; RMSNorm and the residual add are the rest of the layer</text>
+</svg>
+<figcaption>Figure 2 &mdash; Logical construction of the MLP layer. The shaded block is exactly the benchmark op
+  <code>mlp(x, gate, up, down)</code>: its four <code>nn.Module</code> children &mdash; <code>gate_proj</code>
+  and <code>up_proj</code> (parallel <code>Linear 4096&rarr;16384</code>), <code>act_fn</code> (SiLU on the gate
+  path), and <code>down_proj</code> (<code>Linear 16384&rarr;4096</code>) &mdash; with the elementwise multiply
+  fusing the two front paths. The <code>RMSNorm</code> that precedes it and the residual add (<code>+</code>)
+  that follows belong to the <em>surrounding decoder layer</em>, not the measured op &mdash; which is why &sect;2
+  calls this "one FFN block, not a layer." In a real model this whole figure repeats once per layer, with the
+  weights resident on-device (the amortization point of &sect;8).</figcaption>
+</figure>
+
+<p>Two shapes are benchmarked:</p>
+<ul>
+  <li><strong>Prefill</strong>: <code>M = 512</code> tokens at once (a 512-token sequence). Total
+    work ≈ <strong>1.03&times;10<sup>11</sup> MACs</strong>.</li>
+  <li><strong>Decode</strong>: one token per step. The profiled decode case is a 4-token batch
+    <code>[4, 1, 4096]</code> (4 independent sequences, one token each), i.e. <code>M = 1</code> per
+    sequence. Total work ≈ <strong>8.05&times;10<sup>8</sup> MACs</strong> &mdash; about <strong>128&times;
+    less</strong> than prefill.</li>
+</ul>
+<p>Hold onto that 128&times;: the decode kernel does ~128&times; less arithmetic, yet (we'll see) it
+  takes <em>about the same wall time</em> as prefill. That gap is the whole story.</p>
+
+<!-- ===================== SECTION 3 ===================== -->
+<h2 id="s3">3. How it lowers on Spyre</h2>
+<p>The two stacks fuse the FFN differently, which matters when you read the per-kernel table.</p>
+
+<p><strong>torch-spyre (Inductor)</strong> splits the block into <strong>two compute kernels</strong>
+  plus a Memset:</p>
+<ul>
+  <li><code>sdsc_fused_bmm_mul_silu_0</code> &mdash; the <em>front half</em>: gate-mm + up-mm + SiLU
+    + the elementwise multiply, all fused into one SDSC kernel that emits the
+    <code>[M, 16384]</code> intermediate.</li>
+  <li><code>sdsc_fused_bmm_1</code> &mdash; the <em>down projection</em>: <code>[M,16384]@[16384,4096]</code>.</li>
+  <li>a <code>Memset</code> to zero an accumulator (sub-millisecond).</li>
+</ul>
+<p><strong>sendnn (the production backend)</strong> fuses the <em>whole</em> FFN into a
+  <strong>single <code>bmm</code> kernel</strong>, plus host&harr;device <code>Memcpy</code>
+  (HtoD / DtoH) and a Memset. So when comparing, remember: torch-spyre's "front + down" is two rows
+  that you sum; sendnn's "bmm" is one row that already contains everything.</p>
+
+<figure>
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="190" y="22" text-anchor="middle" font-size="13" font-weight="bold" fill="#2563eb">torch-spyre &mdash; 2 compute kernels</text>
+  <text x="575" y="22" text-anchor="middle" font-size="13" font-weight="bold" fill="#16a34a">sendnn &mdash; 1 bmm kernel</text>
+
+  <!-- tsp side -->
+  <g>
+    <rect x="40" y="44" width="120" height="40" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+    <text x="100" y="62" text-anchor="middle" font-size="10">gate = x@Wg</text>
+    <text x="100" y="77" text-anchor="middle" font-size="10">up = x@Wu</text>
+    <rect x="40" y="92" width="120" height="34" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+    <text x="100" y="113" text-anchor="middle" font-size="10">silu(gate)*up</text>
+    <rect x="24" y="38" width="152" height="96" rx="8" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="4,3"/>
+    <text x="100" y="150" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#2563eb">sdsc_fused_bmm_mul_silu_0</text>
+    <text x="100" y="163" text-anchor="middle" font-size="9" fill="#475569">&rarr; [M, 16384] intermediate</text>
+
+    <path d="M 100,170 L 100,196" stroke="#475569" stroke-width="1.6" marker-end="url(#m1)"/>
+
+    <rect x="40" y="200" width="120" height="40" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+    <text x="100" y="224" text-anchor="middle" font-size="10">out = h@Wd</text>
+    <rect x="24" y="194" width="152" height="52" rx="8" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="4,3"/>
+    <text x="100" y="262" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#2563eb">sdsc_fused_bmm_1</text>
+  </g>
+
+  <line x1="370" y1="40" x2="370" y2="270" stroke="#e5e7eb" stroke-width="1.5"/>
+
+  <!-- sendnn side -->
+  <g>
+    <rect x="440" y="60" width="240" height="150" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+    <text x="560" y="86" text-anchor="middle" font-size="10">gate, up</text>
+    <text x="560" y="104" text-anchor="middle" font-size="10">silu &middot; mul</text>
+    <text x="560" y="122" text-anchor="middle" font-size="10">down</text>
+    <text x="560" y="155" text-anchor="middle" font-size="12" font-weight="bold" fill="#16a34a">bmm</text>
+    <text x="560" y="174" text-anchor="middle" font-size="9" fill="#475569">whole FFN, one kernel</text>
+    <text x="560" y="195" text-anchor="middle" font-size="9" fill="#92400e">+ Memcpy HtoD / DtoH + Memset</text>
+  </g>
+
+  <defs>
+    <marker id="m1" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0,8 4,0 8" fill="#475569"/></marker>
+  </defs>
+</svg>
+<figcaption>Figure 3 &mdash; Kernel fusion. torch-spyre emits two compute kernels (front: gate+up+silu+mul; down) plus a Memset; sendnn fuses the entire FFN into one <code>bmm</code> kernel and surfaces host&harr;device copies as separate Memcpy events. To compare "kernel time," sum the two torch-spyre kernels against sendnn's single <code>bmm</code>.</figcaption>
+</figure>
+
+<!-- ===================== SECTION 4 ===================== -->
+<h2 id="s4">4. The three metrics, defined</h2>
+<p>The benchmark reports several clocks (see <code>run_benchmark</code> / <code>write_stats</code>
+  in <code>benchmark.py</code>). Three matter, and conflating them is the source of the
+  200&nbsp;ms/token confusion:</p>
+<table>
+  <thead><tr><th>metric</th><th>what it measures</th><th>includes</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="mono">kernel_ms</td>
+      <td>Sum of the <em>compute</em> SDSC kernel durations (the <code>bmm</code>/<code>sdsc_fused_*</code>
+        rows), excluding Memset and Memcpy. This is the actual PT-array work.</td>
+      <td>matmul + fused pointwise on-device</td>
+    </tr>
+    <tr>
+      <td class="mono">PT-Util&nbsp;(%)</td>
+      <td>How <em>full</em> the 8&times;8 systolic array is during the kernel &mdash; the fraction of the
+        64 multiply-accumulate cells doing useful work, averaged over the kernel. The smoking gun.</td>
+      <td>array occupancy, not a time</td>
+    </tr>
+    <tr>
+      <td class="mono">spyre_ms</td>
+      <td>Total device time for the call, summed over all device events: kernels <em>plus</em>
+        per-call stickify, HBM staging, Memset, and (sendnn) host&harr;device Memcpy.</td>
+      <td>everything the device did this call</td>
+    </tr>
+  </tbody>
+</table>
+<p>There is also <code>wall_clock_ms</code> (Python <code>perf_counter</code> around the call,
+  including the <code>.to(device)</code> / <code>.cpu()</code> transfers and dispatch — hundreds of
+  ms here, dominated by host overhead and the per-call H2D/D2H of weights) and <code>cpu_ms</code>
+  (self CPU time). Those are not the interesting signal for "is the accelerator slow."</p>
+<div class="callout key">
+  <div class="callout-title">Which clock is Jamie's table?</div>
+  Jamie's per-kernel profile reports <strong><code>kernel_ms</code> &mdash; "bmm kernel time only"</strong>,
+  broken down per kernel with PT-Util. It is <em>not</em> wall-clock and <em>not</em> <code>spyre_ms</code>.
+  That distinction is the crux of §8.
+</div>
+
+<!-- ===================== SECTION 5 ===================== -->
+<h2 id="s5">5. The data: prefill vs decode</h2>
+<p>Jamie's per-kernel profile (durations in ms, PT-Util in %). PT-Util is the column to watch.</p>
+
+<h3>Prefill &mdash; mlp <code>[1, 512, 4096]</code> (512 tokens)</h3>
+<table>
+  <thead><tr><th>stack</th><th>kernel</th><th class="num">dur (ms)</th><th class="num">PT-Util</th></tr></thead>
+  <tbody>
+    <tr><td>torch-spyre</td><td class="mono">sdsc_fused_bmm_mul_silu_0 (front)</td><td class="num">7.109</td><td class="num">20.95%</td></tr>
+    <tr><td>torch-spyre</td><td class="mono">sdsc_fused_bmm_1 (down)</td><td class="num">2.423</td><td class="num">30.73%</td></tr>
+    <tr class="total"><td>torch-spyre</td><td>kernel_ms (sum of compute)</td><td class="num">9.53</td><td class="num">~25%</td></tr>
+    <tr><td>sendnn</td><td class="mono">bmm (whole FFN)</td><td class="num">5.770</td><td class="num">38.72%</td></tr>
+    <tr><td>sendnn</td><td class="mono">Memcpy HtoD</td><td class="num">2.707</td><td class="num">&mdash;</td></tr>
+    <tr><td>sendnn</td><td class="mono">Memcpy DtoH</td><td class="num">5.875</td><td class="num">&mdash;</td></tr>
+  </tbody>
+</table>
+
+<h3>Decode &mdash; mlp <code>[4, 1, 4096]</code> (4 tokens, M=1 each)</h3>
+<table>
+  <thead><tr><th>stack</th><th>kernel</th><th class="num">dur (ms)</th><th class="num">PT-Util</th></tr></thead>
+  <tbody>
+    <tr><td>torch-spyre</td><td class="mono">sdsc_fused_bmm_mul_silu_0 (front)</td><td class="num">7.979</td><td class="num bad">0.146%</td></tr>
+    <tr><td>torch-spyre</td><td class="mono">sdsc_fused_bmm_1 (down)</td><td class="num">4.020</td><td class="num bad">0.145%</td></tr>
+    <tr class="total"><td>torch-spyre</td><td>kernel_ms (sum of compute)</td><td class="num">12.00</td><td class="num bad">~0.15%</td></tr>
+    <tr><td>sendnn</td><td class="mono">bmm (whole FFN)</td><td class="num">8.486</td><td class="num bad">0.206%</td></tr>
+    <tr><td>sendnn</td><td class="mono">Memcpy HtoD</td><td class="num warn">10.601</td><td class="num">&mdash;</td></tr>
+    <tr><td>sendnn</td><td class="mono">Memcpy DtoH</td><td class="num">8.487</td><td class="num">&mdash;</td></tr>
+    <tr><td>sendnn</td><td class="mono">Memset</td><td class="num">2.794</td><td class="num">&mdash;</td></tr>
+  </tbody>
+</table>
+<div class="callout">
+  <div class="callout-title">Read the per-kernel rows, not the "Total"</div>
+  The profiler screenshot also has a "Total" row, but it is an aggregate / per-iteration figure that
+  does <em>not</em> equal the sum of the kernel durations. Don't over-rely on it. The signal is the
+  per-kernel <strong>duration + PT-Util</strong> pair.
+</div>
+<p>The arresting fact: the decode front kernel (<strong>7.979&nbsp;ms</strong>) is essentially the
+  same as the prefill front kernel (<strong>7.109&nbsp;ms</strong>) &mdash; <em>despite doing 128&times;
+  fewer tokens of work.</em> If the kernel were compute-bound, decode would be ~128&times; faster.
+  It isn't. The PT-Util column tells you why.</p>
+
+<!-- ===================== SECTION 6 ===================== -->
+<h2 id="s6">6. The PT-Util collapse</h2>
+<p>PT-Util goes from <strong>~20&ndash;30%</strong> at prefill to <strong>~0.15%</strong> at decode.
+  That is a ~140&times; drop in array occupancy &mdash; the systolic array is essentially <em>idle</em>
+  during the decode kernel.</p>
+
+<figure>
+<svg viewBox="0 0 720 270" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="360" y="20" text-anchor="middle" font-size="13" font-weight="bold">PT-Util: prefill (M=512) vs decode (M=1)</text>
+  <line x1="90" y1="220" x2="690" y2="220" stroke="#475569" stroke-width="1.5"/>
+  <line x1="90" y1="220" x2="90" y2="44" stroke="#475569" stroke-width="1.5"/>
+  <!-- y ticks: 0..40% -->
+  <text x="80" y="224" text-anchor="end" font-size="10">0%</text>
+  <text x="80" y="176" text-anchor="end" font-size="10">10%</text>
+  <text x="80" y="132" text-anchor="end" font-size="10">20%</text>
+  <text x="80" y="88" text-anchor="end" font-size="10">30%</text>
+  <text x="80" y="48" text-anchor="end" font-size="10">40%</text>
+  <!-- gridlines -->
+  <g stroke="#e5e7eb" stroke-width="0.8">
+    <line x1="90" y1="176" x2="690" y2="176"/><line x1="90" y1="132" x2="690" y2="132"/>
+    <line x1="90" y1="88" x2="690" y2="88"/><line x1="90" y1="44" x2="690" y2="44"/>
+  </g>
+  <!-- prefill bars: 20.95% front, 30.73% down, 38.72% sendnn -->
+  <!-- scale: 40% = 176px (220-44). px per % = 4.4 -->
+  <g>
+    <rect x="150" y="128.8" width="48" height="91.2" fill="#2563eb"/>
+    <text x="174" y="120" text-anchor="middle" font-size="9" fill="#2563eb">20.95%</text>
+    <rect x="210" y="84.8" width="48" height="135.2" fill="#1e40af"/>
+    <text x="234" y="76" text-anchor="middle" font-size="9" fill="#1e40af">30.73%</text>
+    <rect x="270" y="49.6" width="48" height="170.4" fill="#16a34a"/>
+    <text x="294" y="42" text-anchor="middle" font-size="9" fill="#16a34a">38.72%</text>
+    <text x="234" y="240" text-anchor="middle" font-size="11" font-weight="bold">PREFILL (M=512)</text>
+    <text x="174" y="254" text-anchor="middle" font-size="8" fill="#475569">tsp front</text>
+    <text x="234" y="254" text-anchor="middle" font-size="8" fill="#475569">tsp down</text>
+    <text x="294" y="254" text-anchor="middle" font-size="8" fill="#475569">sendnn</text>
+  </g>
+  <!-- decode bars: 0.146, 0.145, 0.206% -> all ~0.6px tall; draw as sliver + label -->
+  <g>
+    <rect x="470" y="219.4" width="48" height="0.6" fill="#dc2626"/>
+    <rect x="530" y="219.4" width="48" height="0.6" fill="#b91c1c"/>
+    <rect x="590" y="219.1" width="48" height="0.9" fill="#dc2626"/>
+    <text x="554" y="206" text-anchor="middle" font-size="9" fill="#b91c1c" font-weight="bold">~0.15% &mdash; the array is idle</text>
+    <line x1="494" y1="218" x2="494" y2="210" stroke="#dc2626" stroke-width="1"/>
+    <line x1="614" y1="218" x2="614" y2="210" stroke="#dc2626" stroke-width="1"/>
+    <text x="554" y="240" text-anchor="middle" font-size="11" font-weight="bold">DECODE (M=1)</text>
+    <text x="494" y="254" text-anchor="middle" font-size="8" fill="#475569">tsp front 0.146%</text>
+    <text x="614" y="254" text-anchor="middle" font-size="8" fill="#475569">sendnn 0.206%</text>
+  </g>
+</svg>
+<figcaption>Figure 4 &mdash; PT-Util bar chart. At prefill the array runs at 20&ndash;40% occupancy; at decode it collapses to ~0.15%. The bars at decode are invisible at this scale on purpose &mdash; that is the point.</figcaption>
+</figure>
+
+<p>Why does occupancy collapse? The matmul engine is an <strong>8&times;8 systolic array</strong> that
+  consumes <strong>8 rows of <code>M</code> per pass</strong> (<code>_PT_ROWS = 8</code> in
+  <code>work_division.py</code>). It reaches full pipeline fill at roughly <code>_TARGET_PT_PASSES = 8</code>
+  passes &mdash; about <strong>64 rows of M</strong>. The number of rows you feed it <em>is</em> M:</p>
+<ul>
+  <li>Prefill <code>M = 512</code> &rarr; ~8 full passes per core (after an m-split) &rarr; the array fills.</li>
+  <li>Decode <code>M = 1</code> &rarr; <strong>one row</strong>. A single row enters an 8&times;8 array,
+    so at most ~1 of the array's rows is active and the other ~63 cells do nothing. The pipeline
+    never fills; it spends its time in startup/drain.</li>
+</ul>
+
+<figure>
+<svg viewBox="0 0 720 240" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="360" y="20" text-anchor="middle" font-size="13" font-weight="bold">The 8&times;8 array: filled at M=512 vs ~1 row at M=1</text>
+  <!-- left: filled -->
+  <g transform="translate(70,44)">
+    <text x="110" y="-8" text-anchor="middle" font-size="11" font-weight="bold" fill="#16a34a">M=512 (prefill): array fills</text>
+    <g>
+      <!-- 8x8 grid all green -->
+      <g fill="#86efac" stroke="#16a34a" stroke-width="0.6">
+        <rect x="0" y="0" width="24" height="24"/><rect x="26" y="0" width="24" height="24"/><rect x="52" y="0" width="24" height="24"/><rect x="78" y="0" width="24" height="24"/><rect x="104" y="0" width="24" height="24"/><rect x="130" y="0" width="24" height="24"/><rect x="156" y="0" width="24" height="24"/><rect x="182" y="0" width="24" height="24"/>
+        <rect x="0" y="26" width="24" height="24"/><rect x="26" y="26" width="24" height="24"/><rect x="52" y="26" width="24" height="24"/><rect x="78" y="26" width="24" height="24"/><rect x="104" y="26" width="24" height="24"/><rect x="130" y="26" width="24" height="24"/><rect x="156" y="26" width="24" height="24"/><rect x="182" y="26" width="24" height="24"/>
+        <rect x="0" y="52" width="24" height="24"/><rect x="26" y="52" width="24" height="24"/><rect x="52" y="52" width="24" height="24"/><rect x="78" y="52" width="24" height="24"/><rect x="104" y="52" width="24" height="24"/><rect x="130" y="52" width="24" height="24"/><rect x="156" y="52" width="24" height="24"/><rect x="182" y="52" width="24" height="24"/>
+        <rect x="0" y="78" width="24" height="24"/><rect x="26" y="78" width="24" height="24"/><rect x="52" y="78" width="24" height="24"/><rect x="78" y="78" width="24" height="24"/><rect x="104" y="78" width="24" height="24"/><rect x="130" y="78" width="24" height="24"/><rect x="156" y="78" width="24" height="24"/><rect x="182" y="78" width="24" height="24"/>
+        <rect x="0" y="104" width="24" height="24"/><rect x="26" y="104" width="24" height="24"/><rect x="52" y="104" width="24" height="24"/><rect x="78" y="104" width="24" height="24"/><rect x="104" y="104" width="24" height="24"/><rect x="130" y="104" width="24" height="24"/><rect x="156" y="104" width="24" height="24"/><rect x="182" y="104" width="24" height="24"/>
+        <rect x="0" y="130" width="24" height="24"/><rect x="26" y="130" width="24" height="24"/><rect x="52" y="130" width="24" height="24"/><rect x="78" y="130" width="24" height="24"/><rect x="104" y="130" width="24" height="24"/><rect x="130" y="130" width="24" height="24"/><rect x="156" y="130" width="24" height="24"/><rect x="182" y="130" width="24" height="24"/>
+        <rect x="0" y="156" width="24" height="24"/><rect x="26" y="156" width="24" height="24"/><rect x="52" y="156" width="24" height="24"/><rect x="78" y="156" width="24" height="24"/><rect x="104" y="156" width="24" height="24"/><rect x="130" y="156" width="24" height="24"/><rect x="156" y="156" width="24" height="24"/><rect x="182" y="156" width="24" height="24"/>
+      </g>
+    </g>
+    <text x="103" y="200" text-anchor="middle" font-size="9" fill="#166534">all 64 cells busy</text>
+  </g>
+  <!-- right: 1 row -->
+  <g transform="translate(420,44)">
+    <text x="110" y="-8" text-anchor="middle" font-size="11" font-weight="bold" fill="#dc2626">M=1 (decode): ~1 row active</text>
+    <g>
+      <!-- top row green, rest gray -->
+      <g stroke="#94a3b8" stroke-width="0.6" fill="#f1f5f9">
+        <rect x="0" y="26" width="24" height="24"/><rect x="26" y="26" width="24" height="24"/><rect x="52" y="26" width="24" height="24"/><rect x="78" y="26" width="24" height="24"/><rect x="104" y="26" width="24" height="24"/><rect x="130" y="26" width="24" height="24"/><rect x="156" y="26" width="24" height="24"/><rect x="182" y="26" width="24" height="24"/>
+        <rect x="0" y="52" width="24" height="24"/><rect x="26" y="52" width="24" height="24"/><rect x="52" y="52" width="24" height="24"/><rect x="78" y="52" width="24" height="24"/><rect x="104" y="52" width="24" height="24"/><rect x="130" y="52" width="24" height="24"/><rect x="156" y="52" width="24" height="24"/><rect x="182" y="52" width="24" height="24"/>
+        <rect x="0" y="78" width="24" height="24"/><rect x="26" y="78" width="24" height="24"/><rect x="52" y="78" width="24" height="24"/><rect x="78" y="78" width="24" height="24"/><rect x="104" y="78" width="24" height="24"/><rect x="130" y="78" width="24" height="24"/><rect x="156" y="78" width="24" height="24"/><rect x="182" y="78" width="24" height="24"/>
+        <rect x="0" y="104" width="24" height="24"/><rect x="26" y="104" width="24" height="24"/><rect x="52" y="104" width="24" height="24"/><rect x="78" y="104" width="24" height="24"/><rect x="104" y="104" width="24" height="24"/><rect x="130" y="104" width="24" height="24"/><rect x="156" y="104" width="24" height="24"/><rect x="182" y="104" width="24" height="24"/>
+        <rect x="0" y="130" width="24" height="24"/><rect x="26" y="130" width="24" height="24"/><rect x="52" y="130" width="24" height="24"/><rect x="78" y="130" width="24" height="24"/><rect x="104" y="130" width="24" height="24"/><rect x="130" y="130" width="24" height="24"/><rect x="156" y="130" width="24" height="24"/><rect x="182" y="130" width="24" height="24"/>
+        <rect x="0" y="156" width="24" height="24"/><rect x="26" y="156" width="24" height="24"/><rect x="52" y="156" width="24" height="24"/><rect x="78" y="156" width="24" height="24"/><rect x="104" y="156" width="24" height="24"/><rect x="130" y="156" width="24" height="24"/><rect x="156" y="156" width="24" height="24"/><rect x="182" y="156" width="24" height="24"/>
+      </g>
+      <!-- one active row -->
+      <g fill="#fca5a5" stroke="#dc2626" stroke-width="0.8">
+        <rect x="0" y="0" width="24" height="24"/><rect x="26" y="0" width="24" height="24"/><rect x="52" y="0" width="24" height="24"/><rect x="78" y="0" width="24" height="24"/><rect x="104" y="0" width="24" height="24"/><rect x="130" y="0" width="24" height="24"/><rect x="156" y="0" width="24" height="24"/><rect x="182" y="0" width="24" height="24"/>
+      </g>
+    </g>
+    <text x="103" y="200" text-anchor="middle" font-size="9" fill="#b91c1c">~63 of 64 cells idle &rarr; PT-Util ~0.15%</text>
+  </g>
+</svg>
+<figcaption>Figure 5 &mdash; Systolic underfill. At M=512 the array's rows are fully fed; at M=1 a single token enters the 8&times;8 array, leaving ~63 of 64 cells idle. PT-Util is, almost literally, the fraction of this grid lit up.</figcaption>
+</figure>
+
+<!-- ===================== SECTION 7 ===================== -->
+<h2 id="s7">7. Why decode is overhead-bound</h2>
+<p>If the array does no useful arithmetic, where does the ~3&ndash;8&nbsp;ms per kernel go? Into
+  <strong>fixed, per-kernel overhead</strong> that is independent of token count:</p>
+<ul>
+  <li><strong>Kernel launch / dispatch</strong> &mdash; a fixed cost paid whether you matmul 1 row or 512.</li>
+  <li><strong>Stickify of the <code>[M, 16384]</code> intermediate</strong> &mdash; the front kernel still
+    materializes a 16384-wide intermediate (= <strong>256 sticks</strong> wide). Laying that out in
+    tiled stick format is a fixed layout cost dominated by the 16384 dimension, not by M.</li>
+  <li><strong>K = 16384 reduction setup</strong> &mdash; the down projection reduces over K=16384 (256
+    sticks). The loop/accumulator setup over that long reduction axis is paid regardless of M.</li>
+</ul>
+<p>This is why decode kernel time (7.979&nbsp;ms front) ≈ prefill kernel time (7.109&nbsp;ms front):
+  the part that scales with tokens has shrunk to nothing, leaving only the part that doesn't.
+  <strong>Decode is overhead-bound, not compute-bound.</strong></p>
+
+<div class="callout key">
+  <div class="callout-title">The ~700&times; gap from the compute floor</div>
+  Put a number on "the array is idle." One token's FFN is <strong>2.013&times;10<sup>8</sup> MACs</strong>.
+  The AIU's per-core peak is <code>(98.304&times;10<sup>12</sup> FLOPS / 2 / 32) = 1.536&times;10<sup>6</sup>
+  MACs/&micro;s/core</code> (from <code>_PEAK_MACS_US_CORE</code>), so across 32 cores the floor is
+  ~<strong>4.9&times;10<sup>7</sup> MACs/&micro;s</strong>. The arithmetic <em>lower bound</em> for a
+  1-token FFN is therefore<br>
+  <code>2.013e8 / 4.9e7 &asymp; 4&nbsp;&micro;s</code>.<br>
+  A single front matmul (gate or up, ~6.7e7 MACs) measures ~2.9&nbsp;ms &mdash; about
+  <strong>700&times; the compute floor</strong>. 700&times; means: ~0.15% of the time is arithmetic,
+  the rest is overhead. PT-Util and the 700&times; gap are two views of the same fact.
+</div>
+
+<p>Contrast prefill: M=512 has 512&times; the MACs, so the compute floor is ~2.1&nbsp;ms &mdash; now a
+  meaningful fraction of the measured kernel time. That is exactly why prefill PT-Util is 20&ndash;40%
+  (compute is a real share of the kernel) and decode PT-Util is ~0.15% (compute is a rounding error).</p>
+
+<!-- ===================== SECTION 8 ===================== -->
+<h2 id="s8">8. The "5&ndash;8&nbsp;ms &rarr; 200&nbsp;ms/token" claim, reconciled</h2>
+<p>The worry: a model has ~40 layers; 5&nbsp;ms/MLP &times; 40 ≈ 200&nbsp;ms/token, which would be a
+  disaster. Two things are wrong with that multiplication.</p>
+
+<h3>8.1 It multiplies the wrong number</h3>
+<p>The 5&ndash;8&nbsp;ms is an <em>isolated</em> single-op kernel measurement. Worse, the
+  <code>spyre_ms</code> for the isolated call (~30&nbsp;ms at decode for torch-spyre) includes
+  per-call data movement that <strong>does not recur per layer</strong> in a real model:</p>
+<ul>
+  <li>In the benchmark, every call ships fresh weights and activations host&harr;device. sendnn's
+    decode shows this nakedly: <strong>Memcpy HtoD = 10.601&nbsp;ms</strong>, DtoH = 8.487&nbsp;ms
+    &mdash; the copies <em>dwarf</em> the 8.486&nbsp;ms <code>bmm</code>. The benchmark is, at decode,
+    more than half memcpy.</li>
+  <li>In a real autoregressive decoder, <strong>weights stay resident</strong> on-device across
+    tokens and layers; activations stream through. You pay weight staging once, not per layer per
+    token. The isolated benchmark charges it every call.</li>
+</ul>
+<p>So if you must project per-token latency, the relevant quantity is the <em>per-layer kernel time</em>
+  (~2&ndash;4&nbsp;ms for the decode matmuls), not the per-call <code>spyre_ms</code>, and even that
+  per-layer kernel time is inflated by the fixed overhead of §7 that a fused, resident-weight decoder
+  would pay far less of (one launch and one stickify for a fused MLP, not two).</p>
+
+<h3>8.2 The latency claim hinges on metric + amortization</h3>
+<p>Whether "5&ndash;8&nbsp;ms/MLP" is alarming depends entirely on which clock you propagate:</p>
+<table>
+  <thead><tr><th>if you multiply&hellip;</th><th>by 40 layers</th><th>is it real?</th></tr></thead>
+  <tbody>
+    <tr><td><code>spyre_ms</code> isolated (~30&nbsp;ms)</td><td class="num">~1200&nbsp;ms</td><td class="bad">No &mdash; double-charges per-call memcpy/stickify</td></tr>
+    <tr><td>kernel_ms sum (~12&nbsp;ms)</td><td class="num">~480&nbsp;ms</td><td class="warn">Overstated &mdash; per-layer launch+stickify amortizes when fused/resident</td></tr>
+    <tr><td>compute floor (~4&micro;s/FFN)</td><td class="num">~0.16&nbsp;ms</td><td>The arithmetic the array <em>actually</em> needs to do</td></tr>
+  </tbody>
+</table>
+<p>The truth is between the kernel-sum and the floor: real decode latency is set by how much of that
+  fixed overhead you can amortize (resident weights, fused MLP, pipelined launches), not by the
+  isolated-benchmark <code>spyre_ms</code>. The 200&nbsp;ms/token figure is <strong>not a settled
+  "too slow"</strong> &mdash; it is an artifact of multiplying the most pessimistic, least-amortized
+  metric.</p>
+
+<div class="callout">
+  <div class="callout-title">The honest one-liner</div>
+  Decode kernel time is high because the array is idle (overhead-bound at M=1), not because the
+  arithmetic is slow. The "200&nbsp;ms/token" projection multiplies an isolated per-call cost
+  (heavy on memcpy/stickify) that amortizes away once weights stay resident. It is a measurement /
+  amortization question, not a proven hardware ceiling.
+</div>
+
+<!-- ===================== SECTION 9 ===================== -->
+<h2 id="s9">9. The LX-frac footnote</h2>
+<p>One backend knob colors any tsp-vs-sendnn comparison. <code>DXP_LX_FRAC_AVAIL</code> defaults to
+  <strong>0.2</strong>: only 20% of the LX scratchpad is offered to the matmul planner, with 80%
+  reserved for the frontend. With less LX, the matmul has to chunk more and torch-spyre looks slower.</p>
+<ul>
+  <li>If that 80% reservation is genuinely <em>idle</em> during these matmuls (it is, in a single-op
+    benchmark with nothing else running), then <code>DXP_LX_FRAC_AVAIL = 1.0</code> is the fair
+    comparison &mdash; and that is what Jamie's table uses (frac=1).</li>
+  <li>Crucially, the planner's <em>split choice</em> &mdash; the <code>(m, n, k)</code> it picks &mdash;
+    is <strong>frac-independent</strong>. LX-frac changes how much chunking happens within a chosen
+    split, not which split wins. So the underfill story above is unaffected by the frac setting; only
+    the absolute tsp numbers move.</li>
+</ul>
+
+<!-- ===================== SECTION 10 ===================== -->
+<h2 id="s10">10. The wide-N matmul: why ~20% slower than sendnn</h2>
+<p>Separate from the decode story is a prefill flag: the standalone matmul
+  <code>[1, 512, 4096] @ [4096, 12800]</code> &mdash; B=1, M=512, K=4096, <strong>N=12800 (= 200
+  sticks)</strong> &mdash; runs ~1.18&ndash;1.22&times; slower than sendnn in the field. This is the
+  MLP's wide front projection measured in isolation. Two hypotheses: either the cost-model planner
+  is picking a worse <code>(m, n, k)</code> split than it should (fixable in the planner), or the
+  matmul kernel itself is slower regardless of split (a kernel/bandwidth gap). We settled it on
+  device by <em>forcing</em> every legal split and timing each.</p>
+
+<h3>10.1 Why this matmul is bandwidth-bound, not compute-bound</h3>
+<p>Look at what moves. The weight is <code>4096 &times; 12800 &times; 2&nbsp;B = 100&nbsp;MB</code>,
+  which is <strong>~86% of all bytes</strong> the kernel touches (the M=512 activation in/out are
+  ~4&nbsp;MB + ~13&nbsp;MB). The arithmetic intensity (~5.4&times;10<sup>10</sup> FLOPs over ~117&nbsp;MB
+  &asymp; <strong>~460 FLOP/byte</strong>) sits right at the AIU's machine balance, so the matmul is
+  pinned against the <strong>HBM roofline knee</strong>: the floor is set by streaming that 100&nbsp;MB
+  weight through HBM (~204.8&nbsp;GB/s &rarr; a <strong>~0.6&nbsp;ms bandwidth floor</strong>), not by
+  array arithmetic. The decisive consequence: <strong>every split moves the same 100&nbsp;MB weight.</strong>
+  Work-division reshuffles <em>which core does which output column</em>, but the weight stream from
+  HBM is invariant. You cannot divide your way out of a bandwidth wall.</p>
+
+<h3>10.2 The force-split experiment</h3>
+<p>On this node's card (serial, device-free for every run), I patched the work-division pass to force
+  each legal full-32-core split and timed the matmul kernel. Only four splits use all 32 cores legally
+  &mdash; <code>n</code> must divide 200 sticks, so <code>m&times;n=32</code> admits
+  <code>(32,1), (16,2), (8,4), (4,8)</code> and nothing else (<code>n=16</code> or <code>32</code> don't
+  divide 200).</p>
+<table>
+  <thead><tr><th>forced split (m,&nbsp;n,&nbsp;k)</th><th class="num">cores</th><th class="num">matmul kernel (ms)</th><th class="num">vs sendnn</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">DEFAULT (planner)</td><td class="num">32</td><td class="num">~1.18</td><td class="num">1.23&times;</td></tr>
+    <tr><td class="mono">(8, 4, 1)</td><td class="num">32</td><td class="num">~1.21</td><td class="num">1.25&times;</td></tr>
+    <tr><td class="mono">(4, 8, 1)</td><td class="num">32</td><td class="num">~1.20</td><td class="num">1.24&times;</td></tr>
+    <tr><td class="mono">(16, 2, 1)</td><td class="num">32</td><td class="num">1.199</td><td class="num">1.25&times;</td></tr>
+    <tr><td class="mono">(32, 1, 1)</td><td class="num">32</td><td class="num">~1.21</td><td class="num">1.25&times;</td></tr>
+    <tr class="total"><td class="mono">sendnn (mm-BMM)</td><td class="num">32</td><td class="num good">0.962</td><td class="num">1.00&times;</td></tr>
+  </tbody>
+</table>
+<p class="subtitle" style="font-size:0.92em;margin-top:-0.3rem;">Matmul-kernel time only. The raw
+  harness <code>kernel_ms</code> for the tsp arm runs ~0.09&nbsp;ms higher because it includes a
+  <code>.sum()</code> epilogue the harness appends (an artifact, absent from sendnn's number); the
+  matmul-only figures above subtract it. Splits without a separately-isolated matmul row are shown as
+  <code>~</code> (their full <code>kernel_ms</code> landed in a 1.276&ndash;1.299&nbsp;ms band).</p>
+
+<div class="callout key">
+  <div class="callout-title">Two findings, one verdict</div>
+  <strong>(1) No split spread.</strong> Every legal full-core split &mdash; pure-N <code>(8,4)</code>,
+  pure-M <code>(32,1)</code>, and everything between &mdash; lands within <strong>~2% of each other</strong>
+  (run-to-run noise). <code>(4,8)</code> is <em>not</em> meaningfully faster than <code>(8,4)</code>.
+  The planner's tie-break between cohorts is irrelevant to throughput on this shape.<br><br>
+  <strong>(2) The whole band sits ~25% over sendnn.</strong> Best tsp matmul kernel ≈ 1.18&ndash;1.20&nbsp;ms
+  vs sendnn's 0.962&nbsp;ms &rarr; <strong>~1.25&times;</strong>, matching the field slowdown. Even the
+  fastest forced split stays ~20&ndash;25% above sendnn.<br><br>
+  <strong>Verdict: it is a kernel/bandwidth gap, not a work-division problem.</strong> The slowdown
+  lives in the matmul kernel itself (how well each stack streams the wide-N weight from HBM), exactly
+  as the roofline argument in &sect;10.1 predicts. The planner is choosing correctly; there is no
+  split-choice win to capture here.
+</div>
+
+<p>This is a useful negative result. An earlier paper analysis had hypothesized that ~half the gap was
+  split choice &mdash; that <code>(4,8)</code> would beat the planner's pick because the cohort penalty
+  is blind to weight rebroadcast. The device experiment <strong>refutes that</strong>: on hardware the
+  splits are indistinguishable. The right place to chase the remaining 25% is the matmul kernel's
+  weight-streaming codegen (a deeptools / kernel concern), not the inductor work-division planner.</p>
+
+<div class="callout">
+  <div class="callout-title">A premise that didn't hold</div>
+  On the worktree this ran against, the planner's <em>default</em> split for this shape is pure
+  <code>M=32</code>, not the <code>(8,4,1)</code> an earlier write-up assumed (the two were built from
+  different revisions). It does not change the verdict &mdash; <code>(8,4,1)</code> and
+  <code>(4,8,1)</code> were forced explicitly and are no faster than the M=32 default &mdash; but it is
+  worth flagging that "the planner picks (8,4,1) here" was itself incorrect.
+</div>
+
+<!-- ===================== SECTION 11 ===================== -->
+<h2 id="s11">11. Planner A/B across the matmul shapes</h2>
+<p>The wide-N result in &sect;10 is one row of a larger picture. Here is the same-harness A/B that
+  motivates the cost-model planner in the first place: each of Priyanka's six matmul shapes, run
+  three ways &mdash; <strong>OFF</strong> (the main work-division heuristic), <strong>ON</strong> (the
+  cost-model planner), and <strong>sendnn</strong> &mdash; on the same <code>_C.so</code>, same
+  profiler, at <code>DXP_LX_FRAC_AVAIL = 1</code> (the fair isolated-benchmark setting from &sect;9).
+  All numbers are <strong>matmul-kernel <code>kernel_ms</code></strong> (the <code>sdsc_fused_linear</code>
+  / <code>mm-BMM</code> row only &mdash; no Memset/Memcpy). Each shape is a <em>single</em> matmul, not
+  the full FFN of &sect;2.</p>
+
+<table>
+  <thead><tr><th>shape</th><th class="mono">M</th><th class="mono">N (sticks)</th><th>role</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">qo_prefill</td><td class="num">512</td><td class="num">4096 (64)</td><td>attention Q/O proj, prefill</td></tr>
+    <tr><td class="mono">kv_prefill</td><td class="num">512</td><td class="num">1024 (16)</td><td>narrow K/V proj, prefill</td></tr>
+    <tr><td class="mono">mlp_prefill</td><td class="num">512</td><td class="num">12800 (200)</td><td><strong>the wide-N matmul of &sect;10</strong></td></tr>
+    <tr><td class="mono">qo_bs4</td><td class="num">1&times;4</td><td class="num">4096 (64)</td><td>Q/O proj, decode (4 tokens)</td></tr>
+    <tr><td class="mono">kv_bs4</td><td class="num">1&times;4</td><td class="num">1024 (16)</td><td>K/V proj, decode</td></tr>
+    <tr><td class="mono">mlp_bs4</td><td class="num">1&times;4</td><td class="num">12800 (200)</td><td>wide-N, decode</td></tr>
+  </tbody>
+</table>
+
+<table>
+  <thead><tr><th>shape</th><th class="num">OFF (heuristic)</th><th class="num">ON (cost-model)</th><th class="num">sendnn</th><th class="num">OFF&rarr;ON</th><th class="num">ON vs sendnn</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">qo_prefill</td><td class="num">0.843</td><td class="num">0.325</td><td class="num">0.369</td><td class="num good">2.59&times;</td><td class="num good">0.88&times;</td></tr>
+    <tr><td class="mono">kv_prefill</td><td class="num">0.202</td><td class="num">0.115</td><td class="num">0.107</td><td class="num good">1.76&times;</td><td class="num">1.07&times;</td></tr>
+    <tr><td class="mono">mlp_prefill</td><td class="num">2.389</td><td class="num">1.152</td><td class="num">0.961</td><td class="num good">2.07&times;</td><td class="num warn">1.20&times;</td></tr>
+    <tr><td class="mono">qo_bs4</td><td class="num">0.241</td><td class="num">0.236</td><td class="num">0.247</td><td class="num">1.02&times;</td><td class="num good">0.96&times;</td></tr>
+    <tr><td class="mono">kv_bs4</td><td class="num">0.067</td><td class="num">0.063</td><td class="num">0.063</td><td class="num">1.06&times;</td><td class="num">1.00&times;</td></tr>
+    <tr><td class="mono">mlp_bs4</td><td class="num">0.896</td><td class="num">0.749</td><td class="num">0.910</td><td class="num">1.20&times;</td><td class="num good">0.82&times;</td></tr>
+  </tbody>
+</table>
+<p class="subtitle" style="font-size:0.92em;margin-top:-0.3rem;">kernel_ms, mean over runs, frac=1.
+  <span class="good">OFF&rarr;ON &gt; 1</span> = planner faster than the heuristic;
+  <span class="good">ON&nbsp;vs&nbsp;sendnn &lt; 1</span> = torch-spyre faster than sendnn.</p>
+
+<p>Three things fall out, each tying back to a section above:</p>
+<ol>
+  <li><strong>The planner wins on every prefill shape, biggest where N is wide.</strong>
+    <code>qo_prefill</code> 2.59&times; and <code>mlp_prefill</code> 2.07&times; over the heuristic.
+    On <code>qo_prefill</code> the planner actually goes <em>below</em> sendnn (0.88&times;); the
+    heuristic was leaving ~2.5&times; on the table by mis-splitting the same matmul.</li>
+  <li><strong>The <code>mlp_prefill</code> residual is the &sect;10 wall.</strong> Even after a 2.07&times;
+    win, ON is 1.20&times; sendnn &mdash; and &sect;10's force-split proved that 20% is <em>not</em>
+    recoverable by a different split (it's HBM weight streaming). So this row is "planner did its job,
+    the rest is a kernel/bandwidth gap," not "planner picked wrong."</li>
+  <li><strong>Decode (bs4) barely moves, by design.</strong> At M=1 the array is underfilled
+    regardless of split (the PT-Util collapse of &sect;6&ndash;7), so OFF, ON, and sendnn all land
+    within a few percent &mdash; there is almost no work-division lever at one token. ON still edges
+    sendnn on <code>qo_bs4</code> (0.96&times;) and <code>mlp_bs4</code> (0.82&times;); the real decode
+    lever is K-split to fill the idle array (&sect;10 / takeaway 6), not N/M tuning.</li>
+</ol>
+
+<div class="callout key">
+  <div class="callout-title">What the A/B says in one line</div>
+  The cost-model planner's value shows up at <strong>prefill</strong>, where M fills the array and the
+  split actually matters: it roughly halves the heuristic's kernel time on the wide projections and
+  reaches or beats sendnn on the square ones. Where it <em>doesn't</em> close the gap
+  (<code>mlp_prefill</code>, 1.20&times;) the cause is the bandwidth wall of &sect;10, not the split;
+  where it <em>can't</em> move much (decode) the cause is the underfilled array of &sect;6&ndash;7,
+  not the split. Every residual traces to a kernel/hardware limit the planner is not responsible for.
+</div>
+
+<!-- ===================== SECTION 12 ===================== -->
+<h2 id="s12">12. Takeaways</h2>
+<ol>
+  <li><strong>The op is one SwiGLU FFN block</strong>: gate &amp; up project 4096&rarr;16384, SiLU-gate
+    times up, down projects 16384&rarr;4096. Three matmuls, ~2&times;10<sup>8</sup> MACs per token.</li>
+  <li><strong>It lowers to 2 tsp kernels</strong> (front fused: gate+up+silu+mul; down) vs <strong>1
+    sendnn <code>bmm</code></strong>. Sum the two tsp rows to compare.</li>
+  <li><strong>Jamie's table is kernel time</strong> ("bmm kernel time only") &mdash; not wall, not
+    <code>spyre_ms</code>.</li>
+  <li><strong>Decode is not anomalous, it is overhead-bound.</strong> At M=1 the 8&times;8 array runs
+    ~1 row; PT-Util collapses from ~25% to ~0.15%; kernel time barely changes from prefill because
+    the compute that should have shrunk 128&times; was never the bottleneck. Measured kernel is ~700&times;
+    the ~4&micro;s arithmetic floor.</li>
+  <li><strong>"200&nbsp;ms/token" is a metric artifact.</strong> It multiplies an isolated per-call
+    cost (in sendnn's decode, memcpy HtoD 10.6&nbsp;ms &gt; the bmm itself) that amortizes once
+    weights stay resident across layers/tokens. Per-layer kernel time (~2&ndash;4&nbsp;ms) is the
+    right quantity, and even that is inflated by fixed launch/stickify overhead a fused resident
+    decoder pays far less of.</li>
+  <li><strong>The real lever for decode</strong> is filling the idle array: K-split (split the K=16384
+    reduction across the otherwise-idle cores) is the only way to put work on more than ~1 row at
+    M=1 &mdash; which is exactly where the cost-model's split-K decode path applies.</li>
+  <li><strong>LX-frac=1 is the fair comparison</strong> for an isolated benchmark; the split choice
+    is frac-independent.</li>
+  <li><strong>The wide-N ~20% slowdown is a kernel/bandwidth gap, not a split problem</strong>
+    (&sect;10). Forcing every legal split of <code>[1,512,4096]@[4096,12800]</code> on device gives a
+    ~2%-wide band all ~25% over sendnn; the matmul is HBM-bound streaming a 100&nbsp;MB weight (~86% of
+    bytes), so no split helps. Chase it in the matmul kernel's weight streaming, not in work division.</li>
+  <li><strong>The planner's value is concentrated at prefill</strong> (&sect;11). Across the six matmul
+    shapes it roughly halves the heuristic's kernel time on wide prefill projections (qo 2.59&times;,
+    mlp 2.07&times;) and reaches/beats sendnn on the square ones; decode shapes barely move because the
+    array is underfilled regardless of split. Every place it trails sendnn traces to &sect;10 (bandwidth)
+    or &sect;6&ndash;7 (underfill), not to a wrong split.</li>
+</ol>
+
+</main>
+</div>
+</body>
+</html>
