@@ -1,0 +1,12 @@
+metric                      max_ms       mean_ms     median_ms        min_ms
+----------------------------------------------------------------------------
+wall_clock_ms              415.880       367.764       355.793       343.589
+cpu_ms                     367.552       367.552       367.552       367.552
+spyre_ms                    35.469        35.469        35.469        35.469
+
+kernel_times:                                                                                                   mean_ms
+------------------------------------------------------------------------------------------------------------------------
+/tmp/claude-1000800000/torchinductor_adnan/inductor-spyre/sdsc_fused_mm_1_w786x4o3/bundle.mlir                    2.674
+/tmp/claude-1000800000/torchinductor_adnan/inductor-spyre/sdsc_fused_mm_mul_silu_0_pso4vwy8/bundle.mlir           7.789
+Memset-(Device)                                                                                                   0.246
+

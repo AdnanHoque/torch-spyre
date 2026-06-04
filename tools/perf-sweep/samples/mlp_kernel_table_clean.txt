@@ -1,0 +1,11 @@
+MLP SwiGLU FFN prefill  M=512  emb=4096  inter=16384  fp16   (10 profiled iters)
+Per-kernel DEVICE (Spyre/AIU) timing  —  source: torch.profiler PrivateUse1
+
+kernel                                  cat             calls    tot_ms   per_iter_ms
+-------------------------------------------------------------------------------------
+sdsc_fused_mm_mul_silu_0_434jgp19       matmul/kernel      10    78.464        7.8464
+sdsc_fused_mm_1__xsd2q8y                matmul/kernel      10    26.632        2.6632
+sdsc_fused_sum_0_g_wf9afd               matmul/kernel      10     0.279        0.0279
+Memset (Device)                         memset             20     0.083        0.0083
+-------------------------------------------------------------------------------------
+TOTAL device per-iter                                                         10.5458
