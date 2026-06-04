@@ -466,11 +466,14 @@
     <tr><td>torch-spyre</td><td class="mono">sdsc_fused_bmm_mul_silu_0 (front)</td><td class="num">7.109</td><td class="num">20.95%</td></tr>
     <tr><td>torch-spyre</td><td class="mono">sdsc_fused_bmm_1 (down)</td><td class="num">2.423</td><td class="num">30.73%</td></tr>
     <tr class="total"><td>torch-spyre</td><td>kernel_ms (sum of compute)</td><td class="num">9.53</td><td class="num">~25%</td></tr>
-    <tr><td>sendnn</td><td class="mono">bmm (whole FFN)</td><td class="num">5.770</td><td class="num">38.72%</td></tr>
+    <tr><td>sendnn</td><td class="mono">bmm (whole FFN)</td><td class="num">5.77<sup>&dagger;</sup></td><td class="num">38.72%</td></tr>
     <tr><td>sendnn</td><td class="mono">Memcpy HtoD</td><td class="num">2.707</td><td class="num">&mdash;</td></tr>
     <tr><td>sendnn</td><td class="mono">Memcpy DtoH</td><td class="num">5.875</td><td class="num">&mdash;</td></tr>
   </tbody>
 </table>
+<p class="subtitle" style="font-size:0.9em;"><sup>&dagger;</sup>5.77&nbsp;ms &mdash; older run; the current
+  swept value for the same 402.7&nbsp;MB FFN is ~7.2&nbsp;ms (&sect;14.4). Both measure the same kernel; the
+  difference is stale-vs-current, not run-to-run spread.</p>
 
 <h3>Decode &mdash; mlp <code>[4, 1, 4096]</code> (4 tokens, M=1 each) &mdash; Dataset&nbsp;1 (Jamie's)</h3>
 <table>
@@ -975,7 +978,8 @@
 <div class="callout">
   <div class="callout-title">But the round-trip is small &mdash; utilization is the real gap</div>
   Quantify it: 2&times;16.78&nbsp;MB / 204.8&nbsp;GB/s &asymp; <strong>0.16&nbsp;ms</strong> &mdash; only
-  ~4% of the 3.76&nbsp;ms prefill gap (tsp 9.53 vs sendnn 5.77&nbsp;ms). The dominant factor is
+  a few percent of the prefill gap (tsp 9.53 vs sendnn 5.77&nbsp;ms &mdash; the latter a stale run,
+  ~7.2&nbsp;ms current, &sect;14.4). The dominant factor is
   <strong>array utilization</strong>: sendnn's one fused kernel runs the systolic array at
   <strong>~39% PT-Util</strong>, torch-spyre's two kernels at <strong>21&ndash;31%</strong>. Both stream
   roughly the same ~400&nbsp;MB of weights; sendnn just fills the array ~1.5&ndash;1.8&times; better and
@@ -1008,18 +1012,22 @@
 <table>
   <thead><tr><th>regime</th><th class="num">ideal (ms)</th><th>binding</th><th class="num">tsp (ms)</th><th class="num">tsp &times;over</th><th class="num">tsp eff</th><th class="num">sendnn (ms)</th><th class="num">sendnn &times;over</th><th class="num">sendnn eff</th></tr></thead>
   <tbody>
-    <tr><td>Prefill (M=512)</td><td class="num">2.10</td><td>compute</td><td class="num">9.53</td><td class="num">4.54&times;</td><td class="num">22%</td><td class="num">5.77</td><td class="num">2.75&times;</td><td class="num good">36%</td></tr>
+    <tr><td>Prefill (M=512)</td><td class="num">2.10</td><td>compute</td><td class="num">9.53</td><td class="num">4.54&times;</td><td class="num">22%</td><td class="num">7.2<sup>&dagger;</sup></td><td class="num">3.43&times;</td><td class="num good">29%</td></tr>
     <tr><td>Decode (M=4)</td><td class="num">1.97</td><td>HBM (weight read)</td><td class="num">12.00</td><td class="num bad">6.10&times;</td><td class="num">16%</td><td class="num">8.49</td><td class="num">4.32&times;</td><td class="num">23%</td></tr>
   </tbody>
 </table>
 <p class="subtitle" style="font-size:0.9em;margin-top:-0.3rem;">efficiency = ideal/actual; &times;over =
   actual/ideal. Decode ideal at the alternate 166&nbsp;GB/s HBM figure is 2.43&nbsp;ms (tsp 4.95&times;,
-  sendnn 3.50&times;).</p>
+  sendnn 3.50&times;). <sup>&dagger;</sup>The 5.77&nbsp;ms sendnn prefill in earlier drafts was a stale
+  measurement; the current swept value for the same 402.7&nbsp;MB FFN is ~7.2&ndash;7.4&nbsp;ms (&sect;14.4).</p>
 <div class="callout key">
   <div class="callout-title">The decode roofline is not the bottleneck &mdash; overhead is</div>
-  Prefill: sendnn runs at <strong>2.75&times;</strong> the compute floor (36% efficient), torch-spyre at
-  <strong>4.54&times;</strong> (22%) &mdash; sendnn is ~1.65&times; faster, so most of the tsp prefill gap is
-  implementation overhead, not a roofline wall.<br><br>
+  Prefill: sendnn runs at <strong>3.43&times;</strong> the compute floor (29% efficient), torch-spyre at
+  <strong>4.54&times;</strong> (22%) &mdash; sendnn is ~1.3&times; faster, so a chunk of the tsp prefill gap is
+  implementation overhead, not a roofline wall. &sect;14 re-grades prefill against the <em>measured</em> bus:
+  the real floor is three weight-reads at ~143&nbsp;GB/s &asymp; <strong>3.5&nbsp;ms</strong>, sendnn's
+  7.2&nbsp;ms is ~<strong>2&times;</strong> over it (a large-M inter-matmul sequencing stall, &sect;14.4),
+  and torch-spyre's 10.5&nbsp;ms is ~<strong>3&times;</strong> over.<br><br>
   Decode looks 4&ndash;6&times; off <em>this</em> floor &mdash; but that is because the floor uses the
   204.8&nbsp;GB/s <em>spec</em> bandwidth, which the silicon does not deliver. &sect;14 measures the real
   bus and the real decode kernel: the persistent-weight decode kernel is ~<strong>2.8&nbsp;ms</strong>,
@@ -1031,7 +1039,7 @@
   a different kernel from our ~2.8&nbsp;ms <em>shared-weight</em> probe (&sect;14.3). The lever for decode is
   ensuring batched decode shares one weight read, and keeping weights resident.
 </div>
-<p class="subtitle" style="font-size:0.9em;">These ideals use the 204.8&nbsp;GB/s <em>spec</em>; &sect;14 re-grades them against the <em>measured</em> bus (~113&nbsp;GB/s balanced copy, ~143&nbsp;GB/s read-dominated streaming), which raises the memory-bound ideal and shows the decode kernel already sits on it.</p>
+<p class="subtitle" style="font-size:0.9em;">These ideals use the 204.8&nbsp;GB/s <em>spec</em>; &sect;14 re-grades them against the <em>measured</em> bus (~113&nbsp;GB/s balanced copy, ~143&nbsp;GB/s read-dominated streaming): the decode kernel sits right on the ~143&nbsp;GB/s read ceiling, and prefill's real floor is three weight-reads &asymp; 3.5&nbsp;ms (sendnn 7.2&nbsp;ms &asymp; 2&times; over, the inter-matmul sequencing stall; tsp 10.5&nbsp;ms &asymp; 3&times; over).</p>
 
 <!-- ===================== SECTION 14 ===================== -->
 <h2 id="s14">14. Off the roofline: what's the gap really made of?</h2>
@@ -1066,116 +1074,53 @@
 <h3>14.2 How fast is the highway, really?</h3>
 <p>The cost model on paper assumes the highway runs at <strong>204.8&nbsp;GB/s</strong> &mdash; the
   LPDDR5 memory's <em>rated spec</em>. But a spec is a sticker number; what matters is what the silicon
-  actually delivers. So we measured it directly with the simplest possible test: a tiny program,
-  <code>y = x &times; 2</code>, that reads a block of memory and writes it back out &mdash; one read,
-  one write, <em>no math to confuse the picture</em>. We ran it at many block sizes and computed the
-  achieved GB/s for each. Figure 6 is the result.</p>
+  actually delivers. So we measured it directly, two independent ways: a pure copy
+  (<code>y = x &times; 2</code>, one read + one write) and a pure reduction (<code>x.sum()</code>,
+  read-only) &mdash; <em>no matmul to confuse the picture</em>. We ran each at many block sizes and
+  computed the achieved GB/s. The copy plateaus at ~<strong>113&nbsp;GB/s</strong> (~55% of spec); the
+  read-only reduction plateaus higher at ~<strong>143&nbsp;GB/s</strong> (~70% of spec), because a copy
+  pays for a read <em>and</em> a write while a read-only stream pays for one &mdash; writes contend for
+  the bus. The 143 matters: read-heavy ops like weight streaming hit it, and a single matmul and decode
+  both independently reach ~143&ndash;146&nbsp;GB/s. Figure 6 is the result.</p>
 
 <figure>
-<svg viewBox="0 0 760 430" xmlns="http://www.w3.org/2000/svg" class="svg-text">
-  <!-- title -->
-  <text x="380" y="20" text-anchor="middle" font-size="14" font-weight="bold">The real bus speed, measured (pure copy, 1 read + 1 write)</text>
-
-  <!-- ============ TOP PANEL: GB/s vs transfer size ============ -->
-  <!-- plot box: x 90..700, y 56..256 ; y: 0..210 GB/s ; x: log positions -->
-  <!-- axes -->
-  <line x1="90" y1="256" x2="700" y2="256" stroke="#475569" stroke-width="1.5"/>
-  <line x1="90" y1="256" x2="90" y2="50" stroke="#475569" stroke-width="1.5"/>
-  <!-- y ticks 0,50,100,150,200 -> y = 256 - val/210*200 -->
+<svg viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="380" y="20" text-anchor="middle" font-size="14" font-weight="bold">The real bus speed, measured two ways</text>
+  <text x="380" y="38" text-anchor="middle" font-size="9.5" fill="#475569">achieved bandwidth vs transfer size &mdash; pure copy (1 read + 1 write) vs pure reduction (read-only)</text>
+  <line x1="90" y1="320" x2="710" y2="320" stroke="#475569" stroke-width="1.4"/>
+  <line x1="90" y1="320" x2="90" y2="55" stroke="#475569" stroke-width="1.4"/>
   <g font-size="9" fill="#475569">
-    <text x="84" y="259" text-anchor="end">0</text>
-    <text x="84" y="211.4" text-anchor="end">50</text>
-    <text x="84" y="163.8" text-anchor="end">100</text>
-    <text x="84" y="116.2" text-anchor="end">150</text>
-    <text x="84" y="68.7" text-anchor="end">200</text>
+    <text x="84" y="323" text-anchor="end">0</text><text x="84" y="258.1" text-anchor="end">50</text>
+    <text x="84" y="196.2" text-anchor="end">100</text><text x="84" y="134.3" text-anchor="end">150</text>
+    <text x="84" y="72.4" text-anchor="end">200</text>
   </g>
-  <text x="30" y="155" text-anchor="middle" font-size="10" fill="#475569" transform="rotate(-90 30 155)">achieved GB/s</text>
-  <!-- gridlines -->
-  <g stroke="#eef2f7" stroke-width="1">
-    <line x1="90" y1="211.4" x2="700" y2="211.4"/><line x1="90" y1="163.8" x2="700" y2="163.8"/>
-    <line x1="90" y1="116.2" x2="700" y2="116.2"/><line x1="90" y1="68.7" x2="700" y2="68.7"/>
-  </g>
-  <!-- x positions (log scale): map MB -> x. Use anchors:
-       1MB=130, 16=250, 32=300, 64=360, 128=420, 256=480, 384=525, 512=560, 1024=620, 2048=685 -->
+  <text x="34" y="190" text-anchor="middle" font-size="10" fill="#475569" transform="rotate(-90 34 190)">achieved GB/s</text>
   <g font-size="9" fill="#475569">
-    <text x="130" y="270" text-anchor="middle">1</text>
-    <text x="250" y="270" text-anchor="middle">16</text>
-    <text x="360" y="270" text-anchor="middle">64</text>
-    <text x="480" y="270" text-anchor="middle">256</text>
-    <text x="620" y="270" text-anchor="middle">1024</text>
-    <text x="685" y="270" text-anchor="middle">2048</text>
+    <text x="90" y="334" text-anchor="middle">1</text><text x="330" y="334" text-anchor="middle">16</text>
+    <text x="450" y="334" text-anchor="middle">64</text><text x="570" y="334" text-anchor="middle">256</text>
+    <text x="690" y="334" text-anchor="middle">1024</text>
   </g>
-  <text x="395" y="285" text-anchor="middle" font-size="10" fill="#475569">transfer size (MB, log scale)</text>
-
-  <!-- spec reference line at 204.8 -> y = 256 - 204.8/210*200 = 256 - 195.0 = 61.0 -->
-  <line x1="90" y1="61.0" x2="700" y2="61.0" stroke="#dc2626" stroke-width="1.3" stroke-dasharray="6,4"/>
-  <text x="696" y="56" text-anchor="end" font-size="9.5" fill="#dc2626" font-weight="bold">204.8 GB/s &mdash; LPDDR5 spec (the sticker number)</text>
-
-  <!-- plateau shaded band 16..256 MB, around ~113 GB/s. y(113)=256-107.6=148.4 ; band 105..118 GB/s -> y 143.6..156 -->
-  <rect x="250" y="138" width="230" height="22" fill="#dbeafe" opacity="0.7"/>
-  <text x="365" y="132" text-anchor="middle" font-size="9.5" fill="#1e40af" font-weight="bold">real bus &asymp; 113 GB/s plateau (&asymp; 55% of spec)</text>
-
-  <!-- data points. y = 256 - GBs/210*200 -->
-  <!-- (1MB,123) x130 y=256-117.1=138.9 ; (16,114.4) x250 y=256-108.95=147.05 ; (32,111.9) x300 y=256-106.6=149.4 ;
-       (64,116.8) x360 y=256-111.2=144.8 ; (128,113.0) x420 y=256-107.6=148.4 ; (256,109.2) x480 y=256-104.0=152.0 ;
-       (384,60) x525 y=256-57.1=198.9 ; (512,60) x560 y=198.9 ; (1024,84.3) x620 y=256-80.3=175.7 ; (2048,74.7) x685 y=256-71.1=184.9 -->
-  <!-- connecting line through plateau points -->
-  <polyline points="130,138.9 250,147.05 300,149.4 360,144.8 420,148.4 480,152.0" fill="none" stroke="#2563eb" stroke-width="1.6"/>
-  <!-- drop region line (artifact) -->
-  <polyline points="480,152.0 525,198.9 560,198.9 620,175.7 685,184.9" fill="none" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="5,3"/>
-  <!-- points plateau (blue) -->
-  <g fill="#2563eb">
-    <circle cx="130" cy="138.9" r="3.4"/><circle cx="250" cy="147.05" r="3.4"/><circle cx="300" cy="149.4" r="3.4"/>
-    <circle cx="360" cy="144.8" r="3.4"/><circle cx="420" cy="148.4" r="3.4"/><circle cx="480" cy="152.0" r="3.4"/>
-  </g>
-  <!-- 1MB callout -->
-  <text x="130" y="128" text-anchor="middle" font-size="8.5" fill="#2563eb">123</text>
-  <!-- points drop (gray) -->
-  <g fill="#94a3b8">
-    <circle cx="525" cy="198.9" r="3.4"/><circle cx="560" cy="198.9" r="3.4"/><circle cx="620" cy="175.7" r="3.4"/><circle cx="685" cy="184.9" r="3.4"/>
-  </g>
-  <!-- artifact label + bracket -->
-  <text x="600" y="218" text-anchor="middle" font-size="9" fill="#64748b" font-weight="bold">&gt; 256 MB: same kernel drops to ~60&ndash;84 GB/s</text>
-  <text x="600" y="230" text-anchor="middle" font-size="8.5" fill="#64748b">codegen/tiling artifact, NOT the bus &mdash; excluded from the peak</text>
-
-  <!-- read-dominated ceiling annotation: ~143 GB/s -> y=256-136.2=119.8 -->
-  <line x1="90" y1="119.8" x2="480" y2="119.8" stroke="#16a34a" stroke-width="1.2" stroke-dasharray="3,3"/>
-  <text x="96" y="114" text-anchor="start" font-size="9" fill="#16a34a" font-weight="bold">&asymp; 143 GB/s &mdash; read-dominated weight streaming (decode kernels) reaches here</text>
-
-  <!-- ============ BOTTOM PANEL: cost (ms) grows linearly with bytes ============ -->
-  <text x="380" y="318" text-anchor="middle" font-size="11" font-weight="bold" fill="#1e40af">In the plateau, transfer cost (ms) grows in a straight line with bytes = the highway is saturated</text>
-  <!-- mini axes: x 120..560 maps 0..512 MB traffic ; y 360..408 maps 0..5 ms (inverted) -->
-  <line x1="120" y1="408" x2="600" y2="408" stroke="#475569" stroke-width="1.2"/>
-  <line x1="120" y1="408" x2="120" y2="332" stroke="#475569" stroke-width="1.2"/>
-  <text x="360" y="424" text-anchor="middle" font-size="9" fill="#475569">traffic moved (MB)  &mdash;  cost = traffic / 113 GB/s</text>
-  <text x="112" y="338" text-anchor="end" font-size="9" fill="#475569">ms</text>
-  <!-- straight line: (2MB,0.016) ~origin to (512MB,4.687). scale x: 600-120=480px for 512MB -> 0.9375 px/MB
-       y: 408 - ms/5*76. (0,408) (4.687ms -> 408-71.2=336.8 at x=120+512*0.9375=600) -->
-  <line x1="120" y1="408" x2="600" y2="336.8" stroke="#2563eb" stroke-width="2"/>
-  <!-- plateau measured points on the line -->
-  <g fill="#2563eb">
-    <!-- 32MB,0.280 x=120+32*.9375=150 y=408-.280/5*76=403.7 -->
-    <circle cx="150" cy="403.7" r="3"/>
-    <!-- 128MB,1.096 x=240 y=408-16.7=391.3 -->
-    <circle cx="240" cy="391.3" r="3"/>
-    <!-- 512MB,4.687 x=600 y=336.8 -->
-    <circle cx="600" cy="336.8" r="3"/>
-  </g>
-  <text x="320" y="372" text-anchor="middle" font-size="8.5" fill="#1e40af">double the bytes &rarr; double the time: the bus is the limit, not the chip</text>
+  <text x="390" y="350" text-anchor="middle" font-size="10" fill="#475569">transfer size (MB, log scale)</text>
+  <line x1="90" y1="66.4" x2="710" y2="66.4" stroke="#dc2626" stroke-width="1.2" stroke-dasharray="6,4"/>
+  <text x="706" y="62" text-anchor="end" font-size="9.5" fill="#dc2626" font-weight="bold">204.8 GB/s &mdash; LPDDR5 spec</text>
+  <rect x="330" y="140" width="240" height="48" fill="#f1f5f9" opacity="0.7"/>
+  <polyline points="330,193 390,184 450,150 485,167 510,148 545,145 570,143" fill="none" stroke="#16a34a" stroke-width="2"/>
+  <g fill="#16a34a"><circle cx="330" cy="193" r="3"/><circle cx="390" cy="184" r="3"/><circle cx="450" cy="150" r="3"/><circle cx="485" cy="167" r="3"/><circle cx="510" cy="148" r="3"/><circle cx="545" cy="145" r="3"/><circle cx="570" cy="143" r="3"/></g>
+  <text x="576" y="139" text-anchor="start" font-size="9.5" fill="#16a34a" font-weight="bold">read-only (sum) &asymp; 143 GB/s</text>
+  <polyline points="570,143 589,207.5 605,267.4 630,267.1 665,244 690,235.7" fill="none" stroke="#86efac" stroke-width="1.4" stroke-dasharray="4,3"/>
+  <g fill="#86efac"><circle cx="589" cy="207.5" r="2.6"/><circle cx="605" cy="267.4" r="2.6"/><circle cx="630" cy="267.1" r="2.6"/><circle cx="665" cy="244" r="2.6"/><circle cx="690" cy="235.7" r="2.6"/></g>
+  <polyline points="90,167.7 330,178.4 390,181.4 450,175.4 510,180.1 570,184.8" fill="none" stroke="#2563eb" stroke-width="2"/>
+  <g fill="#2563eb"><circle cx="90" cy="167.7" r="3"/><circle cx="330" cy="178.4" r="3"/><circle cx="390" cy="181.4" r="3"/><circle cx="450" cy="175.4" r="3"/><circle cx="510" cy="180.1" r="3"/><circle cx="570" cy="184.8" r="3"/></g>
+  <text x="576" y="190" text-anchor="start" font-size="9.5" fill="#2563eb" font-weight="bold">read+write (copy) &asymp; 113 GB/s</text>
+  <polyline points="570,184.8 605,245.7 630,245.7 690,215.6" fill="none" stroke="#93c5fd" stroke-width="1.4" stroke-dasharray="4,3"/>
+  <g fill="#93c5fd"><circle cx="605" cy="245.7" r="2.6"/><circle cx="630" cy="245.7" r="2.6"/><circle cx="690" cy="215.6" r="2.6"/></g>
+  <line x1="300" y1="143" x2="300" y2="184" stroke="#7c3aed" stroke-width="1.2"/>
+  <text x="294" y="160" text-anchor="end" font-size="8.5" fill="#7c3aed" font-weight="bold">writes contend</text>
+  <text x="294" y="171" text-anchor="end" font-size="8" fill="#7c3aed">(~27% lower)</text>
+  <text x="632" y="292" text-anchor="middle" font-size="8.5" fill="#64748b" font-weight="bold">&gt; 256 MB: kernel codegen</text>
+  <text x="632" y="303" text-anchor="middle" font-size="8" fill="#64748b">regime change, not the bus</text>
 </svg>
-<figcaption>Figure 6 &mdash; The device's real memory bandwidth, measured with a pure copy
-  (<code>y = x&times;2</code>, one read + one write, no matmul). Each blue dot is one transfer size.
-  From 16&nbsp;MB through 256&nbsp;MB the speed holds a flat plateau at <strong>~113&nbsp;GB/s</strong>
-  &mdash; only ~55% of the 204.8&nbsp;GB/s LPDDR5 spec (red dashed line). Above 256&nbsp;MB the
-  <em>same</em> kernel drops to ~60&ndash;84&nbsp;GB/s (gray): that is a code-generation/tiling quirk
-  of the test program, not the highway slowing down, so we exclude it from the peak. The bottom panel
-  shows that inside the plateau the time-to-transfer grows in a straight line with the number of bytes
-  &mdash; the textbook signature of a saturated bus. One more fact (green line): a <em>read-dominated</em>
-  workload &mdash; like weight streaming, which reads ~400&nbsp;MB of weights and writes only a tiny
-  output &mdash; reaches a higher ~<strong>143&nbsp;GB/s</strong>, because a copy pays for both a read
-  and a write while weight streaming is almost all reads. So the real ceiling is access-pattern
-  dependent: ~113&nbsp;GB/s for balanced read+write, up to ~143&nbsp;GB/s for read-dominated streaming
-  &mdash; both well under the 204.8 sticker.</figcaption>
+<figcaption>Figure 6 &mdash; The device's real memory bandwidth, measured two independent ways. <strong>Green</strong>: a pure reduction (<code>x.sum()</code>, read-only) plateaus at ~<strong>143&nbsp;GB/s</strong>. <strong>Blue</strong>: a pure copy (<code>y = x&times;2</code>, one read + one write) plateaus at ~<strong>113&nbsp;GB/s</strong>. Both are ~55&ndash;70% of the 204.8&nbsp;GB/s LPDDR5 spec. The read-only stream is ~27% faster &mdash; adding a write-back stream drops effective bandwidth from 143 to 113, i.e. <strong>writes contend for the bus</strong>. Above 256&nbsp;MB both kernels' codegen degrades (dashed) &mdash; a tiling/accumulator regime change inside the kernel, not the bus, so those points are excluded from the ceiling. The 143&nbsp;GB/s here is measured <em>independently</em> (a reduction, no matmul), and it is the same rate the matmul weight-streams hit (a single matmul and decode both reach ~143&ndash;146&nbsp;GB/s).</figcaption>
 </figure>
 
 <p>The takeaway in one sentence: <strong>the real highway runs at roughly half its sticker speed</strong>
@@ -1245,57 +1190,87 @@
   distinct form; our 2.8&nbsp;ms probe is the green form. Same physics, two different kernels.</figcaption>
 </figure>
 <div class="callout key">
-  <div class="callout-title">Reconciling the two datasets &mdash; and an open question</div>
+  <div class="callout-title">Reconciling the two datasets &mdash; settled: production already amortizes the weight read</div>
   The gap was never reload or weight-residency &mdash; it is two different kernels. Our 2.8&nbsp;ms is the
   <strong>shared-weight</strong> form; the profile's 12&nbsp;ms (<code>sdsc_fused_bmm_mul_silu_0</code>) is the
-  <strong>distinct-weight</strong> form. An MLP's weights <em>are</em> shared across the batch, so it
-  <em>should</em> always lower to the efficient <code>bmm_expand</code>. The profile showing the distinct
-  <code>bmm</code> means the graph materialized a per-batch weight &mdash; and if the real production decode
-  does that, it is reading the weights B&times; when it should read them once: a <strong>B&times;
-  batched-throughput inefficiency</strong>. Which form production actually emits is under active
-  investigation; this section will be updated once it is settled.
+  <strong>distinct-weight</strong> form. This is now settled, and there is <strong>no B&times; bug</strong>:
+  the real FMS Granite/Llama MLP is built from <code>nn.Linear</code> / 2-D shared weights, and that lowers
+  to the shared-weight <code>bmm_expand</code> form &mdash; the 402.7&nbsp;MB weight read is amortized across
+  the whole batch, read <em>once</em>. The distinct <code>bmm</code> (the 12&nbsp;ms form) only arises from
+  explicit 3-D <em>per-batch</em> weights, which the real MLP never produces. So
+  <strong>production decode already amortizes the weight read</strong>: batched decode shares one read
+  and the per-token cost falls as <code>~2.85&nbsp;ms / B</code>; the distinct form is a synthetic 3-D-weight
+  shape, not what the model emits.
 </div>
 <p>One thing this does <em>not</em> change: the benchmark's large total device time
   (<code>spyre_ms</code> ~36&nbsp;ms) is still inflated by a per-call host&rarr;device <strong>weight
   upload</strong> (<code>Memcpy</code>/<code>Memset</code>) that amortizes to ~0 once weights stay resident
   &mdash; but that is a separate event from the kernel, and it is covered in &sect;8.</p>
 
-<h3>14.4 Prefill, re-told: memory-leaning at the real bus, and no overlap</h3>
-<p>Prefill (M=512) processes 512 tokens at once, so each weight is reused 512 times &mdash; now there is
-  real math to do, and you might expect it to be compute-bound and land near the 98.3-TFLOPS peak. Two
-  things stop it, and neither is "the kernel wasting cycles":</p>
-<ul>
-  <li><strong>At the real bus, memory is the bigger cost, not compute.</strong> The math takes
-    <code>2.10&nbsp;ms</code> (all three matmuls' MACs at peak). Streaming the 402.7&nbsp;MB of weights at
-    the measured ~113&nbsp;GB/s takes <code>402.7 / 113 &asymp; 3.5&nbsp;ms</code> &mdash; <em>more</em>
-    than the compute. So at the real (half-spec) bus, prefill is actually <strong>memory-leaning</strong>,
-    and the proper roofline floor is <code>max(2.10, 3.5) = <strong>3.5&nbsp;ms</strong></code>, set by
-    memory.</li>
-  <li><strong>Compute and memory don't overlap.</strong> A well-pipelined kernel loads the <em>next</em>
-    tile of weights <em>while</em> computing the current one, so it pays only the larger of the two (the
-    <code>max</code>). AIU runs the weight-load step and the matmul step <em>serially</em> (separate
-    SDSCs), so it pays their <strong>sum</strong> instead.</li>
-</ul>
+<h3>14.4 Prefill, re-told: the matmuls overlap fine &mdash; the cost is sequencing the FFN</h3>
+<p>This is where the earlier draft was wrong, and direct measurement corrects it. We claimed prefill pays
+  "compute + memory, serially, no overlap." It does not. Two measured facts dismantle that:</p>
+<p><strong>(1) sendnn overlaps compute under the weight read.</strong> Take one matmul of the FFN
+  (<code>[M,4096]@[4096,16384]</code>, a fixed 134&nbsp;MB weight) and sweep M, so the compute grows while
+  the weight read stays fixed. If compute and memory were serial, the kernel would grow by the full
+  compute. Instead it barely moves:</p>
+<table>
+  <thead><tr><th class="num">M</th><th class="num">sendnn kernel</th><th class="num">compute floor</th></tr></thead>
+  <tbody>
+    <tr><td class="num">1</td><td class="num">0.939 ms</td><td class="num">~0</td></tr>
+    <tr><td class="num">128</td><td class="num">1.026 ms</td><td class="num">0.18 ms</td></tr>
+    <tr><td class="num">512</td><td class="num">1.178 ms</td><td class="num">0.70 ms</td></tr>
+  </tbody>
+</table>
+<p>The kernel rises only <strong>+0.24&nbsp;ms across a 512&times; increase in compute</strong> &mdash;
+  pinned at the ~143&nbsp;GB/s weight-read floor, with the compute <em>hidden under it</em>. sendnn
+  pipelines a single matmul properly. And the SiLU is <strong>free</strong> (folded into the matmul,
+  ~0&nbsp;ms added). So "compute doesn't overlap memory" is dead.</p>
+<p><strong>(2) So where does the ~7.2&nbsp;ms go?</strong> (The doc's old 5.77&nbsp;ms was a stale
+  measurement; the current swept value is <strong>7.2&ndash;7.4&nbsp;ms</strong> for the same
+  402.7&nbsp;MB FFN.) Decompose it by measuring each piece in isolation:</p>
+<table>
+  <thead><tr><th>piece (sendnn, M=512)</th><th class="num">kernel</th></tr></thead>
+  <tbody>
+    <tr><td>one matmul (<code>x@Wg</code>)</td><td class="num">1.18 ms</td></tr>
+    <tr><td>down matmul (<code>h@Wd</code>)</td><td class="num">1.25 ms</td></tr>
+    <tr><td>3 matmuls, isolated (sum)</td><td class="num">3.60 ms</td></tr>
+    <tr><td>SiLU (marginal)</td><td class="num good">~0 ms</td></tr>
+    <tr class="total"><td>fused full FFN</td><td class="num">7.21 ms</td></tr>
+    <tr><td>&rarr; residual (fused &minus; pieces)</td><td class="num bad">+3.6 ms</td></tr>
+  </tbody>
+</table>
+<p>Each matmul in isolation is ~1.2&nbsp;ms (weight-read-bound, compute hidden). Three of them = 3.6&nbsp;ms.
+  But the <em>fused</em> FFN is <strong>7.2&nbsp;ms &mdash; double</strong>. The extra +3.6&nbsp;ms is not
+  SiLU (free), not raw compute (~5&times; too big), and not the intermediate's HBM round-trip (~15&times;
+  too big).</p>
 <div class="callout key">
-  <div class="callout-title">Why "sendnn is 2.75&times; off peak" dissolves &mdash; and what's left</div>
-  Against the <em>right</em> floor &mdash; <code>max(compute 2.10, memory 3.5) = 3.5&nbsp;ms</code> &mdash;
-  sendnn's <strong>5.77&nbsp;ms</strong> (Dataset&nbsp;1; 7.39 persistent, Dataset&nbsp;2) is
-  ~<strong>1.6&times; over</strong>, not 2.75&times;. The "2.75&times; off the 2.10&nbsp;ms compute peak"
-  was the wrong yardstick twice over: the real binding resource is <em>memory</em>, not compute, and the
-  real bus is ~half its sticker. What remains &mdash; the 1.6&times; &mdash; is <em>not</em> wasted compute;
-  it is the <strong>missing overlap</strong>. AIU pays
-  <code>compute + memory = 2.10 + 3.5 = 5.6&nbsp;ms</code> (serial) instead of <code>max = 3.5&nbsp;ms</code>
-  (overlapped), and the sum landing on the measured 5.77 is the fingerprint of no overlap. A kernel that
-  overlapped them &mdash; GPU-style software pipelining / warp specialization &mdash; would approach the
-  3.5&nbsp;ms floor. So that 1.6&times; is a real <strong>prefill overlap lever</strong>, not a hardware
-  wall. (We keep both sendnn numbers; they bracket run-to-run / config spread, both consistent with a
-  memory-leaning, non-overlapping kernel.)
+  <div class="callout-title">The real prefill cost: overlapped weight-reads + a sequencing stall</div>
+  The residual is a <strong>matmul-sequencing stall</strong>, and the giveaway is that it appears
+  <em>only at large M</em>. At <strong>decode (M=1)</strong> the fused FFN = 2.76&nbsp;ms &asymp; exactly
+  three weight-reads at the ceiling &mdash; residual &asymp; <strong>0</strong>. At <strong>prefill (M=512)</strong>
+  the residual is <strong>+3.7&nbsp;ms</strong>, and it <em>scales with M</em> (the activation/intermediate
+  volume), not with the weights. The mechanism: chained into the SwiGLU, the down-projection can't
+  prefetch its weights against the front matmul's compute the way an <em>isolated</em> matmul pipelines
+  its own &mdash; <strong>the FFN's matmuls don't overlap <em>each other</em></strong>. Effective bandwidth
+  says the same: a single matmul and the decode FFN both hit ~143&ndash;146&nbsp;GB/s, but the prefill FFN
+  drops to <strong>56&nbsp;GB/s</strong> &mdash; pure large-M structure. So prefill is
+  <strong>~3.5&nbsp;ms of overlapped weight-reads + ~3.7&nbsp;ms of inter-matmul sequencing stall</strong>,
+  with zero attributable to compute/memory non-overlap <em>within</em> a matmul.
 </div>
+<p>So "2.75&times; off the compute peak" dissolves into: the matmuls are memory-bound (weight-read at
+  ~143&nbsp;GB/s, compute hidden), and the chained FFN pays a large-M sequencing penalty on top. The
+  addressable lever is <strong>pipelining the chained matmuls</strong> &mdash; letting the
+  down-projection's weight prefetch overlap the front's compute &mdash; the producer&rarr;consumer /
+  warp-specialization idea applied <em>between</em> the FFN's matmuls (&sect;14.7).</p>
+<p>torch-spyre's prefill FFN is worse (10.5&nbsp;ms) for two <em>additional</em> measured reasons: its
+  per-matmul overlap <strong>breaks above M&asymp;256</strong> (the matmul stops hiding compute &mdash;
+  kernel jumps ~2.3&times;), and its SiLU is <strong>not</strong> free (+1.7&nbsp;ms, &sect;14.5).</p>
 
 <h3>14.5 Why torch-spyre pays a SiLU tax that sendnn doesn't</h3>
-<p>So far the limits (half-speed bus, no overlap) hit <em>both</em> stacks equally. The one place
-  torch-spyre falls clearly behind sendnn on prefill is a specific, measurable, fixable thing: how each
-  stack handles the <strong>SiLU</strong> activation.</p>
+<p>So far the limits (half-speed bus, the chained-FFN sequencing stall) hit <em>both</em> stacks roughly
+  equally. The one place torch-spyre falls clearly behind sendnn on prefill is a specific, measurable,
+  fixable thing: how each stack handles the <strong>SiLU</strong> activation.</p>
 <p>Plain background first. The matmul runs on the <strong>PT array</strong> (the 8&times;8 assembly
   line). SiLU is not a matmul &mdash; it is a per-element curve applied to every number in the wide
   intermediate &mdash; and it runs on a <em>different</em> piece of hardware, the <strong>SFP
@@ -1379,15 +1354,17 @@
   which packs 64 M-rows per core &mdash; a full array). In other words, the array <em>is</em> being
   filled. The reported "PT-Util 21&ndash;39%" is a <em>different</em> ratio: it is
   <code>compute_floor / kernel_time</code>, and at prefill the denominator is dominated by the
-  <em>memory</em> term (the ~3.5&nbsp;ms weight stream that does not overlap the compute).</p>
+  <em>weight-read floor</em> (~3.5&nbsp;ms, the compute hidden under it) plus the large-M
+  <em>sequencing stall</em> (~3.7&nbsp;ms), not by the arithmetic.</p>
 <div class="callout key">
   <div class="callout-title">"PT-Util 21%" does not mean the array is 21% full</div>
-  It means the array is essentially <em>full</em> but spends most of the kernel <strong>waiting on
-  memory</strong> &mdash; the few-lane highway delivering weights at half-spec. Concretely: with compute
-  ~2.10&nbsp;ms and a non-overlapped memory stream ~3.5&nbsp;ms, the arithmetic can occupy at most
-  <code>2.10 / (2.10 + 3.5) &asymp; 37%</code> of the kernel &mdash; which is exactly the ~38.7% sendnn
-  reports. The low PT-Util at prefill is the <em>memory wall showing through</em>, not an underfilled
-  array. (At decode it really is "almost no compute," as &sect;6&ndash;7 said.)
+  It means the array is essentially <em>full</em> but the kernel time is set by something other than
+  arithmetic: the weight-read floor (~3.5&nbsp;ms, compute hidden under it, &sect;14.4) plus the FFN's
+  inter-matmul sequencing stall (~3.7&nbsp;ms). With a ~2.10&nbsp;ms compute floor over a ~7.2&nbsp;ms
+  kernel, the arithmetic can occupy at most <code>2.10 / 7.2 &asymp; 29%</code> &mdash; in the same band as
+  the ~38.7% sendnn reports against its lower per-matmul kernels. The low PT-Util at prefill is the
+  <em>weight-read floor and the sequencing stall showing through</em>, not an underfilled array. (At
+  decode it really is "almost no compute," as &sect;6&ndash;7 said.)
 </div>
 
 <h3>14.7 So where is torch-spyre's real, addressable headroom?</h3>
@@ -1395,16 +1372,19 @@
   is hardware reality &mdash; the highway runs at ~half its spec. But not all of it is unaddressable, and
   the array itself is <em>not</em> the problem (<code>pt_eff &asymp; 1.0</code>, full, not fragmented). Two
   kinds of lever remain. First, the places torch-spyre trails sendnn <em>specifically</em> &mdash; it can
-  match sendnn here: the serialized SiLU and the batched-decode kernel form. Second, a gap <em>both</em>
-  stacks share: neither overlaps compute with the weight load, so both pay the <em>sum</em> instead of the
-  <em>max</em> (sendnn included &mdash; it sits ~1.6&times; over the real prefill floor for exactly this
-  reason). A GPU-style pipelined / warp-specialized kernel would close that one and lift both stacks:</p>
+  match sendnn here: the serialized SiLU, the batched-decode kernel form, and tsp's per-matmul overlap
+  breaking above M&asymp;256. Second, a gap <em>both</em> stacks share: sendnn's matmuls are already at the
+  weight-read ceiling (compute hidden), but the chained FFN pays a large-M <strong>sequencing stall</strong>
+  &mdash; its matmuls don't overlap <em>each other</em> &mdash; that sendnn pays too. A producer&rarr;consumer
+  / warp-specialized schedule that lets the down-projection's weight prefetch overlap the front matmul's
+  compute would close that one and lift both stacks:</p>
 <table>
   <thead><tr><th>#</th><th>the real lever</th><th>regime</th><th class="num">est. payoff</th><th>why it is addressable</th></tr></thead>
   <tbody>
     <tr><td>1</td><td>Emit SiLU as a matmul <strong>epilogue</strong> (run it on the SFP worker concurrently, like sendnn) instead of a serial pass after the matmul</td><td>prefill</td><td class="num good">~1.7 ms</td><td>measured directly (&sect;14.5); pure codegen change in the Inductor backend</td></tr>
     <tr><td>2</td><td>Ensure batched decode lowers to the shared-weight <code>bmm_expand</code> form (read weights once, broadcast), not a distinct-weight <code>bmm</code> (B&times; reads)</td><td>decode</td><td class="num good">up to ~B&times; on batched decode throughput</td><td>kernel-form / lowering fix; the ~2.8&nbsp;ms streaming floor itself is intrinsic</td></tr>
-    <tr><td>3</td><td><strong>Overlap</strong> the weight load with the matmul (software pipelining / warp specialization across SDSCs) so the kernel pays <code>max(compute, memory)</code>, not their sum</td><td>prefill</td><td class="num good">~1.6&times; (toward the 3.5&nbsp;ms floor)</td><td>helps <em>both</em> stacks; deeptools/SDSC-level (the harder-to-land kind), the same family as the ring-prefetch / warp-spec work</td></tr>
+    <tr><td>3</td><td><strong>Pipeline the chained FFN matmuls</strong> (producer&rarr;consumer / warp specialization) so the down-projection's weight prefetch overlaps the front matmul's compute &mdash; kills the large-M sequencing stall (the matmuls don't currently overlap each other)</td><td>prefill</td><td class="num good">~3.7 ms (the sequencing residual)</td><td>helps both stacks; deeptools/SDSC-level, same family as the ring-prefetch / warp-spec work</td></tr>
+    <tr><td>4</td><td><strong>Keep per-matmul overlap from breaking above M&asymp;256</strong> (tsp's matmul stops hiding compute past a tile threshold)</td><td>prefill</td><td class="num good">recovers the ~2.3&times; jump tsp pays at large M</td><td>tsp-specific; codegen/tiling</td></tr>
   </tbody>
 </table>
 <div class="callout">
@@ -1461,23 +1441,26 @@
     under-filled kernels instead of one fused <code>bmm</code>.</li>
   <li><strong>Distance from the roofline</strong> (&sect;13): graded against the 204.8&nbsp;GB/s
     <em>spec</em>, both regimes look 4&ndash;6&times; off &mdash; but that floor uses a bandwidth the
-    silicon does not deliver. Re-graded against the <em>measured</em> bus (&sect;14), prefill is
-    memory-leaning (sendnn ~1.6&times; over the real floor &mdash; the gap is the missing compute/memory
-    overlap, &sect;14.4) and the persistent decode kernel sits right <em>on</em>
-    the real ~143&nbsp;GB/s read ceiling. Decode is memory-bound at the ceiling, not overhead-stuck
-    below its roofline.</li>
-  <li><strong>Off the roofline, decomposed</strong> (&sect;14): the measured bus is ~55% of spec
-    (~113&nbsp;GB/s balanced copy, ~143&nbsp;GB/s read-dominated streaming) &mdash; it does NOT collapse
-    at decode. At real BW, prefill is memory-leaning: the roofline floor is
-    <code>max(compute 2.10, memory 3.5) = 3.5&nbsp;ms</code>, and sendnn (5.77) is ~1.6&times; over it
-    because AIU runs compute and memory <em>serially</em> &mdash; it pays their sum
-    (<code>2.10 + 3.5 = 5.6&nbsp;ms</code> &asymp; measured 5.77) where a pipelined GPU kernel pays the max.
-    That 1.6&times; is the prefill overlap lever. torch-spyre's
-    one clearly addressable prefill loss is <strong>SiLU serialized after the matmul</strong> (measured
-    marginal +1.85&nbsp;ms vs sendnn's ~0, which folds SiLU into the matmul epilogue): emit SiLU as an
-    epilogue to put ~1.7&nbsp;ms back. On decode the shared-weight kernel is already at the memory ceiling
-    (~2.8&nbsp;ms); the lever is ensuring batched decode lowers to that shared-weight <code>bmm_expand</code>
-    form (one weight read, not B&times;) and keeping weights resident, not faster memory.</li>
+    silicon does not deliver. Re-graded against the <em>measured</em> bus (&sect;14): prefill's real floor
+    is three weight-reads at ~143&nbsp;GB/s &asymp; <strong>3.5&nbsp;ms</strong>, sendnn's 7.2&nbsp;ms is
+    ~2&times; over it (a large-M inter-matmul <em>sequencing stall</em>, &sect;14.4), tsp's 10.5&nbsp;ms is
+    ~3&times; over; the persistent decode kernel sits right <em>on</em> the ~143&nbsp;GB/s read ceiling.
+    Decode is memory-bound at the ceiling, not overhead-stuck below its roofline.</li>
+  <li><strong>Off the roofline, decomposed</strong> (&sect;14): the measured bus is ~55&ndash;70% of spec
+    (~113&nbsp;GB/s balanced copy, ~143&nbsp;GB/s read-only/weight streaming) &mdash; it does NOT collapse
+    at decode. A single matmul's compute is <em>hidden under</em> its weight read (sweeping M 1&rarr;512
+    moves the kernel only +0.24&nbsp;ms), so "compute and memory run serially" is dead. The prefill cost is
+    instead <strong>~3.5&nbsp;ms of overlapped weight-reads + a ~3.7&nbsp;ms inter-matmul sequencing
+    stall</strong> (the fused FFN is 7.2&nbsp;ms, double the 3.6&nbsp;ms of its three matmuls measured in
+    isolation): chained into the SwiGLU, the down-projection can't prefetch its weights against the front
+    matmul's compute &mdash; the FFN's matmuls don't overlap <em>each other</em>. That residual is the
+    prefill lever (pipeline the chained matmuls, producer&rarr;consumer / warp-spec). torch-spyre's
+    additional, clearly addressable prefill loss is <strong>SiLU serialized after the matmul</strong>
+    (measured marginal +1.85&nbsp;ms vs sendnn's ~0, which folds SiLU into the matmul epilogue): emit SiLU
+    as an epilogue to put ~1.7&nbsp;ms back. On decode the shared-weight kernel is already at the memory
+    ceiling (~2.8&nbsp;ms); production decode already amortizes the weight read (the real
+    <code>nn.Linear</code> MLP lowers to shared-weight <code>bmm_expand</code> &mdash; no B&times; bug,
+    &sect;14.3), so the lever is keeping weights resident, not faster memory.</li>
 </ol>
 
 </main>
