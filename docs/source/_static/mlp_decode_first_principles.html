@@ -1386,12 +1386,14 @@
   On <strong>prefill</strong>, torch-spyre's dominant loss is the <strong>wide-N matmul under-filling the
   array</strong> (29.5% vs 77.7% PT-Util, 3.3&times;) &mdash; a kernel-codegen/tiling gap, not a planner or
   bandwidth gap; the cleanest add-on wins are folding SiLU into the matmul epilogue (~1.7&nbsp;ms) and
-  fusing the FFN to one kernel. On <strong>decode</strong>, the shared-weight kernel is already at the
-  memory ceiling &mdash; streaming 402.7&nbsp;MB of weights at ~143&nbsp;GB/s in ~2.8&nbsp;ms, at parity
-  with sendnn (0.83&times; at the matmul level) &mdash; so the decode-MLP win is the SiLU/FFN epilogue glue
-  (the full decode FFN is 1.94&times; even though the GEMM is at parity), plus keeping batched decode on the
-  shared-weight form and weights resident. Chasing the 98.3-TFLOPS compute "peak" is chasing a ceiling the
-  real silicon and bus do not allow; chasing sendnn is chasing array fill.
+  fusing the FFN to one kernel. On <strong>decode</strong>, the FFN is already at the memory ceiling &mdash;
+  streaming 402.7&nbsp;MB of weights at ~143&nbsp;GB/s in ~2.8&nbsp;ms, <strong>at parity with sendnn</strong>
+  (re-measured on device with resident weights: tsp 2.84 / sendnn 2.76&nbsp;ms = 1.03&times;, and 0.83&times;
+  on the bare matmul). There is <strong>no decode-MLP lever</strong> &mdash; the standalone <code>mlp</code>
+  probe's 1.94&times; is per-call weight-reload inflation (~24&nbsp;ms of Memset), not compute; the only
+  decode hygiene is the shared-weight <code>bmm_expand</code> form and keeping weights resident. Chasing the
+  98.3-TFLOPS compute "peak" is chasing a ceiling the real silicon and bus do not allow; chasing sendnn is
+  chasing array fill, and that is a prefill story.
 </div>
 
 <!-- ===================== SECTION 15 ===================== -->
@@ -1452,10 +1454,12 @@
     gap, the loss is per-matmul array fill, not inter-matmul sequencing. The dominant prefill lever is
     <strong>filling the array on the wide-N matmul</strong> (kernel codegen / tiling); the clean add-ons are
     folding SiLU into the matmul epilogue (~1.7&nbsp;ms, measured marginal +1.85&nbsp;ms vs sendnn's ~0) and
-    fusing the FFN to one kernel. On decode the shared-weight kernel is already at the memory ceiling
-    (~2.8&nbsp;ms, 0.83&times; sendnn at the matmul level); the full decode FFN is 1.94&times; though, so the
-    decode-MLP lever is the SiLU/FFN epilogue glue plus the shared-weight <code>bmm_expand</code> form (no
-    B&times; bug, &sect;14.3) and keeping weights resident.</li>
+    fusing the FFN to one kernel. On decode the FFN is already at the memory ceiling and <strong>at parity</strong>
+    (re-measured on device, resident weights: tsp 2.84 / sendnn 2.76&nbsp;ms = 1.03&times;, flat across
+    M=1&ndash;16; 0.83&times; on the bare matmul) &mdash; there is <strong>no decode-MLP lever</strong> (the
+    standalone <code>mlp</code> probe's 1.94&times; is per-call reload inflation, not compute). The only
+    decode hygiene is the shared-weight <code>bmm_expand</code> form (no B&times; bug, &sect;14.3) and keeping
+    weights resident.</li>
 </ol>
 
 </main>

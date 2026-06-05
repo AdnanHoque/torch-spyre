@@ -75,7 +75,8 @@
   <tbody>
     <tr><td>Prefill wide-N matmul <code>[4096,12800]</code></td><td class="num">3.16 ms</td><td class="num">0.96 ms</td><td class="num bad">3.30&times;</td><td class="num bad">29.5 / 77.7</td></tr>
     <tr><td>Decode bare matmul <code>[4,1,4096]&times;[4096,12800]</code></td><td class="num good">0.72 ms</td><td class="num">0.87 ms</td><td class="num good">0.83&times;</td><td class="num">0.81 / 0.67</td></tr>
-    <tr><td>Decode full FFN (gate+up+silu+mul+down)</td><td class="num bad">16.6 ms</td><td class="num">8.6 ms</td><td class="num bad">1.94&times;</td><td class="num">&mdash;</td></tr>
+    <tr><td>Decode full FFN — standalone <span class="warn">*</span></td><td class="num bad">16.6 ms</td><td class="num">8.6 ms</td><td class="num bad">1.94&times;</td><td class="num">&mdash;</td></tr>
+    <tr><td>Decode full FFN — <strong>resident, re-measured</strong></td><td class="num good">2.84 ms</td><td class="num good">2.76 ms</td><td class="num good">1.03&times;</td><td class="num">&mdash;</td></tr>
   </tbody>
 </table>
 <div class="box">
@@ -89,11 +90,15 @@
   choosing good splits, but it cannot touch the 3.3&times; per-matmul gap — that lives in deeptools/Inductor
   kernel codegen.
 </div>
-<p><strong>Decode is two different stories.</strong> The bare matmul (M=1, one weight read, batch-amortized)
-  is at parity-or-faster (0.83&times;) at the GEMM level. But the <em>full</em> decode FFN is <span class="bad">1.94&times;</span> slower, so the
-  entire decode MLP gap lives in the <strong>surrounding kernels — the SiLU/mul epilogue, the down-projection
-  matmul, and the glue between them — not the core GEMM</strong>. Improving the wide-N matmul does nothing for
-  decode.</p>
+<p><strong>Decode has no MLP gap.</strong> The bare matmul (M=1, one weight read, batch-amortized) is at
+  parity-or-faster (0.83&times;). The standalone full-FFN <span class="warn">*</span>1.94&times; above is a
+  measurement artifact — the standalone probe reloads all 402.7&nbsp;MB of weights every call (~24&nbsp;ms of
+  Memset), inflating its "kernel" number. <strong>Re-measured on device with resident weights, the decode FFN
+  is tsp 2.84 / sendnn 2.76&nbsp;ms = 1.03&times;</strong> — parity, both at the
+  402.7&nbsp;MB/~143&nbsp;GB/s weight-read floor (flat across M=1&ndash;16). Cross-check: Antoni's own bare
+  decode matmul is 0.72&nbsp;ms, so a 16.6&nbsp;ms <em>compute</em> FFN of three matmuls is impossible.
+  <strong>So decode has no MLP lever</strong> — improving the matmul, fusing the FFN, or folding SiLU all do
+  nothing at decode; the whole MLP story is prefill.</p>
 
 <h2>3. Closing the gap: parity vs. beat</h2>
 <table>
@@ -112,10 +117,10 @@
     already picks the right core split.</li>
   <li><strong>SiLU in the matmul epilogue</strong> — run the activation on the SFP unit concurrently with the
     matmul, as sendnn does, instead of a serial pass after. Mostly <em>ours</em> (Inductor fusion); needs the
-    matmul SDSC to expose an epilogue hook. <strong>This is the main decode-MLP lever</strong> (the decode GEMM
-    is already at parity; the 1.94&times; full-FFN gap is the epilogue + glue).</li>
+    matmul SDSC to expose an epilogue hook. <strong>Prefill only</strong> — at decode the intermediate is tiny
+    and the FFN is already at parity, so this buys nothing there.</li>
   <li><strong>Fuse the FFN to one kernel</strong> — removes tsp's intermediate HBM round-trip and enables (2).
-    Inductor decides it; deeptools executes it. Helps both prefill and the decode-FFN glue.</li>
+    Inductor decides it; deeptools executes it. A prefill win; decode is already at the memory ceiling.</li>
   <li><strong>Pipeline the chained matmuls</strong> (the beat lever, <em>both</em> stacks) — let the
     down-projection's weight prefetch overlap the front matmul's compute. sendnn doesn't do this, so it's a
     genuine lead, not parity. <em>Deeptools / SDSC overlap</em> — same family as the on-chip ring
@@ -158,11 +163,12 @@
   <li><strong>Prefill:</strong> MLP-matmul (lever 1: array fill) and attention SDPA are co-equal targets.
     Fixing the MLP-silu kernel's array utilization is the largest single line; the SDPA kernel is the worst
     relative loss.</li>
-  <li><strong>Decode:</strong> the bare GEMM is at parity, but the full decode FFN is 1.94&times; — so a large
-    part of the decode gap <strong>is inside the MLP</strong>, specifically the SiLU/mul epilogue + down-proj +
-    glue (lever 2/3), <em>not</em> the GEMM. PR&nbsp;#2407 (work division) does not move it; FFN kernel fusion
-    does. <span class="warn">(The whole-model decode 2.0&times; is unverified — no decode config in the
-    authoritative report.)</span></li>
+  <li><strong>Decode:</strong> the MLP is <strong>not</strong> in the decode gap at all. Re-measured on
+    device with resident weights, the decode FFN is at parity (tsp 2.84 / sendnn 2.76&nbsp;ms = 1.03&times;),
+    at the weight-read floor; the standalone 1.94&times; is per-call reload inflation, not compute. So the
+    decode gap (if any) is <strong>outside the MLP</strong> — attention / KV-cache / per-token overhead — and
+    none of the MLP levers move it. <span class="warn">(The whole-model decode 2.0&times; is unverified — no
+    decode config in the authoritative report.)</span></li>
 </ul>
 <p style="font-size:0.88em;color:var(--muted);">Caveat: the whole-model breakdown is tsp-only; per-class
   sendnn is <em>estimated</em> via micro-probe ratios, not measured. The split is robust in direction (both MLP

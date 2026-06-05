@@ -132,10 +132,12 @@
     <li><strong>Attention SDPA (≈47% of the gap)</strong> is the worst single op at
       <strong>7.6&times;</strong> (PT-Util 3.1 vs 23.6).</li>
   </ul>
-  <strong>Decode</strong> inverts: the bare matmul is at parity-or-faster (0.83&times;), but the full
-  decode FFN is 1.94&times; — so the decode-MLP loss is in the <em>SiLU/FFN epilogue glue</em>, not the
-  GEMM. <strong>Path:</strong> parity = fill the array + fold SiLU into the matmul epilogue + fuse the FFN
-  to one kernel; beat = pipeline the chained FFN matmuls (sendnn doesn't, so it's a genuine lead).
+  <strong>Decode has no MLP gap at all:</strong> re-measured on device with resident weights, the decode
+  FFN is <strong>tsp 2.84 / sendnn 2.76&nbsp;ms = 1.03&times;</strong> — parity, at the weight-read floor.
+  (The standalone <code>mlp</code> probe's 1.94&times; is per-call weight-reload inflation, not compute;
+  &sect;3.2.) So <strong>all MLP effort is prefill.</strong> <strong>Path to parity:</strong> fill the array
+  on the wide-N matmul + fold SiLU into the matmul epilogue + fuse the FFN to one kernel; beat = pipeline
+  the chained FFN matmuls (sendnn doesn't, so it's a genuine lead).
 </div>
 
 <!-- ===================== 1. WHAT THE MLP IS ===================== -->
@@ -394,14 +396,27 @@ out  = h @ Wd              # [M, 16384] @ [16384, 4096]</code></pre>
     <tr><td>QO matmul</td><td class="mono">[4,1,4096]×[4096,4096]</td><td class="num">0.216</td><td class="num">0.236</td><td class="num good">0.92</td><td class="num">0.86 / 0.79</td></tr>
     <tr><td>KV matmul</td><td class="mono">[4,1,4096]×[4096,1024]</td><td class="num">0.057</td><td class="num">0.061</td><td class="num good">0.93</td><td class="num">0.82 / 0.76</td></tr>
     <tr><td><strong>MLP wide-N matmul</strong></td><td class="mono">[4,1,4096]×[4096,12800]</td><td class="num good">0.720</td><td class="num">0.866</td><td class="num good">0.83</td><td class="num">0.81 / 0.67</td></tr>
-    <tr><td>full FFN (mlp)</td><td class="mono">[4,1,4096]</td><td class="num bad">16.611</td><td class="num">8.565</td><td class="num bad">1.94</td><td class="num">0.11 / 0.20</td></tr>
+    <tr><td>full FFN (mlp) — standalone <span class="warn">*</span></td><td class="mono">[4,1,4096]</td><td class="num bad">16.611</td><td class="num">8.565</td><td class="num bad">1.94</td><td class="num">0.11 / 0.20</td></tr>
+    <tr><td>full FFN — <strong>resident, re-measured</strong> <span class="good">&dagger;</span></td><td class="mono">M=1, INTER=16384</td><td class="num good">2.84</td><td class="num good">2.76</td><td class="num good">1.03</td><td class="num">&mdash;</td></tr>
   </tbody>
 </table>
 <p>The standout diagnostics: in <strong>prefill</strong> the MLP wide-N matmul is <strong>3.30&times;</strong>
   slower at PT-Util <strong>29.5 vs 77.7</strong>, and attention SDPA is the single worst op at
   <strong>7.59&times;</strong> (3.1 vs 23.6) — both are array-fill problems. In <strong>decode</strong> the
-  picture inverts: the bare matmul is <strong>0.83&times;</strong> (tsp <em>faster</em>), yet the fused full
-  FFN regresses to <strong>1.94&times;</strong> — so the decode loss is fusion/epilogue overhead, not the GEMM.</p>
+  bare matmul is at parity (<strong>0.83&times;</strong>, tsp <em>faster</em>) — and so, it turns out, is
+  the full FFN.</p>
+<div class="callout key">
+  <div class="callout-title">The decode 1.94&times; is a reload artifact — resident decode is at parity</div>
+  <span class="warn">*</span> The standalone <code>mlp</code> probe reloads all 402.7&nbsp;MB of weights to
+  the device <em>every call</em> (~24&nbsp;ms of Memset), inflating its "kernel" number.
+  <span class="good">&dagger;</span> Re-measured on device with <strong>resident weights</strong> (how a
+  real model runs), the decode FFN <em>compute</em> is <strong>tsp 2.84 / sendnn 2.76&nbsp;ms =
+  1.03&times;</strong> — parity, both sitting on the 402.7&nbsp;MB / ~143&nbsp;GB/s ≈ 2.82&nbsp;ms
+  weight-read floor (confirmed flat across M=1&ndash;16, &sect;5.1). Cross-check: Antoni's <em>own</em> bare
+  decode matmul is 0.72&nbsp;ms, so a 16.6&nbsp;ms <em>compute</em> FFN of three matmuls is impossible — the
+  16.6&nbsp;ms is reload, not arithmetic. <strong>So decode has no MLP gap and no MLP lever; all MLP
+  optimization effort belongs in prefill (the array under-fill).</strong>
+</div>
 
 <h3>3.3 Whole-model prefill breakdown (bs1, sl512)</h3>
 <p>torch-spyre <code>kernel_ms = 495.681</code> (sums exactly over the 9 kernels). This is tsp-only — the
@@ -459,10 +474,12 @@ out  = h @ Wd              # [M, 16384] @ [16384, 4096]</code></pre>
   kernel. (The per-class sendnn split is estimated via micro-probe ratios — robust in direction, ±10–15
   points in magnitude.)
 </div>
-<p><strong>Decode is a different story.</strong> The bare GEMM is at parity (0.83&times;), so improving the
-  matmul does nothing for decode; the entire decode-MLP gap (full FFN 1.94&times;) lives in the SiLU/mul
-  epilogue, the down-projection, and the glue between them. PR&nbsp;#2407 (work division) does not move
-  decode — FFN kernel fusion does.</p>
+<p><strong>Decode is a different story — there is no decode-MLP gap to chase.</strong> Re-measured on device
+  with resident weights, the decode FFN is at parity (tsp 2.84 / sendnn 2.76&nbsp;ms = 1.03&times;,
+  &sect;3.2), both at the weight-read floor; the bare GEMM is at parity too (0.83&times;). The standalone
+  probe's 1.94&times; is per-call reload inflation, not compute. So decode has no MLP lever at all — neither
+  work division (PR&nbsp;#2407 doesn't move it) nor kernel fusion buys anything; the FFN is already at the
+  memory ceiling. <strong>All MLP optimization effort belongs in prefill.</strong></p>
 
 <!-- ===================== 5. WHY ===================== -->
 <h2 id="why">5. Why — first principles</h2>
@@ -616,6 +633,60 @@ out  = h @ Wd              # [M, 16384] @ [16384, 4096]</code></pre>
   other side: sweeping M 1&rarr;512 grows its single-matmul kernel only +0.24&nbsp;ms — compute hidden under
   the weight read, array kept full.
 </div>
+<p>The decode-parity (&sect;5.1) and prefill-gap (&sect;5.3) facts are the two ends of <em>one</em> curve.
+  Sweeping the full FFN's compute time against M (resident weights, our re-measurement) shows exactly where
+  each stack leaves the memory floor:</p>
+<figure>
+<svg viewBox="0 0 760 380" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="380" y="20" text-anchor="middle" font-size="14" font-weight="bold">FFN kernel time vs M: decode parity &rarr; prefill gap</text>
+  <text x="380" y="38" text-anchor="middle" font-size="9.5" fill="#475569">resident-weight FFN (INTER=16384), COMPUTE kernel_ms &mdash; torch-spyre vs sendnn</text>
+  <line x1="90" y1="320" x2="710" y2="320" stroke="#475569" stroke-width="1.4"/>
+  <line x1="90" y1="320" x2="90" y2="50" stroke="#475569" stroke-width="1.4"/>
+  <g font-size="9" fill="#475569">
+    <text x="84" y="323" text-anchor="end">0</text>
+    <text x="84" y="278.8" text-anchor="end">2</text>
+    <text x="84" y="234.7" text-anchor="end">4</text>
+    <text x="84" y="190.5" text-anchor="end">6</text>
+    <text x="84" y="146.3" text-anchor="end">8</text>
+    <text x="84" y="102.2" text-anchor="end">10</text>
+    <text x="84" y="58" text-anchor="end">12</text>
+  </g>
+  <text x="34" y="190" text-anchor="middle" font-size="10" fill="#475569" transform="rotate(-90 34 190)">kernel_ms (COMPUTE)</text>
+  <g font-size="9" fill="#475569">
+    <text x="90" y="334" text-anchor="middle">1</text>
+    <text x="212" y="334" text-anchor="middle">4</text>
+    <text x="334" y="334" text-anchor="middle">16</text>
+    <text x="456" y="334" text-anchor="middle">64</text>
+    <text x="578" y="334" text-anchor="middle">256</text>
+    <text x="700" y="334" text-anchor="middle">512</text>
+  </g>
+  <text x="395" y="350" text-anchor="middle" font-size="10" fill="#475569">M (tokens, log scale) &mdash; decode &asymp; 1, prefill = 512</text>
+  <g stroke="#eef2f7" stroke-width="0.8">
+    <line x1="90" y1="278.8" x2="710" y2="278.8"/><line x1="90" y1="234.7" x2="710" y2="234.7"/>
+    <line x1="90" y1="190.5" x2="710" y2="190.5"/><line x1="90" y1="146.3" x2="710" y2="146.3"/>
+    <line x1="90" y1="102.2" x2="710" y2="102.2"/>
+  </g>
+  <line x1="90" y1="257.7" x2="710" y2="257.7" stroke="#94a3b8" stroke-width="1" stroke-dasharray="5,4"/>
+  <text x="96" y="252" text-anchor="start" font-size="8.5" fill="#64748b">402.7 MB @ ~143 GB/s &asymp; 2.8 ms weight-read floor</text>
+  <polyline points="90,257.3 212,257.3 334,256.6 456,211.8 578,116.6 700,88.2" fill="none" stroke="#2563eb" stroke-width="2"/>
+  <g fill="#2563eb"><circle cx="90" cy="257.3" r="3.2"/><circle cx="212" cy="257.3" r="3.2"/><circle cx="334" cy="256.6" r="3.2"/><circle cx="456" cy="211.8" r="3.2"/><circle cx="578" cy="116.6" r="3.2"/><circle cx="700" cy="88.2" r="3.2"/></g>
+  <text x="698" y="80" text-anchor="end" font-size="9.5" fill="#2563eb" font-weight="bold">torch-spyre</text>
+  <polyline points="90,259.1 212,258.4 334,259.1 456,256.2 578,237.9 700,157.1" fill="none" stroke="#16a34a" stroke-width="2"/>
+  <g fill="#16a34a"><circle cx="90" cy="259.1" r="3.2"/><circle cx="212" cy="258.4" r="3.2"/><circle cx="334" cy="259.1" r="3.2"/><circle cx="456" cy="256.2" r="3.2"/><circle cx="578" cy="237.9" r="3.2"/><circle cx="700" cy="157.1" r="3.2"/></g>
+  <text x="698" y="170" text-anchor="end" font-size="9.5" fill="#16a34a" font-weight="bold">sendnn</text>
+  <text x="250" y="248" text-anchor="middle" font-size="9" fill="#166534" font-weight="bold">decode (M&le;16): both on the floor &mdash; parity</text>
+  <text x="470" y="202" text-anchor="middle" font-size="8.5" fill="#2563eb">tsp lifts off ~M=64</text>
+  <text x="590" y="232" text-anchor="middle" font-size="8.5" fill="#16a34a">sendnn holds floor to ~M=256</text>
+</svg>
+<figcaption>Figure 9 &mdash; FFN compute time vs sequence length M (resident weights, our re-measurement). At
+  decode (M=1&ndash;16) both stacks sit on the ~2.8&nbsp;ms weight-read floor &mdash; <strong>parity</strong>.
+  As M grows the array fills and the gap opens: torch-spyre lifts off the floor early (~M=64) because it
+  under-fills the array, while sendnn holds the floor to ~M=256. The gap is widest mid-range (M=256,
+  ~2.5&times;). <strong>Caveat:</strong> this resident probe under-measures the <em>absolute</em> prefill gap
+  &mdash; at M=512 it reads 1.42&times; (our proxy), whereas the authoritative production build measures the
+  wide-N matmul at 3.3&times; (&sect;3.1). The curve's <em>shape</em> (decode parity &rarr; prefill array-fill
+  gap) is the robust result, not the M=512 absolute.</figcaption>
+</figure>
 
 <h3 id="why-roofline">5.4 The roofline — spec vs measured</h3>
 <p>Using torch-spyre's own cost-model constants — peak <strong>98.3&nbsp;TFLOPS</strong> DL16
@@ -635,8 +706,9 @@ out  = h @ Wd              # [M, 16384] @ [16384, 4096]</code></pre>
   100&nbsp;MB in ~0.70&nbsp;ms, sendnn lands near it (73% eff) while tsp is at 4.5&times; (the array-fill
   gap); the decode matmul sits right <em>on</em> the 143&nbsp;GB/s read ceiling — tsp at the floor (97%
   eff), sendnn just above it. Decode is memory-bound at the ceiling, not overhead-stuck below its roofline.
-  (The full decode FFN streams all three weights, ~402.7&nbsp;MB ≈ 2.8&nbsp;ms; its 1.94&times; gap is the
-  SiLU/glue epilogue of &sect;4, not the GEMM.)</p>
+  (The full decode FFN streams all three weights, ~402.7&nbsp;MB ≈ 2.8&nbsp;ms — re-measured on device at
+  tsp 2.84 / sendnn 2.76&nbsp;ms = parity, &sect;3.2 / &sect;5.1; the standalone 1.94&times; is reload, not
+  compute.)</p>
 
 <h3 id="why-not">5.5 Three things the gap is <em>not</em></h3>
 <p><strong>Not a relayout problem.</strong> The fused MLP compiles to <strong>0 restickifies</strong>
@@ -707,11 +779,10 @@ out  = h @ Wd              # [M, 16384] @ [16384, 4096]</code></pre>
   <li><strong>Fill the PT array on the wide-N matmul</strong> (the dominant prefill term). Tile N=12800 onto
     the 8&times;8 array the way sendnn does, raising PT-Util from ~29.5% toward ~77.7%. Biggest single win;
     <em>kernel codegen</em> (deeptools/Inductor), not work division.</li>
-  <li><strong>SiLU in the matmul epilogue</strong> (~1.7&nbsp;ms). Run the activation on the SFP unit
-    concurrently with the matmul, as sendnn does, instead of a serial pass after. Mostly <em>ours</em>
-    (Inductor fusion); needs the matmul SDSC to expose an epilogue hook. <strong>This is also the main
-    decode-MLP lever</strong> — the decode GEMM is already at parity; the 1.94&times; full-FFN gap is the
-    epilogue + glue.</li>
+  <li><strong>SiLU in the matmul epilogue</strong> (~1.7&nbsp;ms, prefill). Run the activation on the SFP
+    unit concurrently with the matmul, as sendnn does, instead of a serial pass after. Mostly <em>ours</em>
+    (Inductor fusion); needs the matmul SDSC to expose an epilogue hook. (This is a <em>prefill</em> win —
+    at decode the intermediate is tiny and the FFN is already at parity, so there is no decode-MLP lever.)</li>
   <li><strong>Fuse the FFN to one kernel.</strong> Removes the 16.78&nbsp;MB intermediate HBM round-trip and
     <em>enables</em> (2). Inductor decides the fusion; deeptools executes it.</li>
   <li><strong>Pipeline the chained matmuls</strong> (the <em>beat</em> lever). Let the down-projection's
@@ -751,10 +822,12 @@ out  = h @ Wd              # [M, 16384] @ [16384, 4096]</code></pre>
   as a matmul epilogue, putting ~1.7&nbsp;ms back on every prefill front kernel.</figcaption>
 </figure>
 <div class="box">
-  <strong>Decode, restated.</strong> The bare GEMM is at parity (0.83&times;), so lever 1 does nothing for
-  decode. The decode-MLP win is lever 2/3 — the SiLU/FFN epilogue glue (the full decode FFN is 1.94&times;
-  even though the GEMM is at parity) — plus keeping batched decode on the shared-weight
-  <code>bmm_expand</code> form and weights resident. PR&nbsp;#2407 (work division) does not move decode.
+  <strong>Decode, restated.</strong> There is <strong>no decode-MLP lever</strong>. Re-measured on device,
+  the decode FFN is at parity (tsp 2.84 / sendnn 2.76&nbsp;ms = 1.03&times;) and at the weight-read floor;
+  the bare GEMM is at parity too (0.83&times;). The standalone probe's 1.94&times; is per-call reload
+  inflation, not compute (&sect;3.2). None of levers 1&ndash;4 help decode — it is already at the memory
+  ceiling. The only decode hygiene is keeping batched decode on the shared-weight <code>bmm_expand</code>
+  form and weights resident; the win is entirely in <strong>prefill</strong>.
 </div>
 
 <!-- ===================== 7. METHODS ===================== -->
