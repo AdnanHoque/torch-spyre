@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Closing the torch-spyre ↔ sendnn gap</title>
+<style>
+  :root { --fg:#1a1a1a; --muted:#555; --bg:#fdfdfd; --code-bg:#f3f4f6; --accent:#2563eb;
+    --good:#166534; --bad:#b91c1c; --warn:#92400e; --rule:#e5e7eb; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    line-height:1.6; color:var(--fg); background:var(--bg); max-width:880px; margin:0 auto;
+    padding:2.5rem 2rem 5rem; font-size:16px; }
+  h1 { font-size:1.7rem; margin:0 0 0.3rem; }
+  h2 { font-size:1.25rem; margin-top:2.2rem; padding-bottom:0.2rem; border-bottom:1px solid var(--rule); }
+  .subtitle { color:var(--muted); font-size:1.02rem; margin-bottom:1.5rem; }
+  p,li { margin:0.55rem 0; }
+  code { font-family:"SF Mono",Menlo,Consolas,monospace; background:var(--code-bg);
+    padding:0.1em 0.35em; border-radius:4px; font-size:0.9em; }
+  table { border-collapse:collapse; width:100%; margin:1rem 0; font-size:0.92em; }
+  th,td { border-bottom:1px solid var(--rule); padding:0.5rem 0.65rem; text-align:left; vertical-align:top; }
+  th { background:var(--code-bg); font-weight:600; }
+  td.num,th.num { text-align:right; font-family:"SF Mono",monospace; }
+  .good { color:var(--good); font-weight:600; }
+  .bad { color:var(--bad); font-weight:600; }
+  .warn { color:var(--warn); font-weight:600; }
+  .box { background:#fffbeb; border-left:3px solid #d97706; padding:0.8rem 1rem; margin:1.2rem 0;
+    border-radius:0 4px 4px 0; }
+  .box-title { font-weight:600; color:var(--warn); margin-bottom:0.3rem; }
+  .tldr { background:#eff6ff; border-left:3px solid var(--accent); padding:0.8rem 1rem; margin:1.2rem 0;
+    border-radius:0 4px 4px 0; }
+  .pending { color:#94a3b8; font-style:italic; }
+</style>
+</head>
+<body>
+
+<h1>Closing the torch-spyre ↔ sendnn gap</h1>
+<p class="subtitle">What the remaining matmul/MLP gap actually is, how to reach parity, and how to
+  <em>beat</em> sendnn — grounded in measured kernel decompositions, not estimates. Companion to the
+  <a href="mlp_decode_first_principles.html">MLP deep-dive</a>.</p>
+
+<div class="tldr">
+  <strong>The one line:</strong> on the latest main (5838b3b) the tsp↔sendnn gap is a <em>measured</em>
+  kernel-codegen problem, dominated by <strong>PT-array under-fill</strong> — tsp's wide-N MLP matmul fills
+  the 8&times;8 systolic array to only <strong>29.5% vs sendnn's 77.7%</strong> (a 3.3&times; kernel gap) —
+  plus SiLU not fused into the matmul epilogue and the FFN not fused to one kernel. <strong>None of it is in
+  the work-division planner</strong>: PR&nbsp;#2407 already picks good splits (it cut prefill 832&rarr;495&nbsp;ms).
+  The remaining prize once the array is filled: <strong>warp-specialized inter-matmul pipelining</strong>, the
+  on-chip ring work already prototyped on attention.
+</div>
+
+<h2>1. Where we are (whole model, today)</h2>
+<p>Latest mains, bs=1 sl=512, kernel time (Antoni's spyre-perf-suite run):</p>
+<table>
+  <thead><tr><th>regime</th><th class="num">torch-spyre</th><th class="num">sendnn</th><th class="num">ratio</th><th class="num">yesterday (tsp)</th></tr></thead>
+  <tbody>
+    <tr><td>Prefill</td><td class="num">495 ms</td><td class="num">190 ms</td><td class="num">2.6&times;</td><td class="num">832 ms</td></tr>
+    <tr><td>Decode <span class="warn">*</span></td><td class="num">274 ms</td><td class="num">134 ms</td><td class="num">2.0&times;</td><td class="num">571 ms</td></tr>
+  </tbody>
+</table>
+<p class="warn" style="font-size:0.88em;">* Prefill (495&nbsp;ms) is the bs1_pl512 whole-model
+  <code>kernel_ms</code> from the authoritative run, verified to the kernel. The decode whole-model number is
+  carried from a prior run — there is <strong>no whole-model decode config in the authoritative report</strong>,
+  so treat 274&nbsp;ms / 2.0&times; as unverified.</p>
+<p>The big day-over-day improvement (832&rarr;495 prefill) comes from <strong>PR&nbsp;#2407</strong>, the
+  matmul work-division cost model — it makes the model's matmuls pick good core splits. <strong>The planner is
+  doing its job; the remaining gap is kernel codegen, not work division.</strong></p>
+
+<h2>2. The matmul gap, decomposed (per-kernel, measured)</h2>
+<p>Authoritative per-op kernel times from the same run (Granite&nbsp;3.3 8B shapes, emb=4096,
+  intermediate=12800). <strong>Use the ratios, not the absolute ms</strong> — the standalone op probes carry
+  ~4&times; per-op overhead (standalone <code>mlp</code> 21&nbsp;ms vs in-model ~5&nbsp;ms/layer).</p>
+<table>
+  <thead><tr><th>op (one MLP/matmul)</th><th class="num">tsp</th><th class="num">sendnn</th><th class="num">ratio</th><th class="num">PT-Util tsp/sendnn</th></tr></thead>
+  <tbody>
+    <tr><td>Prefill wide-N matmul <code>[4096,12800]</code></td><td class="num">3.16 ms</td><td class="num">0.96 ms</td><td class="num bad">3.30&times;</td><td class="num bad">29.5 / 77.7</td></tr>
+    <tr><td>Decode bare matmul <code>[4,1,4096]&times;[4096,12800]</code></td><td class="num good">0.72 ms</td><td class="num">0.87 ms</td><td class="num good">0.83&times;</td><td class="num">0.81 / 0.67</td></tr>
+    <tr><td>Decode full FFN (gate+up+silu+mul+down)</td><td class="num bad">16.6 ms</td><td class="num">8.6 ms</td><td class="num bad">1.94&times;</td><td class="num">&mdash;</td></tr>
+  </tbody>
+</table>
+<div class="box">
+  <div class="box-title">The single most important diagnostic: PT-Util 29.5 vs 77.7</div>
+  PT-Util is how fully each kernel fills the 8&times;8 systolic (PT) array. On the wide-N prefill matmul, tsp
+  fills it to only <strong>~38% of sendnn's occupancy</strong> (29.5/77.7). That reciprocally matches the
+  3.30&times; kernel gap — under-fill the array and compute takes proportionally longer. <strong>This is a
+  codegen/tiling problem, not a planner problem:</strong> the work-division planner decides how many cores and
+  which axis to split; it does <em>not</em> decide how the wide N=12800 dimension tiles onto the array
+  <em>inside</em> one core's kernel. PR&nbsp;#2407 correctly cut whole-model prefill 832&rarr;495&nbsp;ms by
+  choosing good splits, but it cannot touch the 3.3&times; per-matmul gap — that lives in deeptools/Inductor
+  kernel codegen.
+</div>
+<p><strong>Decode is two different stories.</strong> The bare matmul (M=1, one weight read, batch-amortized)
+  is at parity-or-faster (0.83&times;) at the GEMM level. But the <em>full</em> decode FFN is <span class="bad">1.94&times;</span> slower, so the
+  entire decode MLP gap lives in the <strong>surrounding kernels — the SiLU/mul epilogue, the down-projection
+  matmul, and the glue between them — not the core GEMM</strong>. Improving the wide-N matmul does nothing for
+  decode.</p>
+
+<h2>3. Closing the gap: parity vs. beat</h2>
+<table>
+  <thead><tr><th>goal</th><th>levers</th><th class="num">target</th><th>whose control</th><th>confidence</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Parity</strong></td><td>Fill the PT array on the wide-N matmul (29.5&rarr;~78%) <strong>+</strong> SiLU epilogue fusion <strong>+</strong> fuse FFN to one kernel</td><td class="num">3.30&times; &rarr; 1.0&times; on the matmul</td><td>array-fill = deeptools/Inductor codegen; SiLU = ours (Inductor)</td><td class="good">high (root cause is the measured PT-Util gap)</td></tr>
+    <tr><td><strong>Beat</strong></td><td>pipeline the chained FFN matmuls (warp specialization / ring prefetch — down-proj prefetches while front computes)</td><td class="num good">~2&times; faster than sendnn</td><td>deeptools (existing ring-prefetch design)</td><td class="warn">projected (warp-spec demoed ~1.8&times; on attention)</td></tr>
+  </tbody>
+</table>
+<p><strong>The levers, concretely (in priority order):</strong></p>
+<ol>
+  <li><strong>Fill the PT array on the wide-N matmul</strong> (prefill, the <em>dominant</em> term) — tsp's
+    <code>[4096,12800]</code> kernel drives the 8&times;8 systolic array to only 29.5% util vs sendnn's 77.7%.
+    Better tiling of the wide N=12800 dimension onto the array closes most of the 3.3&times;. This is the
+    biggest single win and it is <em>kernel codegen</em> (deeptools/Inductor), not work division — the planner
+    already picks the right core split.</li>
+  <li><strong>SiLU in the matmul epilogue</strong> — run the activation on the SFP unit concurrently with the
+    matmul, as sendnn does, instead of a serial pass after. Mostly <em>ours</em> (Inductor fusion); needs the
+    matmul SDSC to expose an epilogue hook. <strong>This is the main decode-MLP lever</strong> (the decode GEMM
+    is already at parity; the 1.94&times; full-FFN gap is the epilogue + glue).</li>
+  <li><strong>Fuse the FFN to one kernel</strong> — removes tsp's intermediate HBM round-trip and enables (2).
+    Inductor decides it; deeptools executes it. Helps both prefill and the decode-FFN glue.</li>
+  <li><strong>Pipeline the chained matmuls</strong> (the beat lever, <em>both</em> stacks) — let the
+    down-projection's weight prefetch overlap the front matmul's compute. sendnn doesn't do this, so it's a
+    genuine lead, not parity. <em>Deeptools / SDSC overlap</em> — same family as the on-chip ring
+    producer&rarr;consumer work already shown on attention. Only buys speedup <em>after</em> the array is
+    filled (lever 1).</li>
+</ol>
+<div class="box">
+  <div class="box-title">Strategic read</div>
+  Closing to parity is <strong>not</strong> a work-division / cost-model problem — the planner already picks
+  the right splits (PR&nbsp;#2407). It is <strong>kernel codegen</strong>, and the dominant term is
+  <strong>PT-array under-fill on the wide-N matmul</strong> (a deeptools/Inductor tiling problem, now in
+  scope). The SiLU epilogue is the clearest Inductor-side win and the primary decode lever.
+</div>
+
+<h2>4. Where the whole-model gap actually lives</h2>
+<p>The authoritative bs1_pl512 prefill breakdown (tsp-only; sums to 495.7&nbsp;ms exactly). Two kernel classes
+  carry <strong>75%</strong> of tsp prefill time:</p>
+<table>
+  <thead><tr><th>kernel</th><th class="num">ms</th><th class="num">% of 495.7</th><th>class</th></tr></thead>
+  <tbody>
+    <tr><td><code>linear_mul_rms_norm_silu_3</code></td><td class="num">202.4</td><td class="num">40.8%</td><td>MLP gate/up + SiLU</td></tr>
+    <tr><td><code>scaled_dot_product…_clone_expand_</code></td><td class="num">106.9</td><td class="num">21.6%</td><td>attention (SDPA)</td></tr>
+    <tr><td><code>add_linear_mul_4</code></td><td class="num">73.7</td><td class="num">14.9%</td><td>MLP down-proj + residual</td></tr>
+    <tr><td><code>scaled_dot_product…_add_clone_exp</code></td><td class="num">62.1</td><td class="num">12.5%</td><td>attention (SDPA)</td></tr>
+    <tr><td><code>linear_mul_rms_norm_sum_…_0</code></td><td class="num">41.7</td><td class="num">8.4%</td><td>projection / norm</td></tr>
+    <tr><td>bmm, div, rmsnorm, mul</td><td class="num">8.9</td><td class="num">1.8%</td><td>—</td></tr>
+  </tbody>
+</table>
+<p>Rolling up and applying the per-op tsp/sendnn ratios (calibrated so the sendnn estimate lands on the
+  measured ~190&nbsp;ms — the standalone-probe ratios over-state the in-model gap by ~37%), the
+  <strong>305&nbsp;ms prefill gap splits roughly evenly: ~53% MLP, ~47% attention.</strong></p>
+<div class="box">
+  <div class="box-title">The gap is in both MLP and attention</div>
+  The MLP-silu block is the <em>single largest kernel</em> (41% of prefill) <em>and</em> its matmul runs at
+  3.3&times; with 38% array fill. Attention SDPA carries the worst <em>relative</em> efficiency in the report
+  (7.6&times;, PT-Util 3.1 vs 23.6). <strong>So the prefill gap is genuinely split across both op classes</strong>
+  — neither the MLP-matmul nor attention can be treated as already-solved.
+</div>
+<ul>
+  <li><strong>Prefill:</strong> MLP-matmul (lever 1: array fill) and attention SDPA are co-equal targets.
+    Fixing the MLP-silu kernel's array utilization is the largest single line; the SDPA kernel is the worst
+    relative loss.</li>
+  <li><strong>Decode:</strong> the bare GEMM is at parity, but the full decode FFN is 1.94&times; — so a large
+    part of the decode gap <strong>is inside the MLP</strong>, specifically the SiLU/mul epilogue + down-proj +
+    glue (lever 2/3), <em>not</em> the GEMM. PR&nbsp;#2407 (work division) does not move it; FFN kernel fusion
+    does. <span class="warn">(The whole-model decode 2.0&times; is unverified — no decode config in the
+    authoritative report.)</span></li>
+</ul>
+<p style="font-size:0.88em;color:var(--muted);">Caveat: the whole-model breakdown is tsp-only; per-class
+  sendnn is <em>estimated</em> via micro-probe ratios, not measured. The split is robust in direction (both MLP
+  and attention are real losses) but &plusmn;10–15 points in magnitude. Whole-model PT-Util figures are on a
+  different normalization than the micro-probes — only the tsp-vs-sendnn <em>relative</em> util (29.5 vs 77.7,
+  3.1 vs 23.6) is interpretable.</p>
+
+</body>
+</html>
