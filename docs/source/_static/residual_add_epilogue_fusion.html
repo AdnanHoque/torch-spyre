@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Folding the residual add into the matmul epilogue</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --muted: #555;
+    --bg: #fdfdfd;
+    --code-bg: #f3f4f6;
+    --accent: #2563eb;
+    --accent-soft: #eff6ff;
+    --rule: #e5e7eb;
+    --good: #166534;
+    --bad: #b91c1c;
+    --warn: #92400e;
+    --toc-w: 270px;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--bg); color: var(--fg); scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    line-height: 1.65;
+    margin: 0;
+    font-size: 17px;
+  }
+  .layout { display: flex; align-items: flex-start; max-width: 1180px; margin: 0 auto; }
+  nav.toc {
+    position: sticky; top: 0; align-self: flex-start; width: var(--toc-w);
+    max-height: 100vh; overflow-y: auto; padding: 1.5rem 1rem 2rem 1.25rem;
+    font-size: 0.84rem; border-right: 1px solid var(--rule); background: var(--bg);
+  }
+  nav.toc strong { display: block; font-size: 0.95rem; margin-bottom: 0.6rem; color: var(--fg); }
+  nav.toc ol { margin: 0; padding-left: 1.1rem; }
+  nav.toc > ol { padding-left: 1.2rem; }
+  nav.toc li { margin: 0.12rem 0; }
+  nav.toc a { color: var(--accent); text-decoration: none; line-height: 1.35; display: block; }
+  nav.toc a:hover { text-decoration: underline; }
+  main { flex: 1 1 auto; min-width: 0; max-width: 860px; padding: 2.5rem 2rem 6rem; }
+  h1 { font-size: 1.95rem; line-height: 1.22; margin: 0 0 0.5rem; }
+  h2 { font-size: 1.42rem; margin-top: 3rem; padding-bottom: 0.25rem; border-bottom: 1px solid var(--rule); scroll-margin-top: 1rem; }
+  h3 { font-size: 1.1rem; margin-top: 2rem; color: var(--accent); scroll-margin-top: 1rem; }
+  p, li { margin: 0.6rem 0; }
+  .subtitle { color: var(--muted); font-size: 1.05rem; margin-bottom: 1.5rem; }
+  code {
+    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+    background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.9em;
+  }
+  pre {
+    background: var(--code-bg); padding: 1rem 1.25rem; border-radius: 6px;
+    overflow-x: auto; font-size: 0.86em; line-height: 1.5;
+  }
+  pre code { background: transparent; padding: 0; font-size: 1em; }
+  .callout {
+    background: var(--accent-soft); border-left: 3px solid var(--accent);
+    padding: 0.8rem 1rem; margin: 1rem 0; border-radius: 0 4px 4px 0;
+  }
+  .callout-title { font-weight: 600; color: var(--accent); margin-bottom: 0.3rem; }
+  .callout.key { background: #fffbeb; border-left-color: #d97706; }
+  .callout.key .callout-title { color: var(--warn); }
+  table { border-collapse: collapse; margin: 1rem 0; width: 100%; font-size: 0.92em; }
+  th, td { border-bottom: 1px solid var(--rule); padding: 0.5rem 0.7rem; text-align: left; vertical-align: top; }
+  th { font-weight: 600; background: var(--code-bg); }
+  td.num, th.num { text-align: right; font-family: "SF Mono", monospace; }
+  td.mono, th.mono { font-family: "SF Mono", monospace; font-size: 0.92em; }
+  tr.total th, tr.total td { border-top: 2px solid var(--rule); font-weight: 600; }
+  .good { color: var(--good); font-weight: 600; }
+  .bad { color: var(--bad); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  hr.section { border: 0; border-top: 2px solid var(--rule); margin: 3rem 0; }
+  figure { margin: 1.5rem 0; text-align: center; }
+  figure svg { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+  figcaption {
+    color: var(--muted); font-size: 0.86em; margin-top: 0.6rem; font-style: italic;
+    text-align: center; max-width: 720px; margin-left: auto; margin-right: auto;
+  }
+  .svg-text { font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+  @media (max-width: 900px) {
+    nav.toc { display: none; }
+    main { padding: 2rem 1.25rem 5rem; }
+  }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<nav class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#s1">What was fused (and what was not)</a></li>
+    <li><a href="#s2">The transformer block, and the two <code>+</code>s</a></li>
+    <li><a href="#s3">First principles: 2 SDSCs &rarr; 1 SDSC</a></li>
+    <li><a href="#s4">The DeepTools contract: position is output</a></li>
+    <li><a href="#s5">The empirical numbers</a></li>
+    <li><a href="#s6">Validation &amp; the regression guard</a></li>
+    <li><a href="#s7">Where this sits on the roadmap</a></li>
+  </ol>
+</nav>
+
+<main>
+
+<h1>Folding the residual add into the matmul epilogue</h1>
+<p class="subtitle">
+  A first-principles, device-measured account of the <code>add_linear_mul</code> fusion: what
+  exactly was folded (the residual-connection <code>+</code>, <em>not</em> the GLU activation), why
+  it collapses two SDSCs into one and erases an HBM round-trip, the subtle DeepTools ordering
+  contract that the first cut got wrong, and what it buys on device. Companion to the
+  <a href="mlp_decode_first_principles.html">MLP deep-dive</a> and
+  <a href="closing_the_gap.html">Closing the gap</a>.
+</p>
+
+<div class="callout">
+  <div class="callout-title">The one line</div>
+  This PR folds the <strong>residual-connection add</strong> &mdash; the <code>x&nbsp;+</code> /
+  <code>h&nbsp;+</code> that <em>wraps</em> each sub-block &mdash; into the <em>preceding</em> matmul
+  (<code>down_proj</code> for the MLP, <code>o_proj</code> for attention) as a <code>stridedadd</code>
+  SFP&nbsp;PSUM epilogue. The standalone <code>[add]</code> kernel and its HBM round-trip disappear:
+  two SDSCs become one. It does <strong>not</strong> fuse the GLU's <code>silu</code> or the
+  <code>silu&times;mul</code> gate &mdash; that is a separate, DeepTools-gated SwiGLU follow-up. On
+  device this is <strong>&minus;11%</strong> on o-proj and <strong>&minus;3.2%</strong> on MLP-down,
+  a near-constant ~0.09&ndash;0.11&nbsp;ms saved per fold.
+</div>
+
+<!-- ===================== SECTION 1 ===================== -->
+<h2 id="s1">1. What was fused &mdash; and, just as importantly, what was not</h2>
+<p>The headline is easy to overclaim, so pin it down first. The name <code>add_linear_mul</code> is
+  the Inductor-fused op label, and it is tempting to read it as "the GLU activation got fused into the
+  matmul." <strong>That is not what happened.</strong> What was fused is the <em>residual-connection
+  add</em>: the lone <code>+</code> that adds a sub-block's output back onto the residual stream. The
+  GLU's own <code>silu</code> and its <code>silu&times;mul</code> gate are untouched and remain a
+  separate, larger, DeepTools-gated prize.</p>
+
+<figure>
+<svg viewBox="0 0 820 470" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <defs>
+    <marker id="arA" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto"><polygon points="0 0,8 4,0 8" fill="#475569"/></marker>
+  </defs>
+  <text x="410" y="22" text-anchor="middle" font-size="14" font-weight="bold">One decoder layer &mdash; which <tspan fill="#16a34a">+</tspan> got folded, which GLU ops did NOT</text>
+  <text x="410" y="41" text-anchor="middle" font-size="10" fill="#475569">h = x + Attn(x) &nbsp;;&nbsp; y = h + MLP(h) &nbsp;&mdash;&nbsp; the residual <tspan fill="#16a34a" font-weight="bold">+</tspan> folds into the preceding matmul; the GLU gate stays standalone</text>
+
+  <!-- residual stream input -->
+  <rect x="40" y="60" width="120" height="34" rx="8" fill="#fff" stroke="#334155" stroke-width="1.4"/>
+  <text x="100" y="81" text-anchor="middle" font-size="11" font-weight="bold">x  (residual)</text>
+
+  <!-- ATTENTION SUBLAYER -->
+  <rect x="40" y="118" width="300" height="120" rx="10" fill="#faf5ff" stroke="#7c3aed" stroke-width="1.3" stroke-dasharray="5,3"/>
+  <text x="190" y="137" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#5b21b6">Attention sub-block</text>
+  <rect x="60" y="148" width="110" height="32" rx="5" fill="#ede9fe" stroke="#7c3aed"/>
+  <text x="115" y="168" text-anchor="middle" font-size="9.5">q/k/v + SDPA</text>
+  <rect x="190" y="148" width="130" height="32" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="255" y="164" text-anchor="middle" font-size="9.5" font-weight="bold">o_proj  (matmul)</text>
+  <text x="255" y="175" text-anchor="middle" font-size="7.5" fill="#1e3a8a">[*, 4096]@[4096,4096]</text>
+  <path d="M 170,164 L 188,164" stroke="#475569" stroke-width="1.3" marker-end="url(#arA)"/>
+
+  <!-- residual add 1 (FOLDED) -->
+  <circle cx="380" cy="164" r="20" fill="#dcfce7" stroke="#16a34a" stroke-width="2.5"/>
+  <text x="380" y="171" text-anchor="middle" font-size="20" font-weight="bold" fill="#16a34a">+</text>
+  <path d="M 320,164 L 358,164" stroke="#475569" stroke-width="1.3" marker-end="url(#arA)"/>
+  <path d="M 100,94 L 100,300 L 358,300 L 376,300 C 380,300 380,190 380,186" stroke="#16a34a" stroke-width="1.3" fill="none" stroke-dasharray="3,2" marker-end="url(#arA)"/>
+  <text x="100" y="318" text-anchor="middle" font-size="8" fill="#16a34a">residual skip (x)</text>
+  <rect x="338" y="196" width="84" height="20" rx="9" fill="#16a34a"/>
+  <text x="380" y="210" text-anchor="middle" font-size="8.5" font-weight="bold" fill="#fff">FOLDED &rarr; o_proj</text>
+
+  <text x="424" y="168" font-size="11" fill="#475569">= h</text>
+
+  <!-- MLP SUBLAYER -->
+  <rect x="470" y="118" width="300" height="200" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.3" stroke-dasharray="5,3"/>
+  <text x="620" y="137" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#166534">MLP / GLU sub-block</text>
+
+  <!-- gate / up -->
+  <rect x="490" y="148" width="120" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="550" y="167" text-anchor="middle" font-size="9">gate_proj</text>
+  <rect x="490" y="184" width="120" height="30" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="550" y="203" text-anchor="middle" font-size="9">up_proj</text>
+
+  <!-- silu (NOT fused) -->
+  <rect x="624" y="146" width="58" height="28" rx="14" fill="#fef3c7" stroke="#d97706" stroke-width="1.6"/>
+  <text x="653" y="164" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#92400e">silu</text>
+  <!-- mul (NOT fused) -->
+  <circle cx="700" cy="180" r="16" fill="#fff" stroke="#d97706" stroke-width="1.8"/>
+  <text x="700" y="186" text-anchor="middle" font-size="14" font-weight="bold" fill="#92400e">&times;</text>
+  <path d="M 610,162 L 622,160" stroke="#475569" stroke-width="1.2" marker-end="url(#arA)"/>
+  <path d="M 682,162 C 692,166 696,170 699,165" stroke="#475569" stroke-width="1.2" fill="none" marker-end="url(#arA)"/>
+  <path d="M 610,199 C 660,199 690,196 700,196" stroke="#475569" stroke-width="1.2" fill="none" marker-end="url(#arA)"/>
+  <rect x="624" y="222" width="120" height="20" rx="9" fill="#fff" stroke="#d97706" stroke-width="1.4"/>
+  <text x="684" y="236" text-anchor="middle" font-size="8" font-weight="bold" fill="#92400e">NOT fused &mdash; SwiGLU follow-up</text>
+
+  <!-- down_proj -->
+  <rect x="510" y="252" width="160" height="32" rx="5" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="590" y="268" text-anchor="middle" font-size="9.5" font-weight="bold">down_proj  (matmul)</text>
+  <text x="590" y="279" text-anchor="middle" font-size="7.5" fill="#1e3a8a">[*, 12800]@[12800,4096]</text>
+  <path d="M 700,196 L 700,268 L 672,268" stroke="#475569" stroke-width="1.2" fill="none" marker-end="url(#arA)"/>
+
+  <!-- residual add 2 (FOLDED) -->
+  <circle cx="430" cy="380" r="20" fill="#dcfce7" stroke="#16a34a" stroke-width="2.5"/>
+  <text x="430" y="387" text-anchor="middle" font-size="20" font-weight="bold" fill="#16a34a">+</text>
+  <path d="M 510,268 L 460,268 L 460,362 C 460,372 446,378 451,378" stroke="#475569" stroke-width="1.2" fill="none" marker-end="url(#arA)"/>
+  <path d="M 424,180 L 424,300 L 412,360 C 408,372 410,378 414,372" stroke="#16a34a" stroke-width="1.3" fill="none" stroke-dasharray="3,2" marker-end="url(#arA)"/>
+  <text x="424" y="330" text-anchor="middle" font-size="8" fill="#16a34a">residual skip (h)</text>
+  <rect x="388" y="412" width="84" height="20" rx="9" fill="#16a34a"/>
+  <text x="430" y="426" text-anchor="middle" font-size="8.5" font-weight="bold" fill="#fff">FOLDED &rarr; down_proj</text>
+
+  <!-- output -->
+  <rect x="500" y="364" width="120" height="32" rx="8" fill="#fff" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="560" y="384" text-anchor="middle" font-size="11" font-weight="bold" fill="#166534">y  (next layer)</text>
+  <path d="M 450,380 L 498,380" stroke="#475569" stroke-width="1.3" marker-end="url(#arA)"/>
+</svg>
+<figcaption>Figure 1 &mdash; One decoder layer. The two <strong style="color:#16a34a">green</strong>
+  <code>+</code> nodes are the residual-connection adds; this PR folds each into its <em>preceding</em>
+  matmul (<code>o_proj</code>, <code>down_proj</code>) as a <code>stridedadd</code> epilogue. The
+  <strong style="color:#92400e">amber</strong> GLU ops &mdash; <code>silu</code> and the
+  <code>silu&times;mul</code> gate inside the MLP &mdash; are <em>not</em> touched here; folding them
+  into the matmul is the separate, DeepTools-gated SwiGLU follow-up (the bigger prize). The thing
+  folded is the wrapper <code>+</code>, not the GLU activation.</figcaption>
+</figure>
+
+<div class="callout key">
+  <div class="callout-title">Do not read this as "GLU activation fusion"</div>
+  The residual <code>+</code> is a <em>full-shape, elementwise</em> add of the matmul output with the
+  same-shape residual tensor. That is exactly what a <code>stridedadd</code> SFP epilogue does, and it
+  is <em>already</em> in the matmul template's DDL menu (<code>bmm.ddl</code> <code>stradd_op</code>)
+  and DDC whitelist &mdash; so an Inductor-side fold is correct end-to-end with no DeepTools change.
+  The GLU gate (<code>silu</code> then a non-aligned multiply by the up-projection) is a different
+  animal and needs DeepTools work; it is explicitly out of scope here.
+</div>
+
+<!-- ===================== SECTION 2 ===================== -->
+<h2 id="s2">2. The transformer block, and the two <code>+</code>s</h2>
+<p>Spelled out, one decoder layer is two residual-wrapped sub-blocks:</p>
+<pre><code>h = x + Attn(x)                                  # attention residual
+y = h + MLP(h)                                   # MLP residual
+  where MLP(h) = down_proj( silu(gate_proj(h)) * up_proj(h) )   # SwiGLU / GLU</code></pre>
+<p>Each <code>+</code> is a residual connection: it adds the sub-block's output back onto the tensor
+  that entered it. Crucially, the value being added (<code>Attn(x)</code>, <code>MLP(h)</code>) is the
+  output of a <em>matmul</em> &mdash; <code>o_proj</code> closes attention, <code>down_proj</code>
+  closes the MLP. So the residual add always sits <em>immediately downstream of a matmul</em>, reading
+  that matmul's full-shape output and adding the skip tensor. That adjacency is the entire fusion
+  opportunity.</p>
+<p>The two GLU operations &mdash; <code>silu(gate_proj(h))</code> and the <code>* up_proj(h)</code>
+  multiply &mdash; live <em>inside</em> <code>MLP(h)</code>, between the front projections and
+  <code>down_proj</code>. They are not what this PR folds. The op label
+  <code>add_linear_mul</code> names the Inductor group that the residual <code>add</code> lands in; the
+  <code>mul</code> in that name is incidental graph fusion, not the SwiGLU gate getting absorbed into
+  the matmul array.</p>
+
+<!-- ===================== SECTION 3 ===================== -->
+<h2 id="s3">3. First principles: why this is two SDSCs, and why folding makes it one</h2>
+<p>On Spyre a compiled op lowers to one or more <strong>SDSCs</strong> (Super-DSC kernel descriptors).
+  Take the unfused residual: <code>out = matmul(x, w) + r</code>. Inductor schedules it as
+  <em>two</em> nodes, and the backend emits <em>two</em> SDSCs:</p>
+<ul>
+  <li><code>[batchmatmul]</code> &mdash; the matmul, writing its <code>[M, N]</code> product to an HBM
+    intermediate.</li>
+  <li><code>[add]</code> &mdash; a standalone SFP kernel that <em>loads that intermediate back from
+    HBM</em>, loads the residual, adds, and stores the result.</li>
+</ul>
+<p>The second kernel is pure tax. The matmul just produced its result in PSUM; the standalone add
+  pushes it out to HBM and immediately streams it back in only to add a same-shape tensor to it. That
+  round-trip is the cost the fold removes.</p>
+<p>Fused, it is <strong>one</strong> SDSC carrying a 2-entry <code>computeOp_</code> &mdash;
+  <code>[batchmatmul(pt), stridedadd(sfp)]</code>. The <code>stridedadd</code> runs on the SFP unit
+  against the matmul's PSUM output <em>in place</em>, reading the residual as an extra HBM input. The
+  separate add kernel and its HBM round-trip of the matmul output simply never exist.</p>
+
+<figure>
+<svg viewBox="0 0 800 360" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <defs>
+    <marker id="arB" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0,8 4,0 8" fill="#475569"/></marker>
+    <marker id="arR" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><polygon points="0 0,8 4,0 8" fill="#b91c1c"/></marker>
+  </defs>
+  <text x="200" y="22" text-anchor="middle" font-size="13" font-weight="bold" fill="#b91c1c">UNFUSED &mdash; 2 SDSCs</text>
+  <text x="600" y="22" text-anchor="middle" font-size="13" font-weight="bold" fill="#16a34a">FUSED &mdash; 1 SDSC</text>
+
+  <!-- UNFUSED side -->
+  <rect x="40" y="48" width="150" height="50" rx="6" fill="#dbeafe" stroke="#2563eb"/>
+  <text x="115" y="68" text-anchor="middle" font-size="10.5" font-weight="bold">SDSC #1</text>
+  <text x="115" y="84" text-anchor="middle" font-size="9.5">[batchmatmul]</text>
+  <!-- HBM round trip -->
+  <path d="M 115,98 L 115,128" stroke="#b91c1c" stroke-width="1.6" marker-end="url(#arR)"/>
+  <rect x="44" y="130" width="142" height="34" rx="5" fill="#fef2f2" stroke="#b91c1c" stroke-dasharray="3,2"/>
+  <text x="115" y="146" text-anchor="middle" font-size="9" fill="#b91c1c" font-weight="bold">[M, N] mm output</text>
+  <text x="115" y="158" text-anchor="middle" font-size="8" fill="#b91c1c">stored to HBM &rarr; reloaded</text>
+  <path d="M 115,164 L 115,194" stroke="#b91c1c" stroke-width="1.6" marker-end="url(#arR)"/>
+  <rect x="40" y="196" width="150" height="50" rx="6" fill="#fee2e2" stroke="#b91c1c"/>
+  <text x="115" y="216" text-anchor="middle" font-size="10.5" font-weight="bold" fill="#b91c1c">SDSC #2</text>
+  <text x="115" y="232" text-anchor="middle" font-size="9.5" fill="#b91c1c">[add]  (SFP)</text>
+  <!-- residual into add -->
+  <rect x="218" y="200" width="78" height="32" rx="5" fill="#fff" stroke="#334155"/>
+  <text x="257" y="220" text-anchor="middle" font-size="9">residual r</text>
+  <path d="M 218,216 L 192,221" stroke="#475569" stroke-width="1.3" marker-end="url(#arB)"/>
+  <text x="115" y="270" text-anchor="middle" font-size="9" fill="#b91c1c" font-weight="bold">round-trip = ~0.09&ndash;0.11 ms</text>
+  <text x="115" y="284" text-anchor="middle" font-size="8" fill="#475569">[512,4096] fp16 &asymp; 12 MB read+write</text>
+
+  <!-- divider -->
+  <line x1="400" y1="40" x2="400" y2="330" stroke="#e5e7eb" stroke-width="1.5"/>
+
+  <!-- FUSED side -->
+  <rect x="490" y="78" width="230" height="150" rx="8" fill="#dcfce7" stroke="#16a34a" stroke-width="2"/>
+  <text x="605" y="100" text-anchor="middle" font-size="11" font-weight="bold" fill="#166534">SDSC (one)</text>
+  <rect x="510" y="112" width="190" height="40" rx="5" fill="#fff" stroke="#2563eb"/>
+  <text x="605" y="130" text-anchor="middle" font-size="10" font-weight="bold">computeOp_[0]  batchmatmul</text>
+  <text x="605" y="144" text-anchor="middle" font-size="8.5" fill="#1e3a8a">exUnit "pt" &rarr; PSUM</text>
+  <path d="M 605,152 L 605,166" stroke="#16a34a" stroke-width="1.8" marker-end="url(#arB)"/>
+  <text x="660" y="164" font-size="8" fill="#166534">in PSUM</text>
+  <rect x="510" y="168" width="190" height="40" rx="5" fill="#fff" stroke="#d97706"/>
+  <text x="605" y="186" text-anchor="middle" font-size="10" font-weight="bold" fill="#92400e">computeOp_[1]  stridedadd</text>
+  <text x="605" y="200" text-anchor="middle" font-size="8.5" fill="#92400e">exUnit "sfp" &mdash; reads PSUM + r</text>
+  <!-- residual into fused -->
+  <rect x="488" y="248" width="78" height="32" rx="5" fill="#fff" stroke="#334155"/>
+  <text x="527" y="268" text-anchor="middle" font-size="9">residual r</text>
+  <path d="M 540,248 C 560,232 580,218 600,210" stroke="#475569" stroke-width="1.3" fill="none" marker-end="url(#arB)"/>
+  <text x="605" y="306" text-anchor="middle" font-size="9" fill="#166534" font-weight="bold">no mm-output HBM round-trip</text>
+  <text x="605" y="320" text-anchor="middle" font-size="8" fill="#475569">add runs on PSUM in place</text>
+</svg>
+<figcaption>Figure 2 &mdash; The 2&rarr;1 SDSC fold. Unfused (left), the matmul stores its
+  <code>[M, N]</code> output to HBM and a standalone <code>[add]</code> SFP kernel streams it straight
+  back in &mdash; a wasted ~12&nbsp;MB round-trip for a <code>[512,4096]</code> fp16 tile. Fused (right),
+  the <code>stridedadd</code> becomes <code>computeOp_[1]</code> in the <em>same</em> SDSC and adds the
+  residual onto the matmul's PSUM output in place; the round-trip and the separate kernel launch both
+  vanish. Verified on current main (53bbd76) through the real scheduler: unfused emits
+  <code>[batchmatmul]</code>+<code>[add]</code>, fused emits one
+  <code>[batchmatmul, stridedadd]</code>.</figcaption>
+</figure>
+
+<!-- ===================== SECTION 4 ===================== -->
+<h2 id="s4">4. The DeepTools contract: the LAST entry is the output (an empirically-earned lesson)</h2>
+<p>This is the part the emit-only unit tests could not catch, and the cleanest first-principles lesson
+  in the PR. A fused SDSC carries a list of labeled data-streams, <code>labeledDs_</code> &mdash; one
+  per tensor the kernel touches. DeepTools decides which one is the kernel's <em>output</em> purely by
+  <strong>position</strong>:</p>
+<ul>
+  <li>The <strong>last</strong> <code>labeledDs_</code> entry is the <em>stored output</em>. It is
+    produced by the kernel; DeepTools does <em>not</em> attach a load for it.</li>
+  <li>Every <strong>earlier</strong> entry is an <em>HBM-pinned input</em>. DeepTools auto-attaches an
+    HBM&rarr;LX load transfer and a producer for each.</li>
+</ul>
+<p>So the residual, which is a genuine HBM <em>input</em> to the <code>stridedadd</code>, has to be
+  spliced into the <em>input section</em> of the arg list &mdash; before the matmul output, which must
+  stay last. Put it anywhere after the output and DeepTools reads it as a second "output," gives it no
+  load and no producer, and the on-device compile aborts.</p>
+
+<figure>
+<svg viewBox="0 0 800 330" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="400" y="22" text-anchor="middle" font-size="13" font-weight="bold">labeledDs_ ordering decides input vs. output &mdash; by POSITION</text>
+
+  <!-- WRONG ordering -->
+  <text x="200" y="52" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#b91c1c">&#10007; first cut: residual AFTER output</text>
+  <g font-size="9.5">
+    <rect x="55" y="66" width="100" height="30" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="105" y="85" text-anchor="middle">x  (input)</text>
+    <rect x="55" y="100" width="100" height="30" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="105" y="119" text-anchor="middle">w  (input)</text>
+    <rect x="55" y="134" width="100" height="30" rx="4" fill="#dcfce7" stroke="#16a34a"/><text x="105" y="153" text-anchor="middle">mm output</text>
+    <rect x="55" y="168" width="100" height="30" rx="4" fill="#fee2e2" stroke="#b91c1c"/><text x="105" y="187" text-anchor="middle" fill="#b91c1c">residual r</text>
+    <text x="170" y="153" font-size="8" fill="#777">&larr; not last</text>
+    <text x="170" y="187" font-size="8.5" fill="#b91c1c" font-weight="bold">&larr; LAST = "output"</text>
+  </g>
+  <text x="200" y="222" text-anchor="middle" font-size="8.5" fill="#b91c1c">r lands in the no-load output slot &rarr; no producer attached</text>
+  <rect x="48" y="234" width="304" height="52" rx="5" fill="#fef2f2" stroke="#b91c1c" stroke-dasharray="3,2"/>
+  <text x="200" y="253" text-anchor="middle" font-size="9" font-family="monospace" fill="#b91c1c">dxp_standalone: Illegal DDL</text>
+  <text x="200" y="268" text-anchor="middle" font-size="8.5" font-family="monospace" fill="#b91c1c">l3_lx_resadd does not have any producer</text>
+  <text x="200" y="281" text-anchor="middle" font-size="8" fill="#777">(DDC ddcv1.cpp:3191) &mdash; only the device compile caught it</text>
+
+  <line x1="400" y1="40" x2="400" y2="300" stroke="#e5e7eb" stroke-width="1.5"/>
+
+  <!-- RIGHT ordering -->
+  <text x="600" y="52" text-anchor="middle" font-size="11.5" font-weight="bold" fill="#166534">&#10003; fix: residual spliced into INPUT section</text>
+  <g font-size="9.5">
+    <rect x="455" y="66" width="100" height="30" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="505" y="85" text-anchor="middle">x  (input)</text>
+    <rect x="455" y="100" width="100" height="30" rx="4" fill="#dbeafe" stroke="#2563eb"/><text x="505" y="119" text-anchor="middle">w  (input)</text>
+    <rect x="455" y="134" width="100" height="30" rx="4" fill="#dcfce7" stroke="#16a34a"/><text x="505" y="153" text-anchor="middle" fill="#166534">residual r</text>
+    <rect x="455" y="168" width="100" height="30" rx="4" fill="#dcfce7" stroke="#16a34a" stroke-width="1.8"/><text x="505" y="187" text-anchor="middle" font-weight="bold">mm output</text>
+    <text x="570" y="153" font-size="8.5" fill="#166534" font-weight="bold">&larr; input (loaded)</text>
+    <text x="570" y="187" font-size="8.5" fill="#166534" font-weight="bold">&larr; LAST = output &#10003;</text>
+  </g>
+  <text x="600" y="222" text-anchor="middle" font-size="8.5" fill="#166534">r is an earlier entry &rarr; gets an HBM&rarr;LX load + producer</text>
+  <rect x="448" y="234" width="304" height="52" rx="5" fill="#f0fdf4" stroke="#16a34a" stroke-dasharray="3,2"/>
+  <text x="600" y="253" text-anchor="middle" font-size="9" fill="#166534">output stays last; num_inputs unchanged</text>
+  <text x="600" y="268" text-anchor="middle" font-size="8.5" fill="#475569">matmul computeOp's inputLabeledDs still = [x, w]</text>
+  <text x="600" y="281" text-anchor="middle" font-size="8.5" fill="#166534" font-weight="bold">device compile passes &#10003;</text>
+</svg>
+<figcaption>Figure 3 &mdash; The position contract. DeepTools keys input-vs-output on
+  <code>labeledDs_</code> position: the last entry is the stored output (no load), every earlier entry
+  is an HBM-loaded input that gets an auto-producer. The first implementation appended the residual
+  <em>after</em> the matmul output, so it landed in the no-load "output" slot &mdash;
+  <code>dxp_standalone</code> aborted with <code>Illegal DDL: l3_lx_resadd does not have any
+  producer</code>. The fix splices the residual into the <em>input</em> section, leaving the matmul
+  output last. The matmul's own <code>inputLabeledDs</code> still references only <code>x</code> and
+  <code>w</code> (<code>num_inputs</code> is unchanged).</figcaption>
+</figure>
+
+<div class="callout key">
+  <div class="callout-title">The lesson: emit-only tests passed straight through this bug</div>
+  The 17 device-free unit tests verify the SDSC JSON we <em>emit</em> &mdash; that a 2-entry
+  <code>computeOp_</code> appears, that the residual is in the input section, that the output is the
+  last <code>labeledDs_</code>. They <em>all passed</em> on the first (wrong-ordering) cut, because the
+  emitted JSON was structurally valid. Only the on-device compile &mdash; DeepTools' DDC attaching
+  producers by position &mdash; surfaced the fault. The first-principles takeaway: a fusion's
+  correctness lives partly in a downstream contract you don't own (output = last by position), so an
+  emit-shape test is necessary but not sufficient; the on-device compile is the real oracle. The fix
+  itself is one line of intent &mdash; insert the residual <em>before</em> the output, not after.
+</div>
+
+<!-- ===================== SECTION 5 ===================== -->
+<h2 id="s5">5. The empirical numbers (device-measured)</h2>
+<p>Both residual sites measured on current main (53bbd76) through the real scheduler, unfused vs.
+  fused, at prefill shapes (bs=1, sl=512, M=512):</p>
+<table>
+  <thead>
+    <tr><th>matmul + residual</th><th class="mono">shape [M, N, K]</th><th class="num">unfused</th><th class="num">fused</th><th class="num">&Delta;</th><th class="num">saved</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>o_proj</strong> + attn residual</td>
+      <td class="mono">[512, 4096, 4096]</td>
+      <td class="num">0.969 ms</td>
+      <td class="num">0.862 ms</td>
+      <td class="num good">&minus;11%</td>
+      <td class="num">0.107 ms</td>
+    </tr>
+    <tr>
+      <td><strong>down_proj</strong> + MLP residual</td>
+      <td class="mono">[512, 12800, 4096]</td>
+      <td class="num">2.651 ms</td>
+      <td class="num">2.565 ms</td>
+      <td class="num good">&minus;3.2%</td>
+      <td class="num">0.086 ms</td>
+    </tr>
+  </tbody>
+</table>
+
+<figure>
+<svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" class="svg-text">
+  <text x="360" y="20" text-anchor="middle" font-size="13" font-weight="bold">Kernel time: unfused vs. fused (device, main 53bbd76)</text>
+  <line x1="80" y1="240" x2="700" y2="240" stroke="#475569" stroke-width="1.5"/>
+  <line x1="80" y1="240" x2="80" y2="44" stroke="#475569" stroke-width="1.5"/>
+  <!-- y ticks 0..3 ms, 3ms=196px (240-44) -> 65.3 px/ms -->
+  <text x="72" y="244" text-anchor="end" font-size="10">0</text>
+  <text x="72" y="174" text-anchor="end" font-size="10">1 ms</text>
+  <text x="72" y="109" text-anchor="end" font-size="10">2 ms</text>
+  <text x="72" y="48" text-anchor="end" font-size="10">3 ms</text>
+  <g stroke="#e5e7eb" stroke-width="0.8">
+    <line x1="80" y1="174.7" x2="700" y2="174.7"/><line x1="80" y1="109.3" x2="700" y2="109.3"/><line x1="80" y1="44" x2="700" y2="44"/>
+  </g>
+
+  <!-- o_proj group: unfused 0.969 -> 63.3px, fused 0.862 -> 56.3px -->
+  <g>
+    <rect x="150" y="176.7" width="60" height="63.3" fill="#b91c1c" opacity="0.85"/>
+    <text x="180" y="168" text-anchor="middle" font-size="9" fill="#b91c1c">0.969</text>
+    <rect x="222" y="183.7" width="60" height="56.3" fill="#16a34a"/>
+    <text x="252" y="175" text-anchor="middle" font-size="9" fill="#16a34a">0.862</text>
+    <text x="216" y="258" text-anchor="middle" font-size="10.5" font-weight="bold">o_proj [512,4096,4096]</text>
+    <text x="216" y="272" text-anchor="middle" font-size="9.5" fill="#166534" font-weight="bold">&minus;11%</text>
+  </g>
+
+  <!-- down_proj group: unfused 2.651 -> 173.1px, fused 2.565 -> 167.5px -->
+  <g>
+    <rect x="440" y="66.9" width="60" height="173.1" fill="#b91c1c" opacity="0.85"/>
+    <text x="470" y="58" text-anchor="middle" font-size="9" fill="#b91c1c">2.651</text>
+    <rect x="512" y="72.5" width="60" height="167.5" fill="#16a34a"/>
+    <text x="542" y="64" text-anchor="middle" font-size="9" fill="#16a34a">2.565</text>
+    <text x="506" y="258" text-anchor="middle" font-size="10.5" font-weight="bold">down_proj [512,12800,4096]</text>
+    <text x="506" y="272" text-anchor="middle" font-size="9.5" fill="#166534" font-weight="bold">&minus;3.2%</text>
+  </g>
+
+  <!-- legend -->
+  <rect x="600" y="60" width="14" height="14" fill="#b91c1c" opacity="0.85"/><text x="620" y="72" font-size="9.5">unfused (2 SDSCs)</text>
+  <rect x="600" y="80" width="14" height="14" fill="#16a34a"/><text x="620" y="92" font-size="9.5">fused (1 SDSC)</text>
+</svg>
+<figcaption>Figure 4 &mdash; The fold's saving is a near-constant ~0.09&ndash;0.11&nbsp;ms in both cases
+  &mdash; it is the eliminated add's HBM round-trip, not a fraction of the matmul. A
+  <code>[512,4096]</code> fp16 add reads+writes ~12&nbsp;MB &asymp; ~0.084&nbsp;ms at the device's
+  ~143&nbsp;GB/s read bus, plus a kernel launch. Because the saving is constant, it is a large slice of
+  the small o-proj matmul (&minus;11%) and a small slice of the wide down-proj (&minus;3.2%).</figcaption>
+</figure>
+
+<div class="callout">
+  <div class="callout-title">Honest framing &mdash; what this is, and is not</div>
+  The saving is a roughly fixed ~0.09&ndash;0.11&nbsp;ms per fold, with ~2 residual adds per layer, so
+  on the order of <strong>~1.5% of whole-prefill</strong>. That is a real, clean, shippable win and the
+  <strong>proof-of-concept for matmul-epilogue fusion on Spyre</strong> &mdash; it lights up the
+  <code>stridedadd</code> epilogue path Inductor-side with no DeepTools change. It is <em>not</em> the
+  array-fill story (&sect;6 of <a href="closing_the_gap.html">Closing the gap</a>), and it is not the
+  big GLU prize: folding the <code>silu&times;mul</code> gate into the matmul epilogue is the larger,
+  DeepTools-gated next step.
+</div>
+
+<!-- ===================== SECTION 6 ===================== -->
+<h2 id="s6">6. Validation &amp; the regression guard</h2>
+<ul>
+  <li><strong>Numerically correct</strong> on current main &mdash; the fused result matches the unfused
+    <code>matmul + residual</code> reference.</li>
+  <li><strong>17 device-free unit tests</strong> (<code>tests/inductor/test_fused_matmul_add.py</code>)
+    cover the fusion predicate, the spliced-input ordering, the output-stays-last invariant, the
+    2-entry <code>computeOp_</code>, the spec-tree fold to a single leaf, and the one-SDSC-JSON-per-pair
+    emit.</li>
+  <li><strong>Regression guard is green</strong>: a 1-D bias add stays <em>unfused</em>. The
+    <code>stridedadd</code> epilogue requires a <em>same-shape</em> residual; a broadcast bias (shape
+    <code>[N]</code>) is a <code>biasadd</code>, not a <code>stridedadd</code>, and folding it would
+    leave its data-connect without a producer &mdash; so the predicate rejects any add whose non-matmul
+    operand does not match the matmul output's element count.</li>
+</ul>
+<p>The shape check is the single guard that keeps the fusion safe: both the Inductor-side
+  <code>can_fuse_matmul_residual_add</code> gate and the backend
+  <code>_residual_add_fusion</code> require <code>residual.numel == matmul_out.numel</code>, so only a
+  true full-shape residual is ever folded.</p>
+
+<!-- ===================== SECTION 7 ===================== -->
+<h2 id="s7">7. Where this sits on the roadmap</h2>
+<table>
+  <thead><tr><th>step</th><th>what it folds</th><th>whose control</th><th>status</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>This PR</strong></td>
+      <td>residual <code>+</code> &rarr; <code>stridedadd</code> matmul epilogue</td>
+      <td>Inductor (epilogue already in <code>bmm.ddl</code>)</td>
+      <td class="good">shipped &mdash; &minus;3&ndash;11% per fold</td>
+    </tr>
+    <tr>
+      <td><strong>Next</strong></td>
+      <td>GLU <code>silu&times;mul</code> gate &rarr; matmul epilogue</td>
+      <td>DeepTools-gated (new epilogue contract)</td>
+      <td class="warn">follow-up &mdash; the larger prize</td>
+    </tr>
+    <tr>
+      <td><strong>Beyond</strong></td>
+      <td>fuse the whole FFN to one kernel; fill the wide-N array</td>
+      <td>DeepTools / Inductor codegen</td>
+      <td class="warn">see <a href="closing_the_gap.html">Closing the gap</a></td>
+    </tr>
+  </tbody>
+</table>
+<p>The value of this PR beyond its own ~1.5% is that it establishes the pattern: a matmul SDSC can
+  carry an SFP epilogue that operates on the PSUM output in place, scheduled Inductor-side, with the
+  residual spliced into the input section so DeepTools attaches the right producer. The SwiGLU gate
+  fusion reuses exactly this machinery &mdash; once DeepTools exposes a <code>silu</code>+aligned-mul
+  epilogue, the same fold removes the FFN's intermediate round-trip too.</p>
+
+</main>
+</div>
+</body>
+</html>
