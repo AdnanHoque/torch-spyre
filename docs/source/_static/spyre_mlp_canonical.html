@@ -676,16 +676,20 @@ out  = h @ Wd              # [M, 16384] @ [16384, 4096]</code></pre>
   <text x="698" y="170" text-anchor="end" font-size="9.5" fill="#16a34a" font-weight="bold">sendnn</text>
   <text x="250" y="248" text-anchor="middle" font-size="9" fill="#166534" font-weight="bold">decode (M&le;16): both on the floor &mdash; parity</text>
   <text x="470" y="202" text-anchor="middle" font-size="8.5" fill="#2563eb">tsp lifts off ~M=64</text>
-  <text x="590" y="232" text-anchor="middle" font-size="8.5" fill="#16a34a">sendnn holds floor to ~M=256</text>
+  <text x="592" y="232" text-anchor="middle" font-size="8.5" fill="#16a34a">sendnn stays low to ~M=448</text>
 </svg>
 <figcaption>Figure 9 &mdash; FFN compute time vs sequence length M (resident weights, our re-measurement). At
   decode (M=1&ndash;16) both stacks sit on the ~2.8&nbsp;ms weight-read floor &mdash; <strong>parity</strong>.
-  As M grows the array fills and the gap opens: torch-spyre lifts off the floor early (~M=64) because it
-  under-fills the array, while sendnn holds the floor to ~M=256. The gap is widest mid-range (M=256,
-  ~2.5&times;). <strong>Caveat:</strong> this resident probe under-measures the <em>absolute</em> prefill gap
-  &mdash; at M=512 it reads 1.42&times; (our proxy), whereas the authoritative production build measures the
-  wide-N matmul at 3.3&times; (&sect;3.1). The curve's <em>shape</em> (decode parity &rarr; prefill array-fill
-  gap) is the robust result, not the M=512 absolute.</figcaption>
+  As M grows the array fills and the gap opens: <strong>torch-spyre lifts off the floor early (~M=64)
+  because it under-fills the array</strong>, while sendnn &mdash; filling the array well &mdash; stays
+  floor-bound far longer (flat ~3.7&ndash;4&nbsp;ms to ~M=448) before a sharp, reproducible tiling-boundary
+  step at <strong>M&asymp;464</strong> (verified: bit-stable, present with and without SiLU; ideal cycles
+  grow linearly throughout while wall-time stays flat then steps &mdash; the array goes from floor-bound to
+  cycle-bound there). That late step is exactly why the ratio at M=512 reads only 1.42&times; in this probe:
+  it's where sendnn <em>finally</em> stops being under-fill/floor-bound, not a weakening of the gap. The
+  authoritative prefill gap stays the production wide-N matmul's 3.3&times; (&sect;3.1); the robust result is
+  the curve's <em>shape</em> &mdash; decode parity, then tsp leaving the floor far earlier than sendnn, which
+  is the array-under-fill story itself.</figcaption>
 </figure>
 
 <h3 id="why-roofline">5.4 The roofline — spec vs measured</h3>
