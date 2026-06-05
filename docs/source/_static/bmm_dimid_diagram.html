@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Why the planner declines a shared-weight (3D @ 2D) bmm</title>
+<style>
+  :root{--fg:#1a1a1a;--muted:#555;--rule:#e5e7eb;--code:#f3f4f6;--accent:#2563eb;--good:#166534;--bad:#991b1b;--warn:#92400e}
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.6;color:var(--fg);max-width:820px;margin:0 auto;padding:2.2rem 1.4rem 4rem;font-size:16px}
+  h1{font-size:1.45rem;margin:0 0 .3rem}
+  h2{font-size:1.12rem;margin-top:2rem;border-bottom:1px solid var(--rule);padding-bottom:.2rem}
+  p,li{margin:.5rem 0}
+  code{font-family:"SF Mono",Menlo,Consolas,monospace;background:var(--code);padding:.1em .35em;border-radius:4px;font-size:.9em}
+  .tldr{background:#eff6ff;border-left:3px solid var(--accent);padding:.8rem 1rem;margin:1.2rem 0;border-radius:0 4px 4px 0}
+  ol li{margin:.55rem 0}
+  .step{font-weight:600}
+  figure{margin:1.4rem 0;text-align:center}
+  figure svg{max-width:100%;height:auto}
+  .sub{color:var(--muted);font-size:.92em}
+  table{border-collapse:collapse;width:100%;margin:.6rem 0;font-size:.92em}
+  th,td{border-bottom:1px solid var(--rule);padding:.35rem .6rem;text-align:left}
+  th{background:var(--code)}
+</style>
+</head><body>
+
+<h1>Why the cost-model planner declines a shared-weight (3D&nbsp;@&nbsp;2D) bmm</h1>
+<p class="sub">The production MLP lowers to a batched matmul with a <em>shared</em> 2D weight. The work-division
+  cost model (Pass&nbsp;2) currently can't handle that shape and hands it to the default distributor
+  (Pass&nbsp;3). Here is exactly why.</p>
+
+<div class="tldr">
+  <strong>The one idea:</strong> the planner figures out which dim is <strong>M</strong> (the matmul's row
+  dim) by looking for <em>the dim that appears in only one input</em>. A normal batch dim sits in
+  <strong>both</strong> inputs, so it's easy to tell apart from M. But a <strong>shared</strong> 2D weight is
+  broadcast across the batch with <strong>stride&nbsp;0</strong> — which makes the batch dim disappear from the
+  weight's coordinates. Now <em>two</em> dims (batch and M) both "appear in only one input," the planner can't
+  tell which is M, and it bails.
+</div>
+
+<figure>
+<svg viewBox="0 0 780 440" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
+  <text x="390" y="28" text-anchor="middle" font-size="16" font-weight="700">The planner finds M by looking for the dim that lives in exactly ONE input</text>
+  <text x="390" y="48" text-anchor="middle" font-size="12" fill="#555">A batch dim normally sits in <tspan font-weight="600">both</tspan> inputs; the M (row) dim sits in <tspan font-weight="600">only the LHS</tspan>. That's how it tells them apart.</text>
+
+  <rect x="20" y="66" width="360" height="350" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="200" y="92" text-anchor="middle" font-size="14" font-weight="700" fill="#166534">&#10003; distinct weight (rank-3) &mdash; works</text>
+  <text x="200" y="116" text-anchor="middle" font-size="13" font-family="monospace">[B, M, K] &#64; [B, K, N]</text>
+  <text x="52"  y="150" font-size="11" fill="#777">dim</text>
+  <text x="160" y="150" text-anchor="middle" font-size="11" fill="#777">in LHS</text>
+  <text x="250" y="150" text-anchor="middle" font-size="11" fill="#777">in weight</text>
+  <text x="335" y="150" text-anchor="middle" font-size="11" fill="#777">in 1 input?</text>
+  <line x1="40" y1="158" x2="360" y2="158" stroke="#cbd5e1"/>
+  <rect x="20" y="172" width="360" height="22" fill="#16a34a" opacity="0.06"/>
+  <rect x="20" y="204" width="360" height="22" fill="#16a34a" opacity="0.16"/>
+  <g font-size="13">
+    <text x="52" y="188" font-weight="700">B</text><text x="160" y="188" text-anchor="middle" fill="#16a34a">&#9679;</text><text x="250" y="188" text-anchor="middle" fill="#16a34a">&#9679;</text><text x="335" y="188" text-anchor="middle" fill="#777">no (in 2)</text>
+    <text x="52" y="220" font-weight="700">M</text><text x="160" y="220" text-anchor="middle" fill="#16a34a">&#9679;</text><text x="250" y="220" text-anchor="middle" fill="#bbb">&#8212;</text><text x="335" y="220" text-anchor="middle" font-weight="700" fill="#166534">YES</text>
+    <text x="52" y="252" font-weight="700">K</text><text x="160" y="252" text-anchor="middle" fill="#16a34a">&#9679;</text><text x="250" y="252" text-anchor="middle" fill="#16a34a">&#9679;</text><text x="335" y="252" text-anchor="middle" fill="#777">sum dim</text>
+    <text x="52" y="284" font-weight="700">N</text><text x="160" y="284" text-anchor="middle" fill="#bbb">&#8212;</text><text x="250" y="284" text-anchor="middle" fill="#16a34a">&#9679;</text><text x="335" y="284" text-anchor="middle" fill="#777">output</text>
+  </g>
+  <line x1="40" y1="304" x2="360" y2="304" stroke="#cbd5e1"/>
+  <text x="200" y="338" text-anchor="middle" font-size="12.5">Exactly <tspan font-weight="700">one</tspan> "1-input" dim &rarr; it must be M.</text>
+  <text x="200" y="362" text-anchor="middle" font-size="12.5" font-weight="700" fill="#166534">M is unambiguous &rarr; planner runs &#10003;</text>
+
+  <rect x="420" y="66" width="360" height="350" rx="10" fill="#fef2f2" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="600" y="92" text-anchor="middle" font-size="14" font-weight="700" fill="#991b1b">&#10007; shared weight (rank-2) &mdash; bails</text>
+  <text x="600" y="116" text-anchor="middle" font-size="13" font-family="monospace">[B, M, K] &#64; [K, N] &rarr; broadcast</text>
+  <text x="600" y="133" text-anchor="middle" font-size="11" fill="#991b1b">the weight's batch stride is <tspan font-weight="700">0</tspan> &rarr; B vanishes from its coords</text>
+  <text x="452" y="160" font-size="11" fill="#777">dim</text>
+  <text x="560" y="160" text-anchor="middle" font-size="11" fill="#777">in LHS</text>
+  <text x="650" y="160" text-anchor="middle" font-size="11" fill="#777">in weight</text>
+  <text x="735" y="160" text-anchor="middle" font-size="11" fill="#777">in 1 input?</text>
+  <line x1="440" y1="168" x2="760" y2="168" stroke="#fca5a5"/>
+  <rect x="420" y="182" width="360" height="22" fill="#dc2626" opacity="0.12"/>
+  <rect x="420" y="214" width="360" height="22" fill="#dc2626" opacity="0.12"/>
+  <g font-size="13">
+    <text x="452" y="198" font-weight="700">B</text><text x="560" y="198" text-anchor="middle" fill="#16a34a">&#9679;</text><text x="650" y="198" text-anchor="middle" fill="#dc2626">&#10007; stride 0</text><text x="735" y="198" text-anchor="middle" font-weight="700" fill="#991b1b">YES</text>
+    <text x="452" y="230" font-weight="700">M</text><text x="560" y="230" text-anchor="middle" fill="#16a34a">&#9679;</text><text x="650" y="230" text-anchor="middle" fill="#bbb">&#8212;</text><text x="735" y="230" text-anchor="middle" font-weight="700" fill="#991b1b">YES</text>
+    <text x="452" y="262" font-weight="700">K</text><text x="560" y="262" text-anchor="middle" fill="#16a34a">&#9679;</text><text x="650" y="262" text-anchor="middle" fill="#16a34a">&#9679;</text><text x="735" y="262" text-anchor="middle" fill="#777">sum dim</text>
+    <text x="452" y="294" font-weight="700">N</text><text x="560" y="294" text-anchor="middle" fill="#bbb">&#8212;</text><text x="650" y="294" text-anchor="middle" fill="#16a34a">&#9679;</text><text x="735" y="294" text-anchor="middle" fill="#777">output</text>
+  </g>
+  <line x1="440" y1="314" x2="760" y2="314" stroke="#fca5a5"/>
+  <text x="600" y="346" text-anchor="middle" font-size="12.5"><tspan font-weight="700">Two</tspan> dims (B and M) now look like M.</text>
+  <text x="600" y="370" text-anchor="middle" font-size="12.5" font-weight="700" fill="#991b1b">Can't tell which is M &rarr; <tspan font-family="monospace">return splits</tspan> (Pass 3) &#10007;</text>
+
+  <text x="390" y="432" text-anchor="middle" font-size="11" fill="#666">Fix: teach dim-ID to recognize the stride-0 (broadcast) weight, so the batch dim is distinguishable from M again.</text>
+</svg>
+</figure>
+
+<h2>Why the 3D&nbsp;@&nbsp;2D case is the hard one — step by step</h2>
+<p>The trouble is that a <em>shared</em> weight is genuinely a broadcast (the same weight reused for every
+  batch element), and the lowering represents that broadcast in a way that erases the exact signal the
+  dim-identifier relies on. Walking it through:</p>
+<ol>
+  <li><span class="step">The MLP produces a 2D&nbsp;@&nbsp;2D matmul,</span> which gets rewritten into a bmm so
+    it can be batched: <code>_unflatten_mm_to_bmm</code> turns <code>mm(x_2D, W_2D)</code> into
+    <code>bmm(x_3D, expand(unsqueeze(W)))</code> (<code>temp_passes.py:41-45,101</code>). The result is a
+    <strong>3D&nbsp;@&nbsp;2D</strong>-in-spirit op: a real 3D activation times a weight that is the
+    <em>same</em> across the batch.</li>
+  <li><span class="step">The broadcast is a stride-0 view, not a copy.</span> <code>expand</code> gives the
+    weight a batch dimension with <strong>stride&nbsp;0</strong> — there is no per-batch weight data, just the
+    one weight read repeatedly. This is correct and is exactly what we <em>want</em> (read the weight once).</li>
+  <li><span class="step">Stride-0 dims are dropped from coordinates.</span> The coordinate system intentionally
+    omits stride-0 dims because they carry no addressing
+    (<code>compute_coordinates</code>, <code>views.py:91,108</code>). So the batch dim has coefficient 0 in the
+    weight's index and <strong>never appears in the weight's <code>device_coords</code></strong>.</li>
+  <li><span class="step">Dim-ID separates batch from M using "appears in both inputs."</span> The identifier
+    assumes a batch dim shows up in <em>both</em> operands and M shows up in <em>only the LHS</em>, then takes
+    M as the unique single-input row dim
+    (<code>m_candidates = [d for d in m_dims if _n_inputs(d) == 1]</code>, <code>work_division.py:856</code>).</li>
+  <li><span class="step">For the shared weight, that assumption is false.</span> Because step&nbsp;3 removed the
+    batch dim from the weight's coords, the batch dim now appears in <strong>only the LHS</strong> — exactly
+    like M. So <code>m_candidates</code> holds <em>two</em> dims (batch and M), <code>len != 1</code>, and the
+    planner returns <code>None</code> (<code>work_division.py:857-858</code>), caught as
+    <code>if dims is None: return splits</code> (<code>work_division.py:1218-1219</code>) — the op falls
+    through to Pass&nbsp;3.</li>
+</ol>
+<p>The deeper reason it's "complex": from the coordinates alone, a broadcast-batch bmm is
+  <strong>indistinguishable</strong> from a plain 2D matmul that happens to have an extra leading dim. The
+  information that disambiguates them — "this operand is a rank-2 weight that was broadcast" — has been thrown
+  away by the time dim-ID runs. Recovering it needs <strong>weight-rank awareness</strong> (knowing the weight
+  was broadcast), not just coordinate inspection.</p>
+
+<h2>Two separate gaps — keep them apart</h2>
+<table>
+  <thead><tr><th>gap</th><th>what it is</th><th>load-bearing today?</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Dim-ID ambiguity</strong></td><td>stride-0 broadcast hides the batch dim → batch looks like M → bail (the steps above)</td><td><strong>Yes</strong> — this is why shared-weight bmms decline now</td></tr>
+    <tr><td><strong>Cost-function over-count</strong></td><td>the HBM term charges the weight as <code>B·K·N</code> (read B times), with no notion of a shared rank-2 weight read once (<code>work_division.py:659</code>)</td><td>No — separate, latent; only bites <em>after</em> dim-ID is fixed and the op actually reaches costing</td></tr>
+  </tbody>
+</table>
+
+<h2>The fix (follow-up)</h2>
+<p>Make dim-ID recognize the broadcast: detect the stride-0 weight (or carry the original weight rank through
+  the lowering) so the batch dim is distinguishable from M again. Once shared-weight bmms reach the cost model,
+  the <code>B·K·N</code> weight term should also be corrected to <code>K·N</code> for a shared weight so the
+  broadcast's HBM cost isn't over-counted.</p>
+
+</body></html>
