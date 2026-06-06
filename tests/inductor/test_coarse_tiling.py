@@ -40,7 +40,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from sympy import Integer, Symbol, simplify, sympify  # noqa: F401
+from sympy import Integer, Mod, Symbol, floor, simplify, sympify  # noqa: F401
 
 from torch._inductor.utils import IndentedBuffer
 from torch.utils._ordered_set import OrderedSet
@@ -52,7 +52,13 @@ from torch_spyre._inductor.codegen.compute_ops import (
     _tiled_byte_stride,
     generate_sdsc,
 )
-from torch_spyre._inductor.codegen.superdsc import SDSCArgs, SDSCSpec, compile_op_spec
+from torch_spyre._inductor.codegen.superdsc import (
+    SDSCArgs,
+    SDSCSpec,
+    compile_op_spec,
+    parse_op_spec,
+)
+from torch_spyre._inductor.constants import SHARED_WEIGHT_UNIT_BMM_INFO_KEY
 from torch_spyre._inductor.coarse_tile import coarse_tile, _divide_ranges
 from torch_spyre._inductor.op_spec import LoopSpec, OpSpec, TensorArg, UnimplementedOp
 from torch_spyre._inductor.scheduler import (
@@ -61,7 +67,11 @@ from torch_spyre._inductor.scheduler import (
     _loop_group_id,
     build_loop_scheduler_nodes,
 )
-from torch_spyre._inductor.spyre_kernel import _codegen_op_spec_list, _iter_op_specs
+from torch_spyre._inductor.spyre_kernel import (
+    _codegen_op_spec_list,
+    _iter_op_specs,
+    _preserve_shared_weight_unit_bmm_dim,
+)
 
 _FP16 = DataFormats.SEN169_FP16
 
@@ -1128,6 +1138,111 @@ class TestCompileOpSpecSymbolMapping(unittest.TestCase):
         self.assertIn("affine.apply", mlir)
         self.assertIn("affine_map", mlir)
         self.assertIn("scf.for", mlir)
+
+
+class TestSharedWeightUnitBmmLayout(unittest.TestCase):
+    def _make_shared_weight_bmm_args(self):
+        c0 = Symbol("c0")
+        c1 = Symbol("c1")
+        c2 = Symbol("c2")
+        input_arg = TensorArg(
+            is_input=True,
+            arg_index=0,
+            device_dtype=_FP16,
+            device_size=[512, 64, 1, 64],
+            device_coordinates=[c0, floor(c2 / 64), Integer(0), Mod(c2, 64)],
+            allocation={"hbm": 0},
+            stride_map=[4096, 64, -1, 1],
+        )
+        kernel_arg = TensorArg(
+            is_input=True,
+            arg_index=1,
+            device_dtype=_FP16,
+            device_size=[200, 4096, 64],
+            device_coordinates=[floor(c1 / 64), c2, Mod(c1, 64)],
+            allocation={"hbm": 0x400000000},
+            stride_map=[64, 12800, 1],
+        )
+        output_arg = TensorArg(
+            is_input=False,
+            arg_index=2,
+            device_dtype=_FP16,
+            device_size=[512, 200, 1, 64],
+            device_coordinates=[c0, floor(c1 / 64), Integer(0), Mod(c1, 64)],
+            allocation={"hbm": 0x800000000},
+            stride_map=[12800, 64, -1, 1],
+        )
+        iteration_space = {
+            c0: (Integer(512), 4),
+            c1: (Integer(12800), 8),
+            c2: (Integer(4096), 1),
+        }
+        return iteration_space, [input_arg, kernel_arg, output_arg]
+
+    def test_marked_shared_weight_bmm_emits_sendnn_like_unit_layout(self):
+        iteration_space, args = self._make_shared_weight_bmm_args()
+        op_info = {SHARED_WEIGHT_UNIT_BMM_INFO_KEY: {"batch_dim": 0}}
+
+        iteration_space = _preserve_shared_weight_unit_bmm_dim(
+            "batchmatmul", iteration_space, args, op_info
+        )
+        sdsc_spec, _ = parse_op_spec(
+            OpSpec(
+                op="batchmatmul",
+                is_reduction=True,
+                iteration_space=iteration_space,
+                args=args,
+                op_info=op_info,
+            )
+        )
+
+        self.assertEqual(
+            [str(dim) for dim in sdsc_spec.iteration_space],
+            ["x", "mb", "out", "in"],
+        )
+        self.assertEqual(
+            [str(dim) for dim in sdsc_spec.work_slices],
+            ["x", "mb", "out", "in"],
+        )
+        input_layout = sdsc_spec.layouts[sdsc_spec.args[0].layout]
+        output_layout = sdsc_spec.layouts[sdsc_spec.args[-1].layout]
+        self.assertEqual(
+            [str(dim) for dim in input_layout["dim_order"]],
+            ["mb", "in", "x"],
+        )
+        self.assertEqual(
+            [str(dim) for dim in output_layout["dim_order"]],
+            ["mb", "out", "x"],
+        )
+        self.assertEqual(str(input_layout["stick_dim_order"]), "in")
+        self.assertEqual(str(output_layout["stick_dim_order"]), "out")
+
+    def test_unmarked_bmm_keeps_original_iteration_space(self):
+        iteration_space, args = self._make_shared_weight_bmm_args()
+        original_keys = list(iteration_space)
+        result = _preserve_shared_weight_unit_bmm_dim(
+            "batchmatmul", iteration_space, args, {}
+        )
+
+        self.assertIs(result, iteration_space)
+        self.assertEqual(list(result), original_keys)
+        self.assertEqual(args[0].device_coordinates[2], Integer(0))
+
+    def test_marked_bmm_with_ambiguous_unit_dim_is_ignored(self):
+        iteration_space, args = self._make_shared_weight_bmm_args()
+        original_keys = list(iteration_space)
+        args[0].device_size[0] = Integer(1)
+        args[0].device_coordinates[0] = Integer(0)
+        op_info = {SHARED_WEIGHT_UNIT_BMM_INFO_KEY: {"batch_dim": 0}}
+
+        result = _preserve_shared_weight_unit_bmm_dim(
+            "batchmatmul", iteration_space, args, op_info
+        )
+
+        self.assertIs(result, iteration_space)
+        self.assertEqual(list(result), original_keys)
+        self.assertEqual(args[0].device_coordinates[0], Integer(0))
+        self.assertEqual(args[0].device_coordinates[2], Integer(0))
 
 
 # ===========================================================================

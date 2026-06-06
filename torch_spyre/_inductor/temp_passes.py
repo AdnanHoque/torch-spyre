@@ -23,6 +23,7 @@ from torch._inductor.pattern_matcher import (
     register_graph_pattern,
 )
 from .logging_utils import get_inductor_logger
+from .constants import SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY
 from .pass_utils import copy_fx_custom_meta
 
 aten = torch.ops.aten
@@ -37,6 +38,13 @@ _RESHAPE_OPS = (
 
 mm_to_bmm_pass = PatternMatcherPass(pass_name="unflatten_mm_to_bmm")
 bmm_unflatten_pass = PatternMatcherPass(pass_name="unflatten_bmm_batch_dims")
+
+
+def _is_static_one(value) -> bool:
+    try:
+        return int(value) == 1
+    except (TypeError, ValueError):
+        return False
 
 
 @register_graph_pattern(
@@ -141,6 +149,10 @@ def _unflatten_mm_to_bmm(
         )
         bmm_node.meta["val"] = torch.empty(output_shape, dtype=rhs_dtype, device="meta")
         copy_fx_custom_meta(node, bmm_node)
+        if len(batch_dims) == 1 and _is_static_one(batch_dims[0]):
+            custom = dict(bmm_node.meta.get("custom") or {})
+            custom[SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY] = {"batch_dim": 0}
+            bmm_node.meta["custom"] = custom
 
     # Replace all uses of mm and output view with the bmm
     node.replace_all_uses_with(bmm_node)
