@@ -17,6 +17,16 @@ IDENTITY_OP = "identity"
 RESTICKIFY_OP = "ReStickifyOpHBM"
 BATCH_MATMUL_FP8_OP = "batchmatmulfp8"
 
+# The pointwise op name that the matmul-residual-add epilogue fuses on.
+RESIDUAL_ADD_OP = "add"
+
+# opFuncName emitted for the residual-add matmul epilogue.  This string parses
+# to OpFuncs::STRIDED_ADD in the DeepTools backend (dscdefn.cpp), which is the
+# token the DDC/DVS matmul-epilogue path detects (bmm.ddl ``stradd_op``) to
+# fold a residual add into the matmul kernel.  The plain pointwise "add"
+# (OpFuncs::ADD) is a PSUM/partial-reduction token, NOT the residual epilogue.
+STRIDED_ADD_OP = "stridedadd"
+
 # Type casting operators from deeptools
 DL16TOFP32_OP = "dl16tofp32"
 FP32TODL16_OP = "fp32todl16"

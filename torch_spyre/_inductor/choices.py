@@ -18,6 +18,8 @@ import torch
 from torch._inductor.choices import InductorChoices
 from torch._inductor.scheduler import BaseSchedulerNode, Scheduler
 
+from .scheduler import can_fuse_matmul_residual_add
+
 
 class SpyreHeuristics(InductorChoices):
     @staticmethod
@@ -39,7 +41,8 @@ class SpyreHeuristics(InductorChoices):
         node2: BaseSchedulerNode,
         shared_data_score: int,
     ) -> bool:
-        return False
+        # Only the narrow matmul -> residual-add vertical fusion is allowed.
+        return can_fuse_matmul_residual_add(node1, node2)
 
     @staticmethod
     def can_fuse_vertical(
@@ -48,7 +51,7 @@ class SpyreHeuristics(InductorChoices):
         node2: BaseSchedulerNode,
         shared_data_score: int,
     ) -> bool:
-        return False
+        return can_fuse_matmul_residual_add(node1, node2)
 
     @staticmethod
     def can_fuse_horizontal(

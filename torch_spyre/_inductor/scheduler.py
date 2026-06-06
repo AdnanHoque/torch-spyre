@@ -15,6 +15,7 @@
 from typing import Sequence, Union
 
 import sympy
+import torch
 
 from torch._inductor.utils import IndentedBuffer
 from torch._inductor.utils import (
@@ -33,11 +34,96 @@ from torch._inductor.codecache import code_hash
 from torch.utils._ordered_set import OrderedSet
 
 from .spyre_kernel import SpyreKernel
-from .pass_utils import iteration_space
+from .pass_utils import iteration_space, _is_matmul_op
 from .logging_utils import get_inductor_logger
 from .op_spec import LoopSpec
 
 logger = get_inductor_logger("scheduler")
+
+
+_ADD_ATEN_TARGETS = (
+    torch.ops.aten.add.Tensor,
+    torch.ops.aten.add.default,
+)
+
+
+def _is_matmul_node(node: BaseSchedulerNode) -> bool:
+    """True if ``node`` is a matmul reduction SchedulerNode."""
+    if not isinstance(node, SchedulerNode) or not node.is_reduction():
+        return False
+    ir_op = node.node
+    return ir_op is not None and _is_matmul_op(ir_op)
+
+
+def _is_residual_add_node(node: BaseSchedulerNode) -> bool:
+    """True if ``node`` is a pointwise ``aten.add`` (the residual epilogue)."""
+    if not isinstance(node, SchedulerNode) or node.is_reduction():
+        return False
+    ir_node = node.node
+    origins = getattr(ir_node, "origins", None) or getattr(
+        getattr(ir_node, "data", None), "origins", None
+    )
+    if not origins:
+        return False
+    return any(getattr(fx, "target", None) in _ADD_ATEN_TARGETS for fx in origins)
+
+
+def _numel(name: str):
+    """Best-effort element count for buffer ``name`` (None if unavailable)."""
+    buf = V.graph.get_buffer(name)
+    if buf is None:
+        return None
+    try:
+        return V.graph.sizevars.size_hint(buf.get_numel())
+    except Exception:
+        return None
+
+
+def _add_residual_is_full(node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+    """The add's non-matmul operand must be a full-shape residual, not a bias.
+
+    A broadcast bias (e.g. ``F.linear`` bias, shape ``[N]``) is a ``biasadd``,
+    not a ``stridedadd``; folding it as a residual epilogue produces an invalid
+    SDSC.  Require the residual read to have the same element count as the
+    matmul output.
+    """
+    mm_buffers = node1.get_buffer_names()
+    residual_reads = [
+        dep.name for dep in node2.read_writes.reads if dep.name not in mm_buffers
+    ]
+    if len(residual_reads) != 1:
+        return False
+    out_numel = None
+    for w in node2.read_writes.writes:
+        out_numel = _numel(w.name)
+        break
+    res_numel = _numel(residual_reads[0])
+    if out_numel is None or res_numel is None:
+        # Be conservative: if we cannot verify shapes, do not fuse.
+        return False
+    return res_numel == out_numel
+
+
+def can_fuse_matmul_residual_add(
+    node1: BaseSchedulerNode, node2: BaseSchedulerNode
+) -> bool:
+    """Narrow vertical-fusion gate: a matmul absorbing a consuming residual add.
+
+    This is the only matmul-epilogue fusion that is correct to fold
+    Inductor-side today: ``stridedadd`` is already in the matmul template's DDL
+    menu (bmm.ddl) and DDC whitelist, so a 2-entry computeOp_ SDSC is consumed
+    correctly end-to-end.  Horizontal fusion and the two-matmul case stay off.
+
+    Only a full-shape residual add is fused; a broadcast bias add is left
+    unfused (it is a ``biasadd``, not a ``stridedadd``).
+    """
+    if not _is_matmul_node(node1) or not _is_residual_add_node(node2):
+        return False
+    # The add must consume the matmul's output.
+    mm_buffers = node1.get_buffer_names()
+    if not any(dep.name in mm_buffers for dep in node2.read_writes.reads):
+        return False
+    return _add_residual_is_full(node1, node2)
 
 
 def _find_leaf_sched_node(node: BaseSchedulerNode):
@@ -295,9 +381,13 @@ class SuperDSCScheduling(BaseScheduling):
     ) -> bool:
         """
         Check whether node1 and node2 can be vertically fused or not.
+
+        Narrowly enabled for a matmul SchedulerNode absorbing a consuming
+        residual add (``add_linear_mul`` / ``stridedadd`` epilogue), which folds
+        into one SDSC with a 2-entry computeOp_.  All other vertical fusion is
+        still off (issue #826), and horizontal fusion stays off too.
         """
-        # TODO: Revisit this as part of https://github.com/torch-spyre/torch-spyre/issues/826
-        return False
+        return can_fuse_matmul_residual_add(node1, node2)
 
     def can_fuse_horizontal(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

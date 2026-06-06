@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
 import json
 import os
 from collections.abc import Sequence
@@ -20,7 +21,11 @@ from typing import Any
 import sympy
 
 from torch_spyre._inductor import config as _spyre_config
-from torch_spyre._inductor.codegen.superdsc import compile_op_spec
+from torch_spyre._inductor.codegen.superdsc import (
+    compile_fused_matmul_add,
+    compile_op_spec,
+    is_residual_add_fusion,
+)
 from torch_spyre._inductor.codegen.unroll import unroll_loop_specs
 from torch_spyre._inductor.op_spec import LoopSpec, OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
@@ -39,6 +44,53 @@ logger = get_inductor_logger("sdsc_compile")
 #                       {tiled_sym: stride_bytes} for tiled HBM tensors,
 #                       empty dict for non-tiled / lx tensors
 _CompiledEntry = tuple[Any, list[int], list[dict]]
+
+
+@dataclasses.dataclass
+class _FusedMatmulAdd:
+    """A folded (matmul, residual-add) pair that compiles to ONE SDSC.
+
+    A matmul OpSpec immediately followed by a residual-add OpSpec that consumes
+    its output is replaced (in the spec tree, before Pass 1) by this single
+    leaf node, so both passes see exactly one SDSC for the pair: the standalone
+    add SDSC is never emitted.  The fused SDSC carries a 2-entry computeOp_
+    ([batchmatmul, stridedadd]).
+    """
+
+    matmul: OpSpec
+    add: OpSpec
+
+
+def _fold_residual_adds(specs: list) -> list:
+    """Fold adjacent matmul + residual-add OpSpec siblings into _FusedMatmulAdd.
+
+    Recurses into ``LoopSpec`` bodies so coarse-tiled paths fold per-iteration.
+    A matmul OpSpec immediately followed by a fusible residual-add OpSpec is
+    replaced by one ``_FusedMatmulAdd``; everything else passes through intact.
+    Operates on the (possibly already-unrolled) spec list, preserving order.
+    """
+    result: list = []
+    i = 0
+    n = len(specs)
+    while i < n:
+        cur = specs[i]
+        if isinstance(cur, LoopSpec):
+            result.append(dataclasses.replace(cur, body=_fold_residual_adds(cur.body)))
+            i += 1
+            continue
+        nxt = specs[i + 1] if i + 1 < n else None
+        if (
+            isinstance(cur, OpSpec)
+            and isinstance(nxt, OpSpec)
+            and is_residual_add_fusion(cur, nxt)
+        ):
+            logger.info("Fusing matmul + residual-add into one SDSC (stridedadd)")
+            result.append(_FusedMatmulAdd(matmul=cur, add=nxt))
+            i += 2
+        else:
+            result.append(cur)
+            i += 1
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +132,12 @@ def generate_bundle(
         unroll_loops = _spyre_config.unroll_loops
 
     specs_list: list = unroll_loop_specs(list(specs)) if unroll_loops else list(specs)
+
+    # Fold matmul + residual-add OpSpec pairs into single _FusedMatmulAdd
+    # leaves (recursing into LoopSpec bodies).  Done after unrolling so the
+    # matmul/add stay adjacent per-iteration, and before both passes so the
+    # compiled-entry stream stays one entry per leaf.
+    specs_list = _fold_residual_adds(specs_list)
 
     # -----------------------------------------------------------------------
     # Pass 1: compile all OpSpecs depth-first.
@@ -193,16 +251,26 @@ def _compile_specs(
                 output_dir,
                 use_symbols=use_symbols,
             )
-        elif isinstance(entry, OpSpec):
+        elif isinstance(entry, (OpSpec, _FusedMatmulAdd)):
             idx = sdsc_counter[0]
             sdsc_counter[0] += 1
-            sdsc_json, local_sym_values, affine_strides = compile_op_spec(
-                idx,
-                entry,
-                symbols,
-                symbol_id_offset_counter[0],
-                use_symbols=use_symbols,
-            )
+            if isinstance(entry, _FusedMatmulAdd):
+                sdsc_json, local_sym_values, affine_strides = compile_fused_matmul_add(
+                    idx,
+                    entry.matmul,
+                    entry.add,
+                    symbols,
+                    symbol_id_offset_counter[0],
+                    use_symbols=use_symbols,
+                )
+            else:
+                sdsc_json, local_sym_values, affine_strides = compile_op_spec(
+                    idx,
+                    entry,
+                    symbols,
+                    symbol_id_offset_counter[0],
+                    use_symbols=use_symbols,
+                )
             symbol_id_offset_counter[0] += len(local_sym_values)
             compiled.append((sdsc_json, local_sym_values, affine_strides))
             file_name = f"sdsc_{idx}.json"
@@ -245,7 +313,7 @@ def _collect_affine_maps(
                 loop_var_depth + [len(loop_var_depth)],
                 affine_map_index,
             )
-        elif isinstance(entry, OpSpec):
+        elif isinstance(entry, (OpSpec, _FusedMatmulAdd)):
             _, _, affine_strides = next(compiled_iter)
             for tensor_strides in affine_strides:
                 if not tensor_strides:
@@ -307,7 +375,7 @@ def _emit_specs(
             )
             f.write(f"{tab}}}\n")
 
-        elif isinstance(entry, OpSpec):
+        elif isinstance(entry, (OpSpec, _FusedMatmulAdd)):
             sdsc_json, local_sym_values, affine_strides = next(compiled_iter)
             # Determine the JSON filename from the sdsc_json key.
             sdsc_name = next(iter(sdsc_json))

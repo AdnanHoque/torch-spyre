@@ -21,12 +21,15 @@ from sympy import Integer, Symbol, Expr, Mod, floor
 from torch._inductor.virtualized import V
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.constants import (
+    BATCH_MATMUL_OP,
     IDENTITY_OP,
     INPUT_DIM_LABELS,
     OUTPUT_DIM_LABELS,
     LAYOUT_LABELS,
     MATMUL_DIM_LABELS,
     MATMUL_LAYOUT_LABELS,
+    RESIDUAL_ADD_OP,
+    STRIDED_ADD_OP,
     TOPK_OPS,
 )
 from torch_spyre._inductor import config as _spyre_config
@@ -76,6 +79,23 @@ class SDSCArgs:
 
 
 @dataclasses.dataclass
+class Epilogue:
+    """A compute op fused onto the tail of a primary op in a single SDSC.
+
+    The epilogue runs on the SFP after the primary (matmul) op and shares the
+    primary's iteration space and output (PSUM) tensor.  ``input_indices`` and
+    ``output_index`` index into the enclosing ``SDSCSpec.args`` list, so the
+    epilogue references the primary's output tensor plus any auxiliary tensors
+    (e.g. the residual tensor for a ``stridedadd``).
+    """
+
+    opfunc: str
+    execution_unit: str
+    input_indices: list[int]
+    output_index: int
+
+
+@dataclasses.dataclass
 class SDSCSpec:
     opfunc: str
     execution_unit: str
@@ -90,6 +110,7 @@ class SDSCSpec:
     args: list[SDSCArgs]
     constants: dict[str, Any]
     coordinate_masking: dict[Symbol, Any]
+    epilogues: list[Epilogue] = dataclasses.field(default_factory=list)
 
     def __str__(self) -> str:
         iter_space = ", ".join(f"{k}={v}" for k, v in self.iteration_space.items())
@@ -128,6 +149,16 @@ class SDSCSpec:
         if self.constants:
             parts.append(
                 f"  constants=[{', '.join(f'{k}={v}' for k, v in self.constants.items())}]"
+            )
+        if self.epilogues:
+            parts.append(
+                "  epilogues=["
+                + ", ".join(
+                    f"{e.opfunc}(exUnit={e.execution_unit}, "
+                    f"in={e.input_indices}, out={e.output_index})"
+                    for e in self.epilogues
+                )
+                + "]"
             )
         return "SDSCSpec(\n" + "\n".join(parts) + "\n)"
 
@@ -643,6 +674,140 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     )
 
 
+def _same_tensor(a: TensorArg, b: TensorArg) -> bool:
+    """Two TensorArgs refer to the same device buffer.
+
+    Buffers are linked by their allocation dict (HBM/pool/lx address), which is
+    shared object-identity across ops that read/write the same buffer.  Falls
+    back to comparing the resolved address values for robustness after the
+    OpSpec list round-trips through wrapper serialisation (where the dicts are
+    reconstructed and no longer share identity).
+    """
+    if a.allocation is b.allocation:
+        return True
+    if not isinstance(a.allocation, dict) or not isinstance(b.allocation, dict):
+        return False
+    for key in ("pool", "lx", "hbm"):
+        if key in a.allocation and key in b.allocation:
+            return a.allocation[key] == b.allocation[key]
+    return False
+
+
+def _residual_add_fusion(
+    matmul: OpSpec, add: OpSpec
+) -> tuple[TensorArg, TensorArg] | None:
+    """Return (residual_input, final_output) if ``add`` is a residual add that
+    consumes ``matmul``'s output, else None.
+
+    The fusible pattern is ``out = matmul(x, y) + residual`` where ``residual``
+    is a *full* tensor with the same device shape as the matmul output.  The
+    ``stridedadd`` epilogue (bmm.ddl ``stradd_op`` / DDC whitelist) expects a
+    same-shape residual; a broadcast bias (e.g. ``F.linear`` bias, shape ``[N]``)
+    is a ``biasadd``, NOT a ``stridedadd``, and must not be folded here (it would
+    leave the residual data-connect without a producer in DDC).
+    """
+    if matmul.op != BATCH_MATMUL_OP or add.op != RESIDUAL_ADD_OP:
+        return None
+    # add: args = [input_a, input_b, output]; matmul: args = [x, y, mm_out].
+    if len(add.args) != 3 or len(matmul.args) != 3:
+        return None
+    mm_out = matmul.args[-1]
+    add_inputs = [a for a in add.args if a.is_input]
+    add_outputs = [a for a in add.args if not a.is_input]
+    if len(add_inputs) != 2 or len(add_outputs) != 1:
+        return None
+    consumes = [a for a in add_inputs if _same_tensor(a, mm_out)]
+    residuals = [a for a in add_inputs if not _same_tensor(a, mm_out)]
+    if len(consumes) != 1 or len(residuals) != 1:
+        return None
+    residual, final_out = residuals[0], add_outputs[0]
+    # Reject broadcast operands (e.g. a 1-D bias): the residual and the output
+    # must have the same device element count as the matmul output.
+    out_elems = math.prod(mm_out.device_size)
+    if (
+        math.prod(residual.device_size) != out_elems
+        or math.prod(final_out.device_size) != out_elems
+    ):
+        return None
+    return residual, final_out
+
+
+def _retarget_buffer(out_arg: SDSCArgs, target: TensorArg) -> SDSCArgs:
+    """Clone the matmul-output SDSCArgs, pointing it at ``target``'s buffer.
+
+    Both the residual aux tensor and the fused final output are
+    elementwise-aligned with the matmul output, so they share the OUTPUT
+    layout/scales/strides; only the buffer address differs.
+    """
+    return dataclasses.replace(
+        out_arg,
+        allocation=target.allocation,
+        start_address=(
+            target.allocation.get("pool")
+            if "pool" in target.allocation
+            else target.allocation.get("lx")
+            if "lx" in target.allocation
+            else target.allocation.get("hbm")
+        ),
+    )
+
+
+def parse_fused_matmul_add(matmul: OpSpec, add: OpSpec) -> tuple["SDSCSpec", "dict"]:
+    """Parse a fused matmul + residual-add pair into one SDSC spec.
+
+    The matmul is parsed normally (computeOp_[0], exUnit "pt").  A ``stridedadd``
+    epilogue (computeOp_[1], exUnit "sfp") is appended that reads the matmul
+    output + residual and writes the result, sharing the matmul's iteration
+    space and PSUM output.
+
+    The matmul-output tensor is retargeted to the add's *final* output buffer:
+    on device the ``stradd_op`` (bmm.ddl) writes its result into ``%outtensor``
+    (the matmul output), so the matmul must produce its product directly in the
+    fused kernel's output buffer for downstream consumers to read the right
+    data.  The original matmul-output intermediate buffer is then unused.
+
+    The residual is spliced into the *input* section of ``args`` (between the
+    matmul inputs and the output), NOT appended after the output.  The
+    DeepTools scheduler keys input-vs-output on labeledDs position: the last
+    labeledDs is the output (stored), every preceding labeledDs is an
+    HBM-pinned input that gets an HBM->LX load transfer.  An appended-after-
+    output residual would become the "output" slot (no load) and leave its
+    ``l3_lx_resadd`` data-connect without a producer (DDC ddcv1.cpp:3191).
+    ``num_inputs`` stays at the matmul's real input count, so the matmul
+    computeOp's ``inputLabeledDs`` still references only x and y.
+
+    Returns ``(SDSCSpec, symbol_mapping)`` to match ``parse_op_spec``; the
+    mapping is the matmul's, since the residual is a non-tiled HBM input that
+    carries no new tiled symbols.
+    """
+    fusion = _residual_add_fusion(matmul, add)
+    assert fusion is not None, "parse_fused_matmul_add called on a non-fusible pair"
+    residual, final_out = fusion
+
+    spec, symbol_mapping = parse_op_spec(matmul)
+    out_index = len(spec.args) - 1  # matmul output (last arg)
+    # Retarget the matmul output to the fused kernel's final output buffer.
+    spec.args[out_index] = _retarget_buffer(spec.args[out_index], final_out)
+
+    # Splice the residual into the input section, just before the output, so
+    # the output remains the last labeledDs.  The residual shares the output's
+    # device layout (same [M, N] shape); only its buffer address differs.
+    residual_arg = _retarget_buffer(spec.args[out_index], residual)
+    residual_index = out_index
+    spec.args.insert(residual_index, residual_arg)
+    out_index = len(spec.args) - 1  # output is now the last arg again
+
+    spec.epilogues.append(
+        Epilogue(
+            opfunc=STRIDED_ADD_OP,
+            execution_unit="sfp",
+            input_indices=[out_index, residual_index],
+            output_index=out_index,
+        )
+    )
+    return spec, symbol_mapping
+
+
 def compile_op_spec(
     idx: int,
     op_spec: OpSpec,
@@ -665,3 +830,39 @@ def compile_op_spec(
         tiled_symbols=tiled_symbols,
         use_symbols=use_symbols,
     )
+
+
+def compile_fused_matmul_add(
+    idx: int,
+    matmul: OpSpec,
+    add: OpSpec,
+    symbols: list[int],
+    symbol_id_offset: int = 0,
+    use_symbols: bool = False,
+) -> tuple[Any, list[int], list[dict]]:
+    """Compile a fused matmul + residual-add pair into one SDSC JSON.
+
+    Mirrors ``compile_op_spec`` but parses the pair via
+    ``parse_fused_matmul_add``.  Tiled symbols come from the matmul (the spliced
+    residual is a non-tiled HBM input, so it contributes an empty
+    ``affine_strides`` entry parallel to its position in ``args``).
+    """
+    sdsc_spec, symbol_mapping = parse_fused_matmul_add(matmul, add)
+    logger.debug("%s", sdsc_spec)
+    tiled_symbols = [
+        symbol_mapping[s] for s in matmul.tiled_symbols if s in symbol_mapping
+    ]
+    return generate_sdsc(
+        idx,
+        sdsc_spec,
+        symbols,
+        symbol_id_offset,
+        tiled_symbols=tiled_symbols,
+        use_symbols=use_symbols,
+    )
+
+
+def is_residual_add_fusion(matmul: OpSpec, add: OpSpec) -> bool:
+    """Public predicate: can ``add`` be folded into ``matmul`` as a stridedadd
+    epilogue in a single SDSC?"""
+    return _residual_add_fusion(matmul, add) is not None
