@@ -71,6 +71,7 @@ from torch_spyre._inductor.spyre_kernel import (
     _codegen_op_spec_list,
     _iter_op_specs,
     _preserve_shared_weight_unit_bmm_dim,
+    _shared_weight_unit_bmm_info_from_sizes,
 )
 
 _FP16 = DataFormats.SEN169_FP16
@@ -1243,6 +1244,34 @@ class TestSharedWeightUnitBmmLayout(unittest.TestCase):
         self.assertEqual(list(result), original_keys)
         self.assertEqual(args[0].device_coordinates[0], Integer(0))
         self.assertEqual(args[0].device_coordinates[2], Integer(0))
+
+    def test_shared_weight_unit_bmm_info_matches_prefill_matmul(self):
+        self.assertEqual(
+            _shared_weight_unit_bmm_info_from_sizes(
+                [Integer(1), Integer(512), Integer(4096)],
+                [Integer(4096), Integer(12800)],
+                [Integer(1), Integer(512), Integer(12800)],
+            ),
+            {"batch_dim": 0},
+        )
+
+    def test_shared_weight_unit_bmm_info_rejects_batched_weight(self):
+        self.assertIsNone(
+            _shared_weight_unit_bmm_info_from_sizes(
+                [Integer(4), Integer(1), Integer(4096)],
+                [Integer(4), Integer(4096), Integer(12800)],
+                [Integer(4), Integer(1), Integer(12800)],
+            )
+        )
+
+    def test_shared_weight_unit_bmm_info_rejects_non_unit_batch(self):
+        self.assertIsNone(
+            _shared_weight_unit_bmm_info_from_sizes(
+                [Integer(4), Integer(512), Integer(4096)],
+                [Integer(4096), Integer(12800)],
+                [Integer(4), Integer(512), Integer(12800)],
+            )
+        )
 
 
 # ===========================================================================
