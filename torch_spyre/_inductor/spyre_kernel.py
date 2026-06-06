@@ -60,6 +60,36 @@ import logging
 logger = get_inductor_logger("spyre_kernel")
 
 
+def _is_static_one(value: Any) -> bool:
+    try:
+        return concretize_expr(value) == 1
+    except Exception:
+        return False
+
+
+def _same_static_size(lhs: Any, rhs: Any) -> bool:
+    try:
+        return concretize_expr(lhs) == concretize_expr(rhs)
+    except Exception:
+        return False
+
+
+def _shared_weight_unit_bmm_info_from_sizes(
+    x_size: Sequence[Any], y_size: Sequence[Any], out_size: Sequence[Any]
+) -> dict[str, int] | None:
+    if len(x_size) != 3 or len(y_size) != 2 or len(out_size) != 3:
+        return None
+    if not (_is_static_one(x_size[0]) and _is_static_one(out_size[0])):
+        return None
+    if not (
+        _same_static_size(x_size[1], out_size[1])
+        and _same_static_size(x_size[2], y_size[0])
+        and _same_static_size(y_size[1], out_size[2])
+    ):
+        return None
+    return {"batch_dim": 0}
+
+
 class RValue(ABC):
     """
     An RValue is an expression that can appear on the right hand side of an assignment.
@@ -661,6 +691,12 @@ class SpyreKernel(Kernel[CSEVariable]):
                 raise Unsupported(f"invalid {value.op} arguments {value.arguments}")
             x = value.arguments[0]
             y = value.arguments[1]
+            if SHARED_WEIGHT_UNIT_BMM_INFO_KEY not in op_info:
+                shared_weight_info = _shared_weight_unit_bmm_info_from_sizes(
+                    x.layout.size, y.layout.size, dst.layout.size
+                )
+                if shared_weight_info is not None:
+                    op_info[SHARED_WEIGHT_UNIT_BMM_INFO_KEY] = shared_weight_info
             args = [
                 self.create_tensor_arg(True, x.name, x),
                 self.create_tensor_arg(True, y.name, y),
