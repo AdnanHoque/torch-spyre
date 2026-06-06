@@ -104,11 +104,20 @@ def enable_spyre_context(
     old_loop = Loops.has_large_inner_fn
     Loops.has_large_inner_fn = lambda self, threshold=None: True
 
-    from torch._inductor.fx_passes import joint_graph
+    from torch._inductor.fx_passes import fuse_attention, joint_graph
 
     origin_pass = list(joint_graph.pass_patterns)
     # disable mul_softmax_pattern and div_softmax_pattern for now
     joint_graph.pass_patterns.pop()
+
+    old_sfdp_init = fuse_attention._sfdp_init
+
+    def _spyre_sfdp_init(input_device=None):
+        if getattr(input_device, "type", None) == "spyre":
+            return None
+        return old_sfdp_init(input_device)
+
+    fuse_attention._sfdp_init = _spyre_sfdp_init
 
     # Inject the pre_scheduling_passes before the Scheduler is constructed,
     # allowing the passes to modify the graph IR (buffers, inputs, constants).
@@ -134,5 +143,6 @@ def enable_spyre_context(
             yield spyre_context_decompositions
         finally:
             joint_graph.pass_patterns[:] = origin_pass
+            fuse_attention._sfdp_init = old_sfdp_init
             Loops.has_large_inner_fn = old_loop
             GraphLowering._update_scheduler = old_update_scheduler  # type: ignore[method-assign]
