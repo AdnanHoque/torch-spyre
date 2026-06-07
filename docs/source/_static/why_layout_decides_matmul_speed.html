@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Why Layout Decides Matmul Speed: Fixing the Spyre Prefill Gap</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --ink:#e6edf3;
+    --muted:#9aa7b4; --line:#2d3848; --accent:#58a6ff; --good:#3fb950;
+    --bad:#f85149; --warn:#d29922; --purple:#bc8cff; --teal:#39d3c3;
+    --code:#0b0f14;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1000px; margin:0 auto; padding:0 22px 120px}
+  header.hero{
+    padding:64px 22px 48px; text-align:center;
+    background:radial-gradient(1200px 400px at 50% -120px, #1d3a5f55, transparent),
+               linear-gradient(180deg,#11161d,#0e1116);
+    border-bottom:1px solid var(--line);
+  }
+  header.hero .kicker{
+    color:var(--accent); letter-spacing:.18em; text-transform:uppercase;
+    font-size:12px; font-weight:700;
+  }
+  header.hero h1{
+    font-size:38px; line-height:1.13; margin:14px auto 12px; max-width:860px;
+    background:linear-gradient(90deg,#e6edf3,#9fd0ff);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  header.hero p.sub{color:var(--muted); max-width:740px; margin:0 auto; font-size:17px}
+  .pills{display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:24px}
+  .pill{
+    background:var(--panel); border:1px solid var(--line); border-radius:999px;
+    padding:7px 14px; font-size:13px; color:var(--muted);
+  }
+  .pill b{color:var(--ink)}
+  .pill .up{color:var(--good)}
+  .puzzle{
+    max-width:760px; margin:30px auto 0; background:#101d2e; border:1px solid #234263;
+    border-radius:14px; padding:20px 24px; text-align:left;
+  }
+  .puzzle .ttl{color:#9fd0ff; font-weight:700; font-size:14px; letter-spacing:.04em;
+    text-transform:uppercase; margin-bottom:8px}
+  .puzzle p{margin:8px 0; color:#d7e0ea; font-size:15.5px}
+  .puzzle b{color:#fff}
+  h2{
+    font-size:26px; margin:58px 0 8px; padding-top:14px;
+    border-top:1px solid var(--line);
+  }
+  h2 .num{color:var(--accent); font-variant-numeric:tabular-nums; margin-right:10px}
+  h3{font-size:19px; margin:32px 0 6px; color:#cdd9e5}
+  h4.sub{font-size:15px; color:var(--teal); margin:24px 0 4px; letter-spacing:.02em;
+    text-transform:uppercase}
+  p{margin:12px 0}
+  .lead{font-size:17.5px; color:#d7e0ea}
+  .part-banner{
+    background:linear-gradient(90deg,#15243a,#11161d); border:1px solid #234263;
+    border-radius:12px; padding:14px 20px; margin:46px 0 6px;
+    display:flex; align-items:center; gap:14px;
+  }
+  .part-banner .tagp{color:var(--accent); font-size:12px; font-weight:700;
+    letter-spacing:.16em; text-transform:uppercase; white-space:nowrap}
+  .part-banner .desc{color:var(--muted); font-size:14px}
+  code,kbd{
+    font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:13.5px;
+  }
+  p code,li code,td code{
+    background:#1b2230; border:1px solid var(--line); border-radius:5px;
+    padding:1px 6px; color:#9fd0ff; white-space:nowrap;
+  }
+  .fileref{color:var(--purple); font-weight:600}
+  pre{
+    background:var(--code); border:1px solid var(--line); border-radius:10px;
+    padding:16px 18px; overflow:auto; font-size:13px; line-height:1.55;
+    margin:16px 0;
+  }
+  pre code{color:#cfe3f5; white-space:pre}
+  .c-key{color:#ff7b72}
+  .c-fn{color:#d2a8ff}
+  .c-str{color:#a5d6ff}
+  .c-num{color:#79c0ff}
+  .c-com{color:#6e7a8a; font-style:italic}
+  .c-good{color:var(--good)}
+  .c-bad{color:var(--bad)}
+  .panel{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:20px 22px; margin:18px 0;
+  }
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  .card{
+    background:var(--panel2); border:1px solid var(--line); border-radius:10px;
+    padding:16px 18px;
+  }
+  .card h4{margin:0 0 8px; font-size:15px; color:#cdd9e5}
+  .card.before{border-left:3px solid var(--bad)}
+  .card.after{border-left:3px solid var(--good)}
+  table{
+    width:100%; border-collapse:collapse; margin:18px 0; font-size:14px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    overflow:hidden;
+  }
+  th,td{padding:11px 13px; text-align:left; border-bottom:1px solid var(--line)}
+  th{background:#1a212c; color:#cdd9e5; font-size:12.5px; letter-spacing:.03em; text-transform:uppercase}
+  tr:last-child td{border-bottom:none}
+  td.num,th.num{text-align:right; font-variant-numeric:tabular-nums}
+  .tag{display:inline-block; padding:1px 8px; border-radius:6px; font-size:12px; font-weight:600}
+  .tag.bad{background:#3a1a1a; color:#ff9d96}
+  .tag.good{background:#15351f; color:#7ee597}
+  .tag.warn{background:#3a2f12; color:#f0cf7a}
+  .tag.neu{background:#1f2733; color:#9fb3c8}
+  .callout{
+    border-radius:12px; padding:18px 20px; margin:22px 0; border:1px solid;
+  }
+  .callout .ttl{font-weight:700; font-size:15px; margin-bottom:6px; display:flex; align-items:center; gap:8px}
+  .callout.myth{background:#2a1414; border-color:#5a2222}
+  .callout.myth .ttl{color:#ff9d96}
+  .callout.truth{background:#11271a; border-color:#22532f}
+  .callout.truth .ttl{color:#7ee597}
+  .callout.warn{background:#2a2410; border-color:#5a4d1c}
+  .callout.warn .ttl{color:#f0cf7a}
+  .callout.note{background:#101d2e; border-color:#234263}
+  .callout.note .ttl{color:#9fd0ff}
+  .callout.key{background:#161033; border-color:#3a2a6a}
+  .callout.key .ttl{color:#bc8cff}
+  figure{margin:26px 0; text-align:center}
+  figure svg{max-width:100%; height:auto; background:#0b0f15; border:1px solid var(--line); border-radius:12px}
+  figcaption{color:var(--muted); font-size:13px; margin-top:10px; max-width:800px; margin-left:auto; margin-right:auto}
+  .svg-bg{fill:#0b0f15}
+  .mono{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  ul.clean{list-style:none; padding-left:0}
+  ul.clean li{padding:6px 0 6px 26px; position:relative}
+  ul.clean li::before{content:"\25B8"; color:var(--accent); position:absolute; left:4px}
+  .toc{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:18px 22px; margin:28px 0; columns:2; column-gap:30px;
+  }
+  @media(max-width:760px){.toc{columns:1}}
+  .toc a{color:#bcd3ea; text-decoration:none; display:block; padding:4px 0; font-size:14px}
+  .toc a:hover{color:var(--accent)}
+  .toc .g{color:var(--muted); font-size:11px; letter-spacing:.12em; text-transform:uppercase;
+    padding:10px 0 2px; display:block; break-inside:avoid}
+  .footnote{color:var(--muted); font-size:13px}
+  .arrow{color:var(--accent); font-weight:700}
+  .delta-up{color:var(--good); font-weight:700}
+  .delta-flat{color:var(--muted); font-weight:600}
+  hr.soft{border:none; border-top:1px dashed var(--line); margin:28px 0}
+  .legend{display:flex; gap:18px; justify-content:center; flex-wrap:wrap; font-size:12.5px; color:var(--muted); margin-top:6px}
+  .legend span{display:inline-flex; align-items:center; gap:6px}
+  .sw{width:13px; height:13px; border-radius:3px; display:inline-block}
+  .vs{display:grid; grid-template-columns:1fr 1fr; gap:0; margin:18px 0;
+    border:1px solid var(--line); border-radius:10px; overflow:hidden}
+  .vs > div{padding:16px 18px}
+  .vs .l{background:#1a1212; border-right:1px solid var(--line)}
+  .vs .r{background:#101a13}
+  .vs h4{margin:0 0 8px; font-size:14px}
+  .vs .l h4{color:#ff9d96}
+  .vs .r h4{color:#7ee597}
+  @media(max-width:760px){.vs{grid-template-columns:1fr} .vs .l{border-right:none; border-bottom:1px solid var(--line)}}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="kicker">torch-spyre &middot; IBM Spyre AIU &middot; tensor layout &amp; the systolic array</div>
+  <h1>Why Layout Decides Matmul Speed: Fixing the Spyre Prefill Gap</h1>
+  <p class="sub">A bs=1/sl=512 prefill matmul ran at 29.8% of peak. A pure-inductor change took it
+  to 73% &mdash; matching the reference back end. The strange part: the work was split across the
+  32 cores <em>exactly the same way</em> before and after. Only the <b>layout</b> changed.</p>
+  <div class="pills">
+    <span class="pill">Wide-N MLP proj: <b>3.122&nbsp;ms</b> <span class="arrow">&rarr;</span> <b class="up">1.020&nbsp;ms</b></span>
+    <span class="pill">PT-Util: <b>29.8%</b> <span class="arrow">&rarr;</span> <b class="up">73.0%</b></span>
+    <span class="pill">vs sendnn <b>0.959&nbsp;ms</b></span>
+    <span class="pill">Diff: <b>pure Python</b>, 0 C++</span>
+  </div>
+
+  <div class="puzzle">
+    <div class="ttl">The puzzle this document exists to answer</div>
+    <p>Same FLOPs. Same hardware. Same 32 cores. The <b>same work-division split</b>
+    (<code>m4&nbsp;&times;&nbsp;n8&nbsp;&times;&nbsp;k1</code>) before and after. And yet the matmul went from
+    <b style="color:#ff9d96">29.8%</b> to <b style="color:#7ee597">73%</b> utilization.</p>
+    <p>How is that possible? The answer is one word &mdash; <b>layout</b> &mdash; and most people have
+    never been taught what layout actually <em>is</em> or why it governs how fast a matmul runs.
+    So that is what the first half of this document builds, from zero.</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<nav class="toc">
+  <span class="g">Part I &mdash; building the intuition</span>
+  <a href="#systolic">1. The systolic array: a machine that must be fed</a>
+  <a href="#sticks">2. Sticks: how Spyre actually stores a tensor</a>
+  <a href="#dims">3. M, N, K and the one job of a layout</a>
+  <a href="#layout">4. What &ldquo;layout&rdquo; means &mdash; and why it decides speed</a>
+  <a href="#splitvslayout">5. Split vs. layout: two different knobs</a>
+  <span class="g">Part II &mdash; the specific fix</span>
+  <a href="#story">6. The op: a shared-weight unit BMM</a>
+  <a href="#bug">7. The bug: a collapsed unit dim buries M</a>
+  <a href="#fix">8. The fix: re-introduce the dim, re-order the layout</a>
+  <a href="#identical">9. The clincher: the kernel is byte-identical</a>
+  <a href="#numbers">10. The numbers (device-verified)</a>
+  <span class="g">Part III &mdash; context &amp; caveats</span>
+  <a href="#planner">11. The planner edit (also load-bearing)</a>
+  <a href="#myth">12. Correcting the &ldquo;chunk-cap&rdquo; misconception</a>
+  <a href="#notfix">13. What this does NOT fix</a>
+  <a href="#refs">14. Code map</a>
+</nav>
+
+<!-- ============================================================ -->
+<!-- ==================== PART I ================================ -->
+<!-- ============================================================ -->
+
+<div class="part-banner">
+  <span class="tagp">Part I</span>
+  <span class="desc">Building the intuition &mdash; what layout is, and why the same split can be
+  fast or slow depending on it. Read this even if you already know what a matmul is.</span>
+</div>
+
+<h2 id="systolic"><span class="num">1</span>The systolic array: a machine that must be fed</h2>
+
+<p class="lead">Before we can talk about layout, we have to look at the machine that consumes
+the layout. Everything about why layout matters falls out of one fact: a systolic array is a
+<em>streaming</em> engine, and a streaming engine is only fast if you never stop feeding it.</p>
+
+<p>Each Spyre core has an <strong>8&times;8 PT systolic array</strong> &mdash; a grid of 64
+multiply-accumulate (MAC) cells. It does <em>not</em> compute a matmul the way a CPU does
+(load operands, multiply, store). Instead, data physically <strong>marches through the grid</strong>,
+one step per clock cycle:</p>
+
+<ul class="clean">
+  <li><b>One operand flows in</b> as a continuous stream &mdash; row by row, cycle by cycle, entering
+  the left edge and rippling rightward.</li>
+  <li><b>The other operand sits stationary</b> in the cells.</li>
+  <li>As each value passes a cell, it is multiplied and <b>added into a running partial sum</b>.
+  Partial sums accumulate as the data wave travels across the grid.</li>
+</ul>
+
+<p>The crucial consequence: <strong>the array has a fixed pipeline that must fill and drain.</strong>
+The first result doesn't emerge until the data wave has crossed the whole grid (fill); the last
+results trickle out after the input ends (drain). Fill and drain are pure overhead &mdash; cycles
+where the array is not yet, or no longer, doing full useful work. They are only <em>amortized</em>
+if you push a <strong>long, uninterrupted stream</strong> through afterward.</p>
+
+<p>And here is the failure mode that this entire document is about. If, on any cycle, the next
+value the array needs <em>isn't ready</em> &mdash; because it is somewhere else in memory, out of
+order, waiting to be gathered &mdash; the array <strong>stalls</strong>. That stall is called a
+<strong>bubble</strong>: a cycle where MAC cells spin with no valid data. Every bubble is throughput
+thrown on the floor. A systolic array fed a clean stream runs near 100%; the same array fed a
+stuttering, scattered stream runs at a fraction of that &mdash; <em>doing the exact same math</em>.</p>
+
+<figure>
+<svg viewBox="0 0 900 420" role="img" aria-label="Systolic array fed continuously versus fed with bubbles">
+  <rect class="svg-bg" x="0" y="0" width="900" height="420"/>
+  <defs>
+    <marker id="s-ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#58a6ff"/>
+    </marker>
+  </defs>
+
+  <!-- TOP: well fed -->
+  <text x="40" y="40" fill="#7ee597" font-size="16" font-weight="700">Fed a clean, continuous stream &rarr; pipeline saturated</text>
+  <!-- stream of data -->
+  <g transform="translate(40,58)">
+    <text x="0" y="14" fill="#9aa7b4" font-size="12">stream in:</text>
+    <g>
+      <rect x="70" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="94" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="118" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="142" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="166" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="190" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="214" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="238" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="262" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="286" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+    </g>
+    <line x1="320" y1="10" x2="370" y2="10" stroke="#58a6ff" stroke-width="2" marker-end="url(#s-ar)"/>
+  </g>
+  <!-- 8x8 array fully green -->
+  <g transform="translate(440,52)">
+    <text x="100" y="-6" fill="#9aa7b4" font-size="11" text-anchor="middle">8&times;8 PT array</text>
+    <g>
+      <!-- 8x8 all filled -->
+      <!-- row gen -->
+      <g fill="#3fb950" opacity=".85">
+        <rect x="0" y="0" width="20" height="20"/><rect x="23" y="0" width="20" height="20"/><rect x="46" y="0" width="20" height="20"/><rect x="69" y="0" width="20" height="20"/><rect x="92" y="0" width="20" height="20"/><rect x="115" y="0" width="20" height="20"/><rect x="138" y="0" width="20" height="20"/><rect x="161" y="0" width="20" height="20"/>
+        <rect x="0" y="23" width="20" height="20"/><rect x="23" y="23" width="20" height="20"/><rect x="46" y="23" width="20" height="20"/><rect x="69" y="23" width="20" height="20"/><rect x="92" y="23" width="20" height="20"/><rect x="115" y="23" width="20" height="20"/><rect x="138" y="23" width="20" height="20"/><rect x="161" y="23" width="20" height="20"/>
+        <rect x="0" y="46" width="20" height="20"/><rect x="23" y="46" width="20" height="20"/><rect x="46" y="46" width="20" height="20"/><rect x="69" y="46" width="20" height="20"/><rect x="92" y="46" width="20" height="20"/><rect x="115" y="46" width="20" height="20"/><rect x="138" y="46" width="20" height="20"/><rect x="161" y="46" width="20" height="20"/>
+        <rect x="0" y="69" width="20" height="20"/><rect x="23" y="69" width="20" height="20"/><rect x="46" y="69" width="20" height="20"/><rect x="69" y="69" width="20" height="20"/><rect x="92" y="69" width="20" height="20"/><rect x="115" y="69" width="20" height="20"/><rect x="138" y="69" width="20" height="20"/><rect x="161" y="69" width="20" height="20"/>
+        <rect x="0" y="92" width="20" height="20"/><rect x="23" y="92" width="20" height="20"/><rect x="46" y="92" width="20" height="20"/><rect x="69" y="92" width="20" height="20"/><rect x="92" y="92" width="20" height="20"/><rect x="115" y="92" width="20" height="20"/><rect x="138" y="92" width="20" height="20"/><rect x="161" y="92" width="20" height="20"/>
+        <rect x="0" y="115" width="20" height="20"/><rect x="23" y="115" width="20" height="20"/><rect x="46" y="115" width="20" height="20"/><rect x="69" y="115" width="20" height="20"/><rect x="92" y="115" width="20" height="20"/><rect x="115" y="115" width="20" height="20"/><rect x="138" y="115" width="20" height="20"/><rect x="161" y="115" width="20" height="20"/>
+        <rect x="0" y="138" width="20" height="20"/><rect x="23" y="138" width="20" height="20"/><rect x="46" y="138" width="20" height="20"/><rect x="69" y="138" width="20" height="20"/><rect x="92" y="138" width="20" height="20"/><rect x="115" y="138" width="20" height="20"/><rect x="138" y="138" width="20" height="20"/><rect x="161" y="138" width="20" height="20"/>
+        <rect x="0" y="161" width="20" height="20"/><rect x="23" y="161" width="20" height="20"/><rect x="46" y="161" width="20" height="20"/><rect x="69" y="161" width="20" height="20"/><rect x="92" y="161" width="20" height="20"/><rect x="115" y="161" width="20" height="20"/><rect x="138" y="161" width="20" height="20"/><rect x="161" y="161" width="20" height="20"/>
+      </g>
+    </g>
+  </g>
+  <text x="540" y="258" fill="#7ee597" font-size="12" text-anchor="middle">every cell busy every cycle</text>
+
+  <!-- divider -->
+  <line x1="40" y1="282" x2="860" y2="282" stroke="#2d3848" stroke-dasharray="4 4"/>
+
+  <!-- BOTTOM: bubbles -->
+  <text x="40" y="312" fill="#ff9d96" font-size="16" font-weight="700">Fed a scattered, stuttering stream &rarr; bubbles, under-fill</text>
+  <g transform="translate(40,330)">
+    <text x="0" y="14" fill="#9aa7b4" font-size="12">stream in:</text>
+    <g>
+      <rect x="70" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="94" y="0" width="22" height="20" fill="#26301f" stroke="#3a4a2a"/>
+      <rect x="118" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="142" y="0" width="22" height="20" fill="#26301f" stroke="#3a4a2a"/>
+      <rect x="166" y="0" width="22" height="20" fill="#26301f" stroke="#3a4a2a"/>
+      <rect x="190" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="214" y="0" width="22" height="20" fill="#26301f" stroke="#3a4a2a"/>
+      <rect x="238" y="0" width="22" height="20" fill="#3fb950" opacity=".9"/>
+      <rect x="262" y="0" width="22" height="20" fill="#26301f" stroke="#3a4a2a"/>
+      <rect x="286" y="0" width="22" height="20" fill="#26301f" stroke="#3a4a2a"/>
+    </g>
+    <text x="70" y="40" fill="#6e7a8a" font-size="10">gaps = the next value isn't ready (waiting on a gather)</text>
+    <line x1="320" y1="10" x2="370" y2="10" stroke="#58a6ff" stroke-width="2" marker-end="url(#s-ar)"/>
+  </g>
+  <!-- 8x8 array ~30% green -->
+  <g transform="translate(440,326)">
+    <g>
+      <rect x="0" y="0" width="20" height="20" fill="#3fb950" opacity=".85"/><rect x="23" y="0" width="20" height="20" fill="#3fb950" opacity=".85"/><rect x="46" y="0" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="69" y="0" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="92" y="0" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="115" y="0" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="138" y="0" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="161" y="0" width="20" height="20" fill="#1c232d" stroke="#2d3848"/>
+      <rect x="0" y="23" width="20" height="20" fill="#3fb950" opacity=".85"/><rect x="23" y="23" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="46" y="23" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="69" y="23" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="92" y="23" width="20" height="20" fill="#3fb950" opacity=".85"/><rect x="115" y="23" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="138" y="23" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="161" y="23" width="20" height="20" fill="#1c232d" stroke="#2d3848"/>
+      <rect x="0" y="46" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="23" y="46" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="46" y="46" width="20" height="20" fill="#3fb950" opacity=".85"/><rect x="69" y="46" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="92" y="46" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="115" y="46" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="138" y="46" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="161" y="46" width="20" height="20" fill="#1c232d" stroke="#2d3848"/>
+      <rect x="0" y="69" width="20" height="20" fill="#3fb950" opacity=".85"/><rect x="23" y="69" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="46" y="69" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="69" y="69" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="92" y="69" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="115" y="69" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="138" y="69" width="20" height="20" fill="#3fb950" opacity=".85"/><rect x="161" y="69" width="20" height="20" fill="#1c232d" stroke="#2d3848"/>
+      <rect x="0" y="92" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="23" y="92" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="46" y="92" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="69" y="92" width="20" height="20" fill="#3fb950" opacity=".85"/><rect x="92" y="92" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="115" y="92" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="138" y="92" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="161" y="92" width="20" height="20" fill="#1c232d" stroke="#2d3848"/>
+      <rect x="0" y="115" width="20" height="20" fill="#3fb950" opacity=".85"/><rect x="23" y="115" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="46" y="115" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="69" y="115" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="92" y="115" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="115" y="115" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="138" y="115" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="161" y="115" width="20" height="20" fill="#1c232d" stroke="#2d3848"/>
+      <rect x="0" y="138" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="23" y="138" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="46" y="138" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="69" y="138" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="92" y="138" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="115" y="138" width="20" height="20" fill="#3fb950" opacity=".85"/><rect x="138" y="138" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="161" y="138" width="20" height="20" fill="#1c232d" stroke="#2d3848"/>
+      <rect x="0" y="161" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="23" y="161" width="20" height="20" fill="#3fb950" opacity=".85"/><rect x="46" y="161" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="69" y="161" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="92" y="161" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="115" y="161" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="138" y="161" width="20" height="20" fill="#1c232d" stroke="#2d3848"/><rect x="161" y="161" width="20" height="20" fill="#1c232d" stroke="#2d3848"/>
+    </g>
+  </g>
+  <text x="540" y="532" fill="#ff9d96" font-size="12" text-anchor="middle" transform="translate(0,-1)"></text>
+</svg>
+<figcaption>The same 8&times;8 array, the same total multiplications to perform. Top: a continuous
+stream keeps every cell busy &mdash; near-100% utilization. Bottom: a stuttering stream (because the
+next value lives somewhere awkward in memory) leaves cells idle &mdash; same math, ~30% utilization.
+The difference is entirely about <em>how the data is arranged so it can be streamed</em>.
+That arrangement is the layout.</figcaption>
+</figure>
+
+<div class="callout key">
+  <div class="ttl">Take this with you</div>
+  <p>A systolic array's speed is decided <em>not</em> by how much math it has to do, but by whether
+  it can be <strong>fed a long, in-order, contiguous stream</strong> with no bubbles. Hold that
+  thought &mdash; layout is precisely the thing that determines whether such a stream exists.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="sticks"><span class="num">2</span>Sticks: how Spyre actually stores a tensor</h2>
+
+<p class="lead">A tensor on Spyre is not a flat C array. Memory is organized into fixed
+<strong>sticks</strong>, and the array is fed stick-by-stick. To understand layout you first have to
+know what a stick is.</p>
+
+<p>A <strong>stick</strong> is the atomic, aligned unit of Spyre memory:
+<strong>128 bytes = 64 fp16 elements</strong>. Hardware moves, addresses, and feeds data in whole
+sticks. A tensor is tiled into sticks; its <strong>innermost 64-element dimension</strong> is the
+<em>stick dimension</em> &mdash; the 64 values that sit physically contiguous and travel together.</p>
+
+<p>Think of it like cache lines, but mandatory and load-bearing: the hardware can only efficiently
+grab data a stick at a time. A value's neighbors <em>within</em> its stick are free to reach; a
+value's neighbors in a <em>different</em> stick cost a separate fetch. So which logical dimension
+you choose to be the 64-wide stick, and how the other dimensions are ordered around it, decides
+whether the data the array wants next is the next 64 contiguous bytes (good) or 64 bytes scattered
+across far-apart sticks (bad &mdash; the bubble machine from Section 1).</p>
+
+<figure>
+<svg viewBox="0 0 880 280" role="img" aria-label="A tensor tiled into 64-element sticks">
+  <rect class="svg-bg" x="0" y="0" width="880" height="280"/>
+  <text x="40" y="38" fill="#cdd9e5" font-size="15" font-weight="700">One stick = 128 bytes = 64 fp16 elements (the atomic unit)</text>
+  <!-- a single stick: 64 cells (show as 16 + ellipsis for space) -->
+  <g transform="translate(40,56)">
+    <g fill="#1f3a5a" stroke="#2d3848">
+      <rect x="0" y="0" width="18" height="22"/><rect x="19" y="0" width="18" height="22"/><rect x="38" y="0" width="18" height="22"/><rect x="57" y="0" width="18" height="22"/><rect x="76" y="0" width="18" height="22"/><rect x="95" y="0" width="18" height="22"/><rect x="114" y="0" width="18" height="22"/><rect x="133" y="0" width="18" height="22"/>
+    </g>
+    <text x="160" y="16" fill="#9aa7b4" font-size="13">&hellip; 64 contiguous fp16 values &hellip;</text>
+    <g fill="#1f3a5a" stroke="#2d3848">
+      <rect x="320" y="0" width="18" height="22"/><rect x="339" y="0" width="18" height="22"/><rect x="358" y="0" width="18" height="22"/><rect x="377" y="0" width="18" height="22"/>
+    </g>
+    <path d="M0,30 L395,30" stroke="#58a6ff" stroke-width="1"/>
+    <path d="M0,26 L0,34 M395,26 L395,34" stroke="#58a6ff" stroke-width="1"/>
+    <text x="197" y="48" fill="#58a6ff" font-size="11" text-anchor="middle">these 64 are physically contiguous &mdash; one fetch</text>
+  </g>
+
+  <text x="40" y="138" fill="#cdd9e5" font-size="15" font-weight="700">A tensor is a grid of sticks</text>
+  <g transform="translate(40,156)">
+    <!-- 5 cols x 3 rows of sticks -->
+    <g>
+      <rect x="0" y="0" width="120" height="26" fill="#1f3a5a" stroke="#3a557a"/><rect x="124" y="0" width="120" height="26" fill="#1f3a5a" stroke="#3a557a"/><rect x="248" y="0" width="120" height="26" fill="#1f3a5a" stroke="#3a557a"/><rect x="372" y="0" width="120" height="26" fill="#1f3a5a" stroke="#3a557a"/><rect x="496" y="0" width="120" height="26" fill="#1f3a5a" stroke="#3a557a"/>
+      <rect x="0" y="30" width="120" height="26" fill="#19273a" stroke="#33485f"/><rect x="124" y="30" width="120" height="26" fill="#19273a" stroke="#33485f"/><rect x="248" y="30" width="120" height="26" fill="#19273a" stroke="#33485f"/><rect x="372" y="30" width="120" height="26" fill="#19273a" stroke="#33485f"/><rect x="496" y="30" width="120" height="26" fill="#19273a" stroke="#33485f"/>
+      <rect x="0" y="60" width="120" height="26" fill="#19273a" stroke="#33485f"/><rect x="124" y="60" width="120" height="26" fill="#19273a" stroke="#33485f"/><rect x="248" y="60" width="120" height="26" fill="#19273a" stroke="#33485f"/><rect x="372" y="60" width="120" height="26" fill="#19273a" stroke="#33485f"/><rect x="496" y="60" width="120" height="26" fill="#19273a" stroke="#33485f"/>
+    </g>
+    <text x="60" y="17" fill="#9fd0ff" font-size="11" text-anchor="middle">stick</text>
+    <text x="308" y="17" fill="#9fd0ff" font-size="11" text-anchor="middle">stick</text>
+    <text x="640" y="20" fill="#9aa7b4" font-size="12">&larr; stick dim (innermost 64)</text>
+    <text x="640" y="50" fill="#9aa7b4" font-size="12">outer dims index</text>
+    <text x="640" y="66" fill="#9aa7b4" font-size="12">which stick</text>
+  </g>
+  <text x="40" y="262" fill="#6e7a8a" font-size="12">The order of the outer dims decides whether the sticks the array needs next are adjacent or far apart.</text>
+</svg>
+<figcaption>Every Spyre tensor is tiled into 64-element sticks. The innermost dimension is the
+stick. The remaining dimensions form an addressing order over the sticks. Feeding the array fast
+means the next stick it needs is the next stick in memory &mdash; which is purely a question of how
+the dimensions are ordered.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h2 id="dims"><span class="num">3</span>M, N, K and the one job of a layout</h2>
+
+<p class="lead">A matmul has three logical dimensions. Mapping them onto sticks and stream order is
+the whole game. Let's name them, then state the rule the hardware imposes.</p>
+
+<p>For <code>C[M,N] = A[M,K] &times; B[K,N]</code>:</p>
+<ul class="clean">
+  <li><b>M</b> &mdash; output rows (e.g. the 512 sequence positions in a prefill).</li>
+  <li><b>N</b> &mdash; output columns (e.g. the 12800 features of a wide projection).</li>
+  <li><b>K</b> &mdash; the contraction dim, summed away (e.g. the 4096 hidden size).</li>
+</ul>
+
+<p>To run efficiently on the 8&times;8 array, the data has to be arranged so that:</p>
+<ul class="clean">
+  <li><b>One dimension is the 64-wide stick</b> &mdash; the contiguous unit that streams through cells.</li>
+  <li><b>M is presented as a clean OUTER iteration dimension</b> &mdash; the array processes one
+  M-tile, then the next, then the next, marching down the rows. If M is a tidy outer loop, the
+  hardware knows exactly where the next row of work lives: it's the next stick over. It streams
+  row after row at full rate.</li>
+</ul>
+
+<div class="callout key">
+  <div class="ttl">The rule, in one sentence</div>
+  <p>The array stays fed when <strong>M is a first-class outer dimension</strong> (so rows stream
+  one after another) and the stick dimension is a clean contiguous 64-wide run. Break either &mdash;
+  bury M among the inner dims, or scatter the stick &mdash; and the next value isn't where the array
+  expects it, so you get bubbles. <em>Same math, fewer useful cycles.</em></p>
+</div>
+
+<p>This is exactly why the prefill matmul ran slow. Not because the math was hard, not because the
+work was badly divided among cores &mdash; but because the data got arranged so that M was
+<em>not</em> a clean outer dimension. We'll see precisely how in Part II. First, let's make the
+intuition airtight with an analogy you may already carry.</p>
+
+<!-- ============================================================ -->
+<h2 id="layout"><span class="num">4</span>What &ldquo;layout&rdquo; means &mdash; and why it decides speed</h2>
+
+<p class="lead">Layout is the mapping from the logical <code>[M,N,K]</code> dimensions to their
+<em>physical</em> realization: which dim is the 64-stick, which dims are outer iteration dims and in
+what order, and the strides that follow from that order. Same numbers, same logical operation &mdash;
+but a different physical arrangement in memory and a different stream order into the array.</p>
+
+<h4 class="sub">The analogy: coalesced vs. uncoalesced access</h4>
+
+<p>If you've written GPU kernels, you've met this exact phenomenon under a different name. On a GPU,
+when a warp of threads reads memory, the hardware is fast only if the threads touch
+<strong>contiguous</strong> addresses &mdash; a <em>coalesced</em> access, served as one wide
+transaction. If the threads touch <strong>scattered</strong> addresses, the read
+<em>uncoalesces</em> into many small transactions and the compute units stall waiting on the gather.
+Identical arithmetic; the access pattern alone makes it fast or slow.</p>
+
+<p>Or, if you've ever fed a GEMM library the wrong <em>leading dimension</em> &mdash; passed a
+row-major matrix to a kernel expecting column-major, or transposed an operand it wanted untransposed
+&mdash; you've watched a matmul crater for no reason except that the rows it wanted next were strided
+far apart in memory. The FLOPs didn't change. The layout did.</p>
+
+<p>The systolic-array version is the same story, told in sticks:</p>
+
+<div class="vs">
+  <div class="l">
+    <h4>Bad layout &mdash; M buried</h4>
+    <p>M is interleaved with the inner stick dim, not a clean outer loop. The row of work the array
+    needs next is <em>not</em> the next stick in memory &mdash; it's scattered. The feed stutters
+    while the hardware gathers. <strong>Bubbles. Under-fill.</strong></p>
+    <p class="footnote" style="color:#caa">like an uncoalesced GPU read / the wrong leading dimension</p>
+  </div>
+  <div class="r">
+    <h4>Good layout &mdash; M outer</h4>
+    <p>M is a first-class outer dimension; the stick is a clean contiguous 64. The next row of work
+    is the next stick over. The array streams row after row, no gathers, no stalls.
+    <strong>Saturated. Full util.</strong></p>
+    <p class="footnote" style="color:#9c9">like a coalesced GPU read / the matching leading dimension</p>
+  </div>
+</div>
+
+<figure>
+<svg viewBox="0 0 900 360" role="img" aria-label="Memory order: M buried versus M as a clean outer dimension">
+  <rect class="svg-bg" x="0" y="0" width="900" height="360"/>
+  <defs>
+    <marker id="l-ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#f0cf7a"/>
+    </marker>
+    <marker id="l-arg" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#7ee597"/>
+    </marker>
+  </defs>
+
+  <!-- LEFT: M buried -->
+  <text x="225" y="34" fill="#ff9d96" font-size="15" font-weight="700" text-anchor="middle">M buried next to the stick</text>
+  <text x="225" y="54" fill="#9aa7b4" font-size="12" text-anchor="middle">device dim_order [in, mb] &mdash; 3-dim degenerate space</text>
+  <!-- memory ribbon: sticks where consecutive M-rows are far apart -->
+  <g transform="translate(40,80)">
+    <text x="0" y="-6" fill="#6e7a8a" font-size="11">memory order &rarr;</text>
+    <!-- color stripes: M-row label alternates non-contiguously -->
+    <rect x="0" y="0" width="44" height="34" fill="#5a2330" stroke="#2d3848"/><text x="22" y="22" fill="#ffb3b3" font-size="11" text-anchor="middle">M0</text>
+    <rect x="46" y="0" width="44" height="34" fill="#2a3a52" stroke="#2d3848"/><text x="68" y="22" fill="#9fd0ff" font-size="11" text-anchor="middle">k</text>
+    <rect x="92" y="0" width="44" height="34" fill="#2a3a52" stroke="#2d3848"/><text x="114" y="22" fill="#9fd0ff" font-size="11" text-anchor="middle">k</text>
+    <rect x="138" y="0" width="44" height="34" fill="#5a2330" stroke="#2d3848"/><text x="160" y="22" fill="#ffb3b3" font-size="11" text-anchor="middle">M1</text>
+    <rect x="184" y="0" width="44" height="34" fill="#2a3a52" stroke="#2d3848"/><text x="206" y="22" fill="#9fd0ff" font-size="11" text-anchor="middle">k</text>
+    <rect x="230" y="0" width="44" height="34" fill="#2a3a52" stroke="#2d3848"/><text x="252" y="22" fill="#9fd0ff" font-size="11" text-anchor="middle">k</text>
+    <rect x="276" y="0" width="44" height="34" fill="#5a2330" stroke="#2d3848"/><text x="298" y="22" fill="#ffb3b3" font-size="11" text-anchor="middle">M2</text>
+    <!-- the array wants M0,M1,M2 consecutively but they're strided apart -->
+    <path d="M22,42 C70,90 110,90 160,42" fill="none" stroke="#f0cf7a" stroke-width="2" marker-end="url(#l-ar)"/>
+    <path d="M160,48 C220,96 250,96 298,48" fill="none" stroke="#f0cf7a" stroke-width="2" marker-end="url(#l-ar)"/>
+    <text x="160" y="118" fill="#f0cf7a" font-size="11" text-anchor="middle">array wants M0&rarr;M1&rarr;M2 but they are strided apart</text>
+    <text x="160" y="138" fill="#ff9d96" font-size="12" text-anchor="middle" font-weight="600">&rarr; gather every row &rarr; bubbles</text>
+  </g>
+  <!-- mini array under-filled -->
+  <g transform="translate(110,240)">
+    <text x="115" y="-8" fill="#9aa7b4" font-size="11" text-anchor="middle">array starves</text>
+    <g>
+      <rect x="0" y="0" width="22" height="22" fill="#3fb950" opacity=".8"/><rect x="25" y="0" width="22" height="22" fill="#1c232d" stroke="#2d3848"/><rect x="50" y="0" width="22" height="22" fill="#1c232d" stroke="#2d3848"/><rect x="75" y="0" width="22" height="22" fill="#3fb950" opacity=".8"/><rect x="100" y="0" width="22" height="22" fill="#1c232d" stroke="#2d3848"/>
+      <rect x="0" y="25" width="22" height="22" fill="#1c232d" stroke="#2d3848"/><rect x="25" y="25" width="22" height="22" fill="#1c232d" stroke="#2d3848"/><rect x="50" y="25" width="22" height="22" fill="#3fb950" opacity=".8"/><rect x="75" y="25" width="22" height="22" fill="#1c232d" stroke="#2d3848"/><rect x="100" y="25" width="22" height="22" fill="#1c232d" stroke="#2d3848"/>
+      <rect x="0" y="50" width="22" height="22" fill="#3fb950" opacity=".8"/><rect x="25" y="50" width="22" height="22" fill="#1c232d" stroke="#2d3848"/><rect x="50" y="50" width="22" height="22" fill="#1c232d" stroke="#2d3848"/><rect x="75" y="50" width="22" height="22" fill="#1c232d" stroke="#2d3848"/><rect x="100" y="50" width="22" height="22" fill="#1c232d" stroke="#2d3848"/>
+    </g>
+  </g>
+
+  <!-- divider -->
+  <line x1="450" y1="20" x2="450" y2="340" stroke="#2d3848" stroke-dasharray="4 4"/>
+
+  <!-- RIGHT: M outer -->
+  <text x="675" y="34" fill="#7ee597" font-size="15" font-weight="700" text-anchor="middle">M as a clean outer dimension</text>
+  <text x="675" y="54" fill="#9aa7b4" font-size="12" text-anchor="middle">device dim_order [mb, in, x] &mdash; 4-dim unit-bmm space</text>
+  <g transform="translate(490,80)">
+    <text x="0" y="-6" fill="#6e7a8a" font-size="11">memory order &rarr;</text>
+    <rect x="0" y="0" width="44" height="34" fill="#5a2330" stroke="#2d3848"/><text x="22" y="22" fill="#ffb3b3" font-size="11" text-anchor="middle">M0</text>
+    <rect x="46" y="0" width="44" height="34" fill="#5a2330" stroke="#2d3848"/><text x="68" y="22" fill="#ffb3b3" font-size="11" text-anchor="middle">M1</text>
+    <rect x="92" y="0" width="44" height="34" fill="#5a2330" stroke="#2d3848"/><text x="114" y="22" fill="#ffb3b3" font-size="11" text-anchor="middle">M2</text>
+    <rect x="138" y="0" width="44" height="34" fill="#5a2330" stroke="#2d3848"/><text x="160" y="22" fill="#ffb3b3" font-size="11" text-anchor="middle">M3</text>
+    <rect x="184" y="0" width="44" height="34" fill="#5a2330" stroke="#2d3848"/><text x="206" y="22" fill="#ffb3b3" font-size="11" text-anchor="middle">M4</text>
+    <rect x="230" y="0" width="44" height="34" fill="#5a2330" stroke="#2d3848"/><text x="252" y="22" fill="#ffb3b3" font-size="11" text-anchor="middle">M5</text>
+    <rect x="276" y="0" width="44" height="34" fill="#5a2330" stroke="#2d3848"/><text x="298" y="22" fill="#ffb3b3" font-size="11" text-anchor="middle">M6</text>
+    <path d="M22,42 L290,42" stroke="#7ee597" stroke-width="2" marker-end="url(#l-arg)"/>
+    <text x="155" y="118" fill="#7ee597" font-size="11" text-anchor="middle">array reads M0,M1,M2,&hellip; as one contiguous run</text>
+    <text x="155" y="138" fill="#7ee597" font-size="12" text-anchor="middle" font-weight="600">&rarr; no gather &rarr; no bubbles</text>
+  </g>
+  <g transform="translate(560,240)">
+    <text x="115" y="-8" fill="#9aa7b4" font-size="11" text-anchor="middle">array saturates</text>
+    <g fill="#3fb950" opacity=".85">
+      <rect x="0" y="0" width="22" height="22"/><rect x="25" y="0" width="22" height="22"/><rect x="50" y="0" width="22" height="22"/><rect x="75" y="0" width="22" height="22"/><rect x="100" y="0" width="22" height="22"/>
+      <rect x="0" y="25" width="22" height="22"/><rect x="25" y="25" width="22" height="22"/><rect x="50" y="25" width="22" height="22"/><rect x="75" y="25" width="22" height="22"/><rect x="100" y="25" width="22" height="22"/>
+      <rect x="0" y="50" width="22" height="22"/><rect x="25" y="50" width="22" height="22"/><rect x="50" y="50" width="22" height="22"/><rect x="75" y="50" width="22" height="22"/><rect x="100" y="50" width="22" height="22"/>
+    </g>
+  </g>
+</svg>
+<figcaption>The exact same matmul, two layouts. Left (the bug): M-rows are interleaved with the
+contraction dim, so consecutive rows live far apart in memory; the array gathers each one and
+stalls. Right (the fix): M is the outermost dimension, so its rows are a single contiguous run the
+array streams without interruption. This is the difference between 29.8% and 73% &mdash; and nothing
+about the math changed.</figcaption>
+</figure>
+
+<p>Notice the labels in the figure: <code>[in, mb]</code> on the left, <code>[mb, in, x]</code> on
+the right. Those are real <code>dim_order</code> values from the Spyre kernel descriptor, and the
+position of <code>mb</code> (M) within that list is <em>literally</em> the difference between buried
+and outer. Part II shows exactly where those lists come from and why one had three entries and the
+other has four.</p>
+
+<!-- ============================================================ -->
+<h2 id="splitvslayout"><span class="num">5</span>Split vs. layout: two different knobs</h2>
+
+<p class="lead">This is the single most important distinction in the document, and it's the one most
+people conflate. <strong>Split</strong> and <strong>layout</strong> are independent. A perfect split
+with a broken layout still starves the array.</p>
+
+<div class="grid2">
+  <div class="card">
+    <h4 style="color:#9fd0ff">SPLIT &mdash; <span style="font-weight:400">how much work each core gets</span></h4>
+    <p>The 32 cores divide the matmul along three axes: <code>m &times; n &times; k</code>. A split of
+    <code>(m4, n8, k1)</code> means 4 cores tile M, 8 tile N, 1 tiles K &mdash; 4&times;8&times;1 = 32
+    cores, each owning one rectangular chunk of the output. The split decides
+    <em>the size and shape of each core's sub-problem</em>.</p>
+  </div>
+  <div class="card">
+    <h4 style="color:#7ee597">LAYOUT &mdash; <span style="font-weight:400">how that chunk is arranged for streaming</span></h4>
+    <p>Given a core's chunk, the layout decides whether its data is arranged so the array can stream
+    it &mdash; M outer, stick contiguous &mdash; or whether M is buried and the feed stutters. The
+    layout decides <em>whether each core's work actually fills its array</em>.</p>
+  </div>
+</div>
+
+<p>Here is the punchline, and the whole reason this document exists: <strong>the fix changed only
+the layout.</strong> The split was <code>(m4, n8, k1)</code> before the fix and
+<code>(m4, n8, k1)</code> after it. Each core received the identical chunk of work. But before, that
+chunk was laid out with M buried, so the array under-filled; after, the same chunk was laid out with
+M outer, so the array saturated. <em>Same split, different layout, 29.8% &rarr; 73%.</em></p>
+
+<figure>
+<svg viewBox="0 0 900 330" role="img" aria-label="Identical split, two layouts: starved versus streaming">
+  <rect class="svg-bg" x="0" y="0" width="900" height="330"/>
+  <text x="450" y="32" fill="#cdd9e5" font-size="15" font-weight="700" text-anchor="middle">Identical split: (m4 &times; n8 &times; k1) = 32 cores &mdash; in both panels</text>
+
+  <!-- LEFT: same split, bad layout -->
+  <text x="225" y="62" fill="#ff9d96" font-size="14" font-weight="700" text-anchor="middle">same 32-core grid &middot; BAD layout</text>
+  <g transform="translate(70,78)">
+    <!-- 4 (M) x 8 (N) grid of cores; each core tinted by how full its array is -->
+    <!-- M across (4), N down (8) -->
+    <g>
+      <!-- row n0 -->
+      <rect x="0" y="0" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="76" y="0" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="152" y="0" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="228" y="0" width="74" height="22" fill="#2a1414" stroke="#5a2222"/>
+      <rect x="0" y="24" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="76" y="24" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="152" y="24" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="228" y="24" width="74" height="22" fill="#2a1414" stroke="#5a2222"/>
+      <rect x="0" y="48" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="76" y="48" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="152" y="48" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="228" y="48" width="74" height="22" fill="#2a1414" stroke="#5a2222"/>
+      <rect x="0" y="72" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="76" y="72" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="152" y="72" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="228" y="72" width="74" height="22" fill="#2a1414" stroke="#5a2222"/>
+      <rect x="0" y="96" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="76" y="96" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="152" y="96" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="228" y="96" width="74" height="22" fill="#2a1414" stroke="#5a2222"/>
+      <rect x="0" y="120" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="76" y="120" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="152" y="120" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="228" y="120" width="74" height="22" fill="#2a1414" stroke="#5a2222"/>
+      <rect x="0" y="144" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="76" y="144" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="152" y="144" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="228" y="144" width="74" height="22" fill="#2a1414" stroke="#5a2222"/>
+      <rect x="0" y="168" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="76" y="168" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="152" y="168" width="74" height="22" fill="#2a1414" stroke="#5a2222"/><rect x="228" y="168" width="74" height="22" fill="#2a1414" stroke="#5a2222"/>
+    </g>
+    <text x="151" y="208" fill="#9aa7b4" font-size="11" text-anchor="middle">each core got its chunk&hellip;</text>
+    <text x="151" y="226" fill="#ff9d96" font-size="12" text-anchor="middle" font-weight="600">&hellip;but its array runs ~30% full</text>
+  </g>
+
+  <line x1="450" y1="56" x2="450" y2="310" stroke="#2d3848" stroke-dasharray="4 4"/>
+
+  <!-- RIGHT: same split, good layout -->
+  <text x="675" y="62" fill="#7ee597" font-size="14" font-weight="700" text-anchor="middle">same 32-core grid &middot; GOOD layout</text>
+  <g transform="translate(520,78)">
+    <g>
+      <rect x="0" y="0" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="76" y="0" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="152" y="0" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="228" y="0" width="74" height="22" fill="#15351f" stroke="#22532f"/>
+      <rect x="0" y="24" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="76" y="24" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="152" y="24" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="228" y="24" width="74" height="22" fill="#15351f" stroke="#22532f"/>
+      <rect x="0" y="48" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="76" y="48" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="152" y="48" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="228" y="48" width="74" height="22" fill="#15351f" stroke="#22532f"/>
+      <rect x="0" y="72" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="76" y="72" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="152" y="72" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="228" y="72" width="74" height="22" fill="#15351f" stroke="#22532f"/>
+      <rect x="0" y="96" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="76" y="96" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="152" y="96" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="228" y="96" width="74" height="22" fill="#15351f" stroke="#22532f"/>
+      <rect x="0" y="120" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="76" y="120" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="152" y="120" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="228" y="120" width="74" height="22" fill="#15351f" stroke="#22532f"/>
+      <rect x="0" y="144" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="76" y="144" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="152" y="144" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="228" y="144" width="74" height="22" fill="#15351f" stroke="#22532f"/>
+      <rect x="0" y="168" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="76" y="168" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="152" y="168" width="74" height="22" fill="#15351f" stroke="#22532f"/><rect x="228" y="168" width="74" height="22" fill="#15351f" stroke="#22532f"/>
+    </g>
+    <text x="151" y="208" fill="#9aa7b4" font-size="11" text-anchor="middle">each core got the same chunk&hellip;</text>
+    <text x="151" y="226" fill="#7ee597" font-size="12" text-anchor="middle" font-weight="600">&hellip;and its array runs ~73% full</text>
+  </g>
+</svg>
+<figcaption>The work-division split is pixel-for-pixel identical on both sides: 4&times;8&times;1, 32
+cores, the same chunk to each core. The only difference is the layout inside each chunk &mdash;
+whether M is streamable. The split tells you who does what; the layout tells you whether they can do
+it fast. This fix touched only the right-hand knob.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<!-- ==================== PART II =============================== -->
+<!-- ============================================================ -->
+
+<div class="part-banner">
+  <span class="tagp">Part II</span>
+  <span class="desc">The specific fix &mdash; how a decomposition quietly buried M, and how three
+  small inductor changes put it back where the array can stream it. Grounded in file:func.</span>
+</div>
+
+<h2 id="story"><span class="num">6</span>The op: a shared-weight unit BMM</h2>
+
+<p class="lead">The matmul that ran slow is an ordinary Transformer prefill projection. But by the
+time it reaches the layout machinery, a chain of decompositions has reshaped it into a peculiar form
+&mdash; a <em>batched</em> matmul whose batch is exactly 1. That &ldquo;unit batch&rdquo; is where the
+bug lives.</p>
+
+<p>Take the wide MLP gate-up projection at batch-size 1, sequence-length 512:</p>
+
+<pre><code><span class="c-com"># logical op: activation @ weight</span>
+torch.matmul(<span class="c-num">[1, 512, 4096]</span>, <span class="c-num">[4096, 12800]</span>)</code></pre>
+
+<p>The activation is 3D <code>[B=1, M=512, K=4096]</code>; the weight is 2D <code>[K=4096, N=12800]</code>
+and <em>shared across the batch</em> (a normal Linear layer &mdash; every batch element multiplies the
+same weight, not a per-batch expert weight). Three things happen on the way down:</p>
+
+<pre><code><span class="c-com"># 1. PyTorch flattens batch into rows</span>
+view(act, <span class="c-num">[B*M, K]</span>) <span class="arrow">&rarr;</span> aten.mm(<span class="c-num">[512,4096]</span>, <span class="c-num">[4096,12800]</span>) <span class="arrow">&rarr;</span> view(<span class="c-num">[B,M,N]</span>)
+
+<span class="c-com"># 2. temp_passes.py:_unflatten_mm_to_bmm rewrites the view->mm->view back to a bmm,</span>
+<span class="c-com">#    expanding the 2D weight into a real 3D [1,K,N] tensor</span>
+bmm(act_3d<span class="c-num">[1,512,4096]</span>, expand(unsqueeze(weight))<span class="c-num">[1,4096,12800]</span>)</code></pre>
+
+<p>The unflatten exists because the Spyre backend tiles batched matmuls uniformly &mdash; it's easier
+to handle one bmm code path than two. The result is a bmm whose batch dimension is the literal
+integer <code>1</code> and whose weight is broadcast across that batch. That is the
+<strong>shared-weight unit BMM</strong>: 2D weight, statically-1 batch. The name pins down exactly
+the shape this fix is gated to, and distinguishes it from a <em>genuine</em> batched bmm (per-batch
+3D weights, e.g. MoE experts), which this fix deliberately leaves alone.</p>
+
+<div class="grid2">
+  <div class="card after">
+    <h4>Shared-weight unit BMM <span class="tag good">FIX TARGET</span></h4>
+    <p><code>[1,M,K] @ [1,K,N]</code> where the weight is the same broadcast matrix for the size-1
+    batch. The batch dim is an artifact of decomposition, not real parallel work.</p>
+  </div>
+  <div class="card before">
+    <h4>Genuine batched BMM <span class="tag neu">UNTOUCHED</span></h4>
+    <p><code>[B,M,K] @ [B,K,N]</code> with <em>distinct</em> per-batch weights (B&gt;1, 3D weight).
+    Real batch parallelism; the fix's recognizers return <code>None</code> for this.</p>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="bug"><span class="num">7</span>The bug: a collapsed unit dim buries M</h2>
+
+<p class="lead">Now we can name the bug precisely in the language of Part I: the size-1 batch dim got
+silently dropped, which knocked the iteration space down to three dimensions and pushed M out of its
+clean-outer position &mdash; the exact "M buried" failure mode.</p>
+
+<p>After the <code>mm&rarr;bmm</code> unflatten, the batch-of-1 dim has a device coordinate that is
+the constant integer <code>0</code> (<code>Integer(0)</code>) &mdash; it carries
+<em>no free iteration symbol</em>. The device-layout machinery
+(<span class="fileref">superdsc.py:_get_device_dim_order</span>) only promotes dims that carry a
+symbol to iteration dims. With no symbol, the unit dim is treated as an inert, collapsed dim and
+dropped. The kernel descriptor then sees a <strong>3-dim</strong> iteration space instead of four.</p>
+
+<p>And the labels &mdash; which tell the layout machinery which dim is M, which is N, which is the
+stick &mdash; are assigned <em>positionally</em>. <span class="fileref">superdsc.py:_get_op_dim_labels</span>
+returns the last <code>ndim</code> entries of <code>MATMUL_DIM_LABELS</code> from
+<span class="fileref">constants.py</span>:</p>
+
+<pre><code>MATMUL_DIM_LABELS = [<span class="c-str">"ki"</span>,<span class="c-str">"kj"</span>,<span class="c-str">"y"</span>,<span class="c-str">"x"</span>,<span class="c-str">"mb"</span>,<span class="c-str">"out"</span>,<span class="c-str">"in"</span>]
+
+ndim = <span class="c-num">3</span> <span class="arrow">&rarr;</span> last 3 = [<span class="c-str">"mb"</span>, <span class="c-str">"out"</span>, <span class="c-str">"in"</span>]      <span class="c-com"># BEFORE: degenerate 2D-mm layout, M buried</span>
+ndim = <span class="c-num">4</span> <span class="arrow">&rarr;</span> last 4 = [<span class="c-str">"x"</span>, <span class="c-str">"mb"</span>, <span class="c-str">"out"</span>, <span class="c-str">"in"</span>]  <span class="c-com"># AFTER: sendnn-like unit layout, M outer</span></code></pre>
+
+<p>With only three surviving symbols, they map positionally to <code>[mb, out, in]</code>. The
+consequence in device terms (this is the ground truth from the kernel descriptor):</p>
+
+<table>
+  <tr><th>Tensor</th><th>BEFORE device_size</th><th>BEFORE dim_order</th><th>stick</th></tr>
+  <tr><td>input (act)</td><td class="mono">[512, 64, 1, 64]</td><td class="mono">[in, mb]</td><td><code>in</code></td></tr>
+  <tr><td>output</td><td class="mono">&mdash;</td><td class="mono">[out, mb]</td><td><code>out</code></td></tr>
+</table>
+
+<p>Read the <code>dim_order</code>: M (<code>mb</code>) sits <em>second</em>, adjacent to the
+64-element stick, rather than out front as a clean outer row dim. This is the
+<strong>"M buried next to the stick"</strong> situation from Section 4 &mdash; exactly the left-hand
+panel of that diagram. The array cannot stream a clean run of M-rows; consecutive rows are strided
+apart, every row is a gather, the pipeline bubbles, and the matmul under-fills at
+<strong>29.8%</strong> (wide-N MLP) / <strong>42.6%</strong> (QO-proj).</p>
+
+<div class="callout note">
+  <div class="ttl">It was the layout all along, not the split</div>
+  <p>An earlier investigation had noticed a "frozen <code>(m4,n8,k1)</code> split, dismissed as
+  marginal." That split was <em>already correct</em> &mdash; it only looked marginal because the
+  layout was broken underneath it. A good split feeding a buried-M layout still starves the array.
+  This is the split-vs-layout distinction from Section 5, observed in the wild.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="fix"><span class="num">8</span>The fix: re-introduce the dim, re-order the layout</h2>
+
+<p class="lead">The fix does one conceptual thing: <strong>put the unit batch dim back as a real
+iteration-space symbol, and re-order each tensor's device dims so M becomes a clean outer dimension
+again.</strong> Mechanically it's three coordinated parts &mdash; a marker that recognizes the shape,
+a thread that carries it through lowering, and the layout rewrite itself.</p>
+
+<figure>
+<svg viewBox="0 0 900 250" role="img" aria-label="Recognition to lowering to layout pipeline">
+  <rect class="svg-bg" x="0" y="0" width="900" height="250"/>
+  <defs>
+    <marker id="p-ar" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#58a6ff"/>
+    </marker>
+  </defs>
+  <g font-size="13" font-weight="600">
+    <rect x="30" y="60" width="230" height="96" rx="10" fill="#161b22" stroke="#bc8cff"/>
+    <text x="145" y="46" fill="#bc8cff" text-anchor="middle" font-size="12">1 &middot; RECOGNIZE (afc9b57)</text>
+    <text x="145" y="90" fill="#e6edf3" text-anchor="middle">_unflatten_mm_to_bmm</text>
+    <text x="145" y="110" fill="#9aa7b4" text-anchor="middle" font-size="11">temp_passes.py</text>
+    <text x="145" y="134" fill="#9fd0ff" text-anchor="middle" font-size="11">tag node: batch is statically 1</text>
+
+    <rect x="300" y="60" width="230" height="96" rx="10" fill="#161b22" stroke="#39d3c3"/>
+    <text x="415" y="46" fill="#39d3c3" text-anchor="middle" font-size="12">2 &middot; THREAD (afc9b57)</text>
+    <text x="415" y="90" fill="#e6edf3" text-anchor="middle">lower_bmm</text>
+    <text x="415" y="110" fill="#9aa7b4" text-anchor="middle" font-size="11">lowering.py</text>
+    <text x="415" y="134" fill="#9fd0ff" text-anchor="middle" font-size="11">SpyreReduction(op_info=&hellip;)</text>
+
+    <rect x="570" y="60" width="300" height="96" rx="10" fill="#161b22" stroke="#3fb950"/>
+    <text x="720" y="46" fill="#3fb950" text-anchor="middle" font-size="12">3 &middot; RE-LAYOUT (afc9b57)</text>
+    <text x="720" y="90" fill="#e6edf3" text-anchor="middle" font-size="12">_preserve_shared_weight_unit_bmm_dim</text>
+    <text x="720" y="110" fill="#9aa7b4" text-anchor="middle" font-size="11">spyre_kernel.py</text>
+    <text x="720" y="134" fill="#9fd0ff" text-anchor="middle" font-size="11">re-inject unit dim, reorder dims, M outer</text>
+  </g>
+  <line x1="260" y1="108" x2="298" y2="108" stroke="#58a6ff" stroke-width="2" marker-end="url(#p-ar)"/>
+  <line x1="530" y1="108" x2="568" y2="108" stroke="#58a6ff" stroke-width="2" marker-end="url(#p-ar)"/>
+  <text x="280" y="182" fill="#6e7a8a" font-size="11" text-anchor="middle">meta["custom"] marker</text>
+  <text x="550" y="182" fill="#6e7a8a" font-size="11" text-anchor="middle">op_info dict</text>
+  <rect x="300" y="200" width="300" height="40" rx="10" fill="#11271a" stroke="#22532f"/>
+  <text x="450" y="225" fill="#7ee597" text-anchor="middle" font-size="13" font-weight="700">4-dim [x,mb,out,in] layout &mdash; M streamable</text>
+</svg>
+<figcaption>The three-part pipeline. A statically-1 batch is recognized at FX-graph time; the fact
+is threaded through lowering as an <code>op_info</code> marker; codegen then rewrites the layout.
+All pure Python under <code>torch_spyre/_inductor/</code>.</figcaption>
+</figure>
+
+<h3>Part 1 &mdash; Recognize (commit afc9b57)</h3>
+<p>A marker key is added in <span class="fileref">constants.py</span>:
+<code>SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY = "_spyre_shared_weight_unit_bmm"</code>.
+<span class="fileref">temp_passes.py:_unflatten_mm_to_bmm</span> tags the bmm node when there is
+exactly one batch dim and it is statically 1:</p>
+
+<pre><code><span class="c-key">if</span> len(batch_dims) <span class="c-key">==</span> <span class="c-num">1</span> <span class="c-key">and</span> <span class="c-fn">_is_static_one</span>(batch_dims[<span class="c-num">0</span>]):
+    custom = dict(bmm_node.meta.<span class="c-fn">get</span>(<span class="c-str">"custom"</span>) <span class="c-key">or</span> {})
+    custom[SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY] = {<span class="c-str">"batch_dim"</span>: <span class="c-num">0</span>}
+    bmm_node.meta[<span class="c-str">"custom"</span>] = custom</code></pre>
+
+<p><code>_is_static_one</code> does <code>int(value) == 1</code> guarded against
+<code>TypeError/ValueError</code>, so it fires only for a concrete 1 &mdash; never for symbolic or
+&gt;1 batch. The pre-existing <span class="fileref">pass_utils.py:copy_fx_custom_meta</span> propagates
+<code>meta["custom"]</code> across the rewrite, so the marker survives.</p>
+
+<h3>Part 2 &mdash; Thread it through lowering (commit afc9b57)</h3>
+<p><span class="fileref">lowering.py:lower_bmm</span> reads the FX custom meta; if the marker is
+present, it builds an <code>op_info</code> dict and routes the reduction through
+<span class="fileref">ir.py:SpyreReduction.create(op_info=&hellip;)</span> instead of the stock
+<code>Reduction.create</code>. (<code>SpyreReduction</code> is a pre-existing IR carrier whose whole
+job is to ferry op-specific info to codegen, since reductions bypass the virtualized ops API.)
+No marker &rarr; plain <code>Reduction.create</code> &rarr; unchanged behavior.</p>
+
+<h3>Part 3 &mdash; Re-introduce the dim and re-order the layout (commit afc9b57)</h3>
+<p>This is the heart of the fix:
+<span class="fileref">spyre_kernel.py:_preserve_shared_weight_unit_bmm_dim</span>. It replaces the
+constant-0 batch coordinate with a fresh iteration symbol <code>_spyre_bmm_unit</code>, reorders each
+tensor's <code>device_size</code> / <code>device_coordinates</code> / <code>stride_map</code> so the
+unit dim leads (stick stays last), and <em>injects the unit dim into the iteration space</em> as
+<code>(S.One, 1)</code>. The iteration space becomes 4-dim, so the positional labels flip from
+<code>[mb,out,in]</code> to <code>[x,mb,out,in]</code> &mdash; the sendnn-like unit layout. Concretely:</p>
+
+<table>
+  <tr><th>Tensor / field</th><th>BEFORE</th><th>AFTER</th></tr>
+  <tr><td>input <code>device_size</code></td><td class="mono">[512, 64, 1, 64]</td><td class="mono">[1, 64, 512, 64]</td></tr>
+  <tr><td>iteration_space</td><td class="mono">[mb, out, in]</td><td class="mono">[x, mb, out, in]</td></tr>
+  <tr><td>input <code>dim_order</code></td><td class="mono">[in, mb] <span class="tag bad">M buried</span></td><td class="mono">[mb, in, x] <span class="tag good">M outer</span></td></tr>
+  <tr><td>output <code>dim_order</code></td><td class="mono">[out, mb] <span class="tag bad">M buried</span></td><td class="mono">[mb, out, x] <span class="tag good">M outer</span></td></tr>
+  <tr><td>stick</td><td class="mono">in / out</td><td class="mono">in / out (unchanged)</td></tr>
+</table>
+
+<p>Read the <code>dim_order</code> rows top to bottom against Section 4's diagram: <code>mb</code> (M)
+moves from the buried position next to the stick to the <strong>front</strong> of the order. The
+stick stays <code>in</code> (input) / <code>out</code> (output). That single re-ordering is what turns
+the strided, gather-every-row feed into a contiguous M-stream the array can saturate. The
+<em>same</em> <code>(m4&times;n8)</code> split now fills the array &rarr; <strong>73%</strong>.</p>
+
+<div class="callout note">
+  <div class="ttl">Which recognizer fires for prefill</div>
+  <p>There is a second, size-based recognizer
+  (<span class="fileref">spyre_kernel.py:_shared_weight_unit_bmm_info_from_sizes</span>) as a
+  fallback &mdash; but it requires the weight to be <strong>2D</strong>. The real prefill path
+  <em>expands the weight to 3D <code>[1,K,N]</code></em>, so the size fallback does <strong>not</strong>
+  fire for prefill. The prefill win therefore depends on the FX marker surviving
+  <code>copy_fx_custom_meta</code>. The 2D-only fallback covers a different entry point.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="identical"><span class="num">9</span>The clincher: the kernel is byte-identical</h2>
+
+<p class="lead">If you remember one fact from Part II, make it this. The kernel descriptor's scalar
+fields are <strong>byte-for-byte identical</strong> before and after the fix. Only the iteration-space
+order, the <code>dim_order</code>, and the strides changed. Same kernel. Same split. Same hardware.
+We just told it to lay the data out so the array can stream it.</p>
+
+<div class="vs">
+  <div class="l">
+    <h4>What did NOT change (byte-identical)</h4>
+    <ul class="clean">
+      <li><code>opfunc = batchmatmul</code></li>
+      <li><code>num_cores = 32</code></li>
+      <li><code>num_inputs = 2</code></li>
+      <li><code>data_format</code> (e.g. SEN169_FP16)</li>
+      <li>the split: <code>(m4, n8, k1)</code></li>
+      <li>the FLOPs, the dtype, the hardware</li>
+    </ul>
+  </div>
+  <div class="r">
+    <h4>What DID change (layout only)</h4>
+    <ul class="clean">
+      <li>iteration space: <code>[mb,out,in]</code> &rarr; <code>[x,mb,out,in]</code></li>
+      <li>input <code>dim_order</code>: <code>[in,mb]</code> &rarr; <code>[mb,in,x]</code></li>
+      <li>output <code>dim_order</code>: <code>[out,mb]</code> &rarr; <code>[mb,out,x]</code></li>
+      <li>the strides that follow from the new order</li>
+      <li>M's position: buried &rarr; outer</li>
+    </ul>
+  </div>
+</div>
+
+<p>This is the entire lesson of the document, made concrete: a matmul's speed on a systolic array is
+governed by layout, not just by how the work is divided. The same op, the same split, the same
+silicon went from 29.8% to 73% because the data was finally arranged so the array could be fed.</p>
+
+<div class="callout truth">
+  <div class="ttl">Verified, and INDUCTOR-only</div>
+  <p>Reproduced on our local <code>/opt</code> deeptools (the older one, <em>not</em> codex's newer
+  back end) at <strong>73.7% / 72.7%</strong>. All 10 fix tests plus 117
+  <code>test_coarse_tiling</code> tests pass. Because the speedup needs no back-end change &mdash; the
+  layout is the back end's <em>input</em>, not its capability &mdash; this is an inductor-only fix,
+  not a deeptools-version effect.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="numbers"><span class="num">10</span>The numbers (device-verified)</h2>
+
+<table>
+  <tr>
+    <th>Matmul (M, K &rarr; N)</th>
+    <th>Role</th>
+    <th class="num">tsp before</th>
+    <th class="num">PT-Util</th>
+    <th class="num">tsp after</th>
+    <th class="num">PT-Util</th>
+    <th class="num">sendnn</th>
+    <th class="num">speedup</th>
+  </tr>
+  <tr>
+    <td class="mono">[1,512,4096]&times;[4096,4096]</td>
+    <td>Q/O proj</td>
+    <td class="num">0.559 ms</td>
+    <td class="num"><span class="tag bad">42.6%</span></td>
+    <td class="num">0.323 ms</td>
+    <td class="num"><span class="tag good">74.3%</span></td>
+    <td class="num">0.358 ms</td>
+    <td class="num"><span class="delta-up">1.73&times;</span></td>
+  </tr>
+  <tr>
+    <td class="mono">[1,512,4096]&times;[4096,12800]</td>
+    <td>MLP gate-up (wide-N)</td>
+    <td class="num">3.122 ms</td>
+    <td class="num"><span class="tag bad">29.8%</span></td>
+    <td class="num">1.020 ms</td>
+    <td class="num"><span class="tag good">73.0%</span></td>
+    <td class="num">0.959 ms</td>
+    <td class="num"><span class="delta-up">3.06&times;</span></td>
+  </tr>
+  <tr>
+    <td class="mono">decode M=1 / M=4</td>
+    <td>weight-bound</td>
+    <td class="num">&mdash;</td>
+    <td class="num"><span class="tag neu">~0.8%</span></td>
+    <td class="num">&mdash;</td>
+    <td class="num"><span class="tag neu">~0.8%</span></td>
+    <td class="num">&mdash;</td>
+    <td class="num"><span class="delta-flat">unchanged</span></td>
+  </tr>
+  <tr>
+    <td class="mono">[4,1,4096] batched 3D weights</td>
+    <td>per-batch (MoE-like)</td>
+    <td class="num">&mdash;</td>
+    <td class="num"><span class="tag neu">~0.07%</span></td>
+    <td class="num">&mdash;</td>
+    <td class="num"><span class="tag neu">~0.07%</span></td>
+    <td class="num">&mdash;</td>
+    <td class="num"><span class="delta-flat">unchanged</span></td>
+  </tr>
+</table>
+
+<p>Both prefill projections go from well below the reference to <strong>parity-or-better</strong>:
+the Q/O proj now beats sendnn (0.323 vs 0.358 ms); the wide-N MLP proj closes from 3.3&times; sendnn
+to within ~6% (1.020 vs 0.959 ms). And to underline Section 9: the <em>modeled</em> work-division
+cost is unchanged because the split didn't change &mdash; the win is the layout, not a re-pricing of
+the physics.</p>
+
+<!-- ============================================================ -->
+<!-- ==================== PART III ============================== -->
+<!-- ============================================================ -->
+
+<div class="part-banner">
+  <span class="tagp">Part III</span>
+  <span class="desc">Context and caveats &mdash; the coupled planner edit, a misconception
+  corrected, and an honest map of what this does and does not fix.</span>
+</div>
+
+<h2 id="planner"><span class="num">11</span>The planner edit &mdash; also load-bearing</h2>
+
+<p class="lead">A second change rides along on commit <code>6a383d8</code>. An ablation &mdash; revert
+<em>only</em> this, keep the layout fix &mdash; shows it is <strong>not</strong> secondary: it is
+worth up to <strong>+25 utilization points</strong> on the wide projection. Both fixes are needed.</p>
+
+<p>The work-division planner (<span class="fileref">work_division.py:_matmul_split_cost</span>) had a
+symmetric tie-break term, <code>target_m_us</code>, a V-shaped penalty that punished
+<em>fewer</em>-M-core splits exactly as hard as over-splitting M. For wide projections this
+"incorrectly prefers M-parallelism over N-parallelism" (the commit's own words). The edit rewrites it
+into a one-sided floor penalty &mdash; punish only M-splits that leave the per-core tile too short to
+fill the PT pipeline:</p>
+
+<pre><code><span class="c-com"># NEW (6a383d8) &mdash; penalize only PT under-fill</span>
+<span class="c-key">if</span> pt_passes <span class="c-key">&gt;=</span> _TARGET_PT_PASSES:        <span class="c-com"># per-core M tile already fills PT</span>
+    target_m_us = <span class="c-num">0.0</span>
+<span class="c-key">else</span>:
+    target_m_us = math.<span class="c-fn">log2</span>(_TARGET_PT_PASSES <span class="c-key">/</span> pt_passes) <span class="c-key">*</span> _TARGET_M_PENALTY_US</code></pre>
+
+<div class="callout">
+  <div class="ttl">The ablation: both levers are necessary</div>
+  <p>Here is the subtlety. Once the layout fix re-introduces the unit dim, the iteration space is 4-D
+  and the planner <em>engages</em>. On that new space the <strong>old</strong> cost model picks the
+  M-heavy <code>(m8,n4)</code> split; the edit flips it to the N-heavy <code>(m4,n8)</code> the wide
+  projection actually wants. Reverting only the planner edit (keeping the layout fix) measures its
+  weight directly &mdash; device-verified:</p>
+  <table style="width:100%;border-collapse:collapse;margin:14px 0;font-size:14px">
+    <thead><tr style="text-align:left;border-bottom:2px solid #cbd5e1">
+      <th style="padding:6px 10px">config</th><th style="padding:6px 10px">split</th>
+      <th style="padding:6px 10px">QO&#8209;proj util</th><th style="padding:6px 10px">wide&#8209;N util</th></tr></thead>
+    <tbody>
+      <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:6px 10px">no fix</td><td style="padding:6px 10px"><code>(m4,n8)</code></td><td style="padding:6px 10px">42.6%</td><td style="padding:6px 10px">29.8%</td></tr>
+      <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:6px 10px"><strong>layout only</strong> (planner reverted)</td><td style="padding:6px 10px"><code>(m8,n4)</code></td><td style="padding:6px 10px">62.3%</td><td style="padding:6px 10px">47.4%</td></tr>
+      <tr><td style="padding:6px 10px"><strong>full fix</strong></td><td style="padding:6px 10px"><code>(m4,n8)</code></td><td style="padding:6px 10px"><strong>73.7%</strong></td><td style="padding:6px 10px"><strong>72.7%</strong></td></tr>
+    </tbody>
+  </table>
+  <p>So the two fixes are <strong>coupled</strong>: the layout fix makes the data streamable and
+  restructures the iteration space; the planner edit then keeps the split N-heavy on that new space
+  (otherwise the old cost model drifts to the worse <code>(m8,n4)</code> and stalls at 47%). Layout
+  alone gets 47&ndash;62%; the planner edit adds the rest. <strong>Both are required for 73%.</strong>
+  (An earlier static reading claimed the planner "declines" for this path &mdash; the ablation refutes
+  it; the planner engages and the split visibly flips.)</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="myth"><span class="num">12</span>Correcting the &ldquo;chunk-cap&rdquo; misconception</h2>
+
+<div class="callout myth">
+  <div class="ttl">&#10007; The old story (refuted)</div>
+  <p>"The ~29.5% prefill matmul plateau is a <em>hard DeepTools chunk-optimizer cap</em> &mdash; an
+  array-fill ceiling unreachable from inductor, with <em>no inductor lever</em>. The only inductor
+  observation was a frozen <code>(m4,n8,k1)</code> split, dismissed as marginal."</p>
+</div>
+
+<div class="callout truth">
+  <div class="ttl">&#10003; What was actually true</div>
+  <p>The plateau was an <strong>inductor layout artifact</strong>, not a hardware or back-end
+  ceiling. The size-1 batch dim collapsed, the iteration space dropped to a degenerate 3-dim
+  <code>[mb,out,in]</code> space, M got buried next to the stick, and the array couldn't be streamed.
+  An inductor-only fix reaching 73% on the <em>same</em> <code>--bundle</code> back end refutes the
+  "no inductor lever" framing. DeepTools was faithfully executing a badly-laid-out matmul; the same
+  compiler builds a fast kernel the moment inductor hands it a streamable layout.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="notfix"><span class="num">13</span>What this does NOT fix</h2>
+
+<p>The fix is tightly gated (2D weight, batch dim statically 1). It deliberately leaves several
+adjacent cases untouched, and it is honest about its blast radius.</p>
+
+<div class="grid2">
+  <div class="card before">
+    <h4>Decode matmuls (M=1 / M=4)</h4>
+    <p>Unchanged at ~0.8% util &mdash; and <em>expected</em>. Decode is <strong>weight-bound</strong>:
+    M is so tiny there's nothing to stream regardless of layout, so a layout rewrite can't help. A
+    different regime (data movement, not array-fill).</p>
+  </div>
+  <div class="card before">
+    <h4>Genuine batched BMM (true 3D weights)</h4>
+    <p>The <code>[4,1,4096]</code> per-batch-weight op stays at ~0.07% util. The recognizers return
+    <code>None</code> for a 3D weight &mdash; this fix targets the <em>shared-weight</em> (2D,
+    unit-batch) case only. MoE-style experts are a separate lever.</p>
+  </div>
+</div>
+
+<div class="callout note">
+  <div class="ttl">Out of scope: the MLP LX-overflow crash</div>
+  <p>This fix is about array-fill on the matmul. The separate prefill-MLP issue &mdash; the on-chip
+  LX-residency / overflow behavior governed by the DeepTools LX allocator (a compile-time crash, not
+  a utilization number) &mdash; is a different problem and is not touched here.</p>
+</div>
+
+<div class="callout note">
+  <div class="ttl">One-line reference: the attention fix</div>
+  <p>A separate commit (<code>824ad4b</code> on the sibling branch <code>pr-mlp-fix</code>) bypasses
+  the SDPA fake-tensor setup that mis-fires on the Spyre device. It is an <em>attention</em>
+  correctness fix, unrelated to this matmul layout work, and is mentioned only so it isn't confused
+  with it.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="refs"><span class="num">14</span>Code map</h2>
+
+<table>
+  <tr><th>Concern</th><th>file:func</th><th>What</th></tr>
+  <tr><td>Markers</td><td class="mono">constants.py</td><td><code>SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY</code>; <code>MATMUL_DIM_LABELS</code></td></tr>
+  <tr><td>Recognize (tag)</td><td class="mono">temp_passes.py:_unflatten_mm_to_bmm</td><td>tags bmm node when single batch dim is static 1; <code>_is_static_one</code></td></tr>
+  <tr><td>Meta survival</td><td class="mono">pass_utils.py:copy_fx_custom_meta</td><td>propagates <code>meta["custom"]</code> across the rewrite</td></tr>
+  <tr><td>Lowering (read)</td><td class="mono">lowering.py:lower_bmm</td><td>reads marker &rarr; <code>SpyreReduction.create(op_info=&hellip;)</code></td></tr>
+  <tr><td>IR carrier</td><td class="mono">ir.py:SpyreReduction</td><td><code>op_info</code> field ferried lowering &rarr; codegen</td></tr>
+  <tr><td>Layout (rewrite)</td><td class="mono">spyre_kernel.py:_preserve_shared_weight_unit_bmm_dim</td><td>re-injects unit dim as <code>_spyre_bmm_unit</code>, reorders to 4-dim, M outer</td></tr>
+  <tr><td>Size fallback</td><td class="mono">spyre_kernel.py:_shared_weight_unit_bmm_info_from_sizes</td><td>2D-weight-only; does NOT fire for 3D-expanded prefill</td></tr>
+  <tr><td>Label mapping</td><td class="mono">superdsc.py:_get_op_dim_labels</td><td><code>MATMUL_DIM_LABELS[len-ndim:]</code> (3&rarr;mb,out,in; 4&rarr;x,mb,out,in)</td></tr>
+  <tr><td>Device dim order</td><td class="mono">superdsc.py:_get_device_dim_order</td><td>only symbol-carrying dims become iteration dims (why the unit dim collapsed)</td></tr>
+  <tr><td>Planner (tie-break)</td><td class="mono">work_division.py:_matmul_split_cost</td><td>one-sided PT-underfill penalty replacing the symmetric V-penalty (complementary)</td></tr>
+</table>
+
+<hr class="soft">
+
+<p class="footnote">Branch <code>AdnanHoque/torch-spyre pr-mlp-fix-prefill</code>, commits
+<code>afc9b57</code> ("Fix shared-weight unit BMM layout") + <code>6a383d8</code> (planner). Diff is
+pure Python under <code>torch_spyre/_inductor/</code>. The layout half was reproduced on the older
+local <code>/opt</code> deeptools at 73.7% / 72.7%; all 10 fix tests and 117 test_coarse_tiling tests
+pass. All quoted utilizations are PT-Util &mdash; the fraction of 8&times;8 systolic-array MAC cycles
+doing useful work.</p>
+
+</div>
+</body>
+</html>
