@@ -1,0 +1,32 @@
+metric                      max_ms       mean_ms     median_ms        min_ms
+----------------------------------------------------------------------------
+wall_clock_ms               18.426        18.154        18.256        17.677
+cpu_ms                      18.062        18.062        18.062        18.062
+spyre_ms                     0.609         0.609         0.609         0.609
+kernel_ms                    0.214         0.214         0.214         0.214
+memory_transfer_ms           0.394         0.394         0.394         0.394
+pt_util%                     0.868
+
+Spyre-kernel_times:                  mean_ms      PT-Util%
+-----------------------------------------------------------
+Memset-(Device)                        0.039         0.000
+sdsc_fused_linear_0_0acnenhb           0.214         0.868
+Total                                  0.127         0.868
+
+CPU-kernel_times:                              mean_ms
+-------------------------------------------------------
+aten::to                                         5.952
+aten::_to_copy                                   5.949
+aten::empty_strided                              0.007
+aten::copy_                                      5.936
+aten::_copy_from                                 5.932
+aiuLaunchDMIControlBlocks                        0.001
+TorchDynamo-Cache-Lookup                         0.032
+Torch-Compiled-Region:-0/0                       0.175
+Pregraph-bytecode                                0.003
+AOTDispatcher-Runtime-Wrapper-Prologue           0.010
+##-Call-CompiledFxGraph-None-##                  0.101
+launch_kernel:sdsc_fused_linear_0                0.057
+aiuLaunchControlBlocks                           0.002
+aiuLaunchDMOControlBlocks                        0.001
+

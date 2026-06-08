@@ -1,0 +1,657 @@
+<?xml version="1.0" ?>
+<testsuites name="spyre-perf-suite">
+    <testsuite name="spyre-perf-suite" errors="0" failures="2" skipped="0" tests="65" time="1723.279" timestamp="2026-06-07T16:58:07+00:00">
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_pointwise_add_wall_clock_ms_[[1, 512, 4096], [1, 512, 4096]]" time="7.019">
+            <properties>
+                <property name="tag" value="op__pointwise_add"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__7.019"/>
+                <property name="tag" value="sendnn_ms__4.493"/>
+                <property name="tag" value="ratio__1.56"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_pointwise_add_cpu_ms_[[1, 512, 4096], [1, 512, 4096]]" time="6.914">
+            <properties>
+                <property name="tag" value="op__pointwise_add"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__6.914"/>
+                <property name="tag" value="sendnn_ms__4.835"/>
+                <property name="tag" value="ratio__1.43"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_pointwise_add_spyre_ms_[[1, 512, 4096], [1, 512, 4096]]" time="0.325">
+            <properties>
+                <property name="tag" value="op__pointwise_add"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.325"/>
+                <property name="tag" value="sendnn_ms__0.982"/>
+                <property name="tag" value="ratio__0.33"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_pointwise_add_kernel_ms_[[1, 512, 4096], [1, 512, 4096]]" time="0.127">
+            <properties>
+                <property name="tag" value="op__pointwise_add"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.127"/>
+                <property name="tag" value="sendnn_ms__0.117"/>
+                <property name="tag" value="ratio__1.09"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_pointwise_add_memory_transfer_ms_[[1, 512, 4096], [1, 512, 4096]]" time="0.198">
+            <properties>
+                <property name="tag" value="op__pointwise_add"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.198"/>
+                <property name="tag" value="sendnn_ms__0.864"/>
+                <property name="tag" value="ratio__0.23"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_pointwise_add_wall_clock_ms_[[4, 1, 4096], [4, 1, 4096]]" time="0.392">
+            <properties>
+                <property name="tag" value="op__pointwise_add"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.392"/>
+                <property name="tag" value="sendnn_ms__0.310"/>
+                <property name="tag" value="ratio__1.26"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_pointwise_add_cpu_ms_[[4, 1, 4096], [4, 1, 4096]]" time="0.339">
+            <properties>
+                <property name="tag" value="op__pointwise_add"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.339"/>
+                <property name="tag" value="sendnn_ms__0.274"/>
+                <property name="tag" value="ratio__1.24"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_pointwise_add_spyre_ms_[[4, 1, 4096], [4, 1, 4096]]" time="0.024">
+            <properties>
+                <property name="tag" value="op__pointwise_add"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.024"/>
+                <property name="tag" value="sendnn_ms__0.024"/>
+                <property name="tag" value="ratio__1.00"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_pointwise_add_kernel_ms_[[4, 1, 4096], [4, 1, 4096]]" time="0.001">
+            <properties>
+                <property name="tag" value="op__pointwise_add"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.001"/>
+                <property name="tag" value="sendnn_ms__0.001"/>
+                <property name="tag" value="ratio__1.00"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_pointwise_add_memory_transfer_ms_[[4, 1, 4096], [4, 1, 4096]]" time="0.023">
+            <properties>
+                <property name="tag" value="op__pointwise_add"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.023"/>
+                <property name="tag" value="sendnn_ms__0.023"/>
+                <property name="tag" value="ratio__1.00"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_softmax_wall_clock_ms_[[1, 512, 4096]]" time="4.937">
+            <properties>
+                <property name="tag" value="op__softmax"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__4.937"/>
+                <property name="tag" value="sendnn_ms__3.671"/>
+                <property name="tag" value="ratio__1.34"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_softmax_cpu_ms_[[1, 512, 4096]]" time="4.856">
+            <properties>
+                <property name="tag" value="op__softmax"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__4.856"/>
+                <property name="tag" value="sendnn_ms__3.621"/>
+                <property name="tag" value="ratio__1.34"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_softmax_spyre_ms_[[1, 512, 4096]]" time="0.213">
+            <properties>
+                <property name="tag" value="op__softmax"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.213"/>
+                <property name="tag" value="sendnn_ms__0.707"/>
+                <property name="tag" value="ratio__0.30"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_softmax_kernel_ms_[[1, 512, 4096]]" time="0.101">
+            <properties>
+                <property name="tag" value="op__softmax"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.101"/>
+                <property name="tag" value="sendnn_ms__0.095"/>
+                <property name="tag" value="ratio__1.06"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_softmax_memory_transfer_ms_[[1, 512, 4096]]" time="0.112">
+            <properties>
+                <property name="tag" value="op__softmax"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.112"/>
+                <property name="tag" value="sendnn_ms__0.612"/>
+                <property name="tag" value="ratio__0.18"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_softmax_wall_clock_ms_[[4, 1, 4096]]" time="0.372">
+            <properties>
+                <property name="tag" value="op__softmax"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.372"/>
+                <property name="tag" value="sendnn_ms__0.280"/>
+                <property name="tag" value="ratio__1.33"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_softmax_cpu_ms_[[4, 1, 4096]]" time="0.320">
+            <properties>
+                <property name="tag" value="op__softmax"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.320"/>
+                <property name="tag" value="sendnn_ms__0.244"/>
+                <property name="tag" value="ratio__1.31"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_softmax_spyre_ms_[[4, 1, 4096]]" time="0.018">
+            <properties>
+                <property name="tag" value="op__softmax"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.018"/>
+                <property name="tag" value="sendnn_ms__0.027"/>
+                <property name="tag" value="ratio__0.67"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_softmax_kernel_ms_[[4, 1, 4096]]" time="0.006">
+            <properties>
+                <property name="tag" value="op__softmax"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.006"/>
+                <property name="tag" value="sendnn_ms__0.006"/>
+                <property name="tag" value="ratio__1.00"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_softmax_memory_transfer_ms_[[4, 1, 4096]]" time="0.013">
+            <properties>
+                <property name="tag" value="op__softmax"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.013"/>
+                <property name="tag" value="sendnn_ms__0.021"/>
+                <property name="tag" value="ratio__0.62"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_layernorm_wall_clock_ms_[[1, 512, 4096]]" time="5.342">
+            <properties>
+                <property name="tag" value="op__layernorm"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__5.342"/>
+                <property name="tag" value="sendnn_ms__9.224"/>
+                <property name="tag" value="ratio__0.58"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_layernorm_cpu_ms_[[1, 512, 4096]]" time="5.268">
+            <properties>
+                <property name="tag" value="op__layernorm"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__5.268"/>
+                <property name="tag" value="sendnn_ms__9.169"/>
+                <property name="tag" value="ratio__0.57"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_layernorm_spyre_ms_[[1, 512, 4096]]" time="0.339">
+            <properties>
+                <property name="tag" value="op__layernorm"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.339"/>
+                <property name="tag" value="sendnn_ms__0.702"/>
+                <property name="tag" value="ratio__0.48"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_layernorm_kernel_ms_[[1, 512, 4096]]" time="0.221">
+            <properties>
+                <property name="tag" value="op__layernorm"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.221"/>
+                <property name="tag" value="sendnn_ms__0.121"/>
+                <property name="tag" value="ratio__1.83"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_layernorm_memory_transfer_ms_[[1, 512, 4096]]" time="0.118">
+            <properties>
+                <property name="tag" value="op__layernorm"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.118"/>
+                <property name="tag" value="sendnn_ms__0.581"/>
+                <property name="tag" value="ratio__0.20"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-QO-proj_wall_clock_ms_[[1, 512, 4096], [4096, 4096]]" time="22.425">
+            <properties>
+                <property name="tag" value="op__mul-QO-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__22.425"/>
+                <property name="tag" value="sendnn_ms__23.460"/>
+                <property name="tag" value="ratio__0.96"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-QO-proj_cpu_ms_[[1, 512, 4096], [4096, 4096]]" time="22.304">
+            <properties>
+                <property name="tag" value="op__mul-QO-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__22.304"/>
+                <property name="tag" value="sendnn_ms__23.394"/>
+                <property name="tag" value="ratio__0.95"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-QO-proj_spyre_ms_[[1, 512, 4096], [4096, 4096]]" time="0.842">
+            <properties>
+                <property name="tag" value="op__mul-QO-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.842"/>
+                <property name="tag" value="sendnn_ms__2.514"/>
+                <property name="tag" value="ratio__0.33"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-QO-proj_kernel_ms_[[1, 512, 4096], [4096, 4096]]" time="0.321">
+            <properties>
+                <property name="tag" value="op__mul-QO-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.321"/>
+                <property name="tag" value="sendnn_ms__0.358"/>
+                <property name="tag" value="ratio__0.90"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-QO-proj_memory_transfer_ms_[[1, 512, 4096], [4096, 4096]]" time="0.521">
+            <properties>
+                <property name="tag" value="op__mul-QO-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.521"/>
+                <property name="tag" value="sendnn_ms__2.156"/>
+                <property name="tag" value="ratio__0.24"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-QO-proj_wall_clock_ms_[[4, 1, 4096], [4096, 4096]]" time="18.154">
+            <properties>
+                <property name="tag" value="op__mul-QO-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__18.154"/>
+                <property name="tag" value="sendnn_ms__16.313"/>
+                <property name="tag" value="ratio__1.11"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-QO-proj_cpu_ms_[[4, 1, 4096], [4096, 4096]]" time="18.062">
+            <properties>
+                <property name="tag" value="op__mul-QO-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__18.062"/>
+                <property name="tag" value="sendnn_ms__16.253"/>
+                <property name="tag" value="ratio__1.11"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-QO-proj_spyre_ms_[[4, 1, 4096], [4096, 4096]]" time="0.609">
+            <properties>
+                <property name="tag" value="op__mul-QO-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.609"/>
+                <property name="tag" value="sendnn_ms__2.589"/>
+                <property name="tag" value="ratio__0.24"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-QO-proj_kernel_ms_[[4, 1, 4096], [4096, 4096]]" time="0.214">
+            <properties>
+                <property name="tag" value="op__mul-QO-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.214"/>
+                <property name="tag" value="sendnn_ms__0.233"/>
+                <property name="tag" value="ratio__0.92"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-QO-proj_memory_transfer_ms_[[4, 1, 4096], [4096, 4096]]" time="0.394">
+            <properties>
+                <property name="tag" value="op__mul-QO-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__0.394"/>
+                <property name="tag" value="sendnn_ms__2.356"/>
+                <property name="tag" value="ratio__0.17"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-KV-proj_wall_clock_ms_[[1, 512, 4096], [4096, 1024]]" time="5.583">
+            <properties>
+                <property name="tag" value="op__mul-KV-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 1024]]"/>
+                <property name="tag" value="torch_spyre_ms__5.583"/>
+                <property name="tag" value="sendnn_ms__4.091"/>
+                <property name="tag" value="ratio__1.36"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-KV-proj_cpu_ms_[[1, 512, 4096], [4096, 1024]]" time="5.500">
+            <properties>
+                <property name="tag" value="op__mul-KV-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 1024]]"/>
+                <property name="tag" value="torch_spyre_ms__5.500"/>
+                <property name="tag" value="sendnn_ms__4.037"/>
+                <property name="tag" value="ratio__1.36"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-KV-proj_spyre_ms_[[1, 512, 4096], [4096, 1024]]" time="0.275">
+            <properties>
+                <property name="tag" value="op__mul-KV-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 1024]]"/>
+                <property name="tag" value="torch_spyre_ms__0.275"/>
+                <property name="tag" value="sendnn_ms__0.808"/>
+                <property name="tag" value="ratio__0.34"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-KV-proj_kernel_ms_[[1, 512, 4096], [4096, 1024]]" time="0.090">
+            <properties>
+                <property name="tag" value="op__mul-KV-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 1024]]"/>
+                <property name="tag" value="torch_spyre_ms__0.090"/>
+                <property name="tag" value="sendnn_ms__0.106"/>
+                <property name="tag" value="ratio__0.85"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-KV-proj_memory_transfer_ms_[[1, 512, 4096], [4096, 1024]]" time="0.185">
+            <properties>
+                <property name="tag" value="op__mul-KV-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 1024]]"/>
+                <property name="tag" value="torch_spyre_ms__0.185"/>
+                <property name="tag" value="sendnn_ms__0.702"/>
+                <property name="tag" value="ratio__0.26"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-KV-proj_wall_clock_ms_[[4, 1, 4096], [4096, 1024]]" time="3.675">
+            <properties>
+                <property name="tag" value="op__mul-KV-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 1024]]"/>
+                <property name="tag" value="torch_spyre_ms__3.675"/>
+                <property name="tag" value="sendnn_ms__2.364"/>
+                <property name="tag" value="ratio__1.55"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-KV-proj_cpu_ms_[[4, 1, 4096], [4096, 1024]]" time="3.610">
+            <properties>
+                <property name="tag" value="op__mul-KV-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 1024]]"/>
+                <property name="tag" value="torch_spyre_ms__3.610"/>
+                <property name="tag" value="sendnn_ms__2.317"/>
+                <property name="tag" value="ratio__1.56"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-KV-proj_spyre_ms_[[4, 1, 4096], [4096, 1024]]" time="0.197">
+            <properties>
+                <property name="tag" value="op__mul-KV-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 1024]]"/>
+                <property name="tag" value="torch_spyre_ms__0.197"/>
+                <property name="tag" value="sendnn_ms__0.806"/>
+                <property name="tag" value="ratio__0.24"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-KV-proj_kernel_ms_[[4, 1, 4096], [4096, 1024]]" time="0.056">
+            <properties>
+                <property name="tag" value="op__mul-KV-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 1024]]"/>
+                <property name="tag" value="torch_spyre_ms__0.056"/>
+                <property name="tag" value="sendnn_ms__0.062"/>
+                <property name="tag" value="ratio__0.90"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-KV-proj_memory_transfer_ms_[[4, 1, 4096], [4096, 1024]]" time="0.141">
+            <properties>
+                <property name="tag" value="op__mul-KV-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 1024]]"/>
+                <property name="tag" value="torch_spyre_ms__0.141"/>
+                <property name="tag" value="sendnn_ms__0.744"/>
+                <property name="tag" value="ratio__0.19"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-MLP-proj_wall_clock_ms_[[1, 512, 4096], [4096, 12800]]" time="64.515">
+            <properties>
+                <property name="tag" value="op__mul-MLP-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 12800]]"/>
+                <property name="tag" value="torch_spyre_ms__64.515"/>
+                <property name="tag" value="sendnn_ms__70.396"/>
+                <property name="tag" value="ratio__0.92"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-MLP-proj_cpu_ms_[[1, 512, 4096], [4096, 12800]]" time="64.374">
+            <properties>
+                <property name="tag" value="op__mul-MLP-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 12800]]"/>
+                <property name="tag" value="torch_spyre_ms__64.374"/>
+                <property name="tag" value="sendnn_ms__70.310"/>
+                <property name="tag" value="ratio__0.92"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-MLP-proj_spyre_ms_[[1, 512, 4096], [4096, 12800]]" time="3.026">
+            <properties>
+                <property name="tag" value="op__mul-MLP-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 12800]]"/>
+                <property name="tag" value="torch_spyre_ms__3.026"/>
+                <property name="tag" value="sendnn_ms__7.103"/>
+                <property name="tag" value="ratio__0.43"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-MLP-proj_kernel_ms_[[1, 512, 4096], [4096, 12800]]" time="1.020">
+            <properties>
+                <property name="tag" value="op__mul-MLP-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 12800]]"/>
+                <property name="tag" value="torch_spyre_ms__1.020"/>
+                <property name="tag" value="sendnn_ms__0.959"/>
+                <property name="tag" value="ratio__1.06"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-MLP-proj_memory_transfer_ms_[[1, 512, 4096], [4096, 12800]]" time="2.006">
+            <properties>
+                <property name="tag" value="op__mul-MLP-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 4096], [4096, 12800]]"/>
+                <property name="tag" value="torch_spyre_ms__2.006"/>
+                <property name="tag" value="sendnn_ms__6.144"/>
+                <property name="tag" value="ratio__0.33"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-MLP-proj_wall_clock_ms_[[4, 1, 4096], [4096, 12800]]" time="55.266">
+            <properties>
+                <property name="tag" value="op__mul-MLP-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 12800]]"/>
+                <property name="tag" value="torch_spyre_ms__55.266"/>
+                <property name="tag" value="sendnn_ms__58.990"/>
+                <property name="tag" value="ratio__0.94"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-MLP-proj_cpu_ms_[[4, 1, 4096], [4096, 12800]]" time="55.637">
+            <properties>
+                <property name="tag" value="op__mul-MLP-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 12800]]"/>
+                <property name="tag" value="torch_spyre_ms__55.637"/>
+                <property name="tag" value="sendnn_ms__58.916"/>
+                <property name="tag" value="ratio__0.94"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-MLP-proj_spyre_ms_[[4, 1, 4096], [4096, 12800]]" time="2.501">
+            <properties>
+                <property name="tag" value="op__mul-MLP-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 12800]]"/>
+                <property name="tag" value="torch_spyre_ms__2.501"/>
+                <property name="tag" value="sendnn_ms__6.234"/>
+                <property name="tag" value="ratio__0.40"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-MLP-proj_kernel_ms_[[4, 1, 4096], [4096, 12800]]" time="0.721">
+            <properties>
+                <property name="tag" value="op__mul-MLP-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 12800]]"/>
+                <property name="tag" value="torch_spyre_ms__0.721"/>
+                <property name="tag" value="sendnn_ms__0.846"/>
+                <property name="tag" value="ratio__0.85"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mul-MLP-proj_memory_transfer_ms_[[4, 1, 4096], [4096, 12800]]" time="1.780">
+            <properties>
+                <property name="tag" value="op__mul-MLP-proj"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096], [4096, 12800]]"/>
+                <property name="tag" value="torch_spyre_ms__1.780"/>
+                <property name="tag" value="sendnn_ms__5.388"/>
+                <property name="tag" value="ratio__0.33"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mlp_wall_clock_ms_[[4, 1, 4096]]" time="617.845">
+            <properties>
+                <property name="tag" value="op__mlp"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__617.845"/>
+                <property name="tag" value="sendnn_ms__721.407"/>
+                <property name="tag" value="ratio__0.86"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mlp_cpu_ms_[[4, 1, 4096]]" time="617.680">
+            <properties>
+                <property name="tag" value="op__mlp"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__617.680"/>
+                <property name="tag" value="sendnn_ms__721.303"/>
+                <property name="tag" value="ratio__0.86"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mlp_spyre_ms_[[4, 1, 4096]]" time="45.652">
+            <properties>
+                <property name="tag" value="op__mlp"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__45.652"/>
+                <property name="tag" value="sendnn_ms__71.524"/>
+                <property name="tag" value="ratio__0.64"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mlp_kernel_ms_[[4, 1, 4096]]" time="23.407">
+            <properties>
+                <property name="tag" value="op__mlp"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__23.407"/>
+                <property name="tag" value="sendnn_ms__8.497"/>
+                <property name="tag" value="ratio__2.75"/>
+            </properties>
+            <failure message="Regression: tsp/sendnn ratio 2.75 exceeds threshold 2.0"/>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_mlp_memory_transfer_ms_[[4, 1, 4096]]" time="22.245">
+            <properties>
+                <property name="tag" value="op__mlp"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[4, 1, 4096]]"/>
+                <property name="tag" value="torch_spyre_ms__22.245"/>
+                <property name="tag" value="sendnn_ms__63.028"/>
+                <property name="tag" value="ratio__0.35"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_attention_wall_clock_ms_[[1, 512, 128], [1, 4096, 128], [1, 4096, 128]]" time="2.117">
+            <properties>
+                <property name="tag" value="op__attention"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 128], [1, 4096, 128], [1, 4096, 128]]"/>
+                <property name="tag" value="torch_spyre_ms__2.117"/>
+                <property name="tag" value="sendnn_ms__1.364"/>
+                <property name="tag" value="ratio__1.55"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_attention_cpu_ms_[[1, 512, 128], [1, 4096, 128], [1, 4096, 128]]" time="2.051">
+            <properties>
+                <property name="tag" value="op__attention"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 128], [1, 4096, 128], [1, 4096, 128]]"/>
+                <property name="tag" value="torch_spyre_ms__2.051"/>
+                <property name="tag" value="sendnn_ms__1.316"/>
+                <property name="tag" value="ratio__1.56"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_attention_spyre_ms_[[1, 512, 128], [1, 4096, 128], [1, 4096, 128]]" time="0.340">
+            <properties>
+                <property name="tag" value="op__attention"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 128], [1, 4096, 128], [1, 4096, 128]]"/>
+                <property name="tag" value="torch_spyre_ms__0.340"/>
+                <property name="tag" value="sendnn_ms__0.434"/>
+                <property name="tag" value="ratio__0.78"/>
+            </properties>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_attention_kernel_ms_[[1, 512, 128], [1, 4096, 128], [1, 4096, 128]]" time="0.269">
+            <properties>
+                <property name="tag" value="op__attention"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 128], [1, 4096, 128], [1, 4096, 128]]"/>
+                <property name="tag" value="torch_spyre_ms__0.269"/>
+                <property name="tag" value="sendnn_ms__0.063"/>
+                <property name="tag" value="ratio__4.27"/>
+            </properties>
+            <failure message="Regression: tsp/sendnn ratio 4.27 exceeds threshold 2.0"/>
+        </testcase>
+        <testcase classname="spyre_perf_suite.benchmark" name="perf_attention_memory_transfer_ms_[[1, 512, 128], [1, 4096, 128], [1, 4096, 128]]" time="0.071">
+            <properties>
+                <property name="tag" value="op__attention"/>
+                <property name="tag" value="dtype__float16"/>
+                <property name="tag" value="input_shape__[[1, 512, 128], [1, 4096, 128], [1, 4096, 128]]"/>
+                <property name="tag" value="torch_spyre_ms__0.071"/>
+                <property name="tag" value="sendnn_ms__0.370"/>
+                <property name="tag" value="ratio__0.19"/>
+            </properties>
+        </testcase>
+    </testsuite>
+</testsuites>

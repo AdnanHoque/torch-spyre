@@ -1,0 +1,16 @@
+============ Version Info ============
+torch-spyre:      824ad4b (branch: pr-mlp-fix)
+flex:             N/A (path not found: ../flex)
+deeptools:        N/A (path not found: ../deeptools)
+spyre-perf-suite: 7450624 (branch: HEAD)
+======================================
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 12800]]
+Stack                     Kernel_name                                duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memset-(Device)                                   0.072           0.000
+                          sdsc_fused_linear_0_vnhppsd1                      1.016          73.297
+                          Total                                             0.544          73.297
+sendnn:
+                          N/A                                                 N/A             N/A

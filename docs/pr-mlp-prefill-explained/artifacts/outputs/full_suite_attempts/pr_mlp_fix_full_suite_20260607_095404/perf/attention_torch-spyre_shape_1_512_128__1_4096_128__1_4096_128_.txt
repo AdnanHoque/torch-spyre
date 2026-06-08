@@ -1,0 +1,36 @@
+metric                      max_ms       mean_ms     median_ms        min_ms
+----------------------------------------------------------------------------
+wall_clock_ms                2.594         2.117         1.985         1.905
+cpu_ms                       2.051         2.051         2.051         2.051
+spyre_ms                     0.340         0.340         0.340         0.340
+kernel_ms                    0.269         0.269         0.269         0.269
+memory_transfer_ms           0.071         0.071         0.071         0.071
+pt_util%                     5.541
+
+Spyre-kernel_times:                                                     mean_ms      PT-Util%
+----------------------------------------------------------------------------------------------
+Memset-(Device)                                                           0.014         0.000
+sdsc_fused__scaled_dot_product_fused_attention_overrideable_0_g           0.269         5.541
+Total                                                                     0.142         5.541
+
+CPU-kernel_times:                                                                   mean_ms
+--------------------------------------------------------------------------------------------
+aten::to                                                                              0.310
+aten::_to_copy                                                                        0.371
+aten::empty_strided                                                                   0.005
+aten::copy_                                                                           0.362
+aten::_copy_from                                                                      0.360
+aiuLaunchDMIControlBlocks                                                             0.001
+TorchDynamo-Cache-Lookup                                                              0.025
+Torch-Compiled-Region:-0/0                                                            0.229
+Pregraph-bytecode                                                                     0.002
+AOTDispatcher-Runtime-Wrapper-Prologue                                                0.008
+##-Call-CompiledFxGraph-None-##                                                       0.169
+aten::empty                                                                           0.004
+aten::lift_fresh                                                                      0.000
+aten::detach_                                                                         0.002
+detach_                                                                               0.001
+launch_kernel:sdsc_fused__scaled_dot_product_fused_attention_overrideable_0           0.036
+aiuLaunchControlBlocks                                                                0.001
+aiuLaunchDMOControlBlocks                                                             0.001
+

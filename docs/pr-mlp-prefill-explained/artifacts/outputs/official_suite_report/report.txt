@@ -1,0 +1,16 @@
+============ Version Info ============
+torch-spyre:      824ad4b (branch: pr-mlp-fix)
+flex:             N/A (path not found: ../flex)
+deeptools:        N/A (path not found: ../deeptools)
+spyre-perf-suite: 7450624 (branch: HEAD)
+======================================
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 12800]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                 60.834             N/A        N/A
+cpu_ms.mean_ms                        60.686             N/A        N/A
+spyre_ms.mean_ms                       3.165             N/A        N/A
+kernel_ms.mean_ms                      1.016             N/A        N/A
+memory_transfer_ms.mean_ms             2.149             N/A        N/A
+pt_util%                              73.297             N/A        N/A
