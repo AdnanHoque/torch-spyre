@@ -75,7 +75,7 @@ Benchmark environment:
 
 ```text
 LX_PLANNING=0
-torch-spyre:      fb65d27 (branch: pr-mlp-prefill-explained)
+torch-spyre:      9e10e95 (branch: pr-mlp-prefill-explained)
 flex:             2457d3fc (branch: main)
 deeptools:        60b12999e4 (branch: master)
 spyre-perf-suite: 7450624 (branch: HEAD)
@@ -84,7 +84,7 @@ runroot:          /tmp/mlp-prefill-unitcanon-tsp-lx0-20260608_054919
 
 The raw report version block shows `6942fd9` because the benchmark was run just
 before this commit, while the static-unit-BMM patch was still uncommitted. The
-committed code in `fb65d27` is the same patch plus this archived report.
+implementation commit `9e10e95` is the same patch plus this archived report.
 
 Primary perf-suite command:
 
