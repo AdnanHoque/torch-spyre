@@ -1,0 +1,17 @@
+============ Version Info ============
+torch-spyre:      6942fd9 (branch: pr-mlp-prefill-explained)
+flex:             2457d3fc (branch: main)
+deeptools:        60b12999e4 (branch: master)
+spyre-perf-suite: 7450624 (branch: HEAD)
+======================================
+
+Op: mlp  Shape: [[1, 512, 4096]]
+Stack                     Kernel_name                                      duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memset-(Device)                                         0.070           0.000
+                          sdsc_fused_bmm_1_nzjfmlwd                               1.581          47.106
+                          sdsc_fused_bmm_mul_silu_0_sy9tete0                      4.588          32.464
+                          Total                                                   2.080          36.217
+sendnn:
+                          N/A                                                       N/A             N/A

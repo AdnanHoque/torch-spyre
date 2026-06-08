@@ -1,0 +1,44 @@
+metric                      max_ms       mean_ms     median_ms        min_ms
+----------------------------------------------------------------------------
+wall_clock_ms              193.202       185.136       185.136       177.070
+cpu_ms                     185.032       185.032       185.032       185.032
+spyre_ms                    25.870        25.870        25.870        25.870
+kernel_ms                    5.788         5.788         5.788         5.788
+memory_transfer_ms          20.082        20.082        20.082        20.082
+pt_util%                     0.000
+
+Spyre-kernel_times:       mean_ms      PT-Util%
+------------------------------------------------
+Memset-(Device)           0.676         0.000
+Memcpy-(HtoD)             2.701         0.000
+Memcpy-(DtoH)             5.895         0.000
+bmm                       5.788         0.000
+Total                     3.765         0.000
+
+CPU-kernel_times:                              mean_ms
+-------------------------------------------------------
+TorchDynamo-Cache-Lookup                         0.026
+Torch-Compiled-Region:-0/0                     185.005
+Pregraph-bytecode                                0.004
+AOTDispatcher-Runtime-Wrapper-Prologue           0.011
+aten::empty                                      0.016
+aiuLaunchSuperNode                             184.640
+aiuGraphExecution                              181.475
+aiuMalloc                                       78.370
+aiuResizeTensorAllocation                        0.003
+aiuDataConvert                                  18.332
+aiuClockCalibration                              1.594
+aiuNodeCompute                                  11.437
+aiuInitScheduler                                 0.003
+aiuCreateVirtualAddresses                        0.005
+aiuLaunchScheduleCompute                         0.059
+aiuPrepareDMAs                                   0.005
+aiuPrepareAndSyncRDMA                            0.002
+aiuClearCache                                    0.001
+aiuPreloadCache                                  0.001
+aiuLaunchComputeStream                           0.027
+aiuLaunchControlBlocks                           0.005
+aiuScheduleWait                                 11.361
+Memory-(Release)                                 0.535
+aten::to                                         0.003
+

@@ -77,15 +77,27 @@ def _same_static_size(lhs: Any, rhs: Any) -> bool:
 def _shared_weight_unit_bmm_info_from_sizes(
     x_size: Sequence[Any], y_size: Sequence[Any], out_size: Sequence[Any]
 ) -> dict[str, int] | None:
-    if len(x_size) != 3 or len(y_size) != 2 or len(out_size) != 3:
+    if len(x_size) != 3 or len(out_size) != 3:
         return None
     if not (_is_static_one(x_size[0]) and _is_static_one(out_size[0])):
         return None
-    if not (
-        _same_static_size(x_size[1], out_size[1])
-        and _same_static_size(x_size[2], y_size[0])
-        and _same_static_size(y_size[1], out_size[2])
-    ):
+    if len(y_size) == 2:
+        if not (
+            _same_static_size(x_size[1], out_size[1])
+            and _same_static_size(x_size[2], y_size[0])
+            and _same_static_size(y_size[1], out_size[2])
+        ):
+            return None
+    elif len(y_size) == 3:
+        if not _is_static_one(y_size[0]):
+            return None
+        if not (
+            _same_static_size(x_size[1], out_size[1])
+            and _same_static_size(x_size[2], y_size[1])
+            and _same_static_size(y_size[2], out_size[2])
+        ):
+            return None
+    else:
         return None
     return {"batch_dim": 0}
 
@@ -125,17 +137,35 @@ def _preserve_shared_weight_unit_bmm_dim(
         suffix += 1
         unit_sym = sympy.Symbol(f"_spyre_bmm_unit_{suffix}")
 
-    rewrite_targets = []
-    for arg in (args[0], args[-1]):
-        unit_idxs = []
-        for idx, (size, coord) in enumerate(
-            zip(arg.device_size[:-1], arg.device_coordinates[:-1])
-        ):
-            if concretize_expr(size) == 1 and coord == 0:
-                unit_idxs.append(idx)
-        if len(unit_idxs) != 1:
-            return it_space
-        rewrite_targets.append((arg, unit_idxs[0]))
+    def _unit_indices(arg: TensorArg) -> list[int]:
+        return [
+            idx
+            for idx, (size, coord) in enumerate(
+                zip(arg.device_size[:-1], arg.device_coordinates[:-1])
+            )
+            if concretize_expr(size) == 1 and coord == 0
+        ]
+
+    target_args = (args[0], args[-1])
+    unit_idxs_by_arg = [_unit_indices(arg) for arg in target_args]
+
+    if all(len(unit_idxs) == 0 for unit_idxs in unit_idxs_by_arg):
+        for arg in target_args:
+            if len(arg.device_size) < 2:
+                return it_space
+            insert_at = len(arg.device_size) - 1
+            arg.device_size.insert(insert_at, 1)
+            arg.device_coordinates.insert(insert_at, sympy.S.Zero)
+            if arg.stride_map is not None:
+                arg.stride_map.insert(insert_at, -1)
+        unit_idxs_by_arg = [_unit_indices(arg) for arg in target_args]
+
+    if not all(len(unit_idxs) == 1 for unit_idxs in unit_idxs_by_arg):
+        return it_space
+
+    rewrite_targets = [
+        (arg, unit_idxs[0]) for arg, unit_idxs in zip(target_args, unit_idxs_by_arg)
+    ]
 
     for arg, unit_idx in rewrite_targets:
         arg.device_coordinates[unit_idx] = unit_sym

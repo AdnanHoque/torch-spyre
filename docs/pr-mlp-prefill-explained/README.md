@@ -40,6 +40,42 @@ This directory collects the writeups, benchmark reports, helper scripts, and com
 
 The prefill/shared-weight projection fix changes the problematic MLP-proj matmul from the old slow torch-spyre layout/split to a sendnn-like shared-weight unit-BMM representation.
 
+## Static Unit-Batch BMM Follow-Up
+
+A follow-up probe extends the same idea to the full perf-suite prefill MLP when
+the weights arrive as static unit-batch BMM operands:
+
+```text
+[1, M, K] @ [1, K, N] -> [1, M, N]
+```
+
+The result is archived in:
+
+```text
+artifacts/outputs/static_unit_batch_bmm_canonicalization/
+```
+
+Headline paired result with `LX_PLANNING=0`:
+
+```text
+mlp [[1, 512, 4096]]
+torch-spyre kernel_ms: 6.169 ms
+sendnn kernel_ms:      5.788 ms
+tsp/sendnn:            1.066x
+```
+
+The standalone wide projection remains near parity:
+
+```text
+matmul [[1, 512, 4096], [4096, 12800]]
+torch-spyre kernel_ms: 1.018 ms
+sendnn kernel_ms:      0.960 ms
+tsp/sendnn:            1.060x
+```
+
+See `artifacts/outputs/static_unit_batch_bmm_canonicalization/static_unit_batch_bmm_canonicalization_report.md`
+for the codegen evidence, exact commands, and kernel breakdown.
+
 The key official-suite style result is in:
 
 ```text

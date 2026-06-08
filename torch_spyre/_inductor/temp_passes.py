@@ -47,6 +47,41 @@ def _is_static_one(value) -> bool:
         return False
 
 
+def _node_shape(node: torch.fx.Node) -> list[int] | None:
+    val = node.meta.get("val")
+    shape = getattr(val, "shape", None)
+    if shape is None:
+        return None
+    return list(shape)
+
+
+def _mark_static_unit_batch_bmm(
+    bmm_node: torch.fx.Node, lhs_node: torch.fx.Node, rhs_node: torch.fx.Node
+) -> None:
+    lhs_shape = _node_shape(lhs_node)
+    rhs_shape = _node_shape(rhs_node)
+    out_shape = _node_shape(bmm_node)
+    if lhs_shape is None or rhs_shape is None or out_shape is None:
+        return
+    if len(lhs_shape) != 3 or len(rhs_shape) != 3 or len(out_shape) != 3:
+        return
+    if not (
+        _is_static_one(lhs_shape[0])
+        and _is_static_one(rhs_shape[0])
+        and _is_static_one(out_shape[0])
+    ):
+        return
+    if not (
+        lhs_shape[1] == out_shape[1]
+        and lhs_shape[2] == rhs_shape[1]
+        and rhs_shape[2] == out_shape[2]
+    ):
+        return
+    custom = dict(bmm_node.meta.get("custom") or {})
+    custom[SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY] = {"batch_dim": 0}
+    bmm_node.meta["custom"] = custom
+
+
 @register_graph_pattern(
     CallFunction(aten.mm.default, Arg(), Arg()),
     pass_dict=mm_to_bmm_pass,
@@ -212,6 +247,8 @@ def _unflatten_bmm_batch_dims(
     node = match.nodes[-1]
     graph = node.graph
     lhs_reshape, rhs_reshape = mat1_node, mat2_node
+
+    _mark_static_unit_batch_bmm(node, lhs_reshape, rhs_reshape)
 
     # Both inputs must be reshape/view that collapse batch dims to 3D
     if not _is_batch_collapsing_reshape(lhs_reshape):

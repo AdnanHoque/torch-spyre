@@ -1,0 +1,36 @@
+============ Version Info ============
+torch-spyre:      6942fd9 (branch: pr-mlp-prefill-explained)
+flex:             2457d3fc (branch: main)
+deeptools:        60b12999e4 (branch: master)
+spyre-perf-suite: 7450624 (branch: HEAD)
+======================================
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 12800]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                 69.239          71.270     0.972
+cpu_ms.mean_ms                        69.064          71.174     0.970
+spyre_ms.mean_ms                       2.993           7.052     0.424
+kernel_ms.mean_ms                      1.018           0.960     1.060
+memory_transfer_ms.mean_ms             1.975           6.091     0.324
+pt_util%                              73.165           0.000        N/A
+
+Op: mlp  Shape: [[1, 512, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                137.480         185.136     0.743
+cpu_ms.mean_ms                       137.277         185.032     0.742
+spyre_ms.mean_ms                      11.596          25.870     0.448
+kernel_ms.mean_ms                      6.169           5.788     1.066
+memory_transfer_ms.mean_ms             5.427          20.082     0.270
+pt_util%                              36.217           0.000        N/A
+
+Op: mlp  Shape: [[4, 1, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                588.716             N/A        N/A
+cpu_ms.mean_ms                       588.553             N/A        N/A
+spyre_ms.mean_ms                      47.635             N/A        N/A
+kernel_ms.mean_ms                     24.765             N/A        N/A
+memory_transfer_ms.mean_ms            22.870             N/A        N/A
+pt_util%                               0.080             N/A        N/A

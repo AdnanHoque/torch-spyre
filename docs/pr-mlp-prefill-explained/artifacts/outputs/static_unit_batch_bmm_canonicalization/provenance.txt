@@ -1,0 +1,4 @@
+RUNROOT=/tmp/mlp-prefill-unitcanon-tsp-lx0-20260608_054919
+SRC=/tmp/mlp-prefill-unitcanon-tsp-lx0-20260608_054919/torch-spyre-unitcanon
+LX_PLANNING=0
+COMMAND=python run_benchmark.py --op mlp --shape 1 512 4096 --stacks torch-spyre --runs 3 --perf-dir /tmp/mlp-prefill-unitcanon-tsp-lx0-20260608_054919/spyre-perf-suite/perf --report /tmp/mlp-prefill-unitcanon-tsp-lx0-20260608_054919/report.txt --kernel_report /tmp/mlp-prefill-unitcanon-tsp-lx0-20260608_054919/kernel_report.txt
