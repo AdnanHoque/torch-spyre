@@ -813,11 +813,13 @@ the shape this fix is gated to, and distinguishes it from a <em>genuine</em> bat
 <!-- ============================================================ -->
 <h2 id="bug"><span class="num">7</span>The bug: a collapsed unit dim demotes M</h2>
 
-<p class="lead">Now we can name the bug precisely in the language of Part I: the size-1 batch dim got
-silently dropped, which knocked the iteration space down to three dimensions and pushed M out of its
-clean-outer streaming position &mdash; the exact &ldquo;M demoted&rdquo; failure mode. The op reaches
-the weight-stationary scheduler as a degenerate bmm, not a well-formed <code>[M,K]&times;[K,N]</code>
-matmul.</p>
+<p class="lead">Now we can name the bug precisely. The unit-BMM shape was <strong>flattened</strong>, so
+torch-spyre stopped presenting the shared-weight prefill projection in the sendnn-like BMM layout. That
+led the back end (<strong>KG3</strong>) to a worse layout and split: <em>too much splitting on M, not
+enough splitting on N</em>, and weaker PT utilization. In the language of Part I, the collapse pushed M
+out of its clean-outer streaming position &mdash; but the load-bearing fact is the lost BMM layout, not
+a memory effect. The op reaches the weight-stationary scheduler as a degenerate, flattened matmul
+rather than the well-formed <code>[M,K]&times;[K,N]</code> BMM layout sendnn uses.</p>
 
 <p>After the <code>mm&rarr;bmm</code> unflatten, the batch-of-1 dim has a device coordinate that is
 the constant integer <code>0</code> (<code>Integer(0)</code>) &mdash; it carries
@@ -855,23 +857,25 @@ cost dominates and the matmul under-fills at <strong>29.8%</strong> (wide-N MLP)
 &ldquo;under-utilization of the weight stationary dataflow.&rdquo;</p>
 
 <div class="callout note">
-  <div class="ttl">It was the layout all along, not the split</div>
+  <div class="ttl">It was the layout first, then the split</div>
   <p>An earlier investigation had noticed a "frozen <code>(m4,n8,k1)</code> split, dismissed as
-  marginal." That split was <em>already correct</em> &mdash; it only looked marginal because the op
-  was being presented to the scheduler as a degenerate, M-demoted bmm underneath it. A good split
-  cannot rescue an op the array can't stream. This is the split-vs-layout distinction from Section 5,
-  observed in the wild.</p>
+  marginal." Tuning the split in isolation looked marginal because the op was being presented to the
+  scheduler as a degenerate, flattened bmm underneath it &mdash; a good split cannot rescue an op the
+  array can't stream. Restore the sendnn-like BMM layout <em>first</em> and the split lever comes alive
+  (Section 11 shows it flipping from the unfixed <code>(m8,n4)</code> to the N-heavy <code>(m4,n8)</code>).
+  This is the split-vs-layout distinction from Section 5, observed in the wild.</p>
 </div>
 
 <!-- ============================================================ -->
 <h2 id="fix"><span class="num">8</span>The fix: re-introduce the dim, restore M as the outer stream</h2>
 
-<p class="lead">The fix does one conceptual thing: <strong>put the unit batch dim back as a real
-iteration-space symbol, and re-order each tensor's device dims so M becomes a clean outer streaming
-dimension again</strong> &mdash; handing the weight-stationary scheduler a well-formed
-<code>[M,K]&times;[K,N]</code> matmul instead of a collapsed bmm. Mechanically it's three coordinated
-parts &mdash; a marker that recognizes the shape, a thread that carries it through lowering, and the
-layout rewrite itself.</p>
+<p class="lead">The fix does one conceptual thing: <strong>un-flatten the unit-BMM shape so torch-spyre
+presents the projection in the sendnn-like BMM layout again</strong>. Concretely it puts the unit batch
+dim back as a real iteration-space symbol and re-orders each tensor's device dims so M becomes a clean
+outer streaming dimension &mdash; handing KG3 the well-formed <code>[M,K]&times;[K,N]</code> BMM layout
+(which then splits less on M and more on N) instead of the flattened, degenerate form. Mechanically
+it's three coordinated parts &mdash; a marker that recognizes the shape, a thread that carries it
+through lowering, and the layout rewrite itself.</p>
 
 <figure>
 <svg viewBox="0 0 900 250" role="img" aria-label="Recognition to lowering to layout pipeline">
@@ -961,6 +965,63 @@ moves from a demoted inner position to the <strong>front</strong> of the order. 
 re-ordering restores M as a clean outer streaming dimension, so the weight-stationary scheduler can
 stream a long run of tokens past each resident weight. With the coupled planner edit (Section 11)
 keeping the split N-heavy on the now-4-dim space, the array fills &rarr; <strong>73%</strong>.</p>
+
+<h4 class="sub">The probe: exact before/after from the device</h4>
+
+<p>Jamie's instrumented probe captures the full kernel-descriptor change on the fix's actual base
+(<code>a4c2449</code>). This is the authoritative before/after for the wide-N MLP projection
+(<span class="fileref">jamie_unit_bmm_probe.md</span>):</p>
+
+<div class="vs">
+  <div class="l">
+    <h4>BEFORE (unfixed) &mdash; flattened</h4>
+<pre style="margin:6px 0;background:#0b0f14;border:1px solid #5a2222"><code>N_ = { mb: 512, out: 12800, in: 4096 }
+
+INPUT  layoutDimOrder = [in, mb]
+KERNEL layoutDimOrder = [in, out]
+OUTPUT layoutDimOrder = [out, mb]
+
+split: mb=8, out=4, in=1
+  &rarr; per core: <span class="c-bad">64 M rows</span>, <span class="c-bad">50 N sticks</span></code></pre>
+  </div>
+  <div class="r">
+    <h4>AFTER (fixed) &mdash; sendnn-like BMM</h4>
+<pre style="margin:6px 0;background:#0b0f14;border:1px solid #22532f"><code>N_ = { <span class="c-good">x: 1</span>, mb: 512, out: 12800, in: 4096 }
+
+INPUT  layoutDimOrder = [mb, in, <span class="c-good">x</span>]
+KERNEL layoutDimOrder = [in, out]
+OUTPUT layoutDimOrder = [mb, out, <span class="c-good">x</span>]
+
+split: x=1, mb=4, out=8, in=1
+  &rarr; per core: <span class="c-good">128 M rows</span>, <span class="c-good">25 N sticks</span></code></pre>
+  </div>
+</div>
+
+<p>The single difference that unlocks everything is the missing <code>x:1</code> &mdash; the logical
+unit-BMM axis. Its size is <strong>1</strong>, so dropping it cannot change the math, but it changes how
+the op is <em>recognized</em> and <em>scheduled</em>. Re-introducing it flips the layout from the
+flattened form to the sendnn-like BMM layout, and the split that follows from it is the clean one.</p>
+
+<p>The arithmetic of the &ldquo;after&rdquo; shows why it is the right shape. The wide N projection is
+<code>12800</code> features; at 64 elements per stick that is <code>12800 / 64 = 200</code> output
+sticks. Splitting N across <code>out=8</code> cores gives <code>200 / 8 = 25</code> sticks per core
+&mdash; versus <code>200 / 4 = 50</code> before. And M doubles per core: <code>512 / 4 = 128</code>
+rows streamed past each resident weight, versus <code>512 / 8 = 64</code> before. That is exactly the
+KB's MLP-prefill model made concrete: keep the weights stationary, stream <strong>more</strong> M rows
+past them (64 &rarr; 128 per core), and split the wide N projection cleanly into N tiles (25 sticks per
+core).</p>
+
+<div class="callout key">
+  <div class="ttl">Why it was still correct before (the legality point)</div>
+  <p>Layout metadata is <em>not</em> the mathematical index formula by itself. The old SDSC was still a
+  <strong>legal</strong> matmul &mdash; activation stick on <code>in</code>/K, weight &amp; output stick
+  on <code>out</code>/N &mdash; so the compiler still knew how to map every logical element to physical
+  memory. It was just a <em>poorer</em> legal schedule/layout, not an <em>incorrect</em> one. That is
+  why the buggy version produced byte-correct numbers (it complements the byte-identical-kernel point in
+  Section 9). Size-1 axes are especially tricky here: mathematically they are removable, but for this
+  back end they still carry useful scheduling/layout identity &mdash; drop the <code>x:1</code> and you
+  lose the BMM-layout identity that gets you the clean split.</p>
+</div>
 
 <div class="callout note">
   <div class="ttl">Which recognizer fires for prefill</div>
@@ -1128,30 +1189,34 @@ one (<code>m4</code>) gives more. Penalizing only the under-fill direction lets 
 better weight-stationary amortization.</p>
 
 <div class="callout">
-  <div class="ttl">The ablation: both levers are necessary</div>
-  <p>Here is the subtlety. Once the layout fix re-introduces the unit dim, the iteration space is 4-D
-  and the planner <em>engages</em>. On that new space the <strong>old</strong> cost model picks the
-  M-heavy <code>(m8,n4)</code> split (each core streams only M/8 tokens &mdash; starved); the edit
-  flips it to the N-heavy <code>(m4,n8)</code> the wide projection actually wants (M/4 tokens per core
-  &mdash; amortized). Reverting only the planner edit (keeping the layout fix) measures its weight
-  directly &mdash; device-verified:</p>
+  <div class="ttl">The split, before and after (authoritative)</div>
+  <p>Jamie's probe (<span class="fileref">jamie_unit_bmm_probe.md</span>, base <code>a4c2449</code>)
+  gives the canonical before/after for the wide-N projection's split. The unfixed, flattened form splits
+  <em>too much on M and too little on N</em>; the full fix un-flattens to the sendnn-like BMM layout and
+  the split inverts &mdash; fewer M-tiles, more N-tiles:</p>
   <table style="width:100%;border-collapse:collapse;margin:14px 0;font-size:14px">
     <thead><tr style="text-align:left;border-bottom:2px solid #cbd5e1">
       <th style="padding:6px 10px">config</th><th style="padding:6px 10px">split</th>
-      <th style="padding:6px 10px">QO&#8209;proj util</th><th style="padding:6px 10px">wide&#8209;N util</th></tr></thead>
+      <th style="padding:6px 10px">per core (M rows / N sticks)</th></tr></thead>
     <tbody>
-      <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:6px 10px">no fix</td><td style="padding:6px 10px"><code>(m4,n8)</code></td><td style="padding:6px 10px">42.6%</td><td style="padding:6px 10px">29.8%</td></tr>
-      <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:6px 10px"><strong>layout only</strong> (planner reverted)</td><td style="padding:6px 10px"><code>(m8,n4)</code></td><td style="padding:6px 10px">62.3%</td><td style="padding:6px 10px">47.4%</td></tr>
-      <tr><td style="padding:6px 10px"><strong>full fix</strong></td><td style="padding:6px 10px"><code>(m4,n8)</code></td><td style="padding:6px 10px"><strong>73.7%</strong></td><td style="padding:6px 10px"><strong>72.7%</strong></td></tr>
+      <tr style="border-bottom:1px solid #e2e8f0"><td style="padding:6px 10px">BEFORE (unfixed, flattened)</td><td style="padding:6px 10px"><code>(m8,n4)</code></td><td style="padding:6px 10px">64 rows / 50 sticks</td></tr>
+      <tr><td style="padding:6px 10px"><strong>AFTER (full fix)</strong></td><td style="padding:6px 10px"><code>(m4,n8)</code></td><td style="padding:6px 10px"><strong>128 rows / 25 sticks</strong></td></tr>
     </tbody>
   </table>
-  <p>So the two fixes are <strong>coupled</strong>: the layout fix presents M as a clean outer stream
-  and restructures the iteration space; the planner edit then keeps the split N-heavy on that new
-  space (otherwise the old cost model drifts to <code>(m8,n4)</code>, over-splits M, starves each
-  core of tokens, and stalls at 47%). Layout alone gets 47&ndash;62%; the planner edit &mdash; fewer
-  M-splits, more tokens per core &mdash; adds the rest. <strong>Both are required for 73%.</strong>
+  <p>So the two fixes are <strong>coupled</strong>. The layout fix un-flattens the op into the
+  sendnn-like BMM layout and presents M as a clean outer stream; on that restored 4-D space, the
+  <strong>old</strong> cost model still picks the M-heavy split, and the planner edit is what flips it
+  to the N-heavy <code>(m4,n8)</code> the wide projection actually wants &mdash; 128 M rows streamed per
+  core (vs 64) and the wide N projection split cleanly into 25 sticks per core (vs 50). Our own ablation
+  independently confirmed the cost-model edit is load-bearing: on our build, the new layout with the
+  <em>old</em> cost model reached only <strong>~47% PT-Util</strong>, versus <strong>~73%</strong> with
+  the edit. <strong>Both the layout restoration and the N-heavy split are required for 73%.</strong>
   (An earlier static reading claimed the planner "declines" for this path &mdash; the ablation refutes
   it; the planner engages and the split visibly flips.)</p>
+  <p class="footnote">The <em>exact</em> unfixed split is base-dependent &mdash; a hand-port on an older
+  base (<code>53bbd76</code>) showed a different unfixed split &mdash; but the direction (the full fix
+  lands on the N-heavy <code>(m4,n8)</code>, and both levers are needed) holds. Jamie's probe on the
+  fix's actual base (<code>a4c2449</code>) is the authoritative reading.</p>
 </div>
 
 <!-- ============================================================ -->
