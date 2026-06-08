@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The MLP Prefill Fix: Rebalancing the Weight-Stationary Core Grid</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --ink:#e6edf3;
+    --muted:#9aa7b4; --line:#2d3848; --accent:#58a6ff; --good:#3fb950;
+    --bad:#f85149; --warn:#d29922; --purple:#bc8cff; --teal:#39d3c3;
+    --code:#0b0f14;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1000px; margin:0 auto; padding:0 22px 120px}
+  header.hero{
+    padding:64px 22px 48px; text-align:center;
+    background:radial-gradient(1200px 400px at 50% -120px, #1d3a5f55, transparent),
+               linear-gradient(180deg,#11161d,#0e1116);
+    border-bottom:1px solid var(--line);
+  }
+  header.hero .kicker{
+    color:var(--accent); letter-spacing:.18em; text-transform:uppercase;
+    font-size:12px; font-weight:700;
+  }
+  header.hero h1{
+    font-size:38px; line-height:1.13; margin:14px auto 12px; max-width:880px;
+    background:linear-gradient(90deg,#e6edf3,#9fd0ff);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  header.hero p.sub{color:var(--muted); max-width:760px; margin:0 auto; font-size:17px}
+  .pills{display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:24px}
+  .pill{
+    background:var(--panel); border:1px solid var(--line); border-radius:999px;
+    padding:7px 14px; font-size:13px; color:var(--muted);
+  }
+  .pill b{color:var(--ink)}
+  .pill .up{color:var(--good)}
+  .puzzle{
+    max-width:780px; margin:30px auto 0; background:#101d2e; border:1px solid #234263;
+    border-radius:14px; padding:20px 24px; text-align:left;
+  }
+  .puzzle .ttl{color:#9fd0ff; font-weight:700; font-size:14px; letter-spacing:.04em;
+    text-transform:uppercase; margin-bottom:8px}
+  .puzzle p{margin:8px 0; color:#d7e0ea; font-size:15.5px}
+  .puzzle b{color:#fff}
+  h2{
+    font-size:26px; margin:58px 0 8px; padding-top:14px;
+    border-top:1px solid var(--line);
+  }
+  h2 .num{color:var(--accent); font-variant-numeric:tabular-nums; margin-right:10px}
+  h3{font-size:19px; margin:32px 0 6px; color:#cdd9e5}
+  h4.sub{font-size:15px; color:var(--teal); margin:24px 0 4px; letter-spacing:.02em;
+    text-transform:uppercase}
+  p{margin:12px 0}
+  .lead{font-size:17.5px; color:#d7e0ea}
+  code,kbd{
+    font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:13.5px;
+  }
+  p code,li code,td code{
+    background:#1b2230; border:1px solid var(--line); border-radius:5px;
+    padding:1px 6px; color:#9fd0ff; white-space:nowrap;
+  }
+  .fileref{color:var(--purple); font-weight:600}
+  pre{
+    background:var(--code); border:1px solid var(--line); border-radius:10px;
+    padding:16px 18px; overflow:auto; font-size:13px; line-height:1.55;
+    margin:16px 0;
+  }
+  pre code{color:#cfe3f5; white-space:pre}
+  .c-key{color:#ff7b72}
+  .c-num{color:#79c0ff}
+  .c-com{color:#6e7a8a; font-style:italic}
+  .c-good{color:var(--good)}
+  .c-bad{color:var(--bad)}
+  .panel{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:20px 22px; margin:18px 0;
+  }
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  .card{
+    background:var(--panel2); border:1px solid var(--line); border-radius:10px;
+    padding:16px 18px;
+  }
+  .card h4{margin:0 0 8px; font-size:15px; color:#cdd9e5}
+  .card.before{border-left:3px solid var(--bad)}
+  .card.after{border-left:3px solid var(--good)}
+  table{
+    width:100%; border-collapse:collapse; margin:18px 0; font-size:14px;
+    background:var(--panel); border:1px solid var(--line); border-radius:10px;
+    overflow:hidden;
+  }
+  th,td{padding:11px 13px; text-align:left; border-bottom:1px solid var(--line)}
+  th{background:#1a212c; color:#cdd9e5; font-size:12.5px; letter-spacing:.03em; text-transform:uppercase}
+  tr:last-child td{border-bottom:none}
+  td.num,th.num{text-align:right; font-variant-numeric:tabular-nums}
+  .tag{display:inline-block; padding:1px 8px; border-radius:6px; font-size:12px; font-weight:600}
+  .tag.bad{background:#3a1a1a; color:#ff9d96}
+  .tag.good{background:#15351f; color:#7ee597}
+  .tag.warn{background:#3a2f12; color:#f0cf7a}
+  .tag.neu{background:#1f2733; color:#9fb3c8}
+  .callout{
+    border-radius:12px; padding:18px 20px; margin:22px 0; border:1px solid;
+  }
+  .callout .ttl{font-weight:700; font-size:15px; margin-bottom:6px; display:flex; align-items:center; gap:8px}
+  .callout.myth{background:#2a1414; border-color:#5a2222}
+  .callout.myth .ttl{color:#ff9d96}
+  .callout.truth{background:#11271a; border-color:#22532f}
+  .callout.truth .ttl{color:#7ee597}
+  .callout.warn{background:#2a2410; border-color:#5a4d1c}
+  .callout.warn .ttl{color:#f0cf7a}
+  .callout.note{background:#101d2e; border-color:#234263}
+  .callout.note .ttl{color:#9fd0ff}
+  .callout.key{background:#161033; border-color:#3a2a6a}
+  .callout.key .ttl{color:#bc8cff}
+  figure{margin:30px 0; text-align:center}
+  figure svg{max-width:100%; height:auto; background:#0b0f15; border:1px solid var(--line); border-radius:12px}
+  figcaption{color:var(--muted); font-size:13px; margin-top:10px; max-width:820px; margin-left:auto; margin-right:auto}
+  .mono{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  ul.clean{list-style:none; padding-left:0}
+  ul.clean li{padding:6px 0 6px 26px; position:relative}
+  ul.clean li::before{content:"\25B8"; color:var(--accent); position:absolute; left:4px}
+  .toc{
+    background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:18px 22px; margin:28px 0; columns:2; column-gap:30px;
+  }
+  @media(max-width:760px){.toc{columns:1}}
+  .toc a{color:#bcd3ea; text-decoration:none; display:block; padding:4px 0; font-size:14px}
+  .toc a:hover{color:var(--accent)}
+  .toc .g{color:var(--muted); font-size:11px; letter-spacing:.12em; text-transform:uppercase;
+    padding:10px 0 2px; display:block; break-inside:avoid}
+  .arrow{color:var(--accent); font-weight:700}
+  .legend{display:flex; gap:18px; justify-content:center; flex-wrap:wrap; font-size:12.5px; color:var(--muted); margin-top:6px}
+  .legend span{display:inline-flex; align-items:center; gap:6px}
+  .sw{width:13px; height:13px; border-radius:3px; display:inline-block}
+  blockquote.src{
+    margin:16px 0; padding:12px 18px; border-left:3px solid var(--purple);
+    background:#161033; border-radius:0 8px 8px 0; color:#d7d0ea; font-size:14.5px;
+  }
+  blockquote.src cite{display:block; margin-top:6px; color:#9b8cc8; font-size:12.5px; font-style:normal}
+  .svgtxt{fill:#cdd9e5; font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  .svgmut{fill:#9aa7b4; font-family:-apple-system,"Segoe UI",sans-serif}
+  .svghd{fill:#e6edf3; font-family:-apple-system,"Segoe UI",sans-serif; font-weight:700}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="kicker">torch-spyre &middot; IBM Spyre AIU &middot; weight-stationary core-grid scheduling</div>
+  <h1>The MLP Prefill Fix: Rebalancing the Weight-Stationary Core Grid</h1>
+  <p class="sub">Same 32 cores. Same math. Same K. The old schedule gave each core
+  <b>64 M&nbsp;rows &times; 50 N&nbsp;sticks</b>; the new one gives <b>128 &times; 25</b>.
+  Why is the second grid so much better? The answer is about <b>weight duplication</b> &mdash;
+  and it has almost nothing to do with the number 25.</p>
+  <div class="pills">
+    <span class="pill">Grid: <b>8&times;4 (M-heavy)</b> <span class="arrow">&rarr;</span> <b class="up">4&times;8 (N-heavy)</b></span>
+    <span class="pill">Per core: <b>64&times;50</b> <span class="arrow">&rarr;</span> <b class="up">128&times;25</b></span>
+    <span class="pill">Weight duplication: <b>8&times;</b> <span class="arrow">&rarr;</span> <b class="up">4&times;</b></span>
+    <span class="pill">M-reuse / weight tile: <b>64</b> <span class="arrow">&rarr;</span> <b class="up">128</b></span>
+  </div>
+
+  <div class="puzzle">
+    <div class="ttl">The puzzle this document exists to answer</div>
+    <p>The op is a shared-weight prefill projection:
+    <span class="mono" style="color:#9fd0ff">O[mb,out] = &Sigma;<sub>in</sub> A[mb,in] &middot; W[in,out]</span>,
+    with <b>M = 512</b>, <b>N = 12800</b>, <b>K = 4096</b>, on <b>32 cores</b>.</p>
+    <p>Both the old and the new schedule describe the <em>identical legal matmul</em>. K is never
+    split either way. So the FLOPs are identical, the result is bit-for-bit the same, and exactly
+    32 cores are busy in both. Yet the rebalance from an <b style="color:#ff9d96">8&times;4</b> grid
+    to a <b style="color:#7ee597">4&times;8</b> grid is a large win. <b>How can rearranging the same
+    32 cores over the same matrix matter?</b></p>
+    <p>The answer rests on one asymmetry of a <b>weight-stationary</b> array: <b>splitting M
+    duplicates the weight; splitting N does not.</b> This document builds that first principle from
+    zero, then reads it straight out of the saved <span class="fileref">sdsc_0.json</span> /
+    <span class="fileref">jamie_unit_bmm_probe.md</span>.</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<nav class="toc">
+  <span class="g">The core idea</span>
+  <a href="#weightstationary">1. Weight-stationary in one minute</a>
+  <a href="#asymmetry">2. The asymmetry: M-split duplicates weight, N-split does not</a>
+  <a href="#dupmath">3. The money diagram: 8&times; vs 4&times; weight duplication</a>
+  <span class="g">The actual fix</span>
+  <a href="#data">4. Before / after, straight from the SDSC</a>
+  <a href="#grid">5. Rebalancing the 32-core grid: 8&times;4 &rarr; 4&times;8</a>
+  <a href="#reuse">6. Reuse view: 64 vs 128 M-rows per resident weight tile</a>
+  <a href="#why25">7. Why 25 beats 50 &mdash; the full accounting</a>
+  <span class="g">Loose ends</span>
+  <a href="#ntile">8. The 25 matches the backend's natural N tile</a>
+  <a href="#correct">9. Why correctness survived the change</a>
+  <a href="#refs">10. Sources</a>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="weightstationary"><span class="num">1</span>Weight-stationary in one minute</h2>
+
+<p class="lead">Everything below falls out of one fact about how a Spyre core runs a matmul:
+it is a <strong>weight-stationary</strong> systolic array. To understand the fix you only
+need to internalize what that phrase costs you.</p>
+
+<p>Each core has an <strong>8&times;8 MPE array</strong> (the KG3 weight-stationary engine, 64
+multiply-accumulate cells). To run a matmul tile, the hardware does three things, in order:</p>
+
+<ul class="clean">
+  <li><b>Load a tile of the weight <code>W</code> into the array and hold it resident.</b> The
+  weight values sit in the cells and do <em>not move</em> while the tile runs. This load is a
+  fixed setup cost.</li>
+  <li><b>Stream the rows of the activation &mdash; the M dimension &mdash; through the resident
+  weights, one after another.</b> Each M row is a K-vector fed across the held weights.</li>
+  <li><b>The N outputs accumulate</b> on the output edge as each M row passes.</li>
+</ul>
+
+<p>The load-bearing consequence is <em>amortization</em>. Loading a weight tile is paid
+<strong>per weight load</strong>. You earn it back only by streaming many M rows past that
+resident tile before reloading. So a weight-stationary array has a clear preference, and it is
+the whole story of this fix:</p>
+
+<div class="callout key">
+  <div class="ttl">&#9733; The single rule</div>
+  <p style="margin:6px 0 0">Load a weight tile <b>once</b>, then stream <b>as many M rows as
+  possible</b> through it before you reload. Anything that forces you to load the same weight tile
+  again &mdash; on another core, or another pass &mdash; is wasted setup the array did not need to pay.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="asymmetry"><span class="num">2</span>The asymmetry: M-split duplicates the weight, N-split does not</h2>
+
+<p>We have 32 cores and one big matmul. We must hand each core a rectangle of work. The work is
+indexed by two output axes &mdash; <code>mb</code> (the M rows of the output) and <code>out</code>
+(the N columns). So the scheduler chooses a <strong>grid</strong>: split M into
+<span class="mono">m</span> partitions and N into <span class="mono">n</span> partitions, with
+<span class="mono">m &times; n = 32</span>. Every core owns one cell <code>(mb_i, out_j)</code>.</p>
+
+<p>Here is the asymmetry that makes one grid better than another. Look at what a single core at
+cell <code>(mb_i, out_j)</code> actually needs to read:</p>
+
+<table>
+  <tr><th>The core at cell (mb_i, out_j) reads&hellip;</th><th>which depends on&hellip;</th></tr>
+  <tr><td>its activation rows <code>A[its M-rows, all in]</code></td><td>its M-partition <code>mb_i</code> only</td></tr>
+  <tr><td>its weight columns <code>W[all in, its out_j]</code></td><td>its N-partition <code>out_j</code> only</td></tr>
+</table>
+
+<p>Now ask: which cores share the <em>same weight columns</em>? Every core with the same
+<code>out_j</code> &mdash; regardless of its <code>mb_i</code> &mdash; needs the
+<em>identical</em> weight slice <code>W[:, out_j]</code>. They differ only in which M rows they
+stream through it.</p>
+
+<div class="grid2">
+  <div class="card before">
+    <h4>Splitting M is expensive &mdash; it duplicates the weight</h4>
+    <p style="margin:6px 0 0">All the cores in one column of the grid (same <code>out_j</code>,
+    different <code>mb_i</code>) need the <b>same</b> weight columns. So that weight slice is loaded
+    once <b>per M-partition</b>. The whole weight <code>W</code> ends up loaded
+    <b>m times</b> across the machine &mdash; the M-split factor <em>is</em> the duplication factor.</p>
+  </div>
+  <div class="card after">
+    <h4>Splitting N is cheap &mdash; no duplication</h4>
+    <p style="margin:6px 0 0">Each N-partition owns <b>different</b> output columns and therefore
+    <b>different</b> weight columns. Spreading more cores across N hands each one a fresh,
+    non-overlapping slice of <code>W</code>. Parallelism goes up; weight loads do <b>not</b>.
+    Every core still runs, but no weight byte is loaded twice.</p>
+  </div>
+</div>
+
+<div class="callout truth">
+  <div class="ttl">&#10003; The first principle in one sentence</div>
+  <p style="margin:6px 0 0">On a weight-stationary array, <b>the M-split factor is the
+  weight-duplication factor.</b> Cores that share an N-partition reload the same weights; cores in
+  different N-partitions never do. So given a fixed core budget, you want to spend cores on N (free
+  parallelism) and as few as possible on M (each one re-loads the whole weight again).</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="dupmath"><span class="num">3</span>The money diagram: 8&times; vs 4&times; weight duplication</h2>
+
+<p>This is the diagram the entire fix turns on. The weight matrix <code>W[in, out]</code> is
+sliced by <code>out</code> into column-slices &mdash; one per N-partition. The
+<strong>height of each stack</strong> below is how many cores load that same slice, i.e. the
+M-split factor. That stack height is the number of times the weight is duplicated.</p>
+
+<figure>
+<svg viewBox="0 0 940 470" width="940" height="470" role="img"
+     aria-label="Weight duplication: before mb=8 loads each weight slice on 8 cores (8x); after mb=4 loads it on 4 cores (4x)">
+  <rect class="svg-bg" x="0" y="0" width="940" height="470" rx="12" fill="#0b0f15"/>
+
+  <!-- BEFORE -->
+  <text class="svghd" x="40" y="38" font-size="17">BEFORE &mdash; grid 8&times;4 (M-split = 8)</text>
+  <text class="svgmut" x="40" y="60" font-size="13">N split into 4 column-slices &middot; each slice loaded on 8 cores</text>
+
+  <!-- 4 column slices, each a stack of 8 -->
+  <!-- slice geometry -->
+  <g font-size="11">
+  <!-- slice 1..4 -->
+  <!-- We draw 8 stacked thin copies per slice -->
+  <!-- helper offsets -->
+  <!-- slice x positions -->
+  <!-- slice width 70, gap 24 -->
+  <!-- copies y from 86, each 28 tall, slight offset to show "duplication" -->
+  <g>
+    <!-- slice 1 -->
+    <g>
+      <rect x="56" y="92" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="52" y="116" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="48" y="140" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="44" y="164" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="40" y="188" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="36" y="212" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="32" y="236" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="28" y="260" width="70" height="22" fill="#7a2c2c" stroke="#f85149" stroke-width="1.5"/>
+      <text class="svgmut" x="63" y="298" text-anchor="middle">out[0]</text>
+    </g>
+    <!-- slice 2 -->
+    <g>
+      <rect x="186" y="92" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="182" y="116" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="178" y="140" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="174" y="164" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="170" y="188" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="166" y="212" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="162" y="236" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="158" y="260" width="70" height="22" fill="#7a2c2c" stroke="#f85149" stroke-width="1.5"/>
+      <text class="svgmut" x="193" y="298" text-anchor="middle">out[1]</text>
+    </g>
+    <!-- slice 3 -->
+    <g>
+      <rect x="316" y="92" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="312" y="116" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="308" y="140" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="304" y="164" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="300" y="188" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="296" y="212" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="292" y="236" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="288" y="260" width="70" height="22" fill="#7a2c2c" stroke="#f85149" stroke-width="1.5"/>
+      <text class="svgmut" x="323" y="298" text-anchor="middle">out[2]</text>
+    </g>
+    <!-- slice 4 -->
+    <g>
+      <rect x="446" y="92" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="442" y="116" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="438" y="140" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="434" y="164" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="430" y="188" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="426" y="212" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="422" y="236" width="70" height="22" fill="#5a2222" stroke="#f85149" stroke-width="1"/>
+      <rect x="418" y="260" width="70" height="22" fill="#7a2c2c" stroke="#f85149" stroke-width="1.5"/>
+      <text class="svgmut" x="453" y="298" text-anchor="middle">out[3]</text>
+    </g>
+  </g>
+  </g>
+  <text class="svgtxt" x="40" y="332" font-size="13" fill="#ff9d96">&#8593; each slice loaded on <tspan font-weight="700">8 cores</tspan> &rArr; full W loaded <tspan font-weight="700">8&times;</tspan> total</text>
+
+  <!-- divider -->
+  <line x1="560" y1="80" x2="560" y2="350" stroke="#2d3848" stroke-width="1.5" stroke-dasharray="5 5"/>
+
+  <!-- AFTER -->
+  <text class="svghd" x="600" y="38" font-size="17">AFTER &mdash; grid 4&times;8 (M-split = 4)</text>
+  <text class="svgmut" x="600" y="60" font-size="13">N split into 8 column-slices &middot; each slice loaded on only 4 cores</text>
+
+  <!-- 8 column slices, each a stack of 4. narrower slices -->
+  <g>
+  <!-- positions: x from 600, width 32, gap 8 => pitch 40 -->
+  <!-- slice loop manually -->
+  <!-- s0 -->
+  <g>
+    <rect x="612" y="140" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="609" y="164" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="606" y="188" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="603" y="212" width="30" height="22" fill="#226b39" stroke="#3fb950" stroke-width="1.5"/>
+  </g>
+  <g>
+    <rect x="652" y="140" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="649" y="164" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="646" y="188" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="643" y="212" width="30" height="22" fill="#226b39" stroke="#3fb950" stroke-width="1.5"/>
+  </g>
+  <g>
+    <rect x="692" y="140" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="689" y="164" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="686" y="188" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="683" y="212" width="30" height="22" fill="#226b39" stroke="#3fb950" stroke-width="1.5"/>
+  </g>
+  <g>
+    <rect x="732" y="140" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="729" y="164" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="726" y="188" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="723" y="212" width="30" height="22" fill="#226b39" stroke="#3fb950" stroke-width="1.5"/>
+  </g>
+  <g>
+    <rect x="772" y="140" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="769" y="164" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="766" y="188" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="763" y="212" width="30" height="22" fill="#226b39" stroke="#3fb950" stroke-width="1.5"/>
+  </g>
+  <g>
+    <rect x="812" y="140" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="809" y="164" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="806" y="188" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="803" y="212" width="30" height="22" fill="#226b39" stroke="#3fb950" stroke-width="1.5"/>
+  </g>
+  <g>
+    <rect x="852" y="140" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="849" y="164" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="846" y="188" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="843" y="212" width="30" height="22" fill="#226b39" stroke="#3fb950" stroke-width="1.5"/>
+  </g>
+  <g>
+    <rect x="892" y="140" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="889" y="164" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="886" y="188" width="30" height="22" fill="#1d4d2c" stroke="#3fb950" stroke-width="1"/>
+    <rect x="883" y="212" width="30" height="22" fill="#226b39" stroke="#3fb950" stroke-width="1.5"/>
+  </g>
+  <text class="svgmut" x="600" y="262" font-size="11">out[0] &hellip; out[7] &mdash; twice as many distinct N slices</text>
+  </g>
+  <text class="svgtxt" x="600" y="332" font-size="13" fill="#7ee597">&#8593; each slice loaded on only <tspan font-weight="700">4 cores</tspan> &rArr; full W loaded <tspan font-weight="700">4&times;</tspan> total</text>
+
+  <!-- bottom summary bar -->
+  <rect x="40" y="372" width="860" height="74" rx="10" fill="#11161d" stroke="#234263"/>
+  <text class="svghd" x="60" y="400" font-size="14">The fix HALVES duplicated weight traffic:</text>
+  <text class="svgtxt" x="60" y="424" font-size="13">M-split 8 &rarr; 4 means the full weight is set up <tspan fill="#ff9d96" font-weight="700">8&times;</tspan> &rarr; <tspan fill="#7ee597" font-weight="700">4&times;</tspan>. The freed 4&times; of N-split is pure parallelism &mdash; no extra weight loaded.</text>
+</svg>
+<figcaption><b>Figure 1 &mdash; the money diagram.</b> Each column-slice of <code>W</code> is the weight
+needed by one N-partition. The stack height is the M-split factor: how many cores load that
+<em>same</em> slice. Before (8&times;4) the weight is loaded 8&times;; after (4&times;8) only
+4&times;. Splitting N just adds more <em>distinct</em> slices &mdash; never a reload.</figcaption>
+</figure>
+
+<div class="callout note">
+  <div class="ttl">Why "load W 8&times;" is the right way to count it</div>
+  <p style="margin:6px 0 0">There is exactly one copy of W in memory. "Loaded 8&times;" means the
+  array setup &mdash; reading a weight slice into the resident MPE cells &mdash; happens 8 times for
+  each slice's worth of weight across the 32 cores, because 8 cores in a column all need the same
+  slice. That repeated setup is the cost a weight-stationary array is built to avoid.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="data"><span class="num">4</span>Before / after, straight from the SDSC</h2>
+
+<p>Now the actual data. These are the exact records from the saved
+<span class="fileref">sdsc_0.json</span> / the <span class="fileref">jamie_unit_bmm_probe.md</span>
+probe, for the shared-weight projection
+<span class="mono" style="color:#9fd0ff">O[mb,out] = &Sigma;<sub>in</sub> A[mb,in]&middot;W[in,out]</span>
+with <span class="mono">mb=512, out=12800, in=4096</span> on 32 cores.</p>
+
+<div class="grid2">
+  <div class="card before">
+    <h4><span class="tag bad">BEFORE</span> M-heavy 8&times;4</h4>
+<pre><code><span class="c-com"># shape identity</span>
+N_ = { mb:512, out:12800, in:4096 }
+
+<span class="c-com"># layouts (stick axis in brackets-tail)</span>
+INPUT  [in, mb]   stick [in]
+KERNEL [in, out]  stick [out]
+OUTPUT [out, mb]  stick [out]
+
+<span class="c-com"># core split</span>
+mb=<span class="c-bad">8</span>, out=<span class="c-bad">4</span>, in=1
+
+<span class="c-com"># per core</span>
+M rows = 512/8  = <span class="c-bad">64</span>
+N elems = 12800/4 = 3200 = <span class="c-bad">50</span> sticks
+K = 4096 (unsplit)</code></pre>
+    <p style="margin:8px 0 0; font-size:13.5px; color:#ff9d96"><b>32 cores = 8 mb &times; 4 out</b>
+    &mdash; each core: 64 M rows &times; 50 N sticks.</p>
+  </div>
+  <div class="card after">
+    <h4><span class="tag good">AFTER</span> N-heavy 4&times;8</h4>
+<pre><code><span class="c-com"># shape identity (+ unit-BMM axis)</span>
+N_ = { <span class="c-good">x:1</span>, mb:512, out:12800, in:4096 }
+
+<span class="c-com"># layouts (stick axis in brackets-tail)</span>
+INPUT  [mb, in, x]  stick [in]
+KERNEL [in, out]    stick [out]
+OUTPUT [mb, out, x] stick [out]
+
+<span class="c-com"># core split</span>
+x=1, mb=<span class="c-good">4</span>, out=<span class="c-good">8</span>, in=1
+
+<span class="c-com"># per core</span>
+M rows = 512/4  = <span class="c-good">128</span>
+N elems = 12800/8 = 1600 = <span class="c-good">25</span> sticks
+K = 4096 (unsplit)</code></pre>
+    <p style="margin:8px 0 0; font-size:13.5px; color:#7ee597"><b>32 cores = 4 mb &times; 8 out</b>
+    &mdash; each core: 128 M rows &times; 25 N sticks.</p>
+  </div>
+</div>
+
+<table>
+  <tr><th>Quantity</th><th class="num">Before (8&times;4)</th><th class="num">After (4&times;8)</th><th>Effect</th></tr>
+  <tr><td>M-partitions (mb-split)</td><td class="num">8</td><td class="num">4</td><td><span class="tag good">halved</span></td></tr>
+  <tr><td>N-partitions (out-split)</td><td class="num">4</td><td class="num">8</td><td><span class="tag good">doubled</span></td></tr>
+  <tr><td>Cores busy</td><td class="num">32</td><td class="num">32</td><td><span class="tag neu">same</span></td></tr>
+  <tr><td>K split</td><td class="num">1 (none)</td><td class="num">1 (none)</td><td><span class="tag neu">same</span></td></tr>
+  <tr><td>M rows / core</td><td class="num">64</td><td class="num">128</td><td><span class="tag good">2&times; reuse</span></td></tr>
+  <tr><td>N sticks / core</td><td class="num">50</td><td class="num">25</td><td><span class="tag good">one clean tile</span></td></tr>
+  <tr><td><b>Weight duplication (= mb-split)</b></td><td class="num">8&times;</td><td class="num">4&times;</td><td><span class="tag good">halved</span></td></tr>
+</table>
+
+<div class="callout warn">
+  <div class="ttl">&#9888; The framing that is easy to get wrong</div>
+  <p style="margin:6px 0 0">M was <b>not</b> absent or "demoted" before. The old SDSC clearly carried
+  <code>mb:512</code> and clearly split M &mdash; eight ways. The fix is <b>not</b> "introducing M
+  streaming." It is two distinct things: (1) an <b>identity change</b> &mdash; the
+  <code>x:1</code> unit-BMM axis that lets DeepTools recognize this as the sendnn-like BMM and
+  schedule it as such; and (2) a <b>grid rebalance</b> &mdash; moving cores off the M-split and onto
+  the N-split (mb 8&rarr;4, out 4&rarr;8). Read the fix as <b>rebalancing the 32-core grid</b>, not
+  as adding a stream that was missing.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="grid"><span class="num">5</span>Rebalancing the 32-core grid: 8&times;4 &rarr; 4&times;8</h2>
+
+<p>Same 32 cells, both times. The rebalance just changes the <em>shape</em> of the grid: tall and
+narrow (M-heavy) becomes short and wide (N-heavy). Each cell's label is what that core computes.</p>
+
+<figure>
+<svg viewBox="0 0 940 430" width="940" height="430" role="img"
+     aria-label="32-core grid before 8 rows by 4 cols, after 4 rows by 8 cols, same 32 cells rebalanced">
+  <rect class="svg-bg" x="0" y="0" width="940" height="430" rx="12" fill="#0b0f15"/>
+
+  <!-- BEFORE 8x4 -->
+  <text class="svghd" x="40" y="36" font-size="16">BEFORE: 8 (mb) &times; 4 (out)</text>
+  <text class="svgmut" x="40" y="56" font-size="12.5">tall &amp; narrow &mdash; M-heavy</text>
+  <!-- 8 rows x 4 cols, cell 70x32, gap 6, origin 40,72 -->
+  <g>
+    <!-- generate manually -->
+    <!-- rows r0..r7 -->
+    <!-- y = 72 + r*38 ; x = 40 + c*76 -->
+    <!-- r0 -->
+    <g fill="#3a1a1a" stroke="#f85149" stroke-width="1">
+      <rect x="40" y="72" width="70" height="32"/><rect x="116" y="72" width="70" height="32"/><rect x="192" y="72" width="70" height="32"/><rect x="268" y="72" width="70" height="32"/>
+      <rect x="40" y="110" width="70" height="32"/><rect x="116" y="110" width="70" height="32"/><rect x="192" y="110" width="70" height="32"/><rect x="268" y="110" width="70" height="32"/>
+      <rect x="40" y="148" width="70" height="32"/><rect x="116" y="148" width="70" height="32"/><rect x="192" y="148" width="70" height="32"/><rect x="268" y="148" width="70" height="32"/>
+      <rect x="40" y="186" width="70" height="32"/><rect x="116" y="186" width="70" height="32"/><rect x="192" y="186" width="70" height="32"/><rect x="268" y="186" width="70" height="32"/>
+      <rect x="40" y="224" width="70" height="32"/><rect x="116" y="224" width="70" height="32"/><rect x="192" y="224" width="70" height="32"/><rect x="268" y="224" width="70" height="32"/>
+      <rect x="40" y="262" width="70" height="32"/><rect x="116" y="262" width="70" height="32"/><rect x="192" y="262" width="70" height="32"/><rect x="268" y="262" width="70" height="32"/>
+      <rect x="40" y="300" width="70" height="32"/><rect x="116" y="300" width="70" height="32"/><rect x="192" y="300" width="70" height="32"/><rect x="268" y="300" width="70" height="32"/>
+      <rect x="40" y="338" width="70" height="32"/><rect x="116" y="338" width="70" height="32"/><rect x="192" y="338" width="70" height="32"/><rect x="268" y="338" width="70" height="32"/>
+    </g>
+    <!-- one representative cell label -->
+    <text class="svgtxt" x="75" y="92" text-anchor="middle" font-size="10">64&times;50</text>
+    <text class="svgmut" x="189" y="392" text-anchor="middle" font-size="12">32 cores &middot; per core <tspan fill="#ff9d96" font-weight="700">64 M &times; 50 N</tspan></text>
+  </g>
+
+  <!-- center arrow -->
+  <g>
+    <line x1="380" y1="215" x2="440" y2="215" stroke="#58a6ff" stroke-width="3"/>
+    <polygon points="440,207 458,215 440,223" fill="#58a6ff"/>
+    <text class="svgmut" x="419" y="200" text-anchor="middle" font-size="11">rebalance</text>
+  </g>
+
+  <!-- AFTER 4x8 -->
+  <text class="svghd" x="480" y="36" font-size="16">AFTER: 4 (mb) &times; 8 (out)</text>
+  <text class="svgmut" x="480" y="56" font-size="12.5">short &amp; wide &mdash; N-heavy</text>
+  <!-- 4 rows x 8 cols, cell 50x44, gap 6, origin 480,72 -->
+  <g>
+    <g fill="#15351f" stroke="#3fb950" stroke-width="1">
+      <!-- row0 y=72 -->
+      <rect x="480" y="72" width="50" height="44"/><rect x="536" y="72" width="50" height="44"/><rect x="592" y="72" width="50" height="44"/><rect x="648" y="72" width="50" height="44"/><rect x="704" y="72" width="50" height="44"/><rect x="760" y="72" width="50" height="44"/><rect x="816" y="72" width="50" height="44"/><rect x="872" y="72" width="50" height="44"/>
+      <!-- row1 y=122 -->
+      <rect x="480" y="122" width="50" height="44"/><rect x="536" y="122" width="50" height="44"/><rect x="592" y="122" width="50" height="44"/><rect x="648" y="122" width="50" height="44"/><rect x="704" y="122" width="50" height="44"/><rect x="760" y="122" width="50" height="44"/><rect x="816" y="122" width="50" height="44"/><rect x="872" y="122" width="50" height="44"/>
+      <!-- row2 y=172 -->
+      <rect x="480" y="172" width="50" height="44"/><rect x="536" y="172" width="50" height="44"/><rect x="592" y="172" width="50" height="44"/><rect x="648" y="172" width="50" height="44"/><rect x="704" y="172" width="50" height="44"/><rect x="760" y="172" width="50" height="44"/><rect x="816" y="172" width="50" height="44"/><rect x="872" y="172" width="50" height="44"/>
+      <!-- row3 y=222 -->
+      <rect x="480" y="222" width="50" height="44"/><rect x="536" y="222" width="50" height="44"/><rect x="592" y="222" width="50" height="44"/><rect x="648" y="222" width="50" height="44"/><rect x="704" y="222" width="50" height="44"/><rect x="760" y="222" width="50" height="44"/><rect x="816" y="222" width="50" height="44"/><rect x="872" y="222" width="50" height="44"/>
+    </g>
+    <text class="svgtxt" x="505" y="98" text-anchor="middle" font-size="10">128&times;25</text>
+    <text class="svgmut" x="701" y="392" text-anchor="middle" font-size="12">32 cores &middot; per core <tspan fill="#7ee597" font-weight="700">128 M &times; 25 N</tspan></text>
+  </g>
+</svg>
+<figcaption><b>Figure 2 &mdash; the grid rebalance.</b> Both grids are exactly 32 cores. The fix
+trades a tall M-heavy 8&times;4 (each core 64&times;50) for a wide N-heavy 4&times;8 (each core
+128&times;25). Fewer rows means fewer M-partitions means less weight duplication; more columns means
+more distinct, non-overlapping N work.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h2 id="reuse"><span class="num">6</span>Reuse view: 64 vs 128 M-rows per resident weight tile</h2>
+
+<p>The duplication story has a mirror image that is worth seeing on its own, because it is the
+positive side of the same coin. A weight-stationary array wants to load a weight tile once and then
+stream <em>as many M rows as possible</em> through it. With fewer M-partitions, each core's resident
+weight tile serves <strong>more</strong> M rows before any reload.</p>
+
+<figure>
+<svg viewBox="0 0 940 360" width="940" height="360" role="img"
+     aria-label="Weight-stationary reuse: a resident weight tile streams 64 M rows before vs 128 after">
+  <rect class="svg-bg" x="0" y="0" width="940" height="360" rx="12" fill="#0b0f15"/>
+
+  <!-- BEFORE -->
+  <text class="svghd" x="40" y="36" font-size="15">BEFORE &mdash; 64 M rows per resident tile</text>
+  <!-- resident weight tile -->
+  <rect x="60" y="64" width="84" height="120" rx="6" fill="#26334a" stroke="#58a6ff" stroke-width="2"/>
+  <text class="svgtxt" x="102" y="118" text-anchor="middle" font-size="11">resident</text>
+  <text class="svgtxt" x="102" y="134" text-anchor="middle" font-size="11">W tile</text>
+  <text class="svgmut" x="102" y="200" text-anchor="middle" font-size="11">load once</text>
+  <!-- stream of M rows: 8 ticks representing 64 -->
+  <g stroke="#f85149" stroke-width="2" fill="none">
+    <line x1="150" y1="86" x2="430" y2="86"/>
+    <line x1="150" y1="103" x2="430" y2="103"/>
+    <line x1="150" y1="120" x2="430" y2="120"/>
+    <line x1="150" y1="137" x2="430" y2="137"/>
+    <line x1="150" y1="154" x2="430" y2="154"/>
+  </g>
+  <polygon points="430,80 446,124 430,140 430,80" fill="#f85149" opacity="0.25"/>
+  <text class="svgmut" x="290" y="178" text-anchor="middle" font-size="12" fill="#ff9d96">64 M rows stream by, then RELOAD</text>
+
+  <!-- divider -->
+  <line x1="470" y1="56" x2="470" y2="300" stroke="#2d3848" stroke-width="1.5" stroke-dasharray="5 5"/>
+
+  <!-- AFTER -->
+  <text class="svghd" x="500" y="36" font-size="15">AFTER &mdash; 128 M rows per resident tile</text>
+  <rect x="520" y="64" width="84" height="120" rx="6" fill="#26334a" stroke="#58a6ff" stroke-width="2"/>
+  <text class="svgtxt" x="562" y="118" text-anchor="middle" font-size="11">resident</text>
+  <text class="svgtxt" x="562" y="134" text-anchor="middle" font-size="11">W tile</text>
+  <text class="svgmut" x="562" y="200" text-anchor="middle" font-size="11">load once</text>
+  <g stroke="#3fb950" stroke-width="2" fill="none">
+    <line x1="610" y1="80" x2="900" y2="80"/>
+    <line x1="610" y1="93" x2="900" y2="93"/>
+    <line x1="610" y1="106" x2="900" y2="106"/>
+    <line x1="610" y1="119" x2="900" y2="119"/>
+    <line x1="610" y1="132" x2="900" y2="132"/>
+    <line x1="610" y1="145" x2="900" y2="145"/>
+    <line x1="610" y1="158" x2="900" y2="158"/>
+    <line x1="610" y1="171" x2="900" y2="171"/>
+  </g>
+  <text class="svgmut" x="755" y="196" text-anchor="middle" font-size="12" fill="#7ee597">128 M rows stream by per reload &mdash; 2&times; the amortization</text>
+
+  <!-- bottom note -->
+  <rect x="40" y="232" width="860" height="96" rx="10" fill="#11161d" stroke="#234263"/>
+  <text class="svghd" x="60" y="262" font-size="14">Load-once, stream-more</text>
+  <text class="svgtxt" x="60" y="286" font-size="13">The fixed cost of loading the weight tile and filling the systolic pipeline is paid per weight load.</text>
+  <text class="svgtxt" x="60" y="308" font-size="13">Doubling M-rows-per-tile (<tspan fill="#ff9d96" font-weight="700">64</tspan> &rarr; <tspan fill="#7ee597" font-weight="700">128</tspan>) halves how often that cost is paid relative to the work done &mdash; the array stays full longer.</text>
+</svg>
+<figcaption><b>Figure 3 &mdash; weight-stationary reuse.</b> Fewer M-partitions means each resident
+weight tile is amortized over twice as many streamed M rows (64 &rarr; 128). This is the same fact
+as "less weight duplication," viewed from the reuse side rather than the traffic side.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h2 id="why25"><span class="num">7</span>Why 25 beats 50 &mdash; the full accounting</h2>
+
+<p class="lead">Here is the most important caveat in the whole document: <b>25 N&nbsp;sticks per core
+is not magically better than 50 by itself.</b> If you somehow shrank each core to 25 N sticks while
+keeping the rest of the grid the same, you would not gain anything. 25 wins <em>only</em> because of
+<em>where the 25 came from</em>.</p>
+
+<div class="callout key">
+  <div class="ttl">&#9733; The provenance of the 25</div>
+  <p style="margin:6px 0 0">The 50&rarr;25 did not appear out of thin air. It is the direct
+  consequence of <b>moving cores from the M-split to the N-split</b> (mb 8&rarr;4, out 4&rarr;8).
+  More N-partitions &rArr; each owns fewer N sticks &rArr; 50 becomes 25. The 25 is a
+  <em>symptom</em> of the rebalance, not the cause of the win.</p>
+</div>
+
+<p>So when we say "25 beats 50," what actually got better is everything the rebalance bought, all
+at once:</p>
+
+<ul class="clean">
+  <li><b>Fewer M partitions.</b> mb 8 &rarr; 4. The M-split factor dropped by half.</li>
+  <li><b>Less duplicate weight loading.</b> Because the M-split factor <em>is</em> the duplication
+  factor, the full weight goes from being loaded <b>8&times;</b> to <b>4&times;</b> across the
+  machine (Figure 1).</li>
+  <li><b>More M rows streamed per resident weight tile.</b> 64 &rarr; 128 &mdash; double the
+  weight-stationary amortization (Figure 3).</li>
+  <li><b>An N width that matches the backend's natural tile.</b> 25 sticks is exactly one clean N
+  tile (next section), where 50 is two of them.</li>
+</ul>
+
+<div class="callout truth">
+  <div class="ttl">&#10003; Net summary &mdash; state it plainly</div>
+  <p style="margin:6px 0 0">25 N&nbsp;sticks/core is better <em>here</em> because it means
+  <b>fewer M partitions, less duplicate weight loading, more M rows streamed per resident weight
+  tile, and an N width matching the backend's natural tile</b> &mdash; all four are the same
+  rebalance, seen from four angles. The number 25 is just the fingerprint of having spent the cores
+  on N instead of M.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="ntile"><span class="num">8</span>The 25 matches the backend's natural N tile</h2>
+
+<p>There is one more reason the new grid lands cleanly, and it ties the work-division choice to the
+backend's own tiling. The full N dimension is
+<span class="mono">12800 / 64 = 200</span> output sticks. The KB's MLP-prefill model has an ideal
+<b>N_TILE = 25 sticks</b>, giving <b>N_ITERS = 200 / 25 = 8</b> tiles over the whole N axis.</p>
+
+<figure>
+<svg viewBox="0 0 940 320" width="940" height="320" role="img"
+     aria-label="N=200 output sticks tiled: before 50-stick partitions split into two 25 chunks, after clean 25-stick partitions">
+  <rect class="svg-bg" x="0" y="0" width="940" height="320" rx="12" fill="#0b0f15"/>
+
+  <text class="svgmut" x="40" y="32" font-size="13">Full N = 12800 / 64 = <tspan class="svghd" font-size="13">200 output sticks</tspan> &nbsp; &middot; &nbsp; KB MLP-prefill ideal N_TILE = 25 &rArr; N_ITERS = 8</text>
+
+  <!-- BEFORE: 4 partitions of 50, each = 2x25 chunks -->
+  <text class="svghd" x="40" y="70" font-size="15">BEFORE &mdash; 4 partitions &times; 50 sticks (= 2 chunks of 25 each)</text>
+  <!-- bar from x=40 width 860 represents 200 sticks; 4 partitions => each 215px -->
+  <g>
+    <!-- partition boundaries every 215; chunk boundaries every 107.5 -->
+    <!-- partition 0 -->
+    <rect x="40" y="84" width="105" height="40" fill="#3a1a1a" stroke="#f85149"/>
+    <rect x="147" y="84" width="105" height="40" fill="#4a2222" stroke="#f85149"/>
+    <!-- partition 1 -->
+    <rect x="254" y="84" width="105" height="40" fill="#3a1a1a" stroke="#f85149"/>
+    <rect x="361" y="84" width="105" height="40" fill="#4a2222" stroke="#f85149"/>
+    <!-- partition 2 -->
+    <rect x="468" y="84" width="105" height="40" fill="#3a1a1a" stroke="#f85149"/>
+    <rect x="575" y="84" width="105" height="40" fill="#4a2222" stroke="#f85149"/>
+    <!-- partition 3 -->
+    <rect x="682" y="84" width="105" height="40" fill="#3a1a1a" stroke="#f85149"/>
+    <rect x="789" y="84" width="105" height="40" fill="#4a2222" stroke="#f85149"/>
+    <!-- thick partition dividers -->
+    <line x1="254" y1="80" x2="254" y2="128" stroke="#ff9d96" stroke-width="2.5"/>
+    <line x1="468" y1="80" x2="468" y2="128" stroke="#ff9d96" stroke-width="2.5"/>
+    <line x1="682" y1="80" x2="682" y2="128" stroke="#ff9d96" stroke-width="2.5"/>
+  </g>
+  <text class="svgmut" x="146" y="142" text-anchor="middle" font-size="10.5">50 sticks = 25 + 25</text>
+  <text class="svgmut" x="360" y="142" text-anchor="middle" font-size="10.5">50 sticks = 25 + 25</text>
+  <text class="svgmut" x="574" y="142" text-anchor="middle" font-size="10.5">50 sticks = 25 + 25</text>
+  <text class="svgmut" x="788" y="142" text-anchor="middle" font-size="10.5">50 sticks = 25 + 25</text>
+  <text class="svgtxt" x="40" y="166" font-size="12.5" fill="#ff9d96">each 50-stick partition is handled as two 25-stick chunks anyway &mdash; but with only 64 M rows of reuse</text>
+
+  <!-- AFTER: 8 partitions of 25 -->
+  <text class="svghd" x="40" y="206" font-size="15">AFTER &mdash; 8 partitions &times; 25 sticks (one clean N_TILE each)</text>
+  <g>
+    <!-- 8 partitions, each 105px wide approx (860/8 ~ 107) -->
+    <rect x="40"  y="220" width="103" height="40" fill="#15351f" stroke="#3fb950"/>
+    <rect x="147" y="220" width="103" height="40" fill="#15351f" stroke="#3fb950"/>
+    <rect x="254" y="220" width="103" height="40" fill="#15351f" stroke="#3fb950"/>
+    <rect x="361" y="220" width="103" height="40" fill="#15351f" stroke="#3fb950"/>
+    <rect x="468" y="220" width="103" height="40" fill="#15351f" stroke="#3fb950"/>
+    <rect x="575" y="220" width="103" height="40" fill="#15351f" stroke="#3fb950"/>
+    <rect x="682" y="220" width="103" height="40" fill="#15351f" stroke="#3fb950"/>
+    <rect x="789" y="220" width="103" height="40" fill="#15351f" stroke="#3fb950"/>
+  </g>
+  <text class="svgmut" x="91"  y="244" text-anchor="middle" font-size="10">25</text>
+  <text class="svgmut" x="198" y="244" text-anchor="middle" font-size="10">25</text>
+  <text class="svgmut" x="305" y="244" text-anchor="middle" font-size="10">25</text>
+  <text class="svgmut" x="412" y="244" text-anchor="middle" font-size="10">25</text>
+  <text class="svgmut" x="519" y="244" text-anchor="middle" font-size="10">25</text>
+  <text class="svgmut" x="626" y="244" text-anchor="middle" font-size="10">25</text>
+  <text class="svgmut" x="733" y="244" text-anchor="middle" font-size="10">25</text>
+  <text class="svgmut" x="840" y="244" text-anchor="middle" font-size="10">25</text>
+  <text class="svgtxt" x="40" y="284" font-size="12.5" fill="#7ee597">8 partitions &times; 25 = N_ITERS 8, exactly the KB ideal &mdash; one clean tile per core, with 128 M rows of reuse</text>
+</svg>
+<figcaption><b>Figure 4 &mdash; N tiling.</b> N is 200 output sticks. The new grid gives each core
+exactly one clean 25-stick N tile (N_ITERS = 8, the KB MLP-prefill ideal). The old 50-stick
+partition likely had to be handled as two 25-stick chunks anyway &mdash; but each chunk saw only 64
+M rows of reuse instead of 128.</figcaption>
+</figure>
+
+<div class="callout note">
+  <div class="ttl">Putting the N-tile fact in its place</div>
+  <p style="margin:6px 0 0">This is a real but <em>secondary</em> benefit. The dominant lever is the
+  weight-duplication / reuse rebalance from sections 2&ndash;7. The N-tile match is the cherry on
+  top: because the rebalance already chose 8 N-partitions, each core's 25 sticks happen to coincide
+  with the backend's natural <code>N_TILE = 25</code> &mdash; one iteration, no awkward remainder.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="correct"><span class="num">9</span>Why correctness survived the change</h2>
+
+<p>A natural worry: if the schedule changed this much, how do we know the answer did not? Because
+both versions describe the <em>same legal matmul</em>, and every change was a scheduling/layout
+change, not an arithmetic one. Walk the four guarantees:</p>
+
+<div class="grid2">
+  <div class="card">
+    <h4>Same math</h4>
+    <p style="margin:6px 0 0">Both versions compute
+    <span class="mono">O[mb,out] = &Sigma;<sub>in</sub> A[mb,in]&middot;W[in,out]</span>. Identical
+    contraction, identical operands.</p>
+  </div>
+  <div class="card">
+    <h4>Stick axes correct both times</h4>
+    <p style="margin:6px 0 0">Activation sticks on <code>in</code> (the K axis); weight and output
+    sticks on <code>out</code> (the N axis). The fix did not move a stick axis, so the
+    element-to-stick mapping is unchanged.</p>
+  </div>
+  <div class="card">
+    <h4>K is never split</h4>
+    <p style="margin:6px 0 0">in-split = 1 in both. With no cross-core reduction, there is no
+    partial-sum accumulation across cores to get wrong &mdash; no reduction ambiguity at all.</p>
+  </div>
+  <div class="card">
+    <h4>Grids cover disjoint rectangles</h4>
+    <p style="margin:6px 0 0">8&times;4 and 4&times;8 both tile the output <code>mb &times; out</code>
+    plane into 32 disjoint rectangles. Same area, repartitioned. No cell is computed twice or
+    skipped.</p>
+  </div>
+</div>
+
+<div class="callout truth">
+  <div class="ttl">&#10003; Dropping x:1 cannot change a value</div>
+  <p style="margin:6px 0 0">The unit-BMM axis <code>x</code> has extent 1 &mdash; its only valid
+  coordinate is zero. Adding or removing it cannot change any index or any sum; it only changes what
+  <b>scheduling and layout facts DeepTools can see</b> (namely, that this is the sendnn-like BMM
+  worth scheduling N-heavy). So the old version was <b>not</b> "wrong indexing." It was a
+  <em>correct but less favorable</em> schedule: 64 rows &times; 50 sticks instead of 128 &times; 25,
+  with no explicit unit-BMM identity to steer the planner.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="refs"><span class="num">10</span>Sources</h2>
+
+<ul class="clean">
+  <li><span class="fileref">sdsc_0.json</span> (saved) &mdash; the before/after layout, shape
+  identity (<code>N_</code>), and core split for the shared-weight prefill projection.</li>
+  <li><span class="fileref">jamie_unit_bmm_probe.md</span> &mdash; the unit-BMM probe that surfaced
+  the <code>x:1</code> identity and the 8&times;4 &rarr; 4&times;8 grid rebalance.</li>
+  <li><b>KB MLP-prefill model</b> &mdash; the N tiling target <code>N_TILE = 25</code> sticks,
+  <code>N_ITERS = 200 / 25 = 8</code> for N = 12800 (= 200 output sticks at 64 elems/stick).</li>
+  <li>Companion document: <span class="fileref">why_layout_decides_matmul_speed.html</span> &mdash;
+  the layout-and-array intuition this doc assumes and extends toward core-grid scheduling.</li>
+</ul>
+
+<p class="footnote" style="color:#9aa7b4; font-size:13px; margin-top:30px">
+Hardware basis: each Spyre core runs an 8&times;8 weight-stationary MPE array (KG3); fp16 stick =
+64 elements; 32 cores per accelerator. All numbers in this document are read directly from the
+saved SDSC / probe and the KB MLP-prefill model &mdash; none are estimated.</p>
+
+</div>
+</body>
+</html>
