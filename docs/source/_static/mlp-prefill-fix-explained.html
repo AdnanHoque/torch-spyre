@@ -200,8 +200,10 @@
   <a href="#ntile">8. The 25 matches the backend's natural N tile</a>
   <span class="g">Under the hood</span>
   <a href="#contract">9. From SDSC to device program: which DeepTools stage reads what</a>
-  <a href="#correct">10. Why correctness survived the change</a>
-  <a href="#refs">11. Sources</a>
+  <span class="g">The payoff</span>
+  <a href="#measured">10. Measured results (device, bs=1 seq=512)</a>
+  <a href="#correct">11. Why correctness survived the change</a>
+  <a href="#refs">12. Sources</a>
 </nav>
 
 <!-- ============================================================ -->
@@ -1017,7 +1019,105 @@ natural N tile (section 8).</p>
 </div>
 
 <!-- ============================================================ -->
-<h2 id="correct"><span class="num">10</span>Why correctness survived the change</h2>
+<h2 id="measured"><span class="num">10</span>Measured results (device, bs=1 seq=512)</h2>
+
+<p class="lead">All numbers below are <b>device-measured this session</b> on Spyre (fp16, prefill
+<span class="mono">bs=1, seq=512</span>, shared-weight). The fix is a <b>general shared-weight
+unit-BMM fix</b> &mdash; <em>every</em> prefill projection speeds up, not just the wide-N one.</p>
+
+<h3>Per-projection prefill matmul</h3>
+
+<table>
+  <tr>
+    <th>Shape</th>
+    <th class="num">main</th>
+    <th class="num">after PR</th>
+    <th class="num">speedup</th>
+  </tr>
+  <tr>
+    <td>Q/O-proj <span class="mono">4096&times;4096</span> <span class="tag neu">square</span></td>
+    <td class="num"><span style="color:#ff9d96">0.559 ms</span> @ <span style="color:#ff9d96">42.6%</span></td>
+    <td class="num"><span style="color:#7ee597">0.324 ms</span> @ <span style="color:#7ee597">73.6%</span></td>
+    <td class="num"><span class="tag good">1.73&times;</span></td>
+  </tr>
+  <tr>
+    <td>K/V-proj <span class="mono">4096&times;1024</span> <span class="tag neu">narrow-N</span></td>
+    <td class="num"><span style="color:#ff9d96">0.124 ms</span> @ <span style="color:#ff9d96">48.2%</span></td>
+    <td class="num"><span style="color:#7ee597">0.092 ms</span> @ <span style="color:#7ee597">64.9%</span></td>
+    <td class="num"><span class="tag good">1.35&times;</span></td>
+  </tr>
+  <tr>
+    <td>gate/up-proj <span class="mono">4096&times;12800</span> <span class="tag neu">wide-N</span></td>
+    <td class="num"><span style="color:#ff9d96">3.122 ms</span> @ <span style="color:#ff9d96">29.8%</span></td>
+    <td class="num"><span style="color:#7ee597">1.021 ms</span> @ <span style="color:#7ee597">73.0%</span></td>
+    <td class="num"><span class="tag good">3.06&times;</span></td>
+  </tr>
+</table>
+
+<p>The speedup scales <b>inversely with the old utilization</b> &mdash; biggest on wide-N (the most
+degenerate layout, <span style="color:#ff9d96">30%</span>&rarr;<span style="color:#7ee597">73%</span>),
+smallest on the already-decent narrow-N &mdash; confirming it is a <b>general unit-BMM fix</b>
+(Q, K, V, O, gate, up all benefit), not a wide-N special case.</p>
+
+<h3>Full MLP prefill</h3>
+
+<p>The assembled MLP (shared 2-D weights), measured for the two LX scratchpad-planning configs:</p>
+
+<table>
+  <tr>
+    <th>Config</th>
+    <th class="num">main</th>
+    <th class="num">after PR</th>
+    <th class="num">speedup</th>
+  </tr>
+  <tr>
+    <td><code>LX_PLANNING=1</code> <span class="tag neu">default</span></td>
+    <td class="num"><span class="tag bad">compile crash (LX overflow)</span></td>
+    <td class="num"><span class="tag bad">compile crash (LX overflow)</span></td>
+    <td class="num"><span class="tag neu">&mdash;</span></td>
+  </tr>
+  <tr>
+    <td><code>LX_PLANNING=0</code></td>
+    <td class="num"><span style="color:#ff9d96">8.04 ms</span> @ <span style="color:#ff9d96">27.8%</span></td>
+    <td class="num"><span style="color:#7ee597">4.43 ms</span> @ <span style="color:#7ee597">50.5%</span></td>
+    <td class="num"><span class="tag good">1.82&times;</span></td>
+  </tr>
+  <tr>
+    <td style="padding-left:30px; color:var(--muted)">&hookrightarrow; gate+up <span class="mono">(bmm_mul_silu)</span></td>
+    <td class="num"><span style="color:#ff9d96">6.41 ms</span> @ <span style="color:#ff9d96">23.2%</span></td>
+    <td class="num"><span style="color:#7ee597">3.48 ms</span> @ <span style="color:#7ee597">42.8%</span></td>
+    <td class="num"><span class="tag good">1.84&times;</span></td>
+  </tr>
+  <tr>
+    <td style="padding-left:30px; color:var(--muted)">&hookrightarrow; down <span class="mono">(sdsc_fused_1)</span></td>
+    <td class="num"><span style="color:#ff9d96">1.63 ms</span> @ <span style="color:#ff9d96">45.8%</span></td>
+    <td class="num"><span style="color:#7ee597">0.95 ms</span> @ <span style="color:#7ee597">78.5%</span></td>
+    <td class="num"><span class="tag good">1.71&times;</span></td>
+  </tr>
+</table>
+
+<div class="callout warn">
+  <div class="ttl">&#9888; The full MLP crashes to compile at the default <code>LX_PLANNING=1</code> &mdash; on both main and the PR</div>
+  <p style="margin:6px 0 0">At the default <code>LX_PLANNING=1</code>, the full MLP prefill
+  <b>crashes during compile on BOTH main and the PR</b>: the fused
+  gate+up+silu&times;mul SDSC overflows the <b>2&nbsp;MB LX scratchpad</b>. That LX-allocator overflow
+  is a <b>separate DeepTools bug</b> &mdash; it is <b>not</b> fixed by this PR (this PR fixes the
+  matmul layout / split). So the MLP numbers above are measured at <code>LX_PLANNING=0</code>, the
+  config where the MLP compiles on both &mdash; which is what makes it a clean main-vs-PR comparison.
+  The per-projection matmul numbers (first table) do <b>not</b> need this caveat: single matmuls do
+  not overflow.</p>
+</div>
+
+<div class="callout note">
+  <div class="ttl">Where these numbers come from</div>
+  <p style="margin:6px 0 0">All figures in this section are from the perf-suite
+  <code>benchmark.py</code> op harness on our build (<code>53bbd76</code> +
+  the <code>pr-mlp-fix-prefill</code> inductor changes), device-measured on Spyre at
+  fp16, prefill <span class="mono">bs=1, seq=512</span>, shared-weight.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="correct"><span class="num">11</span>Why correctness survived the change</h2>
 
 <p>A natural worry: if the schedule changed this much, how do we know the answer did not? Because
 both versions describe the <em>same legal matmul</em>, and every change was a scheduling/layout
@@ -1060,7 +1160,7 @@ change, not an arithmetic one. Walk the four guarantees:</p>
 </div>
 
 <!-- ============================================================ -->
-<h2 id="refs"><span class="num">11</span>Sources</h2>
+<h2 id="refs"><span class="num">12</span>Sources</h2>
 
 <ul class="clean">
   <li><span class="fileref">sdsc_0.json</span> (saved) &mdash; the before/after layout, shape
