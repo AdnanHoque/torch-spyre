@@ -198,8 +198,10 @@
   <a href="#why25">7. Why 25 beats 50 &mdash; the full accounting</a>
   <span class="g">Loose ends</span>
   <a href="#ntile">8. The 25 matches the backend's natural N tile</a>
-  <a href="#correct">9. Why correctness survived the change</a>
-  <a href="#refs">10. Sources</a>
+  <span class="g">Under the hood</span>
+  <a href="#contract">9. From SDSC to device program: which DeepTools stage reads what</a>
+  <a href="#correct">10. Why correctness survived the change</a>
+  <a href="#refs">11. Sources</a>
 </nav>
 
 <!-- ============================================================ -->
@@ -767,7 +769,255 @@ M rows of reuse instead of 128.</figcaption>
 </div>
 
 <!-- ============================================================ -->
-<h2 id="correct"><span class="num">9</span>Why correctness survived the change</h2>
+<h2 id="contract"><span class="num">9</span>From SDSC to device program: which DeepTools stage reads what</h2>
+
+<p class="lead">Sections 1&ndash;8 read the fix off the SDSC. This section goes one layer deeper: torch-spyre
+<em>writes</em> the SDSC (<span class="fileref">sdsc_N.json</span>); <code>dxp_standalone --bundle</code>
+(DeepTools) <em>consumes</em> it and emits the device program. The two fixes write <b>disjoint</b>
+SDSC fields, consumed by <b>different</b> DeepTools stages. Here is the contract between them.</p>
+
+<h3>The DeepTools pipeline that reads the SDSC</h3>
+
+<p>The SDSC json is parsed into a <code>SuperDsc</code>
+(<code>SuperDsc::importJsonStr</code>, <span class="fileref">dsc/superdsc.cpp:564</span>), then run through
+four stages (<span class="fileref">dxp/dxp.cpp:537-557</span>, <code>runDxpOnSdsc</code>):</p>
+
+<ol>
+  <li><b>runDsmClSplit</b> &mdash; cluster/core split.</li>
+  <li><b>runDdc</b> = <code>L3DlOpsScheduler.run</code> + <code>ddc::Ddc.run_v1</code> &mdash; the
+  scheduler and the address-gen / data-distribution compiler.</li>
+  <li><b>runCodegen</b> = DCG + DCC.</li>
+  <li><b>runDip</b> = DIP.</li>
+</ol>
+
+<p>The two fixes both land in stage 2 (<b>runDdc</b>), but they touch different parts of it: the
+<em>layout</em> fix changes how <code>L3DlOpsScheduler</code> <em>classifies</em> the op; the
+<em>split</em> fix changes how it (and DDC) <em>distributes</em> the op across cores.</p>
+
+<!-- field -> stage -> behavior flow -->
+<figure>
+<svg viewBox="0 0 940 520" width="940" height="520" role="img"
+     aria-label="Two-lane flow: SDSC fields feed different DeepTools stages which change device-program behavior, converging into a faster program">
+  <rect class="svg-bg" x="0" y="0" width="940" height="520" rx="12" fill="#0b0f15"/>
+
+  <!-- column headers -->
+  <text class="svgmut" x="150"  y="34" text-anchor="middle" font-size="12" letter-spacing="1.5">SDSC FIELD (torch-spyre writes)</text>
+  <text class="svgmut" x="470"  y="34" text-anchor="middle" font-size="12" letter-spacing="1.5">DEEPTOOLS STAGE (reads)</text>
+  <text class="svgmut" x="800"  y="34" text-anchor="middle" font-size="12" letter-spacing="1.5">DEVICE-PROGRAM BEHAVIOR</text>
+
+  <!-- ===== LANE 1: LAYOUT ===== -->
+  <text class="svghd" x="40" y="74" font-size="13" fill="#9fd0ff">LANE 1 &mdash; layout / classification</text>
+
+  <!-- field box -->
+  <rect x="40" y="86" width="222" height="92" rx="9" fill="#101d2e" stroke="#234263"/>
+  <text class="svgtxt" x="54" y="110" font-size="12">N_ gains <tspan fill="#7ee597" font-weight="700">x:1</tspan></text>
+  <text class="svgtxt" x="54" y="130" font-size="11.5">INPUT  [in,mb]&rarr;[mb,in,x]</text>
+  <text class="svgtxt" x="54" y="148" font-size="11.5">OUTPUT [out,mb]&rarr;[mb,out,x]</text>
+  <text class="svgmut" x="54" y="166" font-size="11">KERNEL [in,out] &amp; sticks UNCHANGED</text>
+
+  <!-- arrow -->
+  <line x1="262" y1="132" x2="356" y2="132" stroke="#58a6ff" stroke-width="2.5"/>
+  <polygon points="356,125 372,132 356,139" fill="#58a6ff"/>
+
+  <!-- stage box -->
+  <rect x="372" y="86" width="200" height="92" rx="9" fill="#161b22" stroke="#2d3848"/>
+  <text class="svgtxt" x="386" y="110" font-size="11.5">L3DlOpsScheduler</text>
+  <text class="svgtxt" x="386" y="128" font-size="11.5">.hasDimensionReuse</text>
+  <text class="svgmut" x="386" y="146" font-size="11">+ DDC bmm.ddl</text>
+  <text class="svgmut" x="386" y="162" font-size="11">layout match (%wrd/%nrd)</text>
+
+  <!-- arrow -->
+  <line x1="572" y1="132" x2="666" y2="132" stroke="#58a6ff" stroke-width="2.5"/>
+  <polygon points="666,125 682,132 666,139" fill="#58a6ff"/>
+
+  <!-- behavior box -->
+  <rect x="682" y="86" width="218" height="92" rx="9" fill="#11271a" stroke="#22532f"/>
+  <text class="svgtxt" x="696" y="110" font-size="11.5">mb &rarr; <tspan fill="#7ee597" font-weight="700">%wrd</tspan> (weight-reuse)</text>
+  <text class="svgtxt" x="696" y="130" font-size="11.5">x &rarr; <tspan fill="#7ee597" font-weight="700">%nrd</tspan> (no-reuse)</text>
+  <text class="svgtxt" x="696" y="152" font-size="11.5">weight-stationary</text>
+  <text class="svgtxt" x="696" y="168" font-size="11.5">tiling</text>
+
+  <!-- ===== LANE 2: SPLIT ===== -->
+  <text class="svghd" x="40" y="222" font-size="13" fill="#9fd0ff">LANE 2 &mdash; split / distribution</text>
+
+  <!-- field box -->
+  <rect x="40" y="234" width="222" height="92" rx="9" fill="#101d2e" stroke="#234263"/>
+  <text class="svgtxt" x="54" y="262" font-size="11.5">numWkSlicesPerDim_</text>
+  <text class="svgtxt" x="54" y="284" font-size="11.5"><tspan fill="#ff9d96">{mb:8, out:4}</tspan></text>
+  <text class="svgtxt" x="54" y="304" font-size="11.5">&rarr; <tspan fill="#7ee597">{mb:4, out:8}</tspan></text>
+
+  <!-- arrow -->
+  <line x1="262" y1="280" x2="356" y2="280" stroke="#58a6ff" stroke-width="2.5"/>
+  <polygon points="356,273 372,280 356,287" fill="#58a6ff"/>
+
+  <!-- stage box -->
+  <rect x="372" y="234" width="200" height="92" rx="9" fill="#161b22" stroke="#2d3848"/>
+  <text class="svgtxt" x="386" y="262" font-size="11.5">L3DlOpsScheduler</text>
+  <text class="svgtxt" x="386" y="280" font-size="11.5">multicast degree</text>
+  <text class="svgmut" x="386" y="298" font-size="11">+ DDC address-gen</text>
+  <text class="svgmut" x="386" y="314" font-size="11">(ddc_fold per-core)</text>
+
+  <!-- arrow -->
+  <line x1="572" y1="280" x2="666" y2="280" stroke="#58a6ff" stroke-width="2.5"/>
+  <polygon points="666,273 682,280 666,287" fill="#58a6ff"/>
+
+  <!-- behavior box -->
+  <rect x="682" y="234" width="218" height="92" rx="9" fill="#11271a" stroke="#22532f"/>
+  <text class="svgtxt" x="696" y="260" font-size="11.5">weight tiles <tspan fill="#ff9d96">4</tspan> &rarr; <tspan fill="#7ee597">8</tspan></text>
+  <text class="svgtxt" x="696" y="280" font-size="11.5">weight traffic <tspan fill="#ff9d96">8&times;</tspan> &rarr; <tspan fill="#7ee597">4&times;</tspan></text>
+  <text class="svgtxt" x="696" y="302" font-size="11.5">per core <tspan fill="#ff9d96">64M/50N</tspan></text>
+  <text class="svgtxt" x="696" y="318" font-size="11.5">&rarr; <tspan fill="#7ee597">128M/25N</tspan></text>
+
+  <!-- convergence arrows down to emit box -->
+  <line x1="791" y1="178" x2="791" y2="200" stroke="#bc8cff" stroke-width="2"/>
+  <line x1="791" y1="326" x2="791" y2="356" stroke="#bc8cff" stroke-width="2"/>
+  <path d="M791 200 C791 360 470 350 470 384" fill="none" stroke="#bc8cff" stroke-width="2"/>
+  <path d="M791 356 C791 372 470 372 470 384" fill="none" stroke="#bc8cff" stroke-width="2"/>
+  <polygon points="463,384 477,384 470,398" fill="#bc8cff"/>
+
+  <!-- emit box -->
+  <rect x="300" y="402" width="340" height="44" rx="9" fill="#161033" stroke="#3a2a6a"/>
+  <text class="svghd" x="470" y="430" text-anchor="middle" font-size="14" fill="#bc8cff">DeepTools emits device program</text>
+
+  <!-- arrow down -->
+  <line x1="470" y1="446" x2="470" y2="466" stroke="#bc8cff" stroke-width="2.5"/>
+  <polygon points="463,466 477,466 470,480" fill="#bc8cff"/>
+
+  <!-- result box -->
+  <rect x="220" y="482" width="500" height="30" rx="8" fill="#11271a" stroke="#22532f"/>
+  <text class="svgtxt" x="470" y="502" text-anchor="middle" font-size="13">util <tspan fill="#ff9d96" font-weight="700">29.8%</tspan> &rarr; <tspan fill="#7ee597" font-weight="700">73%</tspan> &nbsp;&middot;&nbsp; ideal_cycles UNCHANGED (819200)</text>
+</svg>
+<figcaption><b>Figure 5 &mdash; the SDSC&rarr;DeepTools contract.</b> The two fixes write disjoint SDSC
+fields. The layout fix (lane 1) changes how <code>L3DlOpsScheduler</code> <em>classifies</em> the op
+&mdash; binding <code>mb</code> to the weight-reuse slot so DeepTools tiles it weight-stationary. The
+split fix (lane 2) changes how the op is <em>distributed</em> &mdash; halving weight multicast and
+doubling M-reuse per resident tile. Both converge into the same emitted program: same
+<code>ideal_cycles</code>, higher utilization.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h4 class="sub">Part A &mdash; the layout fields drive weight-reuse classification</h4>
+
+<p>The layout deltas (<code>N_</code> gains <code>x:1</code>; INPUT
+<code>[in,mb]&rarr;[mb,in,x]</code>; OUTPUT <code>[out,mb]&rarr;[mb,out,x]</code>; KERNEL
+<code>[in,out]</code> and all sticks <b>unchanged</b>) are consumed to decide which axes are
+<em>weight-reuse</em> axes:</p>
+
+<ul class="clean">
+  <li><b>The reuse rule.</b> <code>L3DlOpsScheduler::hasDimensionReuse</code>
+  (<span class="fileref">L3DlOpsScheduler.cpp:288-310</span>): a dim is a weight-reuse axis iff KERNEL
+  is present <em>and</em> that dim is <b>absent</b> from the kernel's layout.</li>
+  <li><b>The template that encodes it.</b> The bmm.ddl DDL template
+  (<span class="fileref">/opt/ibm/spyre/deeptools/share/ddc/ddl_templates/bmm.ddl</span>) hard-codes
+  a weight-reuse slot <code>%wrd</code> (<span class="fileref">bmm.ddl:6</span>) and a no-reuse slot
+  <code>%nrd</code> (<span class="fileref">bmm.ddl:12</span>). The KERNEL global layout carries
+  <b>no</b> <code>%wrd</code> (<span class="fileref">bmm.ddl:25</span>) while INPUT/OUTPUT do
+  (<span class="fileref">bmm.ddl:20,29</span>). The match is built from <code>layoutDimOrder_</code>
+  (<span class="fileref">ddc/ddl/ddl_conversion.cpp:2329-2347</span>) and matched at
+  (<span class="fileref">ddl_conversion.cpp:2419-2421</span>).</li>
+</ul>
+
+<div class="grid2">
+  <div class="card before">
+    <h4><span class="tag bad">BEFORE</span> [in, mb] &mdash; degenerate bmm</h4>
+    <p style="margin:6px 0 0">INPUT is <code>[in, mb]</code> (3-dim, no <code>x</code>): <code>mb</code>
+    is led by the contraction/stick dim <code>in</code> and there is no unit batch slot, so
+    <code>mb</code> is not cleanly presented as the trailing weight-reuse axis the template expects.
+    DeepTools tiles it as a <b>degenerate bmm</b>.</p>
+  </div>
+  <div class="card after">
+    <h4><span class="tag good">AFTER</span> [mb, in, x] &mdash; unit batchmatmul</h4>
+    <p style="margin:6px 0 0"><code>mb</code> is in INPUT+OUTPUT but <b>not</b> KERNEL &rarr; it binds
+    to <code>%wrd</code> &rarr; the weight is held resident while M (<code>mb</code>) streams through
+    it (the source-level realization of weight-stationary). <code>x_</code> binds by name to
+    <code>DataStructDims.x_ = "a repeat dim that does not add reuse"</code>
+    (<span class="fileref">dims.h:169-170</span>) &rarr; proper <b>unit-batchmatmul</b>
+    classification.</p>
+  </div>
+</div>
+
+<p><b>Behavior change.</b> DeepTools goes from a degenerate-bmm tiling to the genuine
+weight-stationary tiling (weight in the array, M as the reuse loop). The sticks (<code>in</code>/<code>out</code>,
+64) never move &mdash; so it is still a legal matmul.</p>
+
+<div class="callout warn">
+  <div class="ttl">&#9888; One link here is inferred, not captured</div>
+  <p style="margin:6px 0 0">Every field delta, the parse path, the pipeline order, the reuse rule,
+  and the bmm.ddl slot lines above are <b>sourced</b> (JSON + file:line). The single
+  <em>inferred</em> claim is the causality &mdash; that <code>[in,mb]</code> <em>mis-matches</em> the
+  template while <code>[mb,in,x]</code> <em>matches</em> it. That is reasoned from the bmm.ddl match
+  rules (<span class="fileref">ddl_conversion.cpp:2329-2347</span>, <span class="fileref">:2419-2421</span>),
+  <b>not</b> from a captured match log. Treat the BEFORE/AFTER classification as the most likely
+  reading of those rules, not a logged fact.</p>
+</div>
+
+<!-- ============================================================ -->
+<h4 class="sub">Part B &mdash; the split field drives the core grid + weight multicast</h4>
+
+<p>The split delta (<code>numWkSlicesPerDim_</code> <code>{mb:8, out:4} &rarr; {mb:4, out:8}</code>)
+is consumed to build the core grid and decide how widely each weight slice is multicast:</p>
+
+<ul class="clean">
+  <li><b>Multicast degree.</b> <code>L3DlOpsScheduler::getLabeledDsWkSliceMulticastDegree</code>
+  (<span class="fileref">L3DlOpsScheduler.cpp:165-204</span>): the KERNEL multicast degree = how many
+  cores share the same weight slice = the M-split factor. It feeds
+  <code>calculateBurstEfficiency</code> (<span class="fileref">L3DlOpsScheduler.cpp:1432-1698</span>).</li>
+  <li><b>Per-core address-gen.</b> DDC address-gen
+  (<span class="fileref">ddc/ddc_fold.cpp:1894-1905</span>) builds a per-core fold with cardinality =
+  <code>numWkSlicesPerDim_[dim]</code> and per-core HBM windows.</li>
+</ul>
+
+<div class="grid2">
+  <div class="card before">
+    <h4><span class="tag bad">BEFORE</span> m8 &mdash; multicast 8</h4>
+    <p style="margin:6px 0 0">KERNEL multicast = <b>8</b> &rarr; each weight tile loaded by 8 cores
+    &rarr; <b>4 distinct</b> weight tiles, weight HBM traffic <b>8&times;</b>. Per core: 64 M rows /
+    50 N sticks; per-core resident weight <b>~26.2 MB</b>.</p>
+  </div>
+  <div class="card after">
+    <h4><span class="tag good">AFTER</span> m4 &mdash; multicast 4</h4>
+    <p style="margin:6px 0 0">KERNEL multicast = <b>4</b> &rarr; <b>8 distinct</b> weight tiles,
+    weight traffic <b>4&times;</b> (halved). Per core: 128 M rows / 25 N sticks; resident
+    <b>~13.1 MB</b>. Output addrs stay <b>32 distinct</b> (output partitioned, never duplicated);
+    in-split = 1 so <b>no</b> cross-core reduction is introduced
+    (<span class="fileref">ddl_conversion.cpp:1908-1925</span>).</p>
+  </div>
+</div>
+
+<p><b>Behavior change.</b> The device program loads the weight half as many times and streams twice
+as many M rows per resident weight tile; the 25-stick N tile = <code>200 / 8 = 25</code> = the KB
+natural N tile (section 8).</p>
+
+<!-- ============================================================ -->
+<h3>Why the emitted program is faster</h3>
+
+<p>Both programs do the <em>same math</em>: <code>ideal_cycles</code> is <b>unchanged</b>
+(<span class="mono">819200</span>, split-invariant). The gain is entirely in
+<b>achieved / ideal utilization</b> (<span class="mono">29.8% &rarr; 73%</span>).</p>
+
+<div class="callout truth">
+  <div class="ttl">&#10003; Two fixes, two jobs &mdash; one feeds the other</div>
+  <p style="margin:6px 0 0">The <b>layout fix</b> makes DeepTools <em>recognize and tile</em> the op
+  as weight-stationary (<code>mb &rarr; %wrd</code>). The <b>cost-model / split fix</b> makes
+  DeepTools <em>build a core grid</em> that halves weight multicast and doubles M-reuse per weight
+  tile (<code>{mb:8,out:4} &rarr; {mb:4,out:8}</code>). One sets up the dataflow; the other feeds it
+  well. Neither changes a single FLOP &mdash; that is why <code>ideal_cycles</code> stays at 819200
+  while utilization more than doubles.</p>
+</div>
+
+<div class="callout note">
+  <div class="ttl">Confidence ledger</div>
+  <p style="margin:6px 0 0">All field deltas, the parse path
+  (<span class="fileref">superdsc.cpp:564</span>), the pipeline order
+  (<span class="fileref">dxp.cpp:537-557</span>), <code>hasDimensionReuse</code>, the multicast
+  function, the weight-tile counts (4&rarr;8), and <code>ideal_cycles = 819200</code> are
+  <b>sourced</b> (JSON + file:line). The <b>one inferred link</b> is the layout causality flagged in
+  the Part A callout (<code>[in,mb]</code> mis-matches &rarr; <code>[mb,in,x]</code> matches),
+  reasoned from the bmm.ddl rules rather than a captured match log.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="correct"><span class="num">10</span>Why correctness survived the change</h2>
 
 <p>A natural worry: if the schedule changed this much, how do we know the answer did not? Because
 both versions describe the <em>same legal matmul</em>, and every change was a scheduling/layout
@@ -810,7 +1060,7 @@ change, not an arithmetic one. Walk the four guarantees:</p>
 </div>
 
 <!-- ============================================================ -->
-<h2 id="refs"><span class="num">10</span>Sources</h2>
+<h2 id="refs"><span class="num">11</span>Sources</h2>
 
 <ul class="clean">
   <li><span class="fileref">sdsc_0.json</span> (saved) &mdash; the before/after layout, shape
