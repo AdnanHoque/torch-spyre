@@ -11,6 +11,7 @@ This directory collects the writeups, benchmark reports, helper scripts, and com
     - `jamie_unit_bmm_probe.md`
     - `torch_spyre_mlp_gap_takeover.md`
     - `pr_mlp_fix_shape_aware_summary.md`
+    - `static_unit_batch_bmm_canonicalization/first_principles_static_unit_bmm_writeup.md`
   - Shape-aware TSV summary:
     - `pr_mlp_fix_shape_aware_summary.tsv`
   - Official benchmark-suite style reports:
@@ -76,6 +77,34 @@ tsp/sendnn:            1.060x
 See `artifacts/outputs/static_unit_batch_bmm_canonicalization/static_unit_batch_bmm_canonicalization_report.md`
 for the codegen evidence, exact commands, and kernel breakdown.
 
+See `artifacts/outputs/static_unit_batch_bmm_canonicalization/first_principles_static_unit_bmm_writeup.md`
+for a first-principles explanation of why the static unit-batch BMM shape is
+safe to canonicalize, how the metadata flows through lowering into `OpSpec`,
+and how each isolated compiler chain maps to measured speedup.
+
+## Fresh Main-vs-PR Prefill Sweep
+
+A focused bs1/sl512 sweep was rerun on the three prefill matmul shapes and the
+prefill MLP:
+
+```text
+artifacts/outputs/prefill_bs1_sl512_main_vs_pr_sendnn_20260608_072036/
+```
+
+Headline torch-spyre kernel changes from upstream main to this PR:
+
+```text
+matmul KV:       0.127 ms -> 0.090 ms, 1.41x
+matmul QO:       0.560 ms -> 0.318 ms, 1.76x
+matmul MLP-proj: 3.729 ms -> 1.020 ms, 3.66x
+mlp:            21.724 ms -> 6.962 ms, 3.12x
+```
+
+The same summary logs the new torch-spyre/sendnn ratios. Fresh sendnn attempts
+in this runtime lane produced CPU-only zero-kernel traces, so those ratios use
+the archived valid sendnn perf files from the same `spyre-perf-suite` commit;
+the failed fresh sendnn traces are archived next to the summary for provenance.
+
 The key official-suite style result is in:
 
 ```text
@@ -106,5 +135,7 @@ For external review, start with:
 1. `artifacts/outputs/pr_mlp_fix_writeup.md`
 2. `artifacts/outputs/spyre_kb_theory_grounding.md`
 3. `artifacts/outputs/jamie_unit_bmm_probe.md`
-4. `artifacts/outputs/full_suite_attempts/pr_mlp_fix_full_suite_20260607_095404/summary.md`
-5. `artifacts/outputs/full_suite_attempts/pr_mlp_fix_full_suite_20260607_095404/report.txt`
+4. `artifacts/outputs/static_unit_batch_bmm_canonicalization/first_principles_static_unit_bmm_writeup.md`
+5. `artifacts/outputs/prefill_bs1_sl512_main_vs_pr_sendnn_20260608_072036/prefill_bs1_sl512_main_vs_pr_sendnn_summary.md`
+6. `artifacts/outputs/full_suite_attempts/pr_mlp_fix_full_suite_20260607_095404/summary.md`
+7. `artifacts/outputs/full_suite_attempts/pr_mlp_fix_full_suite_20260607_095404/report.txt`

@@ -1,0 +1,47 @@
+============ Version Info ============
+torch-spyre:      N/A (path not found: ../torch-spyre)
+flex:             N/A (path not found: ../flex)
+deeptools:        N/A (path not found: ../deeptools)
+spyre-perf-suite: 7450624 (branch: main)
+======================================
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 4096]]
+Stack                     Kernel_name                                duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memset-(Device)                                   0.052           0.000
+                          sdsc_fused_linear_0_8r7a3495                      0.560          42.522
+                          Total                                             0.306          42.522
+sendnn:
+                          N/A                                                 N/A             N/A
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 1024]]
+Stack                     Kernel_name                                duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memset-(Device)                                   0.042           0.000
+                          sdsc_fused_linear_0_y1os7fpb                      0.127          47.038
+                          Total                                             0.084          47.038
+sendnn:
+                          N/A                                                 N/A             N/A
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 12800]]
+Stack                     Kernel_name                                duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memset-(Device)                                   0.066           0.000
+                          sdsc_fused_linear_0_ed6taq_c                      2.486          29.958
+                          Total                                             1.276          29.958
+sendnn:
+                          N/A                                                 N/A             N/A
+
+Op: mlp  Shape: [[1, 512, 4096]]
+Stack                     Kernel_name                                      duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memset-(Device)                                         0.066           0.000
+                          sdsc_fused_bmm_1_obpi1ciu                               3.598          20.699
+                          sdsc_fused_bmm_mul_silu_0_ssi_b2ps                     16.327           9.122
+                          Total                                                   6.664          11.213
+sendnn:
+                          N/A                                                       N/A             N/A

@@ -1,0 +1,507 @@
+
+Op: pointwise_add  Shape: [[1, 512, 4096], [1, 512, 4096]]
+Stack                     Kernel_name                             duration(ms)      PT-Util(%)
+----------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                  0.153           0.000
+                          Memcpy-(DtoH)                                  0.263           0.000
+                          Memset-(Device)                                0.147           0.000
+                          sdsc_fused_add_0_ztbhu7xr                      0.128           0.000
+                          Total                                          0.173           0.000
+sendnn:
+                          Memcpy-(HtoD)                                  0.135           0.000
+                          Memcpy-(DtoH)                                  0.223           0.000
+                          Memset-(Device)                                0.223           0.000
+                          add                                            0.117           0.000
+                          Total                                          0.175           0.000
+
+Op: pointwise_add  Shape: [[4, 1, 4096], [4, 1, 4096]]
+Stack                     Kernel_name                             duration(ms)      PT-Util(%)
+----------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                  0.008           0.000
+                          Memcpy-(DtoH)                                  0.007           0.000
+                          Memset-(Device)                                0.008           0.000
+                          sdsc_fused_add_0_t021_3mm                      0.001           0.000
+                          Total                                          0.006           0.000
+sendnn:
+                          Memcpy-(HtoD)                                  0.004           0.000
+                          Memcpy-(DtoH)                                  0.002           0.000
+                          Memset-(Device)                                0.009           0.000
+                          add                                            0.001           0.000
+                          Total                                          0.004           0.000
+
+Op: softmax  Shape: [[1, 512, 4096]]
+Stack                     Kernel_name                                  duration(ms)      PT-Util(%)
+---------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                       0.192           0.000
+                          Memcpy-(DtoH)                                       0.314           0.000
+                          Memset-(Device)                                     0.127           0.000
+                          sdsc_fused__softmax_0_fzuuu5cm                      0.287           0.000
+                          Total                                               0.230           0.000
+sendnn:
+                          Memcpy-(HtoD)                                       0.180           0.000
+                          Memcpy-(DtoH)                                       0.202           0.000
+                          Memset-(Device)                                     0.252           0.000
+                          _softmax-Max                                        0.096           0.000
+                          Total                                               0.183           0.000
+
+Op: softmax  Shape: [[4, 1, 4096]]
+Stack                     Kernel_name                                  duration(ms)      PT-Util(%)
+---------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                       0.008           0.000
+                          Memcpy-(DtoH)                                       0.007           0.000
+                          Memset-(Device)                                     0.008           0.000
+                          sdsc_fused__softmax_0_gz1g4i7x                      0.006           0.000
+                          Total                                               0.007           0.000
+sendnn:
+                          Memcpy-(HtoD)                                       0.003           0.000
+                          Memcpy-(DtoH)                                       0.007           0.000
+                          Memset-(Device)                                     0.010           0.000
+                          _softmax-Max                                        0.006           0.000
+                          Total                                               0.007           0.000
+
+Op: layernorm  Shape: [[1, 512, 4096]]
+Stack                     Kernel_name                                  duration(ms)      PT-Util(%)
+---------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                       0.073           0.000
+                          Memcpy-(DtoH)                                       0.188           0.000
+                          Memset-(Device)                                     0.086           0.000
+                          sdsc_fused_rms_norm_0_62x84l4t                      0.221           0.000
+                          Total                                               0.142           0.000
+sendnn:
+                          Memcpy-(HtoD)                                       0.079           0.000
+                          Memcpy-(DtoH)                                       0.176           0.000
+                          Memset-(Device)                                     0.079           0.000
+                          pow_1-Mul0                                          0.059           0.000
+                          rsqrt                                               0.064           0.000
+                          Total                                               0.091           0.000
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 4096]]
+Stack                     Kernel_name                                duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                     0.105           0.000
+                          Memcpy-(DtoH)                                     0.119           0.000
+                          Memset-(Device)                                   0.076           0.000
+                          sdsc_fused_linear_0_u5uc180k                      1.486          16.041
+                          Total                                             0.447          16.041
+sendnn:
+                          Memcpy-(HtoD)                                     0.603           0.000
+                          Memcpy-(DtoH)                                     0.467           0.000
+                          Memset-(Device)                                   0.344           0.000
+                          mm-BMM_1                                          0.362          65.854
+                          Total                                             0.444          65.854
+
+Op: matmul  Shape: [[4, 1, 4096], [4096, 4096]]
+Stack                     Kernel_name                                duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                     0.097           0.000
+                          Memcpy-(DtoH)                                     0.007           0.000
+                          Memset-(Device)                                   0.051           0.000
+                          sdsc_fused_linear_0_bqd9pa9t                      0.239           0.780
+                          Total                                             0.099           0.780
+sendnn:
+                          Memcpy-(HtoD)                                     0.631           0.000
+                          Memcpy-(DtoH)                                     0.236           0.000
+                          Memset-(Device)                                   0.128           0.000
+                          mm-BMM_1                                          0.234           0.794
+                          Total                                             0.307           0.794
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 1024]]
+Stack                     Kernel_name                                duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                     0.083           0.000
+                          Memcpy-(DtoH)                                     0.040           0.000
+                          Memset-(Device)                                   0.091           0.000
+                          sdsc_fused_linear_0_m769fztr                      0.615           9.695
+                          Total                                             0.207           9.695
+sendnn:
+                          Memcpy-(HtoD)                                     0.200           0.000
+                          Memcpy-(DtoH)                                     0.135           0.000
+                          Memset-(Device)                                   0.119           0.000
+                          mm-BMM_1                                          0.108          55.254
+                          Total                                             0.140          55.254
+
+Op: matmul  Shape: [[4, 1, 4096], [4096, 1024]]
+Stack                     Kernel_name                                duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                     0.078           0.000
+                          Memcpy-(DtoH)                                     0.006           0.000
+                          Memset-(Device)                                   0.048           0.000
+                          sdsc_fused_linear_0_f1zcv4mw                      0.062           0.751
+                          Total                                             0.049           0.751
+sendnn:
+                          Memcpy-(HtoD)                                     0.239           0.000
+                          Memcpy-(DtoH)                                     0.064           0.000
+                          Memset-(Device)                                   0.070           0.000
+                          mm-BMM_1                                          0.064           0.732
+                          Total                                             0.109           0.732
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 12800]]
+Stack                     Kernel_name                                duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                     0.090           0.000
+                          Memcpy-(DtoH)                                     0.157           0.000
+                          Memset-(Device)                                   0.085           0.000
+                          sdsc_fused_linear_0_1qvd4sze                      4.104          18.147
+                          Total                                             1.109          18.147
+sendnn:
+                          Memcpy-(HtoD)                                     1.811           0.000
+                          Memcpy-(DtoH)                                     1.285           0.000
+                          Memset-(Device)                                   1.035           0.000
+                          mm-BMM_1                                          0.957          77.793
+                          Total                                             1.272          77.793
+
+Op: matmul  Shape: [[4, 1, 4096], [4096, 12800]]
+Stack                     Kernel_name                                duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                     0.086           0.000
+                          Memcpy-(DtoH)                                     0.010           0.000
+                          Memset-(Device)                                   0.081           0.000
+                          sdsc_fused_linear_0_2ka4ddy0                      0.846           0.688
+                          Total                                             0.256           0.688
+sendnn:
+                          Memcpy-(HtoD)                                     1.783           0.000
+                          Memcpy-(DtoH)                                     0.867           0.000
+                          Memset-(Device)                                   0.370           0.000
+                          mm-BMM_1                                          0.864           0.674
+                          Total                                             0.971           0.674
+
+Op: mlp  Shape: [[1, 512, 4096]]
+Stack                     Kernel_name                                      duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                           0.087           0.000
+                          Memcpy-(DtoH)                                           0.118           0.000
+                          Memset-(Device)                                         0.180           0.000
+                          sdsc_fused_bmm_1_8jmjl2ok                               9.692           7.684
+                          sdsc_fused_bmm_mul_silu_0_vb7o7o29                     19.897           7.486
+                          Total                                                   5.995           7.551
+sendnn:
+                          Memcpy-(HtoD)                                           2.709           0.000
+                          Memcpy-(DtoH)                                           5.890           0.000
+                          Memset-(Device)                                         0.849           0.000
+                          bmm                                                     5.785          38.623
+                          Total                                                   3.808          38.623
+
+Op: mlp  Shape: [[4, 1, 4096]]
+Stack                     Kernel_name                                      duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                           0.078           0.000
+                          Memcpy-(DtoH)                                           0.140           0.000
+                          Memset-(Device)                                         0.365           0.000
+                          sdsc_fused_bmm_1_c4fvrr4y                               3.942           0.148
+                          sdsc_fused_bmm_mul_silu_0_f3_xgtew                     11.544           0.101
+                          Total                                                   3.214           0.113
+sendnn:
+                          Memcpy-(HtoD)                                          10.623           0.000
+                          Memcpy-(DtoH)                                           8.442           0.000
+                          Memset-(Device)                                         2.785           0.000
+                          bmm                                                     8.440           0.207
+                          Total                                                   7.573           0.207
+
+Op: attention  Shape: [[1, 512, 128], [1, 4096, 128], [1, 4096, 128]]
+Stack                     Kernel_name                                                         duration(ms)      PT-Util(%)
+--------------------------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                                              0.078           0.000
+                          Memcpy-(DtoH)                                                              0.010           0.000
+                          Memset-(Device)                                                            0.039           0.000
+                          sdsc_fused__scaled_dot_product_fused_attention_overri                      0.491           3.032
+                          Total                                                                      0.155           3.032
+sendnn:
+                          Memcpy-(HtoD)                                                              0.062           0.000
+                          Memcpy-(DtoH)                                                              0.067           0.000
+                          Memset-(Device)                                                            0.032           0.000
+                          mul                                                                        0.063          23.484
+                          Total                                                                      0.056          23.484
+
+sendnn:
+                          Memcpy-(HtoD)                                                              0.062           0.000
+                          Memcpy-(DtoH)                                                              0.067           0.000
+                          Memset-(Device)                                                            0.032           0.000
+                          mul                                                                        0.063          23.484
+                          Total                                                                      0.056          23.484
+
+Granite Config: bs1_pl512_full_model_prefill_only
+Stack                     Kernel_name                                                                                      duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy (HtoD)                                                                                           0.205            0.00
+                          Memcpy (DtoH)                                                                                          16.349            0.00
+                          Memset (Device)                                                                                        43.668            0.00
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_clone                    105.601           0.310
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_exp                    184.609           0.048
+                          sdsc_fused_add_linear_mul_rms_norm_160_3lci3sr4                                                        16.034          17.882
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_100_jk20mqah                                      1.657          14.386
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_104_n_oqccv9                                      1.651          14.436
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_108_r12xuftb                                      1.672          14.252
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_112_q2j621cc                                      1.675          14.228
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_116_1gzvmow9                                      1.654          14.407
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_120_q9_hmesv                                      1.664          14.324
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_124__loqigly                                      1.661          14.348
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_128_1x48zmhx                                      1.657          14.382
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_12_kp1u22q8                                       1.673          14.245
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_132_93o4eibp                                      1.655          14.401
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_136_4597mzn9                                      1.660          14.357
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_140_pr6m6pq6                                      1.672          14.253
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_144_kmd4kxdj                                      1.655          14.396
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_148_fu_5eoqk                                      1.664          14.324
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_152_6thbzq00                                      1.662          14.338
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_156_h3k_3vhi                                      1.658          14.377
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_16_7gwxiy66                                       1.666          14.307
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_20_754ucwbx                                       1.644          14.493
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_24_11zfk2s_                                       1.659          14.361
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_28_7hwzmxbr                                       1.669          14.279
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_32_m8kojd0m                                       1.667          14.292
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_36_9y8ft34n                                       1.654          14.407
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_40_k418y6yj                                       1.670          14.273
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_44_qtz577zg                                       1.662          14.337
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_48_jndcyyr8                                       1.648          14.464
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_4_77ygf85h                                        1.647          14.469
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_52_5ky0qhil                                       1.678          14.206
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_56_m0d7y8s0                                       1.675          14.231
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_60_9x6sjl8t                                       1.655          14.402
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_64_tmt00bta                                       1.652          14.427
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_68_n2kazrh_                                       1.665          14.316
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_72__tsphlo2                                       1.657          14.385
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_76_n2fdo52h                                       1.656          14.388
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_80_hof9oiu7                                       1.674          14.232
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_84_pfnd9k6k                                       1.669          14.283
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_88_r9l6y394                                       1.658          14.377
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_8_6zvr8clq                                        1.646          14.474
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_92_7sq50p8b                                       1.668          14.288
+                          sdsc_fused_add_linear_mul_rms_norm_sum_unsqueeze_view_96_djznmqmp                                       1.668          14.285
+                          sdsc_fused_div_161_ohsrigsc                                                                             0.987           0.000
+                          sdsc_fused_linear_mul_rms_norm_0_zurqvl9q                                                               1.239          19.239
+                          sdsc_fused_linear_mul_rms_norm_silu_103_o70s2klk                                                       11.559          19.329
+                          sdsc_fused_linear_mul_rms_norm_silu_107_pnp3xjr3                                                       11.551          19.342
+                          sdsc_fused_linear_mul_rms_norm_silu_111_togwvt12                                                       11.409          19.582
+                          sdsc_fused_linear_mul_rms_norm_silu_115_fervx_aa                                                       11.463          19.490
+                          sdsc_fused_linear_mul_rms_norm_silu_119__xijai4r                                                       11.542          19.357
+                          sdsc_fused_linear_mul_rms_norm_silu_11_wq7bywvx                                                        11.493          19.440
+                          sdsc_fused_linear_mul_rms_norm_silu_123_duthfxpl                                                       11.448          19.516
+                          sdsc_fused_linear_mul_rms_norm_silu_127_zqvq5wxs                                                       11.366          19.657
+                          sdsc_fused_linear_mul_rms_norm_silu_131_x9xz1t1f                                                       11.580          19.293
+                          sdsc_fused_linear_mul_rms_norm_silu_135_pijgvfj3                                                       11.485          19.454
+                          sdsc_fused_linear_mul_rms_norm_silu_139_a4_tnnj4                                                       11.341          19.700
+                          sdsc_fused_linear_mul_rms_norm_silu_143_65ca9o0y                                                       11.527          19.382
+                          sdsc_fused_linear_mul_rms_norm_silu_147__pyy4t1n                                                       11.614          19.238
+                          sdsc_fused_linear_mul_rms_norm_silu_151_k__yddia                                                       11.504          19.421
+                          sdsc_fused_linear_mul_rms_norm_silu_155_ydau2bbi                                                       11.414          19.573
+                          sdsc_fused_linear_mul_rms_norm_silu_159_vx8u2x_2                                                       11.580          19.294
+                          sdsc_fused_linear_mul_rms_norm_silu_15_3j4b81cw                                                        11.424          19.556
+                          sdsc_fused_linear_mul_rms_norm_silu_19_yg_ufuzz                                                        11.512          19.407
+                          sdsc_fused_linear_mul_rms_norm_silu_23_57tfsz90                                                        11.540          19.360
+                          sdsc_fused_linear_mul_rms_norm_silu_27__y68mrfe                                                        11.382          19.629
+                          sdsc_fused_linear_mul_rms_norm_silu_31_k87l4e5t                                                        11.465          19.487
+                          sdsc_fused_linear_mul_rms_norm_silu_35_h2rr6ojb                                                        11.606          19.251
+                          sdsc_fused_linear_mul_rms_norm_silu_39_kdhxzh9f                                                        11.465          19.487
+                          sdsc_fused_linear_mul_rms_norm_silu_3__nw1c5_a                                                         11.537          19.366
+                          sdsc_fused_linear_mul_rms_norm_silu_43_cl9g4g1s                                                        11.391          19.614
+                          sdsc_fused_linear_mul_rms_norm_silu_47_ffvnj98e                                                        11.559          19.328
+                          sdsc_fused_linear_mul_rms_norm_silu_51_t5mwmf1h                                                        11.496          19.435
+                          sdsc_fused_linear_mul_rms_norm_silu_55_p3a1r0hr                                                        11.394          19.608
+                          sdsc_fused_linear_mul_rms_norm_silu_59_2lz0q63v                                                        11.510          19.411
+                          sdsc_fused_linear_mul_rms_norm_silu_63_qgezs0s7                                                        11.607          19.248
+                          sdsc_fused_linear_mul_rms_norm_silu_67_sje5z0ok                                                        11.411          19.579
+                          sdsc_fused_linear_mul_rms_norm_silu_71_c9ytlw7m                                                        11.388          19.619
+                          sdsc_fused_linear_mul_rms_norm_silu_75_tidhv1xk                                                        11.570          19.310
+                          sdsc_fused_linear_mul_rms_norm_silu_79_6ida7vz3                                                        11.532          19.373
+                          sdsc_fused_linear_mul_rms_norm_silu_7_kyf0klet                                                         11.638          19.197
+                          sdsc_fused_linear_mul_rms_norm_silu_83__qowirk_                                                        11.403          19.592
+                          sdsc_fused_linear_mul_rms_norm_silu_87_bjpeln0x                                                        11.495          19.436
+                          sdsc_fused_linear_mul_rms_norm_silu_91_rv8nfqmq                                                        11.569          19.312
+                          sdsc_fused_linear_mul_rms_norm_silu_95_qbxn03xi                                                        11.482          19.458
+                          sdsc_fused_linear_mul_rms_norm_silu_99_yd0mnesa                                                        11.423          19.558
+                          Total                                                                                                                   0.313
+sendnn:
+                          Memcpy (HtoD)                                                                                           0.208            0.00
+                          Memcpy (DtoH)                                                                                         151.987            0.00
+                          Memset (Device)                                                                                         0.606            0.00
+                          embedding                                                                                             190.041           0.122
+                          Total                                                                                                                   0.122
+
+Granite Config: bs1_pl512_one_block_prefill_only
+Stack                     Kernel_name                                                                                      duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy (HtoD)                                                                                           0.213            0.00
+                          Memcpy (DtoH)                                                                                          15.453            0.00
+                          Memset (Device)                                                                                        13.382            0.00
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_clone                      2.636          12.429
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_exp                      4.887           1.828
+                          sdsc_fused_add_linear_mul_rms_norm_4_6wmcoa7f                                                          16.056          17.858
+                          sdsc_fused_div_5_0y6tvt17                                                                               1.150           0.000
+                          sdsc_fused_linear_mul_rms_norm_0_gbi2nd45                                                               1.239          19.233
+                          sdsc_fused_linear_mul_rms_norm_silu_3_q2t3veqm                                                         11.635          19.202
+                          Total                                                                                                                   5.777
+sendnn:
+                          Memcpy (HtoD)                                                                                           0.074            0.00
+                          Memcpy (DtoH)                                                                                           7.792            0.00
+                          Memset (Device)                                                                                         0.080            0.00
+                          embedding                                                                                               7.789           0.146
+                          Total                                                                                                                   0.146
+
+Granite Config: bs4_pl1_full_model_decode_only
+Stack                     Kernel_name                                                                                      duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy (HtoD)                                                                                           9.201            0.00
+                          Memcpy (DtoH)                                                                                          12.076            0.00
+                          Memset (Device)                                                                                        53.826            0.00
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_cat_clone                    147.645           0.011
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_mul_sum_transpo                     59.749           0.249
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_102_3                      1.174           2.537
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_107_5                      1.174           2.537
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_112_a                      1.175           2.536
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_118_j                      1.170           2.545
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_124_t                      1.175           2.534
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_130_0                      1.171           2.543
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_136_2                      1.175           2.535
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_141_9                      1.178           2.529
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_147_i                      1.176           2.534
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_153_1                      1.179           2.526
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_159_5                      1.174           2.537
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_15_nc                      1.171           2.544
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_165_y                      1.172           2.541
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_171_8                      1.175           2.535
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_177_5                      1.168           2.550
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_183_o                      1.180           2.525
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_189_o                      1.176           2.533
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_195_i                      1.172           2.542
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_201_6                      1.181           2.523
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_207_2                      1.180           2.525
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_213_r                      1.178           2.530
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_219_6                      1.170           2.545
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_21_gx                      1.175           2.534
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_225_m                      1.173           2.540
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_231_t                      1.174           2.537
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_27_3y                      1.172           2.541
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_33_ym                      1.175           2.535
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_39_r8                      1.179           2.527
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_3_h6h                      1.181           2.523
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_45_8_                      1.180           2.524
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_51_3m                      1.168           2.551
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_57_n_                      1.177           2.531
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_63_ec                      1.173           2.539
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_69_pv                      1.176           2.534
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_75_w9                      1.174           2.537
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_81_r7                      1.175           2.535
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_87_am                      1.180           2.525
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_92_if                      1.171           2.544
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_97_hm                      1.177           2.531
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_9_y66                      1.182           2.520
+                          sdsc_fused_add_linear_mul_rms_norm_104_ra6h18ti                                                         5.141          14.486
+                          sdsc_fused_add_linear_mul_rms_norm_109_txuo95d3                                                         5.145          14.475
+                          sdsc_fused_add_linear_mul_rms_norm_115_0wev_us5                                                         5.087          14.641
+                          sdsc_fused_add_linear_mul_rms_norm_121_a2jetsix                                                         5.139          14.492
+                          sdsc_fused_add_linear_mul_rms_norm_127_quot4ji6                                                         5.145          14.475
+                          sdsc_fused_add_linear_mul_rms_norm_12_e4t4jxr3                                                          5.151          14.457
+                          sdsc_fused_add_linear_mul_rms_norm_133_w_9qdagh                                                         5.143          14.480
+                          sdsc_fused_add_linear_mul_rms_norm_139_rr5vvbpj                                                         5.161          14.431
+                          sdsc_fused_add_linear_mul_rms_norm_144_tninmcp7                                                         5.151          14.458
+                          sdsc_fused_add_linear_mul_rms_norm_150_7f9cl4rh                                                         5.103          14.593
+                          sdsc_fused_add_linear_mul_rms_norm_156_4smueni8                                                         5.162          14.428
+                          sdsc_fused_add_linear_mul_rms_norm_162_phd5uiv9                                                         5.089          14.633
+                          sdsc_fused_add_linear_mul_rms_norm_168_s593gpu0                                                         5.108          14.580
+                          sdsc_fused_add_linear_mul_rms_norm_174_7ys_zdti                                                         5.089          14.635
+                          sdsc_fused_add_linear_mul_rms_norm_180_jgnx17zf                                                         5.100          14.603
+                          sdsc_fused_add_linear_mul_rms_norm_186_rchwu21g                                                         5.165          14.418
+                          sdsc_fused_add_linear_mul_rms_norm_18_z34rtfe6                                                          5.096          14.613
+                          sdsc_fused_add_linear_mul_rms_norm_192_7hajj01g                                                         5.155          14.447
+                          sdsc_fused_add_linear_mul_rms_norm_198_nz9bq9_k                                                         5.151          14.458
+                          sdsc_fused_add_linear_mul_rms_norm_204_7zll_veb                                                         5.086          14.641
+                          sdsc_fused_add_linear_mul_rms_norm_210_zux08y1g                                                         5.092          14.627
+                          sdsc_fused_add_linear_mul_rms_norm_216_8dd9u8hy                                                         5.099          14.605
+                          sdsc_fused_add_linear_mul_rms_norm_222_y2qy3kfl                                                         5.083          14.652
+                          sdsc_fused_add_linear_mul_rms_norm_228_c23mbh_0                                                         5.149          14.463
+                          sdsc_fused_add_linear_mul_rms_norm_234_icdjn4eu                                                         5.101          14.600
+                          sdsc_fused_add_linear_mul_rms_norm_24_1hgdjqb3                                                          5.097          14.612
+                          sdsc_fused_add_linear_mul_rms_norm_30_fwq671mi                                                          4.114          18.102
+                          sdsc_fused_add_linear_mul_rms_norm_36_8s9l50d1                                                          5.089          14.635
+                          sdsc_fused_add_linear_mul_rms_norm_42_dyo_rj71                                                          5.157          14.441
+                          sdsc_fused_add_linear_mul_rms_norm_48_y22q55ep                                                          5.148          14.466
+                          sdsc_fused_add_linear_mul_rms_norm_54_d3w5sofd                                                          5.108          14.579
+                          sdsc_fused_add_linear_mul_rms_norm_60_v_6j177c                                                          5.094          14.618
+                          sdsc_fused_add_linear_mul_rms_norm_66_qjycnfkb                                                          5.109          14.577
+                          sdsc_fused_add_linear_mul_rms_norm_6_w0kkffb0                                                           5.104          14.590
+                          sdsc_fused_add_linear_mul_rms_norm_72_hecyy0fu                                                          5.144          14.477
+                          sdsc_fused_add_linear_mul_rms_norm_78_3g94y7_1                                                          5.114          14.562
+                          sdsc_fused_add_linear_mul_rms_norm_84_h1jinf99                                                          5.147          14.469
+                          sdsc_fused_add_linear_mul_rms_norm_89_nxqpodc6                                                          5.101          14.599
+                          sdsc_fused_add_linear_mul_rms_norm_94_5p90kf_h                                                          5.099          14.606
+                          sdsc_fused_add_linear_mul_rms_norm_99_s7hu3xly                                                          5.162          14.428
+                          sdsc_fused_add_linear_mul_rms_norm_silu_103__uz2uuve                                                    2.353          15.827
+                          sdsc_fused_add_linear_mul_rms_norm_silu_108_cgt_7yzd                                                    2.327          16.003
+                          sdsc_fused_add_linear_mul_rms_norm_silu_114_ts2n1cxj                                                    2.343          15.892
+                          sdsc_fused_add_linear_mul_rms_norm_silu_11_vmj7bn29                                                     2.335          15.947
+                          sdsc_fused_add_linear_mul_rms_norm_silu_120_ggchdg_5                                                    2.347          15.865
+                          sdsc_fused_add_linear_mul_rms_norm_silu_126_gs31wycr                                                    2.337          15.931
+                          sdsc_fused_add_linear_mul_rms_norm_silu_132_wbb49ejb                                                    2.331          15.976
+                          sdsc_fused_add_linear_mul_rms_norm_silu_138_zhk26ljb                                                    2.352          15.831
+                          sdsc_fused_add_linear_mul_rms_norm_silu_143_22nh7rk0                                                    2.331          15.977
+                          sdsc_fused_add_linear_mul_rms_norm_silu_149_5xiuh3x1                                                    2.341          15.903
+                          sdsc_fused_add_linear_mul_rms_norm_silu_155_30snd24y                                                    2.347          15.865
+                          sdsc_fused_add_linear_mul_rms_norm_silu_161_lhwjrv9e                                                    2.344          15.887
+                          sdsc_fused_add_linear_mul_rms_norm_silu_167_4ov_t8vg                                                    2.315          16.086
+                          sdsc_fused_add_linear_mul_rms_norm_silu_173_1ct1qs3i                                                    2.371          15.706
+                          sdsc_fused_add_linear_mul_rms_norm_silu_179_gj0224bh                                                    2.330          15.979
+                          sdsc_fused_add_linear_mul_rms_norm_silu_17_wb_o_8wj                                                     2.332          15.966
+                          sdsc_fused_add_linear_mul_rms_norm_silu_185_h0sl3sca                                                    2.332          15.968
+                          sdsc_fused_add_linear_mul_rms_norm_silu_191_85r2vd_l                                                    2.347          15.864
+                          sdsc_fused_add_linear_mul_rms_norm_silu_197_mrhmox_w                                                    2.340          15.915
+                          sdsc_fused_add_linear_mul_rms_norm_silu_203_5btpri1w                                                    2.322          16.037
+                          sdsc_fused_add_linear_mul_rms_norm_silu_209_po0gb5d5                                                    2.370          15.714
+                          sdsc_fused_add_linear_mul_rms_norm_silu_215_i2h8xyw8                                                    2.326          16.008
+                          sdsc_fused_add_linear_mul_rms_norm_silu_221_awk3p3l3                                                    2.331          15.974
+                          sdsc_fused_add_linear_mul_rms_norm_silu_227_za4wx68t                                                    2.344          15.884
+                          sdsc_fused_add_linear_mul_rms_norm_silu_233_hioq77ss                                                    2.329          15.987
+                          sdsc_fused_add_linear_mul_rms_norm_silu_23_2rlhlb4k                                                     2.336          15.939
+                          sdsc_fused_add_linear_mul_rms_norm_silu_29_teuphdtu                                                     2.320          16.053
+                          sdsc_fused_add_linear_mul_rms_norm_silu_35_e_d_7yt0                                                     2.353          15.823
+                          sdsc_fused_add_linear_mul_rms_norm_silu_41_2zqga62c                                                     2.337          15.931
+                          sdsc_fused_add_linear_mul_rms_norm_silu_47_ok1nll24                                                     2.319          16.055
+                          sdsc_fused_add_linear_mul_rms_norm_silu_53_tay6s09z                                                     2.346          15.874
+                          sdsc_fused_add_linear_mul_rms_norm_silu_59_e9gne4j5                                                     2.344          15.888
+                          sdsc_fused_add_linear_mul_rms_norm_silu_5_51yx5g68                                                      2.341          15.905
+                          sdsc_fused_add_linear_mul_rms_norm_silu_65_evmk8g9y                                                     2.331          15.976
+                          sdsc_fused_add_linear_mul_rms_norm_silu_71_av5h7gv6                                                     2.354          15.818
+                          sdsc_fused_add_linear_mul_rms_norm_silu_77_chdg4w_i                                                     2.326          16.008
+                          sdsc_fused_add_linear_mul_rms_norm_silu_83_uk5p3pyz                                                     2.328          15.994
+                          sdsc_fused_add_linear_mul_rms_norm_silu_88_8tkakxh5                                                     2.347          15.866
+                          sdsc_fused_add_linear_mul_rms_norm_silu_93_l786uhtw                                                     2.328          15.995
+                          sdsc_fused_add_linear_mul_rms_norm_silu_98_mrpkkxor                                                     2.317          16.069
+                          sdsc_fused_div_linear_235_rsfebgqb                                                                     18.432           7.778
+                          sdsc_fused_linear_mul_rms_norm_0_go31ivfd                                                               1.234           9.652
+                          Total                                                                                                                   0.256
+sendnn:
+                          N/A                                                                                                       N/A             N/A
+
+Granite Config: bs4_pl1_one_block_decode_only
+Stack                     Kernel_name                                                                                      duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy (HtoD)                                                                                           9.110            0.00
+                          Memcpy (DtoH)                                                                                          13.741            0.00
+                          Memset (Device)                                                                                        19.847            0.00
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_cat_clone                      3.719           0.451
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_mul_sum_transpo                      0.490          30.416
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_3_jxo                      1.202           2.478
+                          sdsc_fused_add_linear_mul_rms_norm_6_cdff3b0s                                                           5.173          14.398
+                          sdsc_fused_add_linear_mul_rms_norm_silu_5_f3xvlx9m                                                      2.388          15.595
+                          sdsc_fused_div_linear_7_26thbr_8                                                                       18.227           7.865
+                          sdsc_fused_linear_mul_rms_norm_0_l5on5g94                                                               1.230           9.690
+                          Total                                                                                                                   4.034
+sendnn:
+                          N/A                                                                                                       N/A             N/A

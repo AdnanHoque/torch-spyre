@@ -1,0 +1,22 @@
+metric                      max_ms       mean_ms     median_ms        min_ms
+----------------------------------------------------------------------------
+wall_clock_ms              192.795       189.018       189.018       185.242
+cpu_ms                     188.917       188.917       188.917       188.917
+spyre_ms                     0.000         0.000         0.000         0.000
+kernel_ms                    0.000         0.000         0.000         0.000
+memory_transfer_ms           0.000         0.000         0.000         0.000
+pt_util%                     0.000
+
+Spyre-kernel_times:          mean_ms      PT-Util%
+---------------------------------------------------
+Total                          0.000         0.000
+
+CPU-kernel_times:                              mean_ms
+-------------------------------------------------------
+TorchDynamo-Cache-Lookup                         0.027
+Torch-Compiled-Region:-0/0                     188.889
+Pregraph-bytecode                                0.004
+AOTDispatcher-Runtime-Wrapper-Prologue           0.011
+aten::empty                                      0.016
+aten::to                                         0.003
+

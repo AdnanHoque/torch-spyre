@@ -1,0 +1,10 @@
+runroot: /tmp/prefill-bs1-sl512-ab-20260608_072036
+lx_planning: 0
+main_ref: upstream/main
+main_commit: c7861a0
+main_extra_patch: 824ad4b (benchmark compatibility only: patches.py)
+fix_ref: origin/pr-mlp-prefill-explained
+fix_commit: e544a05
+suite_commit: 7450624
+flex_commit: 2457d3fc
+deeptools_commit: 60b12999e4
