@@ -1,0 +1,62 @@
+============ Version Info ============
+torch-spyre:      a73350b (branch: adnan/codex-clean-dev)
+flex:             2457d3fc (branch: main)
+deeptools:        60b12999e4 (branch: master)
+spyre-perf-suite: baa99e3 (branch: HEAD)
+======================================
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 4096]]
+Stack                     Kernel_name                   duration(ms)      PT-Util(%)
+------------------------------------------------------------------------------------
+torch-spyre:
+                          Memset-(Device)                      0.075           0.000
+                          sdsc_f                               0.321          18.573
+                          Total                                0.198          46.434
+sendnn:
+                          Memcpy-(HtoD)                        0.601           0.000
+                          Memcpy-(DtoH)                        0.471           0.000
+                          Memset-(Device)                      0.206           0.000
+                          mm-BMM_1                             0.366          65.195
+                          Total                                0.411          65.195
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 1024]]
+Stack                     Kernel_name                   duration(ms)      PT-Util(%)
+------------------------------------------------------------------------------------
+torch-spyre:
+                          Memset-(Device)                      0.102           0.000
+                          sdsc_f                               0.089          66.708
+                          Total                                0.096          66.708
+sendnn:
+                          Memcpy-(HtoD)                        0.223           0.000
+                          Memcpy-(DtoH)                        0.134           0.000
+                          Memset-(Device)                      0.104           0.000
+                          mm-BMM_1                             0.107          55.852
+                          Total                                0.142          55.852
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 12800]]
+Stack                     Kernel_name                   duration(ms)      PT-Util(%)
+------------------------------------------------------------------------------------
+torch-spyre:
+                          Memset-(Device)                      0.078           0.000
+                          sdsc_f                               1.018           5.851
+                          Total                                0.548          34.131
+sendnn:
+                          Memcpy-(HtoD)                        1.974           0.000
+                          Memcpy-(DtoH)                        1.281           0.000
+                          Memset-(Device)                      0.458           0.000
+                          mm-BMM_1                             0.952          78.203
+                          Total                                1.166          78.203
+
+Op: mlp  Shape: [[1, 512, 4096]]
+Stack                     Kernel_name                   duration(ms)      PT-Util(%)
+------------------------------------------------------------------------------------
+torch-spyre:
+                          Memset-(Device)                      0.073           0.000
+                          sdsc_f                               2.781           2.143
+                          Total                                1.427          23.569
+sendnn:
+                          Memcpy-(HtoD)                        2.699           0.000
+                          Memcpy-(DtoH)                        5.882           0.000
+                          Memset-(Device)                      0.661           0.000
+                          bmm                                  5.776          38.679
+                          Total                                3.755          38.679

@@ -1,0 +1,98 @@
+{
+  "dsName_" : "bmm-Input0",
+  "isHostToSen_" : 1,
+  "dataformat_src_" : 15,
+  "dataformat_dst_" : 0,
+  "dcOpName_" : 0,
+  "pre_expand_dcsi_" : [
+  ],
+  "pre_input_shape_" : [],
+  "dcsi_" : [
+    {
+      "size_" : [64, 512, 64, 1],
+      "offset_src_" : 0,
+      "stride_src_" : [1, 4096, 64, 2097152],
+      "offset_dst_" : 0,
+      "stride_dst_" : [1, 64, 32768, 2097152]
+    }
+  ],
+  "input_shape_" : [4096, 512, 1],
+  "output_shape_" : [64, 512, 64, 1],
+  "post_slice_dcsi_" : [
+  ],
+  "post_output_shape_" : [],
+  "input_dimwise_ea_" : [
+  ],
+  "output_dimwise_ea_" : [
+  ],
+  "useSpi_" : 0,
+  "spi_" :{
+    "valOrIdx_" : 0,
+    "numElems_" : 0,
+    "spBlkSize_" : 0,
+    "nonzeroElems_" : 0,
+    "spBlkStride_" : 0
+  },
+  "gii_" :{
+    "input_volume_" : 0,
+    "compress_factor_" : 1,
+    "expanded_idx_val_" : 0,
+    "expanded_volume_" : 0,
+    "base_addr_" : 0,
+    "skip_addr_" : [],
+    "idx_prev_cum_size_" : []
+  },
+  "usePca_" : 0,
+  "pca_" :{
+    "alamax_" : 0,
+    "alamin_" : 0,
+    "scalea_" : 0,
+    "scaleaoffset_" : 0
+  },
+  "usePadVal_" : 0,
+  "padVal_" : 0,
+  "inputPadVal_" : 0,
+  "useWli_" : 0,
+  "imi_" :{
+    "idxToMaskValidElementOffset_" : 0,
+    "maskInnerRepeat_" : 1,
+    "invertMask_" : 0,
+    "reverseMask_" : 0,
+    "isCausalMask_" : 0,
+    "causalDimLength_" : 1,
+    "continuousMaskElems_" : 1,
+    "strideAfterContinuous_" : 1
+  },
+  "wli_" :{
+    "isActOrKer_" : 0,
+    "collapseDim_" : 0,
+    "chDimIdx_" : 0,
+    "wdimIdx_" : [],
+    "numWindows_" : [],
+    "wsize_" : [],
+    "stride_" : [],
+    "dilation_" : [],
+    "zpadfront_" : [],
+    "zpadback_" : []
+  },
+  "dmdi_" :{
+    "perTensorInfo" : [
+    ]
+  },
+  "quantInfo_" :{
+    "act_quant_type_" : 3,
+    "wt_quant_type_" : 2,
+    "smooth_quant_" : 0,
+    "quant_out_type_" : 6,
+    "quant_out_channel_size_" : 0,
+    "quant_in_channel_size_" : 0
+  },
+  "ssi_" :{
+    "value_and_locs_" : [
+    ],
+    "inputSym_" : [],
+    "unSubstitutedFlitStartOffset_" : 0,
+    "variableDefs_" : {
+    }
+  }
+}

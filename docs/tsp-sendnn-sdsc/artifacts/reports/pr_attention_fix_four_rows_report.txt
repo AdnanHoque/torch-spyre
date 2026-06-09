@@ -1,0 +1,46 @@
+============ Version Info ============
+torch-spyre:      a73350b (branch: adnan/codex-clean-dev)
+flex:             2457d3fc (branch: main)
+deeptools:        60b12999e4 (branch: master)
+spyre-perf-suite: baa99e3 (branch: HEAD)
+======================================
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                 24.059          25.355     0.949
+cpu_ms.mean_ms                        23.871          25.279     0.944
+spyre_ms.mean_ms                       1.071           2.656     0.403
+kernel_ms.mean_ms                      0.321           0.366     0.877
+memory_transfer_ms.mean_ms             0.750           2.291     0.327
+pt_util%                              46.434          65.195        N/A
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 1024]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                  6.937           5.063     1.370
+cpu_ms.mean_ms                         6.814           4.999     1.363
+spyre_ms.mean_ms                       0.497           0.997     0.498
+kernel_ms.mean_ms                      0.089           0.107     0.832
+memory_transfer_ms.mean_ms             0.407           0.891     0.457
+pt_util%                              66.708          55.852        N/A
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 12800]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                 64.389          72.372     0.890
+cpu_ms.mean_ms                        64.189          72.283     0.888
+spyre_ms.mean_ms                       3.360           7.553     0.445
+kernel_ms.mean_ms                      1.018           0.952     1.069
+memory_transfer_ms.mean_ms             2.342           6.601     0.355
+pt_util%                              34.131          78.203        N/A
+
+Op: mlp  Shape: [[1, 512, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                143.752         183.600     0.783
+cpu_ms.mean_ms                       143.533         183.494     0.782
+spyre_ms.mean_ms                      12.683          25.761     0.492
+kernel_ms.mean_ms                      6.952           5.776     1.204
+memory_transfer_ms.mean_ms             5.732          19.985     0.287
+pt_util%                              23.569          38.679        N/A

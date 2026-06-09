@@ -1,0 +1,146 @@
+============ Version Info ============
+torch-spyre:      a73350b (branch: adnan/codex-clean-dev)
+flex:             2457d3fc (branch: main)
+deeptools:        60b12999e4 (branch: master)
+spyre-perf-suite: baa99e3 (branch: HEAD)
+======================================
+
+Op: pointwise_add  Shape: [[1, 512, 4096], [1, 512, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                  6.633           5.519     1.202
+cpu_ms.mean_ms                         6.544           5.466     1.197
+spyre_ms.mean_ms                       0.441           0.903     0.488
+kernel_ms.mean_ms                      0.127           0.118     1.076
+memory_transfer_ms.mean_ms             0.314           0.786     0.399
+pt_util%                               0.000           0.000        N/A
+
+Op: pointwise_add  Shape: [[4, 1, 4096], [4, 1, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                  0.381           0.325     1.172
+cpu_ms.mean_ms                         0.334           0.289     1.156
+spyre_ms.mean_ms                       0.019           0.029     0.655
+kernel_ms.mean_ms                      0.001           0.001     1.000
+memory_transfer_ms.mean_ms             0.018           0.028     0.643
+pt_util%                               0.000           0.000        N/A
+
+Op: softmax  Shape: [[1, 512, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                  5.180           3.625     1.429
+cpu_ms.mean_ms                         5.077           3.578     1.419
+spyre_ms.mean_ms                       0.697           0.739     0.943
+kernel_ms.mean_ms                      0.517           0.095     5.442
+memory_transfer_ms.mean_ms             0.181           0.644     0.281
+pt_util%                               0.000           0.000        N/A
+
+Op: softmax  Shape: [[4, 1, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                  0.370           0.261     1.418
+cpu_ms.mean_ms                         0.319           0.228     1.399
+spyre_ms.mean_ms                       0.020           0.027     0.741
+kernel_ms.mean_ms                      0.006           0.006     1.000
+memory_transfer_ms.mean_ms             0.015           0.021     0.714
+pt_util%                               0.000           0.000        N/A
+
+Op: layernorm  Shape: [[1, 512, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                  5.096           8.990     0.567
+cpu_ms.mean_ms                         5.006           8.936     0.560
+spyre_ms.mean_ms                       0.425           0.814     0.522
+kernel_ms.mean_ms                      0.221           0.120     1.842
+memory_transfer_ms.mean_ms             0.204           0.694     0.294
+pt_util%                               0.000           0.000        N/A
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                 23.363          23.369     1.000
+cpu_ms.mean_ms                        23.228          23.312     0.996
+spyre_ms.mean_ms                       1.194           2.609     0.458
+kernel_ms.mean_ms                      0.560           0.362     1.547
+memory_transfer_ms.mean_ms             0.634           2.247     0.282
+pt_util%                               0.000          65.880        N/A
+
+Op: matmul  Shape: [[4, 1, 4096], [4096, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                 15.741          16.780     0.938
+cpu_ms.mean_ms                        15.640          16.719     0.935
+spyre_ms.mean_ms                       0.672           2.270     0.296
+kernel_ms.mean_ms                      0.216           0.238     0.908
+memory_transfer_ms.mean_ms             0.456           2.032     0.224
+pt_util%                               0.000           0.782        N/A
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 1024]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                  6.904           4.677     1.476
+cpu_ms.mean_ms                         6.815           4.628     1.473
+spyre_ms.mean_ms                       0.418           0.956     0.437
+kernel_ms.mean_ms                      0.128           0.108     1.185
+memory_transfer_ms.mean_ms             0.290           0.847     0.342
+pt_util%                               0.000          54.957        N/A
+
+Op: matmul  Shape: [[4, 1, 4096], [4096, 1024]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                  3.690           2.841     1.299
+cpu_ms.mean_ms                         3.609           2.792     1.293
+spyre_ms.mean_ms                       0.240           0.878     0.273
+kernel_ms.mean_ms                      0.057           0.063     0.905
+memory_transfer_ms.mean_ms             0.183           0.816     0.224
+pt_util%                               0.000           0.742        N/A
+
+Op: matmul  Shape: [[1, 512, 4096], [4096, 12800]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                 66.789          69.257     0.964
+cpu_ms.mean_ms                        66.658          69.177     0.964
+spyre_ms.mean_ms                       5.321           7.164     0.743
+kernel_ms.mean_ms                      3.151           0.952     3.310
+memory_transfer_ms.mean_ms             2.169           6.212     0.349
+pt_util%                               0.000          78.195        N/A
+
+Op: matmul  Shape: [[4, 1, 4096], [4096, 12800]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                 55.244          57.912     0.954
+cpu_ms.mean_ms                        55.143          57.840     0.953
+spyre_ms.mean_ms                       2.555           6.547     0.390
+kernel_ms.mean_ms                      0.719           0.859     0.837
+memory_transfer_ms.mean_ms             1.837           5.688     0.323
+pt_util%                               0.000           0.677        N/A
+
+Op: mlp  Shape: [[1, 512, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                155.318         180.587     0.860
+cpu_ms.mean_ms                       155.174         180.492     0.860
+spyre_ms.mean_ms                      28.861          25.777     1.120
+kernel_ms.mean_ms                     23.262           5.761     4.038
+memory_transfer_ms.mean_ms             5.599          20.016     0.280
+pt_util%                               0.000          38.778        N/A
+
+Op: mlp  Shape: [[4, 1, 4096]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                602.993         705.241     0.855
+cpu_ms.mean_ms                       602.805         705.136     0.855
+spyre_ms.mean_ms                      44.810          71.442     0.627
+kernel_ms.mean_ms                     21.838           8.476     2.576
+memory_transfer_ms.mean_ms            22.973          62.966     0.365
+pt_util%                               0.000           0.206        N/A
+
+Op: attention  Shape: [[1, 512, 128], [1, 4096, 128], [1, 4096, 128]]
+Metric                             torch-spyre          sendnn tsp/sendnn
+----------------------------------------------------------------------
+wall_clock_ms.mean_ms                  2.754           1.730     1.592
+cpu_ms.mean_ms                         2.668           1.684     1.584
+spyre_ms.mean_ms                       0.854           0.499     1.711
+kernel_ms.mean_ms                      0.728           0.064    11.375
+memory_transfer_ms.mean_ms             0.127           0.434     0.293
+pt_util%                               0.000          23.159        N/A

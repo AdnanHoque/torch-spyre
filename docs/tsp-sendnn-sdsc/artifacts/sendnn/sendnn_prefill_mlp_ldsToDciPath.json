@@ -1,0 +1,9 @@
+{
+  "ldsToDciPath" : {
+    "bmm-Input0" : "execute/pi_0-Output0_0-HostPrep/",
+    "bmm-Input1" : "execute/pi_1-Output0_0-HostPrep/",
+    "bmm_1-Input1" : "execute/pi_2-Output0_0-HostPrep/",
+    "bmm_2-Input1" : "execute/pi_3-Output0_0-HostPrep/",
+    "bmm_2_out" : "execute/output_0-Input0-HostPrep/"
+  }
+}
