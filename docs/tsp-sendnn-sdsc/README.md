@@ -16,6 +16,34 @@ output:     [1, 512, 12800]
 
 The same issue also shows up on the QO/KV projection shapes with smaller `N`.
 
+## Reproducing the Artifacts
+
+Use the helper script in this directory:
+
+```bash
+./docs/tsp-sendnn-sdsc/generate_tsp_sendnn_sdsc_artifacts.sh
+```
+
+The script is intentionally verbose. It prints the torch-spyre checkout, spyre-perf-suite checkout, run root, cache/export directories, and the final `summary.md` path. It runs only the focused cases needed for this proof:
+
+- torch-spyre matmul `[[1, 512, 4096], [4096, 12800]]`
+- torch-spyre MLP `[[1, 512, 4096]]`
+- sendnn MLP `[[1, 512, 4096]]`
+
+Common overrides:
+
+```bash
+TORCH_SPYRE_REPO=/path/to/torch-spyre \
+SPYRE_PERF_SUITE=/path/to/spyre-perf-suite \
+RUN_ROOT=/tmp/tsp-sendnn-sdsc-proof \
+RUNS=1 \
+./docs/tsp-sendnn-sdsc/generate_tsp_sendnn_sdsc_artifacts.sh
+```
+
+The generated files are collected under `$RUN_ROOT/collected`, and the human-readable extraction lands in `$RUN_ROOT/summary.md`.
+
+To regenerate a pre-fix vs post-fix comparison, run the script twice with different `TORCH_SPYRE_REPO` checkouts and different `RUN_ROOT` values. The script labels the generated torch-spyre SDSCs as `current` because it records whichever checkout you point it at.
+
 ## Main Finding
 
 | path | backend-visible evidence | singleton visible? | relevant schedule/layout clue |
