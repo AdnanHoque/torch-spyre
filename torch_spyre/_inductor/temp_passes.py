@@ -47,6 +47,13 @@ def _is_static_one(value) -> bool:
         return False
 
 
+def _is_static_gt_one(value) -> bool:
+    try:
+        return int(value) > 1
+    except (TypeError, ValueError):
+        return False
+
+
 def _is_static_multiple(value, divisor: int) -> bool:
     try:
         return int(value) % divisor == 0
@@ -87,6 +94,8 @@ def _mark_static_unit_batch_bmm(
         and lhs_shape[2] == rhs_shape[1]
         and rhs_shape[2] == out_shape[2]
     ):
+        return
+    if not _is_static_gt_one(lhs_shape[1]):
         return
     if not _has_stick_aligned_matmul_dims(lhs_shape[2], rhs_shape[2]):
         return

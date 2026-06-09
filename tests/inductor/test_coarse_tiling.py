@@ -1300,6 +1300,10 @@ class TestSharedWeightUnitBmmLayout(unittest.TestCase):
         )
         self.assertNotIn(
             SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY,
+            self._static_bmm_custom_meta((1, 1, k), (1, k, n), (1, 1, n)),
+        )
+        self.assertNotIn(
+            SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY,
             self._static_bmm_custom_meta((1, m, 2), (1, 2, n), (1, m, n)),
         )
 
