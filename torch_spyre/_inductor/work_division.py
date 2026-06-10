@@ -918,6 +918,12 @@ def _cost_model_matmul_planner(
     n_divs = [int(d) for d in divisors(n_sticks)]
     k_divs = [int(d) for d in divisors(k_sticks)]
 
+    # The trade-down guard below declines any split using fewer cores than the
+    # default, so restrict the argmin to that candidate set. Otherwise a
+    # fewer-core candidate can win the argmin, get declined, and leave the
+    # default split in place even when a better same-core split exists
+    # (M<=64 projections silently regressed to the default pure-M split).
+    default_cores = math.prod(splits.values())
     best = None
     best_cost = float("inf")
     for b_combo in b_combos:
@@ -925,7 +931,8 @@ def _cost_model_matmul_planner(
         for mm in m_divs:
             for nn in n_divs:
                 for kk in k_divs:
-                    if b_prod * mm * nn * kk > max_cores:
+                    cores = b_prod * mm * nn * kk
+                    if cores > max_cores or cores < default_cores:
                         continue
                     c = _matmul_split_cost(
                         (B_total, b_prod), (M_e, mm), (N_e, nn), (K_e, kk), max_cores
