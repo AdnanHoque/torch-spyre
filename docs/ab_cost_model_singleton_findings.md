@@ -67,3 +67,46 @@ Cheapest next test: e2e decode with `LX_PLANNING=0`.
   device-event profiling.
 - The fused SDPA SuperDSC needs latest deeptools to chunk; on older SDKs only
   the MLP sub-block compiles (≈62% of the regression).
+
+---
+
+## Update: full-block A/B (latest deeptools) — #2550 cost hunk IS implicated in decode
+
+Rebuilding deeptools at latest master made the fused SDPA SuperDSC compile, so
+the full Granite block (attention + KV cache, padded decode_multiple=64) ran
+at all four points with per-kernel `ideal_cycles.json` + SuperDSC artifacts.
+
+**The padded decode block is M=64, not M=1.** The earlier MLP-only A/B used
+M=1 decode and was flat — that probe missed the regression.
+
+In the e2e graph, the singleton window flips decode-block bmm splits:
+
+| bmm (decode block, M=64) | f520b5e | 9035fb8 |
+|---|---|---|
+| attention out-proj `2_bmm` | (m4, n8) | **(m32, n1) pure-M** |
+| attention `14_bmm` | (m4, n8) | **(m32, n1) pure-M** |
+
+The unit-bmm marking is inert (proven on real fused kernels). The flip comes
+from the `target_m_us` cost-model hunk in #2550, which fires on every matmul:
+at M=64, `pt_passes = max(1, m_t/PT_ROWS) = 1` regardless of m-split, so the
+pure-M candidate's penalty matches the m×n candidate and the tie now breaks
+to pure-M — 2 rows/core on the 64-row PT array, weight reloaded everywhere.
+
+**Device confirmation, standalone `[64,4096]·[4096,4096]` matmul:**
+
+| stack | split | median |
+|---|---|---:|
+| f520b5e (pre) | (m4, n8) | 0.631 ms |
+| 9035fb8 (post) | **(m32, n1)** | **1.260 ms (2.0×)** |
+
+This matches the decode regression signature: every padded-decode matmul runs
+at M=64, and Antoni's e2e decode matmuls are ~1.3× slower (only some kernels
+flip → smaller aggregate factor).
+
+**Fix direction:** in `_matmul_split_cost`, the `target_m_us` term must not
+reward higher m-splits when `m_t ≤ PT_ROWS` (M ≤ 64 → m-split beyond 1 adds
+zero PT throughput, costs N-parallelism); the prefill speedups don't depend
+on that regime.
+
+LX-pass commits (#2459/#2533) remain suspects for the residual diffs (e2e
+LX_PLANNING=0 ablation still worthwhile).
