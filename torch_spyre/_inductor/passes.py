@@ -205,15 +205,15 @@ class CustomPostPasses(_SpyreGraphPassPipeline):
     """
 
     def __init__(self):
-        super().__init__(
-            [
-                recover_spyre_hints,
-                convert_constant_with_graph_node,
-                mm_to_bmm_pass.apply,
-                mark_direct_unit_bmm_pass,
-                bmm_unflatten_pass.apply,
-            ]
-        )
+        passes = [
+            recover_spyre_hints,
+            convert_constant_with_graph_node,
+            mm_to_bmm_pass.apply,
+        ]
+        if config.shared_weight_unit_bmm_marker:
+            passes.append(mark_direct_unit_bmm_pass)
+        passes.append(bmm_unflatten_pass.apply)
+        super().__init__(passes)
 
 
 class CustomPreFusionPasses(_SpyreNodePassPipeline):
