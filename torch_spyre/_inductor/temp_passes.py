@@ -22,6 +22,7 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
+from . import config
 from .logging_utils import get_inductor_logger
 from .constants import SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY
 from .pass_utils import copy_fx_custom_meta
@@ -76,6 +77,8 @@ def _node_shape(node: torch.fx.Node) -> list[int] | None:
 def _mark_static_unit_batch_bmm(
     bmm_node: torch.fx.Node, lhs_node: torch.fx.Node, rhs_node: torch.fx.Node
 ) -> None:
+    if not config.shared_weight_unit_bmm_marker:
+        return
     lhs_shape = _node_shape(lhs_node)
     rhs_shape = _node_shape(rhs_node)
     out_shape = _node_shape(bmm_node)

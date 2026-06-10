@@ -40,6 +40,10 @@ core_id_k_fast_emission: bool = (
     os.environ.get("SPYRE_CORE_ID_K_FAST_EMISSION", "1") == "1"
 )
 
+shared_weight_unit_bmm_marker: bool = (
+    os.environ.get("SPYRE_SHARED_WEIGHT_UNIT_BMM_MARKER", "1") == "1"
+)
+
 # When False (default), HBM tensor addresses are baked as concrete integers
 # into the SDSC JSON and bundle.mlir emits sdsc_execute with no operands.
 # When True, addresses are emitted as runtime symbols with

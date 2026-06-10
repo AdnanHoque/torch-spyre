@@ -1307,6 +1307,17 @@ class TestSharedWeightUnitBmmLayout(unittest.TestCase):
             self._static_bmm_custom_meta((1, m, 2), (1, 2, n), (1, m, n)),
         )
 
+    def test_shared_weight_marker_can_be_disabled(self):
+        with patch(
+            "torch_spyre._inductor.config.shared_weight_unit_bmm_marker", False
+        ):
+            self.assertNotIn(
+                SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY,
+                self._static_bmm_custom_meta(
+                    (1, 2, 128), (1, 128, 64), (1, 2, 64)
+                ),
+            )
+
     def test_mark_direct_unit_bmm_pass_does_not_mark_reshape_inputs(self):
         m, k, n = 2, 64, 128
         graph = fx.Graph()
