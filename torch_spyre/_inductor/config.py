@@ -26,10 +26,11 @@ chunk_large_tensors: bool = os.environ.get("CHUNK_LARGE_TENSORS", "0") == "1"
 
 global_stick_optimizer: bool = os.environ.get("GLOBAL_STICK_OPTIMIZER", "1") == "1"
 
-# Shared-weight unit-BMM marking. Fires on standalone B=1 bmms (e.g. the
-# prefill attention bmm); inert on fused kernels.
+# Shared-weight unit-BMM marking. Device-confirmed inert on real fused Granite
+# (prefill kernels byte-identical on/off; no standalone bmm to mark). Off by
+# default until it shows a measured win.
 shared_weight_unit_bmm_marker: bool = (
-    os.environ.get("SPYRE_SHARED_WEIGHT_UNIT_BMM_MARKER", "1") == "1"
+    os.environ.get("SPYRE_SHARED_WEIGHT_UNIT_BMM_MARKER", "0") == "1"
 )
 
 allow_all_ops_in_lx_planning: bool = False
