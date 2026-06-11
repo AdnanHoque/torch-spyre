@@ -1,11 +1,25 @@
 # Exhaustive 32-core split sweep — device-best vs cost-model pick
 
+> **⚠️ CORRECTION (read first).** The single-pass "device-best" gains below
+> (14.7% MLP-up K-split, the decode K-split wins, etc.) **did not survive
+> repeat measurement.** Re-timing the headline MLP-up split 3× each showed
+> `in1` and `in2` are statistically indistinguishable (each varies ~20%
+> *within itself*; the distributions fully overlap; on medians the "winning"
+> K-split is actually slower). The per-split device noise here is **~20%**,
+> which swamps essentially every gap flagged in the table. **Conclusion: on
+> this device we cannot demonstrate the cost model leaves meaningful split
+> performance on the table.** The reliable result is the conservative one —
+> the cost model is device-optimal or within-noise on the prefill proj/MLP
+> shapes. Treat the per-shape "device-best" below as single noisy samples, not
+> verified optima.
+
 Every full-utilization (32-core) work-division split, device-timed standalone,
 for all 12 golden Granite matmul shapes (240 forced-split runs, 233 valid, 7
 device hangs skipped). This is the rigorous version of "are we picking
 device-best splits" — the prior hand-picked sweep covered only ~40% of the
-32-core split space and **0%** of the K-split / batch-split families, which is
-where the misses turn out to live.
+32-core split space and **0%** of the K-split / batch-split families. The sweep's
+real value turned out to be (a) confirming prefill proj/MLP optimality and
+(b) proving the noise floor is too high here to trust sub-20% "misses".
 
 Data: [`exhaustive_summary.csv`](exhaustive_summary.csv) (per-shape best),
 [`exhaustive_full.csv`](exhaustive_full.csv) (all 233 split timings).
@@ -67,3 +81,24 @@ decode (3/4)** — standalone the planner takes K-splits the fused e2e pins to
 Every K-split / batch-split win above is gated on the same question: *can the
 fused kernel use it, or does span-reduction pin `in1`/`x1`?* That probe is the
 next step before any cost-model change.
+
+## Repeat-confirmation (why the gains don't survive)
+
+Re-timed the headline MLP-up split 3× each, interleaved:
+
+| split | runs (ms) | median |
+|---|---|---:|
+| `mb4,out8,in1` (cost pick) | 10.69, 12.73, 12.64 | 12.64 |
+| `mb4,out4,in2` (K-split, "best") | 13.54, 11.16, 13.48 | 13.48 |
+
+Each split varies ~20% within itself and the distributions fully overlap; on
+medians the K-split is 6.7% *slower*. The single-pass 10.632 was a lucky
+sample. The attn@V repeat-confirm (pure-M vs (16,2)) **wedged** on the
+device's lost-control-block bug before producing data — itself a reminder that
+this device's instability is the binding constraint.
+
+**Net:** the device noise floor (~20% per split) exceeds essentially every gap
+in the table, so the cost model cannot be shown to be sub-optimal here. A
+stable device (e.g. flex with the lost-CB fix, GHE `ai-chip-toolchain/flex`
+PR #1019) is required to resolve these gaps; until then the conservative result
+holds — cost-model picks are within noise of device-best.
