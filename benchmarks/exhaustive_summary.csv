@@ -1,0 +1,13 @@
+B,M,N,K,role,phase,cost_pick_split,cost_ms,device_best_split,best_ms,gain_pct,winner_type,e2e_representative
+512,32,512,128,QK^T scores,prefill,4_1_8_1,16.735,4_2_2_2,12.782,23.6,K-split,yes
+32,512,128,512,attn @ V,prefill,1_32_1_1,4.803,8_2_2_1,4.521,5.9,batch-split,yes
+1,512,4096,4096,Q/O proj,prefill,1_4_8_1,3.243,1_4_8_1,3.243,0.0,optimal,yes
+1,512,1024,4096,"K,V proj (GQA)",prefill,1_4_8_1,1.245,1_4_8_1,1.245,0.0,optimal,yes
+1,512,12800,4096,"MLP gate+up (w1,w3)",prefill,1_4_8_1,12.457,1_4_4_2,10.632,14.7,K-split,yes
+1,512,4096,12800,MLP down (w2),prefill,1_4_8_1,4.899,1_4_8_1,4.899,0.0,optimal,yes
+64,32,576,128,QK^T scores,decode,32_1_1_1,2.712,4_4_1_2,2.543,6.2,K-split,no (standalone!=e2e)
+32,64,128,576,attn @ V,decode,1_16_2_1,0.776,4_8_1_1,0.701,9.7,batch-split,no (standalone!=e2e)
+1,64,4096,4096,Q/O proj,decode,1_4_8_1,0.829,1_2_1_16,0.745,10.1,K-split,no (standalone!=e2e)
+1,64,1024,4096,"K,V proj (GQA)",decode,1_4_8_1,0.3,1_8_1_4,0.283,5.7,K-split,no (standalone!=e2e)
+1,64,12800,4096,"MLP gate+up (w1,w3)",decode,1_4_8_1,2.007,1_4_8_1,2.007,0.0,optimal,no (standalone!=e2e)
+1,64,4096,12800,MLP down (w2),decode,1_4_8_1,1.307,1_4_4_2,1.213,7.2,K-split,no (standalone!=e2e)
