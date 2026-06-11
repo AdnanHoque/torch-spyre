@@ -781,7 +781,8 @@ _DTYPE_BYTES = 2  # fp16
 _PSUM_PER_ELEM_US = 1.4e-4  # per output element, per K-split ring reduction hop
 _COHORT_LIMIT = 8  # cores sharing a broadcast before it contends for bandwidth
 _BATCH_SPLIT_EXPONENT = 1.4  # batch-split cost grows ~ b ** this (fit to bmm sweeps)
-_TARGET_M_PENALTY_US = 50.0  # tie-break weight when per-core M under-fills PT
+_TARGET_M_PENALTY_US = 25.0  # tie-break weight when per-core M under-fills PT
+_K_SPLIT_SETUP_US = 50.0  # fixed PSUM-chain setup/launch overhead per K-split hop
 
 
 def _matmul_split_cost(
@@ -820,6 +821,10 @@ def _matmul_split_cost(
     # PSUM: a K-split spreads the reduction over k cores, costing (k-1) partial-
     # sum hops around the ring, each touching every output element.
     psum_us = max(0, k - 1) * (B * M * N) * _PSUM_PER_ELEM_US
+    # The per-element term underprices small outputs: a K-split also pays a
+    # fixed PSUM-chain setup per hop, so k>1 must not win near-ties against
+    # k=1 (decode-block outputs are tiny but per-launch setup is not).
+    psum_us += max(0, k - 1) * _K_SPLIT_SETUP_US
 
     # Tie-break: among compute-equivalent splits, penalize only M splits that
     # make the per-core tile too short to fill the PT pipeline. Larger per-core
