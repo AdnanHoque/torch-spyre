@@ -1,0 +1,5787 @@
+[
+  {
+    "completed_runs": true,
+    "elapsed_s": 74.46639466285706,
+    "expected_split_dict": {
+      "in": 1,
+      "mb": 1,
+      "out": 8,
+      "x": 4
+    },
+    "expected_split_match": false,
+    "first_split": {
+      "in": 1,
+      "mb": 4,
+      "out": 8,
+      "x": 1
+    },
+    "first_split_text": "x1,mb4,out8,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_bmm_0_k30vlt_2"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_prefill_qk_t_scores_512x32x128_x_512",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_prefill_qk_t_scores_512x32x128_x_512/adnan-cdx-spyre-dev-pf_1624467.1781208947659035183.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 1.6456330000000001,
+      "kernels": [],
+      "pt_util%.": 1.8101904196798986,
+      "wall_clock_ms.mean_ms": 1.8431013450026512
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_bmm_0_k30vlt_2",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8,
+                  "x": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "x4,mb1,out8,in1",
+      "golden_count": 1,
+      "group": "golden-shape",
+      "name": "golden_prefill_qk_t_scores_512x32x128_x_512",
+      "op": "golden_matmul",
+      "role": "prefill QK^T scores",
+      "shapes": [
+        [
+          512,
+          32,
+          128
+        ],
+        [
+          512,
+          128,
+          512
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 1.6456330000000001
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 1.2823805809020996,
+    "expected_split_dict": {
+      "in": 1,
+      "mb": 32,
+      "out": 1,
+      "x": 1
+    },
+    "expected_split_match": true,
+    "first_split": {
+      "in": 1,
+      "mb": 32,
+      "out": 1,
+      "x": 1
+    },
+    "first_split_text": "x1,mb32,out1,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_bmm_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_prefill_attn_v_32x512x512_x_128",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_prefill_attn_v_32x512x512_x_128/adnan-cdx-spyre-dev-pf_1624467.1781208949063978036.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.778458,
+      "kernels": [],
+      "pt_util%.": 3.8266792696704135,
+      "wall_clock_ms.mean_ms": 0.9412067010998726
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_bmm_0_9u2kfaul",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 32,
+                  "out": 1,
+                  "x": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "x1,mb32,out1,in1",
+      "golden_count": 1,
+      "group": "golden-shape",
+      "name": "golden_prefill_attn_v_32x512x512_x_128",
+      "op": "golden_matmul",
+      "role": "prefill attn @ V",
+      "shapes": [
+        [
+          32,
+          512,
+          512
+        ],
+        [
+          32,
+          512,
+          128
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.778458
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 1.0519840717315674,
+    "expected_split_dict": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "expected_split_match": true,
+    "first_split": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "first_split_text": "mb4,out8,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0_c"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_prefill_mlp_gate_up_w1_w3_1x512x4096_x_12800",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_prefill_mlp_gate_up_w1_w3_1x512x4096_x_12800/adnan-cdx-spyre-dev-pf_1624467.1781208950224074796.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 1.9733205,
+      "kernels": [],
+      "pt_util%.": 37.73980317577772,
+      "wall_clock_ms.mean_ms": 2.1366355940699577
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_c_q9jms2",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "mb4,out8,in1",
+      "golden_count": 2,
+      "group": "golden-shape",
+      "name": "golden_prefill_mlp_gate_up_w1_w3_1x512x4096_x_12800",
+      "op": "golden_matmul",
+      "role": "prefill MLP gate+up (w1,w3)",
+      "shapes": [
+        [
+          1,
+          512,
+          4096
+        ],
+        [
+          4096,
+          12800
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 1.9733205
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 1.3320896625518799,
+    "expected_split_dict": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "expected_split_match": false,
+    "first_split": {
+      "in": 1,
+      "mb": 8,
+      "out": 4
+    },
+    "first_split_text": "mb8,out4,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_prefill_mlp_down_w2_1x512x12800_x_4096",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_prefill_mlp_down_w2_1x512x12800_x_4096/adnan-cdx-spyre-dev-pf_1624467.1781208951659517472.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 1.6110609999999999,
+      "kernels": [],
+      "pt_util%.": 46.225889195211906,
+      "wall_clock_ms.mean_ms": 1.7728852108120918
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_bxblmco2",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 8,
+                  "out": 4
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "mb4,out8,in1",
+      "golden_count": 1,
+      "group": "golden-shape",
+      "name": "golden_prefill_mlp_down_w2_1x512x12800_x_4096",
+      "op": "golden_matmul",
+      "role": "prefill MLP down (w2)",
+      "shapes": [
+        [
+          1,
+          512,
+          12800
+        ],
+        [
+          12800,
+          4096
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 1.6110609999999999
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 1.1328179836273193,
+    "expected_split_dict": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "expected_split_match": false,
+    "first_split": {
+      "in": 1,
+      "mb": 8,
+      "out": 4
+    },
+    "first_split_text": "mb8,out4,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_prefill_q_o_proj_1x512x4096_x_4096",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_prefill_q_o_proj_1x512x4096_x_4096/adnan-cdx-spyre-dev-pf_1624467.1781208952911235996.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.5465385,
+      "kernels": [],
+      "pt_util%.": 43.60401458867532,
+      "wall_clock_ms.mean_ms": 0.7155723869800568
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_fk0ifx7k",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 8,
+                  "out": 4
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "mb4,out8,in1",
+      "golden_count": 2,
+      "group": "golden-shape",
+      "name": "golden_prefill_q_o_proj_1x512x4096_x_4096",
+      "op": "golden_matmul",
+      "role": "prefill Q/O proj",
+      "shapes": [
+        [
+          1,
+          512,
+          4096
+        ],
+        [
+          4096,
+          4096
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.5465385
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 0.9243643283843994,
+    "expected_split_dict": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "expected_split_match": false,
+    "first_split": {
+      "in": 1,
+      "mb": 8,
+      "out": 4
+    },
+    "first_split_text": "mb8,out4,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0_1287u8_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_prefill_k_v_proj_gqa_1x512x4096_x_1024",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_prefill_k_v_proj_gqa_1x512x4096_x_1024/adnan-cdx-spyre-dev-pf_1624467.1781208953945964890.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.1262735,
+      "kernels": [],
+      "pt_util%.": 47.181856698501115,
+      "wall_clock_ms.mean_ms": 0.29536616057157516
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_1287u8_0",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 8,
+                  "out": 4
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "mb4,out8,in1",
+      "golden_count": 2,
+      "group": "golden-shape",
+      "name": "golden_prefill_k_v_proj_gqa_1x512x4096_x_1024",
+      "op": "golden_matmul",
+      "role": "prefill K,V proj (GQA)",
+      "shapes": [
+        [
+          1,
+          512,
+          4096
+        ],
+        [
+          4096,
+          1024
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.1262735
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 0.6411497592926025,
+    "expected_split_dict": {
+      "in": 1,
+      "mb": 1,
+      "out": 1,
+      "x": 32
+    },
+    "expected_split_match": true,
+    "first_split": {
+      "in": 1,
+      "mb": 1,
+      "out": 1,
+      "x": 32
+    },
+    "first_split_text": "x32,mb1,out1,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_bmm_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_decode_qk_t_scores_64x32x128_x_576",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_decode_qk_t_scores_64x32x128_x_576/adnan-cdx-spyre-dev-pf_1624467.1781208954701914162.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.236734,
+      "kernels": [],
+      "pt_util%.": 1.7695349671322709,
+      "wall_clock_ms.mean_ms": 0.40751881897449493
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_bmm_0_laefnmb1",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 1,
+                  "out": 1,
+                  "x": 32
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "x32,mb1,out1,in1",
+      "golden_count": 8,
+      "group": "golden-shape",
+      "name": "golden_decode_qk_t_scores_64x32x128_x_576",
+      "op": "golden_matmul",
+      "role": "decode QK^T scores",
+      "shapes": [
+        [
+          64,
+          32,
+          128
+        ],
+        [
+          64,
+          128,
+          576
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.236734
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 0.783499002456665,
+    "expected_split_dict": {
+      "in": 1,
+      "mb": 16,
+      "out": 2,
+      "x": 1
+    },
+    "expected_split_match": false,
+    "first_split": {
+      "in": 1,
+      "mb": 32,
+      "out": 1,
+      "x": 1
+    },
+    "first_split_text": "x1,mb32,out1,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_bmm_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_decode_attn_v_32x64x576_x_128",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_decode_attn_v_32x64x576_x_128/adnan-cdx-spyre-dev-pf_1624467.1781208955595893915.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.3371105,
+      "kernels": [],
+      "pt_util%.": 1.242646227005955,
+      "wall_clock_ms.mean_ms": 0.5026264116168022
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_bmm_0_ivqbxcka",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 32,
+                  "out": 1,
+                  "x": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "x1,mb16,out2,in1",
+      "golden_count": 8,
+      "group": "golden-shape",
+      "name": "golden_decode_attn_v_32x64x576_x_128",
+      "op": "golden_matmul",
+      "role": "decode attn @ V",
+      "shapes": [
+        [
+          32,
+          64,
+          576
+        ],
+        [
+          32,
+          576,
+          128
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.3371105
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 0.9664580821990967,
+    "expected_split_dict": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "expected_split_match": true,
+    "first_split": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "first_split_text": "mb4,out8,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_decode_mlp_gate_up_w1_w3_1x64x4096_x_12800",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_decode_mlp_gate_up_w1_w3_1x64x4096_x_12800/adnan-cdx-spyre-dev-pf_1624467.1781208956676064316.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.7400005,
+      "kernels": [],
+      "pt_util%.": 12.579844079957933,
+      "wall_clock_ms.mean_ms": 0.9142141789197922
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_wewi4b4p",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "mb4,out8,in1",
+      "golden_count": 16,
+      "group": "golden-shape",
+      "name": "golden_decode_mlp_gate_up_w1_w3_1x64x4096_x_12800",
+      "op": "golden_matmul",
+      "role": "decode MLP gate+up (w1,w3)",
+      "shapes": [
+        [
+          1,
+          64,
+          4096
+        ],
+        [
+          4096,
+          12800
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.7400005
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 1.1541850566864014,
+    "expected_split_dict": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "expected_split_match": true,
+    "first_split": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "first_split_text": "mb4,out8,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_decode_q_o_proj_1x64x4096_x_4096",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_decode_q_o_proj_1x64x4096_x_4096/adnan-cdx-spyre-dev-pf_1624467.1781208957956930052.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.2463915,
+      "kernels": [],
+      "pt_util%.": 12.090145524131678,
+      "wall_clock_ms.mean_ms": 0.3976309671998024
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_95af6ehr",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "mb4,out8,in1",
+      "golden_count": 17,
+      "group": "golden-shape",
+      "name": "golden_decode_q_o_proj_1x64x4096_x_4096",
+      "op": "golden_matmul",
+      "role": "decode Q/O proj",
+      "shapes": [
+        [
+          1,
+          64,
+          4096
+        ],
+        [
+          4096,
+          4096
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.2463915
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 1.3041598796844482,
+    "expected_split_dict": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "expected_split_match": true,
+    "first_split": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "first_split_text": "mb4,out8,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_decode_mlp_down_w2_1x64x12800_x_4096",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_decode_mlp_down_w2_1x64x12800_x_4096/adnan-cdx-spyre-dev-pf_1624467.1781208959377331692.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.7645775000000001,
+      "kernels": [],
+      "pt_util%.": 12.175470647633377,
+      "wall_clock_ms.mean_ms": 0.9232005104422569
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_gd4cdfde",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "mb4,out8,in1",
+      "golden_count": 8,
+      "group": "golden-shape",
+      "name": "golden_decode_mlp_down_w2_1x64x12800_x_4096",
+      "op": "golden_matmul",
+      "role": "decode MLP down (w2)",
+      "shapes": [
+        [
+          1,
+          64,
+          12800
+        ],
+        [
+          12800,
+          4096
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.7645775000000001
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 0.7171993255615234,
+    "expected_split_dict": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "expected_split_match": true,
+    "first_split": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "first_split_text": "mb4,out8,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_decode_k_v_proj_gqa_1x64x4096_x_1024",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/golden_decode_k_v_proj_gqa_1x64x4096_x_1024/adnan-cdx-spyre-dev-pf_1624467.1781208960197984856.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.070838,
+      "kernels": [],
+      "pt_util%.": 10.513104163404849,
+      "wall_clock_ms.mean_ms": 0.22403057664632797
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_wxfk9s8q",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "mb4,out8,in1",
+      "golden_count": 16,
+      "group": "golden-shape",
+      "name": "golden_decode_k_v_proj_gqa_1x64x4096_x_1024",
+      "op": "golden_matmul",
+      "role": "decode K,V proj (GQA)",
+      "shapes": [
+        [
+          1,
+          64,
+          4096
+        ],
+        [
+          4096,
+          1024
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.070838
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 2.244107484817505,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {
+      "mb": 32,
+      "out": 1
+    },
+    "first_split_text": "mb32,out1",
+    "normalized_kernel_names": [
+      "sdsc_fused_mul_rms_norm_silu_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/fused_prefill_mlp_gate_rms_linear_silu",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/fused_prefill_mlp_gate_rms_linear_silu/adnan-cdx-spyre-dev-pf_1624467.1781208962568924285.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 1.6596835,
+      "kernels": [],
+      "pt_util%.": 44.871644065104746,
+      "wall_clock_ms.mean_ms": 1.9573336467146873
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_mul_rms_norm_silu_0_nuoyczwq",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_1.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "1_mean"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_2.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "x"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                }
+              ],
+              "ops": [
+                "2_add"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "out": 32,
+                  "x": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_3.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "x"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                }
+              ],
+              "ops": [
+                "3_rsqrt"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "out": 32,
+                  "x": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_4.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "4_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_5.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "5_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_6.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "6_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            },
+            {
+              "file": "sdsc_7.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "7_silu"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "fused-context",
+      "name": "fused_prefill_mlp_gate_rms_linear_silu",
+      "op": "fused_rms_linear_silu",
+      "role": "prefill MLP gate/up in RMSNorm+linear+SiLU context",
+      "shapes": [
+        [
+          1,
+          512,
+          4096
+        ],
+        [
+          4096,
+          12800
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 1.6596835
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 4.711814880371094,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {
+      "in": 1,
+      "mb": 8,
+      "out": 4
+    },
+    "first_split_text": "mb8,out4,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_add_2",
+      "sdsc_fused_add_mul_rms_norm_0",
+      "sdsc_fused_mul_silu_1"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/fused_prefill_full_glu_chain",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/fused_prefill_full_glu_chain/adnan-cdx-spyre-dev-pf_1624467.1781208967403025121.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 5.0611305,
+      "kernels": [],
+      "pt_util%.": 44.14392828206699,
+      "wall_clock_ms.mean_ms": 5.345654673874378
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_add_2_fighciel",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 8,
+                  "out": 4
+                }
+              ]
+            },
+            {
+              "file": "sdsc_1.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "1_add"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 8,
+                  "out": 4
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kernel_dir": "sdsc_fused_add_mul_rms_norm_0_knmrbiq1",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_add"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_1.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "1_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_2.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "2_mean"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_3.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "x"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                }
+              ],
+              "ops": [
+                "3_add"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "out": 32,
+                  "x": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_4.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "x"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                }
+              ],
+              "ops": [
+                "4_rsqrt"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "out": 32,
+                  "x": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_5.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "5_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_6.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "6_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_7.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "7_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kernel_dir": "sdsc_fused_mul_silu_1_32o1iowx",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            },
+            {
+              "file": "sdsc_1.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "1_silu"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            },
+            {
+              "file": "sdsc_2.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "2_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "fused-context",
+      "name": "fused_prefill_full_glu_chain",
+      "op": "fused_glu_chain",
+      "role": "prefill full GLU chain",
+      "shapes": [
+        [
+          1,
+          512,
+          4096
+        ],
+        [
+          4096,
+          12800
+        ],
+        [
+          12800,
+          4096
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 6,
+      "trace_kernel_ms.mean_ms": 5.0611305
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 2.118773937225342,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {
+      "mb": 32,
+      "out": 1
+    },
+    "first_split_text": "mb32,out1",
+    "normalized_kernel_names": [
+      "sdsc_fused_add_0",
+      "sdsc_fused_mul_rms_norm_silu_1"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/fused_decode_mlp_gate_rms_linear_silu",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/fused_decode_mlp_gate_rms_linear_silu/adnan-cdx-spyre-dev-pf_1624467.1781208969644501327.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.8103875,
+      "kernels": [],
+      "pt_util%.": 11.487209401787304,
+      "wall_clock_ms.mean_ms": 1.1217137798666954
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_add_0_bn6dh9jp",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_add"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kernel_dir": "sdsc_fused_mul_rms_norm_silu_1_66cjuyfn",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_1.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "1_mean"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_2.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "x"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                }
+              ],
+              "ops": [
+                "2_add"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "out": 32,
+                  "x": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_3.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "x"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                }
+              ],
+              "ops": [
+                "3_rsqrt"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "out": 32,
+                  "x": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_4.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "4_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_5.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "5_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_6.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "6_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            },
+            {
+              "file": "sdsc_7.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "7_silu"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "fused-context",
+      "name": "fused_decode_mlp_gate_rms_linear_silu",
+      "op": "fused_add_rms_linear_silu",
+      "role": "decode padded MLP gate/up in add+RMSNorm+linear+SiLU context",
+      "shapes": [
+        [
+          1,
+          64,
+          4096
+        ],
+        [
+          4096,
+          12800
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 4,
+      "trace_kernel_ms.mean_ms": 0.8103875
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 4.389477729797363,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "first_split_text": "mb4,out8,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_add_2",
+      "sdsc_fused_add_mul_rms_norm_0",
+      "sdsc_fused_mul_silu_1"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/fused_decode_full_glu_chain",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/fused_decode_full_glu_chain/adnan-cdx-spyre-dev-pf_1624467.1781208974151234653.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 2.3272475,
+      "kernels": [],
+      "pt_util%.": 12.000130079535044,
+      "wall_clock_ms.mean_ms": 2.613930031657219
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_add_2_fk25brvd",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            },
+            {
+              "file": "sdsc_1.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "1_add"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kernel_dir": "sdsc_fused_add_mul_rms_norm_0_4o225crk",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_add"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_1.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "1_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_2.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "2_mean"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_3.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "x"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                }
+              ],
+              "ops": [
+                "3_add"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "out": 32,
+                  "x": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_4.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "x"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "x"
+                  ]
+                }
+              ],
+              "ops": [
+                "4_rsqrt"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "out": 32,
+                  "x": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_5.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "5_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_6.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "6_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_7.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "7_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "kernel_dir": "sdsc_fused_mul_silu_1_m69b5rq9",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            },
+            {
+              "file": "sdsc_1.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "1_silu"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            },
+            {
+              "file": "sdsc_2.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "2_mul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "fused-context",
+      "name": "fused_decode_full_glu_chain",
+      "op": "fused_glu_chain",
+      "role": "decode padded full GLU chain",
+      "shapes": [
+        [
+          1,
+          64,
+          4096
+        ],
+        [
+          4096,
+          12800
+        ],
+        [
+          12800,
+          4096
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 6,
+      "trace_kernel_ms.mean_ms": 2.3272475
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": false,
+    "elapsed_s": 0.11411333084106445,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {},
+    "first_split_text": "",
+    "normalized_kernel_names": [],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/fused_decode_attention_cat_qk"
+    },
+    "perf": {
+      "kernels": []
+    },
+    "postprocess_failure": false,
+    "returncode": 1,
+    "sdsc": {
+      "kernels": []
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "fused-context",
+      "name": "fused_decode_attention_cat_qk",
+      "op": "attention_cat_qk_scores",
+      "role": "decode attention cat-cache QK score context",
+      "shapes": [
+        [
+          64,
+          32,
+          128
+        ],
+        [
+          64,
+          512,
+          128
+        ],
+        [
+          64,
+          64,
+          128
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {},
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 0.8553423881530762,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "first_split_text": "mb4,out8,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_prefill_mlp_gate_m256",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_prefill_mlp_gate_m256/adnan-cdx-spyre-dev-pf_1624467.1781208975349848414.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 1.2905295,
+      "kernels": [],
+      "pt_util%.": 28.853554790001805,
+      "wall_clock_ms.mean_ms": 1.448221504688263
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_29xqp0hb",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "neighborhood",
+      "name": "neighborhood_prefill_mlp_gate_m256",
+      "op": "golden_matmul",
+      "role": "prefill MLP gate/up neighborhood M=256",
+      "shapes": [
+        [
+          1,
+          256,
+          4096
+        ],
+        [
+          4096,
+          12800
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 1.2905295
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 1.0272765159606934,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "first_split_text": "mb4,out8,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_prefill_mlp_gate_m512",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_prefill_mlp_gate_m512/adnan-cdx-spyre-dev-pf_1624467.1781208976494454675.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 1.9648290000000002,
+      "kernels": [],
+      "pt_util%.": 37.9029051753243,
+      "wall_clock_ms.mean_ms": 2.122163772583008
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_ur1v3xzc",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "neighborhood",
+      "name": "neighborhood_prefill_mlp_gate_m512",
+      "op": "golden_matmul",
+      "role": "prefill MLP gate/up neighborhood M=512",
+      "shapes": [
+        [
+          1,
+          512,
+          4096
+        ],
+        [
+          4096,
+          12800
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 1.9648290000000002
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 1.063873052597046,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "first_split_text": "mb4,out8,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_prefill_mlp_gate_m1024",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_prefill_mlp_gate_m1024/adnan-cdx-spyre-dev-pf_1624467.1781208977678046538.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 3.783987,
+      "kernels": [],
+      "pt_util%.": 39.3620418213526,
+      "wall_clock_ms.mean_ms": 3.9353901520371437
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_c06qpwsr",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "neighborhood",
+      "name": "neighborhood_prefill_mlp_gate_m1024",
+      "op": "golden_matmul",
+      "role": "prefill MLP gate/up neighborhood M=1024",
+      "shapes": [
+        [
+          1,
+          1024,
+          4096
+        ],
+        [
+          4096,
+          12800
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 3.783987
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 0.9027354717254639,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {
+      "in": 1,
+      "out": 25
+    },
+    "first_split_text": "out25,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_decode_mlp_gate_m1",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_decode_mlp_gate_m1/adnan-cdx-spyre-dev-pf_1624467.1781208978701353646.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.8582645,
+      "kernels": [],
+      "pt_util%.": 0.16947519727839783,
+      "wall_clock_ms.mean_ms": 1.0171039029955864
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_rpwdtudq",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "out": 25
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "neighborhood",
+      "name": "neighborhood_decode_mlp_gate_m1",
+      "op": "golden_matmul",
+      "role": "decode MLP gate/up neighborhood M=1",
+      "shapes": [
+        [
+          1,
+          1,
+          4096
+        ],
+        [
+          4096,
+          12800
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.8582645
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 0.9523041248321533,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {
+      "in": 1,
+      "mb": 4,
+      "out": 8
+    },
+    "first_split_text": "mb4,out8,in1",
+    "normalized_kernel_names": [
+      "sdsc_fused_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_decode_mlp_gate_m64",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_decode_mlp_gate_m64/adnan-cdx-spyre-dev-pf_1624467.1781208979763541197.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.7317855,
+      "kernels": [],
+      "pt_util%.": 12.721064996629355,
+      "wall_clock_ms.mean_ms": 0.8816896006464958
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_0_u1rau7jp",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "in",
+                    "out"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "neighborhood",
+      "name": "neighborhood_decode_mlp_gate_m64",
+      "op": "golden_matmul",
+      "role": "decode MLP gate/up neighborhood M=64",
+      "shapes": [
+        [
+          1,
+          64,
+          4096
+        ],
+        [
+          4096,
+          12800
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.7317855
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 1.1102104187011719,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {
+      "mb": 32,
+      "out": 1,
+      "x": 1
+    },
+    "first_split_text": "x1,mb32,out1",
+    "normalized_kernel_names": [
+      "sdsc_fused_bmm_transpose_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_decode_attention_qk_n512",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_decode_attention_qk_n512/adnan-cdx-spyre-dev-pf_1624467.1781208980986189764.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.39339850000000004,
+      "kernels": [],
+      "pt_util%.": 0.9465303918638133,
+      "wall_clock_ms.mean_ms": 0.5487361922860146
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_bmm_transpose_0_e884to02",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "x",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "x"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "x",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_ReStickifyOpHBM"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1,
+                  "x": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_1.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "1_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8,
+                  "x": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "neighborhood",
+      "name": "neighborhood_decode_attention_qk_n512",
+      "op": "attention_qk_scores",
+      "role": "decode QK score neighborhood cache N=512",
+      "shapes": [
+        [
+          64,
+          32,
+          128
+        ],
+        [
+          64,
+          512,
+          128
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.39339850000000004
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 1.0560529232025146,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {
+      "mb": 32,
+      "out": 1,
+      "x": 1
+    },
+    "first_split_text": "x1,mb32,out1",
+    "normalized_kernel_names": [
+      "sdsc_fused_bmm_transpose_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_decode_attention_qk_n576",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_decode_attention_qk_n576/adnan-cdx-spyre-dev-pf_1624467.1781208982159464160.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.539566,
+      "kernels": [],
+      "pt_util%.": 0.7763815564900142,
+      "wall_clock_ms.mean_ms": 0.7089562714099884
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_bmm_transpose_0_cifhtvla",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "x",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "x"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "x",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_ReStickifyOpHBM"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1,
+                  "x": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_1.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "1_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 1,
+                  "out": 1,
+                  "x": 32
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "neighborhood",
+      "name": "neighborhood_decode_attention_qk_n576",
+      "op": "attention_qk_scores",
+      "role": "decode QK score neighborhood cache N=576",
+      "shapes": [
+        [
+          64,
+          32,
+          128
+        ],
+        [
+          64,
+          576,
+          128
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.539566
+    },
+    "weighted_trace_count": 0
+  },
+  {
+    "completed_runs": true,
+    "elapsed_s": 1.3672621250152588,
+    "expected_split_dict": {},
+    "expected_split_match": false,
+    "first_split": {
+      "mb": 32,
+      "out": 1,
+      "x": 1
+    },
+    "first_split_text": "x1,mb32,out1",
+    "normalized_kernel_names": [
+      "sdsc_fused_bmm_transpose_0"
+    ],
+    "paths": {
+      "task_dir": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_decode_attention_qk_n1024",
+      "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/golden_shape_trace_probe_20260611_195755/direct_full/neighborhood_decode_attention_qk_n1024/adnan-cdx-spyre-dev-pf_1624467.1781208983644690485.pt.trace.json"
+    },
+    "perf": {
+      "kernel_ms.mean_ms": 0.962728,
+      "kernels": [],
+      "pt_util%.": 0.7735593778588268,
+      "wall_clock_ms.mean_ms": 1.1281268671154976
+    },
+    "postprocess_failure": false,
+    "returncode": 0,
+    "sdsc": {
+      "kernels": [
+        {
+          "kernel_dir": "sdsc_fused_bmm_transpose_0_wk4erctl",
+          "sdscs": [
+            {
+              "file": "sdsc_0.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "x",
+                    "out"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "x"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "out",
+                    "x"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "mb",
+                    "x",
+                    "out"
+                  ]
+                }
+              ],
+              "ops": [
+                "0_ReStickifyOpHBM"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "mb": 32,
+                  "out": 1,
+                  "x": 1
+                }
+              ]
+            },
+            {
+              "file": "sdsc_1.json",
+              "layout_fields_sample": [
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "in"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                },
+                {
+                  "stickDimOrder_": [
+                    "out"
+                  ]
+                },
+                {
+                  "stickSize_": [
+                    64
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "in",
+                    "mb"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "in"
+                  ]
+                },
+                {
+                  "layoutDimOrder_": [
+                    "x",
+                    "out",
+                    "mb"
+                  ]
+                }
+              ],
+              "ops": [
+                "1_batchmatmul"
+              ],
+              "primaryDsInfo_count": 1,
+              "splits": [
+                {
+                  "in": 1,
+                  "mb": 4,
+                  "out": 8,
+                  "x": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "task": {
+      "expected_split": "",
+      "golden_count": 0,
+      "group": "neighborhood",
+      "name": "neighborhood_decode_attention_qk_n1024",
+      "op": "attention_qk_scores",
+      "role": "decode QK score neighborhood cache N=1024",
+      "shapes": [
+        [
+          64,
+          32,
+          128
+        ],
+        [
+          64,
+          1024,
+          128
+        ]
+      ]
+    },
+    "trace_kernel_subset": false,
+    "trace_perf": {
+      "trace_kernel_event_count": 2,
+      "trace_kernel_ms.mean_ms": 0.962728
+    },
+    "weighted_trace_count": 0
+  }
+]
