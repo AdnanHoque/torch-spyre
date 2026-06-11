@@ -1,0 +1,332 @@
+[
+  {
+    "M": 512,
+    "case": "prefill_mlp_gate",
+    "kernel_ms": 3.5018895000000003,
+    "kernels": [
+      {
+        "kernel_dir": "sdsc_fused_linear_mul_rms_norm_silu_0_g5_eyoj9",
+        "normalized": "sdsc_fused_linear_mul_rms_norm_silu_0_g5_eyoj9",
+        "splits": [
+          {
+            "file": "sdsc_0.json",
+            "op": "0_mul",
+            "split": {
+              "mb": 32,
+              "out": 1
+            }
+          },
+          {
+            "file": "sdsc_1.json",
+            "op": "1_mean",
+            "split": {
+              "mb": 32,
+              "out": 1
+            }
+          },
+          {
+            "file": "sdsc_2.json",
+            "op": "2_add",
+            "split": {
+              "out": 32,
+              "x": 1
+            }
+          },
+          {
+            "file": "sdsc_3.json",
+            "op": "3_rsqrt",
+            "split": {
+              "out": 32,
+              "x": 1
+            }
+          },
+          {
+            "file": "sdsc_4.json",
+            "op": "4_mul",
+            "split": {
+              "mb": 32,
+              "out": 1
+            }
+          },
+          {
+            "file": "sdsc_5.json",
+            "op": "5_mul",
+            "split": {
+              "mb": 32,
+              "out": 1
+            }
+          },
+          {
+            "file": "sdsc_6.json",
+            "op": "6_ReStickifyOpHBM",
+            "split": {
+              "mb": 25,
+              "out": 1
+            }
+          },
+          {
+            "file": "sdsc_7.json",
+            "op": "7_batchmatmul",
+            "split": {
+              "in": 1,
+              "mb": 4,
+              "out": 8
+            }
+          },
+          {
+            "file": "sdsc_8.json",
+            "op": "8_silu",
+            "split": {
+              "mb": 4,
+              "out": 8
+            }
+          }
+        ]
+      }
+    ],
+    "matched_target_prefix": true,
+    "normalized_kernel_names": [
+      "sdsc_fused_linear_mul_rms_norm_silu_0_g5_eyoj9"
+    ],
+    "returncode": 0,
+    "target_prefix": "sdsc_fused_linear_mul_rms_norm_silu",
+    "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/trace_named_granite_probe_20260611_202930/mlp_cases/prefill_mlp_gate_m512/adnan-cdx-spyre-dev-pf_1625008.1781209891962138283.pt.trace.json"
+  },
+  {
+    "M": 64,
+    "case": "decode_mlp_gate_add",
+    "kernel_ms": 2.6257949999999997,
+    "kernels": [
+      {
+        "kernel_dir": "sdsc_fused_add_0_a8d909v2",
+        "normalized": "sdsc_fused_add_0",
+        "splits": [
+          {
+            "file": "sdsc_0.json",
+            "op": "0_add",
+            "split": {
+              "mb": 32,
+              "out": 1
+            }
+          }
+        ]
+      },
+      {
+        "kernel_dir": "sdsc_fused_linear_mul_rms_norm_silu_1_l8o1ze7v",
+        "normalized": "sdsc_fused_linear_mul_rms_norm_silu_1",
+        "splits": [
+          {
+            "file": "sdsc_0.json",
+            "op": "0_mul",
+            "split": {
+              "mb": 32,
+              "out": 1
+            }
+          },
+          {
+            "file": "sdsc_1.json",
+            "op": "1_mean",
+            "split": {
+              "mb": 32,
+              "out": 1
+            }
+          },
+          {
+            "file": "sdsc_2.json",
+            "op": "2_add",
+            "split": {
+              "out": 32,
+              "x": 1
+            }
+          },
+          {
+            "file": "sdsc_3.json",
+            "op": "3_rsqrt",
+            "split": {
+              "out": 32,
+              "x": 1
+            }
+          },
+          {
+            "file": "sdsc_4.json",
+            "op": "4_mul",
+            "split": {
+              "mb": 32,
+              "out": 1
+            }
+          },
+          {
+            "file": "sdsc_5.json",
+            "op": "5_mul",
+            "split": {
+              "mb": 32,
+              "out": 1
+            }
+          },
+          {
+            "file": "sdsc_6.json",
+            "op": "6_ReStickifyOpHBM",
+            "split": {
+              "mb": 25,
+              "out": 1
+            }
+          },
+          {
+            "file": "sdsc_7.json",
+            "op": "7_batchmatmul",
+            "split": {
+              "in": 1,
+              "mb": 4,
+              "out": 8
+            }
+          },
+          {
+            "file": "sdsc_8.json",
+            "op": "8_silu",
+            "split": {
+              "mb": 4,
+              "out": 8
+            }
+          }
+        ]
+      }
+    ],
+    "matched_target_prefix": false,
+    "normalized_kernel_names": [
+      "sdsc_fused_add_0",
+      "sdsc_fused_linear_mul_rms_norm_silu_1"
+    ],
+    "returncode": 0,
+    "target_prefix": "sdsc_fused_add_linear_mul_rms_norm_silu",
+    "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/trace_named_granite_probe_20260611_202930/mlp_cases/decode_mlp_gate_add_m64/adnan-cdx-spyre-dev-pf_1625008.1781209895057146298.pt.trace.json"
+  },
+  {
+    "M": 512,
+    "case": "prefill_mlp_down",
+    "kernel_ms": 4.0350955,
+    "kernels": [
+      {
+        "kernel_dir": "sdsc_fused_add_linear_mul_0_8_1thuem",
+        "normalized": "sdsc_fused_add_linear_mul_0_8",
+        "splits": [
+          {
+            "file": "sdsc_0.json",
+            "op": "0_ReStickifyOpHBM",
+            "split": {
+              "mb": 1,
+              "out": 25
+            }
+          },
+          {
+            "file": "sdsc_1.json",
+            "op": "1_batchmatmul",
+            "split": {
+              "in": 1,
+              "mb": 8,
+              "out": 4
+            }
+          },
+          {
+            "file": "sdsc_2.json",
+            "op": "2_mul",
+            "split": {
+              "mb": 8,
+              "out": 4
+            }
+          },
+          {
+            "file": "sdsc_3.json",
+            "op": "3_add",
+            "split": {
+              "mb": 8,
+              "out": 4
+            }
+          }
+        ]
+      }
+    ],
+    "matched_target_prefix": true,
+    "normalized_kernel_names": [
+      "sdsc_fused_add_linear_mul_0_8"
+    ],
+    "returncode": 0,
+    "target_prefix": "sdsc_fused_add_linear_mul",
+    "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/trace_named_granite_probe_20260611_202930/mlp_cases/prefill_mlp_down_m512/adnan-cdx-spyre-dev-pf_1625008.1781209897717325172.pt.trace.json"
+  },
+  {
+    "M": 64,
+    "case": "decode_mlp_down_silu",
+    "kernel_ms": 2.756116,
+    "kernels": [
+      {
+        "kernel_dir": "sdsc_fused_add_1_fs474lj5",
+        "normalized": "sdsc_fused_add_1",
+        "splits": [
+          {
+            "file": "sdsc_0.json",
+            "op": "0_add",
+            "split": {
+              "mb": 4,
+              "out": 8
+            }
+          }
+        ]
+      },
+      {
+        "kernel_dir": "sdsc_fused_linear_mul_silu_0_k51f2ql0",
+        "normalized": "sdsc_fused_linear_mul_silu_0",
+        "splits": [
+          {
+            "file": "sdsc_0.json",
+            "op": "0_silu",
+            "split": {
+              "mb": 1,
+              "out": 25
+            }
+          },
+          {
+            "file": "sdsc_1.json",
+            "op": "1_mul",
+            "split": {
+              "mb": 1,
+              "out": 25
+            }
+          },
+          {
+            "file": "sdsc_2.json",
+            "op": "2_ReStickifyOpHBM",
+            "split": {
+              "mb": 1,
+              "out": 25
+            }
+          },
+          {
+            "file": "sdsc_3.json",
+            "op": "3_batchmatmul",
+            "split": {
+              "in": 1,
+              "mb": 4,
+              "out": 8
+            }
+          },
+          {
+            "file": "sdsc_4.json",
+            "op": "4_mul",
+            "split": {
+              "mb": 4,
+              "out": 8
+            }
+          }
+        ]
+      }
+    ],
+    "matched_target_prefix": false,
+    "normalized_kernel_names": [
+      "sdsc_fused_add_1",
+      "sdsc_fused_linear_mul_silu_0"
+    ],
+    "returncode": 0,
+    "target_prefix": "sdsc_fused_add_linear_mul_silu",
+    "trace": "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/trace_named_granite_probe_20260611_202930/mlp_cases/decode_mlp_down_silu_m64/adnan-cdx-spyre-dev-pf_1625008.1781209900818829383.pt.trace.json"
+  }
+]
