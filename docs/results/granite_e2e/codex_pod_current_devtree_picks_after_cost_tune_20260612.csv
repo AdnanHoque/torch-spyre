@@ -1,0 +1,13 @@
+op,phase,shape,shared_weight,compact_split,sdsc_split,device_us_median
+QK^T,prefill,512x32x512x128,False,1_4_8_1,"{'x': 1, 'mb': 4, 'out': 8, 'in': 1}",733.8325
+attn@V,prefill,32x512x128x512,False,1_16_2_1,"{'x': 1, 'mb': 16, 'out': 2, 'in': 1}",195.89300000000003
+Q/O proj,prefill,1x512x4096x4096,True,1_8_4_1,"{'mb': 8, 'out': 4, 'in': 1}",331.09950000000003
+K/V proj,prefill,1x512x1024x4096,True,1_8_4_1,"{'mb': 8, 'out': 4, 'in': 1}",116.45949999999999
+MLP up,prefill,1x512x12800x4096,True,1_4_8_1,"{'mb': 4, 'out': 8, 'in': 1}",1027.5300000000002
+MLP down,prefill,1x512x4096x12800,True,1_8_4_1,"{'mb': 8, 'out': 4, 'in': 1}",1008.0714999999999
+QK^T,decode,64x32x576x128,False,1_4_3_2,"{'x': 1, 'mb': 4, 'out': 3, 'in': 2}",105.0935
+attn@V,decode,32x64x128x576,False,1_4_2_3,"{'x': 1, 'mb': 4, 'out': 2, 'in': 3}",55.14450000000002
+Q/O proj,decode,1x64x4096x4096,True,1_4_8_1,"{'mb': 4, 'out': 8, 'in': 1}",226.4275
+K/V proj,decode,1x64x1024x4096,True,1_4_8_1,"{'mb': 4, 'out': 8, 'in': 1}",68.607
+MLP up,decode,1x64x12800x4096,True,1_4_8_1,"{'mb': 4, 'out': 8, 'in': 1}",669.7750000000001
+MLP down,decode,1x64x4096x12800,True,1_4_8_1,"{'mb': 4, 'out': 8, 'in': 1}",706.1120000000001
