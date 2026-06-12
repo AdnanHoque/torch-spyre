@@ -108,7 +108,7 @@ def _divisors(n: int):
     return [d for d in range(1, n + 1) if n % d == 0]
 
 
-def _best_shared_weight_split(n_sticks: int):
+def _best_shared_weight_split(n_sticks: int, k_elems: int = 4096):
     best = None
     best_cost = float("inf")
     for m_split in (1, 2, 4, 8, 16, 32):
@@ -120,7 +120,7 @@ def _best_shared_weight_split(n_sticks: int):
                     (1, 1),
                     (512, m_split),
                     (n_sticks * 64, n_split),
-                    (4096, k_split),
+                    (k_elems, k_split),
                     32,
                     shared_weight=True,
                 )
@@ -134,6 +134,13 @@ def test_shared_weight_cost_model_keeps_pt_friendly_m_tile():
     assert _best_shared_weight_split(16) == (8, 4, 1)
     assert _best_shared_weight_split(64) == (8, 4, 1)
     assert _best_shared_weight_split(200) == (4, 8, 1)
+
+
+def test_folded_long_k_projection_prefers_n_split():
+    # Granite e2e MLP-down matmuls are folded to a no-batch 2D projection by
+    # the time the planner runs. They still have an unbatched RHS loaded once,
+    # and the long-K reduction shape is fastest with more N splitting.
+    assert _best_shared_weight_split(64, k_elems=12800) == (4, 8, 1)
 
 
 def _best_true_bmm_split(B: int, M: int, N: int, K: int):
