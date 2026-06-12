@@ -53,3 +53,17 @@ Is the e2e attention kernel's `x1` the **cost model's choice** (→ a scoped
 `batch_penalty` fix captures the 11%) or **fusion-pinned** (→ needs a lowering
 change to allow head-splitting first)? Tested by forcing/allowing a batch-split
 in the fused attention compile and checking whether the attn@V bmm flips to `x4`.
+
+## ANSWER: x1 is the cost model's choice, not fusion-pinned — the 11% is capturable
+
+Recompiled the 1-layer prefill with `_BATCH_SPLIT_EXPONENT = 0` (batch penalty
+off). The fused attention kernel's attn@V bmm **flipped `x1 → x2`** (`x2,mb8,out2`)
+and compiled+ran clean. So the e2e attention kernel **can** take a batch-split;
+`x1` was the `b^1.4` penalty's doing, not a lowering constraint.
+
+**Conclusion: the confirmed +11% prefill-attn@V batch-split is capturable by a
+scoped cost-model fix** — skip/soften the `_BATCH_SPLIT_EXPONENT` penalty in the
+batched-attention regime (batch dim = head count, small N) so the planner splits
+heads across cores. Global zeroing is too aggressive (wrongly batch-splits other
+shapes); the fix must be gated to that regime. First fully-validated cost-model
+lever: survived trustworthy device + repeat-confirm + e2e-feasibility.
