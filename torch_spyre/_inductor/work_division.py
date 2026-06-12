@@ -771,21 +771,27 @@ _PT_ROWS = 8  # PT block rows per corelet
 
 # Constants for the matmul cost model (_matmul_split_cost). Each is either an
 # AIU hardware limit or a coefficient fit to measured device kernel times.
-_TARGET_PT_PASSES = 4  # per-core M that keeps the PT pipeline full = this * _PT_ROWS
-_TARGET_M_TIE_PASSES = 3  # preferred m-split target for near-tie candidates
-_PT_EFFICIENCY_EXPONENT = 1.0 / 3.0
+_TARGET_PT_PASSES = 3  # per-core M that keeps the PT pipeline full = this * _PT_ROWS
+_TARGET_M_TIE_PASSES = 4  # preferred m-split target for near-tie candidates
+_PT_EFFICIENCY_EXPONENT = 0.25
 _M_MIN = _PT_ROWS // 2  # below half a PT pass an m-split buys nothing
 _PEAK_MACS_US_CORE = (98.304e12 / 2 / 32) / 1e6  # DL16 peak / 32 cores, MACs/us/core
 _HBM_BW_GBS = 204.8  # LPDDR5 aggregate peak bandwidth
 _DTYPE_BYTES = 2  # fp16
-_PSUM_PER_ELEM_US = 1.4e-4  # per output element, per K-split ring reduction hop
-_BMM_PSUM_PER_ELEM_US = 4.0e-5  # true BMMs tolerate K-splits better in device sweeps
+_PSUM_PER_CORE_ELEM_US = 1.0e-4
+_BMM_PSUM_PER_CORE_ELEM_US = 1.0e-3
 _COHORT_LIMIT = 8  # cores sharing a broadcast before it contends for bandwidth
 _TARGET_M_PENALTY_US = 50.0  # tie-break weight when per-core M under-fills PT
 _TARGET_N_TILE_ELEMS = 1024  # per-core N wider than this loses schedule efficiency
-_WIDE_N_TILE_PENALTY_US = 100.0  # per log2 step over _TARGET_N_TILE_ELEMS
-_CORE_UNDERUSE_PENALTY_US = 75.0  # soft replacement for the old hard full-core fallback
-_BMM_BATCH_SPLIT_PENALTY_US = 75.0  # additive true-BMM batch split cost per log2 step
+_WIDE_N_TILE_PENALTY_US = 150.0  # per log2 step over _TARGET_N_TILE_ELEMS
+_CORE_UNDERUSE_PENALTY_US = 150.0  # soft replacement for the old hard full-core fallback
+_BMM_BATCH_SPLIT_PENALTY_US = 150.0  # additive true-BMM batch split cost per log2 step
+_QK_N_SPLIT_PENALTY_US = 25.0
+_QK_BATCH_SPLIT_DISCOUNT_US = 10.0
+_QK_TARGET_M_SPLIT = 3
+_QK_M_SPLIT_PENALTY_US = 50.0
+_LONG_K_SHARED_N_SPLIT_DISCOUNT_US = 150.0
+_LONG_K_SHARED_MIN = 8192
 
 
 def _matmul_split_cost(
@@ -824,10 +830,14 @@ def _matmul_split_cost(
     cohort_penalty = max(1.0, max(m, n) / _COHORT_LIMIT)
     hbm_us = bytes_total / (_HBM_BW_GBS * 1000) * cohort_penalty
 
-    # PSUM: a K-split spreads the reduction over k cores, costing (k-1) partial-
-    # sum hops around the ring, each touching every output element.
-    psum_coeff = _PSUM_PER_ELEM_US if shared_weight else _BMM_PSUM_PER_ELEM_US
-    psum_us = max(0, k - 1) * (B * M * N) * psum_coeff
+    # PSUM: a K-split spreads the reduction over k cores, costing (k-1)
+    # partial-sum hops. Charge each core's output tile rather than the whole
+    # output, so useful K-splits are not over-penalized.
+    psum_coeff = (
+        _PSUM_PER_CORE_ELEM_US if shared_weight else _BMM_PSUM_PER_CORE_ELEM_US
+    )
+    output_elems_per_core = (B * M * N) / max(1, b * m * n)
+    psum_us = max(0, k - 1) * output_elems_per_core * psum_coeff
 
     # Tie-break: among compute-equivalent splits prefer the m-split that lands
     # per-core M near the PT sweet spot, penalising log2-distance from it.
@@ -860,6 +870,21 @@ def _matmul_split_cost(
         else math.log2(max(1, b)) * _BMM_BATCH_SPLIT_PENALTY_US
     )
 
+    qk_attention_us = 0.0
+    if not shared_weight and K <= 128 and N >= 256:
+        qk_attention_us = (
+            math.log2(max(1, n)) * _QK_N_SPLIT_PENALTY_US
+            - math.log2(max(1, b)) * _QK_BATCH_SPLIT_DISCOUNT_US
+            + abs(math.log2(max(1, m) / _QK_TARGET_M_SPLIT))
+            * _QK_M_SPLIT_PENALTY_US
+        )
+
+    long_k_shared_us = 0.0
+    if shared_weight and K >= _LONG_K_SHARED_MIN:
+        long_k_shared_us = (
+            -math.log2(max(1, n)) * _LONG_K_SHARED_N_SPLIT_DISCOUNT_US
+        )
+
     return (
         compute_us
         + hbm_us
@@ -868,6 +893,8 @@ def _matmul_split_cost(
         + wide_n_us
         + core_underuse_us
         + batch_split_us
+        + qk_attention_us
+        + long_k_shared_us
     )
 
 
@@ -948,17 +975,23 @@ def _cost_model_matmul_planner(
     n_dim = n_dims[0]
 
     m_candidates = _single_input_row_dims(row_dims, input_tds)
-    shared_weight = False
+    rhs_loaded_once = False
     if len(m_candidates) == 1:
         m_dim = m_candidates[0]
     elif len(m_candidates) > 1:
         m_dim = _pick_innermost_output_dim(m_candidates, output_td.dep.index)
         if m_dim is None:
             return splits
-        shared_weight = True
+        rhs_loaded_once = True
     else:
         return splits
     batch_dims = [d for d in row_dims if d != m_dim]
+    # Folded projection matmuls have no batch dims left by this stage, but the
+    # RHS is still an unbatched weight that is loaded once. Treat them like the
+    # broadcast/shared-weight path for cost purposes while keeping true BMMs
+    # where RHS depends on batch dims on the non-shared path.
+    if not batch_dims:
+        rhs_loaded_once = True
 
     # K is the lone reduction dim (anything else this planner does not model).
     reduction = [d for d in it_space_adjusted if d not in output_coord_vars]
@@ -1002,7 +1035,7 @@ def _cost_model_matmul_planner(
                         (N_e, nn),
                         (K_e, kk),
                         max_cores,
-                        shared_weight=shared_weight,
+                        shared_weight=rhs_loaded_once,
                     )
                     if c < best_cost:
                         best_cost = c
@@ -1021,7 +1054,7 @@ def _cost_model_matmul_planner(
 
     logger.debug(
         f"cost_model work_division {op.get_name()}: "
-        f"b={b_combo} m={m_s} n={n_s} k={k_s} shared_weight={shared_weight} "
+        f"b={b_combo} m={m_s} n={n_s} k={k_s} rhs_loaded_once={rhs_loaded_once} "
         f"cost={best_cost:.1f}us "
         f"[B={B_total} M={M_e} K={K_e} N={N_e}]"
     )
