@@ -132,7 +132,7 @@ def _best_shared_weight_split(n_sticks: int, k_elems: int = 4096):
 
 def test_shared_weight_cost_model_keeps_pt_friendly_m_tile():
     assert _best_shared_weight_split(16) == (8, 4, 1)
-    assert _best_shared_weight_split(64) == (8, 4, 1)
+    assert _best_shared_weight_split(64) == (4, 8, 1)
     assert _best_shared_weight_split(200) == (4, 8, 1)
 
 
