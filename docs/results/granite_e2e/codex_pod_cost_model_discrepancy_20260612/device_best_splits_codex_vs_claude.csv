@@ -1,0 +1,13 @@
+phase,op,shape,codex_best_split,codex_best_us,claude_best_split,claude_best_us,same_best_split,codex_us_for_claude_best,claude_us_for_codex_best_if_reported
+prefill,QK^T,512x32x512x128,4_1_8_1,731.06,1_2_8_2,1009,False,747.0240000000001,
+prefill,attn@V,32x512x128x512,1_16_2_1,197.72,4_4_2_1,395,False,198.065,
+prefill,Q/O proj,1x512x4096x4096,1_8_4_1,331.07,1_4_8_1,317,False,340.144,
+prefill,K/V proj,1x512x1024x4096,1_8_4_1,117.55,1_4_8_1,89,False,174.50300000000004,
+prefill,MLP up,1x512x12800x4096,1_4_8_1,1037.61,1_4_8_1,1017,True,1037.6145,
+prefill,MLP down,1x512x4096x12800,1_4_8_1,926.95,1_4_8_1,899,True,926.9475,
+decode,QK^T,64x32x576x128,8_2_1_2,89.93,4_4_1_2,158,False,104.1435,
+decode,attn@V,32x64x128x576,1_4_2_3,55.04,2_8_2_1,60,False,60.043499999999995,
+decode,Q/O proj,1x64x4096x4096,1_4_8_1,231.84,1_4_8_1,221,True,231.8425000000001,
+decode,K/V proj,1x64x1024x4096,1_8_4_1,66.78,1_8_4_1,60,True,66.77649999999994,
+decode,MLP up,1x64x12800x4096,1_4_8_1,673.44,1_4_8_1,705,True,673.4425000000001,
+decode,MLP down,1x64x4096x12800,1_4_4_1,689.20,1_4_8_1,685,False,689.4275,

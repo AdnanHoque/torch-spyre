@@ -1,0 +1,12 @@
+[
+  {
+    "sdsc_name": "TOTAL",
+    "op_category": "ALL",
+    "ideal_cycles": 65536
+  },
+  {
+    "sdsc_name": "debug/",
+    "op_category": "Bmm_fp16",
+    "ideal_cycles": 65536
+  }
+]
