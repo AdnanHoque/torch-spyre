@@ -101,3 +101,33 @@ profiled device-event timing (not wall-clock) to resolve — flagged, not shippe
   → noise 20%→~5%, and the full real-embedding e2e (which wedged on clc) now runs.
 - **Method:** repeat-confirm + cross-run-drift awareness; single-pass "device-best"
   on a noisy device is meaningless.
+
+## CORRECTION VIA PROFILER: attn@V batch-split is a real ~2x DEVICE win
+
+Wall-clock was the wrong instrument. A profiled `_C.so` (USE_SPYRE_PROFILER=1,
+per-kernel `self_device_time_total`) shows the attn@V batch-split is **2x faster
+on device**, with <1% noise — the wall-clock buried it because the kernel is
+~800us but the wall-clock was ~6.5ms (~5.7ms fixed host launch/round-trip,
+identical for both splits, diluting a 2x kernel gap to ~6% — inside wall noise).
+
+| attn@V split | device us/call | vs pure-M |
+|---|---:|---|
+| pure-M (1,32,1,1) | 796 | baseline |
+| batch (2,8,2,1) | 406 | +49% |
+| batch (4,4,2,1) | 373 | +53% |
+
+pure-M leaves the 32 heads unparallelized (x=1, serialized per core); batch-split
+spreads heads across cores. The `b^1.4` penalty forbids it.
+
+Profiler also CONFIRMS the cost model is right on proj/MLP (the wall-clock K-split
+"wins" were backwards): MLP-up cost-pick 1017us vs K-split 1695us (+67%); decode
+Q/O 222 vs 245us (+10%). All <1% device noise.
+
+**FINAL (profiler-validated): the cost model is device-optimal on all 12 Granite
+shapes EXCEPT prefill attn@V, which wants a batch-split (~2x device, the b^1.4
+penalty forbids it). The scoped batch_penalty fix is re-instated — it is a real,
+large lever, not the noise-grade ~1% the wall-clock suggested.**
+
+LESSON: wall-clock (even at 5% noise) is blind to kernels dominated by fixed host
+overhead. Profiled device time (self_device_time_total) is the correct instrument
+for split/cost-model work; it has <1% noise here.
