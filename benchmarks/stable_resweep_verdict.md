@@ -67,3 +67,37 @@ batched-attention regime (batch dim = head count, small N) so the planner splits
 heads across cores. Global zeroing is too aggressive (wrongly batch-splits other
 shapes); the fix must be gated to that regime. First fully-validated cost-model
 lever: survived trustworthy device + repeat-confirm + e2e-feasibility.
+
+## FINAL CORRECTION: the +11% did not survive enough passes either
+
+Measuring the fix's chosen split vs pure-M across more invocations: +11% (4-pass,
+clean) → +1.9% (4-pass, overlap) → +1.2% (6-pass, overlap). pure-M's own median
+drifted 6.998 → 6.586 → 6.499 — the attn@V kernel has ~10% per-kernel run-variance
+even on the stable stack, comparable to the gap. The +11% was a noise artifact,
+like the MLP-up 14.7% before it.
+
+**The batch-split is *directionally* always-faster (every run, every pass) but by
+a noise-grade ~1-2% that does not clear the bar to change the cost model.** The
+batch_penalty fix was **reverted**.
+
+## The honest, final verdict
+
+After a trustworthy device + exhaustive sweep + multi-pass repeat-confirm:
+**the work-division cost model is device-optimal (within ~5-10% noise) on ALL 12
+Granite matmul shapes.** There is no confirmed split-level cost-model miss. Every
+candidate (MLP-up 14.7%, attn@V 11%, the decode/K-split gaps) collapsed under
+sufficient repetition. This is a strong *negative* result: split tuning is not
+where the Granite perf gap lives.
+
+**Redirect:** the gap is fusion / residency / program-load — the rms_norm
+fusion-placement that makes us 10/20 vs Antoni's trace, the restickify/layout
+cascade behind 360-vs-408 (pure-M ≈ (16,2) standalone), and decode program-load.
+A possible small (~1-2%) attention batch-split lever remains, but needs
+profiled device-event timing (not wall-clock) to resolve — flagged, not shipped.
+
+## Lasting wins
+
+- **Stable measurement device:** harvest (+148 senlib) + PR #1019 flex on ba:00.0
+  → noise 20%→~5%, and the full real-embedding e2e (which wedged on clc) now runs.
+- **Method:** repeat-confirm + cross-run-drift awareness; single-pass "device-best"
+  on a noisy device is meaningless.
