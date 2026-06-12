@@ -1,0 +1,6 @@
+N 0 SenPreparedOp sdsc_fused_bmm_0_5n_0w8pp
+E 0 1
+N 1 SenProgAddrGenerate sdsc_fused_bmm_0_5n_0w8pp
+I { }
+O { }
+T { }

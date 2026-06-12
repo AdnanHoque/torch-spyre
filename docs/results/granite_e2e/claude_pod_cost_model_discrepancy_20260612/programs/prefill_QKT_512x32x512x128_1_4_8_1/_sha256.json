@@ -1,0 +1,12 @@
+{
+  "bundle.mlir": "452bcb6af786e50ead1b45a7bc81e439f454ba0ffdff51d282b3d187f075f492",
+  "execute/sdsc_fused_bmm_0_vymvgh3n/pagi.json": "b1fc881a03b36a7b227349e4fdb1321bca6f4b15bcbb905951857a002af34316",
+  "execute_dsg.txt": "386eaae3f02a519b81154e35a5df46cfe2b1f1e7e4a8963721be25927affd06e",
+  "loadmodel_to_device_dsg.txt": "a931679565cc1fdd937fb04238ac4ff55c3c3268e2571f5cb91d0bbda44fb129",
+  "loadmodel_to_spad_dsg.txt": "a931679565cc1fdd937fb04238ac4ff55c3c3268e2571f5cb91d0bbda44fb129",
+  "loadprogram_to_device/sdsc_fused_bmm_0_vymvgh3n-SenProgSend/init.txt": "28f897a2d752a3061269d6748ec8a0faa1af8e7b02e0a18db189be9d492050c2",
+  "loadprogram_to_device_dsg.txt": "2981a7582de5f252c27e9f49289003f1679e6469922fcc0cc9f736566aa3400d",
+  "loadprogram_to_spad_dsg.txt": "a931679565cc1fdd937fb04238ac4ff55c3c3268e2571f5cb91d0bbda44fb129",
+  "sdsc_0.json": "9e8385cfec7f87077729eae279157f57121398943fffe60d793155ca60d33e7a",
+  "segment_size.json": "34bc86e8803e219669703e19a666808c168cfc118a4a919342255b850728202b"
+}
