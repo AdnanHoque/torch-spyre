@@ -935,27 +935,24 @@ _PT_ROWS = 8  # PT block rows per corelet
 
 # Constants for the matmul cost model (_matmul_split_cost). Each is either an
 # AIU hardware limit or a coefficient fit to measured device kernel times.
-_TARGET_PT_PASSES = 3  # per-core M that keeps the PT pipeline full = this * _PT_ROWS
-_TARGET_M_TIE_PASSES = 4  # preferred m-split target for near-tie candidates
-_PT_EFFICIENCY_EXPONENT = 0.25
+_TARGET_PT_PASSES = 5  # per-core M that keeps the PT pipeline full = this * _PT_ROWS
+_TARGET_M_TIE_PASSES = 3  # preferred m-split target for near-tie candidates
+_PT_EFFICIENCY_EXPONENT = 0.5
 _M_MIN = _PT_ROWS // 2  # below half a PT pass an m-split buys nothing
 _PEAK_MACS_US_CORE = (98.304e12 / 2 / 32) / 1e6  # DL16 peak / 32 cores, MACs/us/core
 _HBM_BW_GBS = 204.8  # LPDDR5 aggregate peak bandwidth
 _DTYPE_BYTES = 2  # fp16
-_PSUM_PER_CORE_ELEM_US = 1.0e-4
-_BMM_PSUM_PER_CORE_ELEM_US = 1.0e-3
+_PSUM_PER_CORE_ELEM_US = 3.0e-3
+_BMM_PSUM_PER_CORE_ELEM_US = 3.0e-4
 _COHORT_LIMIT = 8  # cores sharing a broadcast before it contends for bandwidth
+_COHORT_PENALTY_EXPONENT = 0.75
 _TARGET_M_PENALTY_US = 50.0  # tie-break weight when per-core M under-fills PT
-_TARGET_N_TILE_ELEMS = 1024  # per-core N wider than this loses schedule efficiency
-_WIDE_N_TILE_PENALTY_US = 150.0  # per log2 step over _TARGET_N_TILE_ELEMS
+_TARGET_N_TILE_ELEMS = 512  # per-core N wider than this loses schedule efficiency
+_WIDE_N_TILE_PENALTY_US = 75.0  # per log2 step over _TARGET_N_TILE_ELEMS
 _CORE_UNDERUSE_PENALTY_US = 150.0  # soft replacement for the old hard full-core fallback
-_BMM_BATCH_SPLIT_PENALTY_US = 150.0  # additive true-BMM batch split cost per log2 step
-_QK_N_SPLIT_PENALTY_US = 25.0
-_QK_BATCH_SPLIT_DISCOUNT_US = 10.0
-_QK_TARGET_M_SPLIT = 3
-_QK_M_SPLIT_PENALTY_US = 50.0
-_LONG_K_SHARED_N_SPLIT_DISCOUNT_US = 150.0
-_LONG_K_SHARED_MIN = 8192
+_BMM_BATCH_SPLIT_PENALTY_US = 150.0  # true-BMM batch split cost per log2 step
+_BMM_BATCH_SPLIT_K_REF = 16.0  # measured in 64-element reduction sticks
+_BMM_BATCH_SPLIT_K_EXPONENT = 0.5
 
 
 def _matmul_split_cost(
@@ -991,7 +988,9 @@ def _matmul_split_cost(
     # link, so effective bandwidth falls off linearly with cohort size.
     weight_batches = 1 if shared_weight else B
     bytes_total = (B * M * K + weight_batches * K * N + B * M * N) * _DTYPE_BYTES
-    cohort_penalty = max(1.0, max(m, n) / _COHORT_LIMIT)
+    cohort_penalty = max(
+        1.0, (max(m, n) / _COHORT_LIMIT) ** _COHORT_PENALTY_EXPONENT
+    )
     hbm_us = bytes_total / (_HBM_BW_GBS * 1000) * cohort_penalty
 
     # PSUM: a K-split spreads the reduction over k cores, costing (k-1)
@@ -1028,26 +1027,17 @@ def _matmul_split_cost(
 
     # True BMMs often need batch parallelism to avoid tiny-M underfill. Charge
     # batch splitting additively instead of multiplying the whole estimate.
+    k_sticks = max(1.0, K / 64)
+    batch_split_scale = (
+        k_sticks / _BMM_BATCH_SPLIT_K_REF
+    ) ** _BMM_BATCH_SPLIT_K_EXPONENT
     batch_split_us = (
         0.0
         if shared_weight
-        else math.log2(max(1, b)) * _BMM_BATCH_SPLIT_PENALTY_US
+        else math.log2(max(1, b))
+        * _BMM_BATCH_SPLIT_PENALTY_US
+        * batch_split_scale
     )
-
-    qk_attention_us = 0.0
-    if not shared_weight and K <= 128 and N >= 256:
-        qk_attention_us = (
-            math.log2(max(1, n)) * _QK_N_SPLIT_PENALTY_US
-            - math.log2(max(1, b)) * _QK_BATCH_SPLIT_DISCOUNT_US
-            + abs(math.log2(max(1, m) / _QK_TARGET_M_SPLIT))
-            * _QK_M_SPLIT_PENALTY_US
-        )
-
-    long_k_shared_us = 0.0
-    if shared_weight and K >= _LONG_K_SHARED_MIN:
-        long_k_shared_us = (
-            -math.log2(max(1, n)) * _LONG_K_SHARED_N_SPLIT_DISCOUNT_US
-        )
 
     return (
         compute_us
@@ -1057,8 +1047,6 @@ def _matmul_split_cost(
         + wide_n_us
         + core_underuse_us
         + batch_split_us
-        + qk_attention_us
-        + long_k_shared_us
     )
 
 
