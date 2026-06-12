@@ -80,6 +80,46 @@ Splits are core-counts per axis: `batch_M_N_K`. N and K are in stick groups
    explicit batch/K-split modeling for tiny-M bmms — the core-count restriction
    alone is not enough, and for QK^T decode it is a net regression.**
 
+## Fix applied (`cost-model-min-cores-fix` @ 7fb4e55)
+
+Three changes to `_matmul_split_cost`, each tied to a decomposed cost term and
+validated against the 240-split device oracle, then device-confirmed on-device
+(the real edited cost model's SDSC picks match the oracle on all 12 shapes):
+
+1. **PSUM per-core (bug fix).** `(k-1)·(B·M·N)·PSE` → `(k-1)·(B·M·N)/(b·m·n)·PSE`.
+   The ring reduction touches each core's output *share*, not the full output;
+   the `b·m·n` non-K cohorts reduce in parallel. The old form over-priced
+   K-splits ~`b·m·n`-fold, which (under decode-fix's core-restriction) forced the
+   catastrophic `1_32_1_1` on QK^T decode. This single change removes the
+   regression and takes the aggregate +23% → +14%.
+2. **sqrt-batch.** In the small-N regime (`N_sticks < cores`) the batch penalty
+   is `b**0.5` instead of linear — batch is attention's natural parallelism axis
+   (one head/core), not a waste vs time-tiling.
+3. **target_m 25 → 12.** The per-core-M under-fill penalty was too harsh for
+   tiny-M bmms where a moderate M-split + batch beats keeping M whole.
+
+### before → after (device µs, profiled)
+
+| op | phase | device-best | MAIN | decode-fix | **fixed** |
+|---|---|---|--:|--:|--:|
+| QK^T | prefill | `1_2_8_2` 1009 | 1827 (+81%) | 1630 (+62%) | **1630 (+62%)** |
+| attn@V | prefill | `4_4_2_1` 395 | 796 (+101%) | 406 (+3%) | **406 (+3%)** |
+| QK^T | decode | `4_4_1_2` 158 | 259 (+63%) | 793 (**+401%**) | **234 (+48%)** |
+| attn@V | decode | `2_8_2_1` 60 | 343 (+474%) | 105 (+76%) | **60 (+0%)** |
+| Q/O · K/V · MLP×2 | both | `1_4_8_1`/`1_8_4_1` | (varies) | ~best | **~best (0–2%)** |
+| **TOTAL** | | **5617** | 9867 (+76%) | 6929 (+23%) | **6326 (+13%)** |
+
+10/12 shapes now within 3% of device-best. **The QK^T-decode regression is
+eliminated** (+401% → +48%, now better than MAIN's +63%) and **attn@V decode is
+fixed to device-best** (+76% → +0%).
+
+**Remaining: QK^T prefill +62% (structural).** Its optimum `1_2_8_2` needs *high*
+target_m (to reject `m4`) and *low* K-tax (to allow the `k2` split)
+simultaneously; the decode projections need the *opposite* K-tax through the same
+knob. No single parameterization satisfies both — confirmed across a 4-parameter
+oracle grid. Closing it would need a K-magnitude-aware term (overfitting on 12
+shapes) or a QK^T-specific path.
+
 ## Raw data
 
 - `device_timing_sweep_raw.txt` — all 236 valid `(shape, split) → µs` rows.
