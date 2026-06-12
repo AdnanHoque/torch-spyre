@@ -1,0 +1,6 @@
+N 0 SenProgSend sdsc_fused_bmm_0_lij21m20-SenProgSend
+A dev_ptr 6 120259084288
+A size 6 14080
+I { }
+O { }
+T { }

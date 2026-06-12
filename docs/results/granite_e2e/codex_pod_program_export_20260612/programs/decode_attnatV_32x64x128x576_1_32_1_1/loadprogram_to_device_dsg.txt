@@ -1,0 +1,6 @@
+N 0 SenProgSend sdsc_fused_bmm_0_eidf5i3f-SenProgSend
+A dev_ptr 6 120259084288
+A size 6 7936
+I { }
+O { }
+T { }
