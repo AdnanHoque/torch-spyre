@@ -781,8 +781,10 @@ _DTYPE_BYTES = 2  # fp16
 _PSUM_PER_ELEM_US = 1.4e-4  # per output element, per K-split ring reduction hop
 _COHORT_LIMIT = 8  # cores sharing a broadcast before it contends for bandwidth
 _BATCH_SPLIT_EXPONENT = 1.4  # batch-split cost grows ~ b ** this (fit to bmm sweeps)
-_TARGET_M_PENALTY_US = 25.0  # tie-break weight when per-core M under-fills PT
+_STICK_ELEMS = 64  # fp16 elements per stick; N_sticks = N // this
+_TARGET_M_PENALTY_US = 12.0  # tie-break weight when per-core M under-fills PT
 _K_SPLIT_SETUP_US = 50.0  # fixed PSUM-chain setup/launch overhead per K-split hop
+_BATCH_SMALLN_EXPONENT = 0.5  # batch-split cost grows ~sqrt(b) when N can't fill cores
 
 
 def _matmul_split_cost(
@@ -819,8 +821,12 @@ def _matmul_split_cost(
     hbm_us = bytes_total / (_HBM_BW_GBS * 1000) * cohort_penalty
 
     # PSUM: a K-split spreads the reduction over k cores, costing (k-1) partial-
-    # sum hops around the ring, each touching every output element.
-    psum_us = max(0, k - 1) * (B * M * N) * _PSUM_PER_ELEM_US
+    # sum hops around the ring. Each hop touches only the per-core output share:
+    # the output (B*M*N) is partitioned across the b*m*n non-K cores, and those
+    # cohorts reduce their shares in parallel, so divide by the non-K core count.
+    # (Charging the full output over-priced K-splits ~b*m*n-fold and made the
+    # device-best K-splits for the attention bmms look catastrophic.)
+    psum_us = max(0, k - 1) * (B * M * N / (b * m * n)) * _PSUM_PER_ELEM_US
     # The per-element term underprices small outputs: a K-split also pays a
     # fixed PSUM-chain setup per hop, so k>1 must not win near-ties against
     # k=1 (decode-block outputs are tiny but per-launch setup is not).
@@ -835,9 +841,19 @@ def _matmul_split_cost(
     else:
         target_m_us = math.log2(_TARGET_PT_PASSES / pt_passes) * _TARGET_M_PENALTY_US
 
-    # Splitting batch across cores is strictly worse than tiling it in time on
-    # one core (each item is independent), so charge a super-linear b penalty.
-    batch_penalty = b**_BATCH_SPLIT_EXPONENT
+    # Splitting batch across cores is normally worse than tiling in time, EXCEPT
+    # when N is too small for the n-split to fill the cores on its own
+    # (N_sticks < max_cores) — the batched-attention regime, where N is the head
+    # dim and the batch is the head count. There, batch-split is the natural
+    # parallelism axis (one head per core), not a waste vs time-tiling, so its
+    # cost grows sub-linearly. The profiler confirms it: attn@V batch-split is
+    # ~2x faster on device (796us pure-M -> 395us), and a sqrt(b) penalty picks
+    # the device-best batch-splits without runaway over-batching.
+    n_fills_cores = (N // _STICK_ELEMS) >= max_cores
+    if b > 1 and not n_fills_cores:
+        batch_penalty = b**_BATCH_SMALLN_EXPONENT
+    else:
+        batch_penalty = b**_BATCH_SPLIT_EXPONENT
 
     return (compute_us + hbm_us + psum_us + target_m_us) * batch_penalty
 
