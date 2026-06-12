@@ -131,3 +131,34 @@ large lever, not the noise-grade ~1% the wall-clock suggested.**
 LESSON: wall-clock (even at 5% noise) is blind to kernels dominated by fixed host
 overhead. Profiled device time (self_device_time_total) is the correct instrument
 for split/cost-model work; it has <1% noise here.
+
+## Profiled device-time attribution: where the Granite gap actually is
+
+Per-kernel device time (USE_SPYRE_PROFILER=1, self_device_time_total, <1% noise).
+
+**Prefill (1 layer):** MLP gate+up 43%, MLP-down/O-proj 24%, attention 11.6%,
+QKV proj 5.2%, data-movement (memset+memcpy) ~16%. Matmuls ~73% and the cost
+model is device-optimal on them → headroom is **array-fill/PT-util**, not splits.
+
+**Decode (M=64) matmul device times:** MLP-up 702us, MLP-down 683us, QK^T 259us,
+Q/O 222us, attn@V 105us. The decode MLP is ~700us *even at M=64* — its weight is
+100MB (4096x12800x2), ~600us of pure HBM streaming at 166GB/s (~85% bandwidth).
+M=64 activation is 0.5MB, negligible. So **decode MLP is weight-bandwidth-bound:
+it re-streams 100MB of weights every decode step.** Lever = **weight residency**.
+
+(The full fused-decode profile is blocked: profiler + decode path triggers a
+reproducible Compute-CB hardware error on this device; standalone per-shape
+profiling used instead.)
+
+## CONCLUSION (profiler-validated, the definitive answer)
+
+The Granite perf gap is **RESIDENCY, not work-division**:
+- prefill: array-fill / PT-util (weights resident long enough to fill the PT array)
+- decode: weight residency (don't re-stream 100MB/layer every step — sendnn's
+  DSM ProgramCombine + weight-preload edge)
+- plus ~16% prefill data-movement (restickify/layout)
+
+The work-division cost model is device-optimal on all 12 Granite shapes (the only
+miss is attn@V batch-split, ~2x on a small kernel = ~2% prefill, captured by the
+batch_penalty fix). **Split tuning is done; the leverage is the residency/layout
+layer (deeptools weight-preload, LX residency, restickify).**
