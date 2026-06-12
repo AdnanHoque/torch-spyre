@@ -1,0 +1,14 @@
+Claude-pod stack (forced-split oracle for the disputed rows)
+- torch-spyre (lowering):  cf67411  (latest-main; #2596 tip)
+- PyTorch:                 2.11.0+cpu
+- flex:                    PR #1019 build  (/home/adnan/dt-inductor/flex-pr1019-install, lost-CB fix)
+- deeptools / senlib / runtime / spyre-comms:  harvested SDK at /home/adnan/opt-newer
+                           (senlib ~+148, deeptools ~+932, per session notes; no version file in tree)
+- device:                  clc card ba:00.0 (stable harvest firmware)
+- profiler:               USE_SPYRE_PROFILER=1 _C.so; self_device_time_total
+- env (LD precedence):    flex-pr1019-install > opt-newer/{runtime,spyre-comms,deeptools,senlib}/lib
+- SENCORES:               32 (default)
+- timing:                 single profiler session, 20 reps, per-rep = total device self-time / 20
+                          (<1% run-to-run noise on this pod; NOT the 20-sample median codex used)
+NOTE: this pod does NOT emit ideal_cycles.json anywhere in the inductor cache
+      (codex's pod does) — itself a backend/deeptools difference.

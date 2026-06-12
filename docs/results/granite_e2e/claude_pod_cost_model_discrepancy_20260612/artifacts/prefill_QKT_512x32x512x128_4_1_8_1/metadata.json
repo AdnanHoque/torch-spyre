@@ -1,0 +1,17 @@
+{
+  "label": "prefill_QKT_512x32x512x128_4_1_8_1",
+  "shape": "512x32x512x128",
+  "target_split": "4_1_8_1",
+  "emitted_split": "4_1_8_1",
+  "split_matches_target": true,
+  "claude_device_us_median": 2257.70068359375,
+  "claude_device_us_mean": 2257.70068359375,
+  "claude_device_us_min": 2257.70068359375,
+  "claude_device_us_max": 2257.70068359375,
+  "claude_device_us_reps": [
+    2257.70068359375
+  ],
+  "sdsc_sha256": "97279f508e648232dc443f22cd396021f818991fea6109134740eeff98d5d702",
+  "bundle_sha256": "452bcb6af786e50ead1b45a7bc81e439f454ba0ffdff51d282b3d187f075f492",
+  "ideal_cycles_present": false
+}

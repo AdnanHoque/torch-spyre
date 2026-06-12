@@ -1,0 +1,17 @@
+{
+  "label": "prefill_attnatV_32x512x128x512_2_8_2_1",
+  "shape": "32x512x128x512",
+  "target_split": "2_8_2_1",
+  "emitted_split": "2_8_2_1",
+  "split_matches_target": true,
+  "claude_device_us_median": 404.10009765625,
+  "claude_device_us_mean": 404.10009765625,
+  "claude_device_us_min": 404.10009765625,
+  "claude_device_us_max": 404.10009765625,
+  "claude_device_us_reps": [
+    404.10009765625
+  ],
+  "sdsc_sha256": "4e38bc2ca11c1962cfcc65fdba151a067cada86eac5eb91f4f3cef08c9dd79e4",
+  "bundle_sha256": "452bcb6af786e50ead1b45a7bc81e439f454ba0ffdff51d282b3d187f075f492",
+  "ideal_cycles_present": false
+}
