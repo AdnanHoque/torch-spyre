@@ -936,23 +936,21 @@ _PT_ROWS = 8  # PT block rows per corelet
 # Constants for the matmul cost model (_matmul_split_cost). Each is either an
 # AIU hardware limit or a coefficient fit to measured device kernel times.
 _TARGET_PT_PASSES = 5  # per-core M that keeps the PT pipeline full = this * _PT_ROWS
-_TARGET_M_TIE_PASSES = 3  # preferred m-split target for near-tie candidates
-_PT_EFFICIENCY_EXPONENT = 0.5
+_TARGET_M_TIE_PASSES = 4  # enough M lanes to keep the stationary weights fed
+_PT_EFFICIENCY_EXPONENT = 0.25
 _M_MIN = _PT_ROWS // 2  # below half a PT pass an m-split buys nothing
 _PEAK_MACS_US_CORE = (98.304e12 / 2 / 32) / 1e6  # DL16 peak / 32 cores, MACs/us/core
 _HBM_BW_GBS = 204.8  # LPDDR5 aggregate peak bandwidth
 _DTYPE_BYTES = 2  # fp16
-_PSUM_PER_CORE_ELEM_US = 3.0e-3
-_BMM_PSUM_PER_CORE_ELEM_US = 3.0e-4
+_PSUM_PER_CORE_ELEM_US = 1.0e-3
+_BMM_PSUM_PER_CORE_ELEM_US = 1.0e-4
 _COHORT_LIMIT = 8  # cores sharing a broadcast before it contends for bandwidth
 _COHORT_PENALTY_EXPONENT = 0.75
-_TARGET_M_PENALTY_US = 50.0  # tie-break weight when per-core M under-fills PT
+_M_LANE_UNDERUSE_PENALTY_US = 10.0  # tie-break when too few M lanes are used
 _TARGET_N_TILE_ELEMS = 512  # per-core N wider than this loses schedule efficiency
-_WIDE_N_TILE_PENALTY_US = 75.0  # per log2 step over _TARGET_N_TILE_ELEMS
+_WIDE_N_TILE_PENALTY_US = 25.0  # per log2 step over _TARGET_N_TILE_ELEMS
 _CORE_UNDERUSE_PENALTY_US = 150.0  # soft replacement for the old hard full-core fallback
-_BMM_BATCH_SPLIT_PENALTY_US = 150.0  # true-BMM batch split cost per log2 step
-_BMM_BATCH_SPLIT_K_REF = 16.0  # measured in 64-element reduction sticks
-_BMM_BATCH_SPLIT_K_EXPONENT = 0.5
+_BMM_BATCH_SPLIT_PENALTY_US = 10.0  # true-BMM batch split cost per log2 step
 
 
 def _matmul_split_cost(
@@ -1002,13 +1000,17 @@ def _matmul_split_cost(
     output_elems_per_core = (B * M * N) / max(1, b * m * n)
     psum_us = max(0, k - 1) * output_elems_per_core * psum_coeff
 
-    # Tie-break: among compute-equivalent splits prefer the m-split that lands
-    # per-core M near the PT sweet spot, penalising log2-distance from it.
+    # Tie-break: among compute-equivalent splits prefer exposing enough M lanes
+    # to stream work over the stationary weight tile. PT efficiency above handles
+    # the opposite case where an M split makes each per-core tile too short.
     target_m = max(
         _M_MIN,
         min(max_cores // 2, max(1, M // (_TARGET_M_TIE_PASSES * _PT_ROWS))),
     )
-    target_m_us = abs(math.log2(max(1, m) / target_m)) * _TARGET_M_PENALTY_US
+    m_lane_underuse_us = (
+        max(0.0, math.log2(target_m / max(1, m)))
+        * _M_LANE_UNDERUSE_PENALTY_US
+    )
 
     # Very wide output tiles lose schedule efficiency in the generated kernel.
     # Charge only the over-wide side so small/moderate N and decode choices are
@@ -1025,25 +1027,19 @@ def _matmul_split_cost(
         max(0.0, math.log2(max_cores / cores_used)) * _CORE_UNDERUSE_PENALTY_US
     )
 
-    # True BMMs often need batch parallelism to avoid tiny-M underfill. Charge
-    # batch splitting additively instead of multiplying the whole estimate.
-    k_sticks = max(1.0, K / 64)
-    batch_split_scale = (
-        k_sticks / _BMM_BATCH_SPLIT_K_REF
-    ) ** _BMM_BATCH_SPLIT_K_EXPONENT
+    # True BMMs often need batch parallelism to avoid tiny-M underfill. Charge a
+    # small additive split overhead instead of multiplying the whole estimate.
     batch_split_us = (
         0.0
         if shared_weight
-        else math.log2(max(1, b))
-        * _BMM_BATCH_SPLIT_PENALTY_US
-        * batch_split_scale
+        else math.log2(max(1, b)) * _BMM_BATCH_SPLIT_PENALTY_US
     )
 
     return (
         compute_us
         + hbm_us
         + psum_us
-        + target_m_us
+        + m_lane_underuse_us
         + wide_n_us
         + core_underuse_us
         + batch_split_us
