@@ -105,14 +105,6 @@ batch_split_us = log2(batch_split) * small_overhead
 
 That still acknowledges that splitting batch has some scheduling cost, but it no longer overwhelms the core compute and memory terms.
 
-Small-output true BMMs get one additional structural adjustment. When `N` is
-only a couple of sticks, `K` is long, and `M` is small, measured device timing
-shows that `K` splitting can be a good way to expose useful parallelism even if
-the split uses fewer than 32 cores. For that family the model reduces the
-partial-sum coefficient and the soft core-underuse penalty. This is not keyed on
-QK, attention, or Granite names; it follows from the shape: small output, long
-reduction, true BMM.
-
 ## What Changed From The More Tuned Model
 
 The simplified model keeps the useful structural pieces but removes or weakens the fit-heavy terms:
@@ -124,8 +116,6 @@ The simplified model keeps the useful structural pieces but removes or weakens t
 - Charged true-BMM HBM fanout from `N` split instead of treating `M` split as
   equivalent broadcast pressure.
 - Added a small one-sided startup penalty for very small per-core `M` tiles.
-- Relaxed PSUM and core-underuse costs for small-output, long-`K` true BMMs
-  where measured timing supports fewer-core `K`-split schedules.
 - Kept all decisions based on observable matmul and hardware features, with no op-name conditionals.
 
 This makes the model easier to explain: it is not trying to memorize twelve Granite shapes. It is trying to estimate the physical cost of each legal split.
@@ -139,16 +129,18 @@ The model was validated against the measured +549 DeepTools oracle for the 12 Gr
 | device-best oracle | 5148.19 us | 0.00% |
 | generic tuned model | 5176.95 us | about 0.56% |
 | first physics-lite model | 5189.43 us | about 0.80% |
-| iterated physics model | 5166.56 us | about 0.36% |
+| lean iterated physics model | about 5178.52 us | about 0.59% |
 
-The iterated physics model is now ahead of the more tuned model on the 12-shape
-oracle while staying simpler and structural. It fixes the first model's two
-decode-attention misses and restores the measured-best prefill `attn@V` pick.
+The lean iterated physics model keeps the two general improvements that survived
+review: true-BMM fanout follows `N` split, and tiny per-core `M` tiles pay a PT
+startup cost. It intentionally drops the small-output BMM threshold gate because
+that was too close to fitting one attention-decode oracle row.
 
 The remaining known tradeoff is prefill QK. The iterated model picks
 `2_2_8_1`, measured around 739 us, while the measured best is `4_1_8_1` at
-about 731 us. That is roughly a 1% miss. Most projection and MLP shapes are at
-or very close to the measured best split.
+about 731 us. That is roughly a 1% miss. Decode `attn@V` also remains an
+e2e-validation target because the best standalone split varied across pods.
+Most projection and MLP shapes are at or very close to the measured best split.
 
 ## Why This Is A Better Production Direction
 

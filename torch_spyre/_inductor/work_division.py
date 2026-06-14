@@ -953,11 +953,6 @@ _TARGET_N_TILE_ELEMS = 512  # per-core N wider than this loses schedule efficien
 _WIDE_N_TILE_PENALTY_US = 25.0  # per log2 step over _TARGET_N_TILE_ELEMS
 _CORE_UNDERUSE_PENALTY_US = 150.0  # soft replacement for the old hard full-core fallback
 _BMM_BATCH_SPLIT_PENALTY_US = 10.0  # true-BMM batch split cost per log2 step
-_SMALL_OUTPUT_BMM_N_MAX = 128
-_SMALL_OUTPUT_BMM_K_MIN = 512
-_SMALL_OUTPUT_BMM_M_MAX = 128
-_SMALL_OUTPUT_BMM_CORE_UNDERUSE_SCALE = 0.25
-_SMALL_OUTPUT_BMM_PSUM_SCALE = 0.25
 
 
 def _matmul_split_cost(
@@ -976,12 +971,6 @@ def _matmul_split_cost(
     cores_used = b * m * n * k
     if cores_used == 0 or cores_used > max_cores:
         return float("inf")
-    small_output_bmm = (
-        not shared_weight
-        and N <= _SMALL_OUTPUT_BMM_N_MAX
-        and K >= _SMALL_OUTPUT_BMM_K_MIN
-        and M <= _SMALL_OUTPUT_BMM_M_MAX
-    )
 
     # Compute: per-core MACs over peak, derated when the per-core M tile is too
     # short to fill the PT pipeline. The PT array streams M in passes of
@@ -1011,11 +1000,6 @@ def _matmul_split_cost(
     psum_coeff = (
         _PSUM_PER_CORE_ELEM_US if shared_weight else _BMM_PSUM_PER_CORE_ELEM_US
     )
-    if small_output_bmm:
-        # These true-BMM reductions have only a few output sticks per row, so
-        # K-split PSUM traffic is a smaller scheduling risk than in wide-output
-        # matmuls. Lower the coefficient instead of adding an op-name special case.
-        psum_coeff *= _SMALL_OUTPUT_BMM_PSUM_SCALE
     output_elems_per_core = (B * M * N) / max(1, b * m * n)
     psum_us = max(0, k - 1) * output_elems_per_core * psum_coeff
 
@@ -1046,14 +1030,8 @@ def _matmul_split_cost(
 
     # Prefer using the full core budget, but keep this soft so measured-good
     # lower-core candidates can still win.
-    core_underuse_penalty = _CORE_UNDERUSE_PENALTY_US
-    if small_output_bmm:
-        # Small-output true BMMs can profitably use K-split parallelism with
-        # fewer than 32 cores; do not make the full-core preference dominate
-        # the physical compute/HBM/PSUM terms for that family.
-        core_underuse_penalty *= _SMALL_OUTPUT_BMM_CORE_UNDERUSE_SCALE
     core_underuse_us = (
-        max(0.0, math.log2(max_cores / cores_used)) * core_underuse_penalty
+        max(0.0, math.log2(max_cores / cores_used)) * _CORE_UNDERUSE_PENALTY_US
     )
 
     # True BMMs often need batch parallelism to avoid tiny-M underfill. Charge a
