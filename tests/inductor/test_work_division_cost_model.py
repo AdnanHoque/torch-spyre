@@ -166,6 +166,6 @@ def _best_true_bmm_split(B: int, M: int, N: int, K: int):
     return best
 
 
-def test_true_bmm_attention_cost_model_uses_n_and_k_splits():
+def test_true_bmm_attention_cost_model_uses_structural_parallelism():
     assert _best_true_bmm_split(32, 512, 128, 512) == (1, 16, 2, 1)
-    assert _best_true_bmm_split(32, 64, 128, 576) == (1, 4, 2, 3)
+    assert _best_true_bmm_split(32, 64, 128, 576) == (4, 4, 2, 1)
