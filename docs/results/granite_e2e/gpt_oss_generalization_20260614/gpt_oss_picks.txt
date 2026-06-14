@@ -1,0 +1,12 @@
+Qproj_pre  shape=1 512 4096 2880  pick=1_4_8_1
+Qproj_dec  shape=1 64 4096 2880  pick=1_4_8_1
+KVproj_pre  shape=1 512 512 2880  pick=1_8_4_1
+KVproj_dec  shape=1 64 512 2880  pick=1_4_8_1
+Oproj_pre  shape=1 512 2880 4096  pick=1_8_3_1
+Oproj_dec  shape=1 64 2880 4096  pick=1_2_15_1
+MoEup_pre  shape=1 64 2880 2880  pick=1_2_5_3
+MoEdn_pre  shape=1 64 2880 2880  pick=1_2_5_3
+QKT_pre  shape=64 512 512 64  pick=1_16_2_1
+QKT_dec  shape=64 64 576 64  pick=8_4_1_1
+attnV_pre  shape=64 512 64 512  pick=1_32_1_1
+attnV_dec  shape=64 64 64 576  pick=32_1_1_1
