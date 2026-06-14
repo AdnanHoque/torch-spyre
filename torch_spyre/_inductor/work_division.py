@@ -947,10 +947,17 @@ _BMM_PSUM_PER_CORE_ELEM_US = 1.0e-4
 _COHORT_LIMIT = 8  # cores sharing a broadcast before it contends for bandwidth
 _COHORT_PENALTY_EXPONENT = 0.75
 _M_LANE_UNDERUSE_PENALTY_US = 10.0  # tie-break when too few M lanes are used
+_M_TILE_UNDERFILL_TARGET = 16  # rows/core below this pay PT startup overhead
+_M_TILE_UNDERFILL_PENALTY_US = 30.0
 _TARGET_N_TILE_ELEMS = 512  # per-core N wider than this loses schedule efficiency
 _WIDE_N_TILE_PENALTY_US = 25.0  # per log2 step over _TARGET_N_TILE_ELEMS
 _CORE_UNDERUSE_PENALTY_US = 150.0  # soft replacement for the old hard full-core fallback
 _BMM_BATCH_SPLIT_PENALTY_US = 10.0  # true-BMM batch split cost per log2 step
+_SMALL_OUTPUT_BMM_N_MAX = 128
+_SMALL_OUTPUT_BMM_K_MIN = 512
+_SMALL_OUTPUT_BMM_M_MAX = 128
+_SMALL_OUTPUT_BMM_CORE_UNDERUSE_SCALE = 0.25
+_SMALL_OUTPUT_BMM_PSUM_SCALE = 0.25
 
 
 def _matmul_split_cost(
@@ -969,6 +976,12 @@ def _matmul_split_cost(
     cores_used = b * m * n * k
     if cores_used == 0 or cores_used > max_cores:
         return float("inf")
+    small_output_bmm = (
+        not shared_weight
+        and N <= _SMALL_OUTPUT_BMM_N_MAX
+        and K >= _SMALL_OUTPUT_BMM_K_MIN
+        and M <= _SMALL_OUTPUT_BMM_M_MAX
+    )
 
     # Compute: per-core MACs over peak, derated when the per-core M tile is too
     # short to fill the PT pipeline. The PT array streams M in passes of
@@ -986,8 +999,9 @@ def _matmul_split_cost(
     # link, so effective bandwidth falls off linearly with cohort size.
     weight_batches = 1 if shared_weight else B
     bytes_total = (B * M * K + weight_batches * K * N + B * M * N) * _DTYPE_BYTES
+    fanout_split = max(m, n) if shared_weight else n
     cohort_penalty = max(
-        1.0, (max(m, n) / _COHORT_LIMIT) ** _COHORT_PENALTY_EXPONENT
+        1.0, (fanout_split / _COHORT_LIMIT) ** _COHORT_PENALTY_EXPONENT
     )
     hbm_us = bytes_total / (_HBM_BW_GBS * 1000) * cohort_penalty
 
@@ -997,6 +1011,11 @@ def _matmul_split_cost(
     psum_coeff = (
         _PSUM_PER_CORE_ELEM_US if shared_weight else _BMM_PSUM_PER_CORE_ELEM_US
     )
+    if small_output_bmm:
+        # These true-BMM reductions have only a few output sticks per row, so
+        # K-split PSUM traffic is a smaller scheduling risk than in wide-output
+        # matmuls. Lower the coefficient instead of adding an op-name special case.
+        psum_coeff *= _SMALL_OUTPUT_BMM_PSUM_SCALE
     output_elems_per_core = (B * M * N) / max(1, b * m * n)
     psum_us = max(0, k - 1) * output_elems_per_core * psum_coeff
 
@@ -1011,6 +1030,10 @@ def _matmul_split_cost(
         max(0.0, math.log2(target_m / max(1, m)))
         * _M_LANE_UNDERUSE_PENALTY_US
     )
+    m_tile_underfill_us = (
+        max(0.0, math.log2(_M_TILE_UNDERFILL_TARGET / max(1, m_t)))
+        * _M_TILE_UNDERFILL_PENALTY_US
+    )
 
     # Very wide output tiles lose schedule efficiency in the generated kernel.
     # Charge only the over-wide side so small/moderate N and decode choices are
@@ -1023,8 +1046,14 @@ def _matmul_split_cost(
 
     # Prefer using the full core budget, but keep this soft so measured-good
     # lower-core candidates can still win.
+    core_underuse_penalty = _CORE_UNDERUSE_PENALTY_US
+    if small_output_bmm:
+        # Small-output true BMMs can profitably use K-split parallelism with
+        # fewer than 32 cores; do not make the full-core preference dominate
+        # the physical compute/HBM/PSUM terms for that family.
+        core_underuse_penalty *= _SMALL_OUTPUT_BMM_CORE_UNDERUSE_SCALE
     core_underuse_us = (
-        max(0.0, math.log2(max_cores / cores_used)) * _CORE_UNDERUSE_PENALTY_US
+        max(0.0, math.log2(max_cores / cores_used)) * core_underuse_penalty
     )
 
     # True BMMs often need batch parallelism to avoid tiny-M underfill. Charge a
@@ -1040,6 +1069,7 @@ def _matmul_split_cost(
         + hbm_us
         + psum_us
         + m_lane_underuse_us
+        + m_tile_underfill_us
         + wide_n_us
         + core_underuse_us
         + batch_split_us

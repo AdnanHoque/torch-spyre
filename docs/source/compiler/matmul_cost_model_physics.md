@@ -44,6 +44,13 @@ Shared-weight matmuls and true BMMs behave differently. For shared-weight projec
 
 The model also includes a fanout/cohort effect for HBM broadcasts. If too many cores contend for the same broadcast path, bandwidth efficiency falls. This is represented as a structural penalty based on the number of cores sharing a broadcast group, not as an op-specific rule.
 
+For shared-weight matmuls the fanout term uses the larger of the `M` and `N`
+splits, because a single RHS tile is reused across the streamed rows and output
+columns. For true BMMs the fanout term uses the `N` split. Splitting `M` in a
+true BMM mainly gives the array more independent rows to stream; it should not
+be charged as if it were the same broadcast pressure as splitting output/weight
+sticks.
+
 ### Partial-Sum Cost
 
 Splitting `K` means multiple cores compute partial sums for the same output tile. Those partial sums must then be combined. The model charges an additional cost proportional to:
@@ -68,6 +75,16 @@ penalty only when the candidate exposes too few M lanes
 
 This captures the real issue: underfilling `M` is bad; having enough `M` is fine.
 
+The current iteration also adds a small per-core `M` tile startup term:
+
+```text
+penalty when M / m_split < 16 rows per core
+```
+
+This catches tiny-decode cases where the compute estimate alone does not fully
+account for PT startup/drain overhead. It is still structural: the term only
+depends on the candidate's per-core `M` tile.
+
 ### Wide-N Tile Cost
 
 Very wide per-core output tiles can be less efficient in the generated schedule. The model keeps a small penalty when each core receives an over-wide `N` tile. This acts as a tie-breaker between otherwise similar splits. It helps prefer more balanced `M`/`N` tiling for wide projections, without hard-coding projection shapes.
@@ -88,6 +105,14 @@ batch_split_us = log2(batch_split) * small_overhead
 
 That still acknowledges that splitting batch has some scheduling cost, but it no longer overwhelms the core compute and memory terms.
 
+Small-output true BMMs get one additional structural adjustment. When `N` is
+only a couple of sticks, `K` is long, and `M` is small, measured device timing
+shows that `K` splitting can be a good way to expose useful parallelism even if
+the split uses fewer than 32 cores. For that family the model reduces the
+partial-sum coefficient and the soft core-underuse penalty. This is not keyed on
+QK, attention, or Granite names; it follows from the shape: small output, long
+reduction, true BMM.
+
 ## What Changed From The More Tuned Model
 
 The simplified model keeps the useful structural pieces but removes or weakens the fit-heavy terms:
@@ -96,6 +121,11 @@ The simplified model keeps the useful structural pieces but removes or weakens t
 - Reduced partial-sum coefficients so `K` splitting is discouraged by real output movement, not a large magic penalty.
 - Reduced the wide-`N` coefficient so it works as a tie-breaker.
 - Replaced the large `K`-scaled true-BMM batch penalty with a small additive split cost.
+- Charged true-BMM HBM fanout from `N` split instead of treating `M` split as
+  equivalent broadcast pressure.
+- Added a small one-sided startup penalty for very small per-core `M` tiles.
+- Relaxed PSUM and core-underuse costs for small-output, long-`K` true BMMs
+  where measured timing supports fewer-core `K`-split schedules.
 - Kept all decisions based on observable matmul and hardware features, with no op-name conditionals.
 
 This makes the model easier to explain: it is not trying to memorize twelve Granite shapes. It is trying to estimate the physical cost of each legal split.
@@ -108,11 +138,17 @@ The model was validated against the measured +549 DeepTools oracle for the 12 Gr
 |---|---:|---:|
 | device-best oracle | 5148.19 us | 0.00% |
 | generic tuned model | 5176.95 us | about 0.56% |
-| physics-lite model | 5189.43 us | about 0.80% |
+| first physics-lite model | 5189.43 us | about 0.80% |
+| iterated physics model | 5166.56 us | about 0.36% |
 
-The simplified model is slightly behind the more tuned model, but the loss is small: about 12.5 us over the full 12-shape set. In exchange, the model is less parameterized and easier to reason about.
+The iterated physics model is now ahead of the more tuned model on the 12-shape
+oracle while staying simpler and structural. It fixes the first model's two
+decode-attention misses and restores the measured-best prefill `attn@V` pick.
 
-The worst miss is decode QK, where the model picks a split about 18% slower than the measured best. That shape remains the main target for further improvement. Most projection and MLP shapes are at or very close to the measured best split.
+The remaining known tradeoff is prefill QK. The iterated model picks
+`2_2_8_1`, measured around 739 us, while the measured best is `4_1_8_1` at
+about 731 us. That is roughly a 1% miss. Most projection and MLP shapes are at
+or very close to the measured best split.
 
 ## Why This Is A Better Production Direction
 
@@ -129,4 +165,3 @@ That is the behavior we want from a hardware-backed planner.
 ## Current Caveats
 
 This model should not be considered fully production-ready from the 12 Granite anchors alone. The next validation step is an out-of-sample oracle with shapes that vary `B`, `M`, `N`, and `K` across shared-weight matmuls and true BMMs. The acceptance bar should be that the model stays within a small margin of device-best on Granite while avoiding catastrophic misses outside the Granite anchor set.
-
