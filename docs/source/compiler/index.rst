@@ -56,4 +56,5 @@ test coverage, bug classification), see :doc:`/contributing/op_enablement`.
    working_set_reduction
    coarse_tiling_loops
    work_division_planning
+   matmul_cost_model_physics
    scratchpad_planning
