@@ -272,6 +272,14 @@ def apply_lx_flip(sdsc_json: dict, flip: LxFlip) -> None:
     node["startAddressCoreCorelet_"]["data_"] = {
         f"[{c}, 0, 0]": str(flip.lx_base) for c in range(num_cores)
     }
+    # Clear any HBM-layout inter-core gap: an LX-resident tile is per-core
+    # contiguous, so the HBM-style backGapCore_ (keyed by -1) is meaningless in
+    # LX and makes dxp codegen fail ("AllocNode has gap in Dim, but coreId not
+    # avail", dsc2.cpp:3867 -- the LX branch needs a per-core coreId the -1 gap
+    # lacks). The matmul gate-half sub-slice carries such a gap; clear it on flip.
+    node["backGapCore_"] = {}
+    if "gapStickSpread_" in node:
+        node["gapStickSpread_"] = {}
     lds["memOrg_"] = {"lx": {"isPresent": 1, "allocateNode_": alloc_node}}
     lds["hbmStartAddress_"] = -1
     lds["hbmSize_"] = 0
