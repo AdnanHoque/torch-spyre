@@ -89,4 +89,32 @@ unroll_loops: bool = os.environ.get("UNROLL_LOOPS", "1") == "1"
 # TODO(isuruf): Change to firstfit when deeptools PR4298 lands
 layout_solver: Literal["greedy", "bestfit", "firstfit"] = "greedy"
 
+# Experimental cross-core LX-to-LX movement planner.  This is deliberately
+# separate from lx_planning: lx_planning keeps same-core values in scratchpad,
+# while this path plans explicit ring/data-op movement for mismatched views.
+onchip_move_planner: bool = os.environ.get("SPYRE_ONCHIP_MOVE_PLANNER", "0") == "1"
+onchip_move_realize: bool = os.environ.get("SPYRE_ONCHIP_MOVE_REALIZE", "0") == "1"
+onchip_move_carrier: Literal["mixed"] = os.environ.get(  # type: ignore[assignment]
+    "SPYRE_ONCHIP_MOVE_CARRIER", "mixed"
+)
+onchip_move_debug_dir: str = os.environ.get("SPYRE_ONCHIP_MOVE_DEBUG_DIR", "")
+onchip_move_jsonl: str = os.environ.get("SPYRE_ONCHIP_MOVE_JSONL", "")
+onchip_move_max_cells: int = int(os.environ.get("SPYRE_ONCHIP_MOVE_MAX_CELLS", "8192"))
+onchip_move_producer_lx_base: int = int(
+    os.environ.get("SPYRE_ONCHIP_MOVE_PRODUCER_LX_BASE", str(16 * 1024)), 0
+)
+onchip_move_consumer_lx_base: int = int(
+    os.environ.get("SPYRE_ONCHIP_MOVE_CONSUMER_LX_BASE", str(8 * 1024)), 0
+)
+
+# Secondary SwiGLU/warp-specialization audit.  This does not change scheduling;
+# it only records whether the lowered bundle still has standalone SiLU/mul ops
+# that could later be scheduled against PT-heavy matmul rows.
+swiglu_warpspec_audit: bool = (
+    os.environ.get("SPYRE_SWIGLU_WARPSPEC_AUDIT", "0") == "1"
+)
+swiglu_warpspec_audit_jsonl: str = os.environ.get(
+    "SPYRE_SWIGLU_WARPSPEC_AUDIT_JSONL", ""
+)
+
 install_config_module(sys.modules[__name__])
