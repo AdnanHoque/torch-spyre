@@ -130,7 +130,7 @@ def apply_reshard() -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--lever", choices=["baseline", "steer", "reshard"], required=True)
+    ap.add_argument("--lever", choices=["baseline", "steer", "reshard", "coassign"], required=True)
     ap.add_argument("--op", required=True)
     ap.add_argument(
         "--shape", type=int, nargs="+", action="append", dest="shapes", required=True
@@ -154,6 +154,12 @@ def main() -> None:
         apply_steer()
     elif args.lever == "reshard":
         apply_reshard()
+    elif args.lever == "coassign":
+        _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        from ab.coassign.coassign import apply_coassign
+        apply_coassign()
 
     sys.path.insert(0, PERF_SUITE)
     os.chdir(PERF_SUITE)  # run_tsp_stack writes inductor/perf artifacts relative to cwd

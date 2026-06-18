@@ -3,7 +3,26 @@
 Handoff for the on-chip core-to-core reshard thread. Detail lives in
 `ab/README.md` (A/B design), `ab/results/RESULTS.md` (A/B numbers),
 `ab/reshard/README.md` (reshard core + dxp-gate findings),
+`ab/coassign/README.md` (the value-correct Inductor-only path),
 `../CORE_TO_CORE_SWIGLU_BASELINE.md` (kernel-time baseline + Phase-0 owner pin).
+
+## VERDICT (2026-06-18) — co-assignment wins; reshard is deeptools-blocked
+
+Two ways to kill the `matmul→pointwise` cross-division HBM hand-off were taken to
+device:
+
+- **Co-assignment (B, `ab/coassign/`) — SHIP THIS.** Propagate the matmul's
+  `(m4,n8)` split to the element-wise consumers so the edge is same-division
+  same-core; no data moves. **~7% faster (12.9 vs 13.9 ms unfused) AND
+  value-correct** (max_abs_diff 0.0059, `allclose=True` vs CPU eager). Pure
+  Inductor — no data-op, no dxp gate, no deeptools change.
+- **Data-op reshard (A, `ab/reshard/`) — parked, deeptools-blocked.** Mechanism
+  proven (compiles on the §5-patched dxp, runs, real cross-core ring senprog,
+  ~12% faster) but **value-broken by a DCG EBR packing bug** (`l3su` dest column
+  linearised `3200*core` vs `3200*(core//4)`; frontend PieceInfo/permutation/base
+  all correct). Needs a deeptools EBR fix — see `ab/reshard/PATH_A_PROGRESS.md`.
+
+Everything below is the historical handoff that led here.
 
 ## Done (committed on `core-to-core`)
 

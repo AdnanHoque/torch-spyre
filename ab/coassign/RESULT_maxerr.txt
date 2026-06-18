@@ -1,0 +1,24 @@
+co-assign device output vs CPU eager (CPU-only diff, no device)
+op=granite_micro_bench.swiglu_unfused  shape=(1, 512, 4096)  seed=0
+saved device output: /tmp/c2c-out/spyre_coassign_unfused_out.pt (2026-06-18)
+
+  actual   (device co-assign) mean=-0.00340741  std=0.106391
+  expected (CPU eager)        mean=-0.00338505  std=0.105534
+  max_abs_diff  = 0.00585938
+  mean_abs_diff = 0.000806822
+  allclose(atol=1e-2, rtol=1e-2) = True
+
+VERDICT: value-correct (fp16-noise level). Contrast the data-op reshard, which
+is ~0 (mean|out|~0.0001) on the same edge -> co-assignment preserves values
+because it propagates the split (no data moved), while the reshard moves data to
+the wrong column (DCG EBR packing bug, see ../reshard/PATH_A_PROGRESS.md).
+
+Repro:
+  # device capture (solo, stock dxp + harvest stack):
+  bash ab/coassign/run_coassign_device.sh
+  # offline diff (CPU only):
+  cd /home/adnan/dt-inductor/spyre-perf-suite-aisw && \
+  PYTHONPATH=/home/adnan/dt-inductor/foundation-model-stack \
+  python /tmp/core-to-core-wt/ab/coassign/check_maxerr.py \
+    /tmp/c2c-out/spyre_coassign_unfused_out.pt \
+    granite_micro_bench.swiglu_unfused 0 1 512 4096
