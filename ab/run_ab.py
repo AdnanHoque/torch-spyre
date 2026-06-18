@@ -50,7 +50,16 @@ def apply_steer() -> None:
     """
     import torch_spyre._inductor.work_division as wd
 
-    wd._cost_model_divide_op = lambda *args, **kwargs: False
+    _calls = {"n": 0}
+
+    def _declined(*args, **kwargs):
+        _calls["n"] += 1
+        if _calls["n"] <= 3:
+            print(f"[STEER] _cost_model_divide_op declined (call {_calls['n']})", flush=True)
+        return False
+
+    wd._cost_model_divide_op = _declined
+    print("[STEER] patched work_division._cost_model_divide_op -> False", flush=True)
 
 
 def main() -> None:
