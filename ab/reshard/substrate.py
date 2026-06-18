@@ -197,6 +197,62 @@ def build_asymmetric_reshard_bridge(
     return [stcdp], ["STCDPOpLx"], mixed_schedule(1, num_cores)
 
 
+def build_perband_reshard_bridge(
+    edges: Sequence[tuple[Sequence[Piece], Sequence[Piece]]],
+    dim_pool: Sequence[str],
+    iter_sizes: Mapping[str, int],
+    stick_size: int,
+    num_cores: int,
+    lx_size: int,
+    src_base: int,
+    dst_base: int,
+    layout: Sequence[str],
+    row_dim: str,
+    stick_dim: str,
+) -> tuple[list[dict], list[str], dict]:
+    """One STCDPOpLx per column band -- the per-band decomposition of the 2-D edge.
+
+    ``edges[b] = (producer_pieces_b, consumer_pieces_b)`` covers only band ``b``'s
+    columns; producer and consumer pieces in an edge share the same logical column
+    band, so each STCDP is a pure row redistribution at a fixed column (no
+    intra-row column re-placement). Emits ``len(edges)`` datadscs and a matching
+    ``mixed_schedule`` -- the multi-data-op shape (the 2-STCDP round trip uses the
+    same shape with 2). All bands read producer LX ``src_base`` and write consumer
+    LX ``dst_base``; the per-band column offset is carried by the piece
+    ``dimToStartCordinate`` (identical on src and dst), not by a base delta.
+    """
+    datadscs: list[dict] = []
+    for b, (producer_pieces, consumer_pieces) in enumerate(edges):
+        owners = [p.owner for p in producer_pieces] + [
+            p.owner for p in consumer_pieces
+        ]
+        if any(o >= num_cores or o < 0 for o in owners):
+            raise ValueError(
+                f"band {b} owners out of range [0,{num_cores}): "
+                f"{sorted(set(owners))}"
+            )
+        in_pi = pieces_to_pieceinfo(
+            producer_pieces, layout, row_dim, stick_dim, iter_sizes, src_base
+        )
+        out_pi = pieces_to_pieceinfo(
+            consumer_pieces, layout, row_dim, stick_dim, iter_sizes, dst_base
+        )
+        in_ld = _labeled_ds(
+            "dataIN", layout, stick_dim, iter_sizes, stick_size, lx_size, in_pi
+        )
+        out_ld = _labeled_ds(
+            "dataOUT", layout, stick_dim, iter_sizes, stick_size, lx_size, out_pi
+        )
+        datadscs.append(
+            _datadsc(
+                f"{b}_STCDPOpLx_dataop", _stcdp_op(), dim_pool, in_ld, out_ld,
+                num_cores,
+            )
+        )
+    opfuncs = ["STCDPOpLx"] * len(datadscs)
+    return datadscs, opfuncs, mixed_schedule(len(datadscs), num_cores)
+
+
 def allocate_lx_bases(
     num_regions: int, slice_bytes: int,
     capacity: int = LX_CAPACITY_BYTES, region0: int = 0,

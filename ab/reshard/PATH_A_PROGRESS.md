@@ -182,3 +182,34 @@ deeptools EBR-packing fix (use the per-subpiece computed StartAddr, don't
 re-linearise by core index for many→one-column scatters), OR pivot to the 1-D /
 co-assignment path that never triggers the 2-D EBR packer. Debug dirs left at
 `/tmp/swiglu_splice_dbg` (un-split) and `/tmp/swiglu_splice_fix` (split-consumer).
+
+## Per-band multi-STCDP REFUTES the frontend-fix path (2026-06-18, CPU)
+
+The strongest remaining frontend idea: decompose the single 2-D-scatter STCDP into
+**8 per-band STCDPs** (one per producer `out`-band), each moving a fixed
+`[*, b*1600 : +1600)` column band so **`src_col == dst_col`** -- a pure row (`mb`)
+redistribution at a constant column, no intra-row column placement handed to the
+packer. Built in `pieces.build_swiglu_unfused_perband_edges` +
+`substrate.build_perband_reshard_bridge` + `splice_swiglu.splice_bundle_perband`
+(offline-verified: 8 bands, 256 single-source cells, `src_col==dst_col`).
+
+Compiled on the patched dxp (CPU, no device, swap onto the spliced bundle's
+`sdsc_2`): **exit 0, 248 `L3_LDU`/`L3_STU`, correct ROW scatter** (core 0 →
+consumer cores 0–7). But `debug/sdsc_2/smc.txt` `@regInit:EBR:R0` is **STILL
+`3200*core`** (`0 3200 6400 ... 99200`), NOT the correct `3200*(core//4)`
+(`0 0 0 0 3200 3200 ...`) — byte-identical to the single-STCDP bug; **cores 8–31
+(24/32) store out of bounds** of the 12800-col gate (EBR ≥ 25600). So a genuinely
+different frontend structure produces the **identical** broken EBR.
+
+**Conclusion (two independent frontend framings → same core-linearised EBR):** the
+bug is the **DCG EBR packer**, not the frontend pieces. `setPlacementInfoSubPiece`
+(stcdpOp.cpp:2676) correctly computes the per-subpiece LX (LBR) address from piece
+coordinates, but the L3SU **dest store column** (EBR `initValue`,
+`dcgbeCodegen.cpp:2720` ← `getDestStAddr` ← per-core `ebrInit_`) is derived from the
+**core index `cidx`**, ignoring the piece's `out_` coordinate. So the producer's
+`out`-band (`p//4`) is lost and replaced by the full core index `p`. **The frontend
+is exhausted** — the per-band decomposition was the strongest available structure
+and it does not move the EBR. Landing a value-correct reshard requires the deeptools
+EBR fix: derive the L3SU dest column from the subpiece `out_` coordinate (the
+`out`-band), not the core index. Co-assignment (`ab/coassign/`) remains the
+value-correct inductor-only win that needs none of this.

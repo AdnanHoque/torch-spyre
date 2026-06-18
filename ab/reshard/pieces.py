@@ -314,3 +314,61 @@ def build_swiglu_unfused_edge() -> tuple[list[Piece], list[Piece]]:
         swiglu_consumer_owner,
     )
     return producer, consumer
+
+
+# --- Per-band decomposition: 8 single-column-band STCDPs (NO intra-row scatter) -
+#
+# The single-STCDP edge above hands DCG the full 2-D scatter: 32 producer pieces
+# (4x8 co-split) -> 32 consumer pieces spanning the FULL [0,12800) row, so DCG
+# must place each producer out-band at its column offset WITHIN the consumer row
+# (`dest_col = out_band*1600`). That intra-row column placement is what the EBR
+# packer mis-linearises (`3200*core` vs `3200*(core//4)`; PATH_A_PROGRESS.md).
+#
+# This decomposition instead emits ONE STCDP per out-band. STCDP ``b`` moves only
+# column band ``[b*1600, b*1600+1600)``: BOTH the producer pieces and the consumer
+# sub-slice pieces sit at the SAME logical column band, so ``src_col == dst_col``
+# -- the move is a pure row (``mb``) redistribution at a FIXED column. There is no
+# intra-row column placement for the packer to linearise. Each per-band STCDP is
+# the proven 1-D shape (the recipe's same-stick re-ownership), composed 8x.
+
+
+def build_swiglu_unfused_perband_edges() -> list[tuple[list[Piece], list[Piece]]]:
+    """Eight ``(producer, consumer)`` edges, one per producer ``out``-band.
+
+    Edge ``b`` (band cols ``[b*1600, +1600)``) has 4 producer pieces (the
+    ``mb=0..3`` row-bands of ``out=b``, owner ``mb + 4*b``) and 32 consumer
+    sub-slice pieces (each consumer core ``c``'s 16-row band, restricted to band
+    ``b``'s columns, owner ``c``). Producer and consumer cols are IDENTICAL within
+    an edge -> no column re-placement. The 8 edges together tile the full
+    ``[512, 12800]`` gate output and its 32x1 consumer exactly (8 * 32 = 256
+    single-source cells -- the same coverage as the single-STCDP edge, repartitioned
+    so no edge crosses a column band).
+    """
+    m_split = SWIGLU_UNFUSED_PROD_SPLIT["mb"]  # 4
+    n_split = SWIGLU_UNFUSED_PROD_SPLIT["out"]  # 8
+    cons_m_split = SWIGLU_UNFUSED_CONS_SPLIT["mb"]  # 32
+    prod_row_bands = _even_bands(SWIGLU_M_ROWS, m_split)  # 4 x 128
+    col_bands = _even_bands(SWIGLU_UNFUSED_N_COLS, n_split)  # 8 x 1600
+    cons_row_bands = _even_bands(SWIGLU_M_ROWS, cons_m_split)  # 32 x 16
+    edges: list[tuple[list[Piece], list[Piece]]] = []
+    for b, col in enumerate(col_bands):
+        producer = [
+            Piece(
+                key=f"p{mb + 1}",
+                owner=swiglu_producer_owner(mb, b),
+                rows=prod_row_bands[mb],
+                cols=col,
+            )
+            for mb in range(m_split)
+        ]
+        consumer = [
+            Piece(
+                key=f"p{c + 1}",
+                owner=swiglu_consumer_owner(c, 0),
+                rows=cons_row_bands[c],
+                cols=col,
+            )
+            for c in range(cons_m_split)
+        ]
+        edges.append((producer, consumer))
+    return edges

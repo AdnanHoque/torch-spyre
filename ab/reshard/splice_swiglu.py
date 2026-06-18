@@ -54,12 +54,14 @@ if __package__ in (None, ""):
         SWIGLU_UNFUSED_N_COLS,
         build_swiglu_edge,
         build_swiglu_unfused_edge,
+        build_swiglu_unfused_perband_edges,
     )
     from reshard.substrate import (
         STICK_BYTES,
         WORD_LENGTH,
         allocate_lx_bases,
         build_asymmetric_reshard_bridge,
+        build_perband_reshard_bridge,
         splice_reshard,
         splice_reshard_standalone,
     )
@@ -71,12 +73,14 @@ else:
         SWIGLU_UNFUSED_N_COLS,
         build_swiglu_edge,
         build_swiglu_unfused_edge,
+        build_swiglu_unfused_perband_edges,
     )
     from .substrate import (
         STICK_BYTES,
         WORD_LENGTH,
         allocate_lx_bases,
         build_asymmetric_reshard_bridge,
+        build_perband_reshard_bridge,
         splice_reshard,
         splice_reshard_standalone,
     )
@@ -404,6 +408,53 @@ def splice_bundle(bundle_dir: str) -> bool:
     return True
 
 
+def splice_bundle_perband(bundle_dir: str) -> bool:
+    """Detect the matmul->neg edge and splice the PER-BAND multi-STCDP reshard.
+
+    Like :func:`splice_bundle` but folds EIGHT single-column-band STCDPs (one per
+    producer ``out``-band) into the consumer SDSC instead of one 2-D-scatter
+    STCDP. Each STCDP moves a fixed 1600-col band with ``src_col == dst_col``, so
+    no intra-row column re-placement is handed to the EBR packer (the
+    mis-linearisation in PATH_A_PROGRESS.md). Unfused edge only -- the per-band
+    decomposition is derived for the full ``[512, 12800]`` gate output. Idempotent
+    over the LX flip, so it may be re-folded onto an already-spliced bundle copy
+    (only ``datadscs_``/schedule change).
+    """
+    edge = detect_edge(bundle_dir)
+    if edge is None:
+        return False
+    producer_out_idx, consumer_in_idx = edge
+
+    prod_path = os.path.join(bundle_dir, "sdsc_1.json")
+    cons_path = os.path.join(bundle_dir, "sdsc_2.json")
+    with open(prod_path) as f:
+        producer_sdsc = json.load(f)
+    with open(cons_path) as f:
+        consumer_sdsc = json.load(f)
+
+    args = derive_bridge_args_unfused()
+    edges = build_swiglu_unfused_perband_edges()
+    datadscs, opfuncs, schedule = build_perband_reshard_bridge(edges, **args)
+
+    splice_reshard(
+        producer_sdsc=producer_sdsc,
+        consumer_sdsc=consumer_sdsc,
+        producer_out_idx=producer_out_idx,
+        consumer_in_idx=consumer_in_idx,
+        producer_base=args["src_base"],
+        consumer_base=args["dst_base"],
+        datadscs=datadscs,
+        opfuncs=opfuncs,
+        schedule=schedule,
+    )
+
+    with open(prod_path, "w") as f:
+        json.dump(producer_sdsc, f)
+    with open(cons_path, "w") as f:
+        json.dump(consumer_sdsc, f)
+    return True
+
+
 # The standalone SDSC step name (must match its on-disk filename and the
 # sdsc_execute the bundle.mlir edit inserts).
 STANDALONE_SDSC_FILE = "sdsc_1b.json"
@@ -500,12 +551,24 @@ def main() -> int:
         help="Option (b): emit a standalone pure-data-op SDSC step (not a "
         "mixed fold into the consumer SDSC).",
     )
+    parser.add_argument(
+        "--perband",
+        action="store_true",
+        help="Fold the per-band multi-STCDP reshard (8 single-column-band STCDPs) "
+        "instead of the single 2-D-scatter STCDP. Unfused edge only.",
+    )
     ns = parser.parse_args()
     if ns.standalone:
         args = splice_bundle_standalone(ns.bundle_dir)
         print(f"spliced {ns.bundle_dir}")
         for k, v in args.items():
             print(f"  {k} = {v}")
+        return 0
+    if ns.perband:
+        if splice_bundle_perband(ns.bundle_dir):
+            print(f"spliced (per-band) {ns.bundle_dir}")
+            return 0
+        print(f"no matmul->neg edge in {ns.bundle_dir} (no-op)")
         return 0
     if splice_bundle(ns.bundle_dir):
         print(f"spliced {ns.bundle_dir}")
