@@ -15,8 +15,12 @@ to) — the cross-division hand-off is genuinely removed.
 |---|---|---|---|---|---|---|
 | prefill 1×512×4096 | fused | A0 baseline | (m4,n8) | cross-div HBM | **19.8** | 16.9% |
 | prefill 1×512×4096 | fused | A1 steer | pure-M | same-div | **27.8** | 12.1% |
+| prefill 1×512×4096 | unfused | A0 baseline | (m4,n8) | cross-div HBM | **13.9** | 20.1% |
+| prefill 1×512×4096 | unfused | A1 steer | pure-M | same-div | **22.8** | 11.1% |
 
-(other shapes: in progress)
+Steer loses in **both** fused (1.40×) and unfused (1.64×) — consistent. (Decode
+A1: not run; decode matmul is tiny / 0.2% util, so steering can't help there and
+the movement-bound reshard is the only lever regardless.)
 
 ## Verdict
 

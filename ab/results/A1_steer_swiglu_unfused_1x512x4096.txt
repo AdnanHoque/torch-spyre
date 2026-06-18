@@ -1,0 +1,38 @@
+metric                      max_ms       mean_ms     median_ms        min_ms
+----------------------------------------------------------------------------
+wall_clock_ms               32.882        32.181        32.181        31.480
+cpu_ms                      11.831        11.831        11.831        11.831
+spyre_ms                    23.326        23.326        23.326        23.326
+kernel_ms                   22.795        22.795        22.795        22.795
+memory_transfer_ms           0.531         0.531         0.531         0.531
+pt_util%                    11.054
+
+Spyre-kernel_times:                           mean_ms      PT-Util%
+--------------------------------------------------------------------
+sdsc_fused_linear_1_qinq2rzp                    5.165        14.418
+Memset-(Device)                                 0.177         0.000
+sdsc_fused_linear_mul_silu_0_tyey6or7          15.047         9.899
+Total                                          20.389        11.054
+
+CPU-kernel_times:                                  mean_ms
+-----------------------------------------------------------
+aten::to                                             2.894
+aten::_to_copy                                       3.856
+aten::empty_strided                                  0.014
+aten::copy_                                          3.833
+aten::_copy_from                                     3.829
+aiuLaunchDMIControlBlocks                            0.002
+TorchDynamo-Cache-Lookup                             0.030
+Torch-Compiled-Region:-0/0                           0.312
+Pregraph-bytecode                                    0.006
+AOTDispatcher-Runtime-Wrapper-Prologue               0.009
+##-Call-CompiledFxGraph-None-##                      0.242
+aten::empty                                          0.005
+aten::lift_fresh                                     0.000
+aten::detach_                                        0.003
+detach_                                              0.002
+launch_kernel:sdsc_fused_linear_mul_silu_0           0.041
+aiuLaunchControlBlocks                               0.001
+launch_kernel:sdsc_fused_linear_1                    0.019
+aiuLaunchDMOControlBlocks                            0.002
+

@@ -1,0 +1,37 @@
+metric                      max_ms       mean_ms     median_ms        min_ms
+----------------------------------------------------------------------------
+wall_clock_ms               24.498        24.071        24.071        23.645
+cpu_ms                      11.157        11.157        11.157        11.157
+spyre_ms                    14.428        14.428        14.428        14.428
+kernel_ms                   13.873        13.873        13.873        13.873
+memory_transfer_ms           0.555         0.555         0.555         0.555
+pt_util%                    20.130
+
+Spyre-kernel_times:        mean_ms      PT-Util%
+-------------------------------------------------
+sdsc_fused_linear_           5.549        26.840
+Memset-(Device)              0.185         0.000
+Total                        5.734        20.130
+
+CPU-kernel_times:                                                                       mean_ms
+------------------------------------------------------------------------------------------------
+aten::to                                                                                  2.726
+aten::_to_copy                                                                            3.632
+aten::empty_strided                                                                       0.013
+aten::copy_                                                                               3.609
+aten::_copy_from                                                                          3.605
+aiuLaunchDMIControlBlocks                                                                 0.002
+TorchDynamo-Cache-Lookup                                                                  0.030
+Torch-Compiled-Region:-0/0                                                                0.312
+Pregraph-bytecode                                                                         0.006
+AOTDispatcher-Runtime-Wrapper-Prologue                                                    0.009
+##-Call-CompiledFxGraph-febtwmge5gv42rjwywrcywujdeknqs3b3giq5m7ok6y7ezomrpnn-##           0.244
+aten::empty                                                                               0.006
+aten::lift_fresh                                                                          0.000
+aten::detach_                                                                             0.003
+detach_                                                                                   0.002
+launch_kernel:sdsc_fused_linear_mul_silu_0                                                0.041
+aiuLaunchControlBlocks                                                                    0.001
+launch_kernel:sdsc_fused_linear_1                                                         0.017
+aiuLaunchDMOControlBlocks                                                                 0.002
+
