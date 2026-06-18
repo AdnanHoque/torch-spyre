@@ -118,3 +118,67 @@ same-core `apply_lx_flip` (the 1.88× softmax-chain mechanism — no data-op, no
 **no dxp gate**, value-correct) persists it. This sidesteps the asymmetric move
 entirely. Recommend device-validating co-assignment next rather than grinding the
 broken asymmetric reshard.
+
+## CPU root-cause: zero-output traced to DCG EBR packing, NOT the frontend (2026-06-18)
+
+CPU-only dxp inspection (no device). Spliced the unfused bundle, compiled with the
+patched dxp (`DXP_VERBOSE=1`, exit 0, 248 L3_LDU/STU), decoded `debug/sdsc_2/smc.txt`
++ `senprog.txt` register inits, and compared to the producer/consumer device
+ground-truth layouts (the `coordInfo` allocate-node folds).
+
+**Ground truth (from the un-spliced sdsc_1/sdsc_2 `coordInfo`):**
+- Producer matmul `{mb:4,out:8}`: core `p` writes logical rows `[128*(p%4), +128)` ×
+  cols `[1600*(p//4), +1600)`; owner `= mb_band + 4*out_band` (matches `pieces.py`).
+  Each core writes its 128×1600 tile **per-core-contiguous at LX-local base 0**.
+- Consumer neg `{mb:32,out:1}`: core `c` reads rows `[16c, 16c+16)` × cols
+  `[0, 12800)` from LX base 409600.
+
+**The STCDP PieceInfo is CORRECT (rules out a/c):**
+- dataIN per-piece `memId`/`dimToStartCordinate`/`dimToSize_` match the producer's
+  device write layout exactly (e.g. core 4 → coord `{mb:0,out:1600}` size
+  `{128,1600}`). dataOUT matches the consumer's read layout. `assert_partition`
+  passes; the offline cells (256) tile the consumer exactly.
+- The DCG **transfer-function permutation** is correct: `p → consumers [8*(p%4),
+  8*(p%4)+8)`, `maxConsumers:8` — the right asymmetric scatter, real cross-core
+  ring (not a same-core no-op). Consumer-base 409600 IS threaded (l3lu `LBR=3200`
+  sticks = 409600/128). So memId routing + consumer read base are right.
+
+**The mismatch is (b): the destination column offset (producer `l3su` EBR) is
+linearised by CORE INDEX, ignoring the out-band.** Decoded `EBR` per `@core:N`:
+`EBR = 3200 * core_id` (0, 3200, 6400, 9600, 12800, …, 99200) — i.e. dest col =
+`core_id * 1600`. CORRECT is `3200 * (core_id // 4)` (dest col = `out_band * 1600`):
+cores 0–3 are all out-band 0 → must land at col 0, but get cols 0/1600/3200/4800;
+cores ≥8 write past the consumer's 12800-wide row (out of bounds). So each consumer
+row gets one ~1600-col window written (scrambled) and ~11200 cols stay zero →
+`silu(≈0)=0` → output ≈ 0. **Matches the device `mean|reshard|≈0`.**
+
+**This is a DCG bug downstream of subpiece address computation, NOT a frontend
+piece-field bug.** Hand-replaying `setPlacementInfoSubPiece` (stcdpOp.cpp:2676 —
+`offset = (subPiece.coord − piece.coord) * eleToSkip * bytesPerStick`, walking
+layout `[mb_,out_]`) on these exact pieces yields the CORRECT dest offsets
+(0,0,0,0,3200,3200,3200,3200 = `3200*(p//4)`). The emitted EBR (`3200*p`) diverges
+from that by a core-linear stride → the corruption is in the later EBR
+register-packing for a many-producer → one-consumer-column scatter
+(`splitDtTableEntriesForSegCoreGrps` / `reoderSubPieceSegCores` /
+`computeMulticastOptMetadata`, transfer_compute.cpp + stcdpOp.cpp), which the
+proven 1-D mirror cases (attention/MoE: stick-dim only, 1:1 `i→31-i`,
+`maxConsumers:1`) never exercised. The 2-D (row-band × col-band) asymmetric scatter
+is genuinely new and hits this linearisation.
+
+**No frontend `pieces.py` / `build_asymmetric_reshard_bridge` field fixes it (CPU-tested):**
+- splitting each consumer `out:1` piece into 8 per-out-band sub-pieces → identical
+  senprog/EBR (no change);
+- forcing producer/consumer mb-coord local (rows.start=0) → breaks the §4
+  row-overlap (`maxConsumers:32`) and dxp **segfaults**.
+The producer's global mb-coordinate is load-bearing for the overlap match yet, via
+the full-row `mb` skip in the address flatten, is also what the EBR packer
+mis-linearises — the two cannot be reconciled from the piece fields alone.
+
+**Proven CPU-side:** PieceInfo correct; permutation correct; consumer base threaded;
+EBR mis-linearised by core index (`3200*core` vs `3200*(core//4)`) = the exact
+zero-output mechanism. **Needs parent's device run:** confirm an EBR fix (or a 1-D
+restructure of the edge) restores value-correctness. **Recommended fix:** a
+deeptools EBR-packing fix (use the per-subpiece computed StartAddr, don't
+re-linearise by core index for many→one-column scatters), OR pivot to the 1-D /
+co-assignment path that never triggers the 2-D EBR packer. Debug dirs left at
+`/tmp/swiglu_splice_dbg` (un-split) and `/tmp/swiglu_splice_fix` (split-consumer).
