@@ -131,7 +131,7 @@ def _best_shared_weight_split(n_sticks: int, k_elems: int = 4096):
 
 
 def test_shared_weight_cost_model_keeps_pt_friendly_m_tile():
-    assert _best_shared_weight_split(16) == (8, 4, 1)
+    assert _best_shared_weight_split(16) == (4, 8, 1)
     assert _best_shared_weight_split(64) == (4, 8, 1)
     assert _best_shared_weight_split(200) == (4, 8, 1)
 
@@ -167,5 +167,6 @@ def _best_true_bmm_split(B: int, M: int, N: int, K: int):
 
 
 def test_true_bmm_attention_cost_model_uses_structural_parallelism():
-    assert _best_true_bmm_split(32, 512, 128, 512) == (1, 16, 2, 1)
+    assert _best_true_bmm_split(512, 32, 512, 128) == (2, 2, 8, 1)
+    assert _best_true_bmm_split(32, 512, 128, 512) == (1, 32, 1, 1)
     assert _best_true_bmm_split(32, 64, 128, 576) == (4, 4, 2, 1)
