@@ -12,38 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Emission / integration layer for the asymmetric reshard (ported substrate).
+"""Emission layer for the asymmetric core-to-core reduction reshard.
 
-Ports the device-proven emission helpers from
-``origin/attention-overlap:torch_spyre/_inductor/codegen/onchip_bridge.py`` and
-``onchip_realize.py`` so the offline ``pieces``/``cells`` core can be folded into
-a real mixed (DL + data-op) SuperDSC bundle. Pure dict surgery -- torch-free, no
-device, no dxp.
+Synthesizes the device data-movement program for the 2-D ``mul -> down_proj``
+reduction-input edge: an ``STCDPOpLx`` (LX -> RIU ring -> LX) that gathers the
+producer's ``{mb:4, out:8}`` co-split output onto the cores that reduce over
+``K=12800``. Pure dict surgery -- torch-free, no device, no dxp.
 
-What is ported (kept byte-shape-identical to the attention-overlap reference, the
-2048-case-validated schema):
-  - ``_stcdp_op`` / ``mixed_schedule`` -- the STCDPOpLx datadsc op + schedule rows;
-  - ``_labeled_ds`` / ``_datadsc`` -- the dataIN/dataOUT labeledDs + datadsc wrap;
-  - ``build_asymmetric_reshard_bridge`` -- single STCDP, N producer pieces in,
-    M consumer pieces out (the DCG overlap-cell engine does the cells);
-  - ``LxFlip`` / ``apply_lx_flip`` -- flip a DL labeledDs to LX-resident;
-  - the bundle-splice (``splice_reshard``) that folds the bridge into the consumer
-    SDSC (datadscs_ + coreIdToDscSchedule + opFuncsUsed_), mirroring
-    ``realize_onchip_handoff``.
+Two emission shapes:
+  - :func:`build_asymmetric_reshard_bridge` -- single ``STCDPOpLx``, N producer
+    pieces in, M consumer pieces out (the DCG overlap-cell engine does the
+    cells). Hands DCG the full 2-D scatter.
+  - :func:`build_perband_reshard_bridge` -- one ``STCDPOpLx`` per column band
+    (``src_col == dst_col`` within each band; pure row redistribution).
 
-Generalization over the attention-overlap reference: that ``_partition_pieces``
-is 1-D (stick dim only, other dims full). The SwiGLU edge is genuinely 2-D
-(consumer rows are mb-banded 32 ways, producer rows mb-banded 4 ways), so this
-port consumes the 2-D :class:`~ab.reshard.pieces.Piece` objects directly via
-``pieces_to_pieceinfo`` instead of the 1-D ``owners/starts/lengths`` triple.
+Two splice shapes:
+  - :func:`splice_reshard` -- folds the STCDP into the consumer SDSC as a mixed
+    (DL + data-op) SuperDSC. REJECTED by harvest dxp (``SdscTree.cpp:152``
+    "Datadsc not allowed, use dldsc"); kept for reference / cross-check.
+  - :func:`splice_reshard_standalone` -- emits the STCDP as its OWN pure-data-op
+    SDSC step, routed through dxp's ``dxp.cpp:255`` (``dscs_==0 &&
+    dataOpdscs_>0 -> dcg.runDcg``) branch. This is the live path.
 
-cf67411 API drift (see README "Port drift"): cf67411 has NO ``onchip_*`` modules
-and NO ``restickify_ring``/``restickify_cost`` -- the whole substrate is net-new
-from attention-overlap. So this is a SELF-CONTAINED port (it does not import any
-cf67411 onchip API); the only live cf67411 coupling is the SDSC-JSON SCHEMA that
-``codegen/compute_ops.generate_sdsc`` emits, which the splice rewrites in place.
-The integration layer is offline-validated for SHAPE only; folding it into a real
-compile + accepting it in dxp is # DEVICE-VALIDATE (see README).
+All labeledDs are pure-LX (``isExternal_:0``, ``hbmSize_:0``) so the move stays
+on the RIU ring (the ``L3_STU``/``L3_LDU`` legs). :func:`apply_lx_flip` flips a
+DL labeledDs to LX-resident and clears the HBM-layout inter-core gap.
 """
 
 from __future__ import annotations
@@ -53,13 +46,13 @@ from collections.abc import Mapping, Sequence
 
 from .pieces import Piece, pieces_to_pieceinfo
 
-# --- Constants (ported verbatim from onchip_bridge.py / onchip_realize.py) ----
+# --- Constants (the device-proven STCDPOpLx schema) --------------------------
 DATA_FORMAT = "SEN169_FP16"
 WORD_LENGTH = 2
 LX_CAPACITY_BYTES = 2 << 20  # 2 MB per-core LX (AIU 1.0)
 STICK_BYTES = 128
-# Per-core LX byte span declared inside each data-op labeledDs (matches the
-# splice_2048_stcdp DATAOP_LX_SIZE); DL-DSC LX size sentinel.
+# Per-core LX byte span declared inside each data-op labeledDs; DL-DSC LX size
+# sentinel.
 DATAOP_LX_SIZE = 2 << 20
 DL_LX_SENTINEL = 2147483647
 
@@ -78,15 +71,17 @@ class LxFlip:
 
 
 def _stcdp_op() -> dict:
-    """The STCDPOpLx op stub (ported verbatim)."""
+    """The STCDPOpLx op stub."""
     return {"name": "STCDPOpLx"}
 
 
 def mixed_schedule(num_dataops: int, num_cores: int) -> dict:
     """coreIdToDscSchedule rows: each data-op (before-sync), then the DL op.
 
-    Ported verbatim from onchip_bridge.mixed_schedule. Row k for data-op k is
-    ``[k, -1, 1 if k>0 else 0, 1]``; the final ``[-1, 0, 1, 0]`` is the DL op.
+    Row k for data-op k is ``[k, -1, 1 if k>0 else 0, 1]``; the final
+    ``[-1, 0, 1, 0]`` is the DL op. Field order is
+    ``[datadsc_idx, dldsc_idx, before_sync, after_sync]`` (the importJsonStr
+    layout, ``superdsc.cpp:744-762`` -- the authoritative parser).
     """
     rows = []
     for k in range(num_dataops):
@@ -106,8 +101,7 @@ def _labeled_ds(
 ) -> dict:
     """One labeledDs (dataIN_L0 / dataOUT_L0) with caller-supplied PieceInfo.
 
-    Ported from onchip_bridge._labeled_ds, but takes the rendered ``piece_info``
-    directly (the 2-D :class:`Piece` list) instead of recomputing equal chunks.
+    Pure-LX (``isExternal_:0``, ``hbmSize_:0``) so the move stays on the ring.
     """
     return {
         "ldsName_": f"{pds_name}_L0",
@@ -131,10 +125,14 @@ def _labeled_ds(
 
 
 def _datadsc(
-    name: str, op: dict, dim_pool: Sequence[str], in_ld: dict, out_ld: dict,
+    name: str,
+    op: dict,
+    dim_pool: Sequence[str],
+    in_ld: dict,
+    out_ld: dict,
     num_cores: int,
 ) -> dict:
-    """One datadsc block (ported verbatim from onchip_bridge._datadsc)."""
+    """One datadsc block."""
     return {
         name: {
             "coreIdsUsed_": list(range(num_cores)),
@@ -166,13 +164,11 @@ def build_asymmetric_reshard_bridge(
 ) -> tuple[list[dict], list[str], dict]:
     """Single STCDPOpLx: N producer pieces in dataIN, M consumer pieces in dataOUT.
 
-    The 2-D generalization of ``onchip_bridge.build_asymmetric_reshard_bridge``:
-    instead of a 1-D ``owners/starts/lengths`` triple it takes the 2-D
-    :class:`Piece` lists (row-band x col-band per core) and renders them with
-    ``pieces_to_pieceinfo``. The DCG overlap-cell engine (createSubPieces) does
-    the cells; we just feed native, unequal pieces. Every owner must be
-    ``< num_cores`` (the mixed SuperDSC lives on the consumer; dxp rejects a cell
-    sourced from a core outside the consumer's active corelet set).
+    Takes the 2-D :class:`Piece` lists (row-band x col-band per core) and renders
+    them with ``pieces_to_pieceinfo``. The DCG overlap-cell engine
+    (createSubPieces) does the cells; we feed native, unequal pieces. Every owner
+    must be ``< num_cores`` (dxp rejects a cell sourced from a core outside the
+    consumer's active corelet set).
     """
     owners = [p.owner for p in producer_pieces] + [p.owner for p in consumer_pieces]
     if any(o >= num_cores or o < 0 for o in owners):
@@ -213,12 +209,10 @@ def build_perband_reshard_bridge(
     """One STCDPOpLx per column band -- the per-band decomposition of the 2-D edge.
 
     ``edges[b] = (producer_pieces_b, consumer_pieces_b)`` covers only band ``b``'s
-    columns; producer and consumer pieces in an edge share the same logical column
-    band, so each STCDP is a pure row redistribution at a fixed column (no
-    intra-row column re-placement). Emits ``len(edges)`` datadscs and a matching
-    ``mixed_schedule`` -- the multi-data-op shape (the 2-STCDP round trip uses the
-    same shape with 2). All bands read producer LX ``src_base`` and write consumer
-    LX ``dst_base``; the per-band column offset is carried by the piece
+    columns; producer and consumer pieces share the same logical column band, so
+    each STCDP is a pure row redistribution at a fixed column (no intra-row column
+    re-placement). All bands read producer LX ``src_base`` and write consumer LX
+    ``dst_base``; the per-band column offset is carried by the piece
     ``dimToStartCordinate`` (identical on src and dst), not by a base delta.
     """
     datadscs: list[dict] = []
@@ -245,7 +239,11 @@ def build_perband_reshard_bridge(
         )
         datadscs.append(
             _datadsc(
-                f"{b}_STCDPOpLx_dataop", _stcdp_op(), dim_pool, in_ld, out_ld,
+                f"{b}_STCDPOpLx_dataop",
+                _stcdp_op(),
+                dim_pool,
+                in_ld,
+                out_ld,
                 num_cores,
             )
         )
@@ -254,16 +252,15 @@ def build_perband_reshard_bridge(
 
 
 def allocate_lx_bases(
-    num_regions: int, slice_bytes: int,
-    capacity: int = LX_CAPACITY_BYTES, region0: int = 0,
+    num_regions: int,
+    slice_bytes: int,
+    capacity: int = LX_CAPACITY_BYTES,
+    region0: int = 0,
 ) -> list[int]:
-    """Non-overlapping stick-aligned LX bases (ported from onchip_bridge).
+    """Non-overlapping stick-aligned LX bases.
 
-    Packs regions back-to-back; raises ValueError if the footprint exceeds the
-    per-core LX capacity (fail-closed -- e.g. the SwiGLU producer tile
-    128*3200*2 = 800 KB; two regions = 1.6 MB fits the 2 MB LX, but the consumer
-    16*12800*2 = 400 KB band must also be checked by the caller for the chosen
-    region layout).
+    Packs regions back-to-back; raises ValueError (fail-closed) if the footprint
+    exceeds the per-core LX capacity.
     """
     aligned = _align_up(slice_bytes, STICK_BYTES)
     bases = [region0 + k * aligned for k in range(num_regions)]
@@ -276,19 +273,22 @@ def allocate_lx_bases(
     return bases
 
 
-# --- Bundle-splice: fold the bridge into the consumer SDSC (mirrors
-# realize_onchip_handoff). Pure dict surgery on the generate_sdsc JSON. ---------
+# --- Bundle-splice: fold the bridge into the consumer SDSC. Pure dict surgery. -
 
 
 def _dl_op(sdsc_json: dict) -> dict:
-    """Return the single DL op dict of an SDSC body's first dsc (ported)."""
+    """Return the single DL op dict of an SDSC body's first dsc."""
     body = sdsc_json[next(iter(sdsc_json))]
     dsc = body["dscs_"][0]
     return dsc[next(iter(dsc))]
 
 
 def _core_state_init_entry(lx_base: int) -> dict:
-    """Per-core LX coreStateInit_ entry (ported verbatim)."""
+    """Per-core LX coreStateInit_ entry.
+
+    ``ebrInit_:-1`` is the multicast sentinel; the per-band/per-piece dest column
+    is derived by the DCG packer (see the EBR carrier note in P1/P2).
+    """
     return {
         "ebrInit_": -1,
         "gtr_": {
@@ -309,10 +309,12 @@ def _core_state_init_entry(lx_base: int) -> dict:
 def apply_lx_flip(sdsc_json: dict, flip: LxFlip) -> None:
     """Flip the DL labeledDs at ``flip.ldsidx`` to LX-resident @ ``flip.lx_base``.
 
-    Ported verbatim from onchip_realize.apply_lx_flip (mirrors
-    splice_2048_stcdp._flip_tensor_to_lx): rewrites the labeledDs (memOrg_ -> lx,
-    HBM addr/size cleared, lx size sentinel, per-core coreStateInit_) and its
-    scheduleTree allocate node. In place.
+    Rewrites the labeledDs (memOrg_ -> lx, HBM addr/size cleared, lx size
+    sentinel, per-core coreStateInit_) and its scheduleTree allocate node. In
+    place. Clears the HBM-layout inter-core gap (``backGapCore_``): an LX-resident
+    tile is per-core contiguous, so the HBM-style gap (keyed by -1) is meaningless
+    in LX and makes dxp codegen fail ("AllocNode has gap in Dim, but coreId not
+    avail", dsc2.cpp:3867).
     """
     dl = _dl_op(sdsc_json)
     lds = next(e for e in dl["labeledDs_"] if e["ldsIdx_"] == flip.ldsidx)
@@ -328,11 +330,6 @@ def apply_lx_flip(sdsc_json: dict, flip: LxFlip) -> None:
     node["startAddressCoreCorelet_"]["data_"] = {
         f"[{c}, 0, 0]": str(flip.lx_base) for c in range(num_cores)
     }
-    # Clear any HBM-layout inter-core gap: an LX-resident tile is per-core
-    # contiguous, so the HBM-style backGapCore_ (keyed by -1) is meaningless in
-    # LX and makes dxp codegen fail ("AllocNode has gap in Dim, but coreId not
-    # avail", dsc2.cpp:3867 -- the LX branch needs a per-core coreId the -1 gap
-    # lacks). The matmul gate-half sub-slice carries such a gap; clear it on flip.
     node["backGapCore_"] = {}
     if "gapStickSpread_" in node:
         node["gapStickSpread_"] = {}
@@ -359,17 +356,10 @@ def splice_reshard(
 ) -> None:
     """Fold the reshard bridge into the consumer SDSC (mixed DL + data-op).
 
-    Mirrors ``realize_onchip_handoff``'s tail: flip producer-output +
-    consumer-input to LX, attach the data-op block / schedule / opFuncs to the
-    consumer body, and mark the consumer's DSC2 corelet count. In place; pure dict
-    surgery, no device. # DEVICE-VALIDATE: that dxp accepts the resulting mixed
-    bundle for this 2-D (row+col) reshard (see README "dxp gate").
-
-    REJECTED by harvest dxp: ``SdscTree.cpp:152 "Datadsc not allowed, use dldsc"``
-    -- ``SdscNode::importSdsc`` asserts every imported SDSC has an empty
-    ``dataOpdscs_``. Superseded by :func:`splice_reshard_standalone` (Option b):
-    emit the STCDP as its own pure-data-op SDSC step instead of folding it into a
-    mixed (DL + data-op) consumer SDSC.
+    REJECTED by harvest dxp (``SdscTree.cpp:152`` "Datadsc not allowed, use
+    dldsc" -- ``SdscNode::importSdsc`` asserts every imported SDSC has an empty
+    ``dataOpdscs_``). Superseded by :func:`splice_reshard_standalone`. Kept for
+    cross-check / the non-bundle-import path. In place.
     """
     apply_lx_flip(
         producer_sdsc, LxFlip(producer_out_idx, producer_base, "producer-output")
@@ -394,11 +384,9 @@ def splice_reshard(
 def dataop_schedule(num_dataops: int, num_cores: int) -> dict:
     """coreIdToDscSchedule rows for a PURE data-op SDSC (no DL row).
 
-    Each row is ``[datadsc_idx, dldsc_idx, before_sync, after_sync]`` (the
-    importJsonStr layout, superdsc.cpp:736-760). For a standalone STCDP there is
-    only the data-op (``dldsc_idx = -1``); the first op syncs neither before nor
-    after, matching the lone-op shape. Contrast :func:`mixed_schedule`, which
-    appends a trailing DL row ``[-1, 0, 1, 0]``.
+    Each row is ``[datadsc_idx, dldsc_idx, before_sync, after_sync]``. For a
+    standalone STCDP there is only the data-op (``dldsc_idx = -1``); the first op
+    syncs neither before nor after.
     """
     rows = [[k, -1, 1 if k > 0 else 0, 0] for k in range(num_dataops)]
     return {str(c): [list(r) for r in rows] for c in range(num_cores)}
@@ -413,19 +401,12 @@ def build_standalone_dataop_sdsc(
     """Wrap a STCDP datadsc into a STANDALONE pure-data-op SDSC dict.
 
     The structure dxp's pure-data-op codegen branch (dxp.cpp:255) expects:
-      - ``dscs_`` PRESENT but EMPTY -- ``importJsonStr`` (superdsc.cpp:576) early
-        returns ``false`` if the ``dscs_`` key is absent, so it must exist; the
-        pure-data-op branch keys off ``dscs_.size()==0``;
+      - ``dscs_`` PRESENT but EMPTY (``importJsonStr`` early-returns false if the
+        key is absent; the pure-data-op branch keys off ``dscs_.size()==0``);
       - ``datadscs_`` -- the STCDP datadsc list (populates ``dataOpdscs_``);
       - ``coreIdToDscSchedule`` -- data-op-only rows (no DL row);
-      - ``opFuncsUsed_`` -- ``["STCDPOpLx"]`` (validated against
-        ``EnumsConversion::stringToOpFuncs``);
+      - ``opFuncsUsed_`` -- ``["STCDPOpLx"]``;
       - ``numCoresUsed_`` -- the active core count.
-
-    Wrapped in ``{name: body}`` (the SuperDsc node-name -> body shape every
-    ``importJson`` consumer uses). # DEVICE-VALIDATE: whether harvest dxp's
-    ``importSdsc`` accepts a bundle-imported pure-data-op SDSC at all (the
-    SdscTree.cpp:152 assert reads ``dataOpdscs_.empty()`` unconditionally).
     """
     return {
         name: {
@@ -448,19 +429,15 @@ def splice_reshard_standalone(
     datadscs: list[dict],
     opfuncs: list[str],
     num_cores: int,
+    sdsc_name: str = "1b_STCDP_reshard",
 ) -> dict:
     """Option (b): flip producer-out/consumer-in to LX, return a standalone SDSC.
 
-    Unlike :func:`splice_reshard` (which folds the STCDP into the consumer SDSC
-    and is rejected by SdscTree.cpp:152), this leaves both DL SDSCs as
-    pure-DL-op (only their edge labeledDs flipped to LX-resident at bases A/B)
-    and returns a SEPARATE pure-data-op SDSC. The caller writes that SDSC as its
-    own ``sdsc_execute`` step between the producer and consumer in ``bundle.mlir``.
-
-    The standalone STCDP reads producer-LX base A (``producer_base``) and writes
-    consumer-LX base B (``consumer_base``) -- the same bases the two flips pin.
-    Returns the standalone SDSC dict (the caller serializes it). In place for the
-    two DL SDSCs.
+    Leaves both DL SDSCs as pure-DL-op (only their edge labeledDs flipped to
+    LX-resident at bases A/B) and returns a SEPARATE pure-data-op SDSC. The caller
+    writes that SDSC as its own ``sdsc_execute`` step between the producer and
+    consumer in ``bundle.mlir``. Returns the standalone SDSC dict; in place for
+    the two DL SDSCs.
     """
     apply_lx_flip(
         producer_sdsc, LxFlip(producer_out_idx, producer_base, "producer-output")
@@ -468,6 +445,4 @@ def splice_reshard_standalone(
     apply_lx_flip(
         consumer_sdsc, LxFlip(consumer_in_idx, consumer_base, "consumer-input")
     )
-    return build_standalone_dataop_sdsc(
-        "1b_STCDP_reshard", datadscs, opfuncs, num_cores
-    )
+    return build_standalone_dataop_sdsc(sdsc_name, datadscs, opfuncs, num_cores)

@@ -675,4 +675,36 @@ onchip_handoff_min_bytes: int = int(
     os.environ.get("SPYRE_ONCHIP_HANDOFF_MIN_BYTES", str(1 << 20))
 )
 
+# --- Core-to-core reduction reshard (the genuine non-co-assignable move) ---
+# Realize the 2-D co-split producer -> K-reduction consumer edge (the SwiGLU
+# mul -> down_proj) as an on-chip LX -> RIU ring -> LX gather instead of an HBM
+# round-trip. Default off; when off the planner still detects + reports the edge
+# (fail-closed observer) but emits no data-movement program.
+onchip_reduction_reshard: bool = (
+    os.environ.get("SPYRE_ONCHIP_REDUCTION_RESHARD", "0") == "1"
+)
+# Emit the reshard as one STCDPOpLx per producer out-band (src_col == dst_col,
+# no intra-row column re-placement) instead of one 2-D-scatter STCDPOpLx. The
+# per-band shape sidesteps the DCG EBR dest-column packer path; default off
+# (single 2-D scatter) until the device discriminator (P2) settles the carrier.
+onchip_reduction_reshard_perband: bool = (
+    os.environ.get("SPYRE_ONCHIP_REDUCTION_RESHARD_PERBAND", "0") == "1"
+)
+# Pinned SwiGLU mul -> down_proj reduction-reshard geometry (the worked edge):
+# producer mul output [m_rows, K] co-split {mb:m_split, out:n_split}; consumer
+# down_proj reduces over the full K (mb-banded num_cores ways). The bundle splice
+# detects the edge by the producer-output ``out`` extent == reduction_k.
+onchip_reduction_reshard_m_rows: int = int(
+    os.environ.get("SPYRE_ONCHIP_REDUCTION_RESHARD_M_ROWS", "512")
+)
+onchip_reduction_reshard_k: int = int(
+    os.environ.get("SPYRE_ONCHIP_REDUCTION_RESHARD_K", "12800")
+)
+onchip_reduction_reshard_m_split: int = int(
+    os.environ.get("SPYRE_ONCHIP_REDUCTION_RESHARD_M_SPLIT", "4")
+)
+onchip_reduction_reshard_n_split: int = int(
+    os.environ.get("SPYRE_ONCHIP_REDUCTION_RESHARD_N_SPLIT", "8")
+)
+
 install_config_module(sys.modules[__name__])

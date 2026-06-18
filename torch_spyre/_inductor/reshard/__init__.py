@@ -12,4 +12,59 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Offline core for the on-chip asymmetric core-to-core reshard (compile-study)."""
+"""On-chip core-to-core reduction reshard substrate (torch-free authoring).
+
+The 2-D ``mul -> down_proj`` reduction-input edge that flash-ws fail-closes on:
+a ``{mb:4, out:8}`` co-split producer feeding a ``K=12800`` reduction consumer,
+moved LX -> RIU ring -> LX instead of round-tripping HBM. ``pieces`` builds the
+native per-core tiles; ``substrate`` synthesizes the ``STCDPOpLx`` program and
+the standalone pure-data-op SDSC splice.
+"""
+
+from .pieces import (
+    Band,
+    Piece,
+    build_consumer_pieces,
+    build_producer_pieces,
+    build_swiglu_edge,
+    build_swiglu_perband_edges,
+    pieces_to_pieceinfo,
+    swiglu_consumer_owner,
+    swiglu_producer_owner,
+    swiglu_reshard_sources,
+)
+from .substrate import (
+    DATAOP_LX_SIZE,
+    LX_CAPACITY_BYTES,
+    LxFlip,
+    allocate_lx_bases,
+    apply_lx_flip,
+    build_asymmetric_reshard_bridge,
+    build_perband_reshard_bridge,
+    build_standalone_dataop_sdsc,
+    splice_reshard,
+    splice_reshard_standalone,
+)
+
+__all__ = [
+    "Band",
+    "Piece",
+    "build_consumer_pieces",
+    "build_producer_pieces",
+    "build_swiglu_edge",
+    "build_swiglu_perband_edges",
+    "pieces_to_pieceinfo",
+    "swiglu_consumer_owner",
+    "swiglu_producer_owner",
+    "swiglu_reshard_sources",
+    "DATAOP_LX_SIZE",
+    "LX_CAPACITY_BYTES",
+    "LxFlip",
+    "allocate_lx_bases",
+    "apply_lx_flip",
+    "build_asymmetric_reshard_bridge",
+    "build_perband_reshard_bridge",
+    "build_standalone_dataop_sdsc",
+    "splice_reshard",
+    "splice_reshard_standalone",
+]

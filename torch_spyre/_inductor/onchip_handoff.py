@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any
 
 from torch._inductor.dependencies import MemoryDep
-from torch._inductor.ir import ComputedBuffer, Operation
+from torch._inductor.ir import ComputedBuffer, Operation, Reduction
 
 from . import config
 from .logging_utils import get_inductor_logger
@@ -53,7 +53,9 @@ from .restickify_cost import (
 )
 from .onchip_realize import (
     OnChipRealization,
+    ReductionReshardRealization,
     is_same_shard,
+    realize_reduction_reshard,
     realize_same_core_handoff,
 )
 from .restickify_ring import (
@@ -97,6 +99,8 @@ class OnChipHandoffPlan:
     realizable: bool = False
     fail_closed_reason: str = FAIL_CLOSED_REASON
     realization: OnChipRealization | None = None
+    reduction_reshard: ReductionReshardRealization | None = None
+    is_reduction_input: bool = False
 
 
 def _producer_write_dep(producer: ComputedBuffer) -> MemoryDep | None:
@@ -173,6 +177,162 @@ def _ownership_identical(
     return True
 
 
+def _consumer_reduction_symbols(
+    consumer: ComputedBuffer,
+    consumer_read: MemoryDep,
+) -> set[str]:
+    """Consumer iteration symbols that are REDUCED over (not in its output).
+
+    A reduction op's iteration space is its READ ranges, so the reduction dim K
+    is present in ``consumer_read.var_names`` but carries zero coefficient in the
+    write index (it is reduced away). Returns those read-only symbols. Empty for
+    a non-reduction consumer (Pointwise output == input ranges).
+    """
+    if not isinstance(getattr(consumer, "data", None), Reduction):
+        return set()
+    writes = [
+        dep for dep in consumer.get_read_writes().writes if isinstance(dep, MemoryDep)
+    ]
+    if len(writes) != 1:
+        return set()
+    write_strides = extract_strides(writes[0].index, consumer_read.var_names)
+    return {str(v) for v in consumer_read.var_names if str(v) not in write_strides}
+
+
+def _is_reduction_input_edge(
+    consumer: ComputedBuffer,
+    consumer_read: MemoryDep,
+    producer_splits: Mapping[str, int],
+    consumer_splits: Mapping[str, int],
+    symbol_map: Mapping[str, str],
+) -> bool:
+    """True for the genuine non-co-assignable reduction-input reshard edge.
+
+    The SwiGLU ``mul -> down_proj`` edge: the producer co-splits its stick/output
+    dim (``out``, ``n_split >= 2``), that dim maps (by ``symbol_map`` / stride)
+    onto a dim the consumer REDUCES over (``K = in_``), and the consumer does NOT
+    split that dim (``K`` stays resident whole). This is exactly the edge
+    flash-ws fail-closes on -- a 2-D co-split producer feeding a K-reduction
+    consumer -- so the activation must be gathered LX -> RIU ring -> LX instead
+    of round-tripping HBM.
+    """
+    reduction_syms = _consumer_reduction_symbols(consumer, consumer_read)
+    if not reduction_syms:
+        return False
+    # symbol_map is keyed by consumer symbol -> producer symbol.
+    for cons_sym, prod_sym in symbol_map.items():
+        if cons_sym not in reduction_syms:
+            continue
+        # The producer must SPLIT this (its stick/out co-split dim) ...
+        if int(producer_splits.get(prod_sym, 1)) < 2:
+            continue
+        # ... and the consumer must NOT split the dim it reduces over.
+        if int(consumer_splits.get(cons_sym, 1)) != 1:
+            continue
+        return True
+    return False
+
+
+def _reduction_layout(
+    consumer: ComputedBuffer,
+    consumer_read: MemoryDep,
+    symbol_map: Mapping[str, str],
+    producer_splits: Mapping[str, int],
+) -> tuple[list[str], str, str] | None:
+    """Derive ``(layout, row_dim, stick_dim)`` for the reduction reshard.
+
+    The stick dim is the producer's co-split reduction dim (mapped from the
+    consumer's reduced symbol); the row dim is the remaining producer split dim
+    (``mb``). Returns producer-symbol names (the bridge it-space is the
+    producer's output buffer). ``None`` when the shape is not the expected
+    2-symbol (row, stick) layout.
+    """
+    reduction_syms = _consumer_reduction_symbols(consumer, consumer_read)
+    stick = next(
+        (
+            prod_sym
+            for cons_sym, prod_sym in symbol_map.items()
+            if cons_sym in reduction_syms
+            and int(producer_splits.get(prod_sym, 1)) >= 2
+        ),
+        None,
+    )
+    if stick is None:
+        return None
+    rows = [d for d, v in producer_splits.items() if v > 1 and d != stick]
+    if len(rows) != 1:
+        return None
+    row = rows[0]
+    return [row, stick], row, stick
+
+
+def _plan_reduction_reshard(
+    producer: ComputedBuffer,
+    consumer: ComputedBuffer,
+    consumer_read: MemoryDep,
+    producer_splits: dict[str, int],
+    consumer_splits: dict[str, int],
+    symbol_map: dict[str, str],
+    producer_coords: list[Any],
+    consumer_coords: list[Any],
+    ring_size: int,
+) -> OnChipHandoffPlan | None:
+    """Plan (and, when enabled, realize) the 2-D reduction-input reshard edge."""
+    derived = _reduction_layout(consumer, consumer_read, symbol_map, producer_splits)
+    if derived is None:
+        return None
+    layout, row_dim, stick_dim = derived
+
+    producer_sizes = op_iteration_sizes(producer)
+    consumer_sizes = op_iteration_sizes(consumer)
+    iter_sizes = {
+        row_dim: int(producer_sizes.get(row_dim, consumer_sizes.get(row_dim, 0))),
+        stick_dim: int(
+            producer_sizes.get(stick_dim, consumer_sizes.get(stick_dim, 0))
+        ),
+    }
+    if iter_sizes[row_dim] <= 0 or iter_sizes[stick_dim] <= 0:
+        return None
+
+    num_cores = math.prod(producer_splits.values())
+    realization: ReductionReshardRealization | None = None
+    if config.onchip_reduction_reshard:
+        realization = realize_reduction_reshard(
+            iter_sizes=iter_sizes,
+            layout=layout,
+            row_dim=row_dim,
+            stick_dim=stick_dim,
+            producer_splits={str(k): int(v) for k, v in producer_splits.items()},
+            consumer_splits={str(k): int(v) for k, v in consumer_splits.items()},
+            stick_size=64,
+            num_cores=num_cores,
+            producer_ldsidx=0,
+            consumer_ldsidx=0,
+            perband=config.onchip_reduction_reshard_perband,
+        )
+
+    elem_size = _element_size_bytes(producer)
+    moved = math.prod(iter_sizes.values())
+    return OnChipHandoffPlan(
+        producer_name=producer.get_name(),
+        consumer_name=consumer.get_name(),
+        shared_stick_dim=_shared_stick_dim(producer_coords, consumer_coords),
+        producer_splits={s: v for s, v in producer_splits.items() if v > 1},
+        consumer_splits={s: v for s, v in consumer_splits.items() if v > 1},
+        symbol_map=dict(symbol_map),
+        transfers=num_cores,
+        local_elements=moved // max(num_cores, 1),
+        remote_elements=moved,
+        total_byte_hops=0,
+        max_hops=0,
+        bytes_moved=moved * elem_size,
+        realizable=realization is not None,
+        realization=None,
+        reduction_reshard=realization,
+        is_reduction_input=True,
+    )
+
+
 def _plan_same_core(
     producer: ComputedBuffer,
     consumer: ComputedBuffer,
@@ -231,11 +391,9 @@ def _plan_edge(
     producer_coords = device_coordinates(producer_stl, producer_write)
     consumer_coords = device_coordinates(consumer_stl, consumer_read)
 
-    # Tier 1 only owns SAME-stick edges. A restickify-needed edge (different
-    # stick layout) is Tier 2's territory -- skip it.
-    if not stick_compatible([producer_coords, consumer_coords]):
-        return None
-
+    # The symbol map is by buffer stride on the SHARED activation buffer, so it
+    # is well-defined regardless of the stick-symbol naming (the mul names the
+    # axis ``out_``; the down-proj reduction reads it as ``in_``).
     symbol_map, reason = _consumer_to_producer_symbol_map(
         producer, producer_write, consumer_read
     )
@@ -244,6 +402,36 @@ def _plan_edge(
 
     producer_splits = decode_op_splits(producer)
     consumer_splits = decode_op_splits(consumer)
+
+    # The genuine non-co-assignable edge: a co-split producer feeding a
+    # K-reduction consumer (the SwiGLU mul -> down_proj). It is checked BEFORE
+    # the same-stick gate because it is INTENTIONALLY stick-symbol-changing
+    # (``out_`` -> reduction ``in_``); ``stick_compatible`` would skip it as a
+    # Tier-2 restickify edge, but the reshard substrate owns it. Realized only
+    # when ``config.onchip_reduction_reshard`` is set; else it stays a
+    # fail-closed observer plan.
+    if _is_reduction_input_edge(
+        consumer, consumer_read, producer_splits, consumer_splits, symbol_map
+    ):
+        plan = _plan_reduction_reshard(
+            producer,
+            consumer,
+            consumer_read,
+            producer_splits,
+            consumer_splits,
+            symbol_map,
+            producer_coords,
+            consumer_coords,
+            ring_size,
+        )
+        if plan is not None:
+            return plan
+
+    # Tier 1 only owns SAME-stick edges. A restickify-needed edge (different
+    # stick layout) that is NOT the reduction reshard above is Tier 2's
+    # territory -- skip it.
+    if not stick_compatible([producer_coords, consumer_coords]):
+        return None
 
     # Identical ownership => no cross-core ring needed. Still realizable as a
     # same-core HBM-elimination handoff (single STCDP, 18/40 edges) when realize

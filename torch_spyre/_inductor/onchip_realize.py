@@ -367,6 +367,196 @@ def is_same_shard(
     return True
 
 
+@dataclasses.dataclass(frozen=True)
+class ReductionReshardRealization:
+    """A realized 2-D core-to-core reduction reshard (the genuine ring move).
+
+    Unlike :class:`OnChipRealization` (same-shard, src_split_dim==dst_split_dim),
+    this carries a producer that co-splits two dims (``{mb, out}``) feeding a
+    consumer that reduces over the producer's stick/split dim (``K`` not split):
+    the SwiGLU ``mul -> down_proj`` edge. The datadscs/schedule come from the
+    :mod:`~torch_spyre._inductor.reshard` substrate (the CPU-proven 2-D
+    ``STCDPOpLx`` authoring); ``standalone_sdsc`` is the pure-data-op SDSC the
+    splice writes as its own ``sdsc_execute`` step (avoiding the mixed-fold
+    ``SdscTree.cpp:152`` reject).
+    """
+
+    producer_base: int
+    consumer_base: int
+    slice_bytes: int
+    producer_flip: LxFlip
+    consumer_flip: LxFlip
+    datadscs: list
+    opfuncs: list[str]
+    schedule: dict
+    standalone_sdsc: dict
+    perband: bool
+    realizable: bool = True
+
+
+def realize_reduction_reshard(
+    iter_sizes: dict[str, int],
+    layout: list[str],
+    row_dim: str,
+    stick_dim: str,
+    producer_splits: dict[str, int],
+    consumer_splits: dict[str, int],
+    stick_size: int,
+    num_cores: int,
+    producer_ldsidx: int,
+    consumer_ldsidx: int,
+    perband: bool = False,
+    capacity: int = LX_CAPACITY_BYTES,
+    region0: int = 0,
+) -> ReductionReshardRealization | None:
+    """Realize the 2-D ``mul -> down_proj`` reduction reshard, or None (fail-closed).
+
+    The genuine non-co-assignable edge flash-ws fail-closes on: the producer
+    co-splits ``{mb:m_split, out:n_split}`` (its stick/``out`` dim IS the
+    consumer's reduction ``K``), and the consumer mb-bands ``{mb:num_cores}`` and
+    reduces over the full ``K`` (not split). The move is LX -> RIU ring -> LX.
+
+    Delegates the device-program synthesis to the ``reshard`` substrate (the
+    CPU-proven 2-D ``STCDPOpLx`` authoring) rather than the same-shard
+    ``build_same_layout_bridge`` (which hardcodes ``src_split_dim==dst_split_dim``
+    and cannot express the orthogonal reshard). Fail-closes (returns ``None``)
+    on any shape it cannot map exactly: a non-2-D producer co-split, a consumer
+    that is not a single ``mb``-banded reduction, an uneven band split, or a
+    per-core LX footprint that overflows ``capacity``.
+    """
+    from .reshard import (
+        Band,
+        Piece,
+        allocate_lx_bases,
+        build_asymmetric_reshard_bridge,
+        build_consumer_pieces,
+        build_perband_reshard_bridge,
+        build_producer_pieces,
+        build_standalone_dataop_sdsc,
+    )
+
+    row_sym = row_dim
+    stick_sym = stick_dim
+    if row_sym not in iter_sizes or stick_sym not in iter_sizes:
+        return None
+    m_split = int(producer_splits.get(row_sym, 1))
+    n_split = int(producer_splits.get(stick_sym, 1))
+    cons_m_split = int(consumer_splits.get(row_sym, 1))
+    cons_n_split = int(consumer_splits.get(stick_sym, 1))
+    if m_split < 1 or n_split < 2:
+        # Not a co-split producer over the reduction (stick) dim.
+        return None
+    if cons_n_split != 1:
+        # The consumer must NOT split the dim it reduces over (K resident whole).
+        return None
+    if m_split * n_split != num_cores or cons_m_split != num_cores:
+        return None
+
+    m_rows = int(iter_sizes[row_sym])
+    k_extent = int(iter_sizes[stick_sym])
+    if m_rows % m_split or m_rows % cons_m_split or k_extent % n_split:
+        return None
+
+    # Producer owner = mb + m_split*out (the {mb:4,out:8} co-split, pinned).
+    def _producer_owner(mb_band: int, out_band: int) -> int:
+        return mb_band + m_split * out_band
+
+    def _consumer_owner(mb_band: int, out_band: int) -> int:
+        return mb_band
+
+    # Per-core LX footprint: producer tile + consumer band, two regions.
+    producer_tile_bytes = (m_rows // m_split) * (k_extent // n_split) * WORD_LENGTH
+    consumer_band_bytes = (m_rows // cons_m_split) * k_extent * WORD_LENGTH
+    slice_bytes = max(producer_tile_bytes, consumer_band_bytes)
+    try:
+        producer_base, consumer_base = allocate_lx_bases(
+            2, slice_bytes, capacity=capacity, region0=region0
+        )
+    except ValueError:
+        return None
+
+    bridge_iter = {row_sym: m_rows, stick_sym: k_extent}
+    try:
+        if perband:
+            col_step = k_extent // n_split
+            row_step = m_rows // m_split
+            cons_row_step = m_rows // cons_m_split
+            edges: list[tuple[list[Piece], list[Piece]]] = []
+            for b in range(n_split):
+                producer = [
+                    Piece(
+                        key=f"p{mb + 1}",
+                        owner=_producer_owner(mb, b),
+                        rows=Band(mb * row_step, row_step),
+                        cols=Band(b * col_step, col_step),
+                    )
+                    for mb in range(m_split)
+                ]
+                consumer = [
+                    Piece(
+                        key=f"p{c + 1}",
+                        owner=_consumer_owner(c, 0),
+                        rows=Band(c * cons_row_step, cons_row_step),
+                        cols=Band(b * col_step, col_step),
+                    )
+                    for c in range(cons_m_split)
+                ]
+                edges.append((producer, consumer))
+            datadscs, opfuncs, schedule = build_perband_reshard_bridge(
+                edges,
+                dim_pool=layout,
+                iter_sizes=bridge_iter,
+                stick_size=stick_size,
+                num_cores=num_cores,
+                lx_size=DATAOP_LX_SIZE,
+                src_base=producer_base,
+                dst_base=consumer_base,
+                layout=layout,
+                row_dim=row_sym,
+                stick_dim=stick_sym,
+            )
+        else:
+            producer_pieces = build_producer_pieces(
+                m_rows, k_extent, m_split, n_split, _producer_owner
+            )
+            consumer_pieces = build_consumer_pieces(
+                m_rows, k_extent, cons_m_split, 1, _consumer_owner
+            )
+            datadscs, opfuncs, schedule = build_asymmetric_reshard_bridge(
+                dim_pool=layout,
+                iter_sizes=bridge_iter,
+                stick_size=stick_size,
+                num_cores=num_cores,
+                lx_size=DATAOP_LX_SIZE,
+                src_base=producer_base,
+                dst_base=consumer_base,
+                layout=layout,
+                row_dim=row_sym,
+                stick_dim=stick_sym,
+                producer_pieces=producer_pieces,
+                consumer_pieces=consumer_pieces,
+            )
+    except ValueError:
+        # Owner-out-of-range / uneven band -- fail closed.
+        return None
+
+    standalone_sdsc = build_standalone_dataop_sdsc(
+        "1b_STCDP_reshard", datadscs, opfuncs, num_cores
+    )
+    return ReductionReshardRealization(
+        producer_base=producer_base,
+        consumer_base=consumer_base,
+        slice_bytes=slice_bytes,
+        producer_flip=LxFlip(producer_ldsidx, producer_base, "producer-output"),
+        consumer_flip=LxFlip(consumer_ldsidx, consumer_base, "consumer-input"),
+        datadscs=datadscs,
+        opfuncs=opfuncs,
+        schedule=schedule,
+        standalone_sdsc=standalone_sdsc,
+        perband=perband,
+    )
+
+
 # --- In-memory SDSC transform: emit the mixed bundle DURING compilation. The
 # functions below port splice_2048_stcdp into the codegen path; they are pure
 # dict surgery (torch-free) so generate_bundle and the offline gate share them.
@@ -7288,3 +7478,121 @@ def realize_onchip_handoff(
         return True
 
     return realize_pointwise_handoff(sdscs_json)
+
+
+# --- Bundle-level reduction reshard splice (the SwiGLU mul -> down_proj edge) --
+# Mirrors realize_onchip_handoff: an in-memory mutation of the SDSC list that
+# (a) flips the producer-output and consumer-input edge labeledDs to LX-resident
+# at bases A/B, and (b) inserts a STANDALONE pure-data-op STCDPOpLx SDSC between
+# them (dxp.cpp:255 dscs_==0 && dataOpdscs_>0 branch), avoiding the mixed-fold
+# SdscTree.cpp:152 reject. The standalone SDSC is inserted into sdscs_json as its
+# own {name: body} entry, so the generate_bundle write loop serializes it and the
+# bundle.mlir step loop emits it in order between producer and consumer.
+
+
+def _producer_out_extent_dl(dl: dict, out_idx: int) -> int | None:
+    """Total ``out`` extent of producer-output ``out_idx`` from its alloc node.
+
+    Multiplies the per-fold ``factor_`` of the ``out`` coordinate on the
+    producer-output HBM allocate node to recover the full logical reduction
+    extent K (= the mul output cols = the down-proj K). ``None`` if absent.
+    """
+    for node in dl.get("scheduleTree_", []):
+        if node.get("nodeType_") != "allocate" or node.get("ldsIdx_") != out_idx:
+            continue
+        coord = node.get("coordinates_", {}).get("coordInfo", {}).get("out")
+        if not coord:
+            return None
+        extent = 1
+        for fold in coord["folds"]["dim_prop_attr"]:
+            extent *= int(fold["factor_"])
+        return extent
+    return None
+
+
+def realize_reduction_reshard_bundle(
+    sdscs_json: list[dict],
+    *,
+    m_rows: int,
+    expected_k: int,
+    m_split: int,
+    n_split: int,
+    num_cores: int,
+    perband: bool = False,
+    sdsc_name: str = "1b_STCDP_reshard",
+) -> bool:
+    """Realize the SwiGLU mul -> down_proj reduction reshard in the SDSC list.
+
+    Walks producer SDSCs; for each producer-output HBM tensor whose logical
+    ``out`` extent matches ``expected_k`` (the reduction dim the down-proj
+    reduces over), finds the future consumer SDSC reading that same HBM base
+    (``_future_consumers``). Builds the 2-D reshard via
+    :func:`realize_reduction_reshard`, flips producer-out and consumer-in to LX
+    (:func:`apply_lx_flip`), and inserts the standalone pure-data-op STCDP SDSC
+    into ``sdscs_json`` immediately before the consumer. Returns True if any edge
+    was realized. Fail-closed: a producer/consumer that does not match the pinned
+    geometry is left untouched.
+    """
+    realized = False
+    p = 0
+    while p < len(sdscs_json):
+        prod = sdscs_json[p]
+        try:
+            prod_dl = _dl_op(prod)
+        except (KeyError, IndexError, StopIteration):
+            p += 1
+            continue
+        edge = None
+        for out_idx in _producer_output_indices(prod_dl):
+            if _producer_out_extent_dl(prod_dl, out_idx) != expected_k:
+                continue
+            hbm_addr = _hbm_base(prod_dl, out_idx)
+            if hbm_addr is None:
+                continue
+            consumers = _future_consumers(sdscs_json, p, hbm_addr)
+            if len(consumers) == 1:
+                edge = (out_idx, consumers[0])
+                break
+        if edge is None:
+            p += 1
+            continue
+        producer_out_idx, (cons_pos, consumer_sdsc, consumer_in_idx) = edge
+
+        realization = realize_reduction_reshard(
+            iter_sizes={"mb_": m_rows, "out_": expected_k},
+            layout=["mb_", "out_"],
+            row_dim="mb_",
+            stick_dim="out_",
+            producer_splits={"mb_": m_split, "out_": n_split},
+            consumer_splits={"mb_": num_cores, "out_": 1},
+            stick_size=STICK_SIZE,
+            num_cores=num_cores,
+            producer_ldsidx=producer_out_idx,
+            consumer_ldsidx=consumer_in_idx,
+            perband=perband,
+        )
+        if realization is None:
+            p += 1
+            continue
+
+        apply_lx_flip(prod, realization.producer_flip)
+        apply_lx_flip(consumer_sdsc, realization.consumer_flip)
+        standalone = build_standalone_reduction_reshard_sdsc(realization, sdsc_name)
+        sdscs_json.insert(cons_pos, standalone)
+        realized = True
+        # Resume scanning after the inserted SDSC (now at cons_pos).
+        p = cons_pos + 1
+    return realized
+
+
+def build_standalone_reduction_reshard_sdsc(
+    realization: "ReductionReshardRealization",
+    sdsc_name: str = "1b_STCDP_reshard",
+) -> dict:
+    """Return the standalone pure-data-op SDSC for a realized reduction reshard.
+
+    Re-keys the realization's ``standalone_sdsc`` under ``sdsc_name`` so multiple
+    edges in one bundle get distinct step names.
+    """
+    body = next(iter(realization.standalone_sdsc.values()))
+    return {sdsc_name: body}

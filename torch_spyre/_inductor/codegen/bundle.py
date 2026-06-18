@@ -47,6 +47,7 @@ from torch_spyre._inductor.onchip_realize import (
     flash_attention_value_flow_tile_rejection_reasons,
     realize_flash_attention_pointwise_handoffs,
     realize_onchip_handoff,
+    realize_reduction_reshard_bundle,
 )
 
 
@@ -148,6 +149,22 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             min_handoff_bytes=config.onchip_handoff_min_bytes,
         ):
             logger.info("Realized on-chip handoff")
+    # Core-to-core reduction reshard (the genuine non-co-assignable move): the
+    # SwiGLU mul -> down_proj K-reduction edge, gathered LX -> RIU ring -> LX.
+    # Detects the edge by the producer-output reduction extent and inserts a
+    # standalone pure-data-op STCDPOpLx SDSC between producer and consumer.
+    # Default off -> output byte-identical to before.
+    if config.onchip_reduction_reshard:
+        if realize_reduction_reshard_bundle(
+            sdscs_json,
+            m_rows=config.onchip_reduction_reshard_m_rows,
+            expected_k=config.onchip_reduction_reshard_k,
+            m_split=config.onchip_reduction_reshard_m_split,
+            n_split=config.onchip_reduction_reshard_n_split,
+            num_cores=config.sencores,
+            perband=config.onchip_reduction_reshard_perband,
+        ):
+            logger.info("Realized core-to-core reduction reshard")
     value_flow_tile = config.flash_attention_mixed_pipeline_value_flow_tile
     ifn_pair_tile = config.flash_attention_mixed_pipeline_ifn_pair_tile
     layout_xform_pair_tile = (
