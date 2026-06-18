@@ -117,11 +117,71 @@ see if DCG honours an input value instead of recomputing from `cidx`. If it does
 inductor-only fix after all; if it ignores it (likely) → the deeptools generalisation
 is required.
 
-## 6. Bottom line
+## 6. Alternatives to the mixed SDSC, and the least-invasive analysis
+
+"On-chip reshard" is the *outcome*; the mixed SDSC is one *mechanism*. Only one
+branch of the design tree actually moves data:
+
+| Mechanism | Moves data? | Deeptools cost | Hits the EBR packer? | Note |
+|---|---|---|---|---|
+| Co-assignment (`ab/coassign/`) | **no** | none | no | least invasive; covers the whole element-wise tail |
+| softmax-chain LX flip | no | none | no | same-shard persistence only |
+| **Mixed SDSC + STCDP** (this dir) | yes | §5 gate (built) + EBR fix | yes | most-proven move path |
+| Standalone data-op SDSC | yes | gate + consumer-binding (§11c) | yes | **more** invasive than mixed |
+| Gather (`InputFetchNeighbor`, l3lu) | yes | gate + ? | **shares `computeMulticastOptMetadata`** | cheap probe, not a clean escape |
+| LX-planner extension | yes | large planner rework | n/a | cleanest long-term, **most** invasive |
+| Epilogue fusion | n/a (no handoff) | needs deeptools fusion; silu×mul-into-mm **refuted** | no | limited |
+| Steer producer→consumer layout | via HBM/local | none | no | loses the matmul M-split (~1.6×) |
+
+Verified structural fact: **both the scatter (`STCDPOpLx`) and the gather
+(`InputFetchNeighbor`) route through the same `computeMulticastOptMetadata`
+packer** (`inputNeighFetchOp.cpp:553`), and the EBR `initValue` is computed for
+both `L3LU` and `L3SU` (`dcgbeCodegen.cpp:2720`). So the EBR packer is the **single
+shared chokepoint for every same-stick cross-core data-op** — you cannot dodge it
+by switching primitive, and fixing it once **generalises every move primitive at
+once**. That is the argument for the targeted packer fix over any heavier
+alternative.
+
+**Is the mixed SDSC the least-invasive way?** For SwiGLU's element-wise tail, **no**
+— co-assignment is (no move at all), and it ships. For a *genuine* cross-core move
+(non-co-assignable consumer), **yes among proven options**: the mixed fold is less
+invasive than the standalone (it makes the consumer's own input the bridge output,
+sidestepping the §11c binding gap) and far less than the planner extension; the gate
+is one file and already built; the only open cost is the localized, general EBR fix.
+**There is no non-deeptools path to a true cross-core move** — any ring data-op
+needs the gate, and 2-D co-split needs the EBR fix. Every non-deeptools option works
+by *not moving*.
+
+## 7. Is the LX-planner extension an inductor-only change? No.
+
+Split "LX planner" into its two halves:
+
+1. **Plan LX residency + coordinate addresses across SDSC boundaries** — pure
+   inductor (`onchip_softmax_chain` / `apply_lx_flip` / co-assignment do exactly
+   this, stock dxp).
+2. **Realize a cross-core move** — **not** inductor-only, and cannot be made so.
+   LX is per-core private; the *only* thing that emits ring microcode
+   (`L3_LDU`/`L3_STU`) is DCG codegen of a data-op. Inductor emits SDSC JSON; the
+   senprog is "produced **only** by dxp's post-DCC orchestration" (recipe §5).
+   Inductor literally cannot synthesize a ring transfer.
+
+So an inductor pass can **author** a move (decide it, emit the mixed SDSC — that is
+`realize_onchip_handoff`) but cannot **execute** it without the deeptools data-op
+(gate + EBR packer). Extending the LX planner to do the reshard therefore does
+**not** escape deeptools — it relocates the inductor-side work from a per-edge splice
+into a general planner, i.e. **more** inductor surface on the **same** deeptools
+floor. The only fully inductor-only "LX planner" is the **no-move** variant
+(same-shard persistence + co-assignment) — inductor-only precisely because it never
+crosses a core boundary. This is itself an argument *for* the targeted EBR-packer
+fix: same deeptools requirement, far less inductor surface, one shared chokepoint.
+
+## 8. Bottom line
 
 - **Co-assignment ships the value-correct inductor-only MLP win** (~7%, no data-op,
   no dxp gate, no EBR packer) — it realigns the divisions so no data moves.
 - **The reshard (a genuine 2-D cross-core move) is blocked by one deeptools bug:**
   the DCG EBR packer assumes `core == column-band`, true for the repo's 1-D `out:N`
   moves, false for SwiGLU's 2-D `mb×out`. The frontend is exhausted; landing it
-  needs the packer generalisation + a dxp rebuild + device validation.
+  needs the packer generalisation + a dxp rebuild + device validation. No
+  mechanism — mixed, standalone, gather, or planner — escapes that one fix, because
+  they all share the `computeMulticastOptMetadata` chokepoint.
