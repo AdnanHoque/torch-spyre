@@ -16,7 +16,10 @@ import dataclasses
 
 import sympy
 
-from torch_spyre._inductor.codegen.onchip_move import build_stcdp_datadsc
+from torch_spyre._inductor.codegen.onchip_move import (
+    _validate_lx_regions,
+    build_stcdp_datadsc,
+)
 from torch_spyre._inductor.onchip_move import (
     ONCHIP_MOVE_ATTR,
     ONCHIP_MOVE_OP_INFO_KEY,
@@ -54,12 +57,20 @@ def test_onchip_move_cells_cover_2d_matmul_to_pure_m_reshard():
     assert cells[0].dest_core == 0
     assert cells[0].dim_starts == {"d0_": 0, "d1_": 0}
     assert cells[0].dim_sizes == {"d0_": 16, "d1_": 1600}
+    assert cells[0].source_offset_bytes == 0
+    assert cells[0].dest_offset_bytes == 0
     assert cells[1].source_core == 4
     assert cells[1].dest_core == 0
+    assert cells[1].source_offset_bytes == 0
+    assert cells[1].dest_offset_bytes == 16 * 1600 * 2
     assert cells[8].source_core == 0
     assert cells[8].dest_core == 1
+    assert cells[8].source_offset_bytes == 16 * 2
+    assert cells[8].dest_offset_bytes == 0
     assert cells[64].source_core == 1
     assert cells[64].dest_core == 8
+    assert cells[64].source_offset_bytes == 0
+    assert cells[64].dest_offset_bytes == 0
 
 
 def test_onchip_move_cells_reject_ambiguous_fanout_owner():
@@ -124,7 +135,46 @@ def test_stcdp_datadsc_uses_plan_cells_as_lx_piece_info():
     assert dataop["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"] == [
         {"type": "lx", "memId": [0], "startAddr": [8 * 1024]}
     ]
+    assert dataop["labeledDs_"][0]["PieceInfo"][1]["PlacementInfo"] == [
+        {"type": "lx", "memId": [0], "startAddr": [16 * 1024 + 4096]}
+    ]
+    assert dataop["labeledDs_"][1]["PieceInfo"][1]["PlacementInfo"] == [
+        {"type": "lx", "memId": [1], "startAddr": [8 * 1024]}
+    ]
     assert len(dataop["labeledDs_"][0]["PieceInfo"]) == 4
+
+
+def test_lx_region_validation_rejects_overlap_and_overflow():
+    _validate_lx_regions(
+        producer_base=0,
+        consumer_base=1024 * 1024,
+        producer_region_bytes=512 * 1024,
+        consumer_region_bytes=512 * 1024,
+    )
+
+    try:
+        _validate_lx_regions(
+            producer_base=16 * 1024,
+            consumer_base=8 * 1024,
+            producer_region_bytes=409600,
+            consumer_region_bytes=409600,
+        )
+    except ValueError as exc:
+        assert str(exc) == "producer-consumer-lx-regions-overlap"
+    else:
+        raise AssertionError("expected overlapping LX regions to fail")
+
+    try:
+        _validate_lx_regions(
+            producer_base=0,
+            consumer_base=1536 * 1024,
+            producer_region_bytes=1024,
+            consumer_region_bytes=1024 * 1024,
+        )
+    except ValueError as exc:
+        assert str(exc) == "consumer-lx-region-exceeds-capacity"
+    else:
+        raise AssertionError("expected overflowing LX region to fail")
 
 
 def test_attach_plan_to_consumer_tolerates_frozen_ir_data():
@@ -149,6 +199,8 @@ def test_attach_plan_to_consumer_tolerates_frozen_ir_data():
         element_bytes=2,
         producer_core_count=1,
         consumer_core_count=1,
+        producer_region_bytes=32,
+        consumer_region_bytes=32,
         producer_view={},
         consumer_view={},
         cells=[],

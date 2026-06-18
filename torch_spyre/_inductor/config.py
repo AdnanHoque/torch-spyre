@@ -101,10 +101,10 @@ onchip_move_debug_dir: str = os.environ.get("SPYRE_ONCHIP_MOVE_DEBUG_DIR", "")
 onchip_move_jsonl: str = os.environ.get("SPYRE_ONCHIP_MOVE_JSONL", "")
 onchip_move_max_cells: int = int(os.environ.get("SPYRE_ONCHIP_MOVE_MAX_CELLS", "8192"))
 onchip_move_producer_lx_base: int = int(
-    os.environ.get("SPYRE_ONCHIP_MOVE_PRODUCER_LX_BASE", str(16 * 1024)), 0
+    os.environ.get("SPYRE_ONCHIP_MOVE_PRODUCER_LX_BASE", "0"), 0
 )
 onchip_move_consumer_lx_base: int = int(
-    os.environ.get("SPYRE_ONCHIP_MOVE_CONSUMER_LX_BASE", str(8 * 1024)), 0
+    os.environ.get("SPYRE_ONCHIP_MOVE_CONSUMER_LX_BASE", str(1024 * 1024)), 0
 )
 
 # Secondary SwiGLU/warp-specialization audit.  This does not change scheduling;

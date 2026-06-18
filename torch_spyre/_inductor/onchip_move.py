@@ -52,6 +52,8 @@ class OnChipMoveCell:
     dim_starts: dict[str, int]
     dim_sizes: dict[str, int]
     bytes: int
+    source_offset_bytes: int
+    dest_offset_bytes: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -69,6 +71,8 @@ class OnChipMovePlan:
     element_bytes: int
     producer_core_count: int
     consumer_core_count: int
+    producer_region_bytes: int
+    consumer_region_bytes: int
     producer_view: dict[str, Any]
     consumer_view: dict[str, Any]
     cells: list[OnChipMoveCell]
@@ -161,6 +165,70 @@ def _owner_key(
     )
 
 
+def _side_slice_geometry(
+    *,
+    view: PerCoreView,
+    owner_key: tuple[int, ...],
+    device_sizes: list[int],
+) -> tuple[dict[int, int], dict[int, int]]:
+    """Return per-device-dim start/size for one side's owning core slice."""
+
+    splits = _normalize_view_splits(view)
+    owner_dims = tuple(int(dim) for dim, _split in view.work_slice_dims)
+    slot_by_dim = dict(zip(owner_dims, owner_key))
+    starts: dict[int, int] = {}
+    sizes: dict[int, int] = {}
+    for dim, dim_size in enumerate(device_sizes):
+        split = int(splits.get(dim, 1))
+        chunk = int(dim_size) // split
+        slot = int(slot_by_dim.get(dim, 0))
+        starts[dim] = slot * chunk
+        sizes[dim] = chunk
+    return starts, sizes
+
+
+def _local_offset_bytes(
+    *,
+    cell_starts: dict[str, int],
+    cell_sizes: dict[str, int],
+    slice_starts: dict[int, int],
+    slice_sizes: dict[int, int],
+    element_bytes: int,
+) -> tuple[int, str | None]:
+    """Return the packed per-core byte offset for a cell.
+
+    DataOp DSC layoutDimOrder is fastest-to-slowest, so d0_ has stride 1,
+    d1_ has stride size(d0_), and so on.
+    """
+
+    stride = 1
+    offset_elements = 0
+    for dim in range(len(slice_sizes)):
+        start = int(cell_starts[f"d{dim}_"])
+        size = int(cell_sizes[f"d{dim}_"])
+        slice_start = int(slice_starts[dim])
+        slice_size = int(slice_sizes[dim])
+        delta = start - slice_start
+        if delta < 0 or delta + size > slice_size:
+            return 0, "cell-outside-side-slice"
+        offset_elements += delta * stride
+        stride *= slice_size
+    return offset_elements * int(element_bytes), None
+
+
+def _view_region_bytes(
+    view: PerCoreView,
+    *,
+    device_sizes: list[int],
+    element_bytes: int,
+) -> int:
+    splits = _normalize_view_splits(view)
+    elements = 1
+    for dim, dim_size in enumerate(device_sizes):
+        elements *= int(dim_size) // int(splits.get(dim, 1))
+    return elements * int(element_bytes)
+
+
 def build_onchip_move_cells(
     *,
     producer_view: PerCoreView,
@@ -233,6 +301,34 @@ def build_onchip_move_cells(
             starts[f"d{dim}_"] = int(common_index.get(dim, 0)) * chunk
             sizes[f"d{dim}_"] = chunk
         cell_bytes = math.prod(sizes.values()) * int(element_bytes)
+        producer_starts, producer_sizes = _side_slice_geometry(
+            view=producer_view,
+            owner_key=producer_key,
+            device_sizes=device_sizes,
+        )
+        consumer_starts, consumer_sizes = _side_slice_geometry(
+            view=consumer_view,
+            owner_key=consumer_key,
+            device_sizes=device_sizes,
+        )
+        source_offset, reason = _local_offset_bytes(
+            cell_starts=starts,
+            cell_sizes=sizes,
+            slice_starts=producer_starts,
+            slice_sizes=producer_sizes,
+            element_bytes=element_bytes,
+        )
+        if reason is not None:
+            return [], f"producer-{reason}"
+        dest_offset, reason = _local_offset_bytes(
+            cell_starts=starts,
+            cell_sizes=sizes,
+            slice_starts=consumer_starts,
+            slice_sizes=consumer_sizes,
+            element_bytes=element_bytes,
+        )
+        if reason is not None:
+            return [], f"consumer-{reason}"
         cells.append(
             OnChipMoveCell(
                 cell_index=cell_index,
@@ -241,6 +337,8 @@ def build_onchip_move_cells(
                 dim_starts=starts,
                 dim_sizes=sizes,
                 bytes=cell_bytes,
+                source_offset_bytes=source_offset,
+                dest_offset_bytes=dest_offset,
             )
         )
 
@@ -262,6 +360,8 @@ def _plan_json(plan: OnChipMovePlan) -> dict[str, Any]:
         "element_bytes": plan.element_bytes,
         "producer_core_count": plan.producer_core_count,
         "consumer_core_count": plan.consumer_core_count,
+        "producer_region_bytes": plan.producer_region_bytes,
+        "consumer_region_bytes": plan.consumer_region_bytes,
         "producer_view": plan.producer_view,
         "consumer_view": plan.consumer_view,
         "cell_count": len(plan.cells),
@@ -293,6 +393,8 @@ def _skip_plan(
         element_bytes=0,
         producer_core_count=_op_num_cores(producer),
         consumer_core_count=_op_num_cores(consumer),
+        producer_region_bytes=0,
+        consumer_region_bytes=0,
         producer_view=_view_to_json(producer_view or PerCoreView((), ())),
         consumer_view=_view_to_json(consumer_view or PerCoreView((), ())),
         cells=[],
@@ -396,6 +498,16 @@ def plan_onchip_move_edge(
         element_bytes=element_bytes,
         producer_core_count=_op_num_cores(producer),
         consumer_core_count=_op_num_cores(consumer),
+        producer_region_bytes=_view_region_bytes(
+            producer_view,
+            device_sizes=device_sizes,
+            element_bytes=element_bytes,
+        ),
+        consumer_region_bytes=_view_region_bytes(
+            consumer_view,
+            device_sizes=device_sizes,
+            element_bytes=element_bytes,
+        ),
         producer_view=_view_to_json(producer_view),
         consumer_view=_view_to_json(consumer_view),
         cells=cells,

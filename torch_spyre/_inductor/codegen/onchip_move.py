@@ -148,6 +148,14 @@ def build_mixed_onchip_move_sdsc(
     consumer_root = copy.deepcopy(next(iter(consumer_payload.values())))
     producer_base = int(config.onchip_move_producer_lx_base)
     consumer_base = int(config.onchip_move_consumer_lx_base)
+    producer_region_bytes = _region_bytes(plan, "producer_region_bytes", "source")
+    consumer_region_bytes = _region_bytes(plan, "consumer_region_bytes", "dest")
+    _validate_lx_regions(
+        producer_base=producer_base,
+        consumer_base=consumer_base,
+        producer_region_bytes=producer_region_bytes,
+        consumer_region_bytes=consumer_region_bytes,
+    )
     dataop_name = f"{producer_index}_OnChipMoveSTCDPOpLx"
 
     _patch_lx_endpoint(
@@ -199,6 +207,8 @@ def build_mixed_onchip_move_sdsc(
         "bytes_moved": int(plan.get("bytes_moved", 0) or 0),
         "producer_lx_base": producer_base,
         "consumer_lx_base": consumer_base,
+        "producer_region_bytes": producer_region_bytes,
+        "consumer_region_bytes": consumer_region_bytes,
         "fallback": "stock-hbm-path-when-disabled",
     }
     return {f"{producer_index}_OnChipMoveMixedSTCDP": root}
@@ -328,13 +338,15 @@ def emit_swiglu_warpspec_audit(
 
 def _piece(cell: dict[str, Any], *, source: bool, base: int) -> dict[str, Any]:
     core = int(cell["source_core"] if source else cell["dest_core"])
+    offset_key = "source_offset_bytes" if source else "dest_offset_bytes"
+    start_addr = int(base) + int(cell.get(offset_key, 0) or 0)
     return {
         "key_": f"p{int(cell['cell_index']) + 1}",
         "dimToStartCordinate": dict(cell["dim_starts"]),
         "dimToSize_": dict(cell["dim_sizes"]),
         "validGap_": _valid_gap(cell["dim_sizes"]),
         "PlacementInfo": [
-            {"type": "lx", "memId": [core], "startAddr": [int(base)]}
+            {"type": "lx", "memId": [core], "startAddr": [start_addr]}
         ],
     }
 
@@ -370,8 +382,42 @@ def _labeled_ds(
     }
 
 
-def _valid_gap(sizes: dict[str, Any]) -> dict[str, int]:
-    return {str(dim): 0 for dim in sizes}
+def _valid_gap(sizes: dict[str, Any]) -> dict[str, list[list[int]]]:
+    return {str(dim): [[int(size), 0]] for dim, size in sizes.items()}
+
+
+def _region_bytes(plan: dict[str, Any], explicit_key: str, offset_side: str) -> int:
+    explicit = int(plan.get(explicit_key, 0) or 0)
+    if explicit > 0:
+        return explicit
+    offset_key = f"{offset_side}_offset_bytes"
+    cells = list(plan.get("cells", []) or [])
+    if not cells:
+        return 0
+    return max(
+        int(cell.get(offset_key, 0) or 0) + int(cell.get("bytes", 0) or 0)
+        for cell in cells
+    )
+
+
+def _validate_lx_regions(
+    *,
+    producer_base: int,
+    consumer_base: int,
+    producer_region_bytes: int,
+    consumer_region_bytes: int,
+) -> None:
+    if producer_base < 0 or consumer_base < 0:
+        raise ValueError("lx-base-negative")
+    producer_end = producer_base + producer_region_bytes
+    consumer_end = consumer_base + consumer_region_bytes
+    if producer_end > _LX_SIZE_BYTES:
+        raise ValueError("producer-lx-region-exceeds-capacity")
+    if consumer_end > _LX_SIZE_BYTES:
+        raise ValueError("consumer-lx-region-exceeds-capacity")
+    if producer_region_bytes and consumer_region_bytes:
+        if max(producer_base, consumer_base) < min(producer_end, consumer_end):
+            raise ValueError("producer-consumer-lx-regions-overlap")
 
 
 def _word_length(arg: TensorArg) -> int:
