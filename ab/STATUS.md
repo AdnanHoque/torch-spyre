@@ -20,7 +20,11 @@ device:
   proven (compiles on the §5-patched dxp, runs, real cross-core ring senprog,
   ~12% faster) but **value-broken by a DCG EBR packing bug** (`l3su` dest column
   linearised `3200*core` vs `3200*(core//4)`; frontend PieceInfo/permutation/base
-  all correct). Needs a deeptools EBR fix — see `ab/reshard/PATH_A_PROGRESS.md`.
+  all correct). The per-band multi-STCDP decomposition (the strongest frontend
+  idea) produces the **same** broken EBR → frontend exhausted, it's the deeptools
+  packer. Why the on-chip repo never hit it (1-D `out:N` → `core==column`) and why
+  the mixed dsc is needed at all: **`ab/reshard/MECHANISM_AND_BLOCKER.md`**. Running
+  log + EBR root-cause: `ab/reshard/PATH_A_PROGRESS.md`.
 
 Everything below is the historical handoff that led here.
 
