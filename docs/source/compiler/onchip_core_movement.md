@@ -34,14 +34,20 @@ The v1 carrier is mixed SuperDSC with an `STCDPOpLx` data-op row inserted before
 the consumer compute row. This is a proof carrier, not necessarily the final
 interface.
 
+The carrier now records packed per-core source and destination byte offsets for
+each movement cell. Realization rejects overlapping or over-capacity LX regions
+before emitting mixed SDSC JSON.
+
 ## Validation Snapshot
 
-On the `1x512x4096` MLP/SwiGLU benchmark, planner-only compilation produced:
+On the `1x512x4096` MLP/SwiGLU benchmark, fresh compilation with planner and
+realization enabled produced:
 
-- 3 planned movement edges.
-- 5 skipped edges.
-- Each planned `{mb:4, out:8} -> pure-M` edge has 256 common-refinement cells.
-- Each planned edge moves 13,107,200 bytes.
+- 1 realized movement edge in the emitted mixed SDSC.
+- 256 common-refinement cells for the `{mb:4, out:8} -> pure-M` reshard.
+- 13,107,200 bytes moved.
+- Producer and consumer LX regions of 409,600 bytes each, placed at
+  non-overlapping bases.
 - The down-projection edge is skipped as `consumer-duplicate-owner`, which is
   intentional for v1.
 
@@ -55,7 +61,7 @@ That makes warp specialization a plausible follow-on after movement is
 value-correct: PT-heavy matmul work and SFP-heavy pointwise work are separate
 operations in the generated SuperDSC sequence.
 
-## Current Backend Blocker
+## Backend Status
 
 With realization enabled, Torch-Spyre emits a mixed SuperDSC containing:
 
@@ -63,20 +69,41 @@ With realization enabled, Torch-Spyre emits a mixed SuperDSC containing:
 - two DL compute rows in `dscs_`;
 - `coreIdToDscSchedule` entries for all participating cores.
 
-The installed DeepTools/DXP in the validation pod rejects that form during
-import:
+The clean DeepTools/DXP worktree `/tmp/deeptools-swiglu-ws` has branch
+`swiglu-ws-dxp` commit `aa101d41e6`:
+
+```text
+Allow scheduled mixed data-op SDSCs
+```
+
+It builds `dxp_standalone` successfully with `DT_USE_DCC_DDC=ON`, reusing
+`/home/adnan-cdx/dt-inductor-mixed/llvm-project` and
+`/home/adnan-cdx/dt-inductor-mixed/build/llvm`.
+
+That patch clears the original import rejection:
 
 ```text
 DtException: Datadsc not allowed, use dldsc
 ```
 
-The required backend change is to allow `datadscs_` only for scheduled mixed
-SDSCs that also contain DL `dscs_` and a non-empty `coreIdToDscSchedule`, then
-route those SDSCs through `runDcgForDataOpsDlOps`.
+The current backend blockers are later in DXP/DDC:
+
+```text
+DtException: isValidDimParam(...) && "Expect the chunk dimension has a valid parameter value."
+file dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1200
+```
+
+With `DXP_SKIP_MIXED_MULTI_DL_L3_SCHEDULER=1`, the next blocker is:
+
+```text
+DtException: Missing below-lx schedule insert block
+file ddc/ddcv1.cpp line 2241
+```
 
 ## Next Step
 
-Build and validate a DeepTools/DXP with the scheduled mixed-SDSC import path.
-After DXP accepts the emitted `STCDPOpLx`, run value-correctness tests with
-patterned tensors before evaluating performance or warp-specialization
-scheduling.
+Fix or bypass the mixed multi-DL scheduler path in a principled way, then teach
+DDC how to create the below-LX schedule insert block for scheduled mixed
+DL/data-op SDSCs. After DXP emits runnable code for the mixed carrier, run
+patterned value-correctness tests before evaluating performance or warp-
+specialization scheduling.
