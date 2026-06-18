@@ -1,0 +1,278 @@
+# ============================================================================
+# P3 WARP-SPECIALIZATION LAYER  (append to reshard/substrate.py)
+#
+# K-chunked, software-pipelined mixed SuperDSC for the SwiGLU mul->down-proj
+# reshard edge. Overlaps PT (down-proj partial-matmul) || L3 (RIU ring gather)
+# || SFP (any epilogue) by interleaving per-core schedule steps INSIDE one SDSC
+# body via coreIdToDscSchedule, instead of gather -> barrier -> compute.
+#
+# Stacks ADDITIVELY on the P2 value-correct serial reshard: same PieceInfo /
+# permutation / EBR fix (each K-chunk reuses the same per-subpiece dest column
+# the fix supplies, sliced over K -- the down-proj K-accumulate is associative,
+# so partial-sum-per-chunk is value-identical to the monolithic reduction).
+#
+# Built on flash-ws onchip_bridge.flash_pipeline_schedule (:375-413) row shape
+# [datadsc_idx, dldsc_idx, before_sync, after_sync] and its overlap_candidate
+# (data_idx>=0 AND dsc_idx>=0) -> deeptools isLabeledDsLXNeighbor in-loop fetch.
+# We do NOT reinvent the schedule machinery; we specialise it for a K-reduction
+# consumer paired with a K-shard ring gather (flash-ws's lanes are KV PREFETCH,
+# never a reduction-INPUT gather -- the one piece it lacks).
+# ============================================================================
+
+# FIELD ORDER IS LOAD-BEARING. The deeptools JSON parser
+# (deeptools-onchip/dsc/superdsc.cpp:744-762) reads c==2 -> before_sync,
+# c==3 -> after_sync, matching the ctor superdsc.h:39
+# DscScheduleStep(datadsc_idx, dldsc_idx, before_sync, after_sync). The
+# L3DlOpsScheduler.cpp:378 comment "[..., after_sync, before_sync]" and the
+# RESHARD_DESIGN.md §5.2 prose label "[..., after_sync, before_sync]" are BOTH
+# STALE/SWAPPED -- the parser is authoritative. flash-ws emits before-then-after
+# (onchip_bridge.py:355,363-371) matching the parser; we do the same.
+
+
+def warpspec_pipeline_schedule(num_chunks: int, num_cores: int) -> dict:
+    """Depth-1 double-buffered (ping/pong) PT||L3 pipeline over K chunks.
+
+    The AOT spelling of a CUTLASS producer(TMA gather)/consumer(MMA) mainloop on
+    the ONE reshard edge. Row = [datadsc_idx, dldsc_idx, before_sync, after_sync]
+    (parser order, superdsc.cpp:744-762). datadsc_idx g = the per-K-chunk STCDP
+    gather; dldsc_idx g = the per-K-chunk partial-matmul-accumulate DL op.
+
+    Pipeline (G = num_chunks):
+
+      PROLOGUE  [0,   -1, 0, 1]          gather chunk 0 into bank A; after_sync=1
+                                         so the FIRST compute waits on this land.
+      STEADY g = 1..G-1, two rows each:
+                [g,   -1, 0, 0]          issue gather chunk g into the OTHER bank,
+                                         async on the ring, NO before/after barrier
+                                         -> runs CONCURRENT with the compute below.
+                [-1, g-1, 1, 1]          compute partial-matmul on chunk g-1 (the
+                                         already-landed bank). before_sync=1 gates
+                                         it on the prior bank's gather; after_sync=1
+                                         publishes the bank for reuse two rows later.
+      EPILOGUE  [-1, G-1, 1, 0]          compute the last chunk after its gather
+                                         lands (before_sync=1, no successor).
+
+    The key warp-spec move: before_sync is OFF the steady gather (row 1 of each
+    steady pair, [g,-1,0,0]) and ON the compute. A row with BOTH a gather index
+    AND the compute index is NOT emitted -- deeptools' overlap interpretation
+    (isLabeledDsLXNeighbor, L3DlOpsScheduler.cpp:390 "dldsc_idx==dscIndex &&
+    datadsc_idx>=0") would place the gather INSIDE that compute's innermost loop
+    as a same-step neighbor fetch, which is the in-op fetch, not a pipelined
+    prefetch of the NEXT chunk. We want chunk g's gather to overlap chunk g-1's
+    compute, so they are SEPARATE rows with the barrier moved onto compute. The
+    concurrency therefore rests on deeptools issuing the async gather row on the
+    ring engine without blocking the next compute row when before_sync=0 on the
+    gather -- this is the OPEN device question (see verification, §risk-1).
+
+    Single-chunk (G==1) degenerates to the serial mixed_schedule shape
+    [[0,-1,0,1],[-1,0,1,0]] -- identical to the P2 value-correct base, so the
+    flag-off / G==1 path is byte-equivalent and fail-safe.
+    """
+    if num_chunks <= 0:
+        raise ValueError(f"num_chunks must be positive, got {num_chunks}")
+    if num_cores <= 0:
+        raise ValueError(f"num_cores must be positive, got {num_cores}")
+
+    rows: list[list[int]] = []
+    # PROLOGUE: gather chunk 0; after_sync so the first compute waits on it.
+    rows.append([0, -1, 0, 1])
+    # STEADY: prefetch chunk g while computing chunk g-1.
+    for g in range(1, num_chunks):
+        rows.append([g, -1, 0, 0])        # async gather chunk g (no barrier)
+        rows.append([-1, g - 1, 1, 1])    # compute chunk g-1 (landed bank)
+    # EPILOGUE: compute the final chunk after its gather has landed.
+    rows.append([-1, num_chunks - 1, 1, 0])
+    return {str(c): [list(r) for r in rows] for c in range(num_cores)}
+
+
+def k_chunk_count(k_extent: int, num_chunks_hint: int, stick_size: int,
+                  num_cores: int) -> int:
+    """Clamp the requested chunk count so each per-core K-slice >= 1 stick.
+
+    Sub-stick chunks (G too large -> per-core slice < stick_size fp16) regress
+    the ring move and pile on per-chunk L3_SYNC overhead (RESHARD_DESIGN §5.4).
+    The consumer down-proj reduces over the full K=k_extent and reads it
+    contiguously per core (cons_split out=1), so a chunk's per-core slice is
+    k_extent // G elements; gate G so that >= stick_size and G | k_extent.
+    """
+    if num_chunks_hint <= 0:
+        raise ValueError(f"num_chunks_hint must be positive, got {num_chunks_hint}")
+    g = num_chunks_hint
+    while g > 1 and (k_extent % g != 0 or k_extent // g < stick_size):
+        g -= 1
+    return g
+
+
+def chunk_consumer_pieces(consumer_pieces: Sequence[Piece], chunk: int,
+                          num_chunks: int, k_extent: int) -> list[Piece]:
+    """Window consumer pieces onto K-chunk ``chunk`` along the stick (K) dim.
+
+    The consumer down-proj reduces over K = the ``out_`` stick dim; a K-chunk is
+    a contiguous [chunk*step, (chunk+1)*step) sub-range of every consumer piece's
+    col band. Producer pieces are NOT windowed (the gather pulls each producer
+    core's full owned column band; only the CONSUMER landing/compute is sliced
+    over K -- the producer co-split {mb:4,out:8} is preserved). Returns new
+    Pieces with the col band narrowed to the chunk and a chunk-tagged key.
+    """
+    if k_extent % num_chunks != 0:
+        raise ValueError(f"k_extent {k_extent} not divisible by {num_chunks}")
+    step = k_extent // num_chunks
+    lo = chunk * step
+    out: list[Piece] = []
+    for p in consumer_pieces:
+        c0 = max(p.cols.start, lo)
+        c1 = min(p.cols.end, lo + step)
+        if c1 <= c0:
+            continue
+        out.append(
+            Piece(
+                key=f"{p.key}_k{chunk}",
+                owner=p.owner,
+                rows=p.rows,
+                cols=Band(c0, c1 - c0),
+            )
+        )
+    return out
+
+
+def build_warpspec_reshard_bridge(
+    dim_pool: Sequence[str],
+    iter_sizes: Mapping[str, int],
+    stick_size: int,
+    num_cores: int,
+    lx_size: int,
+    src_base: int,
+    bank_bases: Sequence[int],
+    layout: Sequence[str],
+    row_dim: str,
+    stick_dim: str,
+    producer_pieces: Sequence[Piece],
+    consumer_pieces: Sequence[Piece],
+    k_extent: int,
+    num_chunks: int,
+) -> tuple[list[dict], list[str], dict]:
+    """G per-K-chunk STCDP gathers into ping/pong banks + the warp-spec schedule.
+
+    The K-chunked generalisation of :func:`build_asymmetric_reshard_bridge`:
+    instead of one full-K STCDP it emits ``num_chunks`` STCDPs, gather ``g``
+    landing chunk ``g`` of the consumer pieces into ``bank_bases[g % 2]`` (depth-1
+    double buffer). Producer pieces are read at ``src_base`` every chunk (the
+    producer LX is persistent across the pipeline); the consumer landing band is
+    windowed to chunk ``g`` by :func:`chunk_consumer_pieces`. Returns the data-op
+    list + opfuncs + the pipelined ``coreIdToDscSchedule``. The caller pairs these
+    G gathers with the consumer DL op tiled into G partial-matmul-accumulate DSCs
+    (dldsc index ``g`` reduces over chunk ``g``'s K-slice) via
+    :func:`build_warpspec_mixed_sdsc`.
+
+    ``bank_bases`` must be exactly 2 non-overlapping stick-aligned LX bases (use
+    ``allocate_lx_bases(2, chunk_bytes)``); each bank holds ONE K-chunk's
+    consumer band (k_extent/G * rows_per_core), so the live footprint is 2 banks,
+    NOT the full-K 3.2 MB (RESHARD_DESIGN §5.2: 3.2 MB / G=4 * 2 = 1.6 MB <= 2 MB).
+    """
+    if len(bank_bases) != 2:
+        raise ValueError(f"warp-spec needs exactly 2 ping/pong banks, got "
+                         f"{len(bank_bases)}")
+    owners = [p.owner for p in producer_pieces] + [
+        p.owner for p in consumer_pieces
+    ]
+    if any(o >= num_cores or o < 0 for o in owners):
+        raise ValueError(
+            f"owners out of range [0,{num_cores}): {sorted(set(owners))}"
+        )
+
+    datadscs: list[dict] = []
+    for g in range(num_chunks):
+        dst_base = bank_bases[g % 2]
+        cons_g = chunk_consumer_pieces(consumer_pieces, g, num_chunks, k_extent)
+        in_pi = pieces_to_pieceinfo(
+            producer_pieces, layout, row_dim, stick_dim, iter_sizes, src_base
+        )
+        out_pi = pieces_to_pieceinfo(
+            cons_g, layout, row_dim, stick_dim, iter_sizes, dst_base
+        )
+        in_ld = _labeled_ds(
+            "dataIN", layout, stick_dim, iter_sizes, stick_size, lx_size, in_pi
+        )
+        out_ld = _labeled_ds(
+            "dataOUT", layout, stick_dim, iter_sizes, stick_size, lx_size, out_pi
+        )
+        datadscs.append(
+            _datadsc(
+                f"{g}_STCDPOpLx_kchunk{g}_dataop", _stcdp_op(), dim_pool,
+                in_ld, out_ld, num_cores,
+            )
+        )
+    opfuncs = ["STCDPOpLx"] * len(datadscs)
+    schedule = warpspec_pipeline_schedule(num_chunks, num_cores)
+    return datadscs, opfuncs, schedule
+
+
+def build_warpspec_mixed_sdsc(
+    name: str,
+    datadscs: Sequence[dict],
+    opfuncs: Sequence[str],
+    schedule: Mapping[str, Sequence[Sequence[int]]],
+    compute_dscs: Sequence[dict],
+    num_cores: int,
+) -> dict:
+    """Wrap G K-chunk gathers + G partial-matmul DSCs into ONE mixed SuperDSC.
+
+    Mirrors flash-ws ``onchip_bridge.build_flash_attention_pipeline_mixed_sdsc``
+    (:727-784): validates every schedule row references an existing data-op or
+    compute DSC, computes ``overlap_candidate`` (any row with BOTH indices set --
+    here always False, the pipeline keeps gather and compute on SEPARATE rows so
+    the gather prefetches the NEXT chunk rather than being folded in-loop as a
+    same-step neighbor fetch), and emits the SuperDSC body.
+
+    NOTE on the dxp dispatch path: unlike the P2 SERIAL reshard which routes
+    through the standalone pure-data-op SDSC (dxp.cpp:255, dscs_==0) to dodge the
+    mixed-fold assert SdscTree.cpp:152 "Datadsc not allowed, use dldsc", the
+    warp-spec body is INTRINSICALLY mixed (it MUST co-schedule gather||compute in
+    one body). It therefore depends on the §5 dxp import-gate patch that fires
+    mixed dispatch on has_dsc_schedule regardless of step count (already built at
+    /home/adnan/dt-inductor/build/deeptools-onchip/dxp). The standalone path
+    CANNOT express overlap (a pure-data-op SDSC has no DL row to overlap with).
+    """
+    if not name:
+        raise ValueError("name is required")
+    if not compute_dscs:
+        raise ValueError("at least one compute DSC is required")
+    if num_cores <= 0:
+        raise ValueError(f"num_cores must be positive, got {num_cores}")
+
+    data_count = len(datadscs)
+    dsc_count = len(compute_dscs)
+    overlap_candidate = False
+    for core_id, rows in schedule.items():
+        int(core_id)
+        for row in rows:
+            if len(row) != 4:
+                raise ValueError(f"schedule row must have 4 fields, got {row}")
+            data_idx, dsc_idx = int(row[0]), int(row[1])
+            if data_idx == -1 and dsc_idx == -1:
+                raise ValueError(f"empty schedule row is invalid: {row}")
+            if data_idx < -1 or data_idx >= data_count:
+                raise ValueError(f"data-op index out of range: {row}")
+            if dsc_idx < -1 or dsc_idx >= dsc_count:
+                raise ValueError(f"compute DSC index out of range: {row}")
+            overlap_candidate = overlap_candidate or (
+                data_idx >= 0 and dsc_idx >= 0
+            )
+
+    return {
+        name: {
+            "numCoresUsed_": num_cores,
+            "coreIdToDscSchedule": {
+                str(core_id): [list(row) for row in rows]
+                for core_id, rows in schedule.items()
+            },
+            "datadscs_": [dict(d) for d in datadscs],
+            "dscs_": [dict(d) for d in compute_dscs],
+            "opFuncsUsed_": list(opfuncs),
+            "warpspecPipeline_": {
+                "k_chunks": data_count,
+                "compute_partials": dsc_count,
+                "overlap_candidate": overlap_candidate,
+            },
+        }
+    }

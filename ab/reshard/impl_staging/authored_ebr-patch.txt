@@ -1,0 +1,13 @@
+# NO PATCH RETURNED. The scoped one-site carrier fix is NOT authorable; see rationale.
+# I wrote, tested-against-the-artifact, and REVERTED a band-representative lambda at
+# dsm.cpp:6764 because it mis-fires on the real reshard SDSC (collapses all 32 cores
+# to one band). dsm.cpp is left clean (git diff empty). The blocker is data, not syntax.
+#
+# What WOULD be needed (translator-layer, out of the scoped one-liner):
+# At perfDscToSdsc.cpp:2099 the HBM allocate adds a single SPATIAL "core_fold"
+# (acrossCoreAlpha * coreId). For an [out,mb] HBM tensor feeding a K-reduction the
+# address must instead be folded by the OUT band (acrossOutAlpha * out_coord, with the
+# mb cores in a band sharing one address). That requires the producer's {mb:4,out:8}
+# split to survive into the reshard SDSC (it is flattened to {mb:32,out:1} before the
+# carrier site) AND the out-extent to be carried on allocateCoordinates_. Both are a
+# multi-site frontend/translator change, not the dsm.cpp:6764 re-index the task scoped.

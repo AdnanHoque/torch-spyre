@@ -1,0 +1,71 @@
+All three authored and CPU-validated against the existing /tmp/c2c-perband artifacts. Returned as files at /tmp/c2c-capture/ (scratch). Full contents:
+
+=========================================================================
+(a) /tmp/c2c-capture/probe_a_ebr_attribution.py  -- EBR-attribution decoder
+=========================================================================
+Run: /home/adnan/dt-inductor/.venv/bin/python /tmp/c2c-capture/probe_a_ebr_attribution.py /tmp/c2c-perband/debug/sdsc_2
+(no build, no device; defaults to /tmp/c2c-perband/debug/sdsc_2 if no arg)
+
+# Copyright 2026 The Torch-Spyre Authors.  [Apache 14-line header]
+"""Probe (a): EBR-attribution decode of a reshard debug dir (CPU-only, no build)."""
+from __future__ import annotations
+import sys
+import regex as re
+OUT_BAND_WIDTH = 1600   # unfused 12800/8
+MB_SPLIT = 4
+NUM_CORES = 32
+_RE_CORE = re.compile(r"@core:(\d+)")
+_RE_EBR  = re.compile(r"@regInit:EBR:R0:(-?\d+)")
+_RE_LBR  = re.compile(r"@regInit:LBR:R0:(-?\d+)")
+_RE_OPCODE = re.compile(r"\bL3_[A-Z]+\b")
+# decode_smc_ebr(): walk smc.txt, first /// @regInit:EBR:R0:V after each /// @core:N
+# decode_smc_lbr(): same for LBR (readback base) uniformity check
+# opcode_histogram(): count L3_* over senprog.txt
+# per_core_ring_counts(): per @core block, count L3_STMU (match before L3_STU substring), L3_STU, L3_LDU
+# main() prints: (1) opcode histogram + ring symmetry L3_STU==L3_LDU + L3_STMU minority;
+#   (2) per-core EBR table vs 3200*core (BROKEN) vs OUT_BAND*(core//MB_SPLIT) (CORRECT) with summary;
+#   (3) LBR uniformity (isolates corruption to mirror leg); (4) per-core ring/mirror counts;
+#   (5) CARRIER VERDICT + the device discriminator (EBR fix + max_err: ~0 => mirror live, EBR fix is whole fix;
+#       high => mirror dead, real bug is ring landing LAR/LBR threading or producer-LX persistence).
+(full file written to disk; ~230 lines)
+
+VALIDATED OUTPUT on /tmp/c2c-perband/debug/sdsc_2:
+  248 L3_STU == 248 L3_LDU (1:1 SYMMETRIC ring), 40 L3_STMU (RINGDTHBMU mirror)
+  EBR core-linearised(3200*core)=32/32 BROKEN; LBR uniform {3200,12288}
+  => corrupted VALUE on the HBM-mirror L3_STMU leg, NOT the ring landing.
+
+=========================================================================
+(b) /tmp/c2c-capture/stamp_ebrinit.py  -- JSON-surgery: stamp ebrInit_=(core//4)*1600
+=========================================================================
+# Apache header
+"""Probe (b) step: stamp ebrInit_ = (core//4)*1600 on the reshard's dataOUT."""
+from __future__ import annotations
+import json, sys
+# _stamp_lds_corestateinit(lds, ebr_of_core, num_cores): set per-core ebrInit_, building
+#   the 32-entry coreStateInit_ list if absent (data-op dataOUT carries none in input JSON).
+# stamp_bundle(bundle_dir, out_band_width, mb_split): on bundle_dir/sdsc_2.json node 2_neg --
+#   (1) stamp the consumer DL op (neg) LX-only labeledDs (ldsIdx_=0, the 32-entry live coreStateInit_);
+#   (2) stamp each data-op STCDP dataOUT labeledDs (index 1, substrate._datadsc [dataIN,dataOUT]);
+#   ebr_of_core(c) = out_band_width*(c//mb_split). Prints expected out-band vs broken 3200*core.
+# main(): argv bundle_dir [out_band_width=1600] [mb_split=4]
+(full file written to disk; ~120 lines)
+
+VALIDATED: on a copy of the spliced sdsc_2.json it stamped DL consumer-input + all 8
+data-op dataOUT to [0,0,0,0,1600,1600,1600,1600,3200,...] == 1600*(core//4). Correct.
+
+=========================================================================
+(c) /tmp/c2c-capture/probe_b_stamp_compile.sh  -- driver (CPU + patched-dxp, no device)
+=========================================================================
+Run: bash /tmp/c2c-capture/probe_b_stamp_compile.sh
+  (env overridable: SRC=/tmp/c2c-unfused-final DST=/tmp/c2c-perband-stamp OUT_BAND=1600 MB_SPLIT=4)
+Steps: cp clean bundle -> swap_perband.py (8 per-band STCDPs) -> stamp_ebrinit.py ->
+  drop stale runtime+debug -> source ab/profenv.sh -> patched dxp_standalone --bundle -d DST
+  (PDXP=/home/adnan/dt-inductor/build/deeptools-onchip/dxp, LLVM_LIB=/home/adnan/dt-inductor/build/llvm/lib)
+  -> grep smc.txt @regInit:EBR -> verdict.
+VERDICT (only discriminating cores where 3200*c != 1600*(c//4), i.e. c>=1):
+  EBR == 1600*(core//4) => DCG HONOURED stamp -> INDUCTOR-ONLY fix possible
+  EBR == 3200*core      => DCG RECOMPUTED from coreId -> DEEPTOOLS fix at dsm.cpp:6766 (predicted)
+(full file written to disk; ~100 lines, bash -n clean)
+
+VALIDATED: verdict block run against the existing UNSTAMPED smc reports
+  discriminating=31 honoured=0 recomputed=31 => RECOMPUTED (correct control, since ebrInit_=-1 today).

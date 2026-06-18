@@ -1,0 +1,115 @@
+============================================================================
+DELIVERY MODEL — read first
+============================================================================
+The deliverable builds on flash-ws as the foundation (per the integration plan).
+flash-ws onchip modules live ONLY in /tmp/flash-ws-ro; the core-to-core worktree
+(/tmp/core-to-core-wt, branch core-to-core, cf67411-era) does NOT contain them.
+==> ASSUMPTION the orchestrator must confirm: the production target tree is
+flash-ws (or flash-ws merged into it). All patches below are cut against the
+flash-ws files and verified to apply with `git apply -p1` from the repo root.
+If the target is the bare core-to-core tree, the flash-ws onchip_handoff.py /
+onchip_realize.py / restickify_ring.py / restickify_cost.py / codegen/onchip_bridge.py
+must be merged FIRST (they are the foundation), then these patches applied.
+
+Three deliverables, all CPU-offline-validated (no device/build/compile run):
+ (1) NEW package torch_spyre/_inductor/reshard/  (3 files, full content below)
+ (2) PLANNER predicate patch  -> onchip_handoff.py
+ (3) 2-D REALIZER + bundle-splice patch -> onchip_realize.py ; config flag patch
+     -> config.py ; mutating wiring patch -> codegen/bundle.py
+All files at /tmp/reshard_build/ ({pieces,substrate,__init__}.py + *.fullpath.patch).
+
+VALIDATION done (CPU, exit 0): swiglu edge builds 32 prod (4x8) + 32 cons (32x1);
+reshard map c<-{c//8+4k:k=0..7}; bridge is pure-LX (hbmSize_=0, isExternal_=0);
+standalone SDSC dscs_==[] + 1 datadsc; perband=8 datadscs w/ src_col==dst_col;
+realizer fail-closes on (consumer-splits-K / producer-not-co-split / LX overflow);
+apply_lx_flip clears backGapCore_ + flips both edges to LX bases A=0 B=409600
+(400KB tile each, 800KB footprint < 2MB); all 4 patches apply -p1 from repo root;
+new files <=88 chars, no `import re`, Apache headers.
+
+============================================================================
+FILE 1/3a — NEW  torch_spyre/_inductor/reshard/__init__.py
+============================================================================
+(content at /tmp/reshard_build/__init__.py — exports Band, Piece, build_*_pieces,
+build_swiglu_edge, build_swiglu_perband_edges, pieces_to_pieceinfo,
+swiglu_{producer,consumer}_owner, swiglu_reshard_sources, LxFlip, allocate_lx_bases,
+apply_lx_flip, build_asymmetric_reshard_bridge, build_perband_reshard_bridge,
+build_standalone_dataop_sdsc, splice_reshard, splice_reshard_standalone,
+DATAOP_LX_SIZE, LX_CAPACITY_BYTES)
+
+============================================================================
+FILE 1/3b — NEW  torch_spyre/_inductor/reshard/pieces.py   (full at /tmp/reshard_build/pieces.py)
+FILE 1/3c — NEW  torch_spyre/_inductor/reshard/substrate.py (full at /tmp/reshard_build/substrate.py)
+============================================================================
+These are the CPU-proven ab/reshard/pieces.py + substrate.py PRODUCTIONISED:
+relocated into the package, docstrings de-referenced from ab/, torch-free, Apache
+header, the SwiGLU default re-pinned to the mul->down_proj REDUCTION edge
+(K=12800 = the full mul output cols, owner mb+4*out; consumer mb-banded 32, reads
+full K). substrate.py ports _stcdp_op / mixed_schedule / _labeled_ds (isExternal_:0,
+hbmSize_:0 — pure-ring) / _datadsc / build_asymmetric_reshard_bridge (2-D scatter) /
+build_perband_reshard_bridge (8x src_col==dst_col) / allocate_lx_bases / apply_lx_flip
+(clears backGapCore_) / dataop_schedule / build_standalone_dataop_sdsc (dxp.cpp:255
+pure-data-op shape) / splice_reshard_standalone. The bodies are byte-faithful to the
+CPU-proven originals; only the SwiGLU constants + docstrings changed.
+
+============================================================================
+PATCH 2/3 — torch_spyre/_inductor/onchip_handoff.py   (PLANNER PREDICATE)
+   verified: git apply -p1 OK   (/tmp/reshard_build/onchip_handoff.py.fullpath.patch)
+============================================================================
+Adds, before _plan_same_core: _consumer_reduction_symbols (a Reduction op's
+iter-space is its READ ranges, so K is in consumer_read.var_names but absent from
+the write index -> read-only symbols = reduced dims); _is_reduction_input_edge
+(producer SPLITS a dim mapping via symbol_map onto a consumer REDUCED dim that the
+consumer does NOT split — the genuine mul->down_proj edge); _reduction_layout
+(derive (layout,row,stick) from the co-split); _plan_reduction_reshard (build the
+OnChipHandoffPlan, calling realize_reduction_reshard only when the config flag is
+on). REORDERS _plan_edge: the symbol-map + split decode now precede the
+stick_compatible gate, and the reduction-input branch is checked BEFORE
+stick_compatible (the edge is INTENTIONALLY stick-symbol-changing out_->in_, which
+stick_compatible would otherwise reject as Tier-2). Adds reduction_reshard /
+is_reduction_input fields to OnChipHandoffPlan and the imports
+(Reduction; ReductionReshardRealization, realize_reduction_reshard).
+
+============================================================================
+PATCH 3/3 — onchip_realize.py + config.py + codegen/bundle.py  (REALIZER + WIRING)
+   verified: git apply -p1 OK   (onchip_realize.py.fullpath.patch + config + bundle)
+============================================================================
+onchip_realize.py: ReductionReshardRealization dataclass + realize_reduction_reshard
+(after is_same_shard): accepts prod_split != cons_split (unlike
+realize_same_layout_handoff which hardcodes src==dst), delegates synthesis to the
+reshard package, fail-closes on shape/footprint. Plus the bundle-level mutator
+realize_reduction_reshard_bundle (after realize_onchip_handoff, mirroring it): walks
+SDSCs, finds producer-out whose `out` fold extent == K and its single future
+consumer (reuses _dl_op/_hbm_base/_producer_output_indices/_future_consumers), flips
+both edges to LX via apply_lx_flip, and INSERTS the standalone pure-data-op STCDP
+SDSC into sdscs_json before the consumer (so generate_bundle serializes it + emits
+the sdsc_execute step in order). config.py: SPYRE_ONCHIP_REDUCTION_RESHARD (+ _PERBAND
++ pinned geometry M_ROWS/K/M_SPLIT/N_SPLIT), all default-off. bundle.py:
+config-gated call to realize_reduction_reshard_bundle right after realize_onchip_handoff.
+
+  EXACT PATCH BODIES are printed verbatim in my transcript and saved at:
+  /tmp/reshard_build/onchip_realize.py.fullpath.patch
+  /tmp/reshard_build/config.py.fullpath.patch
+  /tmp/reshard_build/bundle.py.fullpath.patch
+  /tmp/reshard_build/onchip_handoff.py.fullpath.patch
+  (apply: from repo root, `git apply -p1 <patch>` for each; drop the 3 reshard/
+   package files into torch_spyre/_inductor/reshard/.)
+
+============================================================================
+OPEN DECISIONS surfaced (not silently resolved)
+============================================================================
+A) PASS vs BUNDLE for the MUTATION. The plan says "mutating splice pass in
+   passes.py after run_onchip_handoff_planner". I did NOT add a passes.py pass:
+   the inductor graph has no SDSC yet, so the only place to flip labeledDs->LX +
+   insert the standalone STCDP step is generate_bundle (post-lowering) — exactly
+   where realize_onchip_handoff already mutates. The passes.py planner stays the
+   pure observer (its predicate now fires on this edge for telemetry/uuid). If you
+   require the mutation registered as a named pass, it still must run at bundle
+   time; the bundle hook IS that registration.
+B) EBR carrier (P2) is UNCHANGED here — single-scatter routes the same DCG packer
+   path that carries 3200*core. Set SPYRE_ONCHIP_REDUCTION_RESHARD_PERBAND=1 to emit
+   8 src_col==dst_col STCDPs (no intra-row column placement) as the EBR-sidestep
+   candidate; both are wired, default = single scatter, awaiting the P1 stamp probe
+   + P2 device discriminator to pick.
+C) stick_compatible reorder: I moved it AFTER the reduction-input branch rather than
+   relaxing it, so all existing same-stick Tier-1 behavior is byte-identical when the
+   reduction flag/edge is absent.
