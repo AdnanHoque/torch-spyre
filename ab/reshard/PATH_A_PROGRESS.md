@@ -84,3 +84,37 @@ case needs dxp LX-gap support (deeper deeptools) — deprioritize.
 **Lesson:** the offline `assert_partition` gate (7/7) was necessary but
 INSUFFICIENT — it checks abstract cell coverage, not on-device data landing.
 Device validation caught the value bug. (Ablations/device > static analysis.)
+
+## UNFUSED device verdict (2026-06-18): ALSO value-incorrect — gap hypothesis REFUTED
+
+Unfused reshard vs CPU eager (swiglu_unfused, seed 0): max_abs_diff=0.567,
+**mean|reshard|=0.00026 (≈0)** vs mean|cpu|=0.084, rel-err~1.0. So the unfused
+reshard is **also ≈ zero** — value-incorrect — even though it compiled with NO
+gap-clear (248 L3_LDU/STU cross-core, exit 0). **The sub-slice `backGapCore_` gap
+was NOT the bug.**
+
+**Refined diagnosis:** both fused AND unfused produce ≈ zero → the bug is in the
+**asymmetric data-landing** (`build_asymmetric_reshard_bridge` / the
+`createSubPieces` cell + memId + LX-base/coordinate mapping — the NEW code), NOT
+the recipe's proven symmetric path and NOT the gap. Base wiring: producer writes
+LX@0, consumer reads LX@409600; the STCDP emits real cross-core traffic but the
+neg reads ≈ zero → the move's src/dst piece **coordinates** (or the producer-LX
+persistence into the consumer SDSC) don't deliver the data where the neg expects.
+This is the `0b994bb` failure class (asymmetric reshard value-incorrectness),
+reproduced cleanly — the offline `assert_partition` gate (abstract cell coverage)
+and the senprog ring-traffic presence are both necessary-but-INSUFFICIENT.
+
+## Reassessment / recommended pivot
+
+Path A's **mechanism is proven** (compiles on the patched dxp, runs on device,
+cross-core senprog — no deeptools build). But the **asymmetric reshard is
+value-broken and hard** (deep senprog data-flow debugging on a ~25-min/iter flaky
+device; the prior thread never landed it either).
+
+The **value-correct path is co-assignment** (already built offline, `ab/coassign/`):
+make the element-wise pointwise consumers INHERIT the matmul's `(m4,n8)` split so
+the matmul→neg edge is **same-division same-core** → then the recipe's PROVEN
+same-core `apply_lx_flip` (the 1.88× softmax-chain mechanism — no data-op, no STCDP,
+**no dxp gate**, value-correct) persists it. This sidesteps the asymmetric move
+entirely. Recommend device-validating co-assignment next rather than grinding the
+broken asymmetric reshard.
