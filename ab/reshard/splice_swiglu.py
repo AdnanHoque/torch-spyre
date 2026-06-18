@@ -120,13 +120,13 @@ def _lds_min_hbm_address(op: dict, lds_idx: int) -> int | None:
     return None
 
 
-def find_edge_lds_idx(sdsc_json: dict, hbm_address: int) -> int:
-    """Find the labeledDs ``ldsIdx_`` whose HBM base == ``hbm_address``.
+def _edge_lds_idx(sdsc_json: dict, hbm_address: int) -> int | None:
+    """The labeledDs ``ldsIdx_`` whose HBM base == ``hbm_address``, else ``None``.
 
     Matches by the schedule-tree allocate-node base address (the role/HBM-address
-    match the prompt prescribes). Raises if zero or multiple labeledDs match, so a
-    schema drift is caught here rather than producing a silently mis-spliced
-    bundle.
+    match the prompt prescribes). Returns ``None`` when zero OR multiple labeledDs
+    match -- the caller treats both as "no edge" (safe no-op) rather than raising,
+    so the live monkeypatch is safe on every kernel.
     """
     op = _dl_op(sdsc_json)
     matches = [
@@ -134,12 +134,57 @@ def find_edge_lds_idx(sdsc_json: dict, hbm_address: int) -> int:
         for e in op["labeledDs_"]
         if _lds_min_hbm_address(op, e["ldsIdx_"]) == hbm_address
     ]
-    if len(matches) != 1:
+    return matches[0] if len(matches) == 1 else None
+
+
+def find_edge_lds_idx(sdsc_json: dict, hbm_address: int) -> int:
+    """Find the labeledDs ``ldsIdx_`` whose HBM base == ``hbm_address``.
+
+    Strict variant: raises if zero or multiple labeledDs match, so a schema drift
+    is caught here rather than producing a silently mis-spliced bundle. Used by the
+    standalone (Option b) path, which is only invoked on a known-good bundle.
+    """
+    idx = _edge_lds_idx(sdsc_json, hbm_address)
+    if idx is None:
+        op = _dl_op(sdsc_json)
+        matches = [
+            e["ldsIdx_"]
+            for e in op["labeledDs_"]
+            if _lds_min_hbm_address(op, e["ldsIdx_"]) == hbm_address
+        ]
         raise ValueError(
             f"expected exactly one labeledDs at HBM {hbm_address:#x}, "
             f"found ldsIdx_={matches}"
         )
-    return matches[0]
+    return idx
+
+
+def detect_edge(bundle_dir: str) -> tuple[int, int] | None:
+    """Return ``(producer_out_idx, consumer_in_idx)`` for the matmul->neg edge.
+
+    Detects the cross-division edge by the producer-OUTPUT / consumer-INPUT HBM
+    base match (``EDGE_HBM_ADDRESS``): the matmul SDSC (``sdsc_1.json``) output and
+    the neg SDSC (``sdsc_2.json``) input both pinned at the same HBM tensor.
+    Returns ``None`` (no-op signal) when either SDSC file is absent or the edge is
+    not present -- so the live splice is safe on every kernel, not just the SwiGLU
+    one. Torch-free, read-only.
+    """
+    prod_path = os.path.join(bundle_dir, "sdsc_1.json")
+    cons_path = os.path.join(bundle_dir, "sdsc_2.json")
+    if not (os.path.isfile(prod_path) and os.path.isfile(cons_path)):
+        return None
+    try:
+        with open(prod_path) as f:
+            producer_sdsc = json.load(f)
+        with open(cons_path) as f:
+            consumer_sdsc = json.load(f)
+        producer_out_idx = _edge_lds_idx(producer_sdsc, EDGE_HBM_ADDRESS)
+        consumer_in_idx = _edge_lds_idx(consumer_sdsc, EDGE_HBM_ADDRESS)
+    except (ValueError, KeyError, StopIteration, json.JSONDecodeError):
+        return None
+    if producer_out_idx is None or consumer_in_idx is None:
+        return None
+    return producer_out_idx, consumer_in_idx
 
 
 def derive_bridge_args() -> dict:
@@ -171,20 +216,31 @@ def derive_bridge_args() -> dict:
     }
 
 
-def splice_bundle(bundle_dir: str) -> dict:
-    """Load, edge-detect, build the bridge, splice, and write back in place.
+def splice_bundle(bundle_dir: str) -> bool:
+    """Detect the matmul->neg edge and, if present, splice the MIXED reshard.
 
-    Returns the derived bridge args (for logging / reuse by the live wiring).
+    The live ``generate_bundle`` monkeypatch calls this on every kernel's
+    ``output_dir`` right after the SDSC JSONs are written and before
+    ``dxp_standalone``. It first :func:`detect_edge`s the cross-division edge by
+    the producer-output / consumer-input HBM base match; if the bundle has no such
+    edge (any other kernel, or a missing SDSC) it **no-ops and returns False**.
+
+    When the edge is present it folds a single ``STCDPOpLx`` asymmetric-reshard
+    bridge into the consumer SDSC via the MIXED :func:`splice_reshard` path (NOT
+    the standalone option), relying on the gap-cleared ``apply_lx_flip``, writes
+    both SDSCs back in place, and returns True.
     """
+    edge = detect_edge(bundle_dir)
+    if edge is None:
+        return False
+    producer_out_idx, consumer_in_idx = edge
+
     prod_path = os.path.join(bundle_dir, "sdsc_1.json")
     cons_path = os.path.join(bundle_dir, "sdsc_2.json")
     with open(prod_path) as f:
         producer_sdsc = json.load(f)
     with open(cons_path) as f:
         consumer_sdsc = json.load(f)
-
-    producer_out_idx = find_edge_lds_idx(producer_sdsc, EDGE_HBM_ADDRESS)
-    consumer_in_idx = find_edge_lds_idx(consumer_sdsc, EDGE_HBM_ADDRESS)
 
     producer_pieces, consumer_pieces = build_swiglu_edge()
     args = derive_bridge_args()
@@ -210,11 +266,7 @@ def splice_bundle(bundle_dir: str) -> dict:
         json.dump(producer_sdsc, f)
     with open(cons_path, "w") as f:
         json.dump(consumer_sdsc, f)
-
-    args = dict(args)
-    args["producer_out_idx"] = producer_out_idx
-    args["consumer_in_idx"] = consumer_in_idx
-    return args
+    return True
 
 
 # The standalone SDSC step name (must match its on-disk filename and the
@@ -316,11 +368,14 @@ def main() -> int:
     ns = parser.parse_args()
     if ns.standalone:
         args = splice_bundle_standalone(ns.bundle_dir)
-    else:
-        args = splice_bundle(ns.bundle_dir)
-    print(f"spliced {ns.bundle_dir}")
-    for k, v in args.items():
-        print(f"  {k} = {v}")
+        print(f"spliced {ns.bundle_dir}")
+        for k, v in args.items():
+            print(f"  {k} = {v}")
+        return 0
+    if splice_bundle(ns.bundle_dir):
+        print(f"spliced {ns.bundle_dir}")
+        return 0
+    print(f"no matmul->neg edge in {ns.bundle_dir} (no-op)")
     return 0
 
 
