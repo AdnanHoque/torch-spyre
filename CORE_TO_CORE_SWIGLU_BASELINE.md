@@ -74,25 +74,49 @@ The matmul→neg edge, same HBM tensor, same stick (`out`), different split:
   `createSubPieces` the native unequal pieces); the broken `0b994bb` (max_err
   0.669) failed by *guessing* these owners — they are pinned above.
 
-## Perf (cf67411; wall-clock is A/B-only per the device caveat)
+## Perf — device kernel time (the only metric we trust)
 
-| shape | op | metric | value |
+Method: `torch.profiler` with `ProfilerActivity.PrivateUse1`, reading
+`self_device_time_total` per kernel (`<1%` noise). Requires the
+`USE_SPYRE_PROFILER=1` build (verified `nm -D _C.so | grep SpyreActivityProfiler`
+present on the latest-main tree) + harvest libs + `.venv` torch 2.11. Wall-clock
+is discarded — host-side, polluted by the flex profiling-in-streams 60 s sync
+stall. `kernel_ms` = Σ device kernel time; `PT-util` = PT-array active fraction.
+
+| shape | op | kernel_ms | PT-util |
 |---|---|---|---|
-| 1×512×4096 | fused | kernel_ms (profiler), pt_util | 16.3 ms, 17.1% |
-| 1×512×4096 | fused | wall_clock (clean) | min 23.8 / median 31.0 ms (high variance — start-up stalls) |
-| 1×512×4096 | unfused | wall_clock (clean) | min 23.2 / median 24.5 ms |
+| prefill 1×512×4096 | **fused** | 19.8 | 16.9% |
+| prefill 1×512×4096 | **unfused** | **13.9** | 20.1% |
+| decode 4×1×4096 | **fused** | 13.2 | 0.20% |
+| decode 4×1×4096 | **unfused** | **8.07** | 0.22% |
 
-**Wall-clock fused ≈ unfused (≈23–24 ms at the stall-free min)** — the ~5%
-structural difference (unfused's extra weight restickify) is **below this
-device's noise floor**; resolving it needs kernel-time, which needs the flex
-thread-lock fix. Kernel-time was only capturable for fused (16.3 ms) before the
-profiler stall. (Decode `4×1×4096` shapes: pending.)
+### Findings
+
+1. **Unfused beats fused in BOTH regimes — consistently** (prefill 19.8→13.9 =
+   1.42×; decode 13.2→8.07 = 1.63×; higher PT-util unfused, 20.1 vs 16.9). The
+   `linear_mul_silu_split_with_sizes` fusion is **counterproductive on Spyre**:
+   the combined gate+up matmul `[4096,25600]` + `split_with_sizes` is
+   scheduled/utilised worse than two separate `[4096,12800]` matmuls, and that
+   outweighs fusion's one-fewer-weight-restickify saving. *Actionable
+   independent of core-to-core: prefer the unfused SwiGLU lowering.*
+2. **Decode runs at ~0.2% PT-util** — the array is essentially **idle** (decode
+   M=4 → tiny matmul). So decode kernel time is **almost entirely data movement**
+   (restickify + cross-division round-trips), making decode the **prime target**
+   for the reshard/prelayout levers.
+3. **Both prefill and decode are Class C** (cross-division matmul→pointwise). In
+   decode the matmul is still `(m4,n8)` and feeds a pointwise split `out/25`
+   (25 cores) — same-stick, different shard → the reshard applies to decode too.
 
 ## Next
 
-1. Clean fused wall-clock + the `4×1×4096` decode worksplits/perf.
-2. Reshard A/B: keep `(m4,n8)` + on-chip reshard (the Phase-0 map above) vs.
-   **steer the matmul to pure-M** (→ Class B, main's LX_PLANNING persists it
-   free). The A/B decides whether the matmul-speed of `(m4,n8)` outweighs the
-   cross-division hand-off it creates. Wall-clock deltas cancel the device noise.
-3. Weight prelayout/freezing for the Class-A restickifies (the byte-dominant lever).
+1. **Reshard A/B (kernel-time):** keep `(m4,n8)` + on-chip reshard (the Phase-0
+   map above) vs. **steer the matmul to pure-M** (→ Class B, main's LX_PLANNING
+   persists it free). Decides whether `(m4,n8)`'s matmul-speed outweighs the
+   cross-division hand-off it creates. Measure with the profiler kernel-time
+   recipe above.
+2. **Weight prelayout/freezing** for the Class-A restickifies (byte-dominant
+   lever; orthogonal to core-to-core).
+3. **Unfused vs fused** is a free, independent win (1.4–1.6× kernel) — worth a
+   separate look at why the fused lowering schedules worse.
+4. The **decode 0.2%-util / movement-bound** regime is where data-movement
+   elimination should pay off most.
