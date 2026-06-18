@@ -59,6 +59,7 @@ if __package__ in (None, ""):
         allocate_lx_bases,
         build_asymmetric_reshard_bridge,
         splice_reshard,
+        splice_reshard_standalone,
     )
 else:
     from .pieces import (
@@ -73,6 +74,7 @@ else:
         allocate_lx_bases,
         build_asymmetric_reshard_bridge,
         splice_reshard,
+        splice_reshard_standalone,
     )
 
 # The pinned edge HBM tensor: the matmul output / neg input both live at this HBM
@@ -215,11 +217,107 @@ def splice_bundle(bundle_dir: str) -> dict:
     return args
 
 
+# The standalone SDSC step name (must match its on-disk filename and the
+# sdsc_execute the bundle.mlir edit inserts).
+STANDALONE_SDSC_FILE = "sdsc_1b.json"
+
+
+def _insert_standalone_step(mlir_path: str, after_file: str, new_file: str) -> None:
+    """Insert a ``sdsc_execute`` for ``new_file`` right after ``after_file``.
+
+    Edits ``bundle.mlir`` in place: copies the existing step line's indentation
+    and adds an identical ``sdscbundle.sdsc_execute (){sdsc_filename="..."}``
+    line for the standalone SDSC between the producer and consumer steps. Raises
+    if the anchor step is missing or already present (so a re-splice is caught).
+    """
+    with open(mlir_path) as f:
+        lines = f.readlines()
+    if any(new_file in ln for ln in lines):
+        raise ValueError(f"{new_file} already present in {mlir_path}")
+    anchor = f'sdsc_filename="{after_file}"'
+    idx = next((i for i, ln in enumerate(lines) if anchor in ln), None)
+    if idx is None:
+        raise ValueError(f"anchor step {after_file!r} not found in {mlir_path}")
+    template = lines[idx]
+    indent = template[: len(template) - len(template.lstrip())]
+    new_line = (
+        f'{indent}sdscbundle.sdsc_execute (){{sdsc_filename="{new_file}"}}\n'
+    )
+    lines.insert(idx + 1, new_line)
+    with open(mlir_path, "w") as f:
+        f.writelines(lines)
+
+
+def splice_bundle_standalone(bundle_dir: str) -> dict:
+    """Option (b): emit the reshard as a standalone pure-data-op SDSC step.
+
+    Same edge-detect + bridge build as :func:`splice_bundle`, but instead of
+    folding the STCDP into the consumer SDSC (mixed -> rejected by
+    SdscTree.cpp:152) it: (a) flips producer-out (sdsc_1) and consumer-in
+    (sdsc_2) to LX bases A/B; (b) writes a separate pure-data-op SDSC as
+    ``sdsc_1b.json``; (c) inserts ``sdsc_execute{sdsc_filename="sdsc_1b.json"}``
+    between sdsc_1 and sdsc_2 in ``bundle.mlir``. Returns the derived args.
+    """
+    prod_path = os.path.join(bundle_dir, "sdsc_1.json")
+    cons_path = os.path.join(bundle_dir, "sdsc_2.json")
+    mlir_path = os.path.join(bundle_dir, "bundle.mlir")
+    with open(prod_path) as f:
+        producer_sdsc = json.load(f)
+    with open(cons_path) as f:
+        consumer_sdsc = json.load(f)
+
+    producer_out_idx = find_edge_lds_idx(producer_sdsc, EDGE_HBM_ADDRESS)
+    consumer_in_idx = find_edge_lds_idx(consumer_sdsc, EDGE_HBM_ADDRESS)
+
+    producer_pieces, consumer_pieces = build_swiglu_edge()
+    args = derive_bridge_args()
+    datadscs, opfuncs, _ = build_asymmetric_reshard_bridge(
+        producer_pieces=producer_pieces,
+        consumer_pieces=consumer_pieces,
+        **args,
+    )
+
+    standalone_sdsc = splice_reshard_standalone(
+        producer_sdsc=producer_sdsc,
+        consumer_sdsc=consumer_sdsc,
+        producer_out_idx=producer_out_idx,
+        consumer_in_idx=consumer_in_idx,
+        producer_base=args["src_base"],
+        consumer_base=args["dst_base"],
+        datadscs=datadscs,
+        opfuncs=opfuncs,
+        num_cores=args["num_cores"],
+    )
+
+    with open(prod_path, "w") as f:
+        json.dump(producer_sdsc, f)
+    with open(cons_path, "w") as f:
+        json.dump(consumer_sdsc, f)
+    with open(os.path.join(bundle_dir, STANDALONE_SDSC_FILE), "w") as f:
+        json.dump(standalone_sdsc, f)
+    _insert_standalone_step(mlir_path, "sdsc_1.json", STANDALONE_SDSC_FILE)
+
+    args = dict(args)
+    args["producer_out_idx"] = producer_out_idx
+    args["consumer_in_idx"] = consumer_in_idx
+    args["standalone_sdsc_file"] = STANDALONE_SDSC_FILE
+    return args
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle_dir", help="bundle dir with sdsc_1.json/sdsc_2.json")
+    parser.add_argument(
+        "--standalone",
+        action="store_true",
+        help="Option (b): emit a standalone pure-data-op SDSC step (not a "
+        "mixed fold into the consumer SDSC).",
+    )
     ns = parser.parse_args()
-    args = splice_bundle(ns.bundle_dir)
+    if ns.standalone:
+        args = splice_bundle_standalone(ns.bundle_dir)
+    else:
+        args = splice_bundle(ns.bundle_dir)
     print(f"spliced {ns.bundle_dir}")
     for k, v in args.items():
         print(f"  {k} = {v}")

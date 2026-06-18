@@ -300,6 +300,12 @@ def splice_reshard(
     consumer body, and mark the consumer's DSC2 corelet count. In place; pure dict
     surgery, no device. # DEVICE-VALIDATE: that dxp accepts the resulting mixed
     bundle for this 2-D (row+col) reshard (see README "dxp gate").
+
+    REJECTED by harvest dxp: ``SdscTree.cpp:152 "Datadsc not allowed, use dldsc"``
+    -- ``SdscNode::importSdsc`` asserts every imported SDSC has an empty
+    ``dataOpdscs_``. Superseded by :func:`splice_reshard_standalone` (Option b):
+    emit the STCDP as its own pure-data-op SDSC step instead of folding it into a
+    mixed (DL + data-op) consumer SDSC.
     """
     apply_lx_flip(
         producer_sdsc, LxFlip(producer_out_idx, producer_base, "producer-output")
@@ -312,3 +318,92 @@ def splice_reshard(
     body["datadscs_"] = datadscs
     body["opFuncsUsed_"] = opfuncs
     _dl_op(consumer_sdsc)["numCoreletsUsed_DSC2_"] = 1
+
+
+# --- Option (b): standalone pure-data-op SDSC (its own sdsc_execute step) -------
+# Avoids the mixed-fold assert (SdscTree.cpp:152) by emitting the STCDP as a
+# self-contained SDSC: empty dscs_, populated datadscs_, data-op-only schedule.
+# dxp's runCodegen has a pure-data-op branch (dxp.cpp:255: dscs_==0 &&
+# dataOpdscs_>0 -> dcg.runDcg) that handles exactly this shape.
+
+
+def dataop_schedule(num_dataops: int, num_cores: int) -> dict:
+    """coreIdToDscSchedule rows for a PURE data-op SDSC (no DL row).
+
+    Each row is ``[datadsc_idx, dldsc_idx, before_sync, after_sync]`` (the
+    importJsonStr layout, superdsc.cpp:736-760). For a standalone STCDP there is
+    only the data-op (``dldsc_idx = -1``); the first op syncs neither before nor
+    after, matching the lone-op shape. Contrast :func:`mixed_schedule`, which
+    appends a trailing DL row ``[-1, 0, 1, 0]``.
+    """
+    rows = [[k, -1, 1 if k > 0 else 0, 0] for k in range(num_dataops)]
+    return {str(c): [list(r) for r in rows] for c in range(num_cores)}
+
+
+def build_standalone_dataop_sdsc(
+    name: str,
+    datadscs: list[dict],
+    opfuncs: list[str],
+    num_cores: int,
+) -> dict:
+    """Wrap a STCDP datadsc into a STANDALONE pure-data-op SDSC dict.
+
+    The structure dxp's pure-data-op codegen branch (dxp.cpp:255) expects:
+      - ``dscs_`` PRESENT but EMPTY -- ``importJsonStr`` (superdsc.cpp:576) early
+        returns ``false`` if the ``dscs_`` key is absent, so it must exist; the
+        pure-data-op branch keys off ``dscs_.size()==0``;
+      - ``datadscs_`` -- the STCDP datadsc list (populates ``dataOpdscs_``);
+      - ``coreIdToDscSchedule`` -- data-op-only rows (no DL row);
+      - ``opFuncsUsed_`` -- ``["STCDPOpLx"]`` (validated against
+        ``EnumsConversion::stringToOpFuncs``);
+      - ``numCoresUsed_`` -- the active core count.
+
+    Wrapped in ``{name: body}`` (the SuperDsc node-name -> body shape every
+    ``importJson`` consumer uses). # DEVICE-VALIDATE: whether harvest dxp's
+    ``importSdsc`` accepts a bundle-imported pure-data-op SDSC at all (the
+    SdscTree.cpp:152 assert reads ``dataOpdscs_.empty()`` unconditionally).
+    """
+    return {
+        name: {
+            "numCoresUsed_": num_cores,
+            "dscs_": [],
+            "datadscs_": datadscs,
+            "coreIdToDscSchedule": dataop_schedule(len(datadscs), num_cores),
+            "opFuncsUsed_": list(opfuncs),
+        }
+    }
+
+
+def splice_reshard_standalone(
+    producer_sdsc: dict,
+    consumer_sdsc: dict,
+    producer_out_idx: int,
+    consumer_in_idx: int,
+    producer_base: int,
+    consumer_base: int,
+    datadscs: list[dict],
+    opfuncs: list[str],
+    num_cores: int,
+) -> dict:
+    """Option (b): flip producer-out/consumer-in to LX, return a standalone SDSC.
+
+    Unlike :func:`splice_reshard` (which folds the STCDP into the consumer SDSC
+    and is rejected by SdscTree.cpp:152), this leaves both DL SDSCs as
+    pure-DL-op (only their edge labeledDs flipped to LX-resident at bases A/B)
+    and returns a SEPARATE pure-data-op SDSC. The caller writes that SDSC as its
+    own ``sdsc_execute`` step between the producer and consumer in ``bundle.mlir``.
+
+    The standalone STCDP reads producer-LX base A (``producer_base``) and writes
+    consumer-LX base B (``consumer_base``) -- the same bases the two flips pin.
+    Returns the standalone SDSC dict (the caller serializes it). In place for the
+    two DL SDSCs.
+    """
+    apply_lx_flip(
+        producer_sdsc, LxFlip(producer_out_idx, producer_base, "producer-output")
+    )
+    apply_lx_flip(
+        consumer_sdsc, LxFlip(consumer_in_idx, consumer_base, "consumer-input")
+    )
+    return build_standalone_dataop_sdsc(
+        "1b_STCDP_reshard", datadscs, opfuncs, num_cores
+    )

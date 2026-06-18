@@ -163,3 +163,65 @@ proved the symmetric same-core single-STCDP splice end-to-end (the 2048 add→ad
 case); the open question is whether the **asymmetric 2-D** (N≠M, row+col bands)
 variant clears the same gate. The dxp recipe lives in the
 `spyre-onchip-core-to-core` repo (`docs/02-recipe.md` §5).
+
+## dxp gate — RESOLVED (CPU `dxp_standalone --bundle`, harvest deeptools)
+
+Both splice strategies were run through the harvest `dxp_standalone` backend
+compiler (CPU-only; `dxp_standalone --bundle` is the compiler, not a device run).
+Baseline bundle unmodified: **exit 0**.
+
+### (a) Mixed fold — `splice_reshard` — REJECTED
+
+Folding the STCDP into the consumer (neg) SDSC (`datadscs_` + data-op schedule
+rows + `opFuncsUsed_` attached to the same SDSC that carries the DL `dscs_`)
+aborts:
+
+```text
+DtException: Datadsc not allowed, use dldsc,
+file /project_src/deeptools/dxp/SdscTree.cpp line 152
+```
+
+### (b) Standalone pure-data-op SDSC — `splice_reshard_standalone` — ALSO REJECTED
+
+Option (b): emit the STCDP as its **own** `sdsc_execute` step (`sdsc_1b.json`)
+between the matmul (`sdsc_1`) and the neg (`sdsc_2`), structured as a pure
+data-op SDSC — `dscs_: []`, `datadscs_: [stcdp]`, data-op-only
+`coreIdToDscSchedule` (`[[0,-1,0,0]]`), `opFuncsUsed_: ["STCDPOpLx"]`,
+`numCoresUsed_: 32`; producer-out (`sdsc_1` idx 2) and consumer-in (`sdsc_2`
+idx 0) flipped to LX bases A=0 / B=819200. The standalone SDSC itself is
+well-formed (validated against `DataOpDsc::importJsonObj` and
+`SuperDsc::importJsonStr` key handling). It aborts with the **same** error:
+
+```text
+DtException: Datadsc not allowed, use dldsc,
+file /project_src/deeptools/dxp/SdscTree.cpp line 152
+```
+
+### Root cause — a deeptools gap, NOT a fixable SDSC-structure issue
+
+`SdscNode::importSdsc` (`dxp/SdscTree.cpp:147-153`) asserts, for **every** SDSC
+imported via a plain `sdsc_execute`:
+
+```cpp
+DT_CHECK_MSG(mySdsc->dataOpdscs_.empty(), "Datadsc not allowed, use dldsc");
+DT_CHECK_MSG(!mySdsc->dscs_.empty(),       "No dsc in sdsc input");
+```
+
+So a bundle-imported SDSC must have an **empty** `dataOpdscs_` **and** a
+**non-empty** `dscs_`. A pure-data-op SDSC violates *both*; a mixed SDSC
+violates the first. The constructor (`dxp/SdscTree.hpp:122-127`) bypasses
+`importSdsc` only for `isCorrectionProgram()` / `isLoopLatchProgram()` ops.
+
+dxp *does* have a pure-data-op codegen branch — `Dxp::runCodegen`
+(`dxp/dxp.cpp:255`: `dscs_.size()==0 && dataOpdscs_.size()>0 → dcg.runDcg`) —
+but it is **only reachable for SDSCs DSM builds internally** (e.g. restickify /
+spadprefetch), never for one imported through a bundle `sdsc_execute`. There is
+**no bundle-import path** to it. This is the 2-D-asymmetric-reshard blocker
+restated at the import layer: the front-end refuses any imported data-op DSC.
+
+**Verdict: genuine deeptools gap → needs a dxp patch** (relax the
+`importSdsc` assert to permit a standalone pure-data-op imported SDSC — i.e.
+allow `dscs_.empty() && !dataOpdscs_.empty()`, routing it to the existing
+`runCodegen` data-op branch). The Inductor-side emission (`substrate.py` +
+`splice_swiglu.py`) is complete and produces a well-formed SDSC; it cannot
+clear the stock harvest gate without that one-line assert relaxation in dxp.
