@@ -8,6 +8,13 @@ Handoff for the on-chip core-to-core reshard thread. Detail lives in
 
 ## VERDICT (2026-06-18) — co-assignment wins; reshard is deeptools-blocked
 
+**Design:** the end-to-end technique (PyTorch SwiGLU → work-division → on-chip
+hand-off → warp-spec) is in **`ab/reshard/RESHARD_DESIGN.md`** (workflow synthesis,
+2026-06-18). Headline: co-assign the element-wise tail now (ships); reshard only the
+one non-co-assignable edge (down-proj K-reduction), gated on one deeptools EBR fix
+whose exact carrier is still contested (cheap CPU attribution probe settles it);
+warp-specialize that one move (PT ∥ SFP ∥ L3) on top.
+
 Two ways to kill the `matmul→pointwise` cross-division HBM hand-off were taken to
 device:
 
