@@ -56,3 +56,31 @@ then on the device (solo, long timeout for the flex stall):
 - **negative control** (remove the emitted senprog → run must fail).
 
 This is the only device-coupled step; everything above is CPU-proven.
+
+## Device validation VERDICT (2026-06-18): mechanism works, FUSED reshard value-INCORRECT
+
+End-to-end on device (live splice → patched dxp → harvest runtime, exit 0):
+- **Runs + ~12% faster:** reshard kernel 17.4 ms vs baseline 19.8 ms (the on-chip
+  move IS cheaper than the HBM round-trip) — but **moot** (see below).
+- **VALUE-INCORRECT (fused):** vs CPU eager (seed 0, 1×512×4096):
+  | | max_abs_diff | median | mean\|dev\| | rel-err(med) |
+  |---|---|---|---|---|
+  | baseline (no reshard) | 0.086 | 0.011 | 0.0469 (≈mean\|cpu\| 0.047) | ~10% (fp16) |
+  | reshard | 0.31 | 0.040 | **0.0001 (≈0)** | ~100% |
+  The baseline device output matches CPU (harness sane; the flaky device CAN be
+  correct). The reshard output is ≈ **zero** → the reshard corrupts the chain.
+
+**Root cause:** the `backGapCore_ = {'out': {-1: 12800}}` gap that `apply_lx_flip`
+clears (to get past `dsc2.cpp:3867`) is **semantically load-bearing** — it encodes
+the gate as `out[0:12800]` of the combined 25600 matmul output. Cleared → neg
+reads the wrong/empty LX region → gate≈0 → `silu(0)=0` → output≈0. The fused
+gate-half **sub-slice** is the killer.
+
+**Path forward:** the **unfused** SwiGLU (separate gate/up matmuls) makes the gate
+a full `[512,12800]` tensor → no sub-slice gap → nothing to clear → the reshard
+should land correctly. (Unfused is also the faster baseline, 13.9 ms.) The fused
+case needs dxp LX-gap support (deeper deeptools) — deprioritize.
+
+**Lesson:** the offline `assert_partition` gate (7/7) was necessary but
+INSUFFICIENT — it checks abstract cell coverage, not on-device data landing.
+Device validation caught the value bug. (Ablations/device > static analysis.)
