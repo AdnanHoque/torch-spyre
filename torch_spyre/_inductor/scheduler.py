@@ -54,23 +54,36 @@ def _find_leaf_sched_node(node: BaseSchedulerNode):
 def _tiled_syms_for_sched_node_at_depth(sched_node: SchedulerNode, depth: int) -> list:
     """Return the OpSpec iteration-space symbols tiled at ``depth``.
 
-    Uses ``loop_tiled_dims[depth]`` from the IR node and the SchedulerNode's
-    ``iteration_space`` (which produces the same symbols as ``create_op_spec``
-    uses to build ``OpSpec.tiled_symbols``).
+    Uses ``loop_tiled_dims[depth]`` and ``loop_tiled_reduction_dims[depth]``
+    from the IR node and the SchedulerNode's ``iteration_space`` (which
+    produces the same symbols as ``create_op_spec`` uses to build
+    ``OpSpec.tiled_symbols``).
 
     ``loop_tiled_dims`` stores *host-range* dimension indices (indices into
     ``op.data.ranges``), which include unit-size batch dimensions that are
     skipped in the iteration space.  We must map host-range indices to
     iteration-space key indices by walking ``op.data.ranges`` and counting
     only the non-unit entries.
+
+    For reduction-dimension tiling (``loop_tiled_reduction_dims``), the
+    reduction symbols follow the output symbols in the iteration space key
+    list (the scheduler produces keys from reads.ranges for Reduction nodes,
+    which has output dims first then reduction dims).  The offset is the
+    number of non-unit output-dim ranges; indices in
+    ``loop_tiled_reduction_dims`` are 0-based into the reduction portion.
     """
     ir_op = sched_node.node
     if ir_op is None:
         return []
-    raw = getattr(ir_op, "loop_tiled_dims", None)
-    if raw is None or not raw:
+    loop_info = getattr(ir_op, "loop_info", None)
+    if loop_info is None:
         return []
-    dims_per_level: list[list[int]] = raw
+    raw = loop_info.loop_tiled_dims
+    raw_rdims = getattr(loop_info, "loop_tiled_reduction_dims", [])
+    if not raw and not raw_rdims:
+        return []
+    dims_per_level: list[list[int]] = raw if raw else [[] for _ in raw_rdims]
+    rdims_per_level: list[list[int]] = raw_rdims if raw_rdims else [[] for _ in raw]
     if depth >= len(dims_per_level):
         return []
     it_space = iteration_space(sched_node)
@@ -92,6 +105,19 @@ def _tiled_syms_for_sched_node_at_depth(sched_node: SchedulerNode, depth: int) -
         mapped = host_to_it.get(d)
         if mapped is not None and mapped < len(keys):
             result.append(keys[mapped])
+
+    # Map reduction-dimension indices to iteration-space symbols.  For
+    # Reduction nodes the iteration space (from reads.ranges) has output-dim
+    # symbols first, then reduction-dim symbols.  The offset is the count of
+    # non-unit output-dim ranges.
+    rdims_at_depth = rdims_per_level[depth] if depth < len(rdims_per_level) else []
+    if rdims_at_depth:
+        n_output_syms = sum(1 for r in ir_op.data.ranges if int(r) != 1)
+        for rd in rdims_at_depth:
+            sym_idx = n_output_syms + rd
+            if sym_idx < len(keys):
+                result.append(keys[sym_idx])
+
     return result
 
 
@@ -99,8 +125,8 @@ class CountedLoopSchedulerNode(FusedSchedulerNode):
     """A group of SchedulerNodes to be executed inside a counted outer loop.
 
     Produced by build_loop_scheduler_nodes from SchedulerNodes whose
-    underlying ir.Operation has been stamped with loop_group_id and
-    loop_count attributes by the coarse-tiling IR pass.
+    underlying ir.Operation has been stamped with a ``loop_info``
+    (``CoarseTileInfo``) attribute by the coarse-tiling IR pass.
 
     loop_count is the trip count of the loop that directly contains this
     group's operations.  For nested loops, the snodes may themselves
@@ -145,9 +171,9 @@ def _loop_group_id(node: BaseSchedulerNode):
     """Return the loop_group_id of the ir.Operation inside node, or None."""
     for snode in node.get_nodes():
         if isinstance(snode, SchedulerNode) and snode.node is not None:
-            gid = getattr(snode.node, "loop_group_id", None)
-            if gid is not None:
-                return gid
+            loop_info = getattr(snode.node, "loop_info", None)
+            if loop_info is not None:
+                return loop_info.loop_group_id
     return None
 
 
@@ -164,10 +190,10 @@ def _loop_count(node: BaseSchedulerNode, depth: int) -> sympy.Expr:
     """
     for snode in node.get_nodes():
         if isinstance(snode, SchedulerNode) and snode.node is not None:
-            raw = getattr(snode.node, "loop_count", None)
-            if raw is not None:
-                counts: list = raw if isinstance(raw, list) else [raw]
-                gid = getattr(snode.node, "loop_group_id", ())
+            loop_info = getattr(snode.node, "loop_info", None)
+            if loop_info is not None:
+                counts: list = loop_info.loop_count
+                gid = loop_info.loop_group_id
                 # coarse_tile stamps one count per nesting level, so
                 # len(counts) == len(gid) always holds.
                 assert len(counts) == len(gid), (
@@ -231,8 +257,8 @@ def build_loop_scheduler_nodes(
 ) -> list[BaseSchedulerNode]:
     """Pre-fusion pass: wrap loop-group SchedulerNodes into CountedLoopSchedulerNodes.
 
-    Reads loop_group_id and loop_count attributes stamped on ir.Operation
-    objects by the coarse-tiling IR pass.  Nodes without these attributes
+    Reads the ``loop_info`` (``CoarseTileInfo``) attribute stamped on
+    ir.Operation objects by the coarse-tiling IR pass.  Nodes without these attributes
     are passed through unchanged.
 
     loop_group_id is a tuple of ints encoding the nesting path, e.g.
