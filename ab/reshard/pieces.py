@@ -262,3 +262,55 @@ def build_swiglu_edge() -> tuple[list[Piece], list[Piece]]:
         SWIGLU_CONS_SPLIT["mb"], SWIGLU_CONS_SPLIT["out"], swiglu_consumer_owner,
     )
     return producer, consumer
+
+
+# --- The UNFUSED SwiGLU gate-matmul->neg edge (full-out, NO sub-slice gap) -----
+#
+# The unfused variant runs the gate matmul as its OWN op, so its output is the
+# FULL [512, 12800] gate tensor (out=12800), NOT a [0,12800) sub-slice of a fused
+# [512, 25600] combined matmul. With no sub-slice the edge alloc node carries
+# ``backGapCore_=None`` -- there is no inter-core gap to clear on the LX flip, so
+# the reshard lands value-correct (the fused variant's gap-clear corrupted
+# addressing; see PATH_A_PROGRESS.md "Device validation VERDICT").
+
+SWIGLU_UNFUSED_N_COLS = 12800  # full gate-matmul output (NOT a sub-slice)
+SWIGLU_UNFUSED_PROD_SPLIT = {"mb": 4, "out": 8}
+SWIGLU_UNFUSED_CONS_SPLIT = {"mb": 32, "out": 1}
+
+
+def swiglu_unfused_reshard_sources(c: int) -> list[int]:
+    """Unfused reshard map: consumer core ``c`` <- the producer cores it reads.
+
+    The consumer reads the FULL ``out in [0, 12800)``, so it spans ALL EIGHT
+    producer ``out``-bands (each 1600 cols; 8*1600 = 12800), not just four. mb-band
+    ``c//8`` are the producer rows overlapping consumer ``c``'s 16-row band.
+    Producer owner = ``mb + 4*out`` => sources ``c//8 + 4*{0..7}`` -- EIGHT cores
+    per consumer (vs FOUR for the fused gate-half). 32 * 8 = 256 cells.
+    """
+    mb_band = c // 8
+    return [
+        mb_band + SWIGLU_UNFUSED_PROD_SPLIT["mb"] * out_b for out_b in range(8)
+    ]
+
+
+def build_swiglu_unfused_edge() -> tuple[list[Piece], list[Piece]]:
+    """Producer + consumer pieces for the UNFUSED SwiGLU gate-matmul->neg edge.
+
+    Returns ``(producer_pieces, consumer_pieces)`` -- 32 producer pieces (4x8)
+    over the full ``[512, 12800]`` gate output (owner ``mb + 4*out``) and 32
+    consumer pieces (32x1) over the SAME full ``[512, 12800]`` (owner ``c``). The
+    consumer reads the WHOLE out, so the overlap engine intersects each consumer
+    16-row band against all eight producer out-bands -> 256 single-source,
+    whole-stick cells mapping ``c <- {c//8 + 4k : k=0..7}``.
+    """
+    producer = build_producer_pieces(
+        SWIGLU_M_ROWS, SWIGLU_UNFUSED_N_COLS,
+        SWIGLU_UNFUSED_PROD_SPLIT["mb"], SWIGLU_UNFUSED_PROD_SPLIT["out"],
+        swiglu_producer_owner,
+    )
+    consumer = build_consumer_pieces(
+        SWIGLU_M_ROWS, SWIGLU_UNFUSED_N_COLS,
+        SWIGLU_UNFUSED_CONS_SPLIT["mb"], SWIGLU_UNFUSED_CONS_SPLIT["out"],
+        swiglu_consumer_owner,
+    )
+    return producer, consumer

@@ -41,7 +41,9 @@ if __package__ in (None, ""):
         build_consumer_pieces,
         build_producer_pieces,
         build_swiglu_edge,
+        build_swiglu_unfused_edge,
         swiglu_reshard_sources,
+        swiglu_unfused_reshard_sources,
     )
     from reshard.substrate import build_asymmetric_reshard_bridge
 else:
@@ -53,7 +55,9 @@ else:
         build_consumer_pieces,
         build_producer_pieces,
         build_swiglu_edge,
+        build_swiglu_unfused_edge,
         swiglu_reshard_sources,
+        swiglu_unfused_reshard_sources,
     )
     from .substrate import build_asymmetric_reshard_bridge
 
@@ -79,6 +83,36 @@ def test_swiglu_edge_map_and_partition():
     # these bands except by coincidence -- count the genuine cross-core ones).
     ring_cells = [x for x in cells if x.is_ring]
     assert ring_cells, "expected cross-core ring traffic on the SwiGLU edge"
+
+
+def test_swiglu_unfused_edge_map_and_partition():
+    """Unfused SwiGLU gate-matmul->neg: gate passes + map == c <- {c//8 + 4k}.
+
+    Full-out [512, 12800] on both sides (no gate-half sub-slice), so each consumer
+    spans all EIGHT producer out-bands -> 8 sources per consumer, 256 cells.
+    """
+    producer, consumer = build_swiglu_unfused_edge()
+    assert len(producer) == 32  # 4 mb-bands x 8 out-bands
+    assert len(consumer) == 32  # 32 mb-bands x 1 out-band
+
+    cells = assert_partition(producer, consumer)
+    assert len(cells) == 256  # 32 consumers x 8 producer out-bands each
+    rmap = ring_map(cells)
+
+    for c in range(32):
+        expected = set(swiglu_unfused_reshard_sources(c))
+        assert expected == {c // 8 + 4 * k for k in range(8)}, c
+        assert rmap[c] == expected, (
+            f"core {c}: got {sorted(rmap[c])}, want {sorted(expected)}"
+        )
+        assert len(rmap[c]) == 8  # eight sources (full out), not four
+
+    # Full [512, 12800] coverage, whole-stick, with genuine ring traffic.
+    assert sum(x.n_elems for x in cells) == 512 * 12800
+    for x in cells:
+        assert x.cols.start % pieces_mod.STICK_ELEMS == 0
+        assert x.cols.length % pieces_mod.STICK_ELEMS == 0
+    assert any(x.is_ring for x in cells)
 
 
 def test_swiglu_cells_whole_stick_and_total():

@@ -91,18 +91,25 @@ def apply_reshard() -> None:
     if _root not in sys.path:
         sys.path.insert(0, _root)
     from ab.reshard.cells import assert_partition, ring_map
-    from ab.reshard.pieces import build_swiglu_edge
+    from ab.reshard.pieces import build_swiglu_edge, build_swiglu_unfused_edge
     from ab.reshard.splice_swiglu import splice_bundle
 
     # Offline gate (0b994bb safety net): raises if the partition ever regresses.
-    producer, consumer = build_swiglu_edge()
-    cells = assert_partition(producer, consumer)
-    rmap = ring_map(cells)
-    print(
-        f"[RESHARD] offline gate PASSED: {len(cells)} cells, "
-        f"{len(rmap)} consumer cores, map c<-{{c//8+4k}}",
-        flush=True,
-    )
+    # Gate BOTH edges -- splice_bundle auto-selects fused vs unfused at compile
+    # via detect_edge; the unfused edge is full-out (8 sources, 256 cells, NO
+    # sub-slice gap), the fused edge is the gate half (4 sources, 128 cells).
+    for label, edge_fn in (
+        ("fused c<-{c//8+4k:k<4}", build_swiglu_edge),
+        ("unfused c<-{c//8+4k:k<8}", build_swiglu_unfused_edge),
+    ):
+        producer, consumer = edge_fn()
+        cells = assert_partition(producer, consumer)
+        rmap = ring_map(cells)
+        print(
+            f"[RESHARD] offline gate PASSED ({label}): {len(cells)} cells, "
+            f"{len(rmap)} consumer cores",
+            flush=True,
+        )
 
     import torch_spyre.execution.async_compile as ac
 

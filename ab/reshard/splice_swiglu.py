@@ -51,7 +51,9 @@ if __package__ in (None, ""):
         SWIGLU_GATE_EXTENT,
         SWIGLU_M_ROWS,
         SWIGLU_N_COLS,
+        SWIGLU_UNFUSED_N_COLS,
         build_swiglu_edge,
+        build_swiglu_unfused_edge,
     )
     from reshard.substrate import (
         STICK_BYTES,
@@ -66,7 +68,9 @@ else:
         SWIGLU_GATE_EXTENT,
         SWIGLU_M_ROWS,
         SWIGLU_N_COLS,
+        SWIGLU_UNFUSED_N_COLS,
         build_swiglu_edge,
+        build_swiglu_unfused_edge,
     )
     from .substrate import (
         STICK_BYTES,
@@ -77,9 +81,12 @@ else:
         splice_reshard_standalone,
     )
 
-# The pinned edge HBM tensor: the matmul output / neg input both live at this HBM
-# start address (0xc800000). The reshard replaces that round-trip with an on-chip
-# core-to-core move. Verified against the baseline bundle's sdsc_1/sdsc_2.
+# The pinned FUSED edge HBM tensor: the combined matmul output / neg input both
+# live at this HBM start address (0xc800000), out=25600, neg reads gate-half
+# [0,12800). The reshard replaces that round-trip with an on-chip core-to-core
+# move. Kept as the fast-path/back-compat probe; ``detect_edge`` ALSO discovers
+# the shared base generically (so the UNFUSED edge at 0x6400000, out=12800 full,
+# works without a second hard-coded address). Verified vs the baseline bundles.
 EDGE_HBM_ADDRESS = 0xC800000
 
 # Reshard it-space: producer matmul output full [mb=512, out=25600]; consumer neg
@@ -159,15 +166,71 @@ def find_edge_lds_idx(sdsc_json: dict, hbm_address: int) -> int:
     return idx
 
 
+def _lds_hbm_bases(op: dict) -> dict[int, int]:
+    """``{ldsIdx_: min per-core HBM base}`` over the op's HBM allocate nodes.
+
+    The discovery primitive for the generic shared-base match: collects every
+    labeledDs' HBM base from its allocate node, so a producer-output base can be
+    intersected with the consumer-input bases without hard-coding an address.
+    """
+    bases: dict[int, int] = {}
+    for e in op["labeledDs_"]:
+        idx = e["ldsIdx_"]
+        base = _lds_min_hbm_address(op, idx)
+        if base is not None:
+            bases[idx] = base
+    return bases
+
+
+def find_shared_edge_base(
+    producer_sdsc: dict, consumer_sdsc: dict
+) -> tuple[int, int, int] | None:
+    """Find the HBM tensor the producer OUTPUT and the consumer share.
+
+    Generic replacement for the hard-coded ``EDGE_HBM_ADDRESS`` match: takes the
+    producer (matmul) OUTPUT labeledDs' HBM base and looks for a consumer (neg)
+    labeledDs at the SAME base. Returns ``(shared_base, producer_out_idx,
+    consumer_in_idx)`` for the single shared base. Handles both the fused edge
+    (``0xc800000``) and the unfused edge (``0x6400000``) without an address pin.
+
+    The consumer's edge tensor is matched by HBM base alone -- NOT by ``dsType_``:
+    the neg op labels its in-place edge labeledDs ``OUTPUT`` in this schema, so a
+    ``dsType_=="INPUT"`` filter would miss it. The base ``0x0`` (KERNEL /
+    unallocated) is excluded. Returns ``None`` when zero OR multiple bases match
+    (treated as "no clean edge" -- safe no-op).
+    """
+    prod_op = _dl_op(producer_sdsc)
+    cons_op = _dl_op(consumer_sdsc)
+    prod_out = {
+        e["ldsIdx_"]: _lds_min_hbm_address(prod_op, e["ldsIdx_"])
+        for e in prod_op["labeledDs_"]
+        if e.get("dsType_") == "OUTPUT"
+    }
+    cons_bases = {
+        e["ldsIdx_"]: _lds_min_hbm_address(cons_op, e["ldsIdx_"])
+        for e in cons_op["labeledDs_"]
+    }
+    shared = [
+        (pb, pi, ci)
+        for pi, pb in prod_out.items()
+        if pb not in (None, 0)
+        for ci, cb in cons_bases.items()
+        if cb == pb
+    ]
+    return shared[0] if len(shared) == 1 else None
+
+
 def detect_edge(bundle_dir: str) -> tuple[int, int] | None:
     """Return ``(producer_out_idx, consumer_in_idx)`` for the matmul->neg edge.
 
     Detects the cross-division edge by the producer-OUTPUT / consumer-INPUT HBM
-    base match (``EDGE_HBM_ADDRESS``): the matmul SDSC (``sdsc_1.json``) output and
-    the neg SDSC (``sdsc_2.json``) input both pinned at the same HBM tensor.
-    Returns ``None`` (no-op signal) when either SDSC file is absent or the edge is
-    not present -- so the live splice is safe on every kernel, not just the SwiGLU
-    one. Torch-free, read-only.
+    base match: the matmul SDSC (``sdsc_1.json``) output and the neg SDSC
+    (``sdsc_2.json``) input both pinned at the same HBM tensor. The shared base is
+    found GENERICALLY (:func:`find_shared_edge_base`), so this handles both the
+    fused tensor (``0xc800000``) and the unfused tensor (``0x6400000``) without a
+    second hard-coded address. Returns ``None`` (no-op signal) when either SDSC is
+    absent or no single shared base exists -- so the live splice is safe on every
+    kernel, not just the SwiGLU one. Torch-free, read-only.
     """
     prod_path = os.path.join(bundle_dir, "sdsc_1.json")
     cons_path = os.path.join(bundle_dir, "sdsc_2.json")
@@ -178,12 +241,12 @@ def detect_edge(bundle_dir: str) -> tuple[int, int] | None:
             producer_sdsc = json.load(f)
         with open(cons_path) as f:
             consumer_sdsc = json.load(f)
-        producer_out_idx = _edge_lds_idx(producer_sdsc, EDGE_HBM_ADDRESS)
-        consumer_in_idx = _edge_lds_idx(consumer_sdsc, EDGE_HBM_ADDRESS)
+        found = find_shared_edge_base(producer_sdsc, consumer_sdsc)
     except (ValueError, KeyError, StopIteration, json.JSONDecodeError):
         return None
-    if producer_out_idx is None or consumer_in_idx is None:
+    if found is None:
         return None
+    _, producer_out_idx, consumer_in_idx = found
     return producer_out_idx, consumer_in_idx
 
 
@@ -216,6 +279,78 @@ def derive_bridge_args() -> dict:
     }
 
 
+def derive_bridge_args_unfused() -> dict:
+    """Derive bridge args for the UNFUSED SwiGLU gate-matmul->neg edge.
+
+    Same it-space layout as the fused edge but over the FULL ``out=12800`` (not
+    ``25600``): producer tile = ``(512/4) x (12800/8)`` = ``128 x 1600`` fp16 =
+    400 KB; consumer band = ``(512/32) x 12800`` = ``16 x 12800`` fp16 = 400 KB.
+    Two 400 KB regions = 800 KB footprint, well within the 2 MB per-core LX.
+    """
+    producer_tile_bytes = (
+        (SWIGLU_M_ROWS // 4) * (SWIGLU_UNFUSED_N_COLS // 8) * WORD_LENGTH
+    )
+    consumer_band_bytes = (
+        SWIGLU_M_ROWS // NUM_CORES
+    ) * SWIGLU_UNFUSED_N_COLS * WORD_LENGTH
+    slice_bytes = max(producer_tile_bytes, consumer_band_bytes)
+    src_base, dst_base = allocate_lx_bases(2, slice_bytes)
+    return {
+        "dim_pool": LAYOUT,
+        "iter_sizes": {ROW_DIM: SWIGLU_M_ROWS, STICK_DIM: SWIGLU_UNFUSED_N_COLS},
+        "stick_size": STICK_SIZE,
+        "num_cores": NUM_CORES,
+        "lx_size": LX_SIZE,
+        "src_base": src_base,
+        "dst_base": dst_base,
+        "layout": LAYOUT,
+        "row_dim": ROW_DIM,
+        "stick_dim": STICK_DIM,
+    }
+
+
+def _producer_out_extent(producer_sdsc: dict, producer_out_idx: int) -> int | None:
+    """Total ``out`` extent of the producer-output tensor, from its alloc node.
+
+    Reads the ``coordInfo['out']`` folds on the producer-output HBM allocate node
+    and multiplies the per-fold ``factor_`` (``core_fold * elem_arr_1 *
+    elem_arr_0`` etc.) to recover the full logical ``out`` size. This is the
+    fused/unfused discriminator: ``25600`` => fused combined matmul, ``12800`` =>
+    unfused gate-only matmul (full, no sub-slice). Returns ``None`` if absent.
+    """
+    op = _dl_op(producer_sdsc)
+    for node in op["scheduleTree_"]:
+        if node.get("nodeType_") != "allocate":
+            continue
+        if node.get("ldsIdx_") != producer_out_idx:
+            continue
+        coord = node.get("coordinates_", {}).get("coordInfo", {}).get("out")
+        if not coord:
+            return None
+        extent = 1
+        for fold in coord["folds"]["dim_prop_attr"]:
+            extent *= int(fold["factor_"])
+        return extent
+    return None
+
+
+def select_swiglu_variant(
+    producer_sdsc: dict, producer_out_idx: int
+):
+    """Pick the SwiGLU edge variant from the producer-output ``out`` extent.
+
+    Returns ``(pieces_fn, bridge_args)`` -- ``build_swiglu_unfused_edge`` +
+    :func:`derive_bridge_args_unfused` when the producer output is the FULL
+    ``12800`` gate matmul (unfused; ``{mb:4, out:8}`` over a non-sub-slice
+    tensor), else ``build_swiglu_edge`` + :func:`derive_bridge_args` for the fused
+    ``25600`` combined matmul whose neg reads the ``[0,12800)`` gate half.
+    """
+    extent = _producer_out_extent(producer_sdsc, producer_out_idx)
+    if extent == SWIGLU_UNFUSED_N_COLS:
+        return build_swiglu_unfused_edge, derive_bridge_args_unfused()
+    return build_swiglu_edge, derive_bridge_args()
+
+
 def splice_bundle(bundle_dir: str) -> bool:
     """Detect the matmul->neg edge and, if present, splice the MIXED reshard.
 
@@ -242,8 +377,8 @@ def splice_bundle(bundle_dir: str) -> bool:
     with open(cons_path) as f:
         consumer_sdsc = json.load(f)
 
-    producer_pieces, consumer_pieces = build_swiglu_edge()
-    args = derive_bridge_args()
+    pieces_fn, args = select_swiglu_variant(producer_sdsc, producer_out_idx)
+    producer_pieces, consumer_pieces = pieces_fn()
     datadscs, opfuncs, schedule = build_asymmetric_reshard_bridge(
         producer_pieces=producer_pieces,
         consumer_pieces=consumer_pieces,
