@@ -23,6 +23,12 @@ Levers:
   steer     disable the matmul cost model so the matmul reverts to the default
             pure-M split, aligning it with the pure-M pointwise consumer; the
             matmul->pointwise edge becomes same-division (no cross-shard re-read).
+  reshard   keep (m4,n8) but splice the A2 on-chip asymmetric reshard into the
+            matmul->neg edge so the gate-half activation stays LX-resident and is
+            shuffled core-to-core on the ring instead of round-tripping HBM.
+            SCAFFOLD ONLY -- the splice is built + structurally gated offline
+            (ab/reshard/), but wiring it into the live bundle + accepting it in
+            dxp is # DEVICE-VALIDATE (parent owns the device). See ab/reshard/.
 
 Run under the locked profiler stack (see ab/profenv.sh): harvest libs + the
 USE_SPYRE_PROFILER build on the latest-main tree + .venv torch 2.11.
@@ -62,9 +68,79 @@ def apply_steer() -> None:
     print("[STEER] patched work_division._cost_model_divide_op -> False", flush=True)
 
 
+def apply_reshard() -> None:
+    """Lever ``reshard``: splice the A2 on-chip asymmetric reshard (SCAFFOLD).
+
+    Keeps the matmul at ``(m4,n8)`` and folds the offline-built, structurally
+    gated reshard bridge (``ab/reshard/``) into the ``matmul -> neg`` edge so the
+    gate-half activation rides the ring LX->LX instead of round-tripping HBM.
+
+    Hook point (identified, not yet wired live): the SDSC JSONs are built and
+    written one per OpSpec in
+    ``torch_spyre._inductor.codegen.bundle._compile_specs`` (each ``sdsc_json``
+    then ``json.dump`` to ``sdsc_{idx}.json``, bundle.py:323-339). The splice must
+    run AFTER all SDSC JSONs for a bundle exist (it needs both producer and
+    consumer), mirroring attention-overlap's ``realize_onchip_handoff(sdscs_json)``
+    which operates on the full list. The natural monkeypatch wraps
+    ``bundle.generate_bundle`` to collect the compiled list and run
+    ``splice_reshard`` before the JSON is written.
+
+    This function does the OFFLINE-PROVEN half: builds the pieces, runs the
+    structural gate, and prepares the bridge. The LIVE patch (collecting the real
+    producer/consumer SDSC dicts, matching the ``@0xc800000`` edge, and calling
+    ``splice_reshard``) is left as a marked TODO -- it is # DEVICE-VALIDATE and is
+    the parent's to run on the reserved accelerator.
+    """
+    # Build the offline core so the import + gate fire even in the scaffold path
+    # (this is the part proven here; it raises if the gate ever regresses). Put
+    # the worktree root on the path so ``ab.reshard`` imports regardless of cwd.
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
+    from ab.reshard.cells import assert_partition, ring_map
+    from ab.reshard.pieces import build_swiglu_edge
+    from ab.reshard import substrate  # noqa: F401  (the emission/splice layer)
+
+    producer, consumer = build_swiglu_edge()
+    cells = assert_partition(producer, consumer)  # 0b994bb safety net
+    rmap = ring_map(cells)
+    print(
+        f"[RESHARD] offline gate PASSED: {len(cells)} cells, "
+        f"{len(rmap)} consumer cores, map c<-{{c//8+4k}}",
+        flush=True,
+    )
+
+    # DEVICE-VALIDATE: the live splice below is identified but intentionally NOT
+    # wired -- it mutates the real bundle and can only be proven on the device,
+    # which is reserved for the parent. To wire it:
+    #
+    #   import torch_spyre._inductor.codegen.bundle as bundle
+    #   _orig = bundle.generate_bundle
+    #   def _patched(*a, **k):
+    #       # 1. let generate_bundle build the SDSC list
+    #       # 2. find the matmul (producer) + neg (consumer) SDSCs on the
+    #       #    @0xc800000 same-stick edge (mirror detect_onchip_edge, but for
+    #       #    the 2-D matmul->neg geometry, NOT the add->add HBM-base match)
+    #       # 3. build the bridge:
+    #       #      from ab.reshard.substrate import (
+    #       #          build_asymmetric_reshard_bridge, splice_reshard,
+    #       #          allocate_lx_bases)
+    #       #      datadscs, opfuncs, sched = build_asymmetric_reshard_bridge(...)
+    #       #      splice_reshard(prod_sdsc, cons_sdsc, out_idx, in_idx,
+    #       #                     prod_base, cons_base, datadscs, opfuncs, sched)
+    #       # 4. write the spliced JSONs, then hand off to dxp.
+    #       return _orig(*a, **k)
+    #   bundle.generate_bundle = _patched
+    print(
+        "[RESHARD] live bundle splice is SCAFFOLD-ONLY (# DEVICE-VALIDATE); "
+        "see ab/reshard/README.md 'dxp gate'. Running stock (m4,n8) baseline.",
+        flush=True,
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--lever", choices=["baseline", "steer"], required=True)
+    ap.add_argument("--lever", choices=["baseline", "steer", "reshard"], required=True)
     ap.add_argument("--op", required=True)
     ap.add_argument(
         "--shape", type=int, nargs="+", action="append", dest="shapes", required=True
@@ -86,6 +162,8 @@ def main() -> None:
 
     if args.lever == "steer":
         apply_steer()
+    elif args.lever == "reshard":
+        apply_reshard()
 
     sys.path.insert(0, PERF_SUITE)
     os.chdir(PERF_SUITE)  # run_tsp_stack writes inductor/perf artifacts relative to cwd
