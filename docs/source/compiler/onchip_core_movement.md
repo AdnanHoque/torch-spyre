@@ -325,6 +325,50 @@ a generalized non-IJ relayout path before it can serve the scalable LX-to-LX
 movement goal. Continuing to patch the old helper is likely to produce a narrow
 SwiGLU workaround rather than the desired general movement planner.
 
+#### Second Iteration: stock pod backend smoke
+
+On pod `adnan-cdx-spyre-dev-pf`, branch `swiglu-ws-input-fetch` was checked out
+fresh under `/tmp/torch-spyre-swiglu-ws-input-fetch-iter2`. A smaller
+single-edge `mb/out` IFN artifact was built from full torch-spyre-generated
+SDSCs rather than the unit-test fixture:
+
+```text
+artifacts/input_fetch_neighbor_real_mb_out_iter2/
+```
+
+The dedicated Deeptools IFN standalone reaches the IFN path:
+
+```bash
+/opt/ibm/spyre/deeptools/bin/dcg_inpfetch_standalone \
+  -initSdscMain artifacts/input_fetch_neighbor_real_mb_out_iter2/sdsc_1.json \
+  -initSdscPre artifacts/input_fetch_neighbor_real_mb_out_iter2/sdsc_0.json
+```
+
+but the stock backend fails before value execution:
+
+```text
+DtException: mySDscMain.dscs_.at(0).primaryDsInfo_.count(DsTypes::INPUT)
+file /project_src/deeptools/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp line 16
+```
+
+Compatibility-only probes then exposed the next assumptions in order:
+
+- a synthetic `INPUT` primary reaches an LX/ring/SFP-ring pinned assertion at
+  `inputNeighFetchOp.cpp line 30`;
+- forcing all tensors LX-pinned reaches the old `coreStateInit_` assertion at
+  `inputNeighFetchOp.cpp line 455`;
+- adding synthetic `coreStateInit_` reaches `Do not expect empty loop order` in
+  `pcfg_gen_utils.cpp line 329`;
+- the normal `dxp_standalone --bundle` path rejects the artifact earlier with
+  `Datadsc not allowed, use dldsc` in `SdscTree.cpp line 152`.
+
+This means the current torch-spyre IFN artifact can generate the schedule
+trigger and a real single-edge `mb/out` data DSC, but stock Deeptools IFN still
+cannot compile it to a value-correct runtime smoke. The next backend work is not
+a torch-spyre fan-in decomposition; it is a Deeptools IFN generalization that
+selects the compute operand directly, accepts modern LX address metadata, and
+accepts data DSCs in the bundle path.
+
 ## Next Step
 
 Run the minimal STCDP legality probe above. That is now the shortest path to a

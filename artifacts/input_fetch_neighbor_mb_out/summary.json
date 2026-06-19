@@ -11,8 +11,9 @@
       ]
     }
   },
-  "known_backend_risk": "Deeptools InputFetchNeighbor may still require hardcoded i/j coordinates instead of mb/out/x.",
+  "known_backend_risk": "Second-iteration pod testing reached Deeptools IFN but stock backend failed first on INPUT-primary, LX-pinning, legacy coreStateInit_, loop-order, and bundle datadsc assumptions.",
   "one_neighbor_finding": "Current IFN semantics remain a hard blocker for full SwiGLU when multiple neighbor inputs need handoff into one consumer.",
-  "status": "artifact-only-not-deeptools-executed",
-  "why": "Local Python lacks torch and pytest; generated as the minimal JSON shape asserted by the new unit coverage."
+  "status": "fixture-artifact-only-real-probe-blocked",
+  "real_probe": "artifacts/input_fetch_neighbor_real_mb_out_iter2",
+  "why": "This directory is the minimal unit-test fixture. The Deeptools-executed single-edge probe is recorded under artifacts/input_fetch_neighbor_real_mb_out_iter2."
 }

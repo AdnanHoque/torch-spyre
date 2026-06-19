@@ -110,6 +110,43 @@ only one neighbor input.  IFN may still be useful for a single-edge smoke, but
 it cannot cover the full SwiGLU fan-in/fan-out carrier requirement without a
 Deeptools/backend semantic extension.
 
+### Second Iteration Pod Result
+
+The branch was tested in an isolated pod checkout:
+
+```text
+pod: adnan-cdx-spyre-dev-pf
+checkout: /tmp/torch-spyre-swiglu-ws-input-fetch-iter2
+artifact: artifacts/input_fetch_neighbor_real_mb_out_iter2/
+```
+
+A single-edge `mb/out` IFN artifact was built from full torch-spyre-generated
+`batchmatmul` and `add` SDSCs.  The consumer SDSC contains one
+`0_OnChipMoveIFNDataOpLx` and the IFN trigger schedule row
+`[[0, 0, 0, 0]]`.
+
+`dcg_inpfetch_standalone` reaches the Deeptools IFN path but fails before value
+execution:
+
+```text
+DtException: mySDscMain.dscs_.at(0).primaryDsInfo_.count(DsTypes::INPUT)
+file /project_src/deeptools/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp line 16
+```
+
+Compatibility probes show the stock helper also assumes all checked tensors are
+LX/ring-pinned, legacy `coreStateInit_` is present, and loop-order metadata is
+non-empty.  The ordinary DXP bundle path rejects the artifact with:
+
+```text
+DtException: Datadsc not allowed, use dldsc
+file /project_src/deeptools/dxp/SdscTree.cpp line 152
+```
+
+Status: blocked.  A value-correct single-edge smoke was not reached on the stock
+pod backend.  Decomposing multi-neighbor fan-in in torch-spyre is not a safe
+next step until Deeptools IFN accepts modern SuperDSC operand selection, LX
+address metadata, and bundle data DSCs.
+
 ## Next Direction
 
 Do not keep tuning the current mixed `STCDPOpLx` encoding as the scalable

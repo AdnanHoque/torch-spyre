@@ -1,0 +1,51 @@
+Command:
+/opt/ibm/spyre/deeptools/bin/dcg_inpfetch_standalone -initSdscMain artifacts/input_fetch_neighbor_real_mb_out_iter2/sdsc_1.json -initSdscPre artifacts/input_fetch_neighbor_real_mb_out_iter2/sdsc_0.json
+
+Output:
+Reading SuperDscs for file..artifacts/input_fetch_neighbor_real_mb_out_iter2/sdsc_1.json
+Reading SuperDscs for file..artifacts/input_fetch_neighbor_real_mb_out_iter2/sdsc_0.json
+Running DCG for InputFetchNeighbor: Node-name:1_OnChipMoveInputFetchNeighbor
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: mySDscMain.dscs_.at(0).primaryDsInfo_.count(DsTypes::INPUT), file /project_src/deeptools/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp line 16
+dcg_inpfetch_status:134
+
+Command:
+dcg_inpfetch_standalone with synthetic INPUT primary
+
+Output:
+Reading SuperDscs for file..artifacts/input_fetch_neighbor_real_mb_out_iter2/input_primary/sdsc_1.json
+Reading SuperDscs for file..artifacts/input_fetch_neighbor_real_mb_out_iter2/input_primary/sdsc_0.json
+Running DCG for InputFetchNeighbor: Node-name:1_OnChipMoveInputFetchNeighbor
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: lds.isLxPinned() || lds.isRingPinned() || lds.isSfpRingPinned(), file /project_src/deeptools/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp line 30
+dcg_inpfetch_input_primary_status:134
+
+Command:
+dcg_inpfetch_standalone with synthetic INPUT primary and all tensors LX-pinned
+
+Output:
+Reading SuperDscs for file..artifacts/input_fetch_neighbor_real_mb_out_iter2/input_primary_all_lx/sdsc_1.json
+Reading SuperDscs for file..artifacts/input_fetch_neighbor_real_mb_out_iter2/input_primary_all_lx/sdsc_0.json
+Running DCG for InputFetchNeighbor: Node-name:1_OnChipMoveInputFetchNeighbor
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: ldsDLDSC->coreStateInit_.size() > cidx, file /project_src/deeptools/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp line 455
+dcg_inpfetch_input_primary_all_lx_status:134
+
+Command:
+dcg_inpfetch_standalone with synthetic INPUT primary, all tensors LX-pinned, and synthetic coreStateInit_
+
+Output:
+Reading SuperDscs for file..artifacts/input_fetch_neighbor_real_mb_out_iter2/input_primary_all_lx_corestate/sdsc_1.json
+Reading SuperDscs for file..artifacts/input_fetch_neighbor_real_mb_out_iter2/input_primary_all_lx_corestate/sdsc_0.json
+Running DCG for InputFetchNeighbor: Node-name:1_OnChipMoveInputFetchNeighbor
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Do not expect empty loop order., file /project_src/deeptools/dcg/dcg_fe/pcfg_gen/pcfg_gen_utils.cpp line 329
+dcg_inpfetch_input_primary_all_lx_corestate_status:134
+
+Command:
+/opt/ibm/spyre/deeptools/bin/dxp_standalone --bundle -d artifacts/input_fetch_neighbor_real_mb_out_iter2
+
+Output:
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Datadsc not allowed, use dldsc, file /project_src/deeptools/dxp/SdscTree.cpp line 152
+dxp_bundle_status:134

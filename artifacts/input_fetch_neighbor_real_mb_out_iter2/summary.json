@@ -1,0 +1,76 @@
+{
+  "status": "blocked",
+  "artifact": "single-edge IFN mb/out probe from full torch-spyre-generated SDSCs",
+  "producer_source": "/tmp/torchinductor_1000800000/tmp11ujrj2b/inductor-spyre/sdsc_fused_mm_1_z36x9rab/sdsc_0_batchmatmul.json",
+  "consumer_source": "/tmp/torchinductor_1000800000/tmp11ujrj2b/inductor-spyre/sdsc_fused_add_t_0_12t27_5e/sdsc_0_add.json",
+  "pod_checkout": "/tmp/torch-spyre-swiglu-ws-input-fetch-iter2",
+  "pod": "adnan-cdx-spyre-dev-pf",
+  "backend_commands": [
+    "/opt/ibm/spyre/deeptools/bin/dcg_inpfetch_standalone -initSdscMain artifacts/input_fetch_neighbor_real_mb_out_iter2/sdsc_1.json -initSdscPre artifacts/input_fetch_neighbor_real_mb_out_iter2/sdsc_0.json",
+    "/opt/ibm/spyre/deeptools/bin/dxp_standalone --bundle -d artifacts/input_fetch_neighbor_real_mb_out_iter2"
+  ],
+  "backend_blockers": [
+    {
+      "probe": "raw dcg_inpfetch_standalone",
+      "exception": "DtException: mySDscMain.dscs_.at(0).primaryDsInfo_.count(DsTypes::INPUT), file /project_src/deeptools/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp line 16"
+    },
+    {
+      "probe": "with synthetic INPUT primary",
+      "exception": "DtException: lds.isLxPinned() || lds.isRingPinned() || lds.isSfpRingPinned(), file /project_src/deeptools/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp line 30"
+    },
+    {
+      "probe": "with synthetic INPUT primary and all tensors LX-pinned",
+      "exception": "DtException: ldsDLDSC->coreStateInit_.size() > cidx, file /project_src/deeptools/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp line 455"
+    },
+    {
+      "probe": "with synthetic INPUT primary, all tensors LX-pinned, and synthetic coreStateInit_",
+      "exception": "DtException: Do not expect empty loop order., file /project_src/deeptools/dcg/dcg_fe/pcfg_gen/pcfg_gen_utils.cpp line 329"
+    },
+    {
+      "probe": "dxp_standalone --bundle",
+      "exception": "DtException: Datadsc not allowed, use dldsc, file /project_src/deeptools/dxp/SdscTree.cpp line 152"
+    }
+  ],
+  "conclusion": "No value-correct runtime smoke was reached. Stock Deeptools IFN is blocked before non-IJ mb/out coordinate remap execution by INPUT-primary, LX-pinning, legacy coreStateInit_, loop-order, and bundle datadsc assumptions.",
+  "plan": {
+    "status": "planned",
+    "source_name": "Tensor2",
+    "producer": "Tensor2",
+    "consumer": "Tensor0",
+    "device_sizes": [
+      512,
+      8,
+      64
+    ],
+    "device_stride_map": [
+      512,
+      64,
+      1
+    ],
+    "element_bytes": 2,
+    "producer_region_bytes": 2048,
+    "consumer_region_bytes": 2048,
+    "bytes_moved": 2048,
+    "cell_count": 1,
+    "cells": [
+      {
+        "cell_index": 0,
+        "source_core": 0,
+        "dest_core": 0,
+        "source_offset_bytes": 0,
+        "dest_offset_bytes": 0,
+        "bytes": 2048,
+        "dim_starts": {
+          "d0_": 0,
+          "d1_": 1,
+          "d2_": 0
+        },
+        "dim_sizes": {
+          "d0_": 16,
+          "d1_": 1,
+          "d2_": 64
+        }
+      }
+    ]
+  }
+}

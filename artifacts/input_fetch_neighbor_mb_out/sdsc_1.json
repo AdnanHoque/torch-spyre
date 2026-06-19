@@ -665,7 +665,11 @@
       "consumer_region_bytes": 16384,
       "fallback": "stock-hbm-path-when-disabled",
       "limitations": [
-        "single-neighbor-input-only"
+        "single-neighbor-input-only",
+        "deeptools-input-primary-required",
+        "deeptools-lx-pinned-all-tensors-required",
+        "deeptools-core-state-init-required",
+        "deeptools-dldsc-bundle-required"
       ],
       "producer": "buf0",
       "producer_lx_base": 0,

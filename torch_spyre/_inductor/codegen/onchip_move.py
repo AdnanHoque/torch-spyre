@@ -507,7 +507,13 @@ def build_input_fetch_neighbor_sdsc(
         "producer_region_bytes": producer_region_bytes,
         "consumer_region_bytes": consumer_region_bytes,
         "trigger": "schedule-row-with-datadsc-and-dldsc",
-        "limitations": ["single-neighbor-input-only"],
+        "limitations": [
+            "single-neighbor-input-only",
+            "deeptools-input-primary-required",
+            "deeptools-lx-pinned-all-tensors-required",
+            "deeptools-core-state-init-required",
+            "deeptools-dldsc-bundle-required",
+        ],
         "fallback": "stock-hbm-path-when-disabled",
     }
     return (

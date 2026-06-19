@@ -581,7 +581,13 @@ def test_input_fetch_neighbor_carrier_emits_combined_schedule_for_mb_out():
     assert root["coreIdToDscSchedule"]["0"] == [[0, 0, 0, 0]]
     assert root["coreIdToDscSchedule"]["1"] == [[-1, 0, 0, 0]]
     assert root["onchipMove_"]["trigger"] == "schedule-row-with-datadsc-and-dldsc"
-    assert root["onchipMove_"]["limitations"] == ["single-neighbor-input-only"]
+    assert root["onchipMove_"]["limitations"] == [
+        "single-neighbor-input-only",
+        "deeptools-input-primary-required",
+        "deeptools-lx-pinned-all-tensors-required",
+        "deeptools-core-state-init-required",
+        "deeptools-dldsc-bundle-required",
+    ]
 
     dataop = root["datadscs_"][0]["0_OnChipMoveIFNDataOpLx"]
     input_lds = dataop["labeledDs_"][0]
