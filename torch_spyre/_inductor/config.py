@@ -120,6 +120,15 @@ onchip_reduction_reshard_m_split: int = int(
 onchip_reduction_reshard_n_split: int = int(
     os.environ.get("SPYRE_ONCHIP_REDUCTION_RESHARD_N_SPLIT", "8")
 )
+# Split-K alternative to the reshard carrier: instead of gathering the mul output
+# cross-core (the 2-D relayout that the mixed-STCDP carrier gets value-wrong),
+# steer the down_proj to {M:m_split, K:n_split} ALIGNED with the co-assigned mul's
+# {mb,out} co-split, so each core reduces its OWN mul tile in place and the existing
+# PSUM ring reduce (superdsc.py) combines the K-band partials -- no relayout, no
+# data-op, no co-bundle, no new primitive. Requires coassign (mul co-split) first.
+onchip_splitk_downproj: bool = (
+    os.environ.get("SPYRE_ONCHIP_SPLITK_DOWNPROJ", "0") == "1"
+)
 # Per-core LX byte offset for the two reshard regions (producer-out tile +
 # consumer-in band). When mul and down_proj are co-bundled into one device
 # program, the mul's silu inputs already occupy an LX region, so the two reshard

@@ -725,3 +725,78 @@ def coassign_elementwise(graph: GraphLowering, mm_ops: list) -> list:
             frontier.append((op, (csplit, dit)))
             logger.info("coassign %s <- %s", op.get_name(), csplit)
     return extra
+
+
+# --- Split-K alternative: reduce the down_proj IN PLACE (no relayout carrier) ----
+#
+# The relayout carriers (mixed STCDPOpLx / a coordinate-remap dataop) fight the 2-D
+# re-tiling of the mul {mb:4,out:8} output into the down_proj's full-K rows. Split-K
+# sidesteps the re-tiling entirely: steer the down_proj to {M:m_split, K:n_split}
+# ALIGNED with the co-assigned mul's {mb, out} co-split, so each core's K-slice IS
+# the mul tile it already owns (activation local -- or, if the core-mapping does not
+# align, a 1-D same-shape re-ownership, the proven STCDPOpLx case, NEVER the 2-D
+# scatter). The 8 K-band partials per output tile then combine via the EXISTING PSUM
+# ring reduction (codegen/superdsc.py) -- no data-op, no co-bundle, no new primitive.
+
+
+def align_downproj_split_k(graph: GraphLowering, mm_ops: list) -> list:
+    """Steer the down_proj reduction matmul to a K-split aligned with the mul.
+
+    Returns the steered ops so ``_distribute_work`` adds them to
+    ``work_distribution``'s preassigned set (they are divided here, not re-split by
+    the default path). Gated on ``config.onchip_splitk_downproj``; must run AFTER
+    ``coassign_elementwise`` (which makes the mul ``{mb,out}`` co-split so the edge
+    is detectable). Value-correct: a K-split matmul is exact; the PSUM ring reduce
+    sums the partials.
+    """
+    if not config.onchip_splitk_downproj:
+        return []
+    m_split = config.onchip_reduction_reshard_m_split
+    n_split = config.onchip_reduction_reshard_n_split
+    ops = graph.operations
+    name_to_op = {op.get_name(): op for op in ops if isinstance(op, ComputedBuffer)}
+    steered: list = []
+    for consumer in ops:
+        if not isinstance(consumer, ComputedBuffer):
+            continue
+        if not isinstance(getattr(consumer, "data", None), Reduction):
+            continue
+        if consumer.data.reduction_type != BATCH_MATMUL_OP:
+            continue
+        rw = consumer.get_read_writes()
+        reads = [d for d in rw.reads if isinstance(d, MemoryDep)]
+        if len(reads) != 2:
+            continue
+        out_dep = next(iter(rw.writes))
+        x_dep, _y_dep = identify_matmul_inputs(reads, out_dep)
+        if x_dep is None:
+            continue
+        producer = name_to_op.get(x_dep.name)
+        if producer is None:
+            continue
+        try:
+            if not _is_reduction_input_edge(producer, consumer, x_dep):
+                continue
+        except Exception:  # noqa: BLE001
+            continue
+        # K = the dim reduced over (in x, not in the output); M = the row dim
+        # shared by x and the output. Steer the down_proj to {M:m_split, K:n_split}
+        # so its K-bands line up with the mul's out-bands.
+        k_var = find_reduction_var(x_dep, out_dep)
+        m_vars = x_dep.index.free_symbols & out_dep.index.free_symbols
+        if len(m_vars) != 1:
+            continue
+        m_var = next(iter(m_vars))
+        it_space = iteration_space_from_op(consumer)
+        if k_var not in it_space or m_var not in it_space:
+            continue
+        args = get_mem_deps_from_rw(rw)
+        _, output_td = collect_tensor_deps(consumer, args)
+        split = {m_var: m_split, k_var: n_split}
+        apply_splits(consumer, split, output_td)
+        steered.append(consumer)
+        logger.info(
+            "splitk down_proj %s <- {M(%s):%d, K(%s):%d}",
+            consumer.get_name(), m_var, m_split, k_var, n_split,
+        )
+    return steered
