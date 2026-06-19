@@ -63,6 +63,20 @@ class SuperDSCScheduling(BaseScheduling):
         """
         Check whether node1 and node2 can be vertically fused or not.
         """
+        # Co-bundle ONLY the genuine reduction-reshard edge (mul -> down_proj) so the
+        # core-to-core ring reshard lands intra-bundle -- LX does NOT persist across
+        # separate device programs (see reshard/DEVICE_RESULT.md). The planner records
+        # that one edge by buffer name; every other vertical fusion stays disabled
+        # (issue #826). Gated on the reshard flag; lazy import avoids load-time coupling.
+        from . import config
+        from .onchip_handoff import reduction_reshard_edges
+
+        if config.onchip_reduction_reshard:
+            edges = reduction_reshard_edges()
+            if edges:
+                n1, n2 = node1.get_name(), node2.get_name()
+                if (n1, n2) in edges or (n2, n1) in edges:
+                    return True
         # TODO: Revisit this as part of https://github.com/torch-spyre/torch-spyre/issues/826
         return False
 

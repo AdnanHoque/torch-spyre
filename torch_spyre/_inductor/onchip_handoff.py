@@ -75,6 +75,19 @@ logger = get_inductor_logger("onchip_handoff")
 FAIL_CLOSED_REASON = "needs-deeptools-foundation-contract"
 
 
+# Co-bundle store: the reduction-reshard edges (producer_name, consumer_name) the
+# planner found this compile. The scheduler's can_fuse_vertical queries this to fuse
+# mul -> down_proj into ONE FusedSchedulerNode -> one device program, because LX does
+# NOT persist across separate device programs (see reshard/DEVICE_RESULT.md). Cleared
+# per planner run; read by torch_spyre._inductor.scheduler.can_fuse_vertical.
+_REDUCTION_RESHARD_EDGES: set[tuple[str, str]] = set()
+
+
+def reduction_reshard_edges() -> set[tuple[str, str]]:
+    """(producer_name, consumer_name) reduction-reshard edges from the last planner run."""
+    return _REDUCTION_RESHARD_EDGES
+
+
 @dataclasses.dataclass(frozen=True)
 class OnChipHandoffPlan:
     """A planned (but unrealized) same-layout cross-core LX handoff.
@@ -547,7 +560,7 @@ def plan_onchip_handoffs(
     :class:`OnChipHandoffPlan`. Per-edge work is wrapped so one bad edge cannot
     crash compilation. This is a pure observer: it never mutates the graph.
     """
-    if not config.onchip_handoff_planner:
+    if not (config.onchip_handoff_planner or config.onchip_reduction_reshard):
         return []
 
     name_to_op = build_name_to_op_map(operations)
@@ -630,6 +643,13 @@ def run_onchip_handoff_planner(
     to call from the pre-scheduling pass sequence after work division.
     """
     plans = plan_onchip_handoffs(operations, sencores)
+    # Record the genuine reduction-reshard edges (mul -> down_proj) for the
+    # scheduler's co-bundle predicate (can_fuse_vertical): they MUST land in one
+    # device program for the intra-bundle ring reshard to apply. Cleared each run.
+    _REDUCTION_RESHARD_EDGES.clear()
+    for plan in plans:
+        if plan.is_reduction_input:
+            _REDUCTION_RESHARD_EDGES.add((plan.producer_name, plan.consumer_name))
     if plans:
         total_bytes = sum(plan.bytes_moved for plan in plans)
         total_byte_hops = sum(plan.total_byte_hops for plan in plans)
