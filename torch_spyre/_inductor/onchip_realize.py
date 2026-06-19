@@ -7575,13 +7575,28 @@ def realize_reduction_reshard_bundle(
             p += 1
             continue
 
-        apply_lx_flip(prod, realization.producer_flip)
-        apply_lx_flip(consumer_sdsc, realization.consumer_flip)
-        standalone = build_standalone_reduction_reshard_sdsc(realization, sdsc_name)
-        sdscs_json.insert(cons_pos, standalone)
+        # MIXED fold into the consumer (down_proj) SDSC -- NOT a standalone step.
+        # The §5-patched dxp admits only the mixed shape (dataOpdscs_ + dscs_ +
+        # coreIdToDscSchedule); a standalone pure-data-op SDSC aborts at dxp.cpp:479
+        # "Datadsc not allowed without dldsc schedule" (device-confirmed). splice_reshard
+        # flips both endpoints to LX, attaches the STCDP datadscs + the MIXED schedule
+        # (data-ops then the consumer DL row) onto the consumer body, and marks it mixed.
+        from .reshard import splice_reshard
+        from .reshard.substrate import mixed_schedule
+
+        splice_reshard(
+            producer_sdsc=prod,
+            consumer_sdsc=consumer_sdsc,
+            producer_out_idx=producer_out_idx,
+            consumer_in_idx=consumer_in_idx,
+            producer_base=realization.producer_base,
+            consumer_base=realization.consumer_base,
+            datadscs=realization.datadscs,
+            opfuncs=realization.opfuncs,
+            schedule=mixed_schedule(len(realization.datadscs), num_cores),
+        )
         realized = True
-        # Resume scanning after the inserted SDSC (now at cons_pos).
-        p = cons_pos + 1
+        p += 1
     return realized
 
 
