@@ -134,11 +134,12 @@ def patch_onchip_move_mixed_schedules(
             try:
                 consumer_input_idx = _consumer_input_arg_idx(consumer, source_name)
                 patched_consumer = copy.deepcopy(consumer_entry[0])
+                consumer_root = next(iter(patched_consumer.values()))
                 _patch_lx_endpoint(
-                    patched_consumer,
+                    consumer_root,
                     dsc_index=0,
                     lds_idx=_matching_input_lds_idx(
-                        patched_consumer, consumer_input_idx
+                        consumer_root, consumer_input_idx
                     ),
                     base=reuse_base,
                 )
