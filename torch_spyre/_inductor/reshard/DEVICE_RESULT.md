@@ -88,6 +88,31 @@ A narrowly-gated override returning True ONLY for `elementwise-mul -> bmm-reduci
 - `onchip_reduction_reshard_region0` knob (LX disjointness: the consumer band base
   collided with the silu inputs' LX@409600 once co-bundled).
 
+## PREMISE BROKEN ON FLASH-WS (2026-06-19, CPU): the matmuls lower PURE-M, not {mb:4,out:8}
+
+Decoding the cached SDSC `coordInfo/{mb,out}/folds` (first factor = core fold) for the
+device run: gate-matmul, mul, AND down_proj are ALL **`{mb:32, out:1}` pure-M** -- `mb`
+split 32 ways (16 rows/core), `out` NOT split (full 12800/4096 per core). So every
+SwiGLU edge here is **same-shard same-core** (down_proj core `c` reads the full-K rows
+that mul core `c` produced) -- there is NO cross-division edge, and nothing to reshard.
+
+ROOT CAUSE: **`cost_model_matmul_division` (the pass that picks the `{mb:4,out:8}`
+co-split) is NOT on flash-ws -- and not on `main` either** (0 hits in both
+`work_division.py`). It lives on the separate cost-model feature branches. flash-ws's
+`passes.py` runs the default `work_distribution`, which gives pure-M. The core-to-core
+branch saw `{mb:4,out:8}` only because its base (`cf67411`) carried the cost model.
+`realize_reduction_reshard` correctly returns `None` when `n_split < 2` (pure-M), so
+the reshard **no-ops** on flash-ws -- which is why no device run could ever exercise it
+here, independent of the H2D wedge.
+
+IMPLICATION: the genuine SwiGLU reduction-reshard needs THREE things on one branch:
+(1) the cost-model co-split `{mb:4,out:8}` (cost-model branch / `cf67411`, NOT
+flash-ws/main); (2) the co-bundle of mul+down_proj (built here, `d2a82ea`); (3) the
+within-bundle reshard + EBR (built + device-proven here). They currently live on
+different branches. On flash-ws alone the edge is same-shard, so the on-chip win for
+THIS lowering would be pure LX-persistence (softmax-chain style, no data-op), not a
+ring reshard -- and even that is cross-bundle (program-boundary) blocked.
+
 ### Cheapest refuting probe before the co-bundle investment (ablations-over-static)
 A two-program LX-survival probe: program A writes a known pattern to `LX@B` and
 exits; a SEPARATE launch of program B reads `LX@B` without re-init. Confirms the "LX
