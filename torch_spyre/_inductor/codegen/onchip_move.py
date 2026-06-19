@@ -99,6 +99,7 @@ def patch_onchip_move_mixed_schedules(
                 producer_entry[0],
                 consumer_entry[0],
                 producer.args[producer_output_idx],
+                consumer.args[consumer_input_idx],
                 producer_output_idx,
                 consumer_input_idx,
                 plan,
@@ -199,6 +200,7 @@ def build_mixed_onchip_move_sdsc(
     producer_payload: dict[str, Any],
     consumer_payload: dict[str, Any],
     producer_output: TensorArg,
+    consumer_input: TensorArg,
     producer_output_idx: int,
     consumer_input_idx: int,
     plan: dict[str, Any],
@@ -224,12 +226,21 @@ def build_mixed_onchip_move_sdsc(
         lds_idx=producer_output_idx,
         base=producer_base,
     )
+    consumer_input_lds_idx = _matching_input_lds_idx(consumer_root, consumer_input_idx)
     _patch_lx_endpoint(
         consumer_root,
         dsc_index=0,
-        lds_idx=_matching_input_lds_idx(consumer_root, consumer_input_idx),
+        lds_idx=consumer_input_lds_idx,
         base=consumer_base,
     )
+    producer_layout = _logical_dataop_layout(
+        producer_root, producer_output, plan, producer_output_idx
+    )
+    consumer_layout = _logical_dataop_layout(
+        consumer_root, consumer_input, plan, consumer_input_lds_idx
+    )
+    if consumer_layout is None:
+        consumer_layout = _dsc_logical_layout(consumer_root, consumer_input_lds_idx)
     datadsc = build_stcdp_datadsc(
         dataop_name,
         plan,
@@ -237,7 +248,8 @@ def build_mixed_onchip_move_sdsc(
         word_length=_word_length(producer_output),
         producer_base=producer_base,
         consumer_base=consumer_base,
-        logical_layout=_logical_dataop_layout(producer_root, producer_output, plan),
+        logical_layout=producer_layout,
+        output_logical_layout=consumer_layout,
     )
 
     root = copy.deepcopy(consumer_root)
@@ -284,28 +296,14 @@ def _logical_dataop_layout(
     producer_root: dict[str, Any],
     producer_output: TensorArg,
     plan: dict[str, Any],
+    lds_idx: int | None = None,
 ) -> dict[str, Any] | None:
-    dsc = _first_compute_dsc(producer_root)
-    if dsc is None:
+    layout = _dsc_logical_layout(producer_root, lds_idx)
+    if layout is None:
         return None
-    layout_info = (dsc.get("primaryDsInfo_", {}) or {}).get("OUTPUT")
-    if not isinstance(layout_info, dict):
-        return None
-    layout_dim_order = [str(dim) for dim in layout_info.get("layoutDimOrder_", [])]
-    stick_dim_order = [str(dim) for dim in layout_info.get("stickDimOrder_", [])]
-    if not layout_dim_order or len(stick_dim_order) != 1:
-        return None
-    raw_stick_sizes = list(layout_info.get("stickSize_", []) or [])
-    if len(raw_stick_sizes) != len(stick_dim_order):
-        return None
-
-    n_info = dsc.get("N_", {}) or {}
-    layout_sizes: dict[str, int] = {}
-    for dim in layout_dim_order:
-        value = n_info.get(f"{dim}_", n_info.get(dim))
-        if value is None:
-            return None
-        layout_sizes[dim] = int(value)
+    layout_dim_order = list(layout["layout_dim_order"])
+    stick_dim_order = list(layout["stick_dim_order"])
+    layout_sizes = dict(layout["layout_sizes"])
 
     device_sizes = [int(size) for size in plan.get("device_sizes", []) or []]
     stride_map = [
@@ -326,6 +324,46 @@ def _logical_dataop_layout(
     )
     if mapping is None:
         return None
+    result = dict(layout)
+    result["device_to_logical"] = mapping
+    result["stick_elems"] = int(device_sizes[-1])
+    return result
+
+
+def _dsc_logical_layout(
+    root: dict[str, Any],
+    lds_idx: int | None = None,
+) -> dict[str, Any] | None:
+    dsc = _first_compute_dsc(root)
+    if dsc is None:
+        return None
+    label: str | None = None
+    if lds_idx is not None:
+        for lds in dsc.get("labeledDs_", []) or []:
+            if int(lds.get("ldsIdx_", -1)) == int(lds_idx):
+                label = str(lds.get("dsType_"))
+                break
+    if not label:
+        label = "OUTPUT"
+    layout_info = (dsc.get("primaryDsInfo_", {}) or {}).get(label)
+    if not isinstance(layout_info, dict):
+        layout_info = (dsc.get("primaryDsInfo_", {}) or {}).get("OUTPUT")
+    if not isinstance(layout_info, dict):
+        return None
+    layout_dim_order = [str(dim) for dim in layout_info.get("layoutDimOrder_", [])]
+    stick_dim_order = [str(dim) for dim in layout_info.get("stickDimOrder_", [])]
+    if not layout_dim_order or len(stick_dim_order) != 1:
+        return None
+    raw_stick_sizes = list(layout_info.get("stickSize_", []) or [])
+    if len(raw_stick_sizes) != len(stick_dim_order):
+        return None
+    n_info = dsc.get("N_", {}) or {}
+    layout_sizes: dict[str, int] = {}
+    for dim in layout_dim_order:
+        value = n_info.get(f"{dim}_", n_info.get(dim))
+        if value is None:
+            return None
+        layout_sizes[dim] = int(value)
     return {
         "layout_dim_order": layout_dim_order,
         "stick_dim_order": stick_dim_order,
@@ -333,8 +371,6 @@ def _logical_dataop_layout(
         "stick_sizes": {
             dim: int(size) for dim, size in zip(stick_dim_order, raw_stick_sizes)
         },
-        "device_to_logical": mapping,
-        "stick_elems": int(device_sizes[-1]),
     }
 
 
@@ -470,6 +506,152 @@ def _logical_cells(
     return logical_cells
 
 
+def _project_logical_cells(
+    cells: list[dict[str, Any]],
+    output_layout: dict[str, Any],
+) -> list[dict[str, Any]]:
+    dim_order = [str(dim) for dim in output_layout["layout_dim_order"]]
+    projected: list[dict[str, Any]] = []
+    for cell in cells:
+        starts: dict[str, int] = {}
+        sizes: dict[str, int] = {}
+        for dim in dim_order:
+            if dim in cell["dim_starts"]:
+                starts[dim] = int(cell["dim_starts"][dim])
+                sizes[dim] = int(cell["dim_sizes"][dim])
+            else:
+                if int(output_layout["layout_sizes"][dim]) != 1:
+                    raise ValueError("output-layout-dim-not-in-cell")
+                starts[dim] = 0
+                sizes[dim] = 1
+        projected_cell = dict(cell)
+        projected_cell["dim_starts"] = starts
+        projected_cell["dim_sizes"] = sizes
+        projected.append(projected_cell)
+    return projected
+
+
+def _keep_missing_size_one_dims(
+    output_layout: dict[str, Any] | None,
+    input_layout: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if output_layout is None or input_layout is None:
+        return output_layout
+
+    output_dim_order = [str(dim) for dim in output_layout["layout_dim_order"]]
+    output_dim_set = set(output_dim_order)
+    missing_size_one_dims = [
+        str(dim)
+        for dim in input_layout["layout_dim_order"]
+        if str(dim) not in output_dim_set
+    ]
+    if not missing_size_one_dims:
+        return output_layout
+
+    result = dict(output_layout)
+    result["layout_dim_order"] = [*output_dim_order, *missing_size_one_dims]
+    result["layout_sizes"] = dict(output_layout["layout_sizes"])
+    for dim in missing_size_one_dims:
+        if int(input_layout["layout_sizes"][dim]) != 1:
+            raise ValueError("output-layout-drops-non-size-one-dim")
+        result["layout_sizes"][dim] = 1
+    result["stick_dim_order"] = list(output_layout["stick_dim_order"])
+    result["stick_sizes"] = dict(output_layout["stick_sizes"])
+    return result
+
+
+def _coalesce_piece_cells(
+    cells: list[dict[str, Any]],
+    *,
+    core_key: str,
+    offset_key: str,
+    element_bytes: int,
+) -> list[dict[str, Any]]:
+    by_core: dict[int, list[dict[str, Any]]] = {}
+    for cell in cells:
+        by_core.setdefault(int(cell[core_key]), []).append(cell)
+    if not by_core:
+        return cells
+
+    coalesced: list[dict[str, Any]] = []
+    for new_index, (core, group) in enumerate(sorted(by_core.items())):
+        dim_names = list(group[0]["dim_starts"].keys())
+        if any(list(cell["dim_starts"].keys()) != dim_names for cell in group):
+            return cells
+        starts = {
+            dim: min(int(cell["dim_starts"][dim]) for cell in group)
+            for dim in dim_names
+        }
+        ends = {
+            dim: max(
+                int(cell["dim_starts"][dim]) + int(cell["dim_sizes"][dim])
+                for cell in group
+            )
+            for dim in dim_names
+        }
+        sizes = {dim: ends[dim] - starts[dim] for dim in dim_names}
+        bytes_moved = sum(int(cell.get("bytes", 0) or 0) for cell in group)
+        if element_bytes:
+            rect_bytes = math.prod(sizes.values()) * int(element_bytes)
+            if rect_bytes != bytes_moved:
+                return cells
+            bytes_moved = rect_bytes
+
+        first = group[0]
+        merged = dict(first)
+        merged["cell_index"] = new_index
+        merged["source_core"] = int(first["source_core"])
+        merged["dest_core"] = int(first["dest_core"])
+        merged[core_key] = core
+        merged[offset_key] = min(int(cell.get(offset_key, 0) or 0) for cell in group)
+        merged["bytes"] = bytes_moved
+        merged["dim_starts"] = starts
+        merged["dim_sizes"] = sizes
+        coalesced.append(merged)
+    return coalesced
+
+
+def _span_partial_stick_dim_for_output(
+    cells: list[dict[str, Any]],
+    output_layout: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if output_layout is None:
+        return cells
+    stick_dim_order = list(output_layout.get("stick_dim_order", []))
+    if len(stick_dim_order) != 1:
+        return cells
+    stick_dim = str(stick_dim_order[0])
+    full_size = int(output_layout["layout_sizes"][stick_dim])
+    spanned: list[dict[str, Any]] = []
+    for cell in cells:
+        starts = dict(cell["dim_starts"])
+        sizes = dict(cell["dim_sizes"])
+        if stick_dim not in starts or stick_dim not in sizes:
+            spanned.append(cell)
+            continue
+        start = int(starts[stick_dim])
+        size = int(sizes[stick_dim])
+        if size <= 0 or start < 0 or start + size > full_size:
+            raise ValueError("output-stick-piece-out-of-bounds")
+        if size == full_size:
+            spanned.append(cell)
+            continue
+
+        starts[stick_dim] = 0
+        sizes[stick_dim] = full_size
+        valid_gap = _valid_gap(sizes)
+        if start == 0:
+            valid_gap[stick_dim] = [[size, full_size - size]]
+        else:
+            valid_gap[stick_dim] = [[0, start], [size, full_size - start - size]]
+        spanned_cell = dict(cell)
+        spanned_cell["dim_starts"] = starts
+        spanned_cell["dim_sizes"] = sizes
+        spanned_cell["_valid_gap"] = valid_gap
+        spanned.append(spanned_cell)
+    return spanned
+
+
 def build_stcdp_datadsc(
     name: str,
     plan: dict[str, Any],
@@ -479,37 +661,64 @@ def build_stcdp_datadsc(
     producer_base: int,
     consumer_base: int,
     logical_layout: dict[str, Any] | None = None,
+    output_logical_layout: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     device_sizes = [int(size) for size in plan.get("device_sizes", [])]
     if not device_sizes:
         raise ValueError("plan-has-no-device-sizes")
-    cells = _logical_cells(plan, logical_layout) if logical_layout else list(
+    input_cells = _logical_cells(plan, logical_layout) if logical_layout else list(
         plan.get("cells", []) or []
     )
-    if not cells:
+    if not input_cells:
         raise ValueError("plan-has-no-cells")
-    if logical_layout:
-        dim_names = list(logical_layout["layout_dim_order"])
-        stick_dim_order = list(logical_layout.get("stick_dim_order", []))
-        layout_sizes = {
-            str(dim): int(size) for dim, size in logical_layout["layout_sizes"].items()
-        }
-        stick_sizes = {
-            str(dim): int(size)
-            for dim, size in logical_layout["stick_sizes"].items()
-        }
-    else:
+    output_logical_layout = _keep_missing_size_one_dims(
+        output_logical_layout,
+        logical_layout,
+    )
+    output_cells = (
+        _project_logical_cells(input_cells, output_logical_layout)
+        if output_logical_layout
+        else input_cells
+    )
+    output_cells = _span_partial_stick_dim_for_output(
+        output_cells,
+        output_logical_layout or logical_layout,
+    )
+
+    def layout_fields(layout: dict[str, Any] | None) -> tuple[
+        list[str], list[str], dict[str, int], dict[str, int]
+    ]:
+        if layout:
+            dim_names = list(layout["layout_dim_order"])
+            stick_dim_order = list(layout.get("stick_dim_order", []))
+            layout_sizes = {
+                str(dim): int(size) for dim, size in layout["layout_sizes"].items()
+            }
+            stick_sizes = {
+                str(dim): int(size)
+                for dim, size in layout["stick_sizes"].items()
+            }
+            return dim_names, stick_dim_order, layout_sizes, stick_sizes
         dim_names = [f"d{idx}_" for idx in range(len(device_sizes))]
         stick_dim_order = [dim_names[-1]]
         layout_sizes = dict(zip(dim_names, device_sizes))
         stick_sizes = {stick_dim_order[0]: int(layout_sizes[stick_dim_order[0]])}
+        return dim_names, stick_dim_order, layout_sizes, stick_sizes
+
+    input_dim_names, input_stick_dim_order, input_layout_sizes, input_stick_sizes = (
+        layout_fields(logical_layout)
+    )
+    output_dim_names, output_stick_dim_order, output_layout_sizes, output_stick_sizes = (
+        layout_fields(output_logical_layout or logical_layout)
+    )
+    dim_names = list(dict.fromkeys(input_dim_names + output_dim_names))
     input_pieces = [
         _piece(
             cell,
             source=True,
             base=producer_base,
         )
-        for cell in cells
+        for cell in input_cells
     ]
     output_pieces = [
         _piece(
@@ -517,14 +726,14 @@ def build_stcdp_datadsc(
             source=False,
             base=consumer_base,
         )
-        for cell in cells
+        for cell in output_cells
     ]
     core_ids = sorted(
         {
             int(cell["source_core"])
-            for cell in cells
+            for cell in input_cells
         }
-        | {int(cell["dest_core"]) for cell in cells}
+        | {int(cell["dest_core"]) for cell in output_cells}
     )
     return {
         "coreIdsUsed_": core_ids,
@@ -540,10 +749,10 @@ def build_stcdp_datadsc(
                 "dataIN",
                 data_format,
                 word_length,
-                dim_names,
-                stick_dim_order,
-                layout_sizes,
-                stick_sizes,
+                input_dim_names,
+                input_stick_dim_order,
+                input_layout_sizes,
+                input_stick_sizes,
                 input_pieces,
             ),
             _labeled_ds(
@@ -551,10 +760,10 @@ def build_stcdp_datadsc(
                 "dataOUT",
                 data_format,
                 word_length,
-                dim_names,
-                stick_dim_order,
-                layout_sizes,
-                stick_sizes,
+                output_dim_names,
+                output_stick_dim_order,
+                output_layout_sizes,
+                output_stick_sizes,
                 output_pieces,
             ),
         ],
@@ -617,7 +826,7 @@ def _piece(cell: dict[str, Any], *, source: bool, base: int) -> dict[str, Any]:
         "key_": f"p{int(cell['cell_index']) + 1}",
         "dimToStartCordinate": dict(cell["dim_starts"]),
         "dimToSize_": dict(cell["dim_sizes"]),
-        "validGap_": _valid_gap(cell["dim_sizes"]),
+        "validGap_": dict(cell.get("_valid_gap") or _valid_gap(cell["dim_sizes"])),
         "PlacementInfo": [
             {"type": "lx", "memId": [core], "startAddr": [start_addr]}
         ],

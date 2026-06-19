@@ -204,6 +204,7 @@ def test_mixed_carrier_keeps_producer_as_standalone_sdsc():
         producer_payload,
         consumer_payload,
         output_arg,
+        dataclasses.replace(output_arg, is_input=True, arg_index=0),
         2,
         0,
         plan,
@@ -302,6 +303,7 @@ def test_mixed_carrier_emits_logical_dataop_layout_for_stickified_cells():
         producer_payload,
         consumer_payload,
         output_arg,
+        dataclasses.replace(output_arg, is_input=True, arg_index=0),
         1,
         0,
         plan,
@@ -316,12 +318,25 @@ def test_mixed_carrier_emits_logical_dataop_layout_for_stickified_cells():
     assert input_lds["dimToLayoutSize_"] == {"mb": 512, "out": 512}
     assert input_lds["dimToStickSize_"] == {"out": 64}
     pieces = input_lds["PieceInfo"]
+    assert len(pieces) == 3
     assert pieces[0]["dimToStartCordinate"] == {"mb": 0, "out": 0}
     assert pieces[0]["dimToSize_"] == {"mb": 16, "out": 64}
     assert pieces[1]["dimToStartCordinate"] == {"mb": 16, "out": 0}
     assert pieces[1]["dimToSize_"] == {"mb": 16, "out": 64}
     assert pieces[2]["dimToStartCordinate"] == {"mb": 0, "out": 64}
     assert pieces[2]["dimToSize_"] == {"mb": 16, "out": 64}
+    output_lds = dataop["labeledDs_"][1]
+    output_pieces = output_lds["PieceInfo"]
+    assert len(output_pieces) == 3
+    assert output_pieces[0]["dimToStartCordinate"] == {"mb": 0, "out": 0}
+    assert output_pieces[0]["dimToSize_"] == {"mb": 16, "out": 512}
+    assert output_pieces[0]["validGap_"]["out"] == [[64, 448]]
+    assert output_pieces[1]["dimToStartCordinate"] == {"mb": 16, "out": 0}
+    assert output_pieces[1]["dimToSize_"] == {"mb": 16, "out": 512}
+    assert output_pieces[1]["validGap_"]["out"] == [[64, 448]]
+    assert output_pieces[2]["dimToStartCordinate"] == {"mb": 0, "out": 0}
+    assert output_pieces[2]["dimToSize_"] == {"mb": 16, "out": 512}
+    assert output_pieces[2]["validGap_"]["out"] == [[0, 64], [64, 384]]
 
 
 def test_mixed_carrier_maps_collapsed_size_one_logical_dims():
@@ -363,7 +378,8 @@ def test_mixed_carrier_maps_collapsed_size_one_logical_dims():
             output_lds_idx=1,
             input_lds_indices=[0],
             core_ids=list(range(32)),
-            include_x=True,
+            input_layout_dim_order=["out", "mb"],
+            output_layout_dim_order=["out", "mb"],
         )
     }
     output_arg = TensorArg(
@@ -383,6 +399,7 @@ def test_mixed_carrier_maps_collapsed_size_one_logical_dims():
         producer_payload,
         consumer_payload,
         output_arg,
+        dataclasses.replace(output_arg, is_input=True, arg_index=0),
         2,
         0,
         plan,
@@ -396,9 +413,20 @@ def test_mixed_carrier_maps_collapsed_size_one_logical_dims():
     assert input_lds["stickDimOrder_"] == ["out"]
     assert input_lds["dimToLayoutSize_"] == {"mb": 512, "out": 512, "x": 1}
     assert input_lds["dimToStickSize_"] == {"out": 64}
+    assert len(input_lds["PieceInfo"]) == 1
     piece = input_lds["PieceInfo"][0]
     assert piece["dimToStartCordinate"] == {"mb": 0, "out": 64, "x": 0}
     assert piece["dimToSize_"] == {"mb": 16, "out": 64, "x": 1}
+    output_lds = dataop["labeledDs_"][1]
+    assert output_lds["layoutDimOrder_"] == ["out", "mb", "x"]
+    assert output_lds["stickDimOrder_"] == ["out"]
+    assert output_lds["dimToLayoutSize_"] == {"out": 512, "mb": 512, "x": 1}
+    assert output_lds["dimToStickSize_"] == {"out": 64}
+    assert len(output_lds["PieceInfo"]) == 1
+    output_piece = output_lds["PieceInfo"][0]
+    assert output_piece["dimToStartCordinate"] == {"out": 0, "mb": 0, "x": 0}
+    assert output_piece["dimToSize_"] == {"out": 512, "mb": 16, "x": 1}
+    assert output_piece["validGap_"]["out"] == [[0, 64], [64, 384]]
 
 
 def test_mixed_carrier_reuses_lx_source_for_later_fanout_consumer(monkeypatch):
@@ -648,7 +676,17 @@ def _minimal_sdsc_payload(
                         for idx in range(max_lds_idx + 1)
                     ],
                     "labeledDs_": [
-                        {"ldsIdx_": idx, "memOrg_": {"hbm": {"isPresent": 1}}}
+                        {
+                            "ldsIdx_": idx,
+                            "dsType_": (
+                                "OUTPUT"
+                                if idx == output_lds_idx
+                                else "INPUT"
+                                if idx in input_lds_indices
+                                else "LOCAL"
+                            ),
+                            "memOrg_": {"hbm": {"isPresent": 1}},
+                        }
                         for idx in range(max_lds_idx + 1)
                     ],
                     "computeOp_": [
@@ -672,6 +710,8 @@ def _layout_sdsc_payload(
     input_lds_indices: list[int],
     core_ids: list[int],
     include_x: bool = False,
+    input_layout_dim_order: list[str] | None = None,
+    output_layout_dim_order: list[str] | None = None,
 ) -> dict:
     payload = _minimal_sdsc_payload(
         name,
@@ -680,19 +720,24 @@ def _layout_sdsc_payload(
         core_ids=core_ids,
     )
     dsc = next(iter(payload["dscs_"][0].values()))
-    layout_dim_order = ["mb", "out", "x"] if include_x else ["mb", "out"]
-    n_info = {"name_": "n", "mb_": 512, "out_": 512}
-    if include_x:
-        n_info["x_"] = 1
+    default_layout_dim_order = ["mb", "out", "x"] if include_x else ["mb", "out"]
+    input_layout_dim_order = input_layout_dim_order or default_layout_dim_order
+    output_layout_dim_order = output_layout_dim_order or default_layout_dim_order
+    all_layout_dims = list(
+        dict.fromkeys([*input_layout_dim_order, *output_layout_dim_order])
+    )
+    n_info = {"name_": "n"}
+    for dim in all_layout_dims:
+        n_info[f"{dim}_"] = 1 if dim == "x" else 512
     dsc["N_"] = n_info
     dsc["primaryDsInfo_"] = {
         "INPUT": {
-            "layoutDimOrder_": layout_dim_order,
+            "layoutDimOrder_": input_layout_dim_order,
             "stickDimOrder_": ["out"],
             "stickSize_": [64],
         },
         "OUTPUT": {
-            "layoutDimOrder_": layout_dim_order,
+            "layoutDimOrder_": output_layout_dim_order,
             "stickDimOrder_": ["out"],
             "stickSize_": [64],
         },
