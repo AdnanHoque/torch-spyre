@@ -1,0 +1,188 @@
+diff --git a/docs/lx_coordinate_remap_backend.md b/docs/lx_coordinate_remap_backend.md
+new file mode 100644
+index 000000000000..111111111111
+--- /dev/null
++++ b/docs/lx_coordinate_remap_backend.md
+@@ -0,0 +1,159 @@
++# LXCoordinateRemapOp Backend Prototype
++
++This patch/spec is keyed to Torch-Spyre `lx_coordinate_remap_v0` artifacts and
++the normalized `coordinate_remap.deeptools_dataop` payload.  It is meant to land
++as a Deeptools DataOp, not as another `STCDPOpLx` physicalizer patch.
++
++## Import Surface
++
++`LXCoordinateRemapOp` is accepted in a mixed SuperDSC `dataOpdscs_` row.  The
++consumer row must be scheduled after the remap row in `coreIdToDscSchedule`.
++
++```json
++{
++  "op": {"name": "LXCoordinateRemapOp"},
++  "schemaVersion": 0,
++  "sourceName": "buf0",
++  "producer": "buf0",
++  "consumer": "buf1",
++  "producerLxBase": 4096,
++  "consumerLxBase": 36864,
++  "coverage": {"device_sizes": [16], "status": "complete"},
++  "dependencyOrder": [
++    {"order": 0, "kind": "producer_lx_write_before_remap", "op": "buf0"},
++    {"order": 1, "kind": "coordinate_remap", "cellCount": 4},
++    {"order": 2, "kind": "consumer_lx_read_after_remap", "op": "buf1"}
++  ],
++  "lowering": {
++    "strategy": "explicit_lx_copy_via_l3",
++    "addressUnits": "bytes"
++  },
++  "movements": [
++    {
++      "moveIndex": 1,
++      "bytes": 8,
++      "source": {
++        "core": 1,
++        "logicalSlice": {"starts": {"d0_": 4}, "sizes": {"d0_": 4}},
++        "lxAddress": 4096,
++        "localByteRange": {"start": 0, "end": 8},
++        "lxByteRange": {"start": 4096, "end": 4104}
++      },
++      "destination": {
++        "core": 0,
++        "logicalSlice": {"starts": {"d0_": 4}, "sizes": {"d0_": 4}},
++        "lxAddress": 36872,
++        "localByteRange": {"start": 8, "end": 16},
++        "lxByteRange": {"start": 36872, "end": 36880}
++      }
++    }
++  ]
++}
++```
++
++## Validation
++
++The Deeptools importer should reject the data-op before DDC/DCG if any of the
++following is true:
++
++1. `op.name != "LXCoordinateRemapOp"` or `schemaVersion != 0`.
++2. `lowering.strategy != "explicit_lx_copy_via_l3"` or
++   `lowering.addressUnits != "bytes"`.
++3. Dependency kinds are not exactly:
++   `producer_lx_write_before_remap`, `coordinate_remap`,
++   `consumer_lx_read_after_remap`.
++4. Any movement has `bytes <= 0`, or its source/destination `lxByteRange`
++   length differs from `bytes`.
++5. Any source or destination `lxAddress` differs from its `lxByteRange.start`.
++6. Destination `localByteRange` entries overlap for the same destination core.
++7. Logical movement rectangles do not cover `coverage.device_sizes` exactly
++   once.  The first backend patch can implement this with the same rectangle
++   volume and pairwise-intersection checks Torch-Spyre performs.
++8. Any byte address falls outside the producer or consumer LX allocation
++   reported by the surrounding SuperDSC.
++
++## DCG Lowering
++
++For each movement, generate explicit traffic through L3:
++
++1. On `source.core`, issue an LX load from `source.lxAddress` for `bytes`.
++2. Store that payload to an L3 scratch slot assigned to `moveIndex`.
++3. Synchronize source L3 store before destination L3 load.
++4. On `destination.core`, load the same L3 scratch slot.
++5. Store to destination LX at `destination.lxAddress` for `bytes`.
++6. Synchronize the remap row before the consumer DL row.
++
++The prototype can be conservative:
++
++- Use one L3 scratch slot per movement.  Coalescing adjacent movements can come
++  later after value-correctness is established.
++- Preserve movement order by `moveIndex` to keep debug traces stable.
++- Generate only byte-contiguous copies at first.  Torch-Spyre already breaks
++  1-D and simple 2-D remaps into byte-contiguous movements.
++- Reject folded SuperDSC remap rows until the non-folded path is value-correct.
++
++## Required Deeptools Touch Points
++
++The sparse Deeptools source available for this iteration shows these seams:
++
++- `dxp/dxp.cpp::Dxp::runCodegen()` already selects
++  `DcgManager::runDcgForDataOpsDlOps()` when a mixed SuperDSC has both
++  `dataOpdscs_` and `dscs_` plus `coreIdToDscSchedule`.
++- `dcg/dcg_manager/dcg_manager.cpp::runDcgForDataOpsDlOps()` already compiles
++  scheduled DataOp rows before DL rows and merges row PCFGs with before/after
++  syncs.
++- `dcg/dcg_manager/dcg_manager.cpp::mergePcfgInSuperDSC()` already merges each
++  `DataOpDsc::pcfg_` row according to `coreIdToDscSchedule`.
++
++Therefore the first real patch should add:
++
++1. An `OpFuncs::LXCoordinateRemapOp` enum/string entry.
++2. An `LXCoordinateRemapOp` data structure with the movement fields above.
++3. JSON import/export for the data-op payload.
++4. A DCG frontend method that fills `DataOpDsc::pcfg_` with explicit
++   LXLU/L3SU/L3LU/LXSU copies.
++5. A `runDcgForDataOpsDlOps()` dispatch branch that calls the new frontend
++   method for this op before the generic DataOp path.
++
++## Expected Lowering Pseudocode
++
++```cpp
++void DcgFE::generatePcfgIRForLXCoordinateRemapOp(
++    SuperDsc& sdsc, DataOpDsc& ddsc, int uniqueId) {
++  auto* op = checked_cast<LXCoordinateRemapOp*>(ddsc.op);
++  validateLXCoordinateRemapOp(sdsc, *op);
++
++  ddsc.coreIdsUsed_.clear();
++  for (const auto& movement : op->movements) {
++    ddsc.coreIdsUsed_.insert(movement.source.core);
++    ddsc.coreIdsUsed_.insert(movement.destination.core);
++  }
++  ddsc.pcfg_.resize(ddsc.coreIdsUsed_.size());
++
++  for (const auto& movement : sortByMoveIndex(op->movements)) {
++    const auto l3Slot = allocateRemapL3Scratch(sdsc, ddsc, movement);
++
++    auto& sourcePcfg = pcfgFor(ddsc, movement.source.core);
++    emitLXToL3Copy(sourcePcfg,
++                   /*core=*/movement.source.core,
++                   /*lxByteAddress=*/movement.source.lxAddress,
++                   /*l3Scratch=*/l3Slot,
++                   /*bytes=*/movement.bytes);
++    emitRemapStoreSync(sourcePcfg, movement.moveIndex);
++
++    auto& destinationPcfg = pcfgFor(ddsc, movement.destination.core);
++    emitRemapLoadSync(destinationPcfg, movement.moveIndex);
++    emitL3ToLXCopy(destinationPcfg,
++                   /*core=*/movement.destination.core,
++                   /*l3Scratch=*/l3Slot,
++                   /*lxByteAddress=*/movement.destination.lxAddress,
++                   /*bytes=*/movement.bytes);
++  }
++}
++```
++
++The concrete `emitLXToL3Copy` and `emitL3ToLXCopy` helpers should reuse the
++same PCFG instruction builders used by STCDP/InputFetchNeighbor once the
++complete Deeptools headers are available.  The important semantic difference is
++that source and destination byte addresses are explicit; no overlap inference
++from producer and consumer pieces is performed.
+diff --git a/dcg/dcg_manager/dcg_manager.cpp b/dcg/dcg_manager/dcg_manager.cpp
+index 000000000000..222222222222 100644
+--- a/dcg/dcg_manager/dcg_manager.cpp
++++ b/dcg/dcg_manager/dcg_manager.cpp
+@@ -357,10 +357,16 @@ void DcgManager::runDcgForDataOpsDlOps(SuperDsc& mySDsc) {
+     int c = 0;
+     for (int idx = 0; idx < mySDsc.dataOpdscs_.size(); idx++) {
+       auto& myDataOpDsc = mySDsc.dataOpdscs_.at(idx);
+       if (idx == data_dldscIdx_inf.first && reqInpFetch)
+         continue;  // this for input fetch
+-      dcg_fe_.computeTranferforDataOp(mySDsc, myDataOpDsc, c);
+-      dcg_fe_.generatePcfgIRForDataOp(mySDsc, myDataOpDsc, c);
++      if (myDataOpDsc.op->name == OpFuncs::LXCoordinateRemapOp) {
++        // LXCoordinateRemapOp already carries exact source and destination
++        // byte ranges.  Do not route it through STCDP overlap inference.
++        dcg_fe_.generatePcfgIRForLXCoordinateRemapOp(mySDsc, myDataOpDsc, c);
++      } else {
++        dcg_fe_.computeTranferforDataOp(mySDsc, myDataOpDsc, c);
++        dcg_fe_.generatePcfgIRForDataOp(mySDsc, myDataOpDsc, c);
++      }
+       c++;
+     }
+ 

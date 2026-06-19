@@ -406,6 +406,76 @@ def _byte_range_payload(start: int, size: int) -> dict[str, int]:
     return {"start": int(start), "end": int(start) + int(size)}
 
 
+def _dataop_movement_payload(move: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "moveIndex": int(move["move_index"]),
+        "bytes": int(move["bytes"]),
+        "source": {
+            "core": int(move["source_core"]),
+            "logicalSlice": move["source_slice"],
+            "lxAddress": int(move["source_lx_address"]),
+            "localByteRange": move["source_local_byte_range"],
+            "lxByteRange": move["source_lx_byte_range"],
+        },
+        "destination": {
+            "core": int(move["destination_core"]),
+            "logicalSlice": move["destination_slice"],
+            "lxAddress": int(move["destination_lx_address"]),
+            "localByteRange": move["destination_local_byte_range"],
+            "lxByteRange": move["destination_lx_byte_range"],
+        },
+    }
+
+
+def _coordinate_remap_dataop_payload(
+    *,
+    source_name: str,
+    producer_name: str,
+    consumer_name: str,
+    producer_base: int,
+    consumer_base: int,
+    coverage: dict[str, Any],
+    dependency_order: list[dict[str, Any]],
+    movements: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build the backend-facing Deeptools data-op JSON form."""
+
+    return {
+        "op": {"name": "LXCoordinateRemapOp"},
+        "schemaVersion": 0,
+        "sourceName": source_name,
+        "producer": producer_name,
+        "consumer": consumer_name,
+        "producerLxBase": int(producer_base),
+        "consumerLxBase": int(consumer_base),
+        "coverage": coverage,
+        "dependencyOrder": [
+            {
+                "order": int(row["order"]),
+                "kind": row["kind"],
+                **({"op": row["op"]} if "op" in row else {}),
+                **(
+                    {"sourceName": row["source_name"]}
+                    if "source_name" in row
+                    else {}
+                ),
+                **({"primitive": row["primitive"]} if "primitive" in row else {}),
+                **(
+                    {"cellCount": int(row["cell_count"])}
+                    if "cell_count" in row
+                    else {}
+                ),
+            }
+            for row in dependency_order
+        ],
+        "lowering": {
+            "strategy": "explicit_lx_copy_via_l3",
+            "addressUnits": "bytes",
+        },
+        "movements": [_dataop_movement_payload(move) for move in movements],
+    }
+
+
 def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
     """Build torch-spyre-side metadata for a future Deeptools remap data-op."""
 
@@ -445,6 +515,34 @@ def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
             }
         )
 
+    coverage = {
+        "device_sizes": [int(size) for size in plan.device_sizes],
+        "status": validate_onchip_move_cell_coverage(
+            plan.cells,
+            device_sizes=plan.device_sizes,
+        )
+        or "complete",
+    }
+    dependency_order = [
+        {
+            "order": 0,
+            "kind": "producer_lx_write_before_remap",
+            "op": plan.producer_name,
+            "source_name": plan.source_name,
+        },
+        {
+            "order": 1,
+            "kind": "coordinate_remap",
+            "primitive": "lx_coordinate_remap_v0",
+            "cell_count": len(plan.cells),
+        },
+        {
+            "order": 2,
+            "kind": "consumer_lx_read_after_remap",
+            "op": plan.consumer_name,
+            "source_name": plan.source_name,
+        },
+    ]
     return {
         "primitive": "lx_coordinate_remap_v0",
         "schema_version": 0,
@@ -453,35 +551,19 @@ def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
         "consumer": plan.consumer_name,
         "producer_lx_base": producer_base,
         "consumer_lx_base": consumer_base,
-        "coverage": {
-            "device_sizes": [int(size) for size in plan.device_sizes],
-            "status": validate_onchip_move_cell_coverage(
-                plan.cells,
-                device_sizes=plan.device_sizes,
-            )
-            or "complete",
-        },
-        "dependency_order": [
-            {
-                "order": 0,
-                "kind": "producer_lx_write_before_remap",
-                "op": plan.producer_name,
-                "source_name": plan.source_name,
-            },
-            {
-                "order": 1,
-                "kind": "coordinate_remap",
-                "primitive": "lx_coordinate_remap_v0",
-                "cell_count": len(plan.cells),
-            },
-            {
-                "order": 2,
-                "kind": "consumer_lx_read_after_remap",
-                "op": plan.consumer_name,
-                "source_name": plan.source_name,
-            },
-        ],
+        "coverage": coverage,
+        "dependency_order": dependency_order,
         "movements": movements,
+        "deeptools_dataop": _coordinate_remap_dataop_payload(
+            source_name=plan.source_name,
+            producer_name=plan.producer_name,
+            consumer_name=plan.consumer_name,
+            producer_base=producer_base,
+            consumer_base=consumer_base,
+            coverage=coverage,
+            dependency_order=dependency_order,
+            movements=movements,
+        ),
     }
 
 

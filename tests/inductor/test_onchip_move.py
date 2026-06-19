@@ -130,6 +130,38 @@ def test_coordinate_remap_cells_cover_1d_without_overlap_or_gaps(monkeypatch):
     assert move["source_lx_byte_range"] == {"start": 0x1000, "end": 0x1008}
     assert move["destination_lx_address"] == 0x9008
     assert move["destination_lx_byte_range"] == {"start": 0x9008, "end": 0x9010}
+    dataop = metadata["deeptools_dataop"]
+    assert dataop["op"] == {"name": "LXCoordinateRemapOp"}
+    assert dataop["schemaVersion"] == 0
+    assert dataop["sourceName"] == "buf0"
+    assert dataop["producerLxBase"] == 0x1000
+    assert dataop["consumerLxBase"] == 0x9000
+    assert dataop["coverage"] == {"device_sizes": [16], "status": "complete"}
+    assert [row["kind"] for row in dataop["dependencyOrder"]] == [
+        "producer_lx_write_before_remap",
+        "coordinate_remap",
+        "consumer_lx_read_after_remap",
+    ]
+    assert dataop["movements"][1] == {
+        "moveIndex": 1,
+        "bytes": 8,
+        "source": {
+            "core": 1,
+            "logicalSlice": {"starts": {"d0_": 4}, "sizes": {"d0_": 4}},
+            "lxAddress": 0x1000,
+            "localByteRange": {"start": 0, "end": 8},
+            "lxByteRange": {"start": 0x1000, "end": 0x1008},
+        },
+        "destination": {
+            "core": 0,
+            "logicalSlice": {"starts": {"d0_": 4}, "sizes": {"d0_": 4}},
+            "lxAddress": 0x9008,
+            "localByteRange": {"start": 8, "end": 16},
+            "lxByteRange": {"start": 0x9008, "end": 0x9010},
+        },
+    }
+    _assert_no_local_destination_overlap_or_gap(dataop)
+    _assert_patterned_coordinate_remap_is_value_correct(dataop)
 
 
 def test_coordinate_remap_cells_cover_2d_without_overlap_or_gaps(monkeypatch):
@@ -185,6 +217,18 @@ def test_coordinate_remap_cells_cover_2d_without_overlap_or_gaps(monkeypatch):
         "destination_lx_address",
         "destination_lx_byte_range",
     }.issubset(crossing_moves[0])
+    dataop = metadata["deeptools_dataop"]
+    assert dataop["op"] == {"name": "LXCoordinateRemapOp"}
+    assert dataop["producer"] == "buf0"
+    assert dataop["consumer"] == "buf1"
+    assert dataop["movements"][0]["source"]["logicalSlice"] == dataop[
+        "movements"
+    ][0]["destination"]["logicalSlice"]
+    assert dataop["movements"][0]["source"]["lxByteRange"]["end"] - dataop[
+        "movements"
+    ][0]["source"]["lxByteRange"]["start"] == dataop["movements"][0]["bytes"]
+    _assert_no_local_destination_overlap_or_gap(dataop)
+    _assert_patterned_coordinate_remap_is_value_correct(dataop)
 
 
 def test_onchip_move_cells_reject_ambiguous_fanout_owner():
@@ -867,6 +911,65 @@ def _remap_plan(
         consumer_view={},
         cells=cells,
     )
+
+
+def _assert_no_local_destination_overlap_or_gap(dataop: dict) -> None:
+    ranges_by_core: dict[int, list[tuple[int, int]]] = {}
+    for move in dataop["movements"]:
+        byte_range = move["destination"]["localByteRange"]
+        assert byte_range["end"] - byte_range["start"] == move["bytes"]
+        ranges_by_core.setdefault(move["destination"]["core"], []).append(
+            (byte_range["start"], byte_range["end"])
+        )
+
+    for ranges in ranges_by_core.values():
+        ranges.sort()
+        assert ranges[0][0] == 0
+        for left, right in zip(ranges, ranges[1:]):
+            assert left[1] == right[0]
+
+
+def _assert_patterned_coordinate_remap_is_value_correct(dataop: dict) -> None:
+    source_by_core: dict[int, bytearray] = {}
+    destination_by_core: dict[int, bytearray] = {}
+
+    for move in dataop["movements"]:
+        source_range = move["source"]["localByteRange"]
+        dest_range = move["destination"]["localByteRange"]
+        source = source_by_core.setdefault(
+            move["source"]["core"], bytearray(source_range["end"])
+        )
+        if len(source) < source_range["end"]:
+            source.extend(b"\x00" * (source_range["end"] - len(source)))
+
+        destination = destination_by_core.setdefault(
+            move["destination"]["core"], bytearray(dest_range["end"])
+        )
+        if len(destination) < dest_range["end"]:
+            destination.extend(b"\x00" * (dest_range["end"] - len(destination)))
+
+    for core, source in source_by_core.items():
+        for offset in range(len(source)):
+            source[offset] = (core * 17 + offset) % 251
+
+    for move in dataop["movements"]:
+        source_range = move["source"]["localByteRange"]
+        dest_range = move["destination"]["localByteRange"]
+        source = source_by_core[move["source"]["core"]]
+        destination = destination_by_core[move["destination"]["core"]]
+        destination[dest_range["start"] : dest_range["end"]] = source[
+            source_range["start"] : source_range["end"]
+        ]
+
+    for move in dataop["movements"]:
+        source_range = move["source"]["localByteRange"]
+        dest_range = move["destination"]["localByteRange"]
+        source = source_by_core[move["source"]["core"]]
+        expected = source[source_range["start"] : source_range["end"]]
+        core = move["destination"]["core"]
+        start = dest_range["start"]
+        end = dest_range["end"]
+        assert bytes(destination_by_core[core][start:end]) == expected
 
 
 def _minimal_sdsc_payload(
