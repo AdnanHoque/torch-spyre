@@ -8,7 +8,7 @@
  #include <string>
  #include <unordered_map>
  #include <vector>
-@@ -129,6 +130,11 @@
+@@ -129,6 +130,12 @@
    return group;
  }
  
@@ -17,10 +17,11 @@
 +  if (!value.has_value() || value->empty()) return std::nullopt;
 +  return std::stoi(*value);
 +}
- 
++
  int64_t computeSwiGluPhysicalLxAddress(SuperDsc& sdsc, int coreId,
                                         PieceInfo& piece, LdsInfo& dataLds,
-@@ -167,8 +173,26 @@
+                                        bool producer) {
+@@ -166,8 +173,26 @@
    const int64_t byteOffset =
        (static_cast<int64_t>(localOutStick) * localMbExtent + localMb) *
        stickBytes;
@@ -49,7 +50,7 @@
  }
  
  void rewriteSingleLxPlacement(SuperDsc& sdsc, PieceInfo& piece,
-@@ -215,6 +239,17 @@
+@@ -214,6 +239,17 @@
    std::map<std::string, PieceInfo> newOutputPieces;
    int newPieceId = 0;
    const int outStickGroup = getPhysicalizeOutStickGroup();
@@ -67,7 +68,7 @@
  
    for (const auto& kv : inputLds.pieces_) {
      const auto outIt = outputLds.pieces_.find(kv.first);
-@@ -233,6 +268,20 @@
+@@ -232,6 +268,20 @@
        const int outStick = outStickStart + outStickOffset;
        const int groupCount = std::min(outStickGroup,
                                        outStickCount - outStickOffset);
@@ -88,7 +89,7 @@
        const std::string newKey =
            "phys_" + std::to_string(++newPieceId) + "_" + kv.first;
        newInput.key_ = newKey;
-@@ -251,9 +300,15 @@
+@@ -250,9 +300,15 @@
      }
    }
  
