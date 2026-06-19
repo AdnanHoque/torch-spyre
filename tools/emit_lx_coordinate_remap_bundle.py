@@ -32,6 +32,7 @@ from typing import Any
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor import config as spyre_config
 from torch_spyre._inductor.codegen.onchip_move import (
+    _folded_start_address,
     build_coordinate_remap_onchip_move_sdsc,
 )
 from torch_spyre._inductor.onchip_move import (
@@ -61,7 +62,7 @@ def main() -> None:
         _consumer_payload(),
         _producer_output_arg(),
         _consumer_input_arg(),
-        2,
+        1,
         0,
         _plan_payload(),
     )
@@ -71,7 +72,7 @@ def main() -> None:
     (output_dir / "bundle.mlir").write_text(_bundle_mlir(), encoding="utf-8")
 
     root = mixed_consumer["1_OnChipMoveCoordinateRemap"]
-    dataop = root["datadscs_"][0]["0_OnChipMoveLXCoordinateRemapOp"]
+    dataop = next(iter(root["datadscs_"][0].values()))
     summary = {
         "status": "coordinate-remap-bundle-emitted",
         "producer_sdsc": "sdsc_0.json",
@@ -200,10 +201,10 @@ def _consumer_input_arg() -> TensorArg:
 
 def _producer_payload() -> dict[str, Any]:
     return {
-        "0_batchmatmul": _minimal_sdsc_payload(
-            "batchmatmul",
-            output_lds_idx=2,
-            input_lds_indices=[0, 1],
+        "0_neg": _minimal_sdsc_payload(
+            "neg",
+            output_lds_idx=1,
+            input_lds_indices=[0],
             core_ids=[0, 1, 2, 3],
         )
     }
@@ -228,19 +229,60 @@ def _minimal_sdsc_payload(
     core_ids: list[int],
 ) -> dict[str, Any]:
     max_lds_idx = max([output_lds_idx, *input_lds_indices])
+    primary_ds_info = {
+        role: {
+            "layoutDimOrder_": ["out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        }
+        for role in ("INPUT", "OUTPUT", "INTERNAL")
+    }
     return {
+        "sdscFoldProps_": [{"factor_": 1, "label_": "time"}],
+        "sdscFolds_": {
+            "dim_prop_func": [{"Affine": {"alpha_": 1, "beta_": 0}}],
+            "dim_prop_attr": [{"factor_": 1, "label_": "time"}],
+            "data_": {"[0]": 0},
+        },
+        "coreFoldProp_": {"factor_": 32, "label_": "core"},
+        "coreletFoldProp_": {"factor_": 1, "label_": "corelet"},
         "numCoresUsed_": len(core_ids),
+        "coreIdToDsc_": {str(core): 0 for core in core_ids},
+        "numWkSlicesPerDim_": {"out": len(core_ids)},
+        "coreIdToWkSlice_": {
+            str(core): {"out": idx} for idx, core in enumerate(core_ids)
+        },
         "opFuncsUsed_": [name],
         "dscs_": [
             {
                 name: {
                     "numCoresUsed_": len(core_ids),
                     "coreIdsUsed_": core_ids,
+                    "N_": {
+                        "name_": "n",
+                        "out_": 64,
+                    },
+                    "coordinateMasking_": {},
+                    "maskingConstId_": -1,
+                    "dataStageParam_": {
+                        "0": {
+                            "ss_": {"name_": "core", "out_": 64},
+                            "el_": {"name_": "core", "out_": 64},
+                        }
+                    },
+                    "primaryDsInfo_": primary_ds_info,
                     "scheduleTree_": [
                         {
-                            "name_": f"allocate_lds{idx}_hbm",
+                            "nodeType_": "allocate",
+                            "name_": f"allocate-Tensor{idx}_hbm",
+                            "prev_": "",
                             "ldsIdx_": idx,
                             "component_": "hbm",
+                            "layoutDimOrder_": ["out"],
+                            "maxDimSizes_": [-1],
+                            "startAddressCoreCorelet_": _folded_start_address(
+                                core_ids, idx * 1024, core_factor=32
+                            ),
                         }
                         for idx in range(max_lds_idx + 1)
                     ],
@@ -253,17 +295,27 @@ def _minimal_sdsc_payload(
                                 if idx == output_lds_idx
                                 else "INPUT"
                                 if idx in input_lds_indices
-                                else "LOCAL"
+                                else "INTERNAL"
                             ),
-                            "scale_": [1, 1],
+                            "scale_": [1],
                             "wordLength": 2,
                             "dataFormat_": DataFormats.SEN169_FP16.name,
-                            "memOrg_": {"hbm": {"isPresent": 1}},
+                            "memOrg_": {
+                                "hbm": {"isPresent": 1},
+                                "lx": {"isPresent": 0},
+                            },
                         }
                         for idx in range(max_lds_idx + 1)
                     ],
                     "computeOp_": [
                         {
+                            "exUnit": "sfp",
+                            "opFuncName": name,
+                            "attributes_": {
+                                "dataFormat_": DataFormats.SEN169_FP16.name,
+                                "fidelity_": "regular",
+                            },
+                            "location": "Inner",
                             "inputLabeledDs": [
                                 f"Tensor{idx}-idx{idx}" for idx in input_lds_indices
                             ],

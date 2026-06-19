@@ -29,7 +29,9 @@ from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.onchip_move import (
     ONCHIP_MOVE_ATTR,
     ONCHIP_MOVE_OP_INFO_KEY,
+    OnChipMoveCell,
     OnChipMovePlan,
+    _coordinate_remap_v1_support_reason,
     _attach_plan_to_consumer,
     build_coordinate_remap_metadata,
     build_onchip_move_cells,
@@ -79,6 +81,154 @@ def test_onchip_move_cells_cover_2d_matmul_to_pure_m_reshard():
     assert cells[64].dest_core == 8
     assert cells[64].source_offset_bytes == 0
     assert cells[64].dest_offset_bytes == 0
+
+
+def test_coordinate_remap_v1_rejects_unlowerable_cells(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0)
+    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 0x100000)
+    aligned = OnChipMoveCell(
+        cell_index=0,
+        source_core=0,
+        dest_core=0,
+        dim_starts={"d0_": 0},
+        dim_sizes={"d0_": 64},
+        bytes=128,
+        source_offset_bytes=0,
+        dest_offset_bytes=0,
+    )
+
+    assert _coordinate_remap_v1_support_reason([aligned]) is None
+
+    assert (
+        _coordinate_remap_v1_support_reason(
+            [dataclasses.replace(aligned, dest_offset_bytes=16)]
+        )
+        == "coordinate-remap-v1-requires-stick-aligned-destination-address"
+    )
+
+    overlapping = [
+        dataclasses.replace(aligned, bytes=256),
+        dataclasses.replace(
+            aligned,
+            cell_index=1,
+            source_offset_bytes=128,
+            dest_offset_bytes=128,
+        ),
+    ]
+    assert (
+        _coordinate_remap_v1_support_reason(overlapping)
+        == "coordinate-remap-v1-requires-contiguous-destination-cells"
+    )
+
+
+def test_coordinate_remap_v1_swiglu_reshard_uses_physical_sticks(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")
+    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0)
+    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 0x100000)
+    core_id = sympy.Symbol("core_id")
+    producer_view = PerCoreView(
+        work_slice_dims=((0, 8), (1, 4)),
+        core_to_slot=(
+            (0, sympy.Mod(sympy.floor(core_id / 4), 8)),
+            (1, sympy.Mod(core_id, 4)),
+        ),
+    )
+    consumer_view = PerCoreView(
+        work_slice_dims=((1, 32),),
+        core_to_slot=((1, sympy.Mod(core_id, 32)),),
+    )
+
+    cells, reason = build_onchip_move_cells(
+        producer_view=producer_view,
+        consumer_view=consumer_view,
+        device_sizes=[64, 256, 64],
+        device_stride_map=[64, 4096, 1],
+        element_bytes=2,
+        producer_core_count=32,
+        consumer_core_count=32,
+        max_cells=65536,
+        coordinate_remap_v1=True,
+    )
+
+    assert reason is None
+    assert len(cells) == 64 * 256
+    assert sum(cell.bytes for cell in cells) == 64 * 256 * 64 * 2
+    assert all(cell.bytes == 128 for cell in cells)
+    assert _coordinate_remap_v1_support_reason(cells) is None
+
+    assert cells[0].source_core == 0
+    assert cells[0].dest_core == 0
+    assert cells[0].dim_starts == {"d0_": 0, "d1_": 0, "d2_": 0}
+    assert cells[0].dim_sizes == {"d0_": 1, "d1_": 1, "d2_": 64}
+    assert cells[0].source_offset_bytes == 0
+    assert cells[0].dest_offset_bytes == 0
+
+    assert cells[1].source_core == 0
+    assert cells[1].dest_core == 0
+    assert cells[1].dim_starts == {"d0_": 0, "d1_": 1, "d2_": 0}
+    assert cells[1].source_offset_bytes == 128
+    assert cells[1].dest_offset_bytes == 128
+
+    assert cells[256].dim_starts == {"d0_": 1, "d1_": 0, "d2_": 0}
+    assert cells[256].source_core == 0
+    assert cells[256].dest_core == 0
+    assert cells[256].source_offset_bytes == 8192
+    assert cells[256].dest_offset_bytes == 1024
+
+    assert cells[2048].dim_starts == {"d0_": 8, "d1_": 0, "d2_": 0}
+    assert cells[2048].source_core == 4
+    assert cells[2048].dest_core == 0
+    assert cells[2048].source_offset_bytes == 0
+    assert cells[2048].dest_offset_bytes == 8192
+
+
+def test_coordinate_remap_v1_negmm_pure_m_consumer_uses_lx_stick_major_order(
+    monkeypatch,
+):
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")
+    core_id = sympy.Symbol("core_id")
+    producer_view = PerCoreView(
+        work_slice_dims=((0, 8), (1, 4)),
+        core_to_slot=(
+            (0, sympy.Mod(sympy.floor(core_id / 4), 8)),
+            (1, sympy.Mod(core_id, 4)),
+        ),
+    )
+    consumer_view = PerCoreView(
+        work_slice_dims=((1, 32),),
+        core_to_slot=((1, sympy.Mod(core_id, 32)),),
+    )
+
+    cells, reason = build_onchip_move_cells(
+        producer_view=producer_view,
+        consumer_view=consumer_view,
+        device_sizes=[8, 256, 64],
+        device_stride_map=[64, 512, 1],
+        element_bytes=2,
+        producer_core_count=32,
+        consumer_core_count=32,
+        max_cells=65536,
+        coordinate_remap_v1=True,
+    )
+
+    assert reason is None
+    assert len(cells) == 8 * 256
+    assert all(cell.bytes == 128 for cell in cells)
+    assert _coordinate_remap_v1_support_reason(cells) is None
+
+    # d1 is the M/row dimension.  Consecutive rows in one pure-M consumer tile
+    # are adjacent sticks in LX.
+    assert cells[1].dim_starts == {"d0_": 0, "d1_": 1, "d2_": 0}
+    assert cells[1].source_offset_bytes == 128
+    assert cells[1].dest_offset_bytes == 128
+
+    # d0 is the outer output-stick dimension.  It is slowest in Deeptools' LX
+    # local view, so advancing one output stick skips the 8-row consumer tile.
+    assert cells[256].dim_starts == {"d0_": 1, "d1_": 0, "d2_": 0}
+    assert cells[256].source_core == 4
+    assert cells[256].dest_core == 0
+    assert cells[256].source_offset_bytes == 0
+    assert cells[256].dest_offset_bytes == 1024
 
 
 def test_coordinate_remap_cells_cover_1d_without_overlap_or_gaps(monkeypatch):
@@ -448,25 +598,132 @@ def test_coordinate_remap_carrier_emits_real_dataop_sdsc(monkeypatch):
 
     mixed_root = mixed_consumer["2_OnChipMoveCoordinateRemap"]
     assert len(mixed_root["dscs_"]) == 1
-    assert len(mixed_root["datadscs_"]) == 1
-    dataop = mixed_root["datadscs_"][0]["1_OnChipMoveLXCoordinateRemapOp"]
+    assert len(mixed_root["datadscs_"]) == mixed_root["onchipMove_"][
+        "dataop_chunks"
+    ]
+    dataops = [next(iter(row.values())) for row in mixed_root["datadscs_"]]
+    dataop = dataops[0]
     assert dataop["op"] == {"name": "LXCoordinateRemapOp"}
     assert dataop["coreIdsUsed_"] == [0, 1, 2, 3]
     assert dataop["schemaVersion"] == 0
     assert dataop["producerLxBase"] == 0x1000
     assert dataop["consumerLxBase"] == 0x9000
-    assert dataop["movements"][1]["source"]["core"] == 1
-    assert dataop["movements"][1]["destination"]["core"] == 0
-    assert mixed_root["coreIdToDscSchedule"]["0"] == [
-        [0, -1, 0, 1],
-        [-1, 0, 1, 0],
+    movements = [move for row in dataops for move in row["movements"]]
+    assert len(movements) == 5
+    assert any(
+        move["source"]["core"] == 1 and move["destination"]["core"] == 0
+        for move in movements
+    )
+    relay_moves = [move for move in movements if "relay" in move]
+    assert [move["relay"]["kind"] for move in relay_moves] == [
+        "local_first_leg",
+        "local_second_leg",
     ]
+    assert mixed_root["coreIdToDscSchedule"]["0"][-1][0:2] == [-1, 0]
     assert mixed_root["coreIdToDscSchedule"]["2"] == [[0, -1, 0, 0]]
+    assert mixed_root["coreIdToDsc_"] == {
+        "0": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0,
+    }
+    assert set(mixed_root["coreIdToWkSlice_"]) == {"0", "1", "2", "3"}
     assert "LXCoordinateRemapOp" in mixed_root["opFuncsUsed_"]
     assert "STCDPOpLx" not in mixed_root["opFuncsUsed_"]
     assert mixed_root["onchipMove_"]["carrier"] == "coordinate_remap"
     consumer_dsc = next(iter(mixed_root["dscs_"][0].values()))
     assert consumer_dsc["labeledDs_"][0]["memOrg_"] == {"lx": {"isPresent": 1}}
+
+
+def test_coordinate_remap_carrier_chunks_large_dataop(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")
+    monkeypatch.setattr(spyre_config, "onchip_move_coordinate_remap_chunk_cells", 2)
+    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0x1000)
+    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 0x9000)
+
+    core_id = sympy.Symbol("core_id")
+    producer_view = PerCoreView(
+        work_slice_dims=((0, 4),),
+        core_to_slot=((0, sympy.Mod(core_id, 4)),),
+    )
+    consumer_view = PerCoreView(
+        work_slice_dims=((0, 2),),
+        core_to_slot=((0, sympy.Mod(core_id, 2)),),
+    )
+    cells, reason = build_onchip_move_cells(
+        producer_view=producer_view,
+        consumer_view=consumer_view,
+        device_sizes=[16],
+        element_bytes=2,
+        producer_core_count=4,
+        consumer_core_count=2,
+    )
+    assert reason is None
+    plan = _remap_plan_payload(cells, device_sizes=[16], element_bytes=2)
+    producer_payload = {
+        "1_batchmatmul": _minimal_sdsc_payload(
+            "batchmatmul",
+            output_lds_idx=2,
+            input_lds_indices=[0, 1],
+            core_ids=[0, 1, 2, 3],
+        )
+    }
+    consumer_payload = {
+        "2_neg": _minimal_sdsc_payload(
+            "neg",
+            output_lds_idx=1,
+            input_lds_indices=[0],
+            core_ids=[0, 1],
+        )
+    }
+    output_arg = TensorArg(
+        is_input=False,
+        arg_index=0,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[16],
+        device_coordinates=[],
+        allocation=None,
+        name="buf0",
+    )
+
+    _, mixed_consumer = build_coordinate_remap_onchip_move_sdsc(
+        1,
+        2,
+        producer_payload,
+        consumer_payload,
+        output_arg,
+        dataclasses.replace(output_arg, is_input=True, arg_index=0),
+        2,
+        0,
+        plan,
+    )
+
+    mixed_root = mixed_consumer["2_OnChipMoveCoordinateRemap"]
+    assert len(mixed_root["datadscs_"]) == 4
+    assert [
+        list(datadsc)[0] for datadsc in mixed_root["datadscs_"]
+    ] == [
+        f"1_OnChipMoveLXCoordinateRemapOp_{idx}"
+        for idx in range(len(mixed_root["datadscs_"]))
+    ]
+    assert mixed_root["onchipMove_"]["dataop_chunks"] == len(
+        mixed_root["datadscs_"]
+    )
+    movement_counts = [
+        len(next(iter(row.values()))["movements"])
+        for row in mixed_root["datadscs_"]
+    ]
+    assert sum(movement_counts) == 5
+    assert max(movement_counts) <= 2
+    movements = [
+        movement
+        for row in mixed_root["datadscs_"]
+        for movement in next(iter(row.values()))["movements"]
+    ]
+    assert sum(1 for movement in movements if "relay" in movement) == 2
+    assert mixed_root["coreIdToDscSchedule"]["0"][-1][0:2] == [-1, 0]
+    assert mixed_root["coreIdToDscSchedule"]["1"][-1][0:2] == [-1, 0]
+    assert all(row[1] == -1 for row in mixed_root["coreIdToDscSchedule"]["2"])
 
 
 def test_coordinate_remap_carrier_patch_rewrites_adjacent_specs(monkeypatch):
@@ -558,10 +815,10 @@ def test_coordinate_remap_carrier_patch_rewrites_adjacent_specs(monkeypatch):
         }
     ]
     mixed_root = compiled[1][0]["1_OnChipMoveCoordinateRemap"]
-    dataop = mixed_root["datadscs_"][0]["0_OnChipMoveLXCoordinateRemapOp"]
+    dataop = next(iter(mixed_root["datadscs_"][0].values()))
     assert dataop["op"] == {"name": "LXCoordinateRemapOp"}
     assert mixed_root["coreIdToDscSchedule"]["0"][0][0:2] == [0, -1]
-    assert mixed_root["coreIdToDscSchedule"]["0"][1][0:2] == [-1, 0]
+    assert mixed_root["coreIdToDscSchedule"]["0"][-1][0:2] == [-1, 0]
 
 
 def test_mixed_carrier_emits_logical_dataop_layout_for_stickified_cells():
@@ -978,7 +1235,7 @@ def test_mixed_carrier_reuses_lx_source_for_later_fanout_consumer(monkeypatch):
     realdiv_dsc = next(iter(realdiv_root["dscs_"][0].values()))
     assert realdiv_dsc["scheduleTree_"][0]["component_"] == "lx"
     assert realdiv_dsc["scheduleTree_"][0]["startAddressCoreCorelet_"]["data_"] == {
-        "[0, 0, 0]": str(1024 * 1024)
+        "[0, 0, 0]": 1024 * 1024
     }
     assert realdiv_dsc["labeledDs_"][0]["memOrg_"] == {"lx": {"isPresent": 1}}
 

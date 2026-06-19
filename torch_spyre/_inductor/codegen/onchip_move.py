@@ -194,8 +194,8 @@ def build_coordinate_remap_onchip_move_sdsc(
         consumer_region_bytes=consumer_region_bytes,
     )
 
-    dataop = _coordinate_remap_dataop(plan)
     dataop_name = f"{producer_index}_OnChipMoveLXCoordinateRemapOp"
+    datadscs, dataop_core_sets = _coordinate_remap_datadsc_chunks(plan, dataop_name)
 
     _patch_lx_endpoint(
         producer_root,
@@ -212,13 +212,15 @@ def build_coordinate_remap_onchip_move_sdsc(
 
     root = copy.deepcopy(consumer_root)
     root["dscs_"] = copy.deepcopy(consumer_root.get("dscs_", []) or [])
-    root["datadscs_"] = [{dataop_name: dataop}]
+    root["datadscs_"] = datadscs
     root["numCoresUsed_"] = max(
         int(consumer_root.get("numCoresUsed_", 1) or 1),
-        max(dataop.get("coreIdsUsed_", [0])) + 1,
+        max((max(core_set) for core_set in dataop_core_sets if core_set), default=0)
+        + 1,
     )
-    root["coreIdToDscSchedule"] = _consumer_mixed_schedule(
-        dataop_cores=set(dataop["coreIdsUsed_"]),
+    _ensure_root_core_maps(root, root["numCoresUsed_"])
+    root["coreIdToDscSchedule"] = _consumer_chunked_mixed_schedule(
+        dataop_core_sets=dataop_core_sets,
         consumer_cores=_dsc_core_ids(root, 0),
         num_cores=root["numCoresUsed_"],
     )
@@ -238,11 +240,36 @@ def build_coordinate_remap_onchip_move_sdsc(
         "consumer_lx_base": consumer_base,
         "producer_region_bytes": producer_region_bytes,
         "consumer_region_bytes": consumer_region_bytes,
+        "dataop_chunks": len(datadscs),
         "fallback": "stock-hbm-path-when-disabled",
     }
     return {producer_name: producer_root}, {
         f"{consumer_index}_OnChipMoveCoordinateRemap": root
     }
+
+
+def _ensure_root_core_maps(root: dict[str, Any], num_cores: int) -> None:
+    core_to_dsc = {
+        str(core): int(dsc)
+        for core, dsc in (root.get("coreIdToDsc_") or {}).items()
+    }
+    default_dsc = next(iter(core_to_dsc.values()), 0)
+    for core in range(num_cores):
+        core_to_dsc.setdefault(str(core), default_dsc)
+    root["coreIdToDsc_"] = core_to_dsc
+
+    wk_slices = {
+        str(core): dict(value)
+        for core, value in (root.get("coreIdToWkSlice_") or {}).items()
+    }
+    default_slice = next(iter(wk_slices.values()), None)
+    if default_slice is None:
+        default_slice = {
+            dim: 0 for dim in (root.get("numWkSlicesPerDim_") or {}).keys()
+        }
+    for core in range(num_cores):
+        wk_slices.setdefault(str(core), dict(default_slice))
+    root["coreIdToWkSlice_"] = wk_slices
 
 
 def _adjacent_move_match(
@@ -396,6 +423,163 @@ def _coordinate_remap_dataop(plan: dict[str, Any]) -> dict[str, Any]:
     result = copy.deepcopy(dataop)
     result["coreIdsUsed_"] = core_ids
     return result
+
+
+def _coordinate_remap_datadsc_chunks(
+    plan: dict[str, Any],
+    dataop_name: str,
+) -> tuple[list[dict[str, Any]], list[set[int]]]:
+    dataop = _coordinate_remap_dataop(plan)
+    movements = list(dataop.get("movements", []) or [])
+    chunk_size = max(1, int(config.onchip_move_coordinate_remap_chunk_cells))
+
+    datadscs: list[dict[str, Any]] = []
+    core_sets: list[set[int]] = []
+    static_fields = {
+        key: copy.deepcopy(value)
+        for key, value in dataop.items()
+        if key not in {"movements", "coreIdsUsed_"}
+    }
+
+    def append_chunk(chunk_movements_src: list[dict[str, Any]]) -> None:
+        if not chunk_movements_src:
+            return
+        chunk_movements = copy.deepcopy(chunk_movements_src)
+        chunk_core_ids = sorted(
+            {
+                int(movement["source"]["core"])
+                for movement in chunk_movements
+            }
+            | {
+                int(movement["destination"]["core"])
+                for movement in chunk_movements
+            }
+        )
+        chunk = copy.deepcopy(static_fields)
+        chunk["movements"] = chunk_movements
+        chunk["coreIdsUsed_"] = chunk_core_ids
+        datadscs.append({f"{dataop_name}_{len(datadscs)}": chunk})
+        core_sets.append(set(chunk_core_ids))
+
+    movements, local_relay_first, local_relay_second = (
+        _expand_local_coordinate_remap_movements_via_relay(movements)
+    )
+    cross_movements = [
+        movement
+        for movement in movements
+        if int(movement["source"]["core"]) != int(movement["destination"]["core"])
+    ]
+    local_by_core: dict[int, list[dict[str, Any]]] = {}
+    for movement in movements:
+        source_core = int(movement["source"]["core"])
+        if source_core == int(movement["destination"]["core"]):
+            local_by_core.setdefault(source_core, []).append(movement)
+
+    if (
+        not local_by_core
+        and not local_relay_first
+        and not local_relay_second
+        and len(cross_movements) <= chunk_size
+    ):
+        return [{dataop_name: dataop}], [set(dataop["coreIdsUsed_"])]
+
+    for start in range(0, len(cross_movements), chunk_size):
+        append_chunk(cross_movements[start : start + chunk_size])
+
+    for start in range(0, len(local_relay_first), chunk_size):
+        append_chunk(local_relay_first[start : start + chunk_size])
+    for start in range(0, len(local_relay_second), chunk_size):
+        append_chunk(local_relay_second[start : start + chunk_size])
+
+    for core_movements in local_by_core.values():
+        core_movements.sort(
+            key=lambda movement: (
+                int(movement["source"]["lxAddress"]),
+                int(movement["destination"]["lxAddress"]),
+                int(movement["moveIndex"]),
+            )
+        )
+    for _core, rows in sorted(local_by_core.items()):
+        for start in range(0, len(rows), chunk_size):
+            append_chunk(rows[start : start + chunk_size])
+    return datadscs, core_sets
+
+
+def _expand_local_coordinate_remap_movements_via_relay(
+    movements: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    cross_movements: list[dict[str, Any]] = []
+    local_movements: list[dict[str, Any]] = []
+    for movement in movements:
+        if int(movement["source"]["core"]) == int(movement["destination"]["core"]):
+            local_movements.append(movement)
+        else:
+            cross_movements.append(movement)
+    if not local_movements:
+        return movements, [], []
+
+    used_end = 0
+    for movement in movements:
+        used_end = max(
+            used_end,
+            int(movement["source"]["lxByteRange"]["end"]),
+            int(movement["destination"]["lxByteRange"]["end"]),
+        )
+    relay_base = ((used_end + 127) // 128) * 128
+    relay_bytes = sum(int(movement["bytes"]) for movement in local_movements)
+    if relay_base + relay_bytes > _LX_SIZE_BYTES:
+        raise ValueError("coordinate-remap-local-relay-lx-capacity")
+
+    first_legs: list[dict[str, Any]] = []
+    second_legs: list[dict[str, Any]] = []
+    next_move_index = (
+        max((int(movement["moveIndex"]) for movement in movements), default=-1) + 1
+    )
+    relay_offset = 0
+    for movement in local_movements:
+        source_core = int(movement["source"]["core"])
+        relay_core = (source_core + 1) % 32
+        byte_count = int(movement["bytes"])
+        relay_lx_address = relay_base + relay_offset
+        relay_offset += byte_count
+
+        first = copy.deepcopy(movement)
+        first["moveIndex"] = next_move_index
+        next_move_index += 1
+        first["destination"]["core"] = relay_core
+        first["destination"]["lxAddress"] = relay_lx_address
+        first["destination"]["localByteRange"] = {
+            "start": relay_lx_address - relay_base,
+            "end": relay_lx_address - relay_base + byte_count,
+        }
+        first["destination"]["lxByteRange"] = {
+            "start": relay_lx_address,
+            "end": relay_lx_address + byte_count,
+        }
+        first["relay"] = {
+            "kind": "local_first_leg",
+            "originalMoveIndex": int(movement["moveIndex"]),
+            "relayCore": relay_core,
+        }
+        first_legs.append(first)
+
+        second = copy.deepcopy(movement)
+        second["moveIndex"] = next_move_index
+        next_move_index += 1
+        second["source"]["core"] = relay_core
+        second["source"]["lxAddress"] = relay_lx_address
+        second["source"]["localByteRange"] = first["destination"][
+            "localByteRange"
+        ]
+        second["source"]["lxByteRange"] = first["destination"]["lxByteRange"]
+        second["relay"] = {
+            "kind": "local_second_leg",
+            "originalMoveIndex": int(movement["moveIndex"]),
+            "relayCore": relay_core,
+        }
+        second_legs.append(second)
+
+    return cross_movements, first_legs, second_legs
 
 
 def _first_compute_dsc(root: dict[str, Any]) -> dict[str, Any] | None:
@@ -1050,17 +1234,46 @@ def _patch_lx_endpoint(
 ) -> None:
     dsc = next(iter(root["dscs_"][dsc_index].values()))
     num_cores = int(dsc.get("numCoresUsed_", root.get("numCoresUsed_", 1)) or 1)
+    core_ids = [int(core) for core in dsc.get("coreIdsUsed_", range(num_cores))]
+    core_factor = int(root.get("coreFoldProp_", {}).get("factor_", 32) or 32)
     for node in dsc.get("scheduleTree_", []):
         if int(node.get("ldsIdx_", -1)) != int(lds_idx):
             continue
         node["component_"] = "lx"
         node["name_"] = str(node.get("name_", "")).replace("_hbm", "_lx")
-        node.setdefault("startAddressCoreCorelet_", {})["data_"] = {
-            f"[{core}, 0, 0]": str(int(base)) for core in range(num_cores)
-        }
+        node["startAddressCoreCorelet_"] = _folded_start_address(
+            core_ids, int(base), core_factor=core_factor
+        )
+        for dim_gap in (node.get("backGapCore_") or {}).values():
+            if "-1" not in dim_gap:
+                continue
+            uniform_gap = dim_gap["-1"]
+            for core in core_ids:
+                dim_gap[str(core)] = uniform_gap
     for lds in dsc.get("labeledDs_", []):
         if int(lds.get("ldsIdx_", -1)) == int(lds_idx):
             lds["memOrg_"] = {"lx": {"isPresent": 1}}
+
+
+def _folded_start_address(
+    core_ids: list[int],
+    base: int,
+    *,
+    core_factor: int = 32,
+) -> dict[str, Any]:
+    return {
+        "dim_prop_func": [
+            {"Map": {}},
+            {"Const": {}},
+            {"Const": {}},
+        ],
+        "dim_prop_attr": [
+            {"factor_": int(core_factor), "label_": "core"},
+            {"factor_": 1, "label_": "corelet"},
+            {"factor_": 1, "label_": "time"},
+        ],
+        "data_": {f"[{int(core)}, 0, 0]": int(base) for core in core_ids},
+    }
 
 
 def _dsc_core_ids(root: dict[str, Any], dsc_index: int) -> set[int]:
@@ -1074,11 +1287,25 @@ def _consumer_mixed_schedule(
     consumer_cores: set[int],
     num_cores: int,
 ) -> dict[str, list[list[int]]]:
+    return _consumer_chunked_mixed_schedule(
+        dataop_core_sets=[dataop_cores],
+        consumer_cores=consumer_cores,
+        num_cores=num_cores,
+    )
+
+
+def _consumer_chunked_mixed_schedule(
+    *,
+    dataop_core_sets: list[set[int]],
+    consumer_cores: set[int],
+    num_cores: int,
+) -> dict[str, list[list[int]]]:
     schedule: dict[str, list[list[int]]] = {}
     for core in range(num_cores):
         steps: list[list[int]] = []
-        if core in dataop_cores:
-            steps.append([0, -1, 0, 0])
+        for dataop_index, dataop_cores in enumerate(dataop_core_sets):
+            if core in dataop_cores:
+                steps.append([dataop_index, -1, 0, 0])
         if core in consumer_cores:
             steps.append([-1, 0, 0, 0])
         schedule[str(core)] = _with_dependencies(steps)

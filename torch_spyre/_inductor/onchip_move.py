@@ -22,6 +22,7 @@ different per-core ownership, which requires explicit on-chip movement.
 from __future__ import annotations
 
 import dataclasses
+import copy
 import itertools
 import json
 import math
@@ -196,16 +197,33 @@ def _local_offset_bytes(
     slice_starts: dict[int, int],
     slice_sizes: dict[int, int],
     element_bytes: int,
+    device_stride_map: list[int] | None = None,
+    dim_order: list[int] | None = None,
 ) -> tuple[int, str | None]:
     """Return the packed per-core byte offset for a cell.
 
-    DataOp DSC layoutDimOrder is fastest-to-slowest, so d0_ has stride 1,
-    d1_ has stride size(d0_), and so on.
+    When a device stride map is available, preserve its fastest-to-slowest
+    physical order while recomputing packed strides inside the per-core slice.
+    Without a stride map, retain the legacy d0_, d1_, ... packed order.
     """
 
+    dim_count = len(slice_sizes)
+    if dim_order is not None:
+        if sorted(dim_order) != list(range(dim_count)):
+            return 0, "invalid-local-dim-order"
+    elif device_stride_map is not None and len(device_stride_map) == dim_count:
+        dim_order = sorted(range(dim_count), key=lambda dim: (device_stride_map[dim], dim))
+    else:
+        dim_order = list(range(dim_count))
+
+    stride_by_dim: dict[int, int] = {}
     stride = 1
+    for dim in dim_order:
+        stride_by_dim[dim] = stride
+        stride *= int(slice_sizes[dim])
+
     offset_elements = 0
-    for dim in range(len(slice_sizes)):
+    for dim in range(dim_count):
         start = int(cell_starts[f"d{dim}_"])
         size = int(cell_sizes[f"d{dim}_"])
         slice_start = int(slice_starts[dim])
@@ -213,9 +231,82 @@ def _local_offset_bytes(
         delta = start - slice_start
         if delta < 0 or delta + size > slice_size:
             return 0, "cell-outside-side-slice"
-        offset_elements += delta * stride
-        stride *= slice_size
+        offset_elements += delta * stride_by_dim[dim]
     return offset_elements * int(element_bytes), None
+
+
+def _coordinate_remap_v1_lx_dim_order(
+    *,
+    device_sizes: list[int],
+    device_stride_map: list[int],
+) -> tuple[list[int], str | None]:
+    """Return Deeptools' local LX order for fixed-tiled whole-stick moves.
+
+    Fixed-tiled matrix tensors use one unit-stride stick-element dimension and
+    one outer stick dimension.  DCC lowers LX views with stick elements fastest,
+    non-stick logical dimensions next, and the outer stick dimension slowest.
+    The global device stride map orders the outer stick before the row/M dim,
+    which is correct for logical tensor indexing but wrong for per-core LX
+    addresses consumed by data ops.
+    """
+
+    if len(device_stride_map) != len(device_sizes):
+        return [], "coordinate-remap-v1-requires-device-stride-map"
+    fastest_dim = min(
+        range(len(device_sizes)),
+        key=lambda dim: (int(device_stride_map[dim]), dim),
+    )
+    if int(device_stride_map[fastest_dim]) != 1:
+        return [], "coordinate-remap-v1-requires-unit-stride-stick-dim"
+
+    stick_elems = int(device_sizes[fastest_dim])
+    stick_outer_dims = [
+        dim
+        for dim, stride in enumerate(device_stride_map)
+        if dim != fastest_dim and int(stride) == stick_elems
+    ]
+    if len(stick_outer_dims) > 1:
+        return [], "coordinate-remap-v1-ambiguous-stick-outer-dim"
+
+    stick_outer = set(stick_outer_dims)
+    non_stick_dims = [
+        dim
+        for dim in range(len(device_sizes))
+        if dim != fastest_dim and dim not in stick_outer
+    ]
+    non_stick_dims.sort(key=lambda dim: (int(device_stride_map[dim]), dim))
+    stick_outer_dims.sort(key=lambda dim: (int(device_stride_map[dim]), dim))
+    return [fastest_dim, *non_stick_dims, *stick_outer_dims], None
+
+
+def _coordinate_remap_v1_refined_splits(
+    *,
+    common_splits: dict[int, int],
+    device_sizes: list[int],
+    device_stride_map: list[int],
+    element_bytes: int,
+) -> tuple[dict[int, int], str | None]:
+    """Refine common splits to physical whole-stick movements for v1 lowering."""
+
+    if len(device_stride_map) != len(device_sizes):
+        return {}, "coordinate-remap-v1-requires-device-stride-map"
+    fastest_dim = min(
+        range(len(device_sizes)),
+        key=lambda dim: (int(device_stride_map[dim]), dim),
+    )
+    if int(device_stride_map[fastest_dim]) != 1:
+        return {}, "coordinate-remap-v1-requires-unit-stride-stick-dim"
+    if int(device_sizes[fastest_dim]) * int(element_bytes) != 128:
+        return {}, "coordinate-remap-v1-requires-128-byte-stick-dim"
+    if int(common_splits.get(fastest_dim, 1)) != 1:
+        return {}, "coordinate-remap-v1-cannot-remap-split-stick-dim"
+
+    refined = dict(common_splits)
+    for dim, dim_size in enumerate(device_sizes):
+        if dim == fastest_dim:
+            continue
+        refined[dim] = max(int(refined.get(dim, 1)), int(dim_size))
+    return refined, None
 
 
 def _view_region_bytes(
@@ -236,10 +327,12 @@ def build_onchip_move_cells(
     producer_view: PerCoreView,
     consumer_view: PerCoreView,
     device_sizes: list[int],
+    device_stride_map: list[int] | None = None,
     element_bytes: int,
     producer_core_count: int,
     consumer_core_count: int,
     max_cells: int | None = None,
+    coordinate_remap_v1: bool = False,
 ) -> tuple[list[OnChipMoveCell], str | None]:
     """Return common-refinement movement cells, or a skip reason."""
 
@@ -250,6 +343,24 @@ def build_onchip_move_cells(
         dim: math.lcm(producer_splits.get(dim, 1), consumer_splits.get(dim, 1))
         for dim in moved_dims
     }
+    if coordinate_remap_v1:
+        common_splits, reason = _coordinate_remap_v1_refined_splits(
+            common_splits=common_splits,
+            device_sizes=device_sizes,
+            device_stride_map=device_stride_map or [],
+            element_bytes=element_bytes,
+        )
+        if reason is not None:
+            return [], reason
+        moved_dims = tuple(sorted(common_splits))
+        local_dim_order, reason = _coordinate_remap_v1_lx_dim_order(
+            device_sizes=device_sizes,
+            device_stride_map=device_stride_map or [],
+        )
+        if reason is not None:
+            return [], reason
+    else:
+        local_dim_order = None
     cell_count = math.prod(common_splits.values()) if common_splits else 1
     if max_cells is not None and cell_count > max_cells:
         return [], "too-many-common-refinement-cells"
@@ -319,6 +430,8 @@ def build_onchip_move_cells(
             slice_starts=producer_starts,
             slice_sizes=producer_sizes,
             element_bytes=element_bytes,
+            device_stride_map=device_stride_map,
+            dim_order=local_dim_order,
         )
         if reason is not None:
             return [], f"producer-{reason}"
@@ -328,6 +441,8 @@ def build_onchip_move_cells(
             slice_starts=consumer_starts,
             slice_sizes=consumer_sizes,
             element_bytes=element_bytes,
+            device_stride_map=device_stride_map,
+            dim_order=local_dim_order,
         )
         if reason is not None:
             return [], f"consumer-{reason}"
@@ -359,6 +474,9 @@ def validate_onchip_move_cell_coverage(
 
     dims = len(device_sizes)
     boxes: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+    boundaries: list[set[int]] = [
+        {0, int(device_size)} for device_size in device_sizes
+    ]
     total_volume = 0
     for cell in cells:
         starts: list[int] = []
@@ -375,23 +493,82 @@ def validate_onchip_move_cell_coverage(
                 return "coverage-cell-out-of-bounds"
             starts.append(start)
             ends.append(end)
+            boundaries[dim].add(start)
+            boundaries[dim].add(end)
             volume *= size
         boxes.append((tuple(starts), tuple(ends)))
         total_volume += volume
 
-    for idx, (left_starts, left_ends) in enumerate(boxes):
-        for right_starts, right_ends in boxes[idx + 1 :]:
-            overlaps = all(
-                left_starts[dim] < right_ends[dim]
-                and right_starts[dim] < left_ends[dim]
-                for dim in range(dims)
-            )
-            if overlaps:
-                return "coverage-cell-overlap"
-
     expected_volume = math.prod(int(size) for size in device_sizes)
     if total_volume != expected_volume:
         return "coverage-volume-mismatch"
+
+    axes = [sorted(axis) for axis in boundaries]
+    interval_counts = [max(len(axis) - 1, 0) for axis in axes]
+    compressed_cell_count = math.prod(interval_counts)
+    if compressed_cell_count > max(1_000_000, len(cells) * 16):
+        return "coverage-validation-too-complex"
+
+    axis_indices = [
+        {boundary: index for index, boundary in enumerate(axis)} for axis in axes
+    ]
+    strides: list[int] = []
+    stride = 1
+    for count in reversed(interval_counts):
+        strides.append(stride)
+        stride *= count
+    strides.reverse()
+
+    occupied: set[int] = set()
+    for starts, ends in boxes:
+        ranges = [
+            range(axis_indices[dim][starts[dim]], axis_indices[dim][ends[dim]])
+            for dim in range(dims)
+        ]
+        for index_tuple in itertools.product(*ranges):
+            linear_index = sum(
+                int(index) * strides[dim] for dim, index in enumerate(index_tuple)
+            )
+            if linear_index in occupied:
+                return "coverage-cell-overlap"
+            occupied.add(linear_index)
+    return None
+
+
+def _coordinate_remap_v1_support_reason(cells: list[OnChipMoveCell]) -> str | None:
+    """Return why the current Deeptools coordinate-remap carrier cannot lower cells.
+
+    The v1 Deeptools lowering emits whole-stick L3 load/store movements. It is
+    only valid when each logical movement is also a non-overlapping contiguous
+    destination byte range with 128-byte aligned source/destination addresses.
+    """
+
+    stick_bytes = 128
+    destination_ranges_by_core: dict[int, list[tuple[int, int]]] = {}
+    producer_base = int(config.onchip_move_producer_lx_base)
+    consumer_base = int(config.onchip_move_consumer_lx_base)
+    for cell in cells:
+        if int(cell.bytes) <= 0 or int(cell.bytes) % stick_bytes != 0:
+            return "coordinate-remap-v1-requires-stick-sized-moves"
+        source_lx_address = producer_base + int(cell.source_offset_bytes)
+        dest_lx_address = consumer_base + int(cell.dest_offset_bytes)
+        if source_lx_address % stick_bytes != 0:
+            return "coordinate-remap-v1-requires-stick-aligned-source-address"
+        if dest_lx_address % stick_bytes != 0:
+            return "coordinate-remap-v1-requires-stick-aligned-destination-address"
+        start = int(cell.dest_offset_bytes)
+        end = start + int(cell.bytes)
+        destination_ranges_by_core.setdefault(int(cell.dest_core), []).append(
+            (start, end)
+        )
+
+    for ranges in destination_ranges_by_core.values():
+        ranges.sort()
+        previous_end: int | None = None
+        for start, end in ranges:
+            if previous_end is not None and start < previous_end:
+                return "coordinate-remap-v1-requires-contiguous-destination-cells"
+            previous_end = end
     return None
 
 
@@ -427,6 +604,114 @@ def _dataop_movement_payload(move: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _try_extend_logical_slice(
+    current: dict[str, Any],
+    next_slice: dict[str, Any],
+) -> dict[str, Any] | None:
+    current_starts = copy.deepcopy(current.get("starts", {}))
+    current_sizes = copy.deepcopy(current.get("sizes", {}))
+    next_starts = next_slice.get("starts", {})
+    next_sizes = next_slice.get("sizes", {})
+    if set(current_starts) != set(next_starts) or set(current_sizes) != set(
+        next_sizes
+    ):
+        return None
+
+    extending_dim: str | None = None
+    for dim in sorted(current_starts):
+        current_start = int(current_starts[dim])
+        current_size = int(current_sizes[dim])
+        next_start = int(next_starts[dim])
+        next_size = int(next_sizes[dim])
+        if current_start == next_start and current_size == next_size:
+            continue
+        if next_start == current_start + current_size:
+            if extending_dim is not None:
+                return None
+            extending_dim = dim
+            current_sizes[dim] = current_size + next_size
+            continue
+        return None
+
+    if extending_dim is None:
+        return copy.deepcopy(current)
+    return {"starts": current_starts, "sizes": current_sizes}
+
+
+def _coalesce_dataop_movements(movements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if len(movements) < 2:
+        return movements
+
+    sorted_movements = sorted(
+        movements,
+        key=lambda move: (
+            int(move["source"]["core"]),
+            int(move["destination"]["core"]),
+            int(move["source"]["lxAddress"]),
+            int(move["destination"]["lxAddress"]),
+            int(move["moveIndex"]),
+        ),
+    )
+    coalesced: list[dict[str, Any]] = []
+    for movement in sorted_movements:
+        movement = copy.deepcopy(movement)
+        if not coalesced:
+            coalesced.append(movement)
+            continue
+
+        previous = coalesced[-1]
+        same_cores = (
+            int(previous["source"]["core"]) == int(movement["source"]["core"])
+            and int(previous["destination"]["core"])
+            == int(movement["destination"]["core"])
+        )
+        local_move = int(movement["source"]["core"]) == int(
+            movement["destination"]["core"]
+        )
+        previous_local_move = int(previous["source"]["core"]) == int(
+            previous["destination"]["core"]
+        )
+        previous_source = previous["source"]["lxByteRange"]
+        movement_source = movement["source"]["lxByteRange"]
+        previous_dest = previous["destination"]["lxByteRange"]
+        movement_dest = movement["destination"]["lxByteRange"]
+        contiguous = (
+            int(previous_source["end"]) == int(movement_source["start"])
+            and int(previous_dest["end"]) == int(movement_dest["start"])
+        )
+        if local_move or previous_local_move or not same_cores or not contiguous:
+            coalesced.append(movement)
+            continue
+
+        merged_source_slice = _try_extend_logical_slice(
+            previous["source"]["logicalSlice"],
+            movement["source"]["logicalSlice"],
+        )
+        merged_dest_slice = _try_extend_logical_slice(
+            previous["destination"]["logicalSlice"],
+            movement["destination"]["logicalSlice"],
+        )
+        if merged_source_slice is None or merged_dest_slice is None:
+            coalesced.append(movement)
+            continue
+
+        previous["bytes"] = int(previous["bytes"]) + int(movement["bytes"])
+        previous["source"]["localByteRange"]["end"] = movement["source"][
+            "localByteRange"
+        ]["end"]
+        previous["source"]["lxByteRange"]["end"] = movement_source["end"]
+        previous["source"]["logicalSlice"] = merged_source_slice
+        previous["destination"]["localByteRange"]["end"] = movement["destination"][
+            "localByteRange"
+        ]["end"]
+        previous["destination"]["lxByteRange"]["end"] = movement_dest["end"]
+        previous["destination"]["logicalSlice"] = merged_dest_slice
+
+    for index, movement in enumerate(coalesced):
+        movement["moveIndex"] = index
+    return coalesced
+
+
 def _coordinate_remap_dataop_payload(
     *,
     source_name: str,
@@ -440,6 +725,9 @@ def _coordinate_remap_dataop_payload(
 ) -> dict[str, Any]:
     """Build the backend-facing Deeptools data-op JSON form."""
 
+    dataop_movements = _coalesce_dataop_movements(
+        [_dataop_movement_payload(move) for move in movements]
+    )
     return {
         "op": {"name": "LXCoordinateRemapOp"},
         "schemaVersion": 0,
@@ -471,8 +759,10 @@ def _coordinate_remap_dataop_payload(
         "lowering": {
             "strategy": "explicit_lx_copy_via_l3",
             "addressUnits": "bytes",
+            "coalescedMovements": len(dataop_movements),
+            "sourceMovements": len(movements),
         },
-        "movements": [_dataop_movement_payload(move) for move in movements],
+        "movements": dataop_movements,
     }
 
 
@@ -685,10 +975,12 @@ def plan_onchip_move_edge(
             producer_view=producer_view,
             consumer_view=consumer_view,
             device_sizes=device_sizes,
+            device_stride_map=device_stride_map,
             element_bytes=element_bytes,
             producer_core_count=_op_num_cores(producer),
             consumer_core_count=_op_num_cores(consumer),
             max_cells=config.onchip_move_max_cells,
+            coordinate_remap_v1=config.onchip_move_carrier == "coordinate_remap",
         )
     except Exception as exc:  # noqa: BLE001
         return _skip_plan(
@@ -708,6 +1000,17 @@ def plan_onchip_move_edge(
             producer_view=producer_view,
             consumer_view=consumer_view,
         )
+    if config.onchip_move_carrier == "coordinate_remap":
+        reason = _coordinate_remap_v1_support_reason(cells)
+        if reason is not None:
+            return _skip_plan(
+                source_name=read_dep.name,
+                producer=producer,
+                consumer=consumer,
+                reason=reason,
+                producer_view=producer_view,
+                consumer_view=consumer_view,
+            )
 
     return OnChipMovePlan(
         source_name=read_dep.name,

@@ -100,6 +100,9 @@ onchip_move_carrier: Literal["mixed", "coordinate_remap"] = os.environ.get(  # t
 onchip_move_debug_dir: str = os.environ.get("SPYRE_ONCHIP_MOVE_DEBUG_DIR", "")
 onchip_move_jsonl: str = os.environ.get("SPYRE_ONCHIP_MOVE_JSONL", "")
 onchip_move_max_cells: int = int(os.environ.get("SPYRE_ONCHIP_MOVE_MAX_CELLS", "8192"))
+onchip_move_coordinate_remap_chunk_cells: int = int(
+    os.environ.get("SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS", "256")
+)
 onchip_move_producer_lx_base: int = int(
     os.environ.get("SPYRE_ONCHIP_MOVE_PRODUCER_LX_BASE", "0"), 0
 )

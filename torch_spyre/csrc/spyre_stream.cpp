@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "flex/flex.hpp"
+#include "flex/runtime_stream/runtime_operation.hpp"
 #include "job_plan.h"
 #include "logging.h"
 #include "module.h"
@@ -206,13 +207,11 @@ void SpyreStream::copyAsyncImpl(void* cpu_ptr,
 
   // Create and launch operation
   if (host2device) {
-    flex::DmaParams params(cpu_ptr, device_address->total_size(), host2device,
-                           device_address, std::move(dci_ptr));
-    flex_stream->launchOperationH2D(&params);
+    flex::RuntimeOperationH2D op(cpu_ptr, device_address, std::move(dci_ptr));
+    flex_stream->launchOperation(op);
   } else {
-    flex::DmaParams params(cpu_ptr, device_address->total_size(), host2device,
-                           device_address, std::move(dci_ptr));
-    flex_stream->launchOperationD2H(&params);
+    flex::RuntimeOperationD2H op(device_address, cpu_ptr, std::move(dci_ptr));
+    flex_stream->launchOperation(op);
   }
 }
 
@@ -229,12 +228,12 @@ void SpyreStream::executeProgramAsync(
 
   // Program
   auto* ctx = static_cast<SharedOwnerCtx*>(arts.device_alloc.get_context());
-  flex::ComputeParams params(&ctx->composite_addr, std::move(tensor_allocs),
-                             arts.bundle_mlir_path);
+  flex::RuntimeOperationCompute compute_op(
+      &ctx->composite_addr, std::move(tensor_allocs), arts.bundle_mlir_path);
 
   // Get the flex runtime stream handle
   flex::RuntimeStream* flex_stream = getRuntimeHandle();
-  flex_stream->launchOperationCompute(&params);
+  flex_stream->launchOperation(compute_op);
 }
 
 void SpyreStream::launch(const JobPlan& plan,
@@ -248,11 +247,12 @@ void SpyreStream::launch(const JobPlan& plan,
   // Create launch context with tensor arguments
   LaunchContext ctx{args};
 
-  // Each JobPlanStep builds its flex operation params and launches them on the
-  // stream in order. flex owns the RuntimeOperation lifecycle.
+  // Each JobPlanStep builds a runtime operation compatible with the installed
+  // Flex stream API, then submits it in plan order.
   flex::RuntimeStream* flex_stream = getRuntimeHandle();
   for (const auto& step : plan.steps) {
-    step->construct(ctx, flex_stream);
+    auto op = step->construct(ctx);
+    flex_stream->launchOperation(*op);
   }
 }
 
