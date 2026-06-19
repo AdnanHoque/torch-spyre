@@ -295,6 +295,9 @@ def _logical_dataop_layout(
     stick_dim_order = [str(dim) for dim in layout_info.get("stickDimOrder_", [])]
     if not layout_dim_order or len(stick_dim_order) != 1:
         return None
+    raw_stick_sizes = list(layout_info.get("stickSize_", []) or [])
+    if len(raw_stick_sizes) != len(stick_dim_order):
+        return None
 
     n_info = dsc.get("N_", {}) or {}
     layout_sizes: dict[str, int] = {}
@@ -327,6 +330,9 @@ def _logical_dataop_layout(
         "layout_dim_order": layout_dim_order,
         "stick_dim_order": stick_dim_order,
         "layout_sizes": layout_sizes,
+        "stick_sizes": {
+            dim: int(size) for dim, size in zip(stick_dim_order, raw_stick_sizes)
+        },
         "device_to_logical": mapping,
         "stick_elems": int(device_sizes[-1]),
     }
@@ -474,10 +480,15 @@ def build_stcdp_datadsc(
         layout_sizes = {
             str(dim): int(size) for dim, size in logical_layout["layout_sizes"].items()
         }
+        stick_sizes = {
+            str(dim): int(size)
+            for dim, size in logical_layout["stick_sizes"].items()
+        }
     else:
         dim_names = [f"d{idx}_" for idx in range(len(device_sizes))]
         stick_dim_order = [dim_names[-1]]
         layout_sizes = dict(zip(dim_names, device_sizes))
+        stick_sizes = {stick_dim_order[0]: int(layout_sizes[stick_dim_order[0]])}
     input_pieces = [
         _piece(
             cell,
@@ -518,6 +529,7 @@ def build_stcdp_datadsc(
                 dim_names,
                 stick_dim_order,
                 layout_sizes,
+                stick_sizes,
                 input_pieces,
             ),
             _labeled_ds(
@@ -528,6 +540,7 @@ def build_stcdp_datadsc(
                 dim_names,
                 stick_dim_order,
                 layout_sizes,
+                stick_sizes,
                 output_pieces,
             ),
         ],
@@ -605,6 +618,7 @@ def _labeled_ds(
     dim_names: list[str],
     stick_dim_order: list[str],
     layout_sizes: dict[str, int],
+    stick_sizes: dict[str, int],
     pieces: list[dict[str, Any]],
 ) -> dict[str, Any]:
     return {
@@ -618,7 +632,7 @@ def _labeled_ds(
         "stickDimOrder_": stick_dim_order,
         "dimToLayoutSize_": layout_sizes,
         "dimToStickSize_": {
-            stick_dim: int(layout_sizes[stick_dim]) for stick_dim in stick_dim_order
+            stick_dim: int(stick_sizes[stick_dim]) for stick_dim in stick_dim_order
         },
         "validGap_": _valid_gap(layout_sizes),
         "totElements": -1,

@@ -314,6 +314,7 @@ def test_mixed_carrier_emits_logical_dataop_layout_for_stickified_cells():
     assert input_lds["layoutDimOrder_"] == ["mb", "out"]
     assert input_lds["stickDimOrder_"] == ["out"]
     assert input_lds["dimToLayoutSize_"] == {"mb": 512, "out": 512}
+    assert input_lds["dimToStickSize_"] == {"out": 64}
     pieces = input_lds["PieceInfo"]
     assert pieces[0]["dimToStartCordinate"] == {"mb": 0, "out": 0}
     assert pieces[0]["dimToSize_"] == {"mb": 16, "out": 64}
