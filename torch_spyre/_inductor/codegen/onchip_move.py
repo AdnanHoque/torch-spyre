@@ -308,7 +308,7 @@ def _logical_dataop_layout(
     stride_map = [
         int(stride)
         for stride in (
-            producer_output.stride_map or plan.get("device_stride_map", []) or []
+            plan.get("device_stride_map", []) or producer_output.stride_map or []
         )
     ]
     if len(device_sizes) < 2 or len(stride_map) != len(device_sizes):

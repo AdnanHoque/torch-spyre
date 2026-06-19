@@ -292,7 +292,7 @@ def test_mixed_carrier_emits_logical_dataop_layout_for_stickified_cells():
         device_size=[8, 512, 64],
         device_coordinates=[],
         allocation=None,
-        stride_map=[64, 512, 1],
+        stride_map=[64, 512, 64],
         name="buf0",
     )
 
