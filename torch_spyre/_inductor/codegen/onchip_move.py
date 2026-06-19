@@ -34,7 +34,7 @@ def patch_onchip_move_mixed_schedules(
     compiled: list[tuple[Any, list[int], list[dict], list[Any]]],
     specs: list[Any],
 ) -> list[dict[str, Any]]:
-    """Attach an STCDP data-op carrier to adjacent producer/consumer SDSCs.
+    """Attach a data-op carrier to adjacent producer/consumer SDSCs.
 
     This v1 realization is intentionally narrow: unrolled non-symbolic OpSpec
     lists only.  The planner still records all candidates; unsupported bundle
@@ -44,7 +44,7 @@ def patch_onchip_move_mixed_schedules(
     rows: list[dict[str, Any]] = []
     if not config.onchip_move_realize:
         return rows
-    if config.onchip_move_carrier != "mixed":
+    if config.onchip_move_carrier not in {"mixed", "coordinate_remap"}:
         return [{"status": "skipped", "reason": "unsupported-carrier"}]
     if any(isinstance(spec, LoopSpec) for spec in specs):
         return [{"status": "skipped", "reason": "loop-specs-not-supported"}]
@@ -93,17 +93,32 @@ def patch_onchip_move_mixed_schedules(
             continue
 
         try:
-            patched_producer, mixed_consumer = build_mixed_onchip_move_sdsc(
-                producer_index,
-                consumer_index,
-                producer_entry[0],
-                consumer_entry[0],
-                producer.args[producer_output_idx],
-                consumer.args[consumer_input_idx],
-                producer_output_idx,
-                consumer_input_idx,
-                plan,
-            )
+            if config.onchip_move_carrier == "coordinate_remap":
+                patched_producer, mixed_consumer = (
+                    build_coordinate_remap_onchip_move_sdsc(
+                        producer_index,
+                        consumer_index,
+                        producer_entry[0],
+                        consumer_entry[0],
+                        producer.args[producer_output_idx],
+                        consumer.args[consumer_input_idx],
+                        producer_output_idx,
+                        consumer_input_idx,
+                        plan,
+                    )
+                )
+            else:
+                patched_producer, mixed_consumer = build_mixed_onchip_move_sdsc(
+                    producer_index,
+                    consumer_index,
+                    producer_entry[0],
+                    consumer_entry[0],
+                    producer.args[producer_output_idx],
+                    consumer.args[consumer_input_idx],
+                    producer_output_idx,
+                    consumer_input_idx,
+                    plan,
+                )
         except Exception as exc:  # noqa: BLE001
             rows.append(_row(producer_index, "skipped", type(exc).__name__, plan))
             continue
@@ -152,6 +167,82 @@ def patch_onchip_move_mixed_schedules(
             rows.append(_row(consumer_index, "patched-reuse", None, plan))
             break
     return rows
+
+
+def build_coordinate_remap_onchip_move_sdsc(
+    producer_index: int,
+    consumer_index: int,
+    producer_payload: dict[str, Any],
+    consumer_payload: dict[str, Any],
+    producer_output: TensorArg,
+    consumer_input: TensorArg,
+    producer_output_idx: int,
+    consumer_input_idx: int,
+    plan: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    producer_name, producer_root_src = next(iter(producer_payload.items()))
+    producer_root = copy.deepcopy(producer_root_src)
+    consumer_root = copy.deepcopy(next(iter(consumer_payload.values())))
+    producer_base = int(config.onchip_move_producer_lx_base)
+    consumer_base = int(config.onchip_move_consumer_lx_base)
+    producer_region_bytes = _region_bytes(plan, "producer_region_bytes", "source")
+    consumer_region_bytes = _region_bytes(plan, "consumer_region_bytes", "dest")
+    _validate_lx_regions(
+        producer_base=producer_base,
+        consumer_base=consumer_base,
+        producer_region_bytes=producer_region_bytes,
+        consumer_region_bytes=consumer_region_bytes,
+    )
+
+    dataop = _coordinate_remap_dataop(plan)
+    dataop_name = f"{producer_index}_OnChipMoveLXCoordinateRemapOp"
+
+    _patch_lx_endpoint(
+        producer_root,
+        dsc_index=0,
+        lds_idx=producer_output_idx,
+        base=producer_base,
+    )
+    _patch_lx_endpoint(
+        consumer_root,
+        dsc_index=0,
+        lds_idx=_matching_input_lds_idx(consumer_root, consumer_input_idx),
+        base=consumer_base,
+    )
+
+    root = copy.deepcopy(consumer_root)
+    root["dscs_"] = copy.deepcopy(consumer_root.get("dscs_", []) or [])
+    root["datadscs_"] = [{dataop_name: dataop}]
+    root["numCoresUsed_"] = max(
+        int(consumer_root.get("numCoresUsed_", 1) or 1),
+        max(dataop.get("coreIdsUsed_", [0])) + 1,
+    )
+    root["coreIdToDscSchedule"] = _consumer_mixed_schedule(
+        dataop_cores=set(dataop["coreIdsUsed_"]),
+        consumer_cores=_dsc_core_ids(root, 0),
+        num_cores=root["numCoresUsed_"],
+    )
+    root["opFuncsUsed_"] = sorted(
+        _dldsc_op_names(root)
+        | {"LXCoordinateRemapOp"}
+        | set(root.get("opFuncsUsed_", []) or [])
+    )
+    root["onchipMove_"] = {
+        "source_name": plan.get("source_name"),
+        "producer": plan.get("producer"),
+        "consumer": plan.get("consumer"),
+        "carrier": "coordinate_remap",
+        "cell_count": int(plan.get("cell_count", 0) or 0),
+        "bytes_moved": int(plan.get("bytes_moved", 0) or 0),
+        "producer_lx_base": producer_base,
+        "consumer_lx_base": consumer_base,
+        "producer_region_bytes": producer_region_bytes,
+        "consumer_region_bytes": consumer_region_bytes,
+        "fallback": "stock-hbm-path-when-disabled",
+    }
+    return {producer_name: producer_root}, {
+        f"{consumer_index}_OnChipMoveCoordinateRemap": root
+    }
 
 
 def _adjacent_move_match(
@@ -281,6 +372,30 @@ def build_mixed_onchip_move_sdsc(
         "fallback": "stock-hbm-path-when-disabled",
     }
     return {producer_name: producer_root}, {f"{consumer_index}_OnChipMoveMixedSTCDP": root}
+
+
+def _coordinate_remap_dataop(plan: dict[str, Any]) -> dict[str, Any]:
+    metadata = plan.get("coordinate_remap")
+    if not isinstance(metadata, dict):
+        raise ValueError("coordinate-remap-metadata-missing")
+    dataop = metadata.get("deeptools_dataop")
+    if not isinstance(dataop, dict):
+        raise ValueError("coordinate-remap-dataop-missing")
+    if (dataop.get("op") or {}).get("name") != "LXCoordinateRemapOp":
+        raise ValueError("coordinate-remap-dataop-op-mismatch")
+    movements = list(dataop.get("movements", []) or [])
+    if not movements:
+        raise ValueError("coordinate-remap-dataop-has-no-movements")
+    core_ids = sorted(
+        {
+            int(movement["source"]["core"])
+            for movement in movements
+        }
+        | {int(movement["destination"]["core"]) for movement in movements}
+    )
+    result = copy.deepcopy(dataop)
+    result["coreIdsUsed_"] = core_ids
+    return result
 
 
 def _first_compute_dsc(root: dict[str, Any]) -> dict[str, Any] | None:
@@ -998,7 +1113,7 @@ def _row(
         "producer": plan.get("producer"),
         "consumer": plan.get("consumer"),
         "cell_count": plan.get("cell_count"),
-        "carrier": "mixed",
+        "carrier": plan.get("carrier") or config.onchip_move_carrier,
     }
 
 

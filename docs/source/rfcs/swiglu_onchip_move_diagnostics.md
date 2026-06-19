@@ -100,5 +100,13 @@ The metadata is intentionally backend-facing:
 - exact logical coverage status over the device rectangle;
 - dependency ordering from producer LX write to remap to consumer LX read.
 
-There is no Deeptools realization in this branch.  The required backend API is
-sketched in `tools/deeptools_lx_coordinate_remap_api_sketch.patch`.
+Torch-Spyre now also emits this payload as a real mixed-SDSC data-op row when
+`SPYRE_ONCHIP_MOVE_REALIZE=1`.  The diagnostic emitter
+`tools/emit_lx_coordinate_remap_bundle.py` writes a minimal bundle containing
+`LXCoordinateRemapOp` plus a Python byte-range value simulation.
+
+The current backend boundary is Deeptools import/lowering.  Stock Deeptools
+does not define `OpFuncs::LXCoordinateRemapOp`; probing the emitted diagnostic
+bundle with `dxp_standalone --bundle` currently aborts during op-name lookup
+with `std::out_of_range map::at`.  The required backend API and first lowering
+slice are sketched in `tools/deeptools_lx_coordinate_remap_backend_prototype.patch`.

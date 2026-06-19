@@ -12,7 +12,8 @@ index 000000000000..111111111111
 +
 +## Import Surface
 +
-+`LXCoordinateRemapOp` is accepted in a mixed SuperDSC `dataOpdscs_` row.  The
++`LXCoordinateRemapOp` is accepted in a mixed SuperDSC JSON `datadscs_` row
++and imported into the Deeptools in-memory `dataOpdscs_` vector.  The
 +consumer row must be scheduled after the remap row in `coreIdToDscSchedule`.
 +
 +```json
@@ -102,6 +103,15 @@ index 000000000000..111111111111
 +
 +The sparse Deeptools source available for this iteration shows these seams:
 +
++- `dsc/dscdefn.h` and `dsc/dscdefn.cpp` own `OpFuncs` plus
++  string-to-enum conversion.  `LXCoordinateRemapOp` must be added there first;
++  stock Deeptools currently aborts with `std::out_of_range map::at` when it
++  sees the torch-spyre-emitted op name.
++- `dsc/dataOpDsc.h` and `dsc/dataOpDsc.cpp` own concrete DataOp payload
++  import/export.  Add an `LXCoordinateRemapOp : baseOp` payload structure with
++  `schemaVersion`, base addresses, coverage, dependency order, and movements.
++- `dsc/superdsc.cpp` already imports `datadscs_` and
++  `coreIdToDscSchedule`; no new top-level SuperDSC key should be needed.
 +- `dxp/dxp.cpp::Dxp::runCodegen()` already selects
 +  `DcgManager::runDcgForDataOpsDlOps()` when a mixed SuperDSC has both
 +  `dataOpdscs_` and `dscs_` plus `coreIdToDscSchedule`.
@@ -110,6 +120,20 @@ index 000000000000..111111111111
 +  syncs.
 +- `dcg/dcg_manager/dcg_manager.cpp::mergePcfgInSuperDSC()` already merges each
 +  `DataOpDsc::pcfg_` row according to `coreIdToDscSchedule`.
++- `dcg/dcg_fe/transfer_compute/transfer_compute.cpp` handles generic DataOp
++  transfer inference.  The coordinate-remap op should bypass STCDP overlap
++  inference because the torch-spyre payload already carries explicit byte
++  ranges.
++- `dcg/dcg_fe/pcfg_gen/stcdpOp.cpp` and
++  `dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp` show how existing LX data
++  traffic becomes `SenPcfgRingDtNode` / `RINGDATATRANSFER` nodes.  Their helper
++  stack is STCDP-layout-specific, so the first coordinate-remap implementation
++  should generate the existing PCFG node types directly rather than reusing
++  `transformToPcfgSTCDPLxUnrolled`.
++- `dsc/pcfg.h` defines reusable PCFG node classes such as
++  `SenPcfgRingDtNode`, `SenPcfgSyncNode`, `SenPcfgMvloopNode`, and
++  `SenPcfgPtSFPDtNode`; `dcg/dcg_be/dcgbeCodegen.cpp` already lowers ring
++  data-transfer nodes.
 +
 +Therefore the first real patch should add:
 +
