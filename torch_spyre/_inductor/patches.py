@@ -107,10 +107,13 @@ def enable_spyre_context(
     from torch._inductor.fx_passes import joint_graph
 
     origin_pass = list(joint_graph.pass_patterns)
+    origin_lazy_init = joint_graph.lazy_init
     # Disable generic joint-graph pattern rewrites for Spyre. PyTorch 2.12
-    # lazily initializes attention patterns with fake tensors and may invoke
-    # Spyre custom-copy paths while in no_dispatch(), before Spyre lowering runs.
+    # initializes attention patterns in lazy_init() with fake tensors and may
+    # invoke Spyre custom-copy paths while in no_dispatch(), before Spyre
+    # lowering runs.
     joint_graph.pass_patterns.clear()
+    joint_graph.lazy_init = lambda input_device: None
 
     # Inject the pre_scheduling_passes before the Scheduler is constructed,
     # allowing the passes to modify the graph IR (buffers, inputs, constants).
@@ -136,5 +139,6 @@ def enable_spyre_context(
             yield spyre_context_decompositions
         finally:
             joint_graph.pass_patterns[:] = origin_pass
+            joint_graph.lazy_init = origin_lazy_init
             Loops.has_large_inner_fn = old_loop
             GraphLowering._update_scheduler = old_update_scheduler  # type: ignore[method-assign]
