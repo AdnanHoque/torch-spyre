@@ -1,0 +1,64 @@
+diff --git a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+index 3a013bce51..c77168ed24 100644
+--- a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
++++ b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+@@ -2750,7 +2750,7 @@ bool DcgFE::doesPiecesOverlap(STCDPOpLx* op, PieceInfo* inpPiece,
+     } else {
+       DT_CHECK(0);
+     }
+-    outStart -= outStartGap;
++    outStart += outStartGap;
+ 
+     int outEndGap = (outPiece->validGap_.at(key_.first).size() == 2)
+                         ? outPiece->validGap_.at(key_.first)[1].second
+@@ -2781,7 +2781,7 @@ bool DcgFE::doesPiecesOverlap(STCDPOpLx* op, PieceInfo* inpPiece,
+     } else {
+       DT_CHECK(0);
+     }
+-    inpStart -= inpStartGap;
++    inpStart += inpStartGap;
+ 
+     int inpEndGap = (inpPiece->validGap_.at(key_.first).size() == 2)
+                         ? inpPiece->validGap_.at(key_.first)[1].second
+@@ -2820,7 +2820,7 @@ void DcgFE::insertSubPieces(STCDPOpLx* op, PieceInfo& inpPiece,
+     } else {
+       DT_CHECK(0);
+     }
+-    outStart -= outStartGap;
++    outStart += outStartGap;
+ 
+     int outEndGap = (outPiece.validGap_.at(key_.first).size() == 2)
+                         ? outPiece.validGap_.at(key_.first)[1].second
+@@ -2852,7 +2852,7 @@ void DcgFE::insertSubPieces(STCDPOpLx* op, PieceInfo& inpPiece,
+     } else {
+       DT_CHECK(0);
+     }
+-    inpStart -= inpStartGap;
++    inpStart += inpStartGap;
+ 
+     int inpEndGap = (inpPiece.validGap_.at(key_.first).size() == 2)
+                         ? inpPiece.validGap_.at(key_.first)[1].second
+@@ -2862,12 +2862,12 @@ void DcgFE::insertSubPieces(STCDPOpLx* op, PieceInfo& inpPiece,
+     int startCoor = inpStart < outStart ? outStart : inpStart;
+     if (inpStart <= outStart) {
+       // re-adjust dimToStartCordinate
+-      inpSubPiece.dimToStartCordinate[key_.first] = outStart + inpStartGap;
++      inpSubPiece.dimToStartCordinate[key_.first] = outStart;
+       outSubPiece.dimToStartCordinate[key_.first] =
+-          outStart * upsizeFactor + outStartGap;
++          outStart * upsizeFactor;
+     } else {
+-      inpSubPiece.dimToStartCordinate[key_.first] = inpStart + inpStartGap;
+-      outSubPiece.dimToStartCordinate[key_.first] = inpStart + outStartGap;
++      inpSubPiece.dimToStartCordinate[key_.first] = inpStart;
++      outSubPiece.dimToStartCordinate[key_.first] = inpStart;
+     }
+ 
+     if (outEnd <= inpEnd) {
+@@ -6437,4 +6437,4 @@ void DcgFE::fillAddr(FoldManager<int64_t>& lhs,
+       return r[idx];
+     });
+   }
+-}
+\ No newline at end of file
++}
