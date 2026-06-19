@@ -1,3 +1,5 @@
+diff --git a/dxp/dxp.cpp b/dxp/dxp.cpp
+index 50828ce6b2..7a7cff2e52 100644
 --- a/dxp/dxp.cpp
 +++ b/dxp/dxp.cpp
 @@ -28,6 +28,7 @@
@@ -8,7 +10,7 @@
  #include <string>
  #include <unordered_map>
  #include <vector>
-@@ -129,6 +130,12 @@
+@@ -129,6 +130,12 @@ int getPhysicalizeOutStickGroup() {
    return group;
  }
  
@@ -21,7 +23,7 @@
  int64_t computeSwiGluPhysicalLxAddress(SuperDsc& sdsc, int coreId,
                                         PieceInfo& piece, LdsInfo& dataLds,
                                         bool producer) {
-@@ -166,8 +173,26 @@
+@@ -166,8 +173,26 @@ int64_t computeSwiGluPhysicalLxAddress(SuperDsc& sdsc, int coreId,
    const int64_t byteOffset =
        (static_cast<int64_t>(localOutStick) * localMbExtent + localMb) *
        stickBytes;
@@ -50,7 +52,7 @@
  }
  
  void rewriteSingleLxPlacement(SuperDsc& sdsc, PieceInfo& piece,
-@@ -214,6 +239,17 @@
+@@ -214,6 +239,17 @@ bool physicalizeSwiGluOnchipMove(SuperDsc& consumerSdsc,
    std::map<std::string, PieceInfo> newOutputPieces;
    int newPieceId = 0;
    const int outStickGroup = getPhysicalizeOutStickGroup();
@@ -68,7 +70,7 @@
  
    for (const auto& kv : inputLds.pieces_) {
      const auto outIt = outputLds.pieces_.find(kv.first);
-@@ -232,6 +268,20 @@
+@@ -232,13 +268,35 @@ bool physicalizeSwiGluOnchipMove(SuperDsc& consumerSdsc,
        const int outStick = outStickStart + outStickOffset;
        const int groupCount = std::min(outStickGroup,
                                        outStickCount - outStickOffset);
@@ -89,7 +91,23 @@
        const std::string newKey =
            "phys_" + std::to_string(++newPieceId) + "_" + kv.first;
        newInput.key_ = newKey;
-@@ -250,9 +300,15 @@
+       newOutput.key_ = newKey;
++      const bool sourceFullMbStride =
++          dtGetEnv<std::string>(
++              "DXP_ONCHIP_MOVE_PHYSICALIZE_SOURCE_FULL_MB_STRIDE")
++              .value_or("0") == "1";
++      const int sourceMbSpan =
++          sourceFullMbStride
++              ? getCoreExtent(getCoreDsc(producerSdsc, srcCore), "mb")
++              : mbCount;
+       setPieceDimSpan(newInput, "d1_", outStick, groupCount, groupCount);
+       setPieceDimSpan(newOutput, "d1_", outStick, groupCount, groupCount);
+-      setPieceDimSpan(newInput, "d0_", mbStart, mbCount, mbCount);
++      setPieceDimSpan(newInput, "d0_", mbStart, mbCount, sourceMbSpan);
+       setPieceDimSpan(newOutput, "d0_", mbStart, mbCount, mbCount);
+       rewriteSingleLxPlacement(producerSdsc, newInput, inputLds,
+                                /*producer=*/true);
+@@ -250,9 +308,15 @@ bool physicalizeSwiGluOnchipMove(SuperDsc& consumerSdsc,
      }
    }
  
