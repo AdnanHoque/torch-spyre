@@ -48,16 +48,23 @@ import dataclasses
 
 from torch._inductor.dependencies import MemoryDep
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import ComputedBuffer, Reduction
+from torch._inductor.ir import ComputedBuffer, Pointwise, Reduction
 
 from . import config
 from .constants import BATCH_MATMUL_OP
 from .logging_utils import get_inductor_logger
 from .pass_utils import (
     apply_splits_from_index_coeff,
+    concretize_expr,
     find_reduction_var,
+    get_mem_deps_from_rw,
     identify_matmul_inputs,
     iteration_space_from_op,
+)
+from .work_division import (
+    _iter_computed_buffers,
+    apply_splits,
+    collect_tensor_deps,
 )
 from .reshard import LxFlip, splice_reshard
 from .reshard.substrate import (
@@ -630,3 +637,91 @@ def realize_reduction_reshard_bundle(
         realized = True
         p += 1
     return realized
+
+
+# --- Co-assignment: the prerequisite that creates the reduction-reshard edge ----
+#
+# cost_model_matmul_division co-splits the MATMULS ({mb:4,out:8}) but the
+# element-wise SwiGLU tail (neg/exp/add/realdiv/mul) is Pointwise -> the default
+# work_distribution gives it pure-M {mb:32}. With the mul pure-M, the mul->down_proj
+# edge is NOT a producer-co-split-on-the-reduction-dim edge, so the reduction
+# detection cannot fire. Co-assignment propagates each matmul's {mb:4,out:8} split
+# onto its split-agnostic Pointwise consumers (same-core, no move, value-correct),
+# so the mul becomes {mb:4,out:8} and the genuine mul->down_proj reshard edge exists.
+# Distilled from the core-to-core ab/coassign monkeypatch; runs as a pass inside
+# _distribute_work (after cost_model_matmul_division, before work_distribution).
+
+
+def _op_buf_names(op, kind: str) -> set:
+    return {d.name for d in getattr(op.get_read_writes(), kind)}
+
+
+def _recover_committed_split(op):
+    """Reconstruct {symbol: count>1} from op.op_it_space_splits + its iter space."""
+    it = iteration_space_from_op(op)
+    rw = op.get_read_writes()
+    wi = next(iter(rw.writes)).index
+    ri = next((d.index for d in rw.reads), wi)
+    split = apply_splits_from_index_coeff(op.op_it_space_splits, wi, ri, it)
+    return {s: v for s, v in split.items() if v > 1}, it
+
+
+def _map_split_by_extent(src_split, src_it, dst_it) -> dict:
+    """Map a producer split onto a consumer iter space by matching dim extents."""
+    out: dict = {}
+    used: set = set()
+    for ssym, cnt in src_split.items():
+        ext = concretize_expr(src_it[ssym])
+        for dsym, dext in dst_it.items():
+            if dsym in used:
+                continue
+            if concretize_expr(dext) == ext:
+                out[dsym] = cnt
+                used.add(dsym)
+                break
+    return out
+
+
+def _commit_coassign_split(op, split) -> None:
+    rw = op.get_read_writes()
+    args = get_mem_deps_from_rw(rw)
+    _, output_td = collect_tensor_deps(op, args)
+    apply_splits(op, split, output_td)
+
+
+def coassign_elementwise(graph: GraphLowering, mm_ops: list) -> list:
+    """Propagate each matmul's split onto its Pointwise consumer chain.
+
+    Returns the newly co-assigned ops so ``_distribute_work`` adds them to
+    ``work_distribution``'s preassigned set (they are then divided here, not by the
+    default pure-M path). Value-correct: Pointwise ops are split-agnostic and the
+    propagated split is mapped by matching dim extents, so each consumer core reads
+    exactly the tile its own core produced (same-core, no data movement).
+    """
+    ops = list(_iter_computed_buffers(graph.operations))
+    seen = {id(m) for m in mm_ops}
+    extra: list = []
+    frontier = [
+        (m, _recover_committed_split(m))
+        for m in mm_ops
+        if getattr(m, "op_it_space_splits", None)
+    ]
+    for prod, (psplit, pit) in frontier:
+        if not psplit:
+            continue
+        pbufs = _op_buf_names(prod, "writes")
+        for op in ops:
+            if id(op) in seen or not isinstance(op.data, Pointwise):
+                continue
+            if not (_op_buf_names(op, "reads") & pbufs):
+                continue
+            dit = iteration_space_from_op(op)
+            csplit = _map_split_by_extent(psplit, pit, dit)
+            if not csplit:
+                continue
+            _commit_coassign_split(op, csplit)
+            seen.add(id(op))
+            extra.append(op)
+            frontier.append((op, (csplit, dit)))
+            logger.info("coassign %s <- %s", op.get_name(), csplit)
+    return extra

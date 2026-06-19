@@ -63,7 +63,7 @@ from .work_division import (
     cost_model_matmul_division,
 )
 from .pass_utils import apply_splits_from_index_coeff, iteration_space_from_op
-from .reduction_reshard import plan_reduction_reshard_edges
+from .reduction_reshard import coassign_elementwise, plan_reduction_reshard_edges
 from .scratchpad.allocator import (
     StrategyBCoOptimizingAllocator,
     scratchpad_planning,
@@ -283,6 +283,14 @@ def _distribute_work(graph: GraphLowering) -> None:
     # cost_model_matmul_division claims a subset of ops; work_distribution skips
     # those so every op is divided by exactly one of the two passes.
     preassigned_ops = cost_model_matmul_division(graph)
+    if config.onchip_reduction_reshard:
+        # Co-assign the element-wise SwiGLU tail onto the matmul {mb:4,out:8}
+        # split so the mul becomes co-split -> the mul->down_proj reduction-reshard
+        # edge exists for the planner. Co-assigned ops are preassigned so
+        # work_distribution does not overwrite them with the pure-M default.
+        preassigned_ops = list(preassigned_ops) + coassign_elementwise(
+            graph, preassigned_ops
+        )
     work_distribution(graph, preassigned_ops)
 
 
