@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import math
 from pathlib import Path
@@ -771,6 +772,145 @@ def build_stcdp_datadsc(
         ],
         "op": {"name": "STCDPOpLx"},
     }
+
+
+def diagnose_stcdp_output_layout_contiguity(
+    datadsc: dict[str, Any],
+    *,
+    max_examples: int = 8,
+) -> list[dict[str, Any]]:
+    """Return output pieces whose logical layout is not a contiguous LX span.
+
+    The mixed carrier asks STCDP to copy each PieceInfo as one dense LX span
+    from its placement address.  That is only value-correct when the valid
+    logical coordinates of the output piece are contiguous in the consumer's
+    local layout.  A SwiGLU `{mb,out} -> {out,mb}` handoff violates this for
+    64-wide out stripes across multiple mb rows: the copy is contiguous, but
+    the consumer layout needs a gap before the next mb row.
+    """
+
+    labeled_ds = datadsc.get("labeledDs_", []) or []
+    if len(labeled_ds) < 2:
+        return []
+    output_lds = labeled_ds[1]
+    dim_order = [str(dim) for dim in output_lds.get("layoutDimOrder_", [])]
+    layout_sizes = {
+        str(dim): int(size)
+        for dim, size in (output_lds.get("dimToLayoutSize_", {}) or {}).items()
+    }
+    if not dim_order or any(dim not in layout_sizes for dim in dim_order):
+        return []
+
+    strides = _layout_strides_fastest_first(dim_order, layout_sizes)
+    word_length = int(output_lds.get("wordLength", 1) or 1)
+    mismatches: list[dict[str, Any]] = []
+    for piece in output_lds.get("PieceInfo", []) or []:
+        ranges_by_dim = _piece_valid_coordinate_ranges(piece, dim_order)
+        if not ranges_by_dim:
+            continue
+        first_offset: int | None = None
+        first_coord: dict[str, int] | None = None
+        previous: dict[str, Any] | None = None
+        for linear_index, coord in enumerate(
+            _iter_piece_coordinates(dim_order, ranges_by_dim)
+        ):
+            offset = sum(int(coord[dim]) * strides[dim] for dim in dim_order)
+            if first_offset is None:
+                first_offset = offset
+                first_coord = coord
+            required_delta = offset - first_offset
+            if required_delta != linear_index:
+                mismatches.append(
+                    {
+                        "piece": str(piece.get("key_", "")),
+                        "reason": "output-layout-requires-strided-placement",
+                        "layoutDimOrder_": dim_order,
+                        "dimToLayoutSize_": layout_sizes,
+                        "dimToStartCordinate": dict(
+                            piece.get("dimToStartCordinate", {}) or {}
+                        ),
+                        "dimToSize_": dict(piece.get("dimToSize_", {}) or {}),
+                        "validGap_": dict(piece.get("validGap_", {}) or {}),
+                        "placement": copy.deepcopy(
+                            piece.get("PlacementInfo", []) or []
+                        ),
+                        "first_coord": first_coord,
+                        "first_mismatch": {
+                            "linear_index": linear_index,
+                            "coord": coord,
+                            "stcdp_contiguous_element_delta": linear_index,
+                            "required_layout_element_delta": required_delta,
+                            "stcdp_contiguous_byte_delta": (
+                                linear_index * word_length
+                            ),
+                            "required_layout_byte_delta": (
+                                required_delta * word_length
+                            ),
+                            "previous": previous,
+                        },
+                    }
+                )
+                break
+            previous = {
+                "linear_index": linear_index,
+                "coord": coord,
+                "required_layout_element_delta": required_delta,
+            }
+        if len(mismatches) >= max_examples:
+            break
+    return mismatches
+
+
+def _layout_strides_fastest_first(
+    dim_order: list[str],
+    layout_sizes: dict[str, int],
+) -> dict[str, int]:
+    stride = 1
+    strides: dict[str, int] = {}
+    for dim in dim_order:
+        strides[dim] = stride
+        stride *= int(layout_sizes[dim])
+    return strides
+
+
+def _piece_valid_coordinate_ranges(
+    piece: dict[str, Any],
+    dim_order: list[str],
+) -> dict[str, range]:
+    starts = piece.get("dimToStartCordinate", {}) or {}
+    sizes = piece.get("dimToSize_", {}) or {}
+    valid_gaps = piece.get("validGap_", {}) or {}
+    ranges_by_dim: dict[str, range] = {}
+    for dim in dim_order:
+        if dim not in starts or dim not in sizes:
+            return {}
+        start = int(starts[dim])
+        size = int(sizes[dim])
+        if size <= 0:
+            return {}
+        gaps = valid_gaps.get(dim, [[size, 0]])
+        if len(gaps) == 1:
+            valid_start = start
+            valid_size = int(gaps[0][0])
+        elif len(gaps) == 2:
+            valid_start = start + int(gaps[0][1])
+            valid_size = int(gaps[1][0])
+        else:
+            return {}
+        if valid_size <= 0:
+            return {}
+        ranges_by_dim[dim] = range(valid_start, valid_start + valid_size)
+    return ranges_by_dim
+
+
+def _iter_piece_coordinates(
+    dim_order: list[str],
+    ranges_by_dim: dict[str, range],
+):
+    slow_to_fast_ranges = [ranges_by_dim[dim] for dim in reversed(dim_order)]
+    slow_to_fast_dims = list(reversed(dim_order))
+    for values in itertools.product(*slow_to_fast_ranges):
+        yield dict(zip(slow_to_fast_dims, values))
 
 
 def emit_swiglu_warpspec_audit(

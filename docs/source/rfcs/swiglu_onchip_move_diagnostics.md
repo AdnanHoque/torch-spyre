@@ -45,6 +45,42 @@ path, but it still cannot express the consumer layout's row-strided placement.
 The movement remains contiguous at the STCDP subpiece level while the consumer
 layout needs per-row placement within an `["out", "mb"]` local layout.
 
+### `swiglu-ws-dxp` Branch Check
+
+This branch adds an artifact-level diagnostic for the dense-actual encoding:
+`diagnose_stcdp_output_layout_contiguity(...)`.  It checks whether each output
+`PieceInfo` is a contiguous span in the consumer's local logical layout.  The
+small SwiGLU-shaped case reproduces the same failure without a full AIU run:
+
+```text
+output piece p1:
+  layoutDimOrder_: ["out", "mb", "x"]
+  start: {"out": 64, "mb": 0, "x": 0}
+  size:  {"out": 64, "mb": 16, "x": 1}
+
+first mismatch:
+  contiguous STCDP element delta: 64
+  required consumer-layout delta: 512
+  contiguous STCDP byte delta: 128
+  required consumer-layout byte delta: 1024
+```
+
+So the first 64 `out` elements in `mb=0` are contiguous, but the next value
+belongs at `mb=1,out=64`, which is 512 elements from the first value in the
+consumer `["out", "mb", "x"]` layout.  A single dense STCDP output piece writes
+that value at element delta 64 instead.  This is a concrete value-correctness
+blocker for the current mixed `STCDPOpLx` carrier.
+
+The non-hacky fixes are outside the current plain-STCDP encoding:
+
+- a backend physicalizer that splits the transfer into layout-contiguous
+  subpieces and proves the generated STCDP LX descriptors are legal; or
+- a coordinate-aware LX-to-LX data-op that represents source and destination
+  logical coordinates directly.
+
+Splitting only this SwiGLU shape in torch-spyre would hide the problem rather
+than making `STCDPOpLx` a general LX-to-LX carrier.
+
 ## Deeptools Probes
 
 Two probe patches are recorded in `tools/`:
