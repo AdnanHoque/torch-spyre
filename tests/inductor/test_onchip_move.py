@@ -324,6 +324,83 @@ def test_mixed_carrier_emits_logical_dataop_layout_for_stickified_cells():
     assert pieces[2]["dimToSize_"] == {"mb": 16, "out": 64}
 
 
+def test_mixed_carrier_maps_collapsed_size_one_logical_dims():
+    plan = {
+        "source_name": "buf0",
+        "producer": "buf0",
+        "consumer": "buf1",
+        "device_sizes": [512, 8, 1, 64],
+        "device_stride_map": [512, 64, -1, 1],
+        "producer_region_bytes": 16 * 1024,
+        "consumer_region_bytes": 16 * 1024,
+        "bytes_moved": 2048,
+        "cell_count": 1,
+        "cells": [
+            {
+                "cell_index": 0,
+                "source_core": 0,
+                "dest_core": 0,
+                "source_offset_bytes": 0,
+                "dest_offset_bytes": 0,
+                "bytes": 2048,
+                "dim_starts": {"d0_": 0, "d1_": 1, "d2_": 0, "d3_": 0},
+                "dim_sizes": {"d0_": 16, "d1_": 1, "d2_": 1, "d3_": 64},
+            }
+        ],
+    }
+    producer_payload = {
+        "0_batchmatmul": _layout_sdsc_payload(
+            "batchmatmul",
+            output_lds_idx=2,
+            input_lds_indices=[0, 1],
+            core_ids=list(range(32)),
+            include_x=True,
+        )
+    }
+    consumer_payload = {
+        "1_neg": _layout_sdsc_payload(
+            "neg",
+            output_lds_idx=1,
+            input_lds_indices=[0],
+            core_ids=list(range(32)),
+            include_x=True,
+        )
+    }
+    output_arg = TensorArg(
+        is_input=False,
+        arg_index=0,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[512, 8, 1, 64],
+        device_coordinates=[],
+        allocation=None,
+        stride_map=[512, 64, -1, 64],
+        name="buf0",
+    )
+
+    _patched_producer, mixed_consumer = build_mixed_onchip_move_sdsc(
+        0,
+        1,
+        producer_payload,
+        consumer_payload,
+        output_arg,
+        2,
+        0,
+        plan,
+    )
+
+    dataop = mixed_consumer["1_OnChipMoveMixedSTCDP"]["datadscs_"][0][
+        "0_OnChipMoveSTCDPOpLx"
+    ]
+    input_lds = dataop["labeledDs_"][0]
+    assert input_lds["layoutDimOrder_"] == ["mb", "out", "x"]
+    assert input_lds["stickDimOrder_"] == ["out"]
+    assert input_lds["dimToLayoutSize_"] == {"mb": 512, "out": 512, "x": 1}
+    assert input_lds["dimToStickSize_"] == {"out": 64}
+    piece = input_lds["PieceInfo"][0]
+    assert piece["dimToStartCordinate"] == {"mb": 0, "out": 64, "x": 0}
+    assert piece["dimToSize_"] == {"mb": 16, "out": 64, "x": 1}
+
+
 def test_mixed_carrier_reuses_lx_source_for_later_fanout_consumer(monkeypatch):
     monkeypatch.setattr(spyre_config, "onchip_move_realize", True)
     monkeypatch.setattr(spyre_config, "onchip_move_carrier", "mixed")
@@ -594,6 +671,7 @@ def _layout_sdsc_payload(
     output_lds_idx: int,
     input_lds_indices: list[int],
     core_ids: list[int],
+    include_x: bool = False,
 ) -> dict:
     payload = _minimal_sdsc_payload(
         name,
@@ -602,15 +680,19 @@ def _layout_sdsc_payload(
         core_ids=core_ids,
     )
     dsc = next(iter(payload["dscs_"][0].values()))
-    dsc["N_"] = {"name_": "n", "mb_": 512, "out_": 512}
+    layout_dim_order = ["mb", "out", "x"] if include_x else ["mb", "out"]
+    n_info = {"name_": "n", "mb_": 512, "out_": 512}
+    if include_x:
+        n_info["x_"] = 1
+    dsc["N_"] = n_info
     dsc["primaryDsInfo_"] = {
         "INPUT": {
-            "layoutDimOrder_": ["mb", "out"],
+            "layoutDimOrder_": layout_dim_order,
             "stickDimOrder_": ["out"],
             "stickSize_": [64],
         },
         "OUTPUT": {
-            "layoutDimOrder_": ["mb", "out"],
+            "layoutDimOrder_": layout_dim_order,
             "stickDimOrder_": ["out"],
             "stickSize_": [64],
         },

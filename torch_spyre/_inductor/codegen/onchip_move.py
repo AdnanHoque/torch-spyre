@@ -366,6 +366,7 @@ def _device_to_logical_mapping(
     mapping: dict[int, dict[str, Any]] = {}
     outer_stick_dim: int | None = None
     inner_stick_dim: int | None = None
+    used_direct_dims: set[str] = set()
 
     for device_dim, stride in enumerate(stride_map):
         stride = int(stride)
@@ -383,13 +384,26 @@ def _device_to_logical_mapping(
             mapping[device_dim] = {"dim": stick_dim, "kind": "outer"}
             continue
 
-        matches = [
-            dim
-            for dim in layout_dim_order
-            if dim != stick_dim and int(host_strides[dim]) == stride
-        ]
+        if stride > 0:
+            matches = [
+                dim
+                for dim in layout_dim_order
+                if dim != stick_dim
+                and dim not in used_direct_dims
+                and int(host_strides[dim]) == stride
+            ]
+        else:
+            matches = [
+                dim
+                for dim in layout_dim_order
+                if dim != stick_dim
+                and dim not in used_direct_dims
+                and int(layout_sizes[dim]) == 1
+                and int(device_sizes[device_dim]) == 1
+            ]
         if len(matches) != 1:
             return None
+        used_direct_dims.add(matches[0])
         mapping[device_dim] = {"dim": matches[0], "kind": "direct"}
 
     direct_dims = {entry["dim"] for entry in mapping.values() if entry["kind"] == "direct"}
