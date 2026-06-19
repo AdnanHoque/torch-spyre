@@ -278,12 +278,15 @@ export PYTHONPATH=/tmp/torch-spyre-co-remap-native:/tmp/torch-spyre-co-remap-nat
 export DEEPTOOLS_PATH=/tmp/deeptools-coordinate-remap-mainport-lean
 export PATH=/tmp/deeptools-coordinate-remap-mainport-lean/build-swiglu-dxp-main-lean/dxp:$PATH
 export LD_LIBRARY_PATH=/tmp/deeptools-coordinate-remap-mainport-lean/build-swiglu-dxp-main-lean/dsm:/tmp/deeptools-coordinate-remap-mainport-lean/build-swiglu-dxp-main-lean/dsm/translators/perfDscToSdsc:/tmp/deeptools-coordinate-remap-mainport-lean/build-swiglu-dxp-main-lean/dvs:/tmp/deeptools-coordinate-remap-mainport-lean/build-swiglu-dxp-main-lean/deeprt:/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/deeptools/lib:/opt/ibm/spyre/senlib/lib:/opt/ibm/spyre/sentinyexec/lib
-export TORCH_DEVICE_BACKEND_AUTOLOAD=0
+export TORCH_DEVICE_BACKEND_AUTOLOAD=1
 export TORCHINDUCTOR_FX_GRAPH_CACHE=0
 export TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_swiglu_coordinate_remap_smoke
 ```
 
-If the Python side is from the coordinate-remap branch but `dxp_standalone` or
+Perf-suite benchmark workers do not explicitly import `torch_spyre` before
+constructing `torch.device("spyre")`, so backend autoload must be enabled for
+those runs. If the Python side is from the coordinate-remap branch but
+`dxp_standalone` or
 `libperfdsc_to_sdsc.so` comes from an older Deeptools install, the failure mode
 usually looks like an unknown op, rejected mixed SDSC, missing data-op routing,
 or value corruption.

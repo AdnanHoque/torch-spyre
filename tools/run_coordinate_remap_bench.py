@@ -129,7 +129,7 @@ def _base_env(args: argparse.Namespace, run_dir: Path, variant: Variant) -> dict
             "LD_LIBRARY_PATH": _ld_library_path(
                 args.deeptools_root, env.get("LD_LIBRARY_PATH")
             ),
-            "TORCH_DEVICE_BACKEND_AUTOLOAD": "0",
+            "TORCH_DEVICE_BACKEND_AUTOLOAD": "1",
             "TORCHINDUCTOR_CACHE_DIR": str(cache_dir),
             "TORCHINDUCTOR_FX_GRAPH_CACHE": "0",
             "SPYRE_ONCHIP_MOVE_JSONL": str(run_dir / "onchip_move.jsonl"),
