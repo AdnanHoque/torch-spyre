@@ -1,0 +1,106 @@
+--- a/dxp/dxp.cpp
++++ b/dxp/dxp.cpp
+@@ -28,6 +28,7 @@
+ #include <fstream>
+ #include <iostream>
+ #include <numeric>
++#include <optional>
+ #include <string>
+ #include <unordered_map>
+ #include <vector>
+@@ -129,6 +130,11 @@
+   return group;
+ }
+ 
++std::optional<int> getOptionalIntEnv(const std::string& name) {
++  const auto value = dtGetEnv<std::string>(name);
++  if (!value.has_value() || value->empty()) return std::nullopt;
++  return std::stoi(*value);
++}
+ 
+ int64_t computeSwiGluPhysicalLxAddress(SuperDsc& sdsc, int coreId,
+                                        PieceInfo& piece, LdsInfo& dataLds,
+@@ -167,8 +173,26 @@
+   const int64_t byteOffset =
+       (static_cast<int64_t>(localOutStick) * localMbExtent + localMb) *
+       stickBytes;
+-  DT_CHECK(byteOffset % kDxpLxAddrUnitBytes == 0);
+-  return base + byteOffset / kDxpLxAddrUnitBytes;
++  const bool useByteAddrs =
++      dtGetEnv<std::string>("DXP_ONCHIP_MOVE_PHYSICALIZE_LX_BYTE_ADDRS")
++          .value_or("0") == "1";
++  if (!useByteAddrs) DT_CHECK(byteOffset % kDxpLxAddrUnitBytes == 0);
++  const int64_t offset =
++      useByteAddrs ? byteOffset : byteOffset / kDxpLxAddrUnitBytes;
++  const int64_t address = base + offset;
++  if (dtGetEnv<std::string>("DXP_ONCHIP_MOVE_PHYSICALIZE_DUMP_ADDRS")
++          .value_or("0") == "1") {
++    std::cout << "DXP_ONCHIP_MOVE_PHYSICALIZE_ADDR"
++              << " producer=" << (producer ? 1 : 0)
++              << " core=" << coreId << " base=" << base
++              << " byteOffset=" << byteOffset << " startAddr=" << address
++              << " byteAddrs=" << (useByteAddrs ? 1 : 0)
++              << " d0=" << globalMb << " d1=" << globalOutStick
++              << " d0Size=" << getPieceInt(piece, "d0_", true)
++              << " d1Size=" << getPieceInt(piece, "d1_", true)
++              << std::endl;
++  }
++  return address;
+ }
+ 
+ void rewriteSingleLxPlacement(SuperDsc& sdsc, PieceInfo& piece,
+@@ -215,6 +239,17 @@
+   std::map<std::string, PieceInfo> newOutputPieces;
+   int newPieceId = 0;
+   const int outStickGroup = getPhysicalizeOutStickGroup();
++  const auto maxPieces =
++      getOptionalIntEnv("DXP_ONCHIP_MOVE_PHYSICALIZE_MAX_PIECES");
++  const auto onlySrcCore =
++      getOptionalIntEnv("DXP_ONCHIP_MOVE_PHYSICALIZE_SRC_CORE");
++  const auto onlyDstCore =
++      getOptionalIntEnv("DXP_ONCHIP_MOVE_PHYSICALIZE_DST_CORE");
++  const auto onlyMbStart =
++      getOptionalIntEnv("DXP_ONCHIP_MOVE_PHYSICALIZE_MB_START");
++  const auto onlyOutStickStart =
++      getOptionalIntEnv("DXP_ONCHIP_MOVE_PHYSICALIZE_OUT_STICK_START");
++  int skippedPieces = 0;
+ 
+   for (const auto& kv : inputLds.pieces_) {
+     const auto outIt = outputLds.pieces_.find(kv.first);
+@@ -233,6 +268,20 @@
+       const int outStick = outStickStart + outStickOffset;
+       const int groupCount = std::min(outStickGroup,
+                                       outStickCount - outStickOffset);
++      const int srcCore = getSinglePlacementCore(newInput);
++      const int dstCore = getSinglePlacementCore(newOutput);
++      const bool filteredOut =
++          (onlySrcCore.has_value() && srcCore != *onlySrcCore) ||
++          (onlyDstCore.has_value() && dstCore != *onlyDstCore) ||
++          (onlyMbStart.has_value() && mbStart != *onlyMbStart) ||
++          (onlyOutStickStart.has_value() && outStick != *onlyOutStickStart) ||
++          (maxPieces.has_value() &&
++           static_cast<int>(newInputPieces.size()) >= *maxPieces);
++      if (filteredOut) {
++        skippedPieces++;
++        outStickOffset += groupCount;
++        continue;
++      }
+       const std::string newKey =
+           "phys_" + std::to_string(++newPieceId) + "_" + kv.first;
+       newInput.key_ = newKey;
+@@ -251,9 +300,15 @@
+     }
+   }
+ 
++  if (newInputPieces.empty()) return false;
+   DT_CHECK(newInputPieces.size() == newOutputPieces.size());
+   inputLds.pieces_ = std::move(newInputPieces);
+   outputLds.pieces_ = std::move(newOutputPieces);
++  if (skippedPieces > 0) {
++    std::cout << "DXP_ONCHIP_MOVE_PHYSICALIZE: kept "
++              << inputLds.pieces_.size() << " pieces, skipped "
++              << skippedPieces << " pieces" << std::endl;
++  }
+   return true;
+ }
+ 

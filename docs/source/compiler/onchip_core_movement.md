@@ -73,7 +73,8 @@ With realization enabled, Torch-Spyre now emits:
 - `coreIdToDscSchedule` entries that run the data-op before the consumer row.
 
 The clean DeepTools/DXP worktree `/tmp/deeptools-swiglu-ws` has branch
-`swiglu-ws-dxp` commit `aa101d41e6`:
+`swiglu-ws-dxp`. The original mixed-import enabling commit was `aa101d41e6`;
+the latest physicalizer probe seen in the pod was `aeaaa65949`:
 
 ```text
 Allow scheduled mixed data-op SDSCs
@@ -137,8 +138,10 @@ DXP_ONCHIP_MOVE_FORCE_NO_OPT_STCDP=1
 The physicalizer rewrites the 256 logical STCDP cells into grouped physical
 pieces before DCG. It uses the selected producer compute output LDS and consumer
 compute input LDS to derive LX bases, then rewrites each piece as
-`d0=16` by `d1={1,4,8}` out-stick groups. The important address discovery is
-that DXP `startAddr` values are in 64-byte LX address units, not raw bytes.
+`d0=16` by `d1={1,4,8}` out-stick groups. The current open question is address
+units. The corrected 64-byte-unit artifacts line up with some pre-DCG JSON
+patterns, but DeepTools' STCDP LX PCFG/codegen path appears to treat LX
+`startAddr` as bytes.
 
 Validation results on `mlp 1x512x4096` with identical seeded inputs:
 
@@ -154,13 +157,113 @@ Validation results on `mlp 1x512x4096` with identical seeded inputs:
   allclose_atol_0.0001_rtol_0.01 False
   ```
 
-- After fixing offsets to 64-byte address units, the generated `.phys.json`
+- After changing offsets to 64-byte address units, the generated `.phys.json`
   matches the original logical address scale, for example source `d0=16,d1=0`
-  uses `startAddr=32` and destination `d1=50` uses `base+1600`.
+  uses `startAddr=32` and destination `d1=50` uses `base+1600`. A later code
+  audit makes this interpretation suspicious for the final STCDP LX PCFG path,
+  because that path copies LX placement addresses into PCFG/LRF fields without
+  dividing by 64.
 - Correct-address variants with `d1` group sizes 4 and 8 both compile and then
   hit the runtime compute-CB hardware error.
 - Routing the row through conservative STCDP PCFG generation with
   `DXP_ONCHIP_MOVE_FORCE_NO_OPT_STCDP=1` still hits the same hardware error.
+
+Artifact diff from the current probe:
+
+| Run | Physical pieces | Final `p/c/dtTable_` | `useUnicast` | `collapseFactor` | Result |
+| --- | ---: | ---: | ---: | --- | --- |
+| old byte-offset physicalizer | 1792 | 1792 / 1792 / 1792 | 1 | 1536 x `1`, 256 x `4` | runs, value-wrong |
+| corrected 64-byte units, group 4 | 1792 | 1792 / 1792 / 1792 | 1 | all `4` | runtime compute-CB fault |
+| corrected 64-byte units, group 8 | 1024 | 1024 / 1024 / 1024 | 1 | all `4` | runtime compute-CB fault |
+| corrected group 4 plus no-opt PCFG | 1792 | 1792 / 1792 / 1792 | 1 | all `4` | runtime compute-CB fault |
+
+The address examples show the ambiguity. The old byte-offset run used wrong
+piece extents but likely used the address scale expected by STCDP LX PCFG. The
+64-byte-unit runs fixed physical extents but may have underscaled LX addresses:
+
+```text
+source d0=16,d1=0: old startAddr=2048, corrected startAddr=32
+dest   d0=0,d1=50: old startAddr=1150976, corrected startAddr=1050176
+source d0=448,d1=70: old startAddr=335872, corrected startAddr=5248
+dest   d0=448,d1=70: old startAddr=1191936, corrected startAddr=1050816
+```
+
+The strongest remaining signal is that corrected compact addresses push DCG into
+a different STCDP program shape. The old, wrong byte-offset run spread addresses
+far enough to execute but read the wrong values. The corrected group-4 run emits
+much more `LX_LDSTI` traffic in `smc.txt`; the corrected group-8 run avoids that
+specific explosion but still faults.
+
+DeepTools code audit points at this experiment order:
+
+1. Test the physicalizer with corrected `d0=16`/grouped pieces but byte
+   `startAddr` offsets.
+2. If byte addresses run but remain value-wrong, test the STCDP LX-local stick
+   adjustment path. In `stcdpOp.cpp`, the LXLU0/LXSU0 path appears to use the
+   opposite LDS for `makeStickLevelAdjustments(...)`, which is suspicious for
+   non-IJ `{mb,out}` relayouts.
+3. If still unstable, disable local LX burst as a separate diagnostic. The
+   force-no-opt switch does not de-risk this path; it only selects between the
+   optimized and non-optimized L3 STCDP paths.
+
+### Minimal STCDP Legality Probe
+
+`tools/deeptools_onchip_move_physicalizer_filter_probe.patch` is an incremental
+DeepTools patch for `swiglu-ws-dxp`. It adds an address-unit toggle, address
+dumping, and diagnostic filters to the existing physicalizer:
+
+```text
+DXP_ONCHIP_MOVE_PHYSICALIZE_LX_BYTE_ADDRS
+DXP_ONCHIP_MOVE_PHYSICALIZE_DUMP_ADDRS
+DXP_ONCHIP_MOVE_PHYSICALIZE_MAX_PIECES
+DXP_ONCHIP_MOVE_PHYSICALIZE_SRC_CORE
+DXP_ONCHIP_MOVE_PHYSICALIZE_DST_CORE
+DXP_ONCHIP_MOVE_PHYSICALIZE_MB_START
+DXP_ONCHIP_MOVE_PHYSICALIZE_OUT_STICK_START
+```
+
+Run the next probe in this order, keeping the seeded SwiGLU input fixed:
+
+```bash
+cd /tmp/deeptools-swiglu-ws
+git apply /tmp/torch-spyre-main/tools/deeptools_onchip_move_physicalizer_filter_probe.patch
+# rebuild dxp_standalone with the same build command used for swiglu-ws-dxp
+
+export SPYRE_ONCHIP_MOVE_PLANNER=1
+export SPYRE_ONCHIP_MOVE_REALIZE=1
+export DXP_ONCHIP_MOVE_PHYSICALIZE=1
+export DXP_ONCHIP_MOVE_PHYSICALIZE_OUT_STICK_GROUP=4
+export DXP_ONCHIP_MOVE_FORCE_NO_OPT_STCDP=1
+export DXP_ONCHIP_MOVE_PHYSICALIZE_LX_BYTE_ADDRS=1
+export DXP_ONCHIP_MOVE_PHYSICALIZE_DUMP_ADDRS=1
+
+# First run the full physicalized tensor with byte addresses.
+# If it runs, compare against baseline correctness.
+
+# If it faults, keep byte addresses enabled and shrink to a minimal legality
+# probe.
+for n in 1 2 4 8 16 32 64; do
+  export DXP_ONCHIP_MOVE_PHYSICALIZE_MAX_PIECES=$n
+  # run the same seeded 1x512x4096 SwiGLU correctness command
+done
+```
+
+Interpretation:
+
+- Full byte-address run completes and improves correctness: the 64-byte-unit
+  address interpretation was wrong for this backend path; continue with
+  value-correctness debugging from that run.
+- Full byte-address run faults but `MAX_PIECES=1` runs: binary-search piece
+  count, producer core, destination core, `mb`, and `out-stick` with the new
+  filters.
+- `MAX_PIECES=1` faults even with byte addresses: inspect the single generated
+  transfer descriptor and STCDP microprogram. The minimal physical LX transfer
+  is illegal or miscompiled.
+- Small `MAX_PIECES` runs but a larger one faults: binary-search piece count,
+  producer core, destination core, `mb`, and `out-stick` with the new filters.
+- Any filtered run that completes will be value-wrong unless it transfers the
+  full tensor. Use it only as a hardware/codegen legality probe, not as a
+  correctness result.
 
 Conclusion: mixed import and physical address derivation are no longer the only
 blockers. The remaining blocker is in the generated STCDP LX transfer
@@ -204,14 +307,16 @@ SwiGLU workaround rather than the desired general movement planner.
 
 ## Next Step
 
-Close the logical-to-physical LX gap. The next implementation should either:
+Run the minimal STCDP legality probe above. That is now the shortest path to a
+working conclusion:
 
-- add a backend physical-piece rewriter after DDC and before DCG, using the
-  selected producer output and consumer input `LabeledDs` plus allocation
-  metadata; or
-- generalize the `InputFetchNeighbor` algorithm to support arbitrary layout
-  dimensions, not just IJ/spatial movement, then route the mixed carrier through
-  that backend hook.
+- If byte-addressed physical pieces cannot run even for one piece, fix the STCDP
+  LX descriptor or microprogram generation for arbitrary non-IJ dimensions
+  before touching the torch-spyre planner.
+- If one piece runs, binary-search the smallest failing set and decide whether
+  the issue is transaction count, GTR grouping, route pressure, sync placement,
+  or a specific producer/destination core pair.
 
-After the STCDP pieces match physical LX layout, run patterned value-correctness
-tests before evaluating performance or warp-specialization scheduling.
+Only after byte-addressed or otherwise correctly scaled physical pieces run
+without a hardware fault should we move back to full tensor value-correctness
+and then performance or warp-specialized SwiGLU scheduling.
