@@ -25,6 +25,7 @@ from torch_spyre._inductor.codegen.onchip_move import (
     build_stcdp_datadsc,
     patch_onchip_move_mixed_schedules,
 )
+from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.onchip_move import (
     ONCHIP_MOVE_ATTR,
@@ -685,7 +686,12 @@ def test_existing_ops_restickify_lx_artifact_records_cross_core_blocker(monkeypa
         arg_index=2,
         device_dtype=DataFormats.SEN169_FP16,
         device_size=[512, 8, 1, 64],
-        device_coordinates=[mb, sympy.floor(out / 64), 0, sympy.Mod(out, 64)],
+        device_coordinates=[
+            mb,
+            sympy.floor(out / 64),
+            sympy.Integer(0),
+            sympy.Mod(out, 64),
+        ],
         allocation=None,
         stride_map=[512, 64, -1, 1],
         name="swiglu_matmul_out",
@@ -694,7 +700,12 @@ def test_existing_ops_restickify_lx_artifact_records_cross_core_blocker(monkeypa
         producer_output,
         is_input=True,
         arg_index=0,
-        device_coordinates=[mb, 0, 0, sympy.Mod(out, 64)],
+        device_coordinates=[
+            mb,
+            sympy.Integer(0),
+            sympy.Integer(0),
+            sympy.Mod(out, 64),
+        ],
     )
     consumer_spec = OpSpec(
         op="neg",
@@ -740,6 +751,97 @@ def test_existing_ops_restickify_lx_artifact_records_cross_core_blocker(monkeypa
     assert root["coreIdToDscSchedule"]["0"] == [
         [-1, 0, 0, 1],
         [-1, 1, 1, 0],
+    ]
+
+
+def test_existing_lx_dl_rows_have_no_remote_source_piece_schema():
+    mb, out = sympy.symbols("mb out")
+    input_arg = TensorArg(
+        is_input=True,
+        arg_index=0,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[32, 64],
+        device_coordinates=[mb, out],
+        allocation={"lx": 4 * 1024},
+        name="x",
+    )
+    output_arg = dataclasses.replace(
+        input_arg,
+        is_input=False,
+        arg_index=1,
+        allocation={"lx": 8 * 1024},
+        name="y",
+    )
+    spec = OpSpec(
+        op="neg",
+        is_reduction=False,
+        iteration_space={mb: (32, 2), out: (64, 1)},
+        args=[input_arg, output_arg],
+        op_info={},
+    )
+
+    payload, _symbols, _affine_strides, _kinds = compile_op_spec(
+        0,
+        spec,
+        [],
+        use_symbols=False,
+    )
+
+    root = payload["0_neg"]
+    dsc = root["dscs_"][0]["neg"]
+    assert dsc["coreIdsUsed_"] == [0, 1]
+    assert root["coreIdToDscSchedule"] == {
+        "0": [[-1, 0, 0, 0]],
+        "1": [[-1, 0, 0, 0]],
+    }
+
+    input_node = dsc["scheduleTree_"][0]
+    output_node = dsc["scheduleTree_"][1]
+    assert input_node["component_"] == "lx"
+    assert output_node["component_"] == "lx"
+    assert input_node["startAddressCoreCorelet_"]["data_"] == {
+        "[0, 0, 0]": str(4 * 1024),
+        "[1, 0, 0]": str(4 * 1024),
+    }
+    assert output_node["startAddressCoreCorelet_"]["data_"] == {
+        "[0, 0, 0]": str(8 * 1024),
+        "[1, 0, 0]": str(8 * 1024),
+    }
+
+    schema_keys = _collect_json_keys(dsc)
+    assert "PieceInfo" not in schema_keys
+    assert "PlacementInfo" not in schema_keys
+    assert "memId" not in schema_keys
+    assert "source_core" not in schema_keys
+    assert "dest_core" not in schema_keys
+
+    remote_cell = {
+        "cell_index": 0,
+        "source_core": 1,
+        "dest_core": 0,
+        "source_offset_bytes": 0,
+        "dest_offset_bytes": 0,
+        "bytes": 32 * 64 * 2,
+        "dim_starts": {"d0_": 0, "d1_": 0},
+        "dim_sizes": {"d0_": 32, "d1_": 64},
+    }
+    dataop = build_stcdp_datadsc(
+        "remote_capable",
+        {
+            "device_sizes": [32, 64],
+            "element_bytes": 2,
+            "cells": [remote_cell],
+        },
+        data_format=DataFormats.SEN169_FP16.name,
+        word_length=1,
+        producer_base=4 * 1024,
+        consumer_base=8 * 1024,
+    )
+    assert dataop["labeledDs_"][0]["PieceInfo"][0]["PlacementInfo"] == [
+        {"type": "lx", "memId": [1], "startAddr": [4 * 1024]}
+    ]
+    assert dataop["labeledDs_"][1]["PieceInfo"][0]["PlacementInfo"] == [
+        {"type": "lx", "memId": [0], "startAddr": [8 * 1024]}
     ]
 
 
@@ -1036,3 +1138,17 @@ def _tensor_arg(name: str, is_input: bool, arg_index: int) -> TensorArg:
         allocation=None,
         name=name,
     )
+
+
+def _collect_json_keys(value):
+    if isinstance(value, dict):
+        keys = set(value)
+        for child in value.values():
+            keys.update(_collect_json_keys(child))
+        return keys
+    if isinstance(value, list):
+        keys = set()
+        for child in value:
+            keys.update(_collect_json_keys(child))
+        return keys
+    return set()

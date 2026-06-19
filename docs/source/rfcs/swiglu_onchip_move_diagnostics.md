@@ -94,6 +94,19 @@ can retile data already local to a core's LX; it cannot express "consumer core
 0 reads this piece from producer core 4" without adding a separate gather,
 remote-read primitive, or falling back to co-assignment.
 
+The same blocker applies to ordinary existing DL ops generated with LX
+allocations, not just the `ReStickifyOpLx` rewrite.  `compile_op_spec()` emits
+LX tensors as `scheduleTree_` allocate nodes whose
+`startAddressCoreCorelet_.data_` map is keyed by the executing core.  There is
+no `PieceInfo` / `PlacementInfo.memId` field on those DL rows, so the source
+core is implicit: a row scheduled on core `c` reads LX on core `c`.  The only
+schema in this prototype that names remote source and destination cores
+separately is the `STCDPOpLx` data-op descriptor, where input and output pieces
+can carry different `PlacementInfo.memId` values.  The regression test
+`test_existing_lx_dl_rows_have_no_remote_source_piece_schema` locks this down by
+compiling a normal LX DL op and comparing it with the remote-capable STCDP
+piece descriptor.
+
 Temp pressure is not the blocker.  For the small `[512,8,1,64]` activation, the
 producer and consumer per-core LX regions are both 16 KiB, so the prototype has
 roughly the same two-region LX footprint as the DXP/STCDP path.  It would add a
