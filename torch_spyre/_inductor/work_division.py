@@ -953,8 +953,8 @@ _TARGET_N_TILE_ELEMS = 512  # per-core N wider than this loses schedule efficien
 _WIDE_N_TILE_PENALTY_US = 25.0  # per log2 step over _TARGET_N_TILE_ELEMS
 _CORE_UNDERUSE_PENALTY_US = 150.0  # soft replacement for the old hard full-core fallback
 _BMM_BATCH_SPLIT_PENALTY_US = 10.0  # true-BMM batch split cost per log2 step
-_LARGE_M_ROWS = _M_TILE_UNDERFILL_TARGET * _COHORT_LIMIT * 2
-_LARGE_M_TILE_SHAPE_PENALTY_US = 40.0
+_LARGE_M_TILE_SHAPE_PENALTY_US = 20.0
+_SHARED_DOWN_N_SPLIT_PENALTY_US = 10.0
 _SHARED_NARROW_OUTPUT_REF = _TARGET_N_TILE_ELEMS * _COHORT_LIMIT
 _SHARED_N_TILE_TARGET = _TARGET_N_TILE_ELEMS // 4
 
@@ -1039,11 +1039,11 @@ def _matmul_split_cost(
     # means avoiding very wide per-core N tiles when the whole projection is
     # narrow enough that more N lanes are available. Both effects are expressed
     # as ratios rather than op names or exact Granite shapes.
-    large_m_factor = 1.0 if M >= _LARGE_M_ROWS and m_t >= _M_TILE_UNDERFILL_TARGET else 0.0
+    filled_m_tile_factor = 1.0 if m_t >= _M_TILE_UNDERFILL_TARGET else 0.0
     true_bmm_value_split_us = (
         0.0
         if shared_weight or n <= 1
-        else large_m_factor
+        else filled_m_tile_factor
         * max(0.0, math.log2(max(1, K) / max(1, N)))
         * math.log2(n)
         * _LARGE_M_TILE_SHAPE_PENALTY_US
@@ -1051,12 +1051,21 @@ def _matmul_split_cost(
     shared_narrow_tile_us = (
         0.0
         if not shared_weight
-        else large_m_factor
+        else filled_m_tile_factor
         * max(0.0, math.log2(_SHARED_NARROW_OUTPUT_REF / max(1, N)))
         * max(0.0, math.log2(max(1, n_t) / _SHARED_N_TILE_TARGET))
         * (_LARGE_M_TILE_SHAPE_PENALTY_US / 4)
     )
-    large_m_tile_shape_us = true_bmm_value_split_us + shared_narrow_tile_us
+    shared_down_n_split_us = (
+        0.0
+        if not shared_weight or n <= 1
+        else max(0.0, math.log2(max(1, K) / max(1, N)))
+        * math.log2(n)
+        * _SHARED_DOWN_N_SPLIT_PENALTY_US
+    )
+    large_m_tile_shape_us = (
+        true_bmm_value_split_us + shared_narrow_tile_us + shared_down_n_split_us
+    )
 
     # Prefer using the full core budget, but keep this soft so measured-good
     # lower-core candidates can still win.

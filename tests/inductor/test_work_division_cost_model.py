@@ -131,16 +131,16 @@ def _best_shared_weight_split(n_sticks: int, k_elems: int = 4096):
 
 
 def test_shared_weight_cost_model_keeps_pt_friendly_m_tile():
-    assert _best_shared_weight_split(16) == (4, 8, 1)
+    assert _best_shared_weight_split(16) == (8, 4, 1)
     assert _best_shared_weight_split(64) == (4, 8, 1)
     assert _best_shared_weight_split(200) == (4, 8, 1)
 
 
-def test_folded_long_k_projection_prefers_n_split():
+def test_folded_long_k_projection_prefers_more_m_lanes():
     # Granite e2e MLP-down matmuls are folded to a no-batch 2D projection by
     # the time the planner runs. They still have an unbatched RHS loaded once,
-    # and the long-K reduction shape is fastest with more N splitting.
-    assert _best_shared_weight_split(64, k_elems=12800) == (4, 8, 1)
+    # and the long-K reduction shape is fastest with more M splitting.
+    assert _best_shared_weight_split(64, k_elems=12800) == (8, 4, 1)
 
 
 def _best_true_bmm_split(B: int, M: int, N: int, K: int):
@@ -169,4 +169,4 @@ def _best_true_bmm_split(B: int, M: int, N: int, K: int):
 def test_true_bmm_attention_cost_model_uses_structural_parallelism():
     assert _best_true_bmm_split(512, 32, 512, 128) == (2, 2, 8, 1)
     assert _best_true_bmm_split(32, 512, 128, 512) == (1, 32, 1, 1)
-    assert _best_true_bmm_split(32, 64, 128, 576) == (4, 4, 2, 1)
+    assert _best_true_bmm_split(32, 64, 128, 576) == (8, 4, 1, 1)
