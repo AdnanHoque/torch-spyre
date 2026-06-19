@@ -596,6 +596,101 @@ def test_mixed_carrier_diagnoses_dense_actual_output_stride_blocker(monkeypatch)
     assert first_mismatch["required_layout_byte_delta"] == 1024
 
 
+def test_mixed_carrier_diagnoses_mlp_swiglu_dense_actual_output_stride_blocker(
+    monkeypatch,
+):
+    monkeypatch.setattr(spyre_config, "onchip_move_output_piece_mode", "dense_actual")
+    plan = {
+        "source_name": "buf0",
+        "producer": "buf0",
+        "consumer": "buf6",
+        "device_sizes": [64, 256, 64],
+        "device_stride_map": [64, 4096, 1],
+        "producer_region_bytes": 64 * 1024,
+        "consumer_region_bytes": 64 * 1024,
+        "bytes_moved": 8192,
+        "cell_count": 1,
+        "cells": [
+            {
+                "cell_index": 0,
+                "source_core": 0,
+                "dest_core": 0,
+                "source_offset_bytes": 0,
+                "dest_offset_bytes": 0,
+                "bytes": 8192,
+                "dim_starts": {"d0_": 0, "d1_": 0, "d2_": 0},
+                "dim_sizes": {"d0_": 8, "d1_": 8, "d2_": 64},
+            }
+        ],
+    }
+    producer_payload = {
+        "0_batchmatmul": _layout_sdsc_payload(
+            "batchmatmul",
+            output_lds_idx=2,
+            input_lds_indices=[0, 1],
+            core_ids=list(range(32)),
+            input_layout_dim_order=["mb", "out"],
+            output_layout_dim_order=["mb", "out"],
+        )
+    }
+    producer_dsc = next(iter(producer_payload["0_batchmatmul"]["dscs_"][0].values()))
+    producer_dsc["N_"]["mb_"] = 256
+    producer_dsc["N_"]["out_"] = 4096
+    consumer_payload = {
+        "2_neg": _layout_sdsc_payload(
+            "neg",
+            output_lds_idx=1,
+            input_lds_indices=[0],
+            core_ids=list(range(32)),
+            input_layout_dim_order=["mb", "out"],
+            output_layout_dim_order=["mb", "out"],
+        )
+    }
+    consumer_dsc = next(iter(consumer_payload["2_neg"]["dscs_"][0].values()))
+    consumer_dsc["N_"]["mb_"] = 256
+    consumer_dsc["N_"]["out_"] = 4096
+    output_arg = TensorArg(
+        is_input=False,
+        arg_index=0,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[64, 256, 64],
+        device_coordinates=[],
+        allocation=None,
+        stride_map=[64, 4096, 64],
+        name="buf0",
+    )
+
+    _patched_producer, mixed_consumer = build_mixed_onchip_move_sdsc(
+        0,
+        2,
+        producer_payload,
+        consumer_payload,
+        output_arg,
+        dataclasses.replace(output_arg, is_input=True, arg_index=0),
+        2,
+        0,
+        plan,
+    )
+
+    dataop = mixed_consumer["2_OnChipMoveMixedSTCDP"]["datadscs_"][0][
+        "0_OnChipMoveSTCDPOpLx"
+    ]
+    mismatches = diagnose_stcdp_output_layout_contiguity(dataop)
+
+    assert len(mismatches) == 1
+    assert mismatches[0]["reason"] == "output-layout-requires-strided-placement"
+    assert mismatches[0]["layoutDimOrder_"] == ["mb", "out"]
+    assert mismatches[0]["dimToStartCordinate"] == {"mb": 0, "out": 0}
+    assert mismatches[0]["dimToSize_"] == {"mb": 8, "out": 512}
+    first_mismatch = mismatches[0]["first_mismatch"]
+    assert first_mismatch["linear_index"] == 8
+    assert first_mismatch["coord"] == {"mb": 0, "out": 1}
+    assert first_mismatch["stcdp_contiguous_element_delta"] == 8
+    assert first_mismatch["required_layout_element_delta"] == 256
+    assert first_mismatch["stcdp_contiguous_byte_delta"] == 16
+    assert first_mismatch["required_layout_byte_delta"] == 512
+
+
 def test_mixed_carrier_reuses_lx_source_for_later_fanout_consumer(monkeypatch):
     monkeypatch.setattr(spyre_config, "onchip_move_realize", True)
     monkeypatch.setattr(spyre_config, "onchip_move_carrier", "mixed")

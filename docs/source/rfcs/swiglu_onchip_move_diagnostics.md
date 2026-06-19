@@ -71,6 +71,104 @@ consumer `["out", "mb", "x"]` layout.  A single dense STCDP output piece writes
 that value at element delta 64 instead.  This is a concrete value-correctness
 blocker for the current mixed `STCDPOpLx` carrier.
 
+### Second Iteration Backend Check
+
+The second iteration reproduced the blocker at the backend boundary in an
+isolated pod checkout:
+
+```text
+Torch-Spyre checkout: /tmp/torch-spyre-swiglu-ws-dxp-iter2
+artifact root:        /tmp/torch-spyre-swiglu-ws-dxp-iter2-artifacts
+torch/pytest:         /usr/bin/python3, torch 2.11.0+cpu, pytest 9.1.0
+```
+
+The focused on-chip movement unit tests pass in that checkout with a compatible
+prebuilt `_C.so` copied into the isolated tree:
+
+```text
+PYTHONPATH=/tmp/torch-spyre-swiglu-ws-dxp-iter2 \
+  python3 -m pytest tests/inductor/test_onchip_move.py -q
+
+12 passed
+```
+
+The editable build was attempted first but the installed Spyre runtime headers
+do not match this Torch-Spyre source revision:
+
+```text
+flex::DmaParams has no member named pipeline_barrier
+flex::RuntimeStream has no member named launchOperationH2D
+no operator<< for flex::CompositeAddress
+```
+
+A real MLP/SwiGLU compile was then run twice from the isolated checkout:
+
+```text
+baseline cache:
+  /tmp/torchinductor_swiglu_ws_dxp_iter2_baseline/inductor-spyre/
+    sdsc_fused_mm_mul_silu_0_q2qx72l6
+
+mixed-STCDP cache:
+  /tmp/torchinductor_swiglu_ws_dxp_iter2/inductor-spyre/
+    sdsc_fused_mm_mul_silu_0_87wknxzu
+
+archived comparison:
+  /tmp/torch-spyre-swiglu-ws-dxp-iter2-artifacts/dxp_compare
+  /tmp/torch-spyre-swiglu-ws-dxp-iter2-artifacts/dxp_compare.tar.gz
+```
+
+The baseline bundle compiled and the pytest smoke passed.  The mixed-STCDP
+bundle emitted `sdsc_2.json` as `2_OnChipMoveMixedSTCDP`, then stock
+`dxp_standalone --bundle` failed before DDC/DCG:
+
+```text
+baseline dxp exit: 0
+on-chip dxp exit: 134
+
+DtException: Datadsc not allowed, use dldsc,
+file /project_src/deeptools/dxp/SdscTree.cpp line 152
+```
+
+The archived diff stats between the comparable fused bundles are:
+
+```text
+sdsc_1.json: +34 / -37
+sdsc_2.json: +18829 / -39
+sdsc_5.json: +34 / -37
+```
+
+Only the mixed bundle contains STCDP:
+
+```text
+baseline top ops:
+  0_batchmatmul, 1_batchmatmul, 2_neg, 3_exp, 4_add, 5_realdiv, 6_mul
+
+on-chip top ops:
+  0_batchmatmul, 1_batchmatmul, 2_OnChipMoveMixedSTCDP,
+  3_exp, 4_add, 5_realdiv, 6_mul
+```
+
+Running `diagnose_stcdp_output_layout_contiguity(...)` against the real
+`sdsc_2.json` data-op reports the same scalable-placement failure:
+
+```text
+piece p1, layoutDimOrder_: ["mb", "out"]
+start: {"mb": 0, "out": 0}
+size:  {"mb": 8, "out": 512}
+
+first mismatch:
+  coord: {"mb": 0, "out": 1}
+  contiguous STCDP element delta: 8
+  required consumer-layout delta: 256
+  contiguous STCDP byte delta: 16
+  required consumer-layout byte delta: 512
+```
+
+This is the backend/runtime boundary proof for this branch: stock DXP does not
+accept mixed `datadscs_`, and the real emitted STCDP output pieces still require
+strided destination placement before a Deeptools physicalizer tries to make them
+legal.
+
 The non-hacky fixes are outside the current plain-STCDP encoding:
 
 - a backend physicalizer that splits the transfer into layout-contiguous
