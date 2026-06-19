@@ -70,6 +70,46 @@ path, but current Deeptools asserts on missing `i/j` coordinates for this
 `mb/out` tensor.  IFN also supports only one neighbor input today, which is a
 problem for full SwiGLU where both gate/up activations may need handoff.
 
+### Branch `swiglu-ws-input-fetch`
+
+This branch adds a torch-spyre artifact-generation prototype behind:
+
+```bash
+SPYRE_ONCHIP_MOVE_REALIZE=1
+SPYRE_ONCHIP_MOVE_CARRIER=input_fetch_neighbor
+```
+
+The carrier reuses the existing on-chip movement plan payload and emits a mixed
+consumer SDSC with:
+
+- producer output and consumer input patched to LX endpoints;
+- one `datadscs_` entry carrying logical `mb/out/x` piece metadata;
+- `coreIdToDscSchedule` rows with both indices set, for example
+  `[0, 0, 0, 0]`, which is the artifact-level IFN trigger condition.
+
+The emitted data DSC intentionally keeps logical dim names such as `mb`, `out`,
+and collapsed size-one `x` instead of fabricating `i/j` aliases.  That means the
+torch-spyre artifact no longer loses the non-IJ movement-domain metadata, but it
+does not by itself prove Deeptools can run the helper: the known backend blocker
+remains any hardcoded IFN code path that requires `i` and `j` keys instead of
+using the artifact's actual layout dimension names.
+
+The branch also makes the current one-neighbor-input limitation explicit.  If a
+consumer has more than one planned on-chip neighbor input, the IFN carrier skips
+realization with:
+
+```text
+input-fetch-neighbor-single-neighbor-input-only
+```
+
+That is a hard blocker for full SwiGLU fan-in when both gate and up activations
+need neighbor handoff into the same multiply or SiLU/multiply consumer.  This
+branch also does not provide the mixed carrier's later-consumer LX reuse path,
+so non-adjacent fan-out remains unsupported here even when each consumer has
+only one neighbor input.  IFN may still be useful for a single-edge smoke, but
+it cannot cover the full SwiGLU fan-in/fan-out carrier requirement without a
+Deeptools/backend semantic extension.
+
 ## Next Direction
 
 Do not keep tuning the current mixed `STCDPOpLx` encoding as the scalable

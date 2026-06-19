@@ -1,0 +1,18 @@
+{
+  "ifn_trigger_rows": {
+    "sdsc_1.json": {
+      "core 0": [
+        [
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    }
+  },
+  "known_backend_risk": "Deeptools InputFetchNeighbor may still require hardcoded i/j coordinates instead of mb/out/x.",
+  "one_neighbor_finding": "Current IFN semantics remain a hard blocker for full SwiGLU when multiple neighbor inputs need handoff into one consumer.",
+  "status": "artifact-only-not-deeptools-executed",
+  "why": "Local Python lacks torch and pytest; generated as the minimal JSON shape asserted by the new unit coverage."
+}

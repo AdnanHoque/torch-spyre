@@ -20,8 +20,10 @@ from torch_spyre._C import DataFormats
 from torch_spyre._inductor import config as spyre_config
 from torch_spyre._inductor.codegen.onchip_move import (
     _validate_lx_regions,
+    build_input_fetch_neighbor_sdsc,
     build_mixed_onchip_move_sdsc,
     build_stcdp_datadsc,
+    patch_onchip_move_input_fetch_neighbor_schedules,
     patch_onchip_move_mixed_schedules,
 )
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
@@ -507,6 +509,194 @@ def test_mixed_carrier_dense_actual_output_piece_mode(monkeypatch):
     }
     assert output_piece["dimToSize_"] == {"out": 64, "mb": 16, "x": 1}
     assert output_piece["validGap_"]["out"] == [[64, 0]]
+
+
+def test_input_fetch_neighbor_carrier_emits_combined_schedule_for_mb_out():
+    plan = {
+        "source_name": "buf0",
+        "producer": "buf0",
+        "consumer": "buf1",
+        "device_sizes": [512, 8, 1, 64],
+        "device_stride_map": [512, 64, -1, 1],
+        "producer_region_bytes": 16 * 1024,
+        "consumer_region_bytes": 16 * 1024,
+        "bytes_moved": 2048,
+        "cell_count": 1,
+        "cells": [
+            {
+                "cell_index": 0,
+                "source_core": 0,
+                "dest_core": 0,
+                "source_offset_bytes": 0,
+                "dest_offset_bytes": 0,
+                "bytes": 2048,
+                "dim_starts": {"d0_": 0, "d1_": 1, "d2_": 0, "d3_": 0},
+                "dim_sizes": {"d0_": 16, "d1_": 1, "d2_": 1, "d3_": 64},
+            }
+        ],
+    }
+    producer_payload = {
+        "0_batchmatmul": _layout_sdsc_payload(
+            "batchmatmul",
+            output_lds_idx=2,
+            input_lds_indices=[0, 1],
+            core_ids=list(range(32)),
+            include_x=True,
+        )
+    }
+    consumer_payload = {
+        "1_mul": _layout_sdsc_payload(
+            "mul",
+            output_lds_idx=2,
+            input_lds_indices=[0, 1],
+            core_ids=list(range(32)),
+            input_layout_dim_order=["out", "mb"],
+            output_layout_dim_order=["out", "mb"],
+        )
+    }
+    output_arg = TensorArg(
+        is_input=False,
+        arg_index=0,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[512, 8, 1, 64],
+        device_coordinates=[],
+        allocation=None,
+        stride_map=[512, 64, -1, 64],
+        name="buf0",
+    )
+
+    _patched_producer, ifn_consumer = build_input_fetch_neighbor_sdsc(
+        0,
+        1,
+        producer_payload,
+        consumer_payload,
+        output_arg,
+        dataclasses.replace(output_arg, is_input=True, arg_index=0),
+        2,
+        0,
+        plan,
+    )
+
+    root = ifn_consumer["1_OnChipMoveInputFetchNeighbor"]
+    assert root["coreIdToDscSchedule"]["0"] == [[0, 0, 0, 0]]
+    assert root["coreIdToDscSchedule"]["1"] == [[-1, 0, 0, 0]]
+    assert root["onchipMove_"]["trigger"] == "schedule-row-with-datadsc-and-dldsc"
+    assert root["onchipMove_"]["limitations"] == ["single-neighbor-input-only"]
+
+    dataop = root["datadscs_"][0]["0_OnChipMoveIFNDataOpLx"]
+    input_lds = dataop["labeledDs_"][0]
+    assert input_lds["layoutDimOrder_"] == ["mb", "out", "x"]
+    assert input_lds["stickDimOrder_"] == ["out"]
+    piece = input_lds["PieceInfo"][0]
+    assert piece["dimToStartCordinate"] == {"mb": 0, "out": 64, "x": 0}
+    assert piece["dimToSize_"] == {"mb": 16, "out": 64, "x": 1}
+    assert "i" not in piece["dimToStartCordinate"]
+    assert "j" not in piece["dimToStartCordinate"]
+
+    output_lds = dataop["labeledDs_"][1]
+    assert output_lds["layoutDimOrder_"] == ["out", "mb", "x"]
+    output_piece = output_lds["PieceInfo"][0]
+    assert output_piece["dimToStartCordinate"] == {"out": 0, "mb": 0, "x": 0}
+    assert output_piece["validGap_"]["out"] == [[0, 64], [64, 384]]
+
+
+def test_input_fetch_neighbor_carrier_rejects_multiple_neighbor_inputs(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_realize", True)
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "input_fetch_neighbor")
+
+    plan = {
+        "status": "planned",
+        "source_name": "buf1",
+        "producer": "buf1",
+        "consumer": "buf2",
+        "device_sizes": [32, 64],
+        "producer_region_bytes": 4096,
+        "consumer_region_bytes": 4096,
+        "bytes_moved": 4096,
+        "cell_count": 1,
+        "cells": [
+            {
+                "cell_index": 0,
+                "source_core": 0,
+                "dest_core": 0,
+                "source_offset_bytes": 0,
+                "dest_offset_bytes": 0,
+                "bytes": 4096,
+                "dim_starts": {"d0_": 0, "d1_": 0},
+                "dim_sizes": {"d0_": 32, "d1_": 64},
+            }
+        ],
+    }
+    second_plan = {**plan, "source_name": "buf4", "producer": "buf4"}
+    specs = [
+        OpSpec(
+            op="batchmatmul",
+            is_reduction=False,
+            iteration_space={},
+            args=[
+                _tensor_arg("x", True, 0),
+                _tensor_arg("w", True, 1),
+                _tensor_arg("buf1", False, 2),
+            ],
+            op_info={},
+        ),
+        OpSpec(
+            op="mul",
+            is_reduction=False,
+            iteration_space={},
+            args=[
+                _tensor_arg("buf1", True, 0),
+                _tensor_arg("buf4", True, 1),
+                _tensor_arg("buf2", False, 2),
+            ],
+            op_info={ONCHIP_MOVE_OP_INFO_KEY: {"buf1": plan, "buf4": second_plan}},
+        ),
+    ]
+    compiled = [
+        (
+            {
+                "0_batchmatmul": _minimal_sdsc_payload(
+                    "batchmatmul",
+                    output_lds_idx=2,
+                    input_lds_indices=[0, 1],
+                    core_ids=[0],
+                )
+            },
+            [],
+            [],
+            [],
+        ),
+        (
+            {
+                "1_mul": _minimal_sdsc_payload(
+                    "mul",
+                    output_lds_idx=2,
+                    input_lds_indices=[0, 1],
+                    core_ids=[0],
+                )
+            },
+            [],
+            [],
+            [],
+        ),
+    ]
+
+    rows = patch_onchip_move_input_fetch_neighbor_schedules(compiled, specs)
+
+    assert rows == [
+        {
+            "index": 0,
+            "status": "skipped",
+            "reason": "input-fetch-neighbor-single-neighbor-input-only",
+            "source_name": "buf1",
+            "producer": "buf1",
+            "consumer": "buf2",
+            "cell_count": 1,
+            "carrier": "input_fetch_neighbor",
+        }
+    ]
+    assert "1_mul" in compiled[1][0]
+    assert "datadscs_" not in compiled[1][0]["1_mul"]
 
 
 def test_mixed_carrier_reuses_lx_source_for_later_fanout_consumer(monkeypatch):

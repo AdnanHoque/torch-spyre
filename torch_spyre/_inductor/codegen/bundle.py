@@ -23,7 +23,7 @@ from torch_spyre._inductor import config as _spyre_config
 from torch_spyre._inductor.codegen.compute_ops import SymbolKind
 from torch_spyre._inductor.codegen.onchip_move import (
     emit_swiglu_warpspec_audit,
-    patch_onchip_move_mixed_schedules,
+    patch_onchip_move_schedules,
 )
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.codegen.unroll import unroll_loop_specs
@@ -111,9 +111,9 @@ def generate_bundle(
     )
 
     if _spyre_config.onchip_move_realize and not use_symbols:
-        rows = patch_onchip_move_mixed_schedules(compiled, specs_list)
+        rows = patch_onchip_move_schedules(compiled, specs_list)
         for row in rows:
-            logger.info("onchip move mixed schedule patch: %s", row)
+            logger.info("onchip move schedule patch: %s", row)
     elif _spyre_config.onchip_move_realize and use_symbols:
         logger.info("onchip move realization skipped for symbolic bundle args")
 

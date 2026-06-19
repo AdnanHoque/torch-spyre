@@ -154,6 +154,145 @@ def patch_onchip_move_mixed_schedules(
     return rows
 
 
+def patch_onchip_move_schedules(
+    compiled: list[tuple[Any, list[int], list[dict], list[Any]]],
+    specs: list[Any],
+) -> list[dict[str, Any]]:
+    if config.onchip_move_carrier == "mixed":
+        return patch_onchip_move_mixed_schedules(compiled, specs)
+    if config.onchip_move_carrier == "input_fetch_neighbor":
+        return patch_onchip_move_input_fetch_neighbor_schedules(compiled, specs)
+    return [{"status": "skipped", "reason": "unsupported-carrier"}]
+
+
+def patch_onchip_move_input_fetch_neighbor_schedules(
+    compiled: list[tuple[Any, list[int], list[dict], list[Any]]],
+    specs: list[Any],
+) -> list[dict[str, Any]]:
+    """Attach IFN-style mixed schedule rows to adjacent producer/consumer SDSCs.
+
+    Deeptools enters InputFetchNeighbor when a schedule row contains both a
+    data DSC index and a DL DSC index.  This carrier therefore emits one mixed
+    consumer SDSC whose rows use ``[datadsc_idx, dldsc_idx, ...]`` for cores
+    that participate in both sides.  It intentionally supports only one planned
+    neighbor input per consumer because the current backend IFN helper has that
+    same limitation.
+    """
+
+    rows: list[dict[str, Any]] = []
+    if not config.onchip_move_realize:
+        return rows
+    if config.onchip_move_carrier != "input_fetch_neighbor":
+        return [{"status": "skipped", "reason": "unsupported-carrier"}]
+    if any(isinstance(spec, LoopSpec) for spec in specs):
+        return [{"status": "skipped", "reason": "loop-specs-not-supported"}]
+    if any(not isinstance(spec, OpSpec) for spec in specs):
+        return [{"status": "skipped", "reason": "non-opspec-entry-not-supported"}]
+    if len(compiled) != len(specs):
+        return [{"status": "skipped", "reason": "compiled-spec-count-mismatch"}]
+
+    rewritten_consumers: set[int] = set()
+    for producer_index in range(max(len(specs) - 1, 0)):
+        consumer_index = producer_index + 1
+        if consumer_index in rewritten_consumers:
+            continue
+        producer = specs[producer_index]
+        consumer = specs[consumer_index]
+        if not isinstance(producer, OpSpec) or not isinstance(consumer, OpSpec):
+            continue
+        match = _adjacent_move_match(producer, consumer)
+        if match is None:
+            continue
+        plan, producer_output_idx, consumer_input_idx = match
+        if plan.get("status") != "planned":
+            continue
+        planned_inputs = _planned_neighbor_inputs(consumer)
+        if len(planned_inputs) != 1:
+            rows.append(
+                _row(
+                    producer_index,
+                    "skipped",
+                    "input-fetch-neighbor-single-neighbor-input-only",
+                    plan,
+                    carrier="input_fetch_neighbor",
+                )
+            )
+            continue
+        producer_entry = compiled[producer_index]
+        consumer_entry = compiled[consumer_index]
+        if producer_entry[0] is None or consumer_entry[0] is None:
+            rows.append(
+                _row(
+                    producer_index,
+                    "skipped",
+                    "producer-or-consumer-already-rewritten",
+                    plan,
+                    carrier="input_fetch_neighbor",
+                )
+            )
+            continue
+        if producer_entry[1] or consumer_entry[1]:
+            rows.append(
+                _row(
+                    producer_index,
+                    "skipped",
+                    "symbolic-or-local-addresses-not-supported",
+                    plan,
+                    carrier="input_fetch_neighbor",
+                )
+            )
+            continue
+
+        try:
+            patched_producer, ifn_consumer = build_input_fetch_neighbor_sdsc(
+                producer_index,
+                consumer_index,
+                producer_entry[0],
+                consumer_entry[0],
+                producer.args[producer_output_idx],
+                consumer.args[consumer_input_idx],
+                producer_output_idx,
+                consumer_input_idx,
+                plan,
+            )
+        except Exception as exc:  # noqa: BLE001
+            rows.append(
+                _row(
+                    producer_index,
+                    "skipped",
+                    type(exc).__name__,
+                    plan,
+                    carrier="input_fetch_neighbor",
+                )
+            )
+            continue
+
+        compiled[producer_index] = (patched_producer, [], [], [])
+        compiled[consumer_index] = (ifn_consumer, [], [], [])
+        rewritten_consumers.add(consumer_index)
+        rows.append(
+            _row(
+                producer_index,
+                "patched",
+                None,
+                plan,
+                carrier="input_fetch_neighbor",
+            )
+        )
+    return rows
+
+
+def _planned_neighbor_inputs(consumer: OpSpec) -> list[tuple[str, dict[str, Any]]]:
+    move_info = (consumer.op_info or {}).get(ONCHIP_MOVE_OP_INFO_KEY)
+    if not isinstance(move_info, dict):
+        return []
+    result: list[tuple[str, dict[str, Any]]] = []
+    for source_name, plan in move_info.items():
+        if isinstance(plan, dict) and plan.get("status") == "planned":
+            result.append((str(source_name), plan))
+    return result
+
+
 def _adjacent_move_match(
     producer: OpSpec,
     consumer: OpSpec,
@@ -281,6 +420,100 @@ def build_mixed_onchip_move_sdsc(
         "fallback": "stock-hbm-path-when-disabled",
     }
     return {producer_name: producer_root}, {f"{consumer_index}_OnChipMoveMixedSTCDP": root}
+
+
+def build_input_fetch_neighbor_sdsc(
+    producer_index: int,
+    consumer_index: int,
+    producer_payload: dict[str, Any],
+    consumer_payload: dict[str, Any],
+    producer_output: TensorArg,
+    consumer_input: TensorArg,
+    producer_output_idx: int,
+    consumer_input_idx: int,
+    plan: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    producer_name, producer_root_src = next(iter(producer_payload.items()))
+    producer_root = copy.deepcopy(producer_root_src)
+    consumer_root = copy.deepcopy(next(iter(consumer_payload.values())))
+    producer_base = int(config.onchip_move_producer_lx_base)
+    consumer_base = int(config.onchip_move_consumer_lx_base)
+    producer_region_bytes = _region_bytes(plan, "producer_region_bytes", "source")
+    consumer_region_bytes = _region_bytes(plan, "consumer_region_bytes", "dest")
+    _validate_lx_regions(
+        producer_base=producer_base,
+        consumer_base=consumer_base,
+        producer_region_bytes=producer_region_bytes,
+        consumer_region_bytes=consumer_region_bytes,
+    )
+    dataop_name = f"{producer_index}_OnChipMoveIFNDataOpLx"
+
+    _patch_lx_endpoint(
+        producer_root,
+        dsc_index=0,
+        lds_idx=producer_output_idx,
+        base=producer_base,
+    )
+    consumer_input_lds_idx = _matching_input_lds_idx(consumer_root, consumer_input_idx)
+    _patch_lx_endpoint(
+        consumer_root,
+        dsc_index=0,
+        lds_idx=consumer_input_lds_idx,
+        base=consumer_base,
+    )
+    producer_layout = _logical_dataop_layout(
+        producer_root, producer_output, plan, producer_output_idx
+    )
+    consumer_layout = _logical_dataop_layout(
+        consumer_root, consumer_input, plan, consumer_input_lds_idx
+    )
+    if consumer_layout is None:
+        consumer_layout = _dsc_logical_layout(consumer_root, consumer_input_lds_idx)
+    datadsc = build_stcdp_datadsc(
+        dataop_name,
+        plan,
+        data_format=producer_output.device_dtype.name,
+        word_length=_word_length(producer_output),
+        producer_base=producer_base,
+        consumer_base=consumer_base,
+        logical_layout=producer_layout,
+        output_logical_layout=consumer_layout,
+    )
+
+    root = copy.deepcopy(consumer_root)
+    root["dscs_"] = copy.deepcopy(consumer_root.get("dscs_", []) or [])
+    root["datadscs_"] = [{dataop_name: datadsc}]
+    root["numCoresUsed_"] = max(
+        int(consumer_root.get("numCoresUsed_", 1) or 1),
+        max(datadsc.get("coreIdsUsed_", [0])) + 1,
+    )
+    root["coreIdToDscSchedule"] = _consumer_input_fetch_neighbor_schedule(
+        dataop_cores=set(datadsc["coreIdsUsed_"]),
+        consumer_cores=_dsc_core_ids(root, 0),
+        num_cores=root["numCoresUsed_"],
+    )
+    root["opFuncsUsed_"] = sorted(
+        _dldsc_op_names(root) | {"STCDPOpLx"} | set(root.get("opFuncsUsed_", []) or [])
+    )
+    root["onchipMove_"] = {
+        "source_name": plan.get("source_name"),
+        "producer": plan.get("producer"),
+        "consumer": plan.get("consumer"),
+        "carrier": "input_fetch_neighbor",
+        "cell_count": int(plan.get("cell_count", 0) or 0),
+        "bytes_moved": int(plan.get("bytes_moved", 0) or 0),
+        "producer_lx_base": producer_base,
+        "consumer_lx_base": consumer_base,
+        "producer_region_bytes": producer_region_bytes,
+        "consumer_region_bytes": consumer_region_bytes,
+        "trigger": "schedule-row-with-datadsc-and-dldsc",
+        "limitations": ["single-neighbor-input-only"],
+        "fallback": "stock-hbm-path-when-disabled",
+    }
+    return (
+        {producer_name: producer_root},
+        {f"{consumer_index}_OnChipMoveInputFetchNeighbor": root},
+    )
 
 
 def _first_compute_dsc(root: dict[str, Any]) -> dict[str, Any] | None:
@@ -970,6 +1203,27 @@ def _consumer_mixed_schedule(
     return schedule
 
 
+def _consumer_input_fetch_neighbor_schedule(
+    *,
+    dataop_cores: set[int],
+    consumer_cores: set[int],
+    num_cores: int,
+) -> dict[str, list[list[int]]]:
+    schedule: dict[str, list[list[int]]] = {}
+    for core in range(num_cores):
+        steps: list[list[int]] = []
+        has_dataop = core in dataop_cores
+        has_consumer = core in consumer_cores
+        if has_dataop and has_consumer:
+            steps.append([0, 0, 0, 0])
+        elif has_dataop:
+            steps.append([0, -1, 0, 0])
+        elif has_consumer:
+            steps.append([-1, 0, 0, 0])
+        schedule[str(core)] = _with_dependencies(steps)
+    return schedule
+
+
 def _with_dependencies(steps: list[list[int]]) -> list[list[int]]:
     return [
         [step[0], step[1], 1 if idx > 0 else 0, 1 if idx < len(steps) - 1 else 0]
@@ -989,6 +1243,8 @@ def _row(
     status: str,
     reason: str | None,
     plan: dict[str, Any],
+    *,
+    carrier: str | None = None,
 ) -> dict[str, Any]:
     return {
         "index": index,
@@ -998,7 +1254,7 @@ def _row(
         "producer": plan.get("producer"),
         "consumer": plan.get("consumer"),
         "cell_count": plan.get("cell_count"),
-        "carrier": "mixed",
+        "carrier": carrier or plan.get("carrier") or config.onchip_move_carrier,
     }
 
 

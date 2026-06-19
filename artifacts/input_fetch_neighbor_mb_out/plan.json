@@ -1,0 +1,44 @@
+{
+  "bytes_moved": 2048,
+  "carrier": "input_fetch_neighbor",
+  "cell_count": 1,
+  "cells": [
+    {
+      "bytes": 2048,
+      "cell_index": 0,
+      "dest_core": 0,
+      "dest_offset_bytes": 0,
+      "dim_sizes": {
+        "d0_": 16,
+        "d1_": 1,
+        "d2_": 1,
+        "d3_": 64
+      },
+      "dim_starts": {
+        "d0_": 0,
+        "d1_": 1,
+        "d2_": 0,
+        "d3_": 0
+      },
+      "source_core": 0,
+      "source_offset_bytes": 0
+    }
+  ],
+  "consumer": "buf1",
+  "consumer_region_bytes": 16384,
+  "device_sizes": [
+    512,
+    8,
+    1,
+    64
+  ],
+  "device_stride_map": [
+    512,
+    64,
+    -1,
+    1
+  ],
+  "producer": "buf0",
+  "producer_region_bytes": 16384,
+  "source_name": "buf0"
+}
