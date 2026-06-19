@@ -248,6 +248,26 @@ for n in 1 2 4 8 16 32 64; do
 done
 ```
 
+The first transfer in the existing corrected group-4 artifact is:
+
+```text
+src_core=11 -> dst_core=28
+coord: d0/mb=448, d1/out_stick=70, d2=0, d3=0
+size:  d0=16, d1=4, d2=1, d3=64
+64B-unit addresses: src=5248, dst=1050816
+```
+
+To isolate that exact move with byte addresses:
+
+```bash
+export DXP_ONCHIP_MOVE_PHYSICALIZE_MAX_PIECES=1
+export DXP_ONCHIP_MOVE_PHYSICALIZE_SRC_CORE=11
+export DXP_ONCHIP_MOVE_PHYSICALIZE_DST_CORE=28
+export DXP_ONCHIP_MOVE_PHYSICALIZE_MB_START=448
+export DXP_ONCHIP_MOVE_PHYSICALIZE_OUT_STICK_START=70
+# run the same seeded 1x512x4096 SwiGLU correctness command
+```
+
 Interpretation:
 
 - Full byte-address run completes and improves correctness: the 64-byte-unit
