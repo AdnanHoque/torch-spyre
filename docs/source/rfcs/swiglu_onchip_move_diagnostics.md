@@ -70,6 +70,38 @@ path, but current Deeptools asserts on missing `i/j` coordinates for this
 `mb/out` tensor.  IFN also supports only one neighbor input today, which is a
 problem for full SwiGLU where both gate/up activations may need handoff.
 
+## Existing-Op Carrier Check
+
+Branch `swiglu-ws-existing-ops` prototyped an `existing_ops` carrier that builds
+a mixed DL-SDSC with an existing `ReStickifyOpLx` row before the pointwise
+consumer.  The artifact keeps the matmul producer and pure-M consumer work
+divisions separate: it does not co-assign the producer to the consumer split.
+
+The generated shape is:
+
+- producer output is patched to LX at `SPYRE_ONCHIP_MOVE_PRODUCER_LX_BASE`;
+- a `ReStickifyOpLx` DL row reads that LX allocation and writes the consumer
+  LX allocation at `SPYRE_ONCHIP_MOVE_CONSUMER_LX_BASE`;
+- the consumer input is patched to read the consumer LX allocation;
+- the mixed schedule runs restickify first, then the consumer DL op.
+
+This is not a viable carrier for the target `{mb:4,out:8}` producer to pure-M
+consumer edge.  The planned common-refinement cells include remote handoffs such
+as source core 4 to destination core 0.  `ReStickifyOpLx` describes local
+input/output allocations for each executing core, but it has no per-piece
+placement field equivalent to the mixed `STCDPOpLx` `PlacementInfo` pairs.  It
+can retile data already local to a core's LX; it cannot express "consumer core
+0 reads this piece from producer core 4" without adding a separate gather,
+remote-read primitive, or falling back to co-assignment.
+
+Temp pressure is not the blocker.  For the small `[512,8,1,64]` activation, the
+producer and consumer per-core LX regions are both 16 KiB, so the prototype has
+roughly the same two-region LX footprint as the DXP/STCDP path.  It would add a
+DL restickify stage before the consumer instead of a data-op STCDP stage, but it
+still needs an unimplemented cross-core source selection mechanism.  Composing
+extra gather/scatter steps around it would be more indirect than the DXP path
+and would likely add at least one more temporary region or stage.
+
 ## Next Direction
 
 Do not keep tuning the current mixed `STCDPOpLx` encoding as the scalable
@@ -79,9 +111,9 @@ solution.  The next useful implementation slice is one of:
    destination logical coordinates directly.
 2. Generalize InputFetchNeighbor beyond `i/j` assumptions and one neighbor
    input, then emit the combined mixed schedule from torch-spyre.
-3. Prototype a local gather/restickify/scatter carrier using existing
-   `ReStickifyOpLx` / `ReStickifyOpWithPTLx` only if it can preserve the
-   matmul-preferred split and avoid HBM fallback.
+3. Avoid the local `ReStickifyOpLx` carrier for the current SwiGLU cross-core
+   reshuffle unless another existing operation can supply the missing remote
+   source selection without co-assignment or HBM fallback.
 
 Warp specialization should remain secondary until the movement path is
 value-correct.

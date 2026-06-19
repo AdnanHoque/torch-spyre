@@ -17,17 +17,24 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 import math
 from pathlib import Path
 from typing import Any
 
 from torch_spyre._inductor import config
-from torch_spyre._inductor.constants import BATCH_MATMUL_FP8_OP, BATCH_MATMUL_OP
+from torch_spyre._inductor.constants import (
+    BATCH_MATMUL_FP8_OP,
+    BATCH_MATMUL_OP,
+    RESTICKIFY_OP,
+)
 from torch_spyre._inductor.onchip_move import ONCHIP_MOVE_OP_INFO_KEY
 from torch_spyre._inductor.op_spec import LoopSpec, OpSpec, TensorArg
+from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 
 _LX_SIZE_BYTES = 2 * 1024 * 1024
+_RESTICKIFY_LX_OP = "ReStickifyOpLx"
 
 
 def patch_onchip_move_mixed_schedules(
@@ -44,6 +51,8 @@ def patch_onchip_move_mixed_schedules(
     rows: list[dict[str, Any]] = []
     if not config.onchip_move_realize:
         return rows
+    if config.onchip_move_carrier == "existing_ops":
+        return patch_onchip_move_existing_ops_schedules(compiled, specs)
     if config.onchip_move_carrier != "mixed":
         return [{"status": "skipped", "reason": "unsupported-carrier"}]
     if any(isinstance(spec, LoopSpec) for spec in specs):
@@ -151,6 +160,87 @@ def patch_onchip_move_mixed_schedules(
             compiled[consumer_index] = (patched_consumer, [], [], [])
             rows.append(_row(consumer_index, "patched-reuse", None, plan))
             break
+    return rows
+
+
+def patch_onchip_move_existing_ops_schedules(
+    compiled: list[tuple[Any, list[int], list[dict], list[Any]]],
+    specs: list[Any],
+) -> list[dict[str, Any]]:
+    """Try to realize the movement with existing LX-capable DL ops.
+
+    `ReStickifyOpLx` can retile a tensor already local to a core's LX, but its
+    normal DL-SDSC shape has no source-piece placement field that can name a
+    different producer core.  Therefore the carrier is only legal when the
+    planner cells are local (`source_core == dest_core`).  The SwiGLU
+    `{mb:4,out:8}` -> pure-M edge fails that legality check, which is the point
+    of this proof/disproof branch.
+    """
+
+    rows: list[dict[str, Any]] = []
+    if any(isinstance(spec, LoopSpec) for spec in specs):
+        return [{"status": "skipped", "reason": "loop-specs-not-supported"}]
+    if any(not isinstance(spec, OpSpec) for spec in specs):
+        return [{"status": "skipped", "reason": "non-opspec-entry-not-supported"}]
+    if len(compiled) != len(specs):
+        return [{"status": "skipped", "reason": "compiled-spec-count-mismatch"}]
+
+    rewritten_consumers: set[int] = set()
+    for producer_index in range(max(len(specs) - 1, 0)):
+        consumer_index = producer_index + 1
+        if consumer_index in rewritten_consumers:
+            continue
+        producer = specs[producer_index]
+        consumer = specs[consumer_index]
+        if not isinstance(producer, OpSpec) or not isinstance(consumer, OpSpec):
+            continue
+        match = _adjacent_move_match(producer, consumer)
+        if match is None:
+            continue
+        plan, producer_output_idx, consumer_input_idx = match
+        if plan.get("status") != "planned":
+            continue
+
+        blocker = _existing_ops_lx_blocker(plan)
+        if blocker is not None:
+            rows.append(_row(producer_index, "skipped", blocker, plan))
+            continue
+
+        consumer_entry = compiled[consumer_index]
+        if consumer_entry[0] is None:
+            rows.append(
+                _row(consumer_index, "skipped", "consumer-already-rewritten", plan)
+            )
+            continue
+        if consumer_entry[1]:
+            rows.append(
+                _row(
+                    consumer_index,
+                    "skipped",
+                    "symbolic-or-local-addresses-not-supported",
+                    plan,
+                )
+            )
+            continue
+
+        try:
+            mixed_consumer = build_restickify_lx_onchip_move_sdsc(
+                producer_index,
+                consumer_index,
+                consumer_entry[0],
+                producer.args[producer_output_idx],
+                consumer.args[consumer_input_idx],
+                consumer_input_idx,
+                plan,
+                consumer,
+            )
+        except Exception as exc:  # noqa: BLE001
+            rows.append(_row(consumer_index, "skipped", type(exc).__name__, plan))
+            continue
+
+        compiled[consumer_index] = (mixed_consumer, [], [], [])
+        rewritten_consumers.add(consumer_index)
+        rows.append(_row(producer_index, "patched", None, plan))
     return rows
 
 
@@ -281,6 +371,138 @@ def build_mixed_onchip_move_sdsc(
         "fallback": "stock-hbm-path-when-disabled",
     }
     return {producer_name: producer_root}, {f"{consumer_index}_OnChipMoveMixedSTCDP": root}
+
+
+def build_restickify_lx_onchip_move_sdsc(
+    producer_index: int,
+    consumer_index: int,
+    consumer_payload: dict[str, Any],
+    producer_output: TensorArg,
+    consumer_input: TensorArg,
+    consumer_input_idx: int,
+    plan: dict[str, Any],
+    consumer_spec: OpSpec,
+) -> dict[str, Any]:
+    """Build a mixed DL-SDSC using existing `ReStickifyOpLx` before consumer.
+
+    The returned artifact is intentionally useful even when the caller later
+    rejects it for cross-core cells: it shows the exact existing-op JSON shape
+    available to this branch.  A legal insertion requires all planned cells to
+    be local to the same core.
+    """
+
+    consumer_root = copy.deepcopy(next(iter(consumer_payload.values())))
+    producer_base = int(config.onchip_move_producer_lx_base)
+    consumer_base = int(config.onchip_move_consumer_lx_base)
+    producer_region_bytes = _region_bytes(plan, "producer_region_bytes", "source")
+    consumer_region_bytes = _region_bytes(plan, "consumer_region_bytes", "dest")
+    _validate_lx_regions(
+        producer_base=producer_base,
+        consumer_base=consumer_base,
+        producer_region_bytes=producer_region_bytes,
+        consumer_region_bytes=consumer_region_bytes,
+    )
+
+    restickify_payload = build_restickify_lx_artifact(
+        producer_index,
+        producer_output,
+        consumer_input,
+        plan,
+        consumer_spec,
+    )
+    restickify_root = next(iter(restickify_payload.values()))
+    restickify_dscs = copy.deepcopy(restickify_root.get("dscs_", []) or [])
+    if len(restickify_dscs) != 1:
+        raise ValueError("restickify-lx-artifact-must-have-one-dsc")
+
+    root = copy.deepcopy(consumer_root)
+    root["dscs_"] = [
+        restickify_dscs[0],
+        *copy.deepcopy(consumer_root.get("dscs_", []) or []),
+    ]
+    root["datadscs_"] = copy.deepcopy(consumer_root.get("datadscs_", []) or [])
+
+    consumer_input_lds_idx = _matching_input_lds_idx(consumer_root, consumer_input_idx)
+    _patch_lx_endpoint(
+        root,
+        dsc_index=1,
+        lds_idx=consumer_input_lds_idx,
+        base=consumer_base,
+    )
+
+    restickify_cores = _dsc_core_ids(root, 0)
+    consumer_cores = _dsc_core_ids(root, 1)
+    root["numCoresUsed_"] = max(
+        int(root.get("numCoresUsed_", 1) or 1),
+        max(restickify_cores | consumer_cores) + 1,
+    )
+    root["coreIdToDscSchedule"] = _existing_ops_mixed_schedule(
+        restickify_cores=restickify_cores,
+        consumer_cores=consumer_cores,
+        num_cores=root["numCoresUsed_"],
+    )
+    root["opFuncsUsed_"] = sorted(
+        _dldsc_op_names(root)
+        | {_RESTICKIFY_LX_OP}
+        | set(root.get("opFuncsUsed_", []) or [])
+    )
+    blocker = _existing_ops_lx_blocker(plan)
+    root["onchipMove_"] = {
+        "source_name": plan.get("source_name"),
+        "producer": plan.get("producer"),
+        "consumer": plan.get("consumer"),
+        "carrier": "existing_ops",
+        "existing_op": _RESTICKIFY_LX_OP,
+        "cell_count": int(plan.get("cell_count", 0) or 0),
+        "bytes_moved": int(plan.get("bytes_moved", 0) or 0),
+        "producer_lx_base": producer_base,
+        "consumer_lx_base": consumer_base,
+        "producer_region_bytes": producer_region_bytes,
+        "consumer_region_bytes": consumer_region_bytes,
+        "blocker": blocker,
+        "cross_core_cell_count": _cross_core_cell_count(plan),
+    }
+    return {f"{consumer_index}_OnChipMoveReStickifyLx": root}
+
+
+def build_restickify_lx_artifact(
+    bridge_index: int,
+    producer_output: TensorArg,
+    consumer_input: TensorArg,
+    plan: dict[str, Any],
+    consumer_spec: OpSpec,
+) -> dict[str, Any]:
+    """Compile a restickify-shaped OpSpec and rewrite it to the LX op name."""
+
+    producer_base = int(config.onchip_move_producer_lx_base)
+    consumer_base = int(config.onchip_move_consumer_lx_base)
+    input_arg = dataclasses.replace(
+        producer_output,
+        is_input=True,
+        allocation={"lx": producer_base},
+        name=str(plan.get("source_name") or producer_output.name or "onchip_input"),
+    )
+    output_arg = dataclasses.replace(
+        consumer_input,
+        is_input=False,
+        allocation={"lx": consumer_base},
+        name=f"{plan.get('source_name', producer_output.name)}_restickify_lx",
+    )
+    bridge_spec = OpSpec(
+        op=RESTICKIFY_OP,
+        is_reduction=False,
+        iteration_space=consumer_spec.iteration_space,
+        args=[input_arg, output_arg],
+        op_info={},
+        tiled_symbols=list(consumer_spec.tiled_symbols),
+    )
+    payload, _symbols, _affine_strides, _kinds = compile_op_spec(
+        bridge_index,
+        bridge_spec,
+        [],
+        use_symbols=False,
+    )
+    return _rewrite_restickify_artifact_to_lx(payload, bridge_index)
 
 
 def _first_compute_dsc(root: dict[str, Any]) -> dict[str, Any] | None:
@@ -970,6 +1192,23 @@ def _consumer_mixed_schedule(
     return schedule
 
 
+def _existing_ops_mixed_schedule(
+    *,
+    restickify_cores: set[int],
+    consumer_cores: set[int],
+    num_cores: int,
+) -> dict[str, list[list[int]]]:
+    schedule: dict[str, list[list[int]]] = {}
+    for core in range(num_cores):
+        steps: list[list[int]] = []
+        if core in restickify_cores:
+            steps.append([-1, 0, 0, 0])
+        if core in consumer_cores:
+            steps.append([-1, 1, 0, 0])
+        schedule[str(core)] = _with_dependencies(steps)
+    return schedule
+
+
 def _with_dependencies(steps: list[list[int]]) -> list[list[int]]:
     return [
         [step[0], step[1], 1 if idx > 0 else 0, 1 if idx < len(steps) - 1 else 0]
@@ -982,6 +1221,43 @@ def _dldsc_op_names(root: dict[str, Any]) -> set[str]:
     for dsc in root.get("dscs_", []) or []:
         names.update(str(name) for name in dsc.keys())
     return names
+
+
+def _rewrite_restickify_artifact_to_lx(
+    payload: dict[str, Any],
+    bridge_index: int,
+) -> dict[str, Any]:
+    if len(payload) != 1:
+        raise ValueError("restickify-artifact-must-have-one-root")
+    _old_root_name, root_src = next(iter(payload.items()))
+    root = copy.deepcopy(root_src)
+    root["opFuncsUsed_"] = [
+        _RESTICKIFY_LX_OP if name == RESTICKIFY_OP else name
+        for name in root.get("opFuncsUsed_", [])
+    ]
+    for dsc_group in root.get("dscs_", []) or []:
+        if RESTICKIFY_OP not in dsc_group:
+            continue
+        dsc = dsc_group.pop(RESTICKIFY_OP)
+        for compute_op in dsc.get("computeOp_", []) or []:
+            if compute_op.get("opFuncName") == RESTICKIFY_OP:
+                compute_op["opFuncName"] = _RESTICKIFY_LX_OP
+        dsc_group[_RESTICKIFY_LX_OP] = dsc
+    return {f"{bridge_index}_{_RESTICKIFY_LX_OP}": root}
+
+
+def _cross_core_cell_count(plan: dict[str, Any]) -> int:
+    return sum(
+        1
+        for cell in plan.get("cells", []) or []
+        if int(cell.get("source_core", -1)) != int(cell.get("dest_core", -2))
+    )
+
+
+def _existing_ops_lx_blocker(plan: dict[str, Any]) -> str | None:
+    if _cross_core_cell_count(plan):
+        return "existing-op-carrier-needs-remote-lx-read"
+    return None
 
 
 def _row(
@@ -998,7 +1274,7 @@ def _row(
         "producer": plan.get("producer"),
         "consumer": plan.get("consumer"),
         "cell_count": plan.get("cell_count"),
-        "carrier": "mixed",
+        "carrier": config.onchip_move_carrier,
     }
 
 

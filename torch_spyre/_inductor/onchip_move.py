@@ -495,7 +495,7 @@ def plan_onchip_move_edge(
         status="planned",
         fallback_reason=None,
         realization_status=(
-            "planned-mixed-carrier-enabled"
+            f"planned-{config.onchip_move_carrier}-carrier-enabled"
             if config.onchip_move_realize
             else "planned-not-realized"
         ),

@@ -94,7 +94,7 @@ layout_solver: Literal["greedy", "bestfit", "firstfit"] = "greedy"
 # while this path plans explicit ring/data-op movement for mismatched views.
 onchip_move_planner: bool = os.environ.get("SPYRE_ONCHIP_MOVE_PLANNER", "0") == "1"
 onchip_move_realize: bool = os.environ.get("SPYRE_ONCHIP_MOVE_REALIZE", "0") == "1"
-onchip_move_carrier: Literal["mixed"] = os.environ.get(  # type: ignore[assignment]
+onchip_move_carrier: Literal["mixed", "existing_ops"] = os.environ.get(  # type: ignore[assignment]
     "SPYRE_ONCHIP_MOVE_CARRIER", "mixed"
 )
 onchip_move_debug_dir: str = os.environ.get("SPYRE_ONCHIP_MOVE_DEBUG_DIR", "")

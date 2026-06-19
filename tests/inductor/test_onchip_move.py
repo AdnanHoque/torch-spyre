@@ -20,6 +20,7 @@ from torch_spyre._C import DataFormats
 from torch_spyre._inductor import config as spyre_config
 from torch_spyre._inductor.codegen.onchip_move import (
     _validate_lx_regions,
+    build_restickify_lx_onchip_move_sdsc,
     build_mixed_onchip_move_sdsc,
     build_stcdp_datadsc,
     patch_onchip_move_mixed_schedules,
@@ -643,6 +644,206 @@ def test_mixed_carrier_reuses_lx_source_for_later_fanout_consumer(monkeypatch):
         "[0, 0, 0]": str(1024 * 1024)
     }
     assert realdiv_dsc["labeledDs_"][0]["memOrg_"] == {"lx": {"isPresent": 1}}
+
+
+def test_existing_ops_restickify_lx_artifact_records_cross_core_blocker(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0)
+    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 1024 * 1024)
+    core_id = sympy.Symbol("core_id")
+    producer_view = PerCoreView(
+        work_slice_dims=((0, 4), (1, 8)),
+        core_to_slot=((0, sympy.Mod(core_id, 4)), (1, sympy.floor(core_id / 4))),
+    )
+    consumer_view = PerCoreView(
+        work_slice_dims=((0, 32),),
+        core_to_slot=((0, sympy.Mod(core_id, 32)),),
+    )
+    cells, reason = build_onchip_move_cells(
+        producer_view=producer_view,
+        consumer_view=consumer_view,
+        device_sizes=[512, 8, 1, 64],
+        element_bytes=2,
+        producer_core_count=32,
+        consumer_core_count=32,
+    )
+    assert reason is None
+    plan = {
+        "status": "planned",
+        "source_name": "swiglu_matmul_out",
+        "producer": "swiglu_matmul_out",
+        "consumer": "swiglu_pointwise",
+        "device_sizes": [512, 8, 1, 64],
+        "producer_region_bytes": 16 * 1024,
+        "consumer_region_bytes": 16 * 1024,
+        "bytes_moved": sum(cell.bytes for cell in cells),
+        "cell_count": len(cells),
+        "cells": [dataclasses.asdict(cell) for cell in cells],
+    }
+    mb, out = sympy.symbols("mb out")
+    producer_output = TensorArg(
+        is_input=False,
+        arg_index=2,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[512, 8, 1, 64],
+        device_coordinates=[mb, sympy.floor(out / 64), 0, sympy.Mod(out, 64)],
+        allocation=None,
+        stride_map=[512, 64, -1, 1],
+        name="swiglu_matmul_out",
+    )
+    consumer_input = dataclasses.replace(
+        producer_output,
+        is_input=True,
+        arg_index=0,
+        device_coordinates=[mb, 0, 0, sympy.Mod(out, 64)],
+    )
+    consumer_spec = OpSpec(
+        op="neg",
+        is_reduction=False,
+        iteration_space={mb: (512, 32), out: (512, 1)},
+        args=[consumer_input, dataclasses.replace(consumer_input, is_input=False)],
+        op_info={},
+    )
+    consumer_payload = {
+        "1_neg": _layout_sdsc_payload(
+            "neg",
+            output_lds_idx=1,
+            input_lds_indices=[0],
+            core_ids=list(range(32)),
+            input_layout_dim_order=["out", "mb"],
+            output_layout_dim_order=["out", "mb"],
+        )
+    }
+
+    artifact = build_restickify_lx_onchip_move_sdsc(
+        0,
+        1,
+        consumer_payload,
+        producer_output,
+        consumer_input,
+        0,
+        plan,
+        consumer_spec,
+    )
+
+    root = artifact["1_OnChipMoveReStickifyLx"]
+    assert root["onchipMove_"]["carrier"] == "existing_ops"
+    assert root["onchipMove_"]["existing_op"] == "ReStickifyOpLx"
+    assert root["onchipMove_"]["blocker"] == "existing-op-carrier-needs-remote-lx-read"
+    assert root["onchipMove_"]["cross_core_cell_count"] > 0
+    assert root["opFuncsUsed_"] == ["ReStickifyOpLx", "neg"]
+    restickify_dsc = root["dscs_"][0]["ReStickifyOpLx"]
+    assert restickify_dsc["computeOp_"][0]["opFuncName"] == "ReStickifyOpLx"
+    assert all(
+        lds["memOrg_"] == {"lx": {"isPresent": 1}}
+        for lds in restickify_dsc["labeledDs_"]
+    )
+    assert root["coreIdToDscSchedule"]["0"] == [
+        [-1, 0, 0, 1],
+        [-1, 1, 1, 0],
+    ]
+
+
+def test_existing_ops_carrier_skips_swiglu_cross_core_cells(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_realize", True)
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "existing_ops")
+    plan = {
+        "status": "planned",
+        "source_name": "buf1",
+        "producer": "buf1",
+        "consumer": "buf2",
+        "device_sizes": [32, 64],
+        "producer_region_bytes": 4096,
+        "consumer_region_bytes": 4096,
+        "bytes_moved": 4096,
+        "cell_count": 2,
+        "consumer_view": {"work_slice_dims": [{"device_dim": 0, "split": 32}]},
+        "cells": [
+            {
+                "cell_index": 0,
+                "source_core": 0,
+                "dest_core": 0,
+                "source_offset_bytes": 0,
+                "dest_offset_bytes": 0,
+                "bytes": 2048,
+                "dim_starts": {"d0_": 0, "d1_": 0},
+                "dim_sizes": {"d0_": 16, "d1_": 64},
+            },
+            {
+                "cell_index": 1,
+                "source_core": 4,
+                "dest_core": 0,
+                "source_offset_bytes": 0,
+                "dest_offset_bytes": 2048,
+                "bytes": 2048,
+                "dim_starts": {"d0_": 16, "d1_": 0},
+                "dim_sizes": {"d0_": 16, "d1_": 64},
+            },
+        ],
+    }
+    specs = [
+        OpSpec(
+            op="batchmatmul",
+            is_reduction=False,
+            iteration_space={},
+            args=[
+                _tensor_arg("x", True, 0),
+                _tensor_arg("w", True, 1),
+                _tensor_arg("buf1", False, 2),
+            ],
+            op_info={},
+        ),
+        OpSpec(
+            op="neg",
+            is_reduction=False,
+            iteration_space={},
+            args=[_tensor_arg("buf1", True, 0), _tensor_arg("buf2", False, 1)],
+            op_info={ONCHIP_MOVE_OP_INFO_KEY: {"buf1": plan}},
+        ),
+    ]
+    compiled = [
+        (
+            {
+                "0_batchmatmul": _minimal_sdsc_payload(
+                    "batchmatmul",
+                    output_lds_idx=2,
+                    input_lds_indices=[0, 1],
+                    core_ids=[0],
+                )
+            },
+            [],
+            [],
+            [],
+        ),
+        (
+            {
+                "1_neg": _minimal_sdsc_payload(
+                    "neg",
+                    output_lds_idx=1,
+                    input_lds_indices=[0],
+                    core_ids=[0],
+                )
+            },
+            [],
+            [],
+            [],
+        ),
+    ]
+
+    rows = patch_onchip_move_mixed_schedules(compiled, specs)
+
+    assert rows == [
+        {
+            "index": 0,
+            "status": "skipped",
+            "reason": "existing-op-carrier-needs-remote-lx-read",
+            "source_name": "buf1",
+            "producer": "buf1",
+            "consumer": "buf2",
+            "cell_count": 2,
+            "carrier": "existing_ops",
+        }
+    ]
+    assert "1_neg" in compiled[1][0]
 
 
 def test_lx_region_validation_rejects_overlap_and_overflow():
