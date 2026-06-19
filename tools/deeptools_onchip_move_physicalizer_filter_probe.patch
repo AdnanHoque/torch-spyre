@@ -1,5 +1,5 @@
 diff --git a/dxp/dxp.cpp b/dxp/dxp.cpp
-index 50828ce6b2..7a7cff2e52 100644
+index 50828ce6b2..2338a774c1 100644
 --- a/dxp/dxp.cpp
 +++ b/dxp/dxp.cpp
 @@ -28,6 +28,7 @@
@@ -10,7 +10,36 @@ index 50828ce6b2..7a7cff2e52 100644
  #include <string>
  #include <unordered_map>
  #include <vector>
-@@ -129,6 +130,12 @@ int getPhysicalizeOutStickGroup() {
+@@ -120,6 +121,28 @@ int getPieceInt(const PieceInfo& piece, const std::string& dimName,
+   return static_cast<int>(it->second);
+ }
+ 
++bool hasPieceDim(const PieceInfo& piece, const std::string& dimName) {
++  return piece.dimToStartCordinate.count(dimName) &&
++         piece.dimToSize_.count(dimName);
++}
++
++std::string selectPieceDim(const PieceInfo& piece,
++                           const std::string& logicalDim,
++                           const std::string& legacyDim) {
++  if (hasPieceDim(piece, logicalDim)) return logicalDim;
++  DT_CHECK(hasPieceDim(piece, legacyDim));
++  return legacyDim;
++}
++
++int getStickElems(const PieceInfo& piece, LdsInfo& dataLds,
++                  const std::string& outDim) {
++  if (dataLds.dimToStickSize_.count(outDim)) {
++    return static_cast<int>(dataLds.dimToStickSize_.at(outDim));
++  }
++  if (hasPieceDim(piece, "d3_")) return getPieceInt(piece, "d3_", true);
++  return getPieceInt(piece, outDim, true);
++}
++
+ int getPhysicalizeOutStickGroup() {
+   const int group =
+       std::stoi(dtGetEnv<std::string>(
+@@ -129,6 +152,12 @@ int getPhysicalizeOutStickGroup() {
    return group;
  }
  
@@ -23,7 +52,39 @@ index 50828ce6b2..7a7cff2e52 100644
  int64_t computeSwiGluPhysicalLxAddress(SuperDsc& sdsc, int coreId,
                                         PieceInfo& piece, LdsInfo& dataLds,
                                         bool producer) {
-@@ -166,8 +173,26 @@ int64_t computeSwiGluPhysicalLxAddress(SuperDsc& sdsc, int coreId,
+@@ -137,7 +166,10 @@ int64_t computeSwiGluPhysicalLxAddress(SuperDsc& sdsc, int coreId,
+       producer ? getComputeOutputLds(dsc) : getComputeInputLds(dsc);
+   DT_CHECK(dlLds != nullptr);
+ 
+-  const int stickElems = getPieceInt(piece, "d3_", true);
++  const std::string mbDim = selectPieceDim(piece, "mb", "d0_");
++  const std::string outDim = selectPieceDim(piece, "out", "d1_");
++  const bool logicalOutDim = outDim == "out";
++  const int stickElems = getStickElems(piece, dataLds, outDim);
+   const int64_t stickBytes =
+       static_cast<int64_t>(stickElems * dataLds.wordLength);
+   DT_CHECK(stickBytes > 0);
+@@ -147,13 +179,15 @@ int64_t computeSwiGluPhysicalLxAddress(SuperDsc& sdsc, int coreId,
+   DT_CHECK(localOutElems % stickElems == 0);
+   const int localOutSticks = localOutElems / stickElems;
+ 
+-  const int globalMb = getPieceInt(piece, "d0_", false);
+-  const int globalOutStick = getPieceInt(piece, "d1_", false);
++  const int globalMb = getPieceInt(piece, mbDim, false);
++  const int globalOut =
++      logicalOutDim ? getPieceInt(piece, outDim, false) / stickElems
++                    : getPieceInt(piece, outDim, false);
+   const int localMb = globalMb - getWkSlice(sdsc, coreId, PrimaryDimTypes::MB) *
+                                      localMbExtent;
+   const int localOutStick =
+-      globalOutStick -
+-      getWkSlice(sdsc, coreId, PrimaryDimTypes::OUT) * localOutSticks;
++      globalOut - getWkSlice(sdsc, coreId, PrimaryDimTypes::OUT) *
++                      localOutSticks;
+ 
+   DT_CHECK(localMb >= 0);
+   DT_CHECK(localMb < localMbExtent);
+@@ -166,8 +200,26 @@ int64_t computeSwiGluPhysicalLxAddress(SuperDsc& sdsc, int coreId,
    const int64_t byteOffset =
        (static_cast<int64_t>(localOutStick) * localMbExtent + localMb) *
        stickBytes;
@@ -43,19 +104,30 @@ index 50828ce6b2..7a7cff2e52 100644
 +              << " core=" << coreId << " base=" << base
 +              << " byteOffset=" << byteOffset << " startAddr=" << address
 +              << " byteAddrs=" << (useByteAddrs ? 1 : 0)
-+              << " d0=" << globalMb << " d1=" << globalOutStick
-+              << " d0Size=" << getPieceInt(piece, "d0_", true)
-+              << " d1Size=" << getPieceInt(piece, "d1_", true)
++              << " mb=" << globalMb << " outStick=" << globalOut
++              << " mbSize=" << getPieceInt(piece, mbDim, true)
++              << " outSize=" << getPieceInt(piece, outDim, true)
 +              << std::endl;
 +  }
 +  return address;
  }
  
  void rewriteSingleLxPlacement(SuperDsc& sdsc, PieceInfo& piece,
-@@ -214,6 +239,17 @@ bool physicalizeSwiGluOnchipMove(SuperDsc& consumerSdsc,
+@@ -214,17 +266,38 @@ bool physicalizeSwiGluOnchipMove(SuperDsc& consumerSdsc,
    std::map<std::string, PieceInfo> newOutputPieces;
    int newPieceId = 0;
    const int outStickGroup = getPhysicalizeOutStickGroup();
+-
+-  for (const auto& kv : inputLds.pieces_) {
+-    const auto outIt = outputLds.pieces_.find(kv.first);
+-    DT_CHECK(outIt != outputLds.pieces_.end());
+-    const auto& inputPiece = kv.second;
+-    const auto& outputPiece = outIt->second;
+-    const int outStickStart = getPieceInt(inputPiece, "d1_", false);
+-    const int outStickCount = getPieceInt(inputPiece, "d1_", true);
+-    const int mbStart = getPieceInt(inputPiece, "d0_", false);
+-    const int mbCount = getPieceInt(inputPiece, "d0_", true);
+-    DT_CHECK(outStickCount > 0);
 +  const auto maxPieces =
 +      getOptionalIntEnv("DXP_ONCHIP_MOVE_PHYSICALIZE_MAX_PIECES");
 +  const auto onlySrcCore =
@@ -67,10 +139,31 @@ index 50828ce6b2..7a7cff2e52 100644
 +  const auto onlyOutStickStart =
 +      getOptionalIntEnv("DXP_ONCHIP_MOVE_PHYSICALIZE_OUT_STICK_START");
 +  int skippedPieces = 0;
++
++	  for (const auto& kv : inputLds.pieces_) {
++	    const auto outIt = outputLds.pieces_.find(kv.first);
++	    DT_CHECK(outIt != outputLds.pieces_.end());
++	    const auto& inputPiece = kv.second;
++	    const auto& outputPiece = outIt->second;
++	    const std::string mbDim = selectPieceDim(inputPiece, "mb", "d0_");
++	    const std::string outDim = selectPieceDim(inputPiece, "out", "d1_");
++	    const bool logicalOutDim = outDim == "out";
++	    const int stickElems = getStickElems(inputPiece, inputLds, outDim);
++	    const int outStartRaw = getPieceInt(inputPiece, outDim, false);
++	    const int outCountRaw = getPieceInt(inputPiece, outDim, true);
++	    DT_CHECK(!logicalOutDim || outStartRaw % stickElems == 0);
++	    DT_CHECK(!logicalOutDim || outCountRaw % stickElems == 0);
++	    const int outStickStart =
++	        logicalOutDim ? outStartRaw / stickElems : outStartRaw;
++	    const int outStickCount =
++	        logicalOutDim ? outCountRaw / stickElems : outCountRaw;
++	    const int mbStart = getPieceInt(inputPiece, mbDim, false);
++	    const int mbCount = getPieceInt(inputPiece, mbDim, true);
++	    DT_CHECK(outStickCount > 0);
  
-   for (const auto& kv : inputLds.pieces_) {
-     const auto outIt = outputLds.pieces_.find(kv.first);
-@@ -232,13 +268,35 @@ bool physicalizeSwiGluOnchipMove(SuperDsc& consumerSdsc,
+     for (int outStickOffset = 0; outStickOffset < outStickCount;) {
+       PieceInfo newInput = inputPiece;
+@@ -232,14 +305,40 @@ bool physicalizeSwiGluOnchipMove(SuperDsc& consumerSdsc,
        const int outStick = outStickStart + outStickOffset;
        const int groupCount = std::min(outStickGroup,
                                        outStickCount - outStickOffset);
@@ -92,6 +185,10 @@ index 50828ce6b2..7a7cff2e52 100644
            "phys_" + std::to_string(++newPieceId) + "_" + kv.first;
        newInput.key_ = newKey;
        newOutput.key_ = newKey;
+-      setPieceDimSpan(newInput, "d1_", outStick, groupCount, groupCount);
+-      setPieceDimSpan(newOutput, "d1_", outStick, groupCount, groupCount);
+-      setPieceDimSpan(newInput, "d0_", mbStart, mbCount, mbCount);
+-      setPieceDimSpan(newOutput, "d0_", mbStart, mbCount, mbCount);
 +      const bool sourceFullMbStride =
 +          dtGetEnv<std::string>(
 +              "DXP_ONCHIP_MOVE_PHYSICALIZE_SOURCE_FULL_MB_STRIDE")
@@ -100,14 +197,18 @@ index 50828ce6b2..7a7cff2e52 100644
 +          sourceFullMbStride
 +              ? getCoreExtent(getCoreDsc(producerSdsc, srcCore), "mb")
 +              : mbCount;
-       setPieceDimSpan(newInput, "d1_", outStick, groupCount, groupCount);
-       setPieceDimSpan(newOutput, "d1_", outStick, groupCount, groupCount);
--      setPieceDimSpan(newInput, "d0_", mbStart, mbCount, mbCount);
-+      setPieceDimSpan(newInput, "d0_", mbStart, mbCount, sourceMbSpan);
-       setPieceDimSpan(newOutput, "d0_", mbStart, mbCount, mbCount);
++	      const int outStart =
++	          logicalOutDim ? outStick * stickElems : outStick;
++	      const int outValid =
++	          logicalOutDim ? groupCount * stickElems : groupCount;
++	      setPieceDimSpan(newInput, outDim, outStart, outValid, outValid);
++	      setPieceDimSpan(newOutput, outDim, outStart, outValid, outValid);
++	      setPieceDimSpan(newInput, mbDim, mbStart, mbCount, sourceMbSpan);
++	      setPieceDimSpan(newOutput, mbDim, mbStart, mbCount, mbCount);
        rewriteSingleLxPlacement(producerSdsc, newInput, inputLds,
                                 /*producer=*/true);
-@@ -250,9 +308,15 @@ bool physicalizeSwiGluOnchipMove(SuperDsc& consumerSdsc,
+       rewriteSingleLxPlacement(consumerSdsc, newOutput, outputLds,
+@@ -250,9 +349,15 @@ bool physicalizeSwiGluOnchipMove(SuperDsc& consumerSdsc,
      }
    }
  
