@@ -106,6 +106,9 @@ onchip_move_producer_lx_base: int = int(
 onchip_move_consumer_lx_base: int = int(
     os.environ.get("SPYRE_ONCHIP_MOVE_CONSUMER_LX_BASE", str(1024 * 1024)), 0
 )
+onchip_move_output_piece_mode: Literal["valid_gap", "dense_actual"] = os.environ.get(  # type: ignore[assignment]
+    "SPYRE_ONCHIP_MOVE_OUTPUT_PIECE_MODE", "valid_gap"
+)
 
 # Secondary SwiGLU/warp-specialization audit.  This does not change scheduling;
 # it only records whether the lowered bundle still has standalone SiLU/mul ops

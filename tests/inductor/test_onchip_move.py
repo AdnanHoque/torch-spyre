@@ -429,6 +429,86 @@ def test_mixed_carrier_maps_collapsed_size_one_logical_dims():
     assert output_piece["validGap_"]["out"] == [[0, 64], [64, 384]]
 
 
+def test_mixed_carrier_dense_actual_output_piece_mode(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_output_piece_mode", "dense_actual")
+    plan = {
+        "source_name": "buf0",
+        "producer": "buf0",
+        "consumer": "buf1",
+        "device_sizes": [512, 8, 1, 64],
+        "device_stride_map": [512, 64, -1, 1],
+        "producer_region_bytes": 16 * 1024,
+        "consumer_region_bytes": 16 * 1024,
+        "bytes_moved": 2048,
+        "cell_count": 1,
+        "cells": [
+            {
+                "cell_index": 0,
+                "source_core": 0,
+                "dest_core": 0,
+                "source_offset_bytes": 0,
+                "dest_offset_bytes": 0,
+                "bytes": 2048,
+                "dim_starts": {"d0_": 0, "d1_": 1, "d2_": 0, "d3_": 0},
+                "dim_sizes": {"d0_": 16, "d1_": 1, "d2_": 1, "d3_": 64},
+            }
+        ],
+    }
+    producer_payload = {
+        "0_batchmatmul": _layout_sdsc_payload(
+            "batchmatmul",
+            output_lds_idx=2,
+            input_lds_indices=[0, 1],
+            core_ids=list(range(32)),
+            include_x=True,
+        )
+    }
+    consumer_payload = {
+        "1_neg": _layout_sdsc_payload(
+            "neg",
+            output_lds_idx=1,
+            input_lds_indices=[0],
+            core_ids=list(range(32)),
+            input_layout_dim_order=["out", "mb"],
+            output_layout_dim_order=["out", "mb"],
+        )
+    }
+    output_arg = TensorArg(
+        is_input=False,
+        arg_index=0,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[512, 8, 1, 64],
+        device_coordinates=[],
+        allocation=None,
+        stride_map=[512, 64, -1, 64],
+        name="buf0",
+    )
+
+    _patched_producer, mixed_consumer = build_mixed_onchip_move_sdsc(
+        0,
+        1,
+        producer_payload,
+        consumer_payload,
+        output_arg,
+        dataclasses.replace(output_arg, is_input=True, arg_index=0),
+        2,
+        0,
+        plan,
+    )
+
+    dataop = mixed_consumer["1_OnChipMoveMixedSTCDP"]["datadscs_"][0][
+        "0_OnChipMoveSTCDPOpLx"
+    ]
+    output_piece = dataop["labeledDs_"][1]["PieceInfo"][0]
+    assert output_piece["dimToStartCordinate"] == {
+        "out": 64,
+        "mb": 0,
+        "x": 0,
+    }
+    assert output_piece["dimToSize_"] == {"out": 64, "mb": 16, "x": 1}
+    assert output_piece["validGap_"]["out"] == [[64, 0]]
+
+
 def test_mixed_carrier_reuses_lx_source_for_later_fanout_consumer(monkeypatch):
     monkeypatch.setattr(spyre_config, "onchip_move_realize", True)
     monkeypatch.setattr(spyre_config, "onchip_move_carrier", "mixed")

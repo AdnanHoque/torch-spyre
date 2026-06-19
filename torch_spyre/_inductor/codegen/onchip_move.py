@@ -615,6 +615,8 @@ def _span_partial_stick_dim_for_output(
     cells: list[dict[str, Any]],
     output_layout: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
+    if config.onchip_move_output_piece_mode == "dense_actual":
+        return cells
     if output_layout is None:
         return cells
     stick_dim_order = list(output_layout.get("stick_dim_order", []))
