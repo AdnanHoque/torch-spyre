@@ -107,8 +107,10 @@ def enable_spyre_context(
     from torch._inductor.fx_passes import joint_graph
 
     origin_pass = list(joint_graph.pass_patterns)
-    # disable mul_softmax_pattern and div_softmax_pattern for now
-    joint_graph.pass_patterns.pop()
+    # Disable generic joint-graph pattern rewrites for Spyre. PyTorch 2.12
+    # lazily initializes attention patterns with fake tensors and may invoke
+    # Spyre custom-copy paths while in no_dispatch(), before Spyre lowering runs.
+    joint_graph.pass_patterns.clear()
 
     # Inject the pre_scheduling_passes before the Scheduler is constructed,
     # allowing the passes to modify the graph IR (buffers, inputs, constants).
