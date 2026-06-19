@@ -53,6 +53,7 @@ def patch_onchip_move_mixed_schedules(
         return [{"status": "skipped", "reason": "compiled-spec-count-mismatch"}]
 
     rewritten_consumers: set[int] = set()
+    reusable_lx_sources: dict[tuple[str, str, str], int] = {}
     for producer_index in range(max(len(specs) - 1, 0)):
         consumer_index = producer_index + 1
         if consumer_index in rewritten_consumers:
@@ -108,7 +109,45 @@ def patch_onchip_move_mixed_schedules(
         compiled[producer_index] = (patched_producer, [], [], [])
         compiled[consumer_index] = (mixed_consumer, [], [], [])
         rewritten_consumers.add(consumer_index)
+        reusable_lx_sources[_reuse_key(plan)] = int(
+            config.onchip_move_consumer_lx_base
+        )
         rows.append(_row(producer_index, "patched", None, plan))
+
+    for consumer_index, consumer in enumerate(specs):
+        if consumer_index in rewritten_consumers or not isinstance(consumer, OpSpec):
+            continue
+        consumer_entry = compiled[consumer_index]
+        if consumer_entry[0] is None:
+            continue
+        if consumer_entry[1]:
+            continue
+        move_info = (consumer.op_info or {}).get(ONCHIP_MOVE_OP_INFO_KEY)
+        if not isinstance(move_info, dict):
+            continue
+        for source_name, plan in move_info.items():
+            if not isinstance(plan, dict) or plan.get("status") != "planned":
+                continue
+            reuse_base = reusable_lx_sources.get(_reuse_key(plan))
+            if reuse_base is None:
+                continue
+            try:
+                consumer_input_idx = _consumer_input_arg_idx(consumer, source_name)
+                patched_consumer = copy.deepcopy(consumer_entry[0])
+                _patch_lx_endpoint(
+                    patched_consumer,
+                    dsc_index=0,
+                    lds_idx=_matching_input_lds_idx(
+                        patched_consumer, consumer_input_idx
+                    ),
+                    base=reuse_base,
+                )
+            except Exception as exc:  # noqa: BLE001
+                rows.append(_row(consumer_index, "skipped", type(exc).__name__, plan))
+                continue
+            compiled[consumer_index] = (patched_consumer, [], [], [])
+            rows.append(_row(consumer_index, "patched-reuse", None, plan))
+            break
     return rows
 
 
@@ -135,6 +174,21 @@ def _adjacent_move_match(
                 if consumer_arg.name == source_name:
                     return plan, producer_idx, consumer_idx
     return None
+
+
+def _consumer_input_arg_idx(consumer: OpSpec, source_name: str) -> int:
+    for idx, arg in enumerate(consumer.args):
+        if arg.is_input and arg.name == source_name:
+            return idx
+    raise ValueError(f"consumer-input-not-found:{source_name}")
+
+
+def _reuse_key(plan: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(plan.get("source_name")),
+        str(plan.get("producer")),
+        json.dumps(plan.get("consumer_view", {}), sort_keys=True),
+    )
 
 
 def build_mixed_onchip_move_sdsc(
