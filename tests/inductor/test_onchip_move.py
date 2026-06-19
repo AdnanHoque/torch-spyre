@@ -225,6 +225,104 @@ def test_mixed_carrier_keeps_producer_as_standalone_sdsc():
     assert consumer_dsc["labeledDs_"][0]["memOrg_"] == {"lx": {"isPresent": 1}}
 
 
+def test_mixed_carrier_emits_logical_dataop_layout_for_stickified_cells():
+    plan = {
+        "source_name": "buf0",
+        "producer": "buf0",
+        "consumer": "buf1",
+        "device_sizes": [8, 512, 64],
+        "device_stride_map": [64, 512, 1],
+        "producer_region_bytes": 16 * 1024,
+        "consumer_region_bytes": 16 * 1024,
+        "bytes_moved": 3 * 2048,
+        "cell_count": 3,
+        "cells": [
+            {
+                "cell_index": 0,
+                "source_core": 0,
+                "dest_core": 0,
+                "source_offset_bytes": 0,
+                "dest_offset_bytes": 0,
+                "bytes": 2048,
+                "dim_starts": {"d0_": 0, "d1_": 0, "d2_": 0},
+                "dim_sizes": {"d0_": 1, "d1_": 16, "d2_": 64},
+            },
+            {
+                "cell_index": 1,
+                "source_core": 0,
+                "dest_core": 1,
+                "source_offset_bytes": 32,
+                "dest_offset_bytes": 0,
+                "bytes": 2048,
+                "dim_starts": {"d0_": 0, "d1_": 16, "d2_": 0},
+                "dim_sizes": {"d0_": 1, "d1_": 16, "d2_": 64},
+            },
+            {
+                "cell_index": 2,
+                "source_core": 4,
+                "dest_core": 0,
+                "source_offset_bytes": 0,
+                "dest_offset_bytes": 2,
+                "bytes": 2048,
+                "dim_starts": {"d0_": 1, "d1_": 0, "d2_": 0},
+                "dim_sizes": {"d0_": 1, "d1_": 16, "d2_": 64},
+            },
+        ],
+    }
+    producer_payload = {
+        "0_add": _layout_sdsc_payload(
+            "add",
+            output_lds_idx=1,
+            input_lds_indices=[0],
+            core_ids=list(range(32)),
+        )
+    }
+    consumer_payload = {
+        "1_neg": _layout_sdsc_payload(
+            "neg",
+            output_lds_idx=1,
+            input_lds_indices=[0],
+            core_ids=list(range(32)),
+        )
+    }
+    output_arg = TensorArg(
+        is_input=False,
+        arg_index=0,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[8, 512, 64],
+        device_coordinates=[],
+        allocation=None,
+        stride_map=[64, 512, 1],
+        name="buf0",
+    )
+
+    _patched_producer, mixed_consumer = build_mixed_onchip_move_sdsc(
+        0,
+        1,
+        producer_payload,
+        consumer_payload,
+        output_arg,
+        1,
+        0,
+        plan,
+    )
+
+    dataop = mixed_consumer["1_OnChipMoveMixedSTCDP"]["datadscs_"][0][
+        "0_OnChipMoveSTCDPOpLx"
+    ]
+    input_lds = dataop["labeledDs_"][0]
+    assert input_lds["layoutDimOrder_"] == ["mb", "out"]
+    assert input_lds["stickDimOrder_"] == ["out"]
+    assert input_lds["dimToLayoutSize_"] == {"mb": 512, "out": 512}
+    pieces = input_lds["PieceInfo"]
+    assert pieces[0]["dimToStartCordinate"] == {"mb": 0, "out": 0}
+    assert pieces[0]["dimToSize_"] == {"mb": 16, "out": 64}
+    assert pieces[1]["dimToStartCordinate"] == {"mb": 16, "out": 0}
+    assert pieces[1]["dimToSize_"] == {"mb": 16, "out": 64}
+    assert pieces[2]["dimToStartCordinate"] == {"mb": 0, "out": 64}
+    assert pieces[2]["dimToSize_"] == {"mb": 16, "out": 64}
+
+
 def test_mixed_carrier_reuses_lx_source_for_later_fanout_consumer(monkeypatch):
     monkeypatch.setattr(spyre_config, "onchip_move_realize", True)
     monkeypatch.setattr(spyre_config, "onchip_move_carrier", "mixed")
@@ -413,6 +511,7 @@ def test_attach_plan_to_consumer_tolerates_frozen_ir_data():
         realization_status="planned-not-realized",
         carrier="mixed",
         device_sizes=[16],
+        device_stride_map=[1],
         element_bytes=2,
         producer_core_count=1,
         consumer_core_count=1,
@@ -486,6 +585,36 @@ def _minimal_sdsc_payload(
             }
         ],
     }
+
+
+def _layout_sdsc_payload(
+    name: str,
+    *,
+    output_lds_idx: int,
+    input_lds_indices: list[int],
+    core_ids: list[int],
+) -> dict:
+    payload = _minimal_sdsc_payload(
+        name,
+        output_lds_idx=output_lds_idx,
+        input_lds_indices=input_lds_indices,
+        core_ids=core_ids,
+    )
+    dsc = next(iter(payload["dscs_"][0].values()))
+    dsc["N_"] = {"name_": "n", "mb_": 512, "out_": 512}
+    dsc["primaryDsInfo_"] = {
+        "INPUT": {
+            "layoutDimOrder_": ["mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+        "OUTPUT": {
+            "layoutDimOrder_": ["mb", "out"],
+            "stickDimOrder_": ["out"],
+            "stickSize_": [64],
+        },
+    }
+    return payload
 
 
 def _tensor_arg(name: str, is_input: bool, arg_index: int) -> TensorArg:

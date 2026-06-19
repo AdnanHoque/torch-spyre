@@ -68,6 +68,7 @@ class OnChipMovePlan:
     realization_status: str
     carrier: str
     device_sizes: list[int]
+    device_stride_map: list[int]
     element_bytes: int
     producer_core_count: int
     consumer_core_count: int
@@ -104,14 +105,15 @@ def _single_write_dep(op: ComputedBuffer, buf_name: str) -> MemoryDep | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def _device_sizes_and_element_bytes(buf: Any) -> tuple[list[int], int]:
+def _device_layout_and_element_bytes(buf: Any) -> tuple[list[int], list[int], int]:
     layout = getattr(buf, "layout", None)
     dev_layout = getattr(layout, "device_layout", None)
     if dev_layout is None:
         raise ValueError("buffer-has-no-device-layout")
     device_sizes = [int(size) for size in dev_layout.device_size]
+    device_stride_map = [int(stride) for stride in dev_layout.stride_map]
     element_bytes = num_bytes(dev_layout.device_dtype)
-    return device_sizes, element_bytes
+    return device_sizes, device_stride_map, element_bytes
 
 
 def _view_to_json(view: PerCoreView) -> dict[str, Any]:
@@ -357,6 +359,7 @@ def _plan_json(plan: OnChipMovePlan) -> dict[str, Any]:
         "realization_status": plan.realization_status,
         "carrier": plan.carrier,
         "device_sizes": plan.device_sizes,
+        "device_stride_map": plan.device_stride_map,
         "element_bytes": plan.element_bytes,
         "producer_core_count": plan.producer_core_count,
         "consumer_core_count": plan.consumer_core_count,
@@ -390,6 +393,7 @@ def _skip_plan(
         realization_status="not-realized-skipped",
         carrier=config.onchip_move_carrier,
         device_sizes=[],
+        device_stride_map=[],
         element_bytes=0,
         producer_core_count=_op_num_cores(producer),
         consumer_core_count=_op_num_cores(consumer),
@@ -451,7 +455,9 @@ def plan_onchip_move_edge(
 
     try:
         buf = graph.get_buffer(read_dep.name)
-        device_sizes, element_bytes = _device_sizes_and_element_bytes(buf)
+        device_sizes, device_stride_map, element_bytes = _device_layout_and_element_bytes(
+            buf
+        )
         cells, reason = build_onchip_move_cells(
             producer_view=producer_view,
             consumer_view=consumer_view,
@@ -495,6 +501,7 @@ def plan_onchip_move_edge(
         ),
         carrier=config.onchip_move_carrier,
         device_sizes=device_sizes,
+        device_stride_map=device_stride_map,
         element_bytes=element_bytes,
         producer_core_count=_op_num_cores(producer),
         consumer_core_count=_op_num_cores(consumer),

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -236,6 +237,7 @@ def build_mixed_onchip_move_sdsc(
         word_length=_word_length(producer_output),
         producer_base=producer_base,
         consumer_base=consumer_base,
+        logical_layout=_logical_dataop_layout(producer_root, producer_output, plan),
     )
 
     root = copy.deepcopy(consumer_root)
@@ -269,6 +271,185 @@ def build_mixed_onchip_move_sdsc(
     return {producer_name: producer_root}, {f"{consumer_index}_OnChipMoveMixedSTCDP": root}
 
 
+def _first_compute_dsc(root: dict[str, Any]) -> dict[str, Any] | None:
+    for dsc_group in root.get("dscs_", []) or []:
+        if isinstance(dsc_group, dict) and dsc_group:
+            dsc = next(iter(dsc_group.values()))
+            if isinstance(dsc, dict):
+                return dsc
+    return None
+
+
+def _logical_dataop_layout(
+    producer_root: dict[str, Any],
+    producer_output: TensorArg,
+    plan: dict[str, Any],
+) -> dict[str, Any] | None:
+    dsc = _first_compute_dsc(producer_root)
+    if dsc is None:
+        return None
+    layout_info = (dsc.get("primaryDsInfo_", {}) or {}).get("OUTPUT")
+    if not isinstance(layout_info, dict):
+        return None
+    layout_dim_order = [str(dim) for dim in layout_info.get("layoutDimOrder_", [])]
+    stick_dim_order = [str(dim) for dim in layout_info.get("stickDimOrder_", [])]
+    if not layout_dim_order or len(stick_dim_order) != 1:
+        return None
+
+    n_info = dsc.get("N_", {}) or {}
+    layout_sizes: dict[str, int] = {}
+    for dim in layout_dim_order:
+        value = n_info.get(f"{dim}_", n_info.get(dim))
+        if value is None:
+            return None
+        layout_sizes[dim] = int(value)
+
+    device_sizes = [int(size) for size in plan.get("device_sizes", []) or []]
+    stride_map = [
+        int(stride)
+        for stride in (
+            producer_output.stride_map or plan.get("device_stride_map", []) or []
+        )
+    ]
+    if len(device_sizes) < 2 or len(stride_map) != len(device_sizes):
+        return None
+
+    mapping = _device_to_logical_mapping(
+        device_sizes=device_sizes,
+        stride_map=stride_map,
+        layout_dim_order=layout_dim_order,
+        layout_sizes=layout_sizes,
+        stick_dim=stick_dim_order[0],
+    )
+    if mapping is None:
+        return None
+    return {
+        "layout_dim_order": layout_dim_order,
+        "stick_dim_order": stick_dim_order,
+        "layout_sizes": layout_sizes,
+        "device_to_logical": mapping,
+        "stick_elems": int(device_sizes[-1]),
+    }
+
+
+def _logical_host_strides(
+    layout_dim_order: list[str],
+    layout_sizes: dict[str, int],
+) -> dict[str, int]:
+    stride = 1
+    strides: dict[str, int] = {}
+    for dim in reversed(layout_dim_order):
+        strides[dim] = stride
+        stride *= int(layout_sizes[dim])
+    return strides
+
+
+def _device_to_logical_mapping(
+    *,
+    device_sizes: list[int],
+    stride_map: list[int],
+    layout_dim_order: list[str],
+    layout_sizes: dict[str, int],
+    stick_dim: str,
+) -> dict[int, dict[str, Any]] | None:
+    host_strides = _logical_host_strides(layout_dim_order, layout_sizes)
+    if stick_dim not in host_strides:
+        return None
+    stick_elems = int(device_sizes[-1])
+    stick_host_stride = int(host_strides[stick_dim])
+    mapping: dict[int, dict[str, Any]] = {}
+    outer_stick_dim: int | None = None
+    inner_stick_dim: int | None = None
+
+    for device_dim, stride in enumerate(stride_map):
+        stride = int(stride)
+        if device_dim == len(device_sizes) - 1:
+            if stride != stick_host_stride:
+                return None
+            inner_stick_dim = device_dim
+            mapping[device_dim] = {"dim": stick_dim, "kind": "inner"}
+            continue
+
+        if stride == stick_host_stride * stick_elems:
+            if outer_stick_dim is not None:
+                return None
+            outer_stick_dim = device_dim
+            mapping[device_dim] = {"dim": stick_dim, "kind": "outer"}
+            continue
+
+        matches = [
+            dim
+            for dim in layout_dim_order
+            if dim != stick_dim and int(host_strides[dim]) == stride
+        ]
+        if len(matches) != 1:
+            return None
+        mapping[device_dim] = {"dim": matches[0], "kind": "direct"}
+
+    direct_dims = {entry["dim"] for entry in mapping.values() if entry["kind"] == "direct"}
+    if outer_stick_dim is None or inner_stick_dim is None:
+        return None
+    if any(dim != stick_dim and dim not in direct_dims for dim in layout_dim_order):
+        return None
+    return mapping
+
+
+def _logical_cells(
+    plan: dict[str, Any],
+    logical_layout: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if logical_layout is None:
+        return list(plan.get("cells", []) or [])
+    mapping: dict[int, dict[str, Any]] = logical_layout["device_to_logical"]
+    layout_dim_order: list[str] = logical_layout["layout_dim_order"]
+    stick_dim = logical_layout["stick_dim_order"][0]
+    stick_elems = int(logical_layout["stick_elems"])
+    element_bytes = int(plan.get("element_bytes", 0) or 0)
+
+    direct_device_dim_by_logical = {
+        str(entry["dim"]): device_dim
+        for device_dim, entry in mapping.items()
+        if entry["kind"] == "direct"
+    }
+    outer_stick_dim = next(
+        device_dim
+        for device_dim, entry in mapping.items()
+        if entry["dim"] == stick_dim and entry["kind"] == "outer"
+    )
+    inner_stick_dim = next(
+        device_dim
+        for device_dim, entry in mapping.items()
+        if entry["dim"] == stick_dim and entry["kind"] == "inner"
+    )
+
+    logical_cells: list[dict[str, Any]] = []
+    for cell in plan.get("cells", []) or []:
+        dim_starts: dict[str, int] = {}
+        dim_sizes: dict[str, int] = {}
+        for dim in layout_dim_order:
+            if dim == stick_dim:
+                outer_start = int(cell["dim_starts"][f"d{outer_stick_dim}_"])
+                outer_size = int(cell["dim_sizes"][f"d{outer_stick_dim}_"])
+                inner_start = int(cell["dim_starts"][f"d{inner_stick_dim}_"])
+                inner_size = int(cell["dim_sizes"][f"d{inner_stick_dim}_"])
+                dim_starts[dim] = outer_start * stick_elems + inner_start
+                dim_sizes[dim] = (outer_size - 1) * stick_elems + inner_size
+            else:
+                device_dim = direct_device_dim_by_logical[dim]
+                dim_starts[dim] = int(cell["dim_starts"][f"d{device_dim}_"])
+                dim_sizes[dim] = int(cell["dim_sizes"][f"d{device_dim}_"])
+
+        if element_bytes:
+            logical_bytes = math.prod(dim_sizes.values()) * element_bytes
+            if logical_bytes != int(cell.get("bytes", 0) or 0):
+                raise ValueError("logical-cell-byte-size-mismatch")
+        logical_cell = dict(cell)
+        logical_cell["dim_starts"] = dim_starts
+        logical_cell["dim_sizes"] = dim_sizes
+        logical_cells.append(logical_cell)
+    return logical_cells
+
+
 def build_stcdp_datadsc(
     name: str,
     plan: dict[str, Any],
@@ -277,14 +458,26 @@ def build_stcdp_datadsc(
     word_length: int,
     producer_base: int,
     consumer_base: int,
+    logical_layout: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     device_sizes = [int(size) for size in plan.get("device_sizes", [])]
     if not device_sizes:
         raise ValueError("plan-has-no-device-sizes")
-    dim_names = [f"d{idx}_" for idx in range(len(device_sizes))]
-    cells = list(plan.get("cells", []) or [])
+    cells = _logical_cells(plan, logical_layout) if logical_layout else list(
+        plan.get("cells", []) or []
+    )
     if not cells:
         raise ValueError("plan-has-no-cells")
+    if logical_layout:
+        dim_names = list(logical_layout["layout_dim_order"])
+        stick_dim_order = list(logical_layout.get("stick_dim_order", []))
+        layout_sizes = {
+            str(dim): int(size) for dim, size in logical_layout["layout_sizes"].items()
+        }
+    else:
+        dim_names = [f"d{idx}_" for idx in range(len(device_sizes))]
+        stick_dim_order = [dim_names[-1]]
+        layout_sizes = dict(zip(dim_names, device_sizes))
     input_pieces = [
         _piece(
             cell,
@@ -308,8 +501,6 @@ def build_stcdp_datadsc(
         }
         | {int(cell["dest_core"]) for cell in cells}
     )
-    stick_dim = dim_names[-1]
-    layout_sizes = dict(zip(dim_names, device_sizes))
     return {
         "coreIdsUsed_": core_ids,
         "dimPool_": dim_names,
@@ -325,7 +516,7 @@ def build_stcdp_datadsc(
                 data_format,
                 word_length,
                 dim_names,
-                stick_dim,
+                stick_dim_order,
                 layout_sizes,
                 input_pieces,
             ),
@@ -335,7 +526,7 @@ def build_stcdp_datadsc(
                 data_format,
                 word_length,
                 dim_names,
-                stick_dim,
+                stick_dim_order,
                 layout_sizes,
                 output_pieces,
             ),
@@ -412,7 +603,7 @@ def _labeled_ds(
     data_format: str,
     word_length: int,
     dim_names: list[str],
-    stick_dim: str,
+    stick_dim_order: list[str],
     layout_sizes: dict[str, int],
     pieces: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -424,9 +615,11 @@ def _labeled_ds(
         "isExternal_": 0,
         "segment_": "output",
         "layoutDimOrder_": dim_names,
-        "stickDimOrder_": [stick_dim],
+        "stickDimOrder_": stick_dim_order,
         "dimToLayoutSize_": layout_sizes,
-        "dimToStickSize_": {stick_dim: int(layout_sizes[stick_dim])},
+        "dimToStickSize_": {
+            stick_dim: int(layout_sizes[stick_dim]) for stick_dim in stick_dim_order
+        },
         "validGap_": _valid_gap(layout_sizes),
         "totElements": -1,
         "PieceInfo": pieces,
