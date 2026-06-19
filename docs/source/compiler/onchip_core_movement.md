@@ -31,8 +31,10 @@ same-view edges to the existing LX planner and plans only mismatched same-stick
 LX edges. Unsupported cases are skipped with explicit fallback reasons.
 
 The v1 carrier is mixed SuperDSC with an `STCDPOpLx` data-op row inserted before
-the consumer compute row. This is a proof carrier, not necessarily the final
-interface.
+the consumer compute row. The producer remains a standalone SDSC whose output is
+pinned to LX. This avoids DeepTools' current assumption that multiple DL rows in
+one SuperDSC are compatible pieces of the same operation. The carrier is a proof
+carrier, not necessarily the final interface.
 
 The carrier now records packed per-core source and destination byte offsets for
 each movement cell. Realization rejects overlapping or over-capacity LX regions
@@ -63,11 +65,12 @@ operations in the generated SuperDSC sequence.
 
 ## Backend Status
 
-With realization enabled, Torch-Spyre emits a mixed SuperDSC containing:
+With realization enabled, Torch-Spyre now emits:
 
-- one `STCDPOpLx` in `datadscs_`;
-- two DL compute rows in `dscs_`;
-- `coreIdToDscSchedule` entries for all participating cores.
+- a standalone producer SDSC with the selected output pinned to LX;
+- one mixed consumer SDSC containing one `STCDPOpLx` in `datadscs_`;
+- one DL consumer row in `dscs_`;
+- `coreIdToDscSchedule` entries that run the data-op before the consumer row.
 
 The clean DeepTools/DXP worktree `/tmp/deeptools-swiglu-ws` has branch
 `swiglu-ws-dxp` commit `aa101d41e6`:
@@ -86,24 +89,48 @@ That patch clears the original import rejection:
 DtException: Datadsc not allowed, use dldsc
 ```
 
-The current backend blockers are later in DXP/DDC:
+The earlier producer-plus-dataop-plus-consumer carrier exposed an unsupported
+DeepTools scheduler shape:
 
 ```text
 DtException: isValidDimParam(...) && "Expect the chunk dimension has a valid parameter value."
 file dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1200
 ```
 
-With `DXP_SKIP_MIXED_MULTI_DL_L3_SCHEDULER=1`, the next blocker is:
+That failure happens because `L3DlOpsScheduler` builds chunk dimensions from DSC
+0 and applies them to every DL row. A block-only DDC bypass is not enough:
 
 ```text
 DtException: Missing below-lx schedule insert block
 file ddc/ddcv1.cpp line 2241
 ```
 
+DDC needs the loop, allocation, transfer, and sync metadata normally created by
+the L3 scheduler.
+
+The consumer-only carrier gets through direct DXP codegen:
+
+```text
+dxp_standalone --bundle -d .../sdsc_fused_bmm_mul_silu_0_9d148k53
+```
+
+The generated bundle contains `2_OnChipMoveMixedSTCDP` with one `neg` DL row and
+one STCDP data-op. Direct DXP exits successfully.
+
+Runtime execution is not yet value-correct. The current blocker is physical LX
+layout: after DCC lowers the producer batchmatmul, the visible output is carried
+through generated LX/PERF labels and corelet/chunk loop offsets. The current
+planner emits STCDP cells from the logical per-core view, so it can read the
+wrong physical LX subpieces even though the JSON compiles.
+
 ## Next Step
 
-Fix or bypass the mixed multi-DL scheduler path in a principled way, then teach
-DDC how to create the below-LX schedule insert block for scheduled mixed
-DL/data-op SDSCs. After DXP emits runnable code for the mixed carrier, run
-patterned value-correctness tests before evaluating performance or warp-
-specialization scheduling.
+Close the logical-to-physical LX gap. The next implementation should either:
+
+- derive STCDP source pieces from the producer's post-DCC LX allocation and loop
+  offsets; or
+- move this carrier into a backend hook where the source and destination
+  physical `LabeledDs`/allocation metadata are already available.
+
+After the STCDP pieces match physical LX layout, run patterned value-correctness
+tests before evaluating performance or warp-specialization scheduling.

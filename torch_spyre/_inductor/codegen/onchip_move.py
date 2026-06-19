@@ -33,7 +33,7 @@ def patch_onchip_move_mixed_schedules(
     compiled: list[tuple[Any, list[int], list[dict], list[Any]]],
     specs: list[Any],
 ) -> list[dict[str, Any]]:
-    """Replace adjacent producer/consumer SDSCs with one producer-STCDP-consumer SDSC.
+    """Attach an STCDP data-op carrier to adjacent producer/consumer SDSCs.
 
     This v1 realization is intentionally narrow: unrolled non-symbolic OpSpec
     lists only.  The planner still records all candidates; unsupported bundle
@@ -52,12 +52,13 @@ def patch_onchip_move_mixed_schedules(
     if len(compiled) != len(specs):
         return [{"status": "skipped", "reason": "compiled-spec-count-mismatch"}]
 
-    consumed: set[int] = set()
+    rewritten_consumers: set[int] = set()
     for producer_index in range(max(len(specs) - 1, 0)):
-        if producer_index in consumed or producer_index + 1 in consumed:
+        consumer_index = producer_index + 1
+        if consumer_index in rewritten_consumers:
             continue
         producer = specs[producer_index]
-        consumer = specs[producer_index + 1]
+        consumer = specs[consumer_index]
         if not isinstance(producer, OpSpec) or not isinstance(consumer, OpSpec):
             continue
         match = _adjacent_move_match(producer, consumer)
@@ -67,7 +68,7 @@ def patch_onchip_move_mixed_schedules(
         if plan.get("status") != "planned":
             continue
         producer_entry = compiled[producer_index]
-        consumer_entry = compiled[producer_index + 1]
+        consumer_entry = compiled[consumer_index]
         if producer_entry[0] is None or consumer_entry[0] is None:
             rows.append(
                 _row(
@@ -90,8 +91,9 @@ def patch_onchip_move_mixed_schedules(
             continue
 
         try:
-            mixed = build_mixed_onchip_move_sdsc(
+            patched_producer, mixed_consumer = build_mixed_onchip_move_sdsc(
                 producer_index,
+                consumer_index,
                 producer_entry[0],
                 consumer_entry[0],
                 producer.args[producer_output_idx],
@@ -103,9 +105,9 @@ def patch_onchip_move_mixed_schedules(
             rows.append(_row(producer_index, "skipped", type(exc).__name__, plan))
             continue
 
-        compiled[producer_index] = (mixed, [], [], [])
-        compiled[producer_index + 1] = (None, [], [], [])
-        consumed.update({producer_index, producer_index + 1})
+        compiled[producer_index] = (patched_producer, [], [], [])
+        compiled[consumer_index] = (mixed_consumer, [], [], [])
+        rewritten_consumers.add(consumer_index)
         rows.append(_row(producer_index, "patched", None, plan))
     return rows
 
@@ -137,14 +139,16 @@ def _adjacent_move_match(
 
 def build_mixed_onchip_move_sdsc(
     producer_index: int,
+    consumer_index: int,
     producer_payload: dict[str, Any],
     consumer_payload: dict[str, Any],
     producer_output: TensorArg,
     producer_output_idx: int,
     consumer_input_idx: int,
     plan: dict[str, Any],
-) -> dict[str, Any]:
-    producer_root = copy.deepcopy(next(iter(producer_payload.values())))
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    producer_name, producer_root_src = next(iter(producer_payload.items()))
+    producer_root = copy.deepcopy(producer_root_src)
     consumer_root = copy.deepcopy(next(iter(consumer_payload.values())))
     producer_base = int(config.onchip_move_producer_lx_base)
     consumer_base = int(config.onchip_move_consumer_lx_base)
@@ -179,20 +183,16 @@ def build_mixed_onchip_move_sdsc(
         consumer_base=consumer_base,
     )
 
-    producer_dsc = copy.deepcopy(producer_root.get("dscs_", []) or [])
-    consumer_dsc = copy.deepcopy(consumer_root.get("dscs_", []) or [])
-    root = copy.deepcopy(producer_root)
-    root["dscs_"] = producer_dsc + consumer_dsc
+    root = copy.deepcopy(consumer_root)
+    root["dscs_"] = copy.deepcopy(consumer_root.get("dscs_", []) or [])
     root["datadscs_"] = [{dataop_name: datadsc}]
     root["numCoresUsed_"] = max(
-        int(producer_root.get("numCoresUsed_", 1) or 1),
         int(consumer_root.get("numCoresUsed_", 1) or 1),
         max(datadsc.get("coreIdsUsed_", [0])) + 1,
     )
-    root["coreIdToDscSchedule"] = _mixed_schedule(
-        producer_cores=_dsc_core_ids(root, 0),
+    root["coreIdToDscSchedule"] = _consumer_mixed_schedule(
         dataop_cores=set(datadsc["coreIdsUsed_"]),
-        consumer_cores=_dsc_core_ids(root, 1),
+        consumer_cores=_dsc_core_ids(root, 0),
         num_cores=root["numCoresUsed_"],
     )
     root["opFuncsUsed_"] = sorted(
@@ -211,7 +211,7 @@ def build_mixed_onchip_move_sdsc(
         "consumer_region_bytes": consumer_region_bytes,
         "fallback": "stock-hbm-path-when-disabled",
     }
-    return {f"{producer_index}_OnChipMoveMixedSTCDP": root}
+    return {producer_name: producer_root}, {f"{consumer_index}_OnChipMoveMixedSTCDP": root}
 
 
 def build_stcdp_datadsc(
@@ -466,9 +466,8 @@ def _dsc_core_ids(root: dict[str, Any], dsc_index: int) -> set[int]:
     return {int(core) for core in dsc.get("coreIdsUsed_", [])}
 
 
-def _mixed_schedule(
+def _consumer_mixed_schedule(
     *,
-    producer_cores: set[int],
     dataop_cores: set[int],
     consumer_cores: set[int],
     num_cores: int,
@@ -476,12 +475,10 @@ def _mixed_schedule(
     schedule: dict[str, list[list[int]]] = {}
     for core in range(num_cores):
         steps: list[list[int]] = []
-        if core in producer_cores:
-            steps.append([-1, 0, 0, 0])
         if core in dataop_cores:
             steps.append([0, -1, 0, 0])
         if core in consumer_cores:
-            steps.append([-1, 1, 0, 0])
+            steps.append([-1, 0, 0, 0])
         schedule[str(core)] = _with_dependencies(steps)
     return schedule
 

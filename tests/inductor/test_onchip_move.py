@@ -16,10 +16,13 @@ import dataclasses
 
 import sympy
 
+from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.onchip_move import (
     _validate_lx_regions,
+    build_mixed_onchip_move_sdsc,
     build_stcdp_datadsc,
 )
+from torch_spyre._inductor.op_spec import TensorArg
 from torch_spyre._inductor.onchip_move import (
     ONCHIP_MOVE_ATTR,
     ONCHIP_MOVE_OP_INFO_KEY,
@@ -144,6 +147,82 @@ def test_stcdp_datadsc_uses_plan_cells_as_lx_piece_info():
     assert len(dataop["labeledDs_"][0]["PieceInfo"]) == 4
 
 
+def test_mixed_carrier_keeps_producer_as_standalone_sdsc():
+    plan = {
+        "source_name": "buf0",
+        "producer": "buf0",
+        "consumer": "buf1",
+        "device_sizes": [32, 64],
+        "producer_region_bytes": 4096,
+        "consumer_region_bytes": 4096,
+        "bytes_moved": 4096,
+        "cell_count": 1,
+        "cells": [
+            {
+                "cell_index": 0,
+                "source_core": 0,
+                "dest_core": 0,
+                "source_offset_bytes": 0,
+                "dest_offset_bytes": 0,
+                "bytes": 4096,
+                "dim_starts": {"d0_": 0, "d1_": 0},
+                "dim_sizes": {"d0_": 32, "d1_": 64},
+            }
+        ],
+    }
+    producer_payload = {
+        "1_batchmatmul": _minimal_sdsc_payload(
+            "batchmatmul",
+            output_lds_idx=2,
+            input_lds_indices=[0, 1],
+            core_ids=[0],
+        )
+    }
+    consumer_payload = {
+        "2_neg": _minimal_sdsc_payload(
+            "neg",
+            output_lds_idx=1,
+            input_lds_indices=[0],
+            core_ids=[0],
+        )
+    }
+    output_arg = TensorArg(
+        is_input=False,
+        arg_index=0,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[32, 64],
+        device_coordinates=[],
+        allocation=None,
+        name="buf0",
+    )
+
+    patched_producer, mixed_consumer = build_mixed_onchip_move_sdsc(
+        1,
+        2,
+        producer_payload,
+        consumer_payload,
+        output_arg,
+        2,
+        0,
+        plan,
+    )
+
+    producer_root = patched_producer["1_batchmatmul"]
+    producer_dsc = next(iter(producer_root["dscs_"][0].values()))
+    assert producer_dsc["labeledDs_"][2]["memOrg_"] == {"lx": {"isPresent": 1}}
+    assert len(producer_root["dscs_"]) == 1
+
+    mixed_root = mixed_consumer["2_OnChipMoveMixedSTCDP"]
+    assert len(mixed_root["dscs_"]) == 1
+    assert len(mixed_root["datadscs_"]) == 1
+    assert mixed_root["coreIdToDscSchedule"]["0"] == [
+        [0, -1, 0, 1],
+        [-1, 0, 1, 0],
+    ]
+    consumer_dsc = next(iter(mixed_root["dscs_"][0].values()))
+    assert consumer_dsc["labeledDs_"][0]["memOrg_"] == {"lx": {"isPresent": 1}}
+
+
 def test_lx_region_validation_rejects_overlap_and_overflow():
     _validate_lx_regions(
         producer_base=0,
@@ -227,3 +306,45 @@ def test_attach_plan_to_consumer_tolerates_frozen_ir_data():
         mutable_consumer.data.op_info[ONCHIP_MOVE_OP_INFO_KEY]["buf0"]["consumer"]
         == "buf1"
     )
+
+
+def _minimal_sdsc_payload(
+    name: str,
+    *,
+    output_lds_idx: int,
+    input_lds_indices: list[int],
+    core_ids: list[int],
+) -> dict:
+    max_lds_idx = max([output_lds_idx, *input_lds_indices])
+    return {
+        "numCoresUsed_": len(core_ids),
+        "opFuncsUsed_": [name],
+        "dscs_": [
+            {
+                name: {
+                    "numCoresUsed_": len(core_ids),
+                    "coreIdsUsed_": core_ids,
+                    "scheduleTree_": [
+                        {
+                            "name_": f"allocate_lds{idx}_hbm",
+                            "ldsIdx_": idx,
+                            "component_": "hbm",
+                        }
+                        for idx in range(max_lds_idx + 1)
+                    ],
+                    "labeledDs_": [
+                        {"ldsIdx_": idx, "memOrg_": {"hbm": {"isPresent": 1}}}
+                        for idx in range(max_lds_idx + 1)
+                    ],
+                    "computeOp_": [
+                        {
+                            "inputLabeledDs": [
+                                f"tensor-idx{idx}" for idx in input_lds_indices
+                            ],
+                            "outputLabeledDs": [f"tensor-idx{output_lds_idx}"],
+                        }
+                    ],
+                }
+            }
+        ],
+    }
