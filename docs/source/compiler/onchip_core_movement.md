@@ -123,6 +123,50 @@ through generated LX/PERF labels and corelet/chunk loop offsets. The current
 planner emits STCDP cells from the logical per-core view, so it can read the
 wrong physical LX subpieces even though the JSON compiles.
 
+### Physicalizer Probe
+
+DeepTools branch `swiglu-ws-dxp` now has an env-gated post-DDC/pre-DCG
+physicalizer:
+
+```text
+DXP_ONCHIP_MOVE_PHYSICALIZE=1
+DXP_ONCHIP_MOVE_PHYSICALIZE_OUT_STICK_GROUP=4
+DXP_ONCHIP_MOVE_FORCE_NO_OPT_STCDP=1
+```
+
+The physicalizer rewrites the 256 logical STCDP cells into grouped physical
+pieces before DCG. It uses the selected producer compute output LDS and consumer
+compute input LDS to derive LX bases, then rewrites each piece as
+`d0=16` by `d1={1,4,8}` out-stick groups. The important address discovery is
+that DXP `startAddr` values are in 64-byte LX address units, not raw bytes.
+
+Validation results on `mlp 1x512x4096` with identical seeded inputs:
+
+- Baseline torch-spyre without on-chip movement is bit-stable across separate
+  runs.
+- The first physicalizer version used byte offsets. It compiled and ran without
+  the compute-CB hardware error, but was value-wrong:
+
+  ```text
+  max_abs 0.00012183189392089844
+  mean_abs 3.706010465975851e-05
+  nonzero_diff 2094939 of 2097152
+  allclose_atol_0.0001_rtol_0.01 False
+  ```
+
+- After fixing offsets to 64-byte address units, the generated `.phys.json`
+  matches the original logical address scale, for example source `d0=16,d1=0`
+  uses `startAddr=32` and destination `d1=50` uses `base+1600`.
+- Correct-address variants with `d1` group sizes 4 and 8 both compile and then
+  hit the runtime compute-CB hardware error.
+- Routing the row through conservative STCDP PCFG generation with
+  `DXP_ONCHIP_MOVE_FORCE_NO_OPT_STCDP=1` still hits the same hardware error.
+
+Conclusion: mixed import and physical address derivation are no longer the only
+blockers. The remaining blocker is in the generated STCDP LX transfer
+descriptor/program for this non-IJ `{mb,out}` relayout. We do not yet have a
+value-correct running prototype.
+
 ### InputFetchNeighbor Probe
 
 The existing DeepTools `runDcgForInputFetchNeighbor(main, pre)` path was tested
