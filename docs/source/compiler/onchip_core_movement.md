@@ -123,14 +123,51 @@ through generated LX/PERF labels and corelet/chunk loop offsets. The current
 planner emits STCDP cells from the logical per-core view, so it can read the
 wrong physical LX subpieces even though the JSON compiles.
 
+### InputFetchNeighbor Probe
+
+The existing DeepTools `runDcgForInputFetchNeighbor(main, pre)` path was tested
+as a possible backend hook because it sees both the consumer DL row and previous
+producer DL row.
+
+That path is not a drop-in carrier for the current SwiGLU reshards:
+
+- Raw imported torch-spyre pointwise rows use `computeOp_.inputLabeledDs` to
+  identify operands; the input tensor can still have `DsTypes::OUTPUT`.
+  `InputFetchNeighbor` assumed a distinct `DsTypes::INPUT` primary.
+- It checked all consumer tensors and all producer `OUTPUT` tensors for LX-only
+  placement. Modern rows may contain HBM+LX outputs or internal PT/PE
+  temporaries; the relevant tensors are the consumer compute input and producer
+  compute output.
+- Post-DDC artifacts no longer populate the old `coreStateInit_` LBR list for
+  these tensors. The modern address source is the LX allocation node reachable
+  through `DesignSpaceConfig::getAddress(...)`.
+- Under the L3/LX planner, `CoreD_` and `CoreletD_` can be unset in exported
+  JSON while equivalent data lives in `dataStageParam_`.
+- After compatibility patches for those issues, the helper reached its real
+  algorithmic limit: it still assumes IJ-style spatial coordinates and fails on
+  non-IJ SwiGLU movement domains such as `{mb, out}`:
+
+```text
+DtException: op->outSP_.at(mainOutSPIdx).dimToStartCordinate.count("i")
+file dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp line 986
+```
+
+Conclusion: `InputFetchNeighbor` is a useful reference for where a backend hook
+should live and how DCG wants producer/consumer movement expressed, but it needs
+a generalized non-IJ relayout path before it can serve the scalable LX-to-LX
+movement goal. Continuing to patch the old helper is likely to produce a narrow
+SwiGLU workaround rather than the desired general movement planner.
+
 ## Next Step
 
 Close the logical-to-physical LX gap. The next implementation should either:
 
-- derive STCDP source pieces from the producer's post-DCC LX allocation and loop
-  offsets; or
-- move this carrier into a backend hook where the source and destination
-  physical `LabeledDs`/allocation metadata are already available.
+- add a backend physical-piece rewriter after DDC and before DCG, using the
+  selected producer output and consumer input `LabeledDs` plus allocation
+  metadata; or
+- generalize the `InputFetchNeighbor` algorithm to support arbitrary layout
+  dimensions, not just IJ/spatial movement, then route the mixed carrier through
+  that backend hook.
 
 After the STCDP pieces match physical LX layout, run patterned value-correctness
 tests before evaluating performance or warp-specialization scheduling.
