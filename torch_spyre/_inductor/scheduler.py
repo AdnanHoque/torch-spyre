@@ -32,6 +32,7 @@ from torch._inductor.virtualized import V
 from torch._inductor.codecache import code_hash
 from torch.utils._ordered_set import OrderedSet
 
+from . import config
 from .spyre_kernel import SpyreKernel
 from .pass_utils import iteration_space
 from .logging_utils import get_inductor_logger
@@ -323,6 +324,18 @@ class SuperDSCScheduling(BaseScheduling):
         Check whether node1 and node2 can be vertically fused or not.
         """
         # TODO: Revisit this as part of https://github.com/torch-spyre/torch-spyre/issues/826
+        # Co-bundle exception: the SwiGLU mul->down_proj reduction edge must share
+        # one device program so LX persists across the cross-division reshard (LX
+        # does not survive program reloads). Allow vertical fusion ONLY for the edge
+        # the pre-scheduling reduction-reshard planner recorded; all other vertical
+        # fusion stays disabled (#826). Lazy import avoids a module-load cycle.
+        if getattr(config, "onchip_reduction_reshard", False):
+            from .reduction_reshard import reduction_reshard_edges
+
+            n1, n2 = node1.get_name(), node2.get_name()
+            edges = reduction_reshard_edges()
+            if (n1, n2) in edges or (n2, n1) in edges:
+                return True
         return False
 
     def can_fuse_horizontal(

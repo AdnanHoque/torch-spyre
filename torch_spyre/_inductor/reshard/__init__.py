@@ -45,6 +45,11 @@ from .substrate import (
     splice_reshard,
     splice_reshard_standalone,
 )
+from .warpspec import (
+    build_warpspec_reshard_chunks,
+    warpspec_overlap_schedule,
+    warpspec_serial_schedule,
+)
 
 __all__ = [
     "Band",
@@ -67,4 +72,7 @@ __all__ = [
     "build_standalone_dataop_sdsc",
     "splice_reshard",
     "splice_reshard_standalone",
+    "build_warpspec_reshard_chunks",
+    "warpspec_overlap_schedule",
+    "warpspec_serial_schedule",
 ]

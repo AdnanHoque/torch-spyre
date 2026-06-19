@@ -106,6 +106,35 @@ def generate_bundle(
         use_symbols=use_symbols,
     )
 
+    # Core-to-core reduction reshard (the genuine non-co-assignable move): the
+    # SwiGLU mul -> down_proj K-reduction edge, gathered LX -> RIU ring -> LX
+    # instead of round-tripping HBM. Walks the compiled SDSC bodies (in program
+    # order) and MIXED-folds the STCDPOpLx into the down_proj consumer, flipping
+    # both endpoints to LX-resident. Mutates the bodies in place (no SDSC count
+    # change), so the affected sdsc_N.json files written by _compile_specs are
+    # re-dumped below. Default off -> output byte-identical to before.
+    if _spyre_config.onchip_reduction_reshard:
+        from torch_spyre._inductor.reduction_reshard import (
+            realize_reduction_reshard_bundle,
+        )
+
+        sdscs_json = [entry[0] for entry in compiled]
+        if realize_reduction_reshard_bundle(
+            sdscs_json,
+            m_rows=_spyre_config.onchip_reduction_reshard_m_rows,
+            expected_k=_spyre_config.onchip_reduction_reshard_k,
+            m_split=_spyre_config.onchip_reduction_reshard_m_split,
+            n_split=_spyre_config.onchip_reduction_reshard_n_split,
+            num_cores=_spyre_config.sencores,
+            perband=_spyre_config.onchip_reduction_reshard_perband,
+            region0=_spyre_config.onchip_reduction_reshard_region0,
+        ):
+            logger.info("Realized core-to-core reduction reshard")
+            for idx, sdsc_json in enumerate(sdscs_json):
+                file_name = f"sdsc_{idx}.json"
+                with open(os.path.join(output_dir, file_name), "w") as f:
+                    json.dump(sdsc_json, f, indent=2)
+
     # -----------------------------------------------------------------------
     # Pass 2: emit bundle.mlir.
     # -----------------------------------------------------------------------

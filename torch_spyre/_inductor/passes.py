@@ -63,6 +63,7 @@ from .work_division import (
     cost_model_matmul_division,
 )
 from .pass_utils import apply_splits_from_index_coeff, iteration_space_from_op
+from .reduction_reshard import plan_reduction_reshard_edges
 from .scratchpad.allocator import (
     StrategyBCoOptimizingAllocator,
     scratchpad_planning,
@@ -335,6 +336,10 @@ class CustomPreSchedulingPasses:
             # Core Division
             span_reduction,
             _distribute_work,
+            #
+            # Core-to-core reduction-reshard edge planner (config-gated; records
+            # the mul->down_proj edge for the scheduler's co-bundle predicate).
+            plan_reduction_reshard_edges,
             #
             # LX Planning
             _maybe_scratchpad_planning,
