@@ -12,6 +12,17 @@ matmul output layout used by the small smoke:
 
 There is no value-correct working prototype yet for this reshaping handoff.
 
+The implementation experiment is split across four sibling branches, all
+branched from `a344643920f10674139425bc863677506af445f5`:
+
+- `swiglu-ws-dxp`: continue the current mixed-SDSC `STCDPOpLx`/DXP probe path.
+- `swiglu-ws-co-remap`: prototype a native logical coordinate-remap movement
+  primitive.
+- `swiglu-ws-input-fetch`: test whether InputFetchNeighbor can carry general
+  `mb/out` relayouts.
+- `swiglu-ws-existing-ops`: test whether existing LX-capable ops can express
+  the relayout without changing the matmul split.
+
 The planner and mixed-SDSC artifact generation can identify and emit a
 candidate movement.  Unit coverage verifies the common-refinement cells,
 separate producer/consumer logical layouts, collapsed size-one `x`, schedule
