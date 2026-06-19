@@ -1,0 +1,106 @@
+diff --git a/deeptools/docs/lx_coordinate_remap.md b/deeptools/docs/lx_coordinate_remap.md
+new file mode 100644
+index 000000000000..111111111111
+--- /dev/null
++++ b/deeptools/docs/lx_coordinate_remap.md
+@@ -0,0 +1,91 @@
++# LX Coordinate Remap DataOp Sketch
++
++This is the minimal backend interface needed by Torch-Spyre's
++`lx_coordinate_remap_v0` artifact metadata. It is intentionally not an STCDP
++extension: STCDP overlaps source and destination pieces, while SwiGLU
++matmul-to-pointwise handoff needs an explicit logical source rectangle to
++logical destination rectangle copy between different per-core LX layouts.
++
++## DataOp
++
++Add a data-op named `LXCoordinateRemapOp` accepted in a mixed SuperDSC before a
++consumer DL row.
++
++```json
++{
++  "op": {"name": "LXCoordinateRemapOp"},
++  "schemaVersion": 0,
++  "sourceName": "buf0",
++  "producer": "0_batchmatmul",
++  "consumer": "1_neg",
++  "dependencyOrder": [
++    {"order": 0, "kind": "producer_lx_write_before_remap"},
++    {"order": 1, "kind": "coordinate_remap"},
++    {"order": 2, "kind": "consumer_lx_read_after_remap"}
++  ],
++  "movements": [
++    {
++      "moveIndex": 0,
++      "bytes": 2048,
++      "source": {
++        "core": 4,
++        "logicalSlice": {
++          "starts": {"d0_": 1, "d1_": 0, "d2_": 0},
++          "sizes": {"d0_": 1, "d1_": 16, "d2_": 64}
++        },
++        "lxAddress": 0,
++        "byteRange": {"start": 0, "end": 2048}
++      },
++      "destination": {
++        "core": 0,
++        "logicalSlice": {
++          "starts": {"d0_": 1, "d1_": 0, "d2_": 0},
++          "sizes": {"d0_": 1, "d1_": 16, "d2_": 64}
++        },
++        "lxAddress": 1048578,
++        "byteRange": {"start": 1048578, "end": 1050626}
++      }
++    }
++  ]
++}
++```
++
++Torch-Spyre can also emit the flatter diagnostic form currently recorded in
++`onchip_move_plans.json`:
++
++```json
++{
++  "primitive": "lx_coordinate_remap_v0",
++  "movements": [
++    {
++      "source_core": 4,
++      "source_slice": {"starts": {"d0_": 1}, "sizes": {"d0_": 1}},
++      "source_lx_address": 0,
++      "source_lx_byte_range": {"start": 0, "end": 2048},
++      "destination_core": 0,
++      "destination_slice": {"starts": {"d0_": 1}, "sizes": {"d0_": 1}},
++      "destination_lx_address": 1048578,
++      "destination_lx_byte_range": {"start": 1048578, "end": 1050626}
++    }
++  ]
++}
++```
++
++## Required Semantics
++
++1. Treat `core` as the logical core in the surrounding SuperDSC schedule; do
++   not infer movement from physical core adjacency.
++2. Copy exactly `bytes` from source LX byte range to destination LX byte range.
++3. Use `logicalSlice` only for legality, diagnostics, and future physicalizer
++   rewrites; byte ranges define the actual LX transfer.
++4. Preserve dependency order:
++   producer DL row writes source LX before remap;
++   remap completes before consumer DL row reads destination LX.
++5. Reject overlapping destination byte ranges for the same destination core
++   unless every overlapping logical slice and byte range is identical.
++6. Reject source or destination ranges outside the producer/consumer LX region
++   provided by Torch-Spyre.
++
++## Why Current Carriers Are Insufficient
++
++`STCDPOpLx` can move overlapping pieces, but it does not express the destination
++local byte placement needed when producer and consumer `PerCoreView`s disagree.
++The existing mixed STCDP carrier can compile diagnostic JSON but cannot encode a
++general row-strided remap such as `{mb:4,out:8} -> {mb:32}` without backend-side
++physicalizer probes. `InputFetchNeighbor` is also not a replacement because the
++current backend path assumes `i/j` coordinates and one neighbor input.
++
++A first backend patch can import this data-op as an opaque scheduled row and
++lower each movement to the existing ring/LX copy mechanism after validating the
++coverage and dependency metadata above.

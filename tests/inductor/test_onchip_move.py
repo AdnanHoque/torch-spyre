@@ -30,7 +30,9 @@ from torch_spyre._inductor.onchip_move import (
     ONCHIP_MOVE_OP_INFO_KEY,
     OnChipMovePlan,
     _attach_plan_to_consumer,
+    build_coordinate_remap_metadata,
     build_onchip_move_cells,
+    validate_onchip_move_cell_coverage,
 )
 from torch_spyre._inductor.pass_utils import PerCoreView
 
@@ -76,6 +78,113 @@ def test_onchip_move_cells_cover_2d_matmul_to_pure_m_reshard():
     assert cells[64].dest_core == 8
     assert cells[64].source_offset_bytes == 0
     assert cells[64].dest_offset_bytes == 0
+
+
+def test_coordinate_remap_cells_cover_1d_without_overlap_or_gaps(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")
+    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0x1000)
+    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 0x9000)
+    core_id = sympy.Symbol("core_id")
+    producer_view = PerCoreView(
+        work_slice_dims=((0, 4),),
+        core_to_slot=((0, sympy.Mod(core_id, 4)),),
+    )
+    consumer_view = PerCoreView(
+        work_slice_dims=((0, 2),),
+        core_to_slot=((0, sympy.Mod(core_id, 2)),),
+    )
+
+    cells, reason = build_onchip_move_cells(
+        producer_view=producer_view,
+        consumer_view=consumer_view,
+        device_sizes=[16],
+        element_bytes=2,
+        producer_core_count=4,
+        consumer_core_count=2,
+    )
+
+    assert reason is None
+    assert validate_onchip_move_cell_coverage(cells, device_sizes=[16]) is None
+    assert [cell.source_core for cell in cells] == [0, 1, 2, 3]
+    assert [cell.dest_core for cell in cells] == [0, 0, 1, 1]
+
+    plan = _remap_plan(cells, device_sizes=[16], element_bytes=2)
+    metadata = build_coordinate_remap_metadata(plan)
+
+    assert metadata["primitive"] == "lx_coordinate_remap_v0"
+    assert metadata["coverage"]["status"] == "complete"
+    assert [row["kind"] for row in metadata["dependency_order"]] == [
+        "producer_lx_write_before_remap",
+        "coordinate_remap",
+        "consumer_lx_read_after_remap",
+    ]
+    move = metadata["movements"][1]
+    assert move["source_core"] == 1
+    assert move["destination_core"] == 0
+    assert move["source_slice"] == {
+        "starts": {"d0_": 4},
+        "sizes": {"d0_": 4},
+    }
+    assert move["destination_slice"] == move["source_slice"]
+    assert move["source_lx_address"] == 0x1000
+    assert move["source_lx_byte_range"] == {"start": 0x1000, "end": 0x1008}
+    assert move["destination_lx_address"] == 0x9008
+    assert move["destination_lx_byte_range"] == {"start": 0x9008, "end": 0x9010}
+
+
+def test_coordinate_remap_cells_cover_2d_without_overlap_or_gaps(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")
+    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0x2000)
+    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 0xA000)
+    core_id = sympy.Symbol("core_id")
+    producer_view = PerCoreView(
+        work_slice_dims=((0, 2), (1, 2)),
+        core_to_slot=((0, sympy.Mod(core_id, 2)), (1, sympy.floor(core_id / 2))),
+    )
+    consumer_view = PerCoreView(
+        work_slice_dims=((0, 4),),
+        core_to_slot=((0, sympy.Mod(core_id, 4)),),
+    )
+
+    cells, reason = build_onchip_move_cells(
+        producer_view=producer_view,
+        consumer_view=consumer_view,
+        device_sizes=[8, 6],
+        element_bytes=4,
+        producer_core_count=4,
+        consumer_core_count=4,
+    )
+
+    assert reason is None
+    assert validate_onchip_move_cell_coverage(cells, device_sizes=[8, 6]) is None
+    assert len(cells) == 8
+    assert sum(cell.bytes for cell in cells) == 8 * 6 * 4
+
+    plan = _remap_plan(cells, device_sizes=[8, 6], element_bytes=4)
+    metadata = build_coordinate_remap_metadata(plan)
+
+    assert metadata["coverage"] == {"device_sizes": [8, 6], "status": "complete"}
+    assert metadata["producer_lx_base"] == 0x2000
+    assert metadata["consumer_lx_base"] == 0xA000
+    crossing_moves = [
+        move
+        for move in metadata["movements"]
+        if move["source_core"] != move["destination_core"]
+    ]
+    assert crossing_moves
+    assert crossing_moves[0]["source_slice"] == crossing_moves[0][
+        "destination_slice"
+    ]
+    assert {
+        "source_core",
+        "source_slice",
+        "source_lx_address",
+        "source_lx_byte_range",
+        "destination_core",
+        "destination_slice",
+        "destination_lx_address",
+        "destination_lx_byte_range",
+    }.issubset(crossing_moves[0])
 
 
 def test_onchip_move_cells_reject_ambiguous_fanout_owner():
@@ -728,6 +837,35 @@ def test_attach_plan_to_consumer_tolerates_frozen_ir_data():
     assert (
         mutable_consumer.data.op_info[ONCHIP_MOVE_OP_INFO_KEY]["buf0"]["consumer"]
         == "buf1"
+    )
+
+
+def _remap_plan(
+    cells,
+    *,
+    device_sizes: list[int],
+    element_bytes: int,
+) -> OnChipMovePlan:
+    return OnChipMovePlan(
+        source_name="buf0",
+        producer_name="buf0",
+        consumer_name="buf1",
+        producer_op="producer_op",
+        consumer_op="consumer_op",
+        status="planned",
+        fallback_reason=None,
+        realization_status="planned-coordinate-remap-needs-deeptools",
+        carrier="coordinate_remap",
+        device_sizes=device_sizes,
+        device_stride_map=list(range(len(device_sizes))),
+        element_bytes=element_bytes,
+        producer_core_count=32,
+        consumer_core_count=32,
+        producer_region_bytes=sum(cell.bytes for cell in cells),
+        consumer_region_bytes=sum(cell.bytes for cell in cells),
+        producer_view={},
+        consumer_view={},
+        cells=cells,
     )
 
 

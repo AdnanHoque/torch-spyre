@@ -1,0 +1,206 @@
+{
+  "carrier": "coordinate_remap",
+  "cell_count": 4,
+  "coordinate_remap": {
+    "consumer": "buf1",
+    "consumer_lx_base": 36864,
+    "coverage": {
+      "device_sizes": [
+        16
+      ],
+      "status": "complete"
+    },
+    "dependency_order": [
+      {
+        "kind": "producer_lx_write_before_remap",
+        "op": "buf0",
+        "order": 0,
+        "source_name": "buf0"
+      },
+      {
+        "cell_count": 4,
+        "kind": "coordinate_remap",
+        "order": 1,
+        "primitive": "lx_coordinate_remap_v0"
+      },
+      {
+        "kind": "consumer_lx_read_after_remap",
+        "op": "buf1",
+        "order": 2,
+        "source_name": "buf0"
+      }
+    ],
+    "movements": [
+      {
+        "bytes": 8,
+        "destination_core": 0,
+        "destination_local_byte_range": {
+          "end": 8,
+          "start": 0
+        },
+        "destination_lx_address": 36864,
+        "destination_lx_byte_range": {
+          "end": 36872,
+          "start": 36864
+        },
+        "destination_slice": {
+          "sizes": {
+            "d0_": 4
+          },
+          "starts": {
+            "d0_": 0
+          }
+        },
+        "move_index": 0,
+        "source_core": 0,
+        "source_local_byte_range": {
+          "end": 8,
+          "start": 0
+        },
+        "source_lx_address": 4096,
+        "source_lx_byte_range": {
+          "end": 4104,
+          "start": 4096
+        },
+        "source_slice": {
+          "sizes": {
+            "d0_": 4
+          },
+          "starts": {
+            "d0_": 0
+          }
+        }
+      },
+      {
+        "bytes": 8,
+        "destination_core": 0,
+        "destination_local_byte_range": {
+          "end": 16,
+          "start": 8
+        },
+        "destination_lx_address": 36872,
+        "destination_lx_byte_range": {
+          "end": 36880,
+          "start": 36872
+        },
+        "destination_slice": {
+          "sizes": {
+            "d0_": 4
+          },
+          "starts": {
+            "d0_": 4
+          }
+        },
+        "move_index": 1,
+        "source_core": 1,
+        "source_local_byte_range": {
+          "end": 8,
+          "start": 0
+        },
+        "source_lx_address": 4096,
+        "source_lx_byte_range": {
+          "end": 4104,
+          "start": 4096
+        },
+        "source_slice": {
+          "sizes": {
+            "d0_": 4
+          },
+          "starts": {
+            "d0_": 4
+          }
+        }
+      },
+      {
+        "bytes": 8,
+        "destination_core": 1,
+        "destination_local_byte_range": {
+          "end": 8,
+          "start": 0
+        },
+        "destination_lx_address": 36864,
+        "destination_lx_byte_range": {
+          "end": 36872,
+          "start": 36864
+        },
+        "destination_slice": {
+          "sizes": {
+            "d0_": 4
+          },
+          "starts": {
+            "d0_": 8
+          }
+        },
+        "move_index": 2,
+        "source_core": 2,
+        "source_local_byte_range": {
+          "end": 8,
+          "start": 0
+        },
+        "source_lx_address": 4096,
+        "source_lx_byte_range": {
+          "end": 4104,
+          "start": 4096
+        },
+        "source_slice": {
+          "sizes": {
+            "d0_": 4
+          },
+          "starts": {
+            "d0_": 8
+          }
+        }
+      },
+      {
+        "bytes": 8,
+        "destination_core": 1,
+        "destination_local_byte_range": {
+          "end": 16,
+          "start": 8
+        },
+        "destination_lx_address": 36872,
+        "destination_lx_byte_range": {
+          "end": 36880,
+          "start": 36872
+        },
+        "destination_slice": {
+          "sizes": {
+            "d0_": 4
+          },
+          "starts": {
+            "d0_": 12
+          }
+        },
+        "move_index": 3,
+        "source_core": 3,
+        "source_local_byte_range": {
+          "end": 8,
+          "start": 0
+        },
+        "source_lx_address": 4096,
+        "source_lx_byte_range": {
+          "end": 4104,
+          "start": 4096
+        },
+        "source_slice": {
+          "sizes": {
+            "d0_": 4
+          },
+          "starts": {
+            "d0_": 12
+          }
+        }
+      }
+    ],
+    "primitive": "lx_coordinate_remap_v0",
+    "producer": "buf0",
+    "producer_lx_base": 4096,
+    "schema_version": 0,
+    "source_name": "buf0"
+  },
+  "consumer": "buf1",
+  "producer": "buf0",
+  "realization_status": "planned-coordinate-remap-needs-deeptools",
+  "source_name": "buf0",
+  "status": "planned"
+}

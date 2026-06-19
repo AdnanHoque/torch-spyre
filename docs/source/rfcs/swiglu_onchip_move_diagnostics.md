@@ -85,3 +85,20 @@ solution.  The next useful implementation slice is one of:
 
 Warp specialization should remain secondary until the movement path is
 value-correct.
+
+## Coordinate Remap Branch
+
+The `swiglu-ws-co-remap` branch owns option 1.  Torch-Spyre now accepts
+`SPYRE_ONCHIP_MOVE_CARRIER=coordinate_remap` and records a
+`lx_coordinate_remap_v0` metadata block in each planned movement artifact.
+
+The metadata is intentionally backend-facing:
+
+- source logical slice, source logical core, source LX address, and byte range;
+- destination logical slice, destination logical core, destination LX address,
+  and byte range;
+- exact logical coverage status over the device rectangle;
+- dependency ordering from producer LX write to remap to consumer LX read.
+
+There is no Deeptools realization in this branch.  The required backend API is
+sketched in `tools/deeptools_lx_coordinate_remap_api_sketch.patch`.

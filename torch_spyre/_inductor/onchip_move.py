@@ -347,8 +347,146 @@ def build_onchip_move_cells(
     return cells, None
 
 
-def _plan_json(plan: OnChipMovePlan) -> dict[str, Any]:
+def validate_onchip_move_cell_coverage(
+    cells: list[OnChipMoveCell],
+    *,
+    device_sizes: list[int],
+) -> str | None:
+    """Check that movement cells tile the logical device rectangle exactly."""
+
+    if not cells:
+        return "no-cells"
+
+    dims = len(device_sizes)
+    boxes: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+    total_volume = 0
+    for cell in cells:
+        starts: list[int] = []
+        ends: list[int] = []
+        volume = 1
+        for dim, device_size in enumerate(device_sizes):
+            key = f"d{dim}_"
+            if key not in cell.dim_starts or key not in cell.dim_sizes:
+                return "coverage-cell-missing-dim"
+            start = int(cell.dim_starts[key])
+            size = int(cell.dim_sizes[key])
+            end = start + size
+            if start < 0 or size <= 0 or end > int(device_size):
+                return "coverage-cell-out-of-bounds"
+            starts.append(start)
+            ends.append(end)
+            volume *= size
+        boxes.append((tuple(starts), tuple(ends)))
+        total_volume += volume
+
+    for idx, (left_starts, left_ends) in enumerate(boxes):
+        for right_starts, right_ends in boxes[idx + 1 :]:
+            overlaps = all(
+                left_starts[dim] < right_ends[dim]
+                and right_starts[dim] < left_ends[dim]
+                for dim in range(dims)
+            )
+            if overlaps:
+                return "coverage-cell-overlap"
+
+    expected_volume = math.prod(int(size) for size in device_sizes)
+    if total_volume != expected_volume:
+        return "coverage-volume-mismatch"
+    return None
+
+
+def _slice_payload(starts: dict[str, int], sizes: dict[str, int]) -> dict[str, Any]:
     return {
+        "starts": {dim: int(starts[dim]) for dim in sorted(starts)},
+        "sizes": {dim: int(sizes[dim]) for dim in sorted(sizes)},
+    }
+
+
+def _byte_range_payload(start: int, size: int) -> dict[str, int]:
+    return {"start": int(start), "end": int(start) + int(size)}
+
+
+def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
+    """Build torch-spyre-side metadata for a future Deeptools remap data-op."""
+
+    producer_base = int(config.onchip_move_producer_lx_base)
+    consumer_base = int(config.onchip_move_consumer_lx_base)
+    movements: list[dict[str, Any]] = []
+    for cell in plan.cells:
+        source_lx_address = producer_base + int(cell.source_offset_bytes)
+        dest_lx_address = consumer_base + int(cell.dest_offset_bytes)
+        logical_slice = _slice_payload(cell.dim_starts, cell.dim_sizes)
+        movements.append(
+            {
+                "move_index": int(cell.cell_index),
+                "bytes": int(cell.bytes),
+                "source_core": int(cell.source_core),
+                "source_slice": logical_slice,
+                "source_lx_address": source_lx_address,
+                "source_local_byte_range": _byte_range_payload(
+                    cell.source_offset_bytes,
+                    cell.bytes,
+                ),
+                "source_lx_byte_range": _byte_range_payload(
+                    source_lx_address,
+                    cell.bytes,
+                ),
+                "destination_core": int(cell.dest_core),
+                "destination_slice": logical_slice,
+                "destination_lx_address": dest_lx_address,
+                "destination_local_byte_range": _byte_range_payload(
+                    cell.dest_offset_bytes,
+                    cell.bytes,
+                ),
+                "destination_lx_byte_range": _byte_range_payload(
+                    dest_lx_address,
+                    cell.bytes,
+                ),
+            }
+        )
+
+    return {
+        "primitive": "lx_coordinate_remap_v0",
+        "schema_version": 0,
+        "source_name": plan.source_name,
+        "producer": plan.producer_name,
+        "consumer": plan.consumer_name,
+        "producer_lx_base": producer_base,
+        "consumer_lx_base": consumer_base,
+        "coverage": {
+            "device_sizes": [int(size) for size in plan.device_sizes],
+            "status": validate_onchip_move_cell_coverage(
+                plan.cells,
+                device_sizes=plan.device_sizes,
+            )
+            or "complete",
+        },
+        "dependency_order": [
+            {
+                "order": 0,
+                "kind": "producer_lx_write_before_remap",
+                "op": plan.producer_name,
+                "source_name": plan.source_name,
+            },
+            {
+                "order": 1,
+                "kind": "coordinate_remap",
+                "primitive": "lx_coordinate_remap_v0",
+                "cell_count": len(plan.cells),
+            },
+            {
+                "order": 2,
+                "kind": "consumer_lx_read_after_remap",
+                "op": plan.consumer_name,
+                "source_name": plan.source_name,
+            },
+        ],
+        "movements": movements,
+    }
+
+
+def _plan_json(plan: OnChipMovePlan) -> dict[str, Any]:
+    payload = {
         "source_name": plan.source_name,
         "producer": plan.producer_name,
         "consumer": plan.consumer_name,
@@ -371,6 +509,9 @@ def _plan_json(plan: OnChipMovePlan) -> dict[str, Any]:
         "bytes_moved": plan.bytes_moved,
         "cells": [dataclasses.asdict(cell) for cell in plan.cells],
     }
+    if plan.cells:
+        payload["coordinate_remap"] = build_coordinate_remap_metadata(plan)
+    return payload
 
 
 def _skip_plan(
@@ -495,7 +636,9 @@ def plan_onchip_move_edge(
         status="planned",
         fallback_reason=None,
         realization_status=(
-            "planned-mixed-carrier-enabled"
+            "planned-coordinate-remap-needs-deeptools"
+            if config.onchip_move_carrier == "coordinate_remap"
+            else "planned-mixed-carrier-enabled"
             if config.onchip_move_realize
             else "planned-not-realized"
         ),
