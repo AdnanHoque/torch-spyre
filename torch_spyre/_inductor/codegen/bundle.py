@@ -163,6 +163,7 @@ def generate_bundle(kernel_name: str, output_dir: str, specs: list[OpSpec]):
             n_split=config.onchip_reduction_reshard_n_split,
             num_cores=config.sencores,
             perband=config.onchip_reduction_reshard_perband,
+            region0=config.onchip_reduction_reshard_region0,
         ):
             logger.info("Realized core-to-core reduction reshard")
     value_flow_tile = config.flash_attention_mixed_pipeline_value_flow_tile

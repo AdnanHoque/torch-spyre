@@ -7510,6 +7510,26 @@ def _producer_out_extent_dl(dl: dict, out_idx: int) -> int | None:
     return None
 
 
+def _is_reduction_consumer(cons_sdsc: dict, expected_k: int) -> bool:
+    """True iff ``cons_sdsc`` reduces over the producer's split dim ``expected_k``.
+
+    The reshard handoff is valid ONLY for the genuine reduction consumer (the
+    down-proj batchmatmul that reduces over the mul output's K dim). This gate
+    rejects every co-assignable element-wise consumer in the SwiGLU chain
+    (neg/exp/add/realdiv/mul: ``N_`` has no ``in_`` key) and the gate/up
+    matmuls (batchmatmul, but ``N_.in_`` == 4096 != K -- they *produce* K, not
+    reduce it). Across the two cached SwiGLU bundles, exactly one of the 11 ops
+    passes: the down-proj (``opFuncName=='batchmatmul'`` and ``N_.in_`` == K).
+    """
+    try:
+        dl = _dl_op(cons_sdsc)
+    except (KeyError, IndexError, StopIteration):
+        return False
+    if dl.get("computeOp_", [{}])[0].get("opFuncName") != "batchmatmul":
+        return False
+    return int(dl.get("N_", {}).get("in_", -1)) == int(expected_k)
+
+
 def realize_reduction_reshard_bundle(
     sdscs_json: list[dict],
     *,
@@ -7519,6 +7539,7 @@ def realize_reduction_reshard_bundle(
     n_split: int,
     num_cores: int,
     perband: bool = False,
+    region0: int = 0,
     sdsc_name: str = "1b_STCDP_reshard",
 ) -> bool:
     """Realize the SwiGLU mul -> down_proj reduction reshard in the SDSC list.
@@ -7550,7 +7571,15 @@ def realize_reduction_reshard_bundle(
             if hbm_addr is None:
                 continue
             consumers = _future_consumers(sdscs_json, p, hbm_addr)
-            if len(consumers) == 1:
+            # Gate STRICTLY to the reduction consumer: the down-proj batchmatmul
+            # reducing over the producer's K dim. Without this, the producer-only
+            # ``out`` extent == K test matches the within-bundle 12800-wide
+            # element-wise edges (neg/exp/add/realdiv/mul) and the gate/up
+            # matmuls, which are co-assignable and must NEVER be reshard-moved
+            # (device misfire: max_err 1.918, DEVICE_RESULT.md).
+            if len(consumers) == 1 and _is_reduction_consumer(
+                consumers[0][1], expected_k
+            ):
                 edge = (out_idx, consumers[0])
                 break
         if edge is None:
@@ -7570,6 +7599,7 @@ def realize_reduction_reshard_bundle(
             producer_ldsidx=producer_out_idx,
             consumer_ldsidx=consumer_in_idx,
             perband=perband,
+            region0=region0,
         )
         if realization is None:
             p += 1

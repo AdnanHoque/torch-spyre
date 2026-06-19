@@ -47,3 +47,49 @@ never the co-assignable element-wise chain.
 Substrate + mixed-fold mechanism: device-proven. Edge detection/placement for the
 cross-bundle reduction edge: needs the redesign above. Flag is default-off, so the
 misfire is contained to the experimental path.
+
+## CROSS-BUNDLE VERDICT (2026-06-19): on-chip move INFEASIBLE without co-bundling
+
+A design workflow (4 ingest agents, high-confidence convergence) settled the
+feasibility of the cross-bundle realize. VERDICT: **the on-chip `mul -> down_proj`
+move is NOT feasible while the SwiGLU lowers to two separate device programs.**
+
+- The two SwiGLU partitions (`sdsc_fused_linear_mul_silu_0` = gate+silu+up+mul, and
+  `sdsc_fused_linear_1` = down_proj) are **separate device programs**: each
+  `FusedSchedulerNode -> async_compile.sdsc() -> own generate_bundle (own
+  bundle.mlir/code_dir) -> own `dxp_standalone --bundle` -> own init.txt senprog ->
+  own copyProgramAsync + executeProgramAsync launch`. Bundle 0 ends with
+  `sdsc_9_ReStickifyOpHBM` writing the mul output to HBM; bundle 1 re-reads it from
+  HBM as a kernel argument.
+- **LX persistence is proven only WITHIN one bundle.mlir** (across `sdsc_execute`).
+  There is no measurement or mechanism for LX surviving a program reload (the second
+  `copyProgramAsync`); doc 07 states the LX planner has no cross-work-division
+  persistence. So a cross-program LX->ring->LX handoff is unsupported.
+- There is no Python point that sees both partitions' SDSCs together; the planner
+  (`onchip_handoff`, which DOES see the FX edge via `_is_reduction_input_edge`) is a
+  pure observer whose return is discarded; the only mutation site is the per-bundle
+  `generate_bundle` hook, which sees one partition.
+
+**The feasible path: CO-BUNDLE `mul` + `down_proj` into ONE device program first**,
+then realize the reshard intra-bundle (the proven mechanism, with LX persistence
+across `sdsc_execute`). The lever is `scheduler.py:60 can_fuse_vertical` (currently
+`return False` UNCONDITIONALLY, per issue #826 -- Spyre disables vertical fusion).
+A narrowly-gated override returning True ONLY for `elementwise-mul -> bmm-reducing-K`
+(where `_is_reduction_input_edge` fired) would fuse them into one
+`FusedSchedulerNode`. **Uncertain**: may be blocked by a restickify barrier at the
+`mul->down_proj` boundary or a work-division mismatch -- a device gate decides.
+
+### Applied here (stops the misfire; makes the flag safe)
+- `_is_reduction_consumer(cons_sdsc, expected_k)` gates `realize_reduction_reshard_bundle`
+  to fire ONLY on the down-proj (`opFuncName=='batchmatmul'` AND `N_.in_==K=12800`);
+  CPU-verified that across the 11 cached SDSC ops only the down_proj passes. In the
+  current two-program lowering the down_proj is not in the bundle, so the realizer is
+  now **inert** (no misfire, no corruption) until co-bundling lands.
+- `onchip_reduction_reshard_region0` knob (LX disjointness: the consumer band base
+  collided with the silu inputs' LX@409600 once co-bundled).
+
+### Cheapest refuting probe before the co-bundle investment (ablations-over-static)
+A two-program LX-survival probe: program A writes a known pattern to `LX@B` and
+exits; a SEPARATE launch of program B reads `LX@B` without re-init. Confirms the "LX
+dies across program loads" inference directly. If LX unexpectedly survives, the
+simpler cross-bundle path reopens; expected outcome validates the co-bundle-only path.

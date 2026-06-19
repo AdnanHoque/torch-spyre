@@ -706,5 +706,14 @@ onchip_reduction_reshard_m_split: int = int(
 onchip_reduction_reshard_n_split: int = int(
     os.environ.get("SPYRE_ONCHIP_REDUCTION_RESHARD_N_SPLIT", "8")
 )
+# Per-core LX byte offset for the two reshard regions (producer-out tile +
+# consumer-in band). When mul and down_proj are co-bundled into one device
+# program, the mul's silu inputs already occupy an LX region (base 409600 in
+# the worked geometry); the two reshard regions MUST start ABOVE that
+# occupancy or they silently corrupt those inputs. 0 keeps the regions at the
+# LX base (the standalone-bundle case where no other LX tenant exists).
+onchip_reduction_reshard_region0: int = int(
+    os.environ.get("SPYRE_ONCHIP_REDUCTION_RESHARD_REGION0", "0")
+)
 
 install_config_module(sys.modules[__name__])

@@ -356,10 +356,13 @@ def splice_reshard(
 ) -> None:
     """Fold the reshard bridge into the consumer SDSC (mixed DL + data-op).
 
-    REJECTED by harvest dxp (``SdscTree.cpp:152`` "Datadsc not allowed, use
-    dldsc" -- ``SdscNode::importSdsc`` asserts every imported SDSC has an empty
-    ``dataOpdscs_``). Superseded by :func:`splice_reshard_standalone`. Kept for
-    cross-check / the non-bundle-import path. In place.
+    DEVICE-ACCEPTED (the worked path, fix ``d12110e``): the §5-patched harvest
+    dxp admits ONLY the mixed shape -- a ``dataOpdscs_ + dscs_ +
+    coreIdToDscSchedule`` SuperDSC folded into the consumer. It is the
+    STANDALONE pure-data-op variant (:func:`splice_reshard_standalone`) that is
+    rejected at ``dxp.cpp:479`` "Datadsc not allowed without dldsc schedule".
+    This mixed fold compiles, the patched dxp accepts it, and the bundle runs
+    end-to-end on device (``DEVICE_RESULT.md``). In place.
     """
     apply_lx_flip(
         producer_sdsc, LxFlip(producer_out_idx, producer_base, "producer-output")
