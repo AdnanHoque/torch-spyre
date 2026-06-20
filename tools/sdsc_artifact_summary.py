@@ -603,6 +603,7 @@ def _write_env(path: Path, args: argparse.Namespace, sdscs: list[Path]) -> None:
         "SPYRE_ONCHIP_MOVE_CARRIER",
         "SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS",
         "SPYRE_ONCHIP_MOVE_MAX_CELLS",
+        "SPYRE_ONCHIP_MOVE_DEBUG_CELLS",
     ]
     lines = [
         "command_args=" + _short(vars(args), limit=4000),

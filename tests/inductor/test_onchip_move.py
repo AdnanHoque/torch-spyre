@@ -33,6 +33,7 @@ from torch_spyre._inductor.onchip_move import (
     OnChipMovePlan,
     _coordinate_remap_v1_support_reason,
     _attach_plan_to_consumer,
+    _plan_json,
     build_coordinate_remap_metadata,
     build_onchip_move_cells,
     validate_onchip_move_cell_coverage,
@@ -438,6 +439,104 @@ def test_coordinate_remap_cells_cover_2d_without_overlap_or_gaps(monkeypatch):
     ][0]["source"]["lxByteRange"]["start"] == dataop["movements"][0]["bytes"]
     _assert_no_local_destination_overlap_or_gap(dataop)
     _assert_patterned_coordinate_remap_is_value_correct(dataop)
+
+
+def test_coordinate_remap_plan_json_omits_raw_cells_by_default(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_debug_cells", False)
+    cells = [
+        OnChipMoveCell(
+            cell_index=0,
+            source_core=0,
+            dest_core=1,
+            dim_starts={"d0_": 0},
+            dim_sizes={"d0_": 64},
+            bytes=128,
+            source_offset_bytes=0,
+            dest_offset_bytes=0,
+        )
+    ]
+    payload = _plan_json(_remap_plan(cells, device_sizes=[64], element_bytes=2))
+
+    assert payload["cell_count"] == 1
+    assert payload["bytes_moved"] == 128
+    assert "cells" not in payload
+    assert "movements" not in payload["coordinate_remap"]
+    assert payload["coordinate_remap"]["deeptools_dataop"]["movements"]
+
+
+def test_coordinate_remap_plan_json_can_include_debug_cells(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_debug_cells", True)
+    cells = [
+        OnChipMoveCell(
+            cell_index=0,
+            source_core=0,
+            dest_core=1,
+            dim_starts={"d0_": 0},
+            dim_sizes={"d0_": 64},
+            bytes=128,
+            source_offset_bytes=0,
+            dest_offset_bytes=0,
+        )
+    ]
+    payload = _plan_json(_remap_plan(cells, device_sizes=[64], element_bytes=2))
+
+    assert payload["cells"]
+    assert payload["coordinate_remap"]["movements"]
+
+
+def test_coordinate_remap_coalesces_contiguous_nonrectangular_metadata(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0)
+    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 0x100000)
+    cells = [
+        OnChipMoveCell(
+            cell_index=0,
+            source_core=0,
+            dest_core=1,
+            dim_starts={"d0_": 0, "d1_": 0},
+            dim_sizes={"d0_": 1, "d1_": 64},
+            bytes=128,
+            source_offset_bytes=0,
+            dest_offset_bytes=0,
+        ),
+        OnChipMoveCell(
+            cell_index=1,
+            source_core=0,
+            dest_core=1,
+            dim_starts={"d0_": 1, "d1_": 1},
+            dim_sizes={"d0_": 1, "d1_": 64},
+            bytes=128,
+            source_offset_bytes=128,
+            dest_offset_bytes=128,
+        ),
+    ]
+
+    metadata = build_coordinate_remap_metadata(
+        _remap_plan(cells, device_sizes=[2, 65], element_bytes=1),
+    )
+    dataop = metadata["deeptools_dataop"]
+
+    assert dataop["lowering"]["sourceMovements"] == 2
+    assert dataop["lowering"]["coalescedMovements"] == 1
+    assert dataop["movements"] == [
+        {
+            "moveIndex": 0,
+            "bytes": 256,
+            "source": {
+                "core": 0,
+                "logicalSlice": {"starts": {}, "sizes": {}, "coalesced": True},
+                "lxAddress": 0,
+                "localByteRange": {"start": 0, "end": 256},
+                "lxByteRange": {"start": 0, "end": 256},
+            },
+            "destination": {
+                "core": 1,
+                "logicalSlice": {"starts": {}, "sizes": {}, "coalesced": True},
+                "lxAddress": 0x100000,
+                "localByteRange": {"start": 0, "end": 256},
+                "lxByteRange": {"start": 0x100000, "end": 0x100100},
+            },
+        }
+    ]
 
 
 def test_onchip_move_cells_reject_ambiguous_fanout_owner():

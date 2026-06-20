@@ -197,8 +197,9 @@ Useful diagnostics and controls:
 ```bash
 export SPYRE_ONCHIP_MOVE_JSONL=/tmp/onchip_move.jsonl
 export SPYRE_ONCHIP_MOVE_DEBUG_DIR=/tmp/onchip_move_debug
-export SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS=512
-export SPYRE_ONCHIP_MOVE_MAX_CELLS=65536
+export SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS=8192
+export SPYRE_ONCHIP_MOVE_MAX_CELLS=131072
+export SPYRE_ONCHIP_MOVE_DEBUG_CELLS=0  # set to 1 only for raw-cell debugging
 export SPYRE_ONCHIP_MOVE_PRODUCER_LX_BASE=0
 export SPYRE_ONCHIP_MOVE_CONSUMER_LX_BASE=1048576
 ```
@@ -491,6 +492,31 @@ needs all of these to be true:
 2. the targeted edge does not fall back to HBM;
 3. trace-derived `kernel_ms` improves over the value-correct baseline;
 4. the SDSC table proves the intended remap path ran.
+
+## Current Benchmark Findings
+
+The current implementation now reaches the coordinate-remap path on a small
+BMM SwiGLU prefill-style probe.  The run directory
+`/tmp/swiglu-co-remap-opt-small-compare` used `B=1,S=256,E=128,H=512`,
+`SPYRE_SMALL_SWIGLU_MODE=bmm`, and trace-derived kernel timing:
+
+- branch baseline: `kernel_ms_per_iter=0.04234625`, `memory_ms_per_iter=0.03364425`;
+- coordinate remap: `kernel_ms_per_iter=0.03956075`, `memory_ms_per_iter=0.04075475`;
+- coordinate-remap artifacts: three planned remap edges in `onchip_move.jsonl`;
+  realized SDSC summary has `remap_chunks=3`, `remap_movements=264`, and
+  `remap_bytes=270336`.
+
+The full prefill-shaped BMM probe `B=1,S=512,E=4096,H=12800` now plans the
+intended remaps but does not yet compile promptly through Deeptools.  With the
+compact metadata path, each planned edge has `102400` logical cells, `13.1 MB`
+of movement, and `6400` coalesced backend movements.  The mixed consumer SDSC
+for the first realized edge is about `10.5 MB` and contains `6600` post-relay
+movement rows.  A chunk size of `512` generated `15` data-op chunks and left
+`dxp_standalone` CPU-bound for more than six minutes with no generated outputs.
+A chunk size of `8192` reduced that input to three data-op chunks, but still did
+not complete promptly.  The next performance blocker is therefore Deeptools
+scalability for thousands of explicit remap rows, not Torch raw-cell JSON size.
+
 
 ## Future Work
 

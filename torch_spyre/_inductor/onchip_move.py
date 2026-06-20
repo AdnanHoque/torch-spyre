@@ -693,6 +693,19 @@ def _try_extend_logical_slice(
     return {"starts": current_starts, "sizes": current_sizes}
 
 
+def _merge_logical_slice_for_dataop(
+    current: dict[str, Any],
+    next_slice: dict[str, Any],
+) -> dict[str, Any]:
+    merged = _try_extend_logical_slice(current, next_slice)
+    if merged is not None:
+        return merged
+    # Deeptools lowers coordinate remaps from byte ranges and core ids; the
+    # logical slice is diagnostic metadata.  Keep it compact when adjacent byte
+    # ranges do not form a single rectangular logical slice.
+    return {"starts": {}, "sizes": {}, "coalesced": True}
+
+
 def _coalesce_dataop_movements(movements: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(movements) < 2:
         return movements
@@ -720,12 +733,6 @@ def _coalesce_dataop_movements(movements: list[dict[str, Any]]) -> list[dict[str
             and int(previous["destination"]["core"])
             == int(movement["destination"]["core"])
         )
-        local_move = int(movement["source"]["core"]) == int(
-            movement["destination"]["core"]
-        )
-        previous_local_move = int(previous["source"]["core"]) == int(
-            previous["destination"]["core"]
-        )
         previous_source = previous["source"]["lxByteRange"]
         movement_source = movement["source"]["lxByteRange"]
         previous_dest = previous["destination"]["lxByteRange"]
@@ -734,22 +741,18 @@ def _coalesce_dataop_movements(movements: list[dict[str, Any]]) -> list[dict[str
             int(previous_source["end"]) == int(movement_source["start"])
             and int(previous_dest["end"]) == int(movement_dest["start"])
         )
-        if local_move or previous_local_move or not same_cores or not contiguous:
+        if not same_cores or not contiguous:
             coalesced.append(movement)
             continue
 
-        merged_source_slice = _try_extend_logical_slice(
+        merged_source_slice = _merge_logical_slice_for_dataop(
             previous["source"]["logicalSlice"],
             movement["source"]["logicalSlice"],
         )
-        merged_dest_slice = _try_extend_logical_slice(
+        merged_dest_slice = _merge_logical_slice_for_dataop(
             previous["destination"]["logicalSlice"],
             movement["destination"]["logicalSlice"],
         )
-        if merged_source_slice is None or merged_dest_slice is None:
-            coalesced.append(movement)
-            continue
-
         previous["bytes"] = int(previous["bytes"]) + int(movement["bytes"])
         previous["source"]["localByteRange"]["end"] = movement["source"][
             "localByteRange"
@@ -821,7 +824,11 @@ def _coordinate_remap_dataop_payload(
     }
 
 
-def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
+def build_coordinate_remap_metadata(
+    plan: OnChipMovePlan,
+    *,
+    include_debug_movements: bool = True,
+) -> dict[str, Any]:
     """Build torch-spyre-side metadata for a future Deeptools remap data-op."""
 
     producer_base = int(config.onchip_move_producer_lx_base)
@@ -888,7 +895,7 @@ def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
             "source_name": plan.source_name,
         },
     ]
-    return {
+    metadata = {
         "primitive": "lx_coordinate_remap_v0",
         "schema_version": 0,
         "source_name": plan.source_name,
@@ -898,7 +905,6 @@ def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
         "consumer_lx_base": consumer_base,
         "coverage": coverage,
         "dependency_order": dependency_order,
-        "movements": movements,
         "deeptools_dataop": _coordinate_remap_dataop_payload(
             source_name=plan.source_name,
             producer_name=plan.producer_name,
@@ -910,6 +916,9 @@ def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
             movements=movements,
         ),
     }
+    if include_debug_movements:
+        metadata["movements"] = movements
+    return metadata
 
 
 def _plan_json(plan: OnChipMovePlan) -> dict[str, Any]:
@@ -934,10 +943,14 @@ def _plan_json(plan: OnChipMovePlan) -> dict[str, Any]:
         "consumer_view": plan.consumer_view,
         "cell_count": len(plan.cells),
         "bytes_moved": plan.bytes_moved,
-        "cells": [dataclasses.asdict(cell) for cell in plan.cells],
     }
     if plan.cells:
-        payload["coordinate_remap"] = build_coordinate_remap_metadata(plan)
+        if config.onchip_move_debug_cells:
+            payload["cells"] = [dataclasses.asdict(cell) for cell in plan.cells]
+        payload["coordinate_remap"] = build_coordinate_remap_metadata(
+            plan,
+            include_debug_movements=config.onchip_move_debug_cells,
+        )
     return payload
 
 

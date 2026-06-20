@@ -48,8 +48,8 @@ BRANCH_VARIANTS = [
             "SPYRE_ONCHIP_MOVE_PLANNER": "1",
             "SPYRE_ONCHIP_MOVE_REALIZE": "1",
             "SPYRE_ONCHIP_MOVE_CARRIER": "coordinate_remap",
-            "SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS": "512",
-            "SPYRE_ONCHIP_MOVE_MAX_CELLS": "65536",
+            "SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS": "8192",
+            "SPYRE_ONCHIP_MOVE_MAX_CELLS": "131072",
         },
     ),
 ]
@@ -150,22 +150,29 @@ def _benchmark_command(args: argparse.Namespace, run_dir: Path) -> list[str]:
         return [part.format(run_dir=str(run_dir)) for part in args.command]
     benchmark = args.perf_suite_root / "benchmark.py"
     shape_args = [str(value) for value in args.shape]
-    return [
+    command = [
         sys.executable,
         str(benchmark),
         "--stack",
         "torch-spyre",
         "--op",
         args.op,
-        "--shape",
-        *shape_args,
-        "--runs",
-        str(args.runs),
-        "--without-compilation",
-        "--with-profiling",
-        "--output",
-        str(run_dir / "perf.txt"),
     ]
+    if args.op_file is not None:
+        command.extend(["--op-file", str(args.op_file)])
+    command.extend(
+        [
+            "--shape",
+            *shape_args,
+            "--runs",
+            str(args.runs),
+            "--without-compilation",
+            "--with-profiling",
+            "--output",
+            str(run_dir / "perf.txt"),
+        ]
+    )
+    return command
 
 
 def _write_env_record(
@@ -183,6 +190,7 @@ def _write_env_record(
         "SPYRE_ONCHIP_MOVE_CARRIER",
         "SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS",
         "SPYRE_ONCHIP_MOVE_MAX_CELLS",
+        "SPYRE_ONCHIP_MOVE_DEBUG_CELLS",
         "SPYRE_ONCHIP_MOVE_JSONL",
         "SPYRE_ONCHIP_MOVE_DEBUG_DIR",
         "SPYRE_SMALL_SWIGLU_MODE",
@@ -203,6 +211,7 @@ def _write_env_record(
         "perf_suite_branch": _repo_branch(args.perf_suite_root),
         "perf_suite_sha": _repo_sha(args.perf_suite_root),
         "op": args.op,
+        "op_file": str(args.op_file) if args.op_file else "",
         "shape": args.shape,
         "runs": args.runs,
         "env": {key: env.get(key, "") for key in keys},
@@ -289,6 +298,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline-sdsc-dir", type=Path)
     parser.add_argument("--variant", action="append", choices=[v.name for v in BRANCH_VARIANTS])
     parser.add_argument("--op", default="mlp")
+    parser.add_argument("--op-file", type=Path)
     parser.add_argument("--shape", type=int, nargs="+", default=[1, 512, 4096])
     parser.add_argument("--runs", type=int, default=7)
     parser.add_argument("--env", action="append", default=[], help="Extra KEY=VALUE env")

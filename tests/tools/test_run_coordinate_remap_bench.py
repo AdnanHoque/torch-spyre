@@ -27,6 +27,8 @@ def test_run_coordinate_remap_bench_dry_run_writes_variant_commands(
     deeptools_root.mkdir()
     perf_root.mkdir()
     (perf_root / "benchmark.py").write_text("# placeholder\n", encoding="utf-8")
+    op_file = tmp_path / "small_swiglu.py"
+    op_file.write_text("# placeholder\n", encoding="utf-8")
 
     rc = tool.main(
         [
@@ -40,6 +42,10 @@ def test_run_coordinate_remap_bench_dry_run_writes_variant_commands(
             str(perf_root),
             "--variant",
             "coordinate-remap",
+            "--op",
+            "small_swiglu",
+            "--op-file",
+            str(op_file),
             "--shape",
             "1",
             "512",
@@ -53,9 +59,12 @@ def test_run_coordinate_remap_bench_dry_run_writes_variant_commands(
     env_file = tmp_path / "runs" / "coordinate-remap" / "env.json"
     commands = json.loads(command_file.read_text(encoding="utf-8"))
     env = json.loads(env_file.read_text(encoding="utf-8"))
-    assert commands["benchmark"][commands["benchmark"].index("--op") + 1] == "mlp"
+    assert commands["benchmark"][commands["benchmark"].index("--op") + 1] == "small_swiglu"
+    assert commands["benchmark"][commands["benchmark"].index("--op-file") + 1] == str(op_file)
     assert commands["artifact_summary"]
     assert env["env"]["SPYRE_ONCHIP_MOVE_REALIZE"] == "1"
+    assert env["op"] == "small_swiglu"
+    assert env["op_file"] == str(op_file)
     assert env["shape"] == [1, 512, 4096]
 
 
