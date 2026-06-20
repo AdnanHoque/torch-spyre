@@ -1,0 +1,26 @@
+diff --git a/torch_spyre/_inductor/patches.py b/torch_spyre/_inductor/patches.py
+index 5f03247..eda286a 100644
+--- a/torch_spyre/_inductor/patches.py
++++ b/torch_spyre/_inductor/patches.py
+@@ -107,8 +107,12 @@ def enable_spyre_context(
+     from torch._inductor.fx_passes import joint_graph
+
+     origin_pass = list(joint_graph.pass_patterns)
+-    # disable mul_softmax_pattern and div_softmax_pattern for now
+-    joint_graph.pass_patterns.pop()
++    origin_lazy_init = joint_graph.lazy_init
++    # Measurement-only compatibility shim for PyTorch 2.12 in the AIU
++    # profiler pod: lazy attention-pattern initialization can call Spyre
++    # custom copy paths while fake tensors are inside no_dispatch().
++    joint_graph.pass_patterns.clear()
++    joint_graph.lazy_init = lambda input_device: None
+
+     # Inject the pre_scheduling_passes before the Scheduler is constructed,
+     # allowing the passes to modify the graph IR (buffers, inputs, constants).
+@@ -134,5 +138,6 @@ def enable_spyre_context(
+             yield spyre_context_decompositions
+         finally:
+             joint_graph.pass_patterns[:] = origin_pass
++            joint_graph.lazy_init = origin_lazy_init
+             Loops.has_large_inner_fn = old_loop
+             GraphLowering._update_scheduler = old_update_scheduler  # type: ignore[method-assign]

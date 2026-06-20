@@ -1,0 +1,32 @@
+{
+  "artifact_summary": [
+    "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/bin/python",
+    "/tmp/torch-spyre-co-remap-native/tools/sdsc_artifact_summary.py",
+    "--sdsc-dir",
+    "/tmp/swiglu_range_bench_jamie_mlp_20260620_upstream_main/upstream-main/inductor-cache/inductor-spyre",
+    "--trace-dir",
+    "/tmp/swiglu_range_bench_jamie_mlp_20260620_upstream_main/upstream-main/logs",
+    "--active-iters",
+    "4",
+    "--output-dir",
+    "/tmp/swiglu_range_bench_jamie_mlp_20260620_upstream_main/upstream-main/artifacts"
+  ],
+  "benchmark": [
+    "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/bin/python",
+    "/home/adnan-cdx/spyre-perf-suite/benchmark.py",
+    "--stack",
+    "torch-spyre",
+    "--op",
+    "mlp",
+    "--shape",
+    "1",
+    "512",
+    "4096",
+    "--runs",
+    "5",
+    "--without-compilation",
+    "--with-profiling",
+    "--output",
+    "/tmp/swiglu_range_bench_jamie_mlp_20260620_upstream_main/upstream-main/perf.txt"
+  ]
+}

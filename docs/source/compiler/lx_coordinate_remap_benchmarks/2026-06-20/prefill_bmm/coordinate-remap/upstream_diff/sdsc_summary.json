@@ -1,0 +1,22 @@
+{
+  "loc_counts": {
+    "hbm+lx": 15,
+    "lx": 7,
+    "lx->lx": 3
+  },
+  "op_counts": {
+    "LXCoordinateRemapOp": 3,
+    "add": 1,
+    "batchmatmul": 3,
+    "exp": 1,
+    "mul": 1,
+    "neg": 1,
+    "realdiv": 1
+  },
+  "remap_bytes": 13516800,
+  "remap_chunks": 3,
+  "remap_movements": 6600,
+  "row_count": 25,
+  "sdsc_count": 8,
+  "sdsc_with_dataops": 1
+}

@@ -503,14 +503,24 @@ JSON, `sdsc_senprog_summary.py` output, table/diff artifacts, and
 `sdsc_breakdown_jamie_style.md` / `.csv` files with the screenshot-style
 before/after columns.
 
-Trace-derived kernel timing from the current branch shows:
+Trace-derived kernel timing now separates upstream main, branch-disabled, and
+coordinate-remap variants:
 
-| Case | Shape | Baseline kernel ms | Coordinate-remap kernel ms | Delta | Remap chunks | Remap bytes |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| small BMM SwiGLU probe | `B=1,S=256,E=128,H=512` | `0.042498` | `0.038987` | `+8.26%` | `3` | `270336` |
-| prefill BMM SwiGLU probe | `B=1,S=512,E=4096,H=12800` | `5.706476` | `5.445835` | `+4.57%` | `3` | `13516800` |
-| Jamie `mlp` benchmark | `1x512x4096` | `5.693087` | `5.441576` | `+4.42%` | `3` | `13516800` |
-| decode-shaped BMM probe | `B=1,S=1,E=4096,H=12800` | `4.045427` | `4.117234` | `-1.77%` | `0` | `0` |
+| Case | Shape | Upstream main kernel ms | Branch-disabled kernel ms | Coordinate-remap kernel ms | Remap vs upstream | Remap chunks | Remap bytes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| small BMM SwiGLU probe | `B=1,S=256,E=128,H=512` | `0.042227` | `0.042498` | `0.038987` | `+7.67%` | `3` | `270336` |
+| prefill BMM SwiGLU probe | `B=1,S=512,E=4096,H=12800` | `5.717748` | `5.706476` | `5.445835` | `+4.76%` | `3` | `13516800` |
+| Jamie `mlp` benchmark | `1x512x4096` | `5.698974` | `5.693087` | `5.441576` | `+4.52%` | `3` | `13516800` |
+| decode-shaped BMM probe | `B=1,S=1,E=4096,H=12800` | `4.031822` | `4.045427` | `4.117234` | `-2.12%` | `0` | `0` |
+
+The upstream-main rows use Torch main at
+`3db9efbae0182cc916ab7f5f36f38ffbbb05cc25`.  A pristine main checkout did not
+run in this pod's PyTorch 2.12 profiler stack: the available main `_C.so` was
+stale for current Python bindings, and a compatible profiler overlay then hit
+PyTorch's joint-graph lazy attention-pattern `no_dispatch()` path.  The
+archived `upstream-main` variant therefore includes a measurement-only
+`patches.py` shim that disables `joint_graph.lazy_init` for Spyre, recorded in
+`upstream_main_measurement_patch.diff`.
 
 The prefill-shaped paths now compile through Deeptools and run on AIU.  The
 coordinate-remap variant removes the targeted HBM fallback on the first
@@ -527,9 +537,9 @@ decode-specific data-movement case is added.
 
 The `fms_granite_micro.swiglu` perf-suite entry did not produce usable
 artifacts in this pass because the compile/tracing job stalled before Inductor
-artifacts appeared.  The upstream-main profiler baseline also remains
-unpublished because the available profiler overlay was ABI-mismatched with the
-current main checkout.
+artifacts appeared.  The current publishable perf-suite row is Jamie's built-in
+`mlp` shape, which has the same `1x512x4096` MLP dimensions and now includes an
+upstream-main comparison.
 
 
 ## Future Work

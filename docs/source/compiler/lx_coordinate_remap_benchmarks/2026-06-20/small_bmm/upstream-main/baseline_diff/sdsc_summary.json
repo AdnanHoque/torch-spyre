@@ -1,0 +1,20 @@
+{
+  "loc_counts": {
+    "hbm+lx": 18,
+    "lx": 4
+  },
+  "op_counts": {
+    "add": 1,
+    "batchmatmul": 3,
+    "exp": 1,
+    "mul": 1,
+    "neg": 1,
+    "realdiv": 1
+  },
+  "remap_bytes": 0,
+  "remap_chunks": 0,
+  "remap_movements": 0,
+  "row_count": 22,
+  "sdsc_count": 8,
+  "sdsc_with_dataops": 0
+}

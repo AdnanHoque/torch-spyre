@@ -1,0 +1,16 @@
+{
+  "active_iters": 4,
+  "kernel_durations_ms": {
+    "/tmp/swiglu_range_bench_decode_bmm_20260620_upstream_main/upstream-main/inductor-cache/inductor-spyre/sdsc_fused_bmm_1_obv__lbc": 7.339722,
+    "/tmp/swiglu_range_bench_decode_bmm_20260620_upstream_main/upstream-main/inductor-cache/inductor-spyre/sdsc_fused_bmm_mul_silu_0": 8.787565999999998
+  },
+  "kernel_event_counts": {
+    "/tmp/swiglu_range_bench_decode_bmm_20260620_upstream_main/upstream-main/inductor-cache/inductor-spyre/sdsc_fused_bmm_1_obv__lbc": 4,
+    "/tmp/swiglu_range_bench_decode_bmm_20260620_upstream_main/upstream-main/inductor-cache/inductor-spyre/sdsc_fused_bmm_mul_silu_0": 4
+  },
+  "kernel_ms_per_iter": 4.031822,
+  "kernel_ms_total": 16.127288,
+  "memory_ms_per_iter": 5.297144000000002,
+  "memory_ms_total": 21.18857600000001,
+  "trace": "/tmp/swiglu_range_bench_decode_bmm_20260620_upstream_main/upstream-main/logs/tsp-stack/small_swiglu/adnan-cdx-spyre-dev-pf_2294891.1781947844789580072.pt.trace.json"
+}
