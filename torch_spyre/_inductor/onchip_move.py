@@ -235,10 +235,54 @@ def _local_offset_bytes(
     return offset_elements * int(element_bytes), None
 
 
+def _coordinate_remap_v1_stride_map(
+    *,
+    device_sizes: list[int],
+    device_stride_map: list[int],
+    element_bytes: int,
+) -> tuple[list[int], str | None]:
+    """Return a physical device-dim stride map for whole-stick remap planning.
+
+    Some BMM-shaped fixed-tile layouts carry an extra trailing host stride or a
+    collapsed size-one dimension for the in-stick coordinate, e.g.
+    ``device_size=[M, out_sticks, 1, 64]`` with
+    ``stride_map=[512, 64, -1, 1]``.  For movement planning the final device
+    dim is the physical stick element dim and nonpositive sentinel strides
+    should not be considered faster than that stick dim.
+    """
+
+    if len(device_stride_map) == len(device_sizes) + 1:
+        if int(device_stride_map[-1]) != 1:
+            return [], "coordinate-remap-v1-requires-device-stride-map"
+        strides = [int(stride) for stride in device_stride_map[:-1]]
+    elif len(device_stride_map) == len(device_sizes):
+        strides = [int(stride) for stride in device_stride_map]
+    else:
+        return [], "coordinate-remap-v1-requires-device-stride-map"
+
+    if (
+        strides
+        and int(device_sizes[-1]) * int(element_bytes) == 128
+        and int(strides[-1]) != 1
+    ):
+        strides[-1] = 1
+    if any(int(stride) <= 0 for stride in strides):
+        positive_strides = [int(stride) for stride in strides if int(stride) > 0]
+        if not positive_strides:
+            return [], "coordinate-remap-v1-requires-device-stride-map"
+        sentinel_stride = max(positive_strides) * max(math.prod(device_sizes), 1)
+        strides = [
+            int(stride) if int(stride) > 0 else int(sentinel_stride)
+            for stride in strides
+        ]
+    return strides, None
+
+
 def _coordinate_remap_v1_lx_dim_order(
     *,
     device_sizes: list[int],
     device_stride_map: list[int],
+    element_bytes: int,
 ) -> tuple[list[int], str | None]:
     """Return Deeptools' local LX order for fixed-tiled whole-stick moves.
 
@@ -250,8 +294,13 @@ def _coordinate_remap_v1_lx_dim_order(
     addresses consumed by data ops.
     """
 
-    if len(device_stride_map) != len(device_sizes):
-        return [], "coordinate-remap-v1-requires-device-stride-map"
+    device_stride_map, reason = _coordinate_remap_v1_stride_map(
+        device_sizes=device_sizes,
+        device_stride_map=device_stride_map,
+        element_bytes=element_bytes,
+    )
+    if reason is not None:
+        return [], reason
     fastest_dim = min(
         range(len(device_sizes)),
         key=lambda dim: (int(device_stride_map[dim]), dim),
@@ -288,8 +337,13 @@ def _coordinate_remap_v1_refined_splits(
 ) -> tuple[dict[int, int], str | None]:
     """Refine common splits to physical whole-stick movements for v1 lowering."""
 
-    if len(device_stride_map) != len(device_sizes):
-        return {}, "coordinate-remap-v1-requires-device-stride-map"
+    device_stride_map, reason = _coordinate_remap_v1_stride_map(
+        device_sizes=device_sizes,
+        device_stride_map=device_stride_map,
+        element_bytes=element_bytes,
+    )
+    if reason is not None:
+        return {}, reason
     fastest_dim = min(
         range(len(device_sizes)),
         key=lambda dim: (int(device_stride_map[dim]), dim),
@@ -356,6 +410,7 @@ def build_onchip_move_cells(
         local_dim_order, reason = _coordinate_remap_v1_lx_dim_order(
             device_sizes=device_sizes,
             device_stride_map=device_stride_map or [],
+            element_bytes=element_bytes,
         )
         if reason is not None:
             return [], reason
@@ -894,6 +949,11 @@ def _skip_plan(
     reason: str,
     producer_view: PerCoreView | None = None,
     consumer_view: PerCoreView | None = None,
+    device_sizes: list[int] | None = None,
+    device_stride_map: list[int] | None = None,
+    element_bytes: int = 0,
+    producer_region_bytes: int = 0,
+    consumer_region_bytes: int = 0,
 ) -> OnChipMovePlan:
     return OnChipMovePlan(
         source_name=source_name,
@@ -905,13 +965,13 @@ def _skip_plan(
         fallback_reason=reason,
         realization_status="not-realized-skipped",
         carrier=config.onchip_move_carrier,
-        device_sizes=[],
-        device_stride_map=[],
-        element_bytes=0,
+        device_sizes=list(device_sizes or []),
+        device_stride_map=list(device_stride_map or []),
+        element_bytes=int(element_bytes),
         producer_core_count=_op_num_cores(producer),
         consumer_core_count=_op_num_cores(consumer),
-        producer_region_bytes=0,
-        consumer_region_bytes=0,
+        producer_region_bytes=int(producer_region_bytes),
+        consumer_region_bytes=int(consumer_region_bytes),
         producer_view=_view_to_json(producer_view or PerCoreView((), ())),
         consumer_view=_view_to_json(consumer_view or PerCoreView((), ())),
         cells=[],
@@ -999,6 +1059,19 @@ def plan_onchip_move_edge(
             reason=reason,
             producer_view=producer_view,
             consumer_view=consumer_view,
+            device_sizes=device_sizes,
+            device_stride_map=device_stride_map,
+            element_bytes=element_bytes,
+            producer_region_bytes=_view_region_bytes(
+                producer_view,
+                device_sizes=device_sizes,
+                element_bytes=element_bytes,
+            ),
+            consumer_region_bytes=_view_region_bytes(
+                consumer_view,
+                device_sizes=device_sizes,
+                element_bytes=element_bytes,
+            ),
         )
     if config.onchip_move_carrier == "coordinate_remap":
         reason = _coordinate_remap_v1_support_reason(cells)
@@ -1010,6 +1083,19 @@ def plan_onchip_move_edge(
                 reason=reason,
                 producer_view=producer_view,
                 consumer_view=consumer_view,
+                device_sizes=device_sizes,
+                device_stride_map=device_stride_map,
+                element_bytes=element_bytes,
+                producer_region_bytes=_view_region_bytes(
+                    producer_view,
+                    device_sizes=device_sizes,
+                    element_bytes=element_bytes,
+                ),
+                consumer_region_bytes=_view_region_bytes(
+                    consumer_view,
+                    device_sizes=device_sizes,
+                    element_bytes=element_bytes,
+                ),
             )
 
     return OnChipMovePlan(

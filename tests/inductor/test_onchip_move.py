@@ -231,6 +231,64 @@ def test_coordinate_remap_v1_negmm_pure_m_consumer_uses_lx_stick_major_order(
     assert cells[256].dest_offset_bytes == 1024
 
 
+def test_coordinate_remap_v1_bmm_swiglu_layout_canonicalizes_trailing_stick_stride(
+    monkeypatch,
+):
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")
+    core_id = sympy.Symbol("core_id")
+    producer_view = PerCoreView(
+        work_slice_dims=((0, 4), (1, 8)),
+        core_to_slot=(
+            (0, sympy.Mod(core_id, 4)),
+            (1, sympy.Mod(sympy.floor(core_id / 4), 8)),
+        ),
+    )
+    consumer_view = PerCoreView(
+        work_slice_dims=((0, 32),),
+        core_to_slot=((0, sympy.Mod(core_id, 32)),),
+    )
+
+    cells, reason = build_onchip_move_cells(
+        producer_view=producer_view,
+        consumer_view=consumer_view,
+        device_sizes=[256, 8, 1, 64],
+        device_stride_map=[512, 64, -1, 1],
+        element_bytes=2,
+        producer_core_count=32,
+        consumer_core_count=32,
+        max_cells=65536,
+        coordinate_remap_v1=True,
+    )
+
+    assert reason is None
+    assert len(cells) == 256 * 8
+    assert sum(cell.bytes for cell in cells) == 256 * 8 * 64 * 2
+    assert all(cell.bytes == 128 for cell in cells)
+    assert _coordinate_remap_v1_support_reason(cells) is None
+
+    assert cells[0].source_core == 0
+    assert cells[0].dest_core == 0
+    assert cells[0].dim_starts == {"d0_": 0, "d1_": 0, "d2_": 0, "d3_": 0}
+    assert cells[0].source_offset_bytes == 0
+    assert cells[0].dest_offset_bytes == 0
+
+    # The BMM-shaped layout orders device dims as
+    # [mb, out_stick, collapsed_x, stick_elem], so adjacent output sticks are
+    # not adjacent in the pure-M consumer LX tile.
+    assert cells[1].dim_starts == {"d0_": 0, "d1_": 1, "d2_": 0, "d3_": 0}
+    assert cells[1].source_core == 4
+    assert cells[1].dest_core == 0
+    assert cells[1].source_offset_bytes == 0
+    assert cells[1].dest_offset_bytes == 1024
+
+    # Advancing one row within the same output stick is adjacent in LX.
+    assert cells[8].dim_starts == {"d0_": 1, "d1_": 0, "d2_": 0, "d3_": 0}
+    assert cells[8].source_core == 0
+    assert cells[8].dest_core == 0
+    assert cells[8].source_offset_bytes == 128
+    assert cells[8].dest_offset_bytes == 128
+
+
 def test_coordinate_remap_cells_cover_1d_without_overlap_or_gaps(monkeypatch):
     monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")
     monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0x1000)

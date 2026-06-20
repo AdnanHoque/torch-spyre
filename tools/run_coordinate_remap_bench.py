@@ -185,6 +185,7 @@ def _write_env_record(
         "SPYRE_ONCHIP_MOVE_MAX_CELLS",
         "SPYRE_ONCHIP_MOVE_JSONL",
         "SPYRE_ONCHIP_MOVE_DEBUG_DIR",
+        "SPYRE_SMALL_SWIGLU_MODE",
     ]
     torch_root = _runtime_torch_root(args, variant)
     payload = {
