@@ -23,7 +23,9 @@ Upstream-main measurement note:
 
 Primary metric is trace/perf `kernel_ms_per_iter`; wall time is not used for speedup claims.
 
-See `results_table.md` and `results.csv` for the summary.
+See `results_table.md` and `results.csv` for the summary.  See
+`../../lx_coordinate_remap_swiglu_snapshot_2026_06_20.md` for the current
+first-principles snapshot of how the FMS fused SwiGLU speedup was produced.
 
 Each case/variant directory includes:
 
@@ -31,7 +33,12 @@ Each case/variant directory includes:
 - `artifacts/trace_summary.json`, `artifacts/sdsc_summary.json`, `artifacts/sdsc_table.md`, `artifacts/sdsc_table.csv`
 - raw `sdsc_*.json` files under `sdsc_json/`
 - raw Kineto trace JSON under `trace/` when available
-- `sdsc_breakdown_jamie_style.md` and `.csv`, matching the comparison columns from the shared screenshot
+- `sdsc_breakdown_jamie_style.md` and `.csv`, the original table-format dump
+- `sdsc_jamie_summary.md`, `sdsc_jamie_table.md`, and `sdsc_jamie_table.csv`
+  for newly generated Jamie-style operation summaries and screenshot-shaped
+  tables
+- `sdsc_hbm_roundtrip_comparison.md` for coordinate-remap variants that have a
+  branch baseline
 - `baseline_diff/sdsc_diff.md` for non-baseline variants where a branch baseline exists
 - `upstream_diff/sdsc_diff.md` for non-upstream variants where an upstream-main baseline exists
 
