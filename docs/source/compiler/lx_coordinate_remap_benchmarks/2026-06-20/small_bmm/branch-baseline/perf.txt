@@ -1,0 +1,37 @@
+metric                      max_ms       mean_ms     median_ms        min_ms
+----------------------------------------------------------------------------
+wall_clock_ms                0.969         0.818         0.782         0.740
+cpu_ms                       0.757         0.757         0.757         0.757
+spyre_ms                     0.083         0.083         0.083         0.083
+kernel_ms                    0.042         0.042         0.042         0.042
+memory_transfer_ms           0.041         0.041         0.041         0.041
+pt_util%                     3.286
+
+Spyre-kernel_times:                    mean_ms      PT-Util%
+-------------------------------------------------------------
+Memset-(Device)                          0.007         0.000
+sdsc_fused_bmm_mul_silu_0_mqe4           0.037         2.507
+sdsc_fused_bmm_1_vm19bq76                0.005         8.668
+Total                                    0.016         3.286
+
+CPU-kernel_times:                               mean_ms
+--------------------------------------------------------
+aten::to                                          0.080
+aten::_to_copy                                    0.092
+aten::empty_strided                               0.004
+aten::copy_                                       0.085
+aten::_copy_from                                  0.084
+aiuLaunchDMIControlBlocks                         0.001
+TorchDynamo-Cache-Lookup                          0.028
+Torch-Compiled-Region:-0/0                        0.224
+Pregraph-bytecode                                 0.002
+AOTDispatcher-Runtime-Wrapper-Prologue            0.008
+##-Call-CompiledFxGraph-None-##                   0.167
+aten::empty                                       0.004
+aten::lift_fresh                                  0.000
+aten::detach_                                     0.002
+detach_                                           0.001
+launch_kernel:sdsc_fused_bmm_mul_silu_0           0.032
+aiuLaunchControlBlocks                            0.001
+launch_kernel:sdsc_fused_bmm_1                    0.016
+aiuLaunchDMOControlBlocks                         0.001

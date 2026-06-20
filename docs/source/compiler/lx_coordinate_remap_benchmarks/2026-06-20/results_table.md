@@ -1,0 +1,13 @@
+# LX Coordinate Remap Benchmark Results
+
+| case | variant | shape | kernel_ms_per_iter | vs_branch_baseline | memory_ms_per_iter | sdsc_count | row_count | remap_chunks | remap_bytes | planned_edges | planned_bytes | benchmark_rc | artifact_rc | artifact_dir |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| small_bmm | branch-baseline | Custom BMM SwiGLU probe, B=1 S=256 E=128 H=512 | 0.042498 | 0.00% | 0.040955 | 8 | 22 | 0 | 0 | 0 | 0 | 0 | 0 | small_bmm/branch-baseline |
+| small_bmm | planned-only | Custom BMM SwiGLU probe, B=1 S=256 E=128 H=512 | 0.041898 | 1.41% | 0.046052 | 8 | 22 | 0 | 0 | 3 | 786432 | 0 | 0 | small_bmm/planned-only |
+| small_bmm | coordinate-remap | Custom BMM SwiGLU probe, B=1 S=256 E=128 H=512 | 0.038987 | 8.26% | 0.048497 | 8 | 25 | 3 | 270336 | 3 | 786432 | 0 | 0 | small_bmm/coordinate-remap |
+| prefill_bmm | branch-baseline | Custom BMM prefill SwiGLU probe, B=1 S=512 E=4096 H=12800 | 5.706476 | 0.00% | 5.454924 | 8 | 22 | 0 | 0 | 0 | 0 | 0 | 0 | prefill_bmm/branch-baseline |
+| prefill_bmm | coordinate-remap | Custom BMM prefill SwiGLU probe, B=1 S=512 E=4096 H=12800 | 5.445835 | 4.57% | 5.939964 | 8 | 25 | 3 | 13516800 | 3 | 39321600 | 0 | 0 | prefill_bmm/coordinate-remap |
+| decode_bmm | branch-baseline | Custom BMM decode-shaped SwiGLU probe, B=1 S=1 E=4096 H=12800 | 4.045427 | 0.00% | 6.014840 | 8 | 22 | 0 | 0 | 0 | 0 | 0 | 0 | decode_bmm/branch-baseline |
+| decode_bmm | coordinate-remap | Custom BMM decode-shaped SwiGLU probe, B=1 S=1 E=4096 H=12800 | 4.117234 | -1.77% | 5.389968 | 8 | 22 | 0 | 0 | 0 | 0 | 0 | 0 | decode_bmm/coordinate-remap |
+| jamie_mlp | branch-baseline | spyre-perf-suite jamie/dev built-in mlp, shape 1x512x4096 | 5.693087 | 0.00% | 5.633852 | 8 | 22 | 0 | 0 | 0 | 0 | 0 | 0 | jamie_mlp/branch-baseline |
+| jamie_mlp | coordinate-remap | spyre-perf-suite jamie/dev built-in mlp, shape 1x512x4096 | 5.441576 | 4.42% | 6.562700 | 8 | 25 | 3 | 13516800 | 3 | 39321600 | 0 | 0 | jamie_mlp/coordinate-remap |

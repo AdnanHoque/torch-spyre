@@ -496,27 +496,40 @@ needs all of these to be true:
 
 ## Current Benchmark Findings
 
-The current implementation now reaches the coordinate-remap path on a small
-BMM SwiGLU prefill-style probe.  The run directory
-`/tmp/swiglu-co-remap-opt-small-compare` used `B=1,S=256,E=128,H=512`,
-`SPYRE_SMALL_SWIGLU_MODE=bmm`, and trace-derived kernel timing:
+The current archived results live under
+`docs/source/compiler/lx_coordinate_remap_benchmarks/2026-06-20`.  Each run
+directory contains raw benchmark logs, Kineto traces, trace summaries, SDSC
+JSON, `sdsc_senprog_summary.py` output, table/diff artifacts, and
+`sdsc_breakdown_jamie_style.md` / `.csv` files with the screenshot-style
+before/after columns.
 
-- branch baseline: `kernel_ms_per_iter=0.04234625`, `memory_ms_per_iter=0.03364425`;
-- coordinate remap: `kernel_ms_per_iter=0.03956075`, `memory_ms_per_iter=0.04075475`;
-- coordinate-remap artifacts: three planned remap edges in `onchip_move.jsonl`;
-  realized SDSC summary has `remap_chunks=3`, `remap_movements=264`, and
-  `remap_bytes=270336`.
+Trace-derived kernel timing from the current branch shows:
 
-The full prefill-shaped BMM probe `B=1,S=512,E=4096,H=12800` now plans the
-intended remaps but does not yet compile promptly through Deeptools.  With the
-compact metadata path, each planned edge has `102400` logical cells, `13.1 MB`
-of movement, and `6400` coalesced backend movements.  The mixed consumer SDSC
-for the first realized edge is about `10.5 MB` and contains `6600` post-relay
-movement rows.  A chunk size of `512` generated `15` data-op chunks and left
-`dxp_standalone` CPU-bound for more than six minutes with no generated outputs.
-A chunk size of `8192` reduced that input to three data-op chunks, but still did
-not complete promptly.  The next performance blocker is therefore Deeptools
-scalability for thousands of explicit remap rows, not Torch raw-cell JSON size.
+| Case | Shape | Baseline kernel ms | Coordinate-remap kernel ms | Delta | Remap chunks | Remap bytes |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| small BMM SwiGLU probe | `B=1,S=256,E=128,H=512` | `0.042498` | `0.038987` | `+8.26%` | `3` | `270336` |
+| prefill BMM SwiGLU probe | `B=1,S=512,E=4096,H=12800` | `5.706476` | `5.445835` | `+4.57%` | `3` | `13516800` |
+| Jamie `mlp` benchmark | `1x512x4096` | `5.693087` | `5.441576` | `+4.42%` | `3` | `13516800` |
+| decode-shaped BMM probe | `B=1,S=1,E=4096,H=12800` | `4.045427` | `4.117234` | `-1.77%` | `0` | `0` |
+
+The prefill-shaped paths now compile through Deeptools and run on AIU.  The
+coordinate-remap variant removes the targeted HBM fallback on the first
+matmul-to-pointwise edge, emits three `LXCoordinateRemapOp` data-op rows, and
+places those rows before the pointwise consumer.  Memory time is still mixed:
+the remap variants improve kernel time but increase the trace memory bucket on
+the prefill and Jamie MLP runs, so the current result is promising but not yet
+a final end-to-end speedup claim.
+
+The decode-shaped probe does not trigger coordinate remap today because
+`S=1` does not produce the same mismatched producer/consumer ownership pattern.
+Its small regression should be treated as harness/config noise until a
+decode-specific data-movement case is added.
+
+The `fms_granite_micro.swiglu` perf-suite entry did not produce usable
+artifacts in this pass because the compile/tracing job stalled before Inductor
+artifacts appeared.  The upstream-main profiler baseline also remains
+unpublished because the available profiler overlay was ABI-mismatched with the
+current main checkout.
 
 
 ## Future Work
