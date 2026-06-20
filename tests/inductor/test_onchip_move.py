@@ -19,6 +19,7 @@ import sympy
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor import config as spyre_config
 from torch_spyre._inductor.codegen.onchip_move import (
+    _reuse_key,
     _validate_lx_regions,
     build_coordinate_remap_onchip_move_sdsc,
     build_mixed_onchip_move_sdsc,
@@ -31,10 +32,12 @@ from torch_spyre._inductor.onchip_move import (
     ONCHIP_MOVE_OP_INFO_KEY,
     OnChipMoveCell,
     OnChipMovePlan,
+    OnChipMoveSubview,
     _coordinate_remap_v1_support_reason,
     _expand_dataop_movement_ranges,
     _attach_plan_to_consumer,
     _plan_json,
+    _subview_from_device_coordinates,
     build_coordinate_remap_metadata,
     build_onchip_move_cells,
     validate_onchip_move_cell_coverage,
@@ -289,6 +292,169 @@ def test_coordinate_remap_v1_bmm_swiglu_layout_canonicalizes_trailing_stick_stri
     assert cells[8].dest_core == 0
     assert cells[8].source_offset_bytes == 128
     assert cells[8].dest_offset_bytes == 128
+
+
+def test_coordinate_remap_subview_infers_fused_swiglu_half_window():
+    d0, d1 = sympy.symbols("d0 d1", integer=True)
+
+    subview = _subview_from_device_coordinates(
+        coordinates=[d0, sympy.floor(d1 / 64) + 200, 0, sympy.Mod(d1, 64)],
+        ranges={d0: 512, d1: 12800},
+        device_sizes=[512, 400, 1, 64],
+    )
+
+    assert subview == OnChipMoveSubview(
+        starts=[0, 200, 0, 0],
+        sizes=[512, 200, 1, 64],
+    )
+
+
+def test_coordinate_remap_subview_fused_swiglu_half_keeps_full_owner_geometry(
+    monkeypatch,
+):
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")
+    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0)
+    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 0x100000)
+    core_id = sympy.Symbol("core_id")
+    producer_view = PerCoreView(
+        work_slice_dims=((0, 4), (1, 8)),
+        core_to_slot=(
+            (0, sympy.Mod(core_id, 4)),
+            (1, sympy.floor(core_id / 4)),
+        ),
+    )
+    consumer_view = PerCoreView(
+        work_slice_dims=((0, 32),),
+        core_to_slot=((0, sympy.Mod(core_id, 32)),),
+    )
+    subview = OnChipMoveSubview(
+        starts=[0, 200, 0, 0],
+        sizes=[512, 200, 1, 64],
+    )
+
+    cells, reason = build_onchip_move_cells(
+        producer_view=producer_view,
+        consumer_view=consumer_view,
+        device_sizes=[512, 400, 1, 64],
+        device_stride_map=[25600, 64, -1, 1],
+        element_bytes=2,
+        producer_core_count=32,
+        consumer_core_count=32,
+        max_cells=131072,
+        coordinate_remap_v1=True,
+        movement_subview=subview,
+    )
+
+    assert reason is None
+    assert len(cells) == 512 * 200
+    assert sum(cell.bytes for cell in cells) == 512 * 200 * 64 * 2
+    assert all(cell.bytes == 128 for cell in cells)
+    assert _coordinate_remap_v1_support_reason(cells) is None
+    assert (
+        validate_onchip_move_cell_coverage(
+            cells,
+            device_sizes=[512, 400, 1, 64],
+            movement_subview=subview,
+        )
+        is None
+    )
+
+    assert cells[0].source_core == 16
+    assert cells[0].dest_core == 0
+    assert cells[0].dim_starts == {"d0_": 0, "d1_": 200, "d2_": 0, "d3_": 0}
+    assert cells[0].dim_sizes == {"d0_": 1, "d1_": 1, "d2_": 1, "d3_": 64}
+    assert cells[0].source_offset_bytes == 0
+    assert cells[0].dest_offset_bytes == 409600
+
+    assert cells[1].dim_starts == {"d0_": 0, "d1_": 201, "d2_": 0, "d3_": 0}
+    assert cells[1].source_core == 16
+    assert cells[1].dest_core == 0
+    assert cells[1].source_offset_bytes == 16384
+    assert cells[1].dest_offset_bytes == 411648
+
+    assert cells[200].dim_starts == {"d0_": 1, "d1_": 200, "d2_": 0, "d3_": 0}
+    assert cells[200].source_core == 16
+    assert cells[200].dest_core == 0
+    assert cells[200].source_offset_bytes == 128
+    assert cells[200].dest_offset_bytes == 409728
+
+    metadata = build_coordinate_remap_metadata(
+        _remap_plan(
+            cells,
+            device_sizes=[512, 400, 1, 64],
+            element_bytes=2,
+            movement_subview=subview,
+        ),
+        include_debug_movements=False,
+    )
+    assert metadata["coverage"]["subview"] == {
+        "starts": [0, 200, 0, 0],
+        "sizes": [512, 200, 1, 64],
+    }
+    dataop = metadata["deeptools_dataop"]
+    assert dataop["coverage"]["subview"] == metadata["coverage"]["subview"]
+    assert dataop["lowering"]["sourceMovements"] <= len(cells)
+
+
+def test_coordinate_remap_subview_rejects_partial_stick_window(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")
+    core_id = sympy.Symbol("core_id")
+    producer_view = PerCoreView(
+        work_slice_dims=((0, 4), (1, 8)),
+        core_to_slot=(
+            (0, sympy.Mod(core_id, 4)),
+            (1, sympy.floor(core_id / 4)),
+        ),
+    )
+    consumer_view = PerCoreView(
+        work_slice_dims=((0, 32),),
+        core_to_slot=((0, sympy.Mod(core_id, 32)),),
+    )
+
+    cells, reason = build_onchip_move_cells(
+        producer_view=producer_view,
+        consumer_view=consumer_view,
+        device_sizes=[512, 400, 1, 64],
+        device_stride_map=[25600, 64, -1, 1],
+        element_bytes=2,
+        producer_core_count=32,
+        consumer_core_count=32,
+        max_cells=131072,
+        coordinate_remap_v1=True,
+        movement_subview=OnChipMoveSubview(
+            starts=[0, 200, 0, 32],
+            sizes=[512, 200, 1, 32],
+        ),
+    )
+
+    assert cells == []
+    assert reason == "subview-requires-unsplit-device-dim"
+
+
+def test_coordinate_remap_reuse_key_distinguishes_split_subviews():
+    base = {
+        "source_name": "buf0",
+        "producer": "buf0",
+        "consumer_view": {"work_slice_dims": [{"device_dim": 0, "split": 32}]},
+    }
+
+    assert _reuse_key(
+        {
+            **base,
+            "movement_subview": {
+                "starts": [0, 0, 0, 0],
+                "sizes": [512, 200, 1, 64],
+            },
+        }
+    ) != _reuse_key(
+        {
+            **base,
+            "movement_subview": {
+                "starts": [0, 200, 0, 0],
+                "sizes": [512, 200, 1, 64],
+            },
+        }
+    )
 
 
 def test_coordinate_remap_cells_cover_1d_without_overlap_or_gaps(monkeypatch):
@@ -1500,6 +1666,7 @@ def _remap_plan(
     *,
     device_sizes: list[int],
     element_bytes: int,
+    movement_subview: OnChipMoveSubview | None = None,
 ) -> OnChipMovePlan:
     return OnChipMovePlan(
         source_name="buf0",
@@ -1521,6 +1688,7 @@ def _remap_plan(
         producer_view={},
         consumer_view={},
         cells=cells,
+        movement_subview=movement_subview,
     )
 
 

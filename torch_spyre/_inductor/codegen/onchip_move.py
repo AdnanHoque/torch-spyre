@@ -312,7 +312,13 @@ def _reuse_key(plan: dict[str, Any]) -> tuple[str, str, str]:
     return (
         str(plan.get("source_name")),
         str(plan.get("producer")),
-        json.dumps(plan.get("consumer_view", {}), sort_keys=True),
+        json.dumps(
+            {
+                "consumer_view": plan.get("consumer_view", {}),
+                "movement_subview": plan.get("movement_subview"),
+            },
+            sort_keys=True,
+        ),
     )
 
 

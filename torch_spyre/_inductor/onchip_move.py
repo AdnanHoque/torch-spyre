@@ -37,7 +37,11 @@ from torch._inductor.ir import ComputedBuffer, Operation
 from torch_spyre._inductor import config
 from torch_spyre._inductor.codegen.compute_ops import num_bytes
 from torch_spyre._inductor.logging_utils import get_inductor_logger
-from torch_spyre._inductor.pass_utils import PerCoreView, _per_core_view_on_buf
+from torch_spyre._inductor.pass_utils import (
+    PerCoreView,
+    _per_core_view_on_buf,
+    device_coordinates,
+)
 
 logger = get_inductor_logger("onchip_move")
 
@@ -55,6 +59,12 @@ class OnChipMoveCell:
     bytes: int
     source_offset_bytes: int
     dest_offset_bytes: int
+
+
+@dataclasses.dataclass(frozen=True)
+class OnChipMoveSubview:
+    starts: list[int]
+    sizes: list[int]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -78,6 +88,7 @@ class OnChipMovePlan:
     producer_view: dict[str, Any]
     consumer_view: dict[str, Any]
     cells: list[OnChipMoveCell]
+    movement_subview: OnChipMoveSubview | None = None
 
     @property
     def bytes_moved(self) -> int:
@@ -188,6 +199,81 @@ def _side_slice_geometry(
         starts[dim] = slot * chunk
         sizes[dim] = chunk
     return starts, sizes
+
+
+def _default_subview(device_sizes: list[int]) -> OnChipMoveSubview:
+    return OnChipMoveSubview(
+        starts=[0 for _size in device_sizes],
+        sizes=[int(size) for size in device_sizes],
+    )
+
+
+def _is_full_subview(
+    subview: OnChipMoveSubview,
+    *,
+    device_sizes: list[int],
+) -> bool:
+    return (
+        len(subview.starts) == len(device_sizes)
+        and len(subview.sizes) == len(device_sizes)
+        and all(int(start) == 0 for start in subview.starts)
+        and [int(size) for size in subview.sizes]
+        == [int(size) for size in device_sizes]
+    )
+
+
+def _validate_subview(
+    subview: OnChipMoveSubview,
+    *,
+    device_sizes: list[int],
+) -> str | None:
+    if len(subview.starts) != len(device_sizes) or len(subview.sizes) != len(
+        device_sizes
+    ):
+        return "subview-rank-mismatch"
+    for start, size, device_size in zip(subview.starts, subview.sizes, device_sizes):
+        start = int(start)
+        size = int(size)
+        device_size = int(device_size)
+        if start < 0 or size <= 0 or start + size > device_size:
+            return "subview-out-of-bounds"
+    return None
+
+
+def _subview_ranges_for_common_splits(
+    *,
+    subview: OnChipMoveSubview,
+    device_sizes: list[int],
+    common_splits: dict[int, int],
+    moved_dims: tuple[int, ...],
+) -> tuple[list[range], str | None]:
+    """Return common-refinement index ranges clipped to a logical subview."""
+
+    reason = _validate_subview(subview, device_sizes=device_sizes)
+    if reason is not None:
+        return [], reason
+
+    restricted_dims = {
+        dim
+        for dim, (start, size, device_size) in enumerate(
+            zip(subview.starts, subview.sizes, device_sizes)
+        )
+        if int(start) != 0 or int(size) != int(device_size)
+    }
+    missing_restricted_dims = restricted_dims - set(common_splits)
+    if missing_restricted_dims:
+        return [], "subview-requires-unsplit-device-dim"
+
+    ranges: list[range] = []
+    for dim in moved_dims:
+        split = int(common_splits[dim])
+        chunk = int(device_sizes[dim]) // split
+        start = int(subview.starts[dim])
+        end = start + int(subview.sizes[dim])
+        if start % chunk != 0 or end % chunk != 0:
+            return [], "subview-not-aligned-to-common-cell"
+        ranges.append(range(start // chunk, end // chunk))
+    return ranges, None
 
 
 def _local_offset_bytes(
@@ -376,6 +462,176 @@ def _view_region_bytes(
     return elements * int(element_bytes)
 
 
+def _static_int(expr: Any) -> int | None:
+    try:
+        sym_expr = sympy.sympify(expr)
+    except Exception:  # noqa: BLE001
+        return None
+    if getattr(sym_expr, "free_symbols", None):
+        return None
+    try:
+        return int(sym_expr)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _range_size_by_symbol(ranges: dict[Any, Any]) -> dict[sympy.Symbol, int]:
+    result: dict[sympy.Symbol, int] = {}
+    for sym, value in ranges.items():
+        size = _static_int(value)
+        if size is None or size <= 0:
+            continue
+        key = sym if isinstance(sym, sympy.Symbol) else sympy.Symbol(str(sym))
+        result[key] = size
+    return result
+
+
+def _single_free_symbol(expr: sympy.Expr) -> sympy.Symbol | None:
+    free_symbols = list(getattr(expr, "free_symbols", set()))
+    if len(free_symbols) != 1:
+        return None
+    return next(iter(free_symbols))
+
+
+def _as_symbol_floor_div(expr: sympy.Expr) -> tuple[sympy.Symbol, int] | None:
+    expr = sympy.simplify(expr)
+    if expr.func.__name__ == "FloorDiv" and len(expr.args) == 2:
+        sym = _single_free_symbol(sympy.sympify(expr.args[0]))
+        divisor = _static_int(expr.args[1])
+        if sym is not None and divisor is not None and divisor > 0:
+            return sym, divisor
+
+    if expr.func == sympy.floor and len(expr.args) == 1:
+        arg = sympy.simplify(expr.args[0])
+    else:
+        arg = expr
+    sym = _single_free_symbol(arg)
+    if sym is None:
+        return None
+    coeff = sympy.simplify(arg.coeff(sym))
+    if coeff.is_Rational and coeff.p == 1 and coeff.q > 0:
+        return sym, int(coeff.q)
+    return None
+
+
+def _as_symbol_mod(expr: sympy.Expr) -> tuple[sympy.Symbol, int] | None:
+    expr = sympy.simplify(expr)
+    if expr.func != sympy.Mod or len(expr.args) != 2:
+        return None
+    sym = _single_free_symbol(sympy.sympify(expr.args[0]))
+    modulus = _static_int(expr.args[1])
+    if sym is not None and modulus is not None and modulus > 0:
+        return sym, modulus
+    return None
+
+
+def _coord_subview_range(
+    coord: sympy.Expr,
+    *,
+    ranges: dict[sympy.Symbol, int],
+    device_size: int,
+) -> tuple[int, int] | None:
+    coord = sympy.simplify(coord)
+    free_symbols = getattr(coord, "free_symbols", set())
+    if not free_symbols:
+        start = _static_int(coord)
+        if start is None or start < 0 or start >= int(device_size):
+            return None
+        return start, 1
+
+    zero_subs = {sym: 0 for sym in free_symbols}
+    const = _static_int(coord.subs(zero_subs))
+    if const is None:
+        return None
+    residual = sympy.simplify(coord - const)
+
+    sym = _single_free_symbol(residual)
+    if sym is not None and sym in ranges and sympy.simplify(residual - sym) == 0:
+        size = int(ranges[sym])
+        if const < 0 or const + size > int(device_size):
+            return None
+        return const, size
+
+    floor_div = _as_symbol_floor_div(residual)
+    if floor_div is not None:
+        sym, divisor = floor_div
+        source_size = ranges.get(sym)
+        if source_size is None or source_size % divisor != 0:
+            return None
+        size = source_size // divisor
+        if const < 0 or const + size > int(device_size):
+            return None
+        return const, size
+
+    mod = _as_symbol_mod(residual)
+    if mod is not None:
+        sym, modulus = mod
+        source_size = ranges.get(sym)
+        if source_size is None:
+            return None
+        if source_size <= modulus:
+            size = source_size
+        elif source_size % modulus == 0:
+            size = modulus
+        else:
+            return None
+        if const < 0 or const + size > int(device_size):
+            return None
+        return const, size
+
+    return None
+
+
+def _subview_from_device_coordinates(
+    *,
+    coordinates: list[sympy.Expr],
+    ranges: dict[Any, Any],
+    device_sizes: list[int],
+) -> OnChipMoveSubview | None:
+    range_sizes = _range_size_by_symbol(ranges)
+    if len(coordinates) != len(device_sizes):
+        return None
+
+    starts: list[int] = []
+    sizes: list[int] = []
+    for coord, device_size in zip(coordinates, device_sizes):
+        subrange = _coord_subview_range(
+            sympy.sympify(coord),
+            ranges=range_sizes,
+            device_size=int(device_size),
+        )
+        if subrange is None:
+            return None
+        start, size = subrange
+        starts.append(start)
+        sizes.append(size)
+    return OnChipMoveSubview(starts=starts, sizes=sizes)
+
+
+def _movement_subview_from_read_dep(
+    buf: Any,
+    read_dep: MemoryDep,
+    *,
+    device_sizes: list[int],
+) -> OnChipMoveSubview:
+    layout = getattr(buf, "layout", None)
+    dev_layout = getattr(layout, "device_layout", None)
+    if dev_layout is None:
+        return _default_subview(device_sizes)
+    try:
+        coords = device_coordinates(dev_layout, read_dep)
+        subview = _subview_from_device_coordinates(
+            coordinates=coords,
+            ranges=getattr(read_dep, "ranges", {}),
+            device_sizes=device_sizes,
+        )
+    except Exception:  # noqa: BLE001
+        subview = None
+    if subview is None:
+        return _default_subview(device_sizes)
+    return subview
+
+
 def build_onchip_move_cells(
     *,
     producer_view: PerCoreView,
@@ -387,8 +643,14 @@ def build_onchip_move_cells(
     consumer_core_count: int,
     max_cells: int | None = None,
     coordinate_remap_v1: bool = False,
+    movement_subview: OnChipMoveSubview | None = None,
 ) -> tuple[list[OnChipMoveCell], str | None]:
     """Return common-refinement movement cells, or a skip reason."""
+
+    subview = movement_subview or _default_subview(device_sizes)
+    reason = _validate_subview(subview, device_sizes=device_sizes)
+    if reason is not None:
+        return [], reason
 
     producer_splits = _normalize_view_splits(producer_view)
     consumer_splits = _normalize_view_splits(consumer_view)
@@ -416,9 +678,6 @@ def build_onchip_move_cells(
             return [], reason
     else:
         local_dim_order = None
-    cell_count = math.prod(common_splits.values()) if common_splits else 1
-    if max_cells is not None and cell_count > max_cells:
-        return [], "too-many-common-refinement-cells"
 
     for dim, split in common_splits.items():
         if dim < 0 or dim >= len(device_sizes):
@@ -437,7 +696,18 @@ def build_onchip_move_cells(
     consumer_owner_dims = tuple(dim for dim, _split in consumer_view.work_slice_dims)
     cells: list[OnChipMoveCell] = []
 
-    ranges = [range(common_splits[dim]) for dim in moved_dims]
+    ranges, reason = _subview_ranges_for_common_splits(
+        subview=subview,
+        device_sizes=device_sizes,
+        common_splits=common_splits,
+        moved_dims=moved_dims,
+    )
+    if reason is not None:
+        return [], reason
+    cell_count = math.prod(len(r) for r in ranges) if ranges else 1
+    if max_cells is not None and cell_count > max_cells:
+        return [], "too-many-common-refinement-cells"
+
     iterator = math.prod(len(r) for r in ranges)
     if iterator == 0:
         return [], "empty-common-refinement"
@@ -521,30 +791,39 @@ def validate_onchip_move_cell_coverage(
     cells: list[OnChipMoveCell],
     *,
     device_sizes: list[int],
+    movement_subview: OnChipMoveSubview | None = None,
 ) -> str | None:
     """Check that movement cells tile the logical device rectangle exactly."""
 
     if not cells:
         return "no-cells"
 
+    subview = movement_subview or _default_subview(device_sizes)
+    reason = _validate_subview(subview, device_sizes=device_sizes)
+    if reason is not None:
+        return reason
+
     dims = len(device_sizes)
     boxes: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
     boundaries: list[set[int]] = [
-        {0, int(device_size)} for device_size in device_sizes
+        {int(start), int(start) + int(size)}
+        for start, size in zip(subview.starts, subview.sizes)
     ]
     total_volume = 0
     for cell in cells:
         starts: list[int] = []
         ends: list[int] = []
         volume = 1
-        for dim, device_size in enumerate(device_sizes):
+        for dim, _device_size in enumerate(device_sizes):
             key = f"d{dim}_"
             if key not in cell.dim_starts or key not in cell.dim_sizes:
                 return "coverage-cell-missing-dim"
             start = int(cell.dim_starts[key])
             size = int(cell.dim_sizes[key])
             end = start + size
-            if start < 0 or size <= 0 or end > int(device_size):
+            subview_start = int(subview.starts[dim])
+            subview_end = subview_start + int(subview.sizes[dim])
+            if start < subview_start or size <= 0 or end > subview_end:
                 return "coverage-cell-out-of-bounds"
             starts.append(start)
             ends.append(end)
@@ -554,7 +833,7 @@ def validate_onchip_move_cell_coverage(
         boxes.append((tuple(starts), tuple(ends)))
         total_volume += volume
 
-    expected_volume = math.prod(int(size) for size in device_sizes)
+    expected_volume = math.prod(int(size) for size in subview.sizes)
     if total_volume != expected_volume:
         return "coverage-volume-mismatch"
 
@@ -1033,9 +1312,18 @@ def build_coordinate_remap_metadata(
         "status": validate_onchip_move_cell_coverage(
             plan.cells,
             device_sizes=plan.device_sizes,
+            movement_subview=plan.movement_subview,
         )
         or "complete",
     }
+    if plan.movement_subview is not None and not _is_full_subview(
+        plan.movement_subview,
+        device_sizes=plan.device_sizes,
+    ):
+        coverage["subview"] = {
+            "starts": [int(start) for start in plan.movement_subview.starts],
+            "sizes": [int(size) for size in plan.movement_subview.sizes],
+        }
     dependency_order = [
         {
             "order": 0,
@@ -1079,6 +1367,8 @@ def build_coordinate_remap_metadata(
     }
     if include_debug_movements:
         metadata["movements"] = movements
+    if "subview" in coverage:
+        metadata["logical_subview"] = copy.deepcopy(coverage["subview"])
     return metadata
 
 
@@ -1105,6 +1395,14 @@ def _plan_json(plan: OnChipMovePlan) -> dict[str, Any]:
         "cell_count": len(plan.cells),
         "bytes_moved": plan.bytes_moved,
     }
+    if plan.movement_subview is not None and not _is_full_subview(
+        plan.movement_subview,
+        device_sizes=plan.device_sizes,
+    ):
+        payload["movement_subview"] = {
+            "starts": [int(start) for start in plan.movement_subview.starts],
+            "sizes": [int(size) for size in plan.movement_subview.sizes],
+        }
     if plan.cells:
         if config.onchip_move_debug_cells:
             payload["cells"] = [dataclasses.asdict(cell) for cell in plan.cells]
@@ -1132,6 +1430,7 @@ def _skip_plan(
     element_bytes: int = 0,
     producer_region_bytes: int = 0,
     consumer_region_bytes: int = 0,
+    movement_subview: OnChipMoveSubview | None = None,
 ) -> OnChipMovePlan:
     return OnChipMovePlan(
         source_name=source_name,
@@ -1153,6 +1452,7 @@ def _skip_plan(
         producer_view=_view_to_json(producer_view or PerCoreView((), ())),
         consumer_view=_view_to_json(consumer_view or PerCoreView((), ())),
         cells=[],
+        movement_subview=movement_subview,
     )
 
 
@@ -1209,6 +1509,14 @@ def plan_onchip_move_edge(
         device_sizes, device_stride_map, element_bytes = _device_layout_and_element_bytes(
             buf
         )
+        if config.onchip_move_carrier == "coordinate_remap":
+            movement_subview = _movement_subview_from_read_dep(
+                buf,
+                read_dep,
+                device_sizes=device_sizes,
+            )
+        else:
+            movement_subview = _default_subview(device_sizes)
         cells, reason = build_onchip_move_cells(
             producer_view=producer_view,
             consumer_view=consumer_view,
@@ -1219,6 +1527,7 @@ def plan_onchip_move_edge(
             consumer_core_count=_op_num_cores(consumer),
             max_cells=config.onchip_move_max_cells,
             coordinate_remap_v1=config.onchip_move_carrier == "coordinate_remap",
+            movement_subview=movement_subview,
         )
     except Exception as exc:  # noqa: BLE001
         return _skip_plan(
@@ -1250,6 +1559,7 @@ def plan_onchip_move_edge(
                 device_sizes=device_sizes,
                 element_bytes=element_bytes,
             ),
+            movement_subview=movement_subview,
         )
     if config.onchip_move_carrier == "coordinate_remap":
         reason = _coordinate_remap_v1_support_reason(cells)
@@ -1274,6 +1584,7 @@ def plan_onchip_move_edge(
                     device_sizes=device_sizes,
                     element_bytes=element_bytes,
                 ),
+                movement_subview=movement_subview,
             )
 
     return OnChipMovePlan(
@@ -1310,6 +1621,7 @@ def plan_onchip_move_edge(
         producer_view=_view_to_json(producer_view),
         consumer_view=_view_to_json(consumer_view),
         cells=cells,
+        movement_subview=movement_subview,
     )
 
 
