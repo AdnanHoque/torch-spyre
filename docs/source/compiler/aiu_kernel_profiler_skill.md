@@ -62,6 +62,10 @@ directories, environment records, benchmark logs, and artifact summaries. Its
 default benchmark command runs spyre-perf-suite with `--with-profiling` and
 `--output "$run_dir/perf.txt"`.
 
+For parameterized FMS module microbenchmarks, use the
+[Spyre Perf-Suite Empty Weights Skill](spyre_perf_suite_empty_weights_skill.md)
+to avoid large host-to-device parameter copies before compilation.
+
 Each variant run directory should contain the files needed to interpret the
 run:
 

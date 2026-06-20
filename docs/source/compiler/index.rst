@@ -42,6 +42,7 @@ test coverage, bug classification), see :doc:`/contributing/op_enablement`.
    backend
    ktir
    aiu_kernel_profiler_skill
+   spyre_perf_suite_empty_weights_skill
 
 .. toctree::
    :maxdepth: 2
