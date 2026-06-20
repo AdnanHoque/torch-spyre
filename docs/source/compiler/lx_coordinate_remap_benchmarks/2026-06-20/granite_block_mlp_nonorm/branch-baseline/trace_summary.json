@@ -1,0 +1,14 @@
+{
+  "active_iters": 4,
+  "kernel_durations_ms": {
+    "/tmp/granite_block_coordinate_remap_profile_20260620_mlp_nonorm/branch-baseline/inductor-cache/inductor-spyre/sdsc_fused_linear": 65.069014
+  },
+  "kernel_event_counts": {
+    "/tmp/granite_block_coordinate_remap_profile_20260620_mlp_nonorm/branch-baseline/inductor-cache/inductor-spyre/sdsc_fused_linear": 5
+  },
+  "kernel_ms_per_iter": 16.2672535,
+  "kernel_ms_total": 65.069014,
+  "memory_ms_per_iter": 0.200217,
+  "memory_ms_total": 0.800868,
+  "trace": "/tmp/granite_block_coordinate_remap_profile_20260620_mlp_nonorm/branch-baseline/logs/tsp-stack/fms_granite_block_empty/adnan-cdx-spyre-dev-pf_2334006.1781994164545415430.pt.trace.json"
+}

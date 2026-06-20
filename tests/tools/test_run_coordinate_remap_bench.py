@@ -62,6 +62,7 @@ def test_run_coordinate_remap_bench_dry_run_writes_variant_commands(
     assert commands["benchmark"][commands["benchmark"].index("--op") + 1] == "small_swiglu"
     assert commands["benchmark"][commands["benchmark"].index("--op-file") + 1] == str(op_file)
     assert commands["artifact_summary"]
+    assert commands["edge_report"]
     assert env["env"]["SPYRE_ONCHIP_MOVE_REALIZE"] == "1"
     assert env["op"] == "small_swiglu"
     assert env["op_file"] == str(op_file)
@@ -181,5 +182,6 @@ def test_run_coordinate_remap_bench_collects_artifacts_after_profiler_failure(
     assert status == {
         "artifact_returncode": 0,
         "benchmark_returncode": 1,
+        "edge_report_returncode": 0,
         "profiler_failed_after_runs": True,
     }

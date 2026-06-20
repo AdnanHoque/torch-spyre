@@ -196,6 +196,11 @@ def _write_env_record(
         "SPYRE_ONCHIP_MOVE_JSONL",
         "SPYRE_ONCHIP_MOVE_DEBUG_DIR",
         "SPYRE_SMALL_SWIGLU_MODE",
+        "SPYRE_FMS_GRANITE_BLOCK_SCOPE",
+        "SPYRE_FMS_GRANITE_BLOCK_ATTN_NAME",
+        "SPYRE_FMS_GRANITE_BLOCK_TO_EMPTY",
+        "SPYRE_FMS_GRANITE_BLOCK_FUSED_WEIGHTS",
+        "SPYRE_FMS_GRANITE_BLOCK_MAX_SEQ_LEN",
     ]
     torch_root = _runtime_torch_root(args, variant)
     payload = {
@@ -246,6 +251,19 @@ def _artifact_command(args: argparse.Namespace, run_dir: Path) -> list[str]:
             )
         command.extend(["--sdsc-senprog-summary", str(args.sdsc_senprog_summary)])
     return command
+
+
+def _edge_report_command(args: argparse.Namespace, run_dir: Path) -> list[str]:
+    return [
+        sys.executable,
+        str(args.torch_root / "tools" / "onchip_move_edge_report.py"),
+        "--jsonl",
+        str(run_dir / "onchip_move.jsonl"),
+        "--output-dir",
+        str(run_dir / "artifacts"),
+        "--title",
+        f"{run_dir.name} On-Chip Move Edge Report",
+    ]
 
 
 def _run(command: list[str], *, cwd: Path, env: dict[str, str], log: Path) -> int:
@@ -335,10 +353,15 @@ def main(argv: list[str] | None = None) -> int:
         env = _base_env(args, run_dir, variant)
         command = _benchmark_command(args, run_dir)
         artifact_command = _artifact_command(args, run_dir)
+        edge_report_command = _edge_report_command(args, run_dir)
         _write_env_record(run_dir / "env.json", args, variant, env)
         (run_dir / "commands.json").write_text(
             json.dumps(
-                {"benchmark": command, "artifact_summary": artifact_command},
+                {
+                    "benchmark": command,
+                    "artifact_summary": artifact_command,
+                    "edge_report": edge_report_command,
+                },
                 indent=2,
                 sort_keys=True,
             )
@@ -361,11 +384,18 @@ def main(argv: list[str] | None = None) -> int:
             env=env,
             log=run_dir / "artifact_summary.log",
         )
+        edge_report_rc = _run(
+            edge_report_command,
+            cwd=args.torch_root,
+            env=env,
+            log=run_dir / "edge_report.log",
+        )
         (run_dir / "run_status.json").write_text(
             json.dumps(
                 {
                     "benchmark_returncode": benchmark_rc,
                     "artifact_returncode": artifact_rc,
+                    "edge_report_returncode": edge_report_rc,
                     "profiler_failed_after_runs": profiler_failed_after_runs,
                 },
                 indent=2,
@@ -378,6 +408,8 @@ def main(argv: list[str] | None = None) -> int:
             return benchmark_rc
         if artifact_rc != 0:
             return artifact_rc
+        if edge_report_rc != 0:
+            return edge_report_rc
     (args.output_root / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

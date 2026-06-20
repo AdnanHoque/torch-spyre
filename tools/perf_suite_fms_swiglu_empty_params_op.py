@@ -74,5 +74,6 @@ def get_module(op, torch, stack, input_shapes):
     if stack == "tsp" and os.environ.get("SPYRE_FMS_SWIGLU_TO_EMPTY", "1") != "0":
         module = module.to_empty(device=torch.device("spyre"))
 
+    module.requires_grad_(False)
     module.eval()
     return module

@@ -24,12 +24,14 @@ parameters directly on AIU:
 module = _make_swiglu_module(config, torch, fused_weights=True)
 module = module.to(dtype=torch.float16)
 module = module.to_empty(device=torch.device("spyre"))
+module.requires_grad_(False)
 module.eval()
 ```
 
 Keep the `to(dtype=torch.float16).to_empty(device=torch.device("spyre"))` order.
 The dtype cast is still needed, but `to_empty` avoids the host-to-device
-parameter copy.
+parameter copy.  Freeze parameters for benchmark-only runs so AOTAutograd does
+not trace a useless backward graph through the Spyre PrivateUse1 hooks path.
 
 ## Existing Op-File Wrapper
 
@@ -59,6 +61,42 @@ By default the wrapper uses `to_empty` when perf-suite invokes the op-file with
 `stack == "tsp"` for the torch-spyre path. Set
 `SPYRE_FMS_SWIGLU_TO_EMPTY=0` only when deliberately reproducing the standard
 CPU-parameter transfer behavior.
+
+## Granite Block Wrapper
+
+For a full single-block prefill probe, use the Granite block wrapper.  It
+constructs one FMS Granite block, casts it to fp16, and materializes parameters
+with `to_empty(device="spyre")`.
+
+```bash
+cd /tmp/torch-spyre-co-remap-native
+
+$PY212 tools/run_coordinate_remap_bench.py \
+  --output-root /tmp/granite_block_coordinate_remap_profile \
+  --torch-root /tmp/torch-spyre-co-remap-native \
+  --deeptools-root /tmp/deeptools-coordinate-remap-mainport-lean \
+  --perf-suite-root /home/adnan-cdx/spyre-perf-suite \
+  --variant branch-baseline \
+  --variant coordinate-remap \
+  --op fms_granite_block_empty \
+  --op-file /tmp/torch-spyre-co-remap-native/tools/perf_suite_fms_granite_block_empty_params_op.py \
+  --shape 1 512 4096 \
+  --runs 5 \
+  --env LD_LIBRARY_PATH=/home/adnan-cdx/dt-inductor-codex-clean/install/libaiupti/lib:/home/adnan-cdx/dt-inductor-codex-clean/install/runtime-localdt/lib:${LD_LIBRARY_PATH} \
+  --env SPYRE_FMS_GRANITE_BLOCK_SCOPE=full \
+  --env SPYRE_FMS_GRANITE_BLOCK_ATTN_NAME=sdpa_bidirectional
+```
+
+`SPYRE_FMS_GRANITE_BLOCK_SCOPE` can be set to `mlp` or `attention` to isolate
+the block's feed-forward or attention submodules without the normalization
+prefix.  Use `mlp_with_norm` or `attention_with_norm` when debugging norm
+lowering as part of the block.  The default attention mode is
+`sdpa_bidirectional`, matching the existing FMS Granite attention microbench
+choice to avoid the currently problematic causal-mask lowering.
+
+Each run writes `artifacts/onchip_move_edge_report.md` and `.csv`.  Use those
+files to determine whether coordinate remap fired only in the SwiGLU/MLP path
+or also on attention/residual/norm edges.
 
 ## When To Use
 

@@ -1,0 +1,11 @@
+producer_op,consumer_op,communication_class,status,fallback_reason,edge_count,bytes_moved,cell_count,producer_view,consumer_view,example_producer,example_consumer
+op0,op1,exact-reshard,planned,,1,13107200,102400,"d0:4,d1:8; d0=Mod(core_id, 4),d1=Mod(floor(core_id/4), 8)","d0:32; d0=Mod(core_id, 32)",buf0,buf1
+op0,op4,exact-reshard,planned,,1,13107200,102400,"d0:4,d1:8; d0=Mod(core_id, 4),d1=Mod(floor(core_id/4), 8)","d0:32; d0=Mod(core_id, 32)",buf0,buf4
+op0,op5,exact-reshard,planned,,1,13107200,102400,"d0:4,d1:8; d0=Mod(core_id, 4),d1=Mod(floor(core_id/4), 8)","d0:32; d0=Mod(core_id, 32)",buf0,buf5
+op5,op6,fanout-multicast-unsupported,skipped,consumer-duplicate-owner,1,0,0,"d2:32; d2=Mod(core_id, 32)","d2:4; d2=Mod(core_id, 4)",buf5,buf6
+op8,op0,layout-or-stick-unsupported,skipped,coordinate-remap-v1-requires-128-byte-stick-dim,1,0,0,"d0:25; d0=Mod(core_id, 25)","d0:8; d0=Mod(floor(core_id/4), 8)",buf8,buf0
+op9,op6,layout-or-stick-unsupported,skipped,coordinate-remap-v1-requires-128-byte-stick-dim,1,0,0,"d1:25; d1=Mod(core_id, 25)","d0:8; d0=Mod(floor(core_id/4), 8)",buf9,buf6
+op1,op2,same-view-lx-planner,skipped,same-per-core-view-owned-by-lx-planner,1,0,0,"d2:32; d2=Mod(core_id, 32)","d2:32; d2=Mod(core_id, 32)",buf1,buf2
+op2,op3,same-view-lx-planner,skipped,same-per-core-view-owned-by-lx-planner,1,0,0,"d2:32; d2=Mod(core_id, 32)","d2:32; d2=Mod(core_id, 32)",buf2,buf3
+op3,op4,same-view-lx-planner,skipped,same-per-core-view-owned-by-lx-planner,1,0,0,"d2:32; d2=Mod(core_id, 32)","d2:32; d2=Mod(core_id, 32)",buf3,buf4
+op4,op5,same-view-lx-planner,skipped,same-per-core-view-owned-by-lx-planner,1,0,0,"d2:32; d2=Mod(core_id, 32)","d2:32; d2=Mod(core_id, 32)",buf4,buf5

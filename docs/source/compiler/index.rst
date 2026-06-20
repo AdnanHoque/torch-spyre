@@ -61,3 +61,4 @@ test coverage, bug classification), see :doc:`/contributing/op_enablement`.
    scratchpad_planning
    onchip_core_movement
    lx_coordinate_remap_first_principles
+   lx_coordinate_remap_pr_scope

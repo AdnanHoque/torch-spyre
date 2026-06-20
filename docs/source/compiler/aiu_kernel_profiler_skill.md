@@ -65,6 +65,8 @@ default benchmark command runs spyre-perf-suite with `--with-profiling` and
 For parameterized FMS module microbenchmarks, use the
 [Spyre Perf-Suite Empty Weights Skill](spyre_perf_suite_empty_weights_skill.md)
 to avoid large host-to-device parameter copies before compilation.
+The Granite block wrapper in that skill is the preferred way to check whether
+coordinate remap helps beyond the isolated FMS SwiGLU op.
 
 Each variant run directory should contain the files needed to interpret the
 run:
@@ -74,6 +76,8 @@ run:
 - `artifacts/trace_summary.json` for trace-derived kernel timing.
 - `artifacts/sdsc_summary.json` for SDSC structure.
 - `onchip_move.jsonl` for coordinate-remap planner output.
+- `artifacts/onchip_move_edge_report.md` and `.csv` for communication-class
+  coverage across a full block.
 - `env.json` and `commands.json` with SHAs, paths, flags, and exact commands.
 
 Use at least 3 runs, usually 5, when profiling. A one-run perf-suite job can

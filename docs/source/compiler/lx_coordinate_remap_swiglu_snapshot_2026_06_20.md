@@ -267,6 +267,8 @@ changing the basic contract.
 ## Next Gaps
 
 The next performance work should be measured against this artifact baseline.
+The production PR split is recorded in
+[LX Coordinate Remap PR Scope](lx_coordinate_remap_pr_scope.md).
 
 1. Extend final-output persistence into the down projection so `mul` output can
    avoid HBM when the downstream matmul can consume an on-chip view.

@@ -50,3 +50,8 @@ Notes:
 - The FMS namespaced `fms_granite_micro.swiglu` attempt did not produce artifacts: it stayed in baseline compile/tracing for roughly nine minutes, so it is not included as a timing row.
 - `fms_swiglu_prefill_relayfix` is the FMS empty-weight fused SwiGLU prefill rerun after local relay chunking. Coordinate remap now realizes two mixed SDSCs and improves trace kernel time by 19.53% versus branch baseline.
 - `fms_swiglu_decode_relayfix` is the B=1 S=1 control. It emits no remap rows and shows no meaningful speedup.
+- `granite_block_mlp_nonorm` runs the FMS Granite block's feed-forward
+  submodule with fake/empty weights. Coordinate remap improves trace kernel time
+  from 16.267 ms to 13.050 ms per iter, a 19.78% win. Full-block and attention
+  attempts are currently blocked by unrelated norm/RoPE lowering issues before
+  coordinate-remap applicability can be measured there.
