@@ -150,25 +150,72 @@ def patch_onchip_move_mixed_schedules(
             if not isinstance(plan, dict) or plan.get("status") != "planned":
                 continue
             reuse_base = reusable_lx_sources.get(_reuse_key(plan))
-            if reuse_base is None:
-                continue
             try:
                 consumer_input_idx = _consumer_input_arg_idx(consumer, source_name)
-                patched_consumer = copy.deepcopy(consumer_entry[0])
-                consumer_root = next(iter(patched_consumer.values()))
-                _patch_lx_endpoint(
-                    consumer_root,
-                    dsc_index=0,
-                    lds_idx=_matching_input_lds_idx(
-                        consumer_root, consumer_input_idx
-                    ),
-                    base=reuse_base,
+                if reuse_base is not None:
+                    patched_consumer = copy.deepcopy(consumer_entry[0])
+                    consumer_root = next(iter(patched_consumer.values()))
+                    _patch_lx_endpoint(
+                        consumer_root,
+                        dsc_index=0,
+                        lds_idx=_matching_input_lds_idx(
+                            consumer_root, consumer_input_idx
+                        ),
+                        base=reuse_base,
+                    )
+                    compiled[consumer_index] = (patched_consumer, [], [], [])
+                    rows.append(_row(consumer_index, "patched-reuse", None, plan))
+                    break
+
+                if config.onchip_move_carrier != "coordinate_remap":
+                    continue
+                producer_match = _producer_match_for_plan(
+                    specs,
+                    compiled,
+                    consumer_index=consumer_index,
+                    source_name=source_name,
+                    plan=plan,
+                )
+                if producer_match is None:
+                    continue
+                producer_index, producer, producer_output_idx = producer_match
+                producer_entry = compiled[producer_index]
+                if producer_entry[0] is None:
+                    continue
+                if producer_entry[1]:
+                    rows.append(
+                        _row(
+                            consumer_index,
+                            "skipped",
+                            "producer-symbolic-or-local-addresses-not-supported",
+                            plan,
+                        )
+                    )
+                    continue
+
+                patched_producer, mixed_consumer = (
+                    build_coordinate_remap_onchip_move_sdsc(
+                        producer_index,
+                        consumer_index,
+                        producer_entry[0],
+                        consumer_entry[0],
+                        producer.args[producer_output_idx],
+                        consumer.args[consumer_input_idx],
+                        producer_output_idx,
+                        consumer_input_idx,
+                        plan,
+                    )
                 )
             except Exception as exc:  # noqa: BLE001
                 rows.append(_row(consumer_index, "skipped", type(exc).__name__, plan))
                 continue
-            compiled[consumer_index] = (patched_consumer, [], [], [])
-            rows.append(_row(consumer_index, "patched-reuse", None, plan))
+            compiled[producer_index] = (patched_producer, [], [], [])
+            compiled[consumer_index] = (mixed_consumer, [], [], [])
+            rewritten_consumers.add(consumer_index)
+            reusable_lx_sources[_reuse_key(plan)] = int(
+                config.onchip_move_consumer_lx_base
+            )
+            rows.append(_row(consumer_index, "patched-nonadjacent", None, plan))
             break
     return rows
 
@@ -306,6 +353,36 @@ def _consumer_input_arg_idx(consumer: OpSpec, source_name: str) -> int:
         if arg.is_input and arg.name == source_name:
             return idx
     raise ValueError(f"consumer-input-not-found:{source_name}")
+
+
+def _producer_match_for_plan(
+    specs: list[Any],
+    compiled: list[tuple[Any, list[int], list[dict], list[Any]]],
+    *,
+    consumer_index: int,
+    source_name: str,
+    plan: dict[str, Any],
+) -> tuple[int, OpSpec, int] | None:
+    producer_name = str(plan.get("producer", ""))
+    for producer_index in range(consumer_index - 1, -1, -1):
+        producer = specs[producer_index]
+        if not isinstance(producer, OpSpec):
+            continue
+        if compiled[producer_index][0] is None:
+            continue
+        if producer_name and _op_spec_output_name(producer) != producer_name:
+            continue
+        for arg_index, arg in enumerate(producer.args):
+            if not arg.is_input and arg.name == source_name:
+                return producer_index, producer, arg_index
+    return None
+
+
+def _op_spec_output_name(spec: OpSpec) -> str:
+    for arg in spec.args:
+        if not arg.is_input and arg.name:
+            return str(arg.name)
+    return ""
 
 
 def _reuse_key(plan: dict[str, Any]) -> tuple[str, str, str]:

@@ -1156,6 +1156,150 @@ def test_coordinate_remap_carrier_patch_rewrites_adjacent_specs(monkeypatch):
     assert mixed_root["coreIdToDscSchedule"]["0"][-1][0:2] == [-1, 0]
 
 
+def test_coordinate_remap_carrier_patches_nonadjacent_split_subview_consumer(
+    monkeypatch,
+):
+    monkeypatch.setattr(spyre_config, "onchip_move_realize", True)
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")
+    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0x1000)
+    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 0x9000)
+
+    cells = [
+        OnChipMoveCell(
+            cell_index=0,
+            source_core=0,
+            dest_core=1,
+            dim_starts={"d0_": 0},
+            dim_sizes={"d0_": 64},
+            bytes=128,
+            source_offset_bytes=0,
+            dest_offset_bytes=0,
+        )
+    ]
+    first_half_plan = _remap_plan_payload(
+        cells,
+        device_sizes=[128],
+        element_bytes=2,
+        movement_subview=OnChipMoveSubview(starts=[0], sizes=[64]),
+    )
+    second_half_plan = _remap_plan_payload(
+        [
+            dataclasses.replace(
+                cells[0],
+                dim_starts={"d0_": 64},
+                source_offset_bytes=128,
+                dest_offset_bytes=0,
+            )
+        ],
+        device_sizes=[128],
+        element_bytes=2,
+        movement_subview=OnChipMoveSubview(starts=[64], sizes=[64]),
+    )
+
+    specs = [
+        OpSpec(
+            op="batchmatmul",
+            is_reduction=False,
+            iteration_space={},
+            args=[
+                _tensor_arg("x", True, 0),
+                _tensor_arg("w", True, 1),
+                _tensor_arg("buf0", False, 2),
+            ],
+            op_info={},
+        ),
+        OpSpec(
+            op="neg",
+            is_reduction=False,
+            iteration_space={},
+            args=[_tensor_arg("buf0", True, 0), _tensor_arg("buf1", False, 1)],
+            op_info={ONCHIP_MOVE_OP_INFO_KEY: {"buf0": first_half_plan}},
+        ),
+        OpSpec(
+            op="exp",
+            is_reduction=False,
+            iteration_space={},
+            args=[_tensor_arg("buf0", True, 0), _tensor_arg("buf2", False, 1)],
+            op_info={ONCHIP_MOVE_OP_INFO_KEY: {"buf0": first_half_plan}},
+        ),
+        OpSpec(
+            op="mul",
+            is_reduction=False,
+            iteration_space={},
+            args=[_tensor_arg("buf0", True, 0), _tensor_arg("buf3", False, 1)],
+            op_info={ONCHIP_MOVE_OP_INFO_KEY: {"buf0": second_half_plan}},
+        ),
+    ]
+    compiled = [
+        (
+            {
+                "0_batchmatmul": _minimal_sdsc_payload(
+                    "batchmatmul",
+                    output_lds_idx=2,
+                    input_lds_indices=[0, 1],
+                    core_ids=[0, 1],
+                )
+            },
+            [],
+            [],
+            [],
+        ),
+        (
+            {
+                "1_neg": _minimal_sdsc_payload(
+                    "neg",
+                    output_lds_idx=1,
+                    input_lds_indices=[0],
+                    core_ids=[0, 1],
+                )
+            },
+            [],
+            [],
+            [],
+        ),
+        (
+            {
+                "2_exp": _minimal_sdsc_payload(
+                    "exp",
+                    output_lds_idx=1,
+                    input_lds_indices=[0],
+                    core_ids=[0, 1],
+                )
+            },
+            [],
+            [],
+            [],
+        ),
+        (
+            {
+                "3_mul": _minimal_sdsc_payload(
+                    "mul",
+                    output_lds_idx=1,
+                    input_lds_indices=[0],
+                    core_ids=[0, 1],
+                )
+            },
+            [],
+            [],
+            [],
+        ),
+    ]
+
+    rows = patch_onchip_move_mixed_schedules(compiled, specs)
+
+    assert [row["status"] for row in rows] == [
+        "patched",
+        "patched-reuse",
+        "patched-nonadjacent",
+    ]
+    assert "1_OnChipMoveCoordinateRemap" in compiled[1][0]
+    assert len(compiled[1][0]["1_OnChipMoveCoordinateRemap"]["datadscs_"]) == 1
+    assert "2_exp" in compiled[2][0]
+    assert "datadscs_" not in compiled[2][0]["2_exp"]
+    assert "3_OnChipMoveCoordinateRemap" in compiled[3][0]
+    assert len(compiled[3][0]["3_OnChipMoveCoordinateRemap"]["datadscs_"]) == 1
+
+
 def test_mixed_carrier_emits_logical_dataop_layout_for_stickified_cells():
     plan = {
         "source_name": "buf0",
@@ -1697,11 +1841,13 @@ def _remap_plan_payload(
     *,
     device_sizes: list[int],
     element_bytes: int,
+    movement_subview: OnChipMoveSubview | None = None,
 ) -> dict:
     plan = _remap_plan(
         cells,
         device_sizes=device_sizes,
         element_bytes=element_bytes,
+        movement_subview=movement_subview,
     )
     payload = dataclasses.asdict(plan)
     payload["producer"] = plan.producer_name
