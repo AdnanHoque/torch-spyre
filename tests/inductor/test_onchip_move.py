@@ -1061,6 +1061,105 @@ def test_coordinate_remap_carrier_chunks_large_dataop(monkeypatch):
     assert all(row[1] == -1 for row in mixed_root["coreIdToDscSchedule"]["2"])
 
 
+def test_coordinate_remap_local_relay_reuses_scratch_for_high_subview(
+    monkeypatch,
+):
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")
+    monkeypatch.setattr(spyre_config, "onchip_move_coordinate_remap_chunk_cells", 1000)
+    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0)
+    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 1024 * 1024)
+
+    cells = [
+        OnChipMoveCell(
+            cell_index=idx,
+            source_core=idx,
+            dest_core=idx,
+            dim_starts={"d0_": idx * 64},
+            dim_sizes={"d0_": 64},
+            bytes=128 * 1024,
+            source_offset_bytes=idx * 128 * 1024,
+            dest_offset_bytes=400 * 1024 + idx * 128 * 1024,
+        )
+        for idx in range(3)
+    ]
+    plan = _remap_plan_payload(
+        cells,
+        device_sizes=[512],
+        element_bytes=2 * 1024,
+        movement_subview=OnChipMoveSubview(starts=[256], sizes=[256]),
+    )
+    plan["producer_region_bytes"] = 800 * 1024
+    plan["consumer_region_bytes"] = 800 * 1024
+    plan["coordinate_remap"]["producerRegionBytes"] = 800 * 1024
+    plan["coordinate_remap"]["consumerRegionBytes"] = 800 * 1024
+
+    producer_payload = {
+        "1_batchmatmul": _minimal_sdsc_payload(
+            "batchmatmul",
+            output_lds_idx=2,
+            input_lds_indices=[0, 1],
+            core_ids=[0, 1, 2, 3],
+        )
+    }
+    consumer_payload = {
+        "6_mul": _minimal_sdsc_payload(
+            "mul",
+            output_lds_idx=2,
+            input_lds_indices=[0, 1],
+            core_ids=[0, 1, 2, 3],
+        )
+    }
+    output_arg = TensorArg(
+        is_input=False,
+        arg_index=0,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[512],
+        device_coordinates=[],
+        allocation=None,
+        name="buf0",
+    )
+
+    _, mixed_consumer = build_coordinate_remap_onchip_move_sdsc(
+        1,
+        6,
+        producer_payload,
+        consumer_payload,
+        output_arg,
+        dataclasses.replace(output_arg, is_input=True, arg_index=1),
+        2,
+        1,
+        plan,
+    )
+
+    mixed_root = mixed_consumer["6_OnChipMoveCoordinateRemap"]
+    dataops = [next(iter(row.values())) for row in mixed_root["datadscs_"]]
+    relay_kinds = [
+        movement["relay"]["kind"]
+        for dataop in dataops
+        for movement in _dataop_movements_for_test(dataop)
+    ]
+    assert relay_kinds == [
+        "local_first_leg",
+        "local_second_leg",
+        "local_first_leg",
+        "local_second_leg",
+        "local_first_leg",
+        "local_second_leg",
+    ]
+    assert len(dataops) == 6
+    for dataop in dataops:
+        for movement in _dataop_movements_for_test(dataop):
+            relay = movement.get("relay")
+            if relay is None:
+                continue
+            if relay["kind"] == "local_first_leg":
+                scratch_range = movement["destination"]["lxByteRange"]
+            else:
+                scratch_range = movement["source"]["lxByteRange"]
+            assert 800 * 1024 <= scratch_range["start"]
+            assert scratch_range["end"] <= 1024 * 1024
+
+
 def test_coordinate_remap_carrier_patch_rewrites_adjacent_specs(monkeypatch):
     monkeypatch.setattr(spyre_config, "onchip_move_realize", True)
     monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")

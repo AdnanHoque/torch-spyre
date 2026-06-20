@@ -557,26 +557,18 @@ def _coordinate_remap_datadsc_chunks(
         datadscs.append({f"{dataop_name}_{len(datadscs)}": chunk})
         core_sets.append(set(chunk_core_ids))
 
-    movements, local_relay_first, local_relay_second = (
-        _expand_local_coordinate_remap_movements_via_relay(movements)
-    )
     cross_movements = [
         movement
         for movement in movements
         if int(movement["source"]["core"]) != int(movement["destination"]["core"])
     ]
-    local_by_core: dict[int, list[dict[str, Any]]] = {}
-    for movement in movements:
-        source_core = int(movement["source"]["core"])
-        if source_core == int(movement["destination"]["core"]):
-            local_by_core.setdefault(source_core, []).append(movement)
+    local_movements = [
+        movement
+        for movement in movements
+        if int(movement["source"]["core"]) == int(movement["destination"]["core"])
+    ]
 
-    if (
-        not local_by_core
-        and not local_relay_first
-        and not local_relay_second
-        and len(cross_movements) <= chunk_size
-    ):
+    if not local_movements and len(cross_movements) <= chunk_size:
         compact_dataop = copy.deepcopy(dataop)
         if config.onchip_move_range_encoding:
             movement_ranges = _dataop_movement_ranges(cross_movements)
@@ -591,100 +583,165 @@ def _coordinate_remap_datadsc_chunks(
     for start in range(0, len(cross_movements), chunk_size):
         append_chunk(cross_movements[start : start + chunk_size])
 
-    for start in range(0, len(local_relay_first), chunk_size):
-        append_chunk(local_relay_first[start : start + chunk_size])
-    for start in range(0, len(local_relay_second), chunk_size):
-        append_chunk(local_relay_second[start : start + chunk_size])
-
-    for core_movements in local_by_core.values():
-        core_movements.sort(
-            key=lambda movement: (
-                int(movement["source"]["lxAddress"]),
-                int(movement["destination"]["lxAddress"]),
-                int(movement["moveIndex"]),
-            )
-        )
-    for _core, rows in sorted(local_by_core.items()):
-        for start in range(0, len(rows), chunk_size):
-            append_chunk(rows[start : start + chunk_size])
+    for first_legs, second_legs in _relay_local_coordinate_remap_chunks(
+        local_movements,
+        producer_base=int(config.onchip_move_producer_lx_base),
+        producer_region_bytes=_region_bytes(plan, "producer_region_bytes", "source"),
+        consumer_base=int(config.onchip_move_consumer_lx_base),
+        consumer_region_bytes=_region_bytes(plan, "consumer_region_bytes", "dest"),
+        chunk_size=chunk_size,
+    ):
+        append_chunk(first_legs)
+        append_chunk(second_legs)
     return datadscs, core_sets
 
 
-def _expand_local_coordinate_remap_movements_via_relay(
+def _relay_local_coordinate_remap_chunks(
     movements: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    cross_movements: list[dict[str, Any]] = []
-    local_movements: list[dict[str, Any]] = []
-    for movement in movements:
-        if int(movement["source"]["core"]) == int(movement["destination"]["core"]):
-            local_movements.append(movement)
-        else:
-            cross_movements.append(movement)
-    if not local_movements:
-        return movements, [], []
+    *,
+    producer_base: int,
+    producer_region_bytes: int,
+    consumer_base: int,
+    consumer_region_bytes: int,
+    chunk_size: int,
+) -> list[tuple[list[dict[str, Any]], list[dict[str, Any]]]]:
+    if not movements:
+        return []
 
-    used_end = 0
-    for movement in movements:
-        used_end = max(
-            used_end,
-            int(movement["source"]["lxByteRange"]["end"]),
-            int(movement["destination"]["lxByteRange"]["end"]),
-        )
-    relay_base = ((used_end + 127) // 128) * 128
-    relay_bytes = sum(int(movement["bytes"]) for movement in local_movements)
-    if relay_base + relay_bytes > _LX_SIZE_BYTES:
+    relay_base, relay_capacity = _local_relay_scratch_window(
+        producer_base=producer_base,
+        producer_region_bytes=producer_region_bytes,
+        consumer_base=consumer_base,
+        consumer_region_bytes=consumer_region_bytes,
+    )
+    if relay_capacity <= 0:
         raise ValueError("coordinate-remap-local-relay-lx-capacity")
 
-    first_legs: list[dict[str, Any]] = []
-    second_legs: list[dict[str, Any]] = []
     next_move_index = (
         max((int(movement["moveIndex"]) for movement in movements), default=-1) + 1
     )
-    relay_offset = 0
-    for movement in local_movements:
-        source_core = int(movement["source"]["core"])
-        relay_core = (source_core + 1) % 32
+    batches: list[tuple[list[dict[str, Any]], list[dict[str, Any]]]] = []
+    for chunk in _local_relay_batches(
+        sorted(
+            movements,
+            key=lambda movement: (
+                int(movement["source"]["core"]),
+                int(movement["source"]["lxAddress"]),
+                int(movement["destination"]["lxAddress"]),
+                int(movement["moveIndex"]),
+            ),
+        ),
+        chunk_size=chunk_size,
+        relay_capacity=relay_capacity,
+    ):
+        first_legs: list[dict[str, Any]] = []
+        second_legs: list[dict[str, Any]] = []
+        relay_offset = 0
+        for movement in chunk:
+            source_core = int(movement["source"]["core"])
+            relay_core = (source_core + 1) % 32
+            byte_count = int(movement["bytes"])
+            relay_lx_address = relay_base + relay_offset
+            relay_offset += byte_count
+
+            first = copy.deepcopy(movement)
+            first["moveIndex"] = next_move_index
+            next_move_index += 1
+            first["destination"]["core"] = relay_core
+            first["destination"]["lxAddress"] = relay_lx_address
+            first["destination"]["localByteRange"] = {
+                "start": relay_lx_address - relay_base,
+                "end": relay_lx_address - relay_base + byte_count,
+            }
+            first["destination"]["lxByteRange"] = {
+                "start": relay_lx_address,
+                "end": relay_lx_address + byte_count,
+            }
+            first["relay"] = {
+                "kind": "local_first_leg",
+                "originalMoveIndex": int(movement["moveIndex"]),
+                "relayCore": relay_core,
+            }
+            first_legs.append(first)
+
+            second = copy.deepcopy(movement)
+            second["moveIndex"] = next_move_index
+            next_move_index += 1
+            second["source"]["core"] = relay_core
+            second["source"]["lxAddress"] = relay_lx_address
+            second["source"]["localByteRange"] = first["destination"][
+                "localByteRange"
+            ]
+            second["source"]["lxByteRange"] = first["destination"]["lxByteRange"]
+            second["relay"] = {
+                "kind": "local_second_leg",
+                "originalMoveIndex": int(movement["moveIndex"]),
+                "relayCore": relay_core,
+            }
+            second_legs.append(second)
+
+        batches.append((first_legs, second_legs))
+    return batches
+
+
+def _local_relay_batches(
+    movements: list[dict[str, Any]],
+    *,
+    chunk_size: int,
+    relay_capacity: int,
+) -> list[list[dict[str, Any]]]:
+    batches: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    current_bytes = 0
+    for movement in movements:
         byte_count = int(movement["bytes"])
-        relay_lx_address = relay_base + relay_offset
-        relay_offset += byte_count
+        if byte_count > relay_capacity:
+            raise ValueError("coordinate-remap-local-relay-lx-capacity")
+        if current and (
+            len(current) >= chunk_size or current_bytes + byte_count > relay_capacity
+        ):
+            batches.append(current)
+            current = []
+            current_bytes = 0
+        current.append(movement)
+        current_bytes += byte_count
+    if current:
+        batches.append(current)
+    return batches
 
-        first = copy.deepcopy(movement)
-        first["moveIndex"] = next_move_index
-        next_move_index += 1
-        first["destination"]["core"] = relay_core
-        first["destination"]["lxAddress"] = relay_lx_address
-        first["destination"]["localByteRange"] = {
-            "start": relay_lx_address - relay_base,
-            "end": relay_lx_address - relay_base + byte_count,
-        }
-        first["destination"]["lxByteRange"] = {
-            "start": relay_lx_address,
-            "end": relay_lx_address + byte_count,
-        }
-        first["relay"] = {
-            "kind": "local_first_leg",
-            "originalMoveIndex": int(movement["moveIndex"]),
-            "relayCore": relay_core,
-        }
-        first_legs.append(first)
 
-        second = copy.deepcopy(movement)
-        second["moveIndex"] = next_move_index
-        next_move_index += 1
-        second["source"]["core"] = relay_core
-        second["source"]["lxAddress"] = relay_lx_address
-        second["source"]["localByteRange"] = first["destination"][
-            "localByteRange"
-        ]
-        second["source"]["lxByteRange"] = first["destination"]["lxByteRange"]
-        second["relay"] = {
-            "kind": "local_second_leg",
-            "originalMoveIndex": int(movement["moveIndex"]),
-            "relayCore": relay_core,
-        }
-        second_legs.append(second)
+def _local_relay_scratch_window(
+    *,
+    producer_base: int,
+    producer_region_bytes: int,
+    consumer_base: int,
+    consumer_region_bytes: int,
+) -> tuple[int, int]:
+    protected: list[tuple[int, int]] = []
+    if producer_region_bytes > 0:
+        protected.append((producer_base, producer_base + producer_region_bytes))
+    if consumer_region_bytes > 0:
+        protected.append((consumer_base, consumer_base + consumer_region_bytes))
+    protected = [
+        (max(0, start), min(_LX_SIZE_BYTES, end))
+        for start, end in protected
+        if start < _LX_SIZE_BYTES and end > 0 and start < end
+    ]
+    protected.sort()
 
-    return cross_movements, first_legs, second_legs
+    best_start = 0
+    best_end = 0
+    cursor = 0
+    for start, end in protected:
+        aligned_cursor = ((cursor + 127) // 128) * 128
+        aligned_start = (start // 128) * 128
+        if aligned_start - aligned_cursor > best_end - best_start:
+            best_start, best_end = aligned_cursor, aligned_start
+        cursor = max(cursor, end)
+    aligned_cursor = ((cursor + 127) // 128) * 128
+    if _LX_SIZE_BYTES - aligned_cursor > best_end - best_start:
+        best_start, best_end = aligned_cursor, _LX_SIZE_BYTES
+    return best_start, max(0, best_end - best_start)
 
 
 def _first_compute_dsc(root: dict[str, Any]) -> dict[str, Any] | None:
