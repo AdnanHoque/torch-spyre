@@ -55,3 +55,8 @@ Notes:
   from 16.267 ms to 13.050 ms per iter, a 19.78% win. Full-block and attention
   attempts are currently blocked by unrelated norm/RoPE lowering issues before
   coordinate-remap applicability can be measured there.
+- `granite_block_probe_costmodel` runs the standalone
+  `benchmarks/granite_block_probe.py` cost-model probe. It reproduces the fused
+  FFN coordinate-remap win through real FMS `GraniteBlock` code and isolates the
+  full-block blocker to the norm element-arrangement path. Its timing is
+  script wall-sync time, not the primary Kineto metric.

@@ -67,6 +67,9 @@ For parameterized FMS module microbenchmarks, use the
 to avoid large host-to-device parameter copies before compilation.
 The Granite block wrapper in that skill is the preferred way to check whether
 coordinate remap helps beyond the isolated FMS SwiGLU op.
+For quicker block-derived compiler probes, use
+`benchmarks/granite_block_probe.py`; it gives wall-sync timing and SDSC
+structure, but it is not a substitute for archived Kineto `kernel_ms`.
 
 Each variant run directory should contain the files needed to interpret the
 run:
