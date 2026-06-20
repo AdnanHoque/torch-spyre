@@ -41,6 +41,7 @@ test coverage, bug classification), see :doc:`/contributing/op_enablement`.
    inductor_frontend
    backend
    ktir
+   aiu_kernel_profiler_skill
 
 .. toctree::
    :maxdepth: 2
