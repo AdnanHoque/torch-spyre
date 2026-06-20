@@ -770,6 +770,164 @@ def _coalesce_dataop_movements(movements: list[dict[str, Any]]) -> list[dict[str
     return coalesced
 
 
+def _side_stride(previous: dict[str, Any], movement: dict[str, Any], side: str) -> int | None:
+    previous_side = previous[side]
+    movement_side = movement[side]
+    lx_stride = int(movement_side["lxAddress"]) - int(previous_side["lxAddress"])
+    local_stride = int(movement_side["localByteRange"]["start"]) - int(
+        previous_side["localByteRange"]["start"]
+    )
+    lx_range_stride = int(movement_side["lxByteRange"]["start"]) - int(
+        previous_side["lxByteRange"]["start"]
+    )
+    if lx_stride != local_stride or lx_stride != lx_range_stride:
+        return None
+    if int(movement_side["localByteRange"]["end"]) - int(
+        previous_side["localByteRange"]["end"]
+    ) != lx_stride:
+        return None
+    if int(movement_side["lxByteRange"]["end"]) - int(
+        previous_side["lxByteRange"]["end"]
+    ) != lx_stride:
+        return None
+    return lx_stride
+
+
+def _range_side_payload(side: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "core": int(side["core"]),
+        "logicalSlice": copy.deepcopy(side.get("logicalSlice", {})),
+        "lxAddress": int(side["lxAddress"]),
+        "localByteRange": copy.deepcopy(side["localByteRange"]),
+        "lxByteRange": copy.deepcopy(side["lxByteRange"]),
+    }
+
+
+def _dataop_movement_ranges(movements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if not movements:
+        return []
+
+    ranges: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    previous: dict[str, Any] | None = None
+
+    def flush() -> None:
+        nonlocal current
+        if current is None:
+            return
+        current["rangeIndex"] = len(ranges)
+        ranges.append(current)
+        current = None
+
+    for movement in movements:
+        movement = copy.deepcopy(movement)
+        if current is None:
+            current = {
+                "rangeIndex": -1,
+                "moveIndex": int(movement["moveIndex"]),
+                "count": 1,
+                "bytesPerMove": int(movement["bytes"]),
+                "sourceStrideBytes": 0,
+                "destinationStrideBytes": 0,
+                "source": _range_side_payload(movement["source"]),
+                "destination": _range_side_payload(movement["destination"]),
+                **({"relay": copy.deepcopy(movement["relay"])} if "relay" in movement else {}),
+            }
+            previous = movement
+            continue
+
+        assert previous is not None
+        source_stride = _side_stride(previous, movement, "source")
+        destination_stride = _side_stride(previous, movement, "destination")
+        expected_source_stride = int(current["sourceStrideBytes"])
+        expected_destination_stride = int(current["destinationStrideBytes"])
+        compatible = (
+            int(movement["bytes"]) == int(current["bytesPerMove"])
+            and int(movement["source"]["core"]) == int(current["source"]["core"])
+            and int(movement["destination"]["core"])
+            == int(current["destination"]["core"])
+            and source_stride is not None
+            and destination_stride is not None
+            and int(movement["moveIndex"]) == int(previous["moveIndex"]) + 1
+            and movement.get("relay") == current.get("relay")
+            and (int(current["count"]) == 1 or source_stride == expected_source_stride)
+            and (
+                int(current["count"]) == 1
+                or destination_stride == expected_destination_stride
+            )
+        )
+        if not compatible:
+            flush()
+            current = {
+                "rangeIndex": -1,
+                "moveIndex": int(movement["moveIndex"]),
+                "count": 1,
+                "bytesPerMove": int(movement["bytes"]),
+                "sourceStrideBytes": 0,
+                "destinationStrideBytes": 0,
+                "source": _range_side_payload(movement["source"]),
+                "destination": _range_side_payload(movement["destination"]),
+                **({"relay": copy.deepcopy(movement["relay"])} if "relay" in movement else {}),
+            }
+            previous = movement
+            continue
+
+        if int(current["count"]) == 1:
+            current["sourceStrideBytes"] = int(source_stride)
+            current["destinationStrideBytes"] = int(destination_stride)
+        current["count"] = int(current["count"]) + 1
+        previous = movement
+
+    flush()
+    return ranges
+
+
+def _expand_dataop_movement_ranges(ranges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    movements: list[dict[str, Any]] = []
+    for movement_range in ranges:
+        count = int(movement_range.get("count", 0))
+        bytes_per_move = int(movement_range.get("bytesPerMove", 0))
+        source_stride = int(movement_range.get("sourceStrideBytes", 0))
+        destination_stride = int(movement_range.get("destinationStrideBytes", 0))
+        if count <= 0 or bytes_per_move <= 0:
+            continue
+        for offset in range(count):
+            move = {
+                "moveIndex": int(movement_range["moveIndex"]) + offset,
+                "bytes": bytes_per_move,
+                "source": copy.deepcopy(movement_range["source"]),
+                "destination": copy.deepcopy(movement_range["destination"]),
+            }
+            if "relay" in movement_range:
+                move["relay"] = copy.deepcopy(movement_range["relay"])
+            for side_name, stride in (
+                ("source", source_stride),
+                ("destination", destination_stride),
+            ):
+                side = move[side_name]
+                byte_offset = offset * stride
+                side["lxAddress"] = int(side["lxAddress"]) + byte_offset
+                side["localByteRange"]["start"] = int(
+                    side["localByteRange"]["start"]
+                ) + byte_offset
+                side["localByteRange"]["end"] = int(
+                    side["localByteRange"]["end"]
+                ) + byte_offset
+                side["lxByteRange"]["start"] = int(side["lxByteRange"]["start"]) + byte_offset
+                side["lxByteRange"]["end"] = int(side["lxByteRange"]["end"]) + byte_offset
+            movements.append(move)
+    return movements
+
+
+def _compact_coordinate_remap_dataop_for_json(dataop: dict[str, Any]) -> dict[str, Any]:
+    compact = copy.deepcopy(dataop)
+    if config.onchip_move_range_encoding and compact.get("movementRanges"):
+        compact.pop("movements", None)
+        lowering = compact.setdefault("lowering", {})
+        lowering["rangeEncoded"] = True
+    return compact
+
+
 def _coordinate_remap_dataop_payload(
     *,
     source_name: str,
@@ -819,8 +977,11 @@ def _coordinate_remap_dataop_payload(
             "addressUnits": "bytes",
             "coalescedMovements": len(dataop_movements),
             "sourceMovements": len(movements),
+            "movementRanges": len(_dataop_movement_ranges(dataop_movements)),
+            "rangeEncoded": False,
         },
         "movements": dataop_movements,
+        "movementRanges": _dataop_movement_ranges(dataop_movements),
     }
 
 
@@ -947,10 +1108,14 @@ def _plan_json(plan: OnChipMovePlan) -> dict[str, Any]:
     if plan.cells:
         if config.onchip_move_debug_cells:
             payload["cells"] = [dataclasses.asdict(cell) for cell in plan.cells]
-        payload["coordinate_remap"] = build_coordinate_remap_metadata(
+        metadata = build_coordinate_remap_metadata(
             plan,
             include_debug_movements=config.onchip_move_debug_cells,
         )
+        metadata["deeptools_dataop"] = _compact_coordinate_remap_dataop_for_json(
+            metadata["deeptools_dataop"]
+        )
+        payload["coordinate_remap"] = metadata
     return payload
 
 

@@ -24,7 +24,11 @@ from typing import Any
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.constants import BATCH_MATMUL_FP8_OP, BATCH_MATMUL_OP
-from torch_spyre._inductor.onchip_move import ONCHIP_MOVE_OP_INFO_KEY
+from torch_spyre._inductor.onchip_move import (
+    ONCHIP_MOVE_OP_INFO_KEY,
+    _dataop_movement_ranges,
+    _expand_dataop_movement_ranges,
+)
 from torch_spyre._inductor.op_spec import LoopSpec, OpSpec, TensorArg
 
 _LX_SIZE_BYTES = 2 * 1024 * 1024
@@ -401,6 +405,13 @@ def build_mixed_onchip_move_sdsc(
     return {producer_name: producer_root}, {f"{consumer_index}_OnChipMoveMixedSTCDP": root}
 
 
+def _coordinate_remap_dataop_movements(dataop: dict[str, Any]) -> list[dict[str, Any]]:
+    movements = list(dataop.get("movements", []) or [])
+    if movements:
+        return movements
+    return _expand_dataop_movement_ranges(list(dataop.get("movementRanges", []) or []))
+
+
 def _coordinate_remap_dataop(plan: dict[str, Any]) -> dict[str, Any]:
     metadata = plan.get("coordinate_remap")
     if not isinstance(metadata, dict):
@@ -410,17 +421,15 @@ def _coordinate_remap_dataop(plan: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("coordinate-remap-dataop-missing")
     if (dataop.get("op") or {}).get("name") != "LXCoordinateRemapOp":
         raise ValueError("coordinate-remap-dataop-op-mismatch")
-    movements = list(dataop.get("movements", []) or [])
+    movements = _coordinate_remap_dataop_movements(dataop)
     if not movements:
         raise ValueError("coordinate-remap-dataop-has-no-movements")
     core_ids = sorted(
-        {
-            int(movement["source"]["core"])
-            for movement in movements
-        }
+        {int(movement["source"]["core"]) for movement in movements}
         | {int(movement["destination"]["core"]) for movement in movements}
     )
     result = copy.deepcopy(dataop)
+    result["movements"] = movements
     result["coreIdsUsed_"] = core_ids
     return result
 
@@ -438,7 +447,7 @@ def _coordinate_remap_datadsc_chunks(
     static_fields = {
         key: copy.deepcopy(value)
         for key, value in dataop.items()
-        if key not in {"movements", "coreIdsUsed_"}
+        if key not in {"movements", "movementRanges", "coreIdsUsed_"}
     }
 
     def append_chunk(chunk_movements_src: list[dict[str, Any]]) -> None:
@@ -446,17 +455,21 @@ def _coordinate_remap_datadsc_chunks(
             return
         chunk_movements = copy.deepcopy(chunk_movements_src)
         chunk_core_ids = sorted(
-            {
-                int(movement["source"]["core"])
-                for movement in chunk_movements
-            }
-            | {
-                int(movement["destination"]["core"])
-                for movement in chunk_movements
-            }
+            {int(movement["source"]["core"]) for movement in chunk_movements}
+            | {int(movement["destination"]["core"]) for movement in chunk_movements}
         )
         chunk = copy.deepcopy(static_fields)
-        chunk["movements"] = chunk_movements
+        if config.onchip_move_range_encoding:
+            movement_ranges = _dataop_movement_ranges(chunk_movements)
+            chunk["movementRanges"] = movement_ranges
+            lowering = chunk.setdefault("lowering", {})
+            lowering["rangeEncoded"] = True
+            lowering["movementRanges"] = len(movement_ranges)
+            lowering["expandedMovements"] = len(chunk_movements)
+        else:
+            chunk["movements"] = chunk_movements
+            lowering = chunk.setdefault("lowering", {})
+            lowering["rangeEncoded"] = False
         chunk["coreIdsUsed_"] = chunk_core_ids
         datadscs.append({f"{dataop_name}_{len(datadscs)}": chunk})
         core_sets.append(set(chunk_core_ids))
@@ -481,7 +494,16 @@ def _coordinate_remap_datadsc_chunks(
         and not local_relay_second
         and len(cross_movements) <= chunk_size
     ):
-        return [{dataop_name: dataop}], [set(dataop["coreIdsUsed_"])]
+        compact_dataop = copy.deepcopy(dataop)
+        if config.onchip_move_range_encoding:
+            movement_ranges = _dataop_movement_ranges(cross_movements)
+            compact_dataop.pop("movements", None)
+            compact_dataop["movementRanges"] = movement_ranges
+            lowering = compact_dataop.setdefault("lowering", {})
+            lowering["rangeEncoded"] = True
+            lowering["movementRanges"] = len(movement_ranges)
+            lowering["expandedMovements"] = len(cross_movements)
+        return [{dataop_name: compact_dataop}], [set(dataop["coreIdsUsed_"])]
 
     for start in range(0, len(cross_movements), chunk_size):
         append_chunk(cross_movements[start : start + chunk_size])

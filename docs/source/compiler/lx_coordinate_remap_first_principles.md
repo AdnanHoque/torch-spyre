@@ -198,6 +198,7 @@ Useful diagnostics and controls:
 export SPYRE_ONCHIP_MOVE_JSONL=/tmp/onchip_move.jsonl
 export SPYRE_ONCHIP_MOVE_DEBUG_DIR=/tmp/onchip_move_debug
 export SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS=8192
+export SPYRE_ONCHIP_MOVE_RANGE_ENCODING=1
 export SPYRE_ONCHIP_MOVE_MAX_CELLS=131072
 export SPYRE_ONCHIP_MOVE_DEBUG_CELLS=0  # set to 1 only for raw-cell debugging
 export SPYRE_ONCHIP_MOVE_PRODUCER_LX_BASE=0
@@ -296,7 +297,7 @@ or value corruption.
 
 | Layer | Test | Expected result |
 | --- | --- | --- |
-| Torch unit | `tests/inductor/test_onchip_move.py` | `18 passed` |
+| Torch unit | `tests/inductor/test_onchip_move.py` | `26 passed` |
 | DXP gate | emitted whole-stick coordinate-remap bundle | `RC=0` |
 | AIU micro | row-pattern `negmm` | exact match, `max_abs=0.0` |
 | AIU micro | random `negmm` | matches CPU/HBM tolerance |

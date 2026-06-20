@@ -32,6 +32,7 @@ from torch_spyre._inductor.onchip_move import (
     OnChipMoveCell,
     OnChipMovePlan,
     _coordinate_remap_v1_support_reason,
+    _expand_dataop_movement_ranges,
     _attach_plan_to_consumer,
     _plan_json,
     build_coordinate_remap_metadata,
@@ -461,7 +462,11 @@ def test_coordinate_remap_plan_json_omits_raw_cells_by_default(monkeypatch):
     assert payload["bytes_moved"] == 128
     assert "cells" not in payload
     assert "movements" not in payload["coordinate_remap"]
-    assert payload["coordinate_remap"]["deeptools_dataop"]["movements"]
+    dataop = payload["coordinate_remap"]["deeptools_dataop"]
+    assert "movements" not in dataop
+    assert dataop["movementRanges"]
+    assert dataop["lowering"]["rangeEncoded"] is True
+    assert _dataop_movements_for_test(dataop)
 
 
 def test_coordinate_remap_plan_json_can_include_debug_cells(monkeypatch):
@@ -765,7 +770,10 @@ def test_coordinate_remap_carrier_emits_real_dataop_sdsc(monkeypatch):
     assert dataop["schemaVersion"] == 0
     assert dataop["producerLxBase"] == 0x1000
     assert dataop["consumerLxBase"] == 0x9000
-    movements = [move for row in dataops for move in row["movements"]]
+    assert all("movementRanges" in row and "movements" not in row for row in dataops)
+    movements = [
+        move for row in dataops for move in _dataop_movements_for_test(row)
+    ]
     assert len(movements) == 5
     assert any(
         move["source"]["core"] == 1 and move["destination"]["core"] == 0
@@ -866,16 +874,20 @@ def test_coordinate_remap_carrier_chunks_large_dataop(monkeypatch):
     assert mixed_root["onchipMove_"]["dataop_chunks"] == len(
         mixed_root["datadscs_"]
     )
+    dataop_chunks = [next(iter(row.values())) for row in mixed_root["datadscs_"]]
+    assert all(
+        "movementRanges" in chunk and "movements" not in chunk
+        for chunk in dataop_chunks
+    )
     movement_counts = [
-        len(next(iter(row.values()))["movements"])
-        for row in mixed_root["datadscs_"]
+        len(_dataop_movements_for_test(chunk)) for chunk in dataop_chunks
     ]
     assert sum(movement_counts) == 5
     assert max(movement_counts) <= 2
     movements = [
         movement
-        for row in mixed_root["datadscs_"]
-        for movement in next(iter(row.values()))["movements"]
+        for chunk in dataop_chunks
+        for movement in _dataop_movements_for_test(chunk)
     ]
     assert sum(1 for movement in movements if "relay" in movement) == 2
     assert mixed_root["coreIdToDscSchedule"]["0"][-1][0:2] == [-1, 0]
@@ -1533,9 +1545,15 @@ def _remap_plan_payload(
     return payload
 
 
+
+def _dataop_movements_for_test(dataop: dict) -> list[dict]:
+    if "movements" in dataop:
+        return dataop["movements"]
+    return _expand_dataop_movement_ranges(dataop.get("movementRanges") or [])
+
 def _assert_no_local_destination_overlap_or_gap(dataop: dict) -> None:
     ranges_by_core: dict[int, list[tuple[int, int]]] = {}
-    for move in dataop["movements"]:
+    for move in _dataop_movements_for_test(dataop):
         byte_range = move["destination"]["localByteRange"]
         assert byte_range["end"] - byte_range["start"] == move["bytes"]
         ranges_by_core.setdefault(move["destination"]["core"], []).append(
@@ -1553,7 +1571,7 @@ def _assert_patterned_coordinate_remap_is_value_correct(dataop: dict) -> None:
     source_by_core: dict[int, bytearray] = {}
     destination_by_core: dict[int, bytearray] = {}
 
-    for move in dataop["movements"]:
+    for move in _dataop_movements_for_test(dataop):
         source_range = move["source"]["localByteRange"]
         dest_range = move["destination"]["localByteRange"]
         source = source_by_core.setdefault(
@@ -1572,7 +1590,7 @@ def _assert_patterned_coordinate_remap_is_value_correct(dataop: dict) -> None:
         for offset in range(len(source)):
             source[offset] = (core * 17 + offset) % 251
 
-    for move in dataop["movements"]:
+    for move in _dataop_movements_for_test(dataop):
         source_range = move["source"]["localByteRange"]
         dest_range = move["destination"]["localByteRange"]
         source = source_by_core[move["source"]["core"]]
@@ -1581,7 +1599,7 @@ def _assert_patterned_coordinate_remap_is_value_correct(dataop: dict) -> None:
             source_range["start"] : source_range["end"]
         ]
 
-    for move in dataop["movements"]:
+    for move in _dataop_movements_for_test(dataop):
         source_range = move["source"]["localByteRange"]
         dest_range = move["destination"]["localByteRange"]
         source = source_by_core[move["source"]["core"]]

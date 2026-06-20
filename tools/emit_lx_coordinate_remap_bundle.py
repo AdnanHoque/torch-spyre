@@ -38,6 +38,7 @@ from torch_spyre._inductor.codegen.onchip_move import (
 from torch_spyre._inductor.onchip_move import (
     OnChipMoveCell,
     OnChipMovePlan,
+    _expand_dataop_movement_ranges,
     build_coordinate_remap_metadata,
 )
 from torch_spyre._inductor.op_spec import TensorArg
@@ -52,6 +53,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     spyre_config.onchip_move_carrier = "coordinate_remap"
+    spyre_config.onchip_move_range_encoding = True
     spyre_config.onchip_move_producer_lx_base = 0x1000
     spyre_config.onchip_move_consumer_lx_base = 0x9000
 
@@ -79,7 +81,9 @@ def main() -> None:
         "consumer_sdsc": "sdsc_1.json",
         "bundle": "bundle.mlir",
         "op": dataop["op"]["name"],
-        "movement_count": len(dataop["movements"]),
+        "movement_count": len(_dataop_movements(dataop)),
+        "movement_range_count": len(dataop.get("movementRanges") or []),
+        "range_encoded": "movementRanges" in dataop and "movements" not in dataop,
         "core_ids": dataop["coreIdsUsed_"],
         "coverage": dataop["coverage"],
         "python_byte_simulation_value_correct": _simulate_dataop(dataop),
@@ -115,8 +119,8 @@ def _plan_payload() -> dict[str, Any]:
             source_core=0,
             dest_core=0,
             dim_starts={"d0_": 0},
-            dim_sizes={"d0_": 4},
-            bytes=8,
+            dim_sizes={"d0_": 64},
+            bytes=128,
             source_offset_bytes=0,
             dest_offset_bytes=0,
         ),
@@ -124,19 +128,19 @@ def _plan_payload() -> dict[str, Any]:
             cell_index=1,
             source_core=1,
             dest_core=0,
-            dim_starts={"d0_": 4},
-            dim_sizes={"d0_": 4},
-            bytes=8,
+            dim_starts={"d0_": 64},
+            dim_sizes={"d0_": 64},
+            bytes=128,
             source_offset_bytes=0,
-            dest_offset_bytes=8,
+            dest_offset_bytes=128,
         ),
         OnChipMoveCell(
             cell_index=2,
             source_core=2,
             dest_core=1,
-            dim_starts={"d0_": 8},
-            dim_sizes={"d0_": 4},
-            bytes=8,
+            dim_starts={"d0_": 128},
+            dim_sizes={"d0_": 64},
+            bytes=128,
             source_offset_bytes=0,
             dest_offset_bytes=0,
         ),
@@ -144,11 +148,11 @@ def _plan_payload() -> dict[str, Any]:
             cell_index=3,
             source_core=3,
             dest_core=1,
-            dim_starts={"d0_": 12},
-            dim_sizes={"d0_": 4},
-            bytes=8,
+            dim_starts={"d0_": 192},
+            dim_sizes={"d0_": 64},
+            bytes=128,
             source_offset_bytes=0,
-            dest_offset_bytes=8,
+            dest_offset_bytes=128,
         ),
     ]
     plan = OnChipMovePlan(
@@ -161,13 +165,13 @@ def _plan_payload() -> dict[str, Any]:
         fallback_reason=None,
         realization_status="planned-coordinate-remap-needs-deeptools",
         carrier="coordinate_remap",
-        device_sizes=[16],
+        device_sizes=[256],
         device_stride_map=[1],
         element_bytes=2,
         producer_core_count=4,
         consumer_core_count=2,
-        producer_region_bytes=8,
-        consumer_region_bytes=16,
+        producer_region_bytes=128,
+        consumer_region_bytes=256,
         producer_view={},
         consumer_view={},
         cells=cells,
@@ -187,7 +191,7 @@ def _producer_output_arg() -> TensorArg:
         is_input=False,
         arg_index=0,
         device_dtype=DataFormats.SEN169_FP16,
-        device_size=[16],
+        device_size=[256],
         device_coordinates=[],
         allocation=None,
         stride_map=[1],
@@ -330,10 +334,16 @@ def _minimal_sdsc_payload(
     }
 
 
+def _dataop_movements(dataop: dict[str, Any]) -> list[dict[str, Any]]:
+    if "movements" in dataop:
+        return dataop["movements"]
+    return _expand_dataop_movement_ranges(dataop.get("movementRanges") or [])
+
+
 def _simulate_dataop(dataop: dict[str, Any]) -> bool:
     source_by_core: dict[int, bytearray] = {}
     destination_by_core: dict[int, bytearray] = {}
-    for move in dataop["movements"]:
+    for move in _dataop_movements(dataop):
         source_range = move["source"]["localByteRange"]
         dest_range = move["destination"]["localByteRange"]
         source = source_by_core.setdefault(
@@ -351,7 +361,7 @@ def _simulate_dataop(dataop: dict[str, Any]) -> bool:
         for offset in range(len(source)):
             source[offset] = (core * 17 + offset) % 251
 
-    for move in dataop["movements"]:
+    for move in _dataop_movements(dataop):
         source_range = move["source"]["localByteRange"]
         dest_range = move["destination"]["localByteRange"]
         source = source_by_core[move["source"]["core"]]
@@ -360,7 +370,7 @@ def _simulate_dataop(dataop: dict[str, Any]) -> bool:
             source_range["start"] : source_range["end"]
         ]
 
-    for move in dataop["movements"]:
+    for move in _dataop_movements(dataop):
         source_range = move["source"]["localByteRange"]
         dest_range = move["destination"]["localByteRange"]
         source = source_by_core[move["source"]["core"]]

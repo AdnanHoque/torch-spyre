@@ -49,6 +49,7 @@ BRANCH_VARIANTS = [
             "SPYRE_ONCHIP_MOVE_REALIZE": "1",
             "SPYRE_ONCHIP_MOVE_CARRIER": "coordinate_remap",
             "SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS": "8192",
+            "SPYRE_ONCHIP_MOVE_RANGE_ENCODING": "1",
             "SPYRE_ONCHIP_MOVE_MAX_CELLS": "131072",
         },
     ),
@@ -189,6 +190,7 @@ def _write_env_record(
         "SPYRE_ONCHIP_MOVE_REALIZE",
         "SPYRE_ONCHIP_MOVE_CARRIER",
         "SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS",
+        "SPYRE_ONCHIP_MOVE_RANGE_ENCODING",
         "SPYRE_ONCHIP_MOVE_MAX_CELLS",
         "SPYRE_ONCHIP_MOVE_DEBUG_CELLS",
         "SPYRE_ONCHIP_MOVE_JSONL",
@@ -264,6 +266,21 @@ def _run(command: list[str], *, cwd: Path, env: dict[str, str], log: Path) -> in
     return proc.returncode
 
 
+def _benchmark_completed_with_profiler_failure(log: Path, runs: int) -> bool:
+    """Return true when perf-suite failed after all requested runs finished.
+
+    The Spyre PT-utilization post-processing path can raise a ZeroDivisionError
+    when the trace has no nonzero actual PT duration. That should still be
+    reported, but it should not prevent SDSC/artifact extraction for the run.
+    """
+
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return f"Run {runs} completed" in text and "ZeroDivisionError" in text
+
+
 def _variants(args: argparse.Namespace) -> list[Variant]:
     default_variants = [
         variant.name for variant in BRANCH_VARIANTS if variant.name != "upstream-main"
@@ -331,17 +348,36 @@ def main(argv: list[str] | None = None) -> int:
         manifest.append({"variant": variant.name, "run_dir": str(run_dir)})
         if args.dry_run:
             continue
-        rc = _run(command, cwd=run_dir, env=env, log=run_dir / "benchmark.log")
-        if rc != 0:
-            return rc
-        rc = _run(
+        benchmark_rc = _run(command, cwd=run_dir, env=env, log=run_dir / "benchmark.log")
+        profiler_failed_after_runs = (
+            benchmark_rc != 0
+            and _benchmark_completed_with_profiler_failure(
+                run_dir / "benchmark.log", args.runs
+            )
+        )
+        artifact_rc = _run(
             artifact_command,
             cwd=args.torch_root,
             env=env,
             log=run_dir / "artifact_summary.log",
         )
-        if rc != 0:
-            return rc
+        (run_dir / "run_status.json").write_text(
+            json.dumps(
+                {
+                    "benchmark_returncode": benchmark_rc,
+                    "artifact_returncode": artifact_rc,
+                    "profiler_failed_after_runs": profiler_failed_after_runs,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        if benchmark_rc != 0 and not profiler_failed_after_runs:
+            return benchmark_rc
+        if artifact_rc != 0:
+            return artifact_rc
     (args.output_root / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

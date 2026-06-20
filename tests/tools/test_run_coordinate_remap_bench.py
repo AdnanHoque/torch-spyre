@@ -117,3 +117,69 @@ def test_run_coordinate_remap_bench_dry_run_can_label_upstream_main(
     assert env["artifact_tool_root"] == str(torch_root)
     assert env["env"]["SPYRE_ONCHIP_MOVE_PLANNER"] == "0"
     assert "--sdsc-senprog-summary" in commands["artifact_summary"]
+
+
+def test_run_coordinate_remap_bench_collects_artifacts_after_profiler_failure(
+    tmp_path: Path,
+) -> None:
+    tool = _load_tool()
+    torch_root = Path(__file__).resolve().parents[2]
+    deeptools_root = tmp_path / "deeptools"
+    perf_root = tmp_path / "perf"
+    deeptools_root.mkdir()
+    perf_root.mkdir()
+    benchmark = perf_root / "benchmark.py"
+    benchmark.write_text(
+        "\n".join(
+            [
+                "print('Run 1 completed. Not considered for Profiling')",
+                "print('Run 2 completed')",
+                "raise ZeroDivisionError('float division by zero')",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    artifact_tool = tmp_path / "artifact_tool.py"
+    artifact_tool.write_text(
+        "import os, pathlib\n"
+        "pathlib.Path(os.environ['ARTIFACT_MARKER']).write_text('ran\\n')\n",
+        encoding="utf-8",
+    )
+    marker = tmp_path / "artifact-marker.txt"
+    tool._artifact_command = lambda args, run_dir: [sys.executable, str(artifact_tool)]
+
+    rc = tool.main(
+        [
+            "--output-root",
+            str(tmp_path / "runs"),
+            "--torch-root",
+            str(torch_root),
+            "--deeptools-root",
+            str(deeptools_root),
+            "--perf-suite-root",
+            str(perf_root),
+            "--variant",
+            "coordinate-remap",
+            "--runs",
+            "2",
+            "--env",
+            f"ARTIFACT_MARKER={marker}",
+            "--command",
+            sys.executable,
+            str(benchmark),
+        ]
+    )
+
+    assert rc == 0
+    assert marker.read_text(encoding="utf-8") == "ran\n"
+    status = json.loads(
+        (tmp_path / "runs" / "coordinate-remap" / "run_status.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert status == {
+        "artifact_returncode": 0,
+        "benchmark_returncode": 1,
+        "profiler_failed_after_runs": True,
+    }

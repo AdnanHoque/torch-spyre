@@ -194,6 +194,49 @@ def _dataop_payload(row: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return op_name, payload
 
 
+def _movement_ranges(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    return payload.get("movementRanges") or []
+
+
+def _movement_range_count(payload: dict[str, Any]) -> int:
+    ranges = _movement_ranges(payload)
+    if ranges:
+        return sum(_as_int(item.get("count")) or 0 for item in ranges)
+    return len(payload.get("movements") or [])
+
+
+def _movement_range_bytes(payload: dict[str, Any]) -> int:
+    ranges = _movement_ranges(payload)
+    if ranges:
+        return sum(
+            (_as_int(item.get("count")) or 0)
+            * (_as_int(item.get("bytesPerMove")) or 0)
+            for item in ranges
+        )
+    return sum(_as_int(move.get("bytes")) or 0 for move in payload.get("movements") or [])
+
+
+def _movement_range_addresses(payload: dict[str, Any], side: str) -> list[int | None]:
+    ranges = _movement_ranges(payload)
+    if ranges:
+        addresses: list[int | None] = []
+        for item in ranges:
+            side_payload = item.get(side) or {}
+            start = _as_int(side_payload.get("lxAddress"))
+            count = _as_int(item.get("count")) or 0
+            stride = _as_int(item.get(f"{side}StrideBytes")) or 0
+            if start is None:
+                addresses.append(None)
+                continue
+            addresses.append(start)
+            if count > 1:
+                addresses.append(start + (count - 1) * stride)
+        return addresses
+    return [
+        _as_int((move.get(side) or {}).get("lxAddress"))
+        for move in payload.get("movements") or []
+    ]
+
 def sdsc_rows(sdsc: Path) -> list[dict[str, str]]:
     root_name, root = _unwrap_sdsc(sdsc)
     rows: list[dict[str, str]] = []
@@ -204,15 +247,11 @@ def sdsc_rows(sdsc: Path) -> list[dict[str, str]]:
     for index, dataop in enumerate(_root_dataops(root)):
         op_name, payload = _dataop_payload(dataop)
         movements = payload.get("movements") or []
-        byte_count = sum(_as_int(move.get("bytes")) or 0 for move in movements)
-        src_addrs = [
-            _as_int((move.get("source") or {}).get("lxAddress"))
-            for move in movements
-        ]
-        dst_addrs = [
-            _as_int((move.get("destination") or {}).get("lxAddress"))
-            for move in movements
-        ]
+        movement_ranges = _movement_ranges(payload)
+        logical_movement_count = _movement_range_count(payload)
+        byte_count = _movement_range_bytes(payload)
+        src_addrs = _movement_range_addresses(payload, "source")
+        dst_addrs = _movement_range_addresses(payload, "destination")
         src_unique = sorted({addr for addr in src_addrs if addr is not None})
         dst_unique = sorted({addr for addr in dst_addrs if addr is not None})
         address = []
@@ -234,7 +273,8 @@ def sdsc_rows(sdsc: Path) -> list[dict[str, str]]:
                 "loc": "lx->lx",
                 "layout_wkslices": (
                     f"coverage={_short(coverage.get('device_sizes'))}; "
-                    f"movements={len(movements)}; bytes={byte_count}; "
+                    f"ranges={len(movement_ranges)}; "
+                    f"movements={logical_movement_count}; bytes={byte_count}; "
                     f"coalesced={lowering.get('coalescedMovements', '')}"
                 ),
                 "address": "; ".join(address),
@@ -352,9 +392,8 @@ def _summary(sdscs: list[Path]) -> dict[str, Any]:
             op_counts[op_name] += 1
             if op_name == "LXCoordinateRemapOp":
                 remap_chunks += 1
-                movements = payload.get("movements") or []
-                remap_movements += len(movements)
-                remap_bytes += sum(_as_int(move.get("bytes")) or 0 for move in movements)
+                remap_movements += _movement_range_count(payload)
+                remap_bytes += _movement_range_bytes(payload)
         for dsc_map in root.get("dscs_", []) or []:
             op_name, _ = _op_name_from_dsc(dsc_map)
             op_counts[op_name] += 1
@@ -602,6 +641,7 @@ def _write_env(path: Path, args: argparse.Namespace, sdscs: list[Path]) -> None:
         "SPYRE_ONCHIP_MOVE_REALIZE",
         "SPYRE_ONCHIP_MOVE_CARRIER",
         "SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS",
+        "SPYRE_ONCHIP_MOVE_RANGE_ENCODING",
         "SPYRE_ONCHIP_MOVE_MAX_CELLS",
         "SPYRE_ONCHIP_MOVE_DEBUG_CELLS",
     ]

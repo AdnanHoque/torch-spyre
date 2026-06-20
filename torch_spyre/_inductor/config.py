@@ -108,6 +108,9 @@ onchip_move_max_cells: int = int(
 onchip_move_coordinate_remap_chunk_cells: int = int(
     os.environ.get("SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS", "8192")
 )
+onchip_move_range_encoding: bool = (
+    os.environ.get("SPYRE_ONCHIP_MOVE_RANGE_ENCODING", "1") != "0"
+)
 onchip_move_producer_lx_base: int = int(
     os.environ.get("SPYRE_ONCHIP_MOVE_PRODUCER_LX_BASE", "0"), 0
 )
