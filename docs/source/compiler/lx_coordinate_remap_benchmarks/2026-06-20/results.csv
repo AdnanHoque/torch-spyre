@@ -12,3 +12,7 @@ decode_bmm,coordinate-remap,"Custom BMM decode-shaped SwiGLU probe, B=1 S=1 E=40
 jamie_mlp,upstream-main,"spyre-perf-suite jamie/dev built-in mlp, shape 1x512x4096",5.698974,0.00%,-0.10%,5.397703,8,22,0,0,0,0,0,0,jamie_mlp/upstream-main
 jamie_mlp,branch-baseline,"spyre-perf-suite jamie/dev built-in mlp, shape 1x512x4096",5.693087,0.10%,0.00%,5.633852,8,22,0,0,0,0,0,0,jamie_mlp/branch-baseline
 jamie_mlp,coordinate-remap,"spyre-perf-suite jamie/dev built-in mlp, shape 1x512x4096",5.441576,4.52%,4.42%,6.562700,8,25,3,13516800,3,39321600,0,0,jamie_mlp/coordinate-remap
+fms_swiglu_prefill_relayfix,branch-baseline,"spyre-perf-suite FMS empty-weight fused SwiGLU prefill, B=1 S=512 E=4096",15.141168,n/a,0.00%,0.192624,9,23,0,0,0,0,0,0,fms_swiglu_prefill_relayfix/branch-baseline
+fms_swiglu_prefill_relayfix,coordinate-remap,"spyre-perf-suite FMS empty-weight fused SwiGLU prefill, B=1 S=512 E=4096",12.183793,n/a,19.53%,0.284598,9,33,10,27033600,3,39321600,0,0,fms_swiglu_prefill_relayfix/coordinate-remap
+fms_swiglu_decode_relayfix,branch-baseline,"spyre-perf-suite FMS empty-weight fused SwiGLU decode-shaped, B=1 S=1 E=4096",9.395363,n/a,0.00%,0.015450,9,23,0,0,0,0,0,0,fms_swiglu_decode_relayfix/branch-baseline
+fms_swiglu_decode_relayfix,coordinate-remap,"spyre-perf-suite FMS empty-weight fused SwiGLU decode-shaped, B=1 S=1 E=4096",9.368277,n/a,0.29%,0.014997,9,23,0,0,0,0,0,0,fms_swiglu_decode_relayfix/coordinate-remap

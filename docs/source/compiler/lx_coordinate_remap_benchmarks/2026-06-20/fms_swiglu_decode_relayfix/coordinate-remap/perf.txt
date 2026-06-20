@@ -1,0 +1,36 @@
+metric                      max_ms       mean_ms     median_ms        min_ms
+----------------------------------------------------------------------------
+wall_clock_ms               12.572         8.986         8.266         8.241
+cpu_ms                       1.030         1.030         1.030         1.030
+spyre_ms                     9.383         9.383         9.383         9.383
+kernel_ms                    9.368         9.368         9.368         9.368
+memory_transfer_ms           0.015         0.015         0.015         0.015
+pt_util%                     0.054
+
+Spyre-kernel_times:       mean_ms      PT-Util%
+------------------------------------------------
+sdsc_fused_l              8.030         0.054
+Memset-(Device)           0.005         0.000
+Total                     8.035         0.054
+
+CPU-kernel_times:                                                   mean_ms
+----------------------------------------------------------------------------
+aten::to                                                              0.216
+aten::_to_copy                                                        0.287
+aten::empty_strided                                                   0.005
+aten::copy_                                                           0.278
+aten::_copy_from                                                      0.277
+aiuLaunchDMIControlBlocks                                             0.001
+TorchDynamo-Cache-Lookup                                              0.025
+Torch-Compiled-Region:-0/0                                            0.197
+Pregraph-bytecode                                                     0.003
+AOTDispatcher-Runtime-Wrapper-Prologue                                0.007
+##-Call-CompiledFxGraph-None-##                                       0.146
+aten::empty                                                           0.003
+aten::lift_fresh                                                      0.000
+aten::detach_                                                         0.002
+detach_                                                               0.001
+launch_kernel:sdsc_fused_linear_mul_silu_split_with_sizes_0           0.032
+aiuLaunchControlBlocks                                                0.001
+aiuLaunchDMOControlBlocks                                             0.001
+

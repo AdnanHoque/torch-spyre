@@ -1,0 +1,34 @@
+{
+  "artifact_summary": [
+    "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/bin/python",
+    "/tmp/torch-spyre-co-remap-native/tools/sdsc_artifact_summary.py",
+    "--sdsc-dir",
+    "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/branch-baseline/inductor-cache/inductor-spyre",
+    "--trace-dir",
+    "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/branch-baseline/logs",
+    "--active-iters",
+    "6",
+    "--output-dir",
+    "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/branch-baseline/artifacts"
+  ],
+  "benchmark": [
+    "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/bin/python",
+    "/home/adnan-cdx/spyre-perf-suite/benchmark.py",
+    "--stack",
+    "torch-spyre",
+    "--op",
+    "fms_swiglu_empty",
+    "--op-file",
+    "/tmp/torch-spyre-co-remap-native/tools/perf_suite_fms_swiglu_empty_params_op.py",
+    "--shape",
+    "1",
+    "1",
+    "4096",
+    "--runs",
+    "7",
+    "--without-compilation",
+    "--with-profiling",
+    "--output",
+    "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/branch-baseline/perf.txt"
+  ]
+}

@@ -1,0 +1,52 @@
+[
+  {
+    "sdsc_name": "TOTAL",
+    "op_category": "ALL",
+    "ideal_cycles": 2457600
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_prefill_branch_compare_relayfix_20260620_191114/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_qi367v2o/debug/sdsc_0/sdsc_0.json",
+    "op_category": "NA",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_prefill_branch_compare_relayfix_20260620_191114/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_qi367v2o/debug/sdsc_1/sdsc_1.json",
+    "op_category": "Bmm_fp16",
+    "ideal_cycles": 1638400
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_prefill_branch_compare_relayfix_20260620_191114/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_qi367v2o/debug/sdsc_2/sdsc_2.json",
+    "op_category": "NA",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_prefill_branch_compare_relayfix_20260620_191114/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_qi367v2o/debug/sdsc_3/sdsc_3.json",
+    "op_category": "Scalar",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_prefill_branch_compare_relayfix_20260620_191114/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_qi367v2o/debug/sdsc_4/sdsc_4.json",
+    "op_category": "Broadcast",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_prefill_branch_compare_relayfix_20260620_191114/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_qi367v2o/debug/sdsc_5/sdsc_5.json",
+    "op_category": "Broadcast",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_prefill_branch_compare_relayfix_20260620_191114/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_qi367v2o/debug/sdsc_6/sdsc_6.json",
+    "op_category": "Broadcast",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_prefill_branch_compare_relayfix_20260620_191114/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_qi367v2o/debug/sdsc_7/sdsc_7.json",
+    "op_category": "NA",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_prefill_branch_compare_relayfix_20260620_191114/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_qi367v2o/debug/sdsc_8/sdsc_8.json",
+    "op_category": "Bmm_fp16",
+    "ideal_cycles": 819200
+  }
+]

@@ -1,0 +1,12 @@
+{
+  "memReqPerSegment" : {
+    "0" : { "name" : "output", "size" : 1638800 },
+    "1" : { "name" : "input", "size" : 1638400 },
+    "2" : { "name" : "model", "size" : 64 },
+    "3" : { "name" : "stack", "size" : 1 },
+    "4" : { "name" : "heap", "size" : 819200 },
+    "5" : { "name" : "reserve1", "size" : 64 },
+    "6" : { "name" : "reserve2", "size" : 0 },
+    "7" : { "name" : "const", "size" : 424 }
+  }
+}

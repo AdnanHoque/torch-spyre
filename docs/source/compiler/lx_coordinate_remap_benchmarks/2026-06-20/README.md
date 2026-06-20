@@ -5,7 +5,7 @@ These artifacts capture the profiler rerun after range-encoded coordinate-remap 
 Actual SHAs used:
 
 - Upstream Torch main: `3db9efbae0182cc916ab7f5f36f38ffbbb05cc25`
-- Torch branch `swiglu-ws-co-remap`: `763c2314f106d526be508aea3d801894cded3b83` for earlier branch runs; latest docs commit adds archived artifacts.
+- Torch branch `swiglu-ws-co-remap`: `763c2314f106d526be508aea3d801894cded3b83` for earlier branch runs; relay-fix FMS runs use `3ac4c1ed1d3564969fcfd15f07a0c7a5b9645d0b`.
 - Deeptools coordinate-remap checkout: `83f9320cd6924833950c1aa362dfdb9abe0c29d7`
 - `spyre-perf-suite` `jamie/dev`: `d73ea9b9d653f28c4391184eaf84e45e3b6fdfb5`
 
@@ -41,3 +41,5 @@ Notes:
 - `prefill_bmm` and `jamie_mlp` show a roughly 4-5% trace kernel-time improvement with coordinate remap versus both upstream main and branch baseline, but memory-transfer time increases.
 - `decode_bmm` emits no coordinate-remap rows and does not improve kernel time.
 - The FMS namespaced `fms_granite_micro.swiglu` attempt did not produce artifacts: it stayed in baseline compile/tracing for roughly nine minutes, so it is not included as a timing row.
+- `fms_swiglu_prefill_relayfix` is the FMS empty-weight fused SwiGLU prefill rerun after local relay chunking. Coordinate remap now realizes two mixed SDSCs and improves trace kernel time by 19.53% versus branch baseline.
+- `fms_swiglu_decode_relayfix` is the B=1 S=1 control. It emits no remap rows and shows no meaningful speedup.

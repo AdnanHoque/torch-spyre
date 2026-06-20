@@ -1,0 +1,52 @@
+[
+  {
+    "sdsc_name": "TOTAL",
+    "op_category": "ALL",
+    "ideal_cycles": 4800
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_uxvisnws/debug/sdsc_0/sdsc_0.json",
+    "op_category": "NA",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_uxvisnws/debug/sdsc_1/sdsc_1.json",
+    "op_category": "Bmm_fp16",
+    "ideal_cycles": 3200
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_uxvisnws/debug/sdsc_2/sdsc_2.json",
+    "op_category": "NA",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_uxvisnws/debug/sdsc_3/sdsc_3.json",
+    "op_category": "Scalar",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_uxvisnws/debug/sdsc_4/sdsc_4.json",
+    "op_category": "Broadcast",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_uxvisnws/debug/sdsc_5/sdsc_5.json",
+    "op_category": "Broadcast",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_uxvisnws/debug/sdsc_6/sdsc_6.json",
+    "op_category": "Broadcast",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_uxvisnws/debug/sdsc_7/sdsc_7.json",
+    "op_category": "NA",
+    "ideal_cycles": 0
+  },
+  {
+    "sdsc_name": "/tmp/fms_empty_fused_decode_branch_compare_relayfix_20260620_192244/coordinate-remap/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_uxvisnws/debug/sdsc_8/sdsc_8.json",
+    "op_category": "Bmm_fp16",
+    "ideal_cycles": 1600
+  }
+]
