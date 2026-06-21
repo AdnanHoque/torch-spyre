@@ -34,7 +34,7 @@ _LX_SIZE_BYTES = 2 * 1024 * 1024
 def patch_lx_relayout_mixed_schedules(
     compiled: list[tuple[Any, list[int], list[dict], list[Any]]],
     specs: list[Any],
-) -> list[dict[str, Any]]:
+) -> None:
     """Attach a data-op carrier to adjacent producer/consumer SDSCs.
 
     This v1 realization is intentionally narrow: unrolled non-symbolic OpSpec
@@ -42,15 +42,14 @@ def patch_lx_relayout_mixed_schedules(
     shapes fail closed and keep the original SDSCs.
     """
 
-    rows: list[dict[str, Any]] = []
     if not config.lx_relayout_realize:
-        return rows
+        return
     if any(isinstance(spec, LoopSpec) for spec in specs):
-        return [{"status": "skipped", "reason": "loop-specs-not-supported"}]
+        return
     if any(not isinstance(spec, OpSpec) for spec in specs):
-        return [{"status": "skipped", "reason": "non-opspec-entry-not-supported"}]
+        return
     if len(compiled) != len(specs):
-        return [{"status": "skipped", "reason": "compiled-spec-count-mismatch"}]
+        return
 
     rewritten_consumers: set[int] = set()
     reusable_lx_sources: dict[tuple[str, str, str], int] = {}
@@ -69,24 +68,8 @@ def patch_lx_relayout_mixed_schedules(
         producer_entry = compiled[producer_index]
         consumer_entry = compiled[consumer_index]
         if producer_entry[0] is None or consumer_entry[0] is None:
-            rows.append(
-                _row(
-                    producer_index,
-                    "skipped",
-                    "producer-or-consumer-already-rewritten",
-                    plan,
-                )
-            )
             continue
         if producer_entry[1] or consumer_entry[1]:
-            rows.append(
-                _row(
-                    producer_index,
-                    "skipped",
-                    "symbolic-or-local-addresses-not-supported",
-                    plan,
-                )
-            )
             continue
 
         try:
@@ -103,8 +86,7 @@ def patch_lx_relayout_mixed_schedules(
                     plan,
                 )
             )
-        except Exception as exc:  # noqa: BLE001
-            rows.append(_row(producer_index, "skipped", type(exc).__name__, plan))
+        except Exception:  # noqa: BLE001
             continue
 
         compiled[producer_index] = (patched_producer, [], [], [])
@@ -113,7 +95,6 @@ def patch_lx_relayout_mixed_schedules(
         reusable_lx_sources[_reuse_key(plan)] = int(
             config.lx_relayout_consumer_lx_base
         )
-        rows.append(_row(producer_index, "patched", None, plan))
 
     for consumer_index, consumer in enumerate(specs):
         if consumer_index in rewritten_consumers or not isinstance(consumer, OpSpec):
@@ -144,7 +125,6 @@ def patch_lx_relayout_mixed_schedules(
                         base=reuse_base,
                     )
                     compiled[consumer_index] = (patched_consumer, [], [], [])
-                    rows.append(_row(consumer_index, "patched-reuse", None, plan))
                     break
 
                 if "stcdp_range" not in _LX_RELAYOUT_CARRIERS:
@@ -163,14 +143,6 @@ def patch_lx_relayout_mixed_schedules(
                 if producer_entry[0] is None:
                     continue
                 if producer_entry[1]:
-                    rows.append(
-                        _row(
-                            consumer_index,
-                            "skipped",
-                            "producer-symbolic-or-local-addresses-not-supported",
-                            plan,
-                        )
-                    )
                     continue
 
                 patched_producer, mixed_consumer = (
@@ -186,8 +158,7 @@ def patch_lx_relayout_mixed_schedules(
                         plan,
                     )
                 )
-            except Exception as exc:  # noqa: BLE001
-                rows.append(_row(consumer_index, "skipped", type(exc).__name__, plan))
+            except Exception:  # noqa: BLE001
                 continue
             compiled[producer_index] = (patched_producer, [], [], [])
             compiled[consumer_index] = (mixed_consumer, [], [], [])
@@ -195,9 +166,7 @@ def patch_lx_relayout_mixed_schedules(
             reusable_lx_sources[_reuse_key(plan)] = int(
                 config.lx_relayout_consumer_lx_base
             )
-            rows.append(_row(consumer_index, "patched-nonadjacent", None, plan))
             break
-    return rows
 
 
 def build_lx_relayout_sdsc(
@@ -260,20 +229,6 @@ def build_lx_relayout_sdsc(
         | {_selected_dataop_op_func()}
         | set(root.get("opFuncsUsed_", []) or [])
     )
-    root["lxRelayout_"] = {
-        "source_name": plan.get("source_name"),
-        "producer": plan.get("producer"),
-        "consumer": plan.get("consumer"),
-        "carrier": "stcdp_range",
-        "cell_count": int(plan.get("cell_count", 0) or 0),
-        "bytes_moved": int(plan.get("bytes_moved", 0) or 0),
-        "producer_lx_base": producer_base,
-        "consumer_lx_base": consumer_base,
-        "producer_region_bytes": producer_region_bytes,
-        "consumer_region_bytes": consumer_region_bytes,
-        "dataop_chunks": len(datadscs),
-        "fallback": "stock-hbm-path-when-disabled",
-    }
     return {producer_name: producer_root}, {
         f"{consumer_index}_LXRelayout{_selected_mixed_sdsc_suffix()}": root
     }
@@ -861,24 +816,6 @@ def _dldsc_op_names(root: dict[str, Any]) -> set[str]:
     for dsc in root.get("dscs_", []) or []:
         names.update(str(name) for name in dsc.keys())
     return names
-
-
-def _row(
-    index: int,
-    status: str,
-    reason: str | None,
-    plan: dict[str, Any],
-) -> dict[str, Any]:
-    return {
-        "index": index,
-        "status": status,
-        "reason": reason,
-        "source_name": plan.get("source_name"),
-        "producer": plan.get("producer"),
-        "consumer": plan.get("consumer"),
-        "cell_count": plan.get("cell_count"),
-        "carrier": "stcdp_range",
-    }
 
 
 def _collect_opspecs(specs: list[Any], result: list[OpSpec]) -> None:

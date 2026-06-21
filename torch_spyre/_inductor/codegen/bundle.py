@@ -108,9 +108,7 @@ def generate_bundle(
     )
 
     if _spyre_config.lx_relayout_realize and not use_symbols:
-        rows = patch_lx_relayout_mixed_schedules(compiled, specs_list)
-        for row in rows:
-            logger.info("LX relayout mixed schedule patch: %s", row)
+        patch_lx_relayout_mixed_schedules(compiled, specs_list)
     elif _spyre_config.lx_relayout_realize and use_symbols:
         logger.info("LX relayout realization skipped for symbolic bundle args")
 

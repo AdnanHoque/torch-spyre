@@ -187,7 +187,6 @@ def test_stcdp_range_carrier_wraps_relayout_as_stcdp_lx(monkeypatch):
     assert all("movementRanges" in dataop["op"]["rangedLxRemap"] for dataop in dataops)
     assert all("movements" not in dataop["op"]["rangedLxRemap"] for dataop in dataops)
     assert {move["source"]["core"] for move in movements} == {0, 1}
-    assert mixed_root["lxRelayout_"]["carrier"] == "stcdp_range"
     assert "STCDPOpLx" in mixed_root["opFuncsUsed_"]
     assert consumer_dsc["labeledDs_"][0]["memOrg_"] == {"lx": {"isPresent": 1}}
 
