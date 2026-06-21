@@ -1,0 +1,18 @@
+{
+  "active_iters": 5,
+  "kernel_durations_ms": {
+    "/tmp/granite_block_layer_profile_20260621_005122/baseline_causal/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_prod": 17.132023,
+    "/tmp/granite_block_layer_profile_20260621_005122/baseline_causal/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_mul_s": 55.313528,
+    "/tmp/granite_block_layer_profile_20260621_005122/baseline_causal/block_prefill/cache/inductor-spyre/sdsc_fused_linear_rms_norm_": 9.479528
+  },
+  "kernel_event_counts": {
+    "/tmp/granite_block_layer_profile_20260621_005122/baseline_causal/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_prod": 10,
+    "/tmp/granite_block_layer_profile_20260621_005122/baseline_causal/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_mul_s": 5,
+    "/tmp/granite_block_layer_profile_20260621_005122/baseline_causal/block_prefill/cache/inductor-spyre/sdsc_fused_linear_rms_norm_": 5
+  },
+  "kernel_ms_per_iter": 16.3850158,
+  "kernel_ms_total": 81.925079,
+  "memory_ms_per_iter": 0.17374380000000003,
+  "memory_ms_total": 0.868719,
+  "trace": "/tmp/granite_block_layer_profile_20260621_005122/baseline_causal/block_prefill/trace/adnan-cdx-spyre-dev-pf_2347713.1782003172419552417.pt.trace.json"
+}

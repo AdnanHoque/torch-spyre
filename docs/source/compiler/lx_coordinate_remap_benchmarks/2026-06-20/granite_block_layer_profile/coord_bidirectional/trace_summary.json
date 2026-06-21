@@ -1,0 +1,18 @@
+{
+  "active_iters": 5,
+  "kernel_durations_ms": {
+    "/tmp/granite_block_layer_profile_20260621_005122/coord_bidirectional/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_": 14.475987,
+    "/tmp/granite_block_layer_profile_20260621_005122/coord_bidirectional/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_m": 44.99973000000001,
+    "/tmp/granite_block_layer_profile_20260621_005122/coord_bidirectional/block_prefill/cache/inductor-spyre/sdsc_fused_linear_rms_n": 9.506364000000001
+  },
+  "kernel_event_counts": {
+    "/tmp/granite_block_layer_profile_20260621_005122/coord_bidirectional/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_": 10,
+    "/tmp/granite_block_layer_profile_20260621_005122/coord_bidirectional/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_m": 5,
+    "/tmp/granite_block_layer_profile_20260621_005122/coord_bidirectional/block_prefill/cache/inductor-spyre/sdsc_fused_linear_rms_n": 5
+  },
+  "kernel_ms_per_iter": 13.796416200000001,
+  "kernel_ms_total": 68.98208100000001,
+  "memory_ms_per_iter": 0.47301919999999986,
+  "memory_ms_total": 2.365095999999999,
+  "trace": "/tmp/granite_block_layer_profile_20260621_005122/coord_bidirectional/block_prefill/trace/adnan-cdx-spyre-dev-pf_2348093.1782003479354823191.pt.trace.json"
+}

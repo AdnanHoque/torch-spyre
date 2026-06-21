@@ -1,0 +1,103 @@
+{
+  "fallback_reason_counts": {
+    "consumer-duplicate-owner": 7,
+    "coordinate-remap-v1-ambiguous-stick-outer-dim": 1,
+    "coordinate-remap-v1-requires-128-byte-stick-dim": 5,
+    "same-per-core-view-owned-by-lx-planner": 31
+  },
+  "jsonl": "onchip_move.jsonl",
+  "line_count": 54,
+  "planned_bytes": 87556096,
+  "planned_cells": 684032,
+  "planned_edges": [
+    {
+      "bytes_moved": 6291456,
+      "cell_count": 49152,
+      "consumer": "buf7",
+      "consumer_op": "op7",
+      "producer": "buf6",
+      "producer_op": "op6"
+    },
+    {
+      "bytes_moved": 6291456,
+      "cell_count": 49152,
+      "consumer": "buf10",
+      "consumer_op": "op10",
+      "producer": "buf6",
+      "producer_op": "op6"
+    },
+    {
+      "bytes_moved": 4194304,
+      "cell_count": 32768,
+      "consumer": "buf50",
+      "consumer_op": "op50",
+      "producer": "buf13",
+      "producer_op": "op13"
+    },
+    {
+      "bytes_moved": 16777216,
+      "cell_count": 131072,
+      "consumer": "buf15",
+      "consumer_op": "op15",
+      "producer": "buf14",
+      "producer_op": "op14"
+    },
+    {
+      "bytes_moved": 6291456,
+      "cell_count": 49152,
+      "consumer": "buf21",
+      "consumer_op": "op21",
+      "producer": "buf6",
+      "producer_op": "op6"
+    },
+    {
+      "bytes_moved": 4194304,
+      "cell_count": 32768,
+      "consumer": "buf25",
+      "consumer_op": "op25",
+      "producer": "buf24",
+      "producer_op": "op24"
+    },
+    {
+      "bytes_moved": 13107200,
+      "cell_count": 102400,
+      "consumer": "buf34",
+      "consumer_op": "op34",
+      "producer": "buf33",
+      "producer_op": "op33"
+    },
+    {
+      "bytes_moved": 13107200,
+      "cell_count": 102400,
+      "consumer": "buf37",
+      "consumer_op": "op37",
+      "producer": "buf33",
+      "producer_op": "op33"
+    },
+    {
+      "bytes_moved": 13107200,
+      "cell_count": 102400,
+      "consumer": "buf38",
+      "consumer_op": "op38",
+      "producer": "buf33",
+      "producer_op": "op33"
+    },
+    {
+      "bytes_moved": 4194304,
+      "cell_count": 32768,
+      "consumer": "buf40",
+      "consumer_op": "op40",
+      "producer": "buf39",
+      "producer_op": "op39"
+    }
+  ],
+  "realization_status_counts": {
+    "not-realized-skipped": 44,
+    "planned-coordinate-remap-needs-deeptools": 10
+  },
+  "status_counts": {
+    "planned": 10,
+    "skipped": 44
+  },
+  "variant": "coord_causal"
+}

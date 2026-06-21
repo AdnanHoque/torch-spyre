@@ -11,6 +11,7 @@ weights to the AIU.
 from __future__ import annotations
 
 import argparse
+import collections
 import gc
 import glob
 import json
@@ -126,6 +127,51 @@ def _make_mask(batch: int, q_len: int, kv_len: int) -> torch.Tensor:
     return torch.empty((batch, q_len, kv_len), device="spyre", dtype=torch.float16)
 
 
+def _find_trace(paths: list[pathlib.Path]) -> pathlib.Path | None:
+    traces: list[pathlib.Path] = []
+    for path in paths:
+        if path.is_file() and path.name.endswith(".pt.trace.json"):
+            traces.append(path)
+        elif path.is_dir():
+            traces.extend(path.rglob("*.pt.trace.json"))
+    if not traces:
+        return None
+    return max(traces, key=lambda item: item.stat().st_mtime)
+
+
+def _trace_summary(trace: pathlib.Path, active_iters: int) -> dict[str, Any]:
+    data = json.loads(trace.read_text())
+    kernel_us = 0.0
+    memory_us = 0.0
+    kernel_events: collections.Counter[str] = collections.Counter()
+    kernel_durations: collections.Counter[str] = collections.Counter()
+    for event in data.get("traceEvents", []):
+        category = event.get("cat")
+        duration = float(event.get("dur") or 0.0)
+        if category == "kernel":
+            kernel_us += duration
+            name = event.get("name") or "<unnamed>"
+            kernel_events[name] += 1
+            kernel_durations[name] += duration
+        elif category in {"gpu_memcpy", "gpu_memset"}:
+            memory_us += duration
+
+    denom = active_iters or 1
+    return {
+        "trace": str(trace),
+        "active_iters": active_iters,
+        "kernel_ms_total": kernel_us / 1000.0,
+        "kernel_ms_per_iter": (kernel_us / denom) / 1000.0,
+        "memory_ms_total": memory_us / 1000.0,
+        "memory_ms_per_iter": (memory_us / denom) / 1000.0,
+        "kernel_event_counts": dict(sorted(kernel_events.items())),
+        "kernel_durations_ms": {
+            name: duration / 1000.0
+            for name, duration in sorted(kernel_durations.items())
+        },
+    }
+
+
 def _sync(value: Any) -> None:
     if isinstance(value, tuple):
         for item in value:
@@ -156,8 +202,12 @@ def _write_summary(out_dir: pathlib.Path, result: dict[str, Any]) -> None:
         "",
         "## Timing",
         "",
+        f"- profile_enabled: `{result.get('profile_enabled')}`",
         f"- median_ms: `{result.get('median_ms')}`",
         f"- all_ms: `{result.get('all_ms')}`",
+        f"- trace_summary_path: `{result.get('trace_summary_path')}`",
+        f"- kernel_ms_per_iter: `{(result.get('trace_summary') or {}).get('kernel_ms_per_iter')}`",
+        f"- memory_ms_per_iter: `{(result.get('trace_summary') or {}).get('memory_ms_per_iter')}`",
         "",
         "## Generated SDSCs",
         "",
@@ -255,17 +305,67 @@ def run_case(args: argparse.Namespace) -> tuple[pathlib.Path, dict[str, Any]]:
         "attn_name": args.attn_name,
         "warmups": args.warmups,
         "iters": args.iters,
+        "profile_enabled": args.profile,
+        "profile_dir": str(args.profile_dir or (out_dir / "trace")),
+        "profile_memory": args.profile_memory,
+        "record_shapes": args.record_shapes,
+        "trace_path": None,
+        "trace_summary_path": None,
+        "trace_summary": None,
     }
     timings: list[float] = []
+    out: Any = None
+
+    def call_block(iteration: int, total: int) -> tuple[Any, float]:
+        log(f"calling block iteration {iteration}/{total}")
+        start = time.time()
+        value = block(x=x, **kwargs)
+        _sync(value)
+        return value, (time.time() - start) * 1000.0
+
     try:
-        for index in range(args.warmups + args.iters):
-            log(f"calling block iteration {index + 1}/{args.warmups + args.iters}")
-            start = time.time()
-            out = block(x=x, **kwargs)
-            _sync(out)
-            elapsed_ms = (time.time() - start) * 1000.0
-            if index >= args.warmups:
+        if args.iters < 1:
+            raise ValueError("--iters must be at least 1")
+
+        total = args.warmups + args.iters
+        for index in range(args.warmups):
+            out, _ = call_block(index + 1, total)
+
+        if args.profile:
+            from torch.profiler import ProfilerActivity
+
+            profile_dir = args.profile_dir or (out_dir / "trace")
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            with torch.profiler.profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.PrivateUse1],
+                record_shapes=args.record_shapes,
+                profile_memory=args.profile_memory,
+                with_stack=False,
+                on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                    str(profile_dir)
+                ),
+            ) as profiler:
+                for index in range(args.iters):
+                    out, elapsed_ms = call_block(args.warmups + index + 1, total)
+                    timings.append(elapsed_ms)
+                    profiler.step()
+            trace_path = _find_trace([profile_dir])
+            if trace_path is not None:
+                trace_summary = _trace_summary(trace_path, args.iters)
+                trace_summary_path = out_dir / "trace_summary.json"
+                trace_summary_path.write_text(
+                    json.dumps(trace_summary, indent=2, sort_keys=True) + "\n"
+                )
+                result["trace_path"] = str(trace_path)
+                result["trace_summary_path"] = str(trace_summary_path)
+                result["trace_summary"] = trace_summary
+        else:
+            for index in range(args.iters):
+                out, elapsed_ms = call_block(args.warmups + index + 1, total)
                 timings.append(elapsed_ms)
+
+        if out is None:
+            raise RuntimeError("block did not produce an output")
         if isinstance(out, tuple):
             y, cache = out
             result["output_shape"] = _shape(y)
@@ -317,6 +417,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--compile-block", action="store_true")
     parser.add_argument("--fused-weights", action="store_true", default=True)
     parser.add_argument("--unfused-weights", action="store_false", dest="fused_weights")
+    parser.add_argument("--profile", action="store_true")
+    parser.add_argument("--profile-dir", type=pathlib.Path)
+    parser.add_argument("--record-shapes", action="store_true")
+    parser.add_argument(
+        "--no-profile-memory",
+        action="store_false",
+        dest="profile_memory",
+        help="Disable profiler memory recording.",
+    )
+    parser.set_defaults(profile_memory=True)
     return parser
 
 

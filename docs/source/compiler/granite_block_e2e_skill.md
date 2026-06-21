@@ -19,6 +19,31 @@ shape:
 This is a wall-sync e2e smoke/probe.  It is not a replacement for Kineto
 trace-derived `kernel_ms` benchmarking.
 
+For kernel-time measurement, the same probe supports `--profile`.  Use one
+warmup outside the profiler and at least five active iterations:
+
+```bash
+$PY212 benchmarks/granite_block_layer_probe.py \
+  --fms-root "$FMS" \
+  --run-root "$RUN" \
+  --case prefill \
+  --compile-block \
+  --attn-name sdpa_bidirectional \
+  --iters 5 \
+  --warmups 1 \
+  --profile \
+  --no-profile-memory
+```
+
+Profiled runs write:
+
+- `block_prefill/result.json`, with the compact trace summary embedded.
+- `block_prefill/trace_summary.json`, the primary `kernel_ms_per_iter` source.
+- `block_prefill/trace/*.pt.trace.json`, the raw Kineto trace.
+
+The June 21, 2026 archived profile artifacts live at
+`docs/source/compiler/lx_coordinate_remap_benchmarks/2026-06-20/granite_block_layer_profile/`.
+
 ## Required Stack
 
 Use the Torch checkout and Deeptools build used for coordinate-remap work:

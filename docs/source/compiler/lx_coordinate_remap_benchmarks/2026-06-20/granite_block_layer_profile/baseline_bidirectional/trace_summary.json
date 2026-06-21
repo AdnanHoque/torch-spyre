@@ -1,0 +1,18 @@
+{
+  "active_iters": 5,
+  "kernel_durations_ms": {
+    "/tmp/granite_block_layer_profile_20260621_005122/baseline_bidirectional/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_d": 17.075093000000003,
+    "/tmp/granite_block_layer_profile_20260621_005122/baseline_bidirectional/block_prefill/cache/inductor-spyre/sdsc_fused_add_linea": 54.962871,
+    "/tmp/granite_block_layer_profile_20260621_005122/baseline_bidirectional/block_prefill/cache/inductor-spyre/sdsc_fused_linear_rm": 9.438563999999998
+  },
+  "kernel_event_counts": {
+    "/tmp/granite_block_layer_profile_20260621_005122/baseline_bidirectional/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_d": 10,
+    "/tmp/granite_block_layer_profile_20260621_005122/baseline_bidirectional/block_prefill/cache/inductor-spyre/sdsc_fused_add_linea": 5,
+    "/tmp/granite_block_layer_profile_20260621_005122/baseline_bidirectional/block_prefill/cache/inductor-spyre/sdsc_fused_linear_rm": 5
+  },
+  "kernel_ms_per_iter": 16.2953056,
+  "kernel_ms_total": 81.47652799999999,
+  "memory_ms_per_iter": 0.2884326,
+  "memory_ms_total": 1.4421629999999999,
+  "trace": "/tmp/granite_block_layer_profile_20260621_005122/baseline_bidirectional/block_prefill/trace/adnan-cdx-spyre-dev-pf_2347903.1782003261090438100.pt.trace.json"
+}
