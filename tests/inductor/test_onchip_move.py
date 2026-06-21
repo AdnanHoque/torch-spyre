@@ -186,6 +186,97 @@ def test_coordinate_remap_carrier_emits_scheduled_lx_dataop(monkeypatch):
     assert consumer_dsc["labeledDs_"][0]["memOrg_"] == {"lx": {"isPresent": 1}}
 
 
+def test_stcdp_range_carrier_wraps_remap_as_stcdp_lx(monkeypatch):
+    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "stcdp_range")
+    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0x1000)
+    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 0x9000)
+    monkeypatch.setattr(spyre_config, "onchip_move_coordinate_remap_chunk_cells", 32)
+
+    core_id = sympy.Symbol("core_id")
+    producer_view = PerCoreView(
+        work_slice_dims=((0, 2),),
+        core_to_slot=((0, sympy.Mod(core_id, 2)),),
+    )
+    consumer_view = PerCoreView(work_slice_dims=(), core_to_slot=())
+    cells, reason = build_onchip_move_cells(
+        producer_view=producer_view,
+        consumer_view=consumer_view,
+        device_sizes=[2, 64],
+        device_stride_map=[64, 1],
+        element_bytes=2,
+        producer_core_count=2,
+        consumer_core_count=1,
+        coordinate_remap_v1=True,
+    )
+    assert reason is None
+
+    plan = _remap_plan_payload(cells, device_sizes=[2, 64], element_bytes=2)
+    producer_payload = {
+        "1_batchmatmul": _minimal_sdsc_payload(
+            "batchmatmul",
+            output_lds_idx=2,
+            input_lds_indices=[0, 1],
+            core_ids=[0, 1],
+        )
+    }
+    consumer_payload = {
+        "2_neg": _minimal_sdsc_payload(
+            "neg",
+            output_lds_idx=1,
+            input_lds_indices=[0],
+            core_ids=[0],
+        )
+    }
+    output_arg = TensorArg(
+        is_input=False,
+        arg_index=0,
+        device_dtype=DataFormats.SEN169_FP16,
+        device_size=[2, 64],
+        device_coordinates=[],
+        allocation=None,
+        name="buf0",
+    )
+
+    patched_producer, mixed_consumer = build_coordinate_remap_onchip_move_sdsc(
+        1,
+        2,
+        producer_payload,
+        consumer_payload,
+        output_arg,
+        dataclasses.replace(output_arg, is_input=True, arg_index=0),
+        2,
+        0,
+        plan,
+    )
+
+    producer_dsc = next(iter(patched_producer["1_batchmatmul"]["dscs_"][0].values()))
+    assert producer_dsc["labeledDs_"][2]["memOrg_"] == {"lx": {"isPresent": 1}}
+
+    mixed_root = mixed_consumer["2_OnChipMoveSTCDPOpLx"]
+    dataops = [next(iter(row.values())) for row in mixed_root["datadscs_"]]
+    movements = [move for dataop in dataops for move in _dataop_movements(dataop)]
+    consumer_dsc = next(iter(mixed_root["dscs_"][0].values()))
+
+    assert all(dataop["op"]["name"] == "STCDPOpLx" for dataop in dataops)
+    assert all("rangedLxRemap" in dataop["op"] for dataop in dataops)
+    assert all(dataop["op"]["rangedLxRemap"]["schemaVersion"] == 0 for dataop in dataops)
+    assert all(
+        dataop["op"]["rangedLxRemap"]["producerLxBase"] == 0x1000
+        for dataop in dataops
+    )
+    assert all(
+        dataop["op"]["rangedLxRemap"]["consumerLxBase"] == 0x9000
+        for dataop in dataops
+    )
+    assert all("movementRanges" in dataop["op"]["rangedLxRemap"] for dataop in dataops)
+    assert all("movements" not in dataop["op"]["rangedLxRemap"] for dataop in dataops)
+    assert {move["source"]["core"] for move in movements} == {0, 1}
+    assert mixed_root["onchipMove_"]["carrier"] == "stcdp_range"
+    assert "STCDPOpLx" in mixed_root["opFuncsUsed_"]
+    assert "LXCoordinateRemapOp" not in mixed_root["opFuncsUsed_"]
+    assert consumer_dsc["labeledDs_"][0]["memOrg_"] == {"lx": {"isPresent": 1}}
+
+
 def _remap_plan_payload(
     cells: list[OnChipMoveCell],
     *,
@@ -209,6 +300,8 @@ def _remap_plan_payload(
 
 
 def _dataop_movements(dataop: dict) -> list[dict]:
+    if (dataop.get("op") or {}).get("name") == "STCDPOpLx":
+        dataop = (dataop.get("op") or {}).get("rangedLxRemap") or {}
     return _expand_dataop_movement_ranges(dataop.get("movementRanges") or [])
 
 

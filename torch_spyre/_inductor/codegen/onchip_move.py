@@ -29,6 +29,7 @@ from torch_spyre._inductor.onchip_move import (
 from torch_spyre._inductor.op_spec import LoopSpec, OpSpec, TensorArg
 
 _LX_SIZE_BYTES = 2 * 1024 * 1024
+_ONCHIP_MOVE_CARRIERS = {"coordinate_remap", "stcdp_range"}
 
 
 def patch_onchip_move_mixed_schedules(
@@ -45,7 +46,7 @@ def patch_onchip_move_mixed_schedules(
     rows: list[dict[str, Any]] = []
     if not config.onchip_move_realize:
         return rows
-    if config.onchip_move_carrier != "coordinate_remap":
+    if config.onchip_move_carrier not in _ONCHIP_MOVE_CARRIERS:
         return [{"status": "skipped", "reason": "unsupported-carrier"}]
     if any(isinstance(spec, LoopSpec) for spec in specs):
         return [{"status": "skipped", "reason": "loop-specs-not-supported"}]
@@ -149,7 +150,7 @@ def patch_onchip_move_mixed_schedules(
                     rows.append(_row(consumer_index, "patched-reuse", None, plan))
                     break
 
-                if config.onchip_move_carrier != "coordinate_remap":
+                if config.onchip_move_carrier not in _ONCHIP_MOVE_CARRIERS:
                     continue
                 producer_match = _producer_match_for_plan(
                     specs,
@@ -227,7 +228,7 @@ def build_coordinate_remap_onchip_move_sdsc(
         consumer_region_bytes=consumer_region_bytes,
     )
 
-    dataop_name = f"{producer_index}_OnChipMoveLXCoordinateRemapOp"
+    dataop_name = f"{producer_index}_OnChipMove{_selected_dataop_op_func()}"
     datadscs, dataop_core_sets = _coordinate_remap_datadsc_chunks(plan, dataop_name)
 
     _patch_lx_endpoint(
@@ -259,14 +260,14 @@ def build_coordinate_remap_onchip_move_sdsc(
     )
     root["opFuncsUsed_"] = sorted(
         _dldsc_op_names(root)
-        | {"LXCoordinateRemapOp"}
+        | {_selected_dataop_op_func()}
         | set(root.get("opFuncsUsed_", []) or [])
     )
     root["onchipMove_"] = {
         "source_name": plan.get("source_name"),
         "producer": plan.get("producer"),
         "consumer": plan.get("consumer"),
-        "carrier": "coordinate_remap",
+        "carrier": config.onchip_move_carrier,
         "cell_count": int(plan.get("cell_count", 0) or 0),
         "bytes_moved": int(plan.get("bytes_moved", 0) or 0),
         "producer_lx_base": producer_base,
@@ -277,7 +278,7 @@ def build_coordinate_remap_onchip_move_sdsc(
         "fallback": "stock-hbm-path-when-disabled",
     }
     return {producer_name: producer_root}, {
-        f"{consumer_index}_OnChipMoveCoordinateRemap": root
+        f"{consumer_index}_OnChipMove{_selected_mixed_sdsc_suffix()}": root
     }
 
 
@@ -395,6 +396,56 @@ def _coordinate_remap_dataop_movements(dataop: dict[str, Any]) -> list[dict[str,
     return _expand_dataop_movement_ranges(list(dataop.get("movementRanges", []) or []))
 
 
+
+def _selected_mixed_sdsc_suffix() -> str:
+    if config.onchip_move_carrier == "coordinate_remap":
+        return "CoordinateRemap"
+    if config.onchip_move_carrier == "stcdp_range":
+        return "STCDPOpLx"
+    raise ValueError("unsupported-onchip-move-carrier")
+
+
+def _selected_dataop_op_func() -> str:
+    if config.onchip_move_carrier == "coordinate_remap":
+        return "LXCoordinateRemapOp"
+    if config.onchip_move_carrier == "stcdp_range":
+        return "STCDPOpLx"
+    raise ValueError("unsupported-onchip-move-carrier")
+
+
+def _selected_dataop_chunk(chunk: dict[str, Any]) -> dict[str, Any]:
+    if config.onchip_move_carrier == "coordinate_remap":
+        return chunk
+    if config.onchip_move_carrier != "stcdp_range":
+        raise ValueError("unsupported-onchip-move-carrier")
+
+    range_payload_keys = {
+        "schemaVersion",
+        "sourceName",
+        "producer",
+        "consumer",
+        "producerLxBase",
+        "consumerLxBase",
+        "coverage",
+        "dependencyOrder",
+        "lowering",
+        "movements",
+        "movementRanges",
+    }
+    range_payload = {
+        key: copy.deepcopy(value)
+        for key, value in chunk.items()
+        if key in range_payload_keys
+    }
+    return {
+        "op": {
+            "name": "STCDPOpLx",
+            "rangedLxRemap": range_payload,
+        },
+        "coreIdsUsed_": copy.deepcopy(chunk.get("coreIdsUsed_", [])),
+    }
+
+
 def _coordinate_remap_dataop(plan: dict[str, Any]) -> dict[str, Any]:
     metadata = plan.get("coordinate_remap")
     if not isinstance(metadata, dict):
@@ -454,7 +505,7 @@ def _coordinate_remap_datadsc_chunks(
             lowering = chunk.setdefault("lowering", {})
             lowering["rangeEncoded"] = False
         chunk["coreIdsUsed_"] = chunk_core_ids
-        datadscs.append({f"{dataop_name}_{len(datadscs)}": chunk})
+        datadscs.append({f"{dataop_name}_{len(datadscs)}": _selected_dataop_chunk(chunk)})
         core_sets.append(set(chunk_core_ids))
 
     cross_movements = [
@@ -478,7 +529,7 @@ def _coordinate_remap_datadsc_chunks(
             lowering["rangeEncoded"] = True
             lowering["movementRanges"] = len(movement_ranges)
             lowering["expandedMovements"] = len(cross_movements)
-        return [{dataop_name: compact_dataop}], [set(dataop["coreIdsUsed_"])]
+        return [{dataop_name: _selected_dataop_chunk(compact_dataop)}], [set(dataop["coreIdsUsed_"])]
 
     for start in range(0, len(cross_movements), chunk_size):
         append_chunk(cross_movements[start : start + chunk_size])

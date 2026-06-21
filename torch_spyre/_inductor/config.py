@@ -94,9 +94,9 @@ layout_solver: Literal["greedy", "bestfit", "firstfit"] = "greedy"
 # while this path plans explicit ring/data-op movement for mismatched views.
 onchip_move_planner: bool = os.environ.get("SPYRE_ONCHIP_MOVE_PLANNER", "0") == "1"
 onchip_move_realize: bool = os.environ.get("SPYRE_ONCHIP_MOVE_REALIZE", "0") == "1"
-# PR1 only supports the explicit coordinate-remap carrier.  Other prototype
-# carriers must fail closed if selected through the environment.
-onchip_move_carrier: Literal["coordinate_remap"] = os.environ.get(  # type: ignore[assignment]
+# PR1 only supports the explicit coordinate-remap carrier.  This isolated
+# prototype also allows stcdp_range to evaluate a lower-friction backend shape.
+onchip_move_carrier: Literal["coordinate_remap", "stcdp_range"] = os.environ.get(  # type: ignore[assignment]
     "SPYRE_ONCHIP_MOVE_CARRIER", "coordinate_remap"
 )
 onchip_move_max_cells: int = int(

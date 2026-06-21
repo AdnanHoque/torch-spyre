@@ -1401,7 +1401,7 @@ def plan_onchip_move_edge(
         device_sizes, device_stride_map, element_bytes = _device_layout_and_element_bytes(
             buf
         )
-        if config.onchip_move_carrier == "coordinate_remap":
+        if config.onchip_move_carrier in {"coordinate_remap", "stcdp_range"}:
             movement_subview = _movement_subview_from_read_dep(
                 buf,
                 read_dep,
@@ -1418,7 +1418,7 @@ def plan_onchip_move_edge(
             producer_core_count=_op_num_cores(producer),
             consumer_core_count=_op_num_cores(consumer),
             max_cells=config.onchip_move_max_cells,
-            coordinate_remap_v1=config.onchip_move_carrier == "coordinate_remap",
+            coordinate_remap_v1=config.onchip_move_carrier in {"coordinate_remap", "stcdp_range"},
             movement_subview=movement_subview,
         )
     except Exception as exc:  # noqa: BLE001
@@ -1439,7 +1439,7 @@ def plan_onchip_move_edge(
             reason,
         )
         return None
-    if config.onchip_move_carrier == "coordinate_remap":
+    if config.onchip_move_carrier in {"coordinate_remap", "stcdp_range"}:
         reason = _coordinate_remap_v1_support_reason(cells)
         if reason is not None:
             logger.debug(
