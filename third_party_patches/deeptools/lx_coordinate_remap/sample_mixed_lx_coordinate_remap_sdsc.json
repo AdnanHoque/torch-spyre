@@ -1,0 +1,143 @@
+{
+  "0_consumer": {
+    "numCoresUsed_": 2,
+    "coreIdToDsc_": {
+      "0": 0,
+      "1": 0
+    },
+    "numWkSlicesPerDim_": {
+      "mb": 2,
+      "out": 1
+    },
+    "coreIdToWkSlice_": {
+      "0": {
+        "mb": 0,
+        "out": 0
+      },
+      "1": {
+        "mb": 1,
+        "out": 0
+      }
+    },
+    "coreIdToDscSchedule": {
+      "0": [
+        [
+          0,
+          -1,
+          0,
+          1
+        ],
+        [
+          -1,
+          0,
+          1,
+          0
+        ]
+      ],
+      "1": [
+        [
+          0,
+          -1,
+          0,
+          1
+        ],
+        [
+          -1,
+          0,
+          1,
+          0
+        ]
+      ]
+    },
+    "datadscs_": [
+      {
+        "0_OnChipMoveLXCoordinateRemapOp_0": {
+          "op": {
+            "name": "LXCoordinateRemapOp"
+          },
+          "schemaVersion": 0,
+          "sourceName": "producer_output",
+          "producer": "producer_output",
+          "consumer": "consumer_input",
+          "producerLxBase": 0,
+          "consumerLxBase": 1048576,
+          "coverage": {
+            "device_sizes": [
+              32,
+              2,
+              1,
+              64
+            ],
+            "status": "complete"
+          },
+          "dependencyOrder": [
+            {
+              "order": 0,
+              "kind": "producer_lx_write_before_remap"
+            },
+            {
+              "order": 1,
+              "kind": "coordinate_remap",
+              "primitive": "lx_coordinate_remap_v0",
+              "cellCount": 2
+            },
+            {
+              "order": 2,
+              "kind": "consumer_lx_read_after_remap"
+            }
+          ],
+          "lowering": {
+            "strategy": "explicit_lx_copy_via_l3",
+            "addressUnits": "bytes",
+            "rangeEncoded": true,
+            "movementRanges": 1,
+            "expandedMovements": 2
+          },
+          "movementRanges": [
+            {
+              "rangeIndex": 0,
+              "moveIndex": 0,
+              "count": 2,
+              "bytesPerMove": 2048,
+              "sourceStrideBytes": 2048,
+              "destinationStrideBytes": 2048,
+              "source": {
+                "core": 0,
+                "lxAddress": 0,
+                "localByteRange": {
+                  "start": 0,
+                  "end": 2048
+                },
+                "lxByteRange": {
+                  "start": 0,
+                  "end": 2048
+                }
+              },
+              "destination": {
+                "core": 1,
+                "lxAddress": 1048576,
+                "localByteRange": {
+                  "start": 0,
+                  "end": 2048
+                },
+                "lxByteRange": {
+                  "start": 1048576,
+                  "end": 1050624
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "dscs_": [
+      {
+        "0_consumer_dlop": {
+          "op": {
+            "name": "neg"
+          }
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,552 @@
+diff --git a/dcc/src/Conversion/PCFGToDataflowIR/PCFG2ToDataflowIR.cpp b/dcc/src/Conversion/PCFGToDataflowIR/PCFG2ToDataflowIR.cpp
+index eb2f02ba53..6780d37e97 100644
+--- a/dcc/src/Conversion/PCFGToDataflowIR/PCFG2ToDataflowIR.cpp
++++ b/dcc/src/Conversion/PCFGToDataflowIR/PCFG2ToDataflowIR.cpp
+@@ -687,7 +687,8 @@ void PCFGToDataflowIR::createL3TransferOp(SenPcfgIR& pcfgir,
+       is_any_of(pcfgir.unit_type_, SenComponents::L3SU, SenComponents::L3LU));
+   if (pcfgir.unit_type_ == SenComponents::L3SU) {
+     DT_CHECK(pcfg_node->src.unit == SenComponents::LX &&
+-             pcfg_node->dst.unit == SenComponents::HBM);
++             is_any_of(pcfg_node->dst.unit, SenComponents::HBM,
++                       SenComponents::LX));
+   } else {
+     DT_CHECK(pcfg_node->src.unit == SenComponents::HBM &&
+              pcfg_node->dst.unit == SenComponents::LX);
+@@ -1182,4 +1183,4 @@ void PCFGToDataflowIR::createCondOp(SenPcfgIR& pcfgir,
+   pcfgir.lccrcond_to_if_op_[pcfg_node] = ifop;
+ 
+   builder_.setInsertionPointToStart(ifop.thenBlock());
+-}
+\ No newline at end of file
++}
+diff --git a/dcc/src/Transform/Sentient/AddressPinningAndToggle.cpp b/dcc/src/Transform/Sentient/AddressPinningAndToggle.cpp
+index 1230573a4c..972acb5b6d 100644
+--- a/dcc/src/Transform/Sentient/AddressPinningAndToggle.cpp
++++ b/dcc/src/Transform/Sentient/AddressPinningAndToggle.cpp
+@@ -1205,6 +1205,7 @@ struct AddressPinningAndTogglePass
+ 
+   // Use information collected in each data transfer descriptor to compute and
+   // update new mutable/immutable addresses in memory access operations.
++  bool shouldForceLxAddressPinning(const DataTransferDescriptor &dtd) const;
+   void processDataTransfers(const PinningSchemeManager &ps_manager);
+   void processDataTransfer(DataTransferDescriptor &dtd,
+                            const PinningSchemeManager &ps_manager);
+@@ -1444,6 +1445,19 @@ void AddressPinningAndTogglePass::processDataTransfers(
+     processDataTransfer(*dtd, ps_manager);
+ }
+ 
++bool AddressPinningAndTogglePass::shouldForceLxAddressPinning(
++    const DataTransferDescriptor &dtd) const {
++  if (!dtd.isValid() || dtd.getMemoryUnit() != LX) return false;
++
++  const Operation *op = &dtd.getOperation();
++  // Coordinate-remap data movement lowers through L3 LX transfers. Even when
++  // DCC is not in program-stitch mode, these rows are scheduled alongside DL
++  // rows and must use the static LBR pinning scheme instead of leaving large
++  // LX bases directly in immutable address registers.
++  return isa<sentient::LoadAndSendOp, sentient::ReceiveAndStoreOp,
++             sentient::LoadAndStoreOp>(op);
++}
++
+ void AddressPinningAndTogglePass::processDataTransfer(
+     DataTransferDescriptor &dtd, const PinningSchemeManager &ps_manager) {
+   // Note: LoadAndExtractScalarOp and LoadComputeAndSendOp are ignored as they
+@@ -1486,6 +1500,7 @@ void AddressPinningAndTogglePass::processDataTransfer(
+     mlir::MutableOperandRange immutable_addr, uint32_t element_size) {
+   DT_CHECK(mutable_addr.size() == immutable_addr.size() &&
+            mutable_addr.size() == 1);
++  const bool force_lx_address_pinning = shouldForceLxAddressPinning(dtd);
+   if (dtd.isToggle() && !dtd.canBeSimplified())
+     processToggle(dtd, ps_manager, mutable_addr, immutable_addr, element_size);
+   else if (dtd.isConditionalConstant() && !dtd.canBeSimplified())
+@@ -1494,7 +1509,7 @@ void AddressPinningAndTogglePass::processDataTransfer(
+   else if (dtd.isIntegerSequence() && !dtd.canBeSimplified())
+     processIntegerSequence(dtd, ps_manager, mutable_addr, immutable_addr,
+                            element_size);
+-  else if (!dtd.canBeSimplified() &&
++  else if (!force_lx_address_pinning && !dtd.canBeSimplified() &&
+            computeOrGetNumberOfStreams() <= ps_manager.getMaxNumRegisters() &&
+            (ps_manager.getMemoryUnit() == HBM ||
+             !dccExtContext().getProgStitch()) &&
+diff --git a/dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp b/dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp
+index 6f4e0066c6..97e55a49b1 100644
+--- a/dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp
++++ b/dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp
+@@ -841,7 +841,9 @@ void RegisterTypeAssignmentPass::initializeAssignmentForAnOperation(
+ 
+     if (!gather_scatter.isValid())
+       DT_CHECK(((src_unit_type == LX && dst_unit_type == HBM) ||
+-                (src_unit_type == HBM && dst_unit_type == LX)) &&
++                (src_unit_type == HBM && dst_unit_type == LX) ||
++                (src_unit_type == LX && dst_unit_type == LX &&
++                 current_unit_type_ == L3SU)) &&
+                "expected transfers between LX and HBM");
+     if (gather_scatter.isGather())
+       DT_CHECK(current_unit_type_ == L3LU);
+@@ -866,8 +868,14 @@ void RegisterTypeAssignmentPass::initializeAssignmentForAnOperation(
+       // the LAR as a used register.
+       dst_locale = current_unit_type_ == L3LU ? LAR : EAR;
+     } else {
+-      src_locale = src_unit_type == LX ? LAR : EAR;
+-      dst_locale = dst_unit_type == LX ? LAR : EAR;
++      if (src_unit_type == LX && dst_unit_type == LX &&
++          current_unit_type_ == L3SU) {
++        src_locale = LAR;
++        dst_locale = EAR;
++      } else {
++        src_locale = src_unit_type == LX ? LAR : EAR;
++        dst_locale = dst_unit_type == LX ? LAR : EAR;
++      }
+     }
+     auto immutable_locale =
+         (dccExtContext().getArch() >= IsaCoreGen::SEN1P5_ISA) ? Unrelated : LBR;
+diff --git a/dcg/dcg_be/dcgbeCodegen.cpp b/dcg/dcg_be/dcgbeCodegen.cpp
+index 8c9291fc7e..a4c71f922f 100644
+--- a/dcg/dcg_be/dcgbeCodegen.cpp
++++ b/dcg/dcg_be/dcgbeCodegen.cpp
+@@ -1096,6 +1096,37 @@ void DcgBE::pcfgringDTToInstr(SenProg& currProg, pcfgSenInstr& currProgNode,
+                         ? pcfgNode->getSrcStAddr()
+                         : pcfgNode->getDestStAddr();
+     firstAddr = firstAddr / sysDef.bytesPerStick;  // addrOffset L3 unit
++    int larInitAddr = firstAddr;
++
++    if (!isInpFetchNeigh_) {
++      int lastAddr = firstAddr;
++      if (pcfgNode->addrSpan != -1) {
++        DT_CHECK(pcfgNode->addrSpan % (int)sysDef.bytesPerStick == 0);
++        const int spanSticks =
++            std::max(1, pcfgNode->addrSpan / (int)sysDef.bytesPerStick);
++        lastAddr = firstAddr + spanSticks - 1;
++      }
++      int closestLBRVal = 0;
++      int closestLBRDistance =
++          std::max(std::abs(firstAddr - closestLBRVal),
++                   std::abs(lastAddr - closestLBRVal));
++      for (const auto& valLBRIdx : currProg.valueToLBRIdx) {
++        const int valInLBR = valLBRIdx.first;
++        const int distance = std::max(std::abs(firstAddr - valInLBR),
++                                      std::abs(lastAddr - valInLBR));
++        if (distance < closestLBRDistance) {
++          closestLBRDistance = distance;
++          closestLBRVal = valInLBR;
++        }
++      }
++      DT_CHECK(closestLBRDistance <=
++               pow(2, sysDef.regInfoPerUnit.at(unitType)
++                          .at(RegType::LAR)
++                          .bitSize -
++                          1));
++      regLBRIdx = currProg.valueToLBRIdx.at(closestLBRVal);
++      larInitAddr = firstAddr - closestLBRVal;
++    }
+ 
+     if (!ranOutOfLARs) {
+       // check if we can reuse register
+@@ -1129,12 +1160,12 @@ void DcgBE::pcfgringDTToInstr(SenProg& currProg, pcfgSenInstr& currProgNode,
+         DT_CHECK(!currProg.regPool.at(dcgRegType::LAR).at(regLARIdx).reqInit);
+         currProg.regPool.at(dcgRegType::LAR).at(regLARIdx).reqInit = true;
+         currProg.regPool.at(dcgRegType::LAR).at(regLARIdx).initValue =
+-            (int)firstAddr;
++            (int)larInitAddr;
+       }
+     } else {
+       InstrInfo newLARIMMIntr = createInstr(unitType, InstType::LARIMM);
+       newLARIMMIntr.instFields_.at(OperandT::src0).setOperand(regLARIdx);
+-      newLARIMMIntr.instFields_.at(OperandT::imm).setOperand(firstAddr);
++      newLARIMMIntr.instFields_.at(OperandT::imm).setOperand(larInitAddr);
+ 
+       // insert in outer-most MVLOOP stack
+       DT_CHECK(myLoopOrder.size());
+@@ -8117,4 +8148,4 @@ void DcgBE::pcfgPEITOFOptoInstr(SenProg& currProg, pcfgSenInstr& currProgNode,
+   } else {
+     DT_ERROR("Unsupported");
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp b/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+index f0b4f2e53a..de95f4bff8 100644
+--- a/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
++++ b/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+@@ -11,7 +11,10 @@
+ #include <dcg/dcg_fe/dcg_frontend.h>
+ #include <dsc/dsc2Pcfg.h>
+ 
++#include <algorithm>
+ #include <cstdlib>
++#include <functional>
++#include <set>
+ 
+ void DcgFE::generatePcfgIRForDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+                                     int c /*=0*/) {
+@@ -41,6 +44,16 @@ void DcgFE::generatePcfgIRForDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+                  "LXCoordinateRemapOp PCFG generation requires concrete op");
+     DT_CHECK_MSG(!remapOp->movements.empty(),
+                  "LXCoordinateRemapOp has no movements to lower");
++    const bool skipCrossRing =
++        std::getenv("DXP_ONCHIP_MOVE_SKIP_CROSS_RING") != nullptr;
++    const bool skipLocalCopy =
++        std::getenv("DXP_ONCHIP_MOVE_SKIP_LOCAL_COPY") != nullptr;
++    const bool destinationMajorRingOrder =
++        std::getenv("DXP_ONCHIP_MOVE_DEST_MAJOR_RING_ORDER") != nullptr;
++    const bool useLocalCopy =
++        std::getenv("DXP_ONCHIP_MOVE_LOCAL_VIA_RING") == nullptr;
++    const bool groupLocalCopy =
++        std::getenv("DXP_ONCHIP_MOVE_DISABLE_GROUP_LOCAL_COPY") == nullptr;
+ 
+     std::map<int, int> coreIdToIndex;
+     for (int i = 0; i < myDataOpDsc.coreIdsUsed_.size(); ++i) {
+@@ -74,53 +87,315 @@ void DcgFE::generatePcfgIRForDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+     };
+ 
+     auto appendRingNode = [&](int core, SenComponents unit, int peerCore,
+-                              int64_t lxAddress, bool isSend, int moveIndex,
+-                              int stickIndex) {
++                              int64_t lxAddress, int64_t byteCount,
++                              bool isSend, int moveIndex, int segmentIndex) {
+       auto& pcfg = ensureUnitPcfg(core, unit);
+       auto key = std::make_pair(core, unit);
+-      auto* ring = static_cast<SenPcfgRingDtNode*>(
+-          pcfg.createPcfgNode(SenPcfgNode::Type::RINGDATATRANSFER));
+-      ring->name = "c" + std::to_string(core) + "-" +
+-                   pcfg.senComponentsToString.at(unit) +
+-                   "-LXCoordinateRemap-" + (isSend ? "send-" : "recv-") +
+-                   std::to_string(moveIndex) + "-" + std::to_string(stickIndex);
+-      ring->coreletId = -1;
+-      ring->dtInfo = nullptr;
+-      ring->dsInfo = nullptr;
+-      ring->dtFormat = DataFormats::SEN169_FP16;
+-      ring->addrSpan = bytesPerStick;
+-      ring->coreIdForRing = {peerCore};
+-      ring->useBurst = false;
+-      ring->srcDest = isSend ? DtPair{SenComponents::LX, SenComponents::RING}
+-                             : DtPair{SenComponents::RING, SenComponents::LX};
+-      if (isSend) {
+-        ring->setSrcStAddr(lxAddress);
+-      } else {
+-        ring->setDestStAddr(lxAddress);
++      const int64_t sticks = byteCount / bytesPerStick;
++      DT_CHECK_MSG(sticks > 0, "LXCoordinateRemapOp movement has no sticks");
++      DT_CHECK_MSG(lxAddress % bytesPerStick == 0,
++                   "LXCoordinateRemapOp LX address must be stick-aligned");
++      const bool unrollRingSticks =
++          std::getenv("DXP_ONCHIP_MOVE_UNROLL_RING_STICKS") != nullptr;
++      const int64_t nodeCount = unrollRingSticks ? sticks : 1;
++
++      for (int64_t stick = 0; stick < nodeCount; ++stick) {
++        const int64_t segmentByteCount =
++            unrollRingSticks ? bytesPerStick : byteCount;
++        const int64_t segmentLxAddress =
++            unrollRingSticks ? lxAddress + stick * bytesPerStick : lxAddress;
++        const int segment = unrollRingSticks
++                                ? segmentIndex + static_cast<int>(stick)
++                                : segmentIndex;
++        SenPcfgNode* parent = lastNode.at(key);
++        std::string nodePrefix = "c" + std::to_string(core) + "-" +
++                                 pcfg.senComponentsToString.at(unit) +
++                                 "-LXCoordinateRemap-" +
++                                 (isSend ? "send-" : "recv-") +
++                                 std::to_string(moveIndex) + "-" +
++                                 std::to_string(segment);
++
++        SenPcfgMvloopBranchNode* burstBranch = nullptr;
++        std::string burstLoopName;
++        if (!unrollRingSticks && sticks > 1) {
++          auto* burstLoop = static_cast<SenPcfgMvloopNode*>(
++              pcfg.createPcfgNode(SenPcfgNode::Type::MVLOOP));
++          burstLoop->name = nodePrefix + "-burst-loop";
++          burstLoop->loopName = burstLoop->name;
++          burstLoop->loopCount = static_cast<int>(sticks);
++          burstLoopName = burstLoop->loopName;
++
++          burstBranch = static_cast<SenPcfgMvloopBranchNode*>(
++              pcfg.createPcfgNode(SenPcfgNode::Type::MVLOOPBRANCH));
++          burstBranch->name = nodePrefix + "-burst-branch";
++          burstBranch->loopNode = burstLoop;
++          burstBranch->next.push_back(burstLoop);
++          burstLoop->prev.push_back(burstBranch);
++
++          parent->next.push_back(burstLoop);
++          burstLoop->prev.push_back(parent);
++          parent = burstLoop;
++        }
++
++        auto* ring = static_cast<SenPcfgRingDtNode*>(
++            pcfg.createPcfgNode(SenPcfgNode::Type::RINGDATATRANSFER));
++        ring->name = nodePrefix;
++        ring->coreletId = -1;
++        ring->dtInfo = nullptr;
++        ring->dsInfo = nullptr;
++        ring->dtFormat = DataFormats::SEN169_FP16;
++        ring->addrSpan = segmentByteCount;
++        ring->coreIdForRing = {peerCore};
++        ring->useBurst = !unrollRingSticks && sticks > 1;
++        if (!unrollRingSticks && sticks > 1) {
++          PcfgDtOffsets burstOffset;
++          init(burstOffset);
++          burstOffset.dimOffset = 1;
++          ring->bigStAddrOffsets[burstLoopName] = burstOffset;
++        }
++        ring->srcDest = isSend ? DtPair{SenComponents::LX, SenComponents::RING}
++                               : DtPair{SenComponents::RING, SenComponents::LX};
++        if (isSend) {
++          ring->setSrcStAddr(segmentLxAddress);
++        } else {
++          ring->setDestStAddr(segmentLxAddress);
++        }
++
++        parent->next.push_back(ring);
++        ring->prev.push_back(parent);
++        if (burstBranch != nullptr) {
++          ring->next.push_back(burstBranch);
++          burstBranch->prev.push_back(ring);
++          lastNode[key] = burstBranch;
++        } else {
++          lastNode[key] = ring;
++        }
++      }
++    };
++
++    std::function<void(int, int64_t, int64_t, int64_t, int64_t, int64_t,
++                       int64_t, int, int)>
++        appendLocalCopyNode;
++    appendLocalCopyNode = [&](int core, int64_t sourceLxAddress,
++                              int64_t destinationLxAddress, int64_t byteCount,
++                              int64_t groupCount, int64_t sourceMoveStrideBytes,
++                              int64_t destinationMoveStrideBytes, int moveIndex,
++                              int segmentIndex) {
++      if (byteCount > bytesPerStick) {
++        DT_CHECK_MSG(byteCount % bytesPerStick == 0,
++                     "LXCoordinateRemapOp local byte count must be stick-aligned");
++        const int64_t sticks = byteCount / bytesPerStick;
++        for (int64_t group = 0; group < groupCount; ++group) {
++          for (int64_t stick = 0; stick < sticks; ++stick) {
++            appendLocalCopyNode(
++                core, sourceLxAddress + group * sourceMoveStrideBytes +
++                          stick * bytesPerStick,
++                destinationLxAddress + group * destinationMoveStrideBytes +
++                    stick * bytesPerStick,
++                bytesPerStick, 1, bytesPerStick, bytesPerStick, moveIndex,
++                segmentIndex + static_cast<int>(group * sticks + stick));
++          }
++        }
++        return;
++      }
++      auto& pcfg = ensureUnitPcfg(core, SenComponents::L3SU);
++      auto key = std::make_pair(core, SenComponents::L3SU);
++      const int64_t sticks = byteCount / bytesPerStick;
++      DT_CHECK_MSG(sticks > 0, "LXCoordinateRemapOp local copy has no sticks");
++      DT_CHECK_MSG(groupCount > 0, "LXCoordinateRemapOp local copy has no groups");
++      DT_CHECK_MSG(sourceMoveStrideBytes % bytesPerStick == 0,
++                   "LXCoordinateRemapOp local source stride must be stick-aligned");
++      DT_CHECK_MSG(destinationMoveStrideBytes % bytesPerStick == 0,
++                   "LXCoordinateRemapOp local destination stride must be stick-aligned");
++      SenPcfgNode* parent = lastNode.at(key);
++      std::string nodePrefix = "c" + std::to_string(core) + "-" +
++                               pcfg.senComponentsToString.at(SenComponents::L3SU) +
++                               "-LXCoordinateRemap-local-copy-" +
++                               std::to_string(moveIndex) + "-" +
++                               std::to_string(segmentIndex);
++
++      SenPcfgMvloopBranchNode* groupBranch = nullptr;
++      const SenPcfgMvloopNode* groupLoop = nullptr;
++      if (groupCount > 1) {
++        auto* loop = static_cast<SenPcfgMvloopNode*>(
++            pcfg.createPcfgNode(SenPcfgNode::Type::MVLOOP));
++        loop->name = nodePrefix + "-group-loop";
++        loop->loopName = loop->name;
++        loop->loopCount = static_cast<int>(groupCount);
++
++        groupBranch = static_cast<SenPcfgMvloopBranchNode*>(
++            pcfg.createPcfgNode(SenPcfgNode::Type::MVLOOPBRANCH));
++        groupBranch->name = nodePrefix + "-group-branch";
++        groupBranch->loopNode = loop;
++        groupBranch->next.push_back(loop);
++        loop->prev.push_back(groupBranch);
++
++        parent->next.push_back(loop);
++        loop->prev.push_back(parent);
++        parent = loop;
++        groupLoop = loop;
++      }
++
++      TransferLocInfo srcInfo;
++      srcInfo.unit = SenComponents::LX;
++      srcInfo.startAddress.insertData(sourceLxAddress);
++      TransferLocInfo dstInfo;
++      dstInfo.unit = SenComponents::LX;
++      dstInfo.startAddress.insertData(destinationLxAddress);
++      const int transferSticks = static_cast<int>(sticks);
++      srcInfo.dimSizes.push_back({0, 64});
++      srcInfo.dimSizes.push_back({1, 1});
++      dstInfo.dimSizes.push_back({0, 64});
++      dstInfo.dimSizes.push_back({1, 1});
++      TransferInfo srcDt;
++      TransferInfo dstDt;
++      srcDt.dtSizes.push_back({0, 64});
++      srcDt.dtSizes.push_back({1, transferSticks});
++      dstDt.dtSizes.push_back({0, 64});
++      dstDt.dtSizes.push_back({1, transferSticks});
++      if (groupLoop != nullptr) {
++        constexpr int64_t bytesPerElement = bytesPerStick / 64;
++        DT_CHECK_MSG(sourceMoveStrideBytes % bytesPerElement == 0,
++                     "LXCoordinateRemapOp local source stride must be element-aligned");
++        DT_CHECK_MSG(destinationMoveStrideBytes % bytesPerElement == 0,
++                     "LXCoordinateRemapOp local destination stride must be element-aligned");
++        srcDt.loops.push_back(
++            {groupLoop, static_cast<int>(sourceMoveStrideBytes / bytesPerElement),
++             false});
++        dstDt.loops.push_back(
++            {groupLoop,
++             static_cast<int>(destinationMoveStrideBytes / bytesPerElement),
++             false});
+       }
+ 
+-      lastNode.at(key)->next.push_back(ring);
+-      ring->prev.push_back(lastNode.at(key));
+-      lastNode[key] = ring;
++      auto* dt = static_cast<SenPcfgDtNode2*>(
++          pcfg.createPcfgNode(SenPcfgNode::Type::DATATRANSFER2));
++      dt->build(nodePrefix, SenComponents::L3SU, -1, DataFormats::SEN169_FP16,
++                srcInfo, dstInfo, srcDt, dstDt);
++      DT_CHECK_MSG(sourceLxAddress % bytesPerStick == 0,
++                   "LXCoordinateRemapOp local source LX address must be stick-aligned");
++      DT_CHECK_MSG(destinationLxAddress % bytesPerStick == 0,
++                   "LXCoordinateRemapOp local destination LX address must be stick-aligned");
++
++      parent->next.push_back(dt);
++      dt->prev.push_back(parent);
++      if (groupBranch != nullptr) {
++        dt->next.push_back(groupBranch);
++        groupBranch->prev.push_back(dt);
++        lastNode[key] = groupBranch;
++      } else {
++        lastNode[key] = dt;
++      }
+     };
+ 
++    std::map<int, std::vector<const LXCoordinateRemapOp::Movement*>>
++        localMovesByCore;
+     for (const auto& move : remapOp->movements) {
++      if (move.source.core == move.destination.core) {
++        localMovesByCore[move.source.core].push_back(&move);
++      }
++    }
++
++    std::set<int> groupedLocalMoveIndices;
++    if (useLocalCopy) {
++      for (auto& coreAndMoves : localMovesByCore) {
++        auto& moves = coreAndMoves.second;
++        std::sort(moves.begin(), moves.end(),
++                  [](const auto* lhs, const auto* rhs) {
++                    if (lhs->source.lxAddress != rhs->source.lxAddress)
++                      return lhs->source.lxAddress < rhs->source.lxAddress;
++                    return lhs->destination.lxAddress <
++                           rhs->destination.lxAddress;
++                  });
++        if (!groupLocalCopy) {
++          for (const auto* move : moves) {
++            if (!skipLocalCopy) {
++              appendLocalCopyNode(move->source.core, move->source.lxAddress,
++                                  move->destination.lxAddress, move->bytes, 1,
++                                  move->bytes, move->bytes, move->moveIndex, 0);
++            }
++            groupedLocalMoveIndices.insert(move->moveIndex);
++          }
++          continue;
++        }
++        for (size_t idx = 0; idx < moves.size();) {
++          const auto* first = moves.at(idx);
++          int64_t sourceStride = first->bytes;
++          int64_t destinationStride = first->bytes;
++          if (idx + 1 < moves.size() &&
++              moves.at(idx + 1)->bytes == first->bytes) {
++            const int64_t nextSourceStride =
++                moves.at(idx + 1)->source.lxAddress - first->source.lxAddress;
++            const int64_t nextDestinationStride =
++                moves.at(idx + 1)->destination.lxAddress -
++                first->destination.lxAddress;
++            if (nextSourceStride > 0 && nextDestinationStride > 0) {
++              sourceStride = nextSourceStride;
++              destinationStride = nextDestinationStride;
++            }
++          }
++
++          size_t end = idx + 1;
++          for (; end < moves.size(); ++end) {
++            const auto* prev = moves.at(end - 1);
++            const auto* curr = moves.at(end);
++            if (curr->bytes != first->bytes ||
++                curr->source.lxAddress != prev->source.lxAddress + sourceStride ||
++                curr->destination.lxAddress !=
++                    prev->destination.lxAddress + destinationStride) {
++              break;
++            }
++          }
++
++          if (!skipLocalCopy) {
++            appendLocalCopyNode(first->source.core, first->source.lxAddress,
++                                first->destination.lxAddress, first->bytes,
++                                static_cast<int64_t>(end - idx), sourceStride,
++                                destinationStride, first->moveIndex, 0);
++          }
++          for (size_t groupedIdx = idx; groupedIdx < end; ++groupedIdx) {
++            groupedLocalMoveIndices.insert(moves.at(groupedIdx)->moveIndex);
++          }
++          idx = end;
++        }
++      }
++    }
++
++    std::vector<const LXCoordinateRemapOp::Movement*> crossMoves;
++    for (const auto& move : remapOp->movements) {
++      DT_CHECK_MSG(move.bytes > 0,
++                   "LXCoordinateRemapOp movement must transfer positive bytes");
+       DT_CHECK_MSG(move.bytes % bytesPerStick == 0,
+-                   "LXCoordinateRemapOp v1 ring lowering only supports whole-stick movements");
+-      DT_CHECK_MSG(move.source.lxAddress % bytesPerStick == 0,
+-                   "LXCoordinateRemapOp source LX address must be stick-aligned");
+-      DT_CHECK_MSG(move.destination.lxAddress % bytesPerStick == 0,
+-                   "LXCoordinateRemapOp destination LX address must be stick-aligned");
+-      const int64_t sticks = move.bytes / bytesPerStick;
+-      for (int64_t stick = 0; stick < sticks; ++stick) {
+-        const int64_t byteOffset = stick * bytesPerStick;
+-        appendRingNode(move.source.core, SenComponents::L3SU,
+-                       move.destination.core, move.source.lxAddress + byteOffset,
+-                       true, move.moveIndex, static_cast<int>(stick));
+-        appendRingNode(move.destination.core, SenComponents::L3LU,
+-                       move.source.core, move.destination.lxAddress + byteOffset,
+-                       false, move.moveIndex, static_cast<int>(stick));
++                   "LXCoordinateRemapOp movement byte count must be stick-aligned");
++      if (move.source.core == move.destination.core && useLocalCopy) {
++        DT_CHECK_MSG(groupedLocalMoveIndices.count(move.moveIndex),
++                     "LXCoordinateRemapOp local movement was not grouped");
++        continue;
+       }
++      if (skipCrossRing) {
++        continue;
++      }
++      crossMoves.push_back(&move);
++    }
++    if (destinationMajorRingOrder) {
++      std::sort(crossMoves.begin(), crossMoves.end(),
++                [](const auto* lhs, const auto* rhs) {
++                  if (lhs->destination.core != rhs->destination.core)
++                    return lhs->destination.core < rhs->destination.core;
++                  if (lhs->source.core != rhs->source.core)
++                    return lhs->source.core < rhs->source.core;
++                  if (lhs->destination.lxAddress != rhs->destination.lxAddress)
++                    return lhs->destination.lxAddress < rhs->destination.lxAddress;
++                  return lhs->source.lxAddress < rhs->source.lxAddress;
++                });
++    }
++    for (const auto* move : crossMoves) {
++      appendRingNode(move->source.core, SenComponents::L3SU,
++                     move->destination.core, move->source.lxAddress, move->bytes,
++                     true, move->moveIndex, 0);
++      appendRingNode(move->destination.core, SenComponents::L3LU,
++                     move->source.core, move->destination.lxAddress, move->bytes,
++                     false, move->moveIndex, 0);
+     }
+ 
+     for (int i = 0; i < myDataOpDsc.coreIdsUsed_.size(); ++i) {

@@ -1,0 +1,317 @@
+From 83f9320cd6924833950c1aa362dfdb9abe0c29d7 Mon Sep 17 00:00:00 2001
+From: Adnan Hoque <hoque@ualberta.ca>
+Date: Sat, 20 Jun 2026 07:48:38 +0000
+Subject: [PATCH] Lower ranged LX coordinate remaps
+
+---
+ dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp | 119 +++++++++++++++++++++++++------
+ dsc/dataOpDsc.cpp                |  91 ++++++++++++++++++++---
+ dsc/dataOpDsc.h                  |  12 ++++
+ 3 files changed, 189 insertions(+), 33 deletions(-)
+
+diff --git a/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp b/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+index 237fd13881..0e4b89049b 100644
+--- a/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
++++ b/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+@@ -37,7 +37,7 @@ void DcgFE::generatePcfgIRForDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+     auto* remapOp = static_cast<LXCoordinateRemapOp*>(myDataOpDsc.op);
+     DT_CHECK_MSG(remapOp != nullptr,
+                  "LXCoordinateRemapOp PCFG generation requires concrete op");
+-    DT_CHECK_MSG(!remapOp->movements.empty(),
++    DT_CHECK_MSG(!remapOp->movements.empty() || !remapOp->movementRanges.empty(),
+                  "LXCoordinateRemapOp has no movements to lower");
+ 
+     std::map<int, int> coreIdToIndex;
+@@ -71,22 +71,49 @@ void DcgFE::generatePcfgIRForDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+       return myDataOpDsc.pcfg_.at(coreIdx).back().first;
+     };
+ 
++    auto dtOffset = [](double dimOffset) {
++      PcfgDtOffsets offset;
++      offset.dimOffset = dimOffset;
++      offset.subDimOffset = 0;
++      offset.uniDimOffset = 0;
++      offset.freq = 1;
++      offset.clSkipOffset = 0;
++      offset.clSkipFreq = 1;
++      return offset;
++    };
++
+     auto appendRingNode = [&](int core, SenComponents unit, int peerCore,
+                               int64_t lxAddress, bool isSend, int moveIndex,
+-                              int stickIndex) {
++                              int64_t byteCount, int64_t repeatCount,
++                              int64_t addressStrideBytes) {
++      DT_CHECK_MSG(byteCount > 0 && byteCount % bytesPerStick == 0,
++                   "LXCoordinateRemapOp ring node requires whole-stick byte count");
++      DT_CHECK_MSG(repeatCount > 0 && repeatCount <= 2147483647LL,
++                   "LXCoordinateRemapOp repeat count is invalid");
++      if (repeatCount > 1) {
++        DT_CHECK_MSG(addressStrideBytes >= 0 &&
++                         addressStrideBytes % bytesPerStick == 0,
++                     "LXCoordinateRemapOp repeat stride must be stick-aligned");
++      }
++
+       auto& pcfg = ensureUnitPcfg(core, unit);
+       auto key = std::make_pair(core, unit);
++      const int64_t sticks = byteCount / bytesPerStick;
++      DT_CHECK_MSG(sticks <= 2147483647LL,
++                   "LXCoordinateRemapOp stick loop count is too large");
+       auto* ring = static_cast<SenPcfgRingDtNode*>(
+           pcfg.createPcfgNode(SenPcfgNode::Type::RINGDATATRANSFER));
+-      ring->name = "c" + std::to_string(core) + "-" +
+-                   pcfg.senComponentsToString.at(unit) +
+-                   "-LXCoordinateRemap-" + (isSend ? "send-" : "recv-") +
+-                   std::to_string(moveIndex) + "-" + std::to_string(stickIndex);
++      const std::string baseName =
++          "c" + std::to_string(core) + "-" +
++          pcfg.senComponentsToString.at(unit) + "-LXCoordinateRemap-" +
++          (isSend ? "send-" : "recv-") + std::to_string(moveIndex);
++      ring->name =
++          baseName + ((sticks == 1 && repeatCount == 1) ? "-0" : "-looped");
+       ring->coreletId = -1;
+       ring->dtInfo = nullptr;
+       ring->dsInfo = nullptr;
+       ring->dtFormat = DataFormats::SEN169_FP16;
+-      ring->addrSpan = bytesPerStick;
++      ring->addrSpan = static_cast<int>(byteCount * repeatCount);
+       ring->coreIdForRing = {peerCore};
+       ring->useBurst = false;
+       ring->srcDest = isSend ? DtPair{SenComponents::LX, SenComponents::RING}
+@@ -97,30 +124,76 @@ void DcgFE::generatePcfgIRForDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+         ring->setDestStAddr(lxAddress);
+       }
+ 
+-      lastNode.at(key)->next.push_back(ring);
+-      ring->prev.push_back(lastNode.at(key));
+-      lastNode[key] = ring;
++      std::vector<std::string> loopNames;
++      std::vector<int> loopCounts;
++      std::vector<double> loopOffsets;
++      if (sticks > 1) {
++        loopNames.push_back(baseName + "-stick-loop");
++        loopCounts.push_back(static_cast<int>(sticks));
++        loopOffsets.push_back(1);
++      }
++      if (repeatCount > 1) {
++        loopNames.push_back(baseName + "-range-loop");
++        loopCounts.push_back(static_cast<int>(repeatCount));
++        loopOffsets.push_back(static_cast<double>(addressStrideBytes / bytesPerStick));
++      }
++
++      if (loopNames.empty()) {
++        lastNode.at(key)->next.push_back(ring);
++        ring->prev.push_back(lastNode.at(key));
++        lastNode[key] = ring;
++        return;
++      }
++
++      std::vector<int> loopDims(loopNames.size(), -1);
++      auto [innerBranch, outerBranch] = SenPcfg::createLoopNest(
++          pcfg, loopNames, loopCounts, baseName + "-body", {}, loopDims);
++      for (size_t idx = 0; idx < loopNames.size(); ++idx) {
++        ring->bigStAddrOffsets[loopNames[idx]] = dtOffset(loopOffsets[idx]);
++      }
++
++      auto* outerLoop = outerBranch->loopNode;
++      lastNode.at(key)->next.push_back(outerLoop);
++      outerLoop->prev.push_back(lastNode.at(key));
++
++      auto* innerBody = innerBranch->loopNode->next.at(0);
++      SenPcfg::pcfgInsertAbove(ring, innerBody);
++      lastNode[key] = outerBranch;
+     };
+ 
+-    for (const auto& move : remapOp->movements) {
+-      DT_CHECK_MSG(move.bytes % bytesPerStick == 0,
++    auto lowerMovement = [&](int moveIndex, int64_t bytes,
++                             const LXCoordinateRemapOp::MovementSide& source,
++                             const LXCoordinateRemapOp::MovementSide& destination,
++                             int64_t repeatCount, int64_t sourceStrideBytes,
++                             int64_t destinationStrideBytes) {
++      DT_CHECK_MSG(bytes % bytesPerStick == 0,
+                    "LXCoordinateRemapOp v1 ring lowering only supports whole-stick movements");
+-      DT_CHECK_MSG(move.source.lxAddress % bytesPerStick == 0,
++      DT_CHECK_MSG(source.lxAddress % bytesPerStick == 0,
+                    "LXCoordinateRemapOp source LX address must be stick-aligned");
+-      DT_CHECK_MSG(move.destination.lxAddress % bytesPerStick == 0,
++      DT_CHECK_MSG(destination.lxAddress % bytesPerStick == 0,
+                    "LXCoordinateRemapOp destination LX address must be stick-aligned");
+-      const int64_t sticks = move.bytes / bytesPerStick;
+-      for (int64_t stick = 0; stick < sticks; ++stick) {
+-        const int64_t byteOffset = stick * bytesPerStick;
+-        appendRingNode(move.source.core, SenComponents::L3SU,
+-                       move.destination.core, move.source.lxAddress + byteOffset,
+-                       true, move.moveIndex, static_cast<int>(stick));
+-        appendRingNode(move.destination.core, SenComponents::L3LU,
+-                       move.source.core, move.destination.lxAddress + byteOffset,
+-                       false, move.moveIndex, static_cast<int>(stick));
++      appendRingNode(source.core, SenComponents::L3SU, destination.core,
++                     source.lxAddress, true, moveIndex, bytes, repeatCount,
++                     sourceStrideBytes);
++      appendRingNode(destination.core, SenComponents::L3LU, source.core,
++                     destination.lxAddress, false, moveIndex, bytes, repeatCount,
++                     destinationStrideBytes);
++    };
++
++    if (!remapOp->movementRanges.empty()) {
++      for (const auto& range : remapOp->movementRanges) {
++        lowerMovement(range.moveIndex, range.bytesPerMove, range.source,
++                      range.destination, range.count, range.sourceStrideBytes,
++                      range.destinationStrideBytes);
++      }
++    } else {
++      for (const auto& move : remapOp->movements) {
++        lowerMovement(move.moveIndex, move.bytes, move.source, move.destination,
++                      1, 0, 0);
+       }
+     }
+ 
++
+     for (int i = 0; i < myDataOpDsc.coreIdsUsed_.size(); ++i) {
+       if (myDataOpDsc.pcfg_.at(i).empty()) {
+         auto& coreid = myDataOpDsc.coreIdsUsed_.at(i);
+diff --git a/dsc/dataOpDsc.cpp b/dsc/dataOpDsc.cpp
+index 68e9669841..2633bcedf3 100644
+--- a/dsc/dataOpDsc.cpp
++++ b/dsc/dataOpDsc.cpp
+@@ -61,6 +61,65 @@ LXCoordinateRemapOp::MovementSide parseMovementSide(const json11::Json& obj,
+   return side;
+ }
+ 
++LXCoordinateRemapOp::Movement parseMovement(const json11::Json& moveJson) {
++  LXCoordinateRemapOp::Movement move;
++  move.moveIndex = static_cast<int>(getJsonI64(moveJson, "moveIndex"));
++  move.bytes = getJsonI64(moveJson, "bytes");
++  DT_CHECK_MSG(move.bytes > 0,
++               "LXCoordinateRemapOp movement has non-positive byte count");
++  move.source = parseMovementSide(moveJson, "source", move.bytes);
++  move.destination = parseMovementSide(moveJson, "destination", move.bytes);
++  return move;
++}
++
++void addByteOffset(LXCoordinateRemapOp::MovementSide& side, int64_t byteOffset) {
++  side.lxAddress += byteOffset;
++  side.localStart += byteOffset;
++  side.localEnd += byteOffset;
++  side.lxStart += byteOffset;
++  side.lxEnd += byteOffset;
++}
++
++LXCoordinateRemapOp::MovementRange parseMovementRange(
++    const json11::Json& rangeJson) {
++  DT_CHECK_MSG(rangeJson.is_object(),
++               "LXCoordinateRemapOp movementRanges entries must be objects");
++  LXCoordinateRemapOp::MovementRange range;
++  range.rangeIndex = static_cast<int>(getJsonI64(rangeJson, "rangeIndex"));
++  range.moveIndex = static_cast<int>(getJsonI64(rangeJson, "moveIndex"));
++  range.count = getJsonI64(rangeJson, "count");
++  range.bytesPerMove = getJsonI64(rangeJson, "bytesPerMove");
++  range.sourceStrideBytes = getJsonI64(rangeJson, "sourceStrideBytes");
++  range.destinationStrideBytes =
++      getJsonI64(rangeJson, "destinationStrideBytes");
++  DT_CHECK_MSG(range.count > 0,
++               "LXCoordinateRemapOp movement range has non-positive count");
++  DT_CHECK_MSG(range.bytesPerMove > 0,
++               "LXCoordinateRemapOp movement range has non-positive byte count");
++  DT_CHECK_MSG(range.count == 1 || range.sourceStrideBytes >= 0,
++               "LXCoordinateRemapOp movement range has negative source stride");
++  DT_CHECK_MSG(range.count == 1 || range.destinationStrideBytes >= 0,
++               "LXCoordinateRemapOp movement range has negative destination stride");
++  range.source = parseMovementSide(rangeJson, "source", range.bytesPerMove);
++  range.destination =
++      parseMovementSide(rangeJson, "destination", range.bytesPerMove);
++  return range;
++}
++
++void expandMovementRange(const LXCoordinateRemapOp::MovementRange& range,
++                         std::vector<LXCoordinateRemapOp::Movement>& movements) {
++  for (int64_t offset = 0; offset < range.count; ++offset) {
++    LXCoordinateRemapOp::Movement move;
++    move.moveIndex = range.moveIndex + static_cast<int>(offset);
++    move.bytes = range.bytesPerMove;
++    move.source = range.source;
++    move.destination = range.destination;
++    addByteOffset(move.source, offset * range.sourceStrideBytes);
++    addByteOffset(move.destination, offset * range.destinationStrideBytes);
++    movements.push_back(move);
++  }
++}
++
+ void parseLXCoordinateRemapPayload(const json11::Json& dscJson,
+                                    LXCoordinateRemapOp* op) {
+   op->schemaVersion = static_cast<int>(getJsonI64(dscJson, "schemaVersion"));
+@@ -70,18 +129,30 @@ void parseLXCoordinateRemapPayload(const json11::Json& dscJson,
+   op->producerLxBase = getJsonI64(dscJson, "producerLxBase");
+   op->consumerLxBase = getJsonI64(dscJson, "consumerLxBase");
+ 
+-  DT_CHECK_MSG(dscJson["movements"].is_array(),
+-               "LXCoordinateRemapOp missing movements array");
++  const bool hasMovements = dscJson["movements"].is_array();
++  const bool hasMovementRanges = dscJson["movementRanges"].is_array();
++  DT_CHECK_MSG(hasMovements || hasMovementRanges,
++               "LXCoordinateRemapOp requires movements or movementRanges array");
++
+   op->movements.clear();
+-  for (const auto& moveJson : dscJson["movements"].array_items()) {
+-    LXCoordinateRemapOp::Movement move;
+-    move.moveIndex = static_cast<int>(getJsonI64(moveJson, "moveIndex"));
+-    move.bytes = getJsonI64(moveJson, "bytes");
+-    DT_CHECK_MSG(move.bytes > 0, "LXCoordinateRemapOp movement has non-positive byte count");
+-    move.source = parseMovementSide(moveJson, "source", move.bytes);
+-    move.destination = parseMovementSide(moveJson, "destination", move.bytes);
+-    op->movements.push_back(move);
++  op->movementRanges.clear();
++  if (hasMovements) {
++    for (const auto& moveJson : dscJson["movements"].array_items()) {
++      op->movements.push_back(parseMovement(moveJson));
++    }
++  }
++  const bool needsRangeExpansion = op->movements.empty();
++  if (hasMovementRanges) {
++    for (const auto& rangeJson : dscJson["movementRanges"].array_items()) {
++      auto range = parseMovementRange(rangeJson);
++      op->movementRanges.push_back(range);
++      if (needsRangeExpansion) {
++        expandMovementRange(range, op->movements);
++      }
++    }
+   }
++  DT_CHECK_MSG(!op->movements.empty() || !op->movementRanges.empty(),
++               "LXCoordinateRemapOp has no movements after import");
+ }
+ 
+ }  // namespace
+diff --git a/dsc/dataOpDsc.h b/dsc/dataOpDsc.h
+index df4fa293b6..9afa054ef9 100644
+--- a/dsc/dataOpDsc.h
++++ b/dsc/dataOpDsc.h
+@@ -466,6 +466,17 @@ struct LXCoordinateRemapOp : baseOp {
+     MovementSide destination;
+   };
+ 
++  struct MovementRange {
++    int rangeIndex = -1;
++    int moveIndex = -1;
++    int64_t count = 0;
++    int64_t bytesPerMove = 0;
++    int64_t sourceStrideBytes = 0;
++    int64_t destinationStrideBytes = 0;
++    MovementSide source;
++    MovementSide destination;
++  };
++
+   int schemaVersion = 0;
+   std::string sourceName;
+   std::string producer;
+@@ -473,6 +484,7 @@ struct LXCoordinateRemapOp : baseOp {
+   int64_t producerLxBase = -1;
+   int64_t consumerLxBase = -1;
+   std::vector<Movement> movements;
++  std::vector<MovementRange> movementRanges;
+ };
+ 
+ struct baseSTCDPOp : baseOp {
+-- 
+2.52.0
+

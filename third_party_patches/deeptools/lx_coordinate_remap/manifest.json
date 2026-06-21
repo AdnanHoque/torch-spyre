@@ -1,0 +1,55 @@
+{
+  "name": "deeptools-lx-coordinate-remap",
+  "purpose": "Record Deeptools-side support required by Torch LXCoordinateRemapOp mixed SDSCs.",
+  "provenance": {
+    "source_pod": "adnan-cdx-spyre-dev-pf",
+    "lean_patch_source_path": "/tmp/deeptools-83f9320-ranged-lx-coordinate-remaps.patch",
+    "wip_diff_source_path": "/tmp/deeptools-coordinate-remap-e2e-wip-20260619-214732.diff",
+    "copied_into_torch_branch": "swiglu-ws-co-remap"
+  },
+  "artifacts": [
+    {
+      "path": "deeptools_lx_coordinate_remap_ranged_83f9320.patch",
+      "sha256": "cec06fdc86d0891e5b8de7fc9ba105226a6c0c31fcf959cdaf62fcb995d4db0d",
+      "kind": "lean_candidate_patch",
+      "commit_header": "83f9320cd6924833950c1aa362dfdb9abe0c29d7",
+      "description": "Adds ranged LXCoordinateRemapOp parsing and PCFG lowering for whole-stick LX-to-LX movement.",
+      "changed_files": [
+        {
+          "path": "dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp",
+          "reason": "Lower LXCoordinateRemapOp movement ranges to L3 ring transfer PCFG nodes."
+        },
+        {
+          "path": "dsc/dataOpDsc.cpp",
+          "reason": "Import and validate LXCoordinateRemapOp movement and movementRange payloads."
+        },
+        {
+          "path": "dsc/dataOpDsc.h",
+          "reason": "Declare LXCoordinateRemapOp payload fields, including range encoding."
+        }
+      ]
+    },
+    {
+      "path": "deeptools_lx_coordinate_remap_e2e_wip_20260619_214732.diff",
+      "sha256": "3004289345278c5ef37ece0f662867a1fd0681d05f02170849b38511482e1bf2",
+      "kind": "historical_wip_diff",
+      "description": "WIP end-to-end Deeptools changes for DCC LX transfer handling, address pinning, register assignment, and backend codegen. Preserve as context, not as the clean candidate patch.",
+      "changed_files": [
+        "dcc/src/Conversion/PCFGToDataflowIR/PCFG2ToDataflowIR.cpp",
+        "dcc/src/Transform/Sentient/AddressPinningAndToggle.cpp",
+        "dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp",
+        "dcg/dcg_be/dcgbeCodegen.cpp",
+        "dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp"
+      ]
+    },
+    {
+      "path": "sample_mixed_lx_coordinate_remap_sdsc.json",
+      "kind": "contract_sample",
+      "description": "Small mixed-SDSC example with one LXCoordinateRemapOp row scheduled before a consumer DL row."
+    }
+  ],
+  "validation": {
+    "apply_check": "git apply --check third_party_patches/deeptools/lx_coordinate_remap/deeptools_lx_coordinate_remap_ranged_83f9320.patch",
+    "runtime_expectation": "DXP imports mixed datadscs_ plus dscs_ SDSCs, routes through data-op/DL DCG, lowers LXCoordinateRemapOp to L3 ring send/receive movement, and preserves coreIdToDscSchedule ordering."
+  }
+}
