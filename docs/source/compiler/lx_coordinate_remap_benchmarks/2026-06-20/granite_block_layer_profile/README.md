@@ -32,12 +32,20 @@ noise.
 
 ## Results
 
-Primary metric is Kineto trace-derived `kernel_ms_per_iter`.
+Primary metric is Kineto trace-derived `kernel_ms_per_iter`.  The canonical
+production comparison for this work is causal prefill, because that matches the
+normal Granite prefill path.  Bidirectional prefill was collected as a
+diagnostic cross-check only and should not be mixed into headline claims.
 
 | variant | attention | coord remap | kernel ms/iter | memory ms/iter | wall median ms | delta vs baseline | kernel speedup |
 |---|---|---:|---:|---:|---:|---:|---:|
 | `baseline_causal` | `sdpa_causal` | no | `16.385016` | `0.173744` | `23.332596` | - | - |
 | `coord_causal` | `sdpa_causal` | yes | `13.819416` | `0.351185` | `21.236420` | `-2.565600 ms` | `15.66%` |
+
+Diagnostic bidirectional cross-check:
+
+| variant | attention | coord remap | kernel ms/iter | memory ms/iter | wall median ms | delta vs baseline | kernel speedup |
+|---|---|---:|---:|---:|---:|---:|---:|
 | `baseline_bidirectional` | `sdpa_bidirectional` | no | `16.295306` | `0.288433` | `23.861885` | - | - |
 | `coord_bidirectional` | `sdpa_bidirectional` | yes | `13.796416` | `0.473019` | `21.608829` | `-2.498889 ms` | `15.34%` |
 

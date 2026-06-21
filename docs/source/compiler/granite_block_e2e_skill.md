@@ -11,7 +11,7 @@ The known-good path compiles and executes a real FMS `GraniteBlock` prefill
 shape:
 
 - input: `[1, 512, 4096]`
-- attention: `sdpa_causal` or `sdpa_bidirectional`
+- attention: `sdpa_causal`
 - weights: fused, fp16, materialized with empty Spyre tensors
 - output: `[1, 512, 4096]`
 - returned KV cache: two tensors shaped `[1, 8, 512, 128]`
@@ -28,7 +28,7 @@ $PY212 benchmarks/granite_block_layer_probe.py \
   --run-root "$RUN" \
   --case prefill \
   --compile-block \
-  --attn-name sdpa_bidirectional \
+  --attn-name sdpa_causal \
   --iters 5 \
   --warmups 1 \
   --profile \
@@ -115,7 +115,6 @@ Expected success criteria:
 Verified examples from June 21, 2026:
 
 - `sdpa_causal`: `23.835897 ms` wall-sync measured iteration.
-- `sdpa_bidirectional`: `24.121284 ms` wall-sync measured iteration.
 
 ## Coordinate-Remap Variant
 
@@ -132,10 +131,11 @@ export SPYRE_ONCHIP_MOVE_JSONL="$RUN/onchip_move.jsonl"
 export SPYRE_ONCHIP_MOVE_DEBUG_DIR="$RUN/onchip_move_debug"
 ```
 
-Then run the same probe command.  A June 21, 2026 bidirectional run completed
-with `returncode=0` and a `25.817156 ms` wall-sync measured iteration.  Its
-SDSC inventory contained `OnChipMoveCoordinateRemap` rows in both attention and
-MLP kernels, and `onchip_move.jsonl` reported:
+Then run the same causal prefill probe command.  A June 21, 2026 profiled
+causal run completed with `returncode=0`, a `21.236420 ms` wall-sync median,
+and `13.819416 ms` trace-derived kernel time per iteration.  Its SDSC inventory
+contained `OnChipMoveCoordinateRemap` rows in both attention and MLP kernels,
+and `onchip_move.jsonl` reported:
 
 - `10` planned coordinate-remap edges
 - `44` skipped edges

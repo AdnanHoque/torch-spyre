@@ -84,15 +84,15 @@ $PY212 tools/run_coordinate_remap_bench.py \
   --runs 5 \
   --env LD_LIBRARY_PATH=/home/adnan-cdx/dt-inductor-codex-clean/install/libaiupti/lib:/home/adnan-cdx/dt-inductor-codex-clean/install/runtime-localdt/lib:${LD_LIBRARY_PATH} \
   --env SPYRE_FMS_GRANITE_BLOCK_SCOPE=full \
-  --env SPYRE_FMS_GRANITE_BLOCK_ATTN_NAME=sdpa_bidirectional
+  --env SPYRE_FMS_GRANITE_BLOCK_ATTN_NAME=sdpa_causal
 ```
 
 `SPYRE_FMS_GRANITE_BLOCK_SCOPE` can be set to `mlp` or `attention` to isolate
 the block's feed-forward or attention submodules without the normalization
 prefix.  Use `mlp_with_norm` or `attention_with_norm` when debugging norm
-lowering as part of the block.  The default attention mode is
-`sdpa_bidirectional`, matching the existing FMS Granite attention microbench
-choice to avoid the currently problematic causal-mask lowering.
+lowering as part of the block.  Use `sdpa_causal` for coordinate-remap
+performance claims because it matches the production Granite prefill path.
+Treat `sdpa_bidirectional` as a diagnostic-only variant.
 
 Each run writes `artifacts/onchip_move_edge_report.md` and `.csv`.  Use those
 files to determine whether coordinate remap fired only in the SwiGLU/MLP path
@@ -103,6 +103,8 @@ For the known-good one-layer block e2e smoke path, use
 branch-owned `benchmarks/granite_block_layer_probe.py`, the eager-spyre FMS norm
 patch, empty Spyre parameters, and the split-multi trailing-unflattening fix.
 It has verified both `sdpa_causal` and `sdpa_bidirectional` prefill.
+Future performance runs should use causal prefill unless a diagnostic explicitly
+requires bidirectional attention.
 
 ## Standalone GraniteBlock Probe
 
