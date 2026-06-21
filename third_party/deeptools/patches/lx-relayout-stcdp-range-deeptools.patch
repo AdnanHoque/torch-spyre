@@ -1,0 +1,624 @@
+diff --git a/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp b/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+index 2f09a103c0..ad86192df9 100644
+--- a/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
++++ b/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+@@ -32,6 +32,186 @@ void DcgFE::generatePcfgIRForDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+     }
+   };
+ 
++  auto createStcdpLxRangeRemap = [&]() {
++    constexpr int64_t bytesPerStick = 128;
++    auto* remapOp = static_cast<STCDPOpLx*>(myDataOpDsc.op);
++    DT_CHECK_MSG(remapOp != nullptr,
++                 "STCDPOpLx ranged remap PCFG generation requires concrete op");
++    DT_CHECK_MSG(!remapOp->rangeMovements.empty() || !remapOp->rangeMovementRanges.empty(),
++                 "STCDPOpLx ranged remap has no movements to lower");
++
++    std::map<int, int> coreIdToIndex;
++    for (int i = 0; i < myDataOpDsc.coreIdsUsed_.size(); ++i) {
++      coreIdToIndex[myDataOpDsc.coreIdsUsed_.at(i)] = i;
++    }
++
++    myDataOpDsc.pcfg_.clear();
++    myDataOpDsc.pcfg_.resize(myDataOpDsc.coreIdsUsed_.size());
++
++    std::map<std::pair<int, SenComponents>, SenPcfgNode*> lastNode;
++    std::map<std::pair<int, SenComponents>, int> pcfgIndexForUnit;
++
++    auto ensureUnitPcfg = [&](int core, SenComponents unit) -> SenPcfg& {
++      DT_CHECK_MSG(coreIdToIndex.count(core),
++                   "STCDPOpLx ranged remap movement references core outside coreIdsUsed_");
++      const int coreIdx = coreIdToIndex.at(core);
++      auto key = std::make_pair(core, unit);
++      if (!lastNode.count(key)) {
++        std::pair<SenPcfg, SenComponents> newPair;
++        newPair.second = unit;
++        newPair.first.dtFormat = DataFormats::SEN169_FP16;
++        auto* nop = static_cast<SenPcfgNopNode*>(
++            newPair.first.createPcfgNode(SenPcfgNode::Type::NOP));
++        nop->name = "c" + std::to_string(core) + "-" +
++                    newPair.first.senComponentsToString.at(unit) +
++                    "-STCDPOpLxRangeRemap-root-" + std::to_string(c);
++        newPair.first.srcNode = nop;
++        myDataOpDsc.pcfg_.at(coreIdx).push_back(std::move(newPair));
++        pcfgIndexForUnit[key] =
++            static_cast<int>(myDataOpDsc.pcfg_.at(coreIdx).size()) - 1;
++        lastNode[key] = nop;
++      }
++      return myDataOpDsc.pcfg_.at(coreIdx).at(pcfgIndexForUnit.at(key)).first;
++    };
++
++    auto dtOffset = [](double dimOffset) {
++      PcfgDtOffsets offset;
++      offset.dimOffset = dimOffset;
++      offset.subDimOffset = 0;
++      offset.uniDimOffset = 0;
++      offset.freq = 1;
++      offset.clSkipOffset = 0;
++      offset.clSkipFreq = 1;
++      return offset;
++    };
++
++    auto appendRingNode = [&](int core, SenComponents unit, int peerCore,
++                              int64_t lxAddress, bool isSend, int moveIndex,
++                              int64_t byteCount, int64_t repeatCount,
++                              int64_t addressStrideBytes) {
++      DT_CHECK_MSG(byteCount > 0 && byteCount % bytesPerStick == 0,
++                   "STCDPOpLx ranged remap ring node requires whole-stick byte count");
++      DT_CHECK_MSG(repeatCount > 0 && repeatCount <= 2147483647LL,
++                   "STCDPOpLx ranged remap repeat count is invalid");
++      if (repeatCount > 1) {
++        DT_CHECK_MSG(addressStrideBytes >= 0 &&
++                         addressStrideBytes % bytesPerStick == 0,
++                     "STCDPOpLx ranged remap repeat stride must be stick-aligned");
++      }
++
++      auto& pcfg = ensureUnitPcfg(core, unit);
++      auto key = std::make_pair(core, unit);
++      const int64_t sticks = byteCount / bytesPerStick;
++      DT_CHECK_MSG(sticks <= 2147483647LL,
++                   "STCDPOpLx ranged remap stick loop count is too large");
++      auto* ring = static_cast<SenPcfgRingDtNode*>(
++          pcfg.createPcfgNode(SenPcfgNode::Type::RINGDATATRANSFER));
++      const std::string baseName =
++          "c" + std::to_string(core) + "-" +
++          pcfg.senComponentsToString.at(unit) + "-STCDPOpLxRangeRemap-" +
++          (isSend ? "send-" : "recv-") + std::to_string(moveIndex);
++      ring->name =
++          baseName + ((sticks == 1 && repeatCount == 1) ? "-0" : "-looped");
++      ring->coreletId = -1;
++      ring->dtInfo = nullptr;
++      ring->dsInfo = nullptr;
++      ring->dtFormat = DataFormats::SEN169_FP16;
++      ring->addrSpan = static_cast<int>(byteCount * repeatCount);
++      ring->coreIdForRing = {peerCore};
++      ring->useBurst = false;
++      ring->srcDest = isSend ? DtPair{SenComponents::LX, SenComponents::RING}
++                             : DtPair{SenComponents::RING, SenComponents::LX};
++      if (isSend) {
++        ring->setSrcStAddr(lxAddress);
++      } else {
++        ring->setDestStAddr(lxAddress);
++      }
++
++      std::vector<std::string> loopNames;
++      std::vector<int> loopCounts;
++      std::vector<double> loopOffsets;
++      if (sticks > 1) {
++        loopNames.push_back(baseName + "-stick-loop");
++        loopCounts.push_back(static_cast<int>(sticks));
++        loopOffsets.push_back(1);
++      }
++      if (repeatCount > 1) {
++        loopNames.push_back(baseName + "-range-loop");
++        loopCounts.push_back(static_cast<int>(repeatCount));
++        loopOffsets.push_back(static_cast<double>(addressStrideBytes / bytesPerStick));
++      }
++
++      if (loopNames.empty()) {
++        lastNode.at(key)->next.push_back(ring);
++        ring->prev.push_back(lastNode.at(key));
++        lastNode[key] = ring;
++        return;
++      }
++
++      std::vector<int> loopDims(loopNames.size(), -1);
++      auto [innerBranch, outerBranch] = SenPcfg::createLoopNest(
++          pcfg, loopNames, loopCounts, baseName + "-body", {}, loopDims);
++      for (size_t idx = 0; idx < loopNames.size(); ++idx) {
++        ring->bigStAddrOffsets[loopNames[idx]] = dtOffset(loopOffsets[idx]);
++      }
++
++      auto* outerLoop = outerBranch->loopNode;
++      lastNode.at(key)->next.push_back(outerLoop);
++      outerLoop->prev.push_back(lastNode.at(key));
++
++      auto* innerBody = innerBranch->loopNode->next.at(0);
++      SenPcfg::pcfgInsertAbove(ring, innerBody);
++      lastNode[key] = outerBranch;
++    };
++
++    auto lowerMovement = [&](int moveIndex, int64_t bytes,
++                             const STCDPOpLx::RangeMovementSide& source,
++                             const STCDPOpLx::RangeMovementSide& destination,
++                             int64_t repeatCount, int64_t sourceStrideBytes,
++                             int64_t destinationStrideBytes) {
++      DT_CHECK_MSG(bytes % bytesPerStick == 0,
++                   "STCDPOpLx ranged remap v1 ring lowering only supports whole-stick movements");
++      DT_CHECK_MSG(source.lxAddress % bytesPerStick == 0,
++                   "STCDPOpLx ranged remap source LX address must be stick-aligned");
++      DT_CHECK_MSG(destination.lxAddress % bytesPerStick == 0,
++                   "STCDPOpLx ranged remap destination LX address must be stick-aligned");
++      appendRingNode(source.core, SenComponents::L3SU, destination.core,
++                     source.lxAddress, true, moveIndex, bytes, repeatCount,
++                     sourceStrideBytes);
++      appendRingNode(destination.core, SenComponents::L3LU, source.core,
++                     destination.lxAddress, false, moveIndex, bytes, repeatCount,
++                     destinationStrideBytes);
++    };
++
++    if (!remapOp->rangeMovementRanges.empty()) {
++      for (const auto& range : remapOp->rangeMovementRanges) {
++        lowerMovement(range.moveIndex, range.bytesPerMove, range.source,
++                      range.destination, range.count, range.sourceStrideBytes,
++                      range.destinationStrideBytes);
++      }
++    } else {
++      for (const auto& move : remapOp->rangeMovements) {
++        lowerMovement(move.moveIndex, move.bytes, move.source, move.destination,
++                      1, 0, 0);
++      }
++    }
++
++
++    for (int i = 0; i < myDataOpDsc.coreIdsUsed_.size(); ++i) {
++      if (myDataOpDsc.pcfg_.at(i).empty()) {
++        auto& coreid = myDataOpDsc.coreIdsUsed_.at(i);
++        std::pair<SenPcfg, SenComponents> newPairL3LU;
++        newPairL3LU.second = SenComponents::L3LU;
++        auto* nop = static_cast<SenPcfgNopNode*>(
++            newPairL3LU.first.createPcfgNode(SenPcfgNode::Type::NOP));
++        nop->name = "c" + std::to_string(coreid) +
++                    "-L3LU-STCDPOpLxRangeRemap-idle-" + std::to_string(c);
++        newPairL3LU.first.srcNode = nop;
++        myDataOpDsc.pcfg_.at(i).push_back(std::move(newPairL3LU));
++      }
++    }
++  };
++
+   if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx ||
+       myDataOpDsc.op->name == OpFuncs::STCDPOpHBM ||
+       myDataOpDsc.op->name == OpFuncs::ResizeNNLX ||
+@@ -39,7 +219,10 @@ void DcgFE::generatePcfgIRForDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+     bool skip = false;
+     if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx) {
+       STCDPOpLx* myOp = (STCDPOpLx*)myDataOpDsc.op;
+-      if (myOp->dtTable_.empty()) {
++      if (myOp->rangeModeEnabled) {
++        createStcdpLxRangeRemap();
++        skip = true;
++      } else if (myOp->dtTable_.empty()) {
+         createNoOp();
+         skip = true;
+       }
+@@ -182,4 +365,4 @@ DataOpDsc* DcgFE::generatePcfgIRForDataOpInpFetch(
+ 
+   isInpFetchNeigh_ = false;
+   return masterDDsc;
+-}
+\ No newline at end of file
++}
+diff --git a/dcg/dcg_fe/transfer_compute/transfer_compute.cpp b/dcg/dcg_fe/transfer_compute/transfer_compute.cpp
+index cb5c2d1d6f..d6cb08a5bc 100644
+--- a/dcg/dcg_fe/transfer_compute/transfer_compute.cpp
++++ b/dcg/dcg_fe/transfer_compute/transfer_compute.cpp
+@@ -19,6 +19,11 @@ void DcgFE::computeTranferforDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+   initializeDataDscOp(myDataOpDsc, c);
+   verificationCheckDataOpDSC(myDataOpDsc);
+ 
++  if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx &&
++      static_cast<STCDPOpLx*>(myDataOpDsc.op)->rangeModeEnabled) {
++    return;
++  }
++
+   if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx ||
+       myDataOpDsc.op->name == OpFuncs::STCDPOpHBM ||
+       myDataOpDsc.op->name == OpFuncs::ResizeNNLX ||
+@@ -442,6 +447,10 @@ void DcgFE::verificationCheckDataOpDSC(DataOpDsc& myDataOpDsc) {
+       myDataOpDsc.op->name == OpFuncs::STCDPOpHBM ||
+       myDataOpDsc.op->name == OpFuncs::ResizeNNLX ||
+       myDataOpDsc.op->name == OpFuncs::ResizeNNHBM) {
++    if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx &&
++        static_cast<STCDPOpLx*>(myDataOpDsc.op)->rangeModeEnabled) {
++      return;
++    }
+     baseSTCDPOp* myOp = (baseSTCDPOp*)myDataOpDsc.op;
+     DT_CHECK(myDataOpDsc.labeledDs_.size() == 2);
+     DT_CHECK(myOp->inpLds == &myDataOpDsc.labeledDs_[0]);
+@@ -1422,9 +1431,11 @@ void DcgFE::initializeDataDscOp(DataOpDsc& myDataOpDsc, int c /*=0*/) {
+       DT_CHECK(myDataOpDsc.op->name == OpFuncs::STCDPOpLx);
+     }
+     STCDPOpLx* myOp = (STCDPOpLx*)myDataOpDsc.op;
+-    DT_CHECK(myDataOpDsc.labeledDs_.size() == 2);
+-    myOp->inpLds = &myDataOpDsc.labeledDs_[0];
+-    myOp->outLds = &myDataOpDsc.labeledDs_[1];
++    if (!myOp->rangeModeEnabled) {
++      DT_CHECK(myDataOpDsc.labeledDs_.size() == 2);
++      myOp->inpLds = &myDataOpDsc.labeledDs_[0];
++      myOp->outLds = &myDataOpDsc.labeledDs_[1];
++    }
+ 
+     // clear datadsc states
+     myOp->idealStWindowToDtKey.clear();
+diff --git a/dsc/dataOpDsc.cpp b/dsc/dataOpDsc.cpp
+index 4389b14042..2a5dcf6a61 100644
+--- a/dsc/dataOpDsc.cpp
++++ b/dsc/dataOpDsc.cpp
+@@ -12,6 +12,157 @@
+ 
+ #include "util/dt_exception.hpp"
+ 
++namespace {
++
++int64_t getJsonI64(const json11::Json& obj, const std::string& key) {
++  DT_CHECK_MSG(obj[key].is_number(),
++               "STCDPOpLx ranged remap missing numeric field: " + key);
++  return static_cast<int64_t>(obj[key].number_value());
++}
++
++std::string getJsonString(const json11::Json& obj, const std::string& key) {
++  DT_CHECK_MSG(obj[key].is_string(),
++               "STCDPOpLx ranged remap missing string field: " + key);
++  return obj[key].string_value();
++}
++
++std::pair<int64_t, int64_t> getByteRange(const json11::Json& obj,
++                                         const std::string& key) {
++  DT_CHECK_MSG(obj[key].is_object(),
++               "STCDPOpLx ranged remap missing range field: " + key);
++  return {getJsonI64(obj[key], "start"), getJsonI64(obj[key], "end")};
++}
++
++STCDPOpLx::RangeMovementSide parseMovementSide(const json11::Json& obj,
++                                               const std::string& key,
++                                               int64_t expectedBytes) {
++  DT_CHECK_MSG(obj[key].is_object(),
++               "STCDPOpLx ranged remap missing side field: " + key);
++  const auto& sideJson = obj[key];
++  STCDPOpLx::RangeMovementSide side;
++  side.core = static_cast<int>(getJsonI64(sideJson, "core"));
++  side.lxAddress = getJsonI64(sideJson, "lxAddress");
++
++  auto localRange = getByteRange(sideJson, "localByteRange");
++  side.localStart = localRange.first;
++  side.localEnd = localRange.second;
++
++  auto lxRange = getByteRange(sideJson, "lxByteRange");
++  side.lxStart = lxRange.first;
++  side.lxEnd = lxRange.second;
++
++  DT_CHECK_MSG(side.core >= 0,
++               "STCDPOpLx ranged remap side has negative core id");
++  DT_CHECK_MSG(side.localEnd >= side.localStart,
++               "STCDPOpLx ranged remap side has invalid local byte range");
++  DT_CHECK_MSG(side.lxEnd >= side.lxStart,
++               "STCDPOpLx ranged remap side has invalid LX byte range");
++  DT_CHECK_MSG(side.localEnd - side.localStart == expectedBytes,
++               "STCDPOpLx ranged remap side local range does not match bytes");
++  DT_CHECK_MSG(side.lxEnd - side.lxStart == expectedBytes,
++               "STCDPOpLx ranged remap side LX range does not match bytes");
++  DT_CHECK_MSG(side.lxAddress == side.lxStart,
++               "STCDPOpLx ranged remap lxAddress must match lxByteRange.start");
++  return side;
++}
++
++STCDPOpLx::RangeMovement parseMovement(const json11::Json& moveJson) {
++  STCDPOpLx::RangeMovement move;
++  move.moveIndex = static_cast<int>(getJsonI64(moveJson, "moveIndex"));
++  move.bytes = getJsonI64(moveJson, "bytes");
++  DT_CHECK_MSG(move.bytes > 0,
++               "STCDPOpLx ranged remap movement has non-positive byte count");
++  move.source = parseMovementSide(moveJson, "source", move.bytes);
++  move.destination = parseMovementSide(moveJson, "destination", move.bytes);
++  return move;
++}
++
++void addByteOffset(STCDPOpLx::RangeMovementSide& side, int64_t byteOffset) {
++  side.lxAddress += byteOffset;
++  side.localStart += byteOffset;
++  side.localEnd += byteOffset;
++  side.lxStart += byteOffset;
++  side.lxEnd += byteOffset;
++}
++
++STCDPOpLx::RangeMovementRange parseMovementRange(
++    const json11::Json& rangeJson) {
++  DT_CHECK_MSG(rangeJson.is_object(),
++               "STCDPOpLx ranged remap movementRanges entries must be objects");
++  STCDPOpLx::RangeMovementRange range;
++  range.rangeIndex = static_cast<int>(getJsonI64(rangeJson, "rangeIndex"));
++  range.moveIndex = static_cast<int>(getJsonI64(rangeJson, "moveIndex"));
++  range.count = getJsonI64(rangeJson, "count");
++  range.bytesPerMove = getJsonI64(rangeJson, "bytesPerMove");
++  range.sourceStrideBytes = getJsonI64(rangeJson, "sourceStrideBytes");
++  range.destinationStrideBytes =
++      getJsonI64(rangeJson, "destinationStrideBytes");
++  DT_CHECK_MSG(range.count > 0,
++               "STCDPOpLx ranged remap movement range has non-positive count");
++  DT_CHECK_MSG(range.bytesPerMove > 0,
++               "STCDPOpLx ranged remap movement range has non-positive byte count");
++  DT_CHECK_MSG(range.count == 1 || range.sourceStrideBytes >= 0,
++               "STCDPOpLx ranged remap movement range has negative source stride");
++  DT_CHECK_MSG(range.count == 1 || range.destinationStrideBytes >= 0,
++               "STCDPOpLx ranged remap movement range has negative destination stride");
++  range.source = parseMovementSide(rangeJson, "source", range.bytesPerMove);
++  range.destination =
++      parseMovementSide(rangeJson, "destination", range.bytesPerMove);
++  return range;
++}
++
++void expandMovementRange(const STCDPOpLx::RangeMovementRange& range,
++                         std::vector<STCDPOpLx::RangeMovement>& movements) {
++  for (int64_t offset = 0; offset < range.count; ++offset) {
++    STCDPOpLx::RangeMovement move;
++    move.moveIndex = range.moveIndex + static_cast<int>(offset);
++    move.bytes = range.bytesPerMove;
++    move.source = range.source;
++    move.destination = range.destination;
++    addByteOffset(move.source, offset * range.sourceStrideBytes);
++    addByteOffset(move.destination, offset * range.destinationStrideBytes);
++    movements.push_back(move);
++  }
++}
++
++void parseStcdpLxRangeRemapPayload(const json11::Json& dscJson,
++                                   STCDPOpLx* op) {
++  op->rangeModeEnabled = true;
++  op->rangeSchemaVersion = static_cast<int>(getJsonI64(dscJson, "schemaVersion"));
++  op->rangeSourceName = getJsonString(dscJson, "sourceName");
++  op->rangeProducer = getJsonString(dscJson, "producer");
++  op->rangeConsumer = getJsonString(dscJson, "consumer");
++  op->rangeProducerLxBase = getJsonI64(dscJson, "producerLxBase");
++  op->rangeConsumerLxBase = getJsonI64(dscJson, "consumerLxBase");
++
++  const bool hasMovements = dscJson["movements"].is_array();
++  const bool hasMovementRanges = dscJson["movementRanges"].is_array();
++  DT_CHECK_MSG(hasMovements || hasMovementRanges,
++               "STCDPOpLx ranged remap requires movements or movementRanges array");
++
++  op->rangeMovements.clear();
++  op->rangeMovementRanges.clear();
++  if (hasMovements) {
++    for (const auto& moveJson : dscJson["movements"].array_items()) {
++      op->rangeMovements.push_back(parseMovement(moveJson));
++    }
++  }
++  const bool needsRangeExpansion = op->rangeMovements.empty();
++  if (hasMovementRanges) {
++    for (const auto& rangeJson : dscJson["movementRanges"].array_items()) {
++      auto range = parseMovementRange(rangeJson);
++      op->rangeMovementRanges.push_back(range);
++      if (needsRangeExpansion) {
++        expandMovementRange(range, op->rangeMovements);
++      }
++    }
++  }
++  DT_CHECK_MSG(!op->rangeMovements.empty() || !op->rangeMovementRanges.empty(),
++               "STCDPOpLx ranged remap has no movements after import");
++}
++
++}  // namespace
++
+ void DataOpDsc::copyDataOpDsc(DataOpDsc& iDdsc) {
+   std::string iDdscJsonString = iDdsc.exportJsonStr();
+   importJsonStr(iDdscJsonString);
+@@ -1260,6 +1411,14 @@ bool DataOpDsc::importJsonObj(const json11::Json& json,
+         // DT_CHECK(0);  // unexpected key1
+       }
+     }
++    if (this->opName == OpFuncs::STCDPOpLx &&
++        map0.second["op"]["rangedLxRemap"].is_object()) {
++      DT_CHECK_MSG(this->op != nullptr,
++                   "STCDPOpLx ranged remap was not constructed during import");
++      parseStcdpLxRangeRemapPayload(
++          map0.second["op"]["rangedLxRemap"],
++          static_cast<STCDPOpLx*>(this->op));
++    }
+   }
+   return true;
+ }
+diff --git a/dsc/dataOpDsc.h b/dsc/dataOpDsc.h
+index ee3bb0bd7f..2686ae84ab 100644
+--- a/dsc/dataOpDsc.h
++++ b/dsc/dataOpDsc.h
+@@ -477,6 +477,43 @@ struct baseSTCDPOp : baseOp {
+ };
+ 
+ struct STCDPOpLx : baseSTCDPOp {
++  struct RangeMovementSide {
++    int core = -1;
++    int64_t lxAddress = -1;
++    int64_t localStart = 0;
++    int64_t localEnd = 0;
++    int64_t lxStart = 0;
++    int64_t lxEnd = 0;
++  };
++
++  struct RangeMovement {
++    int moveIndex = -1;
++    int64_t bytes = 0;
++    RangeMovementSide source;
++    RangeMovementSide destination;
++  };
++
++  struct RangeMovementRange {
++    int rangeIndex = -1;
++    int moveIndex = -1;
++    int64_t count = 0;
++    int64_t bytesPerMove = 0;
++    int64_t sourceStrideBytes = 0;
++    int64_t destinationStrideBytes = 0;
++    RangeMovementSide source;
++    RangeMovementSide destination;
++  };
++
++  bool rangeModeEnabled = false;
++  int rangeSchemaVersion = 0;
++  std::string rangeSourceName;
++  std::string rangeProducer;
++  std::string rangeConsumer;
++  int64_t rangeProducerLxBase = -1;
++  int64_t rangeConsumerLxBase = -1;
++  std::vector<RangeMovement> rangeMovements;
++  std::vector<RangeMovementRange> rangeMovementRanges;
++
+   bool enOptMC = false;  // filled by GraphOpt, DCG decides ModeMC
+   std::pair<bool, int> forceModeMC = {false, 0};  // filled by GraphOpt
+   std::map<int, std::set<int>> prodConsList;  // key: prod, val: set of cons..
+diff --git a/dxp/SdscTree.cpp b/dxp/SdscTree.cpp
+index c7d56cb8aa..e391a81704 100644
+--- a/dxp/SdscTree.cpp
++++ b/dxp/SdscTree.cpp
+@@ -149,7 +149,11 @@ std::unique_ptr<SuperDsc> SdscNode::importSdsc(const std::string& filename,
+   auto mySdsc = std::make_unique<SuperDsc>();
+   mySdsc->importJson(filename);
+   mySdsc->target_ = target;
+-  DT_CHECK_MSG(mySdsc->dataOpdscs_.empty(), "Datadsc not allowed, use dldsc");
++  const bool hasMixedDataOpSchedule =
++      !mySdsc->dataOpdscs_.empty() && !mySdsc->dscs_.empty() &&
++      !mySdsc->coreIdToDscSchedule.empty();
++  DT_CHECK_MSG(mySdsc->dataOpdscs_.empty() || hasMixedDataOpSchedule,
++               "Datadsc not allowed without dldsc schedule");
+   DT_CHECK_MSG(!mySdsc->dscs_.empty(), "No dsc in sdsc input");
+   return mySdsc;
+ }
+diff --git a/dxp/dxp.cpp b/dxp/dxp.cpp
+index 0ace925a04..9a35efeeff 100644
+--- a/dxp/dxp.cpp
++++ b/dxp/dxp.cpp
+@@ -49,9 +49,28 @@ Dxp::Dxp(const DesignSpaceConfigGlobal& dscGlobal) : dscGlobal(dscGlobal) {
+ Dxp::~Dxp() {}
+ 
+ void Dxp::runDdc(SuperDsc* sdsc) {
+-  L3DlOpsScheduler l3_scheduler(dscGlobal, memTrackers.get(), {executionStep},
+-                                verbose);
+-  l3_scheduler.run(*sdsc);
++  const bool scheduledMixedMultiDl =
++      sdsc != nullptr && sdsc->dscs_.size() > 1 &&
++      !sdsc->dataOpdscs_.empty() && !sdsc->coreIdToDscSchedule.empty();
++  const bool skipMixedMultiDlScheduler =
++      scheduledMixedMultiDl &&
++      dtGetEnv<std::string>("DXP_SKIP_MIXED_MULTI_DL_L3_SCHEDULER")
++              .value_or("0") == "1";
++  if (!skipMixedMultiDlScheduler) {
++    L3DlOpsScheduler l3_scheduler(dscGlobal, memTrackers.get(), {executionStep},
++                                  verbose);
++    l3_scheduler.run(*sdsc);
++  }
++  if (scheduledMixedMultiDl) {
++    for (auto& dsc : sdsc->dscs_) {
++      if (dsc.dataStageParam_.size() == 1 && dsc.dataStageParam_.count(0) &&
++          !dsc.dataStageParam_.count(1)) {
++        dsc.dataStageParam_[1] = dsc.dataStageParam_.at(0);
++        dsc.dataStageParam_[1].ss_.name_ = "chunk";
++        dsc.dataStageParam_[1].el_.name_ = "chunk";
++      }
++    }
++  }
+ 
+   if (debug) {
+     sdscFile.insert(sdscFile.find_last_of('.'), ".out");
+@@ -252,8 +271,24 @@ void Dxp::runCodegen(SuperDsc* sdsc) {
+   dcg.progIRcodeGen = DCGProgIRGen::DCC;
+   dcg.createSenProg = false;
+ 
++  const bool hasMixedDataOpAndDl =
++      !sdsc->dataOpdscs_.empty() && !sdsc->dscs_.empty();
++  bool hasDscSchedule = false;
++  if (hasMixedDataOpAndDl &&
++      sdsc->coreIdToDscSchedule.size() == sdsc->numCoresUsed_) {
++    hasDscSchedule = true;
++    for (auto& kv : sdsc->coreIdToDscSchedule) {
++      if (kv.second.size() == 0) {
++        hasDscSchedule = false;
++        break;
++      }
++    }
++  }
++
+   // DCG to generate L3 programs
+-  if (sdsc->dscs_.size() == 0 && sdsc->dataOpdscs_.size() > 0) {
++  if (hasDscSchedule) {
++    dcg.runDcgForDataOpsDlOps(*sdsc);
++  } else if (sdsc->dscs_.size() == 0 && sdsc->dataOpdscs_.size() > 0) {
+     dcg.runDcg(*sdsc);
+   } else {
+     dcg.runDcgForDlOpsStandalone(*sdsc);
+@@ -337,36 +372,38 @@ void Dxp::createTrackers() {
+       continue;
+     }
+ 
+-    // Fill in allocations for input/outputs present in hbm
+-    DT_CHECK(sdsc->dscs_.size() == 1);
+-    auto& dsc = sdsc->dscs_.front();
+-    for (auto& tensor : dsc.labeledDs_) {
+-      if (!tensor.memOrg_.count(HBM) || !tensor.memOrg_.at(HBM).allocateNode_)
+-        continue;
+-      const auto* hbmAlloc = tensor.memOrg_.at(HBM).allocateNode_;
+-      const auto foldedAddresses =
+-          hbmAlloc->startAddressCoreCorelet_.getDataAndFoldCoordinates();
+-      int64_t baseVirtAddress = std::numeric_limits<int64_t>::max();
+-      for (auto& [coord, val] : foldedAddresses) {
+-        if (is_any_of(coord.at(0), dsc.coreIdsUsed_) && baseVirtAddress > val)
+-          baseVirtAddress = val;
++    // Fill in allocations for input/outputs present in HBM. Mixed SDSCs can
++    // legally contain more than one DL DSC when coreIdToDscSchedule owns the
++    // execution order.
++    for (auto& dsc : sdsc->dscs_) {
++      for (auto& tensor : dsc.labeledDs_) {
++        if (!tensor.memOrg_.count(HBM) || !tensor.memOrg_.at(HBM).allocateNode_)
++          continue;
++        const auto* hbmAlloc = tensor.memOrg_.at(HBM).allocateNode_;
++        const auto foldedAddresses =
++            hbmAlloc->startAddressCoreCorelet_.getDataAndFoldCoordinates();
++        int64_t baseVirtAddress = std::numeric_limits<int64_t>::max();
++        for (auto& [coord, val] : foldedAddresses) {
++          if (is_any_of(coord.at(0), dsc.coreIdsUsed_) && baseVirtAddress > val)
++            baseVirtAddress = val;
++        }
++        const auto baseAddress = baseVirtAddress % segSize;
++        const int segmentId = baseVirtAddress / segSize;
++        DT_CHECK_MSG(segmentId < ldsSegs.size(), "More tensors than segments");
++        auto segment = ldsSegs.at(segmentId);
++        DT_CHECK_MSG(segment != LdsSegment::CONST,
++                     "Input/output tensor allocated in segment reserved for "
++                     "backend compiler");
++        auto volume =
++            dsc.getBufferCapacityForNode(hbmAlloc, tensor.ldsIdx_, HBM, -1, -1);
++        auto addr = memTrackers->hbmTrack.at(segment).checkAndAddDsAtAddr(
++            dsc.name_ + "_" + tensor.dsName_ + "_step" + std::to_string(step),
++            "static", volume, steps, baseAddress);
++        // only check that ds names are correctly uniquified, it is okay if we
++        // fail to add overlapping tensors as those are managed by frontend and
++        // likely aliases
++        DT_CHECK(addr != EXISTS);
+       }
+-      const auto baseAddress = baseVirtAddress % segSize;
+-      const int segmentId = baseVirtAddress / segSize;
+-      DT_CHECK_MSG(segmentId < ldsSegs.size(), "More tensors than segments");
+-      auto segment = ldsSegs.at(segmentId);
+-      DT_CHECK_MSG(segment != LdsSegment::CONST,
+-                   "Input/output tensor allocated in segment reserved for "
+-                   "backend compiler");
+-      auto volume =
+-          dsc.getBufferCapacityForNode(hbmAlloc, tensor.ldsIdx_, HBM, -1, -1);
+-      auto addr = memTrackers->hbmTrack.at(segment).checkAndAddDsAtAddr(
+-          tensor.dsName_ + "_step" + std::to_string(step), "static", volume,
+-          steps, baseAddress);
+-      // only check that ds names are correctly uniquified, it is okay if we
+-      // fail to add overlapping tensors as those are managed by frontend and
+-      // likely aliases
+-      DT_CHECK(addr != EXISTS);
+     }
+   }
+ }
