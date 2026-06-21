@@ -50,6 +50,11 @@ See:
 
 ## Full-Block And Attention Attempts
 
+Update: full one-layer FMS `GraniteBlock` prefill now runs end to end after the
+split-multi trailing-unflattening fix and with the eager-spyre FMS norm patch.
+See [granite_block_layer_e2e](../granite_block_layer_e2e/README.md).  The notes
+below are retained as historical failure isolation from before that fix.
+
 Full block attempt:
 
 - Run directory:

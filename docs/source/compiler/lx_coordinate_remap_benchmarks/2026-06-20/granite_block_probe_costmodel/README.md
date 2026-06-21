@@ -72,6 +72,14 @@ So this cost-model probe gives us a reusable GraniteBlock-derived FFN probe and
 confirms the coordinate-remap win inside real FMS module code.  Full block
 measurement still needs the norm element-arrangement issue fixed first.
 
+Update: the full one-layer FMS `GraniteBlock` prefill path now runs end to end
+when using the eager-spyre FMS norm patch and the split-multi trailing
+unflattening fix.  See
+[granite_block_layer_e2e](../granite_block_layer_e2e/README.md) and
+[Granite Block E2E Skill](../../../granite_block_e2e_skill.md).  The newer
+full-block smoke is an execution proof, not yet a coordinate-remap speedup
+claim.
+
 ## Artifacts
 
 - [baseline probe log](baseline/probe.log)

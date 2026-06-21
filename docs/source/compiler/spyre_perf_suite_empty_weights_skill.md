@@ -64,7 +64,7 @@ CPU-parameter transfer behavior.
 
 ## Granite Block Wrapper
 
-For a full single-block prefill probe, use the Granite block wrapper.  It
+For perf-suite scoped block probes, use the Granite block wrapper.  It
 constructs one FMS Granite block, casts it to fp16, and materializes parameters
 with `to_empty(device="spyre")`.
 
@@ -97,6 +97,12 @@ choice to avoid the currently problematic causal-mask lowering.
 Each run writes `artifacts/onchip_move_edge_report.md` and `.csv`.  Use those
 files to determine whether coordinate remap fired only in the SwiGLU/MLP path
 or also on attention/residual/norm edges.
+
+For the known-good one-layer block e2e smoke path, use
+[Granite Block E2E Skill](granite_block_e2e_skill.md).  That runbook uses the
+branch-owned `benchmarks/granite_block_layer_probe.py`, the eager-spyre FMS norm
+patch, empty Spyre parameters, and the split-multi trailing-unflattening fix.
+It has verified both `sdpa_causal` and `sdpa_bidirectional` prefill.
 
 ## Standalone GraniteBlock Probe
 
