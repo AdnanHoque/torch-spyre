@@ -250,6 +250,41 @@ def _normalize_op_args(op_name, input_fx_nodes, kwargs, out_dtype, device=None):
     return tuple(args), clean_kw, out_dtype
 
 
+def _linearized_load_index(index, size, stride):
+    """Build a linear load index, allowing a trailing flattened view.
+
+    Split multi-op reconstruction builds the final op as a fresh Pointwise body
+    that loads from intermediate buffers.  Most rebuilt ops have the same rank
+    as their intermediate inputs.  Granite RoPE-style pointwise ops can instead
+    consume an intermediate view shaped like [B, M, H, 2, 1, 64] from a
+    consumer indexed as [B, M, H, 128].  In that case the final consumer
+    index's last dimension is a flattened representation of the input's
+    trailing dimensions.
+    """
+    if len(index) == len(stride):
+        return sum(i * s for i, s in zip(index, stride))
+    if size is None or len(index) >= len(stride) or not index:
+        return None
+
+    prefix_rank = len(index) - 1
+    if prefix_rank > len(size):
+        return None
+
+    source_indices = list(index[:prefix_rank])
+    flat = index[prefix_rank]
+    trailing_sizes = list(size[prefix_rank:])
+    if len(trailing_sizes) != len(stride) - prefix_rank:
+        return None
+
+    for pos, dim_size in enumerate(trailing_sizes):
+        divisor = sympy.prod(trailing_sizes[pos + 1 :]) or sympy.Integer(1)
+        coord = flat if divisor == 1 else sympy.floor(flat / divisor)
+        coord = sympy.Integer(0) if dim_size == 1 else sympy.Mod(coord, dim_size)
+        source_indices.append(coord)
+
+    return sum(i * s for i, s in zip(source_indices, stride))
+
+
 def _build_inner_fn(op_name, value_vids, kwargs, vid_to_bufname, vid_to_constant):
     """Build an inner_fn that loads from intermediate buffers.
 
@@ -291,12 +326,19 @@ def _build_inner_fn(op_name, value_vids, kwargs, vid_to_bufname, vid_to_constant
                     inputs.append(V.ops.load(vid_to_bufname[v], sympy.Integer(0)))
             else:
                 buf_stride = vid_to_stride[v]
-                if len(index) != len(buf_stride):
+                buf_name = vid_to_bufname[v]
+                buf = V.graph.get_buffer(buf_name)
+                buf_layout = getattr(buf, "layout", None)
+                buf_size = getattr(buf_layout, "size", None)
+                idx = _linearized_load_index(index, buf_size, buf_stride)
+                if idx is None:
+                    buf_name = vid_to_bufname[v]
                     raise ValueError(
                         f"Mismatch between index & stride dimensions: "
-                        f"{len(index)} vs {len(buf_stride)}"
+                        f"{len(index)} vs {len(buf_stride)}; "
+                        f"op={op_name}, input={buf_name}, "
+                        f"size={buf_size}, stride={buf_stride}, index={index}"
                     )
-                idx = sum(i * s for i, s in zip(index, buf_stride))
                 inputs.append(V.ops.load(vid_to_bufname[v], idx))
         return getattr(V.ops, op_name)(*inputs, *extra, **clean_kw)
 
