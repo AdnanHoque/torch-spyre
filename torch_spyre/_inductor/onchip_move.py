@@ -24,9 +24,7 @@ from __future__ import annotations
 import dataclasses
 import copy
 import itertools
-import json
 import math
-from pathlib import Path
 from typing import Any
 
 import sympy
@@ -72,12 +70,6 @@ class OnChipMovePlan:
     source_name: str
     producer_name: str
     consumer_name: str
-    producer_op: str
-    consumer_op: str
-    status: str
-    fallback_reason: str | None
-    realization_status: str
-    carrier: str
     device_sizes: list[int]
     device_stride_map: list[int]
     element_bytes: int
@@ -85,21 +77,12 @@ class OnChipMovePlan:
     consumer_core_count: int
     producer_region_bytes: int
     consumer_region_bytes: int
-    producer_view: dict[str, Any]
-    consumer_view: dict[str, Any]
     cells: list[OnChipMoveCell]
     movement_subview: OnChipMoveSubview | None = None
 
     @property
     def bytes_moved(self) -> int:
         return sum(cell.bytes for cell in self.cells)
-
-
-def _op_name(op: Operation) -> str:
-    try:
-        return str(op.get_operation_name())
-    except Exception:  # noqa: BLE001
-        return type(op).__name__
 
 
 def _op_num_cores(op: Operation) -> int:
@@ -126,19 +109,6 @@ def _device_layout_and_element_bytes(buf: Any) -> tuple[list[int], list[int], in
     device_stride_map = [int(stride) for stride in dev_layout.stride_map]
     element_bytes = num_bytes(dev_layout.device_dtype)
     return device_sizes, device_stride_map, element_bytes
-
-
-def _view_to_json(view: PerCoreView) -> dict[str, Any]:
-    return {
-        "work_slice_dims": [
-            {"device_dim": int(dim), "split": int(split)}
-            for dim, split in view.work_slice_dims
-        ],
-        "core_to_slot": [
-            {"device_dim": int(dim), "slot_expr": str(expr)}
-            for dim, expr in view.core_to_slot
-        ],
-    }
 
 
 def _normalize_view_splits(view: PerCoreView) -> dict[int, int]:
@@ -1264,11 +1234,7 @@ def _coordinate_remap_dataop_payload(
     }
 
 
-def build_coordinate_remap_metadata(
-    plan: OnChipMovePlan,
-    *,
-    include_debug_movements: bool = True,
-) -> dict[str, Any]:
+def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
     """Build torch-spyre-side metadata for a future Deeptools remap data-op."""
 
     producer_base = int(config.onchip_move_producer_lx_base)
@@ -1365,24 +1331,16 @@ def build_coordinate_remap_metadata(
             movements=movements,
         ),
     }
-    if include_debug_movements:
-        metadata["movements"] = movements
     if "subview" in coverage:
         metadata["logical_subview"] = copy.deepcopy(coverage["subview"])
     return metadata
 
 
-def _plan_json(plan: OnChipMovePlan) -> dict[str, Any]:
+def _planned_payload(plan: OnChipMovePlan) -> dict[str, Any]:
     payload = {
         "source_name": plan.source_name,
         "producer": plan.producer_name,
         "consumer": plan.consumer_name,
-        "producer_op": plan.producer_op,
-        "consumer_op": plan.consumer_op,
-        "status": plan.status,
-        "fallback_reason": plan.fallback_reason,
-        "realization_status": plan.realization_status,
-        "carrier": plan.carrier,
         "device_sizes": plan.device_sizes,
         "device_stride_map": plan.device_stride_map,
         "element_bytes": plan.element_bytes,
@@ -1390,8 +1348,6 @@ def _plan_json(plan: OnChipMovePlan) -> dict[str, Any]:
         "consumer_core_count": plan.consumer_core_count,
         "producer_region_bytes": plan.producer_region_bytes,
         "consumer_region_bytes": plan.consumer_region_bytes,
-        "producer_view": plan.producer_view,
-        "consumer_view": plan.consumer_view,
         "cell_count": len(plan.cells),
         "bytes_moved": plan.bytes_moved,
     }
@@ -1403,57 +1359,12 @@ def _plan_json(plan: OnChipMovePlan) -> dict[str, Any]:
             "starts": [int(start) for start in plan.movement_subview.starts],
             "sizes": [int(size) for size in plan.movement_subview.sizes],
         }
-    if plan.cells:
-        if config.onchip_move_debug_cells:
-            payload["cells"] = [dataclasses.asdict(cell) for cell in plan.cells]
-        metadata = build_coordinate_remap_metadata(
-            plan,
-            include_debug_movements=config.onchip_move_debug_cells,
-        )
-        metadata["deeptools_dataop"] = _compact_coordinate_remap_dataop_for_json(
-            metadata["deeptools_dataop"]
-        )
-        payload["coordinate_remap"] = metadata
-    return payload
-
-
-def _skip_plan(
-    *,
-    source_name: str,
-    producer: ComputedBuffer,
-    consumer: ComputedBuffer,
-    reason: str,
-    producer_view: PerCoreView | None = None,
-    consumer_view: PerCoreView | None = None,
-    device_sizes: list[int] | None = None,
-    device_stride_map: list[int] | None = None,
-    element_bytes: int = 0,
-    producer_region_bytes: int = 0,
-    consumer_region_bytes: int = 0,
-    movement_subview: OnChipMoveSubview | None = None,
-) -> OnChipMovePlan:
-    return OnChipMovePlan(
-        source_name=source_name,
-        producer_name=producer.get_name(),
-        consumer_name=consumer.get_name(),
-        producer_op=_op_name(producer),
-        consumer_op=_op_name(consumer),
-        status="skipped",
-        fallback_reason=reason,
-        realization_status="not-realized-skipped",
-        carrier=config.onchip_move_carrier,
-        device_sizes=list(device_sizes or []),
-        device_stride_map=list(device_stride_map or []),
-        element_bytes=int(element_bytes),
-        producer_core_count=_op_num_cores(producer),
-        consumer_core_count=_op_num_cores(consumer),
-        producer_region_bytes=int(producer_region_bytes),
-        consumer_region_bytes=int(consumer_region_bytes),
-        producer_view=_view_to_json(producer_view or PerCoreView((), ())),
-        consumer_view=_view_to_json(consumer_view or PerCoreView((), ())),
-        cells=[],
-        movement_subview=movement_subview,
+    metadata = build_coordinate_remap_metadata(plan)
+    metadata["deeptools_dataop"] = _compact_coordinate_remap_dataop_for_json(
+        metadata["deeptools_dataop"]
     )
+    payload["coordinate_remap"] = metadata
+    return payload
 
 
 def plan_onchip_move_edge(
@@ -1463,15 +1374,10 @@ def plan_onchip_move_edge(
     read_dep: MemoryDep,
     *,
     cache: dict | None = None,
-) -> OnChipMovePlan:
+) -> OnChipMovePlan | None:
     write_dep = _single_write_dep(producer, read_dep.name)
     if write_dep is None:
-        return _skip_plan(
-            source_name=read_dep.name,
-            producer=producer,
-            consumer=consumer,
-            reason="producer-write-dep-not-unique",
-        )
+        return None
 
     producer_view, producer_partial = _per_core_view_on_buf(
         producer,
@@ -1486,23 +1392,9 @@ def plan_onchip_move_edge(
         cache=cache,
     )
     if producer_partial:
-        return _skip_plan(
-            source_name=read_dep.name,
-            producer=producer,
-            consumer=consumer,
-            reason="producer-k-split-partial-output",
-            producer_view=producer_view,
-            consumer_view=consumer_view,
-        )
+        return None
     if producer_view == consumer_view:
-        return _skip_plan(
-            source_name=read_dep.name,
-            producer=producer,
-            consumer=consumer,
-            reason="same-per-core-view-owned-by-lx-planner",
-            producer_view=producer_view,
-            consumer_view=consumer_view,
-        )
+        return None
 
     try:
         buf = graph.get_buffer(read_dep.name)
@@ -1530,77 +1422,39 @@ def plan_onchip_move_edge(
             movement_subview=movement_subview,
         )
     except Exception as exc:  # noqa: BLE001
-        return _skip_plan(
-            source_name=read_dep.name,
-            producer=producer,
-            consumer=consumer,
-            reason=type(exc).__name__,
-            producer_view=producer_view,
-            consumer_view=consumer_view,
+        logger.debug(
+            "onchip_move skipped %s -> %s for %s: %s",
+            producer.get_name(),
+            consumer.get_name(),
+            read_dep.name,
+            type(exc).__name__,
         )
+        return None
     if reason is not None:
-        return _skip_plan(
-            source_name=read_dep.name,
-            producer=producer,
-            consumer=consumer,
-            reason=reason,
-            producer_view=producer_view,
-            consumer_view=consumer_view,
-            device_sizes=device_sizes,
-            device_stride_map=device_stride_map,
-            element_bytes=element_bytes,
-            producer_region_bytes=_view_region_bytes(
-                producer_view,
-                device_sizes=device_sizes,
-                element_bytes=element_bytes,
-            ),
-            consumer_region_bytes=_view_region_bytes(
-                consumer_view,
-                device_sizes=device_sizes,
-                element_bytes=element_bytes,
-            ),
-            movement_subview=movement_subview,
+        logger.debug(
+            "onchip_move skipped %s -> %s for %s: %s",
+            producer.get_name(),
+            consumer.get_name(),
+            read_dep.name,
+            reason,
         )
+        return None
     if config.onchip_move_carrier == "coordinate_remap":
         reason = _coordinate_remap_v1_support_reason(cells)
         if reason is not None:
-            return _skip_plan(
-                source_name=read_dep.name,
-                producer=producer,
-                consumer=consumer,
-                reason=reason,
-                producer_view=producer_view,
-                consumer_view=consumer_view,
-                device_sizes=device_sizes,
-                device_stride_map=device_stride_map,
-                element_bytes=element_bytes,
-                producer_region_bytes=_view_region_bytes(
-                    producer_view,
-                    device_sizes=device_sizes,
-                    element_bytes=element_bytes,
-                ),
-                consumer_region_bytes=_view_region_bytes(
-                    consumer_view,
-                    device_sizes=device_sizes,
-                    element_bytes=element_bytes,
-                ),
-                movement_subview=movement_subview,
+            logger.debug(
+                "onchip_move skipped %s -> %s for %s: %s",
+                producer.get_name(),
+                consumer.get_name(),
+                read_dep.name,
+                reason,
             )
+            return None
 
     return OnChipMovePlan(
         source_name=read_dep.name,
         producer_name=producer.get_name(),
         consumer_name=consumer.get_name(),
-        producer_op=_op_name(producer),
-        consumer_op=_op_name(consumer),
-        status="planned",
-        fallback_reason=None,
-        realization_status=(
-            "planned-coordinate-remap-realized"
-            if config.onchip_move_realize
-            else "planned-not-realized"
-        ),
-        carrier=config.onchip_move_carrier,
         device_sizes=device_sizes,
         device_stride_map=device_stride_map,
         element_bytes=element_bytes,
@@ -1616,37 +1470,13 @@ def plan_onchip_move_edge(
             device_sizes=device_sizes,
             element_bytes=element_bytes,
         ),
-        producer_view=_view_to_json(producer_view),
-        consumer_view=_view_to_json(consumer_view),
         cells=cells,
         movement_subview=movement_subview,
     )
 
 
-def _append_jsonl(path: str, plans: list[OnChipMovePlan]) -> None:
-    if not path:
-        return
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("a", encoding="utf-8") as handle:
-        for plan in plans:
-            handle.write(json.dumps(_plan_json(plan), sort_keys=True) + "\n")
-
-
-def _write_debug_dir(path: str, plans: list[OnChipMovePlan]) -> None:
-    if not path:
-        return
-    output = Path(path)
-    output.mkdir(parents=True, exist_ok=True)
-    payload = [_plan_json(plan) for plan in plans]
-    (output / "onchip_move_plans.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
-
-
 def _attach_plan_to_consumer(consumer: ComputedBuffer, plan: OnChipMovePlan) -> None:
-    plan_payload = _plan_json(plan)
+    plan_payload = _planned_payload(plan)
     existing_move_info = getattr(consumer, ONCHIP_MOVE_ATTR, None)
     move_info = existing_move_info if isinstance(existing_move_info, dict) else {}
     move_info[plan.source_name] = plan_payload
@@ -1673,6 +1503,7 @@ def plan_onchip_moves(graph: GraphLowering) -> None:
     }
     cache: dict = {}
     plans: list[OnChipMovePlan] = []
+    edge_count = 0
     for consumer in graph.operations:
         if not isinstance(consumer, ComputedBuffer):
             continue
@@ -1682,6 +1513,7 @@ def plan_onchip_moves(graph: GraphLowering) -> None:
             producer = name_to_op.get(dep.name)
             if producer is None:
                 continue
+            edge_count += 1
             plan = plan_onchip_move_edge(
                 graph,
                 producer,
@@ -1689,18 +1521,16 @@ def plan_onchip_moves(graph: GraphLowering) -> None:
                 dep,
                 cache=cache,
             )
+            if plan is None:
+                continue
             plans.append(plan)
-            if plan.status == "planned":
-                _attach_plan_to_consumer(consumer, plan)
+            _attach_plan_to_consumer(consumer, plan)
 
-    planned = [plan for plan in plans if plan.status == "planned"]
-    if plans:
+    if edge_count:
         logger.info(
             "onchip_move summary edges=%d planned=%d bytes=%d realize=%s",
+            edge_count,
             len(plans),
-            len(planned),
-            sum(plan.bytes_moved for plan in planned),
+            sum(plan.bytes_moved for plan in plans),
             config.onchip_move_realize,
         )
-    _append_jsonl(config.onchip_move_jsonl, plans)
-    _write_debug_dir(config.onchip_move_debug_dir, plans)

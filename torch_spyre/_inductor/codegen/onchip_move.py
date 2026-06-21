@@ -68,8 +68,6 @@ def patch_onchip_move_mixed_schedules(
         if match is None:
             continue
         plan, producer_output_idx, consumer_input_idx = match
-        if plan.get("status") != "planned":
-            continue
         producer_entry = compiled[producer_index]
         consumer_entry = compiled[consumer_index]
         if producer_entry[0] is None or consumer_entry[0] is None:
@@ -131,7 +129,7 @@ def patch_onchip_move_mixed_schedules(
         if not isinstance(move_info, dict):
             continue
         for source_name, plan in move_info.items():
-            if not isinstance(plan, dict) or plan.get("status") != "planned":
+            if not isinstance(plan, dict):
                 continue
             reuse_base = reusable_lx_sources.get(_reuse_key(plan))
             try:
@@ -370,13 +368,20 @@ def _op_spec_output_name(spec: OpSpec) -> str:
 
 
 def _reuse_key(plan: dict[str, Any]) -> tuple[str, str, str]:
+    dataop = (
+        ((plan.get("coordinate_remap") or {}).get("deeptools_dataop") or {})
+        if isinstance(plan.get("coordinate_remap"), dict)
+        else {}
+    )
     return (
         str(plan.get("source_name")),
         str(plan.get("producer")),
         json.dumps(
             {
-                "consumer_view": plan.get("consumer_view", {}),
                 "movement_subview": plan.get("movement_subview"),
+                "movement_ranges": dataop.get("movementRanges"),
+                "bytes_moved": plan.get("bytes_moved"),
+                "consumer_region_bytes": plan.get("consumer_region_bytes"),
             },
             sort_keys=True,
         ),
@@ -837,7 +842,7 @@ def _row(
         "producer": plan.get("producer"),
         "consumer": plan.get("consumer"),
         "cell_count": plan.get("cell_count"),
-        "carrier": plan.get("carrier") or config.onchip_move_carrier,
+        "carrier": config.onchip_move_carrier,
     }
 
 

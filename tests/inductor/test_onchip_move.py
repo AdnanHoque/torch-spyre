@@ -26,7 +26,7 @@ from torch_spyre._inductor.onchip_move import (
     OnChipMoveCell,
     OnChipMovePlan,
     _coordinate_remap_v1_support_reason,
-    build_coordinate_remap_metadata,
+    _planned_payload,
     build_onchip_move_cells,
     validate_onchip_move_cell_coverage,
 )
@@ -196,12 +196,6 @@ def _remap_plan_payload(
         source_name="buf0",
         producer_name="buf0",
         consumer_name="buf1",
-        producer_op="producer_op",
-        consumer_op="consumer_op",
-        status="planned",
-        fallback_reason=None,
-        realization_status="planned-coordinate-remap-realized",
-        carrier="coordinate_remap",
         device_sizes=device_sizes,
         device_stride_map=list(range(len(device_sizes))),
         element_bytes=element_bytes,
@@ -209,18 +203,9 @@ def _remap_plan_payload(
         consumer_core_count=1,
         producer_region_bytes=sum(cell.bytes for cell in cells),
         consumer_region_bytes=sum(cell.bytes for cell in cells),
-        producer_view={},
-        consumer_view={},
         cells=cells,
     )
-    payload = dataclasses.asdict(plan)
-    payload["producer"] = plan.producer_name
-    payload["consumer"] = plan.consumer_name
-    payload["cell_count"] = len(cells)
-    payload["bytes_moved"] = plan.bytes_moved
-    payload["cells"] = [dataclasses.asdict(cell) for cell in cells]
-    payload["coordinate_remap"] = build_coordinate_remap_metadata(plan)
-    return payload
+    return _planned_payload(plan)
 
 
 def _dataop_movements(dataop: dict) -> list[dict]:

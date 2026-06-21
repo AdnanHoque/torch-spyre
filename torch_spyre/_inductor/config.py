@@ -99,11 +99,6 @@ onchip_move_realize: bool = os.environ.get("SPYRE_ONCHIP_MOVE_REALIZE", "0") == 
 onchip_move_carrier: Literal["coordinate_remap"] = os.environ.get(  # type: ignore[assignment]
     "SPYRE_ONCHIP_MOVE_CARRIER", "coordinate_remap"
 )
-onchip_move_debug_dir: str = os.environ.get("SPYRE_ONCHIP_MOVE_DEBUG_DIR", "")
-onchip_move_jsonl: str = os.environ.get("SPYRE_ONCHIP_MOVE_JSONL", "")
-onchip_move_debug_cells: bool = (
-    os.environ.get("SPYRE_ONCHIP_MOVE_DEBUG_CELLS", "0") == "1"
-)
 onchip_move_max_cells: int = int(
     os.environ.get("SPYRE_ONCHIP_MOVE_MAX_CELLS", "131072")
 )
