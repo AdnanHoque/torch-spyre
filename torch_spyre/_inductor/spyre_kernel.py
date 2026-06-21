@@ -41,6 +41,7 @@ from .constants import (
 )
 from .errors import Unsupported
 from .ir import FixedTiledLayout
+from .onchip_move import ONCHIP_MOVE_ATTR, ONCHIP_MOVE_OP_INFO_KEY
 from .pass_utils import (
     concretize_expr,
     concretize_index,
@@ -60,6 +61,24 @@ from .op_spec import (
 import logging
 
 logger = get_inductor_logger("spyre_kernel")
+
+
+def _current_node_op_info(current_node) -> dict[str, Any]:
+    op_info: dict[str, Any] = {}
+    node = getattr(current_node, "node", None)
+    data = getattr(node, "data", None)
+    data_op_info = getattr(data, "op_info", None)
+    if isinstance(data_op_info, dict):
+        op_info.update(data_op_info)
+
+    move_info = getattr(node, ONCHIP_MOVE_ATTR, None)
+    if isinstance(move_info, dict):
+        existing = op_info.get(ONCHIP_MOVE_OP_INFO_KEY)
+        if isinstance(existing, dict):
+            existing.update(move_info)
+        else:
+            op_info[ONCHIP_MOVE_OP_INFO_KEY] = dict(move_info)
+    return op_info
 
 
 class RValue(ABC):
@@ -504,7 +523,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             tensor.layout.allocation,
             stride_map=list(tensor.layout.device_layout.stride_map),
             per_tile_fixed=getattr(tensor.layout, "per_tile_fixed", False),
-            name=opspec_name,
+            name=opspec_name or name,
         )
         if (
             "lx" not in tensor.layout.allocation
@@ -646,7 +665,7 @@ class SpyreKernel(Kernel[CSEVariable]):
         if real_dst_name != name:
             # Skip allocating an output buffer; this name is an alias to another buffer
             V.graph.removed_buffers.add(name)
-        op_info: dict[str, Any] = {}
+        op_info = _current_node_op_info(self.current_node)
         if logger.isEnabledFor(logging.DEBUG):
             value_type = type(value).__name__
             logger.debug(
@@ -743,9 +762,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             self.op_specs.append(value)
             return
 
-        op_info = {}
-        if hasattr(self.current_node.node.data, "op_info"):  # type: ignore[union-attr]
-            op_info.update(self.current_node.node.data.op_info)  # type: ignore[union-attr]
+        op_info = _current_node_op_info(self.current_node)
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(

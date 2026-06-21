@@ -62,6 +62,7 @@ from .work_division import (
     work_distribution,
     cost_model_matmul_division,
 )
+from .onchip_move import plan_onchip_moves
 from .pass_utils import apply_splits_from_index_coeff, iteration_space_from_op
 from .scratchpad.allocator import (
     StrategyBCoOptimizingAllocator,
@@ -285,6 +286,12 @@ def _distribute_work(graph: GraphLowering) -> None:
     work_distribution(graph, preassigned_ops)
 
 
+@_runs(plan_onchip_moves)
+def _maybe_plan_onchip_moves(graph: GraphLowering) -> None:
+    if config.onchip_move_planner:
+        plan_onchip_moves(graph)
+
+
 @_runs(scratchpad_planning)
 def _maybe_scratchpad_planning(graph: GraphLowering) -> None:
     if not config.lx_planning:
@@ -335,6 +342,10 @@ class CustomPreSchedulingPasses:
             # Core Division
             span_reduction,
             _distribute_work,
+            #
+            # Explicit on-chip movement planning. Same-view edges are left for
+            # the existing LX planner below.
+            _maybe_plan_onchip_moves,
             #
             # LX Planning
             _maybe_scratchpad_planning,
