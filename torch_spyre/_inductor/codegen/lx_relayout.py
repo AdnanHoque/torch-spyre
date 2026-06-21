@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Coordinate-remap SDSC carrier helpers for experimental on-chip movement."""
+"""STCDPOpLx SDSC carrier helpers for experimental LX relayout."""
 
 from __future__ import annotations
 
@@ -21,18 +21,17 @@ import json
 from typing import Any
 
 from torch_spyre._inductor import config
-from torch_spyre._inductor.onchip_move import (
-    ONCHIP_MOVE_OP_INFO_KEY,
+from torch_spyre._inductor.lx_relayout import (
+    LX_RELAYOUT_OP_INFO_KEY,
     _dataop_movement_ranges,
     _expand_dataop_movement_ranges,
 )
 from torch_spyre._inductor.op_spec import LoopSpec, OpSpec, TensorArg
 
 _LX_SIZE_BYTES = 2 * 1024 * 1024
-_ONCHIP_MOVE_CARRIERS = {"coordinate_remap", "stcdp_range"}
 
 
-def patch_onchip_move_mixed_schedules(
+def patch_lx_relayout_mixed_schedules(
     compiled: list[tuple[Any, list[int], list[dict], list[Any]]],
     specs: list[Any],
 ) -> list[dict[str, Any]]:
@@ -44,10 +43,8 @@ def patch_onchip_move_mixed_schedules(
     """
 
     rows: list[dict[str, Any]] = []
-    if not config.onchip_move_realize:
+    if not config.lx_relayout_realize:
         return rows
-    if config.onchip_move_carrier not in _ONCHIP_MOVE_CARRIERS:
-        return [{"status": "skipped", "reason": "unsupported-carrier"}]
     if any(isinstance(spec, LoopSpec) for spec in specs):
         return [{"status": "skipped", "reason": "loop-specs-not-supported"}]
     if any(not isinstance(spec, OpSpec) for spec in specs):
@@ -94,7 +91,7 @@ def patch_onchip_move_mixed_schedules(
 
         try:
             patched_producer, mixed_consumer = (
-                build_coordinate_remap_onchip_move_sdsc(
+                build_lx_relayout_sdsc(
                     producer_index,
                     consumer_index,
                     producer_entry[0],
@@ -114,7 +111,7 @@ def patch_onchip_move_mixed_schedules(
         compiled[consumer_index] = (mixed_consumer, [], [], [])
         rewritten_consumers.add(consumer_index)
         reusable_lx_sources[_reuse_key(plan)] = int(
-            config.onchip_move_consumer_lx_base
+            config.lx_relayout_consumer_lx_base
         )
         rows.append(_row(producer_index, "patched", None, plan))
 
@@ -126,7 +123,7 @@ def patch_onchip_move_mixed_schedules(
             continue
         if consumer_entry[1]:
             continue
-        move_info = (consumer.op_info or {}).get(ONCHIP_MOVE_OP_INFO_KEY)
+        move_info = (consumer.op_info or {}).get(LX_RELAYOUT_OP_INFO_KEY)
         if not isinstance(move_info, dict):
             continue
         for source_name, plan in move_info.items():
@@ -150,7 +147,7 @@ def patch_onchip_move_mixed_schedules(
                     rows.append(_row(consumer_index, "patched-reuse", None, plan))
                     break
 
-                if config.onchip_move_carrier not in _ONCHIP_MOVE_CARRIERS:
+                if "stcdp_range" not in _LX_RELAYOUT_CARRIERS:
                     continue
                 producer_match = _producer_match_for_plan(
                     specs,
@@ -177,7 +174,7 @@ def patch_onchip_move_mixed_schedules(
                     continue
 
                 patched_producer, mixed_consumer = (
-                    build_coordinate_remap_onchip_move_sdsc(
+                    build_lx_relayout_sdsc(
                         producer_index,
                         consumer_index,
                         producer_entry[0],
@@ -196,14 +193,14 @@ def patch_onchip_move_mixed_schedules(
             compiled[consumer_index] = (mixed_consumer, [], [], [])
             rewritten_consumers.add(consumer_index)
             reusable_lx_sources[_reuse_key(plan)] = int(
-                config.onchip_move_consumer_lx_base
+                config.lx_relayout_consumer_lx_base
             )
             rows.append(_row(consumer_index, "patched-nonadjacent", None, plan))
             break
     return rows
 
 
-def build_coordinate_remap_onchip_move_sdsc(
+def build_lx_relayout_sdsc(
     producer_index: int,
     consumer_index: int,
     producer_payload: dict[str, Any],
@@ -217,8 +214,8 @@ def build_coordinate_remap_onchip_move_sdsc(
     producer_name, producer_root_src = next(iter(producer_payload.items()))
     producer_root = copy.deepcopy(producer_root_src)
     consumer_root = copy.deepcopy(next(iter(consumer_payload.values())))
-    producer_base = int(config.onchip_move_producer_lx_base)
-    consumer_base = int(config.onchip_move_consumer_lx_base)
+    producer_base = int(config.lx_relayout_producer_lx_base)
+    consumer_base = int(config.lx_relayout_consumer_lx_base)
     producer_region_bytes = _region_bytes(plan, "producer_region_bytes", "source")
     consumer_region_bytes = _region_bytes(plan, "consumer_region_bytes", "dest")
     _validate_lx_regions(
@@ -228,8 +225,8 @@ def build_coordinate_remap_onchip_move_sdsc(
         consumer_region_bytes=consumer_region_bytes,
     )
 
-    dataop_name = f"{producer_index}_OnChipMove{_selected_dataop_op_func()}"
-    datadscs, dataop_core_sets = _coordinate_remap_datadsc_chunks(plan, dataop_name)
+    dataop_name = f"{producer_index}_LXRelayout{_selected_dataop_op_func()}"
+    datadscs, dataop_core_sets = _lx_relayout_datadsc_chunks(plan, dataop_name)
 
     _patch_lx_endpoint(
         producer_root,
@@ -263,11 +260,11 @@ def build_coordinate_remap_onchip_move_sdsc(
         | {_selected_dataop_op_func()}
         | set(root.get("opFuncsUsed_", []) or [])
     )
-    root["onchipMove_"] = {
+    root["lxRelayout_"] = {
         "source_name": plan.get("source_name"),
         "producer": plan.get("producer"),
         "consumer": plan.get("consumer"),
-        "carrier": config.onchip_move_carrier,
+        "carrier": "stcdp_range",
         "cell_count": int(plan.get("cell_count", 0) or 0),
         "bytes_moved": int(plan.get("bytes_moved", 0) or 0),
         "producer_lx_base": producer_base,
@@ -278,7 +275,7 @@ def build_coordinate_remap_onchip_move_sdsc(
         "fallback": "stock-hbm-path-when-disabled",
     }
     return {producer_name: producer_root}, {
-        f"{consumer_index}_OnChipMove{_selected_mixed_sdsc_suffix()}": root
+        f"{consumer_index}_LXRelayout{_selected_mixed_sdsc_suffix()}": root
     }
 
 
@@ -310,7 +307,7 @@ def _adjacent_move_match(
     producer: OpSpec,
     consumer: OpSpec,
 ) -> tuple[dict[str, Any], int, int] | None:
-    move_info = (consumer.op_info or {}).get(ONCHIP_MOVE_OP_INFO_KEY)
+    move_info = (consumer.op_info or {}).get(LX_RELAYOUT_OP_INFO_KEY)
     if not isinstance(move_info, dict):
         return None
     producer_outputs = [
@@ -370,8 +367,8 @@ def _op_spec_output_name(spec: OpSpec) -> str:
 
 def _reuse_key(plan: dict[str, Any]) -> tuple[str, str, str]:
     dataop = (
-        ((plan.get("coordinate_remap") or {}).get("deeptools_dataop") or {})
-        if isinstance(plan.get("coordinate_remap"), dict)
+        ((plan.get("lx_relayout") or {}).get("deeptools_dataop") or {})
+        if isinstance(plan.get("lx_relayout"), dict)
         else {}
     )
     return (
@@ -389,7 +386,7 @@ def _reuse_key(plan: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
-def _coordinate_remap_dataop_movements(dataop: dict[str, Any]) -> list[dict[str, Any]]:
+def _lx_relayout_dataop_movements(dataop: dict[str, Any]) -> list[dict[str, Any]]:
     movements = list(dataop.get("movements", []) or [])
     if movements:
         return movements
@@ -398,27 +395,14 @@ def _coordinate_remap_dataop_movements(dataop: dict[str, Any]) -> list[dict[str,
 
 
 def _selected_mixed_sdsc_suffix() -> str:
-    if config.onchip_move_carrier == "coordinate_remap":
-        return "CoordinateRemap"
-    if config.onchip_move_carrier == "stcdp_range":
-        return "STCDPOpLx"
-    raise ValueError("unsupported-onchip-move-carrier")
+    return "STCDPOpLx"
 
 
 def _selected_dataop_op_func() -> str:
-    if config.onchip_move_carrier == "coordinate_remap":
-        return "LXCoordinateRemapOp"
-    if config.onchip_move_carrier == "stcdp_range":
-        return "STCDPOpLx"
-    raise ValueError("unsupported-onchip-move-carrier")
+    return "STCDPOpLx"
 
 
 def _selected_dataop_chunk(chunk: dict[str, Any]) -> dict[str, Any]:
-    if config.onchip_move_carrier == "coordinate_remap":
-        return chunk
-    if config.onchip_move_carrier != "stcdp_range":
-        raise ValueError("unsupported-onchip-move-carrier")
-
     range_payload_keys = {
         "schemaVersion",
         "sourceName",
@@ -446,18 +430,18 @@ def _selected_dataop_chunk(chunk: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _coordinate_remap_dataop(plan: dict[str, Any]) -> dict[str, Any]:
-    metadata = plan.get("coordinate_remap")
+def _lx_relayout_dataop(plan: dict[str, Any]) -> dict[str, Any]:
+    metadata = plan.get("lx_relayout")
     if not isinstance(metadata, dict):
-        raise ValueError("coordinate-remap-metadata-missing")
+        raise ValueError("lx-relayout-metadata-missing")
     dataop = metadata.get("deeptools_dataop")
     if not isinstance(dataop, dict):
-        raise ValueError("coordinate-remap-dataop-missing")
-    if (dataop.get("op") or {}).get("name") != "LXCoordinateRemapOp":
-        raise ValueError("coordinate-remap-dataop-op-mismatch")
-    movements = _coordinate_remap_dataop_movements(dataop)
+        raise ValueError("lx-relayout-dataop-missing")
+    if (dataop.get("op") or {}).get("name") != "STCDPOpLx":
+        raise ValueError("lx-relayout-dataop-op-mismatch")
+    movements = _lx_relayout_dataop_movements(dataop)
     if not movements:
-        raise ValueError("coordinate-remap-dataop-has-no-movements")
+        raise ValueError("lx-relayout-dataop-has-no-movements")
     core_ids = sorted(
         {int(movement["source"]["core"]) for movement in movements}
         | {int(movement["destination"]["core"]) for movement in movements}
@@ -468,13 +452,13 @@ def _coordinate_remap_dataop(plan: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _coordinate_remap_datadsc_chunks(
+def _lx_relayout_datadsc_chunks(
     plan: dict[str, Any],
     dataop_name: str,
 ) -> tuple[list[dict[str, Any]], list[set[int]]]:
-    dataop = _coordinate_remap_dataop(plan)
+    dataop = _lx_relayout_dataop(plan)
     movements = list(dataop.get("movements", []) or [])
-    chunk_size = max(1, int(config.onchip_move_coordinate_remap_chunk_cells))
+    chunk_size = max(1, int(config.lx_relayout_chunk_cells))
 
     datadscs: list[dict[str, Any]] = []
     core_sets: list[set[int]] = []
@@ -493,7 +477,7 @@ def _coordinate_remap_datadsc_chunks(
             | {int(movement["destination"]["core"]) for movement in chunk_movements}
         )
         chunk = copy.deepcopy(static_fields)
-        if config.onchip_move_range_encoding:
+        if config.lx_relayout_range_encoding:
             movement_ranges = _dataop_movement_ranges(chunk_movements)
             chunk["movementRanges"] = movement_ranges
             lowering = chunk.setdefault("lowering", {})
@@ -521,7 +505,7 @@ def _coordinate_remap_datadsc_chunks(
 
     if not local_movements and len(cross_movements) <= chunk_size:
         compact_dataop = copy.deepcopy(dataop)
-        if config.onchip_move_range_encoding:
+        if config.lx_relayout_range_encoding:
             movement_ranges = _dataop_movement_ranges(cross_movements)
             compact_dataop.pop("movements", None)
             compact_dataop["movementRanges"] = movement_ranges
@@ -534,11 +518,11 @@ def _coordinate_remap_datadsc_chunks(
     for start in range(0, len(cross_movements), chunk_size):
         append_chunk(cross_movements[start : start + chunk_size])
 
-    for first_legs, second_legs in _relay_local_coordinate_remap_chunks(
+    for first_legs, second_legs in _relay_local_lx_relayout_chunks(
         local_movements,
-        producer_base=int(config.onchip_move_producer_lx_base),
+        producer_base=int(config.lx_relayout_producer_lx_base),
         producer_region_bytes=_region_bytes(plan, "producer_region_bytes", "source"),
-        consumer_base=int(config.onchip_move_consumer_lx_base),
+        consumer_base=int(config.lx_relayout_consumer_lx_base),
         consumer_region_bytes=_region_bytes(plan, "consumer_region_bytes", "dest"),
         chunk_size=chunk_size,
     ):
@@ -547,7 +531,7 @@ def _coordinate_remap_datadsc_chunks(
     return datadscs, core_sets
 
 
-def _relay_local_coordinate_remap_chunks(
+def _relay_local_lx_relayout_chunks(
     movements: list[dict[str, Any]],
     *,
     producer_base: int,
@@ -566,7 +550,7 @@ def _relay_local_coordinate_remap_chunks(
         consumer_region_bytes=consumer_region_bytes,
     )
     if relay_capacity <= 0:
-        raise ValueError("coordinate-remap-local-relay-lx-capacity")
+        raise ValueError("lx-relayout-local-relay-lx-capacity")
 
     next_move_index = (
         max((int(movement["moveIndex"]) for movement in movements), default=-1) + 1
@@ -593,7 +577,7 @@ def _relay_local_coordinate_remap_chunks(
             sencores = int(config.sencores)
             if sencores <= 1:
                 raise ValueError(
-                    "local relay coordinate remap requires at least two SEN cores"
+                    "local relay lx relayout requires at least two SEN cores"
                 )
             if source_core < 0 or source_core >= sencores:
                 raise ValueError(
@@ -656,7 +640,7 @@ def _local_relay_batches(
     for movement in movements:
         byte_count = int(movement["bytes"])
         if byte_count > relay_capacity:
-            raise ValueError("coordinate-remap-local-relay-lx-capacity")
+            raise ValueError("lx-relayout-local-relay-lx-capacity")
         if current and (
             len(current) >= chunk_size or current_bytes + byte_count > relay_capacity
         ):
@@ -893,7 +877,7 @@ def _row(
         "producer": plan.get("producer"),
         "consumer": plan.get("consumer"),
         "cell_count": plan.get("cell_count"),
-        "carrier": config.onchip_move_carrier,
+        "carrier": "stcdp_range",
     }
 
 

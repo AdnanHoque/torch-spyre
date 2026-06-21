@@ -18,23 +18,23 @@ import sympy
 
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor import config as spyre_config
-from torch_spyre._inductor.codegen.onchip_move import (
+from torch_spyre._inductor.codegen.lx_relayout import (
     _expand_dataop_movement_ranges,
-    build_coordinate_remap_onchip_move_sdsc,
+    build_lx_relayout_sdsc,
 )
-from torch_spyre._inductor.onchip_move import (
-    OnChipMoveCell,
-    OnChipMovePlan,
-    _coordinate_remap_v1_support_reason,
+from torch_spyre._inductor.lx_relayout import (
+    LXRelayoutCell,
+    LXRelayoutPlan,
+    _lx_relayout_v1_support_reason,
     _planned_payload,
-    build_onchip_move_cells,
-    validate_onchip_move_cell_coverage,
+    build_lx_relayout_cells,
+    validate_lx_relayout_cell_coverage,
 )
 from torch_spyre._inductor.op_spec import TensorArg
 from torch_spyre._inductor.pass_utils import PerCoreView
 
 
-def test_onchip_move_cells_cover_matmul_to_pointwise_reshard():
+def test_lx_relayout_cells_cover_matmul_to_pointwise_reshard():
     core_id = sympy.Symbol("core_id")
     producer_view = PerCoreView(
         work_slice_dims=((0, 4), (1, 8)),
@@ -45,7 +45,7 @@ def test_onchip_move_cells_cover_matmul_to_pointwise_reshard():
         core_to_slot=((0, sympy.Mod(core_id, 32)),),
     )
 
-    cells, reason = build_onchip_move_cells(
+    cells, reason = build_lx_relayout_cells(
         producer_view=producer_view,
         consumer_view=consumer_view,
         device_sizes=[512, 12800],
@@ -55,7 +55,7 @@ def test_onchip_move_cells_cover_matmul_to_pointwise_reshard():
     )
 
     assert reason is None
-    assert validate_onchip_move_cell_coverage(
+    assert validate_lx_relayout_cell_coverage(
         cells, device_sizes=[512, 12800]
     ) is None
     assert len(cells) == 256
@@ -66,10 +66,10 @@ def test_onchip_move_cells_cover_matmul_to_pointwise_reshard():
     assert cells[8].dest_core == 1
 
 
-def test_coordinate_remap_v1_rejects_unaligned_and_overlapping_cells(monkeypatch):
-    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0)
-    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 0x100000)
-    aligned = OnChipMoveCell(
+def test_lx_relayout_v1_rejects_unaligned_and_overlapping_cells(monkeypatch):
+    monkeypatch.setattr(spyre_config, "lx_relayout_producer_lx_base", 0)
+    monkeypatch.setattr(spyre_config, "lx_relayout_consumer_lx_base", 0x100000)
+    aligned = LXRelayoutCell(
         cell_index=0,
         source_core=0,
         dest_core=0,
@@ -80,15 +80,15 @@ def test_coordinate_remap_v1_rejects_unaligned_and_overlapping_cells(monkeypatch
         dest_offset_bytes=0,
     )
 
-    assert _coordinate_remap_v1_support_reason([aligned]) is None
+    assert _lx_relayout_v1_support_reason([aligned]) is None
     assert (
-        _coordinate_remap_v1_support_reason(
+        _lx_relayout_v1_support_reason(
             [dataclasses.replace(aligned, dest_offset_bytes=16)]
         )
-        == "coordinate-remap-v1-requires-stick-aligned-destination-address"
+        == "lx-relayout-v1-requires-stick-aligned-destination-address"
     )
     assert (
-        _coordinate_remap_v1_support_reason(
+        _lx_relayout_v1_support_reason(
             [
                 dataclasses.replace(aligned, bytes=256),
                 dataclasses.replace(
@@ -99,15 +99,14 @@ def test_coordinate_remap_v1_rejects_unaligned_and_overlapping_cells(monkeypatch
                 ),
             ]
         )
-        == "coordinate-remap-v1-requires-contiguous-destination-cells"
+        == "lx-relayout-v1-requires-contiguous-destination-cells"
     )
 
 
-def test_coordinate_remap_carrier_emits_scheduled_lx_dataop(monkeypatch):
-    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "coordinate_remap")
-    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0x1000)
-    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 0x9000)
-    monkeypatch.setattr(spyre_config, "onchip_move_coordinate_remap_chunk_cells", 32)
+def test_stcdp_range_carrier_wraps_relayout_as_stcdp_lx(monkeypatch):
+    monkeypatch.setattr(spyre_config, "lx_relayout_producer_lx_base", 0x1000)
+    monkeypatch.setattr(spyre_config, "lx_relayout_consumer_lx_base", 0x9000)
+    monkeypatch.setattr(spyre_config, "lx_relayout_chunk_cells", 32)
 
     core_id = sympy.Symbol("core_id")
     producer_view = PerCoreView(
@@ -115,90 +114,7 @@ def test_coordinate_remap_carrier_emits_scheduled_lx_dataop(monkeypatch):
         core_to_slot=((0, sympy.Mod(core_id, 2)),),
     )
     consumer_view = PerCoreView(work_slice_dims=(), core_to_slot=())
-    cells, reason = build_onchip_move_cells(
-        producer_view=producer_view,
-        consumer_view=consumer_view,
-        device_sizes=[128],
-        element_bytes=2,
-        producer_core_count=2,
-        consumer_core_count=1,
-    )
-    assert reason is None
-
-    plan = _remap_plan_payload(cells, device_sizes=[128], element_bytes=2)
-    producer_payload = {
-        "1_batchmatmul": _minimal_sdsc_payload(
-            "batchmatmul",
-            output_lds_idx=2,
-            input_lds_indices=[0, 1],
-            core_ids=[0, 1],
-        )
-    }
-    consumer_payload = {
-        "2_neg": _minimal_sdsc_payload(
-            "neg",
-            output_lds_idx=1,
-            input_lds_indices=[0],
-            core_ids=[0],
-        )
-    }
-    output_arg = TensorArg(
-        is_input=False,
-        arg_index=0,
-        device_dtype=DataFormats.SEN169_FP16,
-        device_size=[128],
-        device_coordinates=[],
-        allocation=None,
-        name="buf0",
-    )
-
-    patched_producer, mixed_consumer = build_coordinate_remap_onchip_move_sdsc(
-        1,
-        2,
-        producer_payload,
-        consumer_payload,
-        output_arg,
-        dataclasses.replace(output_arg, is_input=True, arg_index=0),
-        2,
-        0,
-        plan,
-    )
-
-    producer_dsc = next(iter(patched_producer["1_batchmatmul"]["dscs_"][0].values()))
-    assert producer_dsc["labeledDs_"][2]["memOrg_"] == {"lx": {"isPresent": 1}}
-
-    mixed_root = mixed_consumer["2_OnChipMoveCoordinateRemap"]
-    dataops = [next(iter(row.values())) for row in mixed_root["datadscs_"]]
-    movements = [move for dataop in dataops for move in _dataop_movements(dataop)]
-    consumer_dsc = next(iter(mixed_root["dscs_"][0].values()))
-
-    assert all(dataop["op"] == {"name": "LXCoordinateRemapOp"} for dataop in dataops)
-    assert all(dataop["schemaVersion"] == 0 for dataop in dataops)
-    assert all(dataop["producerLxBase"] == 0x1000 for dataop in dataops)
-    assert all(dataop["consumerLxBase"] == 0x9000 for dataop in dataops)
-    assert all("movementRanges" in dataop for dataop in dataops)
-    assert all("movements" not in dataop for dataop in dataops)
-    assert {move["source"]["core"] for move in movements} == {0, 1}
-    assert all(row[0] != -1 and row[1] == -1 for row in mixed_root["coreIdToDscSchedule"]["1"])
-    assert mixed_root["coreIdToDscSchedule"]["0"][-1][0:2] == [-1, 0]
-    assert "LXCoordinateRemapOp" in mixed_root["opFuncsUsed_"]
-    assert "STCDPOpLx" not in mixed_root["opFuncsUsed_"]
-    assert consumer_dsc["labeledDs_"][0]["memOrg_"] == {"lx": {"isPresent": 1}}
-
-
-def test_stcdp_range_carrier_wraps_remap_as_stcdp_lx(monkeypatch):
-    monkeypatch.setattr(spyre_config, "onchip_move_carrier", "stcdp_range")
-    monkeypatch.setattr(spyre_config, "onchip_move_producer_lx_base", 0x1000)
-    monkeypatch.setattr(spyre_config, "onchip_move_consumer_lx_base", 0x9000)
-    monkeypatch.setattr(spyre_config, "onchip_move_coordinate_remap_chunk_cells", 32)
-
-    core_id = sympy.Symbol("core_id")
-    producer_view = PerCoreView(
-        work_slice_dims=((0, 2),),
-        core_to_slot=((0, sympy.Mod(core_id, 2)),),
-    )
-    consumer_view = PerCoreView(work_slice_dims=(), core_to_slot=())
-    cells, reason = build_onchip_move_cells(
+    cells, reason = build_lx_relayout_cells(
         producer_view=producer_view,
         consumer_view=consumer_view,
         device_sizes=[2, 64],
@@ -206,11 +122,11 @@ def test_stcdp_range_carrier_wraps_remap_as_stcdp_lx(monkeypatch):
         element_bytes=2,
         producer_core_count=2,
         consumer_core_count=1,
-        coordinate_remap_v1=True,
+        lx_relayout_v1=True,
     )
     assert reason is None
 
-    plan = _remap_plan_payload(cells, device_sizes=[2, 64], element_bytes=2)
+    plan = _lx_relayout_plan_payload(cells, device_sizes=[2, 64], element_bytes=2)
     producer_payload = {
         "1_batchmatmul": _minimal_sdsc_payload(
             "batchmatmul",
@@ -237,7 +153,7 @@ def test_stcdp_range_carrier_wraps_remap_as_stcdp_lx(monkeypatch):
         name="buf0",
     )
 
-    patched_producer, mixed_consumer = build_coordinate_remap_onchip_move_sdsc(
+    patched_producer, mixed_consumer = build_lx_relayout_sdsc(
         1,
         2,
         producer_payload,
@@ -252,7 +168,7 @@ def test_stcdp_range_carrier_wraps_remap_as_stcdp_lx(monkeypatch):
     producer_dsc = next(iter(patched_producer["1_batchmatmul"]["dscs_"][0].values()))
     assert producer_dsc["labeledDs_"][2]["memOrg_"] == {"lx": {"isPresent": 1}}
 
-    mixed_root = mixed_consumer["2_OnChipMoveSTCDPOpLx"]
+    mixed_root = mixed_consumer["2_LXRelayoutSTCDPOpLx"]
     dataops = [next(iter(row.values())) for row in mixed_root["datadscs_"]]
     movements = [move for dataop in dataops for move in _dataop_movements(dataop)]
     consumer_dsc = next(iter(mixed_root["dscs_"][0].values()))
@@ -271,19 +187,18 @@ def test_stcdp_range_carrier_wraps_remap_as_stcdp_lx(monkeypatch):
     assert all("movementRanges" in dataop["op"]["rangedLxRemap"] for dataop in dataops)
     assert all("movements" not in dataop["op"]["rangedLxRemap"] for dataop in dataops)
     assert {move["source"]["core"] for move in movements} == {0, 1}
-    assert mixed_root["onchipMove_"]["carrier"] == "stcdp_range"
+    assert mixed_root["lxRelayout_"]["carrier"] == "stcdp_range"
     assert "STCDPOpLx" in mixed_root["opFuncsUsed_"]
-    assert "LXCoordinateRemapOp" not in mixed_root["opFuncsUsed_"]
     assert consumer_dsc["labeledDs_"][0]["memOrg_"] == {"lx": {"isPresent": 1}}
 
 
-def _remap_plan_payload(
-    cells: list[OnChipMoveCell],
+def _lx_relayout_plan_payload(
+    cells: list[LXRelayoutCell],
     *,
     device_sizes: list[int],
     element_bytes: int,
 ) -> dict:
-    plan = OnChipMovePlan(
+    plan = LXRelayoutPlan(
         source_name="buf0",
         producer_name="buf0",
         consumer_name="buf1",

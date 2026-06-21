@@ -41,7 +41,7 @@ from .constants import (
 )
 from .errors import Unsupported
 from .ir import FixedTiledLayout
-from .onchip_move import ONCHIP_MOVE_ATTR, ONCHIP_MOVE_OP_INFO_KEY
+from .lx_relayout import LX_RELAYOUT_ATTR, LX_RELAYOUT_OP_INFO_KEY
 from .pass_utils import (
     concretize_expr,
     concretize_index,
@@ -71,13 +71,13 @@ def _current_node_op_info(current_node) -> dict[str, Any]:
     if isinstance(data_op_info, dict):
         op_info.update(data_op_info)
 
-    move_info = getattr(node, ONCHIP_MOVE_ATTR, None)
+    move_info = getattr(node, LX_RELAYOUT_ATTR, None)
     if isinstance(move_info, dict):
-        existing = op_info.get(ONCHIP_MOVE_OP_INFO_KEY)
+        existing = op_info.get(LX_RELAYOUT_OP_INFO_KEY)
         if isinstance(existing, dict):
             existing.update(move_info)
         else:
-            op_info[ONCHIP_MOVE_OP_INFO_KEY] = dict(move_info)
+            op_info[LX_RELAYOUT_OP_INFO_KEY] = dict(move_info)
     return op_info
 
 

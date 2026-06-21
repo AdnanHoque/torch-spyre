@@ -89,30 +89,26 @@ unroll_loops: bool = os.environ.get("UNROLL_LOOPS", "1") == "1"
 # TODO(isuruf): Change to firstfit when deeptools PR4298 lands
 layout_solver: Literal["greedy", "bestfit", "firstfit"] = "greedy"
 
-# Experimental cross-core LX-to-LX movement planner.  This is deliberately
-# separate from lx_planning: lx_planning keeps same-core values in scratchpad,
-# while this path plans explicit ring/data-op movement for mismatched views.
-onchip_move_planner: bool = os.environ.get("SPYRE_ONCHIP_MOVE_PLANNER", "0") == "1"
-onchip_move_realize: bool = os.environ.get("SPYRE_ONCHIP_MOVE_REALIZE", "0") == "1"
-# PR1 only supports the explicit coordinate-remap carrier.  This isolated
-# prototype also allows stcdp_range to evaluate a lower-friction backend shape.
-onchip_move_carrier: Literal["coordinate_remap", "stcdp_range"] = os.environ.get(  # type: ignore[assignment]
-    "SPYRE_ONCHIP_MOVE_CARRIER", "coordinate_remap"
+# Experimental cross-core LX-to-LX relayout planner.  This is deliberately
+# separate from lx_planning in this branch: lx_planning keeps same-core values
+# in scratchpad, while this path plans explicit STCDPOpLx movement for
+# mismatched views.
+lx_relayout_planner: bool = os.environ.get("SPYRE_LX_RELAYOUT_PLANNER", "0") == "1"
+lx_relayout_realize: bool = os.environ.get("SPYRE_LX_RELAYOUT_REALIZE", "0") == "1"
+lx_relayout_max_cells: int = int(
+    os.environ.get("SPYRE_LX_RELAYOUT_MAX_CELLS", "131072")
 )
-onchip_move_max_cells: int = int(
-    os.environ.get("SPYRE_ONCHIP_MOVE_MAX_CELLS", "131072")
+lx_relayout_chunk_cells: int = int(
+    os.environ.get("SPYRE_LX_RELAYOUT_CHUNK_CELLS", "8192")
 )
-onchip_move_coordinate_remap_chunk_cells: int = int(
-    os.environ.get("SPYRE_ONCHIP_MOVE_COORDINATE_REMAP_CHUNK_CELLS", "8192")
+lx_relayout_range_encoding: bool = (
+    os.environ.get("SPYRE_LX_RELAYOUT_RANGE_ENCODING", "1") != "0"
 )
-onchip_move_range_encoding: bool = (
-    os.environ.get("SPYRE_ONCHIP_MOVE_RANGE_ENCODING", "1") != "0"
+lx_relayout_producer_lx_base: int = int(
+    os.environ.get("SPYRE_LX_RELAYOUT_PRODUCER_LX_BASE", "0"), 0
 )
-onchip_move_producer_lx_base: int = int(
-    os.environ.get("SPYRE_ONCHIP_MOVE_PRODUCER_LX_BASE", "0"), 0
-)
-onchip_move_consumer_lx_base: int = int(
-    os.environ.get("SPYRE_ONCHIP_MOVE_CONSUMER_LX_BASE", str(1024 * 1024)), 0
+lx_relayout_consumer_lx_base: int = int(
+    os.environ.get("SPYRE_LX_RELAYOUT_CONSUMER_LX_BASE", str(1024 * 1024)), 0
 )
 
 install_config_module(sys.modules[__name__])

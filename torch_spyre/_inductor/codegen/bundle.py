@@ -21,7 +21,7 @@ import sympy
 
 from torch_spyre._inductor import config as _spyre_config
 from torch_spyre._inductor.codegen.compute_ops import SymbolKind
-from torch_spyre._inductor.codegen.onchip_move import patch_onchip_move_mixed_schedules
+from torch_spyre._inductor.codegen.lx_relayout import patch_lx_relayout_mixed_schedules
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.codegen.unroll import unroll_loop_specs
 from torch_spyre._inductor.op_spec import LoopSpec, OpSpec
@@ -107,12 +107,12 @@ def generate_bundle(
         use_symbols=use_symbols,
     )
 
-    if _spyre_config.onchip_move_realize and not use_symbols:
-        rows = patch_onchip_move_mixed_schedules(compiled, specs_list)
+    if _spyre_config.lx_relayout_realize and not use_symbols:
+        rows = patch_lx_relayout_mixed_schedules(compiled, specs_list)
         for row in rows:
-            logger.info("onchip move mixed schedule patch: %s", row)
-    elif _spyre_config.onchip_move_realize and use_symbols:
-        logger.info("onchip move realization skipped for symbolic bundle args")
+            logger.info("LX relayout mixed schedule patch: %s", row)
+    elif _spyre_config.lx_relayout_realize and use_symbols:
+        logger.info("LX relayout realization skipped for symbolic bundle args")
 
     for sdsc_json, _local_sym_values, _affine_strides, _local_symbol_kinds in compiled:
         if sdsc_json is None:

@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Experimental cross-core LX-to-LX movement planner.
+"""Experimental cross-core LX-to-LX relayout planner.
 
 The regular LX planner already handles same-core scratchpad persistence.  This
 module only records edges where producer and consumer slice the same buffer with
-different per-core ownership, which requires explicit on-chip movement.
+different per-core ownership, which requires explicit LX relayout.
 """
 
 from __future__ import annotations
@@ -41,14 +41,14 @@ from torch_spyre._inductor.pass_utils import (
     device_coordinates,
 )
 
-logger = get_inductor_logger("onchip_move")
+logger = get_inductor_logger("lx_relayout")
 
-ONCHIP_MOVE_ATTR = "_spyre_onchip_move_plan"
-ONCHIP_MOVE_OP_INFO_KEY = "onchip_move"
+LX_RELAYOUT_ATTR = "_spyre_lx_relayout_plan"
+LX_RELAYOUT_OP_INFO_KEY = "lx_relayout"
 
 
 @dataclasses.dataclass(frozen=True)
-class OnChipMoveCell:
+class LXRelayoutCell:
     cell_index: int
     source_core: int
     dest_core: int
@@ -60,13 +60,13 @@ class OnChipMoveCell:
 
 
 @dataclasses.dataclass(frozen=True)
-class OnChipMoveSubview:
+class LXRelayoutSubview:
     starts: list[int]
     sizes: list[int]
 
 
 @dataclasses.dataclass(frozen=True)
-class OnChipMovePlan:
+class LXRelayoutPlan:
     source_name: str
     producer_name: str
     consumer_name: str
@@ -77,8 +77,8 @@ class OnChipMovePlan:
     consumer_core_count: int
     producer_region_bytes: int
     consumer_region_bytes: int
-    cells: list[OnChipMoveCell]
-    movement_subview: OnChipMoveSubview | None = None
+    cells: list[LXRelayoutCell]
+    movement_subview: LXRelayoutSubview | None = None
 
     @property
     def bytes_moved(self) -> int:
@@ -171,15 +171,15 @@ def _side_slice_geometry(
     return starts, sizes
 
 
-def _default_subview(device_sizes: list[int]) -> OnChipMoveSubview:
-    return OnChipMoveSubview(
+def _default_subview(device_sizes: list[int]) -> LXRelayoutSubview:
+    return LXRelayoutSubview(
         starts=[0 for _size in device_sizes],
         sizes=[int(size) for size in device_sizes],
     )
 
 
 def _is_full_subview(
-    subview: OnChipMoveSubview,
+    subview: LXRelayoutSubview,
     *,
     device_sizes: list[int],
 ) -> bool:
@@ -193,7 +193,7 @@ def _is_full_subview(
 
 
 def _validate_subview(
-    subview: OnChipMoveSubview,
+    subview: LXRelayoutSubview,
     *,
     device_sizes: list[int],
 ) -> str | None:
@@ -212,7 +212,7 @@ def _validate_subview(
 
 def _subview_ranges_for_common_splits(
     *,
-    subview: OnChipMoveSubview,
+    subview: LXRelayoutSubview,
     device_sizes: list[int],
     common_splits: dict[int, int],
     moved_dims: tuple[int, ...],
@@ -291,13 +291,13 @@ def _local_offset_bytes(
     return offset_elements * int(element_bytes), None
 
 
-def _coordinate_remap_v1_stride_map(
+def _lx_relayout_v1_stride_map(
     *,
     device_sizes: list[int],
     device_stride_map: list[int],
     element_bytes: int,
 ) -> tuple[list[int], str | None]:
-    """Return a physical device-dim stride map for whole-stick remap planning.
+    """Return a physical device-dim stride map for whole-stick data move planning.
 
     Some BMM-shaped fixed-tile layouts carry an extra trailing host stride or a
     collapsed size-one dimension for the in-stick coordinate, e.g.
@@ -309,12 +309,12 @@ def _coordinate_remap_v1_stride_map(
 
     if len(device_stride_map) == len(device_sizes) + 1:
         if int(device_stride_map[-1]) != 1:
-            return [], "coordinate-remap-v1-requires-device-stride-map"
+            return [], "lx-relayout-v1-requires-device-stride-map"
         strides = [int(stride) for stride in device_stride_map[:-1]]
     elif len(device_stride_map) == len(device_sizes):
         strides = [int(stride) for stride in device_stride_map]
     else:
-        return [], "coordinate-remap-v1-requires-device-stride-map"
+        return [], "lx-relayout-v1-requires-device-stride-map"
 
     if (
         strides
@@ -325,7 +325,7 @@ def _coordinate_remap_v1_stride_map(
     if any(int(stride) <= 0 for stride in strides):
         positive_strides = [int(stride) for stride in strides if int(stride) > 0]
         if not positive_strides:
-            return [], "coordinate-remap-v1-requires-device-stride-map"
+            return [], "lx-relayout-v1-requires-device-stride-map"
         sentinel_stride = max(positive_strides) * max(math.prod(device_sizes), 1)
         strides = [
             int(stride) if int(stride) > 0 else int(sentinel_stride)
@@ -334,7 +334,7 @@ def _coordinate_remap_v1_stride_map(
     return strides, None
 
 
-def _coordinate_remap_v1_lx_dim_order(
+def _lx_relayout_v1_lx_dim_order(
     *,
     device_sizes: list[int],
     device_stride_map: list[int],
@@ -350,7 +350,7 @@ def _coordinate_remap_v1_lx_dim_order(
     addresses consumed by data ops.
     """
 
-    device_stride_map, reason = _coordinate_remap_v1_stride_map(
+    device_stride_map, reason = _lx_relayout_v1_stride_map(
         device_sizes=device_sizes,
         device_stride_map=device_stride_map,
         element_bytes=element_bytes,
@@ -362,7 +362,7 @@ def _coordinate_remap_v1_lx_dim_order(
         key=lambda dim: (int(device_stride_map[dim]), dim),
     )
     if int(device_stride_map[fastest_dim]) != 1:
-        return [], "coordinate-remap-v1-requires-unit-stride-stick-dim"
+        return [], "lx-relayout-v1-requires-unit-stride-stick-dim"
 
     stick_elems = int(device_sizes[fastest_dim])
     stick_outer_dims = [
@@ -371,7 +371,7 @@ def _coordinate_remap_v1_lx_dim_order(
         if dim != fastest_dim and int(stride) == stick_elems
     ]
     if len(stick_outer_dims) > 1:
-        return [], "coordinate-remap-v1-ambiguous-stick-outer-dim"
+        return [], "lx-relayout-v1-ambiguous-stick-outer-dim"
 
     stick_outer = set(stick_outer_dims)
     non_stick_dims = [
@@ -384,7 +384,7 @@ def _coordinate_remap_v1_lx_dim_order(
     return [fastest_dim, *non_stick_dims, *stick_outer_dims], None
 
 
-def _coordinate_remap_v1_refined_splits(
+def _lx_relayout_v1_refined_splits(
     *,
     common_splits: dict[int, int],
     device_sizes: list[int],
@@ -393,7 +393,7 @@ def _coordinate_remap_v1_refined_splits(
 ) -> tuple[dict[int, int], str | None]:
     """Refine common splits to physical whole-stick movements for v1 lowering."""
 
-    device_stride_map, reason = _coordinate_remap_v1_stride_map(
+    device_stride_map, reason = _lx_relayout_v1_stride_map(
         device_sizes=device_sizes,
         device_stride_map=device_stride_map,
         element_bytes=element_bytes,
@@ -405,11 +405,11 @@ def _coordinate_remap_v1_refined_splits(
         key=lambda dim: (int(device_stride_map[dim]), dim),
     )
     if int(device_stride_map[fastest_dim]) != 1:
-        return {}, "coordinate-remap-v1-requires-unit-stride-stick-dim"
+        return {}, "lx-relayout-v1-requires-unit-stride-stick-dim"
     if int(device_sizes[fastest_dim]) * int(element_bytes) != 128:
-        return {}, "coordinate-remap-v1-requires-128-byte-stick-dim"
+        return {}, "lx-relayout-v1-requires-128-byte-stick-dim"
     if int(common_splits.get(fastest_dim, 1)) != 1:
-        return {}, "coordinate-remap-v1-cannot-remap-split-stick-dim"
+        return {}, "lx-relayout-v1-cannot-data move-split-stick-dim"
 
     refined = dict(common_splits)
     for dim, dim_size in enumerate(device_sizes):
@@ -557,7 +557,7 @@ def _subview_from_device_coordinates(
     coordinates: list[sympy.Expr],
     ranges: dict[Any, Any],
     device_sizes: list[int],
-) -> OnChipMoveSubview | None:
+) -> LXRelayoutSubview | None:
     range_sizes = _range_size_by_symbol(ranges)
     if len(coordinates) != len(device_sizes):
         return None
@@ -575,7 +575,7 @@ def _subview_from_device_coordinates(
         start, size = subrange
         starts.append(start)
         sizes.append(size)
-    return OnChipMoveSubview(starts=starts, sizes=sizes)
+    return LXRelayoutSubview(starts=starts, sizes=sizes)
 
 
 def _movement_subview_from_read_dep(
@@ -583,7 +583,7 @@ def _movement_subview_from_read_dep(
     read_dep: MemoryDep,
     *,
     device_sizes: list[int],
-) -> OnChipMoveSubview:
+) -> LXRelayoutSubview:
     layout = getattr(buf, "layout", None)
     dev_layout = getattr(layout, "device_layout", None)
     if dev_layout is None:
@@ -602,7 +602,7 @@ def _movement_subview_from_read_dep(
     return subview
 
 
-def build_onchip_move_cells(
+def build_lx_relayout_cells(
     *,
     producer_view: PerCoreView,
     consumer_view: PerCoreView,
@@ -612,9 +612,9 @@ def build_onchip_move_cells(
     producer_core_count: int,
     consumer_core_count: int,
     max_cells: int | None = None,
-    coordinate_remap_v1: bool = False,
-    movement_subview: OnChipMoveSubview | None = None,
-) -> tuple[list[OnChipMoveCell], str | None]:
+    lx_relayout_v1: bool = False,
+    movement_subview: LXRelayoutSubview | None = None,
+) -> tuple[list[LXRelayoutCell], str | None]:
     """Return common-refinement movement cells, or a skip reason."""
 
     subview = movement_subview or _default_subview(device_sizes)
@@ -629,8 +629,8 @@ def build_onchip_move_cells(
         dim: math.lcm(producer_splits.get(dim, 1), consumer_splits.get(dim, 1))
         for dim in moved_dims
     }
-    if coordinate_remap_v1:
-        common_splits, reason = _coordinate_remap_v1_refined_splits(
+    if lx_relayout_v1:
+        common_splits, reason = _lx_relayout_v1_refined_splits(
             common_splits=common_splits,
             device_sizes=device_sizes,
             device_stride_map=device_stride_map or [],
@@ -639,7 +639,7 @@ def build_onchip_move_cells(
         if reason is not None:
             return [], reason
         moved_dims = tuple(sorted(common_splits))
-        local_dim_order, reason = _coordinate_remap_v1_lx_dim_order(
+        local_dim_order, reason = _lx_relayout_v1_lx_dim_order(
             device_sizes=device_sizes,
             device_stride_map=device_stride_map or [],
             element_bytes=element_bytes,
@@ -664,7 +664,7 @@ def build_onchip_move_cells(
 
     producer_owner_dims = tuple(dim for dim, _split in producer_view.work_slice_dims)
     consumer_owner_dims = tuple(dim for dim, _split in consumer_view.work_slice_dims)
-    cells: list[OnChipMoveCell] = []
+    cells: list[LXRelayoutCell] = []
 
     ranges, reason = _subview_ranges_for_common_splits(
         subview=subview,
@@ -742,7 +742,7 @@ def build_onchip_move_cells(
         if reason is not None:
             return [], f"consumer-{reason}"
         cells.append(
-            OnChipMoveCell(
+            LXRelayoutCell(
                 cell_index=cell_index,
                 source_core=producer_owners[producer_key],
                 dest_core=consumer_owners[consumer_key],
@@ -757,11 +757,11 @@ def build_onchip_move_cells(
     return cells, None
 
 
-def validate_onchip_move_cell_coverage(
-    cells: list[OnChipMoveCell],
+def validate_lx_relayout_cell_coverage(
+    cells: list[LXRelayoutCell],
     *,
     device_sizes: list[int],
-    movement_subview: OnChipMoveSubview | None = None,
+    movement_subview: LXRelayoutSubview | None = None,
 ) -> str | None:
     """Check that movement cells tile the logical device rectangle exactly."""
 
@@ -839,8 +839,8 @@ def validate_onchip_move_cell_coverage(
     return None
 
 
-def _coordinate_remap_v1_support_reason(cells: list[OnChipMoveCell]) -> str | None:
-    """Return why the current Deeptools coordinate-remap carrier cannot lower cells.
+def _lx_relayout_v1_support_reason(cells: list[LXRelayoutCell]) -> str | None:
+    """Return why the current Deeptools lx-relayout carrier cannot lower cells.
 
     The v1 Deeptools lowering emits whole-stick L3 load/store movements. It is
     only valid when each logical movement is also a non-overlapping contiguous
@@ -849,17 +849,17 @@ def _coordinate_remap_v1_support_reason(cells: list[OnChipMoveCell]) -> str | No
 
     stick_bytes = 128
     destination_ranges_by_core: dict[int, list[tuple[int, int]]] = {}
-    producer_base = int(config.onchip_move_producer_lx_base)
-    consumer_base = int(config.onchip_move_consumer_lx_base)
+    producer_base = int(config.lx_relayout_producer_lx_base)
+    consumer_base = int(config.lx_relayout_consumer_lx_base)
     for cell in cells:
         if int(cell.bytes) <= 0 or int(cell.bytes) % stick_bytes != 0:
-            return "coordinate-remap-v1-requires-stick-sized-moves"
+            return "lx-relayout-v1-requires-stick-sized-moves"
         source_lx_address = producer_base + int(cell.source_offset_bytes)
         dest_lx_address = consumer_base + int(cell.dest_offset_bytes)
         if source_lx_address % stick_bytes != 0:
-            return "coordinate-remap-v1-requires-stick-aligned-source-address"
+            return "lx-relayout-v1-requires-stick-aligned-source-address"
         if dest_lx_address % stick_bytes != 0:
-            return "coordinate-remap-v1-requires-stick-aligned-destination-address"
+            return "lx-relayout-v1-requires-stick-aligned-destination-address"
         start = int(cell.dest_offset_bytes)
         end = start + int(cell.bytes)
         destination_ranges_by_core.setdefault(int(cell.dest_core), []).append(
@@ -871,7 +871,7 @@ def _coordinate_remap_v1_support_reason(cells: list[OnChipMoveCell]) -> str | No
         previous_end: int | None = None
         for start, end in ranges:
             if previous_end is not None and start < previous_end:
-                return "coordinate-remap-v1-requires-contiguous-destination-cells"
+                return "lx-relayout-v1-requires-contiguous-destination-cells"
             previous_end = end
     return None
 
@@ -949,7 +949,7 @@ def _merge_logical_slice_for_dataop(
     merged = _try_extend_logical_slice(current, next_slice)
     if merged is not None:
         return merged
-    # Deeptools lowers coordinate remaps from byte ranges and core ids; the
+    # Deeptools lowers lx relayouts from byte ranges and core ids; the
     # logical slice is diagnostic metadata.  Keep it compact when adjacent byte
     # ranges do not form a single rectangular logical slice.
     return {"starts": {}, "sizes": {}, "coalesced": True}
@@ -1168,16 +1168,16 @@ def _expand_dataop_movement_ranges(ranges: list[dict[str, Any]]) -> list[dict[st
     return movements
 
 
-def _compact_coordinate_remap_dataop_for_json(dataop: dict[str, Any]) -> dict[str, Any]:
+def _compact_lx_relayout_dataop_for_json(dataop: dict[str, Any]) -> dict[str, Any]:
     compact = copy.deepcopy(dataop)
-    if config.onchip_move_range_encoding and compact.get("movementRanges"):
+    if config.lx_relayout_range_encoding and compact.get("movementRanges"):
         compact.pop("movements", None)
         lowering = compact.setdefault("lowering", {})
         lowering["rangeEncoded"] = True
     return compact
 
 
-def _coordinate_remap_dataop_payload(
+def _lx_relayout_dataop_payload(
     *,
     source_name: str,
     producer_name: str,
@@ -1194,7 +1194,7 @@ def _coordinate_remap_dataop_payload(
         [_dataop_movement_payload(move) for move in movements]
     )
     return {
-        "op": {"name": "LXCoordinateRemapOp"},
+        "op": {"name": "STCDPOpLx"},
         "schemaVersion": 0,
         "sourceName": source_name,
         "producer": producer_name,
@@ -1234,11 +1234,11 @@ def _coordinate_remap_dataop_payload(
     }
 
 
-def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
-    """Build torch-spyre-side metadata for a future Deeptools remap data-op."""
+def build_lx_relayout_metadata(plan: LXRelayoutPlan) -> dict[str, Any]:
+    """Build torch-spyre-side metadata for a STCDPOpLx range data-op."""
 
-    producer_base = int(config.onchip_move_producer_lx_base)
-    consumer_base = int(config.onchip_move_consumer_lx_base)
+    producer_base = int(config.lx_relayout_producer_lx_base)
+    consumer_base = int(config.lx_relayout_consumer_lx_base)
     movements: list[dict[str, Any]] = []
     for cell in plan.cells:
         source_lx_address = producer_base + int(cell.source_offset_bytes)
@@ -1275,7 +1275,7 @@ def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
 
     coverage = {
         "device_sizes": [int(size) for size in plan.device_sizes],
-        "status": validate_onchip_move_cell_coverage(
+        "status": validate_lx_relayout_cell_coverage(
             plan.cells,
             device_sizes=plan.device_sizes,
             movement_subview=plan.movement_subview,
@@ -1293,25 +1293,25 @@ def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
     dependency_order = [
         {
             "order": 0,
-            "kind": "producer_lx_write_before_remap",
+            "kind": "producer_lx_write_before_relayout",
             "op": plan.producer_name,
             "source_name": plan.source_name,
         },
         {
             "order": 1,
-            "kind": "coordinate_remap",
-            "primitive": "lx_coordinate_remap_v0",
+            "kind": "lx_relayout",
+            "primitive": "lx_relayout_v0",
             "cell_count": len(plan.cells),
         },
         {
             "order": 2,
-            "kind": "consumer_lx_read_after_remap",
+            "kind": "consumer_lx_read_after_relayout",
             "op": plan.consumer_name,
             "source_name": plan.source_name,
         },
     ]
     metadata = {
-        "primitive": "lx_coordinate_remap_v0",
+        "primitive": "lx_relayout_v0",
         "schema_version": 0,
         "source_name": plan.source_name,
         "producer": plan.producer_name,
@@ -1320,7 +1320,7 @@ def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
         "consumer_lx_base": consumer_base,
         "coverage": coverage,
         "dependency_order": dependency_order,
-        "deeptools_dataop": _coordinate_remap_dataop_payload(
+        "deeptools_dataop": _lx_relayout_dataop_payload(
             source_name=plan.source_name,
             producer_name=plan.producer_name,
             consumer_name=plan.consumer_name,
@@ -1336,7 +1336,7 @@ def build_coordinate_remap_metadata(plan: OnChipMovePlan) -> dict[str, Any]:
     return metadata
 
 
-def _planned_payload(plan: OnChipMovePlan) -> dict[str, Any]:
+def _planned_payload(plan: LXRelayoutPlan) -> dict[str, Any]:
     payload = {
         "source_name": plan.source_name,
         "producer": plan.producer_name,
@@ -1359,22 +1359,22 @@ def _planned_payload(plan: OnChipMovePlan) -> dict[str, Any]:
             "starts": [int(start) for start in plan.movement_subview.starts],
             "sizes": [int(size) for size in plan.movement_subview.sizes],
         }
-    metadata = build_coordinate_remap_metadata(plan)
-    metadata["deeptools_dataop"] = _compact_coordinate_remap_dataop_for_json(
+    metadata = build_lx_relayout_metadata(plan)
+    metadata["deeptools_dataop"] = _compact_lx_relayout_dataop_for_json(
         metadata["deeptools_dataop"]
     )
-    payload["coordinate_remap"] = metadata
+    payload["lx_relayout"] = metadata
     return payload
 
 
-def plan_onchip_move_edge(
+def plan_lx_relayout_edge(
     graph: GraphLowering,
     producer: ComputedBuffer,
     consumer: ComputedBuffer,
     read_dep: MemoryDep,
     *,
     cache: dict | None = None,
-) -> OnChipMovePlan | None:
+) -> LXRelayoutPlan | None:
     write_dep = _single_write_dep(producer, read_dep.name)
     if write_dep is None:
         return None
@@ -1401,15 +1401,12 @@ def plan_onchip_move_edge(
         device_sizes, device_stride_map, element_bytes = _device_layout_and_element_bytes(
             buf
         )
-        if config.onchip_move_carrier in {"coordinate_remap", "stcdp_range"}:
-            movement_subview = _movement_subview_from_read_dep(
-                buf,
-                read_dep,
-                device_sizes=device_sizes,
-            )
-        else:
-            movement_subview = _default_subview(device_sizes)
-        cells, reason = build_onchip_move_cells(
+        movement_subview = _movement_subview_from_read_dep(
+            buf,
+            read_dep,
+            device_sizes=device_sizes,
+        )
+        cells, reason = build_lx_relayout_cells(
             producer_view=producer_view,
             consumer_view=consumer_view,
             device_sizes=device_sizes,
@@ -1417,13 +1414,13 @@ def plan_onchip_move_edge(
             element_bytes=element_bytes,
             producer_core_count=_op_num_cores(producer),
             consumer_core_count=_op_num_cores(consumer),
-            max_cells=config.onchip_move_max_cells,
-            coordinate_remap_v1=config.onchip_move_carrier in {"coordinate_remap", "stcdp_range"},
+            max_cells=config.lx_relayout_max_cells,
+            lx_relayout_v1=True,
             movement_subview=movement_subview,
         )
     except Exception as exc:  # noqa: BLE001
         logger.debug(
-            "onchip_move skipped %s -> %s for %s: %s",
+            "lx_relayout skipped %s -> %s for %s: %s",
             producer.get_name(),
             consumer.get_name(),
             read_dep.name,
@@ -1432,26 +1429,25 @@ def plan_onchip_move_edge(
         return None
     if reason is not None:
         logger.debug(
-            "onchip_move skipped %s -> %s for %s: %s",
+            "lx_relayout skipped %s -> %s for %s: %s",
             producer.get_name(),
             consumer.get_name(),
             read_dep.name,
             reason,
         )
         return None
-    if config.onchip_move_carrier in {"coordinate_remap", "stcdp_range"}:
-        reason = _coordinate_remap_v1_support_reason(cells)
-        if reason is not None:
-            logger.debug(
-                "onchip_move skipped %s -> %s for %s: %s",
-                producer.get_name(),
-                consumer.get_name(),
-                read_dep.name,
-                reason,
-            )
-            return None
+    reason = _lx_relayout_v1_support_reason(cells)
+    if reason is not None:
+        logger.debug(
+            "lx_relayout skipped %s -> %s for %s: %s",
+            producer.get_name(),
+            consumer.get_name(),
+            read_dep.name,
+            reason,
+        )
+        return None
 
-    return OnChipMovePlan(
+    return LXRelayoutPlan(
         source_name=read_dep.name,
         producer_name=producer.get_name(),
         consumer_name=consumer.get_name(),
@@ -1475,25 +1471,25 @@ def plan_onchip_move_edge(
     )
 
 
-def _attach_plan_to_consumer(consumer: ComputedBuffer, plan: OnChipMovePlan) -> None:
+def _attach_plan_to_consumer(consumer: ComputedBuffer, plan: LXRelayoutPlan) -> None:
     plan_payload = _planned_payload(plan)
-    existing_move_info = getattr(consumer, ONCHIP_MOVE_ATTR, None)
+    existing_move_info = getattr(consumer, LX_RELAYOUT_ATTR, None)
     move_info = existing_move_info if isinstance(existing_move_info, dict) else {}
     move_info[plan.source_name] = plan_payload
-    setattr(consumer, ONCHIP_MOVE_ATTR, move_info)
+    setattr(consumer, LX_RELAYOUT_ATTR, move_info)
 
     data = getattr(consumer, "data", None)
     op_info = getattr(data, "op_info", None)
     if isinstance(op_info, dict):
-        op_move_info = op_info.setdefault(ONCHIP_MOVE_OP_INFO_KEY, {})
+        op_move_info = op_info.setdefault(LX_RELAYOUT_OP_INFO_KEY, {})
         if not isinstance(op_move_info, dict):
             op_move_info = {}
-            op_info[ONCHIP_MOVE_OP_INFO_KEY] = op_move_info
+            op_info[LX_RELAYOUT_OP_INFO_KEY] = op_move_info
         op_move_info[plan.source_name] = plan_payload
 
 
-def plan_onchip_moves(graph: GraphLowering) -> None:
-    if not config.onchip_move_planner:
+def plan_lx_relayouts(graph: GraphLowering) -> None:
+    if not config.lx_relayout_planner:
         return
 
     name_to_op = {
@@ -1502,7 +1498,7 @@ def plan_onchip_moves(graph: GraphLowering) -> None:
         if isinstance(op, ComputedBuffer)
     }
     cache: dict = {}
-    plans: list[OnChipMovePlan] = []
+    plans: list[LXRelayoutPlan] = []
     edge_count = 0
     for consumer in graph.operations:
         if not isinstance(consumer, ComputedBuffer):
@@ -1514,7 +1510,7 @@ def plan_onchip_moves(graph: GraphLowering) -> None:
             if producer is None:
                 continue
             edge_count += 1
-            plan = plan_onchip_move_edge(
+            plan = plan_lx_relayout_edge(
                 graph,
                 producer,
                 consumer,
@@ -1528,9 +1524,9 @@ def plan_onchip_moves(graph: GraphLowering) -> None:
 
     if edge_count:
         logger.info(
-            "onchip_move summary edges=%d planned=%d bytes=%d realize=%s",
+            "lx_relayout summary edges=%d planned=%d bytes=%d realize=%s",
             edge_count,
             len(plans),
             sum(plan.bytes_moved for plan in plans),
-            config.onchip_move_realize,
+            config.lx_relayout_realize,
         )
