@@ -59,6 +59,7 @@ from torch_spyre._inductor.scratchpad.utils import (
 from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
 
 from torch_spyre._inductor import config
+from torch_spyre._inductor.lx_relayout import plan_lx_relayouts
 
 logger = logging.getLogger(__name__)
 
@@ -531,6 +532,9 @@ def scratchpad_planning(
         graph: Lowered graph to plan scratchpad memory for.
         allocator: Allocator strategy to use. Defaults to DefaultAllocator.
     """
+    if config.lx_planner_relayout:
+        plan_lx_relayouts(graph)
+
     if allocator is None:
         allocator = DefaultAllocator()
     allocator.plan_allocation(graph)

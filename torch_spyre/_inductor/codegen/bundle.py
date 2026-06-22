@@ -21,6 +21,7 @@ import sympy
 
 from torch_spyre._inductor import config as _spyre_config
 from torch_spyre._inductor.codegen.compute_ops import SymbolKind
+from torch_spyre._inductor.codegen.lx_relayout import patch_lx_relayout_mixed_schedules
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.codegen.unroll import unroll_loop_specs
 from torch_spyre._inductor.op_spec import LoopSpec, OpSpec
@@ -40,7 +41,7 @@ logger = get_inductor_logger("sdsc_compile")
 #                       {tiled_sym: stride_bytes} for tiled HBM tensors,
 #                       empty dict for non-tiled / lx tensors
 #   symbol_kinds:       list[SymbolKind] parallel to base_symbol_values
-_CompiledEntry = tuple[Any, list[int], list[dict], list[SymbolKind]]
+_CompiledEntry = tuple[Any | None, list[int], list[dict], list[SymbolKind]]
 
 
 # ---------------------------------------------------------------------------
@@ -88,8 +89,8 @@ def generate_bundle(
     # -----------------------------------------------------------------------
     # Pass 1: compile all OpSpecs depth-first.
     # ``symbols`` is indexed by abs(symbol_id)-1: one entry per symbol ID in
-    # registration order, values may repeat across SDSCs.  Writes one
-    # ``sdsc_N.json`` file per OpSpec.
+    # registration order, values may repeat across SDSCs.  JSON files are
+    # written after optional bundle-level rewrites below.
     # -----------------------------------------------------------------------
     symbols: list[int] = []
     compiled: list[_CompiledEntry] = []
@@ -105,6 +106,21 @@ def generate_bundle(
         output_dir,
         use_symbols=use_symbols,
     )
+
+    if _spyre_config.lx_planner_relayout_realize and not use_symbols:
+        patch_lx_relayout_mixed_schedules(compiled, specs_list)
+    elif _spyre_config.lx_planner_relayout_realize and use_symbols:
+        logger.info("LX relayout realization skipped for symbolic bundle args")
+
+    for sdsc_json, _local_sym_values, _affine_strides, _local_symbol_kinds in compiled:
+        if sdsc_json is None:
+            continue
+        sdsc_name = next(iter(sdsc_json))
+        sdsc_idx = sdsc_name.split("_", 1)[0]
+        file_name = f"sdsc_{sdsc_idx}.json"
+        with open(os.path.join(output_dir, file_name), "w") as f:
+            logger.info(f"Generating {f.name}")
+            json.dump(sdsc_json, f, indent=2)
 
     # -----------------------------------------------------------------------
     # Pass 2: emit bundle.mlir.
@@ -346,10 +362,6 @@ def _compile_specs(
             compiled.append(
                 (sdsc_json, local_sym_values, affine_strides, local_symbol_kinds)
             )
-            file_name = f"sdsc_{idx}.json"
-            with open(os.path.join(output_dir, file_name), "w") as f:
-                logger.info(f"Generating {f.name}")
-                json.dump(sdsc_json, f, indent=2)
         # UnimplementedOp and other types are silently skipped.
 
 
@@ -502,6 +514,8 @@ def _emit_specs(
             # Per-tensor loop-var index lists: which positions in the enclosing
             # loop_vars list correspond to the strides for each tensor.
             per_tensor_lv_indices: list[list[int]] = next(affine_map_lv_iter)
+            if sdsc_json is None:
+                continue
 
             # Determine the JSON filename from the sdsc_json key.
             sdsc_name = next(iter(sdsc_json))

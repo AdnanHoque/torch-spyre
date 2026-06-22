@@ -62,6 +62,7 @@ from .work_division import (
     work_distribution,
     cost_model_matmul_division,
 )
+from .lx_relayout import plan_lx_relayouts
 from .pass_utils import apply_splits_from_index_coeff, iteration_space_from_op
 from .scratchpad.allocator import (
     StrategyBCoOptimizingAllocator,
@@ -285,7 +286,7 @@ def _distribute_work(graph: GraphLowering) -> None:
     work_distribution(graph, preassigned_ops)
 
 
-@_runs(scratchpad_planning)
+@_runs(scratchpad_planning, plan_lx_relayouts)
 def _maybe_scratchpad_planning(graph: GraphLowering) -> None:
     if not config.lx_planning:
         return
@@ -335,7 +336,6 @@ class CustomPreSchedulingPasses:
             # Core Division
             span_reduction,
             _distribute_work,
-            #
             # LX Planning
             _maybe_scratchpad_planning,
         ]

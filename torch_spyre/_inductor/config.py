@@ -89,4 +89,27 @@ unroll_loops: bool = os.environ.get("UNROLL_LOOPS", "1") == "1"
 # TODO(isuruf): Change to firstfit when deeptools PR4298 lands
 layout_solver: Literal["greedy", "bestfit", "firstfit"] = "greedy"
 
+# Cross-core LX-to-LX relayout extension for the LX planner.
+# Same-core persistence remains handled by the existing scratchpad allocator;
+# this subfeature plans explicit STCDPOpLx movement for mismatched views.
+lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
+lx_planner_relayout_realize: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_REALIZE", "0") == "1"
+)
+lx_relayout_max_cells: int = int(
+    os.environ.get("SPYRE_LX_RELAYOUT_MAX_CELLS", "131072")
+)
+lx_relayout_chunk_cells: int = int(
+    os.environ.get("SPYRE_LX_RELAYOUT_CHUNK_CELLS", "8192")
+)
+lx_relayout_range_encoding: bool = (
+    os.environ.get("SPYRE_LX_RELAYOUT_RANGE_ENCODING", "1") != "0"
+)
+lx_relayout_producer_lx_base: int = int(
+    os.environ.get("SPYRE_LX_RELAYOUT_PRODUCER_LX_BASE", "0"), 0
+)
+lx_relayout_consumer_lx_base: int = int(
+    os.environ.get("SPYRE_LX_RELAYOUT_CONSUMER_LX_BASE", str(1024 * 1024)), 0
+)
+
 install_config_module(sys.modules[__name__])
