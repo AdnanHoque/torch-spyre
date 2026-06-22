@@ -86,14 +86,16 @@ that cancels in the A/B; the <em>absolute</em> saved time is the matching signal
 <h2>Why &mdash; two good layouts, an HBM tax at the boundary</h2>
 <p>Spyre's 8&times;8 PT array (the matmul engine) is <strong>weight-stationary</strong>: the weight tile <span class="mono">[K,N]</span>
 sits resident in the array and tokens (the M dimension) stream past it. A matmul keeps the array filled by
-tiling the <strong>N</strong> (output width) and <strong>M</strong> (tokens) dims across the 32 cores. For
-the fused SwiGLU projection that is a 2-D split <code>{mb:4, out:8}</code> &#8594; 32 cores, where each core
-owns a <span class="mono">(mb&#7522;, out&#11388;)</span> <strong>tile</strong>: 4 rows &times; &#8539;-width of
-the fused buffer.</p>
-<p>The pointwise SiLU+mul chain that consumes it has no weight and no cross-core dependency. The SFP engines
-are happiest when each core owns a <strong>contiguous full-width row-stripe</strong>, so the consumer picks a
-pure-M split <code>{mb:32}</code> — 16 rows &times; full <span class="mono">2H</span> width per core. Each
-layout is individually optimal for its engine.</p>
+tiling the output matrix across the 32 cores. Name the three matmul dimensions <strong>m</strong> (tokens /
+rows of the output), <strong>n</strong> (output width / columns), and <strong>k</strong> (the contraction /
+model dim that gets summed away). A work division is written <code>(m:&middot;, n:&middot;, k:&middot;)</code>
+= how many ways each dimension is split. The fused SwiGLU projection splits <code>(m:4, n:8, k:1)</code> &#8594;
+32 cores — m four ways, n eight ways, k <em>not</em> split — so each core owns one
+<strong>(m-band &times; n-slice) tile</strong> of the output: a 4-row &times; &#8539;-width block.</p>
+<p>The pointwise SiLU+mul chain that consumes it has no weight and no contraction. The SFP engines are happiest
+when each core owns a <strong>contiguous full-width row-stripe</strong>, so the consumer picks a pure-M split
+<code>(m:32)</code> — only m is split, so each core owns 16 whole rows (the full <span class="mono">n</span>
+width). Each layout is individually optimal for its engine.</p>
 <p>The problem is the <strong>handoff</strong>. For any given physical stick, the producer's owner core (a
 2-D tile) and the consumer's owner core (a row-stripe) are <strong>different cores</strong>. Same sticks, no
 arithmetic — only the <code>PerCoreView</code> owner changes. The baseline's only cross-core path is through
@@ -109,7 +111,7 @@ purely to re-shuffle ownership.</strong></p>
   <!-- producer -->
   <rect x="14" y="36" width="150" height="92" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
   <text x="89" y="60" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">Fused projection</text>
-  <text x="89" y="76" font-size="11" text-anchor="middle" fill="#6b7280">matmul &middot; {mb:4,out:8}</text>
+  <text x="89" y="76" font-size="11" text-anchor="middle" fill="#6b7280">matmul &middot; (m:4, n:8)</text>
   <g>
     <!-- 4x8 tiles -->
     <g fill="#9bb8d8" stroke="#3b6ea8" stroke-width=".5">
@@ -126,7 +128,7 @@ purely to re-shuffle ownership.</strong></p>
   <!-- consumer -->
   <rect x="716" y="36" width="150" height="92" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
   <text x="791" y="60" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">SiLU + mul</text>
-  <text x="791" y="76" font-size="11" text-anchor="middle" fill="#6b7280">pointwise &middot; {mb:32}</text>
+  <text x="791" y="76" font-size="11" text-anchor="middle" fill="#6b7280">pointwise &middot; (m:32)</text>
   <g fill="#9bb8d8" stroke="#3b6ea8" stroke-width=".5">
     <rect x="726" y="86" width="130" height="6"/><rect x="726" y="94" width="130" height="6"/><rect x="726" y="102" width="130" height="6"/><rect x="726" y="110" width="130" height="6"/>
   </g>
@@ -145,7 +147,7 @@ purely to re-shuffle ownership.</strong></p>
   <text x="14" y="212" font-size="13" font-weight="700" fill="#2e9e5b">RELAYOUT &mdash; on-chip L3 ring</text>
   <rect x="14" y="226" width="150" height="92" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
   <text x="89" y="250" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">Fused projection</text>
-  <text x="89" y="266" font-size="11" text-anchor="middle" fill="#6b7280">matmul &middot; {mb:4,out:8}</text>
+  <text x="89" y="266" font-size="11" text-anchor="middle" fill="#6b7280">matmul &middot; (m:4, n:8)</text>
   <g fill="#9bb8d8" stroke="#3b6ea8" stroke-width=".5">
     <rect x="26" y="276" width="16" height="9"/><rect x="44" y="276" width="16" height="9"/><rect x="62" y="276" width="16" height="9"/><rect x="80" y="276" width="16" height="9"/><rect x="98" y="276" width="16" height="9"/><rect x="116" y="276" width="16" height="9"/><rect x="134" y="276" width="16" height="9"/>
     <rect x="26" y="287" width="16" height="9"/><rect x="44" y="287" width="16" height="9"/><rect x="62" y="287" width="16" height="9"/><rect x="80" y="287" width="16" height="9"/><rect x="98" y="287" width="16" height="9"/><rect x="116" y="287" width="16" height="9"/><rect x="134" y="287" width="16" height="9"/>
@@ -172,76 +174,111 @@ than the <em>realized</em> HBM rate.</figcaption>
 </figure>
 
 
-<h2>A toy example &mdash; watch four tiles move</h2>
-<p>Before the real shapes, here is the whole idea on four cores. Take a tiny buffer of
-<strong>4 tiles</strong> — 2 token-rows (<span class="mono">mb0, mb1</span>) &times; 2 output-chunks
-(<span class="mono">out0, out1</span>): tiles <span class="mono">a0, a1</span> (row mb0) and
-<span class="mono">b0, b1</span> (row mb1).</p>
-<p>The <strong>producer</strong> matmul splits <code>{mb:2, out:2}</code> — ownership is
-<em>column-major</em>, so each core holds one tile: <span class="mono">c0=a0, c1=b0, c2=a1, c3=b1</span>.
-The <strong>consumer</strong> pointwise op splits <code>{mb:2}</code> — ownership is <em>row-major</em>:
-core 0 wants the whole <span class="mono">mb0</span> row <span class="mono">{a0,a1}</span>, core 1 wants
-the whole <span class="mono">mb1</span> row <span class="mono">{b0,b1}</span>. Two tiles already sit on the
-right core (<span class="mono">a0</span>&rarr;c0, <span class="mono">b0</span>&rarr;c1 are local); the other
-two must <strong>move cores</strong>: <span class="mono">a1: c2&rarr;c0</span> and
-<span class="mono">b1: c3&rarr;c1</span>. That is the entire relayout — a permutation of <em>who owns
-which stick</em>, with no arithmetic.</p>
+<h2>A toy example &mdash; watch one matrix get re-owned</h2>
+<p>The whole idea, on one small matrix, step by step. The projection matmul produces an output
+<span class="mono">C = x &middot; W</span>. Take <strong>C as a 4&times;4 matrix</strong>: 4 token-rows
+(the <span class="mono">m</span> dimension) &times; 4 output-columns (the <span class="mono">n</span>
+dimension). Everything that follows is just a question of <em>which core holds which cells of C</em>.</p>
+
+<p><strong>Step 1 &mdash; the producer's work division <code>(m:2, n:2)</code>.</strong> Splitting m two ways
+and n two ways makes 4 cores, and each core ends up owning a <strong>2&times;2 block</strong> of C. That is not
+arbitrary: the PT array computes a block from one <em>band of token-rows</em> (its m-slice) against one
+<em>slab of weight columns</em> (its n-slice), so the natural unit a matmul core produces <em>is</em> a
+rectangular (m&times;n) tile. Core 0 gets the top-left block, c1 top-right, c2 bottom-left, c3 bottom-right.</p>
+
+<p><strong>Step 2 &mdash; the consumer's work division <code>(m:4)</code>.</strong> The SiLU&times;mul chain has
+no contraction and no cross-row dependency, so each core just wants a whole <strong>row</strong> of C to chew
+through locally. Pure-M: c0 wants all of row 0, c1 all of row 1, c2 row 2, c3 row 3.</p>
+
+<p><strong>Step 3 &mdash; overlay them, and the relayout falls out.</strong> A cell stays put only if its
+producer-block owner and its consumer-row owner are the <em>same</em> core; every other cell must travel. In
+this 4&times;4, exactly <strong>half the cells move</strong>: within each token-band the two blocks swap their
+off-row halves (<span class="mono">c0&harr;c1</span> for rows 0&ndash;1, <span class="mono">c2&harr;c3</span>
+for rows 2&ndash;3). No arithmetic, no value changes — only <em>ownership</em>.</p>
 
 <figure>
-<svg viewBox="0 0 880 250" role="img" aria-label="toy relayout ownership before, move, after">
+<svg viewBox="0 0 880 300" role="img" aria-label="matrix re-owned: output, producer division, consumer division, moves">
   <defs>
-    <marker id="tm" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#444"/></marker>
+    <marker id="pm" markerWidth="10" markerHeight="10" refX="7" refY="3.2" orient="auto"><path d="M0,0 L8,3.2 L0,6.4 z" fill="#6b7280"/></marker>
   </defs>
-  <!-- PANEL 1: producer ownership -->
-  <text x="125" y="22" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">1 &middot; Producer owns tiles</text>
-  <text x="125" y="38" font-size="11" text-anchor="middle" fill="#6b7280">{mb:2, out:2} &mdash; column-major</text>
-  <!-- 2x2 grid, colored by tile identity, owner labeled -->
-  <g font-size="11" text-anchor="middle">
-    <rect x="55" y="52" width="70" height="48" fill="#3b6ea8"/><text x="90" y="74" fill="#fff" font-weight="700">a0</text><text x="90" y="90" fill="#dce8f5">core 0</text>
-    <rect x="127" y="52" width="70" height="48" fill="#2a9d8f"/><text x="162" y="74" fill="#fff" font-weight="700">a1</text><text x="162" y="90" fill="#dcf2ee">core 2</text>
-    <rect x="55" y="102" width="70" height="48" fill="#c9971b"/><text x="90" y="124" fill="#fff" font-weight="700">b0</text><text x="90" y="140" fill="#f7eccf">core 1</text>
-    <rect x="127" y="102" width="70" height="48" fill="#9c4f96"/><text x="162" y="124" fill="#fff" font-weight="700">b1</text><text x="162" y="140" fill="#f0dcee">core 3</text>
+  <!-- ============ PANEL 1: the matrix C ============ -->
+  <text x="80" y="22" font-size="12" font-weight="700" text-anchor="middle" fill="#1a1a2e">1 &middot; output C = x&middot;W</text>
+  <text x="80" y="37" font-size="10" text-anchor="middle" fill="#6b7280">4 rows (m) &times; 4 cols (n)</text>
+  <!-- axis labels -->
+  <g font-size="8.5" fill="#9aa3af" text-anchor="middle">
+    <text x="35" y="65">n0</text><text x="65" y="65">n1</text><text x="95" y="65">n2</text><text x="125" y="65">n3</text>
   </g>
-  <text x="44" y="80" font-size="9.5" text-anchor="end" fill="#6b7280">mb0</text>
-  <text x="44" y="130" font-size="9.5" text-anchor="end" fill="#6b7280">mb1</text>
-  <text x="90" y="166" font-size="9.5" text-anchor="middle" fill="#6b7280">out0</text>
-  <text x="162" y="166" font-size="9.5" text-anchor="middle" fill="#6b7280">out1</text>
+  <g font-size="8.5" fill="#9aa3af" text-anchor="end">
+    <text x="16" y="89">m0</text><text x="16" y="119">m1</text><text x="16" y="149">m2</text><text x="16" y="179">m3</text>
+  </g>
+  <rect x="20" y="70" width="120" height="120" fill="#fff" stroke="#9aa3af"/>
+  <g stroke="#dfe3e9"><line x1="50" y1="70" x2="50" y2="190"/><line x1="80" y1="70" x2="80" y2="190"/><line x1="110" y1="70" x2="110" y2="190"/><line x1="20" y1="100" x2="140" y2="100"/><line x1="20" y1="130" x2="140" y2="130"/><line x1="20" y1="160" x2="140" y2="160"/></g>
+  <text x="80" y="135" font-size="22" fill="#cbd2db" text-anchor="middle" font-weight="700">C</text>
 
-  <!-- PANEL 2: the moves -->
-  <text x="440" y="22" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">2 &middot; Relayout over the ring</text>
-  <text x="440" y="38" font-size="11" text-anchor="middle" fill="#6b7280">2 tiles move cores, 2 stay local</text>
-  <g font-size="11.5">
-    <rect x="320" y="58" width="240" height="30" rx="6" fill="#eaf4ee" stroke="#2e9e5b"/>
-    <text x="332" y="78" fill="#1f7a47" font-weight="700">a1</text><text x="356" y="78" fill="#1a7a47" class="mono">c2 &#8594; c0</text>
-    <line x1="438" y1="73" x2="552" y2="73" stroke="#2e9e5b" stroke-width="2" marker-end="url(#tm)"/>
-    <rect x="320" y="94" width="240" height="30" rx="6" fill="#f4ecf3" stroke="#9c4f96"/>
-    <text x="332" y="114" fill="#7a3a73" font-weight="700">b1</text><text x="356" y="114" fill="#7a3a73" class="mono">c3 &#8594; c1</text>
-    <line x1="438" y1="109" x2="552" y2="109" stroke="#9c4f96" stroke-width="2" marker-end="url(#tm)"/>
-    <rect x="320" y="130" width="240" height="28" rx="6" fill="#f3f4f6" stroke="#c9ccd2" stroke-dasharray="4 3"/>
-    <text x="440" y="148" text-anchor="middle" fill="#8892a0" class="mono">a0 on c0, b0 on c1 &mdash; local, no move</text>
+  <!-- ============ PANEL 2: producer division (m:2,n:2) ============ -->
+  <text x="300" y="22" font-size="12" font-weight="700" text-anchor="middle" fill="#1a1a2e">2 &middot; producer (m:2, n:2)</text>
+  <text x="300" y="37" font-size="10" text-anchor="middle" fill="#6b7280">each core = a 2&times;2 block</text>
+  <g text-anchor="middle">
+    <rect x="240" y="70" width="60" height="60" fill="#3b6ea8"/><text x="270" y="105" fill="#fff" font-size="13" font-weight="700">c0</text>
+    <rect x="300" y="70" width="60" height="60" fill="#2a9d8f"/><text x="330" y="105" fill="#fff" font-size="13" font-weight="700">c1</text>
+    <rect x="240" y="130" width="60" height="60" fill="#c9971b"/><text x="270" y="165" fill="#fff" font-size="13" font-weight="700">c2</text>
+    <rect x="300" y="130" width="60" height="60" fill="#9c4f96"/><text x="330" y="165" fill="#fff" font-size="13" font-weight="700">c3</text>
+  </g>
+  <g stroke="#fff" stroke-opacity=".5"><line x1="270" y1="70" x2="270" y2="190"/><line x1="330" y1="70" x2="330" y2="190"/><line x1="240" y1="100" x2="360" y2="100"/><line x1="240" y1="160" x2="360" y2="160"/></g>
+
+  <!-- ============ PANEL 3: consumer division (m:4) ============ -->
+  <text x="520" y="22" font-size="12" font-weight="700" text-anchor="middle" fill="#1a1a2e">3 &middot; consumer (m:4)</text>
+  <text x="520" y="37" font-size="10" text-anchor="middle" fill="#6b7280">each core = a full row</text>
+  <g text-anchor="middle" font-size="13" font-weight="700">
+    <rect x="460" y="70" width="120" height="30" fill="#3b6ea8"/><text x="520" y="90" fill="#fff">c0</text>
+    <rect x="460" y="100" width="120" height="30" fill="#2a9d8f"/><text x="520" y="120" fill="#fff">c1</text>
+    <rect x="460" y="130" width="120" height="30" fill="#c9971b"/><text x="520" y="150" fill="#fff">c2</text>
+    <rect x="460" y="160" width="120" height="30" fill="#9c4f96"/><text x="520" y="180" fill="#fff">c3</text>
+  </g>
+  <g stroke="#fff" stroke-opacity=".4"><line x1="490" y1="70" x2="490" y2="190"/><line x1="520" y1="70" x2="520" y2="190"/><line x1="550" y1="70" x2="550" y2="190"/></g>
+
+  <!-- ============ PANEL 4: what must move ============ -->
+  <text x="740" y="22" font-size="12" font-weight="700" text-anchor="middle" fill="#1a1a2e">4 &middot; what must move</text>
+  <text x="740" y="37" font-size="10" text-anchor="middle" fill="#6b7280">8 of 16 cells change cores</text>
+  <g font-size="7.5" text-anchor="middle">
+    <!-- row0: stay,stay,move c1->c0, move c1->c0 -->
+    <rect x="680" y="70" width="30" height="30" fill="#eef0f3" stroke="#fff"/><text x="695" y="88" fill="#b9c0c9">stay</text>
+    <rect x="710" y="70" width="30" height="30" fill="#eef0f3" stroke="#fff"/><text x="725" y="88" fill="#b9c0c9">stay</text>
+    <rect x="740" y="70" width="30" height="30" fill="#f7ddc9" stroke="#fff"/><text x="755" y="88" fill="#b4521f">c1&#8594;c0</text>
+    <rect x="770" y="70" width="30" height="30" fill="#f7ddc9" stroke="#fff"/><text x="785" y="88" fill="#b4521f">c1&#8594;c0</text>
+    <!-- row1: move c0->c1, move c0->c1, stay, stay -->
+    <rect x="680" y="100" width="30" height="30" fill="#f7ddc9" stroke="#fff"/><text x="695" y="118" fill="#b4521f">c0&#8594;c1</text>
+    <rect x="710" y="100" width="30" height="30" fill="#f7ddc9" stroke="#fff"/><text x="725" y="118" fill="#b4521f">c0&#8594;c1</text>
+    <rect x="740" y="100" width="30" height="30" fill="#eef0f3" stroke="#fff"/><text x="755" y="118" fill="#b9c0c9">stay</text>
+    <rect x="770" y="100" width="30" height="30" fill="#eef0f3" stroke="#fff"/><text x="785" y="118" fill="#b9c0c9">stay</text>
+    <!-- row2: stay,stay,move c3->c2,move c3->c2 -->
+    <rect x="680" y="130" width="30" height="30" fill="#eef0f3" stroke="#fff"/><text x="695" y="148" fill="#b9c0c9">stay</text>
+    <rect x="710" y="130" width="30" height="30" fill="#eef0f3" stroke="#fff"/><text x="725" y="148" fill="#b9c0c9">stay</text>
+    <rect x="740" y="130" width="30" height="30" fill="#f7ddc9" stroke="#fff"/><text x="755" y="148" fill="#b4521f">c3&#8594;c2</text>
+    <rect x="770" y="130" width="30" height="30" fill="#f7ddc9" stroke="#fff"/><text x="785" y="148" fill="#b4521f">c3&#8594;c2</text>
+    <!-- row3: move c2->c3,move c2->c3,stay,stay -->
+    <rect x="680" y="160" width="30" height="30" fill="#f7ddc9" stroke="#fff"/><text x="695" y="178" fill="#b4521f">c2&#8594;c3</text>
+    <rect x="710" y="160" width="30" height="30" fill="#f7ddc9" stroke="#fff"/><text x="725" y="178" fill="#b4521f">c2&#8594;c3</text>
+    <rect x="740" y="160" width="30" height="30" fill="#eef0f3" stroke="#fff"/><text x="755" y="178" fill="#b9c0c9">stay</text>
+    <rect x="770" y="160" width="30" height="30" fill="#eef0f3" stroke="#fff"/><text x="785" y="178" fill="#b9c0c9">stay</text>
   </g>
 
-  <!-- PANEL 3: consumer ownership -->
-  <text x="755" y="22" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">3 &middot; Consumer owns rows</text>
-  <text x="755" y="38" font-size="11" text-anchor="middle" fill="#6b7280">{mb:2} &mdash; row-major (pure-M)</text>
-  <g font-size="11" text-anchor="middle">
-    <rect x="685" y="52" width="70" height="48" fill="#3b6ea8"/><text x="720" y="74" fill="#fff" font-weight="700">a0</text><text x="720" y="90" fill="#dce8f5">core 0</text>
-    <rect x="757" y="52" width="70" height="48" fill="#2a9d8f"/><text x="792" y="74" fill="#fff" font-weight="700">a1</text><text x="792" y="90" fill="#dcf2ee">core 0</text>
-    <rect x="685" y="102" width="70" height="48" fill="#c9971b"/><text x="720" y="124" fill="#fff" font-weight="700">b0</text><text x="720" y="140" fill="#f7eccf">core 1</text>
-    <rect x="757" y="102" width="70" height="48" fill="#9c4f96"/><text x="792" y="124" fill="#fff" font-weight="700">b1</text><text x="792" y="140" fill="#f0dcee">core 1</text>
-  </g>
-  <path d="M683,76 h-6 v-6" fill="none" stroke="#3b6ea8"/>
-  <rect x="683" y="50" width="146" height="52" fill="none" stroke="#3b6ea8" stroke-width="1.5" stroke-dasharray="3 2"/>
-  <rect x="683" y="100" width="146" height="52" fill="none" stroke="#c9971b" stroke-width="1.5" stroke-dasharray="3 2"/>
-  <text x="756" y="180" font-size="9.5" text-anchor="middle" fill="#6b7280">each core now holds a full token-row</text>
+  <!-- connectors -->
+  <line x1="144" y1="130" x2="236" y2="130" stroke="#6b7280" stroke-width="1.4" marker-end="url(#pm)"/>
+  <text x="190" y="123" font-size="9" text-anchor="middle" fill="#9aa3af">divide</text>
+  <line x1="364" y1="130" x2="456" y2="130" stroke="#6b7280" stroke-width="1.4" marker-end="url(#pm)"/>
+  <text x="410" y="123" font-size="9" text-anchor="middle" fill="#9aa3af">re-divide</text>
+  <line x1="584" y1="130" x2="676" y2="130" stroke="#6b7280" stroke-width="1.4" marker-end="url(#pm)"/>
+  <text x="630" y="123" font-size="9" text-anchor="middle" fill="#9aa3af">overlay</text>
 
-  <!-- big connectors between panels -->
-  <line x1="210" y1="100" x2="312" y2="100" stroke="#c9ccd2" stroke-width="1.5" marker-end="url(#tm)"/>
-  <line x1="568" y1="100" x2="678" y2="100" stroke="#c9ccd2" stroke-width="1.5" marker-end="url(#tm)"/>
+  <!-- swap summary -->
+  <text x="440" y="232" font-size="11" text-anchor="middle" fill="#1a1a2e" font-weight="700">the relayout = the diff between divisions 2 and 3</text>
+  <text x="440" y="252" font-size="10.5" text-anchor="middle" fill="#6b7280">rows 0&ndash;1: c0 &#8644; c1 swap their off-row halves &nbsp;&bull;&nbsp; rows 2&ndash;3: c2 &#8644; c3 &nbsp;&bull;&nbsp; same cells, new owners, no arithmetic</text>
 </svg>
-<figcaption>The same four tiles, recolored by <em>owner</em>. Tracking a tile's color across the three panels
-shows exactly what the relayout does: <span class="mono">a1</span> and <span class="mono">b1</span> change
-cores; <span class="mono">a0</span>/<span class="mono">b0</span> stay put. No values change.</figcaption>
+<figcaption>One 4&times;4 output matrix, four steps. <strong>(1)</strong> the matmul produces C. <strong>(2)</strong>
+the producer division <code>(m:2,n:2)</code> hands each core a 2&times;2 block. <strong>(3)</strong> the consumer
+division <code>(m:4)</code> wants each core to own a full row. <strong>(4)</strong> the relayout is exactly the
+cells where those two owners disagree — half the matrix, moved core-to-core over the ring.</figcaption>
 </figure>
 
 <h3>How those tiles actually travel: the L3 ring</h3>
@@ -250,8 +287,9 @@ teleport — the source core's <strong>L3SU</strong> (store unit) pushes a 128-b
 travels hop-by-hop to the destination, and the destination core's <strong>L3LU</strong> (load unit) pulls
 it into local LX. Scaled up, the real SwiGLU relayout is a <strong>gather</strong>: each consumer core
 collects its row-stripe from <em>several</em> producer cores sitting at different distances around the ring.
-Below, consumer <span class="mono">c0</span> gathers two tiles — one from a near neighbor
-(<span class="mono">c2</span>) and one from across the ring (<span class="mono">c5</span>).</p>
+Below (drawn at 8 cores to show ring distance), consumer <span class="mono">c0</span> gathers cells from two
+different producer cores — one a near neighbor (<span class="mono">c2</span>) and one across the ring
+(<span class="mono">c5</span>).</p>
 
 <figure>
 <svg viewBox="0 0 880 330" role="img" aria-label="L3 ring with tiles moving between cores">
@@ -284,11 +322,11 @@ Below, consumer <span class="mono">c0</span> gathers two tiles — one from a ne
   </g>
   <!-- transfer 1: c2 -> c0 (near, bows up-right) -->
   <path d="M348,150 Q345,70 268,52" fill="none" stroke="#e8743b" stroke-width="2.6" marker-end="url(#rr)"/>
-  <rect x="372" y="110" width="56" height="20" rx="5" fill="#e8743b"/><text x="400" y="124" font-size="11" font-weight="700" fill="#fff" text-anchor="middle">tile a1</text>
+  <rect x="372" y="110" width="56" height="20" rx="5" fill="#e8743b"/><text x="400" y="124" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">C cells</text>
   <text x="404" y="146" font-size="9.5" fill="#b4521f" text-anchor="middle">c2 send (L3SU)</text>
   <!-- transfer 2: c5 -> c0 (far, bows around the left/top) -->
   <path d="M168,224 Q120,110 232,52" fill="none" stroke="#9c4f96" stroke-width="2.6" marker-end="url(#rp)"/>
-  <rect x="78" y="206" width="58" height="20" rx="5" fill="#9c4f96"/><text x="107" y="220" font-size="11" font-weight="700" fill="#fff" text-anchor="middle">tile x</text>
+  <rect x="78" y="206" width="58" height="20" rx="5" fill="#9c4f96"/><text x="107" y="220" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">C cells</text>
   <text x="96" y="244" font-size="9.5" fill="#7a3a73" text-anchor="middle">c5 send (L3SU)</text>
   <!-- c0 recv tag -->
   <text x="250" y="30" font-size="9.5" fill="#1f5fa0" text-anchor="middle" font-weight="700">c0 recv (L3LU) &times;2</text>
@@ -348,12 +386,12 @@ existing L3 ring path.</p>
 
 <figure>
 <svg viewBox="0 0 880 300" role="img" aria-label="producer to consumer ownership remap">
-  <text x="150" y="22" font-size="12.5" font-weight="700" text-anchor="middle" fill="#3b6ea8">Producer {mb:4, out:8} &mdash; 2-D tiles</text>
-  <text x="720" y="22" font-size="12.5" font-weight="700" text-anchor="middle" fill="#3b6ea8">Consumer {mb:32} &mdash; row-stripes</text>
+  <text x="150" y="22" font-size="12.5" font-weight="700" text-anchor="middle" fill="#3b6ea8">Producer (m:4, n:8) &mdash; 2-D tiles</text>
+  <text x="720" y="22" font-size="12.5" font-weight="700" text-anchor="middle" fill="#3b6ea8">Consumer (m:32) &mdash; row-stripes</text>
   <!-- producer 4x8 grid colored by consumer band -->
   <g stroke="#fff" stroke-width="1">
     <!-- 4 rows (mb) x 8 cols (out); color by mb (which consumer stripe group) -->
-    <!-- row mb0 -->
+    <!-- row m0 -->
     <g>
       <rect x="40" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="68" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="96" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="124" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="152" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="180" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="208" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="236" y="40" width="28" height="22" fill="#3b6ea8"/>
     </g>
@@ -368,7 +406,7 @@ existing L3 ring path.</p>
     </g>
   </g>
   <text x="34" y="55" font-size="9" text-anchor="end" fill="#6b7280">c0,c4&hellip;</text>
-  <text x="152" y="150" font-size="10.5" text-anchor="middle" fill="#6b7280">each row = an mb-band spread over out-tiles on 8 cores</text>
+  <text x="152" y="150" font-size="10.5" text-anchor="middle" fill="#6b7280">each row = an m-band spread over n-slices on 8 cores</text>
 
   <!-- consumer stripes -->
   <g stroke="#fff" stroke-width="1">
@@ -428,8 +466,8 @@ add a new op.</p>
   <g font-size="11.5" text-anchor="middle">
     <rect x="8"   y="40" width="150" height="64" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
     <text x="83" y="64" font-weight="700" fill="#1a1a2e">Work-division</text>
-    <text x="83" y="80" fill="#6b7280">producer {mb:4,out:8}</text>
-    <text x="83" y="94" fill="#6b7280">consumer {mb:32}</text>
+    <text x="83" y="80" fill="#6b7280">producer (m:4, n:8)</text>
+    <text x="83" y="94" fill="#6b7280">consumer (m:32)</text>
 
     <rect x="186" y="40" width="150" height="64" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
     <text x="261" y="60" font-weight="700" fill="#1a1a2e">LX relayout plan</text>
@@ -505,10 +543,10 @@ the HBM round trip the baseline would pay at that edge.</p>
   <text x="620" y="38" font-size="11" text-anchor="middle" fill="#6b7280">engines + memory; relayout on the ring</text>
   <g font-size="11" text-anchor="middle">
     <rect x="500" y="50" width="240" height="26" rx="6" fill="#fbe6da" stroke="#e8743b"/><text x="620" y="67" fill="#b4521f">x + weights in HBM</text>
-    <rect x="500" y="92" width="240" height="32" rx="6" fill="#dde7f5" stroke="#3b6ea8"/><text x="620" y="108" fill="#244e7a" font-weight="700">PT array &mdash; fused gate|up proj</text><text x="620" y="120" fill="#3b6ea8" font-size="9.5">weight-stationary &middot; {mb:4, out:8}</text>
+    <rect x="500" y="92" width="240" height="32" rx="6" fill="#dde7f5" stroke="#3b6ea8"/><text x="620" y="108" fill="#244e7a" font-weight="700">PT array &mdash; fused gate|up proj</text><text x="620" y="120" fill="#3b6ea8" font-size="9.5">weight-stationary &middot; (m:4, n:8)</text>
     <rect x="500" y="138" width="240" height="26" rx="6" fill="#eaf2fb" stroke="#3b6ea8"/><text x="620" y="155" fill="#3b6ea8">LX: producer tiles</text>
     <rect x="500" y="180" width="240" height="34" rx="6" fill="#eaf4ee" stroke="#2e9e5b" stroke-width="1.6"/><text x="620" y="197" fill="#1f7a47" font-weight="700">L3 ring relayout</text><text x="620" y="209" fill="#2e9e5b" font-size="9.5">tiles &#8594; stripes, on-chip (STCDPOpLx)</text>
-    <rect x="500" y="228" width="240" height="26" rx="6" fill="#eaf2fb" stroke="#3b6ea8"/><text x="620" y="245" fill="#3b6ea8">LX: consumer stripes &middot; {mb:32}</text>
+    <rect x="500" y="228" width="240" height="26" rx="6" fill="#eaf2fb" stroke="#3b6ea8"/><text x="620" y="245" fill="#3b6ea8">LX: consumer stripes &middot; (m:32)</text>
     <rect x="500" y="270" width="240" height="32" rx="6" fill="#fbf4e0" stroke="#c9971b"/><text x="620" y="286" fill="#9a7414" font-weight="700">SFP &mdash; SiLU &times; mul</text><text x="620" y="298" fill="#c9971b" font-size="9.5">pure-M, row-local</text>
     <rect x="500" y="316" width="240" height="30" rx="6" fill="#dde7f5" stroke="#3b6ea8"/><text x="620" y="335" fill="#244e7a" font-weight="700">PT array &mdash; down projection</text>
     <rect x="500" y="360" width="240" height="26" rx="6" fill="#fbe6da" stroke="#e8743b"/><text x="620" y="377" fill="#b4521f">out to HBM</text>
@@ -694,7 +732,7 @@ HBM bus and onto the L3 ring, which is not the bottleneck.</div>
 
 <h2>Attention &mdash; same primitive, smaller tensors</h2>
 <p>Attention has the same <strong>matmul&#8594;pointwise&#8594;matmul</strong> shape: <code>QK&#7488;</code>
-(2-D <code>{mb,out}</code>) &#8594; softmax (pure-M <code>{mb:32}</code>) &#8594; <code>probs@V</code> (2-D).
+(2-D <code>(m,n)</code>) &#8594; softmax (pure-M <code>(m:32)</code>) &#8594; <code>probs@V</code> (2-D).
 Both the <strong>QK&#7488;&#8594;softmax</strong> and <strong>softmax&#8594;probs@V</strong> edges are one-to-one
 cross-core ownership changes over the same physical scores/probs sticks — exactly the disjoint relayouts PR1
 covers. The block gains 6 <code>OnChipMoveSTCDPOpLx</code> rows split across MLP and attention; the attention
@@ -731,15 +769,15 @@ fewer bytes — the more conservative case.</p>
   <defs><marker id="arc" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#c9971b"/></marker></defs>
   <rect x="30" y="60" width="150" height="58" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
   <text x="105" y="84" font-size="12" font-weight="700" text-anchor="middle">QK&#7488; matmul</text>
-  <text x="105" y="101" font-size="10.5" text-anchor="middle" fill="#6b7280">{mb,out} &middot; [512,512]</text>
+  <text x="105" y="101" font-size="10.5" text-anchor="middle" fill="#6b7280">(m,n) &middot; [512,512]</text>
 
   <rect x="360" y="60" width="150" height="58" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
   <text x="435" y="84" font-size="12" font-weight="700" text-anchor="middle">softmax</text>
-  <text x="435" y="101" font-size="10.5" text-anchor="middle" fill="#6b7280">pure-M {mb:32}</text>
+  <text x="435" y="101" font-size="10.5" text-anchor="middle" fill="#6b7280">pure-M (m:32)</text>
 
   <rect x="690" y="60" width="160" height="58" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
   <text x="770" y="84" font-size="12" font-weight="700" text-anchor="middle">probs@V matmul</text>
-  <text x="770" y="101" font-size="10.5" text-anchor="middle" fill="#6b7280">{mb,out} &middot; [512,128]</text>
+  <text x="770" y="101" font-size="10.5" text-anchor="middle" fill="#6b7280">(m,n) &middot; [512,128]</text>
 
   <!-- gold edges -->
   <line x1="180" y1="89" x2="358" y2="89" stroke="#c9971b" stroke-width="2.6" marker-end="url(#arc)"/>

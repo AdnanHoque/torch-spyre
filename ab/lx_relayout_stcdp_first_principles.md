@@ -33,12 +33,13 @@ ring/relay cost surfacing. Structurally the full block gains 6 `OnChipMoveSTCDPO
 ## Why — two good layouts, an HBM tax at the boundary
 
 Spyre's 8×8 PT array (the matmul engine) is **weight-stationary**: the weight tile `[K,N]` sits resident in the array and
-tokens (the M dimension) stream past. A matmul keeps the array filled by tiling **N** (output width) and
-**M** (tokens) across the 32 cores — for the fused SwiGLU projection that is `{mb:4, out:8}`, where each
-core owns a `(mb_i, out_j)` **tile** (4 rows × ⅛-width of the fused buffer).
+tokens stream past. Name the three matmul dims **m** (tokens/rows of the output), **n** (output width),
+**k** (the contraction). A division is written `(m:·, n:·, k:·)`. The fused SwiGLU projection splits
+`(m:4, n:8, k:1)` across the 32 cores — m four ways, n eight ways, k not split — so each core owns one
+`(m-band × n-slice)` **tile** of the output (4 rows × ⅛-width of the fused buffer).
 
 The pointwise SiLU+mul chain has no weight and no cross-core dependency; the SFP engines want each core to
-own a contiguous **full-width row-stripe**, so the consumer picks pure-M `{mb:32}` (16 rows × full `2H`
+own a contiguous **full-width row-stripe**, so the consumer picks pure-M `(m:32)` (16 rows × full `2H`
 width per core). Each layout is individually optimal for its engine. The problem is the **handoff**: for
 any physical stick, the producer's owner core (a 2-D tile) and the consumer's owner core (a row-stripe)
 are **different cores**. Same sticks, no arithmetic — only the `PerCoreView` owner changes. The baseline's
@@ -48,12 +49,12 @@ only cross-core path is HBM.
 flowchart LR
   subgraph B["Baseline — HBM round-trip (65.5 MB)"]
     direction LR
-    MM1["Fused projection<br/>matmul · {mb:4,out:8}"] -->|"write 26.2 MB"| H1["HBM"]
-    H1 -->|"read 13.1 MB ×3"| PW1["SiLU + mul<br/>pointwise · {mb:32}"]
+    MM1["Fused projection<br/>matmul · (m:4, n:8)"] -->|"write 26.2 MB"| H1["HBM"]
+    H1 -->|"read 13.1 MB ×3"| PW1["SiLU + mul<br/>pointwise · (m:32)"]
   end
   subgraph A["Relayout — on-chip L3 ring (27.0 MB one-way)"]
     direction LR
-    MM2["Fused projection<br/>{mb:4,out:8}"] -->|"L3 ring LX→LX"| PW2["SiLU + mul<br/>reads local LX"]
+    MM2["Fused projection<br/>(m:4, n:8)"] -->|"L3 ring LX→LX"| PW2["SiLU + mul<br/>reads local LX"]
     H2["HBM (bypassed)"]:::ghost
   end
   classDef ghost fill:#f3f4f6,stroke:#c9ccd2,color:#aeb2ba,stroke-dasharray:4 3;
@@ -86,17 +87,25 @@ carrier-neutral payload; the swap is purely in codegen. The whole feature rides 
 the existing L3 ring path. (For the carrier trade-off vs `coordinate_remap`, see
 `ATTN_ALLGATHER_PR_PLACEMENT.md`.)
 
-The ownership change, concretely — each consumer row-stripe is reassembled from several producer tiles
-that lived on different cores:
+**A toy on one 4×4 matrix.** Let the matmul output `C` be 4 rows (m) × 4 cols (n). The producer
+`(m:2, n:2)` hands each core a 2×2 block (c0 = top-left, c1 = top-right, c2 = bottom-left, c3 = bottom-right)
+— because a matmul core computes a block from its m-band of tokens × its n-slice of weights. The consumer
+`(m:4)` instead wants each core to own a whole **row**. Overlay the two owner maps and the relayout is
+exactly the cells that disagree:
 
-```mermaid
-flowchart LR
-  P0["producer c0,c4…<br/>(mb0 tiles)"] --> C0["consumer c0<br/>(full-width stripe)"]
-  P1["producer c1,c5…<br/>(mb1 tiles)"] --> C1["consumer c1"]
-  P2["producer c2,c6…<br/>(mb2 tiles)"] --> C2["consumer c2"]
+```text
+producer (m:2,n:2)        consumer (m:4)          must move?
+  n0 n1 n2 n3               n0 n1 n2 n3
+m0 c0 c0 c1 c1           m0 c0 c0 c0 c0      m0:  .  .  ←c1 ←c1
+m1 c0 c0 c1 c1           m1 c1 c1 c1 c1      m1: ←c0 ←c0  .  .
+m2 c2 c2 c3 c3           m2 c2 c2 c2 c2      m2:  .  .  ←c3 ←c3
+m3 c2 c2 c3 c3           m3 c3 c3 c3 c3      m3: ←c2 ←c2  .  .
 ```
 
-13,200 stick-movements in 10 chunks — a pure ownership permutation over whole sticks.
+Exactly half the cells change owner: within rows 0–1, c0 ⇄ c1 swap their off-row halves; within rows 2–3,
+c2 ⇄ c3. Same cells, new owners, no arithmetic. Scaled to the real shape that is 13,200 stick-movements in
+10 chunks — a pure ownership permutation over whole sticks, where each consumer row-stripe is reassembled
+from several producer tiles that lived on different cores.
 
 ## How — frontend planner → mixed SDSC → ring nodes
 
@@ -121,7 +130,7 @@ reusing `STCDPOpLx` (`static_cast<STCDPOpLx*>`), not a new op.
 
 ```mermaid
 flowchart LR
-  WD["Work-division<br/>producer {mb:4,out:8}<br/>consumer {mb:32}"] --> PL["LX relayout plan<br/>refinement cells<br/>PR1 disjoint check"]
+  WD["Work-division<br/>producer (m:4, n:8)<br/>consumer (m:32)"] --> PL["LX relayout plan<br/>refinement cells<br/>PR1 disjoint check"]
   PL --> SD["Mixed SDSC<br/>STCDPOpLx rows<br/>LDS HBM→LX · barrier"]
   SD --> DXP["DXP runCodegen<br/>mixed dataop+DL"]
   DXP --> RING["Ring nodes<br/>L3SU send / L3LU recv<br/>RINGDATATRANSFER"]
@@ -180,8 +189,8 @@ block memory-time rise is the ring/relay cost surfacing in the memory bucket. An
 
 ## Attention — same primitive, smaller tensors
 
-Attention has the same **matmul→pointwise→matmul** shape: `QK^T` (2-D `{mb,out}`) → softmax (pure-M
-`{mb:32}`) → `probs@V` (2-D). Both the **QK^T→softmax** and **softmax→probs@V** edges are one-to-one
+Attention has the same **matmul→pointwise→matmul** shape: `QK^T` (2-D `(m,n)`) → softmax (pure-M
+`(m:32)`) → `probs@V` (2-D). Both the **QK^T→softmax** and **softmax→probs@V** edges are one-to-one
 cross-core ownership changes over the same physical scores/probs sticks — exactly the disjoint relayouts
 PR1 covers. The block gains 6 `OnChipMoveSTCDPOpLx` rows split across MLP and attention; the attention
 bucket improves 3.412→2.918 ms (**14.5%, −0.494 ms**).
