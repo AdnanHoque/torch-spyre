@@ -1,17 +1,17 @@
 SDSC Operations Summary - Batch Report
-Directory: /tmp/lx_relayout_pr_swiglu_artifacts_20260622_071914/lx_relayout/inductor-cache/inductor-spyre
+Directory: /tmp/lx_relayout_three_way_profile_20260622_081800/stcdp_enabled/branch-baseline/inductor-cache/inductor-spyre
 Total sdsc.json files found: 9
 
 Operations Summary:
 
 ReStickifyOpHBM      - INPUT (hbm), OUTPUT (hbm)
 batchmatmul          - INPUT (hbm), INPUT (hbm), OUTPUT (lx); INPUT (hbm), INPUT (hbm), OUTPUT (hbm)
-STCDPOpLx            - MOVE (lx->lx), MOVE (lx->lx), MOVE (lx->lx), MOVE (lx->lx), MOVE (lx->lx)
+STCDPOpLx            - MOVE (lx->lx) x10 across two mixed SDSCs
 neg                  - INPUT (lx), OUTPUT (hbm)
 exp                  - INPUT (hbm), OUTPUT (lx)
 add                  - INPUT (lx), INPUT (hbm), OUTPUT (lx)
 realdiv              - INPUT (lx), INPUT (lx), OUTPUT (hbm)
-mul                  - INPUT (hbm), INPUT (hbm), OUTPUT (hbm)
+mul                  - INPUT (hbm), INPUT (lx), OUTPUT (hbm)
 
 Tensor Details:
 
@@ -47,9 +47,14 @@ sdsc_5: realdiv (32 cores)
   - 1_lx: role=INPUT, layout=out,mb; stick=out; stick_size=[64], wkSlice=mb=core_id out=0, address=0x0
   - 2_hbm: role=OUTPUT, layout=out,mb; stick=out; stick_size=[64], wkSlice=mb=core_id out=0, address=0xc80000..0xc8f800 (32 unique)
 
-sdsc_6: mul (32 cores)
+sdsc_6: STCDPOpLx + mul (32 cores)
+  - dataop_0_lx->lx: role=MOVE, coverage=[0, 200, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=124; movements=6200; bytes=12697600; coalesced=6400, wkSlice=[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31], address=src_lx=0x0 dst_lx=0x100000
+  - dataop_1_lx->lx: role=MOVE, coverage=[0, 200, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=112; movements=112; bytes=229376; coalesced=6400, wkSlice=[18,19,22,23,27,28], address=src_lx=0x0 dst_lx=0x100000
+  - dataop_2_lx->lx: role=MOVE, coverage=[0, 200, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=112; movements=112; bytes=229376; coalesced=6400, wkSlice=[18,19,22,23,27,28], address=src_lx=0x0 dst_lx=0x100000
+  - dataop_3_lx->lx: role=MOVE, coverage=[0, 200, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=88; movements=88; bytes=180224; coalesced=6400, wkSlice=[0,27,28,31], address=src_lx=0x0 dst_lx=0x100000
+  - dataop_4_lx->lx: role=MOVE, coverage=[0, 200, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=88; movements=88; bytes=180224; coalesced=6400, wkSlice=[0,27,28,31], address=src_lx=0x0 dst_lx=0x100000
   - 0_hbm: role=INPUT, layout=mb,out; stick=out; stick_size=[64], wkSlice=mb=core_id out=0, address=0xc80000..0xc8f800 (32 unique)
-  - 1_hbm: role=INPUT, layout=mb,out; stick=out; stick_size=[64], wkSlice=mb=core_id out=0, address=0xc806400..0xe03e400 (32 unique)
+  - 1_lx: role=INPUT, layout=mb,out; stick=out; stick_size=[64], wkSlice=mb=core_id out=0, address=0x100000
   - 2_hbm: role=OUTPUT, layout=mb,out; stick=out; stick_size=[64], wkSlice=mb=core_id out=0, address=0x0..0xf800 (32 unique)
 
 sdsc_7: ReStickifyOpHBM (25 cores)

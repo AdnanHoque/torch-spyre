@@ -1,0 +1,13 @@
+{
+  "dsName_" : "sdsc_fused_linear_mul_silu_split_with_sizes_0_pmki81mw",
+  "isMarker_" : 0,
+  "defaultAddr_" : "120259084288",
+  "addrMap_" : [
+  ],
+  "addrMapTag_" : [
+  ],
+  "inputSym_" : [],
+  "addrIdxSym_" : [],
+  "variableDefs_" : {
+  }
+}

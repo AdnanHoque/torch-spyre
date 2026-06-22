@@ -1,0 +1,6 @@
+{
+  "artifact_returncode": 0,
+  "benchmark_returncode": 0,
+  "edge_report_returncode": 0,
+  "profiler_failed_after_runs": false
+}

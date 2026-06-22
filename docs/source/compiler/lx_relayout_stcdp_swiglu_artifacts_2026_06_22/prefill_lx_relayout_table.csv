@@ -19,8 +19,13 @@ add,32,2_lx,OUTPUT,"layout=mb,out; stick=out; stick_size=[64]",0x0,mb=core_id ou
 realdiv,32,0_lx,INPUT,"layout=out,mb; stick=out; stick_size=[64]",0x100000,mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_5
 realdiv,32,1_lx,INPUT,"layout=out,mb; stick=out; stick_size=[64]",0x0,mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_5
 realdiv,32,2_hbm,OUTPUT,"layout=out,mb; stick=out; stick_size=[64]",0xc80000..0xc8f800 (32 unique),mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_5
+STCDPOpLx,32,dataop_0_lx->lx,MOVE,"coverage=[0, 200, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=124; movements=6200; bytes=12697600; coalesced=6400",src_lx=0x0 dst_lx=0x100000,"[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]","4 schedules; core 0 [[0,-1,0,1],[3,-1,1,1],[4,-1,1,1],[-1,0,1,0]]",sdsc_6
+STCDPOpLx,6,dataop_1_lx->lx,MOVE,"coverage=[0, 200, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=112; movements=112; bytes=229376; coalesced=6400",src_lx=0x0 dst_lx=0x100000,"[18,19,22,23,27,28]","4 schedules; core 0 [[0,-1,0,1],[3,-1,1,1],[4,-1,1,1],[-1,0,1,0]]",sdsc_6
+STCDPOpLx,6,dataop_2_lx->lx,MOVE,"coverage=[0, 200, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=112; movements=112; bytes=229376; coalesced=6400",src_lx=0x0 dst_lx=0x100000,"[18,19,22,23,27,28]","4 schedules; core 0 [[0,-1,0,1],[3,-1,1,1],[4,-1,1,1],[-1,0,1,0]]",sdsc_6
+STCDPOpLx,4,dataop_3_lx->lx,MOVE,"coverage=[0, 200, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=88; movements=88; bytes=180224; coalesced=6400",src_lx=0x0 dst_lx=0x100000,"[0,27,28,31]","4 schedules; core 0 [[0,-1,0,1],[3,-1,1,1],[4,-1,1,1],[-1,0,1,0]]",sdsc_6
+STCDPOpLx,4,dataop_4_lx->lx,MOVE,"coverage=[0, 200, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=88; movements=88; bytes=180224; coalesced=6400",src_lx=0x0 dst_lx=0x100000,"[0,27,28,31]","4 schedules; core 0 [[0,-1,0,1],[3,-1,1,1],[4,-1,1,1],[-1,0,1,0]]",sdsc_6
 mul,32,0_hbm,INPUT,"layout=mb,out; stick=out; stick_size=[64]",0xc80000..0xc8f800 (32 unique),mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_6
-mul,32,1_hbm,INPUT,"layout=mb,out; stick=out; stick_size=[64]",0xc806400..0xe03e400 (32 unique),mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_6
+mul,32,1_lx,INPUT,"layout=mb,out; stick=out; stick_size=[64]",0x100000,mb=core_id out=0,"4 schedules; core 0 [[0,-1,0,1],[3,-1,1,1],[4,-1,1,1],[-1,0,1,0]]",sdsc_6
 mul,32,2_hbm,OUTPUT,"layout=mb,out; stick=out; stick_size=[64]",0x0..0xf800 (32 unique),mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_6
 ReStickifyOpHBM,25,0_hbm,INPUT,"layout=mb,out; stick=out; stick_size=[64]",0x1000000000..0x1006000000 (25 unique),mb=0 out=core_id,"all [[-1,0,0,0]]",sdsc_7
 ReStickifyOpHBM,25,1_hbm,OUTPUT,"layout=mb,out; stick=out; stick_size=[64]",0x1900000..0x1a80000 (25 unique),mb=0 out=core_id,"all [[-1,0,0,0]]",sdsc_7

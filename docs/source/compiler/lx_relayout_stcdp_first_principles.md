@@ -28,7 +28,7 @@ both kernel time and wall time:
 | Granite causal prefill block | `16.333 ms` | `13.838 ms` | `15.3%` | `23.062 ms` | `20.490 ms` | `11.2%` |
 | Granite attention kernel within that block | `3.412 ms/iter` | `2.918 ms/iter` | `14.5%` | included above | included above | included above |
 | Granite MLP/SwiGLU kernel within that block | `11.025 ms/iter` | `9.021 ms/iter` | `18.2%` | included above | included above | included above |
-| Standalone fused FMS SwiGLU `[1,512,4096]` | `12.561 ms` | `10.179 ms` | `19.0%` | `13.146 ms` | `10.650 ms` | `19.0%` |
+| Standalone fused FMS SwiGLU `[1,512,4096]` | `16.153 ms` | `13.174 ms` | `18.4%` | `19.600 ms` | `15.717 ms` | `19.8%` |
 
 The structural evidence agrees with the timings:
 
@@ -352,11 +352,12 @@ combination:
 | Evidence | Baseline | After |
 | --- | ---: | ---: |
 | `STCDPOpLx` / `OnChipMoveSTCDPOpLx` rows | `0` | `2` |
+| `STCDPOpLx` data-op chunks | `0` | `10` |
 | `ReStickifyOpHBM` rows | `2` | `2` |
 | Separate `neg` rows in the simple op counter | `1` | `0` |
 | Separate `mul` rows in the simple op counter | `1` | `0` |
-| Fused SwiGLU kernel time | `12.561 ms` | `10.179 ms` |
-| Fused SwiGLU wall time | `13.146 ms` | `10.650 ms` |
+| Fused SwiGLU kernel time | `16.153 ms` | `13.174 ms` |
+| Fused SwiGLU wall time | `19.600 ms` | `15.717 ms` |
 
 The HBM restickifies did not all disappear because this pass does not solve
 preloaded weights or every down-projection handoff. The win comes from removing
@@ -450,21 +451,25 @@ The main rerun discussed here used:
 | Component | Value |
 | --- | --- |
 | Torch artifact branch | `lx-relayout-stcdp-range-proto` |
-| Torch artifact SHA | `9079b5eb0e05bfa037f7fb11b3051ffe414fceca` |
+| Torch artifact SHA | `be0da06` plus fixed production branch artifact update |
 | Production-shaped branch | `pr-lx-planner-relayout-extension` |
+| Production-shaped branch SHA used for fixed SwiGLU rerun | `0f9bbcb682c80d9de9a1c2708a3b336b50f6868c` |
 | Deeptools STCDPOpLx prototype SHA | `29254c37d3f2ee5c96a7323fdfd701026b63546c` |
 | Deeptools patch location | `third_party/deeptools/patches/lx-relayout-stcdp-range-deeptools.patch` |
 | Granite benchmark artifacts | `/tmp/lx_relayout_artifact_perf_rerun_20260621_232751` |
-| Earlier fused FMS before/after artifact used for comparison | `/tmp/fms_empty_fused_prefill_branch_compare_relayfix_20260620_191114` |
+| Fixed fused FMS three-way profiler artifact | `/tmp/lx_relayout_three_way_profile_20260622_081800` |
 | Perf-suite branch used in earlier runs | `jamie/dev` at `d73ea9b9d653f28c4391184eaf84e45e3b6fdfb5` |
 
-The standalone fused FMS SwiGLU rerun used a direct device-resident probe with
-SDPA pattern generation disabled because the artifact branch hit an unrelated
-FakeTensor device-copy path during Inductor SDPA pattern initialization. The
-relative win matched the prior perf-suite result, but the absolute standalone
-SwiGLU numbers should not be mixed with older wrapper-based absolute numbers
-without that caveat. The Granite block result is the stronger system-level
-evidence.
+The fixed-branch Jamie-style tables, profiler summaries, raw compact run
+artifacts, and three-way comparison table are archived in
+[`lx_relayout_stcdp_swiglu_artifacts_2026_06_22/source_artifacts.md`](lx_relayout_stcdp_swiglu_artifacts_2026_06_22/source_artifacts.md).
+
+The latest standalone fused FMS SwiGLU rerun used the profiler-enabled path from
+`spyre-granite-e2e-bench`, device-resident empty weights, and the same
+Deeptools STCDPOpLx build for the upstream-main and STCDPOpLx lanes. The
+coordinate-remap reference branch measured `13.145 ms/iter`, so the fixed
+STCDPOpLx branch is within `0.22%` of the earlier coordinate-remap kernel-time
+result while preserving the lower-friction STCDPOpLx carrier design.
 
 ## PR1 Scope
 

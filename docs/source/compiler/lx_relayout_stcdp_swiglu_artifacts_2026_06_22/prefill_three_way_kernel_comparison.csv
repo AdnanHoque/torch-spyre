@@ -1,0 +1,5 @@
+variant,torch_sha,deeptools_sha,kernel_ms_per_iter,kernel_speedup_vs_upstream_main_pct,wall_mean_ms,wall_median_ms,memory_ms_per_iter,status,artifact_dir
+upstream_main_baseline,c6b357a,29254c37d3,16.153035,0.00,19.600,17.544,0.246932,pass,latest_profile_fixed_branch/upstream_main_current/branch-baseline
+stcdp_disabled_control,0f9bbcb,29254c37d3,16.306749,-0.95,20.055,17.841,0.269957,pass,latest_profile_fixed_branch/stcdp_disabled/branch-baseline
+stcdp_lx_relayout_fixed,0f9bbcb,29254c37d3,13.174297,18.44,15.717,14.844,0.255713,pass,latest_profile_fixed_branch/stcdp_enabled/branch-baseline
+coordinate_remap_reference,b9b8f30f,83f9320cd6,13.145061,18.62,22.994,22.274,0.287262,pass,latest_profile_fixed_branch/coordinate_remap_enabled/branch-baseline

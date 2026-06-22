@@ -1,5 +1,5 @@
 SDSC Operations Summary - Batch Report
-Directory: /tmp/lx_relayout_pr_swiglu_artifacts_20260622_071914/baseline/inductor-cache/inductor-spyre
+Directory: /tmp/lx_relayout_three_way_profile_20260622_081800/upstream_main_current/branch-baseline/inductor-cache/inductor-spyre
 Total sdsc.json files found: 9
 
 Operations Summary:
