@@ -57,3 +57,4 @@ test coverage, bug classification), see :doc:`/contributing/op_enablement`.
    coarse_tiling_loops
    work_division_planning
    scratchpad_planning
+   lx_relayout_stcdp_first_principles
