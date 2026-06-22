@@ -1,0 +1,29 @@
+Op,cores,alloc_tensor {i}_{loc},Role,Layout* extent/wkSlices,Address,coreIdToWkSlice,schedule,json files
+ReStickifyOpHBM,25,0_hbm,INPUT,"layout=mb,out; stick=out; stick_size=[64]",0x400000000..0x400300000 (25 unique),mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_0
+ReStickifyOpHBM,25,1_hbm,OUTPUT,"layout=mb,out; stick=out; stick_size=[64]",0x0..0xc000000 (25 unique),mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_0
+batchmatmul,32,0_hbm,INPUT,"layout=in,mb; stick=in; stick_size=[64]",0x800000000..0x800300000 (4 unique),in=0 mb=0:3 (4 unique) out=0:7 (8 unique),"all [[-1,0,0,0]]",sdsc_1
+batchmatmul,32,1_hbm,INPUT,"layout=in,mb; stick=in; stick_size=[64]",0x0..0xaf00000 (8 unique),in=0 mb=0:3 (4 unique) out=0:7 (8 unique),"all [[-1,0,0,0]]",sdsc_1
+batchmatmul,32,2_lx,OUTPUT,"layout=out,mb; stick=out; stick_size=[64]",0x0,in=0 mb=0:3 (4 unique) out=0:7 (8 unique),"all [[-1,0,0,0]]",sdsc_1
+STCDPOpLx,32,dataop_0_lx->lx,MOVE,"coverage=[0, 0, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=124; movements=6200; bytes=12697600; coalesced=6400",src_lx=0x0 dst_lx=0x100000,"[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]","4 schedules; core 0 [[0,-1,0,1],[1,-1,1,1],[2,-1,1,1],[-1,0,1,0]]",sdsc_2
+STCDPOpLx,6,dataop_1_lx->lx,MOVE,"coverage=[0, 0, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=112; movements=112; bytes=229376; coalesced=6400",src_lx=0x0 dst_lx=0x100000,"[0,1,4,5,9,10]","4 schedules; core 0 [[0,-1,0,1],[1,-1,1,1],[2,-1,1,1],[-1,0,1,0]]",sdsc_2
+STCDPOpLx,6,dataop_2_lx->lx,MOVE,"coverage=[0, 0, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=112; movements=112; bytes=229376; coalesced=6400",src_lx=0x0 dst_lx=0x100000,"[0,1,4,5,9,10]","4 schedules; core 0 [[0,-1,0,1],[1,-1,1,1],[2,-1,1,1],[-1,0,1,0]]",sdsc_2
+STCDPOpLx,4,dataop_3_lx->lx,MOVE,"coverage=[0, 0, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=88; movements=88; bytes=180224; coalesced=6400",src_lx=0x0 dst_lx=0x100000,"[9,10,13,14]","4 schedules; core 0 [[0,-1,0,1],[1,-1,1,1],[2,-1,1,1],[-1,0,1,0]]",sdsc_2
+STCDPOpLx,4,dataop_4_lx->lx,MOVE,"coverage=[0, 0, 0, 0]+[512, 200, 1, 64] of [512, 400, 1, 64]; ranges=88; movements=88; bytes=180224; coalesced=6400",src_lx=0x0 dst_lx=0x100000,"[9,10,13,14]","4 schedules; core 0 [[0,-1,0,1],[1,-1,1,1],[2,-1,1,1],[-1,0,1,0]]",sdsc_2
+neg,32,0_lx,INPUT,"layout=out,mb; stick=out; stick_size=[64]",0x100000,mb=core_id out=0,"4 schedules; core 0 [[0,-1,0,1],[1,-1,1,1],[2,-1,1,1],[-1,0,1,0]]",sdsc_2
+neg,32,1_hbm,OUTPUT,"layout=out,mb; stick=out; stick_size=[64]",0x0..0xf800 (32 unique),mb=core_id out=0,"4 schedules; core 0 [[0,-1,0,1],[1,-1,1,1],[2,-1,1,1],[-1,0,1,0]]",sdsc_2
+exp,32,0_hbm,INPUT,"layout=mb,out; stick=out; stick_size=[64]",0x0..0xf800 (32 unique),mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_3
+exp,32,1_lx,OUTPUT,"layout=mb,out; stick=out; stick_size=[64]",0x0,mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_3
+add,32,0_lx,INPUT,"layout=mb,out; stick=out; stick_size=[64]",0x0,mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_4
+add,32,1_hbm,INPUT,"layout=mb,out; stick=out; stick_size=[64]",0xc00000000,mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_4
+add,32,2_lx,OUTPUT,"layout=mb,out; stick=out; stick_size=[64]",0x0,mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_4
+realdiv,32,0_lx,INPUT,"layout=out,mb; stick=out; stick_size=[64]",0x100000,mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_5
+realdiv,32,1_lx,INPUT,"layout=out,mb; stick=out; stick_size=[64]",0x0,mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_5
+realdiv,32,2_hbm,OUTPUT,"layout=out,mb; stick=out; stick_size=[64]",0xc80000..0xc8f800 (32 unique),mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_5
+mul,32,0_hbm,INPUT,"layout=mb,out; stick=out; stick_size=[64]",0xc80000..0xc8f800 (32 unique),mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_6
+mul,32,1_hbm,INPUT,"layout=mb,out; stick=out; stick_size=[64]",0xc806400..0xe03e400 (32 unique),mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_6
+mul,32,2_hbm,OUTPUT,"layout=mb,out; stick=out; stick_size=[64]",0x0..0xf800 (32 unique),mb=core_id out=0,"all [[-1,0,0,0]]",sdsc_6
+ReStickifyOpHBM,25,0_hbm,INPUT,"layout=mb,out; stick=out; stick_size=[64]",0x1000000000..0x1006000000 (25 unique),mb=0 out=core_id,"all [[-1,0,0,0]]",sdsc_7
+ReStickifyOpHBM,25,1_hbm,OUTPUT,"layout=mb,out; stick=out; stick_size=[64]",0x1900000..0x1a80000 (25 unique),mb=0 out=core_id,"all [[-1,0,0,0]]",sdsc_7
+batchmatmul,32,0_hbm,INPUT,"layout=mb,in; stick=in; stick_size=[64]",0x0..0xc000 (4 unique),in=0 mb=0:3 (4 unique) out=0:7 (8 unique),"all [[-1,0,0,0]]",sdsc_8
+batchmatmul,32,1_hbm,INPUT,"layout=mb,in; stick=in; stick_size=[64]",0x1900000..0x7080000 (8 unique),in=0 mb=0:3 (4 unique) out=0:7 (8 unique),"all [[-1,0,0,0]]",sdsc_8
+batchmatmul,32,2_hbm,OUTPUT,"layout=out,mb; stick=out; stick_size=[64]",0x1400000000..0x1400301c00 (32 unique),in=0 mb=0:3 (4 unique) out=0:7 (8 unique),"all [[-1,0,0,0]]",sdsc_8

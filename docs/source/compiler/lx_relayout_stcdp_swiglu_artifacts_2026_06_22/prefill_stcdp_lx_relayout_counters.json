@@ -1,0 +1,261 @@
+{
+  "baseline_sdsc_dir": "/tmp/lx_relayout_pr_swiglu_artifacts_20260622_071914/baseline/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_f3vs0bah",
+  "baseline_summary": {
+    "loc_counts": {
+      "hbm+lx": 19,
+      "lx": 4
+    },
+    "op_counts": {
+      "ReStickifyOpHBM": 4,
+      "add": 1,
+      "batchmatmul": 2,
+      "exp": 1,
+      "mul": 1,
+      "neg": 1,
+      "realdiv": 1
+    },
+    "remap_bytes": 0,
+    "remap_chunks": 0,
+    "remap_movements": 0,
+    "row_count": 23,
+    "sdsc_count": 9,
+    "sdsc_with_dataops": 0
+  },
+  "lx_relayout_sdsc_dir": "/tmp/lx_relayout_pr_swiglu_artifacts_20260622_071914/lx_relayout/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_xfzzrp9y",
+  "lx_relayout_summary": {
+    "loc_counts": {
+      "hbm+lx": 16,
+      "lx": 7,
+      "lx->lx": 5
+    },
+    "op_counts": {
+      "ReStickifyOpHBM": 4,
+      "STCDPOpLx": 5,
+      "add": 1,
+      "batchmatmul": 2,
+      "exp": 1,
+      "mul": 1,
+      "neg": 1,
+      "realdiv": 1
+    },
+    "remap_bytes": 0,
+    "remap_chunks": 0,
+    "remap_movements": 0,
+    "row_count": 28,
+    "sdsc_count": 9,
+    "sdsc_with_dataops": 1
+  },
+  "run_dir": "/tmp/lx_relayout_pr_swiglu_artifacts_20260622_071914",
+  "stcdp": {
+    "bytes_moved": 13516800,
+    "chunks": [
+      {
+        "bytes_moved": 12697600,
+        "coalesced_movements": 6400,
+        "consumer": "buf1",
+        "consumer_lx_base": 1048576,
+        "coverage": {
+          "device_sizes": [
+            512,
+            400,
+            1,
+            64
+          ],
+          "status": "complete",
+          "subview": {
+            "sizes": [
+              512,
+              200,
+              1,
+              64
+            ],
+            "starts": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "expanded_movements": 6200,
+        "movement_ranges": 124,
+        "movement_ranges_lowering": 124,
+        "name": "1_LXRelayoutSTCDPOpLx_0",
+        "producer": "buf0",
+        "producer_lx_base": 0,
+        "range_encoded": true,
+        "sdsc_file": "sdsc_2.json",
+        "source_movements": 102400,
+        "source_name": "buf0",
+        "strategy": "explicit_lx_copy_via_l3"
+      },
+      {
+        "bytes_moved": 229376,
+        "coalesced_movements": 6400,
+        "consumer": "buf1",
+        "consumer_lx_base": 1048576,
+        "coverage": {
+          "device_sizes": [
+            512,
+            400,
+            1,
+            64
+          ],
+          "status": "complete",
+          "subview": {
+            "sizes": [
+              512,
+              200,
+              1,
+              64
+            ],
+            "starts": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "expanded_movements": 112,
+        "movement_ranges": 112,
+        "movement_ranges_lowering": 112,
+        "name": "1_LXRelayoutSTCDPOpLx_1",
+        "producer": "buf0",
+        "producer_lx_base": 0,
+        "range_encoded": true,
+        "sdsc_file": "sdsc_2.json",
+        "source_movements": 102400,
+        "source_name": "buf0",
+        "strategy": "explicit_lx_copy_via_l3"
+      },
+      {
+        "bytes_moved": 229376,
+        "coalesced_movements": 6400,
+        "consumer": "buf1",
+        "consumer_lx_base": 1048576,
+        "coverage": {
+          "device_sizes": [
+            512,
+            400,
+            1,
+            64
+          ],
+          "status": "complete",
+          "subview": {
+            "sizes": [
+              512,
+              200,
+              1,
+              64
+            ],
+            "starts": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "expanded_movements": 112,
+        "movement_ranges": 112,
+        "movement_ranges_lowering": 112,
+        "name": "1_LXRelayoutSTCDPOpLx_2",
+        "producer": "buf0",
+        "producer_lx_base": 0,
+        "range_encoded": true,
+        "sdsc_file": "sdsc_2.json",
+        "source_movements": 102400,
+        "source_name": "buf0",
+        "strategy": "explicit_lx_copy_via_l3"
+      },
+      {
+        "bytes_moved": 180224,
+        "coalesced_movements": 6400,
+        "consumer": "buf1",
+        "consumer_lx_base": 1048576,
+        "coverage": {
+          "device_sizes": [
+            512,
+            400,
+            1,
+            64
+          ],
+          "status": "complete",
+          "subview": {
+            "sizes": [
+              512,
+              200,
+              1,
+              64
+            ],
+            "starts": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "expanded_movements": 88,
+        "movement_ranges": 88,
+        "movement_ranges_lowering": 88,
+        "name": "1_LXRelayoutSTCDPOpLx_3",
+        "producer": "buf0",
+        "producer_lx_base": 0,
+        "range_encoded": true,
+        "sdsc_file": "sdsc_2.json",
+        "source_movements": 102400,
+        "source_name": "buf0",
+        "strategy": "explicit_lx_copy_via_l3"
+      },
+      {
+        "bytes_moved": 180224,
+        "coalesced_movements": 6400,
+        "consumer": "buf1",
+        "consumer_lx_base": 1048576,
+        "coverage": {
+          "device_sizes": [
+            512,
+            400,
+            1,
+            64
+          ],
+          "status": "complete",
+          "subview": {
+            "sizes": [
+              512,
+              200,
+              1,
+              64
+            ],
+            "starts": [
+              0,
+              0,
+              0,
+              0
+            ]
+          }
+        },
+        "expanded_movements": 88,
+        "movement_ranges": 88,
+        "movement_ranges_lowering": 88,
+        "name": "1_LXRelayoutSTCDPOpLx_4",
+        "producer": "buf0",
+        "producer_lx_base": 0,
+        "range_encoded": true,
+        "sdsc_file": "sdsc_2.json",
+        "source_movements": 102400,
+        "source_name": "buf0",
+        "strategy": "explicit_lx_copy_via_l3"
+      }
+    ],
+    "expanded_movements": 6600,
+    "mixed_sdsc_count": 1,
+    "movement_ranges": 524,
+    "sdsc_files": [
+      "sdsc_2.json"
+    ],
+    "stcdp_chunks": 5
+  }
+}

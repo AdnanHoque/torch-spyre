@@ -1,0 +1,30 @@
+metric                      max_ms       mean_ms     median_ms        min_ms
+----------------------------------------------------------------------------
+wall_clock_ms               21.050        17.065        17.065        13.081
+cpu_ms                       6.084         6.084         6.084         6.084
+spyre_ms                     0.000         0.000         0.000         0.000
+kernel_ms                    0.000         0.000         0.000         0.000
+memory_transfer_ms           0.000         0.000         0.000         0.000
+pt_util%                     0.000
+
+Spyre-kernel_times:          mean_ms      PT-Util%
+---------------------------------------------------
+Total                          0.000         0.000
+
+CPU-kernel_times:                                                   mean_ms
+----------------------------------------------------------------------------
+aten::to                                                              1.462
+aten::_to_copy                                                        1.947
+aten::empty_strided                                                   0.009
+aten::copy_                                                           1.931
+aten::_copy_from                                                      1.928
+TorchDynamo-Cache-Lookup                                              0.041
+Torch-Compiled-Region:-0/0                                            0.280
+Pregraph-bytecode                                                     0.004
+AOTDispatcher-Runtime-Wrapper-Prologue                                0.011
+##-Call-CompiledFxGraph-None-##                                       0.202
+aten::empty                                                           0.005
+aten::lift_fresh                                                      0.000
+aten::detach_                                                         0.002
+detach_                                                               0.001
+launch_kernel:sdsc_fused_linear_mul_silu_split_with_sizes_0           0.038
