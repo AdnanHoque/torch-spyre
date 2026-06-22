@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LX Relayout (STCDPOpLx) — First Principles</title>
+<style>
+  :root{
+    --bg:#fbfbfd; --ink:#1a1a2e; --muted:#6b7280; --line:#e2e5ea;
+    --hbm:#e8743b; --ring:#2e9e5b; --fe:#3b6ea8; --be:#2a9d8f; --gold:#c9971b;
+    --card:#ffffff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:920px;margin:0 auto;padding:48px 24px 96px;}
+  h1{font-size:34px;line-height:1.15;margin:0 0 6px;letter-spacing:-.5px;}
+  h2{font-size:24px;margin:54px 0 4px;letter-spacing:-.3px;padding-top:12px;border-top:1px solid var(--line);}
+  h3{font-size:18px;margin:30px 0 4px;}
+  .sub{color:var(--muted);font-size:17px;margin:0 0 8px;}
+  .kicker{font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--fe);margin:0 0 10px;}
+  p{margin:14px 0;}
+  code{background:#f1f3f6;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:13.5px;
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;}
+  .lead{font-size:18px;}
+  table{border-collapse:collapse;width:100%;margin:20px 0;font-size:14.5px;}
+  th,td{border:1px solid var(--line);padding:8px 11px;text-align:left;}
+  th{background:#f3f5f8;font-weight:650;}
+  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;}
+  .win{color:var(--ring);font-weight:700;}
+  figure{margin:26px 0;background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:18px 18px 12px;box-shadow:0 1px 2px rgba(20,20,50,.04);}
+  figure svg{display:block;width:100%;height:auto;}
+  figcaption{color:var(--muted);font-size:13.5px;margin-top:10px;text-align:center;}
+  .callout{background:#f4f9f5;border:1px solid #cfe9d6;border-left:4px solid var(--ring);
+    border-radius:8px;padding:12px 16px;margin:18px 0;font-size:15px;}
+  .warn{background:#fdf6ef;border-color:#f3ddc4;border-left-color:var(--hbm);}
+  .eq{background:#0f172a;color:#e6edf6;border-radius:8px;padding:12px 16px;margin:16px 0;overflow-x:auto;
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:13.5px;line-height:1.7;}
+  .eq .c{color:#7fd6a8;} .eq .o{color:#f0a86b;} .eq .m{color:#8fb6e8;}
+  .tag{display:inline-block;font-size:11.5px;font-weight:700;letter-spacing:.04em;border-radius:5px;
+    padding:2px 7px;vertical-align:middle;}
+  .tag.fe{background:#e7eff8;color:var(--fe);} .tag.be{background:#e3f4f1;color:var(--be);}
+  .meta{color:var(--muted);font-size:13px;border-top:1px solid var(--line);margin-top:48px;padding-top:16px;}
+  svg text{font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .mono{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="kicker">Spyre AIU &middot; Inductor compiler &middot; core-to-core data movement</p>
+<h1>Trading an HBM round&#8209;trip for an on&#8209;chip ring move</h1>
+<p class="sub">The LX relayout pass: keep both good work-splits, move ownership on chip over the L3 ring via a range-encoded <code>STCDPOpLx</code> carrier — and the math for why it wins.</p>
+
+<p class="lead">On Spyre, a producer matmul and the pointwise op that consumes it usually want
+<strong>different per-core ownership of the same physical LX sticks</strong>. The baseline reconciles
+that mismatch the only way it can move data between arbitrary cores: it bounces the activation through
+HBM — the producer writes it out, the consumer reads it back. The <strong>LX relayout pass</strong>
+detects the ownership mismatch in Inductor and inserts an <strong>on-chip LX&#8594;LX movement over the
+L3 ring</strong>, so the consumer reads from local LX and the HBM round-trip disappears. The data rides
+the <em>existing</em> <code>STCDPOpLx</code> op through a range-encoded payload — no new deeptools op
+class is introduced.</p>
+
+<table>
+  <thead><tr><th>Workload</th><th class="n">Baseline</th><th class="n">Relayout</th><th class="n">Kernel win</th></tr></thead>
+  <tbody>
+    <tr><td>Granite causal prefill <strong>block</strong></td><td class="n">16.333 ms</td><td class="n">13.838 ms</td><td class="n win">15.3% &nbsp;(&minus;2.495)</td></tr>
+    <tr><td>&#8627; Attention kernel in block</td><td class="n">3.412 ms</td><td class="n">2.918 ms</td><td class="n win">14.5% &nbsp;(&minus;0.494)</td></tr>
+    <tr><td>&#8627; MLP / SwiGLU kernel in block</td><td class="n">11.025 ms</td><td class="n">9.021 ms</td><td class="n win">18.2% &nbsp;(&minus;2.004)</td></tr>
+    <tr><td>Standalone fused FMS SwiGLU <span class="mono">[1,512,4096]</span></td><td class="n">12.561 ms</td><td class="n">10.179 ms</td><td class="n win">19.0% &nbsp;(&minus;2.382)</td></tr>
+  </tbody>
+</table>
+<p style="font-size:14px;color:var(--muted);margin-top:-6px">Block <strong>wall</strong> time also drops 23.062&#8594;20.490 ms (11.2%). Memory time rises 0.220&#8594;0.286 ms (+0.066) — the ring/relay cost surfacing. Structurally the full block gains 6 <code>OnChipMoveSTCDPOpLx</code> rows, drops <code>ReStickifyOpHBM</code> 5&#8594;4, <code>neg</code> 1&#8594;0, <code>mul</code> 13&#8594;10.</p>
+
+
+<h2>Why &mdash; two good layouts, an HBM tax at the boundary</h2>
+<p>Spyre's 8&times;8 MPE array is <strong>weight-stationary</strong>: the weight tile <span class="mono">[K,N]</span>
+sits resident in the array and tokens (the M dimension) stream past it. A matmul keeps the array filled by
+tiling the <strong>N</strong> (output width) and <strong>M</strong> (tokens) dims across the 32 cores. For
+the fused SwiGLU projection that is a 2-D split <code>{mb:4, out:8}</code> &#8594; 32 cores, where each core
+owns a <span class="mono">(mb&#7522;, out&#11388;)</span> <strong>tile</strong>: 4 rows &times; &#8539;-width of
+the fused buffer.</p>
+<p>The pointwise SiLU+mul chain that consumes it has no weight and no cross-core dependency. The SFP engines
+are happiest when each core owns a <strong>contiguous full-width row-stripe</strong>, so the consumer picks a
+pure-M split <code>{mb:32}</code> — 16 rows &times; full <span class="mono">2H</span> width per core. Each
+layout is individually optimal for its engine.</p>
+<p>The problem is the <strong>handoff</strong>. For any given physical stick, the producer's owner core (a
+2-D tile) and the consumer's owner core (a row-stripe) are <strong>different cores</strong>. Same sticks, no
+arithmetic — only the <code>PerCoreView</code> owner changes. The baseline's only cross-core path is through
+HBM: the producer restickifies and writes the whole <span class="mono">2H</span>-wide fused buffer to HBM and
+the consumer reads its halves back. For <span class="mono">[1,512,4096]</span> that is a 26.214 MB write plus
+three 13.107 MB half-reads = <strong style="color:var(--hbm)">65.536 MB of HBM round-trip traffic that exists
+purely to re-shuffle ownership.</strong></p>
+
+<figure>
+<svg viewBox="0 0 880 360" role="img" aria-label="MLP SwiGLU before and after">
+  <!-- BASELINE -->
+  <text x="14" y="22" font-size="13" font-weight="700" fill="#e8743b">BASELINE &mdash; HBM round-trip</text>
+  <!-- producer -->
+  <rect x="14" y="36" width="150" height="92" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
+  <text x="89" y="60" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">Fused projection</text>
+  <text x="89" y="76" font-size="11" text-anchor="middle" fill="#6b7280">matmul &middot; {mb:4,out:8}</text>
+  <g>
+    <!-- 4x8 tiles -->
+    <g fill="#9bb8d8" stroke="#3b6ea8" stroke-width=".5">
+    <rect x="26"  y="86" width="16" height="9"/><rect x="44" y="86" width="16" height="9"/><rect x="62" y="86" width="16" height="9"/><rect x="80" y="86" width="16" height="9"/><rect x="98" y="86" width="16" height="9"/><rect x="116" y="86" width="16" height="9"/><rect x="134" y="86" width="16" height="9"/>
+    <rect x="26"  y="97" width="16" height="9"/><rect x="44" y="97" width="16" height="9"/><rect x="62" y="97" width="16" height="9"/><rect x="80" y="97" width="16" height="9"/><rect x="98" y="97" width="16" height="9"/><rect x="116" y="97" width="16" height="9"/><rect x="134" y="97" width="16" height="9"/>
+    <rect x="26"  y="108" width="16" height="9"/><rect x="44" y="108" width="16" height="9"/><rect x="62" y="108" width="16" height="9"/><rect x="80" y="108" width="16" height="9"/><rect x="98" y="108" width="16" height="9"/><rect x="116" y="108" width="16" height="9"/><rect x="134" y="108" width="16" height="9"/>
+    </g>
+  </g>
+  <!-- HBM bar -->
+  <rect x="360" y="40" width="170" height="84" rx="7" fill="#fbe6da" stroke="#e8743b"/>
+  <text x="445" y="68" font-size="13" font-weight="700" text-anchor="middle" fill="#e8743b">HBM</text>
+  <text x="445" y="86" font-size="11" text-anchor="middle" fill="#b4521f">write 26.2 MB</text>
+  <text x="445" y="101" font-size="11" text-anchor="middle" fill="#b4521f">read 13.1 MB &times;3</text>
+  <!-- consumer -->
+  <rect x="716" y="36" width="150" height="92" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
+  <text x="791" y="60" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">SiLU + mul</text>
+  <text x="791" y="76" font-size="11" text-anchor="middle" fill="#6b7280">pointwise &middot; {mb:32}</text>
+  <g fill="#9bb8d8" stroke="#3b6ea8" stroke-width=".5">
+    <rect x="726" y="86" width="130" height="6"/><rect x="726" y="94" width="130" height="6"/><rect x="726" y="102" width="130" height="6"/><rect x="726" y="110" width="130" height="6"/>
+  </g>
+  <!-- arrows baseline -->
+  <defs>
+    <marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#e8743b"/></marker>
+    <marker id="arg" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#2e9e5b"/></marker>
+  </defs>
+  <line x1="164" y1="82" x2="358" y2="82" stroke="#e8743b" stroke-width="2.4" marker-end="url(#ar)"/>
+  <line x1="530" y1="82" x2="714" y2="82" stroke="#e8743b" stroke-width="2.4" marker-end="url(#ar)"/>
+  <text x="445" y="150" font-size="12" font-weight="700" text-anchor="middle" fill="#e8743b">65.5 MB HBM round-trip &middot; just to re-shuffle ownership</text>
+
+  <line x1="14" y1="182" x2="866" y2="182" stroke="#e2e5ea"/>
+
+  <!-- RELAYOUT -->
+  <text x="14" y="212" font-size="13" font-weight="700" fill="#2e9e5b">RELAYOUT &mdash; on-chip L3 ring</text>
+  <rect x="14" y="226" width="150" height="92" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
+  <text x="89" y="250" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">Fused projection</text>
+  <text x="89" y="266" font-size="11" text-anchor="middle" fill="#6b7280">matmul &middot; {mb:4,out:8}</text>
+  <g fill="#9bb8d8" stroke="#3b6ea8" stroke-width=".5">
+    <rect x="26" y="276" width="16" height="9"/><rect x="44" y="276" width="16" height="9"/><rect x="62" y="276" width="16" height="9"/><rect x="80" y="276" width="16" height="9"/><rect x="98" y="276" width="16" height="9"/><rect x="116" y="276" width="16" height="9"/><rect x="134" y="276" width="16" height="9"/>
+    <rect x="26" y="287" width="16" height="9"/><rect x="44" y="287" width="16" height="9"/><rect x="62" y="287" width="16" height="9"/><rect x="80" y="287" width="16" height="9"/><rect x="98" y="287" width="16" height="9"/><rect x="116" y="287" width="16" height="9"/><rect x="134" y="287" width="16" height="9"/>
+    <rect x="26" y="298" width="16" height="9"/><rect x="44" y="298" width="16" height="9"/><rect x="62" y="298" width="16" height="9"/><rect x="80" y="298" width="16" height="9"/><rect x="98" y="298" width="16" height="9"/><rect x="116" y="298" width="16" height="9"/><rect x="134" y="298" width="16" height="9"/>
+  </g>
+  <!-- greyed HBM -->
+  <rect x="360" y="230" width="170" height="84" rx="7" fill="#f3f4f6" stroke="#c9ccd2" stroke-dasharray="4 3"/>
+  <text x="445" y="268" font-size="13" font-weight="700" text-anchor="middle" fill="#aeb2ba">HBM</text>
+  <line x1="372" y1="252" x2="518" y2="292" stroke="#c9ccd2" stroke-width="1.5"/>
+  <text x="445" y="286" font-size="10.5" text-anchor="middle" fill="#aeb2ba">bypassed</text>
+  <rect x="716" y="226" width="150" height="92" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
+  <text x="791" y="250" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">SiLU + mul</text>
+  <text x="791" y="266" font-size="11" text-anchor="middle" fill="#6b7280">reads local LX</text>
+  <g fill="#a9d8ba" stroke="#2e9e5b" stroke-width=".5">
+    <rect x="726" y="276" width="130" height="6"/><rect x="726" y="284" width="130" height="6"/><rect x="726" y="292" width="130" height="6"/><rect x="726" y="300" width="130" height="6"/>
+  </g>
+  <!-- green ring arc -->
+  <path d="M164,272 C 360,200 540,200 714,272" fill="none" stroke="#2e9e5b" stroke-width="2.6" marker-end="url(#arg)"/>
+  <text x="439" y="216" font-size="12" font-weight="700" text-anchor="middle" fill="#2e9e5b">L3 ring LX&#8594;LX &middot; 27.0 MB one-way</text>
+</svg>
+<figcaption>The same two boxes keep their own splits. Baseline pays a 65.5 MB HBM round-trip; the relayout
+replaces it with a 27.0 MB one-way ring move — 2.42&times; fewer bytes, on a fabric ~5&ndash;6&times; faster
+than the <em>realized</em> HBM rate.</figcaption>
+</figure>
+
+
+<h2>What &mdash; refinement cells, a disjoint contract, an existing carrier</h2>
+<p>The pass runs per producer&#8594;consumer read edge. It reads the producer's <code>PerCoreView</code>
+(from the write dep) and the consumer's (from the read dep). If they are identical it defers to the regular
+LX planner; if the producer's write is a K-split partial it bails. Otherwise it computes a
+<strong>common refinement</strong>: for each moved dim, <code>common_splits[dim] = lcm(producer, consumer)</code>,
+refined to <strong>whole-stick (128-byte) cells</strong>. The Cartesian product of the per-dim ranges yields
+the <strong>cells</strong>; each cell resolves its owning <strong>source core</strong> (producer) and
+<strong>dest core</strong> (consumer) plus byte offsets within each core's LX region.</p>
+
+<p>This is a strict <strong>PR1 = disjoint</strong> contract — one-to-one whole-stick relayout, gather/scatter
+<em>without duplication</em>:</p>
+<ul>
+  <li><strong>No fan-out / multicast.</strong> Two cores mapping to the same owner key &#8594;
+    <code>duplicate-owner</code>, edge rejected. (All-gather / K-replication is out of scope.)</li>
+  <li><strong>No K-split partials.</strong> Reduction-split producers are rejected — no partial-sum gather.</li>
+  <li><strong>Exact tiling proven.</strong> A coverage check verifies the cells tile the logical rectangle:
+    no gaps, no overlapping destinations, no out-of-bounds.</li>
+  <li><strong>Whole-stick / 128-byte aligned.</strong> Every cell is stick-sized; LX addresses aligned;
+    per-dest-core destination ranges sorted-contiguous.</li>
+</ul>
+
+<p>The <strong>carrier</strong> is the key engineering choice. The <em>identical</em> cells can ship two ways:
+a bespoke new <code>LXCoordinateRemapOp</code>, or — what this branch uses — the <code>stcdp_range</code>
+carrier, which re-nests the same movement ranges under <code>op.rangedLxRemap</code> on the
+<strong>existing <code>STCDPOpLx</code></strong> op. The planner builds one carrier-neutral payload; the swap
+is purely in codegen, which lifts the range keys and re-nests them on an <code>STCDPOpLx</code>, naming the
+rewritten SDSC <code>2_OnChipMoveSTCDPOpLx</code>. The whole feature rides existing op vocabulary and the
+existing L3 ring path.</p>
+
+<figure>
+<svg viewBox="0 0 880 300" role="img" aria-label="producer to consumer ownership remap">
+  <text x="150" y="22" font-size="12.5" font-weight="700" text-anchor="middle" fill="#3b6ea8">Producer {mb:4, out:8} &mdash; 2-D tiles</text>
+  <text x="720" y="22" font-size="12.5" font-weight="700" text-anchor="middle" fill="#3b6ea8">Consumer {mb:32} &mdash; row-stripes</text>
+  <!-- producer 4x8 grid colored by consumer band -->
+  <g stroke="#fff" stroke-width="1">
+    <!-- 4 rows (mb) x 8 cols (out); color by mb (which consumer stripe group) -->
+    <!-- row mb0 -->
+    <g>
+      <rect x="40" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="68" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="96" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="124" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="152" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="180" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="208" y="40" width="28" height="22" fill="#3b6ea8"/><rect x="236" y="40" width="28" height="22" fill="#3b6ea8"/>
+    </g>
+    <g>
+      <rect x="40" y="62" width="28" height="22" fill="#2a9d8f"/><rect x="68" y="62" width="28" height="22" fill="#2a9d8f"/><rect x="96" y="62" width="28" height="22" fill="#2a9d8f"/><rect x="124" y="62" width="28" height="22" fill="#2a9d8f"/><rect x="152" y="62" width="28" height="22" fill="#2a9d8f"/><rect x="180" y="62" width="28" height="22" fill="#2a9d8f"/><rect x="208" y="62" width="28" height="22" fill="#2a9d8f"/><rect x="236" y="62" width="28" height="22" fill="#2a9d8f"/>
+    </g>
+    <g>
+      <rect x="40" y="84" width="28" height="22" fill="#c9971b"/><rect x="68" y="84" width="28" height="22" fill="#c9971b"/><rect x="96" y="84" width="28" height="22" fill="#c9971b"/><rect x="124" y="84" width="28" height="22" fill="#c9971b"/><rect x="152" y="84" width="28" height="22" fill="#c9971b"/><rect x="180" y="84" width="28" height="22" fill="#c9971b"/><rect x="208" y="84" width="28" height="22" fill="#c9971b"/><rect x="236" y="84" width="28" height="22" fill="#c9971b"/>
+    </g>
+    <g>
+      <rect x="40" y="106" width="28" height="22" fill="#9c4f96"/><rect x="68" y="106" width="28" height="22" fill="#9c4f96"/><rect x="96" y="106" width="28" height="22" fill="#9c4f96"/><rect x="124" y="106" width="28" height="22" fill="#9c4f96"/><rect x="152" y="106" width="28" height="22" fill="#9c4f96"/><rect x="180" y="106" width="28" height="22" fill="#9c4f96"/><rect x="208" y="106" width="28" height="22" fill="#9c4f96"/><rect x="236" y="106" width="28" height="22" fill="#9c4f96"/>
+    </g>
+  </g>
+  <text x="34" y="55" font-size="9" text-anchor="end" fill="#6b7280">c0,c4&hellip;</text>
+  <text x="152" y="150" font-size="10.5" text-anchor="middle" fill="#6b7280">each row = an mb-band spread over out-tiles on 8 cores</text>
+
+  <!-- consumer stripes -->
+  <g stroke="#fff" stroke-width="1">
+    <rect x="600" y="40" width="240" height="20" fill="#3b6ea8"/>
+    <rect x="600" y="62" width="240" height="20" fill="#2a9d8f"/>
+    <rect x="600" y="84" width="240" height="20" fill="#c9971b"/>
+    <rect x="600" y="106" width="240" height="20" fill="#9c4f96"/>
+  </g>
+  <text x="848" y="54" font-size="9" fill="#6b7280">c0</text>
+  <text x="600" y="150" font-size="10.5" text-anchor="middle" fill="#6b7280" >each stripe = full 2H width, assembled from 8 producer tiles</text>
+
+  <!-- arrows: a few representative ring hops -->
+  <path d="M264,51 C 420,51 470,50 598,50" fill="none" stroke="#3b6ea8" stroke-width="1.6" marker-end="url(#arb)"/>
+  <path d="M264,73 C 420,73 470,72 598,72" fill="none" stroke="#2a9d8f" stroke-width="1.6" marker-end="url(#arb2)"/>
+  <path d="M264,95 C 420,95 470,94 598,94" fill="none" stroke="#c9971b" stroke-width="1.6" marker-end="url(#arb3)"/>
+  <defs>
+    <marker id="arb" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#3b6ea8"/></marker>
+    <marker id="arb2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#2a9d8f"/></marker>
+    <marker id="arb3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#c9971b"/></marker>
+  </defs>
+  <text x="431" y="206" font-size="12" font-weight="700" text-anchor="middle" fill="#1a1a2e">Same physical sticks &middot; owner core changes &middot; one-to-one (disjoint)</text>
+  <text x="431" y="226" font-size="11.5" text-anchor="middle" fill="#6b7280">13,200 stick-movements in 10 chunks &middot; no duplication, no arithmetic</text>
+</svg>
+<figcaption>Each consumer row-stripe is reassembled from several producer tiles that lived on different cores.
+The relayout is a pure ownership permutation over whole sticks — exactly the disjoint case PR1 covers.</figcaption>
+</figure>
+
+
+<h2>How &mdash; frontend planner &#8594; mixed SDSC &#8594; ring nodes</h2>
+<p><span class="tag fe">FRONTEND</span> &nbsp;<code>plan_onchip_moves</code> walks the graph;
+<code>plan_onchip_move_edge</code> plans each read edge into refinement cells. Cells split into
+<strong>cross-core</strong> moves (the real ring traffic) and <strong>same-core</strong> moves. A core
+cannot ring-transfer to itself, so same-core cells use a <strong>two-leg neighbor-scratch relay</strong>
+(<code>relay_core = (source_core+1) % sencores</code>): write the stick into a scratch window on the
+neighbor, read it back. This relay is shared by both carriers — not a differentiator — and is the ~3% byte
+overhead (and the +0.066 ms memory-time bump). The pass retargets the producer output LDS and the matching
+consumer input LDS from HBM to <strong>LX</strong>, attaches the dataop chunks as <code>datadscs_</code>, and
+emits a per-core <strong>sequential mixed schedule</strong>:
+<code>producer LX write &#8594; STCDPOpLx rows &#8594; consumer reads its LX base</code> (a barrier — no overlap
+with consumer compute in PR1).</p>
+
+<p><span class="tag be">BACKEND</span> &nbsp;The <code>STCDPOpLx</code> op carries a <code>rangedLxRemap</code>
+payload, parsed in <code>dsc/dataOpDsc.cpp</code> (<code>rangeModeEnabled = true</code>, producer/consumer
+LX bases, compact <code>movementRanges[]</code> expanded into N movements). PCFG generation lowers each
+movement into <strong>two L3 ring nodes</strong>: a source-side <code>L3SU</code> send (LX&#8594;ring) and a
+dest-side <code>L3LU</code> receive (ring&#8594;LX), each a <code>RINGDATATRANSFER</code> node with whole-stick
+alignment and a stick-loop nest for multi-stick moves. <code>dxp</code> permits the mixed
+<code>dataOpdscs_ + dscs_ + schedule</code> case and routes it through <code>runDcgForDataOpsDlOps</code>.
+<strong>No SFP/MPE/arithmetic node is ever emitted</strong> — the lowering is pure data movement on the
+existing ring path; it reuses <code>STCDPOpLx</code> (<code>static_cast&lt;STCDPOpLx*&gt;</code>), it does not
+add a new op.</p>
+
+<figure>
+<svg viewBox="0 0 880 200" role="img" aria-label="compilation pipeline">
+  <defs><marker id="arp" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#6b7280"/></marker></defs>
+  <!-- 5 boxes -->
+  <g font-size="11.5" text-anchor="middle">
+    <rect x="8"   y="40" width="150" height="64" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
+    <text x="83" y="64" font-weight="700" fill="#1a1a2e">Work-division</text>
+    <text x="83" y="80" fill="#6b7280">producer {mb:4,out:8}</text>
+    <text x="83" y="94" fill="#6b7280">consumer {mb:32}</text>
+
+    <rect x="186" y="40" width="150" height="64" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
+    <text x="261" y="60" font-weight="700" fill="#1a1a2e">LX relayout plan</text>
+    <text x="261" y="76" fill="#6b7280">refinement cells</text>
+    <text x="261" y="90" fill="#6b7280">PR1 disjoint check</text>
+
+    <rect x="364" y="40" width="152" height="64" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
+    <text x="440" y="60" font-weight="700" fill="#1a1a2e">Mixed SDSC</text>
+    <text x="440" y="76" fill="#6b7280">STCDPOpLx rows</text>
+    <text x="440" y="90" fill="#6b7280">LDS HBM&#8594;LX, barrier</text>
+
+    <rect x="544" y="40" width="146" height="64" rx="7" fill="#e3f4f1" stroke="#2a9d8f"/>
+    <text x="617" y="64" font-weight="700" fill="#1a1a2e">DXP runCodegen</text>
+    <text x="617" y="84" fill="#6b7280">mixed dataop+DL</text>
+
+    <rect x="718" y="40" width="154" height="64" rx="7" fill="#e3f4f1" stroke="#2a9d8f"/>
+    <text x="795" y="60" font-weight="700" fill="#1a1a2e">Ring nodes</text>
+    <text x="795" y="76" fill="#6b7280">L3SU send / L3LU recv</text>
+    <text x="795" y="90" fill="#6b7280">RINGDATATRANSFER</text>
+  </g>
+  <line x1="158" y1="72" x2="184" y2="72" stroke="#6b7280" stroke-width="1.6" marker-end="url(#arp)"/>
+  <line x1="336" y1="72" x2="362" y2="72" stroke="#6b7280" stroke-width="1.6" marker-end="url(#arp)"/>
+  <line x1="516" y1="72" x2="542" y2="72" stroke="#6b7280" stroke-width="1.6" marker-end="url(#arp)"/>
+  <line x1="690" y1="72" x2="716" y2="72" stroke="#6b7280" stroke-width="1.6" marker-end="url(#arp)"/>
+  <!-- inset: one stick path -->
+  <g font-size="10.5" fill="#2a9d8f">
+    <text x="440" y="150" text-anchor="middle" font-weight="700" fill="#1a1a2e">one stick:</text>
+    <text x="440" y="168" text-anchor="middle" class="mono" fill="#2a9d8f">LX &#8594; [L3SU send] &#8594; (( ring )) &#8594; [L3LU recv] &#8594; LX</text>
+  </g>
+  <text x="247" y="128" font-size="10.5" fill="#3b6ea8" text-anchor="middle">torch-spyre / Inductor</text>
+  <text x="700" y="128" font-size="10.5" fill="#2a9d8f" text-anchor="middle">deeptools</text>
+</svg>
+<figcaption>Frontend (blue) plans the disjoint cells and emits a mixed SDSC; backend (teal) lowers the
+range payload to L3SU/L3LU ring send/receive nodes. The carrier reuses the existing <code>STCDPOpLx</code> op.</figcaption>
+</figure>
+
+
+<h2>The math &mdash; why removing 65.5 MB buys ~19%</h2>
+<p><strong>Peak BW cannot explain the win.</strong> At HBM peak (166 GB/s), removing 65.536 MB would save
+only <span class="mono">65.536e6 / 166e9 = 0.395 ms</span>. The measured standalone SwiGLU win is
+<strong>2.382 ms — ~6&times; larger</strong>. A kernel cannot save more wall time than the removed traffic
+costs at peak <em>unless it was running far below peak</em>. So these kernels are
+<strong>HBM-bandwidth-bound at a realized BW well below peak</strong> — the array-under-fill regime
+(PT-util ~30%, strided / partial-stick HBM access).</p>
+
+<p><strong>Solve for the realized BW</strong> as <span class="mono">eliminated_bytes / win</span>:</p>
+<div class="eq">
+standalone SwiGLU:&nbsp; <span class="m">65.536e6</span> / <span class="o">2.382e-3</span> = <span class="c">27.5 GB/s</span> &nbsp;(16.6% of peak)<br>
+block MLP/SwiGLU:&nbsp;&nbsp; <span class="m">65.536e6</span> / <span class="o">2.004e-3</span> = <span class="c">32.7 GB/s</span> &nbsp;(19.7% of peak)
+</div>
+<p>Both land at <strong>~27&ndash;33 GB/s &asymp; 16&ndash;20% of peak</strong>. Crucially this <em>fell out of</em>
+(bytes &divide; time) — it was not fitted — and it independently agrees with the known ~30% array-under-fill
+HBM utilization on these kernels. That agreement is the consistency check that the mechanism is real.</p>
+
+<p><strong>Ring add-back.</strong> The pass moves <strong>27.034 MB one-way</strong> over the ring
+(<code>remap_bytes = 27,033,600</code>). At ring peak: <span class="mono">27.034e6 / 166e9 = 0.163 ms</span> —
+one-way 27 MB vs a round-trip 65.5 MB (2.42&times; fewer bytes), on a fabric that is <em>not</em> the
+bottleneck, so it overlaps with compute. Even charged fully at peak, 0.163 ms is &lt;7% of the win.</p>
+
+<div class="eq">
+<span style="color:#9aa6b2">net model:</span>&nbsp; win &asymp; E<sub>HBM</sub> / BW<sub>realized</sub> <span class="o">&minus;</span> R<sub>ring</sub> / BW<sub>ring</sub><br>
+&nbsp;= <span class="m">65.536e6</span>/<span class="c">30e9</span> <span class="o">&minus;</span> <span class="m">27.034e6</span>/<span class="c">166e9</span> = <span class="o">2.185</span> &minus; 0.163 = <strong style="color:#e6edf6">2.02 ms</strong>
+</div>
+<p>Predicted ~2.0 ms vs measured 2.382 / 2.004 ms — the model brackets the measurement without tuning. (At
+27.5 GB/s the eliminated term alone is 2.38 ms; ring overlap pushes net toward the measured value.) The byte
+accounting also cross-checks: packed payload <span class="mono">2 &times; (512 &times; 200 &times; 128 B) = 26.214 MB</span>;
+<code>remap_bytes</code> is 27.034 MB = <strong>1.031&times;</strong> — the extra 0.82 MB (+3.125%) is exactly the
+same-core neighbor-scratch double-move.</p>
+
+<figure>
+<svg viewBox="0 0 880 260" role="img" aria-label="bytes bar chart and time waterfall">
+  <!-- LEFT: bar chart -->
+  <text x="150" y="20" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">Bytes moved</text>
+  <!-- axis -->
+  <line x1="60" y1="210" x2="300" y2="210" stroke="#c9ccd2"/>
+  <!-- HBM bar (65.5 -> height scale: 1MB=2.6px) -->
+  <rect x="86" y="40" width="64" height="170" fill="#e8743b"/>
+  <text x="118" y="34" font-size="11.5" font-weight="700" text-anchor="middle" fill="#e8743b">65.5 MB</text>
+  <text x="118" y="226" font-size="10.5" text-anchor="middle" fill="#6b7280">HBM round-trip</text>
+  <!-- ring bar (27 -> 70px) -->
+  <rect x="206" y="140" width="64" height="70" fill="#2e9e5b"/>
+  <rect x="206" y="134" width="64" height="6" fill="#a9d8ba"/>
+  <text x="238" y="128" font-size="11.5" font-weight="700" text-anchor="middle" fill="#2e9e5b">27.0 MB</text>
+  <text x="238" y="226" font-size="10.5" text-anchor="middle" fill="#6b7280">ring, one-way</text>
+  <text x="178" y="248" font-size="11" font-weight="700" text-anchor="middle" fill="#1a1a2e">2.42&times; fewer bytes</text>
+
+  <line x1="360" y1="20" x2="360" y2="244" stroke="#e2e5ea"/>
+
+  <!-- RIGHT: waterfall -->
+  <text x="620" y="20" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">Kernel time &mdash; standalone SwiGLU (ms)</text>
+  <line x1="430" y1="210" x2="852" y2="210" stroke="#c9ccd2"/>
+  <!-- scale: 1ms = 14px, baseline 12.561 -> 176px tall from y=210 -->
+  <!-- start bar -->
+  <rect x="446" y="34" width="70" height="176" fill="#94a3b8"/>
+  <text x="481" y="28" font-size="11" font-weight="700" text-anchor="middle" fill="#475569">12.561</text>
+  <!-- down step -2.382 (33px) -->
+  <rect x="540" y="34" width="70" height="33" fill="#2e9e5b"/>
+  <text x="575" y="28" font-size="10.5" font-weight="700" text-anchor="middle" fill="#2e9e5b">&minus;2.382</text>
+  <text x="575" y="58" font-size="9" text-anchor="middle" fill="#fff">HBM</text>
+  <!-- up step +0.163 (2px) at the new top -->
+  <rect x="634" y="65" width="70" height="3" fill="#e0a458"/>
+  <text x="669" y="60" font-size="10" font-weight="700" text-anchor="middle" fill="#c97f1f">+0.163</text>
+  <text x="669" y="80" font-size="8.5" text-anchor="middle" fill="#c97f1f">ring</text>
+  <!-- final bar 10.179 -> 142px -->
+  <rect x="728" y="68" width="70" height="142" fill="#2e9e5b"/>
+  <text x="763" y="62" font-size="11" font-weight="700" text-anchor="middle" fill="#1f7a47">10.179</text>
+  <!-- connectors -->
+  <line x1="516" y1="34" x2="540" y2="34" stroke="#94a3b8" stroke-dasharray="3 2"/>
+  <line x1="610" y1="67" x2="634" y2="67" stroke="#94a3b8" stroke-dasharray="3 2"/>
+  <line x1="704" y1="68" x2="728" y2="68" stroke="#94a3b8" stroke-dasharray="3 2"/>
+  <text x="481" y="226" font-size="10" text-anchor="middle" fill="#6b7280">baseline</text>
+  <text x="763" y="226" font-size="10" text-anchor="middle" fill="#6b7280">optimized</text>
+</svg>
+<figcaption>Left: the relayout cuts moved bytes 2.42&times;. Right: removing the 65.5 MB HBM round-trip from
+an HBM-bound kernel (~27.5 GB/s realized) buys 2.382 ms; the 27 MB ring move costs back ~0.163 ms at peak —
+net ~19%.</figcaption>
+</figure>
+
+<table>
+  <thead><tr><th>Workload</th><th class="n">Eliminated MB</th><th class="n">Win (ms)</th><th class="n">Implied realized HBM</th><th class="n">% of peak</th></tr></thead>
+  <tbody>
+    <tr><td>Standalone fused SwiGLU</td><td class="n">65.536</td><td class="n">2.382</td><td class="n">27.5 GB/s</td><td class="n">16.6%</td></tr>
+    <tr><td>Block MLP/SwiGLU <span style="color:var(--muted)">(1-handoff basis)</span></td><td class="n">65.536</td><td class="n">2.004</td><td class="n">32.7 GB/s</td><td class="n">19.7%</td></tr>
+    <tr><td>Block attention <span style="color:var(--muted)">(inferred)</span></td><td class="n">~14&ndash;16</td><td class="n">0.494</td><td class="n">27.5&ndash;32.7</td><td class="n">16.6&ndash;19.7%</td></tr>
+  </tbody>
+</table>
+
+<div class="callout warn"><strong>Limits of the model.</strong> The realized-BW assumption (~27&ndash;33 GB/s)
+is the dominant error term — a consistency argument with the known ~30% array-under-fill, not a measured BW;
+&plusmn;20% there moves the prediction &plusmn;20%. The ring term is charged at peak with zero compute overlap
+(conservative). The +0.066 ms block memory-time rise is the ring/relay cost surfacing in the memory bucket.
+And block <strong>wall</strong> win (11.2%) &lt; <strong>kernel</strong> win (15.3%) because wall carries fixed
+host/dispatch overhead the relayout never touches.</div>
+
+
+<h2>Attention &mdash; same primitive, smaller tensors</h2>
+<p>Attention has the same <strong>matmul&#8594;pointwise&#8594;matmul</strong> shape: <code>QK&#7488;</code>
+(2-D <code>{mb,out}</code>) &#8594; softmax (pure-M <code>{mb:32}</code>) &#8594; <code>probs@V</code> (2-D).
+Both the <strong>QK&#7488;&#8594;softmax</strong> and <strong>softmax&#8594;probs@V</strong> edges are one-to-one
+cross-core ownership changes over the same physical scores/probs sticks — exactly the disjoint relayouts PR1
+covers. The block gains 6 <code>OnChipMoveSTCDPOpLx</code> rows split across MLP and attention; the attention
+bucket improves 3.412&#8594;2.918 ms (<strong class="win">14.5%, &minus;0.494 ms</strong>).</p>
+<p>Inverting at the same realized-BW band gives <span class="mono">0.494e-3 &times; 27.5e9 = 13.6 MB</span> to
+<span class="mono">16.2 MB</span> eliminated — <strong>~14&ndash;16 MB</strong>, roughly &frac14; of the SwiGLU
+handoff, consistent with attention's smaller tensors (scores <span class="mono">[512,512]</span>, ctx
+<span class="mono">[512,128]</span> vs the <span class="mono">2H=25600</span>-wide SwiGLU buffer). Same model,
+fewer bytes — the more conservative case.</p>
+
+<figure>
+<svg viewBox="0 0 880 200" role="img" aria-label="attention dataflow">
+  <defs><marker id="arc" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#c9971b"/></marker></defs>
+  <rect x="30" y="60" width="150" height="58" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
+  <text x="105" y="84" font-size="12" font-weight="700" text-anchor="middle">QK&#7488; matmul</text>
+  <text x="105" y="101" font-size="10.5" text-anchor="middle" fill="#6b7280">{mb,out} &middot; [512,512]</text>
+
+  <rect x="360" y="60" width="150" height="58" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
+  <text x="435" y="84" font-size="12" font-weight="700" text-anchor="middle">softmax</text>
+  <text x="435" y="101" font-size="10.5" text-anchor="middle" fill="#6b7280">pure-M {mb:32}</text>
+
+  <rect x="690" y="60" width="160" height="58" rx="7" fill="#eef3f9" stroke="#3b6ea8"/>
+  <text x="770" y="84" font-size="12" font-weight="700" text-anchor="middle">probs@V matmul</text>
+  <text x="770" y="101" font-size="10.5" text-anchor="middle" fill="#6b7280">{mb,out} &middot; [512,128]</text>
+
+  <!-- gold edges -->
+  <line x1="180" y1="89" x2="358" y2="89" stroke="#c9971b" stroke-width="2.6" marker-end="url(#arc)"/>
+  <line x1="510" y1="89" x2="688" y2="89" stroke="#c9971b" stroke-width="2.6" marker-end="url(#arc)"/>
+  <text x="269" y="78" font-size="10" text-anchor="middle" fill="#c9971b">relayout: tile&#8594;row-stripe</text>
+  <text x="599" y="78" font-size="10" text-anchor="middle" fill="#c9971b">relayout: row-stripe&#8594;tile</text>
+
+  <rect x="250" y="20" width="380" height="22" rx="11" fill="#fbf4e0" stroke="#c9971b"/>
+  <text x="440" y="35" font-size="11.5" font-weight="700" text-anchor="middle" fill="#9a7414">PR1-legal disjoint handoffs &mdash; &minus;14.5% (&minus;0.494 ms)</text>
+
+  <!-- out of scope box -->
+  <rect x="300" y="150" width="280" height="34" rx="7" fill="#f3f4f6" stroke="#c9ccd2" stroke-dasharray="4 3"/>
+  <text x="440" y="166" font-size="11" font-weight="700" text-anchor="middle" fill="#aeb2ba">K all-gather (multicast)</text>
+  <text x="440" y="179" font-size="9.5" text-anchor="middle" fill="#aeb2ba">duplicate-owner fan-out &mdash; OUT of PR1 scope</text>
+</svg>
+<figcaption>The two highlighted attention edges are the same disjoint matmul&harr;pointwise ownership changes
+the pass already handles. The duplicate-owner K all-gather (multicast) is a separate primitive, out of PR1 scope.</figcaption>
+</figure>
+
+
+<h2>Scope &amp; what&rsquo;s next</h2>
+<p>PR1 ships the disjoint case only — one-to-one, whole-stick, no duplication — and deliberately rejects
+everything that needs new semantics. The natural follow-ups widen the planner contract additively rather than
+redesigning it:</p>
+<ul>
+  <li><strong>Fan-out / all-gather.</strong> Multicast (one source stick &#8594; many dest cores), e.g.
+    attention K-replication. Needs duplicate-owner support and a multicast ring primitive.</li>
+  <li><strong>K-split partial gather.</strong> Relaying partial-sum outputs of a reduction-split producer
+    instead of HBM-accumulating.</li>
+  <li><strong>Weight preload.</strong> The same LX-residency idea applied to stationary weights, not just
+    activations (the remaining <code>ReStickifyOpHBM</code> rows).</li>
+  <li><strong>Decode.</strong> PR1 evidence is prefill (<span class="mono">M=512</span>); decode
+    (<span class="mono">M=1</span>/padded) has a different fill regime and needs its own measurement.</li>
+  <li><strong>Warp-specialization / overlap.</strong> PR1's mixed schedule is a strict sequential barrier;
+    overlapping the ring transfer with consumer compute would recover the ring add-back term entirely — the
+    model already shows the ring is the only cost line left to hide.</li>
+</ul>
+<p>The mechanism is proven on the cheapest legal case and rides existing op vocabulary; that is what makes the
+carrier choice (<code>stcdp_range</code> over a bespoke op) the lower-risk path to landing in the gated
+deeptools repo.</p>
+
+<p class="meta">
+Sources: Codex design doc <em>&ldquo;LX Planner Relayout with STCDPOpLx&rdquo;</em> (commit <span class="mono">cbdbd538</span>),
+SDSC tables and measured wins; <span class="mono">remap_bytes = 27,033,600</span> from the coordinate-remap
+snapshot (same planner/edges).
+Frontend: <span class="mono">torch_spyre/_inductor/onchip_move.py</span>,
+<span class="mono">.../codegen/onchip_move.py</span>, <span class="mono">config.py</span>,
+<span class="mono">tests/inductor/test_onchip_move.py</span>.
+Backend: <span class="mono">third_party/deeptools/patches/lx-relayout-stcdp-range-deeptools.patch</span>
+(base <span class="mono">621bb9fad8</span>, head <span class="mono">29254c37d3</span>) touching
+<span class="mono">dsc/dataOpDsc.{cpp,h}</span>, <span class="mono">dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp</span>,
+<span class="mono">transfer_compute.cpp</span>, <span class="mono">dxp/SdscTree.cpp</span>,
+<span class="mono">dxp/dxp.cpp</span>. Companion: <span class="mono">lx_relayout_stcdp_first_principles.md</span>.
+</p>
+
+</div>
+</body>
+</html>
