@@ -73,9 +73,18 @@ class is introduced.</p>
 </table>
 <p style="font-size:14px;color:var(--muted);margin-top:-6px">Block <strong>wall</strong> time also drops 23.062&#8594;20.490 ms (11.2%). Memory time rises 0.220&#8594;0.286 ms (+0.066) — the ring/relay cost surfacing. Structurally the full block gains 6 <code>OnChipMoveSTCDPOpLx</code> rows, drops <code>ReStickifyOpHBM</code> 5&#8594;4, <code>neg</code> 1&#8594;0, <code>mul</code> 13&#8594;10.</p>
 
+<div class="callout"><strong>Independently reproduced on this pod.</strong> A freshly-built patched
+<code>dxp_standalone</code> (the STCDP range patch on local deeptools master + harvest runtime) was A/B'd on
+the fused SwiGLU <span class="mono">[1,512,4096]</span> with <code>SPYRE_ONCHIP_MOVE_CARRIER=stcdp_range</code>.
+The run emitted exactly <strong>2</strong> <code>OnChipMoveSTCDPOpLx</code> mixed SDSCs (baseline: 0) — matching
+the 0&rarr;2 structural signature — and saved <strong>~2.40 ms</strong> of device time (full-forward wall-clock
+19.11&rarr;16.71 ms), in line with the reported <strong>2.382 ms</strong> kernel-time win. The fractional
+wall-clock delta is smaller (12.6%) only because the wall harness carries a constant H2D/D2H/Python overhead
+that cancels in the A/B; the <em>absolute</em> saved time is the matching signal.</div>
+
 
 <h2>Why &mdash; two good layouts, an HBM tax at the boundary</h2>
-<p>Spyre's 8&times;8 MPE array is <strong>weight-stationary</strong>: the weight tile <span class="mono">[K,N]</span>
+<p>Spyre's 8&times;8 PT array (the matmul engine) is <strong>weight-stationary</strong>: the weight tile <span class="mono">[K,N]</span>
 sits resident in the array and tokens (the M dimension) stream past it. A matmul keeps the array filled by
 tiling the <strong>N</strong> (output width) and <strong>M</strong> (tokens) dims across the 32 cores. For
 the fused SwiGLU projection that is a 2-D split <code>{mb:4, out:8}</code> &#8594; 32 cores, where each core
@@ -160,6 +169,151 @@ purely to re-shuffle ownership.</strong></p>
 <figcaption>The same two boxes keep their own splits. Baseline pays a 65.5 MB HBM round-trip; the relayout
 replaces it with a 27.0 MB one-way ring move — 2.42&times; fewer bytes, on a fabric ~5&ndash;6&times; faster
 than the <em>realized</em> HBM rate.</figcaption>
+</figure>
+
+
+<h2>A toy example &mdash; watch four tiles move</h2>
+<p>Before the real shapes, here is the whole idea on four cores. Take a tiny buffer of
+<strong>4 tiles</strong> — 2 token-rows (<span class="mono">mb0, mb1</span>) &times; 2 output-chunks
+(<span class="mono">out0, out1</span>): tiles <span class="mono">a0, a1</span> (row mb0) and
+<span class="mono">b0, b1</span> (row mb1).</p>
+<p>The <strong>producer</strong> matmul splits <code>{mb:2, out:2}</code> — ownership is
+<em>column-major</em>, so each core holds one tile: <span class="mono">c0=a0, c1=b0, c2=a1, c3=b1</span>.
+The <strong>consumer</strong> pointwise op splits <code>{mb:2}</code> — ownership is <em>row-major</em>:
+core 0 wants the whole <span class="mono">mb0</span> row <span class="mono">{a0,a1}</span>, core 1 wants
+the whole <span class="mono">mb1</span> row <span class="mono">{b0,b1}</span>. Two tiles already sit on the
+right core (<span class="mono">a0</span>&rarr;c0, <span class="mono">b0</span>&rarr;c1 are local); the other
+two must <strong>move cores</strong>: <span class="mono">a1: c2&rarr;c0</span> and
+<span class="mono">b1: c3&rarr;c1</span>. That is the entire relayout — a permutation of <em>who owns
+which stick</em>, with no arithmetic.</p>
+
+<figure>
+<svg viewBox="0 0 880 250" role="img" aria-label="toy relayout ownership before, move, after">
+  <defs>
+    <marker id="tm" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#444"/></marker>
+  </defs>
+  <!-- PANEL 1: producer ownership -->
+  <text x="125" y="22" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">1 &middot; Producer owns tiles</text>
+  <text x="125" y="38" font-size="11" text-anchor="middle" fill="#6b7280">{mb:2, out:2} &mdash; column-major</text>
+  <!-- 2x2 grid, colored by tile identity, owner labeled -->
+  <g font-size="11" text-anchor="middle">
+    <rect x="55" y="52" width="70" height="48" fill="#3b6ea8"/><text x="90" y="74" fill="#fff" font-weight="700">a0</text><text x="90" y="90" fill="#dce8f5">core 0</text>
+    <rect x="127" y="52" width="70" height="48" fill="#2a9d8f"/><text x="162" y="74" fill="#fff" font-weight="700">a1</text><text x="162" y="90" fill="#dcf2ee">core 2</text>
+    <rect x="55" y="102" width="70" height="48" fill="#c9971b"/><text x="90" y="124" fill="#fff" font-weight="700">b0</text><text x="90" y="140" fill="#f7eccf">core 1</text>
+    <rect x="127" y="102" width="70" height="48" fill="#9c4f96"/><text x="162" y="124" fill="#fff" font-weight="700">b1</text><text x="162" y="140" fill="#f0dcee">core 3</text>
+  </g>
+  <text x="44" y="80" font-size="9.5" text-anchor="end" fill="#6b7280">mb0</text>
+  <text x="44" y="130" font-size="9.5" text-anchor="end" fill="#6b7280">mb1</text>
+  <text x="90" y="166" font-size="9.5" text-anchor="middle" fill="#6b7280">out0</text>
+  <text x="162" y="166" font-size="9.5" text-anchor="middle" fill="#6b7280">out1</text>
+
+  <!-- PANEL 2: the moves -->
+  <text x="440" y="22" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">2 &middot; Relayout over the ring</text>
+  <text x="440" y="38" font-size="11" text-anchor="middle" fill="#6b7280">2 tiles move cores, 2 stay local</text>
+  <g font-size="11.5">
+    <rect x="320" y="58" width="240" height="30" rx="6" fill="#eaf4ee" stroke="#2e9e5b"/>
+    <text x="332" y="78" fill="#1f7a47" font-weight="700">a1</text><text x="356" y="78" fill="#1a7a47" class="mono">c2 &#8594; c0</text>
+    <line x1="438" y1="73" x2="552" y2="73" stroke="#2e9e5b" stroke-width="2" marker-end="url(#tm)"/>
+    <rect x="320" y="94" width="240" height="30" rx="6" fill="#f4ecf3" stroke="#9c4f96"/>
+    <text x="332" y="114" fill="#7a3a73" font-weight="700">b1</text><text x="356" y="114" fill="#7a3a73" class="mono">c3 &#8594; c1</text>
+    <line x1="438" y1="109" x2="552" y2="109" stroke="#9c4f96" stroke-width="2" marker-end="url(#tm)"/>
+    <rect x="320" y="130" width="240" height="28" rx="6" fill="#f3f4f6" stroke="#c9ccd2" stroke-dasharray="4 3"/>
+    <text x="440" y="148" text-anchor="middle" fill="#8892a0" class="mono">a0 on c0, b0 on c1 &mdash; local, no move</text>
+  </g>
+
+  <!-- PANEL 3: consumer ownership -->
+  <text x="755" y="22" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1a1a2e">3 &middot; Consumer owns rows</text>
+  <text x="755" y="38" font-size="11" text-anchor="middle" fill="#6b7280">{mb:2} &mdash; row-major (pure-M)</text>
+  <g font-size="11" text-anchor="middle">
+    <rect x="685" y="52" width="70" height="48" fill="#3b6ea8"/><text x="720" y="74" fill="#fff" font-weight="700">a0</text><text x="720" y="90" fill="#dce8f5">core 0</text>
+    <rect x="757" y="52" width="70" height="48" fill="#2a9d8f"/><text x="792" y="74" fill="#fff" font-weight="700">a1</text><text x="792" y="90" fill="#dcf2ee">core 0</text>
+    <rect x="685" y="102" width="70" height="48" fill="#c9971b"/><text x="720" y="124" fill="#fff" font-weight="700">b0</text><text x="720" y="140" fill="#f7eccf">core 1</text>
+    <rect x="757" y="102" width="70" height="48" fill="#9c4f96"/><text x="792" y="124" fill="#fff" font-weight="700">b1</text><text x="792" y="140" fill="#f0dcee">core 1</text>
+  </g>
+  <path d="M683,76 h-6 v-6" fill="none" stroke="#3b6ea8"/>
+  <rect x="683" y="50" width="146" height="52" fill="none" stroke="#3b6ea8" stroke-width="1.5" stroke-dasharray="3 2"/>
+  <rect x="683" y="100" width="146" height="52" fill="none" stroke="#c9971b" stroke-width="1.5" stroke-dasharray="3 2"/>
+  <text x="756" y="180" font-size="9.5" text-anchor="middle" fill="#6b7280">each core now holds a full token-row</text>
+
+  <!-- big connectors between panels -->
+  <line x1="210" y1="100" x2="312" y2="100" stroke="#c9ccd2" stroke-width="1.5" marker-end="url(#tm)"/>
+  <line x1="568" y1="100" x2="678" y2="100" stroke="#c9ccd2" stroke-width="1.5" marker-end="url(#tm)"/>
+</svg>
+<figcaption>The same four tiles, recolored by <em>owner</em>. Tracking a tile's color across the three panels
+shows exactly what the relayout does: <span class="mono">a1</span> and <span class="mono">b1</span> change
+cores; <span class="mono">a0</span>/<span class="mono">b0</span> stay put. No values change.</figcaption>
+</figure>
+
+<h3>How those tiles actually travel: the L3 ring</h3>
+<p>The 32 cores are wired as a bidirectional <strong>L3 ring</strong>. A relayout move is not a magic
+teleport — the source core's <strong>L3SU</strong> (store unit) pushes a 128-byte stick onto the ring, it
+travels hop-by-hop to the destination, and the destination core's <strong>L3LU</strong> (load unit) pulls
+it into local LX. Scaled up, the real SwiGLU relayout is a <strong>gather</strong>: each consumer core
+collects its row-stripe from <em>several</em> producer cores sitting at different distances around the ring.
+Below, consumer <span class="mono">c0</span> gathers two tiles — one from a near neighbor
+(<span class="mono">c2</span>) and one from across the ring (<span class="mono">c5</span>).</p>
+
+<figure>
+<svg viewBox="0 0 880 330" role="img" aria-label="L3 ring with tiles moving between cores">
+  <defs>
+    <marker id="rr" markerWidth="10" markerHeight="10" refX="7" refY="3.2" orient="auto"><path d="M0,0 L8,3.2 L0,6.4 z" fill="#e8743b"/></marker>
+    <marker id="rp" markerWidth="10" markerHeight="10" refX="7" refY="3.2" orient="auto"><path d="M0,0 L8,3.2 L0,6.4 z" fill="#9c4f96"/></marker>
+  </defs>
+  <!-- the ring -->
+  <circle cx="250" cy="165" r="110" fill="none" stroke="#cdd3db" stroke-width="10"/>
+  <text x="250" y="169" font-size="12" fill="#aeb6c2" text-anchor="middle" font-weight="700">L3 ring</text>
+  <text x="250" y="185" font-size="9.5" fill="#aeb6c2" text-anchor="middle">bidirectional</text>
+  <!-- 8 core nodes at 45deg steps; c0 top, clockwise -->
+  <g font-size="10.5" text-anchor="middle">
+    <!-- c0 top -->
+    <circle cx="250" cy="55" r="19" fill="#3b6ea8" stroke="#1a1a2e"/><text x="250" y="59" fill="#fff" font-weight="700">c0</text>
+    <!-- c1 -->
+    <circle cx="328" cy="87" r="19" fill="#eef3f9" stroke="#3b6ea8"/><text x="328" y="91" fill="#3b6ea8" font-weight="700">c1</text>
+    <!-- c2 -->
+    <circle cx="360" cy="165" r="19" fill="#fbe6da" stroke="#e8743b"/><text x="360" y="169" fill="#e8743b" font-weight="700">c2</text>
+    <!-- c3 -->
+    <circle cx="328" cy="243" r="19" fill="#eef3f9" stroke="#94a3b8"/><text x="328" y="247" fill="#64748b" font-weight="700">c3</text>
+    <!-- c4 -->
+    <circle cx="250" cy="275" r="19" fill="#eef3f9" stroke="#94a3b8"/><text x="250" y="279" fill="#64748b" font-weight="700">c4</text>
+    <!-- c5 -->
+    <circle cx="172" cy="243" r="19" fill="#f4ecf3" stroke="#9c4f96"/><text x="172" y="247" fill="#9c4f96" font-weight="700">c5</text>
+    <!-- c6 -->
+    <circle cx="140" cy="165" r="19" fill="#eef3f9" stroke="#94a3b8"/><text x="140" y="169" fill="#64748b" font-weight="700">c6</text>
+    <!-- c7 -->
+    <circle cx="172" cy="87" r="19" fill="#eef3f9" stroke="#94a3b8"/><text x="172" y="91" fill="#64748b" font-weight="700">c7</text>
+  </g>
+  <!-- transfer 1: c2 -> c0 (near, bows up-right) -->
+  <path d="M348,150 Q345,70 268,52" fill="none" stroke="#e8743b" stroke-width="2.6" marker-end="url(#rr)"/>
+  <rect x="372" y="110" width="56" height="20" rx="5" fill="#e8743b"/><text x="400" y="124" font-size="11" font-weight="700" fill="#fff" text-anchor="middle">tile a1</text>
+  <text x="404" y="146" font-size="9.5" fill="#b4521f" text-anchor="middle">c2 send (L3SU)</text>
+  <!-- transfer 2: c5 -> c0 (far, bows around the left/top) -->
+  <path d="M168,224 Q120,110 232,52" fill="none" stroke="#9c4f96" stroke-width="2.6" marker-end="url(#rp)"/>
+  <rect x="78" y="206" width="58" height="20" rx="5" fill="#9c4f96"/><text x="107" y="220" font-size="11" font-weight="700" fill="#fff" text-anchor="middle">tile x</text>
+  <text x="96" y="244" font-size="9.5" fill="#7a3a73" text-anchor="middle">c5 send (L3SU)</text>
+  <!-- c0 recv tag -->
+  <text x="250" y="30" font-size="9.5" fill="#1f5fa0" text-anchor="middle" font-weight="700">c0 recv (L3LU) &times;2</text>
+
+  <!-- right side: what one transfer is -->
+  <line x1="500" y1="40" x2="500" y2="300" stroke="#e2e5ea"/>
+  <text x="540" y="58" font-size="13" font-weight="700" fill="#1a1a2e">One stick, one move</text>
+  <g font-size="12">
+    <rect x="540" y="74" width="120" height="40" rx="7" fill="#eef3f9" stroke="#3b6ea8"/><text x="600" y="92" text-anchor="middle" font-weight="700">source LX</text><text x="600" y="107" text-anchor="middle" font-size="10" fill="#6b7280">producer-owned</text>
+    <rect x="540" y="138" width="120" height="34" rx="7" fill="#fff3e9" stroke="#e8743b"/><text x="600" y="159" text-anchor="middle" font-weight="700" fill="#b4521f">L3SU send</text>
+    <rect x="540" y="196" width="120" height="34" rx="7" fill="#cdd3db" stroke="#94a3b8"/><text x="600" y="217" text-anchor="middle" font-weight="700" fill="#475569">ring hops</text>
+    <rect x="540" y="254" width="120" height="34" rx="7" fill="#eaf4ee" stroke="#2e9e5b"/><text x="600" y="275" text-anchor="middle" font-weight="700" fill="#1f7a47">L3LU recv</text>
+    <rect x="690" y="254" width="140" height="34" rx="7" fill="#eaf4ee" stroke="#2e9e5b"/><text x="760" y="271" text-anchor="middle" font-weight="700" fill="#1f7a47">dest LX</text><text x="760" y="284" text-anchor="middle" font-size="10" fill="#1f7a47">consumer-owned</text>
+  </g>
+  <defs><marker id="rd" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#64748b"/></marker></defs>
+  <line x1="600" y1="114" x2="600" y2="136" stroke="#64748b" stroke-width="1.6" marker-end="url(#rd)"/>
+  <line x1="600" y1="172" x2="600" y2="194" stroke="#64748b" stroke-width="1.6" marker-end="url(#rd)"/>
+  <line x1="600" y1="230" x2="600" y2="252" stroke="#64748b" stroke-width="1.6" marker-end="url(#rd)"/>
+  <line x1="660" y1="271" x2="688" y2="271" stroke="#64748b" stroke-width="1.6" marker-end="url(#rd)"/>
+  <text x="685" y="170" font-size="10.5" fill="#6b7280" width="140">128-byte whole stick;<tspan x="685" dy="14">no arithmetic, pure copy</tspan></text>
+</svg>
+<figcaption>The fabric view. Each gathered tile rides the ring from its producer core's <code>L3SU</code> to the
+consumer core's <code>L3LU</code>. A near tile (<span class="mono">c2&rarr;c0</span>) takes few hops; a far one
+(<span class="mono">c5&rarr;c0</span>) more. The real relayout is 13,200 such 128-byte stick-moves, batched
+into 10 chunks across all 32 cores.</figcaption>
 </figure>
 
 
@@ -263,7 +417,7 @@ movement into <strong>two L3 ring nodes</strong>: a source-side <code>L3SU</code
 dest-side <code>L3LU</code> receive (ring&#8594;LX), each a <code>RINGDATATRANSFER</code> node with whole-stick
 alignment and a stick-loop nest for multi-stick moves. <code>dxp</code> permits the mixed
 <code>dataOpdscs_ + dscs_ + schedule</code> case and routes it through <code>runDcgForDataOpsDlOps</code>.
-<strong>No SFP/MPE/arithmetic node is ever emitted</strong> — the lowering is pure data movement on the
+<strong>No SFP/PT/arithmetic node is ever emitted</strong> — the lowering is pure data movement on the
 existing ring path; it reuses <code>STCDPOpLx</code> (<code>static_cast&lt;STCDPOpLx*&gt;</code>), it does not
 add a new op.</p>
 
@@ -310,6 +464,71 @@ add a new op.</p>
 </svg>
 <figcaption>Frontend (blue) plans the disjoint cells and emits a mixed SDSC; backend (teal) lowers the
 range payload to L3SU/L3LU ring send/receive nodes. The carrier reuses the existing <code>STCDPOpLx</code> op.</figcaption>
+</figure>
+
+
+<h2>The SwiGLU layer: algorithm view vs hardware view</h2>
+<p>The same layer, drawn two ways. On the left, the textbook math — what SwiGLU computes. On the right, what
+the chip actually does, optimized: weights stay resident in the PT array, activations live in LX, and the
+relayout bridges the projection's tile-ownership to the pointwise chain's stripe-ownership <em>without</em>
+the HBM round trip the baseline would pay at that edge.</p>
+
+<figure>
+<svg viewBox="0 0 880 430" role="img" aria-label="SwiGLU algorithm view vs hardware view">
+  <defs>
+    <marker id="sa" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#6b7280"/></marker>
+    <marker id="sg" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#2e9e5b"/></marker>
+  </defs>
+  <!-- ===== LEFT: algorithm ===== -->
+  <text x="175" y="22" font-size="13" font-weight="700" text-anchor="middle" fill="#1a1a2e">Algorithm view</text>
+  <text x="175" y="38" font-size="11" text-anchor="middle" fill="#6b7280">what SwiGLU computes</text>
+  <g font-size="11.5" text-anchor="middle">
+    <rect x="140" y="50" width="70" height="28" rx="6" fill="#f1f3f6" stroke="#94a3b8"/><text x="175" y="68">x</text>
+    <rect x="40" y="108" width="120" height="30" rx="6" fill="#eef3f9" stroke="#3b6ea8"/><text x="100" y="127">gate = x &middot; W_gate</text>
+    <rect x="190" y="108" width="120" height="30" rx="6" fill="#eef3f9" stroke="#3b6ea8"/><text x="250" y="127">up = x &middot; W_up</text>
+    <rect x="40" y="166" width="120" height="28" rx="6" fill="#fbf4e0" stroke="#c9971b"/><text x="100" y="184">SiLU(gate)</text>
+    <rect x="100" y="226" width="150" height="30" rx="6" fill="#fbf4e0" stroke="#c9971b"/><text x="175" y="245">hidden = up &middot; SiLU(gate)</text>
+    <rect x="100" y="288" width="150" height="30" rx="6" fill="#eef3f9" stroke="#3b6ea8"/><text x="175" y="307">out = hidden &middot; W_down</text>
+  </g>
+  <line x1="160" y1="78" x2="110" y2="106" stroke="#6b7280" marker-end="url(#sa)"/>
+  <line x1="190" y1="78" x2="240" y2="106" stroke="#6b7280" marker-end="url(#sa)"/>
+  <line x1="100" y1="138" x2="100" y2="164" stroke="#6b7280" marker-end="url(#sa)"/>
+  <line x1="100" y1="194" x2="150" y2="224" stroke="#6b7280" marker-end="url(#sa)"/>
+  <line x1="250" y1="138" x2="205" y2="224" stroke="#6b7280" marker-end="url(#sa)"/>
+  <line x1="175" y1="256" x2="175" y2="286" stroke="#6b7280" marker-end="url(#sa)"/>
+  <text x="175" y="340" font-size="10.5" text-anchor="middle" fill="#9aa3af">two matmuls + a pointwise gate</text>
+
+  <line x1="360" y1="40" x2="360" y2="410" stroke="#e2e5ea"/>
+
+  <!-- ===== RIGHT: hardware ===== -->
+  <text x="620" y="22" font-size="13" font-weight="700" text-anchor="middle" fill="#1a1a2e">Hardware view (optimized)</text>
+  <text x="620" y="38" font-size="11" text-anchor="middle" fill="#6b7280">engines + memory; relayout on the ring</text>
+  <g font-size="11" text-anchor="middle">
+    <rect x="500" y="50" width="240" height="26" rx="6" fill="#fbe6da" stroke="#e8743b"/><text x="620" y="67" fill="#b4521f">x + weights in HBM</text>
+    <rect x="500" y="92" width="240" height="32" rx="6" fill="#dde7f5" stroke="#3b6ea8"/><text x="620" y="108" fill="#244e7a" font-weight="700">PT array &mdash; fused gate|up proj</text><text x="620" y="120" fill="#3b6ea8" font-size="9.5">weight-stationary &middot; {mb:4, out:8}</text>
+    <rect x="500" y="138" width="240" height="26" rx="6" fill="#eaf2fb" stroke="#3b6ea8"/><text x="620" y="155" fill="#3b6ea8">LX: producer tiles</text>
+    <rect x="500" y="180" width="240" height="34" rx="6" fill="#eaf4ee" stroke="#2e9e5b" stroke-width="1.6"/><text x="620" y="197" fill="#1f7a47" font-weight="700">L3 ring relayout</text><text x="620" y="209" fill="#2e9e5b" font-size="9.5">tiles &#8594; stripes, on-chip (STCDPOpLx)</text>
+    <rect x="500" y="228" width="240" height="26" rx="6" fill="#eaf2fb" stroke="#3b6ea8"/><text x="620" y="245" fill="#3b6ea8">LX: consumer stripes &middot; {mb:32}</text>
+    <rect x="500" y="270" width="240" height="32" rx="6" fill="#fbf4e0" stroke="#c9971b"/><text x="620" y="286" fill="#9a7414" font-weight="700">SFP &mdash; SiLU &times; mul</text><text x="620" y="298" fill="#c9971b" font-size="9.5">pure-M, row-local</text>
+    <rect x="500" y="316" width="240" height="30" rx="6" fill="#dde7f5" stroke="#3b6ea8"/><text x="620" y="335" fill="#244e7a" font-weight="700">PT array &mdash; down projection</text>
+    <rect x="500" y="360" width="240" height="26" rx="6" fill="#fbe6da" stroke="#e8743b"/><text x="620" y="377" fill="#b4521f">out to HBM</text>
+  </g>
+  <g stroke="#6b7280">
+    <line x1="620" y1="76" x2="620" y2="90" marker-end="url(#sa)"/>
+    <line x1="620" y1="124" x2="620" y2="136" marker-end="url(#sa)"/>
+    <line x1="620" y1="164" x2="620" y2="178" stroke="#2e9e5b" marker-end="url(#sg)"/>
+    <line x1="620" y1="214" x2="620" y2="226" stroke="#2e9e5b" marker-end="url(#sg)"/>
+    <line x1="620" y1="254" x2="620" y2="268" marker-end="url(#sa)"/>
+    <line x1="620" y1="302" x2="620" y2="314" marker-end="url(#sa)"/>
+    <line x1="620" y1="346" x2="620" y2="358" marker-end="url(#sa)"/>
+  </g>
+  <!-- baseline-would-roundtrip annotation on the relayout edge -->
+  <path d="M500,197 C 420,197 420,300 440,300" fill="none" stroke="#e8743b" stroke-width="1.3" stroke-dasharray="4 3"/>
+  <text x="392" y="250" font-size="9.5" fill="#e8743b" text-anchor="middle">baseline:<tspan x="392" dy="12">HBM</tspan><tspan x="392" dy="12">round-trip</tspan><tspan x="392" dy="12">here</tspan></text>
+</svg>
+<figcaption>Left: the math. Right: the optimized hardware mapping. The projection's PT-friendly tile split and
+the pointwise chain's SFP-friendly stripe split are both preserved; the relayout (green) bridges them on the
+ring, replacing the HBM round trip the baseline pays at that one edge.</figcaption>
 </figure>
 
 
@@ -411,6 +630,68 @@ And block <strong>wall</strong> win (11.2%) &lt; <strong>kernel</strong> win (15
 host/dispatch overhead the relayout never touches.</div>
 
 
+<h2>How fast is HBM, <em>really</em>? &mdash; a bandwidth hypothesis</h2>
+<p>The 166 GB/s figure is the datasheet ceiling. When we benchmarked the actual HBM bus on this hardware,
+the sustained numbers came in lower &mdash; and, crucially, <strong>depended on the access pattern</strong>:</p>
+<ul>
+  <li><strong>Read-only</strong> streams peaked at <strong>~143 GB/s</strong> (~86% of datasheet).</li>
+  <li><strong>Read+write</strong> (mixed) streams peaked at only <strong>~113 GB/s</strong> (~68% of datasheet)
+    &mdash; the bus is slowest exactly when it is doing both directions at once.</li>
+</ul>
+<p>This matters for the relayout because the traffic it eliminates is a <strong>round trip</strong> — a
+projection <em>write</em> followed by pointwise <em>reads</em>. That is the read+write regime, so its
+realistic ceiling is the <strong>113 GB/s</strong> mode, not 166. Even at that ceiling, removing 65.5 MB
+would only cost <span class="mono">65.536e6 / 113e9 = 0.58 ms</span> — still <strong>far below the measured
+2.382 ms win</strong>. The gap forces the same conclusion the math reached, now against a measured ceiling:
+the SwiGLU kernels are not even reaching the bus ceiling — they realize only <strong>~27&ndash;33 GB/s</strong>
+(the array-under-fill regime), so the relayout recovers nearly the full stalled round-trip.</p>
+
+<figure>
+<svg viewBox="0 0 760 290" role="img" aria-label="HBM bandwidth hierarchy">
+  <text x="20" y="22" font-size="13" font-weight="700" fill="#1a1a2e">HBM bandwidth: datasheet &rarr; measured bus &rarr; realized on kernels</text>
+  <line x1="60" y1="240" x2="720" y2="240" stroke="#c9ccd2"/>
+  <text x="46" y="244" font-size="10" text-anchor="end" fill="#9aa3af">0</text>
+  <text x="46" y="60" font-size="10" text-anchor="end" fill="#9aa3af">GB/s</text>
+  <!-- bars: scale 1.08 px/GBs, base 240 -->
+  <!-- 166 theoretical -->
+  <rect x="90" y="61" width="96" height="179" fill="#cfd5dd"/>
+  <text x="138" y="54" font-size="13" font-weight="700" text-anchor="middle" fill="#697282">166</text>
+  <text x="138" y="256" font-size="10.5" text-anchor="middle" fill="#6b7280">datasheet</text>
+  <text x="138" y="269" font-size="9.5" text-anchor="middle" fill="#9aa3af">theoretical peak</text>
+  <!-- 143 read-only -->
+  <rect x="230" y="86" width="96" height="154" fill="#3b6ea8"/>
+  <text x="278" y="79" font-size="13" font-weight="700" text-anchor="middle" fill="#3b6ea8">143</text>
+  <text x="278" y="256" font-size="10.5" text-anchor="middle" fill="#6b7280">read-only</text>
+  <text x="278" y="269" font-size="9.5" text-anchor="middle" fill="#9aa3af">measured bus</text>
+  <!-- 113 read+write -->
+  <rect x="370" y="118" width="96" height="122" fill="#e8743b"/>
+  <text x="418" y="111" font-size="13" font-weight="700" text-anchor="middle" fill="#e8743b">113</text>
+  <text x="418" y="256" font-size="10.5" text-anchor="middle" fill="#6b7280">read+write</text>
+  <text x="418" y="269" font-size="9.5" text-anchor="middle" fill="#9aa3af">measured bus &middot; round-trip regime</text>
+  <!-- ~30 realized -->
+  <rect x="560" y="208" width="96" height="32" fill="#2e9e5b"/>
+  <text x="608" y="201" font-size="13" font-weight="700" text-anchor="middle" fill="#1f7a47">~30</text>
+  <text x="608" y="256" font-size="10.5" text-anchor="middle" fill="#6b7280">realized on SwiGLU</text>
+  <text x="608" y="269" font-size="9.5" text-anchor="middle" fill="#9aa3af">array-under-fill</text>
+  <!-- annotation: round-trip ceiling line -->
+  <line x1="370" y1="118" x2="656" y2="118" stroke="#e8743b" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="664" y="121" font-size="9.5" fill="#e8743b">round-trip ceiling</text>
+  <line x1="90" y1="208" x2="560" y2="208" stroke="#2e9e5b" stroke-width="1" stroke-dasharray="4 3"/>
+  <text x="664" y="211" font-size="9.5" fill="#2e9e5b">what kernels hit</text>
+</svg>
+<figcaption>Hypothesis grounded in the bus benchmark: the datasheet 166 GB/s is never reached; read-only tops
+out at 143, and the round-trip (read+write) regime the relayout targets is capped at 113. The SwiGLU kernels
+run far below even that (~30 GB/s), which is why removing the round trip recovers a full ~2 ms. <em>(The bus
+benchmark graph can be embedded here once supplied.)</em></figcaption>
+</figure>
+
+<div class="callout"><strong>Why this strengthens the case.</strong> A skeptic might say &ldquo;166 GB/s makes
+the round trip cheap, so the win must be something else.&rdquo; The bus measurement closes that door from both
+sides: the relevant ceiling is the read+write <strong>113 GB/s</strong> (not 166), and the kernels don't even
+reach it. The relayout's value is precisely that it moves the bytes off the saturated, round-trip-penalized
+HBM bus and onto the L3 ring, which is not the bottleneck.</div>
+
+
 <h2>Attention &mdash; same primitive, smaller tensors</h2>
 <p>Attention has the same <strong>matmul&#8594;pointwise&#8594;matmul</strong> shape: <code>QK&#7488;</code>
 (2-D <code>{mb,out}</code>) &#8594; softmax (pure-M <code>{mb:32}</code>) &#8594; <code>probs@V</code> (2-D).
@@ -418,6 +699,27 @@ Both the <strong>QK&#7488;&#8594;softmax</strong> and <strong>softmax&#8594;prob
 cross-core ownership changes over the same physical scores/probs sticks — exactly the disjoint relayouts PR1
 covers. The block gains 6 <code>OnChipMoveSTCDPOpLx</code> rows split across MLP and attention; the attention
 bucket improves 3.412&#8594;2.918 ms (<strong class="win">14.5%, &minus;0.494 ms</strong>).</p>
+<figure>
+<svg viewBox="0 0 880 170" role="img" aria-label="attention algorithm view">
+  <defs><marker id="aa" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#6b7280"/></marker></defs>
+  <text x="20" y="20" font-size="12.5" font-weight="700" fill="#1a1a2e">Algorithm view</text>
+  <text x="120" y="20" font-size="11" fill="#6b7280">&mdash; what attention computes (the hardware view, with the relayout edges, is below)</text>
+  <g font-size="11.5" text-anchor="middle">
+    <rect x="24" y="60" width="78" height="50" rx="6" fill="#f1f3f6" stroke="#94a3b8"/><text x="63" y="80">Q, K, V</text><text x="63" y="96" font-size="9.5" fill="#6b7280">[512,128]</text>
+    <rect x="190" y="60" width="150" height="50" rx="6" fill="#eef3f9" stroke="#3b6ea8"/><text x="265" y="80" font-weight="700">scores = QK&#7488; / &#8730;d</text><text x="265" y="96" font-size="9.5" fill="#6b7280">[512,512]</text>
+    <rect x="430" y="60" width="150" height="50" rx="6" fill="#fbf4e0" stroke="#c9971b"/><text x="505" y="80" font-weight="700">probs = softmax(scores)</text><text x="505" y="96" font-size="9.5" fill="#6b7280">[512,512] &middot; row-wise</text>
+    <rect x="670" y="60" width="150" height="50" rx="6" fill="#eef3f9" stroke="#3b6ea8"/><text x="745" y="80" font-weight="700">ctx = probs &middot; V</text><text x="745" y="96" font-size="9.5" fill="#6b7280">[512,128]</text>
+  </g>
+  <line x1="102" y1="85" x2="188" y2="85" stroke="#6b7280" stroke-width="1.6" marker-end="url(#aa)"/>
+  <line x1="340" y1="85" x2="428" y2="85" stroke="#6b7280" stroke-width="1.6" marker-end="url(#aa)"/>
+  <line x1="580" y1="85" x2="668" y2="85" stroke="#6b7280" stroke-width="1.6" marker-end="url(#aa)"/>
+  <text x="440" y="140" font-size="10.5" text-anchor="middle" fill="#9aa3af">matmul &#8594; row-wise pointwise &#8594; matmul &mdash; the same producer/consumer split mismatch as SwiGLU</text>
+</svg>
+<figcaption>Attention's algorithm view. The two interior edges (matmul&rarr;softmax and softmax&rarr;matmul)
+have the identical PT-tile&harr;SFP-stripe ownership mismatch the relayout targets &mdash; see the hardware
+view below.</figcaption>
+</figure>
+
 <p>Inverting at the same realized-BW band gives <span class="mono">0.494e-3 &times; 27.5e9 = 13.6 MB</span> to
 <span class="mono">16.2 MB</span> eliminated — <strong>~14&ndash;16 MB</strong>, roughly &frac14; of the SwiGLU
 handoff, consistent with attention's smaller tensors (scores <span class="mono">[512,512]</span>, ctx

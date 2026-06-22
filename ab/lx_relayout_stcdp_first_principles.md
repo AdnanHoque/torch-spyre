@@ -22,9 +22,17 @@ Block **wall** time also drops 23.062→20.490 ms (11.2%). Memory time rises 0.2
 ring/relay cost surfacing. Structurally the full block gains 6 `OnChipMoveSTCDPOpLx` rows, drops
 `ReStickifyOpHBM` 5→4, `neg` 1→0, `mul` 13→10.
 
+> **Independently reproduced on this pod.** A freshly-built patched `dxp_standalone` (the STCDP range patch
+> on local deeptools master + harvest runtime) was A/B'd on the fused SwiGLU `[1,512,4096]` with
+> `SPYRE_ONCHIP_MOVE_CARRIER=stcdp_range`. It emitted exactly **2** `OnChipMoveSTCDPOpLx` mixed SDSCs
+> (baseline: 0) — matching the 0→2 signature — and saved **~2.40 ms** of device time (full-forward
+> wall-clock 19.11→16.71 ms), in line with the reported 2.382 ms kernel-time win. The fractional wall-clock
+> delta is smaller (12.6%) only because the wall harness carries a constant H2D/D2H/Python overhead that
+> cancels in the A/B.
+
 ## Why — two good layouts, an HBM tax at the boundary
 
-Spyre's 8×8 MPE array is **weight-stationary**: the weight tile `[K,N]` sits resident in the array and
+Spyre's 8×8 PT array (the matmul engine) is **weight-stationary**: the weight tile `[K,N]` sits resident in the array and
 tokens (the M dimension) stream past. A matmul keeps the array filled by tiling **N** (output width) and
 **M** (tokens) across the 32 cores — for the fused SwiGLU projection that is `{mb:4, out:8}`, where each
 core owns a `(mb_i, out_j)` **tile** (4 rows × ⅛-width of the fused buffer).
@@ -108,7 +116,7 @@ expanded into N movements). PCFG generation lowers each movement into **two L3 r
 `L3SU` send (LX→ring) and a dest-side `L3LU` receive (ring→LX), each a `RINGDATATRANSFER` node with
 whole-stick alignment and a stick-loop nest for multi-stick moves. `dxp` permits the mixed
 `dataOpdscs_ + dscs_ + schedule` case and routes it through `runDcgForDataOpsDlOps`. **No
-SFP/MPE/arithmetic node is ever emitted** — the lowering is pure data movement on the existing ring path,
+SFP/PT/arithmetic node is ever emitted** — the lowering is pure data movement on the existing ring path,
 reusing `STCDPOpLx` (`static_cast<STCDPOpLx*>`), not a new op.
 
 ```mermaid
