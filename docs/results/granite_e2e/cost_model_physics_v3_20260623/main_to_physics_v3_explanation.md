@@ -24,16 +24,20 @@ Earlier thread reference numbers for latest-main-style Granite e2e were approxim
 | physics v3 candidate | 335 | 177 |
 | implied speedup | 1.48x | 1.55x |
 
-The fused local Granite block probe also showed the same direction for the prefill refinement:
+The local Granite block probe is useful as a fused-kernel sanity check, but it
+does not reproduce the full e2e prefill improvement by itself. A fresh
+main-vs-v3-style block profile showed decode improving clearly and prefill
+landing roughly flat in that empty-weight one-block harness:
 
-| local block probe | prefill block ms | read |
-|---|---:|---|
-| `cost-model-physics` baseline | 524.610 | before large-M tile refinement |
-| large-M tile refinement | 493.336 | 1.06x faster |
+| local block profile | baseline kernel ms/iter | candidate kernel ms/iter | read |
+|---|---:|---:|---|
+| prefill | 16.149 | 16.574 | flat/slightly slower in this harness |
+| decode expand | 14.765 | 10.621 | 1.39x faster |
 
-The branch Antoni tested has one more refinement on top of that local block probe, so the exact e2e number should be taken from Antoni's latest run, not from the older local block probe.
-
-One caveat: the checked-in standalone oracle predates the final v3 tweak, and two current v3 picks do not have exact committed isolated-timing rows. The split tables below are therefore used to explain directionality and root cause. The fused block and Antoni e2e numbers are the source of truth for aggregate latency.
+The exact aggregate source of truth is therefore Antoni's latest Granite e2e
+run. The local block/profile artifacts are used below to explain which fused
+SDSCs changed and to verify that the decode work-division change survives fused
+context.
 
 ## First Principles: What The Planner Is Trying To Choose
 
@@ -256,54 +260,69 @@ Relevant files from that repo:
 
 Coordinate-remap content in that repo is unrelated to this cost-model work and should be ignored for this analysis.
 
-Committed local block probe:
+### Fresh Pod Granite Block Split And Latency Breakdown
 
-| case | median ms | read |
-|---|---:|---|
-| `cost-model-physics` prefill block | 524.610 | baseline physics model |
-| large-M tile refinement prefill block | 493.336 | prefill improves |
-| `cost-model-physics` MLP decode | 8.858 | baseline physics model |
-| large-M tile refinement MLP decode | 8.985 | unchanged within noise |
-| `cost-model-physics` attention decode | 74.993 | baseline physics model |
-| large-M tile refinement attention decode | 75.188 | unchanged within noise |
-
-### Pod Granite Block Split And Latency Breakdown
-
-The concrete pod-side block artifacts are under:
-
-```text
-/home/adnan/dt-inductor/codex_no_antoni_20260618_002631/
-```
-
-The block probe was run through `benchmarks/granite_block_probe.py` from:
+A fresh isolated A/B was run through `benchmarks/granite_block_probe.py` and
+`benchmarks/granite_block_layer_probe.py` from:
 
 ```text
 https://github.ibm.com/Adnan-Hoque1/spyre-granite-e2e-bench
 ```
 
-The split notation below is the emitted SDSC work division. `mb` is the `M`/token-row split, `out` is the `N`/output split, `in` is the `K`/reduction split, and `x` is the batch/head-like split used by fused attention BMMs.
+The comparison used current main plus the same local Granite compile
+prerequisite on both sides, then overlaid only the v3 cost-model
+`work_division.py` on the candidate side. This keeps the measurement focused on
+the planner rather than branch drift.
 
-#### Block Latency
+The concrete pod artifacts are under:
 
-First, isolating the cost model against an upstream-main-style work division:
+```text
+/home/adnan/dt-inductor/profiler_runs/granite_block_cost_model_isolated_20260623_224926/
+```
 
-| artifact | regime | compared versions | median ms | read |
-|---|---|---|---:|---|
-| `maincost_vs_physics_granite_block_20260618_072245` | prefill | main-cost | 512.668 | baseline |
-| `maincost_vs_physics_granite_block_20260618_072245` | prefill | physics | 514.153 | effectively flat, 1.003x main-cost |
-| `maincost_vs_physics_granite_block_20260618_072245` | decode | main-cost | 88.952 | baseline |
-| `maincost_vs_physics_granite_block_20260618_072245` | decode | physics | 77.510 | 1.15x faster |
+The Kineto breakdown artifact is:
 
-Then, validating the v3 large-M refinement against the earlier physics model:
+```text
+docs/results/granite_e2e/cost_model_physics_v3_20260623/granite_block_kineto_breakdown_20260623.md
+```
 
-| artifact | regime | compared versions | median ms | read |
-|---|---|---|---:|---|
-| `validation_v2_20260618_051549` | prefill | physics | 517.410 | baseline physics |
-| `validation_v2_20260618_051549` | prefill | v3 candidate | 507.391 | 1.02x faster |
-| `validation_v2_20260618_051549` | decode | physics | 78.919 | baseline physics |
-| `validation_v2_20260618_051549` | decode | v3 candidate | 77.749 | unchanged/slightly faster |
+The split notation below is the emitted SDSC work division. `mb` is the
+`M`/token-row split, `out` is the `N`/output split, `in` is the `K`/reduction
+split, and `x` is the batch/head-like split used by fused attention BMMs.
 
-The absolute local block times are not meant to equal Antoni's full e2e numbers. The value of this probe is that it exposes which fused SDSCs changed and whether the direction is consistent. The final aggregate source of truth is still Antoni's e2e run.
+#### Block Wall-Sync Latency
+
+The wall-sync block probe is not the primary performance number, but it checks
+that the block compiles and executes with the same fused structure:
+
+| regime | baseline median ms | candidate median ms | read |
+|---|---:|---:|---|
+| prefill | 518.238 | 515.247 | effectively flat, 1.006x faster |
+| decode | 81.210 | 80.491 | effectively flat/slightly faster |
+
+#### Kineto Kernel Time
+
+The layer-probe profile path gives the more useful kernel-time readout:
+
+| regime | baseline wall median ms | candidate wall median ms | baseline kernel ms/iter | candidate kernel ms/iter | read |
+|---|---:|---:|---:|---:|---|
+| prefill | 27.867 | 28.467 | 16.149 | 16.574 | flat/slightly slower in this harness |
+| decode expand | 18.868 | 14.880 | 14.765 | 10.621 | 1.39x faster |
+
+The profiler build names kernel events with path labels, so the per-kernel
+breakdown maps launch-order buckets back to generated SDSCs. The largest decode
+improvements were:
+
+| decode launch bucket | baseline ms | candidate ms | delta |
+|---|---:|---:|---:|
+| fused SDPA mul/sum/transpose bucket | 2.655 | 0.570 | -2.085 |
+| fused add/linear/rms/silu bucket | 1.488 | 0.979 | -0.508 |
+| fused linear/rms/sum bucket | 4.035 | 2.540 | -1.495 |
+
+The absolute local block times are not meant to equal Antoni's full e2e
+numbers. The value of this probe is that it exposes which fused SDSCs changed
+and whether the decode direction is consistent. The final aggregate source of
+truth is still Antoni's e2e run.
 
 #### Prefill Split Changes
 
@@ -332,7 +351,10 @@ Decode is the opposite regime. With `M=64`, many main-cost fused kernels picked 
 | fused SDPA linear/sum/transpose block | `2_batchmatmul` | `{mb:32,out:1,in:1}` | `{mb:4,out:8,in:1}` | fixes pure-M split |
 | fused MLP/rms/silu kernels | `11_batchmatmul` and related | `{mb:32,out:1,in:1}` for the bad rows | `{mb:4,out:8,in:1}` | preserves the known-good decode MLP/projection family |
 
-This is why the block decode result improved from `88.952 ms` to `77.510 ms` in the cost-model-isolated run. V3 keeps the same decode split family and the rerun stayed in the same band at `77.749 ms`.
+This is why the fresh Kineto block decode result improved from `14.765 ms/iter`
+to `10.621 ms/iter` in kernel time. The candidate moves the bad pure-M decode
+matmuls toward the same `mb`/`out` split family that the isolated matmul oracle
+identified as healthy.
 
 Latest Antoni e2e validation of v3:
 
@@ -340,7 +362,9 @@ Latest Antoni e2e validation of v3:
 |---|---:|---:|---|
 | `cost-model-physics-v3-candidate` | 335 | 177 | best reported e2e numbers so far |
 
-The local block probe explains the direction: the large-M refinement recovers prefill without undoing decode. Antoni's run confirms that the complete v3 branch gives the best aggregate result in the real Granite e2e harness.
+The local block/profile probe explains the decode direction and validates the
+fused-kernel split changes. Antoni's run confirms that the complete v3 branch
+also gives the best aggregate result in the real Granite e2e harness.
 
 ## What Changed In Code
 
