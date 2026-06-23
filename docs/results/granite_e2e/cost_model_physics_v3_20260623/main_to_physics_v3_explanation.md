@@ -267,6 +267,73 @@ Committed local block probe:
 | `cost-model-physics` attention decode | 74.993 | baseline physics model |
 | large-M tile refinement attention decode | 75.188 | unchanged within noise |
 
+### Pod Granite Block Split And Latency Breakdown
+
+The concrete pod-side block artifacts are under:
+
+```text
+/home/adnan/dt-inductor/codex_no_antoni_20260618_002631/
+```
+
+The block probe was run through `benchmarks/granite_block_probe.py` from:
+
+```text
+https://github.ibm.com/Adnan-Hoque1/spyre-granite-e2e-bench
+```
+
+The split notation below is the emitted SDSC work division. `mb` is the `M`/token-row split, `out` is the `N`/output split, `in` is the `K`/reduction split, and `x` is the batch/head-like split used by fused attention BMMs.
+
+#### Block Latency
+
+First, isolating the cost model against an upstream-main-style work division:
+
+| artifact | regime | compared versions | median ms | read |
+|---|---|---|---:|---|
+| `maincost_vs_physics_granite_block_20260618_072245` | prefill | main-cost | 512.668 | baseline |
+| `maincost_vs_physics_granite_block_20260618_072245` | prefill | physics | 514.153 | effectively flat, 1.003x main-cost |
+| `maincost_vs_physics_granite_block_20260618_072245` | decode | main-cost | 88.952 | baseline |
+| `maincost_vs_physics_granite_block_20260618_072245` | decode | physics | 77.510 | 1.15x faster |
+
+Then, validating the v3 large-M refinement against the earlier physics model:
+
+| artifact | regime | compared versions | median ms | read |
+|---|---|---|---:|---|
+| `validation_v2_20260618_051549` | prefill | physics | 517.410 | baseline physics |
+| `validation_v2_20260618_051549` | prefill | v3 candidate | 507.391 | 1.02x faster |
+| `validation_v2_20260618_051549` | decode | physics | 78.919 | baseline physics |
+| `validation_v2_20260618_051549` | decode | v3 candidate | 77.749 | unchanged/slightly faster |
+
+The absolute local block times are not meant to equal Antoni's full e2e numbers. The value of this probe is that it exposes which fused SDSCs changed and whether the direction is consistent. The final aggregate source of truth is still Antoni's e2e run.
+
+#### Prefill Split Changes
+
+The first physics model fixed decode, but in prefill it moved some large-M attention BMMs away from the main-cost choices. That is why the first physics prefill block was flat/slightly worse even though the decode path improved.
+
+| fused SDSC family | op | main-cost split | first physics split | v3 candidate split | read |
+|---|---:|---|---|---|---|
+| fused SDPA add/linear/rms/transpose block | `7_batchmatmul` | `{mb:4,out:8,in:1}` | `{mb:8,out:4,in:1}` | `{mb:4,out:8,in:1}` | v3 restores the main-like large-M attention tile |
+| fused SDPA add/linear/rms/transpose block | `9_batchmatmul` | `{x:1,mb:32,out:1,in:1}` | `{x:1,mb:16,out:2,in:1}` | `{x:1,mb:32,out:1,in:1}` | v3 avoids unnecessary `out` split when M already fills |
+| fused SDPA linear/sum/transpose block | `2_batchmatmul` | `{mb:4,out:8,in:1}` | `{mb:8,out:4,in:1}` | `{mb:4,out:8,in:1}` | v3 restores the main-like large-M value path |
+| fused SDPA linear/sum/transpose block | `8_batchmatmul` | `{x:4,mb:1,out:8,in:1}` | `{x:16,mb:1,out:2,in:1}` | `{x:16,mb:1,out:2,in:1}` | this one remains physics-style in the local probe |
+| MLP/projection fused kernels | multiple | `{mb:4,out:8,in:1}` | `{mb:4,out:8,in:1}` | `{mb:4,out:8,in:1}` | already good, preserved |
+
+This is the core v3 prefill story: when `M=512`, the PT already has enough row work, so extra splitting of tiny attention output dimensions can hurt the fused path more than it helps. V3 adds a shape-based large-M tile term to avoid that without naming Granite or SDPA.
+
+#### Decode Split Changes
+
+Decode is the opposite regime. With `M=64`, many main-cost fused kernels picked pure `mb=32` work divisions. Those use all cores, but they expose too little useful per-core work and miss the better batch/output/reduction parallelism.
+
+| fused SDSC family | op | main-cost split | physics/v3 split | read |
+|---|---:|---|---|---|
+| fused SDPA add/cat/linear/rms/transpose block | `3_batchmatmul` | `{x:1,mb:32,out:1,in:1}` | `{x:4,mb:4,out:2,in:1}` | uses batch/head plus M plus output split |
+| fused SDPA add/cat/linear/rms/transpose block | `6_batchmatmul` | `{mb:32,out:1,in:1}` | `{mb:4,out:8,in:1}` | fixes pure-M decode projection/value split |
+| fused SDPA cat/transpose block | `5_batchmatmul` | `{x:32,mb:1,out:1,in:1}` | `{x:4,mb:4,out:1,in:2}` | adds M and K parallelism instead of pure batch/head split |
+| fused SDPA linear block | `7_batchmatmul` | `{mb:32,out:1,in:1}` | `{mb:4,out:8,in:1}` | fixes pure-M split |
+| fused SDPA linear/sum/transpose block | `2_batchmatmul` | `{mb:32,out:1,in:1}` | `{mb:4,out:8,in:1}` | fixes pure-M split |
+| fused MLP/rms/silu kernels | `11_batchmatmul` and related | `{mb:32,out:1,in:1}` for the bad rows | `{mb:4,out:8,in:1}` | preserves the known-good decode MLP/projection family |
+
+This is why the block decode result improved from `88.952 ms` to `77.510 ms` in the cost-model-isolated run. V3 keeps the same decode split family and the rerun stayed in the same band at `77.749 ms`.
+
 Latest Antoni e2e validation of v3:
 
 | run | prefill ms | decode ms | read |
