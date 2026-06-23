@@ -241,6 +241,21 @@ The speedup is therefore not mysterious. It comes from eliminating a cluster of 
 
 The fused block confirms that the split changes survive the context that matters: not just standalone matmul, but fused Granite kernels with pointwise epilogues.
 
+The reusable Granite harness lives in the internal repo:
+
+```text
+https://github.ibm.com/Adnan-Hoque1/spyre-granite-e2e-bench
+```
+
+Relevant files from that repo:
+
+- `benchmarks/granite_block_probe.py`: focused FMS `GraniteBlock` probe with `prefill` `M=512` and `decode` `M=64`.
+- `benchmarks/granite_block_layer_probe.py`: one-layer Granite block profile path with Kineto trace summarization.
+- `runbooks/granite_block_e2e.md`: runbook for the real one-layer FMS Granite block path.
+- `README.md`: states the main methodology: use trace-derived `kernel_ms_per_iter`; keep wall time, memory time, compile time, and CPU time separate.
+
+Coordinate-remap content in that repo is unrelated to this cost-model work and should be ignored for this analysis.
+
 Committed local block probe:
 
 | case | median ms | read |
