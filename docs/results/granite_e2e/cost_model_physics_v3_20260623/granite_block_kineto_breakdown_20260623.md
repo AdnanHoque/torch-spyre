@@ -8,8 +8,8 @@ Run root:
 
 This compares:
 
-- baseline: current main plus the same local Granite compile prerequisite used on both sides
-- candidate: the same baseline plus the cost-model `work_division.py`
+- cost model main: current main plus the same local Granite compile prerequisite used on both sides
+- cost model improved: the same main setup plus the cost-model `work_division.py`
 
 The benchmark is the one-layer FMS Granite block from
 `https://github.ibm.com/Adnan-Hoque1/spyre-granite-e2e-bench`.
@@ -30,7 +30,7 @@ The profiler build records kernel event names as path labels, not SDSC names.
 The per-kernel table below maps Kineto launch-order buckets back to the
 generated SDSC inventory.
 
-| regime | baseline wall median ms | candidate wall median ms | baseline kernel ms/iter | candidate kernel ms/iter | kernel speedup |
+| regime | cost model main wall median ms | cost model improved wall median ms | cost model main kernel ms/iter | cost model improved kernel ms/iter | kernel speedup |
 |---|---:|---:|---:|---:|---:|
 | prefill | 27.867 | 28.467 | 16.149 | 16.574 | 0.974x |
 | decode_expand | 18.868 | 14.880 | 14.765 | 10.621 | 1.390x |
@@ -41,7 +41,7 @@ aggregate source of truth for the prefill improvement.
 
 ## Prefill Kernel Buckets
 
-| launch | kernel name | function / role | baseline key split(s) | baseline mean ms | candidate key split(s) | candidate mean ms | delta ms |
+| launch | kernel name | function / role | cost model main key split(s) | cost model main mean ms | cost model improved key split(s) | cost model improved mean ms | delta ms |
 |---:|---|---|---|---:|---|---:|---:|
 | 1 | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1` | SDPA value path: attention probabilities @ V plus surrounding attention pointwise/reduction work | `attn@V bmm: {b:1,m:32,n:1,k:1}` | 1.901 | `attn@V bmm: {b:1,m:32,n:1,k:1}` | 1.895 | -0.006 |
 | 2 | `sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2` | Attention output path: O projection fused with residual / RMS-norm / layout work | `O-proj: {m:4,n:8,k:1}` | 1.773 | `O-proj: {m:4,n:8,k:1}` | 1.990 | +0.217 |
@@ -50,7 +50,7 @@ aggregate source of truth for the prefill improvement.
 
 ## Decode Kernel Buckets
 
-| launch | kernel name | function / role | baseline key split(s) | baseline mean ms | candidate key split(s) | candidate mean ms | delta ms |
+| launch | kernel name | function / role | cost model main key split(s) | cost model main mean ms | cost model improved key split(s) | cost model improved mean ms | delta ms |
 |---:|---|---|---|---:|---|---:|---:|
 | 1 | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_cat_clone_expand_linear_split_with_sizes_transpose_unsqueeze_view_4` | Attention value path plus O projection in decode context | `attn@V: {b:1,m:32,n:1,k:1}; O-proj: {m:32,n:1,k:1}` | 1.336 | `attn@V: {b:8,m:4,n:1,k:1}; O-proj: {m:4,n:8,k:1}` | 1.283 | -0.053 |
 | 2 | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_cat_clone_expand_transpose_unsqueeze_view_2` | QK^T attention-score matmul and layout work | `QK^T: {b:32,m:1,n:1,k:1}` | 0.006 | `QK^T: {b:4,m:4,n:1,k:2}` | 0.006 | -0.000 |
@@ -67,20 +67,20 @@ from the emitted `sdsc_*.json` files in each Granite block cache. The CPU
 cost-function table in the next section is only a diagnostic for why the branch
 wants different choices; when CPU and SDSC disagree, use this SDSC table.
 
-| regime | function / role | shape `B x M x N x K` | shared RHS | baseline SDSC pick | candidate SDSC pick | changed? |
-|---|---|---|---:|---|---|---:|
-| decode | O projection | `1x64x4096x4096` | true | `{m:32,n:1,k:1}` | `{m:4,n:8,k:1}` | true |
-| decode | MLP down projection | `1x64x4096x12800` | true | `{m:32,n:1,k:1}` | `{m:4,n:8,k:1}` | true |
-| decode | fused QKV projection | `1x64x6144x4096` | true | `{m:1,n:32,k:1}` | `{m:4,n:8,k:1}` | true |
-| decode | MLP gate/up projection | `1x64x25600x4096` | true | `{m:4,n:8,k:1}` | `{m:4,n:8,k:1}` | false |
-| decode | attention @ V | `32x64x128x576` | false | `{b:1,m:32,n:1,k:1}` | `{b:8,m:4,n:1,k:1}` | true |
-| decode | QK^T attention scores | `64x32x576x128` | false | `{b:32,m:1,n:1,k:1}` | `{b:4,m:4,n:1,k:2}` | true |
-| prefill | O projection | `1x512x4096x4096` | true | `{m:4,n:8,k:1}` | `{m:4,n:8,k:1}` | false |
-| prefill | MLP down projection | `1x512x4096x12800` | true | `{m:4,n:8,k:1}` | `{m:8,n:4,k:1}` | true |
-| prefill | fused QKV projection | `1x512x6144x4096` | true | `{m:4,n:8,k:1}` | `{m:4,n:8,k:1}` | false |
-| prefill | MLP gate/up projection | `1x512x25600x4096` | true | `{m:4,n:8,k:1}` | `{m:4,n:8,k:1}` | false |
-| prefill | attention @ V | `32x512x128x512` | false | `{b:1,m:32,n:1,k:1}` | `{b:1,m:32,n:1,k:1}` | false |
-| prefill | QK^T attention scores | `512x32x512x128` | false | `{b:4,m:1,n:8,k:1}` | `{b:16,m:1,n:2,k:1}` | true |
+| regime | function / role | shape `B x M x N x K` | shared RHS | cost model main emitted SDSC kernel/op | cost model main SDSC pick | cost model improved emitted SDSC kernel/op | cost model improved SDSC pick | changed? |
+|---|---|---|---:|---|---|---|---|---:|
+| decode | O projection | `1x64x4096x4096` | true | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_cat_clone_expand_linear_mul_rms_norm_split_with_sizes_transpose_unsqueeze_view_4` / `6_batchmatmul` | `{m:32,n:1,k:1}` | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_cat_clone_expand_linear_mul_rms_norm_split_with_sizes_transpose_unsqueeze_view_4` / `6_batchmatmul` | `{m:4,n:8,k:1}` | true |
+| decode | MLP down projection | `1x64x4096x12800` | true | `sdsc_fused_linear_mul_rms_norm_silu_split_with_sizes_5` / `9_batchmatmul` | `{m:32,n:1,k:1}` | `sdsc_fused_linear_mul_rms_norm_silu_split_with_sizes_5` / `9_batchmatmul` | `{m:4,n:8,k:1}` | true |
+| decode | fused QKV projection | `1x64x6144x4096` | true | `sdsc_fused_linear_mul_rms_norm_split_with_sizes_sum_unsqueeze_view_0` / `7_batchmatmul` | `{m:1,n:32,k:1}` | `sdsc_fused_linear_mul_rms_norm_split_with_sizes_sum_unsqueeze_view_0` / `7_batchmatmul` | `{m:4,n:8,k:1}` | true |
+| decode | MLP gate/up projection | `1x64x25600x4096` | true | `sdsc_fused_linear_mul_rms_norm_silu_split_with_sizes_5` / `2_batchmatmul` | `{m:4,n:8,k:1}` | `sdsc_fused_linear_mul_rms_norm_silu_split_with_sizes_5` / `2_batchmatmul` | `{m:4,n:8,k:1}` | false |
+| decode | attention @ V | `32x64x128x576` | false | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_cat_clone_expand_linear_mul_rms_norm_split_with_sizes_transpose_unsqueeze_view_4` / `3_batchmatmul` | `{b:1,m:32,n:1,k:1}` | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_cat_clone_expand_linear_mul_rms_norm_split_with_sizes_transpose_unsqueeze_view_4` / `3_batchmatmul` | `{b:8,m:4,n:1,k:1}` | true |
+| decode | QK^T attention scores | `64x32x576x128` | false | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_cat_clone_expand_transpose_unsqueeze_view_2` / `5_batchmatmul` | `{b:32,m:1,n:1,k:1}` | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_cat_clone_expand_transpose_unsqueeze_view_2` / `5_batchmatmul` | `{b:4,m:4,n:1,k:2}` | true |
+| prefill | O projection | `1x512x4096x4096` | true | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_clone_expand_linear_mul_rms_norm_split_with_sizes_transpose_unsqueeze_view_2` / `10_batchmatmul` | `{m:4,n:8,k:1}` | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_clone_expand_linear_mul_rms_norm_split_with_sizes_transpose_unsqueeze_view_2` / `10_batchmatmul` | `{m:4,n:8,k:1}` | false |
+| prefill | MLP down projection | `1x512x4096x12800` | true | `sdsc_fused_linear_mul_rms_norm_silu_split_with_sizes_3` / `9_batchmatmul` | `{m:4,n:8,k:1}` | `sdsc_fused_linear_mul_rms_norm_silu_split_with_sizes_3` / `9_batchmatmul` | `{m:8,n:4,k:1}` | true |
+| prefill | fused QKV projection | `1x512x6144x4096` | true | `sdsc_fused_linear_mul_rms_norm_split_with_sizes_sum_unsqueeze_view_0_` / `7_batchmatmul` | `{m:4,n:8,k:1}` | `sdsc_fused_linear_mul_rms_norm_split_with_sizes_sum_unsqueeze_view_0` / `7_batchmatmul` | `{m:4,n:8,k:1}` | false |
+| prefill | MLP gate/up projection | `1x512x25600x4096` | true | `sdsc_fused_linear_mul_rms_norm_silu_split_with_sizes_3` / `2_batchmatmul` | `{m:4,n:8,k:1}` | `sdsc_fused_linear_mul_rms_norm_silu_split_with_sizes_3` / `2_batchmatmul` | `{m:4,n:8,k:1}` | false |
+| prefill | attention @ V | `32x512x128x512` | false | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_clone_expand_linear_mul_rms_norm_split_with_sizes_transpose_unsqueeze_view_2` / `7_batchmatmul` | `{b:1,m:32,n:1,k:1}` | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_clone_expand_linear_mul_rms_norm_split_with_sizes_transpose_unsqueeze_view_2` / `7_batchmatmul` | `{b:1,m:32,n:1,k:1}` | false |
+| prefill | QK^T attention scores | `512x32x512x128` | false | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1` / `6_batchmatmul` | `{b:4,m:1,n:8,k:1}` | `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1` / `6_batchmatmul` | `{b:16,m:1,n:2,k:1}` | true |
 
 ## CPU Split-Choice Diff On Granite Block Shapes
 
@@ -96,7 +96,7 @@ Raw artifact on the pod:
 /home/adnan/dt-inductor/profiler_runs/granite_block_cost_model_isolated_20260623_224926/cpu_split_choice_diff_20260623_235519/cpu_split_choice_diff.md
 ```
 
-| regime | function / role | shape `B x M x N x K` | shared RHS | emitted baseline | emitted candidate | CPU main pick | CPU PR pick | changed? |
+| regime | function / role | shape `B x M x N x K` | shared RHS | emitted cost model main | emitted cost model improved | CPU cost model main pick | CPU cost model improved pick | changed? |
 |---|---|---|---:|---|---|---|---|---:|
 | decode | O projection | `1x64x4096x4096` | true | `{m:32,n:1,k:1}` | `{m:4,n:8,k:1}` | `{m:1,n:8,k:2}` | `{m:4,n:8,k:1}` | true |
 | decode | MLP down projection | `1x64x4096x12800` | true | `{m:32,n:1,k:1}` | `{m:4,n:8,k:1}` | `{m:1,n:8,k:2}` | `{m:4,n:8,k:1}` | true |
@@ -122,7 +122,7 @@ splits into healthier split families:
 - fused QKV decode moves from `{m:1,n:32,k:1}` to `{m:4,n:8,k:1}`.
 
 The prefill story is more mixed in this local block harness. Most heavy
-projection choices are preserved. The candidate changes MLP down from
+projection choices are preserved. The cost model improved run changes MLP down from
 `{m:4,n:8,k:1}` to `{m:8,n:4,k:1}` and changes the QK^T attention-score split,
 but the trace-derived prefill kernel total is flat/slightly slower in this
 empty-weight one-block probe. Antoni's full Granite e2e run remains the
