@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fanout: M-split vs N-split &mdash; Spyre AIU Work-Division Intuition</title>
+<style>
+  :root{
+    --bg:#0e1320;
+    --panel:#161d30;
+    --panel2:#1b2440;
+    --ink:#e7ecf6;
+    --ink-dim:#aab4cc;
+    --ink-faint:#7c87a3;
+    --line:#2a3550;
+    --indigo:#5b6cff;
+    --indigo-soft:#2b3566;
+    --teal:#2dd4bf;
+    --teal-dim:#0f766e;
+    --green:#34d399;
+    --amber:#f4b860;
+    --red:#e06b74;
+    --red-dim:#5a2730;
+    --mono:"SFMono-Regular", "JetBrains Mono",Consolas,"Liberation Mono",Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:var(--sans);line-height:1.62;font-size:16px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:980px;margin:0 auto;padding:0 22px}
+  a{color:var(--teal);text-decoration:none}
+  a:hover{text-decoration:underline}
+  h1,h2,h3,h4{line-height:1.2;font-weight:680}
+  h2{font-size:1.7rem;margin:3.4rem 0 1rem;padding-top:1rem;border-top:1px solid var(--line)}
+  h3{font-size:1.25rem;margin:2.2rem 0 .6rem;color:#fff}
+  h4{font-size:1.05rem;margin:1.6rem 0 .5rem;color:var(--teal)}
+  p{margin:.75rem 0}
+  code,.mono{font-family:var(--mono);font-size:.9em}
+  code{background:#0a0f1c;border:1px solid var(--line);border-radius:5px;padding:.05rem .35rem;color:#cdd6f4}
+  pre{background:#0a0f1c;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:.85rem;line-height:1.5;color:#cdd6f4}
+  pre .cm{color:#6b7691}
+  pre .kw{color:#9db4ff}
+  pre .nm{color:#7be3d2}
+  strong{color:#fff;font-weight:660}
+  em{color:#dfe6f5}
+
+  /* hero */
+  .hero{background:radial-gradient(1200px 480px at 18% -10%,#23306b 0%,rgba(35,48,107,0) 60%),linear-gradient(180deg,#121a31 0%,#0e1320 100%);border-bottom:1px solid var(--line);padding:54px 0 40px}
+  .eyebrow{font-family:var(--mono);font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:var(--teal);margin:0 0 .5rem}
+  .hero h1{font-size:2.5rem;margin:.2rem 0 .6rem;letter-spacing:-.01em}
+  .hero .thesis{font-size:1.12rem;color:var(--ink-dim);max-width:760px}
+  .chips{display:flex;flex-wrap:wrap;gap:12px;margin:24px 0 6px}
+  .chip{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px;min-width:160px}
+  .chip .k{font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)}
+  .chip .v{font-size:1.55rem;font-weight:720;color:#fff;font-family:var(--mono)}
+  .chip .v small{font-size:.8rem;color:var(--ink-faint);font-weight:500}
+  .chip.win .v{color:var(--teal)}
+  .chip.speed .v{color:var(--green)}
+
+  /* nav */
+  nav.toc{position:sticky;top:0;z-index:30;background:rgba(14,19,32,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:10px 0}
+  nav.toc ul{list-style:none;display:flex;flex-wrap:wrap;gap:6px 14px;margin:0;padding:0 22px;max-width:980px;margin:0 auto;font-size:.84rem}
+  nav.toc a{color:var(--ink-dim);white-space:nowrap}
+  nav.toc a:hover{color:var(--teal)}
+
+  /* tables */
+  table{border-collapse:collapse;width:100%;margin:1.1rem 0;font-size:.9rem}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:#fff;font-weight:620}
+  tbody tr:nth-child(odd){background:#131a2c}
+  tbody tr:nth-child(even){background:#0f1525}
+  td.num,th.num{text-align:right;font-family:var(--mono)}
+  .ok{color:var(--teal);font-weight:700}
+  .no{color:var(--ink-faint)}
+  .chg{color:var(--amber);font-weight:700}
+  td.win{background:rgba(45,212,191,.10)}
+  td.flaw{background:rgba(224,107,116,.10)}
+
+  /* callouts */
+  .call{border-left:4px solid var(--indigo);background:var(--panel);border-radius:0 10px 10px 0;padding:14px 18px;margin:1.3rem 0}
+  .call.key{border-left-color:var(--teal);background:linear-gradient(90deg,rgba(45,212,191,.10),var(--panel) 60%)}
+  .call.warn{border-left-color:var(--amber);background:linear-gradient(90deg,rgba(244,184,96,.10),var(--panel) 60%)}
+  .call.flaw{border-left-color:var(--red);background:linear-gradient(90deg,rgba(224,107,116,.10),var(--panel) 60%)}
+  .call .lead{font-family:var(--mono);font-size:.72rem;letter-spacing:.12em;text-transform:uppercase;color:var(--teal);display:block;margin-bottom:.3rem}
+  .call.warn .lead{color:var(--amber)}
+  .call.flaw .lead{color:var(--red)}
+
+  /* figure */
+  figure{margin:1.6rem 0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;overflow:hidden}
+  figure svg{display:block;width:100%;height:auto}
+  figcaption{margin-top:10px;font-size:.85rem;color:var(--ink-dim);text-align:center}
+  .fig-title{font-family:var(--mono);font-size:.74rem;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint);margin-bottom:10px}
+
+  /* term cards */
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin:1.4rem 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card.win{border-color:var(--teal-dim)}
+  .card h4{margin:0 0 .35rem}
+  .card .role{font-size:.78rem;color:var(--ink-faint);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em}
+  .card .f{font-family:var(--mono);font-size:.82rem;background:#0a0f1c;border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin:.5rem 0;white-space:pre-wrap;color:#cdd6f4}
+  .card .worked{font-size:.85rem;color:var(--ink-dim)}
+  .card .worked b{color:var(--teal)}
+
+  /* svg helper text */
+  .svglbl{font-family:var(--sans);font-size:12px;fill:var(--ink-dim)}
+  .svgttl{font-family:var(--mono);font-size:12px;fill:#fff;font-weight:600}
+  .svgsm{font-family:var(--mono);font-size:10px;fill:var(--ink-faint)}
+  .badge{display:inline-block;font-family:var(--mono);font-size:.72rem;padding:1px 7px;border-radius:20px;border:1px solid var(--line)}
+  .badge.win{color:var(--teal);border-color:var(--teal-dim)}
+  .badge.flaw{color:var(--red);border-color:var(--red-dim)}
+  footer{border-top:1px solid var(--line);margin-top:4rem;padding:26px 0 50px;font-size:.85rem;color:var(--ink-faint)}
+  .lede{font-size:1.05rem;color:var(--ink-dim)}
+  .anchor{scroll-margin-top:60px}
+  hr.soft{border:0;border-top:1px solid var(--line);margin:2rem 0}
+</style>
+</head>
+<body>
+
+<nav class="toc"><ul>
+  <li><a href="#setup">The setup</a></li>
+  <li><a href="#grid">2D split = core grid</a></li>
+  <li><a href="#reuse">Who shares what</a></li>
+  <li><a href="#size">"But weights are bigger!"</a></li>
+  <li><a href="#timing">Timing diagram</a></li>
+  <li><a href="#shared-vs-bmm">Shared-weight vs true-BMM</a></li>
+  <li><a href="#decode">The decode payoff</a></li>
+  <li><a href="#cheat">Cheat sheet</a></li>
+</ul></nav>
+
+<header class="hero"><div class="wrap">
+  <p class="eyebrow">Spyre AIU · Work-Division Intuition · Companion to the v3 cost-model doc</p>
+  <h1>Fanout: why N&#8209;split hurts and M&#8209;split doesn't</h1>
+  <p class="thesis">The cost model charges <em>fanout</em> mostly to the N&#8209;split. This isn't about which tensor is bigger &mdash; it's about which operand has to reach many cores <strong>at the same time on the hot path</strong>. In a weight&#8209;stationary array that operand is the <strong>activation stream</strong>, and N&#8209;split duplicates it while M&#8209;split partitions it.</p>
+  <div class="chips">
+    <div class="chip"><div class="k">N&#8209;split</div><div class="v" style="color:var(--amber)">activation fanout</div></div>
+    <div class="chip"><div class="k">M&#8209;split</div><div class="v" style="color:var(--indigo)">weight reuse</div></div>
+    <div class="chip win"><div class="k">B / head split</div><div class="v">independent work</div></div>
+  </div>
+</div></header>
+
+<main class="wrap">
+
+<p class="lede">This note unpacks one question: <em>why does fanout cost mostly depend on <code>n_split</code>?</em> It builds the intuition from toy pictures, then connects it to why the planner treats a <strong>shared&#8209;weight projection</strong> and a <strong>true&#8209;BMM attention</strong> op differently. It's the conceptual companion to the <a href="cost_model_v3_first_principles.html">v3 cost-model explainer</a> &mdash; this one is all intuition and toy diagrams.</p>
+
+<!-- ===================== SETUP ===================== -->
+<h2 id="setup" class="anchor">1 &middot; The setup: weight-stationary matmul</h2>
+
+<p>Every tile of work is a small matmul:</p>
+<pre><span class="nm">A</span>[M, K]  @  <span class="nm">W</span>[K, N]  &rarr;  <span class="nm">C</span>[M, N]
+        <span class="cm"># A = activations (tokens)   W = the right-hand operand   C = output</span></pre>
+
+<p>The hardware runs this <strong>weight&#8209;stationary</strong>. Three steps, and the order is the whole story:</p>
+
+<figure>
+  <div class="fig-title">The weight-stationary loop</div>
+  <svg viewBox="0 0 760 250" role="img" aria-label="Weight stationary array: weight held resident, activations stream through, output accumulates">
+    <!-- core / array -->
+    <rect x="300" y="55" width="170" height="140" rx="10" fill="#161d30" stroke="#2a3550"/>
+    <rect x="318" y="73" width="134" height="104" rx="6" fill="#1b2440" stroke="#5b6cff"/>
+    <text x="385" y="118" text-anchor="middle" class="svgttl" fill="#9db4ff">W[K,N]</text>
+    <text x="385" y="138" text-anchor="middle" class="svgsm">held resident</text>
+    <text x="385" y="44" text-anchor="middle" class="svglbl">8&times;8 PT array (one core)</text>
+    <!-- activation stream in -->
+    <text x="120" y="44" text-anchor="middle" class="svglbl" fill="#f4b860">activation rows stream &rarr;</text>
+    <g font-family="var(--mono)" font-size="12" fill="#f4b860">
+      <rect x="60" y="70" width="40" height="20" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="80" y="84" text-anchor="middle">A0</text>
+      <rect x="120" y="70" width="40" height="20" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="140" y="84" text-anchor="middle">A1</text>
+      <rect x="180" y="70" width="40" height="20" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="200" y="84" text-anchor="middle">A2</text>
+    </g>
+    <line x1="225" y1="118" x2="298" y2="118" stroke="#f4b860" stroke-width="2" marker-end="url(#ar)"/>
+    <text x="120" y="150" text-anchor="middle" class="svgsm">one row per beat, every beat</text>
+    <!-- output out -->
+    <line x1="470" y1="118" x2="545" y2="118" stroke="#2dd4bf" stroke-width="2" marker-end="url(#arT)"/>
+    <rect x="548" y="95" width="150" height="48" rx="8" fill="#0f766e22" stroke="#2dd4bf"/>
+    <text x="623" y="115" text-anchor="middle" class="svgttl" fill="#2dd4bf">C[M,N]</text>
+    <text x="623" y="132" text-anchor="middle" class="svgsm">accumulates locally</text>
+    <defs>
+      <marker id="ar" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#f4b860"/></marker>
+      <marker id="arT" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2dd4bf"/></marker>
+    </defs>
+  </svg>
+  <figcaption><span style="color:var(--indigo)">Weight</span> is loaded once and <em>held</em>; <span style="color:var(--amber)">activation rows</span> stream through it continuously; <span style="color:var(--teal)">output</span> accumulates in place. The weight load is paid once and amortized over every row that streams past. The activation stream is on the critical path <em>every beat</em>.</figcaption>
+</figure>
+
+<div class="call key"><span class="lead">Hold onto this</span> The weight is the <strong>resident</strong> operand (loaded once, reused). The activation is the <strong>streaming</strong> operand (needed every beat). That asymmetry is the reason N&#8209;split and M&#8209;split cost different amounts.</div>
+
+<!-- ===================== GRID ===================== -->
+<h2 id="grid" class="anchor">2 &middot; A 2D split is just a grid of cores</h2>
+
+<p>A split like <code>{m:2, n:4}</code> means: lay the cores out as a <strong>2&times;4 grid</strong>. Each core computes <em>one tile</em> of the output <code>C</code> &mdash; the rows for its M&#8209;group crossed with the columns for its N&#8209;group.</p>
+
+<p>Toy shape: <code>M=8, K=4, N=8</code>, split <code>{m:2, n:4}</code> &rarr; 2&times;4 = 8 cores.</p>
+
+<figure>
+  <div class="fig-title">{m:2, n:4} as a core grid</div>
+  <svg viewBox="0 0 760 300" role="img" aria-label="2 by 4 grid of cores, each owns an M row group and an N column group">
+    <!-- column headers (N groups) -->
+    <g class="svgsm" fill="#f4b860" text-anchor="middle">
+      <text x="245" y="46">N0&ndash;1</text><text x="375" y="46">N2&ndash;3</text><text x="505" y="46">N4&ndash;5</text><text x="635" y="46">N6&ndash;7</text>
+    </g>
+    <text x="440" y="24" text-anchor="middle" class="svglbl" fill="#f4b860">n = 4 output-column groups</text>
+    <!-- row headers (M groups) -->
+    <text x="70" y="115" class="svgsm" fill="#5b6cff">M0&ndash;3</text>
+    <text x="70" y="225" class="svgsm" fill="#5b6cff">M4&ndash;7</text>
+    <text x="40" y="175" text-anchor="middle" class="svglbl" fill="#5b6cff" transform="rotate(-90 40 175)">m = 2 row groups</text>
+    <!-- 2x4 grid -->
+    <g font-family="var(--mono)" font-size="10" fill="#cdd6f4" text-anchor="middle">
+      <!-- row 0 -->
+      <rect x="190" y="70" width="110" height="80" rx="8" fill="#161d30" stroke="#2a3550"/><text x="245" y="105">A[M0-3]</text><text x="245" y="122" fill="#f4b860">&times;W[N0-1]</text>
+      <rect x="320" y="70" width="110" height="80" rx="8" fill="#161d30" stroke="#2a3550"/><text x="375" y="105">A[M0-3]</text><text x="375" y="122" fill="#f4b860">&times;W[N2-3]</text>
+      <rect x="450" y="70" width="110" height="80" rx="8" fill="#161d30" stroke="#2a3550"/><text x="505" y="105">A[M0-3]</text><text x="505" y="122" fill="#f4b860">&times;W[N4-5]</text>
+      <rect x="580" y="70" width="110" height="80" rx="8" fill="#161d30" stroke="#2a3550"/><text x="635" y="105">A[M0-3]</text><text x="635" y="122" fill="#f4b860">&times;W[N6-7]</text>
+      <!-- row 1 -->
+      <rect x="190" y="180" width="110" height="80" rx="8" fill="#161d30" stroke="#2a3550"/><text x="245" y="215">A[M4-7]</text><text x="245" y="232" fill="#f4b860">&times;W[N0-1]</text>
+      <rect x="320" y="180" width="110" height="80" rx="8" fill="#161d30" stroke="#2a3550"/><text x="375" y="215">A[M4-7]</text><text x="375" y="232" fill="#f4b860">&times;W[N2-3]</text>
+      <rect x="450" y="180" width="110" height="80" rx="8" fill="#161d30" stroke="#2a3550"/><text x="505" y="215">A[M4-7]</text><text x="505" y="232" fill="#f4b860">&times;W[N4-5]</text>
+      <rect x="580" y="180" width="110" height="80" rx="8" fill="#161d30" stroke="#2a3550"/><text x="635" y="215">A[M4-7]</text><text x="635" y="232" fill="#f4b860">&times;W[N6-7]</text>
+    </g>
+    <text x="440" y="288" text-anchor="middle" class="svgsm">each core = one C tile = its M rows &times; its N columns</text>
+  </svg>
+  <figcaption>The split is literally a tiling of the output. Now look along a <strong>row</strong> vs down a <strong>column</strong> &mdash; that's where the cost lives.</figcaption>
+</figure>
+
+<p>So for your two examples, with <code>{m, n, k}</code>:</p>
+<table>
+  <thead><tr><th>split</th><th>row / token parallelism</th><th>output-column parallelism</th><th>weight (RHS) reused across&hellip;</th><th>activation (LHS) reused across&hellip;</th></tr></thead>
+  <tbody>
+    <tr><td><code>{m:8, n:4, k:1}</code></td><td>8&#8209;way</td><td>4&#8209;way</td><td class="num">8 M&#8209;lanes</td><td class="num">4 N&#8209;lanes</td></tr>
+    <tr><td><code>{m:4, n:8, k:1}</code></td><td>4&#8209;way</td><td>8&#8209;way</td><td class="num">4 M&#8209;lanes</td><td class="num">8 N&#8209;lanes</td></tr>
+  </tbody>
+</table>
+<p>Your "case 1 vs case 2" reading is <span class="ok">directionally right</span>: in <code>{m:8,n:4}</code> the weight is shared by 8 cores and the activation by 4; in <code>{m:4,n:8}</code> it flips. Which one the planner prefers depends on <em>what the RHS is</em> &mdash; we get to that in &sect;6.</p>
+
+<!-- ===================== REUSE ===================== -->
+<h2 id="reuse" class="anchor">3 &middot; Who shares what: N&#8209;split shares activations, M&#8209;split shares weights</h2>
+
+<p>Take the same grid and ask, for each direction, "which operand is <em>identical</em> across these cores?"</p>
+
+<figure>
+  <div class="fig-title">The two reuse axes</div>
+  <svg viewBox="0 0 760 320" role="img" aria-label="A row of cores shares the same activation; a column of cores shares the same weight">
+    <!-- top: a row shares A -->
+    <text x="20" y="35" class="svglbl" fill="#f4b860">Across a ROW (same M, different N):</text>
+    <g font-family="var(--mono)" font-size="10" text-anchor="middle">
+      <rect x="120" y="50" width="90" height="46" rx="7" fill="#2a210f" stroke="#f4b860"/><text x="165" y="78" fill="#f4b860">W[N0-1]</text>
+      <rect x="230" y="50" width="90" height="46" rx="7" fill="#2a210f" stroke="#f4b860"/><text x="275" y="78" fill="#f4b860">W[N2-3]</text>
+      <rect x="340" y="50" width="90" height="46" rx="7" fill="#2a210f" stroke="#f4b860"/><text x="385" y="78" fill="#f4b860">W[N4-5]</text>
+      <rect x="450" y="50" width="90" height="46" rx="7" fill="#2a210f" stroke="#f4b860"/><text x="495" y="78" fill="#f4b860">W[N6-7]</text>
+    </g>
+    <!-- A source fanning to the 4 -->
+    <rect x="595" y="52" width="120" height="42" rx="7" fill="#161d30" stroke="#5b6cff"/><text x="655" y="70" text-anchor="middle" class="svgttl" fill="#9db4ff">A[M0-3]</text><text x="655" y="86" text-anchor="middle" class="svgsm">one tile</text>
+    <g stroke="#e06b74" stroke-width="1.6" fill="none">
+      <path d="M593,73 C540,73 230,73 167,96" marker-end="url(#arR)"/>
+      <path d="M593,73 C560,73 320,80 277,96" marker-end="url(#arR)"/>
+      <path d="M593,73 C580,75 430,80 387,96" marker-end="url(#arR)"/>
+      <path d="M593,76 L543,82" marker-end="url(#arR)"/>
+    </g>
+    <text x="385" y="125" text-anchor="middle" class="svgsm" fill="#e06b74">same activation tile fanned out to all n cores &nbsp;&rarr;&nbsp; ACTIVATION FANOUT (= n)</text>
+
+    <line x1="20" y1="150" x2="740" y2="150" stroke="#2a3550" stroke-dasharray="4 4"/>
+
+    <!-- bottom: a column shares W -->
+    <text x="20" y="185" class="svglbl" fill="#5b6cff">Down a COLUMN (same N, different M):</text>
+    <g font-family="var(--mono)" font-size="10" text-anchor="middle">
+      <rect x="300" y="200" width="120" height="44" rx="7" fill="#161d30" stroke="#5b6cff"/><text x="360" y="227" fill="#9db4ff">A[M0-3]</text>
+      <rect x="300" y="258" width="120" height="44" rx="7" fill="#161d30" stroke="#5b6cff"/><text x="360" y="285" fill="#9db4ff">A[M4-7]</text>
+    </g>
+    <rect x="500" y="228" width="120" height="46" rx="7" fill="#2a210f" stroke="#f4b860"/><text x="560" y="248" text-anchor="middle" class="svgttl" fill="#f4b860">W[N0-1]</text><text x="560" y="265" text-anchor="middle" class="svgsm">held once</text>
+    <g stroke="#2dd4bf" stroke-width="1.6" fill="none">
+      <path d="M498,243 L423,228" marker-end="url(#arT2)"/>
+      <path d="M498,258 L423,278" marker-end="url(#arT2)"/>
+    </g>
+    <text x="220" y="320" text-anchor="middle" class="svgsm" fill="#2dd4bf">same weight tile reused by m cores &nbsp;&rarr;&nbsp; WEIGHT REUSE (the resident operand)</text>
+    <defs>
+      <marker id="arR" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#e06b74"/></marker>
+      <marker id="arT2" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#2dd4bf"/></marker>
+    </defs>
+  </svg>
+  <figcaption>Along a row the <span style="color:var(--indigo)">activation</span> is identical &rarr; it must reach all <code>n</code> cores. Down a column the <span style="color:var(--amber)">weight</span> is identical &rarr; it's reused by all <code>m</code> cores. So your statement is <span class="ok">true</span>: <strong>n&#8209;split shares activations, m&#8209;split shares weights.</strong></figcaption>
+</figure>
+
+<div class="call key"><span class="lead">Your statement, confirmed</span> "for n&#8209;split &rarr; activations are shared by n cores; for m&#8209;split &rarr; weights are shared by m cores" &mdash; <strong>yes, exactly.</strong> The next section is the subtle part: those two "sharings" do <em>not</em> cost the same.</div>
+
+<!-- ===================== SIZE ===================== -->
+<h2 id="size" class="anchor">4 &middot; "But weights are bigger &mdash; isn't broadcasting activations cheaper?"</h2>
+
+<p>This is the natural objection, and it's the crux. The answer is that <strong>fanout cost is not about total bytes</strong>. It's about which operand has to be <em>delivered to many cores at the same moment, on the path that runs every beat</em>.</p>
+
+<figure>
+  <div class="fig-title">Stationary (amortized) vs streaming (hot path)</div>
+  <svg viewBox="0 0 760 250" role="img" aria-label="weight loaded once then reused, activation needed every beat">
+    <!-- weight lane -->
+    <text x="20" y="40" class="svglbl" fill="#5b6cff">WEIGHT &mdash; stationary</text>
+    <rect x="180" y="24" width="70" height="26" rx="5" fill="#1b2440" stroke="#5b6cff"/><text x="215" y="42" text-anchor="middle" class="svgsm" fill="#9db4ff">LOAD</text>
+    <rect x="255" y="24" width="485" height="26" rx="5" fill="#5b6cff22" stroke="#2b3566"/>
+    <text x="497" y="42" text-anchor="middle" class="svgsm" fill="#9db4ff">held resident &mdash; reused by every row that streams past (cost paid once)</text>
+    <text x="20" y="70" class="svgsm" fill="#7c87a3">a bigger weight just means a bigger one-time load &mdash; off the critical path</text>
+
+    <line x1="20" y1="92" x2="740" y2="92" stroke="#2a3550" stroke-dasharray="4 4"/>
+
+    <!-- activation lane -->
+    <text x="20" y="125" class="svglbl" fill="#f4b860">ACTIVATION &mdash; streaming</text>
+    <g font-family="var(--mono)" font-size="10" fill="#f4b860" text-anchor="middle">
+      <rect x="180" y="110" width="44" height="24" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="202" y="126">A0</text>
+      <rect x="230" y="110" width="44" height="24" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="252" y="126">A1</text>
+      <rect x="280" y="110" width="44" height="24" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="302" y="126">A2</text>
+      <rect x="330" y="110" width="44" height="24" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="352" y="126">A3</text>
+      <rect x="380" y="110" width="44" height="24" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="402" y="126">A4</text>
+      <rect x="430" y="110" width="44" height="24" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="452" y="126">A5</text>
+      <rect x="480" y="110" width="44" height="24" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="502" y="126">&hellip;</text>
+    </g>
+    <text x="20" y="160" class="svgsm" fill="#7c87a3">arrives every beat &mdash; on the critical path. Whoever needs it must get it <tspan fill="#e06b74">now</tspan>.</text>
+    <!-- the punchline -->
+    <rect x="120" y="185" width="520" height="50" rx="10" fill="#0a0f1c" stroke="#2a3550"/>
+    <text x="380" y="205" text-anchor="middle" class="svglbl" fill="#e7ecf6">Fanning out the <tspan fill="#f4b860">streaming</tspan> operand = multicast-or-replay <tspan fill="#e06b74">on the hot path</tspan>.</text>
+    <text x="380" y="224" text-anchor="middle" class="svglbl" fill="#e7ecf6">Reusing the <tspan fill="#5b6cff">stationary</tspan> operand = free &mdash; that's what the array is built for.</text>
+  </svg>
+  <figcaption>Size is a red herring. The weight can be huge, but it's loaded once and amortized. The activation is small but it's on the wire every beat &mdash; so making <em>it</em> feed many cores at once is what creates pressure.</figcaption>
+</figure>
+
+<div class="call"><span class="lead">The one-sentence answer</span> It's cheaper to keep one big weight tile resident and reuse it than to fan a small activation stream out to many consumers, because the weight's reuse is <em>amortized and off the hot path</em>, while the activation's fanout lands <em>on the hot path, every beat</em>. "Which is bigger" never enters into it.</div>
+
+<!-- ===================== TIMING ===================== -->
+<h2 id="timing" class="anchor">5 &middot; The timing diagram: why N&#8209;split stalls the array</h2>
+
+<p>Now make it concrete in time. Four cores, four activation rows <code>A0&hellip;A3</code>. Compare splitting <strong>N</strong> (all cores need the same row at once) against splitting <strong>M</strong> (each core needs a different row).</p>
+
+<figure>
+  <div class="fig-title">n&#8209;split = broadcast + bubbles &nbsp;vs&nbsp; m&#8209;split = clean partition</div>
+  <svg viewBox="0 0 760 380" role="img" aria-label="timing comparison of N split broadcast versus M split partition">
+    <!-- LEFT: N split -->
+    <text x="180" y="28" text-anchor="middle" class="svgttl" fill="#e06b74">N&#8209;split (n=4)</text>
+    <text x="180" y="46" text-anchor="middle" class="svgsm">each core holds a different W column; all need the same A row</text>
+    <!-- core headers -->
+    <g font-family="var(--mono)" font-size="9" text-anchor="middle" fill="#f4b860">
+      <rect x="40" y="58" width="60" height="22" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="70" y="73">W_N0</text>
+      <rect x="110" y="58" width="60" height="22" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="140" y="73">W_N1</text>
+      <rect x="180" y="58" width="60" height="22" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="210" y="73">W_N2</text>
+      <rect x="250" y="58" width="60" height="22" rx="4" fill="#2a210f" stroke="#f4b860"/><text x="280" y="73">W_N3</text>
+    </g>
+    <!-- time rows: same A broadcast -->
+    <g font-family="var(--mono)" font-size="9" text-anchor="middle">
+      <text x="18" y="104" class="svgsm">t0</text>
+      <rect x="40" y="94" width="270" height="20" rx="4" fill="#e06b7422" stroke="#e06b74"/><text x="175" y="108" fill="#e06b74">A0 &rarr; broadcast to all 4</text>
+      <text x="18" y="134" class="svgsm">t1</text>
+      <rect x="40" y="124" width="270" height="20" rx="4" fill="#e06b7422" stroke="#e06b74"/><text x="175" y="138" fill="#e06b74">A1 &rarr; broadcast to all 4</text>
+      <text x="18" y="164" class="svgsm">t2</text>
+      <rect x="40" y="154" width="270" height="20" rx="4" fill="#e06b7422" stroke="#e06b74"/><text x="175" y="168" fill="#e06b74">A2 &rarr; broadcast to all 4</text>
+    </g>
+    <!-- bubble illustration -->
+    <text x="180" y="210" text-anchor="middle" class="svgsm">if the fabric can't feed 4 copies at once:</text>
+    <g font-family="var(--mono)" font-size="9" text-anchor="middle">
+      <rect x="40" y="222" width="130" height="20" rx="4" fill="#161d30" stroke="#2a3550"/><text x="105" y="236" fill="#cdd6f4">A0 &rarr; core0,1</text>
+      <rect x="180" y="222" width="130" height="20" rx="4" fill="#5a273055" stroke="#e06b74"/><text x="245" y="236" fill="#e06b74">A0 &rarr; core2,3</text>
+      <text x="180" y="262" text-anchor="middle" class="svgsm" fill="#e06b74">&uarr; replay / stall &mdash; the array waits</text>
+    </g>
+
+    <!-- divider -->
+    <line x1="380" y1="20" x2="380" y2="360" stroke="#2a3550"/>
+
+    <!-- RIGHT: M split -->
+    <text x="570" y="28" text-anchor="middle" class="svgttl" fill="#2dd4bf">M&#8209;split (m=4)</text>
+    <text x="570" y="46" text-anchor="middle" class="svgsm">all cores hold the same W; each gets different A rows</text>
+    <g font-family="var(--mono)" font-size="9" text-anchor="middle" fill="#9db4ff">
+      <rect x="430" y="58" width="60" height="22" rx="4" fill="#1b2440" stroke="#5b6cff"/><text x="460" y="73">W_N</text>
+      <rect x="500" y="58" width="60" height="22" rx="4" fill="#1b2440" stroke="#5b6cff"/><text x="530" y="73">W_N</text>
+      <rect x="570" y="58" width="60" height="22" rx="4" fill="#1b2440" stroke="#5b6cff"/><text x="600" y="73">W_N</text>
+      <rect x="640" y="58" width="60" height="22" rx="4" fill="#1b2440" stroke="#5b6cff"/><text x="670" y="73">W_N</text>
+    </g>
+    <g font-family="var(--mono)" font-size="9" text-anchor="middle" fill="#2dd4bf">
+      <text x="408" y="104" class="svgsm">t0</text>
+      <rect x="430" y="94" width="60" height="20" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="460" y="108">A0</text>
+      <rect x="500" y="94" width="60" height="20" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="530" y="108">A4</text>
+      <rect x="570" y="94" width="60" height="20" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="600" y="108">A8</text>
+      <rect x="640" y="94" width="60" height="20" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="670" y="108">A12</text>
+      <text x="408" y="134" class="svgsm">t1</text>
+      <rect x="430" y="124" width="60" height="20" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="460" y="138">A1</text>
+      <rect x="500" y="124" width="60" height="20" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="530" y="138">A5</text>
+      <rect x="570" y="124" width="60" height="20" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="600" y="138">A9</text>
+      <rect x="640" y="124" width="60" height="20" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="670" y="138">A13</text>
+      <text x="408" y="164" class="svgsm">t2</text>
+      <rect x="430" y="154" width="60" height="20" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="460" y="168">A2</text>
+      <rect x="500" y="154" width="60" height="20" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="530" y="168">A6</text>
+      <rect x="570" y="154" width="60" height="20" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="600" y="168">A10</text>
+      <rect x="640" y="154" width="60" height="20" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="670" y="168">A14</text>
+    </g>
+    <text x="570" y="210" text-anchor="middle" class="svgsm" fill="#2dd4bf">every core gets a fresh, distinct row each beat</text>
+    <rect x="445" y="226" width="250" height="34" rx="8" fill="#0f766e22" stroke="#2dd4bf"/>
+    <text x="570" y="248" text-anchor="middle" class="svgsm" fill="#2dd4bf">stream is PARTITIONED &mdash; no duplication, no stall</text>
+
+    <text x="380" y="330" text-anchor="middle" class="svglbl">Same compute, same 4 cores. The difference is whether the activation stream is <tspan fill="#e06b74">broadcast</tspan> or <tspan fill="#2dd4bf">partitioned</tspan>.</text>
+    <text x="380" y="352" text-anchor="middle" class="svgsm">N&#8209;split makes one row feed many cores at once; M&#8209;split gives each core its own rows.</text>
+  </svg>
+  <figcaption>The activation stream is on the critical path. Under N&#8209;split the <em>same</em> row is demanded by every column-core simultaneously &mdash; multicast or replay, and the array can bubble. Under M&#8209;split the stream simply splits into independent lanes.</figcaption>
+</figure>
+
+<!-- ===================== SHARED VS BMM ===================== -->
+<h2 id="shared-vs-bmm" class="anchor">6 &middot; Why shared-weight and true-BMM disagree about N&#8209;split</h2>
+
+<p>Everything so far is mechanics that apply to <em>any</em> matmul. What makes a <strong>projection</strong> and an <strong>attention BMM</strong> behave differently is the <em>meaning of the right-hand operand</em>.</p>
+
+<figure>
+  <div class="fig-title">Same N&#8209;split, two very different RHS</div>
+  <svg viewBox="0 0 760 330" role="img" aria-label="shared weight projection sliced by N versus true BMM per-head RHS">
+    <!-- LEFT shared weight -->
+    <text x="190" y="28" text-anchor="middle" class="svgttl" fill="#2dd4bf">Shared-weight projection</text>
+    <text x="190" y="46" text-anchor="middle" class="svgsm">A[B,M,K] @ W[K,N] &mdash; W is ONE big model weight</text>
+    <!-- big W block sliced into N columns -->
+    <g>
+      <rect x="80" y="70" width="220" height="120" rx="8" fill="#1b2440" stroke="#5b6cff"/>
+      <line x1="135" y1="70" x2="135" y2="190" stroke="#5b6cff" stroke-width="1"/>
+      <line x1="190" y1="70" x2="190" y2="190" stroke="#5b6cff" stroke-width="1"/>
+      <line x1="245" y1="70" x2="245" y2="190" stroke="#5b6cff" stroke-width="1"/>
+      <text x="190" y="60" text-anchor="middle" class="svgsm" fill="#9db4ff">W[K,N] &mdash; n=8 owns 1/8 each</text>
+      <text x="190" y="135" text-anchor="middle" class="svgsm" fill="#9db4ff">stationary</text>
+    </g>
+    <text x="190" y="220" text-anchor="middle" class="svglbl" fill="#2dd4bf">N&#8209;split = each core owns a slice of the big weight</text>
+    <text x="190" y="240" text-anchor="middle" class="svgsm">dividing N is the natural way to split a huge output dim</text>
+    <text x="190" y="262" text-anchor="middle" class="svgsm" fill="#f4b860">activation fanout is real, but the array is built to</text>
+    <text x="190" y="278" text-anchor="middle" class="svgsm" fill="#f4b860">stream tokens past stationary weights &mdash; it's acceptable</text>
+    <rect x="60" y="296" width="260" height="24" rx="6" fill="#0a0f1c" stroke="#2a3550"/>
+    <text x="190" y="312" text-anchor="middle" class="svgsm" fill="#e7ecf6">cost uses fanout &asymp; <tspan fill="#fff">max(m, n)</tspan> &mdash; both matter</text>
+
+    <line x1="380" y1="20" x2="380" y2="320" stroke="#2a3550"/>
+
+    <!-- RIGHT true BMM -->
+    <text x="575" y="28" text-anchor="middle" class="svgttl" fill="#e06b74">True-BMM attention</text>
+    <text x="575" y="46" text-anchor="middle" class="svgsm">A[B,M,K] @ R[B,K,N] &mdash; R is per-head K/V data</text>
+    <!-- per head small tiles -->
+    <g font-family="var(--mono)" font-size="9" text-anchor="middle" fill="#9db4ff">
+      <rect x="430" y="66" width="40" height="34" rx="5" fill="#161d30" stroke="#2a3550"/><text x="450" y="87">R h0</text>
+      <rect x="478" y="66" width="40" height="34" rx="5" fill="#161d30" stroke="#2a3550"/><text x="498" y="87">R h1</text>
+      <rect x="526" y="66" width="40" height="34" rx="5" fill="#161d30" stroke="#2a3550"/><text x="546" y="87">R h2</text>
+      <rect x="574" y="66" width="40" height="34" rx="5" fill="#161d30" stroke="#2a3550"/><text x="594" y="87">R h3</text>
+      <rect x="622" y="66" width="40" height="34" rx="5" fill="#161d30" stroke="#2a3550"/><text x="642" y="87">&hellip;</text>
+    </g>
+    <text x="575" y="118" text-anchor="middle" class="svgsm">no single global weight &mdash; each head is its own little problem</text>
+    <!-- bad: N split fans activation -->
+    <text x="455" y="150" class="svgsm" fill="#e06b74">N&#8209;split (same head):</text>
+    <rect x="445" y="158" width="90" height="26" rx="5" fill="#161d30" stroke="#5b6cff"/><text x="490" y="175" text-anchor="middle" class="svgsm" fill="#9db4ff">query A</text>
+    <g stroke="#e06b74" stroke-width="1.4" fill="none">
+      <path d="M538,171 L585,162" marker-end="url(#arR2)"/><path d="M538,171 L585,171" marker-end="url(#arR2)"/><path d="M538,171 L585,180" marker-end="url(#arR2)"/>
+    </g>
+    <text x="650" y="175" class="svgsm" fill="#e06b74">fans A out</text>
+    <!-- good: head split -->
+    <text x="455" y="214" class="svgsm" fill="#2dd4bf">B/head&#8209;split:</text>
+    <g font-family="var(--mono)" font-size="8" text-anchor="middle">
+      <rect x="445" y="222" width="44" height="22" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="467" y="237" fill="#2dd4bf">h0&rarr;c0</text>
+      <rect x="495" y="222" width="44" height="22" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="517" y="237" fill="#2dd4bf">h1&rarr;c1</text>
+      <rect x="545" y="222" width="44" height="22" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="567" y="237" fill="#2dd4bf">h2&rarr;c2</text>
+      <rect x="595" y="222" width="44" height="22" rx="4" fill="#0f766e33" stroke="#2dd4bf"/><text x="617" y="237" fill="#2dd4bf">h3&rarr;c3</text>
+    </g>
+    <text x="575" y="262" text-anchor="middle" class="svgsm" fill="#2dd4bf">independent heads &rarr; clean parallelism, no shared-A fanout</text>
+    <rect x="445" y="296" width="260" height="24" rx="6" fill="#0a0f1c" stroke="#2a3550"/>
+    <text x="575" y="312" text-anchor="middle" class="svgsm" fill="#e7ecf6">cost uses fanout &asymp; <tspan fill="#fff">n</tspan> only &mdash; N&#8209;split is the painful one</text>
+    <defs><marker id="arR2" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 z" fill="#e06b74"/></marker></defs>
+  </svg>
+  <figcaption>Same hardware, same fanout mechanics. For a <strong>projection</strong>, N&#8209;split is the natural way to carve up one giant stationary weight, so both m and n count toward fanout. For <strong>attention</strong>, the RHS is per-head data with no global weight to carve, so an N&#8209;split just fans the activation tile &mdash; and independent <em>heads</em> are a cleaner source of parallelism.</figcaption>
+</figure>
+
+<p>That distinction is exactly one line in the cost model:</p>
+<pre><span class="kw">fanout_split</span> = max(m, n) <span class="kw">if</span> shared_weight <span class="kw">else</span> n
+        <span class="cm"># shared-weight projection: both m and n fan operands out</span>
+        <span class="cm"># true BMM (attention):  only n fans the streaming activation</span></pre>
+
+<div class="call key"><span class="lead">The asymmetry in one breath</span> Shared&#8209;weight: split N to divide the big stationary weight &mdash; both directions cost fanout, and N&#8209;split is often <em>good</em>. True&#8209;BMM: there's no global weight to divide, so N&#8209;split only fans out the streaming activation &mdash; reach for <strong>batch/head + modest M</strong> instead.</div>
+
+<!-- ===================== DECODE ===================== -->
+<h2 id="decode" class="anchor">7 &middot; The payoff: decode attention @ V</h2>
+
+<p>This is where it all cashes out. Decode has tiny <code>M</code> (one or a few new tokens), so the array is starving for rows. The old planner reached for "use all 32 cores by splitting M" &mdash; which leaves each core almost nothing to do. The fix isn't more N&#8209;split; it's <strong>head parallelism</strong>.</p>
+
+<figure>
+  <div class="fig-title">attn @ V, decode &mdash; M=64 over 32 cores</div>
+  <svg viewBox="0 0 760 290" role="img" aria-label="pure M split gives 2 rows per core; batch plus M split gives 16 rows per core">
+    <!-- LEFT main -->
+    <text x="190" y="28" text-anchor="middle" class="svgttl" fill="#e06b74">main: {b:1, m:32, n:1, k:1}</text>
+    <text x="190" y="46" text-anchor="middle" class="svgsm">pure&#8209;M &mdash; 64 / 32 = <tspan fill="#e06b74" font-weight="bold">2 rows / core</tspan></text>
+    <!-- 32 tiny slivers -->
+    <g>
+      <!-- draw 8x4 tiny slivers -->
+      <g fill="#5a273055" stroke="#e06b74" stroke-width="0.8">
+        <!-- generate a grid of 32 thin cells -->
+        <rect x="60" y="70" width="30" height="8"/><rect x="95" y="70" width="30" height="8"/><rect x="130" y="70" width="30" height="8"/><rect x="165" y="70" width="30" height="8"/><rect x="200" y="70" width="30" height="8"/><rect x="235" y="70" width="30" height="8"/><rect x="270" y="70" width="30" height="8"/><rect x="305" y="70" width="30" height="8"/>
+        <rect x="60" y="84" width="30" height="8"/><rect x="95" y="84" width="30" height="8"/><rect x="130" y="84" width="30" height="8"/><rect x="165" y="84" width="30" height="8"/><rect x="200" y="84" width="30" height="8"/><rect x="235" y="84" width="30" height="8"/><rect x="270" y="84" width="30" height="8"/><rect x="305" y="84" width="30" height="8"/>
+        <rect x="60" y="98" width="30" height="8"/><rect x="95" y="98" width="30" height="8"/><rect x="130" y="98" width="30" height="8"/><rect x="165" y="98" width="30" height="8"/><rect x="200" y="98" width="30" height="8"/><rect x="235" y="98" width="30" height="8"/><rect x="270" y="98" width="30" height="8"/><rect x="305" y="98" width="30" height="8"/>
+        <rect x="60" y="112" width="30" height="8"/><rect x="95" y="112" width="30" height="8"/><rect x="130" y="112" width="30" height="8"/><rect x="165" y="112" width="30" height="8"/><rect x="200" y="112" width="30" height="8"/><rect x="235" y="112" width="30" height="8"/><rect x="270" y="112" width="30" height="8"/><rect x="305" y="112" width="30" height="8"/>
+      </g>
+    </g>
+    <text x="190" y="150" text-anchor="middle" class="svgsm">32 cores, each a 2&#8209;row sliver</text>
+    <rect x="80" y="166" width="220" height="40" rx="8" fill="#5a273033" stroke="#e06b74"/>
+    <text x="190" y="184" text-anchor="middle" class="svgsm" fill="#e06b74">PT array underfed &mdash; pays full startup,</text>
+    <text x="190" y="199" text-anchor="middle" class="svgsm" fill="#e06b74">streams almost nothing through it</text>
+
+    <line x1="380" y1="20" x2="380" y2="270" stroke="#2a3550"/>
+
+    <!-- RIGHT improved -->
+    <text x="575" y="28" text-anchor="middle" class="svgttl" fill="#2dd4bf">v3: {b:8, m:4, n:1, k:1}</text>
+    <text x="575" y="46" text-anchor="middle" class="svgsm">head + M &mdash; 64 / 4 = <tspan fill="#2dd4bf" font-weight="bold">16 rows / core</tspan></text>
+    <!-- 8 head groups x 4 cores, each a chunky tile -->
+    <g fill="#0f766e44" stroke="#2dd4bf" stroke-width="0.9" font-family="var(--mono)" font-size="7" text-anchor="middle">
+      <rect x="430" y="66" width="64" height="34"/><rect x="500" y="66" width="64" height="34"/><rect x="570" y="66" width="64" height="34"/><rect x="640" y="66" width="64" height="34"/>
+      <rect x="430" y="108" width="64" height="34"/><rect x="500" y="108" width="64" height="34"/><rect x="570" y="108" width="64" height="34"/><rect x="640" y="108" width="64" height="34"/>
+    </g>
+    <text x="462" y="158" text-anchor="middle" class="svgsm" fill="#2dd4bf">8 head groups &times; 4 M&#8209;lanes</text>
+    <rect x="455" y="172" width="240" height="40" rx="8" fill="#0f766e22" stroke="#2dd4bf"/>
+    <text x="575" y="190" text-anchor="middle" class="svgsm" fill="#2dd4bf">same 32 cores, but each holds 16 rows &mdash;</text>
+    <text x="575" y="205" text-anchor="middle" class="svgsm" fill="#2dd4bf">array fed, no extra activation fanout (n stays 1)</text>
+    <text x="380" y="252" text-anchor="middle" class="svglbl">The win is a <tspan fill="#2dd4bf">healthier per&#8209;core tile</tspan>, not "more cores" &mdash; both use all 32.</text>
+    <text x="380" y="272" text-anchor="middle" class="svgsm">parallelism comes from independent heads (b=8), not from N fanout.</text>
+  </svg>
+  <figcaption>Both splits use all 32 cores. Pure&#8209;M starves each one to 2 rows; the head&#8209;split keeps <code>n=1</code> (no activation fanout) and uses the independent head axis to reach 16 rows/core. That's the same fanout intuition driving a real planner decision &mdash; see the <a href="cost_model_v3_first_principles.html#decode">v3 doc</a> for the matching cost terms.</figcaption>
+</figure>
+
+<!-- ===================== CHEAT SHEET ===================== -->
+<h2 id="cheat" class="anchor">8 &middot; Cheat sheet</h2>
+
+<div class="grid">
+  <div class="card"><div class="role">N&#8209;split</div><h4 style="color:var(--amber)">duplicates the activation stream</h4><p class="worked">Same A rows feed many output-column workers <em>at once</em> &rarr; multicast/replay on the hot path. The expensive direction.</p></div>
+  <div class="card"><div class="role">M&#8209;split</div><h4 style="color:var(--indigo)">partitions the activation rows</h4><p class="worked">Different rows to different cores; the stationary weight is reused (free). Clean &mdash; until the per&#8209;core tile gets too short to feed the array.</p></div>
+  <div class="card win"><div class="role">B / head split</div><h4>partitions independent problems</h4><p class="worked">Different heads are separate matmuls. The cleanest parallelism of all &mdash; no shared operand to fan out.</p></div>
+</div>
+
+<table>
+  <thead><tr><th>operand</th><th>role in weight-stationary</th><th>what its fanout costs</th></tr></thead>
+  <tbody>
+    <tr><td><span style="color:var(--indigo)">Weight / RHS</span></td><td>stationary &mdash; loaded once, held</td><td>cheap: reuse is amortized, off the hot path (this is M&#8209;split's "sharing")</td></tr>
+    <tr><td><span style="color:var(--amber)">Activation / LHS</span></td><td>streaming &mdash; needed every beat</td><td>expensive: fanout is multicast/replay on the hot path (this is N&#8209;split's "sharing")</td></tr>
+  </tbody>
+</table>
+
+<div class="call key"><span class="lead">One-line version</span>
+<strong>Shared&#8209;weight projection:</strong> split N to divide the big stationary weight (and keep enough M to feed the array).<br>
+<strong>True&#8209;BMM attention:</strong> split batch/head and M to avoid tiny row tiles; <em>don't</em> over-split N &mdash; it just fans the streaming activation out to more workers.</div>
+
+<p>And the answer to the question we started with: fanout depends mostly on <code>n_split</code> because <code>n_split</code> is the one that asks the <span style="color:var(--amber)">streaming operand</span> &mdash; the activation, the thing already on the critical path every beat &mdash; to be in many places at once. <code>m_split</code> only asks the <span style="color:var(--indigo)">resident operand</span> to be reused, which is exactly what a weight&#8209;stationary array is built to do for free.</p>
+
+</main>
+
+<footer><div class="wrap">
+  Companion to <a href="cost_model_v3_first_principles.html">Spyre AIU Matmul Work-Division Cost Model &mdash; Physics v3</a>.
+  Toy diagrams are schematic, for intuition; the cost-model formulas and measured results live in the v3 doc.
+</div></footer>
+
+</body>
+</html>
