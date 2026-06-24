@@ -60,6 +60,103 @@ aggregate source of truth for the prefill improvement.
 | 6 | `sdsc_fused_add_linear_mul_silu_split_with_sizes_6` | MLP exit: down projection plus residual / pointwise work | `down: {m:32,n:1,k:1}` | 5.197 | `down: {m:4,n:8,k:1}` | 5.194 | -0.003 |
 | 7 | `sdsc_fused_linear_mul_rms_norm_split_with_sizes_sum_unsqueeze_view_0` | Input norm + fused QKV projection | `QKV: {m:1,n:32,k:1}` | 4.035 | `QKV: {m:4,n:8,k:1}` | 2.540 | -1.495 |
 
+## Attention Matmul Deep Dive
+
+This section isolates the SDPA matmuls because they are the clearest example
+of why the improved model helps decode without blindly applying the same choice
+to prefill. The evidence below comes from the emitted SDSC JSON fields
+`N_`, `numWkSlicesPerDim_`, and `dataStageParam_` in this run root.
+
+### Logical Q/K/V Shapes
+
+The Granite block uses hidden size 4096, 32 query heads, 8 KV heads, and
+head dimension 128. The attention BMM path expands the grouped KV heads to the
+32 query-head space before the BMMs.
+
+| regime | Q shape after projection | K shape used by attention | V shape used by attention | logical attention BMMs |
+|---|---|---|---|---|
+| prefill | `[1, 32, 512, 128]` | `[1, 32, 512, 128]` after KV-head expansion | `[1, 32, 512, 128]` after KV-head expansion | QK^T: `[32,512,128] @ [32,128,512] -> [32,512,512]`; attn@V: `[32,512,512] @ [32,512,128] -> [32,512,128]` |
+| decode | `[1, 32, 64, 128]` | `[1, 32, 576, 128]` after cache append and KV-head expansion | `[1, 32, 576, 128]` after cache append and KV-head expansion | QK^T: `[32,64,128] @ [32,128,576] -> [32,64,576]`; attn@V: `[32,64,576] @ [32,576,128] -> [32,64,128]` |
+
+The emitted SDSC axis labels are compiler iteration-space labels, not always
+the literal PyTorch logical order. In the tables below, `b/m/n/k` means
+`SDSC x/mb/out/in` as in the rest of this file. For attention @ V, `b` is the
+expanded head-batch axis. For QK^T, the emitted axes are transposed: `x` is
+query-length-like and `mb` is head-like. This is why the SDSC shape can look
+like `64x32x576x128` for decode QK^T even though the logical BMM is
+`[32,64,128] @ [32,128,576]`.
+
+### Emitted SDSC Evidence
+
+| regime | attention matmul | logical BMM | emitted SDSC shape `b x m x n x k` | cost model main split | cost model main per-core tile | cost model improved split | cost model improved per-core tile |
+|---|---|---|---|---|---|---|---|
+| prefill | attention @ V | `[32,512,512] @ [32,512,128]` | `32x512x128x512` | `{b:1,m:32,n:1,k:1}` | `{b:32,m:16,n:128,k:512}` | `{b:1,m:32,n:1,k:1}` | `{b:32,m:16,n:128,k:512}` |
+| prefill | QK^T attention scores | `[32,512,128] @ [32,128,512]` | `512x32x512x128` | `{b:4,m:1,n:8,k:1}` | `{b:128,m:32,n:64,k:128}` | `{b:16,m:1,n:2,k:1}` | `{b:32,m:32,n:256,k:128}` |
+| decode | attention @ V | `[32,64,576] @ [32,576,128]` | `32x64x128x576` | `{b:1,m:32,n:1,k:1}` | `{b:32,m:2,n:128,k:576}` | `{b:8,m:4,n:1,k:1}` | `{b:4,m:16,n:128,k:576}` |
+| decode | QK^T attention scores | `[32,64,128] @ [32,128,576]` | `64x32x576x128` | `{b:32,m:1,n:1,k:1}` | `{b:2,m:32,n:576,k:128}` | `{b:4,m:4,n:1,k:2}` | `{b:16,m:8,n:576,k:64}` |
+
+The decode attention @ V row is the cleanest hard proof of the batch/head
+parallelism story. Cost model main uses all 32 cores by splitting only `m`, but
+that leaves each core with only 2 token rows. The improved model still uses
+32 cores, but it moves the split to `{b:8,m:4,n:1,k:1}`. That gives each core
+16 token rows and uses the independent head-batch axis for the remaining
+parallelism. The win is not "more cores"; it is a healthier per-core tile.
+
+Decode QK^T has a similar shape problem but with the emitted axes transposed.
+Main splits only the emitted `b`/`x` axis. The improved model spreads work over
+the emitted outer axis, the head-like `m` axis, and a small `k=2` reduction
+split. That avoids a pure outer-axis schedule and keeps the per-core K tile at
+64 elements, exactly one 64-wide stick.
+
+### Cost Model Terms That Matter
+
+The relevant implementation is `_matmul_split_cost` in
+`torch_spyre/_inductor/work_division.py`. The attention changes are driven by
+general true-BMM terms, not by op-name checks.
+
+| term | formula shape | attention effect |
+|---|---|---|
+| PT efficiency | compute time is derated when `M / m` is too short to fill PT passes | discourages decode tiles that starve the PT array |
+| `m_tile_underfill_us` | `log2(16 / (M / m)) * 30` when `M / m < 16` | directly rejects decode attention @ V main's 2-row/core tile; the improved split reaches 16 rows/core |
+| `m_lane_underuse_us` | tie-break toward enough `m` lanes to stream rows over stationary weights | helps QK^T decode avoid a pure outer-axis split with no head/token lane split |
+| true-BMM HBM fanout | for true BMM, fanout is `n`, not `max(m,n)` | makes head/batch parallelism cheaper than unnecessary output-column fanout |
+| true-BMM batch split | `log2(b) * 10`, additive | allows batch/head splitting when it prevents M underfill instead of globally punishing it |
+| true-BMM PSUM | `(k - 1) * output_elems_per_core * 1e-4` | lets small K-splits such as QK^T decode `k=2` win when they improve the tile shape |
+| large-M true-BMM value guard | when `M` is large, `M/m >= 16`, and `K >> N`, penalize unnecessary `n` split | keeps prefill attention @ V at `{b:1,m:32,n:1,k:1}` because it already has 16 rows/core and splitting tiny `N=128` would add layout/fusion fallout |
+
+This is why prefill and decode do different things. In prefill attention @ V,
+`M=512` and the emitted split `{m:32}` already gives `512 / 32 = 16` rows per
+core, so the PT is fed and the large-M value guard prevents an unnecessary
+`n` split. In decode attention @ V, `M=64` with `{m:32}` gives only
+`64 / 32 = 2` rows per core, so the underfill term pushes the planner to use
+batch/head parallelism instead: `{b:8,m:4,n:1,k:1}` gives `64 / 4 = 16` rows
+per core.
+
+For QK^T, the main improvement is reducing avoidable output-column fanout while
+using independent outer/head/K parallelism. Prefill QK^T shifts from
+`{b:4,m:1,n:8,k:1}` to `{b:16,m:1,n:2,k:1}`; the emitted per-core output
+tile becomes wider, but the true-BMM HBM fanout from `n` drops from 8 to 2.
+Decode QK^T shifts from `{b:32,m:1,n:1,k:1}` to `{b:4,m:4,n:1,k:2}`, which
+adds head-like `m` parallelism and a legal one-stick K split instead of relying
+on a single outer-axis split.
+
+### Relation To The Profile
+
+The attention SDSC changes are visible in the decode fused context:
+
+- attention @ V changes from `{b:1,m:32,n:1,k:1}` to `{b:8,m:4,n:1,k:1}`;
+- QK^T changes from `{b:32,m:1,n:1,k:1}` to `{b:4,m:4,n:1,k:2}`;
+- the fused QKV input projection in the same decode block changes from
+  `{m:1,n:32,k:1}` to `{m:4,n:8,k:1}`.
+
+The local Kineto buckets show the largest decode reductions in the surrounding
+fused attention/QKV region: the attention postprocessing bucket moves from
+2.655 ms to 0.570 ms, and the QKV bucket moves from 4.035 ms to 2.540 ms.
+Those buckets include pointwise/layout work as well as matmul-adjacent effects,
+so the safe conclusion is that the improved attention split/layout choices
+correlate with the fused-region reduction; the SDSC table above is the source
+of truth for the actual matmul split changes.
+
 ## Actual SDSC Matmul Picks
 
 This is the source of truth for what actually ran. These rows are extracted
