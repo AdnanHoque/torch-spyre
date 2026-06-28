@@ -38,6 +38,14 @@ allow_all_ops_in_lx_planning: bool = False
 # eligibility and must not, on its own, enable boundary clone insertion.
 lx_boundary_clones: bool = os.environ.get("LX_BOUNDARY_CLONES", "0") == "1"
 
+# Experimental extension to LX planning: keep producer-owned LX tensors resident
+# across producer/consumer core-division mismatches and describe the producer
+# tensor distribution in dl-dsc allocation coordinates. Deeptools may then
+# synthesize the on-chip relayout from the coordinate mismatch.
+lx_planner_relayout: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
+)
+
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))

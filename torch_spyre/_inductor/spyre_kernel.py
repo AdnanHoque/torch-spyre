@@ -41,6 +41,7 @@ from .constants import (
 )
 from .errors import Unsupported
 from .ir import FixedTiledLayout
+from .lx_relayout import LX_RELAYOUT_ATTR
 from .pass_utils import (
     concretize_expr,
     concretize_index,
@@ -60,6 +61,22 @@ from .op_spec import (
 import logging
 
 logger = get_inductor_logger("spyre_kernel")
+
+
+def _current_node_op_info(current_node) -> dict[str, Any]:
+    op_info: dict[str, Any] = {}
+    node = getattr(current_node, "node", None)
+    data = getattr(node, "data", None)
+    data_op_info = getattr(data, "op_info", None)
+    if isinstance(data_op_info, dict):
+        op_info.update(data_op_info)
+    return op_info
+
+
+def _current_node_lx_relayout_inputs(current_node) -> dict[str, Any]:
+    node = getattr(current_node, "node", None)
+    plans = getattr(node, LX_RELAYOUT_ATTR, None)
+    return plans if isinstance(plans, dict) else {}
 
 
 class RValue(ABC):
@@ -509,6 +526,14 @@ class SpyreKernel(Kernel[CSEVariable]):
             per_tile_fixed=getattr(tensor.layout, "per_tile_fixed", False),
             name=opspec_name,
         )
+        if is_input and "lx" in tensor.layout.allocation:
+            relayout_plan = _current_node_lx_relayout_inputs(self.current_node).get(
+                name
+            )
+            if isinstance(relayout_plan, dict):
+                tensor_arg.lx_residency_core_id_to_wk_slice = relayout_plan.get(
+                    "producer_core_id_to_device_slice"
+                )
         if (
             "lx" not in tensor.layout.allocation
             and "pool" not in tensor.layout.allocation
@@ -656,7 +681,7 @@ class SpyreKernel(Kernel[CSEVariable]):
         if real_dst_name != name:
             # Skip allocating an output buffer; this name is an alias to another buffer
             V.graph.removed_buffers.add(name)
-        op_info: dict[str, Any] = {}
+        op_info = _current_node_op_info(self.current_node)
         if logger.isEnabledFor(logging.DEBUG):
             value_type = type(value).__name__
             logger.debug(
@@ -753,9 +778,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             self.op_specs.append(value)
             return
 
-        op_info = {}
-        if hasattr(self.current_node.node.data, "op_info"):  # type: ignore[union-attr]
-            op_info.update(self.current_node.node.data.op_info)  # type: ignore[union-attr]
+        op_info = _current_node_op_info(self.current_node)
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -967,6 +990,11 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                                 buf.writeline("per_tile_fixed=True,")
                             if arg.name is not None:
                                 buf.writeline(f"name={arg.name!r},")
+                            if arg.lx_residency_core_id_to_wk_slice is not None:
+                                buf.writeline(
+                                    "lx_residency_core_id_to_wk_slice="
+                                    f"{arg.lx_residency_core_id_to_wk_slice!r},"
+                                )
                         buf.writeline("),")
                 buf.writeline("]")
             buf.writeline("),")
