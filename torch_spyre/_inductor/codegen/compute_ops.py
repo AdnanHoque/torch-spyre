@@ -673,7 +673,8 @@ def generate_sdsc(
                                                 "dim_order"
                                             ]
                                         },
-                                        "coreIdToWkSlice_": {},
+                                        "coreIdToWkSlice_": tensor.lx_residency_core_id_to_wk_slice
+                                        or {},
                                     },
                                 }
                                 for i, tensor in enumerate(sdsc_spec.args)

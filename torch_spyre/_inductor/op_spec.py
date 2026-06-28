@@ -50,6 +50,10 @@ class TensorArg:
         device_coordinates: The sympy Exprs that describe how elements in the Tensor are accessed.
                 Free variables in device_coordinates refer to entries in the OpSpec's iteration_space.
         allocation: If present, the offset in scratchpad memory assigned to the Tensor.
+        lx_residency_core_id_to_wk_slice: Optional producer tensor distribution
+                for an LX input whose physical ownership differs from this op's
+                compute distribution. Keys are device-dim indices at this stage;
+                SDSC codegen maps them to primary-dimension labels.
     """
 
     is_input: bool
@@ -60,6 +64,7 @@ class TensorArg:
     allocation: Any
     per_tile_fixed: bool = False
     name: str | None = None
+    lx_residency_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
 
 
 @dataclasses.dataclass
