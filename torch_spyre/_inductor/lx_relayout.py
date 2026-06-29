@@ -41,6 +41,7 @@ logger = get_inductor_logger("lx_relayout")
 
 LX_RELAYOUT_ATTR = "_spyre_lx_relayout_inputs"
 LX_RELAYOUT_SOURCE_ATTR = "_spyre_lx_relayout_source"
+LX_RELAYOUT_RESERVE_PREFIX = "__spyre_lx_relayout_reserve__"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -121,12 +122,20 @@ def _record_plan(consumer: Operation, plan: LXRelayoutPlan) -> None:
     plans[plan.source_name] = dataclasses.asdict(plan)
 
 
-def _clear_relayout_metadata(graph: GraphLowering) -> None:
+def clear_lx_relayout_metadata(graph: GraphLowering) -> None:
     for op in graph.operations:
         if hasattr(op, LX_RELAYOUT_ATTR):
             delattr(op, LX_RELAYOUT_ATTR)
         if hasattr(op, LX_RELAYOUT_SOURCE_ATTR):
             delattr(op, LX_RELAYOUT_SOURCE_ATTR)
+
+
+def make_lx_relayout_reservation_name(consumer_name: str, source_name: str) -> str:
+    return f"{LX_RELAYOUT_RESERVE_PREFIX}:{consumer_name}:{source_name}"
+
+
+def is_lx_relayout_reservation(name: str) -> bool:
+    return name.startswith(f"{LX_RELAYOUT_RESERVE_PREFIX}:")
 
 
 def relayout_source_names(graph: GraphLowering) -> set[str]:
@@ -158,7 +167,7 @@ def plan_lx_relayouts(
     if not config.lx_planner_relayout:
         return []
 
-    _clear_relayout_metadata(graph)
+    clear_lx_relayout_metadata(graph)
     producers = _producer_ops(graph)
     planned: list[LXRelayoutPlan] = []
 

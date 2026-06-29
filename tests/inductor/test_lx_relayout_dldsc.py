@@ -16,7 +16,11 @@ from sympy import Integer, Mod, Symbol, floor
 
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
-from torch_spyre._inductor.lx_relayout import _core_id_to_device_slice
+from torch_spyre._inductor.lx_relayout import (
+    _core_id_to_device_slice,
+    is_lx_relayout_reservation,
+    make_lx_relayout_reservation_name,
+)
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.pass_utils import PerCoreView
 
@@ -53,6 +57,13 @@ def test_core_view_residency_payload_is_static_per_core():
         "2": {"0": 0, "1": 1},
         "3": {"0": 1, "1": 1},
     }
+
+
+def test_lx_relayout_reservation_names_are_identifiable():
+    name = make_lx_relayout_reservation_name("consumer", "producer")
+
+    assert is_lx_relayout_reservation(name)
+    assert not is_lx_relayout_reservation("producer")
 
 
 def test_lx_input_allocation_coordinates_describe_producer_residency():
