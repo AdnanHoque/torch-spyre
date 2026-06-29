@@ -25,6 +25,7 @@ import sympy
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.pass_utils import _per_core_view_on_buf
+from torch_spyre._inductor.lx_relayout import relayout_source_names
 
 # Op outputs eligible for LX-pinning. `amax` is the lowered form of
 # `max`; both names are listed to match whichever the IR shows.
@@ -203,6 +204,7 @@ def get_ncores_for_buffers(
     result: dict[str, int] = {}
     using_multicore = config.sencores > 1
     buf_user_deps = _get_buffer_user_deps(graph, rw_cache)
+    planned_relayout_sources = relayout_source_names(graph)
     for buf_name, users in buf_user_deps.items():
         # this dict includes graph input and output
         if using_multicore and len(users) > 1:
@@ -237,7 +239,13 @@ def get_ncores_for_buffers(
                     mismatch = True
                     break
             if mismatch:
-                num_cores = -1
+                if buf_name in planned_relayout_sources and writer_cores is not None:
+                    # This producer/consumer mismatch is intentional: the
+                    # relayout planner will describe producer tensor residency
+                    # in the consumer dl-dsc allocation coordinates.
+                    num_cores = writer_cores
+                else:
+                    num_cores = -1
             elif writer_cores is not None:
                 num_cores = writer_cores
             else:
