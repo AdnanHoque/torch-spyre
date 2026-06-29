@@ -1,0 +1,14 @@
+{
+  "active_iters": 5,
+  "kernel_durations_ms": {
+    "<unnamed>": 73.48846499999999
+  },
+  "kernel_event_counts": {
+    "<unnamed>": 20
+  },
+  "kernel_ms_per_iter": 14.697693,
+  "kernel_ms_total": 73.48846499999999,
+  "memory_ms_per_iter": 0.3270892,
+  "memory_ms_total": 1.6354460000000002,
+  "trace": "/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/runs/granite_prefill_isolated_20260629_171937/baseline_off/block_prefill/trace/adnan-spyre-dev-pf_264530.1782753685088009002.pt.trace.json"
+}
