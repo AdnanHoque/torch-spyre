@@ -76,6 +76,17 @@ Why this happens:
 - The resident relayout algorithm therefore asks every consumer core to hold the full value operand piece, about `4 MiB/core`.
 - That does not fit and is not the intended algorithm.
 
+Boundary repro:
+
+`docs/results/granite_e2e/dldsc_gap_report_20260629/buf21_small_fit_repro_20260629_145244`
+
+This repro keeps the same producer/consumer mismatch shape but shrinks the value operand to `x=1, out=128, in=16`. The emitted dl-dsc still has Tensor1 resident by `out` while the consumer compute is resident by `mb`, but the full value operand is only `4096` bytes. DXP compiles this case with empty stderr. That is useful evidence because it separates two questions:
+
+- The dldsc coordinate contract can describe the AV/value mismatch.
+- The current backend resident-materialization strategy only works when the whole post-relayout operand fits per consumer core.
+
+So the full Granite failure is a capacity/materialization-scope failure, not evidence that coordinates cannot express the mismatch.
+
 This is not another `scatter` case. It is a matmul operand collective/broadcast class.
 
 ## Cheap Alternatives Checked
