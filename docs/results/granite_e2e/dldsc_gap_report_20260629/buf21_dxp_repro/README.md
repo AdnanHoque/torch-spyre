@@ -57,4 +57,4 @@ full post-relayout tensor on each consumer core is not the intended general
 solution and may exceed LX.
 
 The missing backend feature is a loop-aware matmul operand communication class,
-not another direct resident relayout case.
+not another scatter resident-remap case.

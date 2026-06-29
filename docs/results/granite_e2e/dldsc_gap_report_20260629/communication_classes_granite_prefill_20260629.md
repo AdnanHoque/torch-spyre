@@ -17,7 +17,7 @@ remaining gap is roughly 0.58 ms/iter.
 
 ## Implemented Class
 
-### Direct Resident Reshard
+### Scatter Resident Remap
 
 Producer owns final tensor slices in LX, consumer wants the same tensor in a
 different per-core resident ownership. Torch records the producer residency in
@@ -44,7 +44,7 @@ Signature:
 - producer operand is sharded across cores;
 - consumer matmul compute is parallel, but this operand's consumer view is not
   partitioned by that compute split;
-- if lowered as resident relayout, each consumer core would need a full operand
+- if lowered as resident scatter remap, each consumer core would need a full operand
   piece.
 
 Observed Granite prefill case:
@@ -84,7 +84,7 @@ This rules out a simple work-division override as the route to 1.2x.
 
 The relayout planner should classify communication classes:
 
-- `direct_resident_reshard`: implemented by current dldsc relayout path.
+- `scatter`: implemented by current dldsc relayout path.
 - `resident_fanout`: implemented only when materialized pieces fit.
 - `matmul_operand_broadcast` / `all_gather_replicate`: classified, not
   realized by PR1.

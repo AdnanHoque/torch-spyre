@@ -27,7 +27,7 @@ the remaining gap is not primarily LX capacity.
 
 ## Current Planned Direct Relayout Edges
 
-Current safe dldsc run plans 9 direct resident relayout edges:
+Current safe dldsc run plans 9 scatter resident remap edges:
 
 | source | consumer | source bytes | reserved bytes/core group |
 | --- | --- | ---: | ---: |
@@ -43,7 +43,7 @@ Current safe dldsc run plans 9 direct resident relayout edges:
 
 Total planned source bytes: `68157440`.
 
-These cover the direct resident-relayout class used by the MLP/SwiGLU and some
+These cover the scatter resident-remap class used by the MLP/SwiGLU and some
 attention pointwise handoffs.
 
 ## Skipped Edge Classification
@@ -147,7 +147,7 @@ plain coordinate relayout would produce invalid or ambiguous residency.
 
 ## Deeptools Support Boundary
 
-Current Deeptools dldsc relayout insertion handles the resident relayout case:
+Current Deeptools dldsc relayout insertion handles the scatter resident-remap case:
 
 1. An LX input allocation has `coreIdToWkSlice_`.
 2. The allocation's tensor split differs from the consumer compute split.
@@ -156,7 +156,7 @@ Current Deeptools dldsc relayout insertion handles the resident relayout case:
 4. The relayout materializes a post-relayout form in LX before the consumer
    compute row.
 
-This is enough for direct resident reshards.  It is not enough for attention
+This is enough for scatter resident remaps.  It is not enough for attention
 K/V matmul operands where the consumer wants loop-scoped streaming/broadcast
 from producer shards into the matmul transfer schedule.
 
@@ -167,14 +167,14 @@ validation, which is the correct fail-closed behavior for the current lowering.
 ## Required Next Communication Class
 
 To close the remaining Granite block speedup gap on current main, dldsc relayout
-needs a second class beyond direct resident relayout:
+needs a second class beyond scatter resident remap:
 
 **Loop-scoped LX broadcast/all-gather/streaming for matmul operands.**
 
 The high-level contract should be:
 
 1. Torch/LX planner classifies a producer-to-consumer edge as a matmul operand
-   streaming edge, not direct resident relayout.
+   all-gather/replicate edge, not scatter resident remap.
 2. Torch emits producer tensor distribution and consumer transfer/compute
    requirement in dldsc coordinates.
 3. Deeptools synthesizes scheduled ring movement into the matmul operand
@@ -186,7 +186,7 @@ The high-level contract should be:
 ## Conclusion
 
 The current dldsc LX relayout implementation is value-correct and speed-positive
-for the direct resident relayout class, reaching about `1.10x` on current-main
+for the scatter resident-remap class, reaching about `1.10x` on current-main
 Granite block prefill.
 
 Reaching `1.2x` against the current baseline is unlikely to be achieved by

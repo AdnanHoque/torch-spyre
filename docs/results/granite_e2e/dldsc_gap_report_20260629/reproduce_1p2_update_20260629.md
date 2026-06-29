@@ -35,11 +35,11 @@ Boundary-clone profiled run:
 - This does not reproduce the old ~1.2x claim against the current baseline. A 1.2x result from the current baseline would require about `10.395 ms/iter`, leaving roughly `0.58 ms/iter` still missing from the best current run.
 - Non-boundary full Torch LX already pins the final SwiGLU product into LX and feeds the down projection from LX. Therefore the missing gap is not simply the final MLP activation spill.
 - Boundary clones admit the additional `buf6 -> {buf7, buf10, buf21}` fanout reservation at full Torch LX and improve aggregate kernel time, but still do not reach 1.2x.
-- The remaining skipped high-value class is `buf21 -> buf22`, the value-side attention matmul input. It is skipped as `matmul-nonprimary-input-requires-broadcast`, which is outside the direct resident dldsc relayout class.
+- The remaining skipped high-value class is `buf21 -> buf22`, the value-side attention matmul input. It is skipped as `matmul-nonprimary-input-requires-broadcast`, which is outside the scatter resident-remap class.
 
 ## Current Conclusion
 
-The dldsc resident relayout path is value-producing and improves Granite prefill, but current best evidence says the direct resident relayout class is insufficient by itself to reproduce ~1.2x against today’s baseline. Closing the remaining gap likely requires a broader matmul operand communication class: broadcast/all-gather/replicate semantics for operands whose producer ownership does not match the consumer matmul split. Any bounded staging of that movement belongs with WSR; the relayout planner still needs to classify and cost the movement class rather than tuning the direct resident relayout path.
+The dldsc resident relayout path is value-producing and improves Granite prefill, but current best evidence says the scatter resident remap class is insufficient by itself to reproduce ~1.2x against today’s baseline. Closing the remaining gap likely requires a broader matmul operand communication class: broadcast/all-gather/replicate semantics for operands whose producer ownership does not match the consumer matmul split. Any bounded staging of that movement belongs with WSR; the relayout planner still needs to classify and cost the movement class rather than tuning the scatter resident remap path.
 
 ## Generated SDSC Communication-Class Artifact
 
@@ -52,12 +52,12 @@ Key class-count readout:
 
 | Communication class | Baseline off | dldsc full Torch LX | Interpretation |
 |---|---:|---:|---|
-| direct resident reshard realized | 0 | 5 | Covered by PR1: resident producer LX data feeds a different resident consumer view. |
-| HBM input roundtrip candidate | 5 | 0 | Removed by dldsc resident relayout for these matmul inputs. |
+| scatter resident remap realized | 0 | 5 | Covered by PR1: resident producer LX data feeds a different resident consumer view. |
+| HBM input roundtrip candidate | 5 | 0 | Removed by dldsc resident scatter remap for these matmul inputs. |
 | HBM output spill | 5 | 0 | Removed for these matmul outputs in the profiled full-LX run. |
 | missing matmul operand collective | 1 | 1 | Still present in attention value matmul: the `buf21 -> buf22` class. |
 
-This is the cleanest current evidence split: direct resident relayout is working and valuable; the remaining gap is a new communication class, not a WSR problem by itself.
+This is the cleanest current evidence split: scatter resident remap is working and valuable; the remaining gap is a new communication class, not a WSR problem by itself.
 
 ## Capacity-Priority Probe
 
@@ -77,7 +77,7 @@ Additional targeted diagnostics checked whether the dropped `buf6 -> {buf7, buf1
 | Boundary clones, `0.2`, default accepted/drop set | 11.2891 | 18.2872 | 1.105x |
 | Boundary clones, `0.2`, no `buf14`, `buf6` kept | 11.4027 | 18.5893 | 1.094x |
 
-Conclusion: simple source-level prioritization at `0.2` does not recover the missing speedup. The large `buf14` attention relayout appears more valuable than the `buf6` fanout under the current direct-resident mechanism.
+Conclusion: simple source-level prioritization at `0.2` does not recover the missing speedup. The large `buf14` attention relayout appears more valuable than the `buf6` fanout under the current scatter-resident mechanism.
 
 ## Buf21 / Attention Value Operand Reproducer
 
@@ -105,7 +105,7 @@ Interpretation:
 - That cannot fit in LX, so the resident dldsc relayout path cannot express this case.
 - The HBM fallback path for this forced case still fails DDC coordinate consistency, but that is not the performance path we want; even if fixed, it would reintroduce the HBM round trip.
 
-Conclusion: `buf21 -> buf22` is not a direct resident relayout. It is a matmul operand broadcast/all-gather communication-class problem. Reproducing another ~0.5-0.6 ms of speedup likely requires a new matmul operand movement class, with WSR handling bounded staging/capacity, not more tuning of the current dldsc resident relayout insertion.
+Conclusion: `buf21 -> buf22` is not a scatter resident remap. It is a matmul operand broadcast/all-gather communication-class problem. Reproducing another ~0.5-0.6 ms of speedup likely requires a new matmul operand movement class, with WSR handling bounded staging/capacity, not more tuning of the current dldsc resident relayout insertion.
 
 ## Value-Matmul Batch-Split Diagnostic
 
@@ -141,9 +141,9 @@ generic "streaming" implementation task. Working-set reduction can decide how
 much of an operand is resident at a time, but the compiler/backend still need a
 contract for what communication pattern is required.
 
-Current dldsc resident relayout covers:
+Current dldsc relayout covers the scatter resident-remap class:
 
-- **Direct resident reshard**: producer owns disjoint slices of a tensor in LX;
+- **Scatter resident remap**: producer owns disjoint slices of a tensor in LX;
   consumer wants the same tensor in a different per-core ownership; Deeptools
   materializes a post-relayout LX view before the consumer.
 - **Bounded resident fanout**: producer slices may be copied to multiple
@@ -154,7 +154,7 @@ It does not cover:
 
 - **Non-resident matmul operand collective**: a matmul operand is
   partitioned along a dimension that the consumer matmul does not split. If
-  expressed as resident relayout, each consumer core may need the whole operand
+  expressed as resident scatter remap, each consumer core may need the whole operand
   piece, as in `buf21 -> buf22` where Deeptools computes a `4 MiB` post-relayout
   piece per consumer core. The current planner now records this as
   `kind=matmul_operand_broadcast`, with the `buf21 -> buf22` subclass
@@ -168,11 +168,11 @@ It does not cover:
 
 Near-term implication:
 
-- Keep PR1 scoped to direct resident relayout.
+- Keep PR1 scoped to scatter resident remap.
 - Have the planner classify unsupported non-resident matmul operand movement as
   a named class and subclass, so it can be costed and handed off cleanly later.
 - Let WSR own the bounded working-set/materialization strategy, while the
-  relayout planner owns classification: direct resident reshard vs. non-resident
+  relayout planner owns classification: scatter resident remap vs. non-resident
   matmul operand collective vs. reduction-aware movement vs. layout-changing
   movement.
 
