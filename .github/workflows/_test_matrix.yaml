@@ -181,6 +181,8 @@ jobs:
           - name: Inductor Ops LX Planning
             config: torch_spyre_tests/inductor/test_ops_lx_planning_config.yaml
             runner: spyre_pf_x4
+          - name: Inductor LX Relayout dl-dsc
+            config: torch_spyre_tests/inductor/test_lx_relayout_dldsc_config.yaml
           - name: Inductor Scalar
             config: torch_spyre_tests/inductor/test_inductor_scalar_config.yaml
           - name: Inductor Logging
