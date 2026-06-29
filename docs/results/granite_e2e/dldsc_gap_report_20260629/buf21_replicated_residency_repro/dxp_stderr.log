@@ -1,0 +1,141 @@
+
+Coordinate of allocateNode allocate-Tensor1_lx:
+
+DDC Coordinates<int64_t>: 3 coordinate entries
+
+Primary Dim= in
+  Fold dimension= "factor_" : 1, "label_" : "core_fold"
+    Affine:"alpha_" : 512, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "corelet_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "row_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 512, "label_" : "elem_arr_0"
+    Affine: "alpha_" : 1, "beta_" : 0
+  #Spatial  = 3
+  #Temporal = 0
+  #ElemArr  = 1
+  Padding: { (in, nopad) }
+
+Primary Dim= out
+  Fold dimension= "factor_" : 1, "label_" : "core_fold"
+    Affine:"alpha_" : 128, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "corelet_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "row_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 2, "label_" : "elem_arr_1"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 64, "label_" : "elem_arr_0"
+    Affine: "alpha_" : 1, "beta_" : 0
+  #Spatial  = 3
+  #Temporal = 0
+  #ElemArr  = 2
+  Padding: { (out, nopad) }
+
+Primary Dim= x
+  Fold dimension= "factor_" : 1, "label_" : "core_fold"
+    Affine:"alpha_" : 32, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "corelet_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "row_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 32, "label_" : "elem_arr_0"
+    Affine: "alpha_" : 1, "beta_" : 0
+  #Spatial  = 3
+  #Temporal = 0
+  #ElemArr  = 1
+  Padding: { (x, nopad) }
+  coreIdToWkSlice_ : { 
+    0 : { in : 0, out : 0, x : 0 }, 
+    1 : { in : 0, out : 0, x : 0 }, 
+    2 : { in : 0, out : 0, x : 0 }, 
+    3 : { in : 0, out : 0, x : 0 }, 
+    4 : { in : 0, out : 0, x : 0 }, 
+    5 : { in : 0, out : 0, x : 0 }, 
+    6 : { in : 0, out : 0, x : 0 }, 
+    7 : { in : 0, out : 0, x : 0 }, 
+    8 : { in : 0, out : 0, x : 0 }, 
+    9 : { in : 0, out : 0, x : 0 }, 
+    10 : { in : 0, out : 0, x : 0 }, 
+    11 : { in : 0, out : 0, x : 0 }, 
+    12 : { in : 0, out : 0, x : 0 }, 
+    13 : { in : 0, out : 0, x : 0 }, 
+    14 : { in : 0, out : 0, x : 0 }, 
+    15 : { in : 0, out : 0, x : 0 }, 
+    16 : { in : 0, out : 0, x : 0 }, 
+    17 : { in : 0, out : 0, x : 0 }, 
+    18 : { in : 0, out : 0, x : 0 }, 
+    19 : { in : 0, out : 0, x : 0 }, 
+    20 : { in : 0, out : 0, x : 0 }, 
+    21 : { in : 0, out : 0, x : 0 }, 
+    22 : { in : 0, out : 0, x : 0 }, 
+    23 : { in : 0, out : 0, x : 0 }, 
+    24 : { in : 0, out : 0, x : 0 }, 
+    25 : { in : 0, out : 0, x : 0 }, 
+    26 : { in : 0, out : 0, x : 0 }, 
+    27 : { in : 0, out : 0, x : 0 }, 
+    28 : { in : 0, out : 0, x : 0 }, 
+    29 : { in : 0, out : 0, x : 0 }, 
+    30 : { in : 0, out : 0, x : 0 }, 
+    31 : { in : 0, out : 0, x : 0 }
+  } 
+
+Coordinate of transferNode transfer_lds0_src:lxlu_dst:sfp:
+
+DDC Coordinates<int64_t>: 3 coordinate entries
+
+Primary Dim= in
+  Fold dimension= "factor_" : 1, "label_" : "core_fold"
+    Affine:"alpha_" : 512, "beta_" : 0
+  Fold dimension= "factor_" : 2, "label_" : "corelet_fold"
+    Affine:"alpha_" : 8, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "rowsplit_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 32, "label_" : "loop_ds0_ds1_in in"
+    Affine:"alpha_" : 16, "beta_" : 0
+  Fold dimension= "factor_" : 8, "label_" : "loop_ds1_ds3_in_out_x in"
+    Affine:"alpha_" : 1, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "elem_arr_0"
+    Affine: "alpha_" : 1, "beta_" : 0
+  #Spatial  = 3
+  #Temporal = 2
+  #ElemArr  = 1
+  Padding: { (in, nopad) }
+
+Primary Dim= out
+  Fold dimension= "factor_" : 1, "label_" : "core_fold"
+    Affine:"alpha_" : 128, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "corelet_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "rowsplit_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "loop_ds0_ds1_out out"
+    Affine:"alpha_" : 128, "beta_" : 0
+  Fold dimension= "factor_" : 2, "label_" : "loop_ds1_ds3_in_out_x out"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 64, "label_" : "elem_arr_0"
+    Affine: "alpha_" : 1, "beta_" : 0
+  #Spatial  = 3
+  #Temporal = 2
+  #ElemArr  = 1
+  Padding: { (out, nopad) }
+
+Primary Dim= x
+  Fold dimension= "factor_" : 1, "label_" : "core_fold"
+    Affine:"alpha_" : 32, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "corelet_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "rowsplit_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 32, "label_" : "loop_ds0_ds1_x x"
+    Affine:"alpha_" : 1, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "loop_ds1_ds3_in_out_x x"
+    Affine:"alpha_" : 1, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "elem_arr_0"
+    Affine: "alpha_" : 1, "beta_" : 0
+  #Spatial  = 3
+  #Temporal = 2
+  #ElemArr  = 1
+  Padding: { (x, nopad) }terminate called after throwing an instance of 'DtException'
+  what():  DtException: Coordinates of transfer transfer_lds0_src:lxlu_dst:sfp and allocateNode allocate-Tensor1_lx are not consistent., file /home/adnan-cdx/codex-worktrees/deeptools-master-relayout/ddc/ddc_fold.cpp line 2785
