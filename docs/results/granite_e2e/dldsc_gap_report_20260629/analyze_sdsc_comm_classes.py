@@ -64,7 +64,7 @@ def first_addr(alloc: dict) -> str:
 def classify(bundle: str, file: str, op: dict, role: str, component: str, coord_core_map_len: int, lds_idx: int) -> tuple[str, str]:
     n = op.get("N_") or {}
     if role == "INPUT" and component == "lx" and coord_core_map_len:
-        return "scatter_resident_remap_realized", "input already in LX with producer coordinate map; backend inserted resident relayout"
+        return "scatter", "input already in LX with producer coordinate map; backend inserted resident relayout"
     if role == "INPUT" and component == "hbm":
         return "hbm_input_roundtrip_candidate", "consumer input read from HBM rather than LX"
     if role == "KERNEL" and component == "hbm":
@@ -154,7 +154,7 @@ def main() -> None:
     interesting = [
         row for row in rows
         if row["comm_class"] in {
-            "scatter_resident_remap_realized",
+            "scatter",
             "missing_matmul_operand_collective",
             "hbm_input_roundtrip_candidate",
             "hbm_output_spill",
@@ -176,7 +176,7 @@ def main() -> None:
     key_headers = ["variant", "bundle", "sdsc", "n_shape", "compute_split", "tensor", "role", "component", "layout", "coord_core_map_len", "comm_class", "note"]
     md.append(md_table(key_headers, interesting))
     md.append("\n## Readout\n")
-    md.append("- `scatter_resident_remap_realized` rows are the class PR1 now covers: producer data is resident in LX, consumer wants a different resident view, and dldsc coordinates let Deeptools synthesize the LX relayout.")
+    md.append("- `scatter` rows are the class PR1 now covers: producer data is resident in LX, consumer wants a different resident view, and dldsc coordinates let Deeptools synthesize the LX relayout.")
     md.append("- `missing_matmul_operand_collective` is the remaining Granite attention value path. Treating it as a resident scatter remap asks for a full value operand on every consumer core, which is the 4 MiB/core failure seen in the DXP-only repro.")
     md.append("- WSR should own tiling/staging for capacity. The relayout planner should still classify this as `matmul_operand_broadcast` / `all_gather_replicate` so the backend can realize the right collective instead of falling back to HBM or attempting resident full-materialization.")
     MD_OUT.write_text("\n".join(md) + "\n")
