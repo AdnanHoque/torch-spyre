@@ -1,0 +1,565 @@
+{
+  "all_ms": [
+    18.707,
+    18.645,
+    18.302,
+    18.871,
+    17.792,
+    18.404,
+    18.711,
+    18.249,
+    18.182,
+    18.05,
+    18.175,
+    18.022,
+    18.138,
+    18.124,
+    18.399,
+    18.646,
+    18.348,
+    18.528,
+    18.828,
+    19.25
+  ],
+  "attn_name": "sdpa_causal",
+  "cache_extra": [
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_linear_mul_split_with_sizes_sum_transpose_unsqueeze_view_1",
+    "sdsc_fused_add_3",
+    "sdsc_fused_add_linear_mul_rms_norm_silu_split_with_sizes_2",
+    "sdsc_fused_linear_rms_norm_0"
+  ],
+  "cache_match": false,
+  "cache_missing": [
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_clone_expand_linear_mul_rms_norm_transpose_unsqueeze_view_2",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_clone_expand_linear_mul_rms_norm_unsqueeze_view_3",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_cat_clone_expand_linear_transpose_unsqueeze_view_4",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_cat_clone_expand_transpose_unsqueeze_view_2",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_linear_mul_sum_transpose_unsqueeze_view_1",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_linear_mul_sum_transpose_unsqueeze_view_2",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_mul_sum_transpose_unsqueeze_view_1",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_3",
+    "sdsc_fused_add_linear_mul_4",
+    "sdsc_fused_add_linear_mul_rms_norm_silu_5",
+    "sdsc_fused_add_linear_mul_silu_6",
+    "sdsc_fused_add_mean_mul_rsqrt_0",
+    "sdsc_fused_add_mul_5",
+    "sdsc_fused_bmm_transpose_unsqueeze_0",
+    "sdsc_fused_div_0",
+    "sdsc_fused_linear_mul_rms_norm_silu_3",
+    "sdsc_fused_linear_mul_rms_norm_silu_4",
+    "sdsc_fused_linear_mul_rms_norm_sum_unsqueeze_view_0",
+    "sdsc_fused_linear_overwrite_slice_transpose_view_1",
+    "sdsc_fused_mul_0"
+  ],
+  "cache_overlap": [],
+  "cache_shape": [
+    [
+      1,
+      8,
+      512,
+      128
+    ],
+    [
+      1,
+      8,
+      512,
+      128
+    ]
+  ],
+  "cache_summary": [
+    {
+      "kernel_dir": "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_linear_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_vh6hilwf",
+      "normalized": "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_linear_mul_split_with_sizes_sum_transpose_unsqueeze_view_1",
+      "splits": [
+        {
+          "file": "sdsc_0.json",
+          "op": "0_identity",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "file": "sdsc_1.json",
+          "op": "1_mul",
+          "split": {
+            "i": 1,
+            "mb": 32,
+            "out": 1,
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "file": "sdsc_10.json",
+          "op": "10_batchmatmul",
+          "split": {
+            "in": 1,
+            "mb": 1,
+            "out": 2,
+            "x": 16
+          }
+        },
+        {
+          "file": "sdsc_11.json",
+          "op": "11_add",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_12.json",
+          "op": "12_max",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_13.json",
+          "op": "13_sub",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_14.json",
+          "op": "14_exp",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_15.json",
+          "op": "15_sum",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_16.json",
+          "op": "16_realdiv",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_17.json",
+          "op": "17_identity",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 1,
+            "y": 32
+          }
+        },
+        {
+          "file": "sdsc_18.json",
+          "op": "18_batchmatmul",
+          "split": {
+            "in": 1,
+            "mb": 8,
+            "out": 2,
+            "x": 2
+          }
+        },
+        {
+          "file": "sdsc_19.json",
+          "op": "19_identity",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_2.json",
+          "op": "2_sumnonstick",
+          "split": {
+            "i": 1,
+            "mb": 32,
+            "out": 1,
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "file": "sdsc_20.json",
+          "op": "20_ReStickifyOpHBM",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_21.json",
+          "op": "21_batchmatmul",
+          "split": {
+            "in": 1,
+            "mb": 4,
+            "out": 8
+          }
+        },
+        {
+          "file": "sdsc_3.json",
+          "op": "3_mul",
+          "split": {
+            "mb": 32,
+            "out": 1,
+            "x": 1
+          }
+        },
+        {
+          "file": "sdsc_4.json",
+          "op": "4_mul",
+          "split": {
+            "i": 1,
+            "mb": 32,
+            "out": 1,
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "file": "sdsc_5.json",
+          "op": "5_sumnonstick",
+          "split": {
+            "i": 1,
+            "mb": 32,
+            "out": 1,
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "file": "sdsc_6.json",
+          "op": "6_identity",
+          "split": {
+            "mb": 32,
+            "out": 1,
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "file": "sdsc_7.json",
+          "op": "7_identity",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 1,
+            "y": 32
+          }
+        },
+        {
+          "file": "sdsc_8.json",
+          "op": "8_mul",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_9.json",
+          "op": "9_ReStickifyOpHBM",
+          "split": {
+            "mb": 32,
+            "out": 1,
+            "x": 1
+          }
+        }
+      ]
+    },
+    {
+      "kernel_dir": "sdsc_fused_add_3_j_u90lg7",
+      "normalized": "sdsc_fused_add_3",
+      "splits": [
+        {
+          "file": "sdsc_0.json",
+          "op": "0_add",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        }
+      ]
+    },
+    {
+      "kernel_dir": "sdsc_fused_add_linear_mul_rms_norm_silu_split_with_sizes_2_59aiq5xd",
+      "normalized": "sdsc_fused_add_linear_mul_rms_norm_silu_split_with_sizes_2",
+      "splits": [
+        {
+          "file": "sdsc_0.json",
+          "op": "0_mul",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_1.json",
+          "op": "1_add",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_10.json",
+          "op": "10_silu",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_11.json",
+          "op": "11_mul",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_12.json",
+          "op": "12_ReStickifyOpHBM",
+          "split": {
+            "mb": 1,
+            "out": 25
+          }
+        },
+        {
+          "file": "sdsc_13.json",
+          "op": "13_batchmatmul",
+          "split": {
+            "in": 1,
+            "mb": 8,
+            "out": 4
+          }
+        },
+        {
+          "file": "sdsc_14.json",
+          "op": "14_mul",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_2.json",
+          "op": "2_mul",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_3.json",
+          "op": "3_mean",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_4.json",
+          "op": "4_add",
+          "split": {
+            "out": 32,
+            "x": 1
+          }
+        },
+        {
+          "file": "sdsc_5.json",
+          "op": "5_rsqrt",
+          "split": {
+            "out": 32,
+            "x": 1
+          }
+        },
+        {
+          "file": "sdsc_6.json",
+          "op": "6_mul",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_7.json",
+          "op": "7_mul",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_8.json",
+          "op": "8_ReStickifyOpHBM",
+          "split": {
+            "mb": 25,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_9.json",
+          "op": "9_batchmatmul",
+          "split": {
+            "in": 1,
+            "mb": 4,
+            "out": 8
+          }
+        }
+      ]
+    },
+    {
+      "kernel_dir": "sdsc_fused_linear_rms_norm_0_i92yr0sv",
+      "normalized": "sdsc_fused_linear_rms_norm_0",
+      "splits": [
+        {
+          "file": "sdsc_0.json",
+          "op": "0_identity",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_1.json",
+          "op": "1_mul",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_2.json",
+          "op": "2_mean",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_3.json",
+          "op": "3_add",
+          "split": {
+            "out": 32,
+            "x": 1
+          }
+        },
+        {
+          "file": "sdsc_4.json",
+          "op": "4_rsqrt",
+          "split": {
+            "out": 32,
+            "x": 1
+          }
+        },
+        {
+          "file": "sdsc_5.json",
+          "op": "5_mul",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_6.json",
+          "op": "6_mul",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_7.json",
+          "op": "7_ReStickifyOpHBM",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_8.json",
+          "op": "8_batchmatmul",
+          "split": {
+            "in": 1,
+            "mb": 4,
+            "out": 8
+          }
+        },
+        {
+          "file": "sdsc_9.json",
+          "op": "9_identity",
+          "split": {
+            "mb": 4,
+            "out": 8
+          }
+        }
+      ]
+    }
+  ],
+  "case": "prefill",
+  "compile_block": true,
+  "error": null,
+  "fused_weights": true,
+  "input_shape": [
+    1,
+    512,
+    4096
+  ],
+  "iters": 20,
+  "mask_shape": [
+    1,
+    512,
+    512
+  ],
+  "median_ms": 18.37337017059326,
+  "output_shape": [
+    1,
+    512,
+    4096
+  ],
+  "past_key_value_shape": null,
+  "position_ids_shape": [
+    1,
+    512
+  ],
+  "profile_dir": "/home/adnan-cdx/codex-worktrees/pr-lx-relayout-dldsc-post2829/runs/dldsc_force_av_split_2_8_2_1_20260629_144659/block_prefill/trace",
+  "profile_enabled": true,
+  "profile_memory": false,
+  "record_shapes": false,
+  "returncode": 0,
+  "trace_path": "/home/adnan-cdx/codex-worktrees/pr-lx-relayout-dldsc-post2829/runs/dldsc_force_av_split_2_8_2_1_20260629_144659/block_prefill/trace/adnan-cdx-spyre-dev-pf_2847522.1782744521278000961.pt.trace.json",
+  "trace_summary": {
+    "active_iters": 20,
+    "kernel_durations_ms": {
+      "/home/adnan-cdx/codex-worktrees/pr-lx-relayout-dldsc-post2829/runs/dldsc_force_av_split_2_8_2_1_20260629_144659/block_prefill/c": 230.53777300000004
+    },
+    "kernel_event_counts": {
+      "/home/adnan-cdx/codex-worktrees/pr-lx-relayout-dldsc-post2829/runs/dldsc_force_av_split_2_8_2_1_20260629_144659/block_prefill/c": 80
+    },
+    "kernel_ms_per_iter": 11.526888650000002,
+    "kernel_ms_total": 230.53777300000004,
+    "memory_ms_per_iter": 0.3321054000000001,
+    "memory_ms_total": 6.642108000000002,
+    "trace": "/home/adnan-cdx/codex-worktrees/pr-lx-relayout-dldsc-post2829/runs/dldsc_force_av_split_2_8_2_1_20260629_144659/block_prefill/trace/adnan-cdx-spyre-dev-pf_2847522.1782744521278000961.pt.trace.json"
+  },
+  "trace_summary_path": "/home/adnan-cdx/codex-worktrees/pr-lx-relayout-dldsc-post2829/runs/dldsc_force_av_split_2_8_2_1_20260629_144659/block_prefill/trace_summary.json",
+  "warmups": 5
+}

@@ -1,0 +1,14 @@
+{
+  "active_iters": 20,
+  "kernel_durations_ms": {
+    "/home/adnan-cdx/codex-worktrees/pr-lx-relayout-dldsc-post2829/runs/dldsc_force_av_split_2_8_2_1_20260629_144659/block_prefill/c": 230.53777300000004
+  },
+  "kernel_event_counts": {
+    "/home/adnan-cdx/codex-worktrees/pr-lx-relayout-dldsc-post2829/runs/dldsc_force_av_split_2_8_2_1_20260629_144659/block_prefill/c": 80
+  },
+  "kernel_ms_per_iter": 11.526888650000002,
+  "kernel_ms_total": 230.53777300000004,
+  "memory_ms_per_iter": 0.3321054000000001,
+  "memory_ms_total": 6.642108000000002,
+  "trace": "/home/adnan-cdx/codex-worktrees/pr-lx-relayout-dldsc-post2829/runs/dldsc_force_av_split_2_8_2_1_20260629_144659/block_prefill/trace/adnan-cdx-spyre-dev-pf_2847522.1782744521278000961.pt.trace.json"
+}
