@@ -1,0 +1,280 @@
+# Deeptools local diff used for dldsc Granite relayout profiling
+# Base: 20fb48ac5a4b7a5abaae24f7355f6239a64102c2 [dxp] hardcode to 512
+# Generated: 2026-06-29T14:36:00Z
+# Worktree: /home/adnan-cdx/codex-worktrees/deeptools-master-relayout
+
+ ddc/ddc_fold.cpp              | 69 +++++++++++++++++++++++++++++++++++++++++--
+ dsc/dsc2.cpp                  | 11 +++++++
+ dxp/SdscRelayoutInsertion.cpp | 57 +++++++++++++++++++++++++++--------
+ 3 files changed, 122 insertions(+), 15 deletions(-)
+
+diff --git a/ddc/ddc_fold.cpp b/ddc/ddc_fold.cpp
+index 4df32c50cc..1944214ae3 100644
+--- a/ddc/ddc_fold.cpp
++++ b/ddc/ddc_fold.cpp
+@@ -1259,7 +1259,14 @@ bool Ddc::sameCoordinateRange(
+     gatherFoldParams(lhsFm, lhsFoldParams);
+     gatherFoldParams(rhs.coordinates_.at(coordDim), rhsFoldParams);
+ 
+-    if (lhs.coreIdToWkSlice_ == rhs.coreIdToWkSlice_) {
++    const auto &lhsCoreIdToWkSlice =
++        lhs.coreIdToWkSlice_.empty() ? sdsc_->coreIdToWkSlice_
++                                     : lhs.coreIdToWkSlice_;
++    const auto &rhsCoreIdToWkSlice =
++        rhs.coreIdToWkSlice_.empty() ? sdsc_->coreIdToWkSlice_
++                                     : rhs.coreIdToWkSlice_;
++
++    if (lhsCoreIdToWkSlice == rhsCoreIdToWkSlice) {
+       combineContigousLevels(lhsFoldParams);
+       combineContigousLevels(rhsFoldParams);
+       if (!isConsistentCoord(lhsFoldParams, rhsFoldParams, coordDim,
+@@ -1352,6 +1359,40 @@ bool Ddc::sameCoordinateRange(
+                    workingRhsFoldParams.at(FOLD_POS_CORELET).cardinality) {
+           fixedRhsCorelet = *rhsCoreletInfo.begin();
+         } else {
++          if (workingLhsFoldParams.at(FOLD_POS_CORELET).cardinality !=
++              workingRhsFoldParams.at(FOLD_POS_CORELET).cardinality) {
++            std::cerr << "DLC_CORELET_CARDINALITY_DEBUG"
++                      << " coordDim="
++                      << EnumsConversion::primaryDimToString.at(coordDim)
++                      << " comp=" << EnumsConversion::senComponentsToString.at(comp)
++                      << " ldsIdx=" << ldsIdx
++                      << " lhsNode=" << lhsNode->name_
++                      << " rhsNode=" << rhsNode->name_
++                      << " core=" << lhsCoreId
++                      << " lhsSlice=" << lhsSliceId
++                      << " rhsSlice=" << rhsSliceId
++                      << " lhsCorelets=" << lhsCoreletInfo.size()
++                      << " rhsCorelets=" << rhsCoreletInfo.size()
++                      << " lhsC2W=" << lhs.coreIdToWkSlice_.size()
++                      << " rhsC2W=" << rhs.coreIdToWkSlice_.size()
++                      << " lhsCoreletCard="
++                      << workingLhsFoldParams.at(FOLD_POS_CORELET).cardinality
++                      << " rhsCoreletCard="
++                      << workingRhsFoldParams.at(FOLD_POS_CORELET).cardinality
++                      << " lhsCoreletAlpha="
++                      << workingLhsFoldParams.at(FOLD_POS_CORELET).alpha
++                      << " rhsCoreletAlpha="
++                      << workingRhsFoldParams.at(FOLD_POS_CORELET).alpha
++                      << " lhsCoreletBeta="
++                      << workingLhsFoldParams.at(FOLD_POS_CORELET).beta
++                      << " rhsCoreletBeta="
++                      << workingRhsFoldParams.at(FOLD_POS_CORELET).beta
++                      << " lhsCoreCard="
++                      << workingLhsFoldParams.at(FOLD_POS_CORE).cardinality
++                      << " rhsCoreCard="
++                      << workingRhsFoldParams.at(FOLD_POS_CORE).cardinality
++                      << std::endl;
++          }
+           DT_CHECK_MSG(
+               workingLhsFoldParams.at(FOLD_POS_CORELET).cardinality ==
+                   workingRhsFoldParams.at(FOLD_POS_CORELET).cardinality,
+@@ -2981,8 +3022,32 @@ void Ddc::buildFoldFromAllocation(
+   DT_CHECK_MSG(refAllocNode->ldsIdx_ >= 0,
+                "Reference allocateNode " + refAllocNode->name_ +
+                    " does not have a valid labeledDs index.");
++  auto coreIdToWkSliceVariesOnDim =
++      [](const std::map<int, std::map<PrimaryDimTypes, int>> &coreIdToWkSlice,
++         PrimaryDimTypes dim) {
++        bool hasRef = false;
++        int refWkSlice = 0;
++        for (const auto &[coreId, wkSlice] : coreIdToWkSlice) {
++          auto it = wkSlice.find(dim);
++          if (it == wkSlice.end()) {
++            continue;
++          }
++          if (!hasRef) {
++            refWkSlice = it->second;
++            hasRef = true;
++            continue;
++          }
++          if (it->second != refWkSlice) {
++            return true;
++          }
++        }
++        return false;
++      };
++
+   if (is_any_of(coreletSplitDim, coordPropInfo.dimsToPropagate) &&
+-      !refAllocNode->allocateCoordinates_.coreIdToWkSlice_.empty()) {
++      coreIdToWkSliceVariesOnDim(
++          refAllocNode->allocateCoordinates_.coreIdToWkSlice_,
++          coreletSplitDim)) {
+     DT_ERROR(
+         "[buildFoldFromAllocation] Can not propagate coordinates for "
+         "coreletSplit dimension" +
+diff --git a/dsc/dsc2.cpp b/dsc/dsc2.cpp
+index a50eac1bfd..419df830b2 100644
+--- a/dsc/dsc2.cpp
++++ b/dsc/dsc2.cpp
+@@ -3918,6 +3918,17 @@ DesignSpaceConfig::getBufferCapacityForNodePerDimCustomLocation(
+       auto& dimGap = myAllocNode->backGapCore_.at(entry);
+       DT_CHECK(!dimGap.empty());
+       if (comp == SenComponents::HBM) {
++        if (!dimGap.count(-1)) {
++          std::cerr << "DSC2_DIM_GAP_DEBUG"
++                    << " node=" << myAllocNode->name_
++                    << " comp=" << EnumsConversion::senComponentsToString.at(comp)
++                    << " dim=" << EnumsConversion::primaryDimToString.at(entry)
++                    << " keys=";
++          for (const auto& kv : dimGap) {
++            std::cerr << kv.first << ",";
++          }
++          std::cerr << std::endl;
++        }
+         DT_CHECK(dimGap.count(-1));
+         gap = dimGap.at(-1);
+       } else {
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index f09891ab9c..dd5c79969b 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -2,6 +2,8 @@
+ #include <dsc/superdsc.h>
+ #include <sharedtools/mem_track_bundle.h>
+ 
++#include <set>
++
+ #include "dxp.h"
+ 
+ // #define DEBUG_RELAYOUT 1
+@@ -17,6 +19,24 @@ static DataFormats getDsFormat(double wl) {
+   return DataFormats::INVALID;
+ }
+ 
++static double getRelayoutPieceSize(
++    double form_size,
++    const std::map<int, std::map<PrimaryDimTypes, int>>& coreIdToWkSlice,
++    const std::set<PrimaryDimTypes>& tensorDims) {
++  double num_pieces = 1;
++  std::map<PrimaryDimTypes, std::set<int>> wkslices_in_dim;
++  for (const auto& core_to_slice : coreIdToWkSlice) {
++    for (const auto& dim_to_slice : core_to_slice.second) {
++      if (tensorDims.count(dim_to_slice.first) == 0) continue;
++      wkslices_in_dim[dim_to_slice.first].insert(dim_to_slice.second);
++    }
++  }
++  for (const auto& dim_to_slices : wkslices_in_dim) {
++    num_pieces *= dim_to_slices.second.size();
++  }
++  return std::ceil(form_size / num_pieces);
++}
++
+ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+                              MemTrackBundle* memTrackers,
+                              std::vector<SuperDsc*>& relayout_sdscs) {
+@@ -34,8 +54,9 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+     auto pre_relayout_allocNode = lds.memOrg_.at(LX).allocateNode_;
+     auto& allocCoords = lds.memOrg_.at(LX).allocateNode_->allocateCoordinates_;
+     if (allocCoords.coreIdToWkSlice_.empty() ||
+-        allocCoords.coreIdToWkSlice_ == sdsc->coreIdToWkSlice_)
++        allocCoords.coreIdToWkSlice_ == sdsc->coreIdToWkSlice_) {
+       continue;
++    }
+ 
+ #ifdef DEBUG_RELAYOUT
+     std::cout << "Inserting relayout for: " << lds.dsName_ << std::endl;
+@@ -56,23 +77,37 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+     relayout_sdsc->N_ = sdsc->N_;
+     relayout_sdsc->target_ = sdsc->target_;
+ 
+-    // Step 2b: Check if there is sufficient space in lx for post-relayout form
++    // Step 2b: Insert the relayout program step and check if there is
++    // sufficient contiguous space in LX for the post-relayout form. This must
++    // use the same tracker state as the eventual allocation below; a pure free
++    // capacity check before the inserted step can pass even when no common
++    // contiguous block is available at the real relayout step.
++    memTrackers->insertPsBefore(ps);
+     auto out_form_size = lds.wordLength;
+     auto N_ = sdsc->dscs_.front().N_;
+     auto dim_count = 0;
++    std::set<PrimaryDimTypes> relayout_tensor_dims;
+     for (auto dimid :
+          sdsc->dscs_.front().primaryDsInfo_.at(lds.dsType_).layoutDimOrder_) {
++      relayout_tensor_dims.insert(dimid);
+       if (lds.scale_[dim_count] == -2)
+         out_form_size *= 64;
+       else
+         out_form_size *= N_.primaryDimToVal_st(dimid);
+       dim_count++;
+     }
++    auto out_piece_size =
++        getRelayoutPieceSize(out_form_size, sdsc->coreIdToWkSlice_,
++                             relayout_tensor_dims);
+ 
+     bool lx_space_found = true;
+     for (const auto& mapkv : sdsc->coreIdToWkSlice_) {
+       auto& memTracker = lxTrackPerCore.at(mapkv.first);
+-      if (!memTracker.checkIfDsFits("dynamic", out_form_size, {ps})) {
++      auto probe_ds = sdsc->name_ + "-" + lds.dsName_ + "-LxRelayout-probe";
++	      auto stAddr =
++	          memTracker.checkDsForStartAddr(probe_ds, "dynamic", out_piece_size,
++	                                         {ps}, -1);
++      if (stAddr < 0) {
+         lx_space_found = false;
+         break;
+       }
+@@ -133,8 +168,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         myLds.pdsName_ = "activation";
+         myLds.wordLength = lds.wordLength;
+         myLds.df = getDsFormat(lds.wordLength);
+-        auto& refDsInfo =
+-            dldsc.primaryDsInfo_.at(DsTypes::OUTPUT);  // check this
++        auto& refDsInfo = dldsc.primaryDsInfo_.at(lds.dsType_);
+ 
+         // Fill dimNames, layoutDimOrder_, dimToLayoutSize_ and validGap_
+         auto& N_ = dldsc.N_;
+@@ -244,6 +278,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         for (auto kv :
+              (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
+           for (auto kv2 : kv.second) {
++            if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+             wkslices_in_dim[kv2.first].insert(kv2.second);
+           }
+         }
+@@ -252,6 +287,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+              (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
+           PieceInfo new_piece;
+           for (auto kv2 : kv.second) {
++            if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+             // Fill dimToSize_
+             std::string dimName = dldsc.primaryDimToString.at(kv2.first);
+             DT_CHECK(wkslices_in_dim.at(kv2.first).size() >= 1);
+@@ -302,13 +338,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             } else {
+               // For the output piece, find an empty space in the lx
+               auto& memTracker = lxTrackPerCore.at(kv.first);
+-              auto tensor_size = myLds.wordLength;
+-              for (auto kv : myLds.dimToLayoutSize_) {
+-                tensor_size *= kv.second;
+-              }
+-              memTrackers->insertPsBefore(ps);
+               auto stAddr = memTracker.checkAndAddDs(myLds.ldsName_, "dynamic",
+-                                                     tensor_size, {ps});
++                                                     out_piece_size, {ps});
+               DT_CHECK_MSG(stAddr >= 0, "Must find space in LX\n");
+               new_piece.placement.at(SenComponents::LX)
+                   .insertStAddr(stAddr, {0});
+@@ -476,7 +507,6 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         out_allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
+ 
+         // find space in HBM for the output of relayout
+-        memTrackers->insertPsBefore(ps);
+         auto hbm_stAddr = hbmTrack.checkAndAddDs(outLds.dsName_, "dynamic",
+                                                  out_form_size, {ps});
+         DT_CHECK_MSG(hbm_stAddr >= 0, "Must find space in HBM\n");
+@@ -516,6 +546,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             auto offset_addr = hbm_stAddr;
+             for (auto kv : sdsc->coreIdToWkSlice_.at(coreid)) {
+               if (sdsc->numWkSlicesPerDim_.at(kv.first) == 1) continue;
++              if (strides.count(kv.first) == 0) continue;
+               offset_addr += (kv.second *
+                               (N_.primaryDimToVal_st(kv.first) /
+                                sdsc->numWkSlicesPerDim_.at(kv.first)) *
+@@ -563,4 +594,4 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+   std::string filename = "origsdsc_debug_out.json";
+   sdsc->exportJson(filename);
+ #endif
+-}
+\ No newline at end of file
++}
