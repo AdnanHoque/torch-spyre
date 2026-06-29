@@ -1,0 +1,194 @@
+commit fb1c5e68193131ceb0ac86b20c71f9c4ed73895d
+Author:     Adnan Hoque <hoque@ualberta.ca>
+AuthorDate: Mon Jun 29 15:55:24 2026 +0000
+Commit:     Adnan Hoque <hoque@ualberta.ca>
+CommitDate: Mon Jun 29 15:55:24 2026 +0000
+
+    [DXP] Fix resident LX scatter relayout sizing
+    
+    Signed-off-by: Adnan Hoque <hoque@ualberta.ca>
+---
+ ddc/ddc_fold.cpp              | 26 ++++++++++++++++++++-
+ dxp/SdscRelayoutInsertion.cpp | 54 +++++++++++++++++++++++++++++++++----------
+ 2 files changed, 67 insertions(+), 13 deletions(-)
+
+diff --git a/ddc/ddc_fold.cpp b/ddc/ddc_fold.cpp
+index 4df32c50cc..da13825213 100644
+--- a/ddc/ddc_fold.cpp
++++ b/ddc/ddc_fold.cpp
+@@ -2981,8 +2981,32 @@ void Ddc::buildFoldFromAllocation(
+   DT_CHECK_MSG(refAllocNode->ldsIdx_ >= 0,
+                "Reference allocateNode " + refAllocNode->name_ +
+                    " does not have a valid labeledDs index.");
++  auto coreIdToWkSliceVariesOnDim =
++      [](const std::map<int, std::map<PrimaryDimTypes, int>>& coreIdToWkSlice,
++         PrimaryDimTypes dim) {
++        bool hasRef = false;
++        int refWkSlice = 0;
++        for (const auto& [coreId, wkSlice] : coreIdToWkSlice) {
++          auto it = wkSlice.find(dim);
++          if (it == wkSlice.end()) {
++            continue;
++          }
++          if (!hasRef) {
++            refWkSlice = it->second;
++            hasRef = true;
++            continue;
++          }
++          if (it->second != refWkSlice) {
++            return true;
++          }
++        }
++        return false;
++      };
++
+   if (is_any_of(coreletSplitDim, coordPropInfo.dimsToPropagate) &&
+-      !refAllocNode->allocateCoordinates_.coreIdToWkSlice_.empty()) {
++      coreIdToWkSliceVariesOnDim(
++          refAllocNode->allocateCoordinates_.coreIdToWkSlice_,
++          coreletSplitDim)) {
+     DT_ERROR(
+         "[buildFoldFromAllocation] Can not propagate coordinates for "
+         "coreletSplit dimension" +
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index f09891ab9c..5d67973f91 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -2,6 +2,8 @@
+ #include <dsc/superdsc.h>
+ #include <sharedtools/mem_track_bundle.h>
+ 
++#include <set>
++
+ #include "dxp.h"
+ 
+ // #define DEBUG_RELAYOUT 1
+@@ -17,6 +19,24 @@ static DataFormats getDsFormat(double wl) {
+   return DataFormats::INVALID;
+ }
+ 
++static double getRelayoutPieceSize(
++    double form_size,
++    const std::map<int, std::map<PrimaryDimTypes, int>>& coreIdToWkSlice,
++    const std::set<PrimaryDimTypes>& tensorDims) {
++  double num_pieces = 1;
++  std::map<PrimaryDimTypes, std::set<int>> wkslices_in_dim;
++  for (const auto& core_to_slice : coreIdToWkSlice) {
++    for (const auto& dim_to_slice : core_to_slice.second) {
++      if (tensorDims.count(dim_to_slice.first) == 0) continue;
++      wkslices_in_dim[dim_to_slice.first].insert(dim_to_slice.second);
++    }
++  }
++  for (const auto& dim_to_slices : wkslices_in_dim) {
++    num_pieces *= dim_to_slices.second.size();
++  }
++  return std::ceil(form_size / num_pieces);
++}
++
+ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+                              MemTrackBundle* memTrackers,
+                              std::vector<SuperDsc*>& relayout_sdscs) {
+@@ -56,23 +76,37 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+     relayout_sdsc->N_ = sdsc->N_;
+     relayout_sdsc->target_ = sdsc->target_;
+ 
+-    // Step 2b: Check if there is sufficient space in lx for post-relayout form
++    // Step 2b: Insert the relayout program step and check if there is
++    // sufficient contiguous space in LX for the post-relayout form. This must
++    // use the same tracker state as the eventual allocation below; a pure free
++    // capacity check before the inserted step can pass even when no common
++    // contiguous block is available at the real relayout step.
++    memTrackers->insertPsBefore(ps);
+     auto out_form_size = lds.wordLength;
+     auto N_ = sdsc->dscs_.front().N_;
+     auto dim_count = 0;
++    std::set<PrimaryDimTypes> relayout_tensor_dims;
+     for (auto dimid :
+          sdsc->dscs_.front().primaryDsInfo_.at(lds.dsType_).layoutDimOrder_) {
++      relayout_tensor_dims.insert(dimid);
+       if (lds.scale_[dim_count] == -2)
+         out_form_size *= 64;
+       else
+         out_form_size *= N_.primaryDimToVal_st(dimid);
+       dim_count++;
+     }
++    auto out_piece_size =
++        getRelayoutPieceSize(out_form_size, sdsc->coreIdToWkSlice_,
++                             relayout_tensor_dims);
+ 
+     bool lx_space_found = true;
+     for (const auto& mapkv : sdsc->coreIdToWkSlice_) {
+       auto& memTracker = lxTrackPerCore.at(mapkv.first);
+-      if (!memTracker.checkIfDsFits("dynamic", out_form_size, {ps})) {
++      auto probe_ds = sdsc->name_ + "-" + lds.dsName_ + "-LxRelayout-probe";
++      auto stAddr =
++          memTracker.checkDsForStartAddr(probe_ds, "dynamic", out_piece_size,
++                                         {ps}, -1);
++      if (stAddr < 0) {
+         lx_space_found = false;
+         break;
+       }
+@@ -133,8 +167,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         myLds.pdsName_ = "activation";
+         myLds.wordLength = lds.wordLength;
+         myLds.df = getDsFormat(lds.wordLength);
+-        auto& refDsInfo =
+-            dldsc.primaryDsInfo_.at(DsTypes::OUTPUT);  // check this
++        auto& refDsInfo = dldsc.primaryDsInfo_.at(lds.dsType_);
+ 
+         // Fill dimNames, layoutDimOrder_, dimToLayoutSize_ and validGap_
+         auto& N_ = dldsc.N_;
+@@ -244,6 +277,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         for (auto kv :
+              (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
+           for (auto kv2 : kv.second) {
++            if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+             wkslices_in_dim[kv2.first].insert(kv2.second);
+           }
+         }
+@@ -252,6 +286,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+              (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
+           PieceInfo new_piece;
+           for (auto kv2 : kv.second) {
++            if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+             // Fill dimToSize_
+             std::string dimName = dldsc.primaryDimToString.at(kv2.first);
+             DT_CHECK(wkslices_in_dim.at(kv2.first).size() >= 1);
+@@ -302,13 +337,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             } else {
+               // For the output piece, find an empty space in the lx
+               auto& memTracker = lxTrackPerCore.at(kv.first);
+-              auto tensor_size = myLds.wordLength;
+-              for (auto kv : myLds.dimToLayoutSize_) {
+-                tensor_size *= kv.second;
+-              }
+-              memTrackers->insertPsBefore(ps);
+               auto stAddr = memTracker.checkAndAddDs(myLds.ldsName_, "dynamic",
+-                                                     tensor_size, {ps});
++                                                     out_piece_size, {ps});
+               DT_CHECK_MSG(stAddr >= 0, "Must find space in LX\n");
+               new_piece.placement.at(SenComponents::LX)
+                   .insertStAddr(stAddr, {0});
+@@ -476,7 +506,6 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         out_allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
+ 
+         // find space in HBM for the output of relayout
+-        memTrackers->insertPsBefore(ps);
+         auto hbm_stAddr = hbmTrack.checkAndAddDs(outLds.dsName_, "dynamic",
+                                                  out_form_size, {ps});
+         DT_CHECK_MSG(hbm_stAddr >= 0, "Must find space in HBM\n");
+@@ -516,6 +545,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             auto offset_addr = hbm_stAddr;
+             for (auto kv : sdsc->coreIdToWkSlice_.at(coreid)) {
+               if (sdsc->numWkSlicesPerDim_.at(kv.first) == 1) continue;
++              if (strides.count(kv.first) == 0) continue;
+               offset_addr += (kv.second *
+                               (N_.primaryDimToVal_st(kv.first) /
+                                sdsc->numWkSlicesPerDim_.at(kv.first)) *
+@@ -563,4 +593,4 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+   std::string filename = "origsdsc_debug_out.json";
+   sdsc->exportJson(filename);
+ #endif
+-}
+\ No newline at end of file
++}
