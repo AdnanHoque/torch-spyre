@@ -1,0 +1,6 @@
+N 0 SenPreparedOp buf21_clear_residency_repro
+E 0 1
+N 1 SenProgAddrGenerate buf21_clear_residency_repro
+I { }
+O { }
+T { }

@@ -1,0 +1,6 @@
+N 0 SenProgSend buf21_clear_residency_repro-SenProgSend
+A dev_ptr 6 120259084288
+A size 6 4608
+I { }
+O { }
+T { }
