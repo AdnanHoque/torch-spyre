@@ -4,6 +4,9 @@ Date: 2026-06-29
 
 Branch: `ah/comms-collectives`
 
+Reproduction runbook:
+`docs/results/granite_e2e/comms_collectives_reproduce_runbook_20260630.md`
+
 ## Goal
 
 Use the dl-dsc LX relayout path as the base for removing the remaining
@@ -95,4 +98,3 @@ The next backend prototype should consume a classified
 post-relayout full materialization.  The first target should be the Granite
 attention value-side edge because it is the single remaining non-weight
 communication class in the current artifact table.
-
