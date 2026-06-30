@@ -103,13 +103,23 @@ The intended contract is:
 The corrected artifacts show that all variants still contain five
 `ReStickifyOpHBM` rows:
 
-| kernel area | SDSC row | split | current form |
-|---|---|---|---|
-| attention score path | `sdsc_9` | `{mb:32,x:1,out:1}` | HBM -> HBM |
-| attention + MLP fused kernel input | `sdsc_0` | `{mb:32,out:1}` | HBM -> HBM |
-| fused SwiGLU / down-proj handoff | `sdsc_10` | `{mb:25,out:1}` | HBM -> HBM |
-| residual/downstream linear handoff | `sdsc_0` | `{mb:1,out:25}` | HBM -> HBM |
-| final norm / output projection handoff | `sdsc_7` | `{mb:32,out:1}` | HBM -> HBM |
+| source | shape | row | split | scope |
+|---|---:|---|---|---|
+| `arg2_1`, attention QKV projection weight | `[6144,4096]` | `sdsc_fused_linear_rms_norm_0/sdsc_7.json` | `{mb:32,out:1}` | weight prelayout, out of scope |
+| `mul_6` / `buf13`, computed attention activation | `[1,32,512,128]` logical target | `sdsc_fused__scaled_dot_product.../sdsc_9.json` | `{mb:32,x:1,out:1}` | in scope |
+| `arg5_1`, attention output projection weight | `[4096,4096]` | `sdsc_fused__scaled_dot_product..._add_linear.../sdsc_0.json` | `{mb:32,out:1}` | weight prelayout, out of scope |
+| `arg7_1`, fused FFN gate/up projection weight | `[25600,4096]` | `sdsc_fused__scaled_dot_product..._add_linear.../sdsc_10.json` | `{mb:25,out:1}` | weight prelayout, out of scope |
+| `arg8_1`, FFN down-projection weight | `[4096,12800]` | `sdsc_fused_add_linear_mul_3/sdsc_0.json` | `{mb:1,out:25}` | weight prelayout, out of scope |
+
+This distinction is important.  The benchmark uses empty Spyre parameters for
+speed and reproducibility, but those tensors are still model parameters in the
+compiled graph.  Their restickifies are weight-layout preparation problems.
+They should be handled by offline/preload weight layout work, not by this
+communication-class branch.
+
+The only remaining non-weight restickify in this run is the computed attention
+activation restickify.  That is the row this branch should continue to
+investigate.
 
 These rows are not direct producer-to-consumer LX distribution mismatches by the
 time `plan_lx_relayouts()` runs.  They have already been materialized as
@@ -132,8 +142,8 @@ see an LX input whose tensor distribution differs from the consumer compute
 distribution.  It cannot replace an HBM `ReStickifyOpHBM` node that Torch has
 already inserted before scratchpad planning.
 
-This is also not the same class as resident scatter.  The remaining rows are
-layout/stick restickifies: the tensor's physical stick/layout form changes, not
+This is also not the same class as resident scatter.  The in-scope row is a
+layout/stick restickify: the tensor's physical stick/layout form changes, not
 only the core that owns each already-formed piece.
 
 Current Deeptools `SdscRelayoutInsertion.cpp` also treats relayout input and
@@ -165,17 +175,20 @@ full-block path requires earlier intervention.
 
 ## Next Implementation Step
 
-The next prototype should target explicit layout-restickify HBM rows first:
+The next prototype should target the computed activation layout-restickify HBM
+row first:
 
-1. Identify restickify-plan entries whose input and output can both be LX
-   resident.
-2. Preserve the original producer tensor layout and the consumer-required target
+1. Ignore graph-input/parameter weight restickifies; those belong to offline
+   weight prelayout/preload work.
+2. Identify the computed activation restickify whose input and output can both
+   be LX resident.
+3. Preserve the original producer tensor layout and the consumer-required target
    layout.
-3. Emit a dl-dsc contract that exposes an LX input with explicit producer
+4. Emit a dl-dsc contract that exposes an LX input with explicit producer
    coordinates and a post-layout consumer requirement, without materializing an
    HBM `ReStickifyOpHBM` node.
-4. Extend Deeptools relayout insertion only if needed to support different
+5. Extend Deeptools relayout insertion only if needed to support different
    pre-layout and post-layout forms for `STCDPOpLx`.
-5. After layout-restickify is working, return to the attention value-side
+6. After layout-restickify is working, return to the attention value-side
    `matmul_operand_broadcast` edge and lower it as loop-scoped movement rather
    than post-relayout full materialization.
