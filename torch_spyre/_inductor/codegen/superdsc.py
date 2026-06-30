@@ -23,10 +23,12 @@ from torch_spyre._C import DataFormats
 from torch_spyre._inductor.constants import (
     IDENTITY_OP,
     INPUT_DIM_LABELS,
+    LAYOUT_RESTICKIFY_ACTIVATION_LX_INFO_KEY,
     OUTPUT_DIM_LABELS,
     LAYOUT_LABELS,
     MATMUL_DIM_LABELS,
     MATMUL_LAYOUT_LABELS,
+    RESTICKIFY_LX_OP,
     RESTICKIFY_OP,
     TOPK_OPS,
 )
@@ -636,6 +638,16 @@ def _get_op_func(op: str, is_reduction: bool, output_scales: dict) -> str:
     return op
 
 
+def _should_emit_restickify_lx(op_spec: OpSpec, args: list[SDSCArgs]) -> bool:
+    if op_spec.op != RESTICKIFY_OP:
+        return False
+    if not _spyre_config.lx_planner_relayout_restickify_outputs:
+        return False
+    if not (op_spec.op_info or {}).get(LAYOUT_RESTICKIFY_ACTIVATION_LX_INFO_KEY):
+        return False
+    return bool(args) and all("lx" in arg.allocation for arg in args)
+
+
 def _concretize_for_sdsc(expr: Expr) -> int:
     """Concretize a symbolic expression at the SDSC generation boundary.
 
@@ -922,7 +934,9 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
 
     return (
         SDSCSpec(
-            opfunc=_get_op_func(op_spec.op, op_spec.is_reduction, args[-1].scales),
+            opfunc=RESTICKIFY_LX_OP
+            if _should_emit_restickify_lx(op_spec, args)
+            else _get_op_func(op_spec.op, op_spec.is_reduction, args[-1].scales),
             execution_unit="pt" if is_matmul else "sfp",
             data_format=args[
                 1 if indirect_access_indices else 0

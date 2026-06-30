@@ -27,6 +27,7 @@ from torch._inductor.codegen.common import (
 )
 from torch_spyre._inductor.dtype_ops import DtypeOpTable
 from torch._inductor.ops_handler import DefaultHandler, StoreMode
+from torch._inductor.ir import ComputedBuffer
 from torch._inductor.utils import IndentedBuffer, sympy_index_symbol, sympy_subs
 from torch._inductor.virtualized import V
 
@@ -35,10 +36,12 @@ from .constants import (
     BATCH_MATMUL_OP,
     BATCH_MATMUL_FP8_OP,
     IDENTITY_OP,
+    LAYOUT_RESTICKIFY_ACTIVATION_LX_INFO_KEY,
     RESTICKIFY_OP,
     SEGMENT_OFFSETS,
     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
 )
+from torch_spyre._inductor import config as _spyre_config
 from .errors import Unsupported
 from .ir import FixedTiledLayout
 from .lx_relayout import LX_RELAYOUT_ATTR, LX_RELAYOUT_CLASSIFICATION_ATTR
@@ -792,6 +795,15 @@ class SpyreKernel(Kernel[CSEVariable]):
                 op = RESTICKIFY_OP
             else:
                 op = IDENTITY_OP
+            if (
+                op == RESTICKIFY_OP
+                and _spyre_config.lx_planner_relayout_restickify_outputs
+                and isinstance(V.graph.name_to_buffer.get(value.name), ComputedBuffer)
+            ):
+                op_info = {
+                    **op_info,
+                    LAYOUT_RESTICKIFY_ACTIVATION_LX_INFO_KEY: True,
+                }
             op_spec = self.create_op_spec(
                 op, False, args, op_info, self.indirect_var_names()
             )

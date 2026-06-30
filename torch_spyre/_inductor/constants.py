@@ -15,6 +15,7 @@
 BATCH_MATMUL_OP = "batchmatmul"
 IDENTITY_OP = "identity"
 RESTICKIFY_OP = "ReStickifyOpHBM"
+RESTICKIFY_LX_OP = "ReStickifyOpLx"
 BATCH_MATMUL_FP8_OP = "batchmatmulfp8"
 
 # Type casting operators from deeptools
@@ -40,6 +41,7 @@ ELIDED_COPY_BACK_ATTR = "_spyre_writes_copy_back_target"
 # fact after lowering, where FX metadata is no longer directly available.
 SHARED_WEIGHT_UNIT_BMM_CUSTOM_META_KEY = "_spyre_shared_weight_unit_bmm"
 SHARED_WEIGHT_UNIT_BMM_INFO_KEY = "shared_weight_unit_bmm"
+LAYOUT_RESTICKIFY_ACTIVATION_LX_INFO_KEY = "layout_restickify_activation_lx"
 
 
 SEGMENT_OFFSETS = [
