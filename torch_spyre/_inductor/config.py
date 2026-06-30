@@ -51,6 +51,13 @@ lx_planner_relayout_collectives: bool = (
     os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES", "0") == "1"
 )
 
+# Experimental research lane for layout-restickify spills.  This only makes
+# computed-source synthetic spyre.restickify outputs eligible for LX planning;
+# graph-input/weight restickifies are intentionally left to offline prelayout.
+lx_planner_relayout_restickify_outputs: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS", "0") == "1"
+)
+
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))

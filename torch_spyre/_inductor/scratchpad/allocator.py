@@ -65,6 +65,7 @@ from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.lx_relayout import (
     clear_lx_relayout_metadata,
+    drop_lx_relayout_reservations,
     get_lx_relayout_inputs,
     is_lx_relayout_reservation,
     make_lx_relayout_reservation_name,
@@ -107,13 +108,35 @@ class ScratchpadAllocator(ABC):
         )
         return org_op_name
 
-    def _op_output_good_for_lx_reuse(self, op: Any) -> bool:
+    def _restickify_output_good_for_lx_relayout(
+        self, graph: GraphLowering, op: Any
+    ) -> bool:
+        """Allow only computed-source restickify outputs into this research lane.
+
+        Graph-input/weight restickifies are a prelayout/preload problem.  Pulling
+        them into the relayout experiment can create large backend reservations
+        and clear otherwise useful computed-activation relayout metadata.
+        """
+        if (
+            not config.lx_planner_relayout_restickify_outputs
+            or self._get_op_name(op) != "restickify"
+        ):
+            return False
+        if not isinstance(op, ComputedBuffer):
+            return False
+        return any(
+            isinstance(graph.name_to_buffer.get(dep.name), ComputedBuffer)
+            for dep in op.get_read_writes().reads
+        )
+
+    def _op_output_good_for_lx_reuse(self, graph: GraphLowering, op: Any) -> bool:
         return (
             isinstance(op, ComputedBuffer)
             and not isinstance(op.layout, MutationLayoutSHOULDREMOVE)
             and (
                 config.allow_all_ops_in_lx_planning
                 or (self._get_op_name(op) in OP_OUTPUT_GOOD_FOR_LX_REUSE)
+                or self._restickify_output_good_for_lx_relayout(graph, op)
                 # Clones are only pinned when the boundary-clone path is on; they
                 # are never in the whitelist, so without this they'd be ineligible
                 # and the inserted clones would not land in LX.
@@ -143,7 +166,7 @@ class ScratchpadAllocator(ABC):
 
         # filter out by permitted operations
         for op in graph.operations:
-            if not self._op_output_good_for_lx_reuse(op):
+            if not self._op_output_good_for_lx_reuse(graph, op):
                 drop_list.add(op.name)
                 self.reject_reasons[op.name] = "op not allowed"
 
@@ -365,12 +388,49 @@ class ScratchpadAllocator(ABC):
     ) -> list[LifetimeBoundBuffer]:
         return buffers + self._build_relayout_reservations(graph, buffers, lifetimes)
 
-    def _relayout_reservation_failed(
+    def _failed_relayout_reservations(
         self, allocation: list[LifetimeBoundBuffer]
-    ) -> bool:
-        return any(
-            is_lx_relayout_reservation(b.name) and b.address is None for b in allocation
-        )
+    ) -> list[str]:
+        failed = [
+            b.name
+            for b in allocation
+            if is_lx_relayout_reservation(b.name) and b.address is None
+        ]
+        if failed:
+            logger.info(
+                "LX relayout reservation(s) did not fit: %s", ", ".join(failed)
+            )
+        return failed
+
+    def _retry_after_failed_relayout_reservations(
+        self,
+        graph: GraphLowering,
+        allocation: list[LifetimeBoundBuffer],
+        lifetimes: dict[str, list[int]],
+    ) -> list[LifetimeBoundBuffer] | None:
+        failed = self._failed_relayout_reservations(allocation)
+        if not failed:
+            return None
+
+        removed = drop_lx_relayout_reservations(graph, failed)
+        if removed:
+            logger.info(
+                "disabled %d LX relayout edge(s) with failed reservations; "
+                "retrying scratchpad allocation",
+                removed,
+            )
+        else:
+            logger.info(
+                "clearing LX relayout metadata: backend relayout reservation "
+                "does not fit in scratchpad"
+            )
+            clear_lx_relayout_metadata(graph)
+
+        self.reject_reasons = {}
+        lifetimes = calculate_liveness(graph)
+        buffers = self._generate_buffers(graph, lifetimes=lifetimes)
+        buffers = self._add_lx_relayout_reservations(graph, buffers, lifetimes)
+        return self.layout_planning.plan_layout(buffers, log_lx_usage=True)
 
     def _log_lx_pinning(self, graph: GraphLowering) -> None:
         """Log the final LX pinning decision for every op in the graph."""
@@ -490,16 +550,11 @@ class DefaultAllocator(ScratchpadAllocator):
         buffers = self._generate_buffers(graph, lifetimes=lifetimes)
         buffers = self._add_lx_relayout_reservations(graph, buffers, lifetimes)
         allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
-        if self._relayout_reservation_failed(allocation):
-            logger.info(
-                "clearing LX relayout metadata: backend relayout reservation "
-                "does not fit in scratchpad"
-            )
-            clear_lx_relayout_metadata(graph)
-            self.reject_reasons = {}
-            lifetimes = calculate_liveness(graph)
-            buffers = self._generate_buffers(graph, lifetimes=lifetimes)
-            allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
+        retry_allocation = self._retry_after_failed_relayout_reservations(
+            graph, allocation, lifetimes
+        )
+        if retry_allocation is not None:
+            allocation = retry_allocation
         for b in allocation:
             if is_lx_relayout_reservation(b.name):
                 continue
@@ -975,16 +1030,11 @@ class StrategyBCoOptimizingAllocator(DefaultAllocator):
         )
         buffers = self._add_lx_relayout_reservations(graph, buffers, lifetimes)
         allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
-        if self._relayout_reservation_failed(allocation):
-            logger.info(
-                "clearing LX relayout metadata: backend relayout reservation "
-                "does not fit in scratchpad"
-            )
-            clear_lx_relayout_metadata(graph)
-            self.reject_reasons = {}
-            lifetimes = calculate_liveness(graph)
-            buffers = self._generate_buffers(graph, lifetimes=lifetimes)
-            allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
+        retry_allocation = self._retry_after_failed_relayout_reservations(
+            graph, allocation, lifetimes
+        )
+        if retry_allocation is not None:
+            allocation = retry_allocation
         for b in allocation:
             if is_lx_relayout_reservation(b.name):
                 continue

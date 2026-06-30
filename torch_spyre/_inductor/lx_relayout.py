@@ -74,6 +74,35 @@ def _op_num_cores(op: Operation) -> int:
     return math.prod(factors) if factors else 1
 
 
+def _op_name(op: Operation) -> str:
+    target = getattr(getattr(op, "origin_node", None), "target", None)
+    return (
+        getattr(target, "_opname", None)
+        or getattr(target, "__name__", None)
+        or getattr(target, "name", None)
+        or str(target)
+    )
+
+
+def _is_restickify_op(op: Operation) -> bool:
+    return _op_name(op) == "restickify"
+
+
+def _restickify_reads_only_graph_inputs(
+    graph: GraphLowering, op: Operation
+) -> bool:
+    if not _is_restickify_op(op):
+        return False
+    read_names = [
+        dep.name
+        for dep in op.get_read_writes().reads
+        if isinstance(dep, MemoryDep)
+    ]
+    return bool(read_names) and all(
+        name in graph.graph_input_names for name in read_names
+    )
+
+
 def _single_write_dep(op: ComputedBuffer, buf_name: str) -> MemoryDep | None:
     matches = [
         dep
@@ -173,6 +202,69 @@ def is_lx_relayout_reservation(name: str) -> bool:
     return name.startswith(f"{LX_RELAYOUT_RESERVE_PREFIX}:")
 
 
+def parse_lx_relayout_reservation_name(name: str) -> tuple[str, str] | None:
+    prefix = f"{LX_RELAYOUT_RESERVE_PREFIX}:"
+    if not name.startswith(prefix):
+        return None
+    rest = name[len(prefix) :]
+    try:
+        consumer_name, source_name = rest.split(":", 1)
+    except ValueError:
+        return None
+    if not consumer_name or not source_name:
+        return None
+    return consumer_name, source_name
+
+
+def drop_lx_relayout_reservations(
+    graph: GraphLowering, reservation_names: list[str]
+) -> int:
+    """Disable realized relayout plans whose scratchpad reservations failed."""
+
+    failed_pairs = {
+        parsed
+        for name in reservation_names
+        if (parsed := parse_lx_relayout_reservation_name(name)) is not None
+    }
+    if not failed_pairs:
+        return 0
+
+    removed = 0
+    for op in graph.operations:
+        plans = getattr(op, LX_RELAYOUT_ATTR, None)
+        classifications = getattr(op, LX_RELAYOUT_CLASSIFICATION_ATTR, None)
+        for consumer_name, source_name in failed_pairs:
+            if op.get_name() != consumer_name:
+                continue
+            if isinstance(plans, dict) and source_name in plans:
+                del plans[source_name]
+                removed += 1
+            if isinstance(classifications, dict) and source_name in classifications:
+                classifications[source_name] = {
+                    **classifications[source_name],
+                    "realized": False,
+                    "unsupported_reason": (
+                        "backend relayout reservation did not fit in scratchpad"
+                    ),
+                }
+
+    for op in graph.operations:
+        if hasattr(op, LX_RELAYOUT_SOURCE_ATTR):
+            delattr(op, LX_RELAYOUT_SOURCE_ATTR)
+
+    producers = _producer_ops(graph)
+    for op in graph.operations:
+        plans = getattr(op, LX_RELAYOUT_ATTR, None)
+        if not isinstance(plans, dict):
+            continue
+        for plan in plans.values():
+            producer = producers.get(plan.get("producer_name", ""))
+            if producer is not None:
+                setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
+
+    return removed
+
+
 def relayout_source_names(graph: GraphLowering) -> set[str]:
     if not config.lx_planner_relayout:
         return set()
@@ -259,6 +351,29 @@ def plan_lx_relayouts(
             producer_work_slice_dims = _work_slice_dims(producer_view)
             consumer_work_slice_dims = _work_slice_dims(consumer_view)
             read_index = _memory_read_index(consumer, dep)
+            if _restickify_reads_only_graph_inputs(graph, producer):
+                plan = LXRelayoutPlan(
+                    source_name=dep.name,
+                    producer_name=producer.get_name(),
+                    consumer_name=consumer.get_name(),
+                    kind="layout_restickify_weight",
+                    producer_core_count=producer_core_count,
+                    consumer_core_count=consumer_core_count,
+                    producer_core_id_to_device_slice=producer_core_slices,
+                    producer_work_slice_dims=producer_work_slice_dims,
+                    consumer_work_slice_dims=consumer_work_slice_dims,
+                    read_index=read_index,
+                    realized=False,
+                    communication_pattern="offline_weight_prelayout",
+                    unsupported_reason=(
+                        "graph-input/parameter restickify is owned by offline "
+                        "weight prelayout, not runtime LX relayout"
+                    ),
+                )
+                _record_plan(consumer, plan)
+                planned.append(plan)
+                continue
+
             if is_matmul_consumer and read_index not in (0, None):
                 realize_collective = config.lx_planner_relayout_collectives
                 plan = LXRelayoutPlan(

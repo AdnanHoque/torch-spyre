@@ -530,6 +530,31 @@ weights, but these tensors are still model parameters in the compiled graph.
 Their restickifies should be owned by offline/preload weight layout work.  This
 branch should not chase those four rows.
 
+The latest selective-retry run keeps that contract explicit in the generated
+metadata:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_selective_relayout_retry_20260630_044850
+
+ReStickifyOpHBM rows: 5
+layout_restickify_weight classifications: 4
+disabled runtime relayout reservations: buf14:buf46, buf22:buf21
+```
+
+Each weight row is classified as:
+
+```text
+kind = layout_restickify_weight
+communication_pattern = offline_weight_prelayout
+unsupported_reason = graph-input/parameter restickify is owned by offline weight prelayout, not runtime LX relayout
+```
+
+The one non-weight restickify remains `buf13 -> buf14`, generated from
+`mul_6`.  That row is a computed attention activation restickify, not a model
+parameter restickify.  It is still coupled to the downstream `buf46 -> buf14`
+matmul operand broadcast, which is why making `restickify` outputs LX-eligible
+by itself is not enough to remove the spill.
+
 Allocator rejection:
 
 ```text

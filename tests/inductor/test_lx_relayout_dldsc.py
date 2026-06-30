@@ -19,11 +19,13 @@ from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.lx_relayout import (
     LXRelayoutPlan,
     _core_id_to_device_slice,
+    drop_lx_relayout_reservations,
     _record_plan,
     get_lx_relayout_classifications,
     get_lx_relayout_inputs,
     is_lx_relayout_reservation,
     make_lx_relayout_reservation_name,
+    parse_lx_relayout_reservation_name,
 )
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.pass_utils import PerCoreView
@@ -68,6 +70,49 @@ def test_lx_relayout_reservation_names_are_identifiable():
 
     assert is_lx_relayout_reservation(name)
     assert not is_lx_relayout_reservation("producer")
+    assert parse_lx_relayout_reservation_name(name) == ("consumer", "producer")
+    assert parse_lx_relayout_reservation_name("producer") is None
+
+
+def test_failed_reservation_disables_only_that_realized_plan():
+    class DummyOp:
+        def __init__(self, name):
+            self.name = name
+
+        def get_name(self):
+            return self.name
+
+    class DummyGraph:
+        operations = [DummyOp("consumer")]
+
+    consumer = DummyGraph.operations[0]
+    _record_plan(
+        consumer,
+        LXRelayoutPlan(
+            source_name="buf0",
+            producer_name="producer",
+            consumer_name="consumer",
+            kind="matmul_operand_broadcast",
+            producer_core_count=32,
+            consumer_core_count=32,
+            producer_core_id_to_device_slice={"0": {"0": 0}},
+            producer_work_slice_dims={"0": 32},
+            consumer_work_slice_dims={"0": 32},
+            realized=True,
+            communication_pattern="all_gather_replicate",
+        ),
+    )
+
+    removed = drop_lx_relayout_reservations(
+        DummyGraph(),
+        [make_lx_relayout_reservation_name("consumer", "buf0")],
+    )
+
+    assert removed == 1
+    assert get_lx_relayout_inputs(consumer) == {}
+    classification = get_lx_relayout_classifications(consumer)["buf0"]
+    assert not classification["realized"]
+    assert "did not fit" in classification["unsupported_reason"]
 
 
 def test_lx_relayout_plan_records_scatter_kind():

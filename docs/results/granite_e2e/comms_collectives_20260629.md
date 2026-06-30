@@ -121,6 +121,29 @@ The only remaining non-weight restickify in this run is the computed attention
 activation restickify.  That is the row this branch should continue to
 investigate.
 
+Latest confirmation from
+`/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_selective_relayout_retry_20260630_044850`
+shows the same split:
+
+```text
+ReStickifyOpHBM rows: 5
+layout_restickify_weight classifications: 4
+disabled runtime relayout reservations: buf14:buf46, buf22:buf21
+```
+
+The four weight rows are recorded as:
+
+```text
+kind = layout_restickify_weight
+communication_pattern = offline_weight_prelayout
+unsupported_reason = graph-input/parameter restickify is owned by offline weight prelayout, not runtime LX relayout
+```
+
+That means they are deliberately excluded from the runtime communication scope.
+The remaining runtime issue is the computed attention activation restickify,
+currently emitted as an LX input to HBM output row, plus the dependent matmul
+operand broadcast that prevents that activation from staying fully resident.
+
 These rows are not direct producer-to-consumer LX distribution mismatches by the
 time `plan_lx_relayouts()` runs.  They have already been materialized as
 explicit `spyre.restickify` / `ReStickifyOpHBM` nodes during the stick-layout
