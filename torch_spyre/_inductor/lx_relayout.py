@@ -103,6 +103,18 @@ def _restickify_reads_only_graph_inputs(
     )
 
 
+def _restickify_reads_computed_input(
+    graph: GraphLowering, op: Operation
+) -> bool:
+    if not _is_restickify_op(op):
+        return False
+    return any(
+        isinstance(graph.name_to_buffer.get(dep.name), ComputedBuffer)
+        for dep in op.get_read_writes().reads
+        if isinstance(dep, MemoryDep)
+    )
+
+
 def _single_write_dep(op: ComputedBuffer, buf_name: str) -> MemoryDep | None:
     matches = [
         dep
@@ -368,6 +380,39 @@ def plan_lx_relayouts(
                     unsupported_reason=(
                         "graph-input/parameter restickify is owned by offline "
                         "weight prelayout, not runtime LX relayout"
+                    ),
+                )
+                _record_plan(consumer, plan)
+                planned.append(plan)
+                continue
+
+            if _restickify_reads_computed_input(graph, producer):
+                is_matmul_operand = is_matmul_consumer and read_index not in (0, None)
+                plan = LXRelayoutPlan(
+                    source_name=dep.name,
+                    producer_name=producer.get_name(),
+                    consumer_name=consumer.get_name(),
+                    kind="layout_restickify_activation",
+                    producer_core_count=producer_core_count,
+                    consumer_core_count=consumer_core_count,
+                    producer_core_id_to_device_slice=producer_core_slices,
+                    producer_work_slice_dims=producer_work_slice_dims,
+                    consumer_work_slice_dims=consumer_work_slice_dims,
+                    read_index=read_index,
+                    realized=False,
+                    communication_pattern=(
+                        "layout_transform_then_operand_broadcast"
+                        if is_matmul_operand
+                        else "layout_transform"
+                    ),
+                    unsupported_reason=(
+                        "computed activation restickify needs an LX layout "
+                        "restickify contract"
+                        + (
+                            " plus loop-scoped matmul operand lowering"
+                            if is_matmul_operand
+                            else ""
+                        )
                     ),
                 )
                 _record_plan(consumer, plan)

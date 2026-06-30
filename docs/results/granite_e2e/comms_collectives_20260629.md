@@ -144,6 +144,43 @@ The remaining runtime issue is the computed attention activation restickify,
 currently emitted as an LX input to HBM output row, plus the dependent matmul
 operand broadcast that prevents that activation from staying fully resident.
 
+After adding explicit computed-restickify classification, the latest run is:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_layout_restickify_class_20260630_050148
+kernel_ms_per_iter: 12.0335
+median wall ms: 32.5332
+```
+
+Generated SuperDSC classification counts:
+
+| class | count | realized |
+|---|---:|---|
+| `scatter` | 14 | yes |
+| `layout_restickify_weight` | 4 | no, offline weight prelayout |
+| `layout_restickify_activation` | 1 | no, needs LX layout-restickify contract |
+| `matmul_operand_broadcast` | 1 | no, full resident reservation does not fit |
+
+The one activation class appears on:
+
+```text
+sdsc_fused__scaled_dot_product.../sdsc_10.json
+source: buf46
+kind: layout_restickify_activation
+communication_pattern: layout_transform_then_operand_broadcast
+unsupported_reason: computed activation restickify needs an LX layout restickify contract plus loop-scoped matmul operand lowering
+```
+
+The one remaining operand broadcast class appears on:
+
+```text
+sdsc_fused__scaled_dot_product.../sdsc_18.json
+source: buf21
+kind: matmul_operand_broadcast
+communication_pattern: all_gather_replicate
+unsupported_reason: backend relayout reservation did not fit in scratchpad
+```
+
 These rows are not direct producer-to-consumer LX distribution mismatches by the
 time `plan_lx_relayouts()` runs.  They have already been materialized as
 explicit `spyre.restickify` / `ReStickifyOpHBM` nodes during the stick-layout

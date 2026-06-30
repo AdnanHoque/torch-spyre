@@ -555,6 +555,79 @@ parameter restickify.  It is still coupled to the downstream `buf46 -> buf14`
 matmul operand broadcast, which is why making `restickify` outputs LX-eligible
 by itself is not enough to remove the spill.
 
+### Latest Classification Run
+
+After adding explicit computed activation restickify classification, reproduce
+with the same diagnostic environment above and:
+
+```bash
+RUN="$ROOT/runs/granite_prefill_layout_restickify_class_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$RUN"
+echo "$RUN" > "$ROOT/latest_layout_restickify_class_run.txt"
+
+"$PYTHON" benchmarks/granite_block_layer_probe.py \
+  --fms-root "$FMS" \
+  --run-root "$RUN" \
+  --case prefill \
+  --compile-block \
+  --attn-name sdpa_causal \
+  --iters 3 \
+  --warmups 1 \
+  --profile \
+  --no-profile-memory 2>&1 | tee "$RUN/output.log"
+```
+
+Archived run:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_layout_restickify_class_20260630_050148
+```
+
+Result:
+
+| metric | value |
+|---|---:|
+| `kernel_ms_per_iter` | 12.0335 |
+| median wall ms | 32.5332 |
+| `ReStickifyOpHBM` rows | 5 |
+| SDSCs with `lxRelayoutClassifications_` | 15 |
+| `scatter` classes | 14 |
+| `layout_restickify_weight` classes | 4 |
+| `layout_restickify_activation` classes | 1 |
+| `matmul_operand_broadcast` classes | 1 |
+
+The non-weight unrealized classes are:
+
+| source | consumer SDSC | class | communication pattern | current gap |
+|---|---|---|---|---|
+| `buf46` | attention `sdsc_10.json` | `layout_restickify_activation` | `layout_transform_then_operand_broadcast` | needs LX layout-restickify contract plus loop-scoped matmul operand lowering |
+| `buf21` | attention `sdsc_18.json` | `matmul_operand_broadcast` | `all_gather_replicate` | full resident reservation does not fit; needs staged/loop-scoped lowering |
+
+Use this scanner to regenerate the class counts:
+
+```bash
+RUN=$(cat "$ROOT/latest_layout_restickify_class_run.txt")
+RUN_PATH="$RUN" python3 - <<'PY'
+import collections, json, os, pathlib
+
+run = pathlib.Path(os.environ["RUN_PATH"])
+root = run / "block_prefill/cache/inductor-spyre"
+counts = collections.Counter()
+for f in root.rglob("sdsc_*.json"):
+    data = json.load(open(f))
+    text = json.dumps(data)
+    root_obj = next(iter(data.values()))
+    rel = root_obj.get("lxRelayoutClassifications_", {})
+    if rel:
+        counts["class_files"] += 1
+        for plan in rel.values():
+            counts["class:" + plan.get("kind", "")] += 1
+    if "ReStickifyOpHBM" in text:
+        counts["restickify"] += 1
+print(dict(counts))
+PY
+```
+
 Allocator rejection:
 
 ```text

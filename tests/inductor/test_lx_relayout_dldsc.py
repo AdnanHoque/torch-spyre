@@ -209,6 +209,45 @@ def test_realized_collective_is_classified_and_recorded_as_input():
     assert realized == classified
 
 
+def test_computed_layout_restickify_is_classified_but_not_realized():
+    class DummyOp:
+        pass
+
+    consumer = DummyOp()
+    _record_plan(
+        consumer,
+        LXRelayoutPlan(
+            source_name="buf0",
+            producer_name="restickify_buf",
+            consumer_name="consumer",
+            kind="layout_restickify_activation",
+            producer_core_count=32,
+            consumer_core_count=32,
+            producer_core_id_to_device_slice={
+                "0": {"0": 0},
+                "1": {"0": 1},
+            },
+            producer_work_slice_dims={"0": 32},
+            consumer_work_slice_dims={"0": 4, "1": 8},
+            read_index=1,
+            realized=False,
+            communication_pattern="layout_transform_then_operand_broadcast",
+            unsupported_reason=(
+                "computed activation restickify needs an LX layout restickify "
+                "contract plus loop-scoped matmul operand lowering"
+            ),
+        ),
+    )
+
+    classified = get_lx_relayout_classifications(consumer)["buf0"]
+    assert classified["kind"] == "layout_restickify_activation"
+    assert classified["communication_pattern"] == (
+        "layout_transform_then_operand_broadcast"
+    )
+    assert not classified["realized"]
+    assert get_lx_relayout_inputs(consumer) == {}
+
+
 def test_lx_input_allocation_coordinates_describe_producer_residency():
     mb = Symbol("x0")
     out = Symbol("x1")
