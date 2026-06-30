@@ -595,6 +595,16 @@ def generate_sdsc(
                 "coreIdToDscSchedule": {
                     str(c): [[-1, 0, 0, 0]] for c in range(sdsc_spec.num_cores)
                 },
+                **(
+                    {
+                        "lxRelayoutClassifications_": sdsc_spec.op_info[
+                            "lx_relayout_classifications"
+                        ]
+                    }
+                    if sdsc_spec.op_info
+                    and "lx_relayout_classifications" in sdsc_spec.op_info
+                    else {}
+                ),
                 "dscs_": [
                     {
                         sdsc_spec.opfunc: {

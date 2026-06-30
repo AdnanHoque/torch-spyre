@@ -41,7 +41,7 @@ from .constants import (
 )
 from .errors import Unsupported
 from .ir import FixedTiledLayout
-from .lx_relayout import LX_RELAYOUT_ATTR
+from .lx_relayout import LX_RELAYOUT_ATTR, LX_RELAYOUT_CLASSIFICATION_ATTR
 from .pass_utils import (
     concretize_expr,
     concretize_index,
@@ -78,6 +78,12 @@ def _current_node_op_info(current_node) -> dict[str, Any]:
 def _current_node_lx_relayout_inputs(current_node) -> dict[str, Any]:
     node = getattr(current_node, "node", None)
     plans = getattr(node, LX_RELAYOUT_ATTR, None)
+    return plans if isinstance(plans, dict) else {}
+
+
+def _current_node_lx_relayout_classifications(current_node) -> dict[str, Any]:
+    node = getattr(current_node, "node", None)
+    plans = getattr(node, LX_RELAYOUT_CLASSIFICATION_ATTR, None)
     return plans if isinstance(plans, dict) else {}
 
 
@@ -573,6 +579,14 @@ class SpyreKernel(Kernel[CSEVariable]):
                 raise Unsupported(f"{op} on {arg.device_dtype}")
 
         it_space = iteration_space(self.current_node)
+        lx_relayout_classifications = _current_node_lx_relayout_classifications(
+            self.current_node
+        )
+        if lx_relayout_classifications:
+            op_info = {
+                **op_info,
+                "lx_relayout_classifications": lx_relayout_classifications,
+            }
 
         ir_node = self.current_node.node  # ComputedBuffer
         work_division: dict[sympy.Symbol, int] = {}

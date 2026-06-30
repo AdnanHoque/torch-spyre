@@ -191,3 +191,30 @@ def test_regular_lx_input_keeps_empty_allocation_coordinates():
     input_alloc = compute_dsc["scheduleTree_"][0]
 
     assert input_alloc["coordinates_"]["coreIdToWkSlice_"] == {}
+
+
+def test_lx_relayout_classification_metadata_is_emitted_top_level():
+    mb = Symbol("x0")
+    out = Symbol("x1")
+    classification = {
+        "buf0": {
+            "kind": "matmul_operand_broadcast",
+            "communication_pattern": "all_gather_replicate",
+            "realized": False,
+        }
+    }
+    op_spec = OpSpec(
+        op="neg",
+        is_reduction=False,
+        iteration_space={mb: (Integer(512), 4), out: (Integer(12800), 1)},
+        args=[
+            _fixed_tile_arg(is_input=True, allocation={"lx": 0}),
+            _fixed_tile_arg(is_input=False, allocation={"hbm": 0x1000}),
+        ],
+        op_info={"lx_relayout_classifications": classification},
+    )
+
+    sdsc, _symbols, _affine_strides, _symbol_kinds = compile_op_spec(0, op_spec, [])
+
+    root = next(iter(sdsc.values()))
+    assert root["lxRelayoutClassifications_"] == classification
