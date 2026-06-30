@@ -44,6 +44,13 @@ lx_boundary_clones: bool = os.environ.get("LX_BOUNDARY_CLONES", "0") == "1"
 # synthesize the on-chip relayout from the coordinate mismatch.
 lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
 
+# Experimental research lane for non-scatter relayout classes.  These edges are
+# classified by default, but only materialized when this knob is enabled because
+# full resident materialization can exceed LX capacity for attention operands.
+lx_planner_relayout_collectives: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES", "0") == "1"
+)
+
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))

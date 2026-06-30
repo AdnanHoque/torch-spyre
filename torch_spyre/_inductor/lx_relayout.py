@@ -260,6 +260,7 @@ def plan_lx_relayouts(
             consumer_work_slice_dims = _work_slice_dims(consumer_view)
             read_index = _memory_read_index(consumer, dep)
             if is_matmul_consumer and read_index not in (0, None):
+                realize_collective = config.lx_planner_relayout_collectives
                 plan = LXRelayoutPlan(
                     source_name=dep.name,
                     producer_name=producer.get_name(),
@@ -271,14 +272,18 @@ def plan_lx_relayouts(
                     producer_work_slice_dims=producer_work_slice_dims,
                     consumer_work_slice_dims=consumer_work_slice_dims,
                     read_index=read_index,
-                    realized=False,
+                    realized=realize_collective,
                     communication_pattern="all_gather_replicate",
-                    unsupported_reason=(
+                    unsupported_reason=""
+                    if realize_collective
+                    else (
                         "non-primary matmul operands need loop-scoped "
                         "collective lowering, not resident scatter materialization"
                     ),
                 )
                 _record_plan(consumer, plan)
+                if plan.realized:
+                    setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
                 planned.append(plan)
                 continue
 

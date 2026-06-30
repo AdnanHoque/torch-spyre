@@ -130,6 +130,40 @@ def test_unrealized_collective_is_classified_but_not_realized():
     assert get_lx_relayout_inputs(consumer) == {}
 
 
+def test_realized_collective_is_classified_and_recorded_as_input():
+    class DummyOp:
+        pass
+
+    consumer = DummyOp()
+    _record_plan(
+        consumer,
+        LXRelayoutPlan(
+            source_name="buf0",
+            producer_name="producer",
+            consumer_name="consumer",
+            kind="matmul_operand_broadcast",
+            producer_core_count=32,
+            consumer_core_count=32,
+            producer_core_id_to_device_slice={
+                "0": {"2": 0},
+                "1": {"2": 1},
+            },
+            producer_work_slice_dims={"2": 32},
+            consumer_work_slice_dims={"0": 32},
+            read_index=1,
+            realized=True,
+            communication_pattern="all_gather_replicate",
+        ),
+    )
+
+    classified = get_lx_relayout_classifications(consumer)["buf0"]
+    realized = get_lx_relayout_inputs(consumer)["buf0"]
+    assert classified["kind"] == "matmul_operand_broadcast"
+    assert classified["communication_pattern"] == "all_gather_replicate"
+    assert classified["realized"]
+    assert realized == classified
+
+
 def test_lx_input_allocation_coordinates_describe_producer_residency():
     mb = Symbol("x0")
     out = Symbol("x1")
