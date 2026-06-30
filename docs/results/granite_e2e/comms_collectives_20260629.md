@@ -39,6 +39,78 @@ the generated SDSCs.  The current collectives prototype therefore did not fire
 on the full Granite block.  The measured speedup is still the established
 full-LX/boundary-clone win, not a new collective-lowering win.
 
+## 2026-06-30 Current-Source DXP Replay
+
+The latest validation rebuilt Deeptools from the current
+`ah/comms-collectives` checkout and used a fresh split wrapper:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/tools/dxp-split-wrapper-current/dxp_standalone
+```
+
+Do not use the older `pr_lx_scatter_20260629_170114` wrapper for this branch;
+it points at an older DXP binary.
+
+Three current-source runs are archived:
+
+| run | result | conclusion |
+|---|---|---|
+| `granite_prefill_collectives_current_dxp_20260630_060731` | import failure | runtime library path loaded stale `libdvs.so` |
+| `granite_prefill_collectives_current_dxp_runtimefix_20260630_061024` | DXP pure-DL failure | scheduled pure DL SDSCs were incorrectly routed through the mixed data-op path |
+| `granite_prefill_collectives_current_dxp_routingfix_20260630_061426` | attention DDC failure | real current-source relayout gap reproduced |
+
+The runtime import failure was fixed by putting installed Spyre runtime
+libraries before inherited `dt-inductor` libraries:
+
+```bash
+export LD_LIBRARY_PATH=/opt/ibm/spyre/deeptools/lib:/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
+export TORCH_DEVICE_BACKEND_AUTOLOAD=0
+```
+
+The pure-DL DXP failure was fixed by tightening the mixed-SDSC route in
+`dxp/dxp.cpp`: only SDSCs with both a populated `coreIdToDscSchedule` and
+nonempty `dataOpdscs_` should call `runDcgForDataOpsDlOps`.  Scheduled pure DL
+SDSCs must stay on `runDcgForDlOpsStandalone`.
+
+After that routing fix, the run reached the attention operand relayout gap:
+
+```text
+DtException: Unexpected corelet cardinality mismatch for nodes
+allocate-Tensor1_lx and transfer_lds0_src:lxlu_dst:sfp
+```
+
+A debug replay of the failed attention SuperDSC is archived at:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/debug_relayout_replay_20260630_062207
+```
+
+The replay shows Deeptools master-style automatic relayout insertion is active:
+
+```text
+Inserting relayout for: Tensor0
+Lx space found, inserting stcdpLx
+Inserting relayout for: Tensor0
+Lx space found, inserting stcdpLx
+Inserting relayout for: Tensor1
+Lx space not found, inserting stcdpHBM
+```
+
+So current Deeptools can synthesize LX relayouts for resident `Tensor0`
+scatter-like mismatches, but the value-side attention operand `Tensor1` does
+not fit the resident-relayout model.  Torch classifies that operand as:
+
+```text
+kind = matmul_operand_broadcast
+communication_pattern = all_gather_replicate
+read_index = 1
+labeledDs_[1] = Tensor1, dsType = KERNEL, memOrg = {lx}
+```
+
+This confirms the current gap is communication-class specific.  Resident
+scatter works.  The attention operand needs staged/all-gather-like input
+movement instead of full consumer-view materialization.
+
 The current artifact comparison is:
 
 | metric | baseline off | full Torch LX | comms collectives-on |
@@ -181,6 +253,54 @@ communication_pattern: all_gather_replicate
 unsupported_reason: backend relayout reservation did not fit in scratchpad
 ```
 
+The generated SDSC gives the key handoff fields:
+
+```text
+sdsc_18 root op: 18_batchmatmul
+consumer work division: {x:1, mb:32, out:1, in:1}
+classification read_index: 1
+labeledDs_[1]: Tensor1, dsType=KERNEL, memOrg={hbm,lx}
+```
+
+After the reservation-skip change, a realized-collective probe generated the
+intended Torch-side contract:
+
+```text
+run root:
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_realized_probe_20260630_054408
+
+sdsc_18 Tensor1:
+kind: matmul_operand_broadcast
+realized: true
+read_index: 1
+labeledDs_[1]: Tensor1, dsType=KERNEL, memOrg={lx}
+allocate-Tensor1_lx coordinates: producer out-slice ownership per core
+```
+
+That run then failed in DXP/DDC with:
+
+```text
+Unexpected corelet cardinality mismatch for nodes
+allocate-Tensor1_lx and transfer_lds0_src:lxlu_dst:sfp
+```
+
+That first failure was produced through the older split wrapper from
+`pr_lx_scatter_20260629_170114`, so it was only provisional evidence.  The
+current-source replay above retested the same class with a DXP binary rebuilt
+from the current `ah/comms-collectives` Deeptools checkout.  The same backend
+gap remains, with more precise evidence: Deeptools inserts resident
+`STCDPOpLx` relayouts for `Tensor0`, then cannot handle the `Tensor1`
+all-gather-like matmul operand without falling back to HBM and hitting the DDC
+corelet mismatch.
+
+This matters because the existing Deeptools InputFetchNeighbor path is currently
+hard-coded around the DL `INPUT` data-structure type.  The Granite operand gap
+is a non-primary matmul operand, so the consumer-side data-structure is
+`KERNEL`, not `INPUT`.  The backend already has `STCDPOpLx` ring movement and
+input-neighbor scheduling machinery, but that machinery is not yet generalized
+to "fetch this specific matmul input ordinal / ds type."  That is the current
+blocking backend gap for using staged all-gather-like operand movement here.
+
 ## Backend Integration Shape For Operand Broadcast
 
 The remaining runtime classes should not be forced through the current
@@ -214,13 +334,31 @@ So the next backend patch should be DXP wiring, not a new ring primitive:
 1. Read top-level `lxRelayoutClassifications_`.
 2. For `kind == matmul_operand_broadcast`, skip resident
    `SdscRelayoutInsertion` for that input.
-3. Locate the producer SuperDSC that owns the LX-resident operand.
-4. Call the existing InputFetchNeighbor generation path with
-   `(consumer_sdsс, producer_sdsc)`.
-5. Preserve the resulting `STCDPOpLx` schedule as a loop-scoped input movement
+3. Match the classification to the consumer input using `read_index`.
+4. Generalize InputFetchNeighbor from hard-coded `DsTypes::INPUT` to the
+   classified operand's actual ds type, e.g. `DsTypes::KERNEL` for the Granite
+   value-side matmul.
+5. Locate the producer SuperDSC or producer coordinate metadata that owns the
+   LX-resident operand.
+6. Call the existing InputFetchNeighbor generation path, or synthesize its
+   equivalent `STCDPOpLx` data-op internally from the dl-dsc coordinate maps.
+7. Preserve the resulting `STCDPOpLx` schedule as a loop-scoped input movement
    associated with the consumer batchmatmul.
-6. Reject, rather than silently HBM-fallback, if the producer/consumer metadata
+8. Reject, rather than silently HBM-fallback, if the producer/consumer metadata
    is insufficient for this path.
+
+An isolated prototype for this direction is archived here:
+
+```text
+docs/results/granite_e2e/dldsc_backend_patches/inputfetch_neighbor_consumer_dstype_prototype.patch
+```
+
+That patch generalizes parts of the InputFetchNeighbor path from hard-coded
+`DsTypes::INPUT` toward a consumer operand ds type such as `DsTypes::KERNEL`.
+It is not production-ready: the prototype inferred the consumer ds type from a
+data-op schedule index, which is not guaranteed to equal the consumer read
+index.  The production contract should carry an explicit consumer `read_index`
+or ds-type selector from Torch's classification metadata into backend lowering.
 
 This keeps the contract aligned with the North Star:
 

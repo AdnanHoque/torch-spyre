@@ -88,24 +88,18 @@ def _is_restickify_op(op: Operation) -> bool:
     return _op_name(op) == "restickify"
 
 
-def _restickify_reads_only_graph_inputs(
-    graph: GraphLowering, op: Operation
-) -> bool:
+def _restickify_reads_only_graph_inputs(graph: GraphLowering, op: Operation) -> bool:
     if not _is_restickify_op(op):
         return False
     read_names = [
-        dep.name
-        for dep in op.get_read_writes().reads
-        if isinstance(dep, MemoryDep)
+        dep.name for dep in op.get_read_writes().reads if isinstance(dep, MemoryDep)
     ]
     return bool(read_names) and all(
         name in graph.graph_input_names for name in read_names
     )
 
 
-def _restickify_reads_computed_input(
-    graph: GraphLowering, op: Operation
-) -> bool:
+def _restickify_reads_computed_input(graph: GraphLowering, op: Operation) -> bool:
     if not _is_restickify_op(op):
         return False
     return any(
@@ -297,6 +291,20 @@ def get_lx_relayout_classifications(op: Operation) -> dict[str, Any]:
     return plans if isinstance(plans, dict) else {}
 
 
+def _is_loop_scoped_relayout(plan: dict[str, Any]) -> bool:
+    return plan.get("kind") == "matmul_operand_broadcast" or (
+        plan.get("kind") == "layout_restickify_activation"
+        and plan.get("communication_pattern")
+        == "layout_transform_then_operand_broadcast"
+    )
+
+
+def lx_relayout_needs_resident_reservation(plan: dict[str, Any]) -> bool:
+    """True when Deeptools is expected to materialize a full resident output view."""
+
+    return not _is_loop_scoped_relayout(plan)
+
+
 def plan_lx_relayouts(
     graph: GraphLowering, cache: dict | None = None
 ) -> list[LXRelayoutPlan]:
@@ -388,6 +396,9 @@ def plan_lx_relayouts(
 
             if _restickify_reads_computed_input(graph, producer):
                 is_matmul_operand = is_matmul_consumer and read_index not in (0, None)
+                realize_collective = (
+                    config.lx_planner_relayout_collectives and is_matmul_operand
+                )
                 plan = LXRelayoutPlan(
                     source_name=dep.name,
                     producer_name=producer.get_name(),
@@ -399,13 +410,15 @@ def plan_lx_relayouts(
                     producer_work_slice_dims=producer_work_slice_dims,
                     consumer_work_slice_dims=consumer_work_slice_dims,
                     read_index=read_index,
-                    realized=False,
+                    realized=realize_collective,
                     communication_pattern=(
                         "layout_transform_then_operand_broadcast"
                         if is_matmul_operand
                         else "layout_transform"
                     ),
-                    unsupported_reason=(
+                    unsupported_reason=""
+                    if realize_collective
+                    else (
                         "computed activation restickify needs an LX layout "
                         "restickify contract"
                         + (
@@ -416,6 +429,8 @@ def plan_lx_relayouts(
                     ),
                 )
                 _record_plan(consumer, plan)
+                if plan.realized:
+                    setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
                 planned.append(plan)
                 continue
 

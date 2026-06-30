@@ -24,6 +24,7 @@ from torch_spyre._inductor.lx_relayout import (
     get_lx_relayout_classifications,
     get_lx_relayout_inputs,
     is_lx_relayout_reservation,
+    lx_relayout_needs_resident_reservation,
     make_lx_relayout_reservation_name,
     parse_lx_relayout_reservation_name,
 )
@@ -207,6 +208,28 @@ def test_realized_collective_is_classified_and_recorded_as_input():
     assert classified["communication_pattern"] == "all_gather_replicate"
     assert classified["realized"]
     assert realized == classified
+
+
+def test_collective_relayout_does_not_need_resident_reservation():
+    assert not lx_relayout_needs_resident_reservation(
+        {"kind": "matmul_operand_broadcast"}
+    )
+    assert lx_relayout_needs_resident_reservation({"kind": "scatter"})
+
+
+def test_loop_scoped_layout_restickify_does_not_need_resident_reservation():
+    assert not lx_relayout_needs_resident_reservation(
+        {
+            "kind": "layout_restickify_activation",
+            "communication_pattern": "layout_transform_then_operand_broadcast",
+        }
+    )
+    assert lx_relayout_needs_resident_reservation(
+        {
+            "kind": "layout_restickify_activation",
+            "communication_pattern": "layout_transform",
+        }
+    )
 
 
 def test_computed_layout_restickify_is_classified_but_not_realized():

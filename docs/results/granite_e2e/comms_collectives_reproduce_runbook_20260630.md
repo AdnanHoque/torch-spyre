@@ -61,6 +61,46 @@ Latest run roots:
 Both runs completed successfully.  They emitted a `RuntimeStream::synchronize()`
 warning after 60000 ms but finished successfully.
 
+## Current-Source DXP Replay
+
+The current `ah/comms-collectives` validation uses a DXP binary rebuilt from the
+current Deeptools checkout, not the archived scatter DXP binary.
+
+Current paths:
+
+```text
+ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
+TORCH=$ROOT/torch-spyre
+DEEPTOOLS_PATH=$ROOT/deeptools
+BENCH=$ROOT/spyre-granite-e2e-bench
+DXP_BUILD=$DEEPTOOLS_PATH/build-dxp-comms-current
+DXP_INSTALL=$DEEPTOOLS_PATH/install-comms-current
+DXP_WRAPPER=$ROOT/tools/dxp-split-wrapper-current/dxp_standalone
+```
+
+Current-source runs:
+
+```text
+$ROOT/runs/granite_prefill_collectives_current_dxp_20260630_060731
+$ROOT/runs/granite_prefill_collectives_current_dxp_runtimefix_20260630_061024
+$ROOT/runs/granite_prefill_collectives_current_dxp_routingfix_20260630_061426
+$ROOT/runs/debug_relayout_replay_20260630_062207
+```
+
+Lessons from those runs:
+
+- Put `/opt/ibm/spyre/deeptools/lib` before inherited `dt-inductor` Deeptools
+  libraries.  Otherwise Python can import a stale `libdvs.so` and fail before
+  compilation.
+- Route only true mixed SDSCs through `runDcgForDataOpsDlOps`: a populated
+  `coreIdToDscSchedule` is not enough; `dataOpdscs_` must also be nonempty.
+- Current Deeptools automatic relayout insertion successfully inserts LX
+  `STCDPOpLx` relayouts for resident `Tensor0` scatter-like mismatches.
+- The attention value-side `Tensor1` operand is a different class:
+  `matmul_operand_broadcast` / `all_gather_replicate`, `read_index=1`,
+  consumer ds type `KERNEL`.  It needs staged operand movement, not full
+  resident consumer-view materialization.
+
 ## Pod And Device
 
 Use `adnan-spyre-dev-pf` in namespace `a6-quantization` for AIU validation.
@@ -112,10 +152,47 @@ Latest comms-collectives environment:
 ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
 TORCH=$ROOT/torch-spyre
 DEEPTOOLS_PATH=$ROOT/deeptools
-BENCH=/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/spyre-granite-e2e-bench
+BENCH=$ROOT/spyre-granite-e2e-bench
 FMS=/home/adnan/dt-inductor/foundation-model-stack
 PYTHON=/home/adnan/dt-inductor/.venv/bin/python3
 ```
+
+Do not validate this work from older incidental Deeptools/Torch clones under
+`/home/adnan/dt-inductor/deeptools-*`.  They may contain unrelated historical
+experiments and can make DXP behavior look different when the actual difference
+is the checkout or environment.
+
+Also do not use the old split wrapper as-is for this branch:
+
+```text
+/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/tools/dxp-split-wrapper/dxp_standalone
+```
+
+That wrapper is still useful as a template for the frontend/backend
+`DXP_LX_FRAC_AVAIL` split, but it points at the older
+`pr_lx_scatter_20260629_170114/deeptools/build-dxp-relayout-isolated` binary.
+For comms-collectives validation, create a fresh wrapper that points at a DXP
+build produced from:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/deeptools
+```
+
+When configuring that build, pass `-DMANAGE_LLVM=false` with the existing
+`LLVM_PROJ_SRC` and `LLVM_PROJ_BUILD` paths.  Without that flag, Deeptools CMake
+tries to manage the shared LLVM checkout through `ExternalProject`, including a
+destructive source checkout/update step.  The safe intent is to consume the
+already-built LLVM/MLIR package configs, not rebuild or reclone LLVM.
+
+Local Mac setup is intentionally lightweight:
+
+```text
+/Users/adnan/.codex/venvs/torch-spyre-cpu
+```
+
+That venv currently has `pytest` for syntax/helper checks.  Meaningful
+Torch-Spyre tests still run on the pod because the local Mac does not have the
+compiled `torch_spyre._C` extension or an AIU runtime.
 
 Important SHAs from the archived environment:
 
@@ -127,10 +204,10 @@ spyre-granite-e2e-bench: 76cd51426ba1de6e99dd8fbf613cb0f32b71e87f
 
 ## DXP Split Wrapper
 
-Use this wrapper first in `PATH`:
+For current comms-collectives validation, use this wrapper first in `PATH`:
 
 ```text
-/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/tools/dxp-split-wrapper/dxp_standalone
+/home/adnan/codex-isolated/comms_collectives_20260629/tools/dxp-split-wrapper-current/dxp_standalone
 ```
 
 Wrapper behavior:
@@ -158,7 +235,7 @@ Use this environment for full-LX runs:
 
 ```bash
 export PYTHONPATH="$TORCH:$TORCH/tests/inductor:$FMS:${PYTHONPATH:-}"
-export PATH=/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/tools/dxp-split-wrapper:$PATH
+export PATH=/home/adnan/codex-isolated/comms_collectives_20260629/tools/dxp-split-wrapper-current:$PATH
 export DEEPTOOLS_PATH="$DEEPTOOLS_PATH"
 export TORCH_DEVICE_BACKEND_AUTOLOAD=0
 
@@ -169,7 +246,7 @@ export LX_BOUNDARY_CLONES=1
 export DXP_LX_FRAC_AVAIL=0
 export DXP_BACKEND_LX_FRAC_AVAIL=1
 
-export LD_LIBRARY_PATH=/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:${LD_LIBRARY_PATH:-}
+export LD_LIBRARY_PATH=/opt/ibm/spyre/deeptools/lib:/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
 ```
 
 The `LD_LIBRARY_PATH` ordering matters.  Earlier failing runs used
@@ -406,12 +483,12 @@ Granite run:
 export ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
 export TORCH=$ROOT/torch-spyre
 export DEEPTOOLS_PATH=$ROOT/deeptools
-export BENCH=/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/spyre-granite-e2e-bench
+export BENCH=$ROOT/spyre-granite-e2e-bench
 export FMS=/home/adnan/dt-inductor/foundation-model-stack
 export PYTHON=/home/adnan/dt-inductor/.venv/bin/python3
 
 export PYTHONPATH="$TORCH:$TORCH/tests/inductor:$FMS:${PYTHONPATH:-}"
-export PATH=/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/tools/dxp-split-wrapper:$PATH
+export PATH=$ROOT/tools/dxp-split-wrapper-current:$PATH
 export TORCH_DEVICE_BACKEND_AUTOLOAD=0
 
 export SPYRE_LX_PLANNER_RELAYOUT=1
@@ -422,7 +499,7 @@ export LX_BOUNDARY_CLONES=1
 export DXP_LX_FRAC_AVAIL=0
 export DXP_BACKEND_LX_FRAC_AVAIL=1
 
-export LD_LIBRARY_PATH=/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:${LD_LIBRARY_PATH:-}
+export LD_LIBRARY_PATH=/opt/ibm/spyre/deeptools/lib:/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
 ```
 
 Run command:
@@ -761,7 +838,7 @@ restickify op with both input and output allocated in LX:
 cd "$TORCH"
 export TORCH_DEVICE_BACKEND_AUTOLOAD=0
 export PYTHONPATH="$TORCH:$TORCH/tests/inductor:${PYTHONPATH:-}"
-export LD_LIBRARY_PATH=/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:${LD_LIBRARY_PATH:-}
+export LD_LIBRARY_PATH=/opt/ibm/spyre/deeptools/lib:/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
 
 "$PYTHON" - <<'PY'
 from sympy import Integer, Symbol, Mod, floor
