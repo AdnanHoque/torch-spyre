@@ -47,6 +47,19 @@ LX_RELAYOUT_ATTR = "_spyre_lx_relayout_inputs"
 LX_RELAYOUT_CLASSIFICATION_ATTR = "_spyre_lx_relayout_classifications"
 LX_RELAYOUT_SOURCE_ATTR = "_spyre_lx_relayout_source"
 LX_RELAYOUT_RESERVE_PREFIX = "__spyre_lx_relayout_reserve__"
+LAYOUT_TRANSFORM_THEN_OPERAND_BROADCAST = "layout_transform_then_operand_broadcast"
+STAGED_LAYOUT_TRANSFORM_OPERAND_BROADCAST = (
+    "staged_lx_restickify_then_loop_scoped_input_fetch"
+)
+
+COMM_CLASS_SCATTER = "scatter"
+COMM_CLASS_BROADCAST = "broadcast"
+COMM_CLASS_MULTICAST = "multicast"
+COMM_CLASS_GATHER = "gather"
+COMM_CLASS_ALL_GATHER = "all_gather"
+COMM_CLASS_REDUCE = "reduce"
+COMM_CLASS_ALL_REDUCE = "all_reduce"
+COMM_CLASS_UNSUPPORTED = "unsupported"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -63,8 +76,12 @@ class LXRelayoutPlan:
     producer_work_slice_dims: dict[str, int]
     consumer_work_slice_dims: dict[str, int]
     read_index: int | None = None
+    estimated_tensor_bytes: int | None = None
     realized: bool = True
+    communication_class: str = COMM_CLASS_UNSUPPORTED
     communication_pattern: str = ""
+    realization_strategy: str = ""
+    requires_staged_realization: bool = False
     unsupported_reason: str = ""
 
 
@@ -88,24 +105,18 @@ def _is_restickify_op(op: Operation) -> bool:
     return _op_name(op) == "restickify"
 
 
-def _restickify_reads_only_graph_inputs(
-    graph: GraphLowering, op: Operation
-) -> bool:
+def _restickify_reads_only_graph_inputs(graph: GraphLowering, op: Operation) -> bool:
     if not _is_restickify_op(op):
         return False
     read_names = [
-        dep.name
-        for dep in op.get_read_writes().reads
-        if isinstance(dep, MemoryDep)
+        dep.name for dep in op.get_read_writes().reads if isinstance(dep, MemoryDep)
     ]
     return bool(read_names) and all(
         name in graph.graph_input_names for name in read_names
     )
 
 
-def _restickify_reads_computed_input(
-    graph: GraphLowering, op: Operation
-) -> bool:
+def _restickify_reads_computed_input(graph: GraphLowering, op: Operation) -> bool:
     if not _is_restickify_op(op):
         return False
     return any(
@@ -156,6 +167,146 @@ def _core_id_to_device_slice(
 
 def _work_slice_dims(view: PerCoreView) -> dict[str, int]:
     return {str(int(dim)): int(split) for dim, split in view.work_slice_dims}
+
+
+def _slice_items(slice_by_dim: dict[str, int]) -> tuple[tuple[str, int], ...]:
+    return tuple(sorted((str(dim), int(slot)) for dim, slot in slice_by_dim.items()))
+
+
+def _unique_slices(
+    core_id_to_slice: dict[str, dict[str, int]],
+) -> list[dict[str, int]]:
+    unique: dict[tuple[tuple[str, int], ...], dict[str, int]] = {}
+    for slice_by_dim in core_id_to_slice.values():
+        unique.setdefault(_slice_items(slice_by_dim), slice_by_dim)
+    return list(unique.values())
+
+
+def _intervals_overlap(
+    left_start: int,
+    left_split: int,
+    right_start: int,
+    right_split: int,
+) -> bool:
+    # Compare normalized half-open intervals without floats:
+    # [left_start / left_split, (left_start + 1) / left_split) overlaps
+    # [right_start / right_split, (right_start + 1) / right_split).
+    return (
+        left_start * right_split < (right_start + 1) * left_split
+        and right_start * left_split < (left_start + 1) * right_split
+    )
+
+
+def _slices_overlap(
+    producer_slice: dict[str, int],
+    producer_work_slice_dims: dict[str, int],
+    consumer_slice: dict[str, int],
+    consumer_work_slice_dims: dict[str, int],
+) -> bool:
+    dims = (
+        set(producer_slice)
+        | set(consumer_slice)
+        | set(producer_work_slice_dims)
+        | set(consumer_work_slice_dims)
+    )
+    for dim in dims:
+        producer_split = int(producer_work_slice_dims.get(dim, 1))
+        consumer_split = int(consumer_work_slice_dims.get(dim, 1))
+        if producer_split <= 0 or consumer_split <= 0:
+            return False
+        producer_start = int(producer_slice.get(dim, 0))
+        consumer_start = int(consumer_slice.get(dim, 0))
+        if not _intervals_overlap(
+            producer_start, producer_split, consumer_start, consumer_split
+        ):
+            return False
+    return True
+
+
+def _classify_communication_class(
+    producer_core_id_to_device_slice: dict[str, dict[str, int]],
+    producer_work_slice_dims: dict[str, int],
+    consumer_core_id_to_device_slice: dict[str, dict[str, int]],
+    consumer_work_slice_dims: dict[str, int],
+    *,
+    is_reduction: bool = False,
+) -> str:
+    """Classify the logical movement implied by producer/consumer coordinates."""
+
+    producer_slices = _unique_slices(producer_core_id_to_device_slice)
+    consumer_slices = _unique_slices(consumer_core_id_to_device_slice)
+    if not producer_slices or not consumer_slices:
+        return COMM_CLASS_UNSUPPORTED
+
+    consumer_to_producers: list[set[int]] = []
+    producer_to_consumers: list[set[int]] = [set() for _ in producer_slices]
+    for consumer_idx, consumer_slice in enumerate(consumer_slices):
+        producers_for_consumer: set[int] = set()
+        for producer_idx, producer_slice in enumerate(producer_slices):
+            if _slices_overlap(
+                producer_slice,
+                producer_work_slice_dims,
+                consumer_slice,
+                consumer_work_slice_dims,
+            ):
+                producers_for_consumer.add(producer_idx)
+                producer_to_consumers[producer_idx].add(consumer_idx)
+        if not producers_for_consumer:
+            return COMM_CLASS_UNSUPPORTED
+        consumer_to_producers.append(producers_for_consumer)
+
+    max_fan_in = max(len(producers) for producers in consumer_to_producers)
+    max_fan_out = max(
+        (len(consumers) for consumers in producer_to_consumers), default=0
+    )
+    every_consumer_needs_all_sources = all(
+        len(producers) == len(producer_slices) for producers in consumer_to_producers
+    )
+
+    if is_reduction:
+        if max_fan_in <= 1:
+            return COMM_CLASS_UNSUPPORTED
+        return (
+            COMM_CLASS_ALL_REDUCE
+            if every_consumer_needs_all_sources or max_fan_out > 1
+            else COMM_CLASS_REDUCE
+        )
+
+    if every_consumer_needs_all_sources and len(producer_slices) > 1:
+        return COMM_CLASS_ALL_GATHER
+    if max_fan_in > 1:
+        return COMM_CLASS_GATHER
+    if max_fan_out > 1:
+        if all(
+            len(consumers) == len(consumer_slices)
+            for consumers in producer_to_consumers
+        ):
+            return COMM_CLASS_BROADCAST
+        return COMM_CLASS_MULTICAST
+    return COMM_CLASS_SCATTER
+
+
+def _static_buffer_nbytes(graph: GraphLowering, name: str) -> int | None:
+    buf = graph.name_to_buffer.get(name)
+    if buf is None or not hasattr(buf, "get_size"):
+        return None
+
+    numel = 1
+    for dim in buf.get_size():
+        dim_expr = sympy.sympify(dim)
+        if getattr(dim_expr, "free_symbols", None):
+            return None
+        try:
+            dim_int = int(dim_expr)
+        except TypeError:
+            return None
+        if dim_int < 0:
+            return None
+        numel *= dim_int
+
+    dtype = buf.get_dtype() if hasattr(buf, "get_dtype") else None
+    itemsize = getattr(dtype, "itemsize", None) or 2
+    return numel * int(itemsize)
 
 
 def _memory_read_index(op: ComputedBuffer, dep: MemoryDep) -> int | None:
@@ -297,6 +448,19 @@ def get_lx_relayout_classifications(op: Operation) -> dict[str, Any]:
     return plans if isinstance(plans, dict) else {}
 
 
+def _is_loop_scoped_relayout(plan: dict[str, Any]) -> bool:
+    return plan.get("kind") == "matmul_operand_broadcast" or (
+        plan.get("kind") == "layout_restickify_activation"
+        and plan.get("communication_pattern") == LAYOUT_TRANSFORM_THEN_OPERAND_BROADCAST
+    )
+
+
+def lx_relayout_needs_resident_reservation(plan: dict[str, Any]) -> bool:
+    """True when Deeptools is expected to materialize a full resident output view."""
+
+    return not _is_loop_scoped_relayout(plan)
+
+
 def plan_lx_relayouts(
     graph: GraphLowering, cache: dict | None = None
 ) -> list[LXRelayoutPlan]:
@@ -333,14 +497,6 @@ def plan_lx_relayouts(
             producer_view, producer_has_partial = _per_core_view_on_buf(
                 producer, write_dep, dep.name, cache
             )
-            if producer_has_partial:
-                logger.debug(
-                    "lx relayout skip: %s -> %s has partial reduction output",
-                    producer.name,
-                    consumer.name,
-                )
-                continue
-
             consumer_view, _consumer_has_partial = _per_core_view_on_buf(
                 consumer, dep, dep.name, cache
             )
@@ -349,6 +505,9 @@ def plan_lx_relayouts(
 
             producer_core_count = _op_num_cores(producer)
             consumer_core_count = _op_num_cores(consumer)
+            producer_work_slice_dims = _work_slice_dims(producer_view)
+            consumer_work_slice_dims = _work_slice_dims(consumer_view)
+            read_index = _memory_read_index(consumer, dep)
             producer_core_slices = _core_id_to_device_slice(
                 producer_view, producer_core_count
             )
@@ -358,11 +517,90 @@ def plan_lx_relayouts(
                     producer.name,
                     consumer.name,
                 )
+                plan = LXRelayoutPlan(
+                    source_name=dep.name,
+                    producer_name=producer.get_name(),
+                    consumer_name=consumer.get_name(),
+                    kind=COMM_CLASS_UNSUPPORTED,
+                    producer_core_count=producer_core_count,
+                    consumer_core_count=consumer_core_count,
+                    producer_core_id_to_device_slice={},
+                    producer_work_slice_dims=producer_work_slice_dims,
+                    consumer_work_slice_dims=consumer_work_slice_dims,
+                    read_index=read_index,
+                    realized=False,
+                    communication_class=COMM_CLASS_UNSUPPORTED,
+                    unsupported_reason="producer coordinate slices are not static",
+                )
+                _record_plan(consumer, plan)
+                planned.append(plan)
                 continue
 
-            producer_work_slice_dims = _work_slice_dims(producer_view)
-            consumer_work_slice_dims = _work_slice_dims(consumer_view)
-            read_index = _memory_read_index(consumer, dep)
+            consumer_core_slices = _core_id_to_device_slice(
+                consumer_view, consumer_core_count
+            )
+            if consumer_core_slices is None:
+                logger.debug(
+                    "lx relayout skip: %s -> %s has non-static consumer slices",
+                    producer.name,
+                    consumer.name,
+                )
+                plan = LXRelayoutPlan(
+                    source_name=dep.name,
+                    producer_name=producer.get_name(),
+                    consumer_name=consumer.get_name(),
+                    kind=COMM_CLASS_UNSUPPORTED,
+                    producer_core_count=producer_core_count,
+                    consumer_core_count=consumer_core_count,
+                    producer_core_id_to_device_slice=producer_core_slices,
+                    producer_work_slice_dims=producer_work_slice_dims,
+                    consumer_work_slice_dims=consumer_work_slice_dims,
+                    read_index=read_index,
+                    realized=False,
+                    communication_class=COMM_CLASS_UNSUPPORTED,
+                    unsupported_reason="consumer coordinate slices are not static",
+                )
+                _record_plan(consumer, plan)
+                planned.append(plan)
+                continue
+
+            communication_class = _classify_communication_class(
+                producer_core_slices,
+                producer_work_slice_dims,
+                consumer_core_slices,
+                consumer_work_slice_dims,
+                is_reduction=producer_has_partial,
+            )
+
+            if producer_has_partial:
+                logger.debug(
+                    "lx relayout skip: %s -> %s has partial reduction output",
+                    producer.name,
+                    consumer.name,
+                )
+                plan = LXRelayoutPlan(
+                    source_name=dep.name,
+                    producer_name=producer.get_name(),
+                    consumer_name=consumer.get_name(),
+                    kind="partial_reduction",
+                    producer_core_count=producer_core_count,
+                    consumer_core_count=consumer_core_count,
+                    producer_core_id_to_device_slice=producer_core_slices,
+                    producer_work_slice_dims=producer_work_slice_dims,
+                    consumer_work_slice_dims=consumer_work_slice_dims,
+                    read_index=read_index,
+                    realized=False,
+                    communication_class=communication_class,
+                    communication_pattern=communication_class,
+                    unsupported_reason=(
+                        "partial reduction outputs need backend reduction "
+                        "collective lowering, not pure LX relayout"
+                    ),
+                )
+                _record_plan(consumer, plan)
+                planned.append(plan)
+                continue
+
             if _restickify_reads_only_graph_inputs(graph, producer):
                 plan = LXRelayoutPlan(
                     source_name=dep.name,
@@ -376,6 +614,7 @@ def plan_lx_relayouts(
                     consumer_work_slice_dims=consumer_work_slice_dims,
                     read_index=read_index,
                     realized=False,
+                    communication_class=COMM_CLASS_UNSUPPORTED,
                     communication_pattern="offline_weight_prelayout",
                     unsupported_reason=(
                         "graph-input/parameter restickify is owned by offline "
@@ -388,6 +627,17 @@ def plan_lx_relayouts(
 
             if _restickify_reads_computed_input(graph, producer):
                 is_matmul_operand = is_matmul_consumer and read_index not in (0, None)
+                realize_restickify = not is_matmul_operand
+                realization_strategy = ""
+                requires_staged_realization = False
+                unsupported_reason = ""
+                if is_matmul_operand:
+                    realization_strategy = STAGED_LAYOUT_TRANSFORM_OPERAND_BROADCAST
+                    requires_staged_realization = True
+                    unsupported_reason = (
+                        "computed activation restickify needs staged LX layout "
+                        "transform before loop-scoped matmul operand lowering"
+                    )
                 plan = LXRelayoutPlan(
                     source_name=dep.name,
                     producer_name=producer.get_name(),
@@ -399,28 +649,61 @@ def plan_lx_relayouts(
                     producer_work_slice_dims=producer_work_slice_dims,
                     consumer_work_slice_dims=consumer_work_slice_dims,
                     read_index=read_index,
-                    realized=False,
+                    realized=realize_restickify,
+                    communication_class=communication_class,
                     communication_pattern=(
-                        "layout_transform_then_operand_broadcast"
+                        LAYOUT_TRANSFORM_THEN_OPERAND_BROADCAST
                         if is_matmul_operand
                         else "layout_transform"
                     ),
-                    unsupported_reason=(
-                        "computed activation restickify needs an LX layout "
-                        "restickify contract"
-                        + (
-                            " plus loop-scoped matmul operand lowering"
-                            if is_matmul_operand
-                            else ""
-                        )
-                    ),
+                    realization_strategy=realization_strategy,
+                    requires_staged_realization=requires_staged_realization,
+                    unsupported_reason=unsupported_reason,
                 )
                 _record_plan(consumer, plan)
+                if plan.realized:
+                    setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
                 planned.append(plan)
                 continue
 
             if is_matmul_consumer and read_index not in (0, None):
-                realize_collective = config.lx_planner_relayout_collectives
+                tensor_bytes = _static_buffer_nbytes(graph, dep.name)
+                max_collective_bytes = config.lx_planner_relayout_collective_max_bytes
+                loop_scoped_collective = (
+                    config.lx_planner_relayout_collective_realization == "loop_scoped"
+                )
+                fits_resident_collective = (
+                    tensor_bytes is not None and tensor_bytes <= max_collective_bytes
+                )
+                realize_collective = config.lx_planner_relayout_collectives and (
+                    loop_scoped_collective or fits_resident_collective
+                )
+                if not config.lx_planner_relayout_collectives:
+                    unsupported_reason = (
+                        "non-primary matmul operands need loop-scoped "
+                        "collective lowering, not resident scatter materialization"
+                    )
+                elif tensor_bytes is None and not loop_scoped_collective:
+                    unsupported_reason = (
+                        "resident all-gather requires a static tensor size; "
+                        "dynamic collectives need tiled/streamed lowering"
+                    )
+                elif not loop_scoped_collective and not fits_resident_collective:
+                    unsupported_reason = (
+                        "resident all-gather would replicate "
+                        f"{tensor_bytes} bytes per consumer core, exceeding "
+                        f"SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVE_MAX_BYTES="
+                        f"{max_collective_bytes}; needs tiled/streamed lowering"
+                    )
+                else:
+                    unsupported_reason = ""
+                realization_strategy = ""
+                if realize_collective:
+                    realization_strategy = (
+                        "loop_scoped_input_fetch"
+                        if loop_scoped_collective
+                        else "resident_replicate"
+                    )
                 plan = LXRelayoutPlan(
                     source_name=dep.name,
                     producer_name=producer.get_name(),
@@ -432,14 +715,12 @@ def plan_lx_relayouts(
                     producer_work_slice_dims=producer_work_slice_dims,
                     consumer_work_slice_dims=consumer_work_slice_dims,
                     read_index=read_index,
+                    estimated_tensor_bytes=tensor_bytes,
                     realized=realize_collective,
+                    communication_class=communication_class,
                     communication_pattern="all_gather_replicate",
-                    unsupported_reason=""
-                    if realize_collective
-                    else (
-                        "non-primary matmul operands need loop-scoped "
-                        "collective lowering, not resident scatter materialization"
-                    ),
+                    realization_strategy=realization_strategy,
+                    unsupported_reason=unsupported_reason,
                 )
                 _record_plan(consumer, plan)
                 if plan.realized:
@@ -447,20 +728,33 @@ def plan_lx_relayouts(
                 planned.append(plan)
                 continue
 
+            realize_scatter = communication_class == COMM_CLASS_SCATTER
             plan = LXRelayoutPlan(
                 source_name=dep.name,
                 producer_name=producer.get_name(),
                 consumer_name=consumer.get_name(),
-                kind="scatter",
+                kind="scatter" if realize_scatter else communication_class,
                 producer_core_count=producer_core_count,
                 consumer_core_count=consumer_core_count,
                 producer_core_id_to_device_slice=producer_core_slices,
                 producer_work_slice_dims=producer_work_slice_dims,
                 consumer_work_slice_dims=consumer_work_slice_dims,
                 read_index=read_index,
+                realized=realize_scatter,
+                communication_class=communication_class,
+                communication_pattern=communication_class,
+                unsupported_reason=(
+                    ""
+                    if realize_scatter
+                    else (
+                        f"{communication_class} needs a dedicated collective lowering; "
+                        "PR1 only realizes direct scatter/permutation"
+                    )
+                ),
             )
             _record_plan(consumer, plan)
-            setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
+            if plan.realized:
+                setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
             planned.append(plan)
 
     if planned:

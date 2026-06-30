@@ -61,6 +61,138 @@ Latest run roots:
 Both runs completed successfully.  They emitted a `RuntimeStream::synchronize()`
 warning after 60000 ms but finished successfully.
 
+## Current-Source DXP Replay
+
+The current `ah/comms-collectives` validation uses a DXP binary rebuilt from the
+current Deeptools checkout, not the archived scatter DXP binary.
+
+Current paths:
+
+```text
+ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
+TORCH=$ROOT/torch-spyre
+DEEPTOOLS_PATH=$ROOT/deeptools
+BENCH=$ROOT/spyre-granite-e2e-bench
+DXP_BUILD=$DEEPTOOLS_PATH/build-dxp-comms-current
+DXP_INSTALL=$DEEPTOOLS_PATH/install-comms-current
+DXP_WRAPPER=$ROOT/tools/dxp-split-wrapper-current/dxp_standalone
+```
+
+Current-source runs:
+
+```text
+$ROOT/runs/granite_prefill_collectives_current_dxp_20260630_060731
+$ROOT/runs/granite_prefill_collectives_current_dxp_runtimefix_20260630_061024
+$ROOT/runs/granite_prefill_collectives_current_dxp_routingfix_20260630_061426
+$ROOT/runs/debug_relayout_replay_20260630_062207
+```
+
+Lessons from those runs:
+
+- Put `/opt/ibm/spyre/deeptools/lib` before inherited `dt-inductor` Deeptools
+  libraries.  Otherwise Python can import a stale `libdvs.so` and fail before
+  compilation.
+- Route only true mixed SDSCs through `runDcgForDataOpsDlOps`: a populated
+  `coreIdToDscSchedule` is not enough; `dataOpdscs_` must also be nonempty.
+- Current Deeptools automatic relayout insertion successfully inserts LX
+  `STCDPOpLx` relayouts for resident `Tensor0` scatter-like mismatches.
+- The attention value-side `Tensor1` operand is a different class:
+  `matmul_operand_broadcast` / `all_gather_replicate`, `read_index=1`,
+  consumer ds type `KERNEL`.  It needs staged operand movement, not full
+  resident consumer-view materialization.
+
+## Attention Operand Broadcast Replay
+
+The current active collective reproducer is the attention `sdsc_18` bundle from:
+
+```text
+$ROOT/runs/granite_prefill_collectives_current_dxp_routingfix_20260630_061426/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_1kh00ffo
+```
+
+Replay command:
+
+```bash
+export DXP_LX_FRAC_AVAIL=1
+export LD_LIBRARY_PATH=/opt/ibm/spyre/deeptools/lib:/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
+$DXP --bundle -d "$BUNDLE"
+```
+
+The SDSC confirms this is not a resident scatter:
+
+```text
+sdsc_18 root op: 18_batchmatmul
+consumer work division: {x:1, mb:32, out:1, in:1}
+classification: matmul_operand_broadcast
+communication_pattern: all_gather_replicate
+read_index: 1
+consumer ds type: KERNEL
+producer shards: 32
+consumer tensor split dims: {}
+```
+
+The producer has 32 operand shards, while each consumer core wants the full
+operand.  That makes this a true all-gather/replicate class.  It should not be
+treated as PR1's resident scatter/permutation class.
+
+Known failed lowerings:
+
+| attempt | artifact | result | interpretation |
+|---|---|---|---|
+| full resident materialization | debug replay before input-neighbor routing | `LX_MODLRFIMM :: lrfimm:-4161536` | full per-consumer materialization is too large for LX and produces invalid LX immediates |
+| chunked loop-scoped input-neighbor, original chunking | replay before chunk override | `dtTable=4096 inpSP=4096 outSP=4096`, timeout | one all-gather row is too monolithic |
+| grouped destination pieces plus `x=16` chunk override | `attention_broadcast_replay_x16_20260630_092727` | `Max IBUFF(256) Current IBUFF(745)` for L3LU | representation reaches DCC but still over-grows L3LU instruction buffer |
+| disabling `STCDPOpLx::enSubPieceReuse` for the broadcast | `attention_broadcast_replay_noreuse_20260630_093208` | `Max IBUFF(256) Current IBUFF(1729)` for L3LU | reuse/interleaving is not the cause; disabling it makes the program larger |
+| forcing `launchDCC` to O3 | `attention_broadcast_replay_dcc_o3_20260630_094121` | `Max IBUFF(256) Current IBUFF(745)` for L3LU | existing DCC optimization level is not the missing legalization |
+| compact grouped L3LU cap=16 | `attention_broadcast_replay_compact_l3lu2_20260630_094844` | `Max IBUFF(256) Current IBUFF(1377)` for L3LU | bounded grouping still emits too much nested L3LU control flow |
+| compact grouped L3LU cap=4 | `attention_broadcast_replay_compact_l3lu_cap4_20260630_095205` | `Max IBUFF(256) Current IBUFF(1346)` for L3LU | smaller groups do not recover a legal program |
+| compact grouped L3LU cap=2 | `attention_broadcast_replay_compact_l3lu_cap2_20260630_095518` | DXP/DCC timeout after 180s, still `dtTable=256` | cap tuning can make compile time worse without reducing the logical transfer table |
+| staged input-neighbor, 4 producer cores per row | `attention_broadcast_replay_staged4_20260630_101812` | passes DXP replay; 8 rows with `dtTable=4 inpSP=4 outSP=4 maxL3SU=1 maxL3LU=4` | legalizes the first Granite all-gather-like operand broadcast by splitting one oversized movement row into small scheduled phases |
+| staged input-neighbor, 4 producer cores per row, compact coordinate-sorted L3SU/L3LU | `attention_broadcast_replay_staged4_sorted_20260630_102627` | passes DXP replay; same 8 staged rows | stronger runtime candidate because compact rows use coordinate-sorted send/receive ordering |
+
+Latest DCC/runtime status:
+
+- A Deeptools DCC index fix is required for the staged rows: use the current
+  data-op descriptor via `dataOpdscs_.at(datadscIdx)`.
+- With that fix, the all-gather/replicate lowering now compiles.
+- The stage-size compile sweep passes for
+  `DXP_LX_RELAYOUT_BROADCAST_STAGE_CORES=4`, `8`, `16`, and `32`.
+- Full Granite currently compiles and then bus-fences at runtime.  Treat the
+  current branch state as runtime-safety blocked, not DCC-compile blocked.
+- Next diagnostic: run full Granite with
+  `DXP_LX_RELAYOUT_BROADCAST_STAGE_CORES=32`.
+
+The useful current conclusion is that `matmul_operand_broadcast` needs a real
+collective/staged-input lowering.  Expressing it as one large input-neighbor
+`STCDPOpLx` row is functionally close but not codegen-legal because the
+generated L3LU program exceeds IBUFF.  The grouped-cap experiments show this is
+not a one-knob DCC tuning issue; the emitted collective needs a more compact
+ring program or multiple legal staged phases.  The staged-four replay proves the
+multiple-phase shape is viable for the isolated `sdsc_18` attention operand
+broadcast.
+
+The first full Granite execution attempt with staged-four append ordering
+compiled, emitted the staged rows, and then hit a runtime PCIe bus fence during
+the first block iteration:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_staged4_20260630_102000
+RAS::PCI::BusFence, code 0xa35e
+```
+
+That is a runtime-safety issue, not an SDSC import or DCC legality issue.  The
+current next diagnostic keeps the now-compiling staged movement path and runs
+full Granite with `DXP_LX_RELAYOUT_BROADCAST_STAGE_CORES=32`.
+
+If the device fences, the hot-reset utility requires the PCI device id:
+
+```bash
+/opt/ibm/spyre/senlib/bin/aiu_dd2_hot_reset -t chip -d 3c:00.0
+```
+
+On `adnan-spyre-dev-pf` this can initialize the chip path but the unprivileged
+Linux reset is blocked; use another pod for continued experiments if reset is
+not clean.
+
 ## Pod And Device
 
 Use `adnan-spyre-dev-pf` in namespace `a6-quantization` for AIU validation.
@@ -112,10 +244,47 @@ Latest comms-collectives environment:
 ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
 TORCH=$ROOT/torch-spyre
 DEEPTOOLS_PATH=$ROOT/deeptools
-BENCH=/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/spyre-granite-e2e-bench
+BENCH=$ROOT/spyre-granite-e2e-bench
 FMS=/home/adnan/dt-inductor/foundation-model-stack
 PYTHON=/home/adnan/dt-inductor/.venv/bin/python3
 ```
+
+Do not validate this work from older incidental Deeptools/Torch clones under
+`/home/adnan/dt-inductor/deeptools-*`.  They may contain unrelated historical
+experiments and can make DXP behavior look different when the actual difference
+is the checkout or environment.
+
+Also do not use the old split wrapper as-is for this branch:
+
+```text
+/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/tools/dxp-split-wrapper/dxp_standalone
+```
+
+That wrapper is still useful as a template for the frontend/backend
+`DXP_LX_FRAC_AVAIL` split, but it points at the older
+`pr_lx_scatter_20260629_170114/deeptools/build-dxp-relayout-isolated` binary.
+For comms-collectives validation, create a fresh wrapper that points at a DXP
+build produced from:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/deeptools
+```
+
+When configuring that build, pass `-DMANAGE_LLVM=false` with the existing
+`LLVM_PROJ_SRC` and `LLVM_PROJ_BUILD` paths.  Without that flag, Deeptools CMake
+tries to manage the shared LLVM checkout through `ExternalProject`, including a
+destructive source checkout/update step.  The safe intent is to consume the
+already-built LLVM/MLIR package configs, not rebuild or reclone LLVM.
+
+Local Mac setup is intentionally lightweight:
+
+```text
+/Users/adnan/.codex/venvs/torch-spyre-cpu
+```
+
+That venv currently has `pytest` for syntax/helper checks.  Meaningful
+Torch-Spyre tests still run on the pod because the local Mac does not have the
+compiled `torch_spyre._C` extension or an AIU runtime.
 
 Important SHAs from the archived environment:
 
@@ -127,10 +296,10 @@ spyre-granite-e2e-bench: 76cd51426ba1de6e99dd8fbf613cb0f32b71e87f
 
 ## DXP Split Wrapper
 
-Use this wrapper first in `PATH`:
+For current comms-collectives validation, use this wrapper first in `PATH`:
 
 ```text
-/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/tools/dxp-split-wrapper/dxp_standalone
+/home/adnan/codex-isolated/comms_collectives_20260629/tools/dxp-split-wrapper-current/dxp_standalone
 ```
 
 Wrapper behavior:
@@ -158,7 +327,7 @@ Use this environment for full-LX runs:
 
 ```bash
 export PYTHONPATH="$TORCH:$TORCH/tests/inductor:$FMS:${PYTHONPATH:-}"
-export PATH=/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/tools/dxp-split-wrapper:$PATH
+export PATH=/home/adnan/codex-isolated/comms_collectives_20260629/tools/dxp-split-wrapper-current:$PATH
 export DEEPTOOLS_PATH="$DEEPTOOLS_PATH"
 export TORCH_DEVICE_BACKEND_AUTOLOAD=0
 
@@ -169,13 +338,19 @@ export LX_BOUNDARY_CLONES=1
 export DXP_LX_FRAC_AVAIL=0
 export DXP_BACKEND_LX_FRAC_AVAIL=1
 
-export LD_LIBRARY_PATH=/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:${LD_LIBRARY_PATH:-}
+export LD_LIBRARY_PATH=/opt/ibm/spyre/deeptools/lib:/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
 ```
 
 The `LD_LIBRARY_PATH` ordering matters.  Earlier failing runs used
 `/home/adnan/dt-inductor/flex-pr1019-install/lib` before the installed runtime
 libraries and hit attention hardware errors even when the SDSCs otherwise
 matched.
+
+On CDX, use a clean runtime `LD_LIBRARY_PATH` with the installed Spyre
+Deeptools/runtime/comms libraries first, as shown above.  Do not inherit stale
+`dt-inductor`, flex, or older Deeptools library paths ahead of
+`/opt/ibm/spyre/deeptools/lib`, `/opt/ibm/spyre/runtime/lib`, and
+`/opt/ibm/spyre/spyre-comms/lib`.
 
 ## Granite Prefill Command
 
@@ -406,12 +581,12 @@ Granite run:
 export ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
 export TORCH=$ROOT/torch-spyre
 export DEEPTOOLS_PATH=$ROOT/deeptools
-export BENCH=/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/spyre-granite-e2e-bench
+export BENCH=$ROOT/spyre-granite-e2e-bench
 export FMS=/home/adnan/dt-inductor/foundation-model-stack
 export PYTHON=/home/adnan/dt-inductor/.venv/bin/python3
 
 export PYTHONPATH="$TORCH:$TORCH/tests/inductor:$FMS:${PYTHONPATH:-}"
-export PATH=/home/adnan/codex-isolated/pr_lx_scatter_20260629_170114/tools/dxp-split-wrapper:$PATH
+export PATH=$ROOT/tools/dxp-split-wrapper-current:$PATH
 export TORCH_DEVICE_BACKEND_AUTOLOAD=0
 
 export SPYRE_LX_PLANNER_RELAYOUT=1
@@ -422,7 +597,7 @@ export LX_BOUNDARY_CLONES=1
 export DXP_LX_FRAC_AVAIL=0
 export DXP_BACKEND_LX_FRAC_AVAIL=1
 
-export LD_LIBRARY_PATH=/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:${LD_LIBRARY_PATH:-}
+export LD_LIBRARY_PATH=/opt/ibm/spyre/deeptools/lib:/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
 ```
 
 Run command:
@@ -761,7 +936,7 @@ restickify op with both input and output allocated in LX:
 cd "$TORCH"
 export TORCH_DEVICE_BACKEND_AUTOLOAD=0
 export PYTHONPATH="$TORCH:$TORCH/tests/inductor:${PYTHONPATH:-}"
-export LD_LIBRARY_PATH=/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:${LD_LIBRARY_PATH:-}
+export LD_LIBRARY_PATH=/opt/ibm/spyre/deeptools/lib:/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
 
 "$PYTHON" - <<'PY'
 from sympy import Integer, Symbol, Mod, floor
@@ -798,3 +973,898 @@ PY
 
 If this emits valid `lx` allocations, the next prototype can try a computed-only
 LX restickify.  If it cannot, the gap is in SDSC/schema/codegen before runtime.
+
+## 2026-06-30 Guarded Collective Reproduction Update
+
+The all-gather-style attention operand experiment produced three useful
+outcomes:
+
+1. DXP compile was unblocked by fixing mixed data-op PCFG generation to use the
+   scheduled data-op index:
+
+   ```text
+   dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+     mySDscMain.dataOpdscs_.at(datadscIdx)
+   ```
+
+2. Full resident all-gather is unsafe for the attention operand.  Both compact
+   and explicit/non-compact variants fenced:
+
+   ```text
+   CDX compact stage32:
+   /home/adnan-cdx/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_stage32_20260630_112057
+   PROC_RC=255, RAS::PCI::BusFence
+
+   CLC non-compact stage32:
+   /home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_noncompact_stage32_20260630_113822
+   PROC_RC=255, RAS::PCI::BusFence
+   ```
+
+3. The safe current behavior is to keep resident collectives guarded and
+   require tiled/loop-scoped lowering for large operands:
+
+   ```bash
+   export SPYRE_LX_PLANNER_RELAYOUT=1
+   export SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES=1
+   export SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVE_MAX_BYTES=1048576
+   export SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS=1
+   ```
+
+The successful guarded Granite prefill run is:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_guarded_20260630_114425
+returncode=0
+wall median=24.495 ms
+trace kernel_ms_per_iter=12.0539
+trace=/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_guarded_20260630_114425/block_prefill/trace/adnan-spyre-dev-pf_41462.1782819965394707728.pt.trace.json
+```
+
+Fresh replay after the CLC pod reset and the `ReStickifyOpLx` frontend
+contract/test patch:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_guarded_clc_20260630_122458
+returncode=0
+wall median=23.9255 ms
+trace kernel_ms_per_iter=12.0628
+trace=/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_guarded_clc_20260630_122458/block_prefill/trace/adnan-clc-spyre-dev-pf_489.1782822400344090752.pt.trace.json
+```
+
+Focused frontend contract tests on CLC:
+
+```text
+tests/inductor/test_lx_relayout_dldsc.py
+14 passed in 0.16s
+```
+
+The CLC replay preserves the same guarded communication inventory:
+
+```text
+ReStickifyOpHBM rows: 5
+SDSCs with lxRelayoutClassifications_: 15
+scatter realized: 14
+layout_restickify_weight unrealized: 4
+layout_restickify_activation unrealized: 1
+matmul_operand_broadcast unrealized: 1
+```
+
+The remaining `matmul_operand_broadcast` is the attention value-side operand in:
+
+```text
+.../sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_l66aaivz/sdsc_18.json
+estimated_tensor_bytes = 4194304
+realized = false
+unsupported_reason = resident all-gather exceeds SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVE_MAX_BYTES=1048576; needs tiled/streamed lowering
+```
+
+## Staged Broadcast After-Sync Probe
+
+After reviewing the Deeptools staged input-neighbor path, one likely runtime
+safety issue was that the synthesized data-op schedule ordered movement before
+DL compute but did not request a runtime sync:
+
+```cpp
+schedule.push_back(DscScheduleStep(dataDscIdx, -1, false, false));
+```
+
+The local experiment changed the staged broadcast rows to request `after_sync`:
+
+```cpp
+schedule.push_back(DscScheduleStep(dataDscIdx, -1, false, true));
+```
+
+Build on CLC:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/deeptools/build-dxp-comms-current/dxp/dxp_standalone
+target dxp_standalone rebuilt successfully
+```
+
+Compile-only replay still passes with the patched DXP:
+
+```text
+BUNDLE=/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_guarded_clc_20260630_122458/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_l66aaivz
+DXP_LX_RELAYOUT_BROADCAST_STAGE_CORES=4
+dxp_standalone --bundle -d "$BUNDLE"
+exit code 0
+```
+
+Full Granite with the resident all-gather guard raised to force the staged
+broadcast path still bus-fenced:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_staged4_aftersync_clc_20260630_123407
+DXP_LX_RELAYOUT_BROADCAST_STAGE_CORES=4
+SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVE_MAX_BYTES=999999999
+return code 255
+RAS::PCI::BusFence code 0xa35e
+```
+
+Conclusion: missing schedule fencing was a real concern and worth fixing, but
+it is not the only runtime-safety issue.  The remaining likely problems are in
+the staged input-neighbor realization itself: grouped output pieces,
+multi-consumer `cIDXs`, GTR/GTRIMM behavior for non-`INPUT` consumers, or the
+fact that the current resident form still writes a full consumer operand region
+instead of a matmul-loop-scoped tile.
+
+The proof that the unsafe attention collective was skipped is in:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_guarded_20260630_114425/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_7yt9sfzx/sdsc_18.json
+```
+
+Expected fields:
+
+```text
+kind = matmul_operand_broadcast
+communication_pattern = all_gather_replicate
+estimated_tensor_bytes = 4194304
+realized = false
+unsupported_reason contains "needs tiled/streamed lowering"
+```
+
+For a compact shareable inventory of the guarded run, use:
+
+```text
+docs/results/granite_e2e/comms_collectives_guarded_spill_inventory_20260630.md
+docs/results/granite_e2e/comms_collectives_guarded_spill_inventory_20260630.csv
+```
+
+That inventory records:
+
+```text
+scatter realized: 14
+layout_restickify_weight unrealized: 4
+layout_restickify_activation unrealized: 1
+matmul_operand_broadcast unrealized: 1
+```
+
+Interpretation:
+
+- the four `layout_restickify_weight` rows are graph-input/parameter layout
+  preparation and should stay with offline weight prelayout work;
+- the one `layout_restickify_activation` row is the remaining non-weight
+  HBM restickify in attention;
+- the one `matmul_operand_broadcast` row is the attention value-side
+  all-gather/replicate class skipped by the resident-size guard.
+
+### Pod Runtime Notes
+
+Do not assume all pods have identical `/opt/ibm/spyre` runtime contents:
+
+- `adnan-spyre-dev-pf`: `/opt/ibm/spyre/runtime/lib/libflex.so` has the
+  required `AllocationDirective(... MemoryType)` symbol.  Use `/opt` first.
+- `adnan-clc-spyre-dev-pf`: `/opt/ibm/spyre/runtime/lib/libflex.so` lacks that
+  symbol.  Use `/home/adnan/opt-newer` first for Torch/Spyre imports.
+- `adnan-cdx-spyre-dev-pf`: use the clean stack runtime first:
+  `/home/adnan-cdx/dt-inductor-codex-clean/install/runtime/lib`.
+
+After the unsafe all-gather bus-fence experiments, reset CLC before using it
+for hardware validation.  The reset procedure is:
+
+```bash
+kubectl get pod -n a6-quantization adnan-clc-spyre-dev-pf -o json \
+  > tmp/pod-restart/adnan-clc-spyre-dev-pf.raw.json
+# create sanitized restart spec:
+# tmp/pod-restart/adnan-clc-spyre-dev-pf.restart.json
+kubectl delete pod -n a6-quantization adnan-clc-spyre-dev-pf --wait=true
+kubectl apply -f tmp/pod-restart/adnan-clc-spyre-dev-pf.restart.json
+kubectl wait -n a6-quantization --for=condition=Ready pod/adnan-clc-spyre-dev-pf --timeout=10m
+```
+
+Do not run new hardware tests on CLC until the reset completes and a `ps -ef`
+check shows no stale Python/DXP/senprog/AIU jobs.
+
+Historical reset result from the first 2026-06-30 CLC recreate:
+
+```text
+pod/adnan-clc-spyre-dev-pf created
+pod/adnan-clc-spyre-dev-pf condition met
+STATUS=Running
+IP=10.128.14.133
+NODE=p1-worker-28
+creationTimestamp=2026-06-30T12:02:34Z
+AIU=/dev/vfio/73
+stale python/dxp/senprog/aiu processes: none
+```
+
+Current reset result after the later 2026-06-30 CLC recreate:
+
+```text
+pod/adnan-clc-spyre-dev-pf created
+pod/adnan-clc-spyre-dev-pf condition met
+STATUS=Running
+IP=10.128.18.230
+NODE=p1-worker-43
+creationTimestamp=2026-06-30T14:57:xxZ
+AIU=/dev/vfio/25
+stale python/dxp/senprog/aiu processes: none
+```
+
+The split LX env remains required:
+
+```bash
+export DXP_LX_FRAC_AVAIL=0          # frontend/Torch gets full-LX planning
+export DXP_BACKEND_LX_FRAC_AVAIL=1  # wrapper maps this to DXP_LX_FRAC_AVAIL for backend DXP
+```
+
+## 2026-06-30 Staged Broadcast Debug Runs
+
+Do not put FMS on startup `PYTHONPATH` for the Granite layer probe.  FMS has a
+lightweight `fms/triton` package that shadows Triton and lacks
+`triton.language`, which makes `torch._dynamo` fail before compilation:
+
+```text
+AttributeError: module 'triton' has no attribute 'language'
+```
+
+Pass FMS via `--fms-root` instead.  A run-local `sitecustomize.py` that calls
+`torch_spyre._autoload()` is sufficient when the runtime library path is
+ordered correctly.
+
+### Compact Finite-Burst Replay
+
+After patching `finalizeBurstInfo()` to ceil-divide sub-stick dimensions and
+clamp burst/transaction factors to at least one, the compact staged broadcast
+data-op dump is finite:
+
+```bash
+ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
+RUN=$ROOT/runs/granite_prefill_collectives_staged4_aftersync_clc_20260630_123407
+BUNDLE=$RUN/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_imhpskvs
+DUMP=$ROOT/runs/dxp_dataop_dump_ceilburst_20260630_125425
+
+export DEEPTOOLS_PATH=$ROOT/deeptools
+export DXP_LX_FRAC_AVAIL=1
+export DXP_LX_RELAYOUT_BROADCAST_STAGE_CORES=4
+export DXP_DUMP_RELAYOUT_DATAOPS_DIR=$DUMP
+$ROOT/deeptools/build-dxp-comms-current/dxp/dxp_standalone --bundle -d "$BUNDLE"
+```
+
+Expected transfer summary:
+
+```text
+18_batchmatmul-dataop-{0..7}.json
+entries=4
+inf=0
+maxBurst={32: 4}
+numTransactions={512: 4}
+cMemIDs=[32]
+cIDXs=[1]
+```
+
+Hardware result with this compact path:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_staged4_ceilburst_clc_nofmspath_20260630_125846
+return code 255
+RAS::PCI::BusFence code 0xa35e
+```
+
+### Noncompact Partial-Route Replay
+
+The noncompact path needs a separate backend marker for staged partial-output
+coverage.  `compactInputNeighborBroadcast=0` must not route the data-op through
+ordinary STCDP, because ordinary STCDP expects every data-op row to fully cover
+the output LDS piece.  The exploratory patch uses `partialOutputCoverage=true`
+to keep the row on the InputFetchNeighbor route while disabling compact grouped
+output behavior.
+
+DXP replay command:
+
+```bash
+ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
+RUN=$ROOT/runs/granite_prefill_collectives_staged4_ceilburst_clc_nofmspath_20260630_125846
+BUNDLE=$RUN/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_s70orcsi
+DUMP=$ROOT/runs/dxp_dataop_dump_noncompact_partialroute_20260630_130859
+
+export DEEPTOOLS_PATH=$ROOT/deeptools
+export DXP_LX_FRAC_AVAIL=1
+export DXP_LX_RELAYOUT_BROADCAST_STAGE_CORES=4
+export DXP_LX_RELAYOUT_BROADCAST_COMPACT=0
+export DXP_DUMP_RELAYOUT_DATAOPS_DIR=$DUMP
+$ROOT/deeptools/build-dxp-comms-current/dxp/dxp_standalone --bundle -d "$BUNDLE"
+```
+
+Expected transfer summary:
+
+```text
+18_batchmatmul-dataop-{0..7}.json
+entries=4
+inf=0
+maxBurst={1: 4}
+numTransactions={16384: 4}
+cMemIDs=[32]
+cIDXs=[32]
+```
+
+Hardware result:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_noncompact_partialroute_clc_20260630_130928
+return code 255
+RAS::PCI::BusFence code 0xa35e
+```
+
+The same noncompact path without `--profile` also fenced:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_noncompact_partialroute_noprofile_clc_20260630_131206
+return code 255
+RAS::PCI::BusFence code 0xa35e
+```
+
+Conclusion: the failure is not caused by Kineto/AIUPTI profiling, and it is not
+only caused by compact grouped output pieces.  The current staged broadcast
+still behaves like whole-operand precompute setup.  Attention needs a true
+matmul-loop-scoped operand movement primitive tied to the consumer matmul
+schedule.
+
+Latest CLC reset after the risky runs:
+
+```text
+pod/adnan-clc-spyre-dev-pf created
+pod/adnan-clc-spyre-dev-pf condition met
+IP=10.128.18.230
+NODE=p1-worker-43
+AIU=/dev/vfio/25
+stale python/dxp/senprog/aiu processes: none
+```
+
+### Current Paired IFN Replay Result
+
+The guarded Granite run above remains the safe CLC success baseline:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_guarded_clc_20260630_122458
+returncode=0
+kernel_ms_per_iter=12.0627818
+```
+
+For the attention `sdsc_18` broadcast/all-gather
+(`matmul_operand_broadcast`, `all_gather_replicate`), the current paired
+InputFetchNeighbor experiment is DXP-negative: paired compact and paired
+noncompact both reach DCC, then fail L3LU IBUFF.
+
+| paired IFN form | DXP/DCC result |
+|---|---|
+| compact | `Max IBUFF(256) Current IBUFF(651)` |
+| noncompact | `Max IBUFF(256) Current IBUFF(745)` |
+
+`DXP_LX_RELAYOUT_BROADCAST_IFN_COALESCE` values `1`, `2`, `4`, and `8` did not
+change the compact result.  Do not treat the paired IFN path as a solved
+Granite runtime candidate until it gets past DCC and then hardware validation.
+
+### Latest DXP/Runtime Controls
+
+After the CLC pod was recreated, the valid restored paired compact IFN replay
+was:
+
+```bash
+ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
+BUNDLE=$ROOT/runs/granite_prefill_collectives_staged4_ceilburst_clc_nofmspath_20260630_125846/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_s70orcsi
+OUT=$ROOT/runs/dxp_paired_ifn_affine_restored_clc_20260630_142351
+
+DEEPTOOLS_PATH=$ROOT/deeptools \
+DXP_LX_FRAC_AVAIL=1 \
+DXP_DUMP_RELAYOUT_DATAOPS_DIR=$OUT/dataops \
+DXP_LX_RELAYOUT_BROADCAST_PAIRED_IFN=1 \
+DXP_LX_RELAYOUT_BROADCAST_COMPACT=1 \
+DXP_LX_RELAYOUT_IFN_AFFINE_DTKEYS=1 \
+$ROOT/deeptools/build-dxp-comms-current/dxp/dxp_standalone --bundle -d "$BUNDLE"
+```
+
+Result:
+
+```text
+rc=134
+Max IBUFF(256) Current IBUFF(651)
+full 32-producer coverage in dataops/18_batchmatmul-dataop-0.json
+```
+
+The affine destination-address compression did not reduce the dominant L3LU
+control shape.  The dumped data-op still contains 8192 each of
+`coreIDForRingCondAndVal`, `GTRAndBurstCondAndVal`, `destStartCondAndVal`, and
+`bigStAddrOffsets`.
+
+Forced-unicast controls are useful diagnostics but not viable:
+
+```text
+dxp_paired_ifn_affine_unicast_forced_clc_20260630_143338
+dxp_paired_ifn_noncompact_unicast_forced_clc_20260630_143411
+```
+
+Both fail DCC with `coreids_ring.size() == 1`.  This means unicast cannot be
+applied to the current grouped multi-destination IFN piece without a different
+lowering that splits each destination into its own legal transfer.
+
+The staged non-paired no-sync DXP replay is:
+
+```bash
+ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
+BUNDLE=$ROOT/runs/granite_prefill_collectives_staged4_ceilburst_clc_nofmspath_20260630_125846/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_s70orcsi
+OUT=$ROOT/runs/dxp_nonpaired_stage32_nostagedsync_clc_20260630_143615
+
+DEEPTOOLS_PATH=$ROOT/deeptools \
+DXP_LX_FRAC_AVAIL=1 \
+DXP_DUMP_RELAYOUT_DATAOPS_DIR=$OUT/dataops \
+DXP_LX_RELAYOUT_BROADCAST_STAGE_CORES=32 \
+DXP_LX_RELAYOUT_BROADCAST_COMPACT=1 \
+DXP_LX_RELAYOUT_BROADCAST_NO_STAGED_SYNC=1 \
+$ROOT/deeptools/build-dxp-comms-current/dxp/dxp_standalone --bundle -d "$BUNDLE"
+```
+
+Result:
+
+```text
+rc=0
+IBUFF=none
+```
+
+Hardware result with the same schedule-level no-sync idea:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_stage32_nostagedsync_dev_optfirst_20260630_144557
+returncode=255
+RAS::PCI::BusFence code 0xa35e
+```
+
+The run used `DXP_LX_RELAYOUT_BROADCAST_NO_STAGED_SYNC=1` and
+`DXP_LX_RELAYOUT_BROADCAST_STAGE_CORES=32`.  The DXP gate passed, but hardware
+still fenced.  Therefore, the staged path's broad schedule-level `after_sync`
+is not the primary runtime failure.  The current whole-operand staged
+all-gather is itself unsafe for the Granite attention operand.
+
+Runtime path gotcha: after pod recreation, CLC could not load the isolated
+`torch_spyre._C.so` and `/opt/ibm/spyre/spyre-comms/lib/libspyre_comms.so.1`
+with one obvious flex runtime.  On dev, putting `/opt/ibm/spyre/runtime/lib`
+first allowed import and reached the hardware fence:
+
+```bash
+export LD_LIBRARY_PATH=/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/sentient/runtime/lib:/home/adnan/dt-inductor/build/libaiupti/lib:/opt/ibm/spyre/deeptools/lib:/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
+```
+
+Always archive `env.txt` and verify import failures separately from relayout
+failures.
+
+## Frontend Loop-Scoped Contract Knob
+
+Use this when generating a new bundle that should represent the attention
+`matmul_operand_broadcast` edge as a backend-synthesized operand movement,
+rather than as resident full-operand replication:
+
+```bash
+export SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES=1
+export SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVE_REALIZATION=loop_scoped
+```
+
+This records:
+
+```text
+communication_pattern = all_gather_replicate
+realization_strategy = loop_scoped_input_fetch
+```
+
+For CLC unit-test validation after pod recreation, use the newer runtime tree
+first:
+
+```bash
+cd /home/adnan/codex-isolated/comms_collectives_20260629/torch-spyre
+export TORCH_DEVICE_BACKEND_AUTOLOAD=0
+export LD_LIBRARY_PATH=/home/adnan/opt-newer/runtime/lib:/home/adnan/opt-newer/spyre-comms/lib:/home/adnan/opt-newer/deeptools/lib:/home/adnan/opt-newer/senlib/lib:/home/adnan/dt-inductor/build/libaiupti/lib:/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
+/home/adnan/dt-inductor/.venv/bin/python -m pytest tests/inductor/test_lx_relayout_dldsc.py -q
+```
+
+Latest result:
+
+```text
+14 passed in 4.18s
+```
+
+DXP metadata control after the latest CLC recreate:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/dxp_metadata_control_clc_20260630_150250
+bundle:
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_stage32_nostagedsync_dev_optfirst_20260630_144557/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_g_umxry2
+result:
+  sdsc_18 has matmul_operand_broadcast
+  DXP rc=0
+```
+
+## Subpiece-Reuse Diagnostic For Grouped IFN
+
+The recreated CLC pod for this run was:
+
+```text
+pod=adnan-clc-spyre-dev-pf
+IP=10.128.18.231
+node=p1-worker-43
+AIU=/dev/vfio/25
+```
+
+First sync the local Deeptools diagnostic change and rebuild DXP:
+
+```bash
+COPYFILE_DISABLE=1 tar -C /Users/adnan/torch-spyre-work/deeptools-comms-collectives \
+  -cf /tmp/deeptools_sdsc_relayout_insertion.tar dxp/SdscRelayoutInsertion.cpp
+kubectl cp /tmp/deeptools_sdsc_relayout_insertion.tar \
+  a6-quantization/adnan-clc-spyre-dev-pf:/tmp/deeptools_sdsc_relayout_insertion.tar
+
+kubectl exec -n a6-quantization adnan-clc-spyre-dev-pf -- bash -lc '
+set -euo pipefail
+ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
+cd "$ROOT/deeptools"
+tar xf /tmp/deeptools_sdsc_relayout_insertion.tar
+find dxp -name "._*" -delete
+grep -n "BROADCAST_SUBPIECE_REUSE" dxp/SdscRelayoutInsertion.cpp
+cmake --build build-dxp-comms-current --target dxp_standalone -j$(nproc)
+'
+```
+
+Replay the known attention bundle without running hardware:
+
+```bash
+ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
+BUNDLE=$ROOT/runs/granite_prefill_collectives_stage32_nostagedsync_dev_optfirst_20260630_144557/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_g_umxry2
+DXP=$ROOT/deeptools/build-dxp-comms-current/dxp/dxp_standalone
+RUNROOT=$ROOT/runs/dxp_subpiece_reuse_controls_clc_20260630_151848
+
+DEEPTOOLS_PATH=$ROOT/deeptools \
+DXP_LX_FRAC_AVAIL=1 \
+DXP_DUMP_RELAYOUT_DATAOPS_DIR=$RUNROOT/paired_compact_affine/dataops \
+DXP_LX_RELAYOUT_BROADCAST_PAIRED_IFN=1 \
+DXP_LX_RELAYOUT_BROADCAST_COMPACT=1 \
+DXP_LX_RELAYOUT_IFN_AFFINE_DTKEYS=1 \
+$DXP --bundle -d "$BUNDLE"
+
+DEEPTOOLS_PATH=$ROOT/deeptools \
+DXP_LX_FRAC_AVAIL=1 \
+DXP_DUMP_RELAYOUT_DATAOPS_DIR=$RUNROOT/paired_compact_affine_unicast_noreuse/dataops \
+DXP_LX_RELAYOUT_BROADCAST_PAIRED_IFN=1 \
+DXP_LX_RELAYOUT_BROADCAST_COMPACT=1 \
+DXP_LX_RELAYOUT_IFN_AFFINE_DTKEYS=1 \
+DXP_LX_RELAYOUT_BROADCAST_UNICAST=1 \
+DXP_LX_RELAYOUT_BROADCAST_SUBPIECE_REUSE=0 \
+$DXP --bundle -d "$BUNDLE"
+```
+
+Observed results:
+
+```text
+paired_compact_affine rc=134
+  Max IBUFF(256) Current IBUFF(651)
+
+paired_compact_affine_unicast_reuse rc=134
+  DtException: coreids_ring.size() == 1
+
+paired_compact_affine_unicast_noreuse rc=134
+  DtException: coreids_ring.size() == 1
+
+paired_noncompact_affine_unicast_noreuse rc=134
+  Max IBUFF(256) Current IBUFF(1481)
+  Max IBUFF(256) Current IBUFF(1412)
+```
+
+Takeaway: `DXP_LX_RELAYOUT_BROADCAST_SUBPIECE_REUSE=0` does not unblock the
+grouped IFN route.  The compact unicast path fails in DCC ring lowering; the
+noncompact path remains IBUFF-heavy.  Do not spend more time on this exact
+whole-operand broadcast family unless Deeptools changes the IFN legality model.
+
+## Parallel Pod Lane Notes
+
+CDX is ready as a second DXP replay lane:
+
+```text
+pod=adnan-cdx-spyre-dev-pf
+IP=10.129.19.183
+node=p1-worker-44
+AIU=/dev/vfio/80
+experiment root=/home/adnan-cdx/codex-isolated/comms_collectives_20260629
+torch branch=ah/comms-collectives
+torch sha=df26b2ec7c14159e835a288d3369e7971661c43b
+deeptools branch=ah/comms-collectives
+deeptools sha=c4cf6a4356dee851f1b1c73de8aafcb3f6e1f643
+dxp=/home/adnan-cdx/codex-isolated/comms_collectives_20260629/deeptools/build-dxp-comms-current/dxp/dxp_standalone
+wrapper=/home/adnan-cdx/codex-isolated/comms_collectives_20260629/tools/dxp-split-wrapper-current/dxp_standalone
+```
+
+Known CDX attention bundle:
+
+```text
+/home/adnan-cdx/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_indexfix_cleanrt_20260630_110841/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_hpoq6qop
+```
+
+Safe DXP-only replay result:
+
+```text
+output=/home/adnan-cdx/codex-isolated/comms_collectives_20260629/runs/dxp_only_metadata_replay_20260630_152132
+command:
+  /home/adnan-cdx/codex-isolated/comms_collectives_20260629/deeptools/build-dxp-comms-current/dxp/dxp_standalone --bundle -d .../bundle_input
+result:
+  rc=0
+  stderr=empty
+```
+
+Use CDX for compile-only/DXP experiments unless a run specifically needs the
+new local CLC-only Deeptools source patch.  Sync source and rebuild there before
+assuming a diagnostic knob is available.
+
+Dev is ready as the primary hardware/profile lane:
+
+```text
+pod=adnan-spyre-dev-pf
+IP=10.128.11.76
+node=p1-worker-19
+AIU=/dev/vfio/31
+experiment root=/home/adnan/codex-isolated/comms_collectives_20260629
+torch branch=ah/comms-collectives
+torch sha=df26b2ec7c14159e835a288d3369e7971661c43b
+deeptools branch=ah/comms-collectives
+deeptools sha=c4cf6a4356dee851f1b1c73de8aafcb3f6e1f643
+dxp=/home/adnan/codex-isolated/comms_collectives_20260629/deeptools/build-dxp-comms-current/dxp/dxp_standalone
+stale workload processes=none seen in lightweight scan
+```
+
+## Next Implementation Target
+
+Do not continue broad sweeps over the current staged whole-operand broadcast
+rows.  The current evidence says that family is the wrong abstraction for the
+Granite attention operand:
+
+```text
+resident replication: too large / unsafe
+one grouped IFN row: IBUFF overflow
+unicast grouped IFN: DCC coreids_ring.size() == 1
+staged whole-operand rows: DXP can pass, hardware bus-fences
+```
+
+The next backend implementation should reuse the existing DL scheduler's
+LX-neighbor path:
+
+```text
+dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+  isLabeledDsLXNeighbor
+  createAllocationAndTransfer
+  createSynchronization
+
+dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+  createPcfgForInputFetchNeighbor
+  createSubPieces
+
+dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+  transformToPcfgSTCDPLxUnrolled
+```
+
+Target behavior:
+
+1. DXP reads the Torch classification:
+
+   ```text
+   kind = matmul_operand_broadcast
+   communication_pattern = all_gather_replicate
+   realization_strategy = loop_scoped_input_fetch
+   read_index = <consumer operand index>
+   ```
+
+2. Deeptools marks that consumer operand as an LX-neighbor tensor in the DL
+   schedule tree.
+3. `L3DlOpsScheduler` inserts the `NO_COMPONENT -> LX` `_lx_neighbor` marker
+   inside the consumer matmul loop, before the tile/subchunk compute.
+4. Existing InputFetchNeighbor/STCDP lowering realizes the ring movement for
+   that tile-scoped marker.
+
+This preserves the frontend/backend split we want: Torch classifies and costs
+the communication class; Deeptools realizes a legal scheduled movement using
+the coordinates and the matmul schedule it owns.
+
+### IFN-With-DL Diagnostic
+
+An experimental Deeptools knob was added locally:
+
+```bash
+export DXP_LX_RELAYOUT_IFN_WITH_DLOP=1
+```
+
+It changes `DcgManager::runDcgForDataOpsDlOps` so a paired input-fetch schedule
+also attempts normal DL PCFG generation.  Rebuild on CLC:
+
+```bash
+COPYFILE_DISABLE=1 tar -C /Users/adnan/torch-spyre-work/deeptools-comms-collectives \
+  -cf /tmp/deeptools_dcg_manager_ifn_with_dlop.tar dcg/dcg_manager/dcg_manager.cpp
+kubectl cp /tmp/deeptools_dcg_manager_ifn_with_dlop.tar \
+  a6-quantization/adnan-clc-spyre-dev-pf:/tmp/deeptools_dcg_manager_ifn_with_dlop.tar
+
+kubectl exec -n a6-quantization adnan-clc-spyre-dev-pf -- bash -lc '
+set -euo pipefail
+ROOT=/home/adnan/codex-isolated/comms_collectives_20260629
+cd "$ROOT/deeptools"
+tar xf /tmp/deeptools_dcg_manager_ifn_with_dlop.tar
+find dcg -name "._*" -delete
+cmake --build build-dxp-comms-current --target dxp_standalone -j$(nproc)
+'
+```
+
+DXP-only replay:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/dxp_ifn_with_dlop_controls_clc_20260630_153441
+```
+
+Result:
+
+```text
+paired_compact_affine_old rc=134
+  Max IBUFF(256) Current IBUFF(651)
+
+paired_compact_affine_with_dlop rc=134
+  DtException: unit already set for associated schedule step
+  dcc/src/Stitcher/ModuleStitcher.cpp line 279
+```
+
+This rules out the naive "generate IFN and DL independently for the same paired
+step" approach.  DCC's `ModuleStitcher` indexes program units by schedule step,
+and the independent IFN/DL modules collide for the same unit and step.  The next
+backend patch should avoid independent module stitching and instead make the
+LX-neighbor transfer marker part of the DL-generated module, or explicitly
+teach DCC how a paired IFN+DL step is represented.
+
+Marker-only control:
+
+```bash
+DEEPTOOLS_PATH=$ROOT/deeptools \
+DXP_LX_FRAC_AVAIL=1 \
+DXP_DUMP_RELAYOUT_DATAOPS_DIR=$OUT/dataops \
+DXP_LX_RELAYOUT_BROADCAST_PAIRED_IFN=1 \
+DXP_LX_RELAYOUT_BROADCAST_COMPACT=1 \
+DXP_LX_RELAYOUT_IFN_AFFINE_DTKEYS=1 \
+DXP_LX_RELAYOUT_IFN_WITH_DLOP=1 \
+DXP_LX_RELAYOUT_IFN_DLOP_MARKER_ONLY=1 \
+$DXP --bundle -d "$BUNDLE"
+```
+
+Result:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/dxp_ifn_dlop_marker_only_clc_20260630_153749
+rc=134
+std::out_of_range: vector::_M_range_check: __n (which is 0) >= this->size()
+```
+
+This rules out the opposite naive approach too.  The DL scheduler cannot use
+the marker alone; it needs IFN metadata from `generatePcfgIRForDataOpInpFetch`.
+The missing backend abstraction is therefore more specific:
+
+```text
+build IFN metadata and tile-scoped transfer marker
+without stitching a separate IFN module into the same schedule step
+```
+
+### Metadata-Only IFN Plus DCC Skip
+
+The closest diagnostic to the desired architecture is:
+
+```bash
+export DXP_LX_RELAYOUT_IFN_WITH_DLOP=1
+export DXP_LX_RELAYOUT_IFN_METADATA_ONLY=1
+```
+
+Local guarded changes:
+
+```text
+dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+  populate IFN metadata, then return before createPcfgsSTCDPOp
+
+dcc/src/Conversion/PCFGToDataflowIR/PCFGToDFManager.cpp
+  do not convert metadata-only IFN dataops as standalone empty modules
+```
+
+This moved past the previous errors:
+
+```text
+old paired IFN: IBUFF overflow
+IFN + DL independent modules: unit already set for associated schedule step
+DL marker only: empty IFN metadata / out_of_range
+metadata-only IFN + DCC skip: reaches DL program verification
+```
+
+Runs:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/dxp_ifn_metadata_dccskip_clc_20260630_154401
+  rc=134
+  LX_MODLRFIMM :: lrfimm:-4161536 src0:0
+
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/dxp_ifn_metadata_dccskip_allocreset_clc_20260630_154546
+  rc=134
+  DtException: allocNode, dsc/dsc2.cpp line 3999
+
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/dxp_ifn_metadata_dccskip_alloczero_clc_20260630_154802
+  rc=134
+  LX_MODLRFIMM :: lrfimm:-4161536 src0:0
+```
+
+The `allocreset` run proves the consumer LX allocation node cannot simply be
+removed; DDC needs it to recover layout dimensions.  The `alloczero` run proves
+that replacing the base address alone is not enough.  The DL address-generation
+path still sees a full logical 4 MB neighbor operand and creates an out-of-range
+LRF immediate.  The next backend implementation has to make the neighbor
+allocation chunk-local, not just LX-local.
+
+## Communication Classifier Unit Validation
+
+The artifact branch now records a frontend communication class for each
+producer/consumer LX mismatch:
+
+```text
+scatter
+broadcast
+multicast
+gather
+all_gather
+reduce
+all_reduce
+unsupported
+```
+
+The focused unit test was validated on `adnan-spyre-dev-pf` in a throwaway copy
+of the current comms-collectives checkout:
+
+```text
+/home/adnan/codex-isolated/lx_classifier_validate_20260630_230533
+```
+
+The first run failed before collection with a stale runtime library binding:
+
+```text
+ImportError: /opt/ibm/spyre/spyre-comms/lib/libspyre_comms.so.1:
+undefined symbol: _ZN4flex19AllocationDirectiveC1ENS_15PlacementPolicyE...
+```
+
+The fix is the same library pin used for Granite profiling: put the installed
+Spyre Deeptools/runtime/comms libraries first, and include the Torch shared
+libraries from the pod venv.
+
+```bash
+export TORCH_DEVICE_BACKEND_AUTOLOAD=0
+export PYTHONPATH="$DST:$DST/tests/inductor:${PYTHONPATH:-}"
+export LD_LIBRARY_PATH=/opt/ibm/spyre/deeptools/lib:/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/spyre-comms/lib:/home/adnan/dt-inductor/build/libaiupti/lib:/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib:${LD_LIBRARY_PATH:-}
+
+/home/adnan/dt-inductor/.venv/bin/python3 \
+  -m pytest tests/inductor/test_lx_relayout_dldsc.py -q
+```
+
+Result:
+
+```text
+21 passed in 7.76s
+```
+
+The test includes the concrete attention sub-stick case:
+
+```text
+producer: 32 producer slices over tensor dim out
+consumer: {x:16, out:2}
+expected communication_class: gather
+```

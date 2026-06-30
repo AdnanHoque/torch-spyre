@@ -45,10 +45,23 @@ lx_boundary_clones: bool = os.environ.get("LX_BOUNDARY_CLONES", "0") == "1"
 lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
 
 # Experimental research lane for non-scatter relayout classes.  These edges are
-# classified by default, but only materialized when this knob is enabled because
-# full resident materialization can exceed LX capacity for attention operands.
+# classified by default, but only materialized when this knob is enabled.  The
+# current backend prototype can still behave like a full operand replication for
+# attention-sized matmul operands, so keep a conservative static byte guard
+# until loop-scoped/tiled lowering is proven.
 lx_planner_relayout_collectives: bool = (
     os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES", "0") == "1"
+)
+lx_planner_relayout_collective_max_bytes: int = int(
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVE_MAX_BYTES", "1048576")
+)
+_lx_planner_relayout_collective_realization = os.environ.get(
+    "SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVE_REALIZATION", "resident"
+)
+lx_planner_relayout_collective_realization: Literal["resident", "loop_scoped"] = (
+    _lx_planner_relayout_collective_realization
+    if _lx_planner_relayout_collective_realization in ("resident", "loop_scoped")
+    else "resident"
 )
 
 # Experimental research lane for layout-restickify spills.  This only makes

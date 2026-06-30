@@ -35,6 +35,7 @@ from .constants import (
     BATCH_MATMUL_OP,
     BATCH_MATMUL_FP8_OP,
     IDENTITY_OP,
+    RESTICKIFY_LX_OP,
     RESTICKIFY_OP,
     SEGMENT_OFFSETS,
     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
@@ -789,7 +790,10 @@ class SpyreKernel(Kernel[CSEVariable]):
                 # Broadcast: scalar input expanding to non-scalar output.
                 op = IDENTITY_OP
             elif in_coords[-1].free_symbols != out_coords[-1].free_symbols:
-                op = RESTICKIFY_OP
+                if "lx" in args[-2].allocation and "lx" in args[-1].allocation:
+                    op = RESTICKIFY_LX_OP
+                else:
+                    op = RESTICKIFY_OP
             else:
                 op = IDENTITY_OP
             op_spec = self.create_op_spec(

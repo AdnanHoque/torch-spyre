@@ -68,6 +68,7 @@ from torch_spyre._inductor.lx_relayout import (
     drop_lx_relayout_reservations,
     get_lx_relayout_inputs,
     is_lx_relayout_reservation,
+    lx_relayout_needs_resident_reservation,
     make_lx_relayout_reservation_name,
     plan_lx_relayouts,
 )
@@ -346,6 +347,8 @@ class ScratchpadAllocator(ABC):
             if consumer_idx is None:
                 continue
             for source_name, plan in get_lx_relayout_inputs(consumer).items():
+                if not lx_relayout_needs_resident_reservation(plan):
+                    continue
                 source = graph.name_to_buffer.get(source_name)
                 if source is None:
                     continue
@@ -397,9 +400,7 @@ class ScratchpadAllocator(ABC):
             if is_lx_relayout_reservation(b.name) and b.address is None
         ]
         if failed:
-            logger.info(
-                "LX relayout reservation(s) did not fit: %s", ", ".join(failed)
-            )
+            logger.info("LX relayout reservation(s) did not fit: %s", ", ".join(failed))
         return failed
 
     def _retry_after_failed_relayout_reservations(
