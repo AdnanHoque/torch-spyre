@@ -1,0 +1,20 @@
+diff --git a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+index 895cddb..c0fdd08 100644
+--- a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
++++ b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+@@ -1377,8 +1377,14 @@ void DcgFE::transformToPcfg(SenPcfg& newPcfg, STCDPOpHBM* op, int coreID,
+       {
+         fillAddr(newUnrolledDtNode->SrcStartAddr(),
+                  op->inpSP_[inpSPIDx].placement.StartAddr(), 0);
++        int outPlacementIdx = 0;
++        if (pcfgType == SenComponents::L3LU &&
++            op->outSP_[outSPIDx].placement.getMemId().size() > 1) {
++          outPlacementIdx =
++              op->outSP_[outSPIDx].placement.getIndexInMemIdForCore(coreID);
++        }
+         fillAddr(newUnrolledDtNode->DestStartAddr(),
+-                 op->outSP_[outSPIDx].placement.StartAddr(), 0);
++                 op->outSP_[outSPIDx].placement.StartAddr(), outPlacementIdx);
+ 
+         std::pair<PcfgLccrCond, FoldManager<int64_t>> newPcfgLccrCond;
+         newPcfgLccrCond.first.loopName = newOuterLoopNode->name;
