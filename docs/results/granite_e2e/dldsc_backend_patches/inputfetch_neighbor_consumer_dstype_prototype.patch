@@ -1,0 +1,317 @@
+diff --git a/dcg/dcg_fe/dcg_frontend.h b/dcg/dcg_fe/dcg_frontend.h
+index 72d9c5ae8..a37cd30f7 100644
+--- a/dcg/dcg_fe/dcg_frontend.h
++++ b/dcg/dcg_fe/dcg_frontend.h
+@@ -372,22 +372,27 @@ class DcgFE {
+ 
+   // input fetch neighbor functions..
+   void checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
+-                                         const SuperDsc& mySDscPre);
+-  void checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain);
++                                         const SuperDsc& mySDscPre,
++                                         DsTypes consumerDsType);
++  void checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
++                                         DsTypes consumerDsType);
+ 
+   void createPcfgForInputFetchNeighbor(
+       SuperDsc& mySDscMain, DataOpDsc& ddsc, int uniqueId = 0,
+-      std::string jsonFileName = "dataDSC/relayout.json");
++      std::string jsonFileName = "dataDSC/relayout.json",
++      DsTypes consumerDsType = DsTypes::INPUT);
+ 
+   void fillDataDSCForInputFetchNeighbor(SuperDsc& mySDscMain,
+-                                        SuperDsc& mySDscPre, DataOpDsc& ddsc);
++                                        SuperDsc& mySDscPre, DataOpDsc& ddsc,
++                                        DsTypes consumerDsType);
+ 
+   void inputNeighborFetchL3LUSubpieceOrder(const STCDPOpLx* op);
+   void printInputFetchNeighInfo(std::string context = "");
+   void transformToPcfgSyncInpNeigborFetch(SenPcfg& newPcfg, baseSTCDPOp* op,
+                                           int coreID, SenComponents pcfgType);
+ 
+-  void createSubPieces(STCDPOpLx* op, SuperDsc& mySDscMain);
++  void createSubPieces(STCDPOpLx* op, SuperDsc& mySDscMain,
++                       DsTypes consumerDsType = DsTypes::INPUT);
+   void insertL3SUSortedCoordinateInpFetch(STCDPOpLx* op, int pMemID,
+                                           int inpSPIDx);
+   void insertL3LUSortedCoordinateInpFetch(STCDPOpLx* op, int pMemID,
+@@ -418,8 +423,8 @@ class DcgFE {
+   void computerGTRInfoInpFetchNeighbor(baseSTCDPOp* op);
+ 
+   void fillGTRSharingInfoInpFetchNeighbor(baseSTCDPOp* op);
+-  void fillUnrelatedChunkSplitFactor(SuperDsc& sDsc);
+-  void fillChunkSplitFactor(SuperDsc& sDsc);
++  void fillUnrelatedChunkSplitFactor(SuperDsc& sDsc, DsTypes consumerDsType);
++  void fillChunkSplitFactor(SuperDsc& sDsc, DsTypes consumerDsType);
+   void fillAdjustBParams(SuperDsc& sDsc);
+   void computeTotalWkSlices(SuperDsc& sDsc);
+   void computeCoordinateChunk(SuperDsc& sDsc);
+@@ -494,4 +499,4 @@ class DcgFE {
+   Dtype checkAndGetScalar(const FoldManager<Dtype>& fm_val);
+ };
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+index baa1181dd..0323fd6b3 100644
+--- a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
++++ b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+@@ -11,17 +11,19 @@
+ #include <dcg/dcg_fe/dcg_frontend.h>
+ 
+ void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
+-                                              const SuperDsc& mySDscPre) {
++                                              const SuperDsc& mySDscPre,
++                                              DsTypes consumerDsType) {
+   DT_CHECK(mySDscMain.dscs_.size() > 0);
+-  DT_CHECK(mySDscMain.dscs_.at(0).primaryDsInfo_.count(DsTypes::INPUT));
++  DT_CHECK(mySDscMain.dscs_.at(0).primaryDsInfo_.count(consumerDsType));
+   DT_CHECK(mySDscPre.dscs_.at(0).primaryDsInfo_.count(DsTypes::OUTPUT));
+   DT_CHECK(mySDscPre.dscs_.size() > 0);
+   DT_CHECK(
+-      mySDscMain.dscs_.at(0).primaryDsInfo_.at(DsTypes::INPUT).stickSize_ ==
++      mySDscMain.dscs_.at(0).primaryDsInfo_.at(consumerDsType).stickSize_ ==
+       mySDscPre.dscs_.at(0).primaryDsInfo_.at(DsTypes::OUTPUT).stickSize_);
+ 
+   // check if all data-structures are lx pinned
+-  const auto& pDsInp = mySDscMain.dscs_.at(0).primaryDsInfo_.at(DsTypes::INPUT);
++  const auto& pDsInp =
++      mySDscMain.dscs_.at(0).primaryDsInfo_.at(consumerDsType);
+   DT_CHECK(pDsInp.stickDimOrder_.size() == pDsInp.stickSize_.size());
+   DT_CHECK(pDsInp.stickDimOrder_.size() == pDsInp.stickRepl_.size());
+   for (int idx = 0; idx < mySDscMain.dscs_.size(); idx++) {
+@@ -32,13 +34,13 @@ void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
+     if (idx > 0) {
+       DT_CHECK(mySDscMain.dscs_.at(0).N_ == dscMain_.N_);
+       DT_CHECK(pDsInp.layoutDimOrder_ ==
+-               dscMain_.primaryDsInfo_.at(DsTypes::INPUT).layoutDimOrder_);
++               dscMain_.primaryDsInfo_.at(consumerDsType).layoutDimOrder_);
+       DT_CHECK(pDsInp.stickDimOrder_ ==
+-               dscMain_.primaryDsInfo_.at(DsTypes::INPUT).stickDimOrder_);
++               dscMain_.primaryDsInfo_.at(consumerDsType).stickDimOrder_);
+       DT_CHECK(pDsInp.stickSize_ ==
+-               dscMain_.primaryDsInfo_.at(DsTypes::INPUT).stickSize_);
++               dscMain_.primaryDsInfo_.at(consumerDsType).stickSize_);
+       DT_CHECK(pDsInp.stickRepl_ ==
+-               dscMain_.primaryDsInfo_.at(DsTypes::INPUT).stickRepl_);
++               dscMain_.primaryDsInfo_.at(consumerDsType).stickRepl_);
+ 
+       // support same looporder across multiple dscs
+       DT_CHECK(
+@@ -68,12 +70,14 @@ void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
+   }
+ }
+ 
+-void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain) {
++void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
++                                              DsTypes consumerDsType) {
+   DT_CHECK(mySDscMain.dscs_.size() > 0);
+-  DT_CHECK(mySDscMain.dscs_.at(0).primaryDsInfo_.count(DsTypes::INPUT));
++  DT_CHECK(mySDscMain.dscs_.at(0).primaryDsInfo_.count(consumerDsType));
+ 
+   // check if all data-structures are lx pinned
+-  const auto& pDsInp = mySDscMain.dscs_.at(0).primaryDsInfo_.at(DsTypes::INPUT);
++  const auto& pDsInp =
++      mySDscMain.dscs_.at(0).primaryDsInfo_.at(consumerDsType);
+   DT_CHECK(pDsInp.stickDimOrder_.size() == pDsInp.stickSize_.size());
+   DT_CHECK(pDsInp.stickDimOrder_.size() == pDsInp.stickRepl_.size());
+   for (int idx = 0; idx < mySDscMain.dscs_.size(); idx++) {
+@@ -83,13 +87,13 @@ void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain) {
+     if (idx > 0) {
+       DT_CHECK(mySDscMain.dscs_.at(0).N_ == dscMain_.N_);
+       DT_CHECK(pDsInp.layoutDimOrder_ ==
+-               dscMain_.primaryDsInfo_.at(DsTypes::INPUT).layoutDimOrder_);
++               dscMain_.primaryDsInfo_.at(consumerDsType).layoutDimOrder_);
+       DT_CHECK(pDsInp.stickDimOrder_ ==
+-               dscMain_.primaryDsInfo_.at(DsTypes::INPUT).stickDimOrder_);
++               dscMain_.primaryDsInfo_.at(consumerDsType).stickDimOrder_);
+       DT_CHECK(pDsInp.stickSize_ ==
+-               dscMain_.primaryDsInfo_.at(DsTypes::INPUT).stickSize_);
++               dscMain_.primaryDsInfo_.at(consumerDsType).stickSize_);
+       DT_CHECK(pDsInp.stickRepl_ ==
+-               dscMain_.primaryDsInfo_.at(DsTypes::INPUT).stickRepl_);
++               dscMain_.primaryDsInfo_.at(consumerDsType).stickRepl_);
+ 
+       // support same looporder across multiple dscs
+       DT_CHECK(mySDscMain.dscs_.at(0).loopOrder_ == dscMain_.loopOrder_);
+@@ -102,7 +106,8 @@ void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain) {
+ 
+ void DcgFE::fillDataDSCForInputFetchNeighbor(SuperDsc& mySDscMain,
+                                              SuperDsc& mySDscPre,
+-                                             DataOpDsc& ddsc) {
++                                             DataOpDsc& ddsc,
++                                             DsTypes consumerDsType) {
+   ddsc.dscName_ = mySDscMain.name_ + "-LxInputNeighborFetch";
+ 
+   ddsc.opName = OpFuncs::STCDPOpLx;
+@@ -137,7 +142,7 @@ void DcgFE::fillDataDSCForInputFetchNeighbor(SuperDsc& mySDscMain,
+   // find
+   LabeledDsInfo* outLdsDLDSC_0 = nullptr;
+   for (auto& item : mySDscMain.dscs_.at(0).labeledDs_) {
+-    if (item.dsType_ == DsTypes::INPUT) {
++    if (item.dsType_ == consumerDsType) {
+       outLdsDLDSC_0 = &item;
+     }
+   }
+@@ -149,7 +154,7 @@ void DcgFE::fillDataDSCForInputFetchNeighbor(SuperDsc& mySDscMain,
+     myLds.wordLength = outLdsDLDSC_0->wordLength;
+     myLds.df = DCGUtils::getDsFormat(outLdsDLDSC_0->wordLength);
+     auto& dlPDsInfo =
+-        i == 0 ? mySDscMain.dscs_.at(0).primaryDsInfo_.at(DsTypes::INPUT)
++        i == 0 ? mySDscMain.dscs_.at(0).primaryDsInfo_.at(consumerDsType)
+                : mySDscPre.dscs_.at(0).primaryDsInfo_.at(DsTypes::OUTPUT);
+     // auto& N_ = i == 0 ? mySDscMain.dscs_.at(0).N_ : mySDscPre.dscs_.at(0).N_;
+     auto& N_ = mySDscMain.dscs_.at(0).N_;
+@@ -323,7 +328,7 @@ void DcgFE::fillDataDSCForInputFetchNeighbor(SuperDsc& mySDscMain,
+ 
+       auto& dlPDsInfo =
+           i == 0 ? mySDscMain.coreIdToDsc_.at(wkCoreID)->primaryDsInfo_.at(
+-                       DsTypes::INPUT)
++                       consumerDsType)
+                  : mySDscPre.coreIdToDsc_.at(wkCoreID)->primaryDsInfo_.at(
+                        DsTypes::OUTPUT);
+ 
+@@ -431,7 +436,7 @@ void DcgFE::fillDataDSCForInputFetchNeighbor(SuperDsc& mySDscMain,
+ 
+       if (i == 0) {
+         for (auto& item : mySDscMain.coreIdToDsc_.at(wkCoreID)->labeledDs_) {
+-          if (item.dsType_ == DsTypes::INPUT) {
++          if (item.dsType_ == consumerDsType) {
+             ldsDLDSC = &item;
+           }
+         }
+@@ -476,7 +481,8 @@ void DcgFE::fillDataDSCForInputFetchNeighbor(SuperDsc& mySDscMain,
+ 
+ void DcgFE::createPcfgForInputFetchNeighbor(
+     SuperDsc& mySDscMain, DataOpDsc& ddsc, int uniqueId /*= 0*/,
+-    std::string jsonFileName /*= "dataDSC/relayout.json"*/) {
++    std::string jsonFileName /*= "dataDSC/relayout.json"*/,
++    DsTypes consumerDsType /*= DsTypes::INPUT*/) {
+   // find DB loop order
+   const int mainDscIdx = 0;
+   const std::vector<PrimaryDimAndKind>& loopOrder =
+@@ -484,7 +490,7 @@ void DcgFE::createPcfgForInputFetchNeighbor(
+   for (PrimaryDimAndKind it : loopOrder) {
+     PrimaryDimTypes dim = it.dim_;
+     if (DCGUtils::isValPresent(mySDscMain.dscs_.at(mainDscIdx)
+-                                   .primaryDsInfo_.at(DsTypes::INPUT)
++                                   .primaryDsInfo_.at(consumerDsType)
+                                    .layoutDimOrder_,
+                                dim)) {
+       myIFNInfo_.DBloopOrderForInput.push_back(dim);
+@@ -505,7 +511,7 @@ void DcgFE::createPcfgForInputFetchNeighbor(
+   // checks validGap info..
+   checkGapInfo(ddsc);
+ 
+-  createSubPieces((STCDPOpLx*)ddsc.op, mySDscMain);
++  createSubPieces((STCDPOpLx*)ddsc.op, mySDscMain, consumerDsType);
+ 
+   // printInputFetchNeighInfo("dtTableIdxInWSlice");
+ 
+@@ -598,11 +604,12 @@ void DcgFE::createPcfgForInputFetchNeighbor(
+   }
+ }
+ 
+-void DcgFE::createSubPieces(STCDPOpLx* op, SuperDsc& mySDscMain) {
++void DcgFE::createSubPieces(STCDPOpLx* op, SuperDsc& mySDscMain,
++                            DsTypes consumerDsType) {
+   // parse B_ & adjust params
+   fillAdjustBParams(mySDscMain);
+-  fillUnrelatedChunkSplitFactor(mySDscMain);
+-  fillChunkSplitFactor(mySDscMain);
++  fillUnrelatedChunkSplitFactor(mySDscMain, consumerDsType);
++  fillChunkSplitFactor(mySDscMain, consumerDsType);
+   computeTotalWkSlices(mySDscMain);
+   computeCoordinateChunk(mySDscMain);
+ 
+@@ -628,7 +635,7 @@ void DcgFE::createSubPieces(STCDPOpLx* op, SuperDsc& mySDscMain) {
+ 
+     // dsc specific params
+     auto& B_ = myIFNInfo_.dscIdxToB_.at(dsc_idx);
+-    auto& dlPDsInfo = currdsc.primaryDsInfo_.at(DsTypes::INPUT);
++    auto& dlPDsInfo = currdsc.primaryDsInfo_.at(consumerDsType);
+ 
+     int corei_div_Bi = currdsc.CoreD_.i_ / B_.i_;
+     int corej_div_Bj = currdsc.CoreD_.j_ / B_.j_;
+@@ -1907,7 +1914,8 @@ int DcgFE::getDscIdx(SuperDsc& sDsc, int coreId) {
+   return dscIdx;
+ }
+ 
+-void DcgFE::fillUnrelatedChunkSplitFactor(SuperDsc& sDsc) {
++void DcgFE::fillUnrelatedChunkSplitFactor(SuperDsc& sDsc,
++                                          DsTypes consumerDsType) {
+   DT_CHECK(isInpFetchNeigh_);
+   // unrelated dims handling for extra syncs
+   std::set<PrimaryDimTypes> unrelatedDims = {OUT, KIJ};
+@@ -1928,7 +1936,8 @@ void DcgFE::fillUnrelatedChunkSplitFactor(SuperDsc& sDsc) {
+                    myIFNInfo_.dscIdxToB_.at(dsc_idx).paramNameToVal(dimName));
+ 
+       if (DCGUtils::isValPresent(
+-              currdsc.primaryDsInfo_.at(DsTypes::INPUT).layoutDimOrder_, dim)) {
++              currdsc.primaryDsInfo_.at(consumerDsType).layoutDimOrder_,
++              dim)) {
+         if (DB_ratio > 1) foundRelatedDims = true;
+       } else if (unrelatedDims.count(dim)) {
+         if (foundRelatedDims)
+@@ -1941,7 +1950,7 @@ void DcgFE::fillUnrelatedChunkSplitFactor(SuperDsc& sDsc) {
+   }
+ }
+ 
+-void DcgFE::fillChunkSplitFactor(SuperDsc& sDsc) {
++void DcgFE::fillChunkSplitFactor(SuperDsc& sDsc, DsTypes consumerDsType) {
+   DT_CHECK(isInpFetchNeigh_);
+ 
+   for (int dsc_idx = 0; dsc_idx < sDsc.dscs_.size(); dsc_idx++) {
+@@ -1954,7 +1963,7 @@ void DcgFE::fillChunkSplitFactor(SuperDsc& sDsc) {
+ 
+     int ratio = 1;
+     auto& currdsc = sDsc.dscs_.at(dsc_idx);
+-    auto& dlPDsInfo = currdsc.primaryDsInfo_.at(DsTypes::INPUT);
++    auto& dlPDsInfo = currdsc.primaryDsInfo_.at(consumerDsType);
+     for (auto& pDim : dlPDsInfo.layoutDimOrder_) {
+       auto dimName = currdsc.primaryDimToString.at(pDim);
+ 
+diff --git a/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp b/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+index 2f09a103c..05d6f314f 100644
+--- a/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
++++ b/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+@@ -163,23 +163,31 @@ DataOpDsc* DcgFE::generatePcfgIRForDataOpInpFetch(
+   isInpFetchNeigh_ = true;
+   // ACT1 create dataDSC and fill ldsInfo
+ 
++  DT_CHECK(mySDscMain.dscs_.size() > 0);
++  DT_CHECK(datadscIdx >= 0 &&
++           datadscIdx < mySDscMain.dscs_.at(0).labeledDs_.size());
++  const DsTypes consumerDsType =
++      mySDscMain.dscs_.at(0).labeledDs_.at(datadscIdx).dsType_;
++
+   DataOpDsc* masterDDsc = nullptr;
+   if (mySDscPre == nullptr) {
+     DT_CHECK(datadscIdx >= 0 && datadscIdx < mySDscMain.dataOpdscs_.size());
+     masterDDsc = &mySDscMain.dataOpdscs_.at(0);
+     checkDLDSCForInputFetchNeighborOp(
+-        mySDscMain);  // verification check DL-DSC data..
++        mySDscMain, consumerDsType);  // verification check DL-DSC data..
+     createPcfgForInputFetchNeighbor(mySDscMain, mySDscMain.dataOpdscs_.at(0),
+-                                    datadscIdx, jsonFileName);
++                                    datadscIdx, jsonFileName, consumerDsType);
+   } else {
+     masterDDsc = new DataOpDsc;
+     checkDLDSCForInputFetchNeighborOp(
+-        mySDscMain, *mySDscPre);  // verification check DL-DSC data..
+-    fillDataDSCForInputFetchNeighbor(mySDscMain, *mySDscPre, *masterDDsc);
++        mySDscMain, *mySDscPre,
++        consumerDsType);  // verification check DL-DSC data..
++    fillDataDSCForInputFetchNeighbor(mySDscMain, *mySDscPre, *masterDDsc,
++                                     consumerDsType);
+     createPcfgForInputFetchNeighbor(mySDscMain, *masterDDsc, datadscIdx,
+-                                    jsonFileName);
++                                    jsonFileName, consumerDsType);
+   }
+ 
+   isInpFetchNeigh_ = false;
+   return masterDDsc;
+-}
+\ No newline at end of file
++}
