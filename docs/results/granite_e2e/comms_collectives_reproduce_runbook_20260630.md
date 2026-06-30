@@ -628,6 +628,90 @@ print(dict(counts))
 PY
 ```
 
+### Backend Source Pointers For The Next Patch
+
+The latest evidence says the next patch is not another Torch allocator tweak.
+The remaining non-weight classes need Deeptools to use staged input movement
+instead of full resident materialization.
+
+Current resident-relayout insertion is here:
+
+```text
+deeptools/dxp/dxp.cpp
+  Dxp::runDsmRelayout(sdsc, executionStep, memTrackers, relayout_sdscs)
+
+deeptools/dxp/SdscRelayoutInsertion.cpp
+  Dxp::insertRelayoutSdsc(...)
+```
+
+This path inserts a standalone relayout before the consumer and reserves a full
+post-relayout resident view.  It is the right class for resident `scatter`, but
+not for `matmul_operand_broadcast`.
+
+Existing staged input-neighbor fetch support is here:
+
+```text
+deeptools/dcg/dcg_manager/dcg_manager.cpp
+  DcgManager::runDcgForInputFetchNeighbor(SuperDsc& mySDscMain, SuperDsc* mySDscPre)
+
+deeptools/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+  DcgFE::generatePcfgIRForDataOpInpFetch(...)
+
+deeptools/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+  DcgFE::fillDataDSCForInputFetchNeighbor(...)
+```
+
+That path already creates an `STCDPOpLx` data op with producer/consumer
+subpieces, inferred segment groups, chunk-rank metadata, multicast metadata, and
+traffic-per-chunk accounting.
+
+The next Deeptools prototype should:
+
+1. detect `lxRelayoutClassifications_` with
+   `kind == matmul_operand_broadcast`;
+2. find the producer SDSC for that source tensor;
+3. call the existing input-neighbor fetch path for the consumer/prod pair;
+4. hard-fail on missing producer/consumer metadata instead of falling back to
+   HBM;
+5. leave resident `scatter` on the current `SdscRelayoutInsertion` path.
+
+Do not try to remove the computed activation restickify by simply forcing its
+output into LX.  That would make the downstream batchmatmul read a local shard
+without the required operand broadcast.  The correct implementation is computed
+LX layout restickify plus staged operand movement.
+
+### Deeptools Schema Patch
+
+Current Deeptools `SuperDsc` does not preserve unknown top-level JSON fields.
+That means Torch's `lxRelayoutClassifications_` metadata is dropped on import
+unless Deeptools grows an explicit schema field.
+
+The local Deeptools branch:
+
+```text
+/Users/adnan/torch-spyre-work/deeptools-comms-collectives
+branch: ah/comms-collectives
+```
+
+adds:
+
+```text
+dsc/superdsc.h
+  std::map<std::string, std::map<std::string, std::string>>
+      lxRelayoutClassifications_;
+
+dsc/superdsc.cpp
+  import/export for scalar fields under lxRelayoutClassifications_
+```
+
+This is not the full lowering.  It is the schema hook required for DXP to route
+`scatter` to resident relayout, `matmul_operand_broadcast` to staged
+input-neighbor fetch, and future classes to their own lowering paths.
+
+Validation status: patched locally, not yet rebuilt in a Deeptools build tree in
+this runbook.  Run a narrow Deeptools build before treating this backend patch
+as ready.
+
 Allocator rejection:
 
 ```text

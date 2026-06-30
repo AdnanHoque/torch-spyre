@@ -181,6 +181,83 @@ communication_pattern: all_gather_replicate
 unsupported_reason: backend relayout reservation did not fit in scratchpad
 ```
 
+## Backend Integration Shape For Operand Broadcast
+
+The remaining runtime classes should not be forced through the current
+resident-relayout insertion path.  That path is intentionally materialized:
+
+```text
+DXP: runDsmRelayout(sdsc, executionStep, memTrackers, relayout_sdscs)
+  -> SdscRelayoutInsertion.cpp
+  -> insert an STCDPOpLx relayout before the consumer
+  -> reserve a full post-relayout consumer LX view
+  -> fall back to HBM relayout if LX does not fit
+```
+
+That is correct for resident scatter, but wrong for non-primary matmul operands.
+For `buf21 -> buf22` and the dependent `buf46 -> buf14` path, the consumer
+needs a loop-scoped stream of operand pieces.  Materializing the entire
+consumer-side operand view costs about MiBs per core and either fails LX capacity
+or falls back to HBM, which defeats this branch's purpose.
+
+Deeptools already has a closer lowering entrypoint:
+
+```text
+DcgManager::runDcgForInputFetchNeighbor(SuperDsc& main, SuperDsc* pre)
+  -> DcgFE::generatePcfgIRForDataOpInpFetch(main, pre, ...)
+  -> fillDataDSCForInputFetchNeighbor(...)
+  -> STCDPOpLx with producer/consumer subpieces and chunk traffic
+```
+
+So the next backend patch should be DXP wiring, not a new ring primitive:
+
+1. Read top-level `lxRelayoutClassifications_`.
+2. For `kind == matmul_operand_broadcast`, skip resident
+   `SdscRelayoutInsertion` for that input.
+3. Locate the producer SuperDSC that owns the LX-resident operand.
+4. Call the existing InputFetchNeighbor generation path with
+   `(consumer_sdsс, producer_sdsc)`.
+5. Preserve the resulting `STCDPOpLx` schedule as a loop-scoped input movement
+   associated with the consumer batchmatmul.
+6. Reject, rather than silently HBM-fallback, if the producer/consumer metadata
+   is insufficient for this path.
+
+This keeps the contract aligned with the North Star:
+
+- Torch classifies and costs the communication class.
+- dl-dsc coordinates describe producer residency and consumer demand.
+- Deeptools synthesizes physical movement and chunk scheduling.
+- Later work can overlap this movement with compute instead of merely placing it
+  before compute.
+
+## Primitive Audit
+
+The expanded objective is to understand and eventually implement the on-chip
+communication classes needed by Granite and nearby transformer workloads:
+broadcast, multicast, gather, all-gather, reduce, and all-reduce.  Current
+source inspection shows three different support layers:
+
+| primitive | evidence in Deeptools | usable through current dl-dsc LX relayout path? | status for this branch |
+|---|---|---|---|
+| scatter / permutation | `dxp/SdscRelayoutInsertion.cpp` inserts `STCDPOpLx` for mismatched LX input coordinates | yes, for resident post-relayout views that fit in LX | implemented and validated for PR1-style resident scatter |
+| broadcast / multicast | `STCDPOpLx` carries `prodConsList`; DCG computes multicast metadata via `computeMulticastOptMetadata`, `promoteToMode3`, and GTR multicast lowering | partly; resident relayout can express one-to-many pieces, but materializes the destination view | exists, but Granite operand broadcast needs staged input-neighbor lowering, not resident materialization |
+| gather | `GatherOpHBM` exists in data-op/DSM/DCG paths | no; current named gather path is HBM-oriented, not LX-to-LX relayout | not implemented for this branch's on-chip path |
+| all-gather | multi-AIU optimizer has `OpFuncs::AllGather`; input-neighbor fetch can generate many producer-to-consumer subpieces with `STCDPOpLx` | not yet from Torch dl-dsc relayout metadata | Granite `matmul_operand_broadcast` is the first on-chip all-gather-like target |
+| reduce | DL compute ops include `SUM`, `SUM_NONSTICK`, `MAX`, etc.; ISA has `REDUCE`; psum ring paths exist for reductions | yes as compute/reduction, not as a standalone relayout primitive | existing compute path, not the current Granite spill |
+| all-reduce | multi-AIU collective code has `OpFuncs::AllReduce` and DSM collective implementations | no single-AIU LX relayout hook from this branch yet | future primitive; not needed for current Granite prefill spill evidence |
+
+The important conclusion is that "the primitive exists" is not enough.  For this
+branch, the primitive must be reachable from Torch's dl-dsc coordinate contract
+and must avoid HBM fallback.  Today only resident scatter satisfies that end to
+end.  The next Granite-relevant class is the all-gather-like staged operand
+broadcast for attention batchmatmul inputs.
+
+The first backend schema gap is also clear: Torch emits
+`lxRelayoutClassifications_`, but Deeptools `SuperDsc` did not import or
+preserve that field.  The local Deeptools `ah/comms-collectives` patch now adds
+a small scalar metadata map so DXP can branch on `kind` without re-deriving the
+class from raw coordinates.
+
 These rows are not direct producer-to-consumer LX distribution mismatches by the
 time `plan_lx_relayouts()` runs.  They have already been materialized as
 explicit `spyre.restickify` / `ReStickifyOpHBM` nodes during the stick-layout
