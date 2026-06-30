@@ -48,12 +48,14 @@ Latest literal replay of the archived setup:
 |---|---:|---:|---|
 | literal replay full LX | 12.0625 | 32.0718 | pass |
 | comms branch replay full LX | 12.0129 | 32.2778 | pass |
+| comms branch collectives enabled | 12.3147 | 32.5027 | pass |
 
 Latest run roots:
 
 ```text
 /home/adnan/codex-isolated/comms_collectives_20260629/runs/literal_replay_full_lx_20260630_034958
 /home/adnan/codex-isolated/comms_collectives_20260629/runs/comms_replay_full_lx_runtimefix_20260630_035214
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_splitenv_20260630_040302
 ```
 
 Both runs completed successfully.  They emitted a `RuntimeStream::synchronize()`
@@ -327,7 +329,23 @@ environment and explicitly enable collectives:
 export SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES=1
 ```
 
-If that fails, inspect the generated SDSCs and `lxRelayoutClassifications_`
-metadata from the run directory.  The next expected communication class to study
-is the attention value-side matmul operand collective, which should be lowered
-as loop-scoped movement rather than full resident materialization.
+The latest collectives-enabled run passed but emitted no
+`lxRelayoutClassifications_` metadata.  That means the collectives classifier
+did not fire on the full Granite block.  The artifact comparison showed:
+
+| metric | baseline off | full Torch LX | collectives enabled |
+|---|---:|---:|---:|
+| `ReStickifyOpHBM` rows | 5 | 5 | 5 |
+| SDSCs with `lxRelayoutClassifications_` | 0 | 0 | 0 |
+| LX allocate rows | 53 | 66 | 66 |
+| HBM allocate rows | 61 | 54 | 54 |
+
+So the valid interpretation is:
+
+- the current full-LX win comes from more intermediate LX residency inside fused
+  chains;
+- the explicit HBM restickify rows remain;
+- the full Granite block hides the next communication opportunities behind
+  already-inserted `ReStickifyOpHBM` nodes;
+- the next prototype must intercept or replace those layout-restickify HBM
+  nodes before revisiting loop-scoped matmul operand collectives.

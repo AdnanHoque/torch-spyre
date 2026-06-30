@@ -16,21 +16,43 @@ from the merge-ready PR.
 
 ## Current Baseline From Artifacts
 
-The latest Granite prefill artifact on the dldsc relayout path measured:
+The latest corrected-env Granite prefill artifacts measured:
 
 | variant | kernel ms/iter | median wall ms |
 |---|---:|---:|
-| baseline, relayout off | 12.4741 | 19.1460 |
-| dldsc relayout, full Torch LX | 10.9780 | 17.7715 |
+| baseline, relayout off | 14.6977 | 34.8575 |
+| full Torch LX + backend LX=1 | 12.3391 | 32.4521 |
+| comms branch, collectives enabled | 12.3147 | 32.5027 |
 
-The implemented PR1 class removes the resident scatter HBM round trips:
+The run environment matters.  Torch must see `DXP_LX_FRAC_AVAIL=0` while the
+DXP subprocess must see `DXP_LX_FRAC_AVAIL=1` through the split wrapper recorded
+in the reproduction runbook.
 
-| class | baseline | dldsc relayout |
+The latest collectives-enabled run was:
+
+```text
+/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_collectives_splitenv_20260630_040302
+```
+
+It passed, but it did **not** emit any `lxRelayoutClassifications_` fields in
+the generated SDSCs.  The current collectives prototype therefore did not fire
+on the full Granite block.  The measured speedup is still the established
+full-LX/boundary-clone win, not a new collective-lowering win.
+
+The current artifact comparison is:
+
+| metric | baseline off | full Torch LX | comms collectives-on |
 |---|---:|---:|
-| hbm input roundtrip candidate | 5 | 0 |
-| hbm output spill | 5 | 0 |
-| scatter | 0 | 5 |
-| missing matmul operand collective | 1 | 1 |
+| SDSC count | 44 | 47 | 47 |
+| `ReStickifyOpHBM` rows | 5 | 5 | 5 |
+| SDSCs with `lxRelayoutClassifications_` | 0 | 0 | 0 |
+| LX allocate rows | 53 | 66 | 66 |
+| HBM allocate rows | 61 | 54 | 54 |
+
+So the current speedup does not come from removing the named
+`ReStickifyOpHBM` rows.  It comes from keeping more intermediate allocations in
+LX inside the fused chains.  The five explicit HBM restickifies remain and are
+the next gap to address.
 
 ## Implemented Class: Resident Scatter
 
@@ -76,6 +98,51 @@ The intended contract is:
 4. Working-set reduction decides staging granularity; the communication class
    remains explicit so cost and lowering can reason about it.
 
+## Newly Confirmed Gap: Explicit Layout Restickify HBM
+
+The corrected artifacts show that all variants still contain five
+`ReStickifyOpHBM` rows:
+
+| kernel area | SDSC row | split | current form |
+|---|---|---|---|
+| attention score path | `sdsc_9` | `{mb:32,x:1,out:1}` | HBM -> HBM |
+| attention + MLP fused kernel input | `sdsc_0` | `{mb:32,out:1}` | HBM -> HBM |
+| fused SwiGLU / down-proj handoff | `sdsc_10` | `{mb:25,out:1}` | HBM -> HBM |
+| residual/downstream linear handoff | `sdsc_0` | `{mb:1,out:25}` | HBM -> HBM |
+| final norm / output projection handoff | `sdsc_7` | `{mb:32,out:1}` | HBM -> HBM |
+
+These rows are not direct producer-to-consumer LX distribution mismatches by the
+time `plan_lx_relayouts()` runs.  They have already been materialized as
+explicit `spyre.restickify` / `ReStickifyOpHBM` nodes during the stick-layout
+pipeline:
+
+```text
+propagate_spyre_tensor_layouts
+optimize_restickify_locations
+finalize_layouts
+insert_restickify
+...
+span_reduction
+work_distribution
+scratchpad allocation / LX planner
+```
+
+That placement matters.  The dldsc LX relayout path in Deeptools can currently
+see an LX input whose tensor distribution differs from the consumer compute
+distribution.  It cannot replace an HBM `ReStickifyOpHBM` node that Torch has
+already inserted before scratchpad planning.
+
+This is also not the same class as resident scatter.  The remaining rows are
+layout/stick restickifies: the tensor's physical stick/layout form changes, not
+only the core that owns each already-formed piece.
+
+Current Deeptools `SdscRelayoutInsertion.cpp` also treats relayout input and
+output LDS layout/stick metadata as the consumer form.  That is sufficient for
+same-layout redistribution, but not enough to describe a true LX layout
+restickify with different pre-layout and post-layout forms.  A production
+layout-restickify solution needs an explicit pre/post layout contract, or a
+backend LX restickify primitive that can derive that contract from dl-dsc.
+
 ## Branch State
 
 This branch now records non-primary matmul operand mismatches as classified but
@@ -91,10 +158,24 @@ That metadata intentionally does not populate the existing realized scatter
 input map.  This avoids asking Deeptools to run the resident-scatter lowering on
 a collective edge.
 
+The full Granite block currently does not emit those classifications because
+the relevant edges are hidden behind already-inserted HBM restickify nodes.  The
+classifier is still useful for synthetic and narrower graph shapes, but the
+full-block path requires earlier intervention.
+
 ## Next Implementation Step
 
-The next backend prototype should consume a classified
-`matmul_operand_broadcast` edge and lower it as loop-scoped movement rather than
-post-relayout full materialization.  The first target should be the Granite
-attention value-side edge because it is the single remaining non-weight
-communication class in the current artifact table.
+The next prototype should target explicit layout-restickify HBM rows first:
+
+1. Identify restickify-plan entries whose input and output can both be LX
+   resident.
+2. Preserve the original producer tensor layout and the consumer-required target
+   layout.
+3. Emit a dl-dsc contract that exposes an LX input with explicit producer
+   coordinates and a post-layout consumer requirement, without materializing an
+   HBM `ReStickifyOpHBM` node.
+4. Extend Deeptools relayout insertion only if needed to support different
+   pre-layout and post-layout forms for `STCDPOpLx`.
+5. After layout-restickify is working, return to the attention value-side
+   `matmul_operand_broadcast` edge and lower it as loop-scoped movement rather
+   than post-relayout full materialization.

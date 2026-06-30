@@ -25,6 +25,7 @@ from torch._inductor.ir import (
     Operation,
     Pointwise,
     Reduction,
+    ReinterpretView,
 )
 from torch._inductor.lowering import clone as clone_lowering, lowerings
 
@@ -67,11 +68,19 @@ class GraphEditor:
         while not isinstance(buffer, Buffer):
             if isinstance(buffer, TensorBox):
                 fs.append(TensorBox)
+            elif isinstance(buffer, StorageBox):
+                fs.append(StorageBox)
+            elif isinstance(buffer, ReinterpretView):
+                layout = buffer.get_layout()
+                fs.append(
+                    lambda inner, layout=layout: ReinterpretView(
+                        data=inner, layout=layout
+                    )
+                )
             else:
-                assert isinstance(buffer, StorageBox), (
+                raise AssertionError(
                     f"unexpected buffer type {type(buffer)} while replacing '{old_name}' ({buffer})"
                 )
-                fs.append(StorageBox)
             buffer = buffer.data
 
         if buffer.name == old_name:
