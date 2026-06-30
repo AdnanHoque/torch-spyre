@@ -1868,3 +1868,24 @@ producer: 32 producer slices over tensor dim out
 consumer: {x:16, out:2}
 expected communication_class: gather
 ```
+
+## Deeptools PR 4408 Regression Check
+
+Amrit's Deeptools PR 4408 was validated against the Granite causal prefill
+comparison on `adnan-spyre-dev-pf`:
+
+```text
+docs/results/granite_e2e/pr4408_perf_check_20260630/
+```
+
+Result:
+
+```text
+baseline relayout off:           14.685101 kernel ms/iter, 27.928829 wall ms
+full Torch LX + backend LX=1:    12.023446 kernel ms/iter, 24.392128 wall ms
+kernel speedup:                  1.221x
+wall speedup:                    1.145x
+```
+
+Conclusion: the prior Granite prefill ~1.2x kernel speedup is preserved with
+PR 4408.  No compile/import/runtime regression was observed in this check.

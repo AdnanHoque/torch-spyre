@@ -1,0 +1,73 @@
+{
+  "workspace": "/home/adnan/codex-isolated/pr4408_perf_check_20260630_231905",
+  "runroot": "/home/adnan/codex-isolated/pr4408_perf_check_20260630_231905/runs/granite_prefill_pr4408_20260630_232800",
+  "torch_sha": "df26b2ec7c14159e835a288d3369e7971661c43b",
+  "bench_sha": "76cd51426ba1de6e99dd8fbf613cb0f32b71e87f",
+  "deeptools_pr_sha": "4502294b344bed3c1955e3cd276a7219151505c3",
+  "deeptools_pr_subject": "[DXP] relayout insertion -- code cleanup and minor misc fixes",
+  "deeptools_base_ref_oid_from_gh": "0a9da5eb19d08712383312bb7dec18fbd7caf711",
+  "deeptools_upstream_master_lsremote_at_fetch": "9b22ca42792d8d2a9f72e3f3869d4132e6710069",
+  "deeptools_merge_ref_sha": "323dea254349e5285c0b088dab3b532b644c5773",
+  "dxp_binary": "/home/adnan/codex-isolated/pr4408_perf_check_20260630_231905/deeptools/build-dxp-pr4408/dxp/dxp_standalone",
+  "dxp_wrapper": "/home/adnan/codex-isolated/pr4408_perf_check_20260630_231905/tools/dxp-split-wrapper-pr4408/dxp_standalone",
+  "kernel_speedup": 1.2213720961756238,
+  "wall_speedup": 1.1449935488915823,
+  "rows": [
+    {
+      "variant": "baseline relayout off",
+      "status": "pass",
+      "kernel_ms_per_iter": 14.685101199999998,
+      "wall_median_ms": 27.928829193115234,
+      "result_json": "/home/adnan/codex-isolated/pr4408_perf_check_20260630_231905/runs/granite_prefill_pr4408_20260630_232800/baseline_off/block_prefill/result.json",
+      "trace_summary": "/home/adnan/codex-isolated/pr4408_perf_check_20260630_231905/runs/granite_prefill_pr4408_20260630_232800/baseline_off/block_prefill/trace_summary.json",
+      "trace": "/home/adnan/codex-isolated/pr4408_perf_check_20260630_231905/runs/granite_prefill_pr4408_20260630_232800/baseline_off/block_prefill/trace/adnan-spyre-dev-pf_96463.1782862190878732623.pt.trace.json",
+      "output_shape": [
+        1,
+        512,
+        4096
+      ],
+      "cache_shape": [
+        [
+          1,
+          8,
+          512,
+          128
+        ],
+        [
+          1,
+          8,
+          512,
+          128
+        ]
+      ]
+    },
+    {
+      "variant": "full Torch LX + backend LX=1",
+      "status": "pass",
+      "kernel_ms_per_iter": 12.0234458,
+      "wall_median_ms": 24.392127990722656,
+      "result_json": "/home/adnan/codex-isolated/pr4408_perf_check_20260630_231905/runs/granite_prefill_pr4408_20260630_232800/full_lx_backend1/block_prefill/result.json",
+      "trace_summary": "/home/adnan/codex-isolated/pr4408_perf_check_20260630_231905/runs/granite_prefill_pr4408_20260630_232800/full_lx_backend1/block_prefill/trace_summary.json",
+      "trace": "/home/adnan/codex-isolated/pr4408_perf_check_20260630_231905/runs/granite_prefill_pr4408_20260630_232800/full_lx_backend1/block_prefill/trace/adnan-spyre-dev-pf_96936.1782862311731164737.pt.trace.json",
+      "output_shape": [
+        1,
+        512,
+        4096
+      ],
+      "cache_shape": [
+        [
+          1,
+          8,
+          512,
+          128
+        ],
+        [
+          1,
+          8,
+          512,
+          128
+        ]
+      ]
+    }
+  ]
+}
