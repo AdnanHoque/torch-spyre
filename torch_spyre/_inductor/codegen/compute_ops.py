@@ -597,12 +597,9 @@ def generate_sdsc(
                 },
                 **(
                     {
-                        "lxRelayoutClassifications_": sdsc_spec.op_info[
-                            "lx_relayout_classifications"
-                        ]
+                        "lxRelayoutClassifications_": sdsc_spec.lx_relayout_classifications
                     }
-                    if sdsc_spec.op_info
-                    and "lx_relayout_classifications" in sdsc_spec.op_info
+                    if sdsc_spec.lx_relayout_classifications
                     else {}
                 ),
                 "dscs_": [
