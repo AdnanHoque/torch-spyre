@@ -20,6 +20,7 @@ from torch_spyre._inductor.lx_relayout import (
     LXRelayoutPlan,
     _core_id_to_device_slice,
     _record_plan,
+    get_lx_relayout_classifications,
     get_lx_relayout_inputs,
     is_lx_relayout_reservation,
     make_lx_relayout_reservation_name,
@@ -93,6 +94,40 @@ def test_lx_relayout_plan_records_scatter_kind():
     )
 
     assert get_lx_relayout_inputs(consumer)["buf0"]["kind"] == "scatter"
+
+
+def test_unrealized_collective_is_classified_but_not_realized():
+    class DummyOp:
+        pass
+
+    consumer = DummyOp()
+    _record_plan(
+        consumer,
+        LXRelayoutPlan(
+            source_name="buf0",
+            producer_name="producer",
+            consumer_name="consumer",
+            kind="matmul_operand_broadcast",
+            producer_core_count=32,
+            consumer_core_count=32,
+            producer_core_id_to_device_slice={
+                "0": {"2": 0},
+                "1": {"2": 1},
+            },
+            producer_work_slice_dims={"2": 32},
+            consumer_work_slice_dims={"0": 32},
+            read_index=1,
+            realized=False,
+            communication_pattern="all_gather_replicate",
+            unsupported_reason="needs loop-scoped collective lowering",
+        ),
+    )
+
+    classified = get_lx_relayout_classifications(consumer)["buf0"]
+    assert classified["kind"] == "matmul_operand_broadcast"
+    assert classified["communication_pattern"] == "all_gather_replicate"
+    assert not classified["realized"]
+    assert get_lx_relayout_inputs(consumer) == {}
 
 
 def test_lx_input_allocation_coordinates_describe_producer_residency():

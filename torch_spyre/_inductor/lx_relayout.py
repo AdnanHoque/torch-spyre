@@ -44,6 +44,7 @@ from torch_spyre._inductor.pass_utils import (
 logger = get_inductor_logger("lx_relayout")
 
 LX_RELAYOUT_ATTR = "_spyre_lx_relayout_inputs"
+LX_RELAYOUT_CLASSIFICATION_ATTR = "_spyre_lx_relayout_classifications"
 LX_RELAYOUT_SOURCE_ATTR = "_spyre_lx_relayout_source"
 LX_RELAYOUT_RESERVE_PREFIX = "__spyre_lx_relayout_reserve__"
 
@@ -61,6 +62,10 @@ class LXRelayoutPlan:
     producer_core_id_to_device_slice: dict[str, dict[str, int]]
     producer_work_slice_dims: dict[str, int]
     consumer_work_slice_dims: dict[str, int]
+    read_index: int | None = None
+    realized: bool = True
+    communication_pattern: str = ""
+    unsupported_reason: str = ""
 
 
 def _op_num_cores(op: Operation) -> int:
@@ -134,6 +139,15 @@ def _producer_ops(graph: GraphLowering) -> dict[str, ComputedBuffer]:
 
 
 def _record_plan(consumer: Operation, plan: LXRelayoutPlan) -> None:
+    classifications = getattr(consumer, LX_RELAYOUT_CLASSIFICATION_ATTR, None)
+    if not isinstance(classifications, dict):
+        classifications = {}
+        setattr(consumer, LX_RELAYOUT_CLASSIFICATION_ATTR, classifications)
+    classifications[plan.source_name] = dataclasses.asdict(plan)
+
+    if not plan.realized:
+        return
+
     plans = getattr(consumer, LX_RELAYOUT_ATTR, None)
     if not isinstance(plans, dict):
         plans = {}
@@ -145,6 +159,8 @@ def clear_lx_relayout_metadata(graph: GraphLowering) -> None:
     for op in graph.operations:
         if hasattr(op, LX_RELAYOUT_ATTR):
             delattr(op, LX_RELAYOUT_ATTR)
+        if hasattr(op, LX_RELAYOUT_CLASSIFICATION_ATTR):
+            delattr(op, LX_RELAYOUT_CLASSIFICATION_ATTR)
         if hasattr(op, LX_RELAYOUT_SOURCE_ATTR):
             delattr(op, LX_RELAYOUT_SOURCE_ATTR)
 
@@ -169,6 +185,11 @@ def relayout_source_names(graph: GraphLowering) -> set[str]:
 
 def get_lx_relayout_inputs(op: Operation) -> dict[str, Any]:
     plans = getattr(op, LX_RELAYOUT_ATTR, None)
+    return plans if isinstance(plans, dict) else {}
+
+
+def get_lx_relayout_classifications(op: Operation) -> dict[str, Any]:
+    plans = getattr(op, LX_RELAYOUT_CLASSIFICATION_ATTR, None)
     return plans if isinstance(plans, dict) else {}
 
 
@@ -239,8 +260,26 @@ def plan_lx_relayouts(
             consumer_work_slice_dims = _work_slice_dims(consumer_view)
             read_index = _memory_read_index(consumer, dep)
             if is_matmul_consumer and read_index not in (0, None):
-                # PR1 only realizes resident scatter for primary values.
-                # Non-primary matmul operands need a collective/broadcast class.
+                plan = LXRelayoutPlan(
+                    source_name=dep.name,
+                    producer_name=producer.get_name(),
+                    consumer_name=consumer.get_name(),
+                    kind="matmul_operand_broadcast",
+                    producer_core_count=producer_core_count,
+                    consumer_core_count=consumer_core_count,
+                    producer_core_id_to_device_slice=producer_core_slices,
+                    producer_work_slice_dims=producer_work_slice_dims,
+                    consumer_work_slice_dims=consumer_work_slice_dims,
+                    read_index=read_index,
+                    realized=False,
+                    communication_pattern="all_gather_replicate",
+                    unsupported_reason=(
+                        "non-primary matmul operands need loop-scoped "
+                        "collective lowering, not resident scatter materialization"
+                    ),
+                )
+                _record_plan(consumer, plan)
+                planned.append(plan)
                 continue
 
             plan = LXRelayoutPlan(
@@ -253,6 +292,7 @@ def plan_lx_relayouts(
                 producer_core_id_to_device_slice=producer_core_slices,
                 producer_work_slice_dims=producer_work_slice_dims,
                 consumer_work_slice_dims=consumer_work_slice_dims,
+                read_index=read_index,
             )
             _record_plan(consumer, plan)
             setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
