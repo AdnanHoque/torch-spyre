@@ -1,0 +1,206 @@
+{
+  "artifact_kind": "frontend_backend_contract_excerpt",
+  "approach": "pr2789_explicit_movement_plan",
+  "source_commit": "db130e5b62e1c3e709216134cf4e59f6f9e2b7e4",
+  "source_path": "docs/source/compiler/lx_relayout_stcdp_swiglu_artifacts_2026_06_22/latest_profile_fixed_branch/raw_sdsc/stcdp_enabled/branch-baseline/inductor-cache/inductor-spyre/sdsc_fused_linear_mul_silu_split_with_sizes_0_u7fv9_a0/sdsc_2.json",
+  "logical_edge": {
+    "producer_op": "batchmatmul",
+    "consumer_op": "neg",
+    "source_name": "buf0",
+    "producer_tensor": "buf0",
+    "consumer_tensor": "buf1",
+    "communication_class": "scatter",
+    "producer_split": {
+      "mb": 4,
+      "out": 8,
+      "in": 1
+    },
+    "consumer_split": {
+      "mb": 32,
+      "out": 1
+    }
+  },
+  "superdsc_contract_shape": {
+    "root": "2_LXRelayoutSTCDPOpLx",
+    "opFuncsUsed_": [
+      "STCDPOpLx",
+      "neg"
+    ],
+    "dscs_count": 1,
+    "datadscs_count": 5,
+    "physical_movement_is_frontend_visible": true,
+    "consumer_compute_is_bundled_with_dataops": true
+  },
+  "consumer_compute_dsc_excerpt": {
+    "computeOp_": [
+      {
+        "exUnit": "sfp",
+        "opFuncName": "neg",
+        "inputLabeledDs": [
+          "Tensor0-idx0"
+        ],
+        "outputLabeledDs": [
+          "Tensor1-idx1"
+        ]
+      }
+    ],
+    "input_allocation": {
+      "name_": "allocate-Tensor0_lx",
+      "component_": "lx",
+      "coordinates_.coreIdToWkSlice_": {}
+    }
+  },
+  "dataop_contract_excerpt": {
+    "op": {
+      "name": "STCDPOpLx",
+      "rangedLxRemap": {
+        "schemaVersion": 0,
+        "sourceName": "buf0",
+        "producer": "buf0",
+        "consumer": "buf1",
+        "producerLxBase": 0,
+        "consumerLxBase": 1048576,
+        "coverage": {
+          "device_sizes": [
+            512,
+            400,
+            1,
+            64
+          ],
+          "status": "complete",
+          "subview": {
+            "starts": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "sizes": [
+              512,
+              200,
+              1,
+              64
+            ]
+          }
+        },
+        "dependencyOrder": [
+          {
+            "order": 0,
+            "kind": "producer_lx_write_before_relayout",
+            "op": "buf0",
+            "sourceName": "buf0"
+          },
+          {
+            "order": 1,
+            "kind": "lx_relayout",
+            "primitive": "lx_relayout_v0",
+            "cellCount": 102400
+          },
+          {
+            "order": 2,
+            "kind": "consumer_lx_read_after_relayout",
+            "op": "buf1",
+            "sourceName": "buf0"
+          }
+        ],
+        "lowering": {
+          "strategy": "explicit_lx_copy_via_l3",
+          "addressUnits": "bytes",
+          "coalescedMovements": 6400,
+          "sourceMovements": 102400,
+          "movementRanges": 124,
+          "rangeEncoded": true,
+          "expandedMovements": 6200
+        },
+        "movementRanges_excerpt": [
+          {
+            "rangeIndex": 0,
+            "moveIndex": 50,
+            "count": 50,
+            "bytesPerMove": 2048,
+            "sourceStrideBytes": 16384,
+            "destinationStrideBytes": 2048,
+            "source": {
+              "core": 0,
+              "logicalSlice": {
+                "starts": {
+                  "d0_": 16,
+                  "d1_": 0,
+                  "d2_": 0,
+                  "d3_": 0
+                },
+                "sizes": {
+                  "d0_": 16,
+                  "d1_": 1,
+                  "d2_": 1,
+                  "d3_": 64
+                }
+              },
+              "lxAddress": 2048,
+              "lxByteRange": {
+                "start": 2048,
+                "end": 4096
+              }
+            },
+            "destination": {
+              "core": 1,
+              "logicalSlice": {
+                "starts": {
+                  "d0_": 16,
+                  "d1_": 0,
+                  "d2_": 0,
+                  "d3_": 0
+                },
+                "sizes": {
+                  "d0_": 16,
+                  "d1_": 1,
+                  "d2_": 1,
+                  "d3_": 64
+                }
+              },
+              "lxAddress": 1048576,
+              "lxByteRange": {
+                "start": 1048576,
+                "end": 1050624
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "schedule_excerpt": {
+    "coreIdToDscSchedule[0]": [
+      [
+        0,
+        -1,
+        0,
+        1
+      ],
+      [
+        1,
+        -1,
+        1,
+        1
+      ],
+      [
+        2,
+        -1,
+        1,
+        1
+      ],
+      [
+        -1,
+        0,
+        1,
+        0
+      ]
+    ],
+    "meaning": "data-op rows are scheduled before consumer compute on each core"
+  },
+  "scaling_observation": {
+    "full_raw_sdsc_bytes": 1140577,
+    "full_raw_total_movement_ranges": 524,
+    "risk": "frontend/backend handoff grows with the physical transfer list"
+  }
+}

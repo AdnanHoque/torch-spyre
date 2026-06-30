@@ -1,0 +1,267 @@
+{
+  "artifact_kind": "frontend_backend_contract_excerpt",
+  "approach": "pr2939_dldsc_coordinate_metadata",
+  "source": "equivalent PR #2939 contract for the same logical edge shape observed in db130e5b62e1c3e709216134cf4e59f6f9e2b7e4 sdsc_1 -> sdsc_2",
+  "logical_edge": {
+    "producer_op": "batchmatmul",
+    "consumer_op": "neg",
+    "source_name": "buf0",
+    "communication_class": "scatter",
+    "producer_split": {
+      "mb": 4,
+      "out": 8,
+      "in": 1
+    },
+    "consumer_split": {
+      "mb": 32,
+      "out": 1
+    }
+  },
+  "superdsc_contract_shape": {
+    "root": "2_neg",
+    "opFuncsUsed_": [
+      "neg"
+    ],
+    "dscs_count": 1,
+    "datadscs_present": false,
+    "dataOpdscs_present": false,
+    "physical_movement_is_frontend_visible": false,
+    "movement_is_derived_by_backend_from_coordinates": true
+  },
+  "consumer_compute_dsc_excerpt": {
+    "numWkSlicesPerDim_": {
+      "mb": 32,
+      "out": 1
+    },
+    "coreIdToWkSlice_sample": {
+      "0": {
+        "mb": 0,
+        "out": 0
+      },
+      "1": {
+        "mb": 1,
+        "out": 0
+      },
+      "2": {
+        "mb": 2,
+        "out": 0
+      },
+      "3": {
+        "mb": 3,
+        "out": 0
+      },
+      "31": {
+        "mb": 31,
+        "out": 0
+      }
+    },
+    "computeOp_": [
+      {
+        "exUnit": "sfp",
+        "opFuncName": "neg",
+        "inputLabeledDs": [
+          "Tensor0-idx0"
+        ],
+        "outputLabeledDs": [
+          "Tensor1-idx1"
+        ]
+      }
+    ],
+    "input_allocation": {
+      "name_": "allocate-Tensor0_lx",
+      "component_": "lx",
+      "role_": "INPUT",
+      "coordinates_": {
+        "coreIdToWkSlice_": {
+          "0": {
+            "mb": 0,
+            "out": 0,
+            "in": 0
+          },
+          "1": {
+            "mb": 1,
+            "out": 0,
+            "in": 0
+          },
+          "2": {
+            "mb": 2,
+            "out": 0,
+            "in": 0
+          },
+          "3": {
+            "mb": 3,
+            "out": 0,
+            "in": 0
+          },
+          "4": {
+            "mb": 0,
+            "out": 1,
+            "in": 0
+          },
+          "5": {
+            "mb": 1,
+            "out": 1,
+            "in": 0
+          },
+          "6": {
+            "mb": 2,
+            "out": 1,
+            "in": 0
+          },
+          "7": {
+            "mb": 3,
+            "out": 1,
+            "in": 0
+          },
+          "8": {
+            "mb": 0,
+            "out": 2,
+            "in": 0
+          },
+          "9": {
+            "mb": 1,
+            "out": 2,
+            "in": 0
+          },
+          "10": {
+            "mb": 2,
+            "out": 2,
+            "in": 0
+          },
+          "11": {
+            "mb": 3,
+            "out": 2,
+            "in": 0
+          },
+          "12": {
+            "mb": 0,
+            "out": 3,
+            "in": 0
+          },
+          "13": {
+            "mb": 1,
+            "out": 3,
+            "in": 0
+          },
+          "14": {
+            "mb": 2,
+            "out": 3,
+            "in": 0
+          },
+          "15": {
+            "mb": 3,
+            "out": 3,
+            "in": 0
+          },
+          "16": {
+            "mb": 0,
+            "out": 4,
+            "in": 0
+          },
+          "17": {
+            "mb": 1,
+            "out": 4,
+            "in": 0
+          },
+          "18": {
+            "mb": 2,
+            "out": 4,
+            "in": 0
+          },
+          "19": {
+            "mb": 3,
+            "out": 4,
+            "in": 0
+          },
+          "20": {
+            "mb": 0,
+            "out": 5,
+            "in": 0
+          },
+          "21": {
+            "mb": 1,
+            "out": 5,
+            "in": 0
+          },
+          "22": {
+            "mb": 2,
+            "out": 5,
+            "in": 0
+          },
+          "23": {
+            "mb": 3,
+            "out": 5,
+            "in": 0
+          },
+          "24": {
+            "mb": 0,
+            "out": 6,
+            "in": 0
+          },
+          "25": {
+            "mb": 1,
+            "out": 6,
+            "in": 0
+          },
+          "26": {
+            "mb": 2,
+            "out": 6,
+            "in": 0
+          },
+          "27": {
+            "mb": 3,
+            "out": 6,
+            "in": 0
+          },
+          "28": {
+            "mb": 0,
+            "out": 7,
+            "in": 0
+          },
+          "29": {
+            "mb": 1,
+            "out": 7,
+            "in": 0
+          },
+          "30": {
+            "mb": 2,
+            "out": 7,
+            "in": 0
+          },
+          "31": {
+            "mb": 3,
+            "out": 7,
+            "in": 0
+          }
+        }
+      }
+    }
+  },
+  "classification_metadata_excerpt": {
+    "lxRelayoutClassifications_": {
+      "buf0": {
+        "kind": "scatter",
+        "communication_pattern": "scatter",
+        "realized": true,
+        "producer_work_slice_dims": {
+          "mb": 4,
+          "out": 8,
+          "in": 1
+        },
+        "consumer_work_slice_dims": {
+          "mb": 32,
+          "out": 1
+        }
+      }
+    }
+  },
+  "backend_contract": {
+    "what_torch_sends": "producer residency coordinates on the LX input plus consumer compute coordinates",
+    "what_deeptools_derives": "the source/destination STCDPOpLx movement needed to reconcile the coordinate mismatch",
+    "no_frontend_transfer_list": true
+  },
+  "scaling_observation": {
+    "interface_size_driver": "number of cores and tensor coordinate dimensions",
+    "risk": "backend expansion can still be large, but the frontend/backend handoff is not an enumerated transfer list"
+  }
+}
