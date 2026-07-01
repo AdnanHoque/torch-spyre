@@ -1,0 +1,10 @@
+ M dcc/src/Conversion/PCFGToDataflowIR/PCFGToDataflowIR.cpp
+ M dcg/dcg_be/dcgbeCodegen.cpp
+ M dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+ M dcg/test/dcg_unit_test.cpp
+ M ddc/ddc_fold.cpp
+ M dsc/dataOpDsc.h
+ M dsc/pcfg.cpp
+ M dsc/pcfg.h
+ M dxp/SdscRelayoutInsertion.cpp
+ M senulator/pcfgtransfer.cpp

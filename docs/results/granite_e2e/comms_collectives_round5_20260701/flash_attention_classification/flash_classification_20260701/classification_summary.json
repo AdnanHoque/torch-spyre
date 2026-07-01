@@ -1,0 +1,157 @@
+{
+  "artifact_dir": "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/artifacts/flash_classification_20260701",
+  "comparison": {
+    "baseline_restickify_ids": [
+      2,
+      19,
+      36,
+      53,
+      70,
+      87,
+      104,
+      121,
+      138,
+      155,
+      172,
+      189,
+      206,
+      223,
+      240,
+      257,
+      274,
+      291,
+      308,
+      325,
+      342,
+      359,
+      376,
+      393,
+      410,
+      427,
+      444,
+      461,
+      478,
+      495,
+      512,
+      529
+    ],
+    "hbm_spills_removed_count": 0,
+    "ids_added_by_optimized": [],
+    "ids_removed_by_optimized": [],
+    "optimized_restickify_ids": [
+      2,
+      19,
+      36,
+      53,
+      70,
+      87,
+      104,
+      121,
+      138,
+      155,
+      172,
+      189,
+      206,
+      223,
+      240,
+      257,
+      274,
+      291,
+      308,
+      325,
+      342,
+      359,
+      376,
+      393,
+      410,
+      427,
+      444,
+      461,
+      478,
+      495,
+      512,
+      529
+    ],
+    "same_restickify_ids": true
+  },
+  "group_classification": [
+    {
+      "count_per_run": {
+        "baseline": 32,
+        "optimized": 32
+      },
+      "group": "all ReStickifyOpHBM rows in flash fused attention bundle",
+      "likely_comm_class_needed": "layout/restickify",
+      "missing_blocker": "Need LX-resident layout/restickify handoff across a core-division/layout mismatch into batchmatmul, or batchmatmul support for this LX activation operand. Optimized log reports lx_pinning for the restickify buffer blocked by core div mismatch and all generated SDSC args have lx_residency_core_id_to_wk_slice=None.",
+      "neighbor_pattern": "mul -> ReStickifyOpHBM -> batchmatmul",
+      "producer_consumer": "producer is pointwise mul in softmax/attention pipeline; consumer is reduction batchmatmul",
+      "sdsc_ids": [
+        2,
+        19,
+        36,
+        53,
+        70,
+        87,
+        104,
+        121,
+        138,
+        155,
+        172,
+        189,
+        206,
+        223,
+        240,
+        257,
+        274,
+        291,
+        308,
+        325,
+        342,
+        359,
+        376,
+        393,
+        410,
+        427,
+        444,
+        461,
+        478,
+        495,
+        512,
+        529
+      ],
+      "tensor_handoff": "Tensor0 OUTPUT in lx, layout [out,x,mb] -> Tensor1 KERNEL in hbm, layout [x,out,mb]",
+      "weight_or_activation": "activation-related, not static weight-related; KERNEL is the consumer layout/type label"
+    }
+  ],
+  "returncodes": {
+    "baseline": "0",
+    "optimized": "1"
+  },
+  "rows_csv": "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/artifacts/flash_classification_20260701/restickify_hbm_rows.csv",
+  "runs": {
+    "baseline": "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758",
+    "optimized": "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326"
+  },
+  "summary_counts": {
+    "baseline": {
+      "alloc_counts": {
+        "hbm": 781,
+        "lx": 1485,
+        "pool": 0
+      },
+      "relayout_counts": {},
+      "restickify_hbm_text_count": 32,
+      "sdsc_count": 550
+    },
+    "optimized": {
+      "alloc_counts": {
+        "hbm": 781,
+        "lx": 1485,
+        "pool": 0
+      },
+      "relayout_counts": {},
+      "restickify_hbm_text_count": 32,
+      "sdsc_count": 550
+    }
+  }
+}

@@ -1,0 +1,480 @@
+diff --git a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+index 895cddb..7f5acf9 100644
+--- a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
++++ b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+@@ -10,8 +10,267 @@
+ 
+ #include <dcg/dcg_fe/dcg_frontend.h>
+ 
++#include <set>
++#include <tuple>
++
+ #include "util/dt_exception.hpp"
+ 
++static int positiveRemainder(int value, int modulus) {
++  DT_CHECK(modulus > 0);
++  int result = value % modulus;
++  return result < 0 ? result + modulus : result;
++}
++
++static bool hasExplicitSubStickRangeForSide(const STCDPOpLx* op,
++                                            const transferInfo& dtEntry,
++                                            const SliceInfo& subPiece,
++                                            const std::string& dimName,
++                                            bool producerSide) {
++  if (!op->enableSubStickRanges) return false;
++  if (dtEntry.subStickRanges.empty()) return false;
++  DT_CHECK(subPiece.dimToSize_.count(dimName));
++  const int elementCount = subPiece.dimToSize_.at(dimName);
++  for (const auto& range : dtEntry.subStickRanges) {
++    if (range.transferDim != dimName) continue;
++    if (range.elementCount != elementCount) continue;
++    if (producerSide) {
++      if (range.producerMemId == dtEntry.pMemID) return true;
++    } else {
++      for (const auto consumerMemId : subPiece.placement.getMemId()) {
++        if (range.consumerMemId == consumerMemId) return true;
++      }
++    }
++  }
++  return false;
++}
++
++static void appendSubStickRangesForOverlap(
++    STCDPOpLx* op, transferInfo& dtEntry, const SliceInfo& inpSubPiece,
++    const SliceInfo& outSubPiece, const std::vector<int>& consumerMemIds) {
++  if (!op->enableSubStickRanges) return;
++  if (op->name != OpFuncs::STCDPOpLx) return;
++  DT_CHECK(inpSubPiece.placement.getMemId().size() == 1);
++  const int producerMemId = inpSubPiece.placement.getMemId().at(0);
++
++  for (const auto& dimAndSize : inpSubPiece.dimToSize_) {
++    const auto& dimName = dimAndSize.first;
++    if (outSubPiece.dimToSize_.count(dimName) == 0) continue;
++    const bool inpStickDim = op->inpLds->dimToStickSize_.count(dimName) != 0;
++    const bool outStickDim = op->outLds->dimToStickSize_.count(dimName) != 0;
++    if (!inpStickDim && !outStickDim) continue;
++
++    const int inpStickSize = inpStickDim ? op->inpLds->dimToStickSize_.at(dimName) : 1;
++    const int outStickSize = outStickDim ? op->outLds->dimToStickSize_.at(dimName) : 1;
++    const int inpSize = inpSubPiece.dimToSize_.at(dimName);
++    const int outSize = outSubPiece.dimToSize_.at(dimName);
++    if ((inpStickDim && inpSize >= inpStickSize) &&
++        (outStickDim && outSize >= outStickSize)) {
++      continue;
++    }
++
++    const int srcOffset = inpStickDim
++                              ? positiveRemainder(
++                                    inpSubPiece.dimToStartCordinate.at(dimName),
++                                    inpStickSize)
++                              : 0;
++    const int dstOffset = outStickDim
++                              ? positiveRemainder(
++                                    outSubPiece.dimToStartCordinate.at(dimName),
++                                    outStickSize)
++                              : 0;
++    const int elementCount = inpSize;
++    if (inpStickDim) {
++      DT_CHECK_MSG(srcOffset + elementCount <= inpStickSize,
++                   "Sub-stick source overlap crosses a layout stick.");
++    }
++    if (outStickDim) {
++      DT_CHECK_MSG(dstOffset + outSize <= outStickSize,
++                   "Sub-stick destination overlap crosses a layout stick.");
++    }
++
++    for (const int consumerMemId : consumerMemIds) {
++      SubStickRangeInfo range;
++      range.transferDim = dimName;
++      range.srcIntraStickOffset = srcOffset;
++      range.dstIntraStickOffset = dstOffset;
++      range.elementCount = elementCount;
++      range.producerMemId = producerMemId;
++      range.consumerMemId = consumerMemId;
++      dtEntry.subStickRanges.push_back(range);
++    }
++  }
++}
++
++static bool hasSubStickRanges(const baseSTCDPOp* op,
++                              const std::vector<int>& dtKeys) {
++  if (op->name != OpFuncs::STCDPOpLx) return false;
++  const auto* stcdpOp = static_cast<const STCDPOpLx*>(op);
++  if (!stcdpOp->enableSubStickRanges) return false;
++  for (const int dtKey : dtKeys) {
++    DT_CHECK(op->dtTable_.count(dtKey));
++    if (!op->dtTable_.at(dtKey).subStickRanges.empty()) return true;
++  }
++  return false;
++}
++
++static std::vector<SubStickRangeInfo> collectLocalSubStickRangesForRingDt(
++    const baseSTCDPOp* op, const std::vector<int>& dtKeys, int coreID,
++    SenComponents pcfgType) {
++  std::vector<SubStickRangeInfo> ranges;
++  if (!hasSubStickRanges(op, dtKeys)) return ranges;
++  DT_CHECK(pcfgType == SenComponents::L3SU ||
++           pcfgType == SenComponents::L3LU);
++
++  std::set<std::tuple<std::string, int, int, int, int, int>> seen;
++  for (const int dtKey : dtKeys) {
++    const auto& dtEntry = op->dtTable_.at(dtKey);
++    for (const auto& range : dtEntry.subStickRanges) {
++      const bool matchesCore =
++          pcfgType == SenComponents::L3SU
++              ? range.producerMemId == coreID
++              : range.consumerMemId == coreID;
++      if (!matchesCore) continue;
++      auto key = std::make_tuple(range.transferDim, range.srcIntraStickOffset,
++                                 range.dstIntraStickOffset, range.elementCount,
++                                 range.producerMemId, range.consumerMemId);
++      if (!seen.insert(key).second) continue;
++      ranges.push_back(range);
++    }
++  }
++  return ranges;
++}
++
++static void cloneAddrCondAndVal(
++    std::vector<std::pair<PcfgLccrCond, FoldManager<int64_t>>>& dst,
++    const std::vector<std::pair<PcfgLccrCond, FoldManager<int64_t>>>& src) {
++  dst.clear();
++  dst.resize(src.size());
++  for (int idx = 0; idx < src.size(); idx++) {
++    dst.at(idx).first = src.at(idx).first;
++    dst.at(idx).second.clone(src.at(idx).second);
++  }
++}
++
++static void cloneAnchorAddrToLocalLe128Node(
++    SenPcfgLE128BTransferNode* node, const SenPcfgRingDtNode* ringNode,
++    bool useRingSource) {
++  const auto& anchorAddr =
++      useRingSource ? ringNode->SrcStartAddr() : ringNode->DestStartAddr();
++  node->SrcStartAddr().clone(anchorAddr);
++  node->DestStartAddr().clone(anchorAddr);
++
++  const auto& anchorCondAndVal = useRingSource
++                                     ? ringNode->SrcStartCondAndVal()
++                                     : ringNode->DestStartCondAndVal();
++  cloneAddrCondAndVal(node->SrcStartCondAndVal(), anchorCondAndVal);
++  cloneAddrCondAndVal(node->DestStartCondAndVal(), anchorCondAndVal);
++}
++
++static SenPcfgLE128BTransferNode* createLocalSubStickLe128NodeForRingDt(
++    SenPcfg& pcfg, const baseSTCDPOp* op, const std::vector<int>& dtKeys,
++    int coreID, SenComponents pcfgType, int outerLoopIdx,
++    const SenPcfgRingDtNode* ringNode) {
++  auto ranges =
++      collectLocalSubStickRangesForRingDt(op, dtKeys, coreID, pcfgType);
++  if (ranges.empty()) return nullptr;
++
++  DT_CHECK(op->name == OpFuncs::STCDPOpLx);
++  const LdsInfo* lds =
++      pcfgType == SenComponents::L3SU ? op->inpLds : op->outLds;
++  DT_CHECK(lds != nullptr);
++  DT_CHECK(lds->wordLength > 0);
++  const int wordLength = static_cast<int>(lds->wordLength);
++  DT_CHECK(wordLength == lds->wordLength);
++
++  const std::string transferDim = ranges.front().transferDim;
++  DT_CHECK_MSG(lds->dimToStickSize_.count(transferDim) != 0,
++               "Sub-stick local LE128 lowering requires a stick dimension.");
++  const int stickSize = lds->dimToStickSize_.at(transferDim);
++
++  for (const auto& range : ranges) {
++    DT_CHECK_MSG(range.transferDim == transferDim,
++                 "Sub-stick local LE128 prototype only supports one transfer "
++                 "dimension per ring-DT node.");
++    DT_CHECK(range.elementCount > 0);
++    DT_CHECK(range.srcIntraStickOffset >= 0);
++    DT_CHECK(range.dstIntraStickOffset >= 0);
++    DT_CHECK(range.srcIntraStickOffset + range.elementCount <= stickSize);
++    DT_CHECK(range.dstIntraStickOffset + range.elementCount <= stickSize);
++  }
++
++  std::vector<SubStickRangeInfo> materializedRanges;
++  for (const auto& range : ranges) {
++    // The local helper is anchored to one LX address on both sides. Equal
++    // intra-stick offsets are already in place, so emitting an L3 load/store
++    // chain only bloats Agen lowering.
++    if (range.srcIntraStickOffset == range.dstIntraStickOffset) continue;
++    materializedRanges.push_back(range);
++  }
++  if (materializedRanges.empty()) return nullptr;
++
++  auto* localNode = static_cast<SenPcfgLE128BTransferNode*>(
++      pcfg.createPcfgNode(SenPcfgNode::Type::LE128BTRANSFER));
++  const std::string phase =
++      pcfgType == SenComponents::L3SU ? "localAssembleBeforeRing"
++                                      : "localExtractAfterRing";
++  localNode->name = "c" + std::to_string(coreID) + "-" +
++                    pcfg.senComponentsToString.at(pcfgType) + "-" + phase +
++                    "-" + std::to_string(outerLoopIdx) + "-" +
++                    std::to_string(op->uniqueID);
++  localNode->coreletId = -1;
++  localNode->dtInfo = nullptr;
++  localNode->dsInfo = nullptr;
++  localNode->srcDest = {SenComponents::LX, SenComponents::LX};
++  localNode->dimLayoutOrder = ringNode->dimLayoutOrder;
++  localNode->myBigDimSize = ringNode->myBigDimSize;
++  localNode->myLitDimSize = ringNode->myLitDimSize;
++  localNode->bigStAddrOffsets = ringNode->bigStAddrOffsets;
++  localNode->isPartStick = true;
++  localNode->useBurst = false;
++  localNode->wordLength = wordLength;
++  localNode->stickSize = stickSize;
++  cloneAnchorAddrToLocalLe128Node(
++      localNode, ringNode, pcfgType == SenComponents::L3SU);
++
++  for (const auto& range : materializedRanges) {
++    const int srcByteOffset = range.srcIntraStickOffset * wordLength;
++    const int dstByteOffset = range.dstIntraStickOffset * wordLength;
++    const int bytes = range.elementCount * wordLength;
++    localNode->byteOffsetTr.emplace_back(bytes, srcByteOffset, dstByteOffset,
++                                         true, true);
++  }
++  return localNode;
++}
++
++static void appendPcfgNode(SenPcfgNode*& lastTopNodeInner,
++                           SenPcfgNode* node) {
++  DT_CHECK(lastTopNodeInner != nullptr);
++  DT_CHECK(node != nullptr);
++  lastTopNodeInner->next.push_back(node);
++  node->prev.push_back(lastTopNodeInner);
++  lastTopNodeInner = node;
++}
++
++static void disableRingDtBurstForLocalSubStick(SenPcfgRingDtNode* ringNode) {
++  DT_CHECK(ringNode != nullptr);
++  // Local LE128 nodes share this loop, so the pure-ring burst rewrite is not
++  // legal for these staged sub-stick ring transfers.
++  ringNode->useBurst = false;
++  for (auto& condAndVal : ringNode->GTRAndBurstCondAndVal)
++    condAndVal.second.useBurst = false;
++}
++
++static void checkRingDtCanConsumeSubStickRanges(
++    const baseSTCDPOp* op, const std::vector<int>& dtKeys, int coreID,
++    SenComponents pcfgType) {
++  if (!hasSubStickRanges(op, dtKeys)) return;
++  auto ranges =
++      collectLocalSubStickRangesForRingDt(op, dtKeys, coreID, pcfgType);
++  DT_CHECK_MSG(!ranges.empty(),
++               "DXP_STCDP_SUBSTICK_RANGES reached ring-DT lowering, but no "
++               "local range matched this core/unit.");
++}
++
+ void DcgFE::createSubPieces(STCDPOpHBM* op) {
+   // each piece is a subPiece
+   bool inpPinnedHBM = op->inpLds->isHbmPinned();
+@@ -2094,6 +2353,7 @@ void DcgFE::transformToPcfg(SenPcfg& newPcfg, baseSTCDPOp* op, int coreID,
+     }
+ 
+     if (pcfgType == SenComponents::L3SU || pcfgType == SenComponents::L3LU) {
++      checkRingDtCanConsumeSubStickRanges(op, dtKeys, coreID, pcfgType);
+       if (op->name == OpFuncs::ResizeNNLX || op->name == OpFuncs::ResizeNNHBM)
+         DT_CHECK(mlCf == 1);
+       SenPcfgRingDtNode* newRingDtNode =
+@@ -2295,10 +2555,20 @@ void DcgFE::transformToPcfg(SenPcfg& newPcfg, baseSTCDPOp* op, int coreID,
+       if (op->name == OpFuncs::STCDPOpLx)
+         newRingDtNode->forceModeMC = ((STCDPOpLx*)op)->forceModeMC;
+ 
++      auto* localSubStickNode = createLocalSubStickLe128NodeForRingDt(
++          newPcfg, op, dtKeys, coreID, pcfgType, idx, newRingDtNode);
++
++      if (localSubStickNode != nullptr)
++        disableRingDtBurstForLocalSubStick(newRingDtNode);
++
+       // hook in NodeGraph
+-      lastTopNodeInner->next.push_back(newRingDtNode);
+-      newRingDtNode->prev.push_back(lastTopNodeInner);
+-      lastTopNodeInner = newRingDtNode;
++      if (pcfgType == SenComponents::L3SU && localSubStickNode != nullptr) {
++        appendPcfgNode(lastTopNodeInner, localSubStickNode);
++      }
++      appendPcfgNode(lastTopNodeInner, newRingDtNode);
++      if (pcfgType == SenComponents::L3LU && localSubStickNode != nullptr) {
++        appendPcfgNode(lastTopNodeInner, localSubStickNode);
++      }
+ 
+       // check if last loop is dynamic, if so disable burst
+       if (has_innermost_dyn_loop && newRingDtNode->useBurst)
+@@ -2956,8 +3226,10 @@ void DcgFE::insertSubPieces(STCDPOpLx* op, PieceInfo& inpPiece,
+ 
+       for (auto addr_vec :
+            op->outSP_.at(priorOutSP).placement.StartAddr().getAllData()) {
+-        DT_CHECK(addr_vec.size() == 1);
+-        prior_porality.insert((int64_t)(addr_vec.back() / addr_div) % 2);
++        DT_CHECK(addr_vec.size() >= 1);
++        for (auto addr : addr_vec) {
++          prior_porality.insert((int64_t)(addr / addr_div) % 2);
++        }
+       }
+ 
+       for (auto addr_vec : outSubPiece.placement.StartAddr().getAllData()) {
+@@ -3026,6 +3298,9 @@ void DcgFE::insertSubPieces(STCDPOpLx* op, PieceInfo& inpPiece,
+           op->dtTable_[inpSubPieceIdx].minCMemID = memId;
+         }
+       }
++      appendSubStickRangesForOverlap(op, op->dtTable_.at(inpSubPieceIdx),
++                                     inpSubPiece, outSubPiece,
++                                     outSubPiece.placement.getMemId());
+     } else {
+       // Create separate entry for each placementInfo (memId)
+       PlacementInfo placeInfoCopy = outSubPiece.placement;
+@@ -3052,6 +3327,9 @@ void DcgFE::insertSubPieces(STCDPOpLx* op, PieceInfo& inpPiece,
+             op->dtTable_[inpSubPieceIdx].minCMemID =
+                 outSubPiece.placement.getMemId().at(0);
+         }
++        appendSubStickRangesForOverlap(op, op->dtTable_.at(inpSubPieceIdx),
++                                       inpSubPiece, outSubPiece,
++                                       outSubPiece.placement.getMemId());
+       }
+     }
+   }
+@@ -3441,6 +3719,9 @@ void DcgFE::transformToPcfgSTCDPLxUnrolled(SenPcfg& newPcfg, baseSTCDPOp* op,
+           }
+         }
+     }
++    if (interleave && hasSubStickRanges(op, dtKeys)) {
++      interleave = false;
++    }
+ 
+     // check inpFetch sync
+     bool reqInpFetchSyncToLX = false;
+@@ -3738,6 +4019,7 @@ void DcgFE::transformToPcfgSTCDPLxUnrolled(SenPcfg& newPcfg, baseSTCDPOp* op,
+     }
+ 
+     if (pcfgType == SenComponents::L3SU || pcfgType == SenComponents::L3LU) {
++      checkRingDtCanConsumeSubStickRanges(op, dtKeys, coreID, pcfgType);
+       SenPcfgRingDtNode* newRingDtNode =
+           (SenPcfgRingDtNode*)newPcfg.createPcfgNode(
+               SenPcfgNode::Type::RINGDATATRANSFER);
+@@ -3998,6 +4280,18 @@ void DcgFE::transformToPcfgSTCDPLxUnrolled(SenPcfg& newPcfg, baseSTCDPOp* op,
+         }
+       }
+ 
++      auto* localSubStickNode = createLocalSubStickLe128NodeForRingDt(
++          newPcfg, op, dtKeys, coreID, pcfgType, idx, newRingDtNode);
++      if (localSubStickNode != nullptr)
++        disableRingDtBurstForLocalSubStick(newRingDtNode);
++      DT_CHECK_MSG(
++          localSubStickNode == nullptr || !interleave,
++          "Sub-stick local LE128 prototype does not support interleaved "
++          "ring-DT lowering yet.");
++      if (pcfgType == SenComponents::L3SU && localSubStickNode != nullptr) {
++        appendPcfgNode(lastTopNodeInner, localSubStickNode);
++      }
++
+       if (interleave) {
+         // hook in NodeGraph
+         lastTopNodeInner->next.push_back(newRingDtNode);
+@@ -4123,6 +4417,9 @@ void DcgFE::transformToPcfgSTCDPLxUnrolled(SenPcfg& newPcfg, baseSTCDPOp* op,
+           newRingDtNode->addrSpan = addrSpan;
+         }
+       }
++      if (pcfgType == SenComponents::L3LU && localSubStickNode != nullptr) {
++        appendPcfgNode(lastTopNodeInner, localSubStickNode);
++      }
+     } else {
+       DT_CHECK(0);
+     }
+@@ -4335,6 +4632,47 @@ DcgFE::clusterDtKeysUsingInnerLOsPartialUnRoll(
+ }
+ 
+ void DcgFE::computeInnerLoopCollapseFactor(baseSTCDPOp* op) {
++  const bool debugSubstick =
++      std::getenv("DXP_DEBUG_STCDP_SUBSTICK") != nullptr;
++  auto printSubstickDebug = [&](const std::string& side, int spIdx,
++                                const SliceInfo& sp,
++                                const std::vector<std::string>& loopOrder,
++                                const std::string& dimNameOuter,
++                                int stickDim) {
++    if (!debugSubstick) return;
++    std::cerr << "[stcdp-substick] side=" << side << " spIdx=" << spIdx
++              << " dim=" << dimNameOuter << " size="
++              << sp.dimToSize_.at(dimNameOuter) << " stickDim=" << stickDim
++              << " loopOrder=";
++    for (const auto& dim : loopOrder) {
++      std::cerr << dim << ",";
++    }
++    std::cerr << " start={";
++    for (const auto& kv : sp.dimToStartCordinate) {
++      std::cerr << kv.first << ":" << kv.second << ",";
++    }
++    std::cerr << "} size={";
++    for (const auto& kv : sp.dimToSize_) {
++      std::cerr << kv.first << ":" << kv.second << ",";
++    }
++    std::cerr << "} big={";
++    for (const auto& kv : sp.bigDimToSize_) {
++      std::cerr << kv.first << ":" << kv.second << ",";
++    }
++    std::cerr << "} memIds={";
++    for (const auto memId : sp.placement.getMemId()) {
++      std::cerr << memId << ",";
++    }
++    std::cerr << "} addrs={";
++    for (const auto& addrVec : sp.placement.StartAddr().getAllData()) {
++      std::cerr << "[";
++      for (const auto addr : addrVec) {
++        std::cerr << addr << ",";
++      }
++      std::cerr << "]";
++    }
++    std::cerr << "}" << std::endl;
++  };
+   for (auto& dtEntry : op->dtTable_) {
+     int minCollapseFac = 1;
+     bool doesLoopOrderChanges = false;
+@@ -4371,8 +4709,21 @@ void DcgFE::computeInnerLoopCollapseFactor(baseSTCDPOp* op) {
+               DCGUtils::isValPresent(op->inpLds->stickDimOrder_, dimNameOuter)
+                   ? op->inpLds->dimToStickSize_.at(dimNameOuter)
+                   : 1;
+-          DT_CHECK(op->inpSP_.at(inpSPIdx).dimToSize_.at(dimNameOuter) >=
+-                   stickDim);
++          if (op->inpSP_.at(inpSPIdx).dimToSize_.at(dimNameOuter) <
++              stickDim) {
++            printSubstickDebug("input", inpSPIdx, op->inpSP_.at(inpSPIdx),
++                               dtEntry.second.loopOrder, dimNameOuter,
++                               stickDim);
++            const auto* stcdpOp = static_cast<const STCDPOpLx*>(op);
++            DT_CHECK_MSG(
++                hasExplicitSubStickRangeForSide(stcdpOp, dtEntry.second,
++                                                op->inpSP_.at(inpSPIdx),
++                                                dimNameOuter, true),
++                "STCDPOpLx input sub-stick overlap lacks explicit range "
++                    "metadata for dtKey=" + std::to_string(dtEntry.first) +
++                    " dim=" + dimNameOuter);
++            break;
++          }
+           if (op->inpSP_.at(inpSPIdx).dimToSize_.at(dimNameOuter) == stickDim)
+             minCollapseFac++;
+           else
+@@ -4430,8 +4781,21 @@ void DcgFE::computeInnerLoopCollapseFactor(baseSTCDPOp* op) {
+                 DCGUtils::isValPresent(op->outLds->stickDimOrder_, dimNameOuter)
+                     ? op->outLds->dimToStickSize_.at(dimNameOuter)
+                     : 1;
+-            DT_CHECK(op->outSP_.at(outSPIdx).dimToSize_.at(dimNameOuter) >=
+-                     stickDim);
++            if (op->outSP_.at(outSPIdx).dimToSize_.at(dimNameOuter) <
++                stickDim) {
++              printSubstickDebug("output", outSPIdx, op->outSP_.at(outSPIdx),
++                                 dtEntry.second.loopOrder, dimNameOuter,
++                                 stickDim);
++              const auto* stcdpOp = static_cast<const STCDPOpLx*>(op);
++              DT_CHECK_MSG(
++                  hasExplicitSubStickRangeForSide(stcdpOp, dtEntry.second,
++                                                  op->outSP_.at(outSPIdx),
++                                                  dimNameOuter, false),
++                  "STCDPOpLx output sub-stick overlap lacks explicit range "
++                      "metadata for dtKey=" + std::to_string(dtEntry.first) +
++                      " dim=" + dimNameOuter);
++              break;
++            }
+             if (op->outSP_.at(outSPIdx).dimToSize_.at(dimNameOuter) == stickDim)
+               currCollapseFac++;
+             else

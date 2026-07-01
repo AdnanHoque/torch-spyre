@@ -1,0 +1,61 @@
+   185	  const std::string transferDim = ranges.front().transferDim;
+   186	  DT_CHECK_MSG(lds->dimToStickSize_.count(transferDim) != 0,
+   187	               "Sub-stick local LE128 lowering requires a stick dimension.");
+   188	  const int stickSize = lds->dimToStickSize_.at(transferDim);
+   189	
+   190	  for (const auto& range : ranges) {
+   191	    DT_CHECK_MSG(range.transferDim == transferDim,
+   192	                 "Sub-stick local LE128 prototype only supports one transfer "
+   193	                 "dimension per ring-DT node.");
+   194	    DT_CHECK(range.elementCount > 0);
+   195	    DT_CHECK(range.srcIntraStickOffset >= 0);
+   196	    DT_CHECK(range.dstIntraStickOffset >= 0);
+   197	    DT_CHECK(range.srcIntraStickOffset + range.elementCount <= stickSize);
+   198	    DT_CHECK(range.dstIntraStickOffset + range.elementCount <= stickSize);
+   199	  }
+   200	
+   201	  std::vector<SubStickRangeInfo> materializedRanges;
+   202	  for (const auto& range : ranges) {
+   203	    // The local helper is anchored to one LX address on both sides. Equal
+   204	    // intra-stick offsets are already in place, so emitting an L3 load/store
+   205	    // chain only bloats Agen lowering.
+   206	    if (range.srcIntraStickOffset == range.dstIntraStickOffset) continue;
+   207	    materializedRanges.push_back(range);
+   208	  }
+   209	  if (materializedRanges.empty()) return nullptr;
+   210	
+   211	  auto* localNode = static_cast<SenPcfgLE128BTransferNode*>(
+   212	      pcfg.createPcfgNode(SenPcfgNode::Type::LE128BTRANSFER));
+   213	  const std::string phase =
+   214	      pcfgType == SenComponents::L3SU ? "localAssembleBeforeRing"
+   215	                                      : "localExtractAfterRing";
+   216	  localNode->name = "c" + std::to_string(coreID) + "-" +
+   217	                    pcfg.senComponentsToString.at(pcfgType) + "-" + phase +
+   218	                    "-" + std::to_string(outerLoopIdx) + "-" +
+   219	                    std::to_string(op->uniqueID);
+   220	  localNode->coreletId = -1;
+   221	  localNode->dtInfo = nullptr;
+   222	  localNode->dsInfo = nullptr;
+   223	  localNode->srcDest = {SenComponents::LX, SenComponents::LX};
+   224	  localNode->dimLayoutOrder = ringNode->dimLayoutOrder;
+   225	  localNode->myBigDimSize = ringNode->myBigDimSize;
+   226	  localNode->myLitDimSize = ringNode->myLitDimSize;
+   227	  localNode->bigStAddrOffsets = ringNode->bigStAddrOffsets;
+   228	  localNode->isPartStick = true;
+   229	  localNode->useBurst = false;
+   230	  localNode->wordLength = wordLength;
+   231	  localNode->stickSize = stickSize;
+   232	  cloneAnchorAddrToLocalLe128Node(
+   233	      localNode, ringNode, pcfgType == SenComponents::L3SU);
+   234	
+   235	  for (const auto& range : materializedRanges) {
+   236	    const int srcByteOffset = range.srcIntraStickOffset * wordLength;
+   237	    const int dstByteOffset = range.dstIntraStickOffset * wordLength;
+   238	    const int bytes = range.elementCount * wordLength;
+   239	    localNode->byteOffsetTr.emplace_back(bytes, srcByteOffset, dstByteOffset,
+   240	                                         true, true);
+   241	  }
+   242	  return localNode;
+   243	}
+   244	
+   245	static void appendPcfgNode(SenPcfgNode*& lastTopNodeInner,

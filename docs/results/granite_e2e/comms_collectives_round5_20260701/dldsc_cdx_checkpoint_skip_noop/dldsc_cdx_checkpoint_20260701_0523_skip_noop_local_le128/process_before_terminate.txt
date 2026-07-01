@@ -1,0 +1,2 @@
+    PID    PPID STAT     ELAPSED %CPU %MEM COMMAND
+  84548   84547 R          03:16 98.5  0.0 /home/adnan-cdx/codex-isolated/dldsc_collectives_stage_local_20260701_015300/deeptools/build-stage-local-safe/dxp/dxp_standalone --bundle -d /home/adnan-cdx/codex-isolated/comms_collectives_stcdp_agent_20260630_190747/runs/stcdp_agent_validation_20260630_191625/dxp_replay_fresh_attention_subpiece_20260630_193832/bundle_input
