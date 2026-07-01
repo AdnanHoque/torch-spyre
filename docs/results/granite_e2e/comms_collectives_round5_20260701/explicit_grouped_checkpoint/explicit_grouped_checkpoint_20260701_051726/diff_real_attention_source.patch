@@ -1,0 +1,24 @@
+diff --git a/dcc/src/Stitcher/ModuleStitcher.cpp b/dcc/src/Stitcher/ModuleStitcher.cpp
+index 9e511b4ec..3f8dd05ca 100644
+--- a/dcc/src/Stitcher/ModuleStitcher.cpp
++++ b/dcc/src/Stitcher/ModuleStitcher.cpp
+@@ -258,13 +258,18 @@ void ModuleStitcher::fillStitchMapWithFunction(
+         DT_CHECK_MSG(idx != -1, "no program step uses DLDSC");
+       } else {
+         // If the module_idx is not -1, it represents the index to look for
+-        // in the coreid_to_module_idx entry for the core.
++        // in the coreid_to_module_idx entry for the core. A data module can
++        // contain units for cores where that module is not scheduled; leave
++        // those units out of the stitch map for that core.
++        bool found_module_idx = false;
+         for (int i = 0; i < coreid_to_module_idx[coreId].size(); ++i) {
+           if (coreid_to_module_idx[coreId][i] == idx) {
+             idx = i;
++            found_module_idx = true;
+             break;
+           }
+         }
++        if (!found_module_idx) continue;
+       }
+ 
+       // If there is already an entry in the map, no new list needs to be

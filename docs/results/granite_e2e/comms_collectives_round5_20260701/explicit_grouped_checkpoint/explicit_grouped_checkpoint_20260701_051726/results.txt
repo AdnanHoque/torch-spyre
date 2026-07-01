@@ -1,0 +1,36 @@
+# Results
+
+checkpoint=/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/explicit_grouped_checkpoint_20260701_051726
+original_run=/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/explicit_range_grouped_sdsc10_20260701_024349
+runtime_source=/home/adnan/codex-isolated/explicit_range_agent_20260630/deeptools
+workspace_source=/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/deeptools
+
+rebuild_clean_command:
+cd /home/adnan/codex-isolated/explicit_range_agent_20260630/deeptools; /usr/bin/ninja -C build-explicit-range-agent-nollvm dxp/dxp_standalone -j16
+
+rebuild_clean_result:
+5 ninja steps completed, final target dxp/dxp_standalone linked.
+
+replay_clean_command:
+DEEPTOOLS_PATH=/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/deeptools DEEPTOOLS_EXPLICIT_LX_RANGE_PROTO=1 /home/adnan/codex-isolated/explicit_range_agent_20260630/deeptools/build-explicit-range-agent-nollvm/dxp/dxp_standalone --bundle -d /home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/explicit_range_grouped_sdsc10_20260701_024349/bundle_input
+
+replay_clean_result:
+rc=0
+stdout_lines=1
+stderr_lines=0
+stdout_tail=[WARN] dxp_standalone --bundle option is deprecated (always on)
+
+advanced_past_stitcher_error=yes
+pushed=no
+
+workspace_rebuild_clean_command:
+cd /home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/deeptools; /usr/bin/ninja -C build-explicit-range-agent-nollvm dxp/dxp_standalone -j16
+
+workspace_rebuild_clean_result:
+5 ninja steps completed, final target dxp/dxp_standalone linked.
+
+workspace_replay_clean_result:
+rc=0
+stdout_lines=1
+stderr_lines=0
+stdout_tail=[WARN] dxp_standalone --bundle option is deprecated (always on)

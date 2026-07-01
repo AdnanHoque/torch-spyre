@@ -137,8 +137,47 @@ a simpler lowering shape.
 
 ## Explicit Grouped-Range Path
 
-The explicit grouped-remap lane is still pending a checkpoint.  Last known
-state from round3:
+Artifact:
+
+```text
+explicit_grouped_checkpoint/explicit_grouped_checkpoint_20260701_051726/
+```
+
+What advanced:
+
+- The grouped explicit-remap path advanced past the DCC stitcher failure.
+- The saved grouped `sdsc_10` bundle now replays with `rc=0` after a narrow
+  `ModuleStitcher.cpp` fix.
+- Both the runtime-linked tree and the workspace tree replay cleanly:
+
+```text
+replay_clean_patch/dxp_replay.result           rc=0
+replay_workspace_clean_patch/dxp_replay.result rc=0
+```
+
+Root cause:
+
+- This was schedule-step/unit reuse in mixed DL/data DCC stitching.
+- The grouped explicit STCDP-LX data op produced two dataflow modules for the
+  same `10_batchmatmul` SDSC:
+  - the DL-side L3 PCFG module from `sdsc_.pcfgPool_`;
+  - the explicit STCDP-LX data-op module from the grouped remap.
+- For destination-only cores, the schedule contained only the explicit data
+  module. Before the fix, `ModuleStitcher::fillStitchMapWithFunction` could
+  still insert units from an unscheduled data module into the same schedule
+  slot, then collide when the scheduled explicit module was inserted.
+
+Patch shape:
+
+```text
+dcc/src/Stitcher/ModuleStitcher.cpp
+```
+
+For non-DLDSC modules, search the per-core module order. If that module is not
+scheduled for that core, skip its units instead of inserting them at the default
+module index.
+
+The original round3 state before this checkpoint was:
 
 - grouped schema compressed `sdsc_10 Tensor1` from 2,097,152 modeled moves to
   128 grouped rows;
@@ -151,5 +190,6 @@ DtException: unit already set for associated schedule step
 dcc/src/Stitcher/ModuleStitcher.cpp:279
 ```
 
-That path remains useful as a diagnostic carrier, but the compact DLDSC path is
-currently advancing faster toward a production-shaped backend realization.
+That stitcher error is now fixed for the focused grouped-remap replay. The path
+is still a diagnostic carrier, not the preferred production contract, but it is
+now useful again for quickly testing explicit physical movement shapes.
