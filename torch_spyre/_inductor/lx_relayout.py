@@ -34,6 +34,10 @@ from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import ComputedBuffer, Operation
 
 from torch_spyre._inductor import config
+from torch_spyre._inductor.layout_allgather_restickify import (
+    LAYOUT_ALLGATHER_RESTICKIFY,
+    classify_layout_allgather_restickify_sdsc_triplet,  # noqa: F401
+)
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.pass_utils import (
     PerCoreView,
@@ -449,7 +453,10 @@ def get_lx_relayout_classifications(op: Operation) -> dict[str, Any]:
 
 
 def _is_loop_scoped_relayout(plan: dict[str, Any]) -> bool:
-    return plan.get("kind") == "matmul_operand_broadcast" or (
+    return plan.get("kind") in (
+        "matmul_operand_broadcast",
+        LAYOUT_ALLGATHER_RESTICKIFY,
+    ) or (
         plan.get("kind") == "layout_restickify_activation"
         and plan.get("communication_pattern") == LAYOUT_TRANSFORM_THEN_OPERAND_BROADCAST
     )
@@ -631,18 +638,31 @@ def plan_lx_relayouts(
                 realization_strategy = ""
                 requires_staged_realization = False
                 unsupported_reason = ""
+                kind = "layout_restickify_activation"
+                communication_pattern = "layout_transform"
                 if is_matmul_operand:
                     realization_strategy = STAGED_LAYOUT_TRANSFORM_OPERAND_BROADCAST
                     requires_staged_realization = True
+                    communication_pattern = LAYOUT_TRANSFORM_THEN_OPERAND_BROADCAST
                     unsupported_reason = (
                         "computed activation restickify needs staged LX layout "
                         "transform before loop-scoped matmul operand lowering"
                     )
+                    if (
+                        config.lx_planner_relayout_layout_allgather_restickify
+                        and communication_class == COMM_CLASS_ALL_GATHER
+                    ):
+                        kind = LAYOUT_ALLGATHER_RESTICKIFY
+                        communication_pattern = LAYOUT_ALLGATHER_RESTICKIFY
+                        unsupported_reason = (
+                            "layout_allgather_restickify is metadata-only; "
+                            "backend lowering is not implemented"
+                        )
                 plan = LXRelayoutPlan(
                     source_name=dep.name,
                     producer_name=producer.get_name(),
                     consumer_name=consumer.get_name(),
-                    kind="layout_restickify_activation",
+                    kind=kind,
                     producer_core_count=producer_core_count,
                     consumer_core_count=consumer_core_count,
                     producer_core_id_to_device_slice=producer_core_slices,
@@ -651,11 +671,7 @@ def plan_lx_relayouts(
                     read_index=read_index,
                     realized=realize_restickify,
                     communication_class=communication_class,
-                    communication_pattern=(
-                        LAYOUT_TRANSFORM_THEN_OPERAND_BROADCAST
-                        if is_matmul_operand
-                        else "layout_transform"
-                    ),
+                    communication_pattern=communication_pattern,
                     realization_strategy=realization_strategy,
                     requires_staged_realization=requires_staged_realization,
                     unsupported_reason=unsupported_reason,

@@ -71,6 +71,16 @@ lx_planner_relayout_restickify_outputs: bool = (
     os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS", "0") == "1"
 )
 
+# Metadata-only classifier for the flash activation edge
+# pointwise -> ReStickifyOpHBM -> batchmatmul KERNEL where the restickified
+# operand needs layout-aware grouped all-gather before backend lowering exists.
+lx_planner_relayout_layout_allgather_restickify: bool = (
+    os.environ.get(
+        "SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY", "0"
+    )
+    == "1"
+)
+
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
