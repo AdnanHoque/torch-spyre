@@ -36,3 +36,52 @@ Artifacts:
 - `layout_restickify_gap/flash_layout_restickify_gap.md`
 - `layout_restickify_gap/representative_edge.json`
 - `layout_restickify_gap/sdsc_triplet_snippets.json`
+
+## DLDSC Path Assessment
+
+Artifact directory:
+
+```text
+dldsc_layout_restickify/
+```
+
+CDX conclusion: Deeptools master / PR4408 cannot express this flash edge from plain DLDSC tensor-vs-compute distribution metadata alone. The right long-term direction is still metadata-driven backend-generated movement, but the serialized contract has to include the layout/restickify edge explicitly:
+
+- producer and consumer layouts;
+- source and destination stick dimensions;
+- producer and consumer core mappings;
+- dimension rename between pointwise output and BMM KERNEL operand;
+- replication/all-gather policy;
+- fail-closed behavior when backend cannot realize the handoff.
+
+Key files:
+
+- `dldsc_layout_restickify/analysis.md`
+- `dldsc_layout_restickify/deeptools.diff`
+- `dldsc_layout_restickify/focused_refs.txt`
+- `dldsc_layout_restickify/deeptools_status_short.txt`
+
+## Explicit/Grouped-Remap Path Assessment
+
+Artifact directory:
+
+```text
+explicit_layout_restickify/
+```
+
+CLC conclusion: grouped explicit physical movement can express the communication shape in principle, but the current carrier schema is not sufficient. It needs source/destination layout views, dimension rename, replication groups, and consumer operand lifetime. A proposed schema was written, but no semantic mutation of the latest flash SDSCs was attempted because that would invent backend semantics before the contract is agreed.
+
+Tiny executable carrier result:
+
+- normal DXP replay of the focused bundle: `rc=0`;
+- senulator replay: `rc=134`;
+- first senulator blocker: `ProgCorrectionScatter0 op=ScatterOpHBM ... pieceSize=1 layoutSize=0`.
+
+Key files:
+
+- `explicit_layout_restickify/analysis.md`
+- `explicit_layout_restickify/results.txt`
+- `explicit_layout_restickify/metadata/latest_flash_proposed_explicit_schema.json`
+- `explicit_layout_restickify/replay_senulator/explicit_range_failure_dump.txt`
+- `explicit_layout_restickify/diffs/deeptools_workspace.diff`
+- `explicit_layout_restickify/diffs/deeptools_status.txt`

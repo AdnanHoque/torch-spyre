@@ -1,0 +1,87 @@
+{
+  "backendRequirements": [
+    "resolve producer LX addresses for Tensor2_lx OUTPUT chunks",
+    "perform layout-aware restickify into batchmatmul KERNEL view",
+    "support grouped many-source-to-many-destination replication/all-gather",
+    "feed PT batchmatmul KERNEL operand from LX without HBM materialization"
+  ],
+  "classification": "layout-aware on-chip restickify plus grouped all-gather/broadcast into batchmatmul KERNEL; not scatter-only and not capacity/streaming",
+  "destinationView": {
+    "component": "lx",
+    "coreMap": "x=core_id%4, mb=floor(core_id/4)%8, out=0, in=0",
+    "layoutDimOrder": [
+      "out",
+      "in",
+      "x"
+    ],
+    "operand": "batchmatmul.KERNEL",
+    "perCoreTile": {
+      "in": 128,
+      "mb": 128,
+      "out": 4096,
+      "x": 1
+    },
+    "shapeDims": {
+      "in": 128,
+      "mb": 1024,
+      "out": 4096,
+      "x": 4
+    },
+    "stickDimOrder": [
+      "out"
+    ],
+    "workSlices": {
+      "in": 1,
+      "mb": 8,
+      "out": 1,
+      "x": 4
+    }
+  },
+  "dimensionRename": {
+    "restickify.mb": "batchmatmul.x",
+    "restickify.out": "batchmatmul.in",
+    "restickify.x": "batchmatmul.out"
+  },
+  "edge": "sdsc_1.json:mul -> sdsc_2.json:ReStickifyOpHBM -> sdsc_3.json:batchmatmul KERNEL",
+  "grouping": {
+    "consumerCoresPerGroup": 8,
+    "estimatedChunkBytes": 131072,
+    "estimatedLogicalTransfers": 256,
+    "groups": 4,
+    "logicalTransfers": "for each bmm.x/restickify.mb group, replicate eight producer bmm.out chunks to all eight consumer mb-slice cores",
+    "producerCoresPerGroup": 8
+  },
+  "notReplayableReason": "current grouped-sdsc10 carrier only represents strided substicks inside a synthetic STCDPOpLx shell and lacks producer/consumer layout views, dimension rename, and many-to-many replication semantics",
+  "replayableWithCurrentCarrier": false,
+  "schema": "layout-aware-grouped-lx-remap-proposal",
+  "schemaVersion": 2,
+  "source": "latest test_flash.py representative edge; not replayable by current backend",
+  "sourceView": {
+    "component": "lx",
+    "coreMap": "mb=core_id%4, x=floor(core_id/4)%8, out=0",
+    "layout": "OUTPUT",
+    "layoutDimOrder": [
+      "out",
+      "x",
+      "mb"
+    ],
+    "perCoreTile": {
+      "mb": 1,
+      "out": 128,
+      "x": 512
+    },
+    "shapeDims": {
+      "mb": 4,
+      "out": 128,
+      "x": 4096
+    },
+    "stickDimOrder": [
+      "out"
+    ],
+    "workSlices": {
+      "mb": 4,
+      "out": 1,
+      "x": 8
+    }
+  }
+}

@@ -1,0 +1,776 @@
+diff --git a/dcc/src/Stitcher/ModuleStitcher.cpp b/dcc/src/Stitcher/ModuleStitcher.cpp
+index 9e511b4ec..3f8dd05ca 100644
+--- a/dcc/src/Stitcher/ModuleStitcher.cpp
++++ b/dcc/src/Stitcher/ModuleStitcher.cpp
+@@ -258,13 +258,18 @@ void ModuleStitcher::fillStitchMapWithFunction(
+         DT_CHECK_MSG(idx != -1, "no program step uses DLDSC");
+       } else {
+         // If the module_idx is not -1, it represents the index to look for
+-        // in the coreid_to_module_idx entry for the core.
++        // in the coreid_to_module_idx entry for the core. A data module can
++        // contain units for cores where that module is not scheduled; leave
++        // those units out of the stitch map for that core.
++        bool found_module_idx = false;
+         for (int i = 0; i < coreid_to_module_idx[coreId].size(); ++i) {
+           if (coreid_to_module_idx[coreId][i] == idx) {
+             idx = i;
++            found_module_idx = true;
+             break;
+           }
+         }
++        if (!found_module_idx) continue;
+       }
+ 
+       // If there is already an entry in the map, no new list needs to be
+diff --git a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+index f0640651f..6d285e0f7 100644
+--- a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
++++ b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+@@ -4339,9 +4339,15 @@ void DcgFE::computeInnerLoopCollapseFactor(baseSTCDPOp* op) {
+               DCGUtils::isValPresent(op->inpLds->stickDimOrder_, dimNameOuter)
+                   ? op->inpLds->dimToStickSize_.at(dimNameOuter)
+                   : 1;
+-          DT_CHECK(op->inpSP_.at(inpSPIdx).dimToSize_.at(dimNameOuter) >=
+-                   stickDim);
+-          if (op->inpSP_.at(inpSPIdx).dimToSize_.at(dimNameOuter) == stickDim)
++          const auto dimSize =
++              op->inpSP_.at(inpSPIdx).dimToSize_.at(dimNameOuter);
++          if (dimSize < stickDim) {
++            DT_CHECK(op->name == OpFuncs::STCDPOpLx &&
++                     static_cast<STCDPOpLx*>(op)
++                         ->explicitLxRangeProtoImported);
++            break;
++          }
++          if (dimSize == stickDim)
+             minCollapseFac++;
+           else
+             break;
+@@ -4398,9 +4404,15 @@ void DcgFE::computeInnerLoopCollapseFactor(baseSTCDPOp* op) {
+                 DCGUtils::isValPresent(op->outLds->stickDimOrder_, dimNameOuter)
+                     ? op->outLds->dimToStickSize_.at(dimNameOuter)
+                     : 1;
+-            DT_CHECK(op->outSP_.at(outSPIdx).dimToSize_.at(dimNameOuter) >=
+-                     stickDim);
+-            if (op->outSP_.at(outSPIdx).dimToSize_.at(dimNameOuter) == stickDim)
++            const auto dimSize =
++                op->outSP_.at(outSPIdx).dimToSize_.at(dimNameOuter);
++            if (dimSize < stickDim) {
++              DT_CHECK(op->name == OpFuncs::STCDPOpLx &&
++                       static_cast<STCDPOpLx*>(op)
++                           ->explicitLxRangeProtoImported);
++              break;
++            }
++            if (dimSize == stickDim)
+               currCollapseFac++;
+             else
+               break;
+@@ -6442,4 +6454,4 @@ void DcgFE::fillAddr(FoldManager<int64_t>& lhs,
+       return r[idx];
+     });
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/dcg/dcg_fe/transfer_compute/transfer_compute.cpp b/dcg/dcg_fe/transfer_compute/transfer_compute.cpp
+index d248500bc..b685aedd1 100644
+--- a/dcg/dcg_fe/transfer_compute/transfer_compute.cpp
++++ b/dcg/dcg_fe/transfer_compute/transfer_compute.cpp
+@@ -10,6 +10,185 @@
+ 
+ #include <dcg/dcg_fe/dcg_frontend.h>
+ 
++#include <cstdlib>
++#include <fstream>
++
++namespace {
++
++SliceInfo buildExplicitLxRangeSlice(
++    const STCDPOpLx::ExplicitLxRangeEndpoint& endpoint, const LdsInfo* lds) {
++  SliceInfo slice;
++  for (const auto& size : endpoint.logicalSizes) {
++    const auto& dim = size.first;
++    auto start = endpoint.logicalStarts.find(dim);
++    DT_CHECK_MSG(start != endpoint.logicalStarts.end(),
++                 "explicit lx range missing logical start for dim " + dim);
++    DT_CHECK_MSG(size.second > 0,
++                 "explicit lx range logical size must be positive for dim " +
++                     dim);
++    slice.dimToStartCordinate[dim] = start->second;
++    slice.dimToSize_[dim] = size.second;
++    if (lds != nullptr && lds->dimToLayoutSize_.count(dim)) {
++      slice.bigDimToSize_[dim] = lds->dimToLayoutSize_.at(dim);
++    } else {
++      slice.bigDimToSize_[dim] = size.second;
++    }
++  }
++
++  slice.placement.setType(SenComponents::LX);
++  slice.placement.insertMemId(endpoint.core);
++  slice.placement.insertStAddr(endpoint.lxAddress);
++  return slice;
++}
++
++PieceInfo buildExplicitLxRangePiece(const SliceInfo& slice,
++                                    const std::string& key) {
++  PieceInfo piece;
++  piece.key_ = key;
++  piece.dimToStartCordinate = slice.dimToStartCordinate;
++  piece.dimToSize_ = slice.dimToSize_;
++  for (const auto& size : slice.dimToSize_) {
++    piece.validGap_[size.first].push_back({size.second, 0});
++  }
++  piece.placement[slice.placement.Type()] = slice.placement;
++  return piece;
++}
++
++void materializeExplicitLxRangeProto(STCDPOpLx* op, DataOpDsc& dataOpDsc) {
++  DT_CHECK_MSG(op != nullptr, "explicit lx range materialization needs op");
++  DT_CHECK_MSG(!op->explicitLxRangeMovements.empty(),
++               "explicit lx range materialization needs movements");
++  DT_CHECK_MSG(op->explicitLxRangeMovements.size() <= 4096,
++               "explicit lx range prototype supports at most 4096 movements");
++  LdsInfo* inputLds = op->inpLds;
++  LdsInfo* outputLds = op->outLds;
++  if (inputLds == nullptr || outputLds == nullptr) {
++    DT_CHECK_MSG(dataOpDsc.labeledDs_.size() >= 2,
++                 "explicit lx range data-op needs input and output LDS");
++    inputLds = &dataOpDsc.labeledDs_.at(0);
++    outputLds = &dataOpDsc.labeledDs_.at(1);
++  }
++
++  op->inpSP_.clear();
++  op->outSP_.clear();
++  op->dtTable_.clear();
++  op->coreIDtoDtKey_L3SU.clear();
++  op->coreIDtoDtKey_L3LU.clear();
++  op->coreIDtoDtKey_LX.clear();
++  inputLds->pieces_.clear();
++  outputLds->pieces_.clear();
++
++  for (size_t idx = 0; idx < op->explicitLxRangeMovements.size(); idx++) {
++    const auto& movement = op->explicitLxRangeMovements.at(idx);
++    DT_CHECK_MSG(movement.count > 0,
++                 "explicit lx range count must be positive");
++
++    const auto inputSlice = buildExplicitLxRangeSlice(movement.source, inputLds);
++    const auto outputSlice =
++        buildExplicitLxRangeSlice(movement.destination, outputLds);
++    op->inpSP_.push_back(inputSlice);
++    op->outSP_.push_back(outputSlice);
++
++    const auto pieceKey = "explicit_range_" + std::to_string(idx);
++    inputLds->pieces_[pieceKey] = buildExplicitLxRangePiece(inputSlice, pieceKey);
++    outputLds->pieces_[pieceKey] =
++        buildExplicitLxRangePiece(outputSlice, pieceKey);
++
++    transferInfo transfer;
++    transfer.pIDX = static_cast<int>(idx);
++    transfer.pMemID = movement.source.core;
++    transfer.cIDXs.push_back(static_cast<int>(idx));
++    transfer.cMemIDs.push_back(movement.destination.core);
++    transfer.minCMemID = movement.destination.core;
++    transfer.trVolume = movement.bytesPerMove;
++    transfer.numTransactions_ = movement.count;
++    transfer.useBurst = false;
++    op->dtTable_[static_cast<int>(idx)] = transfer;
++  }
++}
++
++void dumpExplicitLxRangeDiagnostics(STCDPOpLx* op, const DataOpDsc& dataOpDsc) {
++  const char* dumpPath =
++      std::getenv("DEEPTOOLS_EXPLICIT_LX_RANGE_PROTO_DUMP");
++  if (dumpPath == nullptr || dumpPath[0] == '\0') return;
++
++  std::ofstream out(dumpPath, std::ios::app);
++  DT_CHECK_MSG(out.is_open(),
++               "failed to open explicit lx range diagnostic dump");
++
++  out << "dataOpDsc: " << dataOpDsc.dscName_ << "\n";
++  out << "parsedRangeCount: " << op->explicitLxRangeMovements.size() << "\n";
++  for (const auto& movement : op->explicitLxRangeMovements) {
++    out << "range[" << movement.rangeIndex << "]"
++        << " moveIndex=" << movement.moveIndex
++        << " bytesPerMove=" << movement.bytesPerMove
++        << " count=" << movement.count
++        << " sourceStrideBytes=" << movement.sourceStrideBytes
++        << " destinationStrideBytes=" << movement.destinationStrideBytes
++        << " srcCore=" << movement.source.core
++        << " srcLx=" << movement.source.lxAddress
++        << " dstCore=" << movement.destination.core
++        << " dstLx=" << movement.destination.lxAddress << "\n";
++    out << "  logicalSizes";
++    for (const auto& size : movement.source.logicalSizes) {
++      out << " " << size.first << "=" << size.second;
++    }
++    out << "\n";
++  }
++
++  out << "dtTableCount: " << op->dtTable_.size() << "\n";
++  for (const auto& tableEntry : op->dtTable_) {
++    const auto& transfer = tableEntry.second;
++    out << "dt[" << tableEntry.first << "]"
++        << " pIDX=" << transfer.pIDX << " pMemID=" << transfer.pMemID
++        << " minCMemID=" << transfer.minCMemID
++        << " trVolume=" << transfer.trVolume
++        << " numTransactions=" << transfer.numTransactions_
++        << " useBurst=" << transfer.useBurst << " cIDXs=";
++    for (auto cidx : transfer.cIDXs) out << cidx << ",";
++    out << " cMemIDs=";
++    for (auto cmem : transfer.cMemIDs) out << cmem << ",";
++    out << "\n";
++  }
++
++  auto dumpCoreMap = [&](const char* name,
++                         const std::map<int, std::vector<int>>& coreMap) {
++    out << name << "\n";
++    for (const auto& coreEntry : coreMap) {
++      out << "  core " << coreEntry.first << ":";
++      for (auto dtKey : coreEntry.second) out << " " << dtKey;
++      out << "\n";
++    }
++  };
++  dumpCoreMap("coreIDtoDtKey_L3SU", op->coreIDtoDtKey_L3SU);
++  dumpCoreMap("coreIDtoDtKey_L3LU", op->coreIDtoDtKey_L3LU);
++  dumpCoreMap("coreIDtoDtKey_LX", op->coreIDtoDtKey_LX);
++  out << "---\n";
++}
++
++void dumpExplicitRangePieceVerificationFailure(const DataOpDsc& dataOpDsc,
++                                               const LdsInfo& lds,
++                                               const std::string& pieceKey,
++                                               const std::string& dim,
++                                               double pieceSize,
++                                               double layoutSize) {
++  const char* dumpPath =
++      std::getenv("DEEPTOOLS_EXPLICIT_LX_RANGE_PROTO_DUMP");
++  if (dumpPath == nullptr || dumpPath[0] == 0) return;
++
++  std::ofstream out(dumpPath, std::ios::app);
++  if (!out.is_open()) return;
++
++  out << "pieceVerificationFailure"
++      << " dataOpDsc=" << dataOpDsc.dscName_
++      << " op=" << EnumsConversion::opFuncsToString.at(dataOpDsc.op->name)
++      << " lds=" << lds.ldsName_ << " piece=" << pieceKey
++      << " dim=" << dim << " pieceSize=" << pieceSize
++      << " layoutSize=" << layoutSize << "\n---\n";
++}
++
++}  // namespace
++
+ void DcgFE::computeTranferforDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+                                     int c /*=0*/) {
+   DT_CHECK(!isInpFetchNeigh_);
+@@ -17,6 +196,12 @@ void DcgFE::computeTranferforDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+ 
+   // initilaize Op
+   initializeDataDscOp(myDataOpDsc, c);
++  if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx) {
++    auto* stcdpLx = static_cast<STCDPOpLx*>(myDataOpDsc.op);
++    if (stcdpLx->explicitLxRangeProtoImported) {
++      materializeExplicitLxRangeProto(stcdpLx, myDataOpDsc);
++    }
++  }
+   verificationCheckDataOpDSC(myDataOpDsc);
+ 
+   if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx ||
+@@ -31,7 +216,13 @@ void DcgFE::computeTranferforDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+     }
+     if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx ||
+         myDataOpDsc.op->name == OpFuncs::ResizeNNLX) {
+-      createSubPieces((STCDPOpLx*)myDataOpDsc.op);
++      auto* stcdpLx = (STCDPOpLx*)myDataOpDsc.op;
++      if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx &&
++          stcdpLx->explicitLxRangeProtoImported) {
++        materializeExplicitLxRangeProto(stcdpLx, myDataOpDsc);
++      } else {
++        createSubPieces(stcdpLx);
++      }
+ 
+       if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx) {
+         eliminateRedundantTransaction((STCDPOpLx*)myDataOpDsc.op);
+@@ -56,6 +247,12 @@ void DcgFE::computeTranferforDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+       // final act
+       mapDtEntryToSenComponent((STCDPOpLx*)myDataOpDsc.op);
+ 
++      if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx) {
++        auto* stcdpLx = (STCDPOpLx*)myDataOpDsc.op;
++        if (stcdpLx->explicitLxRangeProtoImported)
++          dumpExplicitLxRangeDiagnostics(stcdpLx, myDataOpDsc);
++      }
++
+       // reorder subpieces in consumer/producer for segCoreGrps
+       // tabulate interleaving subpieces
+       if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx)
+@@ -78,7 +275,8 @@ void DcgFE::computeTranferforDataOp(SuperDsc& mySDsc, DataOpDsc& myDataOpDsc,
+         finalizeBurstInfo((STCDPOpLx*)myDataOpDsc.op);
+ 
+       // check if out pieces are covered using sub-pieces..
+-      if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx)
++      if (myDataOpDsc.op->name == OpFuncs::STCDPOpLx &&
++          !((STCDPOpLx*)myDataOpDsc.op)->explicitLxRangeProtoImported)
+         checkSubPieceCoverage((STCDPOpLx*)myDataOpDsc.op);
+ 
+       // check if we can use unicast
+@@ -431,8 +629,15 @@ void DcgFE::verificationCheckDataOpDSC(DataOpDsc& myDataOpDsc) {
+   if (dscGlobal->dtVersion >= 2) {
+     for (auto& lds : myDataOpDsc.labeledDs_) {
+       for (auto& pkv : lds.pieces_) {
+-        for (auto& skv : pkv.second.dimToSize_)
+-          DT_CHECK(skv.second <= lds.dimToLayoutSize_.at(skv.first));
++        for (auto& skv : pkv.second.dimToSize_) {
++          const auto layoutSize = lds.dimToLayoutSize_.at(skv.first);
++          if (skv.second > layoutSize) {
++            dumpExplicitRangePieceVerificationFailure(
++                myDataOpDsc, lds, pkv.first, skv.first, skv.second,
++                layoutSize);
++          }
++          DT_CHECK(skv.second <= layoutSize);
++        }
+       }
+     }
+   }
+diff --git a/dsc/dataOpDsc.cpp b/dsc/dataOpDsc.cpp
+index 4389b1404..885391391 100644
+--- a/dsc/dataOpDsc.cpp
++++ b/dsc/dataOpDsc.cpp
+@@ -5,6 +5,8 @@
+ 
+ #include "dataOpDsc.h"
+ 
++#include <cstdlib>
++
+ #include <dsc/dscdefn.h>
+ #include <util/print_utils.h>
+ 
+@@ -12,6 +14,157 @@
+ 
+ #include "util/dt_exception.hpp"
+ 
++namespace {
++
++bool explicitLxRangeProtoEnabled() {
++  const char* value = std::getenv("DEEPTOOLS_EXPLICIT_LX_RANGE_PROTO");
++  if (value == nullptr) return false;
++  std::string normalized(value);
++  return !(normalized.empty() || normalized == "0" || normalized == "false" ||
++           normalized == "FALSE");
++}
++
++int64_t jsonInt64(const json11::Json& value, const std::string& field) {
++  DT_CHECK_MSG(value.is_number(),
++               "explicit lx range field must be numeric: " + field);
++  return static_cast<int64_t>(value.number_value());
++}
++
++std::map<std::string, double> jsonNumberMap(const json11::Json& value,
++                                            const std::string& field) {
++  DT_CHECK_MSG(value.is_object(),
++               "explicit lx range field must be object: " + field);
++  std::map<std::string, double> result;
++  for (const auto& item : value.object_items()) {
++    DT_CHECK_MSG(item.second.is_number(),
++                 "explicit lx range logical field must be numeric: " +
++                     field + "." + item.first);
++    result[item.first] = item.second.number_value();
++  }
++  return result;
++}
++
++json11::Json objectField(const json11::Json& value, const std::string& field) {
++  DT_CHECK_MSG(value.is_object(),
++               "explicit lx range container must be object for field: " +
++                   field);
++  const auto& object = value.object_items();
++  auto it = object.find(field);
++  DT_CHECK_MSG(it != object.end(),
++               "explicit lx range missing required field: " + field);
++  return it->second;
++}
++
++int64_t lxAddressFromEndpoint(const json11::Json& endpoint,
++                              const std::string& prefix) {
++  const auto& object = endpoint.object_items();
++  auto lxAddress = object.find("lxAddress");
++  if (lxAddress != object.end()) {
++    return jsonInt64(lxAddress->second, prefix + ".lxAddress");
++  }
++
++  auto lxByteRange = object.find("lxByteRange");
++  DT_CHECK_MSG(lxByteRange != object.end(),
++               "explicit lx range endpoint missing lxAddress/lxByteRange: " +
++                   prefix);
++  return jsonInt64(objectField(lxByteRange->second, "start"),
++                   prefix + ".lxByteRange.start");
++}
++
++STCDPOpLx::ExplicitLxRangeEndpoint parseExplicitLxRangeEndpoint(
++    const json11::Json& endpoint, const std::string& prefix) {
++  DT_CHECK_MSG(endpoint.is_object(),
++               "explicit lx range endpoint must be object: " + prefix);
++  STCDPOpLx::ExplicitLxRangeEndpoint parsed;
++  parsed.core = jsonInt64(objectField(endpoint, "core"), prefix + ".core");
++  parsed.lxAddress = lxAddressFromEndpoint(endpoint, prefix);
++
++  auto logicalSlice = objectField(endpoint, "logicalSlice");
++  parsed.logicalStarts =
++      jsonNumberMap(objectField(logicalSlice, "starts"),
++                    prefix + ".logicalSlice.starts");
++  parsed.logicalSizes =
++      jsonNumberMap(objectField(logicalSlice, "sizes"),
++                    prefix + ".logicalSlice.sizes");
++  DT_CHECK_MSG(parsed.logicalStarts.size() == parsed.logicalSizes.size(),
++               "explicit lx range logical starts/sizes rank mismatch");
++  return parsed;
++}
++
++void importExplicitLxRangeProto(STCDPOpLx* op, const json11::Json& remap) {
++  DT_CHECK_MSG(op != nullptr, "explicit lx range import needs STCDPOpLx");
++  DT_CHECK_MSG(remap.is_object(), "rangedLxRemap must be an object");
++
++  const auto& remapObject = remap.object_items();
++  auto loweringIt = remapObject.find("lowering");
++  if (loweringIt != remapObject.end() && loweringIt->second.is_object()) {
++    const auto& lowering = loweringIt->second.object_items();
++    auto unitsIt = lowering.find("addressUnits");
++    if (unitsIt != lowering.end()) {
++      DT_CHECK_MSG(unitsIt->second.string_value() == "bytes",
++                   "explicit lx range prototype only accepts byte addresses");
++    }
++  }
++
++  auto rangesIt = remapObject.find("movementRanges");
++  if (rangesIt == remapObject.end()) {
++    rangesIt = remapObject.find("movementRanges_excerpt");
++  }
++  DT_CHECK_MSG(rangesIt != remapObject.end(),
++               "rangedLxRemap missing movementRanges");
++  DT_CHECK_MSG(rangesIt->second.is_array(),
++               "rangedLxRemap movementRanges must be an array");
++
++  op->explicitLxRangeProtoImported = true;
++  op->explicitLxRangeMovements.clear();
++
++  const auto& ranges = rangesIt->second.array_items();
++  DT_CHECK_MSG(!ranges.empty(),
++               "explicit lx range prototype needs at least one range");
++  DT_CHECK_MSG(ranges.size() <= 4096,
++               "explicit lx range prototype supports at most 4096 ranges");
++  for (size_t rangeIdx = 0; rangeIdx < ranges.size(); rangeIdx++) {
++    const auto& range = ranges.at(rangeIdx);
++    STCDPOpLx::ExplicitLxRangeMovement movement;
++    movement.rangeIndex = static_cast<int>(rangeIdx);
++    movement.moveIndex = static_cast<int>(rangeIdx);
++    const auto& rangeObject = range.object_items();
++    auto maybeSetInt = [&](const char* key, int* target) {
++      auto it = rangeObject.find(key);
++      if (it != rangeObject.end()) *target = jsonInt64(it->second, key);
++    };
++    auto maybeSetInt64 = [&](const char* key, int64_t* target) {
++      auto it = rangeObject.find(key);
++      if (it != rangeObject.end()) *target = jsonInt64(it->second, key);
++    };
++
++    maybeSetInt("rangeIndex", &movement.rangeIndex);
++    maybeSetInt("moveIndex", &movement.moveIndex);
++    maybeSetInt("count", &movement.count);
++    maybeSetInt64("bytesPerMove", &movement.bytesPerMove);
++    maybeSetInt64("sourceStrideBytes", &movement.sourceStrideBytes);
++    maybeSetInt64("destinationStrideBytes", &movement.destinationStrideBytes);
++
++    DT_CHECK_MSG(movement.count > 0,
++                 "explicit lx range count must be positive");
++    DT_CHECK_MSG(movement.bytesPerMove > 0,
++                 "explicit lx range bytesPerMove must be positive");
++    DT_CHECK_MSG(movement.count == 1 ||
++                     movement.destinationStrideBytes >= movement.bytesPerMove,
++                 "explicit lx range destination stride must cover bytesPerMove");
++    movement.source =
++        parseExplicitLxRangeEndpoint(objectField(range, "source"), "source");
++    movement.destination = parseExplicitLxRangeEndpoint(
++        objectField(range, "destination"), "destination");
++    DT_CHECK_MSG(movement.source.logicalSizes ==
++                     movement.destination.logicalSizes,
++                 "explicit lx range source/destination sizes must match");
++    op->explicitLxRangeMovements.push_back(std::move(movement));
++  }
++}
++
++}  // namespace
++
+ void DataOpDsc::copyDataOpDsc(DataOpDsc& iDdsc) {
+   std::string iDdscJsonString = iDdsc.exportJsonStr();
+   importJsonStr(iDdscJsonString);
+@@ -331,6 +484,7 @@ bool DataOpDsc::importJsonObj(const json11::Json& json,
+             } else if (key2 == "validGap_") {
+               myLDs.validGap_.clear();
+               for (const auto& map3 : map2.second.object_items()) {
++                myLDs.validGap_[map3.first];
+                 for (const auto& item3 : map3.second.array_items()) {
+                   int count = 0;
+                   std::pair<double, double> newPair;
+@@ -1167,6 +1321,9 @@ bool DataOpDsc::importJsonObj(const json11::Json& json,
+               myOp->gateLXCodeGen = (map2.second.int_value() >= 1);
+             } else if (key2 == "enSubPieceReuse") {
+               myOp->enSubPieceReuse = (map2.second.int_value() >= 1);
++            } else if (key2 == "rangedLxRemap" &&
++                       explicitLxRangeProtoEnabled()) {
++              importExplicitLxRangeProto(myOp, map2.second);
+             } else if (key2 == "forceModeMC") {
+               for (const auto& map3 : map2.second.object_items()) {
+                 if (map3.first == "force")
+diff --git a/dsc/dataOpDsc.h b/dsc/dataOpDsc.h
+index ee3bb0bd7..c5e96adce 100644
+--- a/dsc/dataOpDsc.h
++++ b/dsc/dataOpDsc.h
+@@ -477,6 +477,24 @@ struct baseSTCDPOp : baseOp {
+ };
+ 
+ struct STCDPOpLx : baseSTCDPOp {
++  struct ExplicitLxRangeEndpoint {
++    int core = -1;
++    int64_t lxAddress = -1;
++    std::map<std::string, double> logicalStarts;
++    std::map<std::string, double> logicalSizes;
++  };
++
++  struct ExplicitLxRangeMovement {
++    int rangeIndex = 0;
++    int moveIndex = 0;
++    int count = 1;
++    int64_t bytesPerMove = 0;
++    int64_t sourceStrideBytes = 0;
++    int64_t destinationStrideBytes = 0;
++    ExplicitLxRangeEndpoint source;
++    ExplicitLxRangeEndpoint destination;
++  };
++
+   bool enOptMC = false;  // filled by GraphOpt, DCG decides ModeMC
+   std::pair<bool, int> forceModeMC = {false, 0};  // filled by GraphOpt
+   std::map<int, std::set<int>> prodConsList;  // key: prod, val: set of cons..
+@@ -498,6 +516,9 @@ struct STCDPOpLx : baseSTCDPOp {
+   // switch to disable piece merging
+   bool enSubPieceReuse = true;
+ 
++  bool explicitLxRangeProtoImported = false;
++  std::vector<ExplicitLxRangeMovement> explicitLxRangeMovements;
++
+   bool is_SRQ_HW_Bug_prone_ = false;
+   int64_t maxBeforeTransactions_ = 0;
+   std::map<std::string, int> split_factor_per_dim;
+diff --git a/dsc/senulatorProg.cpp b/dsc/senulatorProg.cpp
+index 471748a25..e50382713 100644
+--- a/dsc/senulatorProg.cpp
++++ b/dsc/senulatorProg.cpp
+@@ -10,13 +10,51 @@
+ 
+ #include <algorithm>
+ #include <chrono>
++#include <cstdlib>
+ #include <cstring>
+ #include <memory>
+ #include <string>
++#include <unordered_map>
+ #include <utility>
+ 
+ #include "util/dt_exception.hpp"
+ 
++namespace {
++
++bool explicitLxRangeProtoEnabledForSenulator() {
++  auto* value = std::getenv("DEEPTOOLS_EXPLICIT_LX_RANGE_PROTO");
++  return value != nullptr && std::string(value) != "" &&
++         std::string(value) != "0";
++}
++
++int64_t resolveExplicitLxRangeProtoSymbol(const SuperDsc* sdsc,
++                                          int64_t value) {
++  if (!explicitLxRangeProtoEnabledForSenulator() || sdsc == nullptr ||
++      value >= 0) {
++    return value;
++  }
++
++  std::unordered_map<VariableSymbol, VariableDefinition::ValueType> values;
++  auto [resolved, success] = sdsc->symbolDefinitions_.tryComputeVar(value,
++                                                                    values);
++  if (success) return resolved;
++
++  auto tagIt = sdsc->inputSymbolsAndTags_.find(value);
++  if (tagIt == sdsc->inputSymbolsAndTags_.end()) return value;
++
++  static const std::string prefix = "explicit_lx_range_proto_bundle_const:";
++  const auto& tag = tagIt->second;
++  if (tag.rfind(prefix, 0) != 0) return value;
++
++  try {
++    return std::stoll(tag.substr(prefix.size()));
++  } catch (...) {
++    return value;
++  }
++}
++
++}  // namespace
++
+ void exportSenulatorProg(senulator_prog *prog,
+                          std::ostream &os /* = std::cerr*/) {
+   senulator_prog_bundle bundle;
+@@ -315,8 +353,9 @@ void fillDsInfoFromDSCs(const std::vector<const DesignSpaceConfig *> &DSCs,
+         int64_t minStartAddr = INT64_MAX;
+         for (auto &coreId : pdsc->coreIdsUsed_) {
+           full_fold_coord.front() = coreId;
+-          auto address =
+-              allocNode->startAddressCoreCorelet_.getData(full_fold_coord);
++          auto address = resolveExplicitLxRangeProtoSymbol(
++              sdsc,
++              allocNode->startAddressCoreCorelet_.getData(full_fold_coord));
+           if (minStartAddr > address) {
+             minStartAddr = address;
+           }
+diff --git a/dxp/dxp.cpp b/dxp/dxp.cpp
+index fb507f4c3..5f7595644 100644
+--- a/dxp/dxp.cpp
++++ b/dxp/dxp.cpp
+@@ -66,6 +66,93 @@ Dxp::Dxp(const DesignSpaceConfigGlobal& dscGlobal) : dscGlobal(dscGlobal) {
+ 
+ Dxp::~Dxp() {}
+ 
++namespace {
++
++bool explicitLxRangeProtoEnabledForDxp() {
++  auto* value = std::getenv("DEEPTOOLS_EXPLICIT_LX_RANGE_PROTO");
++  return value != nullptr && std::string(value) != "" &&
++         std::string(value) != "0";
++}
++
++bool tryGetConstantIndexValue(mlir::Value value, int64_t& result) {
++  if (!value) return false;
++
++  auto* op = value.getDefiningOp();
++  if (op == nullptr) return false;
++
++  if (auto constOp = mlir::dyn_cast<mlir::arith::ConstantOp>(op)) {
++    if (auto intAttr = mlir::dyn_cast<mlir::IntegerAttr>(constOp.getValue())) {
++      result = intAttr.getInt();
++      return true;
++    }
++  }
++
++  if (auto constIndexOp = mlir::dyn_cast<mlir::arith::ConstantIndexOp>(op)) {
++    result = constIndexOp.value();
++    return true;
++  }
++
++  if (auto addOp = mlir::dyn_cast<mlir::arith::AddIOp>(op)) {
++    int64_t lhs = 0;
++    int64_t rhs = 0;
++    if (tryGetConstantIndexValue(addOp.getLhs(), lhs) &&
++        tryGetConstantIndexValue(addOp.getRhs(), rhs)) {
++      result = lhs + rhs;
++      return true;
++    }
++  }
++
++  if (auto subOp = mlir::dyn_cast<mlir::arith::SubIOp>(op)) {
++    int64_t lhs = 0;
++    int64_t rhs = 0;
++    if (tryGetConstantIndexValue(subOp.getLhs(), lhs) &&
++        tryGetConstantIndexValue(subOp.getRhs(), rhs)) {
++      result = lhs - rhs;
++      return true;
++    }
++  }
++
++  if (auto mulOp = mlir::dyn_cast<mlir::arith::MulIOp>(op)) {
++    int64_t lhs = 0;
++    int64_t rhs = 0;
++    if (tryGetConstantIndexValue(mulOp.getLhs(), lhs) &&
++        tryGetConstantIndexValue(mulOp.getRhs(), rhs)) {
++      result = lhs * rhs;
++      return true;
++    }
++  }
++
++  return false;
++}
++
++void materializeExplicitRangeConstantSymbols(dxp::SdscNode* sdscNode,
++                                             SuperDsc* sdsc) {
++  if (!explicitLxRangeProtoEnabledForDxp() || sdscNode == nullptr ||
++      sdsc == nullptr) {
++    return;
++  }
++
++  auto bundleOp = sdscNode->getBundleOp();
++  DT_CHECK(bundleOp);
++
++  const auto& symbolIds = bundleOp.getSymbolIds();
++  const auto& symbolDefs = bundleOp.getSymbolDefinitions();
++  DT_CHECK_MSG(symbolIds.size() == symbolDefs.size(),
++               "Number of symbol ids and definitions should match");
++
++  for (int i = 0; i < symbolIds.size(); i++) {
++    int64_t value = 0;
++    if (!tryGetConstantIndexValue(symbolDefs[i], value)) continue;
++
++    const auto sym = static_cast<VariableSymbol>(
++        mlir::cast<mlir::IntegerAttr>(symbolIds[i]).getInt());
++    sdsc->inputSymbolsAndTags_[sym] =
++        "explicit_lx_range_proto_bundle_const:" + std::to_string(value);
++  }
++}
++
++}  // namespace
++
+ void Dxp::runDdc(SuperDsc* sdsc) {
+   L3DlOpsScheduler l3_scheduler(dscGlobal, memTrackers.get(), {executionStep},
+                                 verbose);
+@@ -275,9 +362,24 @@ void Dxp::runCodegen(SuperDsc* sdsc) {
+   dcg.progIRcodeGen = DCGProgIRGen::DCC;
+   dcg.createSenProg = false;
+ 
++  const bool explicitLxRangeProto =
++      dtGetEnv<bool>("DEEPTOOLS_EXPLICIT_LX_RANGE_PROTO").value_or(false);
++  bool hasExplicitLxRangeDataOp = false;
++  if (explicitLxRangeProto) {
++    for (auto& ddsc : sdsc->dataOpdscs_) {
++      if (ddsc.opName == OpFuncs::STCDPOpLx && ddsc.op != nullptr) {
++        auto* stcdpLx = static_cast<STCDPOpLx*>(ddsc.op);
++        hasExplicitLxRangeDataOp =
++            hasExplicitLxRangeDataOp || stcdpLx->explicitLxRangeProtoImported;
++      }
++    }
++  }
++
+   // DCG to generate L3 programs
+   if (sdsc->dscs_.size() == 0 && sdsc->dataOpdscs_.size() > 0) {
+     dcg.runDcg(*sdsc);
++  } else if (hasExplicitLxRangeDataOp) {
++    dcg.runDcgForDataOpsDlOps(*sdsc);
+   } else {
+     dcg.runDcgForDlOpsStandalone(*sdsc);
+   }
+@@ -1984,6 +2086,10 @@ void Dxp::runDxp(std::string searchDir, bool bundleMode) {
+         auto sdscEntry =
+             dxpContext.uniqueSdscMap_.find(sdscNode->getSdscFileName());
+         if (sdscEntry != dxpContext.uniqueSdscMap_.end()) {
++          if (dscGlobal.backend == SenTargets::SENULATOR) {
++            materializeExplicitRangeConstantSymbols(sdscNode,
++                                                    sdscEntry->second.get());
++          }
+           Dxp::runDxpOnSdsc(sdscEntry->second.get());
+         } else {
+           auto sdscDesc = sdscNode->getSdscDescriptor();
+diff --git a/dxp/dxp_standalone.cpp b/dxp/dxp_standalone.cpp
+index a79c4e7a4..ab6b3fd45 100644
+--- a/dxp/dxp_standalone.cpp
++++ b/dxp/dxp_standalone.cpp
+@@ -98,6 +98,9 @@ int main(int argc, char* argv[]) {
+   dxp.debug =
+       dtGetEnv<bool>("DXP_DEBUG").value_or(dxp.verbose >= 0 || dxp.debug);
+   dxp.perfMode = dtGetEnv<int>("SENPERFORMANCE").value_or(dxp.perfMode);
++  dxp.enableCompileTimeCorrection =
++      dtGetEnv<bool>("DXP_ENABLE_COMPILE_TIME_CORRECTION")
++          .value_or(dxp.enableCompileTimeCorrection);
+   dxp.standalone = true;
+   dxp.dumpBundleModule = dumpBundleModule;
+   dxp.runDxp(sdscDir);

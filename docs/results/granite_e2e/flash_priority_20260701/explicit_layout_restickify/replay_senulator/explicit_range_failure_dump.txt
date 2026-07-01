@@ -1,0 +1,433 @@
+dataOpDsc: sdsc_10_Tensor1_explicit_range
+parsedRangeCount: 128
+range[0] moveIndex=0 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=0 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[1] moveIndex=1 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=0 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[2] moveIndex=2 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=0 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[3] moveIndex=3 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=0 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[4] moveIndex=4 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=1 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[5] moveIndex=5 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=1 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[6] moveIndex=6 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=1 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[7] moveIndex=7 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=1 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[8] moveIndex=8 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=2 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[9] moveIndex=9 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=2 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[10] moveIndex=10 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=2 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[11] moveIndex=11 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=2 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[12] moveIndex=12 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=3 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[13] moveIndex=13 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=3 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[14] moveIndex=14 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=3 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[15] moveIndex=15 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=3 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[16] moveIndex=16 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=4 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[17] moveIndex=17 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=4 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[18] moveIndex=18 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=4 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[19] moveIndex=19 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=4 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[20] moveIndex=20 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=5 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[21] moveIndex=21 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=5 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[22] moveIndex=22 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=5 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[23] moveIndex=23 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=5 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[24] moveIndex=24 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=6 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[25] moveIndex=25 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=6 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[26] moveIndex=26 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=6 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[27] moveIndex=27 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=6 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[28] moveIndex=28 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=7 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[29] moveIndex=29 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=7 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[30] moveIndex=30 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=7 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[31] moveIndex=31 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=7 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[32] moveIndex=32 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=8 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[33] moveIndex=33 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=8 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[34] moveIndex=34 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=8 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[35] moveIndex=35 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=8 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[36] moveIndex=36 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=9 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[37] moveIndex=37 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=9 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[38] moveIndex=38 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=9 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[39] moveIndex=39 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=9 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[40] moveIndex=40 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=10 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[41] moveIndex=41 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=10 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[42] moveIndex=42 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=10 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[43] moveIndex=43 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=10 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[44] moveIndex=44 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=11 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[45] moveIndex=45 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=11 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[46] moveIndex=46 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=11 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[47] moveIndex=47 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=11 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[48] moveIndex=48 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=12 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[49] moveIndex=49 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=12 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[50] moveIndex=50 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=12 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[51] moveIndex=51 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=12 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[52] moveIndex=52 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=13 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[53] moveIndex=53 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=13 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[54] moveIndex=54 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=13 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[55] moveIndex=55 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=13 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[56] moveIndex=56 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=14 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[57] moveIndex=57 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=14 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[58] moveIndex=58 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=14 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[59] moveIndex=59 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=14 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[60] moveIndex=60 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=15 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[61] moveIndex=61 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=15 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[62] moveIndex=62 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=15 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[63] moveIndex=63 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=15 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[64] moveIndex=64 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=16 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[65] moveIndex=65 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=16 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[66] moveIndex=66 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=16 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[67] moveIndex=67 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=16 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[68] moveIndex=68 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=17 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[69] moveIndex=69 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=17 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[70] moveIndex=70 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=17 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[71] moveIndex=71 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=17 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[72] moveIndex=72 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=18 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[73] moveIndex=73 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=18 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[74] moveIndex=74 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=18 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[75] moveIndex=75 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=18 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[76] moveIndex=76 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=19 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[77] moveIndex=77 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=19 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[78] moveIndex=78 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=19 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[79] moveIndex=79 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=19 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[80] moveIndex=80 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=20 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[81] moveIndex=81 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=20 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[82] moveIndex=82 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=20 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[83] moveIndex=83 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=20 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[84] moveIndex=84 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=21 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[85] moveIndex=85 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=21 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[86] moveIndex=86 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=21 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[87] moveIndex=87 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=21 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[88] moveIndex=88 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=22 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[89] moveIndex=89 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=22 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[90] moveIndex=90 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=22 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[91] moveIndex=91 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=22 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[92] moveIndex=92 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=23 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[93] moveIndex=93 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=23 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[94] moveIndex=94 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=23 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[95] moveIndex=95 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=23 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[96] moveIndex=96 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=24 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[97] moveIndex=97 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=24 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[98] moveIndex=98 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=24 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[99] moveIndex=99 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=24 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[100] moveIndex=100 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=25 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[101] moveIndex=101 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=25 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[102] moveIndex=102 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=25 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[103] moveIndex=103 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=25 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[104] moveIndex=104 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=26 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[105] moveIndex=105 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=26 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[106] moveIndex=106 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=26 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[107] moveIndex=107 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=26 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[108] moveIndex=108 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=27 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[109] moveIndex=109 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=27 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[110] moveIndex=110 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=27 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[111] moveIndex=111 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=27 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[112] moveIndex=112 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=28 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[113] moveIndex=113 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=28 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[114] moveIndex=114 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=28 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[115] moveIndex=115 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=28 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[116] moveIndex=116 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=29 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[117] moveIndex=117 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=29 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[118] moveIndex=118 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=29 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[119] moveIndex=119 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=29 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[120] moveIndex=120 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=30 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[121] moveIndex=121 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=30 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[122] moveIndex=122 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=30 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[123] moveIndex=123 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=30 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+range[124] moveIndex=124 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=3 srcLx=4096 dstCore=31 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[125] moveIndex=125 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=4 srcLx=4128 dstCore=31 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[126] moveIndex=126 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=5 srcLx=4160 dstCore=31 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[127] moveIndex=127 bytesPerMove=32 count=16384 sourceStrideBytes=128 destinationStrideBytes=128 srcCore=6 srcLx=4192 dstCore=31 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+dtTableCount: 128
+dt[0] pIDX=0 pMemID=3 minCMemID=0 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=0, cMemIDs=0,
+dt[1] pIDX=1 pMemID=4 minCMemID=0 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=1, cMemIDs=0,
+dt[2] pIDX=2 pMemID=5 minCMemID=0 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=2, cMemIDs=0,
+dt[3] pIDX=3 pMemID=6 minCMemID=0 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=3, cMemIDs=0,
+dt[4] pIDX=4 pMemID=3 minCMemID=1 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=4, cMemIDs=1,
+dt[5] pIDX=5 pMemID=4 minCMemID=1 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=5, cMemIDs=1,
+dt[6] pIDX=6 pMemID=5 minCMemID=1 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=6, cMemIDs=1,
+dt[7] pIDX=7 pMemID=6 minCMemID=1 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=7, cMemIDs=1,
+dt[8] pIDX=8 pMemID=3 minCMemID=2 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=8, cMemIDs=2,
+dt[9] pIDX=9 pMemID=4 minCMemID=2 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=9, cMemIDs=2,
+dt[10] pIDX=10 pMemID=5 minCMemID=2 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=10, cMemIDs=2,
+dt[11] pIDX=11 pMemID=6 minCMemID=2 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=11, cMemIDs=2,
+dt[12] pIDX=12 pMemID=3 minCMemID=3 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=12, cMemIDs=3,
+dt[13] pIDX=13 pMemID=4 minCMemID=3 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=13, cMemIDs=3,
+dt[14] pIDX=14 pMemID=5 minCMemID=3 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=14, cMemIDs=3,
+dt[15] pIDX=15 pMemID=6 minCMemID=3 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=15, cMemIDs=3,
+dt[16] pIDX=16 pMemID=3 minCMemID=4 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=16, cMemIDs=4,
+dt[17] pIDX=17 pMemID=4 minCMemID=4 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=17, cMemIDs=4,
+dt[18] pIDX=18 pMemID=5 minCMemID=4 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=18, cMemIDs=4,
+dt[19] pIDX=19 pMemID=6 minCMemID=4 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=19, cMemIDs=4,
+dt[20] pIDX=20 pMemID=3 minCMemID=5 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=20, cMemIDs=5,
+dt[21] pIDX=21 pMemID=4 minCMemID=5 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=21, cMemIDs=5,
+dt[22] pIDX=22 pMemID=5 minCMemID=5 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=22, cMemIDs=5,
+dt[23] pIDX=23 pMemID=6 minCMemID=5 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=23, cMemIDs=5,
+dt[24] pIDX=24 pMemID=3 minCMemID=6 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=24, cMemIDs=6,
+dt[25] pIDX=25 pMemID=4 minCMemID=6 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=25, cMemIDs=6,
+dt[26] pIDX=26 pMemID=5 minCMemID=6 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=26, cMemIDs=6,
+dt[27] pIDX=27 pMemID=6 minCMemID=6 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=27, cMemIDs=6,
+dt[28] pIDX=28 pMemID=3 minCMemID=7 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=28, cMemIDs=7,
+dt[29] pIDX=29 pMemID=4 minCMemID=7 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=29, cMemIDs=7,
+dt[30] pIDX=30 pMemID=5 minCMemID=7 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=30, cMemIDs=7,
+dt[31] pIDX=31 pMemID=6 minCMemID=7 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=31, cMemIDs=7,
+dt[32] pIDX=32 pMemID=3 minCMemID=8 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=32, cMemIDs=8,
+dt[33] pIDX=33 pMemID=4 minCMemID=8 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=33, cMemIDs=8,
+dt[34] pIDX=34 pMemID=5 minCMemID=8 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=34, cMemIDs=8,
+dt[35] pIDX=35 pMemID=6 minCMemID=8 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=35, cMemIDs=8,
+dt[36] pIDX=36 pMemID=3 minCMemID=9 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=36, cMemIDs=9,
+dt[37] pIDX=37 pMemID=4 minCMemID=9 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=37, cMemIDs=9,
+dt[38] pIDX=38 pMemID=5 minCMemID=9 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=38, cMemIDs=9,
+dt[39] pIDX=39 pMemID=6 minCMemID=9 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=39, cMemIDs=9,
+dt[40] pIDX=40 pMemID=3 minCMemID=10 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=40, cMemIDs=10,
+dt[41] pIDX=41 pMemID=4 minCMemID=10 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=41, cMemIDs=10,
+dt[42] pIDX=42 pMemID=5 minCMemID=10 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=42, cMemIDs=10,
+dt[43] pIDX=43 pMemID=6 minCMemID=10 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=43, cMemIDs=10,
+dt[44] pIDX=44 pMemID=3 minCMemID=11 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=44, cMemIDs=11,
+dt[45] pIDX=45 pMemID=4 minCMemID=11 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=45, cMemIDs=11,
+dt[46] pIDX=46 pMemID=5 minCMemID=11 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=46, cMemIDs=11,
+dt[47] pIDX=47 pMemID=6 minCMemID=11 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=47, cMemIDs=11,
+dt[48] pIDX=48 pMemID=3 minCMemID=12 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=48, cMemIDs=12,
+dt[49] pIDX=49 pMemID=4 minCMemID=12 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=49, cMemIDs=12,
+dt[50] pIDX=50 pMemID=5 minCMemID=12 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=50, cMemIDs=12,
+dt[51] pIDX=51 pMemID=6 minCMemID=12 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=51, cMemIDs=12,
+dt[52] pIDX=52 pMemID=3 minCMemID=13 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=52, cMemIDs=13,
+dt[53] pIDX=53 pMemID=4 minCMemID=13 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=53, cMemIDs=13,
+dt[54] pIDX=54 pMemID=5 minCMemID=13 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=54, cMemIDs=13,
+dt[55] pIDX=55 pMemID=6 minCMemID=13 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=55, cMemIDs=13,
+dt[56] pIDX=56 pMemID=3 minCMemID=14 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=56, cMemIDs=14,
+dt[57] pIDX=57 pMemID=4 minCMemID=14 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=57, cMemIDs=14,
+dt[58] pIDX=58 pMemID=5 minCMemID=14 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=58, cMemIDs=14,
+dt[59] pIDX=59 pMemID=6 minCMemID=14 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=59, cMemIDs=14,
+dt[60] pIDX=60 pMemID=3 minCMemID=15 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=60, cMemIDs=15,
+dt[61] pIDX=61 pMemID=4 minCMemID=15 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=61, cMemIDs=15,
+dt[62] pIDX=62 pMemID=5 minCMemID=15 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=62, cMemIDs=15,
+dt[63] pIDX=63 pMemID=6 minCMemID=15 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=63, cMemIDs=15,
+dt[64] pIDX=64 pMemID=3 minCMemID=16 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=64, cMemIDs=16,
+dt[65] pIDX=65 pMemID=4 minCMemID=16 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=65, cMemIDs=16,
+dt[66] pIDX=66 pMemID=5 minCMemID=16 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=66, cMemIDs=16,
+dt[67] pIDX=67 pMemID=6 minCMemID=16 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=67, cMemIDs=16,
+dt[68] pIDX=68 pMemID=3 minCMemID=17 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=68, cMemIDs=17,
+dt[69] pIDX=69 pMemID=4 minCMemID=17 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=69, cMemIDs=17,
+dt[70] pIDX=70 pMemID=5 minCMemID=17 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=70, cMemIDs=17,
+dt[71] pIDX=71 pMemID=6 minCMemID=17 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=71, cMemIDs=17,
+dt[72] pIDX=72 pMemID=3 minCMemID=18 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=72, cMemIDs=18,
+dt[73] pIDX=73 pMemID=4 minCMemID=18 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=73, cMemIDs=18,
+dt[74] pIDX=74 pMemID=5 minCMemID=18 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=74, cMemIDs=18,
+dt[75] pIDX=75 pMemID=6 minCMemID=18 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=75, cMemIDs=18,
+dt[76] pIDX=76 pMemID=3 minCMemID=19 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=76, cMemIDs=19,
+dt[77] pIDX=77 pMemID=4 minCMemID=19 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=77, cMemIDs=19,
+dt[78] pIDX=78 pMemID=5 minCMemID=19 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=78, cMemIDs=19,
+dt[79] pIDX=79 pMemID=6 minCMemID=19 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=79, cMemIDs=19,
+dt[80] pIDX=80 pMemID=3 minCMemID=20 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=80, cMemIDs=20,
+dt[81] pIDX=81 pMemID=4 minCMemID=20 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=81, cMemIDs=20,
+dt[82] pIDX=82 pMemID=5 minCMemID=20 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=82, cMemIDs=20,
+dt[83] pIDX=83 pMemID=6 minCMemID=20 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=83, cMemIDs=20,
+dt[84] pIDX=84 pMemID=3 minCMemID=21 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=84, cMemIDs=21,
+dt[85] pIDX=85 pMemID=4 minCMemID=21 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=85, cMemIDs=21,
+dt[86] pIDX=86 pMemID=5 minCMemID=21 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=86, cMemIDs=21,
+dt[87] pIDX=87 pMemID=6 minCMemID=21 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=87, cMemIDs=21,
+dt[88] pIDX=88 pMemID=3 minCMemID=22 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=88, cMemIDs=22,
+dt[89] pIDX=89 pMemID=4 minCMemID=22 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=89, cMemIDs=22,
+dt[90] pIDX=90 pMemID=5 minCMemID=22 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=90, cMemIDs=22,
+dt[91] pIDX=91 pMemID=6 minCMemID=22 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=91, cMemIDs=22,
+dt[92] pIDX=92 pMemID=3 minCMemID=23 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=92, cMemIDs=23,
+dt[93] pIDX=93 pMemID=4 minCMemID=23 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=93, cMemIDs=23,
+dt[94] pIDX=94 pMemID=5 minCMemID=23 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=94, cMemIDs=23,
+dt[95] pIDX=95 pMemID=6 minCMemID=23 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=95, cMemIDs=23,
+dt[96] pIDX=96 pMemID=3 minCMemID=24 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=96, cMemIDs=24,
+dt[97] pIDX=97 pMemID=4 minCMemID=24 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=97, cMemIDs=24,
+dt[98] pIDX=98 pMemID=5 minCMemID=24 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=98, cMemIDs=24,
+dt[99] pIDX=99 pMemID=6 minCMemID=24 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=99, cMemIDs=24,
+dt[100] pIDX=100 pMemID=3 minCMemID=25 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=100, cMemIDs=25,
+dt[101] pIDX=101 pMemID=4 minCMemID=25 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=101, cMemIDs=25,
+dt[102] pIDX=102 pMemID=5 minCMemID=25 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=102, cMemIDs=25,
+dt[103] pIDX=103 pMemID=6 minCMemID=25 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=103, cMemIDs=25,
+dt[104] pIDX=104 pMemID=3 minCMemID=26 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=104, cMemIDs=26,
+dt[105] pIDX=105 pMemID=4 minCMemID=26 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=105, cMemIDs=26,
+dt[106] pIDX=106 pMemID=5 minCMemID=26 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=106, cMemIDs=26,
+dt[107] pIDX=107 pMemID=6 minCMemID=26 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=107, cMemIDs=26,
+dt[108] pIDX=108 pMemID=3 minCMemID=27 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=108, cMemIDs=27,
+dt[109] pIDX=109 pMemID=4 minCMemID=27 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=109, cMemIDs=27,
+dt[110] pIDX=110 pMemID=5 minCMemID=27 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=110, cMemIDs=27,
+dt[111] pIDX=111 pMemID=6 minCMemID=27 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=111, cMemIDs=27,
+dt[112] pIDX=112 pMemID=3 minCMemID=28 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=112, cMemIDs=28,
+dt[113] pIDX=113 pMemID=4 minCMemID=28 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=113, cMemIDs=28,
+dt[114] pIDX=114 pMemID=5 minCMemID=28 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=114, cMemIDs=28,
+dt[115] pIDX=115 pMemID=6 minCMemID=28 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=115, cMemIDs=28,
+dt[116] pIDX=116 pMemID=3 minCMemID=29 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=116, cMemIDs=29,
+dt[117] pIDX=117 pMemID=4 minCMemID=29 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=117, cMemIDs=29,
+dt[118] pIDX=118 pMemID=5 minCMemID=29 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=118, cMemIDs=29,
+dt[119] pIDX=119 pMemID=6 minCMemID=29 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=119, cMemIDs=29,
+dt[120] pIDX=120 pMemID=3 minCMemID=30 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=120, cMemIDs=30,
+dt[121] pIDX=121 pMemID=4 minCMemID=30 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=121, cMemIDs=30,
+dt[122] pIDX=122 pMemID=5 minCMemID=30 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=122, cMemIDs=30,
+dt[123] pIDX=123 pMemID=6 minCMemID=30 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=123, cMemIDs=30,
+dt[124] pIDX=124 pMemID=3 minCMemID=31 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=124, cMemIDs=31,
+dt[125] pIDX=125 pMemID=4 minCMemID=31 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=125, cMemIDs=31,
+dt[126] pIDX=126 pMemID=5 minCMemID=31 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=126, cMemIDs=31,
+dt[127] pIDX=127 pMemID=6 minCMemID=31 trVolume=32 numTransactions=16384 useBurst=0 cIDXs=127, cMemIDs=31,
+coreIDtoDtKey_L3SU
+  core 3: 24 16 20 0 4 8 28 32 36 40 44 48 52 56 60 64 68 72 76 80 84 88 92 96 100 104 108 112 116 120 124
+  core 4: 13 25 21 1 5 9 29 33 37 41 45 49 53 57 61 65 69 73 77 81 85 89 93 97 101 105 109 113 117 121 125
+  core 5: 14 26 18 2 6 10 30 34 38 42 46 50 54 58 62 66 70 74 78 82 86 90 94 98 102 106 110 114 118 122 126
+  core 6: 15 19 23 3 7 11 31 35 39 43 47 51 55 59 63 67 71 75 79 83 87 91 95 99 103 107 111 115 119 123 127
+coreIDtoDtKey_L3LU
+  core 0: 0 3 1 2
+  core 1: 4 7 5 6
+  core 2: 8 11 9 10
+  core 3: 15 13 14
+  core 4: 16 19 18
+  core 5: 20 23 21
+  core 6: 24 25 26
+  core 7: 28 31 29 30
+  core 8: 32 35 33 34
+  core 9: 36 39 37 38
+  core 10: 40 43 41 42
+  core 11: 44 47 45 46
+  core 12: 48 51 49 50
+  core 13: 52 55 53 54
+  core 14: 56 59 57 58
+  core 15: 60 63 61 62
+  core 16: 64 67 65 66
+  core 17: 68 71 69 70
+  core 18: 72 75 73 74
+  core 19: 76 79 77 78
+  core 20: 80 83 81 82
+  core 21: 84 87 85 86
+  core 22: 88 91 89 90
+  core 23: 92 95 93 94
+  core 24: 96 99 97 98
+  core 25: 100 103 101 102
+  core 26: 104 107 105 106
+  core 27: 108 111 109 110
+  core 28: 112 115 113 114
+  core 29: 116 119 117 118
+  core 30: 120 123 121 122
+  core 31: 124 127 125 126
+coreIDtoDtKey_LX
+  core 3: 12
+  core 4: 17
+  core 5: 22
+  core 6: 27
+---
+pieceVerificationFailure dataOpDsc=ProgCorrectionScatter0 op=ScatterOpHBM lds=ProgCorrectionFlit piece=p0 dim=d1 pieceSize=1 layoutSize=0
+---

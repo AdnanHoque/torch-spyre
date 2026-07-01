@@ -1,0 +1,192 @@
+# Focused source references
+
+## Torch onchip_realize relevant symbols
+2590:def _flash_attention_layout_xform_pair_edge(
+2770:    _edge, reasons = _flash_attention_layout_xform_pair_edge(
+2778:def _resolve_flash_attention_layout_xform_pair_edge(
+2783:        edge, reasons = _flash_attention_layout_xform_pair_edge(sdscs_json, tile_index)
+2788:        edge, candidate_reasons = _flash_attention_layout_xform_pair_edge(
+2803:    _tile, _edge, reasons = _resolve_flash_attention_layout_xform_pair_edge(
+2958:def build_flash_attention_layout_xform_pair_tile_artifacts(
+2966:    selected_tile, edge, reasons = _resolve_flash_attention_layout_xform_pair_edge(
+2996:            "layout_xform_pair_role": "predecessor",
+3096:            "layout_xform_pair_role": "consumer",
+4025:def _flash_attention_kv_repack_broadcast_edge(
+4081:        return None, [f"input{input_idx}:producer_not_restickify_hbm:{_op_name(prod)}"]
+4222:    _edge, reasons = _flash_attention_kv_repack_broadcast_edge(
+4230:def _resolve_flash_attention_kv_repack_broadcast_edge(
+4239:            edge, candidate_reasons = _flash_attention_kv_repack_broadcast_edge(
+4252:            edge, candidate_reasons = _flash_attention_kv_repack_broadcast_edge(
+4271:        _resolve_flash_attention_kv_repack_broadcast_edge(
+4287:    edge, reasons = _flash_attention_kv_repack_broadcast_edge(
+4430:        _resolve_flash_attention_kv_repack_broadcast_edge(
+4702:            edge, candidate_reasons = _flash_attention_kv_repack_broadcast_edge(
+6252:        _resolve_flash_attention_kv_repack_broadcast_edge(
+6626:    current_edge, current_reasons = _flash_attention_layout_xform_pair_edge(
+6637:        future_edge, future_reasons = _flash_attention_layout_xform_pair_edge(
+7068:                _flash_attention_layout_xform_pair_edge(
+7081:                    f"input{input_idx}:producer_not_restickify_hbm:"
+7865:def detect_flash_score_scale_handoff(sdscs_json: list[dict]):
+8030:    edge = detect_flash_score_scale_handoff(sdscs_json)
+
+## Torch restickify metadata symbols
+torch_spyre/_inductor/restickify_ring.py:59:    "RestickifyRingEstimate",
+torch_spyre/_inductor/restickify_ring.py:66:    "locality_certificate_for_restickify_override",
+torch_spyre/_inductor/restickify_ring.py:71:    "restickify_source_metadata",
+torch_spyre/_inductor/restickify_ring.py:76:CORE_MAPPING_OVERRIDE_ATTR = "_spyre_core_id_to_work_slice_override"
+torch_spyre/_inductor/restickify_ring.py:77:CORE_MAPPING_OVERRIDE_OP_INFO_KEY = "core_id_to_work_slice_override"
+torch_spyre/_inductor/restickify_ring.py:78:LOCALITY_CERTIFICATE_ATTR = "_spyre_restickify_locality_certificate"
+torch_spyre/_inductor/restickify_ring.py:79:LOCALITY_CERTIFICATE_OP_INFO_KEY = "restickify_locality_certificate"
+torch_spyre/_inductor/restickify_ring.py:97:class RestickifyRingEstimate:
+torch_spyre/_inductor/restickify_ring.py:265:def restickify_source_metadata(
+torch_spyre/_inductor/restickify_ring.py:437:def _locality_certificate_from_op(
+torch_spyre/_inductor/restickify_ring.py:449:    certificate = _locality_certificate_from_op(op)
+torch_spyre/_inductor/restickify_ring.py:483:def locality_certificate_for_restickify_override(
+torch_spyre/_inductor/restickify_ring.py:592:) -> RestickifyRingEstimate:
+torch_spyre/_inductor/restickify_ring.py:595:    source_metadata = restickify_source_metadata(
+torch_spyre/_inductor/restickify_ring.py:602:        return RestickifyRingEstimate(
+torch_spyre/_inductor/restickify_ring.py:624:        return RestickifyRingEstimate(
+torch_spyre/_inductor/restickify_ring.py:665:        return RestickifyRingEstimate(
+torch_spyre/_inductor/restickify_ring.py:682:    return RestickifyRingEstimate(
+torch_spyre/_inductor/optimize_restickify.py:37:from .pass_utils import compute_restickify_needed, device_coordinates, host_coordinates
+torch_spyre/_inductor/optimize_restickify.py:47:    Entries are computed on demand by compute_restickify_needed. `dep` is the
+torch_spyre/_inductor/optimize_restickify.py:49:    compute_restickify_needed in pass_utils.
+torch_spyre/_inductor/optimize_restickify.py:83:        needed, tgt = compute_restickify_needed(
+torch_spyre/_inductor/optimize_restickify.py:233:        return "No mechanism to gather elements from multiple sticks into single stick"
+torch_spyre/_inductor/optimize_restickify.py:235:        return "No mechanism to scatter elements from one stick to multiple sticks"
+torch_spyre/_inductor/insert_restickify.py:56:    restickify_plan: dict,
+torch_spyre/_inductor/insert_restickify.py:60:    restickify_plan is the deferred execution queue: entries are recorded here during
+torch_spyre/_inductor/insert_restickify.py:63:    restickify_plan[op.get_name()].append(
+torch_spyre/_inductor/insert_restickify.py:198:    """Insert restickify operations before all nodes in restickify_plan.
+torch_spyre/_inductor/insert_restickify.py:200:    Consumes V.graph.restickify_plan (built by finalize_layouts) and splices the
+torch_spyre/_inductor/insert_restickify.py:204:    restickify_plan = V.graph.restickify_plan
+torch_spyre/_inductor/insert_restickify.py:205:    if not restickify_plan:
+torch_spyre/_inductor/insert_restickify.py:211:        if isinstance(op, ComputedBuffer) and op.get_name() in restickify_plan:
+torch_spyre/_inductor/insert_restickify.py:213:                op, restickify_plan[op.get_name()], operations
+torch_spyre/_inductor/insert_restickify.py:219:    V.graph.restickify_plan for insert_restickify.
+torch_spyre/_inductor/insert_restickify.py:326:    V.graph.restickify_plan = plan
+
+## Deeptools staged relayout symbols
+dxp/SdscRelayoutInsertion.cpp:50:static bool isLoopScopedLxOperandMovement(const SuperDsc* sdsc,
+dxp/SdscRelayoutInsertion.cpp:74:    if (kind->second == "layout_restickify_activation" &&
+dxp/SdscRelayoutInsertion.cpp:75:        pattern->second == "layout_transform_then_operand_broadcast") {
+dxp/SdscRelayoutInsertion.cpp:259:          ". Missing API/metadata: STCDPOpLx PieceInfo/SliceInfo has no "
+dxp/SdscRelayoutInsertion.cpp:324:static void insertLoopScopedLxOperandMovement(SuperDsc* sdsc,
+dxp/SdscRelayoutInsertion.cpp:333:  auto& allocCoords = allocNode->allocateCoordinates_;
+dxp/SdscRelayoutInsertion.cpp:334:  DT_CHECK(!allocCoords.coreIdToWkSlice_.empty());
+dxp/SdscRelayoutInsertion.cpp:340:      countSlicesInTensorDims(allocCoords.coreIdToWkSlice_, tensorDims);
+dxp/SdscRelayoutInsertion.cpp:345:  for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
+dxp/SdscRelayoutInsertion.cpp:365:  for (const auto& coreAndSlice : allocCoords.coreIdToWkSlice_) {
+dxp/SdscRelayoutInsertion.cpp:379:    ddsc.opName = OpFuncs::STCDPOpLx;
+dxp/SdscRelayoutInsertion.cpp:380:    auto* stcdpOp = new STCDPOpLx;
+dxp/SdscRelayoutInsertion.cpp:381:    stcdpOp->name = OpFuncs::STCDPOpLx;
+dxp/SdscRelayoutInsertion.cpp:435:  for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
+dxp/SdscRelayoutInsertion.cpp:447:  allocCoords.coreIdToWkSlice_.clear();
+dxp/SdscRelayoutInsertion.cpp:465:	    auto& allocCoords = lds.memOrg_.at(LX).allocateNode_->allocateCoordinates_;
+dxp/SdscRelayoutInsertion.cpp:468:	              << " allocMapSize=" << allocCoords.coreIdToWkSlice_.size()
+dxp/SdscRelayoutInsertion.cpp:469:	              << " consumerMapSize=" << sdsc->coreIdToWkSlice_.size()
+dxp/SdscRelayoutInsertion.cpp:471:	    if (allocCoords.coreIdToWkSlice_.empty() ||
+dxp/SdscRelayoutInsertion.cpp:472:	        allocCoords.coreIdToWkSlice_ == sdsc->coreIdToWkSlice_)
+dxp/SdscRelayoutInsertion.cpp:475:	    if (isLoopScopedLxOperandMovement(sdsc, lds)) {
+dxp/SdscRelayoutInsertion.cpp:481:      insertLoopScopedLxOperandMovement(sdsc, dldsc, lds);
+dxp/SdscRelayoutInsertion.cpp:524:        getRelayoutPieceSize(out_form_size, sdsc->coreIdToWkSlice_,
+dxp/SdscRelayoutInsertion.cpp:529:    for (const auto& mapkv : sdsc->coreIdToWkSlice_) {
+dxp/SdscRelayoutInsertion.cpp:561:      ddsc.opName = OpFuncs::STCDPOpLx;
+dxp/SdscRelayoutInsertion.cpp:562:      ddsc.op = new STCDPOpLx;
+dxp/SdscRelayoutInsertion.cpp:563:      ddsc.op->name = OpFuncs::STCDPOpLx;
+dxp/SdscRelayoutInsertion.cpp:580:      for (const auto& mapkv : sdsc->coreIdToWkSlice_) {
+dxp/SdscRelayoutInsertion.cpp:586:      for (const auto& mapkv : allocCoords.coreIdToWkSlice_) {
+dxp/SdscRelayoutInsertion.cpp:716:             (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
+dxp/SdscRelayoutInsertion.cpp:724:             (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
+dxp/SdscRelayoutInsertion.cpp:799:      allocCoords.coreIdToWkSlice_.clear();
+dxp/SdscRelayoutInsertion.cpp:800:      for (const auto& [coreId, workSlice] : sdsc->coreIdToWkSlice_) {
+dxp/SdscRelayoutInsertion.cpp:803:            allocCoords.coreIdToWkSlice_[coreId][dim] = slice;
+dxp/SdscRelayoutInsertion.cpp:809:        if (sdsc->coreIdToWkSlice_.count(coreid) == 0) {
+dxp/SdscRelayoutInsertion.cpp:899:      /*for (const auto& mapkv : sdsc->coreIdToWkSlice_) {
+dxp/SdscRelayoutInsertion.cpp:902:          relayout_sdsc->coreIdToWkSlice_[mapkv.first] = mapkv.second;
+dxp/SdscRelayoutInsertion.cpp:906:      for (const auto& mapkv : allocCoords.coreIdToWkSlice_) {
+dxp/SdscRelayoutInsertion.cpp:909:          relayout_sdsc->coreIdToWkSlice_[mapkv.first] = mapkv.second;
+dxp/SdscRelayoutInsertion.cpp:931:        for (auto& [dim, cfm] : allocNode->allocateCoordinates_.coordinates_) {
+dxp/SdscRelayoutInsertion.cpp:933:          inp_allocNode->allocateCoordinates_.coordinates_[dim]
+dxp/SdscRelayoutInsertion.cpp:944:        for (auto& [dim, cfm] : allocNode->allocateCoordinates_.coordinates_) {
+dxp/SdscRelayoutInsertion.cpp:946:          out_allocNode->allocateCoordinates_.coordinates_[dim]
+dxp/SdscRelayoutInsertion.cpp:952:        /*out_allocNode->allocateCoordinates_.coreIdToWkSlice_ =
+dxp/SdscRelayoutInsertion.cpp:953:            sdsc->coreIdToWkSlice_;*/
+dxp/SdscRelayoutInsertion.cpp:954:        out_allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
+dxp/SdscRelayoutInsertion.cpp:990:          if (sdsc->coreIdToWkSlice_.count(coreid) == 0) {
+dxp/SdscRelayoutInsertion.cpp:994:            for (auto kv : sdsc->coreIdToWkSlice_.at(coreid)) {
+dxp/SdscRelayoutInsertion.cpp:1018:        allocCoords.coreIdToWkSlice_.clear();
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:18:  DT_CHECK(is_any_of(op->name, OpFuncs::ReStickifyOpHBM,
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:35:    if (is_any_of(op->name, OpFuncs::ReStickifyOpHBM,
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:72:    if (op->name == OpFuncs::ReStickifyOpHBM ||
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:106:              newPairLU.first, static_cast<ReStickifyOpHBM*>(op), coreID,
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:116:              newPairSU.first, static_cast<ReStickifyOpHBM*>(op), coreID,
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:216:    if (op->name == OpFuncs::ReStickifyOpHBM ||
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:246:        DT_CHECK(op->name == OpFuncs::ReStickifyOpHBM);
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:285:           op->name == OpFuncs::ReStickifyOpHBM);
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:369:           myOp->name == OpFuncs::ReStickifyOpHBM ||
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:400:           op->name == OpFuncs::ReStickifyOpHBM);
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2015:           myDataDscPtr->op->name == OpFuncs::ReStickifyOpHBM);
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2053:           op->name == OpFuncs::ReStickifyOpHBM);
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2080:             op->name == OpFuncs::ReStickifyOpHBM);
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2135:  if (op->name == OpFuncs::ReStickifyOpHBM) {
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2136:    DT_CHECK(!((ReStickifyOpHBM*)op)
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2139:    DT_CHECK(!((ReStickifyOpHBM*)op)
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2143:        ((ReStickifyOpHBM*)op)->coreIDtoANInfo.at(coreID).inpPieceOrder.size());
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2144:    loopCount = is_lxlu ? ((ReStickifyOpHBM*)op)
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2147:                        : ((ReStickifyOpHBM*)op)
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2264:  if (op->name == OpFuncs::ReStickifyOpHBM) {
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2338:        if (op->name == OpFuncs::ReStickifyOpHBM) {
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2591:    if (rinfo.op->name == OpFuncs::ReStickifyOpHBM) {
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2926:           op->name == OpFuncs::ReStickifyOpHBM);
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2965:    DT_CHECK(op->name == OpFuncs::ReStickifyOpHBM);
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2967:      DT_CHECK(((ReStickifyOpHBM*)op)
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2970:      DT_CHECK(!((ReStickifyOpHBM*)op)
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2974:      DT_CHECK(((ReStickifyOpHBM*)op)
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:2977:      DT_CHECK(!((ReStickifyOpHBM*)op)
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:3015:  if (op->name == OpFuncs::ReStickifyOpHBM) {
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:3103:           op->name == OpFuncs::ReStickifyOpHBM);
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:3142:    DT_CHECK(op->name == OpFuncs::ReStickifyOpHBM);
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:3144:      DT_CHECK(((ReStickifyOpHBM*)op)
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:3147:      DT_CHECK(!((ReStickifyOpHBM*)op)
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:3151:      DT_CHECK(((ReStickifyOpHBM*)op)
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:3154:      DT_CHECK(!((ReStickifyOpHBM*)op)
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:3193:  if (op->name == OpFuncs::ReStickifyOpHBM) {
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:3275:                                                  ReStickifyOpHBM* op,
+dcg/dcg_fe/pcfg_gen/restickifyOp.cpp:3278:  DT_CHECK(is_any_of(op->name, OpFuncs::ReStickifyOpHBM));
+dsc/dataOpDsc.cpp:438:            if (map2.second.string_value() == "STCDPOpLx") {
+dsc/dataOpDsc.cpp:439:              this->opName = OpFuncs::STCDPOpLx;
+dsc/dataOpDsc.cpp:442:            } else if (map2.second.string_value() == "ReStickifyOpHBM") {
+dsc/dataOpDsc.cpp:443:              this->opName = OpFuncs::ReStickifyOpHBM;
+dsc/dataOpDsc.cpp:506:        if (this->opName == OpFuncs::STCDPOpLx) {
+dsc/dataOpDsc.cpp:507:          this->op = new STCDPOpLx();
+dsc/dataOpDsc.cpp:508:          op->name = OpFuncs::STCDPOpLx;
+dsc/dataOpDsc.cpp:515:        } else if (this->opName == OpFuncs::ReStickifyOpHBM) {
+dsc/dataOpDsc.cpp:516:          this->op = new ReStickifyOpHBM();
+dsc/dataOpDsc.cpp:517:          op->name = OpFuncs::ReStickifyOpHBM;
+dsc/dataOpDsc.cpp:591:            this->opName == OpFuncs::ReStickifyOpHBM ||
+dsc/dataOpDsc.cpp:597:               this->op->name == OpFuncs::ReStickifyOpHBM ||
+dsc/dataOpDsc.cpp:841:            this->opName == OpFuncs::ReStickifyOpHBM ||
+dsc/dataOpDsc.cpp:1151:        if (this->op->name == OpFuncs::STCDPOpLx) {
+dsc/dataOpDsc.cpp:1152:          STCDPOpLx* myOp = (STCDPOpLx*)this->op;
+dsc/dataOpDsc.cpp:1450:        this->op->name == OpFuncs::ReStickifyOpHBM ||
+dsc/dataOpDsc.cpp:1456:           this->op->name == OpFuncs::ReStickifyOpHBM ||
+dsc/dataOpDsc.cpp:1696:  if (this->opName == OpFuncs::STCDPOpLx && this->op != nullptr) {
+dsc/dataOpDsc.cpp:1697:    STCDPOpLx* myOp = (STCDPOpLx*)this->op;
+dsc/dataOpDsc.cpp:1865:  if ((this->opName == OpFuncs::STCDPOpLx ||
+dsc/dataOpDsc.cpp:2113:              this->opName == OpFuncs::ReStickifyOpHBM ||
+dsc/dataOpDsc.cpp:2141:         this->opName == OpFuncs::ReStickifyOpHBM) &&
+dsc/dataOpDsc.cpp:2431:  if (opName == OpFuncs::STCDPOpLx) {
+dsc/dataOpDsc.cpp:2433:      op = new STCDPOpLx;
+dsc/dataOpDsc.cpp:2434:      op->name = OpFuncs::STCDPOpLx;
+dsc/dataOpDsc.cpp:2436:      DT_CHECK(op->name == OpFuncs::STCDPOpLx);
+dsc/dataOpDsc.cpp:2494:  } else if (opName == OpFuncs::ReStickifyOpHBM) {
+dsc/dataOpDsc.cpp:2496:      op = new ReStickifyOpHBM;
+dsc/dataOpDsc.cpp:2497:      op->name = OpFuncs::ReStickifyOpHBM;
+dsc/dataOpDsc.cpp:2499:      DT_CHECK(op->name == OpFuncs::ReStickifyOpHBM);
+dsc/dataOpDsc.cpp:2687:  if (opName == OpFuncs::STCDPOpLx) {
+dsc/dataOpDsc.cpp:2688:    STCDPOpLx* myOp = (STCDPOpLx*)op;
+dsc/dataOpDsc.cpp:2716:  } else if (opName == OpFuncs::ReStickifyOpHBM) {
+dsc/dataOpDsc.cpp:2717:    ReStickifyOpHBM* myOp = (ReStickifyOpHBM*)op;
+dsc/dataOpDsc.cpp:2793:  } else if (opName == OpFuncs::ReStickifyOpHBM) {
+dsc/dataOpDsc.cpp:2794:    ReStickifyOpHBM* myOp = static_cast<ReStickifyOpHBM*>(op);

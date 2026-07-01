@@ -1,0 +1,15 @@
+checkpoint=/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/flash_explicit_layout_restickify_20260701_062020
+source_workspace=/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212
+latest_flash_workspace=/home/adnan/codex-isolated/flash-sdsc-20260701-033044
+latest_test_flash=/home/adnan/codex-isolated/flash_main_probe_20260701_015234/test-spyre-scripts/test_flash.py
+latest_flash_edge=sdsc_1.json:mul -> sdsc_2.json:ReStickifyOpHBM -> sdsc_3.json:batchmatmul KERNEL
+latest_flash_classification=layout-aware on-chip restickify plus grouped all-gather/broadcast into batchmatmul KERNEL
+latest_flash_replay_generated=no; current explicit carrier schema cannot safely encode this edge without new layout-view/all-gather metadata
+
+carrier_probe_source_bundle=/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/explicit_range_grouped_sdsc10_20260701_024349/bundle_input
+carrier_probe_focused_bundle=/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/flash_explicit_layout_restickify_20260701_062020/focused_bundle_input
+carrier_probe_edge=sdsc_8.json:8_mul -> sdsc_9.json:9_ReStickifyOpHBM -> sdsc_10.json:10_batchmatmul
+carrier_sentient_replay_result=rc=0 stderr_lines=0 stdout_lines=1
+carrier_senulator_replay_result=rc=134 stderr_lines=2 stdout_lines=1
+carrier_first_blocker=senulator/backend compile-time correction: ProgCorrectionScatter0 ScatterOpHBM has piece dim d1 size 1 with layoutSize 0
+pushed=no
