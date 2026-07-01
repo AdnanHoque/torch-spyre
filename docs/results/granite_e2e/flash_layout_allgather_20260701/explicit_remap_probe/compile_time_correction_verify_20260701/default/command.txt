@@ -1,0 +1,4 @@
+DEEPTOOLS_PATH=/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/deeptools \
+DEEPTOOLS_EXPLICIT_LX_RANGE_PROTO=1 \
+DEEPTOOLS_EXPLICIT_LX_RANGE_PROTO_DUMP=/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/explicit_remap_ctc_verify_20260701_095803/default/explicit_range_diag.txt \
+/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/deeptools/build-explicit-range-agent-nollvm/dxp/dxp_standalone -b senulator --bundle -d /home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/explicit_remap_ctc_verify_20260701_095803/default/bundle_input

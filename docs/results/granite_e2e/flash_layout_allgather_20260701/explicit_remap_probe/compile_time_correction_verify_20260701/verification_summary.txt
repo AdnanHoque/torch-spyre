@@ -1,0 +1,21 @@
+Verification: explicit-remap senulator correction split
+Date: 2026-07-01
+Pod: adnan-clc-spyre-dev-pf
+Workspace: /home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212
+Source bundle: /home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/flash_explicit_layout_restickify_20260701_062020/concrete_layout_allgather_range_probe_20260701_083445/dxp_bundle_replay_senulator/bundle_input
+
+Default senulator:
+  run: /home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/explicit_remap_ctc_verify_20260701_095803/default
+  result: rc=134
+  evidence: explicit_range_diag.txt has parsedRangeCount=256, dtTableCount=256, then pieceVerificationFailure ProgCorrectionScatter0/ProgCorrectionFlit d1 pieceSize=1 layoutSize=0.
+
+Senulator with DXP_ENABLE_COMPILE_TIME_CORRECTION=1:
+  run: /home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/explicit_remap_ctc_verify_20260701_095803/compile_time_correction
+  result: rc=0
+  evidence: explicit_range_diag.txt has parsedRangeCount=256 and dtTableCount=256; no stderr failure.
+
+Conclusion:
+  DXP_ENABLE_COMPILE_TIME_CORRECTION=1 validates the copied-bundle replay by avoiding zero-flit runtime program-correction scatter generation. It should not be treated as proof that a full flash explicit-remap lowering is safe: the replay is a prototype copied-bundle carrier, and production flash still has to bind the LX-resident KERNEL view into downstream batchmatmul and remove/replace the original ReStickifyOpHBM materialization.
+
+Next smallest backend fix:
+  Skip runtime correction SDSC generation when correction flit count is zero and there are no unresolved correction symbols, or make createDataDscProgCorrection emit a no-op for zero correction flits instead of forcing a one-element ScatterOpHBM piece on a zero-sized ProgCorrectionFlit LDS dimension.
