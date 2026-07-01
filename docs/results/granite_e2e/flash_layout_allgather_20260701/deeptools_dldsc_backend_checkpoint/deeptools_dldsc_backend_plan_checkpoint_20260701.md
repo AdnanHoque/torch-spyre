@@ -1,7 +1,7 @@
 # Deeptools DLDSC Backend Plan Checkpoint - 2026-07-01
 
 Branch: `Adnan-Hoque1/deeptools:ah/comms-collectives`
-Head: `96c00ed16a5abea6f6bcc9bf8d45c25523444439`
+Head: `6d7a720f5fddeae1d416a1f19877069fcc0a4bb8`
 Base: `0a9da5eb19d08712383312bb7dec18fbd7caf711`
 
 ## What This Checkpoint Adds
@@ -38,3 +38,8 @@ The checkpoint intentionally marks the edge `realized=false` and skips the old g
 ## Files
 
 See `deeptools_ah_comms_collectives.diffstat.txt`, `deeptools_ah_comms_collectives_commits.txt`, and `deeptools_ah_comms_collectives.patch` in this directory.
+
+## 2026-07-01 Update
+
+The backend plan checker now accepts both `ReStickifyOpHBM` metadata from older staged artifacts and `ReStickifyOpLx` metadata from the latest Torch probe. It still normalizes the physical plan to `ReStickifyOpLx`. Focused `LayoutAllgatherRestickify.*` unit tests pass with 11 tests.
+

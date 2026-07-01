@@ -385,10 +385,10 @@ index d269f445e..87854c641 100644
          )
 diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
 new file mode 100644
-index 000000000..3fbeca602
+index 000000000..3cdb8e246
 --- /dev/null
 +++ b/util/LayoutAllgatherRestickify.cpp
-@@ -0,0 +1,367 @@
+@@ -0,0 +1,371 @@
 +/************************************************************
 + * IBM Confidential
 + * (C) Copyright IBM Corp. 2026
@@ -460,6 +460,10 @@ index 000000000..3fbeca602
 +                      const std::string &expected) {
 +  return json[key].is_null() ||
 +         (json[key].is_string() && json[key].string_value() == expected);
++}
++
++bool isSupportedRestickifyOp(const std::string &op) {
++  return op == "ReStickifyOpHBM" || op == "ReStickifyOpLx";
 +}
 +
 +Json metadataValueToJson(const std::string &value) {
@@ -648,8 +652,8 @@ index 000000000..3fbeca602
 +  if (json["producer_op"].string_value() != "mul") {
 +    return movementFail("producer_op must be mul");
 +  }
-+  if (json["restickify_op"].string_value() != "ReStickifyOpHBM") {
-+    return movementFail("restickify_op must be ReStickifyOpHBM");
++  if (!isSupportedRestickifyOp(json["restickify_op"].string_value())) {
++    return movementFail("restickify_op must be ReStickifyOpHBM or ReStickifyOpLx");
 +  }
 +  if (json["consumer_op"].string_value() != "batchmatmul") {
 +    return movementFail("consumer_op must be batchmatmul");
@@ -836,10 +840,10 @@ index 000000000..ea4e808ea
 +#endif  // UTIL_LAYOUT_ALLGATHER_RESTICKIFY_H_
 diff --git a/util/test/LayoutAllgatherRestickify_unit_test.cpp b/util/test/LayoutAllgatherRestickify_unit_test.cpp
 new file mode 100644
-index 000000000..171aacdb4
+index 000000000..c0cce72db
 --- /dev/null
 +++ b/util/test/LayoutAllgatherRestickify_unit_test.cpp
-@@ -0,0 +1,255 @@
+@@ -0,0 +1,268 @@
 +/************************************************************
 + * IBM Confidential
 + * (C) Copyright IBM Corp. 2026
@@ -991,6 +995,19 @@ index 000000000..171aacdb4
 +  EXPECT_EQ(plan.stages[0], "restickify_layout_on_chip");
 +  EXPECT_EQ(plan.stages[1], "grouped_all_gather");
 +  EXPECT_EQ(plan.stages[2], "bind_bmm_kernel_operand");
++}
++
++TEST(LayoutAllgatherRestickify, synthesizesFlashMovementPlanFromLxRestickify) {
++  const auto contract = replaceFirst(
++      validFlashContract(), R"json("restickify_op": "ReStickifyOpHBM")json",
++      R"json("restickify_op": "ReStickifyOpLx")json");
++
++  const auto plan =
++      deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(contract);
++
++  EXPECT_TRUE(plan.ok) << plan.reason;
++  EXPECT_EQ(plan.restickifyOp, "ReStickifyOpLx");
++  EXPECT_EQ(plan.logicalTransferCount, 256);
 +}
 +
 +TEST(LayoutAllgatherRestickify,
