@@ -1,0 +1,107 @@
+{
+  "baseline_run": "full4_flash_after_scheduler_walk_20260701_085900",
+  "baseline_selected_rows": [
+    {
+      "allocs": "allocate-Tensor0_lx:lx:out/x/mb; allocate-Tensor1_hbm:hbm:x/out/mb",
+      "classified": false,
+      "file": "sdsc_19.json",
+      "root": "19_ReStickifyOpHBM"
+    },
+    {
+      "allocs": "allocate-Tensor0_lx:lx:out/x/mb; allocate-Tensor1_hbm:hbm:x/out/mb",
+      "classified": false,
+      "file": "sdsc_2.json",
+      "root": "2_ReStickifyOpHBM"
+    },
+    {
+      "allocs": "allocate-Tensor0_hbm:hbm:in/mb/x; allocate-Tensor1_hbm:hbm:out/in/x; allocate-Tensor2_hbm:hbm:out/mb/x",
+      "classified": false,
+      "file": "sdsc_20.json",
+      "root": "20_batchmatmul"
+    },
+    {
+      "allocs": "allocate-Tensor0_hbm:hbm:in/mb/x; allocate-Tensor1_hbm:hbm:out/in/x; allocate-Tensor2_hbm:hbm:out/mb/x",
+      "classified": false,
+      "file": "sdsc_3.json",
+      "root": "3_batchmatmul"
+    },
+    {
+      "allocs": "allocate-Tensor0_lx:lx:out/x/mb; allocate-Tensor1_hbm:hbm:x/out/mb",
+      "classified": false,
+      "file": "sdsc_36.json",
+      "root": "36_ReStickifyOpHBM"
+    },
+    {
+      "allocs": "allocate-Tensor0_hbm:hbm:in/mb/x; allocate-Tensor1_hbm:hbm:out/in/x; allocate-Tensor2_hbm:hbm:out/mb/x",
+      "classified": false,
+      "file": "sdsc_37.json",
+      "root": "37_batchmatmul"
+    },
+    {
+      "allocs": "allocate-Tensor0_lx:lx:out/x/mb; allocate-Tensor1_hbm:hbm:x/out/mb",
+      "classified": false,
+      "file": "sdsc_53.json",
+      "root": "53_ReStickifyOpHBM"
+    },
+    {
+      "allocs": "allocate-Tensor0_hbm:hbm:in/mb/x; allocate-Tensor1_hbm:hbm:out/in/x; allocate-Tensor2_hbm:hbm:out/mb/x",
+      "classified": false,
+      "file": "sdsc_54.json",
+      "root": "54_batchmatmul"
+    }
+  ],
+  "shape": "B=1,H=4,Lq=4096,Lk=4096,D=128",
+  "staged_classification_count": 4,
+  "staged_contract_run": "full4_flash_preserve_staged_allgather_20260701_090521",
+  "staged_selected_rows": [
+    {
+      "allocs": "allocate-Tensor0_lx:lx:out/x/mb; allocate-Tensor1_lx:lx:x/out/mb",
+      "classified": false,
+      "file": "sdsc_19.json",
+      "root": "19_ReStickifyOpHBM"
+    },
+    {
+      "allocs": "allocate-Tensor0_lx:lx:out/x/mb; allocate-Tensor1_lx:lx:x/out/mb",
+      "classified": false,
+      "file": "sdsc_2.json",
+      "root": "2_ReStickifyOpHBM"
+    },
+    {
+      "allocs": "allocate-Tensor0_hbm:hbm:in/mb/x; allocate-Tensor1_lx:lx:out/in/x; allocate-Tensor2_hbm:hbm:out/mb/x",
+      "classified": true,
+      "file": "sdsc_20.json",
+      "root": "20_batchmatmul"
+    },
+    {
+      "allocs": "allocate-Tensor0_hbm:hbm:in/mb/x; allocate-Tensor1_lx:lx:out/in/x; allocate-Tensor2_hbm:hbm:out/mb/x",
+      "classified": true,
+      "file": "sdsc_3.json",
+      "root": "3_batchmatmul"
+    },
+    {
+      "allocs": "allocate-Tensor0_lx:lx:out/x/mb; allocate-Tensor1_lx:lx:x/out/mb",
+      "classified": false,
+      "file": "sdsc_36.json",
+      "root": "36_ReStickifyOpHBM"
+    },
+    {
+      "allocs": "allocate-Tensor0_hbm:hbm:in/mb/x; allocate-Tensor1_lx:lx:out/in/x; allocate-Tensor2_hbm:hbm:out/mb/x",
+      "classified": true,
+      "file": "sdsc_37.json",
+      "root": "37_batchmatmul"
+    },
+    {
+      "allocs": "allocate-Tensor0_lx:lx:out/x/mb; allocate-Tensor1_lx:lx:x/out/mb",
+      "classified": false,
+      "file": "sdsc_53.json",
+      "root": "53_ReStickifyOpHBM"
+    },
+    {
+      "allocs": "allocate-Tensor0_hbm:hbm:in/mb/x; allocate-Tensor1_lx:lx:out/in/x; allocate-Tensor2_hbm:hbm:out/mb/x",
+      "classified": true,
+      "file": "sdsc_54.json",
+      "root": "54_batchmatmul"
+    }
+  ],
+  "stock_dxp_failure": "std::out_of_range map::at"
+}

@@ -1,0 +1,9 @@
+file,root,classified,allocs
+sdsc_19.json,19_ReStickifyOpHBM,False,allocate-Tensor0_lx:lx:out/x/mb; allocate-Tensor1_lx:lx:x/out/mb
+sdsc_2.json,2_ReStickifyOpHBM,False,allocate-Tensor0_lx:lx:out/x/mb; allocate-Tensor1_lx:lx:x/out/mb
+sdsc_20.json,20_batchmatmul,True,allocate-Tensor0_hbm:hbm:in/mb/x; allocate-Tensor1_lx:lx:out/in/x; allocate-Tensor2_hbm:hbm:out/mb/x
+sdsc_3.json,3_batchmatmul,True,allocate-Tensor0_hbm:hbm:in/mb/x; allocate-Tensor1_lx:lx:out/in/x; allocate-Tensor2_hbm:hbm:out/mb/x
+sdsc_36.json,36_ReStickifyOpHBM,False,allocate-Tensor0_lx:lx:out/x/mb; allocate-Tensor1_lx:lx:x/out/mb
+sdsc_37.json,37_batchmatmul,True,allocate-Tensor0_hbm:hbm:in/mb/x; allocate-Tensor1_lx:lx:out/in/x; allocate-Tensor2_hbm:hbm:out/mb/x
+sdsc_53.json,53_ReStickifyOpHBM,False,allocate-Tensor0_lx:lx:out/x/mb; allocate-Tensor1_lx:lx:x/out/mb
+sdsc_54.json,54_batchmatmul,True,allocate-Tensor0_hbm:hbm:in/mb/x; allocate-Tensor1_lx:lx:out/in/x; allocate-Tensor2_hbm:hbm:out/mb/x
