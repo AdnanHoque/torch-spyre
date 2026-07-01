@@ -1,0 +1,31 @@
+warning: Error disabling address space randomization: Function not implemented
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib64/libthread_db.so.1".
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+terminate called after throwing an instance of 'std::out_of_range'
+  what():  map::at
+
+Program received signal SIGABRT, Aborted.
+0x00007fc15596b81c in __pthread_kill_implementation () from /lib64/libc.so.6
+#0  0x00007fc15596b81c in __pthread_kill_implementation () from /lib64/libc.so.6
+No symbol table info available.
+#1  0x00007fc155915116 in raise () from /lib64/libc.so.6
+No symbol table info available.
+#2  0x00007fc1558fc8fa in abort () from /lib64/libc.so.6
+No symbol table info available.
+#3  0x00007fc155c2e03a in __gnu_cxx::__verbose_terminate_handler() [clone .cold] () from /lib64/libstdc++.so.6
+No symbol table info available.
+#4  0x00007fc155c440ac in __cxxabiv1::__terminate(void (*)()) () from /lib64/libstdc++.so.6
+No symbol table info available.
+#5  0x00007fc155c2da39 in std::terminate() () from /lib64/libstdc++.so.6
+No symbol table info available.
+#6  0x00007fc155c44338 in __cxa_throw () from /lib64/libstdc++.so.6
+No symbol table info available.
+#7  0x00007fc155c31886 in std::__throw_out_of_range(char const*) () from /lib64/libstdc++.so.6
+No symbol table info available.
+#8  0x00007fc1639c7222 in Dxp::insertRelayoutSdsc(SuperDsc*, int, MemTrackBundle*, std::vector<SuperDsc*, std::allocator<SuperDsc*> >&) [clone .cold] () from /opt/ibm/spyre/deeptools/lib/libdxp.so
+No symbol table info available.
+#9  0x00007fc1639f9d5d in Dxp::runDxp(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, bool) () from /opt/ibm/spyre/deeptools/lib/libdxp.so
+No symbol table info available.
+#10 0x0000000000404d9d in main ()
+No symbol table info available.

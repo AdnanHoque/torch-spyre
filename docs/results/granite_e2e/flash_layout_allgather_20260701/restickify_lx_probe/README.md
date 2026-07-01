@@ -17,3 +17,8 @@ Artifacts:
 - `run.log`: raw compile log with DXP abort.
 - `sdsc_summary.csv`: compact row summary.
 - `classifications.json`: extracted all-gather contracts.
+
+DXP stack evidence:
+
+- `dxp_gdb_bt.txt` shows the abort occurs in `Dxp::insertRelayoutSdsc(SuperDsc*, int, MemTrackBundle*, ...)` inside `/opt/ibm/spyre/deeptools/lib/libdxp.so`.
+- That means the bundle gets far enough for backend relayout insertion. The current blocker is not Python import or frontend metadata loss.
