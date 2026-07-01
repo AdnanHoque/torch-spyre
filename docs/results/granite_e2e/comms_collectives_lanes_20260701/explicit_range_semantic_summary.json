@@ -1,0 +1,219 @@
+{
+  "result": "rc=0",
+  "sourceLxBase": 4096,
+  "destinationLxBase": 36864,
+  "rangeCount": 4,
+  "bytesPerRange": [
+    32,
+    32,
+    32,
+    32
+  ],
+  "destinationCoverageRelativeToBase": [
+    [
+      0,
+      32
+    ],
+    [
+      32,
+      64
+    ],
+    [
+      64,
+      96
+    ],
+    [
+      96,
+      128
+    ]
+  ],
+  "destinationCoverageIsContiguous128Bytes": true,
+  "ranges": [
+    {
+      "rangeIndex": 0,
+      "moveIndex": 0,
+      "bytesPerMove": 32,
+      "count": 1,
+      "sourceCore": 3,
+      "sourceLx": 4096,
+      "sourceOffsetFromBase": 0,
+      "sourceByteRange": [
+        4096,
+        4128
+      ],
+      "destinationCore": 19,
+      "destinationLx": 36864,
+      "destinationOffsetFromBase": 0,
+      "destinationByteRange": [
+        36864,
+        36896
+      ],
+      "logicalStarts": {
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "logicalSizes": {
+        "mb": 1,
+        "out": 16,
+        "in": 1
+      }
+    },
+    {
+      "rangeIndex": 1,
+      "moveIndex": 1,
+      "bytesPerMove": 32,
+      "count": 1,
+      "sourceCore": 4,
+      "sourceLx": 4352,
+      "sourceOffsetFromBase": 256,
+      "sourceByteRange": [
+        4352,
+        4384
+      ],
+      "destinationCore": 19,
+      "destinationLx": 36896,
+      "destinationOffsetFromBase": 32,
+      "destinationByteRange": [
+        36896,
+        36928
+      ],
+      "logicalStarts": {
+        "mb": 0,
+        "out": 16,
+        "in": 0
+      },
+      "logicalSizes": {
+        "mb": 1,
+        "out": 16,
+        "in": 1
+      }
+    },
+    {
+      "rangeIndex": 2,
+      "moveIndex": 2,
+      "bytesPerMove": 32,
+      "count": 1,
+      "sourceCore": 5,
+      "sourceLx": 4608,
+      "sourceOffsetFromBase": 512,
+      "sourceByteRange": [
+        4608,
+        4640
+      ],
+      "destinationCore": 19,
+      "destinationLx": 36928,
+      "destinationOffsetFromBase": 64,
+      "destinationByteRange": [
+        36928,
+        36960
+      ],
+      "logicalStarts": {
+        "mb": 0,
+        "out": 32,
+        "in": 0
+      },
+      "logicalSizes": {
+        "mb": 1,
+        "out": 16,
+        "in": 1
+      }
+    },
+    {
+      "rangeIndex": 3,
+      "moveIndex": 3,
+      "bytesPerMove": 32,
+      "count": 1,
+      "sourceCore": 6,
+      "sourceLx": 4864,
+      "sourceOffsetFromBase": 768,
+      "sourceByteRange": [
+        4864,
+        4896
+      ],
+      "destinationCore": 19,
+      "destinationLx": 36960,
+      "destinationOffsetFromBase": 96,
+      "destinationByteRange": [
+        36960,
+        36992
+      ],
+      "logicalStarts": {
+        "mb": 0,
+        "out": 48,
+        "in": 0
+      },
+      "logicalSizes": {
+        "mb": 1,
+        "out": 16,
+        "in": 1
+      }
+    }
+  ],
+  "dtTable": [
+    {
+      "dtKey": 0,
+      "pIDX": 0,
+      "pMemID": 3,
+      "minCMemID": 19,
+      "trVolume": 32,
+      "numTransactions": 1,
+      "useBurst": false,
+      "cIDXs": [
+        0
+      ],
+      "cMemIDs": [
+        19
+      ]
+    },
+    {
+      "dtKey": 1,
+      "pIDX": 1,
+      "pMemID": 4,
+      "minCMemID": 19,
+      "trVolume": 32,
+      "numTransactions": 1,
+      "useBurst": false,
+      "cIDXs": [
+        1
+      ],
+      "cMemIDs": [
+        19
+      ]
+    },
+    {
+      "dtKey": 2,
+      "pIDX": 2,
+      "pMemID": 5,
+      "minCMemID": 19,
+      "trVolume": 32,
+      "numTransactions": 1,
+      "useBurst": false,
+      "cIDXs": [
+        2
+      ],
+      "cMemIDs": [
+        19
+      ]
+    },
+    {
+      "dtKey": 3,
+      "pIDX": 3,
+      "pMemID": 6,
+      "minCMemID": 19,
+      "trVolume": 32,
+      "numTransactions": 1,
+      "useBurst": false,
+      "cIDXs": [
+        3
+      ],
+      "cMemIDs": [
+        19
+      ]
+    }
+  ],
+  "notes": [
+    "Backend/senulator codegen accepted the bundle with compile-time correction enabled.",
+    "This is not semantic memory execution; no patterned runtime bytes were executed or compared."
+  ]
+}

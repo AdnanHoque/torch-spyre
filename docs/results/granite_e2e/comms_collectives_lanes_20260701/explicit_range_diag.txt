@@ -1,0 +1,24 @@
+dataOpDsc: sdsc_10_Tensor1_explicit_range
+parsedRangeCount: 4
+range[0] moveIndex=0 bytesPerMove=32 count=1 srcCore=3 srcLx=4096 dstCore=19 dstLx=36864
+  logicalSizes in=1 mb=1 out=16
+range[1] moveIndex=1 bytesPerMove=32 count=1 srcCore=4 srcLx=4352 dstCore=19 dstLx=36896
+  logicalSizes in=1 mb=1 out=16
+range[2] moveIndex=2 bytesPerMove=32 count=1 srcCore=5 srcLx=4608 dstCore=19 dstLx=36928
+  logicalSizes in=1 mb=1 out=16
+range[3] moveIndex=3 bytesPerMove=32 count=1 srcCore=6 srcLx=4864 dstCore=19 dstLx=36960
+  logicalSizes in=1 mb=1 out=16
+dtTableCount: 4
+dt[0] pIDX=0 pMemID=3 minCMemID=19 trVolume=32 numTransactions=1 useBurst=0 cIDXs=0, cMemIDs=19,
+dt[1] pIDX=1 pMemID=4 minCMemID=19 trVolume=32 numTransactions=1 useBurst=0 cIDXs=1, cMemIDs=19,
+dt[2] pIDX=2 pMemID=5 minCMemID=19 trVolume=32 numTransactions=1 useBurst=0 cIDXs=2, cMemIDs=19,
+dt[3] pIDX=3 pMemID=6 minCMemID=19 trVolume=32 numTransactions=1 useBurst=0 cIDXs=3, cMemIDs=19,
+coreIDtoDtKey_L3SU
+  core 3: 0
+  core 4: 1
+  core 5: 2
+  core 6: 3
+coreIDtoDtKey_L3LU
+  core 19: 0 1 2 3
+coreIDtoDtKey_LX
+---

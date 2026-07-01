@@ -1282,3 +1282,290 @@ edge?"  We can.  The remaining backend question is whether production wants to
 realize `gather`/`all_gather` by extending compact DLDSC/STCDP staging, or by
 accepting an explicit byte-range carrier for the cases where STCDP's inferred
 whole-stick model is too coarse.
+
+### 2026-07-01 Implementation Lane Checkpoint
+
+Three parallel probes clarified the next boundary.
+
+#### DLDSC/STCDP Internal Range Path
+
+CDX workspace:
+
+```text
+/home/adnan-cdx/codex-isolated/comms_collectives_staged_substick_agent_20260630_225637/deeptools
+```
+
+The prototype added internal sub-stick metadata:
+
+```text
+SubStickRangeInfo
+transferInfo::subStickRanges
+STCDPOpLx::enableSubStickRanges
+```
+
+`insertSubPieces()` now records:
+
+```text
+transfer dim
+source intra-stick offset
+destination intra-stick offset
+element count
+producer memId
+consumer memId
+```
+
+Replay moved past the old front-end STCDP assertion:
+
+```text
+old failure: inpSP.dimToSize["out"] >= stickDim
+observed:    16 >= 64
+```
+
+The new boundary is lower in the backend:
+
+```text
+DXP_STCDP_SUBSTICK_RANGES reached STCDP ring-DT lowering for core=0
+unit=10 dtKey=0 dim=out srcOffset=0 dstOffset=0 count=16 producer=0
+consumer=0.
+
+SenPcfgRingDtNode/DcgBE ring lowering only carries stick-addressed
+start/stride values and has no src/dst intra-stick offset fields.
+```
+
+Artifact:
+
+```text
+/home/adnan-cdx/codex-isolated/comms_collectives_staged_substick_agent_20260630_225637/runs/staged_substick_ranges_20260701_005730
+```
+
+Interpretation: compact DLDSC/STCDP remains a viable architecture, but the
+next required backend work is deeper than `dtTable_` metadata.  Either
+`SenPcfgRingDtNode` plus `DcgBE::pcfgringDTToInstr()` need explicit
+intra-stick source/destination offsets, or Deeptools needs a lower-level ring
+sequence that moves partial-stick ranges without rounding LX addresses to
+`addr / bytesPerStick`.
+
+Follow-up on the same CDX workspace checked the direct ring-offset option.  It
+is not a small backend-only extension in the current model:
+
+```text
+dsc/pcfg.h
+  SenPcfgRingDtNode has stick-addressed start/stride/ring metadata.
+
+dcg/dcg_be/dcgbeCodegen.cpp
+  pcfg ring codegen divides LX start address by bytesPerStick before LAR init.
+
+dsc/isa.cpp
+  L3 ring opcode type 21 carries src0/LAR, src1/LBR or drm, node, burst,
+  group, be.  It has no source intra-stick offset, destination intra-stick
+  offset, or sub-stick element-count field.
+```
+
+Replay artifact:
+
+```text
+/home/adnan-cdx/codex-isolated/comms_collectives_staged_substick_agent_20260630_225637/runs/staged_substick_ring_offsets_20260701_011119
+```
+
+Conclusion: direct partial-stick ring movement needs deeper ISA/ProgIR/codegen
+support.  For the compact DLDSC direction, the practical next architecture is
+whole-stick ring staging followed by local LX partial-stick assemble/extract.
+
+#### Explicit Byte-Range Path
+
+CLC workspace:
+
+```text
+/home/adnan/codex-isolated/explicit_range_agent_20260630/deeptools
+```
+
+The explicit byte-range prototype now lowers a small list of ranges, not just
+one range.  The four-range replay represents one full 128-byte consumer stick
+assembled from four 16-wide FP16 producer fragments:
+
+```text
+parsedRangeCount: 4
+range[0] bytesPerMove=32 srcCore=3 dstCore=19 dstLx=36864
+range[1] bytesPerMove=32 srcCore=4 dstCore=19 dstLx=36896
+range[2] bytesPerMove=32 srcCore=5 dstCore=19 dstLx=36928
+range[3] bytesPerMove=32 srcCore=6 dstCore=19 dstLx=36960
+dtTableCount: 4
+coreIDtoDtKey_L3SU: cores 3,4,5,6 each own one dt key
+coreIDtoDtKey_L3LU: core 19 owns dt keys 0 1 2 3
+```
+
+Replay:
+
+```text
+/home/adnan/codex-isolated/explicit_range_agent_20260630/runs/explicit_range_four_replay_20260701_005411
+rc=0
+```
+
+Runtime-facing validation is still blocked:
+
+```text
+dxp_standalone --bundle ... -b senulator
+rc=134
+DtException: minStartAddr % dscGlobal.sysDef.bytesPerStick == 0
+file dsc/senulatorProg.cpp line 324
+```
+
+Interpretation: explicit ranges are the fastest way to describe and DXP-lower
+the sub-stick gather.  The cost is a larger frontend/backend contract: physical
+movement ranges, byte addresses, producer/consumer cores, synthetic LDS
+metadata, and schedule rows must all be enumerated.  That is useful for a
+research carrier but riskier as the long-term collective contract.
+
+Follow-up on the same CLC workspace moved the explicit byte-range prototype
+through senulator/backend acceptance for the four-range synthetic bundle:
+
+```bash
+DEEPTOOLS_EXPLICIT_LX_RANGE_PROTO=1
+DXP_ENABLE_COMPILE_TIME_CORRECTION=1
+dxp_standalone --bundle -d .../bundle_input -b senulator
+```
+
+Artifact:
+
+```text
+/home/adnan/codex-isolated/explicit_range_agent_20260630/runs/explicit_range_four_senresolve_ctc_20260701_012808
+```
+
+Result:
+
+```text
+result_senulator_backend.txt: rc=0
+semantic coverage: [(0,32), (32,64), (64,96), (96,128)]
+```
+
+This proves backend/senulator codegen acceptance for the intended four
+explicit byte ranges.  It does not yet prove patterned runtime memory
+correctness.  The prototype now touches JSON import, transfer materialization,
+generic verifier expectations, DXP bundle-symbol handling, senulator metadata
+export, and compile-time correction control, which reinforces the earlier
+scaling concern.
+
+#### 4-Head Attention Script Probe
+
+dev-pf workspace:
+
+```text
+/home/adnan/codex-isolated/attention_4h_probe_20260701_005035
+```
+
+Script commit:
+
+```text
+git@github.ibm.com:aviros/test-spyre-scripts.git
+05deb9702654f73781b457ed052a3ff69316670f
+```
+
+Runs:
+
+| lane | result |
+|---|---|
+| baseline current comms | fails before scratchpad/SDSC |
+| scatter planner + Deeptools | same failure before scratchpad/SDSC |
+| archived scatter baseline fallback | same failure before scratchpad/SDSC |
+
+Failure:
+
+```text
+torch._inductor.exc.InductorError:
+NotImplementedError: buf10 (Pointwise): no mechanism to resolve stick incompatibility
+```
+
+No scratchpad allocator plan, `plan_solver` summary, or `sdsc_*.json` files
+were produced.  Therefore this run did not reproduce the pasted baseline that
+showed allocator/SDSC behavior.  The scatter planner cannot affect this failure
+yet because the compile stops before scratchpad planning and SDSC generation.
+
+Follow-up in the same dev-pf workspace identified the issue:
+
+```text
+buf10 = running_max = torch.maximum(real_max, block_max)
+source: test_flash_4_head.py:117
+
+buf4 = real_max.amax(dim=-1)
+buf9 = torch.amax(scores, dim=-1)
+```
+
+Current main fails because it lacks singleton-stick reduction restickify:
+
+```text
+buf4 STL ...: No mechanism to gather elements from multiple sticks into single stick
+```
+
+Local history shows the support existed in:
+
+```text
+0e928a8 Support singleton-stick reduction restickify
+```
+
+and was later reverted by:
+
+```text
+59b1086
+```
+
+Sibling scripts avoid the same issue with a script-level workaround:
+
+```python
+scores.transpose(-1, -2).contiguous()  # avoid stick reduction
+```
+
+Using an isolated runtime monkey patch that restored only the singleton-stick
+branch, both baseline and scatter-planner lanes got past `buf10`, reached
+scratchpad/SDSC, emitted 89 SDSC JSON files, and then failed later in DXP:
+
+```text
+DtException: Could not find any suitable dimension mapping
+```
+
+Baseline with singleton patch:
+
+```text
+/home/adnan/codex-isolated/attention_4h_probe_20260701_005035/runs/baseline_singleton_restickify_patch_20260701_011409
+scratchpad limit: 1638 KB
+SDSC files: 89
+allocations: 154 hbm, 72 lx
+ReStickifyOpHBM count: 20
+```
+
+Scatter planner with singleton patch:
+
+```text
+/home/adnan/codex-isolated/attention_4h_probe_20260701_005035/runs/scatter_singleton_restickify_patch_20260701_011645
+scratchpad limit: 2048 KB
+planned LX relayout edges: 8
+SDSC files: 89
+allocations: 120 hbm, 106 lx
+ReStickifyOpHBM count: 20
+STCDPOpLx count: 0
+```
+
+Realized scatter edges:
+
+```text
+buf4 -> buf10
+buf4 -> buf11
+buf5 -> buf7
+buf1 -> buf13
+buf12 -> buf13
+buf10 -> buf14
+buf20 -> buf21
+```
+
+Still not handled by scatter:
+
+```text
+buf27 -> buf7
+kind: layout_restickify_activation
+realized: false
+reason: computed activation restickify needs loop-scoped matmul operand lowering
+```
+
+Interpretation: the scatter planner does change attention allocation behavior
+once singleton-stick restickify lets compilation reach scratchpad/SDSC.  It
+does not remove the remaining layout-restickify activation spill, and execution
+is still blocked by a later DXP dimension-mapping failure.
