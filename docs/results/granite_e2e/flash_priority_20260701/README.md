@@ -95,3 +95,10 @@ Artifacts:
 - `dldsc_layout_restickify/backend_contract_checker_20260701.md`
 - `dldsc_layout_restickify/deeptools_layout_allgather_restickify_checker.patch`
 
+
+Deeptools fork checkpoint:
+
+- Repository: `git@github.ibm.com:Adnan-Hoque1/deeptools.git`
+- Branch: `ah/comms-collectives`
+- Commit: `4afc4d9f5` (`[DXP] Add flash layout-allgather contract checker`)
+
