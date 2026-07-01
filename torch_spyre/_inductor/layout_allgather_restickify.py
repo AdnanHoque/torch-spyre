@@ -22,6 +22,55 @@ LAYOUT_ALLGATHER_RESTICKIFY = "layout_allgather_restickify"
 COMM_CLASS_ALL_GATHER = "all_gather"
 
 
+def make_layout_allgather_restickify_contract(
+    *,
+    producer_op: str,
+    restickify_op: str,
+    consumer_op: str,
+    producer_work_slice_dims: dict[str, int],
+    restickify_work_slice_dims: dict[str, int],
+    consumer_work_slice_dims: dict[str, int],
+) -> dict[str, Any]:
+    """Return the logical contract needed to lower the flash restickify edge.
+
+    This is intentionally a logical contract, not a physical movement list. The
+    backend still owns route selection and transfer synthesis, but it must see
+    the layout/stick transform and dimension rename to avoid treating the edge
+    as a direct scatter.
+    """
+
+    return {
+        "kind": LAYOUT_ALLGATHER_RESTICKIFY,
+        "classification": LAYOUT_ALLGATHER_RESTICKIFY,
+        "producer_op": producer_op,
+        "restickify_op": restickify_op,
+        "consumer_op": consumer_op,
+        "producer_work_slice_dims": dict(producer_work_slice_dims),
+        "restickify_work_slice_dims": dict(restickify_work_slice_dims),
+        "consumer_work_slice_dims": dict(consumer_work_slice_dims),
+        "producer_layout": {
+            "layoutDimOrder_": ["out", "x", "mb"],
+            "stickDimOrder_": ["out"],
+        },
+        "restickify_kernel_layout": {
+            "layoutDimOrder_": ["x", "out", "mb"],
+            "stickDimOrder_": ["x"],
+        },
+        "consumer_kernel_layout": {
+            "layoutDimOrder_": ["out", "in", "x"],
+            "stickDimOrder_": ["out"],
+        },
+        "dimension_rename": {
+            "restickify.x": "batchmatmul.out",
+            "restickify.out": "batchmatmul.in",
+            "restickify.mb": "batchmatmul.x",
+        },
+        "communication_class": COMM_CLASS_ALL_GATHER,
+        "communication_pattern": LAYOUT_ALLGATHER_RESTICKIFY,
+        "requires_staged_realization": True,
+    }
+
+
 def _sdsc_op_name(sdsc: dict[str, Any]) -> str:
     return str(sdsc.get("op") or sdsc.get("top_key", "").split("_", 1)[-1])
 
@@ -121,35 +170,15 @@ def classify_layout_allgather_restickify_sdsc_triplet(
         return None
 
     return {
-        "kind": LAYOUT_ALLGATHER_RESTICKIFY,
-        "classification": LAYOUT_ALLGATHER_RESTICKIFY,
-        "producer_op": producer_op,
-        "restickify_op": restickify_op,
-        "consumer_op": consumer_op,
-        "producer_work_slice_dims": producer_splits,
-        "restickify_work_slice_dims": restickify_splits,
-        "consumer_work_slice_dims": consumer_splits,
-        "producer_layout": {
-            "layoutDimOrder_": list(producer_output_layout[0]),
-            "stickDimOrder_": list(producer_output_layout[1]),
-        },
-        "restickify_kernel_layout": {
-            "layoutDimOrder_": list(restickify_kernel_layout[0]),
-            "stickDimOrder_": list(restickify_kernel_layout[1]),
-        },
-        "consumer_kernel_layout": {
-            "layoutDimOrder_": list(consumer_kernel_layout[0]),
-            "stickDimOrder_": list(consumer_kernel_layout[1]),
-        },
-        "dimension_rename": {
-            "restickify.x": "batchmatmul.out",
-            "restickify.out": "batchmatmul.in",
-            "restickify.mb": "batchmatmul.x",
-        },
-        "communication_class": COMM_CLASS_ALL_GATHER,
-        "communication_pattern": LAYOUT_ALLGATHER_RESTICKIFY,
+        **make_layout_allgather_restickify_contract(
+            producer_op=producer_op,
+            restickify_op=restickify_op,
+            consumer_op=consumer_op,
+            producer_work_slice_dims=producer_splits,
+            restickify_work_slice_dims=restickify_splits,
+            consumer_work_slice_dims=consumer_splits,
+        ),
         "realized": False,
-        "requires_staged_realization": True,
         "unsupported_reason": (
             "layout_allgather_restickify is metadata-only; "
             "backend lowering is not implemented"

@@ -37,6 +37,7 @@ from torch_spyre._inductor import config
 from torch_spyre._inductor.layout_allgather_restickify import (
     LAYOUT_ALLGATHER_RESTICKIFY,
     classify_layout_allgather_restickify_sdsc_triplet,  # noqa: F401
+    make_layout_allgather_restickify_contract,
 )
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.pass_utils import (
@@ -86,6 +87,10 @@ class LXRelayoutPlan:
     communication_pattern: str = ""
     realization_strategy: str = ""
     requires_staged_realization: bool = False
+    producer_layout: dict[str, Any] | None = None
+    restickify_kernel_layout: dict[str, Any] | None = None
+    consumer_kernel_layout: dict[str, Any] | None = None
+    dimension_rename: dict[str, str] | None = None
     unsupported_reason: str = ""
 
 
@@ -335,11 +340,17 @@ def _producer_ops(graph: GraphLowering) -> dict[str, ComputedBuffer]:
 
 
 def _record_plan(consumer: Operation, plan: LXRelayoutPlan) -> None:
+    payload = {
+        key: value
+        for key, value in dataclasses.asdict(plan).items()
+        if value is not None
+    }
+
     classifications = getattr(consumer, LX_RELAYOUT_CLASSIFICATION_ATTR, None)
     if not isinstance(classifications, dict):
         classifications = {}
         setattr(consumer, LX_RELAYOUT_CLASSIFICATION_ATTR, classifications)
-    classifications[plan.source_name] = dataclasses.asdict(plan)
+    classifications[plan.source_name] = payload
 
     if not plan.realized:
         return
@@ -348,7 +359,7 @@ def _record_plan(consumer: Operation, plan: LXRelayoutPlan) -> None:
     if not isinstance(plans, dict):
         plans = {}
         setattr(consumer, LX_RELAYOUT_ATTR, plans)
-    plans[plan.source_name] = dataclasses.asdict(plan)
+    plans[plan.source_name] = payload
 
 
 def clear_lx_relayout_metadata(graph: GraphLowering) -> None:
@@ -638,6 +649,7 @@ def plan_lx_relayouts(
                 realization_strategy = ""
                 requires_staged_realization = False
                 unsupported_reason = ""
+                layout_contract: dict[str, Any] | None = None
                 kind = "layout_restickify_activation"
                 communication_pattern = "layout_transform"
                 if is_matmul_operand:
@@ -654,6 +666,14 @@ def plan_lx_relayouts(
                     ):
                         kind = LAYOUT_ALLGATHER_RESTICKIFY
                         communication_pattern = LAYOUT_ALLGATHER_RESTICKIFY
+                        layout_contract = make_layout_allgather_restickify_contract(
+                            producer_op="mul",
+                            restickify_op="ReStickifyOpHBM",
+                            consumer_op="batchmatmul",
+                            producer_work_slice_dims=producer_work_slice_dims,
+                            restickify_work_slice_dims=producer_work_slice_dims,
+                            consumer_work_slice_dims=consumer_work_slice_dims,
+                        )
                         unsupported_reason = (
                             "layout_allgather_restickify is metadata-only; "
                             "backend lowering is not implemented"
@@ -674,6 +694,26 @@ def plan_lx_relayouts(
                     communication_pattern=communication_pattern,
                     realization_strategy=realization_strategy,
                     requires_staged_realization=requires_staged_realization,
+                    producer_layout=(
+                        layout_contract.get("producer_layout")
+                        if layout_contract
+                        else None
+                    ),
+                    restickify_kernel_layout=(
+                        layout_contract.get("restickify_kernel_layout")
+                        if layout_contract
+                        else None
+                    ),
+                    consumer_kernel_layout=(
+                        layout_contract.get("consumer_kernel_layout")
+                        if layout_contract
+                        else None
+                    ),
+                    dimension_rename=(
+                        layout_contract.get("dimension_rename")
+                        if layout_contract
+                        else None
+                    ),
                     unsupported_reason=unsupported_reason,
                 )
                 _record_plan(consumer, plan)

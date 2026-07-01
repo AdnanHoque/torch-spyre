@@ -25,6 +25,7 @@ from torch_spyre._inductor.lx_relayout import (
     COMM_CLASS_MULTICAST,
     COMM_CLASS_REDUCE,
     COMM_CLASS_SCATTER,
+    LAYOUT_ALLGATHER_RESTICKIFY,
     LXRelayoutPlan,
     _classify_communication_class,
     _core_id_to_device_slice,
@@ -399,6 +400,81 @@ def test_loop_scoped_layout_restickify_does_not_need_resident_reservation():
             "communication_pattern": "layout_transform",
         }
     )
+
+
+def test_layout_allgather_restickify_contract_is_recorded():
+    class DummyOp:
+        pass
+
+    consumer = DummyOp()
+    _record_plan(
+        consumer,
+        LXRelayoutPlan(
+            source_name="buf0",
+            producer_name="restickify_buf",
+            consumer_name="consumer",
+            kind=LAYOUT_ALLGATHER_RESTICKIFY,
+            producer_core_count=32,
+            consumer_core_count=32,
+            producer_core_id_to_device_slice={
+                "0": {"mb": 0, "x": 0, "out": 0},
+                "1": {"mb": 1, "x": 0, "out": 0},
+            },
+            producer_work_slice_dims={"mb": 4, "x": 8, "out": 1},
+            consumer_work_slice_dims={"x": 4, "mb": 8, "out": 1, "in": 1},
+            read_index=1,
+            realized=False,
+            communication_class=COMM_CLASS_ALL_GATHER,
+            communication_pattern=LAYOUT_ALLGATHER_RESTICKIFY,
+            realization_strategy=(
+                "staged_lx_restickify_then_loop_scoped_input_fetch"
+            ),
+            requires_staged_realization=True,
+            producer_layout={
+                "layoutDimOrder_": ["out", "x", "mb"],
+                "stickDimOrder_": ["out"],
+            },
+            restickify_kernel_layout={
+                "layoutDimOrder_": ["x", "out", "mb"],
+                "stickDimOrder_": ["x"],
+            },
+            consumer_kernel_layout={
+                "layoutDimOrder_": ["out", "in", "x"],
+                "stickDimOrder_": ["out"],
+            },
+            dimension_rename={
+                "restickify.x": "batchmatmul.out",
+                "restickify.out": "batchmatmul.in",
+                "restickify.mb": "batchmatmul.x",
+            },
+            unsupported_reason="backend lowering is not implemented",
+        ),
+    )
+
+    classified = get_lx_relayout_classifications(consumer)["buf0"]
+    assert classified["kind"] == LAYOUT_ALLGATHER_RESTICKIFY
+    assert classified["communication_class"] == COMM_CLASS_ALL_GATHER
+    assert classified["communication_pattern"] == LAYOUT_ALLGATHER_RESTICKIFY
+    assert classified["producer_layout"] == {
+        "layoutDimOrder_": ["out", "x", "mb"],
+        "stickDimOrder_": ["out"],
+    }
+    assert classified["restickify_kernel_layout"] == {
+        "layoutDimOrder_": ["x", "out", "mb"],
+        "stickDimOrder_": ["x"],
+    }
+    assert classified["consumer_kernel_layout"] == {
+        "layoutDimOrder_": ["out", "in", "x"],
+        "stickDimOrder_": ["out"],
+    }
+    assert classified["dimension_rename"] == {
+        "restickify.x": "batchmatmul.out",
+        "restickify.out": "batchmatmul.in",
+        "restickify.mb": "batchmatmul.x",
+    }
+    assert classified["requires_staged_realization"]
+    assert not classified["realized"]
+    assert get_lx_relayout_inputs(consumer) == {}
 
 
 def test_computed_layout_restickify_is_classified_but_not_realized():
