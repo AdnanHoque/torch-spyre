@@ -85,3 +85,13 @@ Key files:
 - `explicit_layout_restickify/replay_senulator/explicit_range_failure_dump.txt`
 - `explicit_layout_restickify/diffs/deeptools_workspace.diff`
 - `explicit_layout_restickify/diffs/deeptools_status.txt`
+
+## 2026-07-01 DLDSC backend checker update
+
+The latest CDX checkpoint adds a Deeptools-side fail-closed contract checker for the flash `layout_allgather_restickify` class. It validates the full logical contract for the `mul -> ReStickifyOpHBM -> batchmatmul KERNEL` edge and rejects scatter-shaped or partial metadata. Focused Deeptools test result: `LayoutAllgatherRestickify.*`, 4 tests passed.
+
+Artifacts:
+
+- `dldsc_layout_restickify/backend_contract_checker_20260701.md`
+- `dldsc_layout_restickify/deeptools_layout_allgather_restickify_checker.patch`
+

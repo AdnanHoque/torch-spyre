@@ -1,0 +1,336 @@
+diff --git a/util/CMakeLists.txt b/util/CMakeLists.txt
+index d269f44..87854c6 100644
+--- a/util/CMakeLists.txt
++++ b/util/CMakeLists.txt
+@@ -22,6 +22,7 @@ set(UTIL_SOURCES
+         "DataConvertInfoGenerate.cpp"
+         "VariableDefinition.cpp"
+         "processSpyreCodeArtifacts.cpp"
++        "LayoutAllgatherRestickify.cpp"
+         "spyrecode.cpp"
+         )
+ 
+@@ -44,6 +45,7 @@ set(UTIL_PUBLIC_HEADERS
+         "DataConvertInfoGenerate.h"
+         "VariableDefinition.h"
+         "processSpyreCodeArtifacts.h"
++        "LayoutAllgatherRestickify.h"
+         "spyrecode.h"
+         # import_utils.h is public-by-transitivity: the installed header
+         # dsc/foldManager/foldInfrastructure.h does #include <util/import_utils.h>,
+@@ -63,6 +65,7 @@ set(UTIL_TESTS
+         "test/TransferGenerate_unit_test.cpp"
+         "test/DataConvertInfoGenerate_unit_test.cpp"
+         "test/VariableDefinition_unit_test.cpp"
++        "test/LayoutAllgatherRestickify_unit_test.cpp"
+         "test/sen_data_convert_unit_test_Z.cpp"
+         "test/sen_data_convert_unit_test_f16_f32_Z.cpp"
+         )
+diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
+new file mode 100644
+index 0000000..7968e10
+--- /dev/null
++++ b/util/LayoutAllgatherRestickify.cpp
+@@ -0,0 +1,138 @@
++/************************************************************
++ * IBM Confidential
++ * (C) Copyright IBM Corp. 2026
++ ************************************************************/
++
++#include "util/LayoutAllgatherRestickify.h"
++
++#include <external/json11/json11.hpp>
++
++#include <cstdint>
++#include <string>
++
++namespace {
++
++using json11::Json;
++
++bool hasNonEmptyString(const Json &json, const std::string &key) {
++  return json[key].is_string() && !json[key].string_value().empty();
++}
++
++bool hasNonEmptyObject(const Json &json, const std::string &key) {
++  return json[key].is_object() && !json[key].object_items().empty();
++}
++
++bool hasNonEmptyArray(const Json &json, const std::string &key) {
++  return json[key].is_array() && !json[key].array_items().empty();
++}
++
++bool hasLayoutContract(const Json &json, const std::string &key) {
++  const Json &layout = json[key];
++  return layout.is_object() && hasNonEmptyArray(layout, "layoutDimOrder_") &&
++         hasNonEmptyArray(layout, "stickDimOrder_");
++}
++
++std::uint64_t splitProduct(const Json &dims) {
++  if (!dims.is_object()) return 0;
++
++  std::uint64_t product = 1;
++  bool sawDim = false;
++  for (const auto &[_, value] : dims.object_items()) {
++    const int dim = value.int_value();
++    if (dim <= 0) return 0;
++    product *= static_cast<std::uint64_t>(dim);
++    sawDim = true;
++  }
++  return sawDim ? product : 0;
++}
++
++deeptools::LayoutAllgatherRestickifyCheckResult fail(
++    const std::string &reason) {
++  deeptools::LayoutAllgatherRestickifyCheckResult result;
++  result.reason = reason;
++  return result;
++}
++
++}  // namespace
++
++namespace deeptools {
++
++LayoutAllgatherRestickifyCheckResult checkLayoutAllgatherRestickifyContract(
++    const std::string &jsonString) {
++  std::string err;
++  const Json json = Json::parse(jsonString, err);
++  if (!err.empty()) {
++    return fail("invalid json: " + err);
++  }
++  if (!json.is_object()) {
++    return fail("contract must be a json object");
++  }
++
++  LayoutAllgatherRestickifyCheckResult result;
++  result.kind = json["kind"].string_value();
++  result.communicationClass = json["communication_class"].string_value();
++  result.requiresStagedRealization =
++      json["requires_staged_realization"].bool_value();
++
++  if (result.kind != "layout_allgather_restickify") {
++    return fail("kind must be layout_allgather_restickify");
++  }
++  if (result.communicationClass != "all_gather") {
++    return fail("communication_class must be all_gather");
++  }
++  if (!result.requiresStagedRealization) {
++    return fail("requires_staged_realization must be true");
++  }
++
++  if (!hasNonEmptyString(json, "producer_op")) {
++    return fail("missing producer_op");
++  }
++  if (!hasNonEmptyString(json, "restickify_op")) {
++    return fail("missing restickify_op");
++  }
++  if (!hasNonEmptyString(json, "consumer_op")) {
++    return fail("missing consumer_op");
++  }
++
++  if (!hasLayoutContract(json, "producer_layout")) {
++    return fail("missing producer_layout layout/stick dim order");
++  }
++  if (!hasLayoutContract(json, "restickify_kernel_layout")) {
++    return fail("missing restickify_kernel_layout layout/stick dim order");
++  }
++  if (!hasLayoutContract(json, "consumer_kernel_layout")) {
++    return fail("missing consumer_kernel_layout layout/stick dim order");
++  }
++  if (!hasNonEmptyObject(json, "dimension_rename")) {
++    return fail("missing dimension_rename");
++  }
++
++  if (!hasNonEmptyObject(json, "producer_work_slice_dims")) {
++    return fail("missing producer_work_slice_dims");
++  }
++  if (!hasNonEmptyObject(json, "restickify_work_slice_dims")) {
++    return fail("missing restickify_work_slice_dims");
++  }
++  if (!hasNonEmptyObject(json, "consumer_work_slice_dims")) {
++    return fail("missing consumer_work_slice_dims");
++  }
++
++  result.sourceCoreCount = splitProduct(json["producer_work_slice_dims"]);
++  result.restickifyCoreCount = splitProduct(json["restickify_work_slice_dims"]);
++  result.consumerCoreCount = splitProduct(json["consumer_work_slice_dims"]);
++  if (result.sourceCoreCount == 0) {
++    return fail("producer_work_slice_dims product must be non-zero");
++  }
++  if (result.restickifyCoreCount == 0) {
++    return fail("restickify_work_slice_dims product must be non-zero");
++  }
++  if (result.consumerCoreCount == 0) {
++    return fail("consumer_work_slice_dims product must be non-zero");
++  }
++
++  result.ok = true;
++  result.reason = "ok";
++  return result;
++}
++
++}  // namespace deeptools
+diff --git a/util/LayoutAllgatherRestickify.h b/util/LayoutAllgatherRestickify.h
+new file mode 100644
+index 0000000..aa8af9c
+--- /dev/null
++++ b/util/LayoutAllgatherRestickify.h
+@@ -0,0 +1,34 @@
++/************************************************************
++ * IBM Confidential
++ * (C) Copyright IBM Corp. 2026
++ ************************************************************/
++
++#ifndef UTIL_LAYOUT_ALLGATHER_RESTICKIFY_H_
++#define UTIL_LAYOUT_ALLGATHER_RESTICKIFY_H_
++
++#include <cstdint>
++#include <string>
++
++namespace deeptools {
++
++struct LayoutAllgatherRestickifyCheckResult {
++  bool ok = false;
++  std::string kind;
++  std::string communicationClass;
++  bool requiresStagedRealization = false;
++  std::string reason;
++  std::uint64_t sourceCoreCount = 0;
++  std::uint64_t restickifyCoreCount = 0;
++  std::uint64_t consumerCoreCount = 0;
++};
++
++// Validate the explicit DLDSC-side contract for flash attention edges where a
++// producer layout must be restickified on chip and then gathered into the
++// consumer kernel operand. This is intentionally fail-closed: partial metadata
++// must not silently look like a realizable movement primitive.
++LayoutAllgatherRestickifyCheckResult checkLayoutAllgatherRestickifyContract(
++    const std::string &jsonString);
++
++}  // namespace deeptools
++
++#endif  // UTIL_LAYOUT_ALLGATHER_RESTICKIFY_H_
+diff --git a/util/test/LayoutAllgatherRestickify_unit_test.cpp b/util/test/LayoutAllgatherRestickify_unit_test.cpp
+new file mode 100644
+index 0000000..765dbfe
+--- /dev/null
++++ b/util/test/LayoutAllgatherRestickify_unit_test.cpp
+@@ -0,0 +1,118 @@
++/************************************************************
++ * IBM Confidential
++ * (C) Copyright IBM Corp. 2026
++ ************************************************************/
++
++#include <gtest/gtest.h>
++
++#include <string>
++
++#include "util/LayoutAllgatherRestickify.h"
++
++namespace {
++
++std::string validFlashContract() {
++  return R"json({
++    "kind": "layout_allgather_restickify",
++    "communication_class": "all_gather",
++    "communication_pattern": "layout_allgather_restickify",
++    "producer_op": "mul",
++    "restickify_op": "ReStickifyOpHBM",
++    "consumer_op": "batchmatmul",
++    "requires_staged_realization": true,
++    "producer_work_slice_dims": {"mb": 4, "x": 8, "out": 1},
++    "restickify_work_slice_dims": {"mb": 4, "x": 8, "out": 1},
++    "consumer_work_slice_dims": {"x": 4, "mb": 8, "out": 1, "in": 1},
++    "producer_layout": {
++      "layoutDimOrder_": ["out", "x", "mb"],
++      "stickDimOrder_": ["out"]
++    },
++    "restickify_kernel_layout": {
++      "layoutDimOrder_": ["x", "out", "mb"],
++      "stickDimOrder_": ["x"]
++    },
++    "consumer_kernel_layout": {
++      "layoutDimOrder_": ["out", "in", "x"],
++      "stickDimOrder_": ["out"]
++    },
++    "dimension_rename": {
++      "restickify.mb": "batchmatmul.x",
++      "restickify.out": "batchmatmul.in",
++      "restickify.x": "batchmatmul.out"
++    },
++    "realized": false
++  })json";
++}
++
++}  // namespace
++
++TEST(LayoutAllgatherRestickify, acceptsCompleteFlashContract) {
++  const auto result = deeptools::checkLayoutAllgatherRestickifyContract(
++      validFlashContract());
++
++  EXPECT_TRUE(result.ok) << result.reason;
++  EXPECT_EQ(result.kind, "layout_allgather_restickify");
++  EXPECT_EQ(result.communicationClass, "all_gather");
++  EXPECT_TRUE(result.requiresStagedRealization);
++  EXPECT_EQ(result.sourceCoreCount, 32);
++  EXPECT_EQ(result.restickifyCoreCount, 32);
++  EXPECT_EQ(result.consumerCoreCount, 32);
++}
++
++TEST(LayoutAllgatherRestickify, rejectsScatterMetadata) {
++  const auto result = deeptools::checkLayoutAllgatherRestickifyContract(
++      R"json({
++        "kind": "layout_allgather_restickify",
++        "communication_class": "scatter",
++        "requires_staged_realization": true,
++        "producer_op": "mul",
++        "restickify_op": "ReStickifyOpHBM",
++        "consumer_op": "batchmatmul"
++      })json");
++
++  EXPECT_FALSE(result.ok);
++  EXPECT_EQ(result.reason, "communication_class must be all_gather");
++}
++
++TEST(LayoutAllgatherRestickify, rejectsMissingLayoutRename) {
++  const auto result = deeptools::checkLayoutAllgatherRestickifyContract(
++      R"json({
++        "kind": "layout_allgather_restickify",
++        "communication_class": "all_gather",
++        "requires_staged_realization": true,
++        "producer_op": "mul",
++        "restickify_op": "ReStickifyOpHBM",
++        "consumer_op": "batchmatmul",
++        "producer_work_slice_dims": {"mb": 4, "x": 8, "out": 1},
++        "restickify_work_slice_dims": {"mb": 4, "x": 8, "out": 1},
++        "consumer_work_slice_dims": {"x": 4, "mb": 8, "out": 1, "in": 1},
++        "producer_layout": {"layoutDimOrder_": ["out", "x", "mb"], "stickDimOrder_": ["out"]},
++        "restickify_kernel_layout": {"layoutDimOrder_": ["x", "out", "mb"], "stickDimOrder_": ["x"]},
++        "consumer_kernel_layout": {"layoutDimOrder_": ["out", "in", "x"], "stickDimOrder_": ["out"]}
++      })json");
++
++  EXPECT_FALSE(result.ok);
++  EXPECT_EQ(result.reason, "missing dimension_rename");
++}
++
++TEST(LayoutAllgatherRestickify, rejectsZeroWidthSplit) {
++  const auto result = deeptools::checkLayoutAllgatherRestickifyContract(
++      R"json({
++        "kind": "layout_allgather_restickify",
++        "communication_class": "all_gather",
++        "requires_staged_realization": true,
++        "producer_op": "mul",
++        "restickify_op": "ReStickifyOpHBM",
++        "consumer_op": "batchmatmul",
++        "producer_work_slice_dims": {"mb": 4, "x": 0, "out": 1},
++        "restickify_work_slice_dims": {"mb": 4, "x": 8, "out": 1},
++        "consumer_work_slice_dims": {"x": 4, "mb": 8, "out": 1, "in": 1},
++        "producer_layout": {"layoutDimOrder_": ["out", "x", "mb"], "stickDimOrder_": ["out"]},
++        "restickify_kernel_layout": {"layoutDimOrder_": ["x", "out", "mb"], "stickDimOrder_": ["x"]},
++        "consumer_kernel_layout": {"layoutDimOrder_": ["out", "in", "x"], "stickDimOrder_": ["out"]},
++        "dimension_rename": {"restickify.mb": "batchmatmul.x"}
++      })json");
++
++  EXPECT_FALSE(result.ok);
++  EXPECT_EQ(result.reason, "producer_work_slice_dims product must be non-zero");
++}
