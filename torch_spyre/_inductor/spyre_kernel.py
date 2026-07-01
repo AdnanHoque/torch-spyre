@@ -75,10 +75,39 @@ def _current_node_op_info(current_node) -> dict[str, Any]:
     return op_info
 
 
+def _iter_current_ir_nodes(current_node):
+    seen: set[int] = set()
+    stack = [current_node]
+    while stack:
+        item = stack.pop()
+        ident = id(item)
+        if ident in seen:
+            continue
+        seen.add(ident)
+
+        node = getattr(item, "node", None)
+        if node is not None:
+            yield node
+
+        get_nodes = getattr(item, "get_nodes", None)
+        if not callable(get_nodes):
+            continue
+        try:
+            subnodes = list(get_nodes())
+        except Exception:
+            continue
+        for subnode in reversed(subnodes):
+            if subnode is not item:
+                stack.append(subnode)
+
+
 def _current_node_lx_relayout_inputs(current_node) -> dict[str, Any]:
-    node = getattr(current_node, "node", None)
-    plans = getattr(node, LX_RELAYOUT_ATTR, None)
-    return plans if isinstance(plans, dict) else {}
+    merged: dict[str, Any] = {}
+    for node in _iter_current_ir_nodes(current_node):
+        plans = getattr(node, LX_RELAYOUT_ATTR, None)
+        if isinstance(plans, dict):
+            merged.update(plans)
+    return merged
 
 
 class RValue(ABC):
@@ -679,6 +708,17 @@ class SpyreKernel(Kernel[CSEVariable]):
             bounds = compute_symbolic_bounds(size_expr)
             if bounds is not None:
                 symbolic_dim_bounds[str(size_expr)] = bounds
+
+        relayout_inputs = _current_node_lx_relayout_inputs(self.current_node)
+        classifications = [
+            dict(plan)
+            for plan in relayout_inputs.values()
+            if isinstance(plan, dict)
+            and plan.get("communication_pattern") == "layout_allgather_restickify"
+        ]
+        if classifications:
+            op_info = dict(op_info)
+            op_info["lx_relayout_classifications"] = classifications
 
         return OpSpec(
             op,

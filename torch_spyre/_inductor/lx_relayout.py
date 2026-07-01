@@ -40,6 +40,11 @@ from torch_spyre._inductor.pass_utils import (
     _is_matmul_op,
     _per_core_view_on_buf,
 )
+from torch_spyre._inductor.layout_allgather_restickify import (
+    COMM_CLASS_ALL_GATHER,
+    LAYOUT_ALLGATHER_RESTICKIFY,
+    make_layout_allgather_restickify_contract,
+)
 
 logger = get_inductor_logger("lx_relayout")
 
@@ -61,12 +66,29 @@ class LXRelayoutPlan:
     producer_core_id_to_device_slice: dict[str, dict[str, int]]
     producer_work_slice_dims: dict[str, int]
     consumer_work_slice_dims: dict[str, int]
+    read_index: int | None = None
+    realized: bool = True
+    communication_class: str = "scatter"
+    communication_pattern: str = "scatter"
+    requires_staged_realization: bool = False
+    layout_contract: dict[str, Any] | None = None
+    unsupported_reason: str = ""
 
 
 def _op_num_cores(op: Operation) -> int:
     splits: tuple[dict, dict] = getattr(op, "op_it_space_splits", ({}, {}))
     factors = [int(factor) for per_dim in splits for factor in per_dim.values()]
     return math.prod(factors) if factors else 1
+
+
+def _op_name(op: Operation) -> str:
+    target = getattr(getattr(op, "origin_node", None), "target", None)
+    return (
+        getattr(target, "_opname", None)
+        or getattr(target, "__name__", None)
+        or getattr(target, "name", None)
+        or str(target)
+    )
 
 
 def _single_write_dep(op: ComputedBuffer, buf_name: str) -> MemoryDep | None:
@@ -127,10 +149,28 @@ def _memory_read_index(op: ComputedBuffer, dep: MemoryDep) -> int | None:
     return None
 
 
+def _restickify_reads_computed_input(graph: GraphLowering, op: Operation) -> bool:
+    if _op_name(op) != "restickify":
+        return False
+    return any(
+        isinstance(graph.name_to_buffer.get(dep.name), ComputedBuffer)
+        for dep in op.get_read_writes().reads
+        if isinstance(dep, MemoryDep)
+    )
+
+
 def _producer_ops(graph: GraphLowering) -> dict[str, ComputedBuffer]:
     return {
         op.get_name(): op for op in graph.operations if isinstance(op, ComputedBuffer)
     }
+
+
+def _plan_payload(plan: LXRelayoutPlan) -> dict[str, Any]:
+    payload = dataclasses.asdict(plan)
+    contract = payload.pop("layout_contract", None)
+    if isinstance(contract, dict):
+        payload.update(contract)
+    return {key: value for key, value in payload.items() if value not in (None, "")}
 
 
 def _record_plan(consumer: Operation, plan: LXRelayoutPlan) -> None:
@@ -138,15 +178,43 @@ def _record_plan(consumer: Operation, plan: LXRelayoutPlan) -> None:
     if not isinstance(plans, dict):
         plans = {}
         setattr(consumer, LX_RELAYOUT_ATTR, plans)
-    plans[plan.source_name] = dataclasses.asdict(plan)
+    plans[plan.source_name] = _plan_payload(plan)
 
 
-def clear_lx_relayout_metadata(graph: GraphLowering) -> None:
+def clear_lx_relayout_metadata(
+    graph: GraphLowering, *, preserve_unrealized: bool = False
+) -> None:
+    kept_sources: set[str] = set()
     for op in graph.operations:
-        if hasattr(op, LX_RELAYOUT_ATTR):
-            delattr(op, LX_RELAYOUT_ATTR)
         if hasattr(op, LX_RELAYOUT_SOURCE_ATTR):
             delattr(op, LX_RELAYOUT_SOURCE_ATTR)
+
+        plans = getattr(op, LX_RELAYOUT_ATTR, None)
+        if not isinstance(plans, dict):
+            continue
+        if not preserve_unrealized:
+            delattr(op, LX_RELAYOUT_ATTR)
+            continue
+
+        kept = {
+            name: plan
+            for name, plan in plans.items()
+            if isinstance(plan, dict)
+            and (
+                plan.get("realized") is False
+                or plan.get("requires_staged_realization") is True
+            )
+        }
+        if kept:
+            setattr(op, LX_RELAYOUT_ATTR, kept)
+            kept_sources.update(kept)
+        else:
+            delattr(op, LX_RELAYOUT_ATTR)
+
+    if preserve_unrealized and kept_sources:
+        for op in graph.operations:
+            if op.get_name() in kept_sources:
+                setattr(op, LX_RELAYOUT_SOURCE_ATTR, True)
 
 
 def make_lx_relayout_reservation_name(consumer_name: str, source_name: str) -> str:
@@ -239,8 +307,39 @@ def plan_lx_relayouts(
             consumer_work_slice_dims = _work_slice_dims(consumer_view)
             read_index = _memory_read_index(consumer, dep)
             if is_matmul_consumer and read_index not in (0, None):
-                # PR1 only realizes resident scatter for primary values.
-                # Non-primary matmul operands need a collective/broadcast class.
+                if (
+                    config.lx_planner_relayout_layout_allgather_restickify
+                    and _restickify_reads_computed_input(graph, producer)
+                ):
+                    layout_contract = make_layout_allgather_restickify_contract(
+                        producer_op="mul",
+                        restickify_op="ReStickifyOpHBM",
+                        consumer_op="batchmatmul",
+                        producer_work_slice_dims=producer_work_slice_dims,
+                        restickify_work_slice_dims=producer_work_slice_dims,
+                        consumer_work_slice_dims=consumer_work_slice_dims,
+                    )
+                    plan = LXRelayoutPlan(
+                        source_name=dep.name,
+                        producer_name=producer.get_name(),
+                        consumer_name=consumer.get_name(),
+                        kind=LAYOUT_ALLGATHER_RESTICKIFY,
+                        producer_core_count=producer_core_count,
+                        consumer_core_count=consumer_core_count,
+                        producer_core_id_to_device_slice=producer_core_slices,
+                        producer_work_slice_dims=producer_work_slice_dims,
+                        consumer_work_slice_dims=consumer_work_slice_dims,
+                        read_index=read_index,
+                        realized=False,
+                        communication_class=COMM_CLASS_ALL_GATHER,
+                        communication_pattern=LAYOUT_ALLGATHER_RESTICKIFY,
+                        requires_staged_realization=True,
+                        layout_contract=layout_contract,
+                        unsupported_reason="backend lowering is not implemented",
+                    )
+                    _record_plan(consumer, plan)
+                    setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
+                    planned.append(plan)
                 continue
 
             plan = LXRelayoutPlan(

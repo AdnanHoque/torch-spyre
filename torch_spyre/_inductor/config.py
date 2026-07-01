@@ -44,6 +44,21 @@ lx_boundary_clones: bool = os.environ.get("LX_BOUNDARY_CLONES", "0") == "1"
 # synthesize the on-chip relayout from the coordinate mismatch.
 lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
 
+# Experimental research lane for layout-restickify spills. This only makes
+# computed-source synthetic spyre.restickify outputs eligible for LX planning;
+# graph-input/weight restickifies are intentionally left to offline prelayout.
+lx_planner_relayout_restickify_outputs: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS", "0") == "1"
+)
+
+# Experimental metadata lane for flash activation edges of the form
+# pointwise -> ReStickifyOpHBM -> batchmatmul KERNEL. The producer and consumer
+# need a layout-aware grouped all-gather, not the direct scatter class realized
+# by PR1. Keep this opt-in until backend lowering is value-correct.
+lx_planner_relayout_layout_allgather_restickify: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY", "0") == "1"
+)
+
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
