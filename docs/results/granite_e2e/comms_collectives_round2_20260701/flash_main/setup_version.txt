@@ -1,0 +1,5 @@
+source_root=/home/adnan/codex-isolated/comms_collectives_20260629
+copied_root=/home/adnan/codex-isolated/flash_main_probe_20260701_015234/setup
+torch_spyre=/home/adnan/codex-isolated/flash_main_probe_20260701_015234/setup/torch-spyre df26b2ec7c14159e835a288d3369e7971661c43b
+deeptools=/home/adnan/codex-isolated/flash_main_probe_20260701_015234/setup/deeptools c4cf6a4356dee851f1b1c73de8aafcb3f6e1f643
+tools=/home/adnan/codex-isolated/flash_main_probe_20260701_015234/setup/tools

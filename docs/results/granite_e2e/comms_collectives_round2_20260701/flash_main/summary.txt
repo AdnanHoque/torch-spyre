@@ -1,0 +1,28 @@
+lane	rc	wall_s	sdsc	ReStickifyOpHBM	STCDPOpLx	alloc_pool	alloc_hbm	alloc_lx	lx_records
+baseline	1	90	89	20	0	159	27	40	0
+scatter	1	101	89	20	0	125	27	74	14
+
+[baseline] op_counts={"ReStickifyOpHBM": 20, "add": 12, "batchmatmul": 8, "exp": 8, "identity": 3, "max": 4, "maximum": 4, "maxnonstick": 2, "mul": 16, "sub": 8, "sumnonstick": 4}
+[baseline] lx_relayout_counts={}
+[scatter] op_counts={"ReStickifyOpHBM": 20, "add": 12, "batchmatmul": 8, "exp": 8, "identity": 3, "max": 4, "maximum": 4, "maxnonstick": 2, "mul": 16, "sub": 8, "sumnonstick": 4}
+[scatter] lx_relayout_counts={"('layout_restickify_activation', False, 'backend relayout reservation did not fit in scratchpad')": 1, "('layout_restickify_activation', False, 'computed activation restickify needs loop-scoped matmul operand lowering')": 1, "('layout_restickify_activation', True, '')": 1, "('scatter', False, 'backend relayout reservation did not fit in scratchpad')": 4, "('scatter', True, '')": 7}
+[scatter] lx_relayout_unique:
+  batchmatmul: buf5->buf7 kind=scatter realized=False pattern= reason=backend relayout reservation did not fit in scratchpad
+  batchmatmul: buf27->buf7 kind=layout_restickify_activation realized=False pattern=layout_transform_then_operand_broadcast reason=computed activation restickify needs loop-scoped matmul operand lowering
+  add: buf7->buf8 kind=scatter realized=False pattern= reason=backend relayout reservation did not fit in scratchpad
+  ReStickifyOpHBM: buf9->buf28 kind=scatter realized=True pattern= reason=
+  maximum: buf4->buf10 kind=scatter realized=True pattern= reason=
+  sub: buf4->buf11 kind=scatter realized=True pattern= reason=
+  mul: buf12->buf13 kind=scatter realized=True pattern= reason=
+  ReStickifyOpHBM: buf8->buf29 kind=scatter realized=False pattern= reason=backend relayout reservation did not fit in scratchpad
+  sub: buf10->buf14 kind=scatter realized=True pattern= reason=
+  batchmatmul: buf30->buf16 kind=layout_restickify_activation realized=False pattern=layout_transform reason=backend relayout reservation did not fit in scratchpad
+  ReStickifyOpHBM: buf16->buf31 kind=scatter realized=True pattern= reason=
+  add: buf31->buf17 kind=layout_restickify_activation realized=True pattern=layout_transform reason=
+  mul: buf20->buf21 kind=scatter realized=True pattern= reason=
+  sum: buf15->buf22 kind=scatter realized=False pattern= reason=backend relayout reservation did not fit in scratchpad
+
+[baseline] lx_pinning_reason_counts={"core div mismatch": 18, "lx": 6, "op not allowed": 8}
+[baseline] lx_pinning_entries=buf0(None)->core div mismatch, buf2(None)->core div mismatch, buf25(constant)->core div mismatch, buf1(full)->op not allowed, buf3(full)->op not allowed, buf4(amax)->core div mismatch, buf19(full)->op not allowed, buf20(amax)->core div mismatch, buf32(empty)->core div mismatch, buf33(empty)->core div mismatch, buf5(expand)->core div mismatch, buf6(mul)->lx, buf27(restickify)->core div mismatch, buf7(None)->core div mismatch, buf8(add)->core div mismatch, buf9(amax)->core div mismatch, buf28(restickify)->op not allowed, buf10(None)->core div mismatch, buf11(sub)->lx, buf12(exp)->core div mismatch, buf13(mul)->lx, buf29(restickify)->op not allowed, buf14(None)->op not allowed, buf15(expand)->core div mismatch, buf30(restickify)->core div mismatch, buf16(None)->core div mismatch, buf31(restickify)->core div mismatch, buf17(None)->op not allowed, buf21(mul)->lx, buf22(sum)->lx, buf23(add)->op not allowed, buf24(div)->lx
+[scatter] lx_pinning_reason_counts={"core div mismatch": 11, "lx": 9, "op not allowed": 11, "single use": 1}
+[scatter] lx_pinning_entries=buf0(None)->core div mismatch, buf2(None)->core div mismatch, buf25(constant)->core div mismatch, buf1(full)->op not allowed, buf3(full)->op not allowed, buf4(amax)->lx, buf19(full)->op not allowed, buf20(amax)->lx, buf32(empty)->core div mismatch, buf33(empty)->core div mismatch, buf5(expand)->core div mismatch, buf6(mul)->lx, buf27(restickify)->core div mismatch, buf7(None)->core div mismatch, buf8(add)->core div mismatch, buf9(amax)->lx, buf28(restickify)->op not allowed, buf10(None)->op not allowed, buf11(sub)->lx, buf12(exp)->lx, buf13(mul)->lx, buf29(restickify)->op not allowed, buf14(None)->op not allowed, buf15(expand)->core div mismatch, buf30(restickify)->core div mismatch, buf16(None)->op not allowed, buf31(restickify)->op not allowed, buf17(None)->op not allowed, buf21(mul)->lx, buf22(sum)->lx, buf23(add)->op not allowed, buf24(div)->single use

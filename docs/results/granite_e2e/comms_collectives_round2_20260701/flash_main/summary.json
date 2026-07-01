@@ -1,0 +1,241 @@
+{
+  "baseline": {
+    "run": "/home/adnan/codex-isolated/flash_main_probe_20260701_015234/runs/baseline_singleton_patch_noskip_20260701_021831",
+    "returncode": "1",
+    "wall_seconds": "90",
+    "sdsc_count_files": 89,
+    "sdsc_count_generated_log": 89,
+    "op_counts": {
+      "ReStickifyOpHBM": 20,
+      "add": 12,
+      "batchmatmul": 8,
+      "exp": 8,
+      "identity": 3,
+      "max": 4,
+      "maximum": 4,
+      "maxnonstick": 2,
+      "mul": 16,
+      "sub": 8,
+      "sumnonstick": 4
+    },
+    "ReStickifyOpHBM_top_keys": 20,
+    "STCDPOpLx_text_hits": 0,
+    "allocation_line_counts": {
+      "pool": 159,
+      "hbm": 27,
+      "lx": 40
+    },
+    "lx_relayout_records": 0,
+    "lx_relayout_counts": {},
+    "lx_relayout_unique": [],
+    "dxp_error": true,
+    "runtime_patch_stdout": "[runtime_patch] singleton-stick compute_restickify_target_layout enabled\n[runtime_patch] no_h2d Tensor.to(device=spyre) compile probe enabled"
+  },
+  "scatter": {
+    "run": "/home/adnan/codex-isolated/flash_main_probe_20260701_015234/runs/scatter_singleton_patch_noskip_20260701_022026",
+    "returncode": "1",
+    "wall_seconds": "101",
+    "sdsc_count_files": 89,
+    "sdsc_count_generated_log": 89,
+    "op_counts": {
+      "ReStickifyOpHBM": 20,
+      "add": 12,
+      "batchmatmul": 8,
+      "exp": 8,
+      "identity": 3,
+      "max": 4,
+      "maximum": 4,
+      "maxnonstick": 2,
+      "mul": 16,
+      "sub": 8,
+      "sumnonstick": 4
+    },
+    "ReStickifyOpHBM_top_keys": 20,
+    "STCDPOpLx_text_hits": 0,
+    "allocation_line_counts": {
+      "pool": 125,
+      "hbm": 27,
+      "lx": 74
+    },
+    "lx_relayout_records": 14,
+    "lx_relayout_counts": {
+      "('scatter', False, 'backend relayout reservation did not fit in scratchpad')": 4,
+      "('layout_restickify_activation', False, 'computed activation restickify needs loop-scoped matmul operand lowering')": 1,
+      "('scatter', True, '')": 7,
+      "('layout_restickify_activation', False, 'backend relayout reservation did not fit in scratchpad')": 1,
+      "('layout_restickify_activation', True, '')": 1
+    },
+    "lx_relayout_unique": [
+      {
+        "op": "batchmatmul",
+        "key": "buf5",
+        "source": "buf5",
+        "producer": "buf5",
+        "consumer": "buf7",
+        "kind": "scatter",
+        "realized": false,
+        "pattern": "",
+        "strategy": "",
+        "reason": "backend relayout reservation did not fit in scratchpad"
+      },
+      {
+        "op": "batchmatmul",
+        "key": "buf27",
+        "source": "buf27",
+        "producer": "buf27",
+        "consumer": "buf7",
+        "kind": "layout_restickify_activation",
+        "realized": false,
+        "pattern": "layout_transform_then_operand_broadcast",
+        "strategy": "",
+        "reason": "computed activation restickify needs loop-scoped matmul operand lowering"
+      },
+      {
+        "op": "add",
+        "key": "buf7",
+        "source": "buf7",
+        "producer": "buf7",
+        "consumer": "buf8",
+        "kind": "scatter",
+        "realized": false,
+        "pattern": "",
+        "strategy": "",
+        "reason": "backend relayout reservation did not fit in scratchpad"
+      },
+      {
+        "op": "ReStickifyOpHBM",
+        "key": "buf9",
+        "source": "buf9",
+        "producer": "buf9",
+        "consumer": "buf28",
+        "kind": "scatter",
+        "realized": true,
+        "pattern": "",
+        "strategy": "",
+        "reason": ""
+      },
+      {
+        "op": "maximum",
+        "key": "buf4",
+        "source": "buf4",
+        "producer": "buf4",
+        "consumer": "buf10",
+        "kind": "scatter",
+        "realized": true,
+        "pattern": "",
+        "strategy": "",
+        "reason": ""
+      },
+      {
+        "op": "sub",
+        "key": "buf4",
+        "source": "buf4",
+        "producer": "buf4",
+        "consumer": "buf11",
+        "kind": "scatter",
+        "realized": true,
+        "pattern": "",
+        "strategy": "",
+        "reason": ""
+      },
+      {
+        "op": "mul",
+        "key": "buf12",
+        "source": "buf12",
+        "producer": "buf12",
+        "consumer": "buf13",
+        "kind": "scatter",
+        "realized": true,
+        "pattern": "",
+        "strategy": "",
+        "reason": ""
+      },
+      {
+        "op": "ReStickifyOpHBM",
+        "key": "buf8",
+        "source": "buf8",
+        "producer": "buf8",
+        "consumer": "buf29",
+        "kind": "scatter",
+        "realized": false,
+        "pattern": "",
+        "strategy": "",
+        "reason": "backend relayout reservation did not fit in scratchpad"
+      },
+      {
+        "op": "sub",
+        "key": "buf10",
+        "source": "buf10",
+        "producer": "buf10",
+        "consumer": "buf14",
+        "kind": "scatter",
+        "realized": true,
+        "pattern": "",
+        "strategy": "",
+        "reason": ""
+      },
+      {
+        "op": "batchmatmul",
+        "key": "buf30",
+        "source": "buf30",
+        "producer": "buf30",
+        "consumer": "buf16",
+        "kind": "layout_restickify_activation",
+        "realized": false,
+        "pattern": "layout_transform",
+        "strategy": "",
+        "reason": "backend relayout reservation did not fit in scratchpad"
+      },
+      {
+        "op": "ReStickifyOpHBM",
+        "key": "buf16",
+        "source": "buf16",
+        "producer": "buf16",
+        "consumer": "buf31",
+        "kind": "scatter",
+        "realized": true,
+        "pattern": "",
+        "strategy": "",
+        "reason": ""
+      },
+      {
+        "op": "add",
+        "key": "buf31",
+        "source": "buf31",
+        "producer": "buf31",
+        "consumer": "buf17",
+        "kind": "layout_restickify_activation",
+        "realized": true,
+        "pattern": "layout_transform",
+        "strategy": "",
+        "reason": ""
+      },
+      {
+        "op": "mul",
+        "key": "buf20",
+        "source": "buf20",
+        "producer": "buf20",
+        "consumer": "buf21",
+        "kind": "scatter",
+        "realized": true,
+        "pattern": "",
+        "strategy": "",
+        "reason": ""
+      },
+      {
+        "op": "sum",
+        "key": "buf15",
+        "source": "buf15",
+        "producer": "buf15",
+        "consumer": "buf22",
+        "kind": "scatter",
+        "realized": false,
+        "pattern": "",
+        "strategy": "",
+        "reason": "backend relayout reservation did not fit in scratchpad"
+      }
+    ],
+    "dxp_error": true,
+    "runtime_patch_stdout": "[runtime_patch] singleton-stick compute_restickify_target_layout enabled\n[runtime_patch] no_h2d Tensor.to(device=spyre) compile probe enabled"
+  }
+}

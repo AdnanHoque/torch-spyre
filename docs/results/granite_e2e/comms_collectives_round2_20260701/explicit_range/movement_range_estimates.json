@@ -1,0 +1,42 @@
+{
+  "sdsc10_tensor1_substick_gather": {
+    "bytes_all_32_consumer_cores": 67108864,
+    "bytes_per_consumer_core": 2097152,
+    "current_sample_destination_stick_ranges": 4,
+    "destination_sticks_per_consumer_core": 16384,
+    "expanded_count1_ranges_all_32_consumer_cores": 2097152,
+    "expanded_count1_ranges_per_consumer_core": 65536,
+    "range_groups_with_count_all_32_consumer_cores": 128,
+    "range_groups_with_count_per_consumer_core": 4,
+    "shape": {
+      "in": 128,
+      "mb": 32,
+      "out": 512,
+      "stickDim": "out",
+      "stickSize": 64,
+      "wordLength": 2
+    }
+  },
+  "sdsc18_buf21_all_gather_replicate": {
+    "bytes_per_source_x_shard": 131072,
+    "coverage_bytes_including_local": 134217728,
+    "destination_cores": 32,
+    "expanded_stick_moves_including_local": 1048576,
+    "expanded_stick_moves_remote_only": 1015808,
+    "producer_shards": 32,
+    "range_groups_including_local_coverage": 1024,
+    "range_groups_remote_only": 992,
+    "remote_transfer_bytes": 130023424,
+    "shape": {
+      "in": 512,
+      "mb": 512,
+      "out": 128,
+      "stickDim": "out",
+      "stickSize": 64,
+      "wordLength": 2,
+      "x": 32
+    },
+    "source": "/home/adnan/codex-isolated/comms_collectives_20260629/runs/granite_prefill_layout_restickify_class_20260630_050148/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_jm0s3oi3/sdsc_18.json",
+    "sticks_per_source_x_shard": 1024
+  }
+}

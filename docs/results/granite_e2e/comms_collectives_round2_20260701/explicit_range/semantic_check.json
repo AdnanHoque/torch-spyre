@@ -1,0 +1,278 @@
+{
+  "dataOpDsc": "sdsc_10_Tensor1_explicit_range",
+  "destinationCoverageByCore": {
+    "19": {
+      "byteCount": 128,
+      "contiguous": true,
+      "maxExclusive": 36992,
+      "minAddress": 36864
+    }
+  },
+  "destinationSha256": "449ccc6fe9a4e4dbfd6622f6ec03d40f68c5eaa5c50db0ec2f32663cf9e06568",
+  "dtTableRowsChecked": 4,
+  "expandedMoveCount": 4,
+  "failures": [],
+  "modeledDestinationByteCount": 128,
+  "rangeCount": 4,
+  "result": "pass",
+  "sdsc": "/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/explicit_range_attention_emitter_20260701_020252/bundle_input/sdsc_10.json",
+  "sourcePattern": "(sourceCore * 31 + rangeIndex * 17 + sourceAddress + byteOffset) & 0xff",
+  "sourceToDestinationSamples": [
+    {
+      "byteValue": 93,
+      "destinationAddress": 36864,
+      "destinationCore": 19,
+      "rangeIndex": 0,
+      "sourceAddress": 4096,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 94,
+      "destinationAddress": 36865,
+      "destinationCore": 19,
+      "rangeIndex": 0,
+      "sourceAddress": 4097,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 95,
+      "destinationAddress": 36866,
+      "destinationCore": 19,
+      "rangeIndex": 0,
+      "sourceAddress": 4098,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 96,
+      "destinationAddress": 36867,
+      "destinationCore": 19,
+      "rangeIndex": 0,
+      "sourceAddress": 4099,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 97,
+      "destinationAddress": 36868,
+      "destinationCore": 19,
+      "rangeIndex": 0,
+      "sourceAddress": 4100,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 98,
+      "destinationAddress": 36869,
+      "destinationCore": 19,
+      "rangeIndex": 0,
+      "sourceAddress": 4101,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 99,
+      "destinationAddress": 36870,
+      "destinationCore": 19,
+      "rangeIndex": 0,
+      "sourceAddress": 4102,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 100,
+      "destinationAddress": 36871,
+      "destinationCore": 19,
+      "rangeIndex": 0,
+      "sourceAddress": 4103,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 141,
+      "destinationAddress": 36896,
+      "destinationCore": 19,
+      "rangeIndex": 1,
+      "sourceAddress": 4352,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 142,
+      "destinationAddress": 36897,
+      "destinationCore": 19,
+      "rangeIndex": 1,
+      "sourceAddress": 4353,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 143,
+      "destinationAddress": 36898,
+      "destinationCore": 19,
+      "rangeIndex": 1,
+      "sourceAddress": 4354,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 144,
+      "destinationAddress": 36899,
+      "destinationCore": 19,
+      "rangeIndex": 1,
+      "sourceAddress": 4355,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 145,
+      "destinationAddress": 36900,
+      "destinationCore": 19,
+      "rangeIndex": 1,
+      "sourceAddress": 4356,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 146,
+      "destinationAddress": 36901,
+      "destinationCore": 19,
+      "rangeIndex": 1,
+      "sourceAddress": 4357,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 147,
+      "destinationAddress": 36902,
+      "destinationCore": 19,
+      "rangeIndex": 1,
+      "sourceAddress": 4358,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 148,
+      "destinationAddress": 36903,
+      "destinationCore": 19,
+      "rangeIndex": 1,
+      "sourceAddress": 4359,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 189,
+      "destinationAddress": 36928,
+      "destinationCore": 19,
+      "rangeIndex": 2,
+      "sourceAddress": 4608,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 190,
+      "destinationAddress": 36929,
+      "destinationCore": 19,
+      "rangeIndex": 2,
+      "sourceAddress": 4609,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 191,
+      "destinationAddress": 36930,
+      "destinationCore": 19,
+      "rangeIndex": 2,
+      "sourceAddress": 4610,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 192,
+      "destinationAddress": 36931,
+      "destinationCore": 19,
+      "rangeIndex": 2,
+      "sourceAddress": 4611,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 193,
+      "destinationAddress": 36932,
+      "destinationCore": 19,
+      "rangeIndex": 2,
+      "sourceAddress": 4612,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 194,
+      "destinationAddress": 36933,
+      "destinationCore": 19,
+      "rangeIndex": 2,
+      "sourceAddress": 4613,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 195,
+      "destinationAddress": 36934,
+      "destinationCore": 19,
+      "rangeIndex": 2,
+      "sourceAddress": 4614,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 196,
+      "destinationAddress": 36935,
+      "destinationCore": 19,
+      "rangeIndex": 2,
+      "sourceAddress": 4615,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 237,
+      "destinationAddress": 36960,
+      "destinationCore": 19,
+      "rangeIndex": 3,
+      "sourceAddress": 4864,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 238,
+      "destinationAddress": 36961,
+      "destinationCore": 19,
+      "rangeIndex": 3,
+      "sourceAddress": 4865,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 239,
+      "destinationAddress": 36962,
+      "destinationCore": 19,
+      "rangeIndex": 3,
+      "sourceAddress": 4866,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 240,
+      "destinationAddress": 36963,
+      "destinationCore": 19,
+      "rangeIndex": 3,
+      "sourceAddress": 4867,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 241,
+      "destinationAddress": 36964,
+      "destinationCore": 19,
+      "rangeIndex": 3,
+      "sourceAddress": 4868,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 242,
+      "destinationAddress": 36965,
+      "destinationCore": 19,
+      "rangeIndex": 3,
+      "sourceAddress": 4869,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 243,
+      "destinationAddress": 36966,
+      "destinationCore": 19,
+      "rangeIndex": 3,
+      "sourceAddress": 4870,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 244,
+      "destinationAddress": 36967,
+      "destinationCore": 19,
+      "rangeIndex": 3,
+      "sourceAddress": 4871,
+      "sourceCore": 6
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "dataOpDsc": "sdsc_10_Tensor1_explicit_range",
+  "destinationCore": 19,
+  "destinationCoverage": [
+    36864,
+    36992
+  ],
+  "expandedMoveCount": 4,
+  "modeledBytes": 128,
+  "notes": [
+    "Prototype rewrites an existing STCDPOpLx dataop shell in a copied bundle.",
+    "Default payload models one 128B destination stick as four 32B sub-stick ranges."
+  ],
+  "outputBundle": "/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/explicit_range_attention_emitter_20260701_020252/bundle_input",
+  "rangeCount": 4,
+  "sdsc": "/home/adnan/codex-isolated/explicit_range_real_attention_20260701_015212/runs/explicit_range_attention_emitter_20260701_020252/bundle_input/sdsc_10.json"
+}
