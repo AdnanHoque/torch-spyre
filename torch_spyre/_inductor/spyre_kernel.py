@@ -35,6 +35,7 @@ from .constants import (
     BATCH_MATMUL_OP,
     BATCH_MATMUL_FP8_OP,
     IDENTITY_OP,
+    RESTICKIFY_LX_OP,
     RESTICKIFY_OP,
     SEGMENT_OFFSETS,
     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
@@ -121,6 +122,15 @@ class TensorAccess(RValue):
     name: str
     index: sympy.Expr
     layout: FixedTiledLayout
+
+
+def _restickify_op_for_args(input_tensor: TensorAccess, output_tensor: TensorAccess) -> str:
+    if (
+        "lx" in input_tensor.layout.allocation
+        and "lx" in output_tensor.layout.allocation
+    ):
+        return RESTICKIFY_LX_OP
+    return RESTICKIFY_OP
 
 
 def _preserve_shared_weight_unit_bmm_dim(
@@ -855,7 +865,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                 # Broadcast: scalar input expanding to non-scalar output.
                 op = IDENTITY_OP
             elif in_coords[-1].free_symbols != out_coords[-1].free_symbols:
-                op = RESTICKIFY_OP
+                op = _restickify_op_for_args(value, dst)
             else:
                 op = IDENTITY_OP
             op_spec = self.create_op_spec(

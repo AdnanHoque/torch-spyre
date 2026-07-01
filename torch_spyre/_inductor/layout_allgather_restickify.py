@@ -20,6 +20,9 @@ from typing import Any
 
 LAYOUT_ALLGATHER_RESTICKIFY = "layout_allgather_restickify"
 COMM_CLASS_ALL_GATHER = "all_gather"
+RESTICKIFY_HBM_OP = "ReStickifyOpHBM"
+RESTICKIFY_LX_OP = "ReStickifyOpLx"
+RESTICKIFY_OPS = {RESTICKIFY_HBM_OP, RESTICKIFY_LX_OP}
 
 
 def make_layout_allgather_restickify_contract(
@@ -131,7 +134,7 @@ def classify_layout_allgather_restickify_sdsc_triplet(
     consumer_op = _sdsc_op_name(consumer)
     if producer_op != "mul":
         return None
-    if restickify_op != "ReStickifyOpHBM":
+    if restickify_op not in RESTICKIFY_OPS:
         return None
     if consumer_op != "batchmatmul":
         return None

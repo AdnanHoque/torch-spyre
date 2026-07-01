@@ -43,6 +43,7 @@ from torch_spyre._inductor.pass_utils import (
 from torch_spyre._inductor.layout_allgather_restickify import (
     COMM_CLASS_ALL_GATHER,
     LAYOUT_ALLGATHER_RESTICKIFY,
+    RESTICKIFY_LX_OP,
     make_layout_allgather_restickify_contract,
 )
 
@@ -313,7 +314,7 @@ def plan_lx_relayouts(
                 ):
                     layout_contract = make_layout_allgather_restickify_contract(
                         producer_op="mul",
-                        restickify_op="ReStickifyOpHBM",
+                        restickify_op=RESTICKIFY_LX_OP,
                         consumer_op="batchmatmul",
                         producer_work_slice_dims=producer_work_slice_dims,
                         restickify_work_slice_dims=producer_work_slice_dims,
