@@ -385,10 +385,10 @@ index d269f445e..87854c641 100644
          )
 diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
 new file mode 100644
-index 000000000..3cdb8e246
+index 000000000..b50a7047b
 --- /dev/null
 +++ b/util/LayoutAllgatherRestickify.cpp
-@@ -0,0 +1,371 @@
+@@ -0,0 +1,415 @@
 +/************************************************************
 + * IBM Confidential
 + * (C) Copyright IBM Corp. 2026
@@ -479,6 +479,17 @@ index 000000000..3cdb8e246
 +  }
 +
 +  return Json(value);
++}
++
++Json logicalTransferToJson(
++    const deeptools::LayoutAllgatherRestickifyLogicalTransfer &transfer) {
++  Json::object object;
++  object["group"] = std::to_string(transfer.group);
++  object["producer_chunk"] = std::to_string(transfer.producerChunk);
++  object["consumer_replica"] = std::to_string(transfer.consumerReplica);
++  object["source_core"] = std::to_string(transfer.sourceCore);
++  object["destination_core"] = std::to_string(transfer.destinationCore);
++  return object;
 +}
 +
 +std::string metadataFieldsToJsonString(
@@ -730,6 +741,11 @@ index 000000000..3cdb8e246
 +    const std::map<std::string, std::string> &context) {
 +  std::vector<Json> stages;
 +  for (const auto &stage : plan.stages) stages.emplace_back(stage);
++  std::vector<Json> logicalTransfers;
++  for (const auto &transfer :
++       layoutAllgatherRestickifyLogicalTransfers(plan)) {
++    logicalTransfers.emplace_back(logicalTransferToJson(transfer));
++  }
 +
 +  Json::object artifact;
 +  artifact["artifact_kind"] = "layout_allgather_restickify_backend_plan";
@@ -756,16 +772,44 @@ index 000000000..3cdb8e246
 +  artifact["logical_transfer_count"] =
 +      std::to_string(plan.logicalTransferCount);
 +  artifact["stages"] = stages;
++  artifact["logical_transfers"] = logicalTransfers;
 +  return Json(artifact).dump();
++}
++
++std::vector<LayoutAllgatherRestickifyLogicalTransfer>
++layoutAllgatherRestickifyLogicalTransfers(
++    const LayoutAllgatherRestickifyMovementPlan &plan) {
++  std::vector<LayoutAllgatherRestickifyLogicalTransfer> transfers;
++  if (!plan.ok || plan.groupCount == 0 || plan.producerChunksPerGroup == 0 ||
++      plan.consumerCoresPerGroup == 0) {
++    return transfers;
++  }
++
++  transfers.reserve(plan.logicalTransferCount);
++  for (std::uint64_t group = 0; group < plan.groupCount; ++group) {
++    for (std::uint64_t producerChunk = 0;
++         producerChunk < plan.producerChunksPerGroup; ++producerChunk) {
++      const std::uint64_t sourceCore =
++          producerChunk * plan.groupCount + group;
++      for (std::uint64_t consumerReplica = 0;
++           consumerReplica < plan.consumerCoresPerGroup; ++consumerReplica) {
++        const std::uint64_t destinationCore =
++            consumerReplica * plan.groupCount + group;
++        transfers.push_back({group, producerChunk, consumerReplica, sourceCore,
++                             destinationCore});
++      }
++    }
++  }
++  return transfers;
 +}
 +
 +}  // namespace deeptools
 diff --git a/util/LayoutAllgatherRestickify.h b/util/LayoutAllgatherRestickify.h
 new file mode 100644
-index 000000000..ea4e808ea
+index 000000000..3e69234fd
 --- /dev/null
 +++ b/util/LayoutAllgatherRestickify.h
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,87 @@
 +/************************************************************
 + * IBM Confidential
 + * (C) Copyright IBM Corp. 2026
@@ -810,6 +854,14 @@ index 000000000..ea4e808ea
 +  std::vector<std::string> stages;
 +};
 +
++struct LayoutAllgatherRestickifyLogicalTransfer {
++  std::uint64_t group = 0;
++  std::uint64_t producerChunk = 0;
++  std::uint64_t consumerReplica = 0;
++  std::uint64_t sourceCore = 0;
++  std::uint64_t destinationCore = 0;
++};
++
 +// Validate the explicit DLDSC-side contract for flash attention edges where a
 +// producer layout must be restickified on chip and then gathered into the
 +// consumer kernel operand. This is intentionally fail-closed: partial metadata
@@ -835,15 +887,22 @@ index 000000000..ea4e808ea
 +    const LayoutAllgatherRestickifyMovementPlan &plan,
 +    const std::map<std::string, std::string> &context);
 +
++// Expand the compact flash grouped-all-gather plan into source/destination core
++// pairs. This is still logical: byte ranges and LX addresses are filled by the
++// DXP mutation point using imported SDSC allocation data.
++std::vector<LayoutAllgatherRestickifyLogicalTransfer>
++layoutAllgatherRestickifyLogicalTransfers(
++    const LayoutAllgatherRestickifyMovementPlan &plan);
++
 +}  // namespace deeptools
 +
 +#endif  // UTIL_LAYOUT_ALLGATHER_RESTICKIFY_H_
 diff --git a/util/test/LayoutAllgatherRestickify_unit_test.cpp b/util/test/LayoutAllgatherRestickify_unit_test.cpp
 new file mode 100644
-index 000000000..c0cce72db
+index 000000000..7b61c1efb
 --- /dev/null
 +++ b/util/test/LayoutAllgatherRestickify_unit_test.cpp
-@@ -0,0 +1,268 @@
+@@ -0,0 +1,310 @@
 +/************************************************************
 + * IBM Confidential
 + * (C) Copyright IBM Corp. 2026
@@ -997,6 +1056,40 @@ index 000000000..c0cce72db
 +  EXPECT_EQ(plan.stages[2], "bind_bmm_kernel_operand");
 +}
 +
++TEST(LayoutAllgatherRestickify, expandsLogicalTransferCorePairs) {
++  const auto plan = deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(
++      validFlashContract());
++  ASSERT_TRUE(plan.ok) << plan.reason;
++
++  const auto transfers =
++      deeptools::layoutAllgatherRestickifyLogicalTransfers(plan);
++
++  ASSERT_EQ(transfers.size(), 256);
++  EXPECT_EQ(transfers.front().group, 0);
++  EXPECT_EQ(transfers.front().producerChunk, 0);
++  EXPECT_EQ(transfers.front().consumerReplica, 0);
++  EXPECT_EQ(transfers.front().sourceCore, 0);
++  EXPECT_EQ(transfers.front().destinationCore, 0);
++
++  EXPECT_EQ(transfers[7].group, 0);
++  EXPECT_EQ(transfers[7].producerChunk, 0);
++  EXPECT_EQ(transfers[7].consumerReplica, 7);
++  EXPECT_EQ(transfers[7].sourceCore, 0);
++  EXPECT_EQ(transfers[7].destinationCore, 28);
++
++  EXPECT_EQ(transfers[8].group, 0);
++  EXPECT_EQ(transfers[8].producerChunk, 1);
++  EXPECT_EQ(transfers[8].consumerReplica, 0);
++  EXPECT_EQ(transfers[8].sourceCore, 4);
++  EXPECT_EQ(transfers[8].destinationCore, 0);
++
++  EXPECT_EQ(transfers.back().group, 3);
++  EXPECT_EQ(transfers.back().producerChunk, 7);
++  EXPECT_EQ(transfers.back().consumerReplica, 7);
++  EXPECT_EQ(transfers.back().sourceCore, 31);
++  EXPECT_EQ(transfers.back().destinationCore, 31);
++}
++
 +TEST(LayoutAllgatherRestickify, synthesizesFlashMovementPlanFromLxRestickify) {
 +  const auto contract = replaceFirst(
 +      validFlashContract(), R"json("restickify_op": "ReStickifyOpHBM")json",
@@ -1071,6 +1164,14 @@ index 000000000..c0cce72db
 +  ASSERT_EQ(artifact["stages"].array_items().size(), 3);
 +  EXPECT_EQ(artifact["stages"].array_items()[1].string_value(),
 +            "grouped_all_gather");
++  ASSERT_TRUE(artifact["logical_transfers"].is_array());
++  ASSERT_EQ(artifact["logical_transfers"].array_items().size(), 256);
++  EXPECT_EQ(artifact["logical_transfers"].array_items()[7]["source_core"]
++                .string_value(),
++            "0");
++  EXPECT_EQ(artifact["logical_transfers"].array_items()[7]["destination_core"]
++                .string_value(),
++            "28");
 +}
 +
 +TEST(LayoutAllgatherRestickify, movementPlanRejectsNonFlashProducer) {

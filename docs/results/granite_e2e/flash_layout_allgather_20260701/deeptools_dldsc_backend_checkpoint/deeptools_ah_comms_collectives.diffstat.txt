@@ -1,9 +1,9 @@
  ddc/ddc_fold.cpp                                  |  26 +-
  dsc/superdsc.cpp                                  |  43 ++-
  dsc/superdsc.h                                    |   2 +
- dxp/SdscRelayoutInsertion.cpp                     | 144 ++++++++-
+ dxp/SdscRelayoutInsertion.cpp                     | 144 +++++++-
  util/CMakeLists.txt                               |   3 +
- util/LayoutAllgatherRestickify.cpp                | 371 ++++++++++++++++++++++
- util/LayoutAllgatherRestickify.h                  |  72 +++++
- util/test/LayoutAllgatherRestickify_unit_test.cpp | 268 ++++++++++++++++
- 8 files changed, 915 insertions(+), 14 deletions(-)
+ util/LayoutAllgatherRestickify.cpp                | 415 ++++++++++++++++++++++
+ util/LayoutAllgatherRestickify.h                  |  87 +++++
+ util/test/LayoutAllgatherRestickify_unit_test.cpp | 310 ++++++++++++++++
+ 8 files changed, 1016 insertions(+), 14 deletions(-)

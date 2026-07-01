@@ -1,7 +1,7 @@
 # Deeptools DLDSC Backend Plan Checkpoint - 2026-07-01
 
 Branch: `Adnan-Hoque1/deeptools:ah/comms-collectives`
-Head: `6d7a720f5fddeae1d416a1f19877069fcc0a4bb8`
+Head: `d17f71046c0e46d3bba408daa959482ba6c36fea`
 Base: `0a9da5eb19d08712383312bb7dec18fbd7caf711`
 
 ## What This Checkpoint Adds
@@ -42,4 +42,9 @@ See `deeptools_ah_comms_collectives.diffstat.txt`, `deeptools_ah_comms_collectiv
 ## 2026-07-01 Update
 
 The backend plan checker now accepts both `ReStickifyOpHBM` metadata from older staged artifacts and `ReStickifyOpLx` metadata from the latest Torch probe. It still normalizes the physical plan to `ReStickifyOpLx`. Focused `LayoutAllgatherRestickify.*` unit tests pass with 11 tests.
+
+
+## 2026-07-01 Logical Transfer Update
+
+The backend plan now expands the compact grouped all-gather contract into a deterministic logical transfer list. For the H=4 flash edge this produces 256 entries: each of 4 groups has 8 producer chunks, and each producer chunk is replicated to 8 consumer cores in that group. The entries currently carry group, producer chunk, consumer replica, source core, and destination core. Byte ranges and LX addresses still come from the DXP mutation point in the next lowering step. Focused `LayoutAllgatherRestickify.*` unit tests pass with 12 tests.
 
