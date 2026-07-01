@@ -1,50 +1,31 @@
-# Deeptools DLDSC Backend Plan Checkpoint - 2026-07-01
+# Deeptools DLDSC Backend Checkpoint - 2026-07-01
 
-Branch: `Adnan-Hoque1/deeptools:ah/comms-collectives`
-Head: `d17f71046c0e46d3bba408daa959482ba6c36fea`
-Base: `0a9da5eb19d08712383312bb7dec18fbd7caf711`
+Branch: Adnan-Hoque1/deeptools ah/comms-collectives
+Head: 4ef9b53a5ca8b39cbc3f3bc151e753a593b49a41
+Base: 0a9da5eb19d08712383312bb7dec18fbd7caf711
 
-## What This Checkpoint Adds
+## Current Direction
 
-This checkpoint keeps the flash attention layout-all-gather/restickify edge in the DLDSC contract lane. It does not claim physical lowering is complete.
+The flash attention H=4 spill is classified as : an LX-resident KERNEL tensor produced with one coordinate distribution is consumed by  with an incompatible compute distribution. The current Deeptools checkpoint keeps the logical classification explicit, but routes physical realization through the existing generic LX relayout insertion path. That path creates STCDPOpLx data movement from producer tensor coordinates to consumer compute coordinates.
 
-The backend now preserves and recognizes Torch-emitted `lxRelayoutClassifications_` metadata, validates the flash `layout_allgather_restickify` contract, and emits a deterministic backend-plan artifact at the DXP relayout mutation point. The plan records:
+## Key Changes
 
-- communication class: grouped all-gather with layout restickify
-- 4 groups
-- 8 producer chunks per group
-- 8 consumer cores per group
-- 256 logical transfers
-- target consumer operand: `batchmatmul.KERNEL`
+- Accept staged Torch metadata that uses compact device-dimension keys and explicit producer/consumer core counts.
+- Accept  imported either as the current map form or as the list form seen in archived staged SDSCs.
+- Keep  as a supported restickify op for this flash all-gather contract.
+- Expand the compact plan to 256 logical source/destination core transfers for the H=4 flash case.
+- Let validated flash all-gather edges fall through to the generic STCDPOpLx LX relayout insertion path instead of stopping after a diagnostic artifact.
 
-The checkpoint intentionally marks the edge `realized=false` and skips the old generic 1:1 relayout path so we do not silently miscompile the flash all-gather as scatter.
+## Validation So Far
 
-## Validation Reported By Worker
-
-- `git diff --check`: pass
-- `cmake --build build-codex-util --target util_unit_test -j16`: pass
-- `./build-codex-util/util/util_unit_test --gtest_filter=LayoutAllgatherRestickify.*`: pass, 10 tests
-- `cmake --build build-codex-util --target dsc_unit_test -j16`: pass
-- full `dxp_standalone` build: still blocked/slow in heavy MLIR/LLVM external configure/build
-
-## Remaining Backend Work
-
-1. Generate grouped `STCDPOpLx` movement for the 256 logical transfers.
-2. Allocate/bind the post-restickify LX KERNEL view.
-3. Patch the consumer `batchmatmul` input `LabeledDs`/allocation coordinates to consume the new LX view.
-4. Schedule movement before consumer compute.
-5. Re-run the H=4 flash bundle and then the full `test_flash.py` shape.
+- Note: Google Test filter = LayoutAllgatherRestickify.*
+[==========] Running 0 tests from 0 test suites.
+[==========] 0 tests from 0 test suites ran. (0 ms total)
+[  PASSED  ] 0 tests. passes on CDX with 13 focused tests.
+- Full DXP/e2e validation is still pending because the CDX DXP build directory is not currently configured with a Makefile.
 
 ## Files
 
-See `deeptools_ah_comms_collectives.diffstat.txt`, `deeptools_ah_comms_collectives_commits.txt`, and `deeptools_ah_comms_collectives.patch` in this directory.
-
-## 2026-07-01 Update
-
-The backend plan checker now accepts both `ReStickifyOpHBM` metadata from older staged artifacts and `ReStickifyOpLx` metadata from the latest Torch probe. It still normalizes the physical plan to `ReStickifyOpLx`. Focused `LayoutAllgatherRestickify.*` unit tests pass with 11 tests.
-
-
-## 2026-07-01 Logical Transfer Update
-
-The backend plan now expands the compact grouped all-gather contract into a deterministic logical transfer list. For the H=4 flash edge this produces 256 entries: each of 4 groups has 8 producer chunks, and each producer chunk is replicated to 8 consumer cores in that group. The entries currently carry group, producer chunk, consumer replica, source core, and destination core. Byte ranges and LX addresses still come from the DXP mutation point in the next lowering step. Focused `LayoutAllgatherRestickify.*` unit tests pass with 12 tests.
-
+- : full patch against current Deeptools master merge-base.
+- : diffstat for the patch.
+- : commit list on the artifact branch.

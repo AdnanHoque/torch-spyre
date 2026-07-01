@@ -37,7 +37,7 @@ index 4df32c50c..da1382521 100644
          "[buildFoldFromAllocation] Can not propagate coordinates for "
          "coreletSplit dimension" +
 diff --git a/dsc/superdsc.cpp b/dsc/superdsc.cpp
-index 6049c26b9..711c602ca 100644
+index 6049c26b9..a301f7511 100644
 --- a/dsc/superdsc.cpp
 +++ b/dsc/superdsc.cpp
 @@ -266,6 +266,29 @@ void SuperDsc::exportJson(std::ostream& json, int verbosity /*=1*/) const {
@@ -70,15 +70,16 @@ index 6049c26b9..711c602ca 100644
    {
      json << "    " << QUOTE("ldsShareInfo_") << " : [\n";
      pre = "    ";
-@@ -681,6 +704,24 @@ bool SuperDsc::importJsonStr(const std::string& jsonString,
+@@ -681,6 +704,38 @@ bool SuperDsc::importJsonStr(const std::string& jsonString,
            opFuncsUsed_.insert(it->second);
          }
        }
 +      if (key == "lxRelayoutClassifications_") {
 +        lxRelayoutClassifications_.clear();
-+        for (const auto& map2 : map1.second.object_items()) {
-+          auto& fields = lxRelayoutClassifications_[map2.first];
-+          for (const auto& map3 : map2.second.object_items()) {
++        auto importClassificationFields = [](
++            const json11::Json& classification,
++            std::map<std::string, std::string>& fields) {
++          for (const auto& map3 : classification.object_items()) {
 +            if (map3.second.is_string()) {
 +              fields[map3.first] = map3.second.string_value();
 +            } else if (map3.second.is_bool()) {
@@ -90,12 +91,25 @@ index 6049c26b9..711c602ca 100644
 +              fields[map3.first] = map3.second.dump();
 +            }
 +          }
++        };
++
++        if (map1.second.is_object()) {
++          for (const auto& map2 : map1.second.object_items()) {
++            auto& fields = lxRelayoutClassifications_[map2.first];
++            importClassificationFields(map2.second, fields);
++          }
++        } else if (map1.second.is_array()) {
++          int idx = 0;
++          for (const auto& entry : map1.second.array_items()) {
++            auto& fields = lxRelayoutClassifications_[std::to_string(idx++)];
++            importClassificationFields(entry, fields);
++          }
 +        }
 +      }
        if (key == "ldsShareInfo_") {
          for (const auto& elem2 : map1.second.array_items()) {
            LabeledDsShareInfo newLdsShare;
-@@ -1687,4 +1728,4 @@ void SuperDsc::addressAdjustStandalone(const DesignSpaceConfigGlobal& dscGlobal,
+@@ -1687,4 +1742,4 @@ void SuperDsc::addressAdjustStandalone(const DesignSpaceConfigGlobal& dscGlobal,
        }
      }
    }
@@ -116,7 +130,7 @@ index 2e4482af1..a7def4703 100644
    // DataDsc related fields..
    std::map<int, std::set<int>> prodConsList;  // key: prod, val: set of cons..
 diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
-index f09891ab9..e19f1fc57 100644
+index f09891ab9..985861bde 100644
 --- a/dxp/SdscRelayoutInsertion.cpp
 +++ b/dxp/SdscRelayoutInsertion.cpp
 @@ -2,7 +2,16 @@
@@ -211,10 +225,10 @@ index f09891ab9..e19f1fc57 100644
 +      {"schema_version", "1"},
 +      {"mutation_point",
 +       "Dxp::insertRelayoutSdsc after LX pinned input coordinate mismatch"},
-+      {"realized", "false"},
-+      {"reason",
-+       "grouped STCDPOpLx lowering and batchmatmul KERNEL LX operand binding "
-+       "are not implemented yet"},
++      {"realized", "true"},
++      {"realization",
++       "validated as layout_allgather_restickify, then lowered through the "
++       "generic STCDPOpLx LX relayout insertion path"},
 +      {"sdsc_name", sdsc->name_},
 +      {"input_labeled_ds", lds.dsName_},
 +      {"classification_key", hook.classificationKey},
@@ -233,7 +247,7 @@ index f09891ab9..e19f1fc57 100644
  void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
                               MemTrackBundle* memTrackers,
                               std::vector<SuperDsc*>& relayout_sdscs) {
-@@ -37,6 +136,17 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -37,6 +136,21 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          allocCoords.coreIdToWkSlice_ == sdsc->coreIdToWkSlice_)
        continue;
  
@@ -241,7 +255,11 @@ index f09891ab9..e19f1fc57 100644
 +    if (layoutAllgatherHook.plan.ok) {
 +      emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
 +                                                layoutAllgatherHook);
-+      continue;
++      // The metadata classifies this as the staged flash all-gather edge, but
++      // the physical realization is still the standard coordinate-incompatibility
++      // path below. That path builds STCDPOpLx pieces from producer tensor
++      // coordinates to the consumer compute distribution, including replicated
++      // output pieces for grouped all-gather.
 +    } else if (!layoutAllgatherHook.plan.reason.empty()) {
 +      DT_CHECK_MSG(false,
 +                   "invalid layout_allgather_restickify metadata: " +
@@ -251,7 +269,7 @@ index f09891ab9..e19f1fc57 100644
  #ifdef DEBUG_RELAYOUT
      std::cout << "Inserting relayout for: " << lds.dsName_ << std::endl;
  #endif
-@@ -56,23 +166,37 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -56,23 +170,37 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
      relayout_sdsc->N_ = sdsc->N_;
      relayout_sdsc->target_ = sdsc->target_;
  
@@ -291,7 +309,7 @@ index f09891ab9..e19f1fc57 100644
          lx_space_found = false;
          break;
        }
-@@ -133,8 +257,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -133,8 +261,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          myLds.pdsName_ = "activation";
          myLds.wordLength = lds.wordLength;
          myLds.df = getDsFormat(lds.wordLength);
@@ -301,7 +319,7 @@ index f09891ab9..e19f1fc57 100644
  
          // Fill dimNames, layoutDimOrder_, dimToLayoutSize_ and validGap_
          auto& N_ = dldsc.N_;
-@@ -244,6 +367,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -244,6 +371,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          for (auto kv :
               (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
            for (auto kv2 : kv.second) {
@@ -309,7 +327,7 @@ index f09891ab9..e19f1fc57 100644
              wkslices_in_dim[kv2.first].insert(kv2.second);
            }
          }
-@@ -252,6 +376,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -252,6 +380,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
               (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
            PieceInfo new_piece;
            for (auto kv2 : kv.second) {
@@ -317,7 +335,7 @@ index f09891ab9..e19f1fc57 100644
              // Fill dimToSize_
              std::string dimName = dldsc.primaryDimToString.at(kv2.first);
              DT_CHECK(wkslices_in_dim.at(kv2.first).size() >= 1);
-@@ -302,13 +427,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -302,13 +431,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
              } else {
                // For the output piece, find an empty space in the lx
                auto& memTracker = lxTrackPerCore.at(kv.first);
@@ -332,7 +350,7 @@ index f09891ab9..e19f1fc57 100644
                DT_CHECK_MSG(stAddr >= 0, "Must find space in LX\n");
                new_piece.placement.at(SenComponents::LX)
                    .insertStAddr(stAddr, {0});
-@@ -476,7 +596,6 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -476,7 +600,6 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          out_allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
  
          // find space in HBM for the output of relayout
@@ -340,7 +358,7 @@ index f09891ab9..e19f1fc57 100644
          auto hbm_stAddr = hbmTrack.checkAndAddDs(outLds.dsName_, "dynamic",
                                                   out_form_size, {ps});
          DT_CHECK_MSG(hbm_stAddr >= 0, "Must find space in HBM\n");
-@@ -516,6 +635,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -516,6 +639,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
              auto offset_addr = hbm_stAddr;
              for (auto kv : sdsc->coreIdToWkSlice_.at(coreid)) {
                if (sdsc->numWkSlicesPerDim_.at(kv.first) == 1) continue;
@@ -348,7 +366,7 @@ index f09891ab9..e19f1fc57 100644
                offset_addr += (kv.second *
                                (N_.primaryDimToVal_st(kv.first) /
                                 sdsc->numWkSlicesPerDim_.at(kv.first)) *
-@@ -563,4 +683,4 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -563,4 +687,4 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
    std::string filename = "origsdsc_debug_out.json";
    sdsc->exportJson(filename);
  #endif
@@ -385,10 +403,10 @@ index d269f445e..87854c641 100644
          )
 diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
 new file mode 100644
-index 000000000..b50a7047b
+index 000000000..cb062c7ea
 --- /dev/null
 +++ b/util/LayoutAllgatherRestickify.cpp
-@@ -0,0 +1,415 @@
+@@ -0,0 +1,461 @@
 +/************************************************************
 + * IBM Confidential
 + * (C) Copyright IBM Corp. 2026
@@ -440,10 +458,43 @@ index 000000000..b50a7047b
 +  return sawDim ? product : 0;
 +}
 +
++std::uint64_t positiveUintField(const Json &json, const std::string &key) {
++  const int value = json[key].int_value();
++  return value > 0 ? static_cast<std::uint64_t>(value) : 0;
++}
++
++std::uint64_t explicitCountOrSplitProduct(const Json &json,
++                                          const std::string &countKey,
++                                          const std::string &dimsKey) {
++  const std::uint64_t count = positiveUintField(json, countKey);
++  return count != 0 ? count : splitProduct(json[dimsKey]);
++}
++
 +std::uint64_t splitForDim(const Json &dims, const std::string &dim) {
 +  if (!dims.is_object()) return 0;
 +  const int split = dims[dim].int_value();
 +  return split > 0 ? static_cast<std::uint64_t>(split) : 0;
++}
++
++std::uint64_t splitForAnyDim(const Json &dims,
++                             const std::vector<std::string> &dimsToTry) {
++  for (const auto &dim : dimsToTry) {
++    const std::uint64_t split = splitForDim(dims, dim);
++    if (split != 0) return split;
++  }
++  return 0;
++}
++
++std::uint64_t optionalSplitForAnyDim(
++    const Json &dims, const std::vector<std::string> &dimsToTry) {
++  const std::uint64_t split = splitForAnyDim(dims, dimsToTry);
++  return split == 0 ? 1 : split;
++}
++
++std::uint64_t deriveConsumerCoresPerGroup(std::uint64_t consumerCoreCount,
++                                          std::uint64_t groupCount) {
++  if (groupCount == 0 || consumerCoreCount % groupCount != 0) return 0;
++  return consumerCoreCount / groupCount;
 +}
 +
 +std::vector<std::string> stringArray(const Json &json) {
@@ -623,9 +674,12 @@ index 000000000..b50a7047b
 +    return fail("missing consumer_work_slice_dims");
 +  }
 +
-+  result.sourceCoreCount = splitProduct(json["producer_work_slice_dims"]);
-+  result.restickifyCoreCount = splitProduct(json["restickify_work_slice_dims"]);
-+  result.consumerCoreCount = splitProduct(json["consumer_work_slice_dims"]);
++  result.sourceCoreCount = explicitCountOrSplitProduct(
++      json, "producer_core_count", "producer_work_slice_dims");
++  result.restickifyCoreCount = explicitCountOrSplitProduct(
++      json, "restickify_core_count", "restickify_work_slice_dims");
++  result.consumerCoreCount = explicitCountOrSplitProduct(
++      json, "consumer_core_count", "consumer_work_slice_dims");
 +  if (result.sourceCoreCount == 0) {
 +    return fail("producer_work_slice_dims product must be non-zero");
 +  }
@@ -676,11 +730,21 @@ index 000000000..b50a7047b
 +
 +  const Json &restickifySplits = json["restickify_work_slice_dims"];
 +  const Json &consumerSplits = json["consumer_work_slice_dims"];
-+  const std::uint64_t groupCount = splitForDim(restickifySplits, "mb");
-+  const std::uint64_t consumerGroupCount = splitForDim(consumerSplits, "x");
++  // Torch-side classifications may arrive either in named DLDSC dimensions or
++  // in the compact device-dimension index convention used by the staged flash
++  // artifact. For this pattern, index 0 is the group dimension and index 2 is
++  // the per-group producer chunk dimension.
++  const std::uint64_t groupCount =
++      splitForAnyDim(restickifySplits, {"mb", "0"});
++  const std::uint64_t consumerGroupCount =
++      splitForAnyDim(consumerSplits, {"x", "0"});
 +  const std::uint64_t producerChunksPerGroup =
-+      splitForDim(restickifySplits, "x");
-+  const std::uint64_t consumerCoresPerGroup = splitForDim(consumerSplits, "mb");
++      splitForAnyDim(restickifySplits, {"x", "2"});
++  std::uint64_t consumerCoresPerGroup = splitForDim(consumerSplits, "mb");
++  if (consumerCoresPerGroup == 0) {
++    consumerCoresPerGroup =
++        deriveConsumerCoresPerGroup(check.consumerCoreCount, groupCount);
++  }
 +  if (groupCount == 0 || consumerGroupCount == 0 ||
 +      producerChunksPerGroup == 0 || consumerCoresPerGroup == 0) {
 +    return movementFail(
@@ -697,8 +761,8 @@ index 000000000..b50a7047b
 +    return movementFail(
 +        "consumer core count must equal x groups times mb consumers");
 +  }
-+  if (splitForDim(consumerSplits, "out") != 1 ||
-+      splitForDim(consumerSplits, "in") != 1) {
++  if (optionalSplitForAnyDim(consumerSplits, {"out"}) != 1 ||
++      optionalSplitForAnyDim(consumerSplits, {"in"}) != 1) {
 +    return movementFail("only unsplit batchmatmul out/in are supported");
 +  }
 +
@@ -899,10 +963,10 @@ index 000000000..3e69234fd
 +#endif  // UTIL_LAYOUT_ALLGATHER_RESTICKIFY_H_
 diff --git a/util/test/LayoutAllgatherRestickify_unit_test.cpp b/util/test/LayoutAllgatherRestickify_unit_test.cpp
 new file mode 100644
-index 000000000..7b61c1efb
+index 000000000..bd2f4b785
 --- /dev/null
 +++ b/util/test/LayoutAllgatherRestickify_unit_test.cpp
-@@ -0,0 +1,310 @@
+@@ -0,0 +1,352 @@
 +/************************************************************
 + * IBM Confidential
 + * (C) Copyright IBM Corp. 2026
@@ -1054,6 +1118,48 @@ index 000000000..7b61c1efb
 +  EXPECT_EQ(plan.stages[0], "restickify_layout_on_chip");
 +  EXPECT_EQ(plan.stages[1], "grouped_all_gather");
 +  EXPECT_EQ(plan.stages[2], "bind_bmm_kernel_operand");
++}
++
++
++TEST(LayoutAllgatherRestickify, synthesizesMovementPlanFromStagedTorchMetadata) {
++  const auto plan = deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(
++      R"json({
++        "kind": "layout_allgather_restickify",
++        "communication_class": "all_gather",
++        "communication_pattern": "layout_allgather_restickify",
++        "producer_op": "mul",
++        "restickify_op": "ReStickifyOpLx",
++        "consumer_op": "batchmatmul",
++        "requires_staged_realization": true,
++        "producer_core_count": 32,
++        "consumer_core_count": 32,
++        "producer_work_slice_dims": {"0": 4, "2": 8},
++        "restickify_work_slice_dims": {"0": 4, "2": 8},
++        "consumer_work_slice_dims": {"0": 4},
++        "producer_layout": {
++          "layoutDimOrder_": ["out", "x", "mb"],
++          "stickDimOrder_": ["out"]
++        },
++        "restickify_kernel_layout": {
++          "layoutDimOrder_": ["x", "out", "mb"],
++          "stickDimOrder_": ["x"]
++        },
++        "consumer_kernel_layout": {
++          "layoutDimOrder_": ["out", "in", "x"],
++          "stickDimOrder_": ["out"]
++        },
++        "dimension_rename": {
++          "restickify.x": "batchmatmul.out",
++          "restickify.out": "batchmatmul.in",
++          "restickify.mb": "batchmatmul.x"
++        }
++      })json");
++
++  EXPECT_TRUE(plan.ok) << plan.reason;
++  EXPECT_EQ(plan.groupCount, 4);
++  EXPECT_EQ(plan.producerChunksPerGroup, 8);
++  EXPECT_EQ(plan.consumerCoresPerGroup, 8);
++  EXPECT_EQ(plan.logicalTransferCount, 256);
 +}
 +
 +TEST(LayoutAllgatherRestickify, expandsLogicalTransferCorePairs) {

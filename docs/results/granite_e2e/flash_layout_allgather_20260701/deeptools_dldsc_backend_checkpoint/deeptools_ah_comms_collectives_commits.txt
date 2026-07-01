@@ -1,3 +1,5 @@
+4ef9b53a5 [DXP] Lower flash allgather through generic LX relayout
+e293dcae8 [DXP] Accept staged flash allgather metadata
 d17f71046 [DXP] Expand flash allgather logical transfers
 6d7a720f5 [DXP] Accept LX restickify in flash allgather plan
 96c00ed16 [DXP] Emit flash layout allgather backend plan artifact
