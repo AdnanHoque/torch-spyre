@@ -1,0 +1,1097 @@
+diff --git a/ddc/ddc_fold.cpp b/ddc/ddc_fold.cpp
+index 4df32c50c..da1382521 100644
+--- a/ddc/ddc_fold.cpp
++++ b/ddc/ddc_fold.cpp
+@@ -2981,8 +2981,32 @@ void Ddc::buildFoldFromAllocation(
+   DT_CHECK_MSG(refAllocNode->ldsIdx_ >= 0,
+                "Reference allocateNode " + refAllocNode->name_ +
+                    " does not have a valid labeledDs index.");
++  auto coreIdToWkSliceVariesOnDim =
++      [](const std::map<int, std::map<PrimaryDimTypes, int>>& coreIdToWkSlice,
++         PrimaryDimTypes dim) {
++        bool hasRef = false;
++        int refWkSlice = 0;
++        for (const auto& [coreId, wkSlice] : coreIdToWkSlice) {
++          auto it = wkSlice.find(dim);
++          if (it == wkSlice.end()) {
++            continue;
++          }
++          if (!hasRef) {
++            refWkSlice = it->second;
++            hasRef = true;
++            continue;
++          }
++          if (it->second != refWkSlice) {
++            return true;
++          }
++        }
++        return false;
++      };
++
+   if (is_any_of(coreletSplitDim, coordPropInfo.dimsToPropagate) &&
+-      !refAllocNode->allocateCoordinates_.coreIdToWkSlice_.empty()) {
++      coreIdToWkSliceVariesOnDim(
++          refAllocNode->allocateCoordinates_.coreIdToWkSlice_,
++          coreletSplitDim)) {
+     DT_ERROR(
+         "[buildFoldFromAllocation] Can not propagate coordinates for "
+         "coreletSplit dimension" +
+diff --git a/dsc/superdsc.cpp b/dsc/superdsc.cpp
+index 6049c26b9..711c602ca 100644
+--- a/dsc/superdsc.cpp
++++ b/dsc/superdsc.cpp
+@@ -266,6 +266,29 @@ void SuperDsc::exportJson(std::ostream& json, int verbosity /*=1*/) const {
+     }
+     json << " ], \n";
+   }
++  {
++    json << "    " << QUOTE("lxRelayoutClassifications_") << " : { \n";
++    int i = 1;
++    for (const auto& entry : lxRelayoutClassifications_) {
++      json << "      " << QUOTE(entry.first) << " : { ";
++      int j = 1;
++      for (const auto& field : entry.second) {
++        json << json11::Json(field.first).dump() << " : "
++             << json11::Json(field.second).dump();
++        if (j < entry.second.size()) {
++          json << ", ";
++        }
++        j++;
++      }
++      json << " }";
++      if (i < lxRelayoutClassifications_.size()) {
++        json << ",";
++      }
++      json << "\n";
++      i++;
++    }
++    json << "    }, \n";
++  }
+   {
+     json << "    " << QUOTE("ldsShareInfo_") << " : [\n";
+     pre = "    ";
+@@ -681,6 +704,24 @@ bool SuperDsc::importJsonStr(const std::string& jsonString,
+           opFuncsUsed_.insert(it->second);
+         }
+       }
++      if (key == "lxRelayoutClassifications_") {
++        lxRelayoutClassifications_.clear();
++        for (const auto& map2 : map1.second.object_items()) {
++          auto& fields = lxRelayoutClassifications_[map2.first];
++          for (const auto& map3 : map2.second.object_items()) {
++            if (map3.second.is_string()) {
++              fields[map3.first] = map3.second.string_value();
++            } else if (map3.second.is_bool()) {
++              fields[map3.first] =
++                  map3.second.bool_value() ? "true" : "false";
++            } else if (map3.second.is_number()) {
++              fields[map3.first] = map3.second.dump();
++            } else if (!map3.second.is_null()) {
++              fields[map3.first] = map3.second.dump();
++            }
++          }
++        }
++      }
+       if (key == "ldsShareInfo_") {
+         for (const auto& elem2 : map1.second.array_items()) {
+           LabeledDsShareInfo newLdsShare;
+@@ -1687,4 +1728,4 @@ void SuperDsc::addressAdjustStandalone(const DesignSpaceConfigGlobal& dscGlobal,
+       }
+     }
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/dsc/superdsc.h b/dsc/superdsc.h
+index 2e4482af1..a7def4703 100644
+--- a/dsc/superdsc.h
++++ b/dsc/superdsc.h
+@@ -69,6 +69,8 @@ class SuperDsc {
+   std::map<PrimaryDimTypes, int> numWkSlicesPerDim_;
+   std::map<int, std::map<PrimaryDimTypes, int>> coreIdToWkSlice_;
+   std::set<OpFuncs> opFuncsUsed_;
++  std::map<std::string, std::map<std::string, std::string>>
++      lxRelayoutClassifications_;
+ 
+   // DataDsc related fields..
+   std::map<int, std::set<int>> prodConsList;  // key: prod, val: set of cons..
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index f09891ab9..e19f1fc57 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -2,7 +2,16 @@
+ #include <dsc/superdsc.h>
+ #include <sharedtools/mem_track_bundle.h>
+ 
++#include <cctype>
++#include <cstdlib>
++#include <filesystem>
++#include <fstream>
++#include <map>
++#include <set>
++#include <string>
++
+ #include "dxp.h"
++#include "util/LayoutAllgatherRestickify.h"
+ 
+ // #define DEBUG_RELAYOUT 1
+ 
+@@ -17,6 +26,96 @@ static DataFormats getDsFormat(double wl) {
+   return DataFormats::INVALID;
+ }
+ 
++static double getRelayoutPieceSize(
++    double form_size,
++    const std::map<int, std::map<PrimaryDimTypes, int>>& coreIdToWkSlice,
++    const std::set<PrimaryDimTypes>& tensorDims) {
++  double num_pieces = 1;
++  std::map<PrimaryDimTypes, std::set<int>> wkslices_in_dim;
++  for (const auto& core_to_slice : coreIdToWkSlice) {
++    for (const auto& dim_to_slice : core_to_slice.second) {
++      if (tensorDims.count(dim_to_slice.first) == 0) continue;
++      wkslices_in_dim[dim_to_slice.first].insert(dim_to_slice.second);
++    }
++  }
++  for (const auto& dim_to_slices : wkslices_in_dim) {
++    num_pieces *= dim_to_slices.second.size();
++  }
++  return std::ceil(form_size / num_pieces);
++}
++
++struct LayoutAllgatherRestickifyHookPlan {
++  std::string classificationKey;
++  deeptools::LayoutAllgatherRestickifyMovementPlan plan;
++};
++
++static LayoutAllgatherRestickifyHookPlan findLayoutAllgatherRestickifyPlan(
++    const SuperDsc* sdsc) {
++  for (const auto& entry : sdsc->lxRelayoutClassifications_) {
++    const auto& fields = entry.second;
++    const auto kindIt = fields.find("kind");
++    const auto patternIt = fields.find("communication_pattern");
++    const bool isLayoutAllgather =
++        (kindIt != fields.end() &&
++         kindIt->second == "layout_allgather_restickify") ||
++        (patternIt != fields.end() &&
++         patternIt->second == "layout_allgather_restickify");
++    if (!isLayoutAllgather) continue;
++
++    return {entry.first,
++            deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(fields)};
++  }
++
++  return {};
++}
++
++static std::string sanitizeArtifactName(std::string value) {
++  for (char& ch : value) {
++    const auto c = static_cast<unsigned char>(ch);
++    if (!std::isalnum(c) && ch != '-' && ch != '_' && ch != '.') ch = '_';
++  }
++  return value;
++}
++
++static void emitLayoutAllgatherRestickifyPlanArtifact(
++    const SuperDsc* sdsc, const LabeledDsInfo& lds, int ps,
++    const LayoutAllgatherRestickifyHookPlan& hook) {
++  const auto& plan = hook.plan;
++  const char* outputDirEnv =
++      std::getenv("DEEPTOOLS_LAYOUT_ALLGATHER_RESTICKIFY_PLAN_DIR");
++  const std::filesystem::path outputDir =
++      outputDirEnv == nullptr ? std::filesystem::path(".")
++                              : std::filesystem::path(outputDirEnv);
++  std::filesystem::create_directories(outputDir);
++
++  const std::string fileName = sanitizeArtifactName(
++      sdsc->name_ + "_" + lds.dsName_ + "_" + hook.classificationKey +
++      "_layout_allgather_restickify_plan.json");
++  const auto outputPath = outputDir / fileName;
++
++  const std::map<std::string, std::string> context = {
++      {"schema_version", "1"},
++      {"mutation_point",
++       "Dxp::insertRelayoutSdsc after LX pinned input coordinate mismatch"},
++      {"realized", "false"},
++      {"reason",
++       "grouped STCDPOpLx lowering and batchmatmul KERNEL LX operand binding "
++       "are not implemented yet"},
++      {"sdsc_name", sdsc->name_},
++      {"input_labeled_ds", lds.dsName_},
++      {"classification_key", hook.classificationKey},
++      {"program_step", std::to_string(ps)},
++  };
++
++  std::ofstream out(outputPath);
++  DT_CHECK_MSG(out.good(),
++               "Failed to open layout_allgather_restickify plan artifact: " +
++                   outputPath.string());
++  out << deeptools::layoutAllgatherRestickifyMovementPlanArtifactJson(
++             plan, context)
++      << std::endl;
++}
++
+ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+                              MemTrackBundle* memTrackers,
+                              std::vector<SuperDsc*>& relayout_sdscs) {
+@@ -37,6 +136,17 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         allocCoords.coreIdToWkSlice_ == sdsc->coreIdToWkSlice_)
+       continue;
+ 
++    const auto layoutAllgatherHook = findLayoutAllgatherRestickifyPlan(sdsc);
++    if (layoutAllgatherHook.plan.ok) {
++      emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
++                                                layoutAllgatherHook);
++      continue;
++    } else if (!layoutAllgatherHook.plan.reason.empty()) {
++      DT_CHECK_MSG(false,
++                   "invalid layout_allgather_restickify metadata: " +
++                       layoutAllgatherHook.plan.reason);
++    }
++
+ #ifdef DEBUG_RELAYOUT
+     std::cout << "Inserting relayout for: " << lds.dsName_ << std::endl;
+ #endif
+@@ -56,23 +166,37 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+     relayout_sdsc->N_ = sdsc->N_;
+     relayout_sdsc->target_ = sdsc->target_;
+ 
+-    // Step 2b: Check if there is sufficient space in lx for post-relayout form
++    // Step 2b: Insert the relayout program step and check if there is
++    // sufficient contiguous space in LX for the post-relayout form. This must
++    // use the same tracker state as the eventual allocation below; a pure free
++    // capacity check before the inserted step can pass even when no common
++    // contiguous block is available at the real relayout step.
++    memTrackers->insertPsBefore(ps);
+     auto out_form_size = lds.wordLength;
+     auto N_ = sdsc->dscs_.front().N_;
+     auto dim_count = 0;
++    std::set<PrimaryDimTypes> relayout_tensor_dims;
+     for (auto dimid :
+          sdsc->dscs_.front().primaryDsInfo_.at(lds.dsType_).layoutDimOrder_) {
++      relayout_tensor_dims.insert(dimid);
+       if (lds.scale_[dim_count] == -2)
+         out_form_size *= 64;
+       else
+         out_form_size *= N_.primaryDimToVal_st(dimid);
+       dim_count++;
+     }
++    auto out_piece_size =
++        getRelayoutPieceSize(out_form_size, sdsc->coreIdToWkSlice_,
++                             relayout_tensor_dims);
+ 
+     bool lx_space_found = true;
+     for (const auto& mapkv : sdsc->coreIdToWkSlice_) {
+       auto& memTracker = lxTrackPerCore.at(mapkv.first);
+-      if (!memTracker.checkIfDsFits("dynamic", out_form_size, {ps})) {
++      auto probe_ds = sdsc->name_ + "-" + lds.dsName_ + "-LxRelayout-probe";
++      auto stAddr =
++          memTracker.checkDsForStartAddr(probe_ds, "dynamic", out_piece_size,
++                                         {ps}, -1);
++      if (stAddr < 0) {
+         lx_space_found = false;
+         break;
+       }
+@@ -133,8 +257,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         myLds.pdsName_ = "activation";
+         myLds.wordLength = lds.wordLength;
+         myLds.df = getDsFormat(lds.wordLength);
+-        auto& refDsInfo =
+-            dldsc.primaryDsInfo_.at(DsTypes::OUTPUT);  // check this
++        auto& refDsInfo = dldsc.primaryDsInfo_.at(lds.dsType_);
+ 
+         // Fill dimNames, layoutDimOrder_, dimToLayoutSize_ and validGap_
+         auto& N_ = dldsc.N_;
+@@ -244,6 +367,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         for (auto kv :
+              (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
+           for (auto kv2 : kv.second) {
++            if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+             wkslices_in_dim[kv2.first].insert(kv2.second);
+           }
+         }
+@@ -252,6 +376,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+              (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
+           PieceInfo new_piece;
+           for (auto kv2 : kv.second) {
++            if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+             // Fill dimToSize_
+             std::string dimName = dldsc.primaryDimToString.at(kv2.first);
+             DT_CHECK(wkslices_in_dim.at(kv2.first).size() >= 1);
+@@ -302,13 +427,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             } else {
+               // For the output piece, find an empty space in the lx
+               auto& memTracker = lxTrackPerCore.at(kv.first);
+-              auto tensor_size = myLds.wordLength;
+-              for (auto kv : myLds.dimToLayoutSize_) {
+-                tensor_size *= kv.second;
+-              }
+-              memTrackers->insertPsBefore(ps);
+               auto stAddr = memTracker.checkAndAddDs(myLds.ldsName_, "dynamic",
+-                                                     tensor_size, {ps});
++                                                     out_piece_size, {ps});
+               DT_CHECK_MSG(stAddr >= 0, "Must find space in LX\n");
+               new_piece.placement.at(SenComponents::LX)
+                   .insertStAddr(stAddr, {0});
+@@ -476,7 +596,6 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         out_allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
+ 
+         // find space in HBM for the output of relayout
+-        memTrackers->insertPsBefore(ps);
+         auto hbm_stAddr = hbmTrack.checkAndAddDs(outLds.dsName_, "dynamic",
+                                                  out_form_size, {ps});
+         DT_CHECK_MSG(hbm_stAddr >= 0, "Must find space in HBM\n");
+@@ -516,6 +635,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             auto offset_addr = hbm_stAddr;
+             for (auto kv : sdsc->coreIdToWkSlice_.at(coreid)) {
+               if (sdsc->numWkSlicesPerDim_.at(kv.first) == 1) continue;
++              if (strides.count(kv.first) == 0) continue;
+               offset_addr += (kv.second *
+                               (N_.primaryDimToVal_st(kv.first) /
+                                sdsc->numWkSlicesPerDim_.at(kv.first)) *
+@@ -563,4 +683,4 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+   std::string filename = "origsdsc_debug_out.json";
+   sdsc->exportJson(filename);
+ #endif
+-}
+\ No newline at end of file
++}
+diff --git a/util/CMakeLists.txt b/util/CMakeLists.txt
+index d269f445e..87854c641 100644
+--- a/util/CMakeLists.txt
++++ b/util/CMakeLists.txt
+@@ -22,6 +22,7 @@ set(UTIL_SOURCES
+         "DataConvertInfoGenerate.cpp"
+         "VariableDefinition.cpp"
+         "processSpyreCodeArtifacts.cpp"
++        "LayoutAllgatherRestickify.cpp"
+         "spyrecode.cpp"
+         )
+ 
+@@ -44,6 +45,7 @@ set(UTIL_PUBLIC_HEADERS
+         "DataConvertInfoGenerate.h"
+         "VariableDefinition.h"
+         "processSpyreCodeArtifacts.h"
++        "LayoutAllgatherRestickify.h"
+         "spyrecode.h"
+         # import_utils.h is public-by-transitivity: the installed header
+         # dsc/foldManager/foldInfrastructure.h does #include <util/import_utils.h>,
+@@ -63,6 +65,7 @@ set(UTIL_TESTS
+         "test/TransferGenerate_unit_test.cpp"
+         "test/DataConvertInfoGenerate_unit_test.cpp"
+         "test/VariableDefinition_unit_test.cpp"
++        "test/LayoutAllgatherRestickify_unit_test.cpp"
+         "test/sen_data_convert_unit_test_Z.cpp"
+         "test/sen_data_convert_unit_test_f16_f32_Z.cpp"
+         )
+diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
+new file mode 100644
+index 000000000..3fbeca602
+--- /dev/null
++++ b/util/LayoutAllgatherRestickify.cpp
+@@ -0,0 +1,367 @@
++/************************************************************
++ * IBM Confidential
++ * (C) Copyright IBM Corp. 2026
++ ************************************************************/
++
++#include "util/LayoutAllgatherRestickify.h"
++
++#include <external/json11/json11.hpp>
++
++#include <cstdint>
++#include <map>
++#include <set>
++#include <string>
++#include <vector>
++
++namespace {
++
++using json11::Json;
++
++bool hasNonEmptyString(const Json &json, const std::string &key) {
++  return json[key].is_string() && !json[key].string_value().empty();
++}
++
++bool hasNonEmptyObject(const Json &json, const std::string &key) {
++  return json[key].is_object() && !json[key].object_items().empty();
++}
++
++bool hasNonEmptyArray(const Json &json, const std::string &key) {
++  return json[key].is_array() && !json[key].array_items().empty();
++}
++
++bool hasLayoutContract(const Json &json, const std::string &key) {
++  const Json &layout = json[key];
++  return layout.is_object() && hasNonEmptyArray(layout, "layoutDimOrder_") &&
++         hasNonEmptyArray(layout, "stickDimOrder_");
++}
++
++std::uint64_t splitProduct(const Json &dims) {
++  if (!dims.is_object()) return 0;
++
++  std::uint64_t product = 1;
++  bool sawDim = false;
++  for (const auto &[_, value] : dims.object_items()) {
++    const int dim = value.int_value();
++    if (dim <= 0) return 0;
++    product *= static_cast<std::uint64_t>(dim);
++    sawDim = true;
++  }
++  return sawDim ? product : 0;
++}
++
++std::uint64_t splitForDim(const Json &dims, const std::string &dim) {
++  if (!dims.is_object()) return 0;
++  const int split = dims[dim].int_value();
++  return split > 0 ? static_cast<std::uint64_t>(split) : 0;
++}
++
++std::vector<std::string> stringArray(const Json &json) {
++  std::vector<std::string> values;
++  if (!json.is_array()) return values;
++  for (const auto &value : json.array_items()) {
++    if (!value.is_string()) return {};
++    values.push_back(value.string_value());
++  }
++  return values;
++}
++
++bool optionalStringIs(const Json &json, const std::string &key,
++                      const std::string &expected) {
++  return json[key].is_null() ||
++         (json[key].is_string() && json[key].string_value() == expected);
++}
++
++Json metadataValueToJson(const std::string &value) {
++  if (value == "true") return Json(true);
++  if (value == "false") return Json(false);
++
++  const auto first = value.find_first_not_of(" \t\n\r");
++  if (first != std::string::npos &&
++      (value[first] == '{' || value[first] == '[')) {
++    std::string err;
++    const Json parsed = Json::parse(value, err);
++    if (err.empty()) return parsed;
++  }
++
++  return Json(value);
++}
++
++std::string metadataFieldsToJsonString(
++    const std::map<std::string, std::string> &fields) {
++  Json::object object;
++  for (const auto &[key, value] : fields) {
++    object[key] = metadataValueToJson(value);
++  }
++  return Json(object).dump();
++}
++
++bool allRestickifyDimsRenamedToConsumer(const Json &json,
++                                        std::string *reason) {
++  const auto restickifyDims = stringArray(
++      json["restickify_kernel_layout"]["layoutDimOrder_"]);
++  const auto consumerDims =
++      stringArray(json["consumer_kernel_layout"]["layoutDimOrder_"]);
++  if (restickifyDims.empty() || consumerDims.empty()) {
++    *reason = "missing restickify or consumer layout dimensions";
++    return false;
++  }
++
++  const std::set<std::string> consumerDimSet(consumerDims.begin(),
++                                             consumerDims.end());
++  const Json &rename = json["dimension_rename"];
++  if (!rename.is_object()) {
++    *reason = "missing dimension_rename";
++    return false;
++  }
++
++  for (const auto &dim : restickifyDims) {
++    const std::string renameKey = "restickify." + dim;
++    const Json &renamed = rename[renameKey];
++    if (!renamed.is_string() || renamed.string_value().empty()) {
++      *reason = "missing rename for " + renameKey;
++      return false;
++    }
++
++    const std::string consumerPrefix = "batchmatmul.";
++    const std::string renamedValue = renamed.string_value();
++    if (renamedValue.rfind(consumerPrefix, 0) != 0) {
++      *reason = renameKey + " must rename to a batchmatmul dimension";
++      return false;
++    }
++
++    const std::string consumerDim = renamedValue.substr(consumerPrefix.size());
++    if (consumerDimSet.count(consumerDim) == 0) {
++      *reason = renamedValue + " is not in consumer_kernel_layout";
++      return false;
++    }
++  }
++
++  return true;
++}
++
++deeptools::LayoutAllgatherRestickifyMovementPlan movementFail(
++    const std::string &reason) {
++  deeptools::LayoutAllgatherRestickifyMovementPlan plan;
++  plan.reason = reason;
++  return plan;
++}
++
++deeptools::LayoutAllgatherRestickifyCheckResult fail(
++    const std::string &reason) {
++  deeptools::LayoutAllgatherRestickifyCheckResult result;
++  result.reason = reason;
++  return result;
++}
++
++}  // namespace
++
++namespace deeptools {
++
++LayoutAllgatherRestickifyCheckResult checkLayoutAllgatherRestickifyContract(
++    const std::string &jsonString) {
++  std::string err;
++  const Json json = Json::parse(jsonString, err);
++  if (!err.empty()) {
++    return fail("invalid json: " + err);
++  }
++  if (!json.is_object()) {
++    return fail("contract must be a json object");
++  }
++
++  LayoutAllgatherRestickifyCheckResult result;
++  result.kind = json["kind"].string_value();
++  result.communicationClass = json["communication_class"].string_value();
++  result.requiresStagedRealization =
++      json["requires_staged_realization"].bool_value();
++
++  if (result.kind != "layout_allgather_restickify") {
++    return fail("kind must be layout_allgather_restickify");
++  }
++  if (result.communicationClass != "all_gather") {
++    return fail("communication_class must be all_gather");
++  }
++  if (!result.requiresStagedRealization) {
++    return fail("requires_staged_realization must be true");
++  }
++
++  if (!hasNonEmptyString(json, "producer_op")) {
++    return fail("missing producer_op");
++  }
++  if (!hasNonEmptyString(json, "restickify_op")) {
++    return fail("missing restickify_op");
++  }
++  if (!hasNonEmptyString(json, "consumer_op")) {
++    return fail("missing consumer_op");
++  }
++
++  if (!hasLayoutContract(json, "producer_layout")) {
++    return fail("missing producer_layout layout/stick dim order");
++  }
++  if (!hasLayoutContract(json, "restickify_kernel_layout")) {
++    return fail("missing restickify_kernel_layout layout/stick dim order");
++  }
++  if (!hasLayoutContract(json, "consumer_kernel_layout")) {
++    return fail("missing consumer_kernel_layout layout/stick dim order");
++  }
++  if (!hasNonEmptyObject(json, "dimension_rename")) {
++    return fail("missing dimension_rename");
++  }
++
++  if (!hasNonEmptyObject(json, "producer_work_slice_dims")) {
++    return fail("missing producer_work_slice_dims");
++  }
++  if (!hasNonEmptyObject(json, "restickify_work_slice_dims")) {
++    return fail("missing restickify_work_slice_dims");
++  }
++  if (!hasNonEmptyObject(json, "consumer_work_slice_dims")) {
++    return fail("missing consumer_work_slice_dims");
++  }
++
++  result.sourceCoreCount = splitProduct(json["producer_work_slice_dims"]);
++  result.restickifyCoreCount = splitProduct(json["restickify_work_slice_dims"]);
++  result.consumerCoreCount = splitProduct(json["consumer_work_slice_dims"]);
++  if (result.sourceCoreCount == 0) {
++    return fail("producer_work_slice_dims product must be non-zero");
++  }
++  if (result.restickifyCoreCount == 0) {
++    return fail("restickify_work_slice_dims product must be non-zero");
++  }
++  if (result.consumerCoreCount == 0) {
++    return fail("consumer_work_slice_dims product must be non-zero");
++  }
++
++  result.ok = true;
++  result.reason = "ok";
++  return result;
++}
++
++LayoutAllgatherRestickifyMovementPlan
++synthesizeLayoutAllgatherRestickifyMovementPlan(
++    const std::string &jsonString) {
++  const auto check = checkLayoutAllgatherRestickifyContract(jsonString);
++  if (!check.ok) {
++    return movementFail("contract check failed: " + check.reason);
++  }
++
++  std::string err;
++  const Json json = Json::parse(jsonString, err);
++  if (!err.empty() || !json.is_object()) {
++    return movementFail("invalid json after contract check");
++  }
++
++  if (!optionalStringIs(json, "communication_pattern",
++                        "layout_allgather_restickify")) {
++    return movementFail(
++        "communication_pattern must be layout_allgather_restickify");
++  }
++  if (json["producer_op"].string_value() != "mul") {
++    return movementFail("producer_op must be mul");
++  }
++  if (json["restickify_op"].string_value() != "ReStickifyOpHBM") {
++    return movementFail("restickify_op must be ReStickifyOpHBM");
++  }
++  if (json["consumer_op"].string_value() != "batchmatmul") {
++    return movementFail("consumer_op must be batchmatmul");
++  }
++  if (check.sourceCoreCount != check.restickifyCoreCount) {
++    return movementFail(
++        "producer/restickify core counts must match for on-chip restickify");
++  }
++
++  const Json &restickifySplits = json["restickify_work_slice_dims"];
++  const Json &consumerSplits = json["consumer_work_slice_dims"];
++  const std::uint64_t groupCount = splitForDim(restickifySplits, "mb");
++  const std::uint64_t consumerGroupCount = splitForDim(consumerSplits, "x");
++  const std::uint64_t producerChunksPerGroup =
++      splitForDim(restickifySplits, "x");
++  const std::uint64_t consumerCoresPerGroup = splitForDim(consumerSplits, "mb");
++  if (groupCount == 0 || consumerGroupCount == 0 ||
++      producerChunksPerGroup == 0 || consumerCoresPerGroup == 0) {
++    return movementFail(
++        "restickify mb/x and consumer x/mb splits must be non-zero");
++  }
++  if (groupCount != consumerGroupCount) {
++    return movementFail("restickify mb split must match batchmatmul x split");
++  }
++  if (check.restickifyCoreCount != groupCount * producerChunksPerGroup) {
++    return movementFail(
++        "restickify core count must equal mb groups times x chunks");
++  }
++  if (check.consumerCoreCount != groupCount * consumerCoresPerGroup) {
++    return movementFail(
++        "consumer core count must equal x groups times mb consumers");
++  }
++  if (splitForDim(consumerSplits, "out") != 1 ||
++      splitForDim(consumerSplits, "in") != 1) {
++    return movementFail("only unsplit batchmatmul out/in are supported");
++  }
++
++  std::string renameReason;
++  if (!allRestickifyDimsRenamedToConsumer(json, &renameReason)) {
++    return movementFail("dimension_rename cannot drive movement: " +
++                        renameReason);
++  }
++
++  LayoutAllgatherRestickifyMovementPlan plan;
++  plan.ok = true;
++  plan.reason = "ok";
++  plan.communicationClass = check.communicationClass;
++  plan.movementPattern = check.kind;
++  plan.restickifyOp = "ReStickifyOpLx";
++  plan.consumerOperandDsType = "KERNEL";
++  plan.sourceCoreCount = check.sourceCoreCount;
++  plan.restickifyCoreCount = check.restickifyCoreCount;
++  plan.consumerCoreCount = check.consumerCoreCount;
++  plan.groupCount = groupCount;
++  plan.producerChunksPerGroup = producerChunksPerGroup;
++  plan.consumerCoresPerGroup = consumerCoresPerGroup;
++  plan.replicationFactor = consumerCoresPerGroup;
++  plan.logicalTransferCount =
++      groupCount * producerChunksPerGroup * consumerCoresPerGroup;
++  plan.stages = {"restickify_layout_on_chip", "grouped_all_gather",
++                 "bind_bmm_kernel_operand"};
++  return plan;
++}
++
++LayoutAllgatherRestickifyMovementPlan
++synthesizeLayoutAllgatherRestickifyMovementPlan(
++    const std::map<std::string, std::string> &fields) {
++  return synthesizeLayoutAllgatherRestickifyMovementPlan(
++      metadataFieldsToJsonString(fields));
++}
++
++std::string layoutAllgatherRestickifyMovementPlanArtifactJson(
++    const LayoutAllgatherRestickifyMovementPlan &plan,
++    const std::map<std::string, std::string> &context) {
++  std::vector<Json> stages;
++  for (const auto &stage : plan.stages) stages.emplace_back(stage);
++
++  Json::object artifact;
++  artifact["artifact_kind"] = "layout_allgather_restickify_backend_plan";
++  for (const auto &[key, value] : context) {
++    artifact[key] = metadataValueToJson(value);
++  }
++  artifact["communication_class"] = plan.communicationClass;
++  artifact["movement_pattern"] = plan.movementPattern;
++  artifact["restickify_op"] = plan.restickifyOp;
++  artifact["consumer_operand_ds_type"] = plan.consumerOperandDsType;
++  artifact["source_core_count"] =
++      std::to_string(plan.sourceCoreCount);
++  artifact["restickify_core_count"] =
++      std::to_string(plan.restickifyCoreCount);
++  artifact["consumer_core_count"] =
++      std::to_string(plan.consumerCoreCount);
++  artifact["group_count"] = std::to_string(plan.groupCount);
++  artifact["producer_chunks_per_group"] =
++      std::to_string(plan.producerChunksPerGroup);
++  artifact["consumer_cores_per_group"] =
++      std::to_string(plan.consumerCoresPerGroup);
++  artifact["replication_factor"] =
++      std::to_string(plan.replicationFactor);
++  artifact["logical_transfer_count"] =
++      std::to_string(plan.logicalTransferCount);
++  artifact["stages"] = stages;
++  return Json(artifact).dump();
++}
++
++}  // namespace deeptools
+diff --git a/util/LayoutAllgatherRestickify.h b/util/LayoutAllgatherRestickify.h
+new file mode 100644
+index 000000000..ea4e808ea
+--- /dev/null
++++ b/util/LayoutAllgatherRestickify.h
+@@ -0,0 +1,72 @@
++/************************************************************
++ * IBM Confidential
++ * (C) Copyright IBM Corp. 2026
++ ************************************************************/
++
++#ifndef UTIL_LAYOUT_ALLGATHER_RESTICKIFY_H_
++#define UTIL_LAYOUT_ALLGATHER_RESTICKIFY_H_
++
++#include <cstdint>
++#include <map>
++#include <string>
++#include <vector>
++
++namespace deeptools {
++
++struct LayoutAllgatherRestickifyCheckResult {
++  bool ok = false;
++  std::string kind;
++  std::string communicationClass;
++  bool requiresStagedRealization = false;
++  std::string reason;
++  std::uint64_t sourceCoreCount = 0;
++  std::uint64_t restickifyCoreCount = 0;
++  std::uint64_t consumerCoreCount = 0;
++};
++
++struct LayoutAllgatherRestickifyMovementPlan {
++  bool ok = false;
++  std::string reason;
++  std::string communicationClass;
++  std::string movementPattern;
++  std::string restickifyOp;
++  std::string consumerOperandDsType;
++  std::uint64_t sourceCoreCount = 0;
++  std::uint64_t restickifyCoreCount = 0;
++  std::uint64_t consumerCoreCount = 0;
++  std::uint64_t groupCount = 0;
++  std::uint64_t producerChunksPerGroup = 0;
++  std::uint64_t consumerCoresPerGroup = 0;
++  std::uint64_t replicationFactor = 0;
++  std::uint64_t logicalTransferCount = 0;
++  std::vector<std::string> stages;
++};
++
++// Validate the explicit DLDSC-side contract for flash attention edges where a
++// producer layout must be restickified on chip and then gathered into the
++// consumer kernel operand. This is intentionally fail-closed: partial metadata
++// must not silently look like a realizable movement primitive.
++LayoutAllgatherRestickifyCheckResult checkLayoutAllgatherRestickifyContract(
++    const std::string &jsonString);
++
++// Consume a validated flash contract into a backend-facing movement plan. This
++// is intentionally narrower than the checker: only the known flash
++// mul->ReStickifyOpHBM->batchmatmul KERNEL edge is accepted.
++LayoutAllgatherRestickifyMovementPlan
++synthesizeLayoutAllgatherRestickifyMovementPlan(const std::string &jsonString);
++
++// Same as above, but accepts the flat string metadata preserved on SuperDsc.
++// Nested values are expected to be JSON-encoded strings.
++LayoutAllgatherRestickifyMovementPlan
++synthesizeLayoutAllgatherRestickifyMovementPlan(
++    const std::map<std::string, std::string> &fields);
++
++// Build the deterministic backend artifact emitted when DXP reaches the exact
++// mutation point but physical grouped lowering is not implemented yet.
++std::string layoutAllgatherRestickifyMovementPlanArtifactJson(
++    const LayoutAllgatherRestickifyMovementPlan &plan,
++    const std::map<std::string, std::string> &context);
++
++}  // namespace deeptools
++
++#endif  // UTIL_LAYOUT_ALLGATHER_RESTICKIFY_H_
+diff --git a/util/test/LayoutAllgatherRestickify_unit_test.cpp b/util/test/LayoutAllgatherRestickify_unit_test.cpp
+new file mode 100644
+index 000000000..171aacdb4
+--- /dev/null
++++ b/util/test/LayoutAllgatherRestickify_unit_test.cpp
+@@ -0,0 +1,255 @@
++/************************************************************
++ * IBM Confidential
++ * (C) Copyright IBM Corp. 2026
++ ************************************************************/
++
++#include <gtest/gtest.h>
++
++#include <map>
++#include <string>
++
++#include "util/LayoutAllgatherRestickify.h"
++
++#include <external/json11/json11.hpp>
++
++namespace {
++
++std::string validFlashContract() {
++  return R"json({
++    "kind": "layout_allgather_restickify",
++    "communication_class": "all_gather",
++    "communication_pattern": "layout_allgather_restickify",
++    "producer_op": "mul",
++    "restickify_op": "ReStickifyOpHBM",
++    "consumer_op": "batchmatmul",
++    "requires_staged_realization": true,
++    "producer_work_slice_dims": {"mb": 4, "x": 8, "out": 1},
++    "restickify_work_slice_dims": {"mb": 4, "x": 8, "out": 1},
++    "consumer_work_slice_dims": {"x": 4, "mb": 8, "out": 1, "in": 1},
++    "producer_layout": {
++      "layoutDimOrder_": ["out", "x", "mb"],
++      "stickDimOrder_": ["out"]
++    },
++    "restickify_kernel_layout": {
++      "layoutDimOrder_": ["x", "out", "mb"],
++      "stickDimOrder_": ["x"]
++    },
++    "consumer_kernel_layout": {
++      "layoutDimOrder_": ["out", "in", "x"],
++      "stickDimOrder_": ["out"]
++    },
++    "dimension_rename": {
++      "restickify.mb": "batchmatmul.x",
++      "restickify.out": "batchmatmul.in",
++      "restickify.x": "batchmatmul.out"
++    },
++    "realized": false
++  })json";
++}
++
++std::string replaceFirst(std::string value, const std::string &from,
++                         const std::string &to) {
++  const auto pos = value.find(from);
++  if (pos == std::string::npos) return value;
++  value.replace(pos, from.size(), to);
++  return value;
++}
++
++}  // namespace
++
++TEST(LayoutAllgatherRestickify, acceptsCompleteFlashContract) {
++  const auto result = deeptools::checkLayoutAllgatherRestickifyContract(
++      validFlashContract());
++
++  EXPECT_TRUE(result.ok) << result.reason;
++  EXPECT_EQ(result.kind, "layout_allgather_restickify");
++  EXPECT_EQ(result.communicationClass, "all_gather");
++  EXPECT_TRUE(result.requiresStagedRealization);
++  EXPECT_EQ(result.sourceCoreCount, 32);
++  EXPECT_EQ(result.restickifyCoreCount, 32);
++  EXPECT_EQ(result.consumerCoreCount, 32);
++}
++
++TEST(LayoutAllgatherRestickify, rejectsScatterMetadata) {
++  const auto result = deeptools::checkLayoutAllgatherRestickifyContract(
++      R"json({
++        "kind": "layout_allgather_restickify",
++        "communication_class": "scatter",
++        "requires_staged_realization": true,
++        "producer_op": "mul",
++        "restickify_op": "ReStickifyOpHBM",
++        "consumer_op": "batchmatmul"
++      })json");
++
++  EXPECT_FALSE(result.ok);
++  EXPECT_EQ(result.reason, "communication_class must be all_gather");
++}
++
++TEST(LayoutAllgatherRestickify, rejectsMissingLayoutRename) {
++  const auto result = deeptools::checkLayoutAllgatherRestickifyContract(
++      R"json({
++        "kind": "layout_allgather_restickify",
++        "communication_class": "all_gather",
++        "requires_staged_realization": true,
++        "producer_op": "mul",
++        "restickify_op": "ReStickifyOpHBM",
++        "consumer_op": "batchmatmul",
++        "producer_work_slice_dims": {"mb": 4, "x": 8, "out": 1},
++        "restickify_work_slice_dims": {"mb": 4, "x": 8, "out": 1},
++        "consumer_work_slice_dims": {"x": 4, "mb": 8, "out": 1, "in": 1},
++        "producer_layout": {"layoutDimOrder_": ["out", "x", "mb"], "stickDimOrder_": ["out"]},
++        "restickify_kernel_layout": {"layoutDimOrder_": ["x", "out", "mb"], "stickDimOrder_": ["x"]},
++        "consumer_kernel_layout": {"layoutDimOrder_": ["out", "in", "x"], "stickDimOrder_": ["out"]}
++      })json");
++
++  EXPECT_FALSE(result.ok);
++  EXPECT_EQ(result.reason, "missing dimension_rename");
++}
++
++TEST(LayoutAllgatherRestickify, rejectsZeroWidthSplit) {
++  const auto result = deeptools::checkLayoutAllgatherRestickifyContract(
++      R"json({
++        "kind": "layout_allgather_restickify",
++        "communication_class": "all_gather",
++        "requires_staged_realization": true,
++        "producer_op": "mul",
++        "restickify_op": "ReStickifyOpHBM",
++        "consumer_op": "batchmatmul",
++        "producer_work_slice_dims": {"mb": 4, "x": 0, "out": 1},
++        "restickify_work_slice_dims": {"mb": 4, "x": 8, "out": 1},
++        "consumer_work_slice_dims": {"x": 4, "mb": 8, "out": 1, "in": 1},
++        "producer_layout": {"layoutDimOrder_": ["out", "x", "mb"], "stickDimOrder_": ["out"]},
++        "restickify_kernel_layout": {"layoutDimOrder_": ["x", "out", "mb"], "stickDimOrder_": ["x"]},
++        "consumer_kernel_layout": {"layoutDimOrder_": ["out", "in", "x"], "stickDimOrder_": ["out"]},
++        "dimension_rename": {"restickify.mb": "batchmatmul.x"}
++      })json");
++
++  EXPECT_FALSE(result.ok);
++  EXPECT_EQ(result.reason, "producer_work_slice_dims product must be non-zero");
++}
++
++TEST(LayoutAllgatherRestickify, synthesizesFlashMovementPlan) {
++  const auto plan = deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(
++      validFlashContract());
++
++  EXPECT_TRUE(plan.ok) << plan.reason;
++  EXPECT_EQ(plan.communicationClass, "all_gather");
++  EXPECT_EQ(plan.movementPattern, "layout_allgather_restickify");
++  EXPECT_EQ(plan.restickifyOp, "ReStickifyOpLx");
++  EXPECT_EQ(plan.consumerOperandDsType, "KERNEL");
++  EXPECT_EQ(plan.sourceCoreCount, 32);
++  EXPECT_EQ(plan.restickifyCoreCount, 32);
++  EXPECT_EQ(plan.consumerCoreCount, 32);
++  EXPECT_EQ(plan.groupCount, 4);
++  EXPECT_EQ(plan.producerChunksPerGroup, 8);
++  EXPECT_EQ(plan.consumerCoresPerGroup, 8);
++  EXPECT_EQ(plan.replicationFactor, 8);
++  EXPECT_EQ(plan.logicalTransferCount, 256);
++  ASSERT_EQ(plan.stages.size(), 3);
++  EXPECT_EQ(plan.stages[0], "restickify_layout_on_chip");
++  EXPECT_EQ(plan.stages[1], "grouped_all_gather");
++  EXPECT_EQ(plan.stages[2], "bind_bmm_kernel_operand");
++}
++
++TEST(LayoutAllgatherRestickify,
++     synthesizesFlashMovementPlanFromSuperDscMetadata) {
++  const std::map<std::string, std::string> fields = {
++      {"kind", "layout_allgather_restickify"},
++      {"communication_class", "all_gather"},
++      {"communication_pattern", "layout_allgather_restickify"},
++      {"producer_op", "mul"},
++      {"restickify_op", "ReStickifyOpHBM"},
++      {"consumer_op", "batchmatmul"},
++      {"requires_staged_realization", "true"},
++      {"producer_work_slice_dims", R"json({"mb":4,"x":8,"out":1})json"},
++      {"restickify_work_slice_dims", R"json({"mb":4,"x":8,"out":1})json"},
++      {"consumer_work_slice_dims", R"json({"x":4,"mb":8,"out":1,"in":1})json"},
++      {"producer_layout", R"json({"layoutDimOrder_":["out","x","mb"],"stickDimOrder_":["out"]})json"},
++      {"restickify_kernel_layout", R"json({"layoutDimOrder_":["x","out","mb"],"stickDimOrder_":["x"]})json"},
++      {"consumer_kernel_layout", R"json({"layoutDimOrder_":["out","in","x"],"stickDimOrder_":["out"]})json"},
++      {"dimension_rename", R"json({"restickify.mb":"batchmatmul.x","restickify.out":"batchmatmul.in","restickify.x":"batchmatmul.out"})json"},
++  };
++
++  const auto plan =
++      deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(fields);
++
++  EXPECT_TRUE(plan.ok) << plan.reason;
++  EXPECT_EQ(plan.groupCount, 4);
++  EXPECT_EQ(plan.producerChunksPerGroup, 8);
++  EXPECT_EQ(plan.consumerCoresPerGroup, 8);
++  EXPECT_EQ(plan.logicalTransferCount, 256);
++}
++
++TEST(LayoutAllgatherRestickify, emitsDeterministicBackendPlanArtifact) {
++  const auto plan = deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(
++      validFlashContract());
++  ASSERT_TRUE(plan.ok) << plan.reason;
++
++  const auto artifactJson =
++      deeptools::layoutAllgatherRestickifyMovementPlanArtifactJson(
++          plan, {{"schema_version", "1"},
++                 {"mutation_point",
++                  "Dxp::insertRelayoutSdsc after LX pinned input coordinate "
++                  "mismatch"},
++                 {"realized", "false"},
++                 {"sdsc_name", "3_batchmatmul"},
++                 {"input_labeled_ds", "Tensor0"},
++                 {"classification_key", "buf9"},
++                 {"program_step", "3"}});
++
++  std::string err;
++  const auto artifact = json11::Json::parse(artifactJson, err);
++  ASSERT_TRUE(err.empty()) << err;
++  EXPECT_EQ(artifact["artifact_kind"].string_value(),
++            "layout_allgather_restickify_backend_plan");
++  EXPECT_FALSE(artifact["realized"].bool_value());
++  EXPECT_EQ(artifact["classification_key"].string_value(), "buf9");
++  EXPECT_EQ(artifact["group_count"].string_value(), "4");
++  EXPECT_EQ(artifact["producer_chunks_per_group"].string_value(), "8");
++  EXPECT_EQ(artifact["consumer_cores_per_group"].string_value(), "8");
++  EXPECT_EQ(artifact["logical_transfer_count"].string_value(), "256");
++  ASSERT_TRUE(artifact["stages"].is_array());
++  ASSERT_EQ(artifact["stages"].array_items().size(), 3);
++  EXPECT_EQ(artifact["stages"].array_items()[1].string_value(),
++            "grouped_all_gather");
++}
++
++TEST(LayoutAllgatherRestickify, movementPlanRejectsNonFlashProducer) {
++  const auto contract = replaceFirst(validFlashContract(),
++                                     R"json("producer_op": "mul")json",
++                                     R"json("producer_op": "add")json");
++
++  const auto plan =
++      deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(contract);
++
++  EXPECT_FALSE(plan.ok);
++  EXPECT_EQ(plan.reason, "producer_op must be mul");
++}
++
++TEST(LayoutAllgatherRestickify, movementPlanRejectsIncompleteRename) {
++  const auto contract = replaceFirst(
++      validFlashContract(),
++      R"json("restickify.x": "batchmatmul.out")json",
++      R"json("restickify.x": "not_batchmatmul.out")json");
++
++  const auto plan =
++      deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(contract);
++
++  EXPECT_FALSE(plan.ok);
++  EXPECT_EQ(plan.reason,
++            "dimension_rename cannot drive movement: restickify.x must rename "
++            "to a batchmatmul dimension");
++}
++
++TEST(LayoutAllgatherRestickify, movementPlanRejectsMismatchedGroups) {
++  const auto contract = replaceFirst(
++      validFlashContract(),
++      R"json("consumer_work_slice_dims": {"x": 4, "mb": 8, "out": 1, "in": 1})json",
++      R"json("consumer_work_slice_dims": {"x": 2, "mb": 16, "out": 1, "in": 1})json");
++
++  const auto plan =
++      deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(contract);
++
++  EXPECT_FALSE(plan.ok);
++  EXPECT_EQ(plan.reason, "restickify mb split must match batchmatmul x split");
++}

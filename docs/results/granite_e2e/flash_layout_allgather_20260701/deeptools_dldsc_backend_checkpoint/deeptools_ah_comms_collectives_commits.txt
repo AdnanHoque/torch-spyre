@@ -1,0 +1,6 @@
+96c00ed16 [DXP] Emit flash layout allgather backend plan artifact
+454756c7a [DXP] Hook flash layout allgather metadata into relayout planning
+c3c4aa52f [DXP] Synthesize flash layout allgather movement plan
+4afc4d9f5 [DXP] Add flash layout-allgather contract checker
+c4cf6a435 [DXP] Preserve LX relayout classification metadata
+b8c09743c [DXP] Fix resident LX scatter relayout sizing
