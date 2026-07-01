@@ -89,4 +89,13 @@ collective class:
 4. Bind the resulting LX-resident KERNEL view to the consumer `batchmatmul`.
 5. Schedule movement before the consumer compute.
 
-Weight restickifies are intentionally out of scope for this directory; those
+Weight restickifies are intentionally out of scope for this directory; those should be handled by offline weight prelayout/preload work.
+
+## 2026-07-01 Follow-Up Findings
+
+`restickify_lx_probe/` reruns the staged DLDSC contract after changing Torch to emit `ReStickifyOpLx` whenever the restickify input and output are both LX-resident. The generated SDSC rows do switch from `ReStickifyOpHBM` to `ReStickifyOpLx`, and the four consumer `batchmatmul` rows still carry `layout_allgather_restickify` metadata. Stock DXP still aborts in `Dxp::insertRelayoutSdsc(...)`, so the op-name mismatch is not the only blocker.
+
+`restickify_lx_probe/dxp_gdb_bt.txt` captures the stock DXP stack trace. The abort is inside backend relayout insertion, not Python import or frontend metadata propagation.
+
+`explicit_remap_probe/explicit_remap_senulator_failure_report_20260701.md` records the explicit-remap lane finding: the concrete ranged transfer SDSC imports/routes successfully, and the senulator failure is avoided with `DXP_ENABLE_COMPILE_TIME_CORRECTION=1`. That points to a runtime program-correction zero-flit/zero-layout issue rather than malformed explicit movement metadata.
+
