@@ -1,0 +1,176 @@
+{
+  "baseline": {
+    "alloc_loc_counts": [
+      [
+        "component:hbm",
+        781
+      ],
+      [
+        "component:lx",
+        704
+      ]
+    ],
+    "bundles": 3,
+    "lx_residency_text_files": 0,
+    "op_class_counts": [
+      [
+        "mul",
+        128
+      ],
+      [
+        "add",
+        96
+      ],
+      [
+        "batchmatmul",
+        64
+      ],
+      [
+        "exp",
+        64
+      ],
+      [
+        "sub",
+        64
+      ],
+      [
+        "max",
+        34
+      ],
+      [
+        "maximum",
+        32
+      ],
+      [
+        "sum",
+        32
+      ],
+      [
+        "ReStickifyOpHBM",
+        32
+      ],
+      [
+        "identity",
+        3
+      ],
+      [
+        "realdiv",
+        1
+      ]
+    ],
+    "rc": "0",
+    "relayout_keys": [],
+    "restickify_examples": [
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_478.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_206.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_121.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_342.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_189.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_274.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_138.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_36.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_53.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_70.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_325.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_223.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_512.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_19.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_172.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_240.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_376.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_2.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_393.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_529.json"
+    ],
+    "restickify_hbm_rows": 32,
+    "run": "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758",
+    "sdsc_files": 550
+  },
+  "optimized": {
+    "alloc_loc_counts": [
+      [
+        "component:hbm",
+        781
+      ],
+      [
+        "component:lx",
+        704
+      ]
+    ],
+    "bundles": 3,
+    "lx_residency_text_files": 0,
+    "op_class_counts": [
+      [
+        "mul",
+        128
+      ],
+      [
+        "add",
+        96
+      ],
+      [
+        "batchmatmul",
+        64
+      ],
+      [
+        "exp",
+        64
+      ],
+      [
+        "sub",
+        64
+      ],
+      [
+        "max",
+        34
+      ],
+      [
+        "maximum",
+        32
+      ],
+      [
+        "sum",
+        32
+      ],
+      [
+        "ReStickifyOpHBM",
+        32
+      ],
+      [
+        "identity",
+        3
+      ],
+      [
+        "realdiv",
+        1
+      ]
+    ],
+    "rc": "1",
+    "relayout_keys": [],
+    "restickify_examples": [
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_478.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_206.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_121.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_342.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_189.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_274.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_138.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_36.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_53.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_70.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_325.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_223.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_512.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_19.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_172.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_240.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_376.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_2.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_393.json",
+      "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr/sdsc_529.json"
+    ],
+    "restickify_hbm_rows": 32,
+    "run": "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326",
+    "sdsc_files": 550
+  }
+}
