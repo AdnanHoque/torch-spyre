@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>On-chip scatter relayout — first principles</title>
+<style>
+  :root{--bg:#fbfbfd;--ink:#1a1a2e;--muted:#6b7280;--line:#e2e5ea;--card:#fff;
+    --green:#2e9e5b;--amber:#c9971b;--red:#d6453d;--grey:#9aa3af;--torch:#3b6ea8;--dt:#2a9d8f;--hbm:#e8743b;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.62 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:920px;margin:0 auto;padding:48px 24px 96px;}
+  h1{font-size:32px;line-height:1.15;margin:0 0 6px;letter-spacing:-.5px;}
+  h2{font-size:23px;margin:54px 0 4px;letter-spacing:-.3px;padding-top:12px;border-top:1px solid var(--line);}
+  h3{font-size:17px;margin:26px 0 4px;}
+  .sub{color:var(--muted);font-size:17px;margin:0 0 8px;}
+  .kicker{font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--torch);margin:0 0 10px;}
+  p{margin:14px 0;} .lead{font-size:18px;}
+  code{background:#f1f3f6;border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:13px;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;}
+  .mono{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;}
+  table{border-collapse:collapse;width:100%;margin:20px 0;font-size:14px;}
+  th,td{border:1px solid var(--line);padding:8px 11px;text-align:left;vertical-align:top;}
+  th{background:#f3f5f8;font-weight:650;}
+  figure{margin:26px 0;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 18px 12px;box-shadow:0 1px 2px rgba(20,20,50,.04);}
+  figure svg{display:block;width:100%;height:auto;}
+  figcaption{color:var(--muted);font-size:13.5px;margin-top:10px;text-align:center;}
+  .callout{background:#f4f9f5;border:1px solid #cfe9d6;border-left:4px solid var(--green);border-radius:8px;padding:12px 16px;margin:18px 0;font-size:15px;}
+  .callout.warn{background:#fdf6ef;border-color:#f3ddc4;border-left-color:var(--hbm);}
+  .pull{font-size:20px;font-weight:700;line-height:1.3;color:var(--torch);border-left:4px solid var(--torch);padding:6px 0 6px 18px;margin:22px 0;}
+  .meta{color:var(--muted);font-size:13px;border-top:1px solid var(--line);margin-top:48px;padding-top:16px;}
+  svg text{font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="kicker">Spyre AIU &middot; on-chip communication &middot; scatter relayout</p>
+<h1>Keeping activations on chip: the scatter relayout</h1>
+<p class="sub">How the production path removes a class of HBM round-trips by moving a tensor core-to-core instead of spilling &mdash; the mechanism, the alternatives we didn't take, and where it can go next.</p>
+
+<p class="lead">The accelerator has a small per-core scratchpad (LX) and slow main memory (HBM). When a producer op
+leaves a tensor resident in LX under one core work-division, and the consumer wants that <em>same logical tensor</em>
+under a <strong>different core ownership</strong>, the simple compiler writes it out to HBM and reads it back. That
+round-trip is pure overhead &mdash; the values don't change, only which core owns which slice. The scatter relayout
+removes it: the tensor stays in LX and the pieces that need to change owner move directly over the on-chip ring.</p>
+
+<figure>
+<svg viewBox="0 0 880 250" role="img" aria-label="spill vs on-chip move">
+  <defs>
+    <marker id="ao" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#e8743b"/></marker>
+    <marker id="ag" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#2e9e5b"/></marker>
+  </defs>
+  <text x="14" y="20" font-size="13" font-weight="700" fill="#e8743b">TODAY &mdash; spill through HBM</text>
+  <rect x="14" y="34" width="150" height="70" rx="7" fill="#eef3f9" stroke="#3b6ea8"/><text x="89" y="62" font-size="12" font-weight="700" text-anchor="middle">producer</text><text x="89" y="80" font-size="10.5" text-anchor="middle" fill="#6b7280">LX, division A</text>
+  <rect x="365" y="40" width="150" height="58" rx="7" fill="#fbe6da" stroke="#e8743b"/><text x="440" y="66" font-size="13" font-weight="700" text-anchor="middle" fill="#e8743b">HBM</text><text x="440" y="83" font-size="10" text-anchor="middle" fill="#b4521f">write + read back</text>
+  <rect x="716" y="34" width="150" height="70" rx="7" fill="#eef3f9" stroke="#3b6ea8"/><text x="791" y="62" font-size="12" font-weight="700" text-anchor="middle">consumer</text><text x="791" y="80" font-size="10.5" text-anchor="middle" fill="#6b7280">LX, division B</text>
+  <line x1="164" y1="69" x2="363" y2="69" stroke="#e8743b" stroke-width="2.4" marker-end="url(#ao)"/>
+  <line x1="515" y1="69" x2="714" y2="69" stroke="#e8743b" stroke-width="2.4" marker-end="url(#ao)"/>
+  <text x="440" y="128" font-size="11.5" text-anchor="middle" fill="#e8743b" font-weight="700">a round-trip that exists only to change owner</text>
+  <line x1="14" y1="152" x2="866" y2="152" stroke="#e2e5ea"/>
+  <text x="14" y="180" font-size="13" font-weight="700" fill="#2e9e5b">SCATTER RELAYOUT &mdash; move on chip</text>
+  <rect x="14" y="194" width="150" height="46" rx="7" fill="#eef3f9" stroke="#3b6ea8"/><text x="89" y="221" font-size="12" font-weight="700" text-anchor="middle">producer LX</text>
+  <rect x="365" y="196" width="150" height="42" rx="7" fill="#f3f4f6" stroke="#c9ccd2" stroke-dasharray="4 3"/><text x="440" y="222" font-size="12" font-weight="700" text-anchor="middle" fill="#aeb2ba">HBM bypassed</text>
+  <rect x="716" y="194" width="150" height="46" rx="7" fill="#eef3f9" stroke="#3b6ea8"/><text x="791" y="221" font-size="12" font-weight="700" text-anchor="middle">consumer LX</text>
+  <path d="M164,214 C 400,168 520,168 714,214" fill="none" stroke="#2e9e5b" stroke-width="2.6" marker-end="url(#ag)"/>
+  <text x="439" y="180" font-size="11.5" text-anchor="middle" fill="#2e9e5b" font-weight="700">ring: only the pieces that change owner move</text>
+</svg>
+<figcaption>Same values, different owner. The spill writes the whole tensor to HBM and reads it back; the relayout
+sends just the pieces whose owner changes, directly over the on-chip ring.</figcaption>
+</figure>
+
+
+<h2>How it works: the frontend records, the backend synthesizes</h2>
+<p>The design splits cleanly. The <strong>frontend</strong> (Torch/Inductor) knows <em>why</em> each op picked its
+work-division and whether an edge is worth keeping on chip &mdash; that is policy. The <strong>backend</strong>
+(deeptools) knows the LX memory state, piece sizing, and legality &mdash; that is realization. So the frontend
+records <em>what</em> is needed and the backend decides <em>how</em>.</p>
+
+<figure>
+<svg viewBox="0 0 900 220" role="img" aria-label="scatter data path">
+  <defs><marker id="ap" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 z" fill="#6b7280"/></marker></defs>
+  <text x="150" y="20" font-size="11.5" text-anchor="middle" fill="#3b6ea8" font-weight="700">FRONTEND (Torch)</text>
+  <text x="620" y="20" font-size="11.5" text-anchor="middle" fill="#2a9d8f" font-weight="700">BACKEND (deeptools)</text>
+  <g font-size="11" text-anchor="middle">
+    <rect x="20" y="34" width="180" height="70" rx="7" fill="#eef3f9" stroke="#3b6ea8"/><text x="110" y="55" font-weight="700">detect the mismatch</text><text x="110" y="72" fill="#6b7280" font-size="10">producer view != consumer view</text><text x="110" y="87" fill="#6b7280" font-size="10">single writer, final (no partial)</text>
+    <rect x="230" y="34" width="180" height="70" rx="7" fill="#eef3f9" stroke="#3b6ea8"/><text x="320" y="55" font-weight="700">record coordinates</text><text x="320" y="72" fill="#6b7280" font-size="10">producer ownership map</text><text x="320" y="87" fill="#6b7280" font-size="10">+ a class label</text>
+    <rect x="440" y="34" width="180" height="70" rx="7" fill="#eef3f9" stroke="#3b6ea8"/><text x="530" y="55" font-weight="700">emit NO movement</text><text x="530" y="72" fill="#6b7280" font-size="10">consumer SDSC still names</text><text x="530" y="87" fill="#6b7280" font-size="10">the tensor as an LX input</text>
+    <rect x="650" y="34" width="230" height="70" rx="7" fill="#e3f4f1" stroke="#2a9d8f"/><text x="765" y="53" font-weight="700">synthesize the move</text><text x="765" y="69" fill="#2a9d8f" font-size="10">coords disagree -&gt; STCDPOpLx</text><text x="765" y="83" fill="#2a9d8f" font-size="10">sized to the resident piece</text><text x="765" y="96" fill="#2a9d8f" font-size="10">LX space check; else HBM fallback</text>
+  </g>
+  <g stroke="#6b7280" stroke-width="1.5">
+    <line x1="200" y1="69" x2="228" y2="69" marker-end="url(#ap)"/>
+    <line x1="410" y1="69" x2="438" y2="69" marker-end="url(#ap)"/>
+    <line x1="620" y1="69" x2="648" y2="69" marker-end="url(#ap)"/>
+  </g>
+  <text x="450" y="140" font-size="12" text-anchor="middle" fill="#1a1a2e" font-weight="700">the mismatch between the two ownership maps <tspan fill="#2a9d8f">is</tspan> the movement plan &mdash; Torch never spells it out</text>
+  <!-- sizing inset -->
+  <rect x="230" y="158" width="440" height="46" rx="7" fill="#0f172a"/>
+  <text x="450" y="177" font-size="11" text-anchor="middle" fill="#e6edf6" class="mono">piece = ceil(tensor / number of distinct owners)</text>
+  <text x="450" y="194" font-size="9.5" text-anchor="middle" fill="#8fb6e8">the resident share one core holds &mdash; not the whole tensor per core</text>
+</svg>
+<figcaption>The scatter path. The frontend detects the ownership mismatch, records the producer's distribution plus
+a class label, and emits <em>no</em> transfer op. The backend reads the two distributions, and where they disagree
+synthesizes the on-chip move, sized to the piece each core actually holds.</figcaption>
+</figure>
+
+<p class="pull">Torch owns the movement <em>intent</em>. The backend owns the movement <em>implementation</em> &mdash;
+because the implementation depends on LX memory state that only the backend can see.</p>
+
+<div class="callout warn"><strong>Honest status.</strong> The scatter path is implemented and the backend
+synthesis is live. But the measured block win (~14.70 &rarr; ~12.34 ms/iter) comes from keeping fused-chain
+intermediates LX-resident, <em>not</em> from named relayout lowering firing &mdash; on the full block the collective
+classifications did not fire and the explicit HBM restickify rows are unchanged. Scatter's edge coverage is high;
+its isolated latency contribution is not yet measured.</div>
+
+
+<h2>Alternatives, and why not</h2>
+<p>Three other ways to bridge a work-division mismatch. Each was considered and set aside for the scatter corner
+for a concrete reason.</p>
+<table>
+  <thead><tr><th>alternative</th><th>what it is</th><th>why not (for scatter)</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Explicit frontend movement rows</strong></td><td>Torch enumerates every source&rarr;dest core pair and emits the transfer rows itself.</td><td>Duplicates what the backend already derives from coordinates, and hard-codes piece sizes / core pairing / LX-vs-HBM fallback that depend on backend memory state Torch <em>cannot see</em>. Only justified where the backend can't derive the move &mdash; which is the all-gather lane, not this one.</td></tr>
+    <tr><td><strong>Co-assignment</strong></td><td>Force producer and consumer onto one shared work-division so there is no mismatch.</td><td>Couples two ops' division choices; the producer's best split and the consumer's best split generally differ, so this de-optimizes one op's array fill to save a movement whose cost is far smaller than the compute penalty. Also can't express fan-out.</td></tr>
+    <tr><td><strong>Just spill</strong></td><td>The status quo: write to HBM, read back under the new view.</td><td>Always correct, but it <em>is</em> the round-trip being removed. Kept only as the backend's fallback when the resident piece doesn't fit in LX.</td></tr>
+  </tbody>
+</table>
+
+
+<h2>Where it can go next</h2>
+<ul>
+  <li><strong>Backend-derived cardinality.</strong> The move is already derived from the two ownership maps; the
+    <em>class</em> (1:1 scatter vs 1:many broadcast vs many:1 gather) is also implied by those maps. Deriving it in
+    the backend would let the frontend drop per-collective labeling and collapse to pure detection &mdash; one path
+    covers every cardinality the coordinates can express, instead of one bespoke label per class.</li>
+  <li><strong>Ring-distance-aware placement.</strong> Piece assignment ignores ring topology today; placing pieces to
+    minimize hop distance between producer and consumer cores cuts on-ring latency for the same logical move.</li>
+  <li><strong>Overlap with compute.</strong> The relayout is a separate scheduled step. Streaming it while the
+    producer's tail or an unrelated op runs would hide the move under compute instead of serializing it.</li>
+</ul>
+
+<p>The first of these is the important one: it is not just an optimization but a contract simplification. If the
+backend derives cardinality, then broadcast, gather, and all-gather need <em>no</em> new frontend path &mdash; only
+the two genuinely different axes (a layout-form change, and arithmetic reduction) call for the interface to grow,
+and each by a single field rather than a new lane.</p>
+
+<p class="meta">Companion artifacts on this branch: the spill/communication taxonomy, the architecture assessment,
+the per-class gap readout and design, the backend live-capability verification, and the deeptools change log. A
+first-iteration communication cost model lives on the <span class="mono">ah/comm-cost-model</span> branch.
+Production PRs are described by function only.</p>
+
+</div>
+</body>
+</html>
