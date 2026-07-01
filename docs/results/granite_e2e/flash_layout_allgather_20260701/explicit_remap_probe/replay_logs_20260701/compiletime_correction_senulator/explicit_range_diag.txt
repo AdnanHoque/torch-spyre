@@ -1,0 +1,871 @@
+dataOpDsc: sdsc_10_Tensor1_explicit_range
+parsedRangeCount: 256
+range[0] moveIndex=0 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=0 srcLx=0 dstCore=0 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[1] moveIndex=1 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=4 srcLx=131072 dstCore=0 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[2] moveIndex=2 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=8 srcLx=262144 dstCore=0 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[3] moveIndex=3 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=12 srcLx=393216 dstCore=0 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[4] moveIndex=4 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=16 srcLx=524288 dstCore=0 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[5] moveIndex=5 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=20 srcLx=655360 dstCore=0 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[6] moveIndex=6 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=24 srcLx=786432 dstCore=0 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[7] moveIndex=7 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=28 srcLx=917504 dstCore=0 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[8] moveIndex=8 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=0 srcLx=0 dstCore=4 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[9] moveIndex=9 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=4 srcLx=131072 dstCore=4 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[10] moveIndex=10 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=8 srcLx=262144 dstCore=4 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[11] moveIndex=11 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=12 srcLx=393216 dstCore=4 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[12] moveIndex=12 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=16 srcLx=524288 dstCore=4 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[13] moveIndex=13 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=20 srcLx=655360 dstCore=4 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[14] moveIndex=14 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=24 srcLx=786432 dstCore=4 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[15] moveIndex=15 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=28 srcLx=917504 dstCore=4 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[16] moveIndex=16 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=0 srcLx=0 dstCore=8 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[17] moveIndex=17 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=4 srcLx=131072 dstCore=8 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[18] moveIndex=18 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=8 srcLx=262144 dstCore=8 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[19] moveIndex=19 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=12 srcLx=393216 dstCore=8 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[20] moveIndex=20 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=16 srcLx=524288 dstCore=8 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[21] moveIndex=21 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=20 srcLx=655360 dstCore=8 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[22] moveIndex=22 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=24 srcLx=786432 dstCore=8 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[23] moveIndex=23 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=28 srcLx=917504 dstCore=8 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[24] moveIndex=24 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=0 srcLx=0 dstCore=12 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[25] moveIndex=25 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=4 srcLx=131072 dstCore=12 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[26] moveIndex=26 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=8 srcLx=262144 dstCore=12 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[27] moveIndex=27 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=12 srcLx=393216 dstCore=12 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[28] moveIndex=28 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=16 srcLx=524288 dstCore=12 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[29] moveIndex=29 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=20 srcLx=655360 dstCore=12 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[30] moveIndex=30 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=24 srcLx=786432 dstCore=12 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[31] moveIndex=31 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=28 srcLx=917504 dstCore=12 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[32] moveIndex=32 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=0 srcLx=0 dstCore=16 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[33] moveIndex=33 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=4 srcLx=131072 dstCore=16 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[34] moveIndex=34 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=8 srcLx=262144 dstCore=16 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[35] moveIndex=35 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=12 srcLx=393216 dstCore=16 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[36] moveIndex=36 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=16 srcLx=524288 dstCore=16 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[37] moveIndex=37 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=20 srcLx=655360 dstCore=16 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[38] moveIndex=38 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=24 srcLx=786432 dstCore=16 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[39] moveIndex=39 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=28 srcLx=917504 dstCore=16 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[40] moveIndex=40 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=0 srcLx=0 dstCore=20 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[41] moveIndex=41 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=4 srcLx=131072 dstCore=20 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[42] moveIndex=42 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=8 srcLx=262144 dstCore=20 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[43] moveIndex=43 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=12 srcLx=393216 dstCore=20 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[44] moveIndex=44 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=16 srcLx=524288 dstCore=20 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[45] moveIndex=45 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=20 srcLx=655360 dstCore=20 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[46] moveIndex=46 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=24 srcLx=786432 dstCore=20 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[47] moveIndex=47 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=28 srcLx=917504 dstCore=20 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[48] moveIndex=48 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=0 srcLx=0 dstCore=24 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[49] moveIndex=49 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=4 srcLx=131072 dstCore=24 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[50] moveIndex=50 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=8 srcLx=262144 dstCore=24 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[51] moveIndex=51 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=12 srcLx=393216 dstCore=24 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[52] moveIndex=52 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=16 srcLx=524288 dstCore=24 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[53] moveIndex=53 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=20 srcLx=655360 dstCore=24 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[54] moveIndex=54 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=24 srcLx=786432 dstCore=24 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[55] moveIndex=55 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=28 srcLx=917504 dstCore=24 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[56] moveIndex=56 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=0 srcLx=0 dstCore=28 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[57] moveIndex=57 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=4 srcLx=131072 dstCore=28 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[58] moveIndex=58 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=8 srcLx=262144 dstCore=28 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[59] moveIndex=59 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=12 srcLx=393216 dstCore=28 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[60] moveIndex=60 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=16 srcLx=524288 dstCore=28 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[61] moveIndex=61 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=20 srcLx=655360 dstCore=28 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[62] moveIndex=62 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=24 srcLx=786432 dstCore=28 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[63] moveIndex=63 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=28 srcLx=917504 dstCore=28 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[64] moveIndex=64 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=1 srcLx=0 dstCore=1 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[65] moveIndex=65 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=5 srcLx=131072 dstCore=1 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[66] moveIndex=66 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=9 srcLx=262144 dstCore=1 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[67] moveIndex=67 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=13 srcLx=393216 dstCore=1 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[68] moveIndex=68 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=17 srcLx=524288 dstCore=1 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[69] moveIndex=69 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=21 srcLx=655360 dstCore=1 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[70] moveIndex=70 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=25 srcLx=786432 dstCore=1 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[71] moveIndex=71 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=29 srcLx=917504 dstCore=1 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[72] moveIndex=72 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=1 srcLx=0 dstCore=5 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[73] moveIndex=73 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=5 srcLx=131072 dstCore=5 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[74] moveIndex=74 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=9 srcLx=262144 dstCore=5 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[75] moveIndex=75 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=13 srcLx=393216 dstCore=5 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[76] moveIndex=76 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=17 srcLx=524288 dstCore=5 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[77] moveIndex=77 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=21 srcLx=655360 dstCore=5 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[78] moveIndex=78 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=25 srcLx=786432 dstCore=5 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[79] moveIndex=79 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=29 srcLx=917504 dstCore=5 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[80] moveIndex=80 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=1 srcLx=0 dstCore=9 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[81] moveIndex=81 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=5 srcLx=131072 dstCore=9 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[82] moveIndex=82 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=9 srcLx=262144 dstCore=9 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[83] moveIndex=83 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=13 srcLx=393216 dstCore=9 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[84] moveIndex=84 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=17 srcLx=524288 dstCore=9 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[85] moveIndex=85 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=21 srcLx=655360 dstCore=9 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[86] moveIndex=86 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=25 srcLx=786432 dstCore=9 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[87] moveIndex=87 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=29 srcLx=917504 dstCore=9 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[88] moveIndex=88 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=1 srcLx=0 dstCore=13 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[89] moveIndex=89 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=5 srcLx=131072 dstCore=13 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[90] moveIndex=90 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=9 srcLx=262144 dstCore=13 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[91] moveIndex=91 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=13 srcLx=393216 dstCore=13 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[92] moveIndex=92 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=17 srcLx=524288 dstCore=13 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[93] moveIndex=93 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=21 srcLx=655360 dstCore=13 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[94] moveIndex=94 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=25 srcLx=786432 dstCore=13 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[95] moveIndex=95 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=29 srcLx=917504 dstCore=13 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[96] moveIndex=96 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=1 srcLx=0 dstCore=17 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[97] moveIndex=97 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=5 srcLx=131072 dstCore=17 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[98] moveIndex=98 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=9 srcLx=262144 dstCore=17 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[99] moveIndex=99 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=13 srcLx=393216 dstCore=17 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[100] moveIndex=100 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=17 srcLx=524288 dstCore=17 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[101] moveIndex=101 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=21 srcLx=655360 dstCore=17 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[102] moveIndex=102 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=25 srcLx=786432 dstCore=17 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[103] moveIndex=103 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=29 srcLx=917504 dstCore=17 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[104] moveIndex=104 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=1 srcLx=0 dstCore=21 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[105] moveIndex=105 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=5 srcLx=131072 dstCore=21 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[106] moveIndex=106 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=9 srcLx=262144 dstCore=21 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[107] moveIndex=107 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=13 srcLx=393216 dstCore=21 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[108] moveIndex=108 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=17 srcLx=524288 dstCore=21 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[109] moveIndex=109 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=21 srcLx=655360 dstCore=21 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[110] moveIndex=110 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=25 srcLx=786432 dstCore=21 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[111] moveIndex=111 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=29 srcLx=917504 dstCore=21 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[112] moveIndex=112 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=1 srcLx=0 dstCore=25 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[113] moveIndex=113 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=5 srcLx=131072 dstCore=25 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[114] moveIndex=114 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=9 srcLx=262144 dstCore=25 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[115] moveIndex=115 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=13 srcLx=393216 dstCore=25 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[116] moveIndex=116 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=17 srcLx=524288 dstCore=25 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[117] moveIndex=117 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=21 srcLx=655360 dstCore=25 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[118] moveIndex=118 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=25 srcLx=786432 dstCore=25 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[119] moveIndex=119 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=29 srcLx=917504 dstCore=25 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[120] moveIndex=120 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=1 srcLx=0 dstCore=29 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[121] moveIndex=121 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=5 srcLx=131072 dstCore=29 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[122] moveIndex=122 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=9 srcLx=262144 dstCore=29 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[123] moveIndex=123 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=13 srcLx=393216 dstCore=29 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[124] moveIndex=124 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=17 srcLx=524288 dstCore=29 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[125] moveIndex=125 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=21 srcLx=655360 dstCore=29 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[126] moveIndex=126 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=25 srcLx=786432 dstCore=29 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[127] moveIndex=127 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=29 srcLx=917504 dstCore=29 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[128] moveIndex=128 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=2 srcLx=0 dstCore=2 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[129] moveIndex=129 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=6 srcLx=131072 dstCore=2 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[130] moveIndex=130 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=10 srcLx=262144 dstCore=2 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[131] moveIndex=131 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=14 srcLx=393216 dstCore=2 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[132] moveIndex=132 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=18 srcLx=524288 dstCore=2 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[133] moveIndex=133 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=22 srcLx=655360 dstCore=2 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[134] moveIndex=134 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=26 srcLx=786432 dstCore=2 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[135] moveIndex=135 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=30 srcLx=917504 dstCore=2 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[136] moveIndex=136 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=2 srcLx=0 dstCore=6 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[137] moveIndex=137 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=6 srcLx=131072 dstCore=6 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[138] moveIndex=138 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=10 srcLx=262144 dstCore=6 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[139] moveIndex=139 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=14 srcLx=393216 dstCore=6 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[140] moveIndex=140 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=18 srcLx=524288 dstCore=6 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[141] moveIndex=141 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=22 srcLx=655360 dstCore=6 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[142] moveIndex=142 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=26 srcLx=786432 dstCore=6 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[143] moveIndex=143 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=30 srcLx=917504 dstCore=6 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[144] moveIndex=144 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=2 srcLx=0 dstCore=10 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[145] moveIndex=145 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=6 srcLx=131072 dstCore=10 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[146] moveIndex=146 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=10 srcLx=262144 dstCore=10 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[147] moveIndex=147 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=14 srcLx=393216 dstCore=10 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[148] moveIndex=148 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=18 srcLx=524288 dstCore=10 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[149] moveIndex=149 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=22 srcLx=655360 dstCore=10 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[150] moveIndex=150 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=26 srcLx=786432 dstCore=10 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[151] moveIndex=151 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=30 srcLx=917504 dstCore=10 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[152] moveIndex=152 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=2 srcLx=0 dstCore=14 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[153] moveIndex=153 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=6 srcLx=131072 dstCore=14 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[154] moveIndex=154 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=10 srcLx=262144 dstCore=14 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[155] moveIndex=155 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=14 srcLx=393216 dstCore=14 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[156] moveIndex=156 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=18 srcLx=524288 dstCore=14 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[157] moveIndex=157 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=22 srcLx=655360 dstCore=14 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[158] moveIndex=158 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=26 srcLx=786432 dstCore=14 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[159] moveIndex=159 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=30 srcLx=917504 dstCore=14 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[160] moveIndex=160 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=2 srcLx=0 dstCore=18 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[161] moveIndex=161 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=6 srcLx=131072 dstCore=18 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[162] moveIndex=162 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=10 srcLx=262144 dstCore=18 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[163] moveIndex=163 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=14 srcLx=393216 dstCore=18 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[164] moveIndex=164 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=18 srcLx=524288 dstCore=18 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[165] moveIndex=165 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=22 srcLx=655360 dstCore=18 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[166] moveIndex=166 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=26 srcLx=786432 dstCore=18 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[167] moveIndex=167 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=30 srcLx=917504 dstCore=18 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[168] moveIndex=168 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=2 srcLx=0 dstCore=22 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[169] moveIndex=169 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=6 srcLx=131072 dstCore=22 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[170] moveIndex=170 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=10 srcLx=262144 dstCore=22 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[171] moveIndex=171 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=14 srcLx=393216 dstCore=22 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[172] moveIndex=172 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=18 srcLx=524288 dstCore=22 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[173] moveIndex=173 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=22 srcLx=655360 dstCore=22 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[174] moveIndex=174 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=26 srcLx=786432 dstCore=22 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[175] moveIndex=175 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=30 srcLx=917504 dstCore=22 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[176] moveIndex=176 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=2 srcLx=0 dstCore=26 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[177] moveIndex=177 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=6 srcLx=131072 dstCore=26 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[178] moveIndex=178 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=10 srcLx=262144 dstCore=26 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[179] moveIndex=179 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=14 srcLx=393216 dstCore=26 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[180] moveIndex=180 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=18 srcLx=524288 dstCore=26 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[181] moveIndex=181 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=22 srcLx=655360 dstCore=26 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[182] moveIndex=182 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=26 srcLx=786432 dstCore=26 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[183] moveIndex=183 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=30 srcLx=917504 dstCore=26 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[184] moveIndex=184 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=2 srcLx=0 dstCore=30 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[185] moveIndex=185 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=6 srcLx=131072 dstCore=30 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[186] moveIndex=186 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=10 srcLx=262144 dstCore=30 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[187] moveIndex=187 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=14 srcLx=393216 dstCore=30 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[188] moveIndex=188 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=18 srcLx=524288 dstCore=30 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[189] moveIndex=189 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=22 srcLx=655360 dstCore=30 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[190] moveIndex=190 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=26 srcLx=786432 dstCore=30 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[191] moveIndex=191 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=30 srcLx=917504 dstCore=30 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[192] moveIndex=192 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=3 srcLx=0 dstCore=3 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[193] moveIndex=193 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=7 srcLx=131072 dstCore=3 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[194] moveIndex=194 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=11 srcLx=262144 dstCore=3 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[195] moveIndex=195 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=15 srcLx=393216 dstCore=3 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[196] moveIndex=196 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=19 srcLx=524288 dstCore=3 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[197] moveIndex=197 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=23 srcLx=655360 dstCore=3 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[198] moveIndex=198 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=27 srcLx=786432 dstCore=3 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[199] moveIndex=199 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=31 srcLx=917504 dstCore=3 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[200] moveIndex=200 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=3 srcLx=0 dstCore=7 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[201] moveIndex=201 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=7 srcLx=131072 dstCore=7 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[202] moveIndex=202 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=11 srcLx=262144 dstCore=7 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[203] moveIndex=203 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=15 srcLx=393216 dstCore=7 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[204] moveIndex=204 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=19 srcLx=524288 dstCore=7 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[205] moveIndex=205 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=23 srcLx=655360 dstCore=7 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[206] moveIndex=206 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=27 srcLx=786432 dstCore=7 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[207] moveIndex=207 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=31 srcLx=917504 dstCore=7 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[208] moveIndex=208 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=3 srcLx=0 dstCore=11 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[209] moveIndex=209 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=7 srcLx=131072 dstCore=11 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[210] moveIndex=210 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=11 srcLx=262144 dstCore=11 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[211] moveIndex=211 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=15 srcLx=393216 dstCore=11 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[212] moveIndex=212 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=19 srcLx=524288 dstCore=11 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[213] moveIndex=213 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=23 srcLx=655360 dstCore=11 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[214] moveIndex=214 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=27 srcLx=786432 dstCore=11 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[215] moveIndex=215 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=31 srcLx=917504 dstCore=11 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[216] moveIndex=216 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=3 srcLx=0 dstCore=15 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[217] moveIndex=217 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=7 srcLx=131072 dstCore=15 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[218] moveIndex=218 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=11 srcLx=262144 dstCore=15 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[219] moveIndex=219 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=15 srcLx=393216 dstCore=15 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[220] moveIndex=220 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=19 srcLx=524288 dstCore=15 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[221] moveIndex=221 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=23 srcLx=655360 dstCore=15 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[222] moveIndex=222 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=27 srcLx=786432 dstCore=15 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[223] moveIndex=223 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=31 srcLx=917504 dstCore=15 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[224] moveIndex=224 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=3 srcLx=0 dstCore=19 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[225] moveIndex=225 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=7 srcLx=131072 dstCore=19 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[226] moveIndex=226 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=11 srcLx=262144 dstCore=19 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[227] moveIndex=227 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=15 srcLx=393216 dstCore=19 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[228] moveIndex=228 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=19 srcLx=524288 dstCore=19 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[229] moveIndex=229 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=23 srcLx=655360 dstCore=19 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[230] moveIndex=230 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=27 srcLx=786432 dstCore=19 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[231] moveIndex=231 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=31 srcLx=917504 dstCore=19 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[232] moveIndex=232 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=3 srcLx=0 dstCore=23 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[233] moveIndex=233 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=7 srcLx=131072 dstCore=23 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[234] moveIndex=234 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=11 srcLx=262144 dstCore=23 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[235] moveIndex=235 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=15 srcLx=393216 dstCore=23 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[236] moveIndex=236 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=19 srcLx=524288 dstCore=23 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[237] moveIndex=237 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=23 srcLx=655360 dstCore=23 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[238] moveIndex=238 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=27 srcLx=786432 dstCore=23 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[239] moveIndex=239 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=31 srcLx=917504 dstCore=23 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[240] moveIndex=240 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=3 srcLx=0 dstCore=27 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[241] moveIndex=241 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=7 srcLx=131072 dstCore=27 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[242] moveIndex=242 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=11 srcLx=262144 dstCore=27 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[243] moveIndex=243 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=15 srcLx=393216 dstCore=27 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[244] moveIndex=244 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=19 srcLx=524288 dstCore=27 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[245] moveIndex=245 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=23 srcLx=655360 dstCore=27 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[246] moveIndex=246 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=27 srcLx=786432 dstCore=27 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[247] moveIndex=247 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=31 srcLx=917504 dstCore=27 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+range[248] moveIndex=248 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=3 srcLx=0 dstCore=31 dstLx=1048576
+  logicalSizes in=1 mb=1 out=1
+range[249] moveIndex=249 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=7 srcLx=131072 dstCore=31 dstLx=1179648
+  logicalSizes in=1 mb=1 out=1
+range[250] moveIndex=250 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=11 srcLx=262144 dstCore=31 dstLx=1310720
+  logicalSizes in=1 mb=1 out=1
+range[251] moveIndex=251 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=15 srcLx=393216 dstCore=31 dstLx=1441792
+  logicalSizes in=1 mb=1 out=1
+range[252] moveIndex=252 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=19 srcLx=524288 dstCore=31 dstLx=1572864
+  logicalSizes in=1 mb=1 out=1
+range[253] moveIndex=253 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=23 srcLx=655360 dstCore=31 dstLx=1703936
+  logicalSizes in=1 mb=1 out=1
+range[254] moveIndex=254 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=27 srcLx=786432 dstCore=31 dstLx=1835008
+  logicalSizes in=1 mb=1 out=1
+range[255] moveIndex=255 bytesPerMove=131072 count=1 sourceStrideBytes=0 destinationStrideBytes=0 srcCore=31 srcLx=917504 dstCore=31 dstLx=1966080
+  logicalSizes in=1 mb=1 out=1
+dtTableCount: 256
+dt[0] pIDX=0 pMemID=0 minCMemID=0 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=0, cMemIDs=0,
+dt[1] pIDX=1 pMemID=4 minCMemID=0 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=1, cMemIDs=0,
+dt[2] pIDX=2 pMemID=8 minCMemID=0 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=2, cMemIDs=0,
+dt[3] pIDX=3 pMemID=12 minCMemID=0 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=3, cMemIDs=0,
+dt[4] pIDX=4 pMemID=16 minCMemID=0 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=4, cMemIDs=0,
+dt[5] pIDX=5 pMemID=20 minCMemID=0 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=5, cMemIDs=0,
+dt[6] pIDX=6 pMemID=24 minCMemID=0 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=6, cMemIDs=0,
+dt[7] pIDX=7 pMemID=28 minCMemID=0 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=7, cMemIDs=0,
+dt[8] pIDX=8 pMemID=0 minCMemID=4 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=8, cMemIDs=4,
+dt[9] pIDX=9 pMemID=4 minCMemID=4 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=9, cMemIDs=4,
+dt[10] pIDX=10 pMemID=8 minCMemID=4 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=10, cMemIDs=4,
+dt[11] pIDX=11 pMemID=12 minCMemID=4 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=11, cMemIDs=4,
+dt[12] pIDX=12 pMemID=16 minCMemID=4 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=12, cMemIDs=4,
+dt[13] pIDX=13 pMemID=20 minCMemID=4 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=13, cMemIDs=4,
+dt[14] pIDX=14 pMemID=24 minCMemID=4 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=14, cMemIDs=4,
+dt[15] pIDX=15 pMemID=28 minCMemID=4 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=15, cMemIDs=4,
+dt[16] pIDX=16 pMemID=0 minCMemID=8 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=16, cMemIDs=8,
+dt[17] pIDX=17 pMemID=4 minCMemID=8 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=17, cMemIDs=8,
+dt[18] pIDX=18 pMemID=8 minCMemID=8 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=18, cMemIDs=8,
+dt[19] pIDX=19 pMemID=12 minCMemID=8 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=19, cMemIDs=8,
+dt[20] pIDX=20 pMemID=16 minCMemID=8 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=20, cMemIDs=8,
+dt[21] pIDX=21 pMemID=20 minCMemID=8 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=21, cMemIDs=8,
+dt[22] pIDX=22 pMemID=24 minCMemID=8 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=22, cMemIDs=8,
+dt[23] pIDX=23 pMemID=28 minCMemID=8 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=23, cMemIDs=8,
+dt[24] pIDX=24 pMemID=0 minCMemID=12 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=24, cMemIDs=12,
+dt[25] pIDX=25 pMemID=4 minCMemID=12 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=25, cMemIDs=12,
+dt[26] pIDX=26 pMemID=8 minCMemID=12 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=26, cMemIDs=12,
+dt[27] pIDX=27 pMemID=12 minCMemID=12 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=27, cMemIDs=12,
+dt[28] pIDX=28 pMemID=16 minCMemID=12 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=28, cMemIDs=12,
+dt[29] pIDX=29 pMemID=20 minCMemID=12 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=29, cMemIDs=12,
+dt[30] pIDX=30 pMemID=24 minCMemID=12 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=30, cMemIDs=12,
+dt[31] pIDX=31 pMemID=28 minCMemID=12 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=31, cMemIDs=12,
+dt[32] pIDX=32 pMemID=0 minCMemID=16 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=32, cMemIDs=16,
+dt[33] pIDX=33 pMemID=4 minCMemID=16 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=33, cMemIDs=16,
+dt[34] pIDX=34 pMemID=8 minCMemID=16 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=34, cMemIDs=16,
+dt[35] pIDX=35 pMemID=12 minCMemID=16 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=35, cMemIDs=16,
+dt[36] pIDX=36 pMemID=16 minCMemID=16 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=36, cMemIDs=16,
+dt[37] pIDX=37 pMemID=20 minCMemID=16 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=37, cMemIDs=16,
+dt[38] pIDX=38 pMemID=24 minCMemID=16 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=38, cMemIDs=16,
+dt[39] pIDX=39 pMemID=28 minCMemID=16 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=39, cMemIDs=16,
+dt[40] pIDX=40 pMemID=0 minCMemID=20 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=40, cMemIDs=20,
+dt[41] pIDX=41 pMemID=4 minCMemID=20 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=41, cMemIDs=20,
+dt[42] pIDX=42 pMemID=8 minCMemID=20 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=42, cMemIDs=20,
+dt[43] pIDX=43 pMemID=12 minCMemID=20 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=43, cMemIDs=20,
+dt[44] pIDX=44 pMemID=16 minCMemID=20 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=44, cMemIDs=20,
+dt[45] pIDX=45 pMemID=20 minCMemID=20 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=45, cMemIDs=20,
+dt[46] pIDX=46 pMemID=24 minCMemID=20 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=46, cMemIDs=20,
+dt[47] pIDX=47 pMemID=28 minCMemID=20 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=47, cMemIDs=20,
+dt[48] pIDX=48 pMemID=0 minCMemID=24 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=48, cMemIDs=24,
+dt[49] pIDX=49 pMemID=4 minCMemID=24 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=49, cMemIDs=24,
+dt[50] pIDX=50 pMemID=8 minCMemID=24 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=50, cMemIDs=24,
+dt[51] pIDX=51 pMemID=12 minCMemID=24 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=51, cMemIDs=24,
+dt[52] pIDX=52 pMemID=16 minCMemID=24 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=52, cMemIDs=24,
+dt[53] pIDX=53 pMemID=20 minCMemID=24 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=53, cMemIDs=24,
+dt[54] pIDX=54 pMemID=24 minCMemID=24 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=54, cMemIDs=24,
+dt[55] pIDX=55 pMemID=28 minCMemID=24 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=55, cMemIDs=24,
+dt[56] pIDX=56 pMemID=0 minCMemID=28 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=56, cMemIDs=28,
+dt[57] pIDX=57 pMemID=4 minCMemID=28 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=57, cMemIDs=28,
+dt[58] pIDX=58 pMemID=8 minCMemID=28 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=58, cMemIDs=28,
+dt[59] pIDX=59 pMemID=12 minCMemID=28 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=59, cMemIDs=28,
+dt[60] pIDX=60 pMemID=16 minCMemID=28 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=60, cMemIDs=28,
+dt[61] pIDX=61 pMemID=20 minCMemID=28 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=61, cMemIDs=28,
+dt[62] pIDX=62 pMemID=24 minCMemID=28 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=62, cMemIDs=28,
+dt[63] pIDX=63 pMemID=28 minCMemID=28 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=63, cMemIDs=28,
+dt[64] pIDX=64 pMemID=1 minCMemID=1 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=64, cMemIDs=1,
+dt[65] pIDX=65 pMemID=5 minCMemID=1 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=65, cMemIDs=1,
+dt[66] pIDX=66 pMemID=9 minCMemID=1 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=66, cMemIDs=1,
+dt[67] pIDX=67 pMemID=13 minCMemID=1 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=67, cMemIDs=1,
+dt[68] pIDX=68 pMemID=17 minCMemID=1 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=68, cMemIDs=1,
+dt[69] pIDX=69 pMemID=21 minCMemID=1 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=69, cMemIDs=1,
+dt[70] pIDX=70 pMemID=25 minCMemID=1 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=70, cMemIDs=1,
+dt[71] pIDX=71 pMemID=29 minCMemID=1 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=71, cMemIDs=1,
+dt[72] pIDX=72 pMemID=1 minCMemID=5 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=72, cMemIDs=5,
+dt[73] pIDX=73 pMemID=5 minCMemID=5 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=73, cMemIDs=5,
+dt[74] pIDX=74 pMemID=9 minCMemID=5 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=74, cMemIDs=5,
+dt[75] pIDX=75 pMemID=13 minCMemID=5 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=75, cMemIDs=5,
+dt[76] pIDX=76 pMemID=17 minCMemID=5 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=76, cMemIDs=5,
+dt[77] pIDX=77 pMemID=21 minCMemID=5 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=77, cMemIDs=5,
+dt[78] pIDX=78 pMemID=25 minCMemID=5 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=78, cMemIDs=5,
+dt[79] pIDX=79 pMemID=29 minCMemID=5 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=79, cMemIDs=5,
+dt[80] pIDX=80 pMemID=1 minCMemID=9 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=80, cMemIDs=9,
+dt[81] pIDX=81 pMemID=5 minCMemID=9 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=81, cMemIDs=9,
+dt[82] pIDX=82 pMemID=9 minCMemID=9 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=82, cMemIDs=9,
+dt[83] pIDX=83 pMemID=13 minCMemID=9 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=83, cMemIDs=9,
+dt[84] pIDX=84 pMemID=17 minCMemID=9 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=84, cMemIDs=9,
+dt[85] pIDX=85 pMemID=21 minCMemID=9 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=85, cMemIDs=9,
+dt[86] pIDX=86 pMemID=25 minCMemID=9 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=86, cMemIDs=9,
+dt[87] pIDX=87 pMemID=29 minCMemID=9 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=87, cMemIDs=9,
+dt[88] pIDX=88 pMemID=1 minCMemID=13 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=88, cMemIDs=13,
+dt[89] pIDX=89 pMemID=5 minCMemID=13 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=89, cMemIDs=13,
+dt[90] pIDX=90 pMemID=9 minCMemID=13 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=90, cMemIDs=13,
+dt[91] pIDX=91 pMemID=13 minCMemID=13 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=91, cMemIDs=13,
+dt[92] pIDX=92 pMemID=17 minCMemID=13 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=92, cMemIDs=13,
+dt[93] pIDX=93 pMemID=21 minCMemID=13 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=93, cMemIDs=13,
+dt[94] pIDX=94 pMemID=25 minCMemID=13 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=94, cMemIDs=13,
+dt[95] pIDX=95 pMemID=29 minCMemID=13 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=95, cMemIDs=13,
+dt[96] pIDX=96 pMemID=1 minCMemID=17 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=96, cMemIDs=17,
+dt[97] pIDX=97 pMemID=5 minCMemID=17 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=97, cMemIDs=17,
+dt[98] pIDX=98 pMemID=9 minCMemID=17 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=98, cMemIDs=17,
+dt[99] pIDX=99 pMemID=13 minCMemID=17 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=99, cMemIDs=17,
+dt[100] pIDX=100 pMemID=17 minCMemID=17 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=100, cMemIDs=17,
+dt[101] pIDX=101 pMemID=21 minCMemID=17 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=101, cMemIDs=17,
+dt[102] pIDX=102 pMemID=25 minCMemID=17 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=102, cMemIDs=17,
+dt[103] pIDX=103 pMemID=29 minCMemID=17 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=103, cMemIDs=17,
+dt[104] pIDX=104 pMemID=1 minCMemID=21 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=104, cMemIDs=21,
+dt[105] pIDX=105 pMemID=5 minCMemID=21 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=105, cMemIDs=21,
+dt[106] pIDX=106 pMemID=9 minCMemID=21 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=106, cMemIDs=21,
+dt[107] pIDX=107 pMemID=13 minCMemID=21 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=107, cMemIDs=21,
+dt[108] pIDX=108 pMemID=17 minCMemID=21 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=108, cMemIDs=21,
+dt[109] pIDX=109 pMemID=21 minCMemID=21 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=109, cMemIDs=21,
+dt[110] pIDX=110 pMemID=25 minCMemID=21 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=110, cMemIDs=21,
+dt[111] pIDX=111 pMemID=29 minCMemID=21 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=111, cMemIDs=21,
+dt[112] pIDX=112 pMemID=1 minCMemID=25 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=112, cMemIDs=25,
+dt[113] pIDX=113 pMemID=5 minCMemID=25 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=113, cMemIDs=25,
+dt[114] pIDX=114 pMemID=9 minCMemID=25 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=114, cMemIDs=25,
+dt[115] pIDX=115 pMemID=13 minCMemID=25 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=115, cMemIDs=25,
+dt[116] pIDX=116 pMemID=17 minCMemID=25 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=116, cMemIDs=25,
+dt[117] pIDX=117 pMemID=21 minCMemID=25 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=117, cMemIDs=25,
+dt[118] pIDX=118 pMemID=25 minCMemID=25 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=118, cMemIDs=25,
+dt[119] pIDX=119 pMemID=29 minCMemID=25 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=119, cMemIDs=25,
+dt[120] pIDX=120 pMemID=1 minCMemID=29 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=120, cMemIDs=29,
+dt[121] pIDX=121 pMemID=5 minCMemID=29 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=121, cMemIDs=29,
+dt[122] pIDX=122 pMemID=9 minCMemID=29 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=122, cMemIDs=29,
+dt[123] pIDX=123 pMemID=13 minCMemID=29 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=123, cMemIDs=29,
+dt[124] pIDX=124 pMemID=17 minCMemID=29 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=124, cMemIDs=29,
+dt[125] pIDX=125 pMemID=21 minCMemID=29 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=125, cMemIDs=29,
+dt[126] pIDX=126 pMemID=25 minCMemID=29 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=126, cMemIDs=29,
+dt[127] pIDX=127 pMemID=29 minCMemID=29 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=127, cMemIDs=29,
+dt[128] pIDX=128 pMemID=2 minCMemID=2 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=128, cMemIDs=2,
+dt[129] pIDX=129 pMemID=6 minCMemID=2 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=129, cMemIDs=2,
+dt[130] pIDX=130 pMemID=10 minCMemID=2 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=130, cMemIDs=2,
+dt[131] pIDX=131 pMemID=14 minCMemID=2 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=131, cMemIDs=2,
+dt[132] pIDX=132 pMemID=18 minCMemID=2 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=132, cMemIDs=2,
+dt[133] pIDX=133 pMemID=22 minCMemID=2 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=133, cMemIDs=2,
+dt[134] pIDX=134 pMemID=26 minCMemID=2 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=134, cMemIDs=2,
+dt[135] pIDX=135 pMemID=30 minCMemID=2 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=135, cMemIDs=2,
+dt[136] pIDX=136 pMemID=2 minCMemID=6 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=136, cMemIDs=6,
+dt[137] pIDX=137 pMemID=6 minCMemID=6 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=137, cMemIDs=6,
+dt[138] pIDX=138 pMemID=10 minCMemID=6 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=138, cMemIDs=6,
+dt[139] pIDX=139 pMemID=14 minCMemID=6 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=139, cMemIDs=6,
+dt[140] pIDX=140 pMemID=18 minCMemID=6 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=140, cMemIDs=6,
+dt[141] pIDX=141 pMemID=22 minCMemID=6 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=141, cMemIDs=6,
+dt[142] pIDX=142 pMemID=26 minCMemID=6 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=142, cMemIDs=6,
+dt[143] pIDX=143 pMemID=30 minCMemID=6 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=143, cMemIDs=6,
+dt[144] pIDX=144 pMemID=2 minCMemID=10 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=144, cMemIDs=10,
+dt[145] pIDX=145 pMemID=6 minCMemID=10 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=145, cMemIDs=10,
+dt[146] pIDX=146 pMemID=10 minCMemID=10 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=146, cMemIDs=10,
+dt[147] pIDX=147 pMemID=14 minCMemID=10 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=147, cMemIDs=10,
+dt[148] pIDX=148 pMemID=18 minCMemID=10 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=148, cMemIDs=10,
+dt[149] pIDX=149 pMemID=22 minCMemID=10 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=149, cMemIDs=10,
+dt[150] pIDX=150 pMemID=26 minCMemID=10 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=150, cMemIDs=10,
+dt[151] pIDX=151 pMemID=30 minCMemID=10 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=151, cMemIDs=10,
+dt[152] pIDX=152 pMemID=2 minCMemID=14 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=152, cMemIDs=14,
+dt[153] pIDX=153 pMemID=6 minCMemID=14 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=153, cMemIDs=14,
+dt[154] pIDX=154 pMemID=10 minCMemID=14 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=154, cMemIDs=14,
+dt[155] pIDX=155 pMemID=14 minCMemID=14 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=155, cMemIDs=14,
+dt[156] pIDX=156 pMemID=18 minCMemID=14 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=156, cMemIDs=14,
+dt[157] pIDX=157 pMemID=22 minCMemID=14 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=157, cMemIDs=14,
+dt[158] pIDX=158 pMemID=26 minCMemID=14 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=158, cMemIDs=14,
+dt[159] pIDX=159 pMemID=30 minCMemID=14 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=159, cMemIDs=14,
+dt[160] pIDX=160 pMemID=2 minCMemID=18 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=160, cMemIDs=18,
+dt[161] pIDX=161 pMemID=6 minCMemID=18 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=161, cMemIDs=18,
+dt[162] pIDX=162 pMemID=10 minCMemID=18 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=162, cMemIDs=18,
+dt[163] pIDX=163 pMemID=14 minCMemID=18 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=163, cMemIDs=18,
+dt[164] pIDX=164 pMemID=18 minCMemID=18 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=164, cMemIDs=18,
+dt[165] pIDX=165 pMemID=22 minCMemID=18 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=165, cMemIDs=18,
+dt[166] pIDX=166 pMemID=26 minCMemID=18 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=166, cMemIDs=18,
+dt[167] pIDX=167 pMemID=30 minCMemID=18 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=167, cMemIDs=18,
+dt[168] pIDX=168 pMemID=2 minCMemID=22 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=168, cMemIDs=22,
+dt[169] pIDX=169 pMemID=6 minCMemID=22 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=169, cMemIDs=22,
+dt[170] pIDX=170 pMemID=10 minCMemID=22 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=170, cMemIDs=22,
+dt[171] pIDX=171 pMemID=14 minCMemID=22 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=171, cMemIDs=22,
+dt[172] pIDX=172 pMemID=18 minCMemID=22 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=172, cMemIDs=22,
+dt[173] pIDX=173 pMemID=22 minCMemID=22 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=173, cMemIDs=22,
+dt[174] pIDX=174 pMemID=26 minCMemID=22 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=174, cMemIDs=22,
+dt[175] pIDX=175 pMemID=30 minCMemID=22 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=175, cMemIDs=22,
+dt[176] pIDX=176 pMemID=2 minCMemID=26 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=176, cMemIDs=26,
+dt[177] pIDX=177 pMemID=6 minCMemID=26 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=177, cMemIDs=26,
+dt[178] pIDX=178 pMemID=10 minCMemID=26 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=178, cMemIDs=26,
+dt[179] pIDX=179 pMemID=14 minCMemID=26 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=179, cMemIDs=26,
+dt[180] pIDX=180 pMemID=18 minCMemID=26 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=180, cMemIDs=26,
+dt[181] pIDX=181 pMemID=22 minCMemID=26 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=181, cMemIDs=26,
+dt[182] pIDX=182 pMemID=26 minCMemID=26 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=182, cMemIDs=26,
+dt[183] pIDX=183 pMemID=30 minCMemID=26 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=183, cMemIDs=26,
+dt[184] pIDX=184 pMemID=2 minCMemID=30 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=184, cMemIDs=30,
+dt[185] pIDX=185 pMemID=6 minCMemID=30 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=185, cMemIDs=30,
+dt[186] pIDX=186 pMemID=10 minCMemID=30 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=186, cMemIDs=30,
+dt[187] pIDX=187 pMemID=14 minCMemID=30 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=187, cMemIDs=30,
+dt[188] pIDX=188 pMemID=18 minCMemID=30 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=188, cMemIDs=30,
+dt[189] pIDX=189 pMemID=22 minCMemID=30 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=189, cMemIDs=30,
+dt[190] pIDX=190 pMemID=26 minCMemID=30 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=190, cMemIDs=30,
+dt[191] pIDX=191 pMemID=30 minCMemID=30 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=191, cMemIDs=30,
+dt[192] pIDX=192 pMemID=3 minCMemID=3 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=192, cMemIDs=3,
+dt[193] pIDX=193 pMemID=7 minCMemID=3 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=193, cMemIDs=3,
+dt[194] pIDX=194 pMemID=11 minCMemID=3 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=194, cMemIDs=3,
+dt[195] pIDX=195 pMemID=15 minCMemID=3 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=195, cMemIDs=3,
+dt[196] pIDX=196 pMemID=19 minCMemID=3 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=196, cMemIDs=3,
+dt[197] pIDX=197 pMemID=23 minCMemID=3 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=197, cMemIDs=3,
+dt[198] pIDX=198 pMemID=27 minCMemID=3 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=198, cMemIDs=3,
+dt[199] pIDX=199 pMemID=31 minCMemID=3 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=199, cMemIDs=3,
+dt[200] pIDX=200 pMemID=3 minCMemID=7 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=200, cMemIDs=7,
+dt[201] pIDX=201 pMemID=7 minCMemID=7 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=201, cMemIDs=7,
+dt[202] pIDX=202 pMemID=11 minCMemID=7 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=202, cMemIDs=7,
+dt[203] pIDX=203 pMemID=15 minCMemID=7 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=203, cMemIDs=7,
+dt[204] pIDX=204 pMemID=19 minCMemID=7 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=204, cMemIDs=7,
+dt[205] pIDX=205 pMemID=23 minCMemID=7 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=205, cMemIDs=7,
+dt[206] pIDX=206 pMemID=27 minCMemID=7 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=206, cMemIDs=7,
+dt[207] pIDX=207 pMemID=31 minCMemID=7 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=207, cMemIDs=7,
+dt[208] pIDX=208 pMemID=3 minCMemID=11 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=208, cMemIDs=11,
+dt[209] pIDX=209 pMemID=7 minCMemID=11 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=209, cMemIDs=11,
+dt[210] pIDX=210 pMemID=11 minCMemID=11 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=210, cMemIDs=11,
+dt[211] pIDX=211 pMemID=15 minCMemID=11 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=211, cMemIDs=11,
+dt[212] pIDX=212 pMemID=19 minCMemID=11 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=212, cMemIDs=11,
+dt[213] pIDX=213 pMemID=23 minCMemID=11 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=213, cMemIDs=11,
+dt[214] pIDX=214 pMemID=27 minCMemID=11 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=214, cMemIDs=11,
+dt[215] pIDX=215 pMemID=31 minCMemID=11 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=215, cMemIDs=11,
+dt[216] pIDX=216 pMemID=3 minCMemID=15 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=216, cMemIDs=15,
+dt[217] pIDX=217 pMemID=7 minCMemID=15 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=217, cMemIDs=15,
+dt[218] pIDX=218 pMemID=11 minCMemID=15 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=218, cMemIDs=15,
+dt[219] pIDX=219 pMemID=15 minCMemID=15 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=219, cMemIDs=15,
+dt[220] pIDX=220 pMemID=19 minCMemID=15 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=220, cMemIDs=15,
+dt[221] pIDX=221 pMemID=23 minCMemID=15 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=221, cMemIDs=15,
+dt[222] pIDX=222 pMemID=27 minCMemID=15 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=222, cMemIDs=15,
+dt[223] pIDX=223 pMemID=31 minCMemID=15 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=223, cMemIDs=15,
+dt[224] pIDX=224 pMemID=3 minCMemID=19 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=224, cMemIDs=19,
+dt[225] pIDX=225 pMemID=7 minCMemID=19 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=225, cMemIDs=19,
+dt[226] pIDX=226 pMemID=11 minCMemID=19 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=226, cMemIDs=19,
+dt[227] pIDX=227 pMemID=15 minCMemID=19 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=227, cMemIDs=19,
+dt[228] pIDX=228 pMemID=19 minCMemID=19 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=228, cMemIDs=19,
+dt[229] pIDX=229 pMemID=23 minCMemID=19 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=229, cMemIDs=19,
+dt[230] pIDX=230 pMemID=27 minCMemID=19 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=230, cMemIDs=19,
+dt[231] pIDX=231 pMemID=31 minCMemID=19 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=231, cMemIDs=19,
+dt[232] pIDX=232 pMemID=3 minCMemID=23 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=232, cMemIDs=23,
+dt[233] pIDX=233 pMemID=7 minCMemID=23 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=233, cMemIDs=23,
+dt[234] pIDX=234 pMemID=11 minCMemID=23 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=234, cMemIDs=23,
+dt[235] pIDX=235 pMemID=15 minCMemID=23 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=235, cMemIDs=23,
+dt[236] pIDX=236 pMemID=19 minCMemID=23 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=236, cMemIDs=23,
+dt[237] pIDX=237 pMemID=23 minCMemID=23 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=237, cMemIDs=23,
+dt[238] pIDX=238 pMemID=27 minCMemID=23 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=238, cMemIDs=23,
+dt[239] pIDX=239 pMemID=31 minCMemID=23 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=239, cMemIDs=23,
+dt[240] pIDX=240 pMemID=3 minCMemID=27 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=240, cMemIDs=27,
+dt[241] pIDX=241 pMemID=7 minCMemID=27 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=241, cMemIDs=27,
+dt[242] pIDX=242 pMemID=11 minCMemID=27 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=242, cMemIDs=27,
+dt[243] pIDX=243 pMemID=15 minCMemID=27 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=243, cMemIDs=27,
+dt[244] pIDX=244 pMemID=19 minCMemID=27 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=244, cMemIDs=27,
+dt[245] pIDX=245 pMemID=23 minCMemID=27 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=245, cMemIDs=27,
+dt[246] pIDX=246 pMemID=27 minCMemID=27 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=246, cMemIDs=27,
+dt[247] pIDX=247 pMemID=31 minCMemID=27 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=247, cMemIDs=27,
+dt[248] pIDX=248 pMemID=3 minCMemID=31 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=248, cMemIDs=31,
+dt[249] pIDX=249 pMemID=7 minCMemID=31 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=249, cMemIDs=31,
+dt[250] pIDX=250 pMemID=11 minCMemID=31 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=250, cMemIDs=31,
+dt[251] pIDX=251 pMemID=15 minCMemID=31 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=251, cMemIDs=31,
+dt[252] pIDX=252 pMemID=19 minCMemID=31 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=252, cMemIDs=31,
+dt[253] pIDX=253 pMemID=23 minCMemID=31 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=253, cMemIDs=31,
+dt[254] pIDX=254 pMemID=27 minCMemID=31 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=254, cMemIDs=31,
+dt[255] pIDX=255 pMemID=31 minCMemID=31 trVolume=131072 numTransactions=1 useBurst=0 cIDXs=255, cMemIDs=31,
+coreIDtoDtKey_L3SU
+  core 0: 56 8 48 16 40 24 32
+  core 1: 120 112 72 104 80 96 88
+  core 2: 184 136 176 144 168 152 160
+  core 3: 248 240 200 232 208 224 216
+  core 4: 1 57 49 17 41 25 33
+  core 5: 121 65 113 105 81 97 89
+  core 6: 129 185 177 145 169 153 161
+  core 7: 249 193 241 233 209 225 217
+  core 8: 2 58 10 50 42 26 34
+  core 9: 122 66 114 74 106 98 90
+  core 10: 130 186 138 178 170 154 162
+  core 11: 250 194 242 202 234 226 218
+  core 12: 3 59 11 51 19 43 35
+  core 13: 123 67 115 75 107 83 99
+  core 14: 131 187 139 179 147 171 163
+  core 15: 251 195 243 203 235 211 227
+  core 16: 4 60 12 52 20 44 28
+  core 17: 124 68 116 76 108 84 92
+  core 18: 132 188 140 180 148 172 156
+  core 19: 252 196 244 204 236 212 220
+  core 20: 5 61 13 53 21 29 37
+  core 21: 125 69 117 77 85 101 93
+  core 22: 133 189 141 181 149 157 165
+  core 23: 253 197 245 205 213 229 221
+  core 24: 6 62 14 22 46 30 38
+  core 25: 126 70 78 110 86 102 94
+  core 26: 134 190 142 150 174 158 166
+  core 27: 254 198 206 238 214 230 222
+  core 28: 7 15 55 23 47 31 39
+  core 29: 71 119 79 111 87 103 95
+  core 30: 135 143 183 151 175 159 167
+  core 31: 199 247 207 239 215 231 223
+coreIDtoDtKey_L3LU
+  core 0: 7 1 6 2 5 3 4
+  core 1: 71 70 65 69 66 68 67
+  core 2: 135 129 134 130 133 131 132
+  core 3: 199 198 193 197 194 196 195
+  core 4: 8 15 14 10 13 11 12
+  core 5: 79 72 78 77 74 76 75
+  core 6: 136 143 142 138 141 139 140
+  core 7: 207 200 206 205 202 204 203
+  core 8: 16 23 17 22 21 19 20
+  core 9: 87 80 86 81 85 84 83
+  core 10: 144 151 145 150 149 147 148
+  core 11: 215 208 214 209 213 212 211
+  core 12: 24 31 25 30 26 29 28
+  core 13: 95 88 94 89 93 90 92
+  core 14: 152 159 153 158 154 157 156
+  core 15: 223 216 222 217 221 218 220
+  core 16: 32 39 33 38 34 37 35
+  core 17: 103 96 102 97 101 98 99
+  core 18: 160 167 161 166 162 165 163
+  core 19: 231 224 230 225 229 226 227
+  core 20: 40 47 41 46 42 43 44
+  core 21: 111 104 110 105 106 108 107
+  core 22: 168 175 169 174 170 171 172
+  core 23: 239 232 238 233 234 236 235
+  core 24: 48 55 49 50 53 51 52
+  core 25: 119 112 113 117 114 116 115
+  core 26: 176 183 177 178 181 179 180
+  core 27: 247 240 241 245 242 244 243
+  core 28: 56 57 62 58 61 59 60
+  core 29: 120 126 121 125 122 124 123
+  core 30: 184 185 190 186 189 187 188
+  core 31: 248 254 249 253 250 252 251
+coreIDtoDtKey_LX
+  core 0: 0
+  core 1: 64
+  core 2: 128
+  core 3: 192
+  core 4: 9
+  core 5: 73
+  core 6: 137
+  core 7: 201
+  core 8: 18
+  core 9: 82
+  core 10: 146
+  core 11: 210
+  core 12: 27
+  core 13: 91
+  core 14: 155
+  core 15: 219
+  core 16: 36
+  core 17: 100
+  core 18: 164
+  core 19: 228
+  core 20: 45
+  core 21: 109
+  core 22: 173
+  core 23: 237
+  core 24: 54
+  core 25: 118
+  core 26: 182
+  core 27: 246
+  core 28: 63
+  core 29: 127
+  core 30: 191
+  core 31: 255
+---
