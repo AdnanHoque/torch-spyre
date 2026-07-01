@@ -1,0 +1,290 @@
+{
+  "communicationClass": "layout_allgather_restickify",
+  "consumerOperandLifetime": {
+    "consumerOp": "batchmatmul",
+    "materialization": "no_hbm",
+    "mutationAllowed": false,
+    "operand": "batchmatmul.KERNEL",
+    "ownership": "destination consumer cores own the replicated KERNEL view for this operand only",
+    "residency": "lx",
+    "validFrom": "after layout_allgather_restickify completes for the consumer group",
+    "validUntil": "batchmatmul KERNEL operand read completes"
+  },
+  "dimensionRename": {
+    "mb": "x",
+    "out": "in",
+    "x": "out"
+  },
+  "edge": "sdsc_1.json:mul -> sdsc_2.json:ReStickifyOpHBM -> sdsc_3.json:batchmatmul KERNEL",
+  "failures": [],
+  "logicalAllGatherPlan": {
+    "consumerCoresPerGroup": 8,
+    "groups": 4,
+    "logicalTransferCount": 256,
+    "modeledByteCount": 33554432,
+    "planExcerpt": [
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 0,
+        "destinationCore": 0,
+        "group": 0,
+        "producerOrdinal": 0,
+        "sourceCore": 0
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 1,
+        "destinationCore": 4,
+        "group": 0,
+        "producerOrdinal": 0,
+        "sourceCore": 0
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 2,
+        "destinationCore": 8,
+        "group": 0,
+        "producerOrdinal": 0,
+        "sourceCore": 0
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 3,
+        "destinationCore": 12,
+        "group": 0,
+        "producerOrdinal": 0,
+        "sourceCore": 0
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 4,
+        "destinationCore": 16,
+        "group": 0,
+        "producerOrdinal": 0,
+        "sourceCore": 0
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 5,
+        "destinationCore": 20,
+        "group": 0,
+        "producerOrdinal": 0,
+        "sourceCore": 0
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 6,
+        "destinationCore": 24,
+        "group": 0,
+        "producerOrdinal": 0,
+        "sourceCore": 0
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 7,
+        "destinationCore": 28,
+        "group": 0,
+        "producerOrdinal": 0,
+        "sourceCore": 0
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 0,
+        "destinationCore": 0,
+        "group": 0,
+        "producerOrdinal": 1,
+        "sourceCore": 4
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 1,
+        "destinationCore": 4,
+        "group": 0,
+        "producerOrdinal": 1,
+        "sourceCore": 4
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 2,
+        "destinationCore": 8,
+        "group": 0,
+        "producerOrdinal": 1,
+        "sourceCore": 4
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 3,
+        "destinationCore": 12,
+        "group": 0,
+        "producerOrdinal": 1,
+        "sourceCore": 4
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 4,
+        "destinationCore": 16,
+        "group": 0,
+        "producerOrdinal": 1,
+        "sourceCore": 4
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 5,
+        "destinationCore": 20,
+        "group": 0,
+        "producerOrdinal": 1,
+        "sourceCore": 4
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 6,
+        "destinationCore": 24,
+        "group": 0,
+        "producerOrdinal": 1,
+        "sourceCore": 4
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 7,
+        "destinationCore": 28,
+        "group": 0,
+        "producerOrdinal": 1,
+        "sourceCore": 4
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 0,
+        "destinationCore": 0,
+        "group": 0,
+        "producerOrdinal": 2,
+        "sourceCore": 8
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 1,
+        "destinationCore": 4,
+        "group": 0,
+        "producerOrdinal": 2,
+        "sourceCore": 8
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 2,
+        "destinationCore": 8,
+        "group": 0,
+        "producerOrdinal": 2,
+        "sourceCore": 8
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 3,
+        "destinationCore": 12,
+        "group": 0,
+        "producerOrdinal": 2,
+        "sourceCore": 8
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 4,
+        "destinationCore": 16,
+        "group": 0,
+        "producerOrdinal": 2,
+        "sourceCore": 8
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 5,
+        "destinationCore": 20,
+        "group": 0,
+        "producerOrdinal": 2,
+        "sourceCore": 8
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 6,
+        "destinationCore": 24,
+        "group": 0,
+        "producerOrdinal": 2,
+        "sourceCore": 8
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 7,
+        "destinationCore": 28,
+        "group": 0,
+        "producerOrdinal": 2,
+        "sourceCore": 8
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 0,
+        "destinationCore": 0,
+        "group": 0,
+        "producerOrdinal": 3,
+        "sourceCore": 12
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 1,
+        "destinationCore": 4,
+        "group": 0,
+        "producerOrdinal": 3,
+        "sourceCore": 12
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 2,
+        "destinationCore": 8,
+        "group": 0,
+        "producerOrdinal": 3,
+        "sourceCore": 12
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 3,
+        "destinationCore": 12,
+        "group": 0,
+        "producerOrdinal": 3,
+        "sourceCore": 12
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 4,
+        "destinationCore": 16,
+        "group": 0,
+        "producerOrdinal": 3,
+        "sourceCore": 12
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 5,
+        "destinationCore": 20,
+        "group": 0,
+        "producerOrdinal": 3,
+        "sourceCore": 12
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 6,
+        "destinationCore": 24,
+        "group": 0,
+        "producerOrdinal": 3,
+        "sourceCore": 12
+      },
+      {
+        "chunkBytes": 131072,
+        "consumerOrdinal": 7,
+        "destinationCore": 28,
+        "group": 0,
+        "producerOrdinal": 3,
+        "sourceCore": 12
+      }
+    ],
+    "producerCoresPerGroup": 8
+  },
+  "result": "pass",
+  "schema": "layout-aware-grouped-lx-remap-v2",
+  "schemaPath": "../runs/flash_explicit_layout_restickify_20260701_062020/metadata/latest_flash_proposed_explicit_schema.json",
+  "schemaVersion": 2,
+  "semanticKind": "layout_allgather_restickify_contract"
+}

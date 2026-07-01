@@ -1,0 +1,55 @@
+result: pass
+dataOpDsc: sdsc_10_Tensor1_explicit_range
+rangeCount: 128
+expandedMoveCount: 2097152
+modeledDestinationByteCount: 67108864
+destinationSha256: 5fe9ce7f75a692627342aa2a9e2740c6304ccea2a54e19cac994fc5b17dbc5d8
+dtTableRowsChecked: 128
+coverage core 0: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 1: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 2: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 3: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 4: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 5: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 6: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 7: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 8: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 9: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 10: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 11: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 12: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 13: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 14: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 15: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 16: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 17: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 18: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 19: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 20: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 21: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 22: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 23: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 24: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 25: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 26: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 27: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 28: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 29: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 30: [36864, 2134016) bytes=2097152 contiguous=True
+coverage core 31: [36864, 2134016) bytes=2097152 contiguous=True
+sample range 0: src c3@0x1000 -> dst c0@0x9000 value=0x5d
+sample range 0: src c3@0x1001 -> dst c0@0x9001 value=0x5e
+sample range 0: src c3@0x1002 -> dst c0@0x9002 value=0x5f
+sample range 0: src c3@0x1003 -> dst c0@0x9003 value=0x60
+sample range 0: src c3@0x1004 -> dst c0@0x9004 value=0x61
+sample range 0: src c3@0x1005 -> dst c0@0x9005 value=0x62
+sample range 0: src c3@0x1006 -> dst c0@0x9006 value=0x63
+sample range 0: src c3@0x1007 -> dst c0@0x9007 value=0x64
+sample range 1: src c4@0x1020 -> dst c0@0x9020 value=0xad
+sample range 1: src c4@0x1021 -> dst c0@0x9021 value=0xae
+sample range 1: src c4@0x1022 -> dst c0@0x9022 value=0xaf
+sample range 1: src c4@0x1023 -> dst c0@0x9023 value=0xb0
+sample range 1: src c4@0x1024 -> dst c0@0x9024 value=0xb1
+sample range 1: src c4@0x1025 -> dst c0@0x9025 value=0xb2
+sample range 1: src c4@0x1026 -> dst c0@0x9026 value=0xb3
+sample range 1: src c4@0x1027 -> dst c0@0x9027 value=0xb4

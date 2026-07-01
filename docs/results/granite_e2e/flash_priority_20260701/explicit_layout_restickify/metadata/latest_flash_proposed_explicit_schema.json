@@ -6,14 +6,27 @@
     "feed PT batchmatmul KERNEL operand from LX without HBM materialization"
   ],
   "classification": "layout-aware on-chip restickify plus grouped all-gather/broadcast into batchmatmul KERNEL; not scatter-only and not capacity/streaming",
+  "communicationClass": "layout_allgather_restickify",
+  "consumerOperandLifetime": {
+    "consumerOp": "batchmatmul",
+    "materialization": "no_hbm",
+    "mutationAllowed": false,
+    "operand": "batchmatmul.KERNEL",
+    "ownership": "destination consumer cores own the replicated KERNEL view for this operand only",
+    "residency": "lx",
+    "validFrom": "after layout_allgather_restickify completes for the consumer group",
+    "validUntil": "batchmatmul KERNEL operand read completes"
+  },
   "destinationView": {
     "component": "lx",
+    "consumerOp": "batchmatmul",
     "coreMap": "x=core_id%4, mb=floor(core_id/4)%8, out=0, in=0",
     "layoutDimOrder": [
       "out",
       "in",
       "x"
     ],
+    "logicalName": "batchmatmul.KERNEL",
     "operand": "batchmatmul.KERNEL",
     "perCoreTile": {
       "in": 128,
@@ -44,16 +57,31 @@
   },
   "edge": "sdsc_1.json:mul -> sdsc_2.json:ReStickifyOpHBM -> sdsc_3.json:batchmatmul KERNEL",
   "grouping": {
+    "chunkDestinationDim": "batchmatmul.out",
+    "chunkSourceDim": "restickify.x",
+    "communicationClass": "layout_allgather_restickify",
     "consumerCoresPerGroup": 8,
     "estimatedChunkBytes": 131072,
     "estimatedLogicalTransfers": 256,
+    "groupBy": {
+      "destinationDim": "batchmatmul.x",
+      "groups": 4,
+      "sourceDim": "restickify.mb"
+    },
     "groups": 4,
     "logicalTransfers": "for each bmm.x/restickify.mb group, replicate eight producer bmm.out chunks to all eight consumer mb-slice cores",
-    "producerCoresPerGroup": 8
+    "producerCoresPerGroup": 8,
+    "replicatedAcrossDestinationDim": "batchmatmul.mb",
+    "replicationKind": "grouped_all_gather"
+  },
+  "loweringStatus": {
+    "backendLoweringImplemented": false,
+    "blocker": "needs layout-aware grouped all-gather/remap primitive plus BMM KERNEL LX operand lifetime lowering",
+    "currentCarrier": "grouped-strided-byte-range-v1 STCDPOpLx shell"
   },
   "notReplayableReason": "current grouped-sdsc10 carrier only represents strided substicks inside a synthetic STCDPOpLx shell and lacks producer/consumer layout views, dimension rename, and many-to-many replication semantics",
   "replayableWithCurrentCarrier": false,
-  "schema": "layout-aware-grouped-lx-remap-proposal",
+  "schema": "layout-aware-grouped-lx-remap-v2",
   "schemaVersion": 2,
   "source": "latest test_flash.py representative edge; not replayable by current backend",
   "sourceView": {
@@ -65,11 +93,13 @@
       "x",
       "mb"
     ],
+    "logicalName": "mul.OUTPUT",
     "perCoreTile": {
       "mb": 1,
       "out": 128,
       "x": 512
     },
+    "producerOp": "mul",
     "shapeDims": {
       "mb": 4,
       "out": 128,

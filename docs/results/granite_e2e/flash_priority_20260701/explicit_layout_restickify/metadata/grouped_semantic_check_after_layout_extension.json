@@ -1,0 +1,827 @@
+{
+  "dataOpDsc": "sdsc_10_Tensor1_explicit_range",
+  "destinationCoverageByCore": {
+    "0": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "1": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "10": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "11": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "12": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "13": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "14": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "15": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "16": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "17": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "18": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "19": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "2": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "20": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "21": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "22": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "23": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "24": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "25": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "26": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "27": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "28": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "29": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "3": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "30": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "31": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "4": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "5": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "6": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "7": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "8": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    },
+    "9": {
+      "byteCount": 2097152,
+      "contiguous": true,
+      "maxExclusive": 2134016,
+      "minAddress": 36864
+    }
+  },
+  "destinationSha256": "5fe9ce7f75a692627342aa2a9e2740c6304ccea2a54e19cac994fc5b17dbc5d8",
+  "destinationSha256SkippedReason": null,
+  "dtTableRowsChecked": 128,
+  "expandedMoveCount": 2097152,
+  "failures": [],
+  "groupedRangeSchema": {
+    "bytesPerItem": 32,
+    "destinationCores": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31
+    ],
+    "itemsPerGroup": 16384,
+    "lanesPerStick": 4,
+    "schema": "grouped-strided-byte-range-v1",
+    "sourceCorePattern": "source cores are fixed by sub-stick lane and reused for each destination core",
+    "stickBytes": 128
+  },
+  "modeledDestinationByteCount": 67108864,
+  "rangeCount": 128,
+  "result": "pass",
+  "sdsc": "../runs/flash_explicit_layout_restickify_20260701_062020/focused_bundle_input/sdsc_10.json",
+  "sourcePattern": "(sourceCore * 31 + rangeIndex * 17 + sourceAddress + byteOffset) & 0xff",
+  "sourceToDestinationSamples": [
+    {
+      "byteValue": 93,
+      "destinationAddress": 36864,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 0,
+      "sourceAddress": 4096,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 94,
+      "destinationAddress": 36865,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 0,
+      "sourceAddress": 4097,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 95,
+      "destinationAddress": 36866,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 0,
+      "sourceAddress": 4098,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 96,
+      "destinationAddress": 36867,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 0,
+      "sourceAddress": 4099,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 97,
+      "destinationAddress": 36868,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 0,
+      "sourceAddress": 4100,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 98,
+      "destinationAddress": 36869,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 0,
+      "sourceAddress": 4101,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 99,
+      "destinationAddress": 36870,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 0,
+      "sourceAddress": 4102,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 100,
+      "destinationAddress": 36871,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 0,
+      "sourceAddress": 4103,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 173,
+      "destinationAddress": 36896,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 0,
+      "sourceAddress": 4128,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 174,
+      "destinationAddress": 36897,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 0,
+      "sourceAddress": 4129,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 175,
+      "destinationAddress": 36898,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 0,
+      "sourceAddress": 4130,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 176,
+      "destinationAddress": 36899,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 0,
+      "sourceAddress": 4131,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 177,
+      "destinationAddress": 36900,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 0,
+      "sourceAddress": 4132,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 178,
+      "destinationAddress": 36901,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 0,
+      "sourceAddress": 4133,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 179,
+      "destinationAddress": 36902,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 0,
+      "sourceAddress": 4134,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 180,
+      "destinationAddress": 36903,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 0,
+      "sourceAddress": 4135,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 253,
+      "destinationAddress": 36928,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 0,
+      "sourceAddress": 4160,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 254,
+      "destinationAddress": 36929,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 0,
+      "sourceAddress": 4161,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 255,
+      "destinationAddress": 36930,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 0,
+      "sourceAddress": 4162,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 0,
+      "destinationAddress": 36931,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 0,
+      "sourceAddress": 4163,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 1,
+      "destinationAddress": 36932,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 0,
+      "sourceAddress": 4164,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 2,
+      "destinationAddress": 36933,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 0,
+      "sourceAddress": 4165,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 3,
+      "destinationAddress": 36934,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 0,
+      "sourceAddress": 4166,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 4,
+      "destinationAddress": 36935,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 0,
+      "sourceAddress": 4167,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 77,
+      "destinationAddress": 36960,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 0,
+      "sourceAddress": 4192,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 78,
+      "destinationAddress": 36961,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 0,
+      "sourceAddress": 4193,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 79,
+      "destinationAddress": 36962,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 0,
+      "sourceAddress": 4194,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 80,
+      "destinationAddress": 36963,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 0,
+      "sourceAddress": 4195,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 81,
+      "destinationAddress": 36964,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 0,
+      "sourceAddress": 4196,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 82,
+      "destinationAddress": 36965,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 0,
+      "sourceAddress": 4197,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 83,
+      "destinationAddress": 36966,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 0,
+      "sourceAddress": 4198,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 84,
+      "destinationAddress": 36967,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 0,
+      "sourceAddress": 4199,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 221,
+      "destinationAddress": 2133888,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 16383,
+      "sourceAddress": 2101120,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 222,
+      "destinationAddress": 2133889,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 16383,
+      "sourceAddress": 2101121,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 223,
+      "destinationAddress": 2133890,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 16383,
+      "sourceAddress": 2101122,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 224,
+      "destinationAddress": 2133891,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 16383,
+      "sourceAddress": 2101123,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 225,
+      "destinationAddress": 2133892,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 16383,
+      "sourceAddress": 2101124,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 226,
+      "destinationAddress": 2133893,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 16383,
+      "sourceAddress": 2101125,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 227,
+      "destinationAddress": 2133894,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 16383,
+      "sourceAddress": 2101126,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 228,
+      "destinationAddress": 2133895,
+      "destinationCore": 0,
+      "rangeIndex": 0,
+      "repeat": 16383,
+      "sourceAddress": 2101127,
+      "sourceCore": 3
+    },
+    {
+      "byteValue": 45,
+      "destinationAddress": 2133920,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 16383,
+      "sourceAddress": 2101152,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 46,
+      "destinationAddress": 2133921,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 16383,
+      "sourceAddress": 2101153,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 47,
+      "destinationAddress": 2133922,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 16383,
+      "sourceAddress": 2101154,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 48,
+      "destinationAddress": 2133923,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 16383,
+      "sourceAddress": 2101155,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 49,
+      "destinationAddress": 2133924,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 16383,
+      "sourceAddress": 2101156,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 50,
+      "destinationAddress": 2133925,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 16383,
+      "sourceAddress": 2101157,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 51,
+      "destinationAddress": 2133926,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 16383,
+      "sourceAddress": 2101158,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 52,
+      "destinationAddress": 2133927,
+      "destinationCore": 0,
+      "rangeIndex": 1,
+      "repeat": 16383,
+      "sourceAddress": 2101159,
+      "sourceCore": 4
+    },
+    {
+      "byteValue": 125,
+      "destinationAddress": 2133952,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 16383,
+      "sourceAddress": 2101184,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 126,
+      "destinationAddress": 2133953,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 16383,
+      "sourceAddress": 2101185,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 127,
+      "destinationAddress": 2133954,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 16383,
+      "sourceAddress": 2101186,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 128,
+      "destinationAddress": 2133955,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 16383,
+      "sourceAddress": 2101187,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 129,
+      "destinationAddress": 2133956,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 16383,
+      "sourceAddress": 2101188,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 130,
+      "destinationAddress": 2133957,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 16383,
+      "sourceAddress": 2101189,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 131,
+      "destinationAddress": 2133958,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 16383,
+      "sourceAddress": 2101190,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 132,
+      "destinationAddress": 2133959,
+      "destinationCore": 0,
+      "rangeIndex": 2,
+      "repeat": 16383,
+      "sourceAddress": 2101191,
+      "sourceCore": 5
+    },
+    {
+      "byteValue": 205,
+      "destinationAddress": 2133984,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 16383,
+      "sourceAddress": 2101216,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 206,
+      "destinationAddress": 2133985,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 16383,
+      "sourceAddress": 2101217,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 207,
+      "destinationAddress": 2133986,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 16383,
+      "sourceAddress": 2101218,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 208,
+      "destinationAddress": 2133987,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 16383,
+      "sourceAddress": 2101219,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 209,
+      "destinationAddress": 2133988,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 16383,
+      "sourceAddress": 2101220,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 210,
+      "destinationAddress": 2133989,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 16383,
+      "sourceAddress": 2101221,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 211,
+      "destinationAddress": 2133990,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 16383,
+      "sourceAddress": 2101222,
+      "sourceCore": 6
+    },
+    {
+      "byteValue": 212,
+      "destinationAddress": 2133991,
+      "destinationCore": 0,
+      "rangeIndex": 3,
+      "repeat": 16383,
+      "sourceAddress": 2101223,
+      "sourceCore": 6
+    }
+  ]
+}

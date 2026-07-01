@@ -102,3 +102,37 @@ Deeptools fork checkpoint:
 - Branch: `ah/comms-collectives`
 - Commit: `4afc4d9f5` (`[DXP] Add flash layout-allgather contract checker`)
 
+## 2026-07-01 flash contract and backend prototype update
+
+Frontend checkpoint:
+
+- Torch branch: `ah/comms-collectives`
+- Commit: `ea98e174` emits the `layout_allgather_restickify` contract fields in relayout metadata.
+- Commit: `06ea92d2` records the frontend validation runbook.
+- Artifact: `layout_restickify_gap/frontend_contract_update_20260701.md`
+
+DLDSC backend checkpoint:
+
+- Deeptools fork: `git@github.ibm.com:Adnan-Hoque1/deeptools.git`
+- Branch: `ah/comms-collectives`
+- Commit: `c3c4aa52f` adds a fail-closed movement-plan synthesizer on top of the contract checker.
+- Focused tests: `LayoutAllgatherRestickify.*`, 8 tests passed.
+- Correct flash grouping: 4 groups, 8 producer chunks per group, 8 consumer cores per group, 256 logical grouped transfers.
+- Artifacts:
+  - `dldsc_layout_restickify/backend_movement_plan_report_20260701.md`
+  - `dldsc_layout_restickify/deeptools_layout_allgather_movement_plan.patch`
+
+Explicit-remap checkpoint:
+
+- CLC explicit lane validates `layout-aware-grouped-lx-remap-v2` schema.
+- Semantic checker result: pass, `logicalTransferCount=256`, `modeledByteCount=33554432`.
+- Existing grouped byte-range checker still passes after the layout schema extension.
+- Artifacts:
+  - `explicit_layout_restickify/metadata/layout_allgather_schema_extension_report.md`
+  - `explicit_layout_restickify/metadata/layout_allgather_semantic_check.json`
+  - `explicit_layout_restickify/metadata/grouped_semantic_check_after_layout_extension.json`
+
+Remaining implementation gap:
+
+Neither path has yet removed the flash HBM spill end-to-end. The next required code is the real backend lowering: use this contract to produce an on-chip restickified KERNEL view, perform grouped all-gather/replication, and bind the BMM KERNEL operand lifetime without falling back to HBM.
+

@@ -1,0 +1,323 @@
+diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
+index 7968e101e..adbdac203 100644
+--- a/util/LayoutAllgatherRestickify.cpp
++++ b/util/LayoutAllgatherRestickify.cpp
+@@ -8,7 +8,9 @@
+ #include <external/json11/json11.hpp>
+ 
+ #include <cstdint>
++#include <set>
+ #include <string>
++#include <vector>
+ 
+ namespace {
+ 
+@@ -46,6 +48,79 @@ std::uint64_t splitProduct(const Json &dims) {
+   return sawDim ? product : 0;
+ }
+ 
++std::uint64_t splitForDim(const Json &dims, const std::string &dim) {
++  if (!dims.is_object()) return 0;
++  const int split = dims[dim].int_value();
++  return split > 0 ? static_cast<std::uint64_t>(split) : 0;
++}
++
++std::vector<std::string> stringArray(const Json &json) {
++  std::vector<std::string> values;
++  if (!json.is_array()) return values;
++  for (const auto &value : json.array_items()) {
++    if (!value.is_string()) return {};
++    values.push_back(value.string_value());
++  }
++  return values;
++}
++
++bool optionalStringIs(const Json &json, const std::string &key,
++                      const std::string &expected) {
++  return json[key].is_null() ||
++         (json[key].is_string() && json[key].string_value() == expected);
++}
++
++bool allRestickifyDimsRenamedToConsumer(const Json &json,
++                                        std::string *reason) {
++  const auto restickifyDims = stringArray(
++      json["restickify_kernel_layout"]["layoutDimOrder_"]);
++  const auto consumerDims =
++      stringArray(json["consumer_kernel_layout"]["layoutDimOrder_"]);
++  if (restickifyDims.empty() || consumerDims.empty()) {
++    *reason = "missing restickify or consumer layout dimensions";
++    return false;
++  }
++
++  const std::set<std::string> consumerDimSet(consumerDims.begin(),
++                                             consumerDims.end());
++  const Json &rename = json["dimension_rename"];
++  if (!rename.is_object()) {
++    *reason = "missing dimension_rename";
++    return false;
++  }
++
++  for (const auto &dim : restickifyDims) {
++    const std::string renameKey = "restickify." + dim;
++    const Json &renamed = rename[renameKey];
++    if (!renamed.is_string() || renamed.string_value().empty()) {
++      *reason = "missing rename for " + renameKey;
++      return false;
++    }
++
++    const std::string consumerPrefix = "batchmatmul.";
++    const std::string renamedValue = renamed.string_value();
++    if (renamedValue.rfind(consumerPrefix, 0) != 0) {
++      *reason = renameKey + " must rename to a batchmatmul dimension";
++      return false;
++    }
++
++    const std::string consumerDim = renamedValue.substr(consumerPrefix.size());
++    if (consumerDimSet.count(consumerDim) == 0) {
++      *reason = renamedValue + " is not in consumer_kernel_layout";
++      return false;
++    }
++  }
++
++  return true;
++}
++
++deeptools::LayoutAllgatherRestickifyMovementPlan movementFail(
++    const std::string &reason) {
++  deeptools::LayoutAllgatherRestickifyMovementPlan plan;
++  plan.reason = reason;
++  return plan;
++}
++
+ deeptools::LayoutAllgatherRestickifyCheckResult fail(
+     const std::string &reason) {
+   deeptools::LayoutAllgatherRestickifyCheckResult result;
+@@ -135,4 +210,92 @@ LayoutAllgatherRestickifyCheckResult checkLayoutAllgatherRestickifyContract(
+   return result;
+ }
+ 
++LayoutAllgatherRestickifyMovementPlan
++synthesizeLayoutAllgatherRestickifyMovementPlan(
++    const std::string &jsonString) {
++  const auto check = checkLayoutAllgatherRestickifyContract(jsonString);
++  if (!check.ok) {
++    return movementFail("contract check failed: " + check.reason);
++  }
++
++  std::string err;
++  const Json json = Json::parse(jsonString, err);
++  if (!err.empty() || !json.is_object()) {
++    return movementFail("invalid json after contract check");
++  }
++
++  if (!optionalStringIs(json, "communication_pattern",
++                        "layout_allgather_restickify")) {
++    return movementFail(
++        "communication_pattern must be layout_allgather_restickify");
++  }
++  if (json["producer_op"].string_value() != "mul") {
++    return movementFail("producer_op must be mul");
++  }
++  if (json["restickify_op"].string_value() != "ReStickifyOpHBM") {
++    return movementFail("restickify_op must be ReStickifyOpHBM");
++  }
++  if (json["consumer_op"].string_value() != "batchmatmul") {
++    return movementFail("consumer_op must be batchmatmul");
++  }
++  if (check.sourceCoreCount != check.restickifyCoreCount) {
++    return movementFail(
++        "producer/restickify core counts must match for on-chip restickify");
++  }
++
++  const Json &restickifySplits = json["restickify_work_slice_dims"];
++  const Json &consumerSplits = json["consumer_work_slice_dims"];
++  const std::uint64_t groupCount = splitForDim(restickifySplits, "mb");
++  const std::uint64_t consumerGroupCount = splitForDim(consumerSplits, "x");
++  const std::uint64_t producerChunksPerGroup =
++      splitForDim(restickifySplits, "x");
++  const std::uint64_t consumerCoresPerGroup = splitForDim(consumerSplits, "mb");
++  if (groupCount == 0 || consumerGroupCount == 0 ||
++      producerChunksPerGroup == 0 || consumerCoresPerGroup == 0) {
++    return movementFail(
++        "restickify mb/x and consumer x/mb splits must be non-zero");
++  }
++  if (groupCount != consumerGroupCount) {
++    return movementFail("restickify mb split must match batchmatmul x split");
++  }
++  if (check.restickifyCoreCount != groupCount * producerChunksPerGroup) {
++    return movementFail(
++        "restickify core count must equal mb groups times x chunks");
++  }
++  if (check.consumerCoreCount != groupCount * consumerCoresPerGroup) {
++    return movementFail(
++        "consumer core count must equal x groups times mb consumers");
++  }
++  if (splitForDim(consumerSplits, "out") != 1 ||
++      splitForDim(consumerSplits, "in") != 1) {
++    return movementFail("only unsplit batchmatmul out/in are supported");
++  }
++
++  std::string renameReason;
++  if (!allRestickifyDimsRenamedToConsumer(json, &renameReason)) {
++    return movementFail("dimension_rename cannot drive movement: " +
++                        renameReason);
++  }
++
++  LayoutAllgatherRestickifyMovementPlan plan;
++  plan.ok = true;
++  plan.reason = "ok";
++  plan.communicationClass = check.communicationClass;
++  plan.movementPattern = check.kind;
++  plan.restickifyOp = "ReStickifyOpLx";
++  plan.consumerOperandDsType = "KERNEL";
++  plan.sourceCoreCount = check.sourceCoreCount;
++  plan.restickifyCoreCount = check.restickifyCoreCount;
++  plan.consumerCoreCount = check.consumerCoreCount;
++  plan.groupCount = groupCount;
++  plan.producerChunksPerGroup = producerChunksPerGroup;
++  plan.consumerCoresPerGroup = consumerCoresPerGroup;
++  plan.replicationFactor = consumerCoresPerGroup;
++  plan.logicalTransferCount =
++      groupCount * producerChunksPerGroup * consumerCoresPerGroup;
++  plan.stages = {"restickify_layout_on_chip", "grouped_all_gather",
++                 "bind_bmm_kernel_operand"};
++  return plan;
++}
++
+ }  // namespace deeptools
+diff --git a/util/LayoutAllgatherRestickify.h b/util/LayoutAllgatherRestickify.h
+index aa8af9ce5..ca8929fd3 100644
+--- a/util/LayoutAllgatherRestickify.h
++++ b/util/LayoutAllgatherRestickify.h
+@@ -8,6 +8,7 @@
+ 
+ #include <cstdint>
+ #include <string>
++#include <vector>
+ 
+ namespace deeptools {
+ 
+@@ -22,6 +23,24 @@ struct LayoutAllgatherRestickifyCheckResult {
+   std::uint64_t consumerCoreCount = 0;
+ };
+ 
++struct LayoutAllgatherRestickifyMovementPlan {
++  bool ok = false;
++  std::string reason;
++  std::string communicationClass;
++  std::string movementPattern;
++  std::string restickifyOp;
++  std::string consumerOperandDsType;
++  std::uint64_t sourceCoreCount = 0;
++  std::uint64_t restickifyCoreCount = 0;
++  std::uint64_t consumerCoreCount = 0;
++  std::uint64_t groupCount = 0;
++  std::uint64_t producerChunksPerGroup = 0;
++  std::uint64_t consumerCoresPerGroup = 0;
++  std::uint64_t replicationFactor = 0;
++  std::uint64_t logicalTransferCount = 0;
++  std::vector<std::string> stages;
++};
++
+ // Validate the explicit DLDSC-side contract for flash attention edges where a
+ // producer layout must be restickified on chip and then gathered into the
+ // consumer kernel operand. This is intentionally fail-closed: partial metadata
+@@ -29,6 +48,12 @@ struct LayoutAllgatherRestickifyCheckResult {
+ LayoutAllgatherRestickifyCheckResult checkLayoutAllgatherRestickifyContract(
+     const std::string &jsonString);
+ 
++// Consume a validated flash contract into a backend-facing movement plan. This
++// is intentionally narrower than the checker: only the known flash
++// mul->ReStickifyOpHBM->batchmatmul KERNEL edge is accepted.
++LayoutAllgatherRestickifyMovementPlan
++synthesizeLayoutAllgatherRestickifyMovementPlan(const std::string &jsonString);
++
+ }  // namespace deeptools
+ 
+ #endif  // UTIL_LAYOUT_ALLGATHER_RESTICKIFY_H_
+diff --git a/util/test/LayoutAllgatherRestickify_unit_test.cpp b/util/test/LayoutAllgatherRestickify_unit_test.cpp
+index 765dbfedc..74369cba2 100644
+--- a/util/test/LayoutAllgatherRestickify_unit_test.cpp
++++ b/util/test/LayoutAllgatherRestickify_unit_test.cpp
+@@ -44,6 +44,14 @@ std::string validFlashContract() {
+   })json";
+ }
+ 
++std::string replaceFirst(std::string value, const std::string &from,
++                         const std::string &to) {
++  const auto pos = value.find(from);
++  if (pos == std::string::npos) return value;
++  value.replace(pos, from.size(), to);
++  return value;
++}
++
+ }  // namespace
+ 
+ TEST(LayoutAllgatherRestickify, acceptsCompleteFlashContract) {
+@@ -116,3 +124,66 @@ TEST(LayoutAllgatherRestickify, rejectsZeroWidthSplit) {
+   EXPECT_FALSE(result.ok);
+   EXPECT_EQ(result.reason, "producer_work_slice_dims product must be non-zero");
+ }
++
++TEST(LayoutAllgatherRestickify, synthesizesFlashMovementPlan) {
++  const auto plan = deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(
++      validFlashContract());
++
++  EXPECT_TRUE(plan.ok) << plan.reason;
++  EXPECT_EQ(plan.communicationClass, "all_gather");
++  EXPECT_EQ(plan.movementPattern, "layout_allgather_restickify");
++  EXPECT_EQ(plan.restickifyOp, "ReStickifyOpLx");
++  EXPECT_EQ(plan.consumerOperandDsType, "KERNEL");
++  EXPECT_EQ(plan.sourceCoreCount, 32);
++  EXPECT_EQ(plan.restickifyCoreCount, 32);
++  EXPECT_EQ(plan.consumerCoreCount, 32);
++  EXPECT_EQ(plan.groupCount, 4);
++  EXPECT_EQ(plan.producerChunksPerGroup, 8);
++  EXPECT_EQ(plan.consumerCoresPerGroup, 8);
++  EXPECT_EQ(plan.replicationFactor, 8);
++  EXPECT_EQ(plan.logicalTransferCount, 256);
++  ASSERT_EQ(plan.stages.size(), 3);
++  EXPECT_EQ(plan.stages[0], "restickify_layout_on_chip");
++  EXPECT_EQ(plan.stages[1], "grouped_all_gather");
++  EXPECT_EQ(plan.stages[2], "bind_bmm_kernel_operand");
++}
++
++TEST(LayoutAllgatherRestickify, movementPlanRejectsNonFlashProducer) {
++  const auto contract = replaceFirst(validFlashContract(),
++                                     R"json("producer_op": "mul")json",
++                                     R"json("producer_op": "add")json");
++
++  const auto plan =
++      deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(contract);
++
++  EXPECT_FALSE(plan.ok);
++  EXPECT_EQ(plan.reason, "producer_op must be mul");
++}
++
++TEST(LayoutAllgatherRestickify, movementPlanRejectsIncompleteRename) {
++  const auto contract = replaceFirst(
++      validFlashContract(),
++      R"json("restickify.x": "batchmatmul.out")json",
++      R"json("restickify.x": "not_batchmatmul.out")json");
++
++  const auto plan =
++      deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(contract);
++
++  EXPECT_FALSE(plan.ok);
++  EXPECT_EQ(plan.reason,
++            "dimension_rename cannot drive movement: restickify.x must rename "
++            "to a batchmatmul dimension");
++}
++
++TEST(LayoutAllgatherRestickify, movementPlanRejectsMismatchedGroups) {
++  const auto contract = replaceFirst(
++      validFlashContract(),
++      R"json("consumer_work_slice_dims": {"x": 4, "mb": 8, "out": 1, "in": 1})json",
++      R"json("consumer_work_slice_dims": {"x": 2, "mb": 16, "out": 1, "in": 1})json");
++
++  const auto plan =
++      deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(contract);
++
++  EXPECT_FALSE(plan.ok);
++  EXPECT_EQ(plan.reason, "restickify mb split must match batchmatmul x split");
++}

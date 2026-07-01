@@ -1,0 +1,28 @@
+result: pass
+semanticKind: layout_allgather_restickify_contract
+schemaVersion: 2
+communicationClass: layout_allgather_restickify
+edge: sdsc_1.json:mul -> sdsc_2.json:ReStickifyOpHBM -> sdsc_3.json:batchmatmul KERNEL
+logicalTransferCount: 256
+modeledByteCount: 33554432
+groups: 4 producerCoresPerGroup: 8 consumerCoresPerGroup: 8
+consumerOperand: batchmatmul.KERNEL residency=lx materialization=no_hbm
+rename: mb->x
+rename: out->in
+rename: x->out
+transfer group=0 producer=0 consumer=0 srcCore=0 dstCore=0 bytes=131072
+transfer group=0 producer=0 consumer=1 srcCore=0 dstCore=4 bytes=131072
+transfer group=0 producer=0 consumer=2 srcCore=0 dstCore=8 bytes=131072
+transfer group=0 producer=0 consumer=3 srcCore=0 dstCore=12 bytes=131072
+transfer group=0 producer=0 consumer=4 srcCore=0 dstCore=16 bytes=131072
+transfer group=0 producer=0 consumer=5 srcCore=0 dstCore=20 bytes=131072
+transfer group=0 producer=0 consumer=6 srcCore=0 dstCore=24 bytes=131072
+transfer group=0 producer=0 consumer=7 srcCore=0 dstCore=28 bytes=131072
+transfer group=0 producer=1 consumer=0 srcCore=4 dstCore=0 bytes=131072
+transfer group=0 producer=1 consumer=1 srcCore=4 dstCore=4 bytes=131072
+transfer group=0 producer=1 consumer=2 srcCore=4 dstCore=8 bytes=131072
+transfer group=0 producer=1 consumer=3 srcCore=4 dstCore=12 bytes=131072
+transfer group=0 producer=1 consumer=4 srcCore=4 dstCore=16 bytes=131072
+transfer group=0 producer=1 consumer=5 srcCore=4 dstCore=20 bytes=131072
+transfer group=0 producer=1 consumer=6 srcCore=4 dstCore=24 bytes=131072
+transfer group=0 producer=1 consumer=7 srcCore=4 dstCore=28 bytes=131072
