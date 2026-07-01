@@ -99,3 +99,5 @@ Weight restickifies are intentionally out of scope for this directory; those sho
 
 `explicit_remap_probe/explicit_remap_senulator_failure_report_20260701.md` records the explicit-remap lane finding: the concrete ranged transfer SDSC imports/routes successfully, and the senulator failure is avoided with `DXP_ENABLE_COMPILE_TIME_CORRECTION=1`. That points to a runtime program-correction zero-flit/zero-layout issue rather than malformed explicit movement metadata.
 
+`deeptools_dldsc_backend_checkpoint/` archives the current Deeptools `ah/comms-collectives` patch. That backend checkpoint preserves/recognizes the staged DLDSC metadata and emits a deterministic grouped all-gather plan artifact at the DXP relayout mutation point. It deliberately does not claim physical movement is complete; grouped `STCDPOpLx` lowering plus BMM KERNEL rebinding remain the next backend implementation steps.
+
