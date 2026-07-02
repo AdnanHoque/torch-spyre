@@ -19,6 +19,8 @@ from __future__ import annotations
 from typing import Any
 
 LAYOUT_ALLGATHER_RESTICKIFY = "layout_allgather_restickify"
+MATMUL_OPERAND_BROADCAST = "matmul_operand_broadcast"
+MATMUL_OPERAND_ALLGATHER_REPLICATE = "all_gather_replicate"
 COMM_CLASS_ALL_GATHER = "all_gather"
 RESTICKIFY_HBM_OP = "ReStickifyOpHBM"
 RESTICKIFY_LX_OP = "ReStickifyOpLx"
@@ -71,6 +73,46 @@ def make_layout_allgather_restickify_contract(
         "communication_class": COMM_CLASS_ALL_GATHER,
         "communication_pattern": LAYOUT_ALLGATHER_RESTICKIFY,
         "requires_staged_realization": True,
+    }
+
+
+def make_matmul_operand_allgather_contract(
+    *,
+    producer_op: str,
+    consumer_op: str,
+    read_index: int,
+    producer_work_slice_dims: dict[str, int],
+    consumer_tensor_work_slice_dims: dict[str, int],
+    consumer_compute_work_slice_dims: dict[str, int],
+    communication_class: str,
+) -> dict[str, Any]:
+    """Return the logical contract for Granite AV Tensor1 materialization.
+
+    Tensor1 is the non-primary batchmatmul operand.  The Granite evidence has
+    the value tensor resident across producer ``out`` slices while each
+    consumer core computes a different ``mb`` slice.  That edge is a grouped
+    all-gather/broadcast into the matmul transfer loop, not a one-to-one
+    scatter relayout.
+    """
+
+    return {
+        "kind": MATMUL_OPERAND_BROADCAST,
+        "classification": MATMUL_OPERAND_BROADCAST,
+        "producer_op": producer_op,
+        "consumer_op": consumer_op,
+        "operand_read_index": int(read_index),
+        "operand_role": "rhs" if int(read_index) == 1 else f"input_{read_index}",
+        "producer_work_slice_dims": dict(producer_work_slice_dims),
+        "consumer_tensor_work_slice_dims": dict(consumer_tensor_work_slice_dims),
+        "consumer_compute_work_slice_dims": dict(consumer_compute_work_slice_dims),
+        "operand_kernel_layout": {
+            "layoutDimOrder_": ["out", "in", "x"],
+            "stickDimOrder_": ["out"],
+        },
+        "communication_class": communication_class,
+        "communication_pattern": MATMUL_OPERAND_ALLGATHER_REPLICATE,
+        "requires_staged_realization": True,
+        "staging_scope": "matmul_transfer_loop",
     }
 
 

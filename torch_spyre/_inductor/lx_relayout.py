@@ -43,8 +43,11 @@ from torch_spyre._inductor.pass_utils import (
 from torch_spyre._inductor.layout_allgather_restickify import (
     COMM_CLASS_ALL_GATHER,
     LAYOUT_ALLGATHER_RESTICKIFY,
+    MATMUL_OPERAND_ALLGATHER_REPLICATE,
+    MATMUL_OPERAND_BROADCAST,
     RESTICKIFY_LX_OP,
     make_layout_allgather_restickify_contract,
+    make_matmul_operand_allgather_contract,
 )
 
 logger = get_inductor_logger("lx_relayout")
@@ -246,6 +249,19 @@ def _core_id_to_device_slice(
 
 def _work_slice_dims(view: PerCoreView) -> dict[str, int]:
     return {str(int(dim)): int(split) for dim, split in view.work_slice_dims}
+
+
+def _op_work_slice_dims(op: Operation) -> dict[str, int]:
+    splits: tuple[dict, dict] = getattr(op, "op_it_space_splits", ({}, {}))
+    result: dict[str, int] = {}
+    for per_dim in splits:
+        for dim, split in per_dim.items():
+            try:
+                key = str(int(dim))
+            except (TypeError, ValueError):
+                key = str(dim)
+            result[key] = int(split)
+    return result
 
 
 def _memory_read_index(op: ComputedBuffer, dep: MemoryDep) -> int | None:
@@ -478,6 +494,55 @@ def plan_lx_relayouts(
                         requires_staged_realization=True,
                         layout_contract=layout_contract,
                         unsupported_reason="staged layout all-gather restickify metadata only",
+                    )
+                    _record_plan(consumer, plan)
+                    setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
+                    planned.append(plan)
+                    continue
+
+                if (
+                    config.lx_planner_relayout_collectives
+                    and config.lx_planner_relayout_matmul_operand_contract
+                    and read_index == 1
+                    and (
+                        topology.communication_class
+                        in (COMM_CLASS_ALL_GATHER, "broadcast")
+                    )
+                ):
+                    layout_contract = make_matmul_operand_allgather_contract(
+                        producer_op=_op_name(producer),
+                        consumer_op="batchmatmul",
+                        read_index=read_index,
+                        producer_work_slice_dims=producer_work_slice_dims,
+                        consumer_tensor_work_slice_dims=consumer_work_slice_dims,
+                        consumer_compute_work_slice_dims=_op_work_slice_dims(consumer),
+                        communication_class=topology.communication_class,
+                    )
+                    plan = LXRelayoutPlan(
+                        source_name=dep.name,
+                        producer_name=producer.get_name(),
+                        consumer_name=consumer.get_name(),
+                        kind=MATMUL_OPERAND_BROADCAST,
+                        producer_core_count=producer_core_count,
+                        consumer_core_count=consumer_core_count,
+                        producer_core_id_to_device_slice=producer_core_slices,
+                        producer_work_slice_dims=producer_work_slice_dims,
+                        consumer_work_slice_dims=consumer_work_slice_dims,
+                        consumer_core_id_to_device_slice=consumer_core_slices,
+                        read_index=read_index,
+                        realized=False,
+                        communication_class=topology.communication_class,
+                        communication_pattern=MATMUL_OPERAND_ALLGATHER_REPLICATE,
+                        max_fanout=topology.max_fanout,
+                        max_fanin=topology.max_fanin,
+                        transfer_count=topology.transfer_count,
+                        requires_staged_realization=True,
+                        layout_contract=layout_contract,
+                        unsupported_reason=(
+                            "matmul operand all-gather/broadcast metadata only; "
+                            "backend must stage materialization through the "
+                            "matmul transfer loop"
+                        ),
                     )
                     _record_plan(consumer, plan)
                     setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)

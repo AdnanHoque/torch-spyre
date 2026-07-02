@@ -58,6 +58,14 @@ lx_planner_relayout_collectives: bool = (
     os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES", "0") == "1"
 )
 
+# Experimental metadata-only contract for Granite attention-value Tensor1
+# materialization. Requires lx_planner_relayout_collectives and records the
+# non-primary matmul operand as grouped all-gather/broadcast rather than
+# allowing it to look like resident scatter.
+lx_planner_relayout_matmul_operand_contract: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_MATMUL_OPERAND_CONTRACT", "0") == "1"
+)
+
 # Experimental metadata lane for flash activation edges of the form
 # pointwise -> ReStickifyOpHBM -> batchmatmul KERNEL. The producer and consumer
 # need a layout-aware grouped all-gather, not the direct scatter class realized

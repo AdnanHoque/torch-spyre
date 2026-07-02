@@ -43,6 +43,10 @@ from .constants import (
 from .errors import Unsupported
 from .ir import FixedTiledLayout
 from .lx_relayout import LX_RELAYOUT_ATTR
+from .layout_allgather_restickify import (
+    LAYOUT_ALLGATHER_RESTICKIFY,
+    MATMUL_OPERAND_ALLGATHER_REPLICATE,
+)
 from .pass_utils import (
     concretize_expr,
     concretize_index,
@@ -64,6 +68,11 @@ from .op_spec import (
 import logging
 
 logger = get_inductor_logger("spyre_kernel")
+
+DLDSC_CLASSIFICATION_PATTERNS = {
+    LAYOUT_ALLGATHER_RESTICKIFY,
+    MATMUL_OPERAND_ALLGATHER_REPLICATE,
+}
 
 
 def _current_node_op_info(current_node) -> dict[str, Any]:
@@ -724,7 +733,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             dict(plan)
             for plan in relayout_inputs.values()
             if isinstance(plan, dict)
-            and plan.get("communication_pattern") == "layout_allgather_restickify"
+            and plan.get("communication_pattern") in DLDSC_CLASSIFICATION_PATTERNS
         ]
         if classifications:
             op_info = dict(op_info)

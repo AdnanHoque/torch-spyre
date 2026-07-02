@@ -16,6 +16,12 @@ from sympy import Integer, Mod, Symbol, floor
 
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
+from torch_spyre._inductor.layout_allgather_restickify import (
+    COMM_CLASS_ALL_GATHER,
+    MATMUL_OPERAND_ALLGATHER_REPLICATE,
+    MATMUL_OPERAND_BROADCAST,
+    make_matmul_operand_allgather_contract,
+)
 from torch_spyre._inductor.lx_relayout import (
     LXRelayoutPlan,
     _classify_coordinate_topology,
@@ -143,6 +149,29 @@ def test_coordinate_topology_classifies_all_gather():
     assert topology.transfer_count == 4
 
 
+def test_matmul_operand_contract_marks_tensor1_all_gather_not_scatter():
+    contract = make_matmul_operand_allgather_contract(
+        producer_op="transpose",
+        consumer_op="batchmatmul",
+        read_index=1,
+        producer_work_slice_dims={"2": 32},
+        consumer_tensor_work_slice_dims={},
+        consumer_compute_work_slice_dims={"mb": 32},
+        communication_class=COMM_CLASS_ALL_GATHER,
+    )
+
+    assert contract["kind"] == MATMUL_OPERAND_BROADCAST
+    assert contract["classification"] == MATMUL_OPERAND_BROADCAST
+    assert contract["communication_class"] == COMM_CLASS_ALL_GATHER
+    assert contract["communication_pattern"] == MATMUL_OPERAND_ALLGATHER_REPLICATE
+    assert contract["requires_staged_realization"]
+    assert contract["operand_role"] == "rhs"
+    assert contract["operand_kernel_layout"] == {
+        "layoutDimOrder_": ["out", "in", "x"],
+        "stickDimOrder_": ["out"],
+    }
+
+
 def test_lx_relayout_reservation_names_are_identifiable():
     name = make_lx_relayout_reservation_name("consumer", "producer")
 
@@ -174,6 +203,58 @@ def test_lx_relayout_plan_records_scatter_kind():
     )
 
     assert get_lx_relayout_inputs(consumer)["buf0"]["kind"] == "scatter"
+
+
+def test_lx_relayout_plan_records_matmul_operand_all_gather_contract():
+    class DummyOp:
+        pass
+
+    consumer = DummyOp()
+    contract = make_matmul_operand_allgather_contract(
+        producer_op="transpose",
+        consumer_op="batchmatmul",
+        read_index=1,
+        producer_work_slice_dims={"2": 32},
+        consumer_tensor_work_slice_dims={},
+        consumer_compute_work_slice_dims={"mb": 32},
+        communication_class=COMM_CLASS_ALL_GATHER,
+    )
+    _record_plan(
+        consumer,
+        LXRelayoutPlan(
+            source_name="buf21",
+            producer_name="buf21",
+            consumer_name="buf22",
+            kind=MATMUL_OPERAND_BROADCAST,
+            producer_core_count=32,
+            consumer_core_count=32,
+            producer_core_id_to_device_slice={
+                str(core): {"2": core} for core in range(32)
+            },
+            producer_work_slice_dims={"2": 32},
+            consumer_work_slice_dims={},
+            consumer_core_id_to_device_slice={str(core): {} for core in range(32)},
+            read_index=1,
+            realized=False,
+            communication_class=COMM_CLASS_ALL_GATHER,
+            communication_pattern=MATMUL_OPERAND_ALLGATHER_REPLICATE,
+            max_fanout=32,
+            max_fanin=32,
+            transfer_count=1024,
+            requires_staged_realization=True,
+            layout_contract=contract,
+            unsupported_reason="metadata only",
+        ),
+    )
+
+    plan = get_lx_relayout_inputs(consumer)["buf21"]
+    assert plan["kind"] == MATMUL_OPERAND_BROADCAST
+    assert plan["communication_class"] == COMM_CLASS_ALL_GATHER
+    assert plan["communication_pattern"] == MATMUL_OPERAND_ALLGATHER_REPLICATE
+    assert plan["transfer_count"] == 1024
+    assert plan["consumer_tensor_work_slice_dims"] == {}
+    assert plan["consumer_compute_work_slice_dims"] == {"mb": 32}
+    assert plan["staging_scope"] == "matmul_transfer_loop"
 
 
 def test_lx_input_allocation_coordinates_describe_producer_residency():
@@ -237,3 +318,31 @@ def test_regular_lx_input_keeps_empty_allocation_coordinates():
     input_alloc = compute_dsc["scheduleTree_"][0]
 
     assert input_alloc["coordinates_"]["coreIdToWkSlice_"] == {}
+
+
+def test_matmul_operand_classification_metadata_is_emitted_top_level():
+    mb = Symbol("x0")
+    out = Symbol("x1")
+    classification = [
+        {
+            "kind": MATMUL_OPERAND_BROADCAST,
+            "communication_class": COMM_CLASS_ALL_GATHER,
+            "communication_pattern": MATMUL_OPERAND_ALLGATHER_REPLICATE,
+            "requires_staged_realization": True,
+        }
+    ]
+    op_spec = OpSpec(
+        op="neg",
+        is_reduction=False,
+        iteration_space={mb: (Integer(512), 4), out: (Integer(12800), 1)},
+        args=[
+            _fixed_tile_arg(is_input=True, allocation={"lx": 0}),
+            _fixed_tile_arg(is_input=False, allocation={"hbm": 0x1000}),
+        ],
+        op_info={"lx_relayout_classifications": classification},
+    )
+
+    sdsc, _symbols, _affine_strides, _symbol_kinds = compile_op_spec(0, op_spec, [])
+
+    root = next(iter(sdsc.values()))
+    assert root["lxRelayoutClassifications_"] == classification
