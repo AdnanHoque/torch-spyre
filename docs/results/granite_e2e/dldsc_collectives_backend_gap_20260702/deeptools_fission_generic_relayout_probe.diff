@@ -1,0 +1,375 @@
+diff --git a/dsm/sen_data_ops.cpp b/dsm/sen_data_ops.cpp
+index f01703602..11197aaf2 100644
+--- a/dsm/sen_data_ops.cpp
++++ b/dsm/sen_data_ops.cpp
+@@ -5122,7 +5122,7 @@ void Dsm::doStcdpDataDscFission(sengraph::Node* currNode,
+             auto& inpPiece = pieces.at(p);
+             bool matchedOutPieceFound = false;
+             for (auto op = 0; op < outPieces.size(); op++) {
+-              auto& outPiece = pieces.at(op);
++              auto& outPiece = outPieces.at(op);
+               if (outPiece->dimToSize_ == inpPiece->dimToSize_ &&
+                   outPiece->dimToStartCordinate ==
+                       inpPiece->dimToStartCordinate) {
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index debe5a3f2..ca31ac8b8 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -321,6 +321,35 @@ static void addReplicatedLxPiece(
+   dataLds.pieces_[key] = piece;
+ }
+ 
++static void addReplicatedLxPieceWithAddresses(
++    LdsInfo& dataLds, const std::string& key, const std::vector<int>& coreIds,
++    const std::map<int, int64_t>& coreIdToStartAddress,
++    const std::map<std::string, double>& dimToSize,
++    const std::map<std::string, double>& dimToStart) {
++  DT_CHECK(!coreIds.empty());
++  PieceInfo piece;
++  piece.key_ = key;
++  piece.dimToSize_ = dimToSize;
++  piece.dimToStartCordinate = dimToStart;
++  for (const auto& dimAndSize : dimToSize) {
++    piece.validGap_[dimAndSize.first].push_back(
++        std::make_pair(dimAndSize.second, 0));
++  }
++  piece.placement[SenComponents::LX];
++  piece.placement.at(SenComponents::LX).setType(SenComponents::LX);
++  auto& addrHelper = piece.placement.at(SenComponents::LX).StartAddr();
++  FoldDimProp* addrFoldProp = new FoldDimProp{1, "time"};
++  addrHelper.buildMapDim(addrFoldProp, 0);
++  for (const auto coreId : coreIds) {
++    const auto addrIt = coreIdToStartAddress.find(coreId);
++    DT_CHECK(addrIt != coreIdToStartAddress.end());
++    piece.placement.at(SenComponents::LX).insertMemId(coreId);
++    piece.placement.at(SenComponents::LX).insertStAddr(addrIt->second, {0});
++    dataLds.coreIdTolxStartAddress_[coreId] = addrIt->second;
++  }
++  dataLds.pieces_[key] = piece;
++}
++
+ static int64_t lxStartAddressForCore(const LabeledDsInfo& lds, int coreId) {
+   const auto memOrgIt = lds.memOrg_.find(SenComponents::LX);
+   if (memOrgIt == lds.memOrg_.end() ||
+@@ -331,6 +360,13 @@ static int64_t lxStartAddressForCore(const LabeledDsInfo& lds, int coreId) {
+       coreId, 0, 0);
+ }
+ 
++static int64_t pieceSizeBytes(
++    const std::map<std::string, double>& dimToSize, double wordLength) {
++  double total = wordLength;
++  for (const auto& dimAndSize : dimToSize) total *= dimAndSize.second;
++  return static_cast<int64_t>(total);
++}
++
+ static bool attachMatmulOperandBroadcastInputFetch(
+     SuperDsc* sdsc, const LabeledDsInfo& lds,
+     const MatmulOperandBroadcastHookPlan& hook, std::string* reason) {
+@@ -461,6 +497,279 @@ static bool attachMatmulOperandBroadcastInputFetch(
+   return true;
+ }
+ 
++static bool attachLayoutAllgatherRestickifyInputFetch(
++    SuperDsc* sdsc, LabeledDsInfo& lds,
++    const LayoutAllgatherRestickifyHookPlan& hook, int ps,
++    MemTrackBundle* memTrackers, std::string* reason) {
++  DT_CHECK(sdsc->dscs_.size() == 1);
++  if (!hook.plan.ok) {
++    *reason = "layout_allgather_restickify plan is not valid: " +
++              hook.plan.reason;
++    return false;
++  }
++
++  auto& dldsc = sdsc->dscs_.at(0);
++  const auto allocNode = lds.memOrg_.count(SenComponents::LX)
++                             ? lds.memOrg_.at(SenComponents::LX).allocateNode_
++                             : nullptr;
++  if (allocNode == nullptr) {
++    *reason = "layout_allgather_restickify input has no LX allocate node";
++    return false;
++  }
++  const auto producerCoreIdToWkSlice =
++      allocNode->allocateCoordinates_.coreIdToWkSlice_;
++  if (producerCoreIdToWkSlice.empty()) {
++    *reason =
++        "layout_allgather_restickify input has empty producer coordinates";
++    return false;
++  }
++
++  std::map<int, std::vector<int>> destinationCoresBySource;
++  for (const auto& transfer :
++       deeptools::layoutAllgatherRestickifyLogicalTransfers(hook.plan)) {
++    destinationCoresBySource[static_cast<int>(transfer.sourceCore)].push_back(
++        static_cast<int>(transfer.destinationCore));
++  }
++  if (destinationCoresBySource.empty()) {
++    *reason = "layout_allgather_restickify produced no logical transfers";
++    return false;
++  }
++
++  const auto& refDsInfo = dldsc.primaryDsInfo_.at(lds.dsType_);
++  auto outFormSize = lds.wordLength;
++  std::set<PrimaryDimTypes> relayoutTensorDims;
++  int dimCount = 0;
++  for (const auto& pDim : refDsInfo.layoutDimOrder_) {
++    relayoutTensorDims.insert(pDim);
++    if (lds.scale_[dimCount] == -2) {
++      outFormSize *= 64;
++    } else {
++      outFormSize *= dldsc.N_.primaryDimToVal_st(pDim);
++    }
++    ++dimCount;
++  }
++  const auto outPieceSize =
++      getRelayoutPieceSize(outFormSize, sdsc->coreIdToWkSlice_,
++                           relayoutTensorDims);
++  if (outPieceSize <= 0) {
++    *reason = "layout_allgather_restickify output piece size is not positive";
++    return false;
++  }
++
++  memTrackers->insertPsBefore(ps);
++  std::map<int, int64_t> destinationStartAddressByCore;
++  for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
++    auto& memTracker = memTrackers->lxTrackPerCore.at(coreAndSlice.first);
++    const auto dsName = sdsc->name_ + "-" + lds.dsName_ +
++                        "-LayoutAllgatherRestickify-out";
++    const auto stAddr =
++        memTracker.checkAndAddDs(dsName, "dynamic", outPieceSize, {ps});
++    if (stAddr < 0) {
++      *reason = "layout_allgather_restickify could not allocate " +
++                std::to_string(static_cast<long long>(outPieceSize)) +
++                " bytes in LX for consumer core " +
++                std::to_string(coreAndSlice.first);
++      return false;
++    }
++    destinationStartAddressByCore[coreAndSlice.first] = stAddr;
++  }
++
++  std::ofstream materializationDebug;
++  if (const char* outputDirEnv =
++          std::getenv("DEEPTOOLS_LAYOUT_ALLGATHER_RESTICKIFY_PLAN_DIR")) {
++    const std::filesystem::path outputDir(outputDirEnv);
++    std::filesystem::create_directories(outputDir);
++    const std::string fileName = sanitizeArtifactName(
++        sdsc->name_ + "_" + lds.dsName_ + "_" + hook.classificationKey +
++        "_layout_allgather_materialization_debug.txt");
++    materializationDebug.open(outputDir / fileName);
++    if (materializationDebug.good()) {
++      materializationDebug << "sdsc=" << sdsc->name_ << "\n";
++      materializationDebug << "lds=" << lds.dsName_ << "\n";
++      materializationDebug << "out_piece_size=" << outPieceSize << "\n";
++      materializationDebug << "destination_bases";
++      for (const auto& dst : destinationStartAddressByCore) {
++        materializationDebug << " " << dst.first << ":" << dst.second;
++      }
++      materializationDebug << "\n";
++    }
++  }
++
++  const auto producerSliceIds =
++      collectTensorSliceIds(producerCoreIdToWkSlice,
++                            refDsInfo.layoutDimOrder_);
++
++  std::vector<int> dataOpIndices;
++  for (const auto& coreAndSlice : producerCoreIdToWkSlice) {
++    const auto dstIt = destinationCoresBySource.find(coreAndSlice.first);
++    if (dstIt == destinationCoresBySource.end() || dstIt->second.empty()) {
++      *reason = "layout_allgather_restickify missing destinations for source " +
++                std::to_string(coreAndSlice.first);
++      return false;
++    }
++
++    for (const auto dstCore : dstIt->second) {
++      if (destinationStartAddressByCore.count(dstCore) == 0) {
++        *reason = "missing allocated destination LX base for consumer core " +
++                  std::to_string(dstCore);
++        return false;
++      }
++    }
++
++    DataOpDsc ddsc;
++    ddsc.dscName_ = sdsc->name_ + "-" + lds.dsName_ +
++                    "-LayoutAllgatherRestickify-src" +
++                    std::to_string(coreAndSlice.first);
++    ddsc.opName = OpFuncs::STCDPOpLx;
++    ddsc.op = new STCDPOpLx;
++    ddsc.op->name = OpFuncs::STCDPOpLx;
++    ddsc.primaryDs_["activation"].name_ = "activation";
++    ddsc.target_ = sdsc->target_;
++    ddsc.foldProps_.push_back(new FoldDimProp(
++        sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++
++    std::set<int> coresSeen;
++    if (coresSeen.insert(coreAndSlice.first).second) {
++      ddsc.coreIdsUsed_.push_back(coreAndSlice.first);
++    }
++    for (const auto dstCore : dstIt->second) {
++      if (coresSeen.insert(dstCore).second) ddsc.coreIdsUsed_.push_back(dstCore);
++    }
++
++    ddsc.labeledDs_.resize(2);
++    auto& inpLds = ddsc.labeledDs_.at(0);
++    auto& outLds = ddsc.labeledDs_.at(1);
++    inpLds.ldsName_ = lds.dsName_ + "-LayoutAllgatherRestickify-inp-src" +
++                      std::to_string(coreAndSlice.first);
++    outLds.ldsName_ = lds.dsName_;
++    fillDataOpLdsShape(inpLds, ddsc, lds, dldsc);
++    fillDataOpLdsShape(outLds, ddsc, lds, dldsc);
++    ddsc.dimPool_ = ddsc.primaryDs_.at("activation").dimNames;
++    DT_CHECK(outLds.stickDimOrder_ == inpLds.stickDimOrder_);
++    DT_CHECK(outLds.dimToStickSize_ == inpLds.dimToStickSize_);
++
++    std::map<std::string, double> dimToSize;
++    std::map<std::string, double> dimToStart;
++    for (const auto& pDim : refDsInfo.layoutDimOrder_) {
++      const std::string dimName = dataOpDimName(dldsc, pDim);
++      const double dimExtent = dldsc.N_.primaryDimToVal_st(pDim);
++      const auto splitIt = producerSliceIds.find(pDim);
++      const int split = splitIt == producerSliceIds.end()
++                            ? 1
++                            : static_cast<int>(splitIt->second.size());
++      DT_CHECK(split > 0);
++      DT_CHECK(static_cast<int>(dimExtent) % split == 0);
++      const int sliceIdx = coreAndSlice.second.count(pDim)
++                               ? coreAndSlice.second.at(pDim)
++                               : 0;
++      dimToSize[dimName] = dimExtent / split;
++      dimToStart[dimName] = sliceIdx * dimToSize.at(dimName);
++    }
++
++    const auto srcAddr = lxStartAddressForCore(lds, coreAndSlice.first);
++    if (srcAddr < 0) {
++      *reason = "missing source LX base for producer core " +
++                std::to_string(coreAndSlice.first);
++      return false;
++    }
++
++    std::map<std::string, double> localDimToStart;
++    for (const auto& dimAndSize : dimToSize) {
++      localDimToStart[dimAndSize.first] = 0;
++    }
++    const auto chunkBytes = pieceSizeBytes(dimToSize, lds.wordLength);
++    int64_t chunkIndex = 0;
++    const auto outStartIt = dimToStart.find("out");
++    const auto outSizeIt = dimToSize.find("out");
++    if (outStartIt != dimToStart.end() && outSizeIt != dimToSize.end() &&
++        outSizeIt->second > 0) {
++      chunkIndex = static_cast<int64_t>(outStartIt->second / outSizeIt->second);
++    }
++    std::map<int, int64_t> chunkDestinationStartAddressByCore;
++    for (const auto dstCore : dstIt->second) {
++      chunkDestinationStartAddressByCore[dstCore] =
++          destinationStartAddressByCore.at(dstCore) + chunkIndex * chunkBytes;
++    }
++
++    addLxPiece(inpLds, "src0", coreAndSlice.first, srcAddr, dimToSize,
++               localDimToStart);
++    addReplicatedLxPieceWithAddresses(outLds, "dst0", dstIt->second,
++                                      chunkDestinationStartAddressByCore,
++                                      dimToSize, localDimToStart);
++
++    if (materializationDebug.good() && dataOpIndices.size() < 16) {
++      materializationDebug << "source=" << coreAndSlice.first << " src_base="
++                           << srcAddr << " dests=";
++      for (const auto dstCore : dstIt->second) {
++        materializationDebug << dstCore << ":"
++                             << chunkDestinationStartAddressByCore.at(dstCore)
++                             << ",";
++      }
++      materializationDebug << " global_dim_start=";
++      for (const auto& dim : dimToStart) {
++        materializationDebug << dim.first << ":" << dim.second << ",";
++      }
++      materializationDebug << " local_dim_start=";
++      for (const auto& dim : localDimToStart) {
++        materializationDebug << dim.first << ":" << dim.second << ",";
++      }
++      materializationDebug << " dim_size=";
++      for (const auto& dim : dimToSize) {
++        materializationDebug << dim.first << ":" << dim.second << ",";
++      }
++      materializationDebug << " chunk_index=" << chunkIndex
++                           << " chunk_bytes=" << chunkBytes;
++      materializationDebug << "\n";
++    }
++
++    const int dataOpIdx = static_cast<int>(sdsc->dataOpdscs_.size());
++    sdsc->dataOpdscs_.push_back(ddsc);
++    dataOpIndices.push_back(dataOpIdx);
++  }
++
++  allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
++  auto& stAddr = allocNode->startAddressCoreCorelet_;
++  for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
++    const auto dstIt = destinationStartAddressByCore.find(coreId);
++    stAddr.insertData(dstIt == destinationStartAddressByCore.end()
++                          ? -1
++                          : dstIt->second,
++                      coreId, 0, 0);
++  }
++  if (!lds.coreStateInit_.empty()) {
++    for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
++      if (static_cast<size_t>(coreId) >= lds.coreStateInit_.size()) continue;
++      auto& coreState = lds.coreStateInit_.at(coreId);
++      if (coreState.lbrInit_.empty()) continue;
++      const auto newBase = stAddr.getData(coreId, 0, 0);
++      if (newBase < 0) {
++        for (auto& lbr : coreState.lbrInit_) lbr = -1;
++        continue;
++      }
++
++      const auto oldBase = coreState.lbrInit_.at(0);
++      const auto delta = static_cast<int>(newBase - oldBase);
++      for (auto& lbr : coreState.lbrInit_) lbr += delta;
++    }
++  }
++  for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
++    auto& schedule = sdsc->coreIdToDscSchedule[coreAndSlice.first];
++    auto insertPos = schedule.begin();
++    for (auto it = schedule.begin(); it != schedule.end(); ++it) {
++      if (it->dldsc_idx == 0) {
++        insertPos = it;
++        break;
++      }
++    }
++    for (const auto dataOpIdx : dataOpIndices) {
++      insertPos = schedule.insert(insertPos,
++                                  DscScheduleStep(dataOpIdx, -1, false, true));
++      ++insertPos;
++    }
++  }
++  return true;
++}
++
+ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+                              MemTrackBundle* memTrackers,
+                              std::vector<SuperDsc*>& relayout_sdscs) {
+@@ -484,23 +793,12 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+     const auto layoutAllgatherHook = findLayoutAllgatherRestickifyPlan(sdsc, lds);
+     if (layoutAllgatherHook.plan.ok ||
+         !layoutAllgatherHook.classificationKey.empty()) {
+-      std::string materializationReason;
+-      // Diagnostic implementation: treat the classified layout all-gather as
+-      // explicit source-shard fanout into the consumer LX operand. This avoids
+-      // the older generic relayout fallback so we can test the DLDSC collective
+-      // contract end to end before replacing this with a staged realization.
+-      if (!attachMatmulOperandBroadcastInputFetch(
+-              sdsc, lds, MatmulOperandBroadcastHookPlan{},
+-              &materializationReason)) {
+-        emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
+-                                                  layoutAllgatherHook);
+-        DT_CHECK_MSG(false,
+-                     "layout_allgather_restickify materialization failed: " +
+-                         materializationReason);
+-      }
+       emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
+                                                 layoutAllgatherHook);
+-      continue;
++      // Probe: force the classified layout-allgather edge through the existing
++      // standalone LxRelayout SDSC insertion path below. If this is value-correct
++      // with consumer-labelled coordinates, we can avoid a special mixed-dataop
++      // carrier for this class.
+     }
+ 
+     const auto matmulBroadcastHook =
