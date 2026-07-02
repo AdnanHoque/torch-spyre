@@ -1,0 +1,199 @@
+    buf0: stride_map=[-1, -1]
+    buf1: stride_map=[524288, 128, 64, -1, 1]
+    buf2: stride_map=[-1, -1]
+    buf3: stride_map=[262144, 64, 64, -1, 1]
+    buf4: stride_map=[-1, 64, 4096, 1]
+    buf25: stride_map=[-1, -1]
+    buf5: stride_map=[524288, 128, 64, -1, 1]
+    buf26: stride_map=[-1, -1]
+    buf6: stride_map=[524288, 128, 64, -1, 1]
+    buf7: stride_map=[16777216, 4096, 64, -1, 1]
+    buf8: stride_map=[4096, -1, 64, 16777216, 1]
+    buf9: stride_map=[1, -1, -1, 4096, -1]
+  state 36 (cost=33554432.0):
+    arg0_1: stride_map=[524288, 128, 64, -1, 1]
+    arg1_1: stride_map=[524288, 128, 64, -1, 1]
+    arg2_1: stride_map=[-1, 4096, 64, -1, 1]
+    arg3_1: stride_map=[524288, 128, 64, -1, 1]
+    buf0: stride_map=[-1, -1]
+    buf1: stride_map=[128, 1, -1, 524288, -1]
+    buf2: stride_map=[-1, -1]
+    buf3: stride_map=[64, 1, 16777216, -1, 262144]
+    buf4: stride_map=[-1, 64, 4096, 1]
+    buf25: stride_map=[-1, -1]
+    buf5: stride_map=[524288, 128, 64, -1, 1]
+    buf26: stride_map=[-1, -1]
+    buf6: stride_map=[524288, 128, 64, -1, 1]
+    buf7: stride_map=[16777216, 4096, 64, -1, 1]
+    buf8: stride_map=[4096, -1, 64, 16777216, 1]
+    buf9: stride_map=[1, -1, -1, 4096, -1]
+  state 37 (cost=33554432.0):
+    arg0_1: stride_map=[524288, 128, 64, -1, 1]
+    arg1_1: stride_map=[524288, 128, 64, -1, 1]
+    arg2_1: stride_map=[-1, 4096, 64, -1, 1]
+    arg3_1: stride_map=[524288, 128, 64, -1, 1]
+    buf0: stride_map=[-1, -1]
+    buf1: stride_map=[128, 1, 33554432, -1, 524288]
+    buf2: stride_map=[-1, -1]
+    buf3: stride_map=[64, 1, 16777216, -1, 262144]
+    buf4: stride_map=[-1, 64, 4096, 1]
+    buf25: stride_map=[-1, -1]
+    buf5: stride_map=[524288, 128, 64, -1, 1]
+    buf26: stride_map=[-1, -1]
+    buf6: stride_map=[524288, 128, 64, -1, 1]
+    buf7: stride_map=[16777216, 4096, 64, -1, 1]
+    buf8: stride_map=[4096, -1, 64, 16777216, 1]
+    buf9: stride_map=[1, -1, -1, 4096, -1]
+  state 38 (cost=33554432.0):
+    arg0_1: stride_map=[524288, 128, 64, -1, 1]
+    arg1_1: stride_map=[524288, 128, 64, -1, 1]
+    arg2_1: stride_map=[-1, 4096, 64, -1, 1]
+    arg3_1: stride_map=[524288, 128, 64, -1, 1]
+    buf0: stride_map=[-1, -1]
+    buf1: stride_map=[524288, 1, 8192, -1, 128]
+    buf2: stride_map=[-1, -1]
+    buf3: stride_map=[64, 1, 16777216, -1, 262144]
+    buf4: stride_map=[-1, 64, 4096, 1]
+    buf25: stride_map=[-1, -1]
+    buf5: stride_map=[524288, 128, 64, -1, 1]
+    buf26: stride_map=[-1, -1]
+    buf6: stride_map=[524288, 128, 64, -1, 1]
+    buf7: stride_map=[16777216, 4096, 64, -1, 1]
+    buf8: stride_map=[4096, -1, 64, 16777216, 1]
+    buf9: stride_map=[1, -1, -1, 4096, -1]
+  state 39 (cost=33554432.0):
+    arg0_1: stride_map=[524288, 128, 64, -1, 1]
+    arg1_1: stride_map=[524288, 128, 64, -1, 1]
+    arg2_1: stride_map=[-1, 4096, 64, -1, 1]
+    arg3_1: stride_map=[524288, 128, 64, -1, 1]
+    buf0: stride_map=[-1, -1]
+    buf1: stride_map=[524288, 128, 64, -1, 1]
+    buf2: stride_map=[-1, -1]
+    buf3: stride_map=[64, 1, 16777216, -1, 262144]
+    buf4: stride_map=[-1, 64, 4096, 1]
+    buf25: stride_map=[-1, -1]
+    buf5: stride_map=[524288, 128, 64, -1, 1]
+    buf26: stride_map=[-1, -1]
+    buf6: stride_map=[524288, 128, 64, -1, 1]
+    buf7: stride_map=[16777216, 4096, 64, -1, 1]
+    buf8: stride_map=[4096, -1, 64, 16777216, 1]
+    buf9: stride_map=[1, -1, -1, 4096, -1]
+Traceback (most recent call last):
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/runs/baseline_main_noh2d_autoload_20260702_113440/bootstrap.py", line 50, in <module>
+    exec(code, globs, globs)
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/test-spyre-scripts/test_flash.py", line 171, in <module>
+    attn_t_spyre = c_flash_spyre(
+                   ^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1038, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1053, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1037, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1798, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1570, in codegen_and_compile
+    compiled_module = graph.compile_to_module()
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2499, in compile_to_module
+    return self._compile_to_module()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2505, in _compile_to_module
+    self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
+                                                             ^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2437, in codegen
+    self._update_scheduler()
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/torch-spyre-main/torch_spyre/_inductor/patches.py", line 120, in _spyre_update_scheduler
+    _pre_scheduling_pass(self)
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/torch-spyre-main/torch_spyre/_inductor/passes.py", line 353, in __call__
+    pass_fn(graph)
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/torch-spyre-main/torch_spyre/_inductor/optimize_restickify.py", line 511, in optimize_restickify_locations
+    beam_global_min_cost(operations)
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/torch-spyre-main/torch_spyre/_inductor/optimize_restickify.py", line 483, in beam_global_min_cost
+    raise _no_feasible_layout_error(op)
+torch._inductor.exc.InductorError: NotImplementedError: buf10 (Pointwise): no mechanism to resolve stick incompatibility
+  Inputs:
+
+    buf4:  size=[1, 32, 4096]  stride=[131072, 4096, 1]  h_coords=[0, d0, d1]
+      STL 0:  device_size=[4096, 1, 1, 32, 64]  stride_map=[1, -1, -1, 4096, -1]  dtype=DataFormats.SEN169_FP16  d_coords=[d1, 0, 0, d0, 0]
+      STL 1:  device_size=[1, 1, 4096, 64]  stride_map=[-1, 262144, 1, 4096]  dtype=DataFormats.SEN169_FP16  d_coords=[0, 0, d1, d0]
+      STL 2:  device_size=[1, 64, 32, 64]  stride_map=[-1, 64, 4096, 1]  dtype=DataFormats.SEN169_FP16  d_coords=[0, floor(d1/64), d0, Mod(d1, 64)]
+      STL 3:  device_size=[4096, 1, 1, 32, 64]  stride_map=[1, -1, -1, 4096, -1]  dtype=DataFormats.SEN169_FP16  d_coords=[d1, 0, 0, d0, 0]
+
+    buf9:  size=[1, 32, 4096]  stride=[131072, 4096, 1]  h_coords=[0, d0, d1]
+      STL 0:  device_size=[4096, 1, 1, 32, 64]  stride_map=[1, -1, -1, 4096, -1]  dtype=DataFormats.SEN169_FP16  d_coords=[d1, 0, 0, d0, 0]
+
+  Output:  size=[1, 32, 4096]  stride=[131072, 4096, 1]  h_coords=[0, d0, d1]
+    STL 0:  device_size=[1, 1, 4096, 64]  stride_map=[-1, 262144, 1, 4096]  dtype=DataFormats.SEN169_FP16  d_coords=[0, 0, d1, d0]
+    STL 1:  device_size=[1, 64, 32, 64]  stride_map=[-1, 64, 4096, 1]  dtype=DataFormats.SEN169_FP16  d_coords=[0, floor(d1/64), d0, Mod(d1, 64)]
+
+  Problem:
+    buf4 STL 0 --> Out STL 0: No mechanism to gather elements from multiple sticks into single stick
+    buf4 STL 3 --> Out STL 0: No mechanism to gather elements from multiple sticks into single stick
+    buf4 STL 0 --> Out STL 1: No mechanism to gather elements from multiple sticks into single stick
+    buf4 STL 3 --> Out STL 1: No mechanism to gather elements from multiple sticks into single stick
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+
+Traceback (most recent call last):
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/runs/baseline_main_noh2d_autoload_20260702_113440/bootstrap.py", line 50, in <module>
+    exec(code, globs, globs)
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/test-spyre-scripts/test_flash.py", line 171, in <module>
+    attn_t_spyre = c_flash_spyre(
+                   ^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1038, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1053, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1037, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1798, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1570, in codegen_and_compile
+    compiled_module = graph.compile_to_module()
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2499, in compile_to_module
+    return self._compile_to_module()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2505, in _compile_to_module
+    self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
+                                                             ^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2437, in codegen
+    self._update_scheduler()
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/torch-spyre-main/torch_spyre/_inductor/patches.py", line 120, in _spyre_update_scheduler
+    _pre_scheduling_pass(self)
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/torch-spyre-main/torch_spyre/_inductor/passes.py", line 353, in __call__
+    pass_fn(graph)
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/torch-spyre-main/torch_spyre/_inductor/optimize_restickify.py", line 511, in optimize_restickify_locations
+    beam_global_min_cost(operations)
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/torch-spyre-main/torch_spyre/_inductor/optimize_restickify.py", line 483, in beam_global_min_cost
+    raise _no_feasible_layout_error(op)
+torch._inductor.exc.InductorError: NotImplementedError: buf10 (Pointwise): no mechanism to resolve stick incompatibility
+  Inputs:
+
+    buf4:  size=[1, 32, 4096]  stride=[131072, 4096, 1]  h_coords=[0, d0, d1]
+      STL 0:  device_size=[4096, 1, 1, 32, 64]  stride_map=[1, -1, -1, 4096, -1]  dtype=DataFormats.SEN169_FP16  d_coords=[d1, 0, 0, d0, 0]
+      STL 1:  device_size=[1, 1, 4096, 64]  stride_map=[-1, 262144, 1, 4096]  dtype=DataFormats.SEN169_FP16  d_coords=[0, 0, d1, d0]
+      STL 2:  device_size=[1, 64, 32, 64]  stride_map=[-1, 64, 4096, 1]  dtype=DataFormats.SEN169_FP16  d_coords=[0, floor(d1/64), d0, Mod(d1, 64)]
+      STL 3:  device_size=[4096, 1, 1, 32, 64]  stride_map=[1, -1, -1, 4096, -1]  dtype=DataFormats.SEN169_FP16  d_coords=[d1, 0, 0, d0, 0]
+
+    buf9:  size=[1, 32, 4096]  stride=[131072, 4096, 1]  h_coords=[0, d0, d1]
+      STL 0:  device_size=[4096, 1, 1, 32, 64]  stride_map=[1, -1, -1, 4096, -1]  dtype=DataFormats.SEN169_FP16  d_coords=[d1, 0, 0, d0, 0]
+
+  Output:  size=[1, 32, 4096]  stride=[131072, 4096, 1]  h_coords=[0, d0, d1]
+    STL 0:  device_size=[1, 1, 4096, 64]  stride_map=[-1, 262144, 1, 4096]  dtype=DataFormats.SEN169_FP16  d_coords=[0, 0, d1, d0]
+    STL 1:  device_size=[1, 64, 32, 64]  stride_map=[-1, 64, 4096, 1]  dtype=DataFormats.SEN169_FP16  d_coords=[0, floor(d1/64), d0, Mod(d1, 64)]
+
+  Problem:
+    buf4 STL 0 --> Out STL 0: No mechanism to gather elements from multiple sticks into single stick
+    buf4 STL 3 --> Out STL 0: No mechanism to gather elements from multiple sticks into single stick
+    buf4 STL 0 --> Out STL 1: No mechanism to gather elements from multiple sticks into single stick
+    buf4 STL 3 --> Out STL 1: No mechanism to gather elements from multiple sticks into single stick
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"

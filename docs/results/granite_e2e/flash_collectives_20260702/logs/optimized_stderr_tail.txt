@@ -1,0 +1,199 @@
+[DEBUG] [spyre.inductor.codegen.superdsc] symbol mapping: c0 -> mb, c1 -> x, c2 -> out
+[DEBUG] [spyre.inductor.codegen.superdsc] SDSCSpec(
+  opfunc=sum
+  exec_unit=sfp
+  data_format=SEN169_FP16
+  num_inputs=2
+  iteration_space=[mb=4, x=1024, out=4096]
+  work_slices=[mb=4, x=8, out=1]
+  core_id_to_work_slice=[mb=Mod(core_id, 4), x=Mod(floor(core_id/4), 8), out=0]
+  layouts=[
+    OUTPUT: dim_order=[mb, out, x], stick_dim_order=out, stick_size=64
+  ]
+  args=[
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, out, x], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, out=1, x=1],
+    strides=[mb=256, out=16384, x=16777216],
+    offsets=[mb=0, out=0, x=0],
+    max_dim_sizes=[mb=-1, out=-1, x=-1],
+    allocation=[lx=0],
+    start_address=0
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, x, out], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, x=1, out=-2],
+    strides=[mb=256, x=262144, out=262144],
+    offsets=[mb=0, x=0, out=0],
+    max_dim_sizes=[mb=-1, x=-1, out=-1],
+    allocation=[lx=1064960],
+    start_address=1064960
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/runs/optimized_collectives_noh2d_pyldfix_latest_20260702_115435/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1__n0p35za/sdsc_542.json
+[DEBUG] [spyre.inductor.codegen.superdsc] symbol mapping: c0 -> mb, c1 -> out
+[DEBUG] [spyre.inductor.codegen.superdsc] SDSCSpec(
+  opfunc=add
+  exec_unit=sfp
+  data_format=SEN169_FP16
+  num_inputs=2
+  iteration_space=[mb=4, out=1024, y=64]
+  work_slices=[mb=4, out=8, y=1]
+  core_id_to_work_slice=[mb=Mod(core_id, 4), out=Mod(floor(core_id/4), 8), y=0]
+  layouts=[
+    OUTPUT: dim_order=[mb, out, y], stick_dim_order=y, stick_size=64
+  ]
+  args=[
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, out, y], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, out=1, y=1],
+    strides=[mb=256, out=262144, y=262144],
+    offsets=[mb=0, out=0, y=0],
+    max_dim_sizes=[mb=-1, out=-1, y=-1],
+    allocation=[lx=1048576],
+    start_address=1048576
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, out, y], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, out=1, y=1],
+    strides=[mb=256, out=262144, y=262144],
+    offsets=[mb=0, out=0, y=0],
+    max_dim_sizes=[mb=-1, out=-1, y=-1],
+    allocation=[lx=1064960],
+    start_address=1064960
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, out, y], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, out=1, y=1],
+    strides=[mb=256, out=2097152, y=2097152],
+    offsets=[mb=0, out=0, y=0],
+    max_dim_sizes=[mb=-1, out=-1, y=-1],
+    allocation=[pool=130027008],
+    start_address=130027008
+    backGap={mb: 28}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/runs/optimized_collectives_noh2d_pyldfix_latest_20260702_115435/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1__n0p35za/sdsc_543.json
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/runs/optimized_collectives_noh2d_pyldfix_latest_20260702_115435/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1__n0p35za/bundle.mlir
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Scheduler failed to find a suitable op mapping for sdsc: 2_ReStickifyOpLx, file /home/adnan/codex-isolated/dldsc_collectives_validate_20260702_112302/deeptools/dxp/dxp.cpp line 113
+Traceback (most recent call last):
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/runs/optimized_collectives_noh2d_pyldfix_latest_20260702_115435/bootstrap.py", line 50, in <module>
+    exec(code, globs, globs)
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/test-spyre-scripts/test_flash.py", line 171, in <module>
+    attn_t_spyre = c_flash_spyre(
+                   ^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1038, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1053, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1037, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1798, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1570, in codegen_and_compile
+    compiled_module = graph.compile_to_module()
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2499, in compile_to_module
+    return self._compile_to_module()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2509, in _compile_to_module
+    mod = self._compile_to_module_lines(wrapper_code)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2584, in _compile_to_module_lines
+    mod = PyCodeCache.load_by_key_path(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/codecache.py", line 3764, in load_by_key_path
+    mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/runtime/compile_tasks.py", line 35, in _reload_python_module
+    exec(code, mod.__dict__, mod.__dict__)
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/runs/optimized_collectives_noh2d_pyldfix_latest_20260702_115435/cache/v2/cv2eoax5gxga6hrxmo7kdrkrd6hojrlee45kzrrh2c5obyutjnt6.py", line 237, in <module>
+    sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1 = async_compile.sdsc('sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1',
+                                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/torch-spyre-collectives/torch_spyre/execution/async_compile.py", line 63, in sdsc
+    subprocess.run(["dxp_standalone", "--bundle", "-d", output_dir], check=True)
+  File "/usr/lib64/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/runs/optimized_collectives_noh2d_pyldfix_latest_20260702_115435/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1__n0p35za']' died with <Signals.SIGABRT: 6>.
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+
+Traceback (most recent call last):
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/runs/optimized_collectives_noh2d_pyldfix_latest_20260702_115435/bootstrap.py", line 50, in <module>
+    exec(code, globs, globs)
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/test-spyre-scripts/test_flash.py", line 171, in <module>
+    attn_t_spyre = c_flash_spyre(
+                   ^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1038, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1053, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1037, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1798, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1570, in codegen_and_compile
+    compiled_module = graph.compile_to_module()
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2499, in compile_to_module
+    return self._compile_to_module()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2509, in _compile_to_module
+    mod = self._compile_to_module_lines(wrapper_code)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2584, in _compile_to_module_lines
+    mod = PyCodeCache.load_by_key_path(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/codecache.py", line 3764, in load_by_key_path
+    mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/runtime/compile_tasks.py", line 35, in _reload_python_module
+    exec(code, mod.__dict__, mod.__dict__)
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/runs/optimized_collectives_noh2d_pyldfix_latest_20260702_115435/cache/v2/cv2eoax5gxga6hrxmo7kdrkrd6hojrlee45kzrrh2c5obyutjnt6.py", line 237, in <module>
+    sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1 = async_compile.sdsc('sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1',
+                                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/repos/torch-spyre-collectives/torch_spyre/execution/async_compile.py", line 63, in sdsc
+    subprocess.run(["dxp_standalone", "--bundle", "-d", output_dir], check=True)
+  File "/usr/lib64/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/home/adnan/codex-isolated/dldsc_flash_attention_20260702_112409/runs/optimized_collectives_noh2d_pyldfix_latest_20260702_115435/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1__n0p35za']' died with <Signals.SIGABRT: 6>.
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"

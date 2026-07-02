@@ -1,0 +1,43 @@
+[DEBUG] [spyre.inductor.lx_relayout] planned 8 LX relayout edge(s)
+[DEBUG] [spyre.inductor.lx_relayout] planned 8 LX relayout edge(s)
+[DEBUG] [spyre.inductor.scratchpad.plan_solver] t=13: 1184 KB  [buf5_32KB@0x0, buf27_128KB@0x28000, __spyre_lx_relayout_reserve__:buf7:buf5_1024KB@0x48000]
+[DEBUG] [spyre.inductor.scratchpad.plan_solver] t=16: 1552 KB  [buf8_1024KB@0x0, buf9_16KB@0x100000, __spyre_lx_relayout_reserve__:buf10:buf4_512KB@0x104000]
+[DEBUG] [spyre.inductor.scratchpad.plan_solver] t=17: 1552 KB  [buf8_1024KB@0x0, buf11_16KB@0x100000, __spyre_lx_relayout_reserve__:buf11:buf4_512KB@0x104000]
+[DEBUG] [spyre.inductor.scratchpad.plan_solver] t=19: 1584 KB  [buf8_1024KB@0x0, buf12_16KB@0x100000, buf13_32KB@0x104000, __spyre_lx_relayout_reserve__:buf13:buf12_512KB@0x10c000]
+[DEBUG] [spyre.inductor.scratchpad.plan_solver] t=20: 2608 KB  [buf8_1024KB@0x0, buf12_16KB@0x100000, buf13_32KB@0x104000, buf14_1024KB@0x0, __spyre_lx_relayout_reserve__:buf14:buf10_512KB@0x10c000]
+[DEBUG] [spyre.inductor.scratchpad.plan_solver] t=24: 1568 KB  [buf12_16KB@0x100000, buf15_1024KB@0x0, buf21_16KB@0x100000, __spyre_lx_relayout_reserve__:buf21:buf20_512KB@0x104000]
+[DEBUG] [spyre.inductor.spyre_kernel] op_spec: ReStickifyOpLx, is_reduction=False, iteration_space={c0: (4, 4), c1: (4096, 8), c2: (128, 1)}, op_info={}
+[DEBUG] [spyre.inductor.spyre_kernel] op_spec: batchmatmul, is_reduction=True, iteration_space={c0: (4, 4), c1: (1024, 8), c2: (4096, 1), c3: (128, 1)}, op_info={'lx_relayout_classifications': [{'source_name': 'buf27', 'producer_name': 'buf27', 'consumer_name': 'buf7', 'kind': 'layout_allgather_restickify', 'producer_core_count': 32, 'consumer_core_count': 32, 'producer_core_id_to_device_slice': {'0': {'0': 0, '2': 0}, '1': {'0': 1, '2': 0}, '2': {'0': 2, '2': 0}, '3': {'0': 3, '2': 0}, '4': {'0': 0, '2': 1}, '5': {'0': 1, '2': 1}, '6': {'0': 2, '2': 1}, '7': {'0': 3, '2': 1}, '8': {'0': 0, '2': 2}, '9': {'0': 1, '2': 2}, '10': {'0': 2, '2': 2}, '11': {'0': 3, '2': 2}, '12': {'0': 0, '2': 3}, '13': {'0': 1, '2': 3}, '14': {'0': 2, '2': 3}, '15': {'0': 3, '2': 3}, '16': {'0': 0, '2': 4}, '17': {'0': 1, '2': 4}, '18': {'0': 2, '2': 4}, '19': {'0': 3, '2': 4}, '20': {'0': 0, '2': 5}, '21': {'0': 1, '2': 5}, '22': {'0': 2, '2': 5}, '23': {'0': 3, '2': 5}, '24': {'0': 0, '2': 6}, '25': {'0': 1, '2': 6}, '26': {'0': 2, '2': 6}, '27': {'0': 3, '2': 6}, '28': {'0': 0, '2': 7}, '29': {'0': 1, '2': 7}, '30': {'0': 2, '2': 7}, '31': {'0': 3, '2': 7}}, 'producer_work_slice_dims': {'0': 4, '2': 8}, 'consumer_work_slice_dims': {'0': 4}, 'consumer_core_id_to_device_slice': {'0': {'0': 0}, '1': {'0': 1}, '2': {'0': 2}, '3': {'0': 3}, '4': {'0': 0}, '5': {'0': 1}, '6': {'0': 2}, '7': {'0': 3}, '8': {'0': 0}, '9': {'0': 1}, '10': {'0': 2}, '11': {'0': 3}, '12': {'0': 0}, '13': {'0': 1}, '14': {'0': 2}, '15': {'0': 3}, '16': {'0': 0}, '17': {'0': 1}, '18': {'0': 2}, '19': {'0': 3}, '20': {'0': 0}, '21': {'0': 1}, '22': {'0': 2}, '23': {'0': 3}, '24': {'0': 0}, '25': {'0': 1}, '26': {'0': 2}, '27': {'0': 3}, '28': {'0': 0}, '29': {'0': 1}, '30': {'0': 2}, '31': {'0': 3}}, 'read_index': 1, 'realized': False, 'communication_class': 'all_gather', 'communication_pattern': 'layout_allgather_restickify', 'max_fanout': 8, 'max_fanin': 8, 'transfer_count': 256, 'requires_staged_realization': True, 'unsupported_reason': 'staged layout all-gather restickify metadata only', 'classification': 'layout_allgather_restickify', 'producer_op': 'mul', 'restickify_op': 'ReStickifyOpLx', 'consumer_op': 'batchmatmul', 'restickify_work_slice_dims': {'0': 4, '2': 8}, 'producer_layout': {'layoutDimOrder_': ['out', 'x', 'mb'], 'stickDimOrder_': ['out']}, 'restickify_kernel_layout': {'layoutDimOrder_': ['x', 'out', 'mb'], 'stickDimOrder_': ['x']}, 'consumer_kernel_layout': {'layoutDimOrder_': ['out', 'in', 'x'], 'stickDimOrder_': ['out']}, 'dimension_rename': {'restickify.x': 'batchmatmul.out', 'restickify.out': 'batchmatmul.in', 'restickify.mb': 'batchmatmul.x'}}]}
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  opfunc=ReStickifyOpLx
+  what():  DtException: Scheduler failed to find a suitable op mapping for sdsc: 2_ReStickifyOpLx, file /home/adnan/codex-isolated/dldsc_collectives_validate_20260702_112302/deeptools/dxp/dxp.cpp line 113
