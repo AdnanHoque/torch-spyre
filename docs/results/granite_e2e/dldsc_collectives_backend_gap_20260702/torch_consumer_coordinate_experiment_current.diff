@@ -1,0 +1,109 @@
+diff --git a/torch_spyre/_inductor/codegen/superdsc.py b/torch_spyre/_inductor/codegen/superdsc.py
+index 911b73f..11befb6 100644
+--- a/torch_spyre/_inductor/codegen/superdsc.py
++++ b/torch_spyre/_inductor/codegen/superdsc.py
+@@ -301,10 +301,26 @@ def _map_lx_residency_to_sdsc_dims(
+     if arg.lx_residency_core_id_to_wk_slice is None:
+         return None
+ 
++    layout_dim_labels = [str(dim) for dim in dim_order]
++    has_labeled_dims = any(
++        not str(dim).isdigit()
++        for per_dim in arg.lx_residency_core_id_to_wk_slice.values()
++        for dim in per_dim
++    )
++    if has_labeled_dims:
++        result: dict[str, dict[str, int]] = {}
++        for core, per_dim in arg.lx_residency_core_id_to_wk_slice.items():
++            mapped = {dim: 0 for dim in layout_dim_labels}
++            for dim, slot in per_dim.items():
++                if str(dim) not in mapped:
++                    return None
++                mapped[str(dim)] = int(slot)
++            result[str(core)] = mapped
++        return result
++
+     device_dim_to_symbol = _device_dim_to_symbol(
+         arg, symbol_mapping, dim_order, stick_dim
+     )
+-    layout_dim_labels = [str(dim) for dim in dim_order]
+     result: dict[str, dict[str, int]] = {}
+     for core, per_device_dim in arg.lx_residency_core_id_to_wk_slice.items():
+         per_dim = {dim: 0 for dim in layout_dim_labels}
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+index 09194fb..0b4f5ff 100644
+--- a/torch_spyre/_inductor/lx_relayout.py
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -67,9 +67,10 @@ class LXRelayoutPlan:
+     kind: str
+     producer_core_count: int
+     consumer_core_count: int
+-    producer_core_id_to_device_slice: dict[str, dict[str, int]]
+     producer_work_slice_dims: dict[str, int]
+     consumer_work_slice_dims: dict[str, int]
++    producer_core_id_to_device_slice: dict[str, dict[str, int]]
++    producer_core_id_to_consumer_slice: dict[str, dict[str, int]] | None = None
+     consumer_core_id_to_device_slice: dict[str, dict[str, int]] | None = None
+     read_index: int | None = None
+     realized: bool = True
+@@ -107,6 +108,19 @@ def _int_keyed_dims(value: dict[str, int] | dict[int, int]) -> dict[int, int]:
+     return {int(dim): int(split) for dim, split in value.items()}
+ 
+ 
++def _layout_allgather_restickify_consumer_slices(
++    producer_core_id_to_device_slice: dict[str, dict[str, int]],
++) -> dict[str, dict[str, int]]:
++    """Map the flash restickify producer shards into consumer KERNEL dims."""
++
++    result: dict[str, dict[str, int]] = {}
++    for core, producer_slice in producer_core_id_to_device_slice.items():
++        group = int(producer_slice.get("0", producer_slice.get("mb", 0)))
++        producer_chunk = int(producer_slice.get("2", producer_slice.get("x", 0)))
++        result[str(core)] = {"out": producer_chunk, "in": 0, "x": group}
++    return result
++
++
+ def _intervals_overlap(
+     a_slot: int, a_split: int, b_slot: int, b_split: int
+ ) -> bool:
+@@ -481,6 +495,11 @@ def plan_lx_relayouts(
+                         producer_core_count=producer_core_count,
+                         consumer_core_count=consumer_core_count,
+                         producer_core_id_to_device_slice=producer_core_slices,
++                        producer_core_id_to_consumer_slice=(
++                            _layout_allgather_restickify_consumer_slices(
++                                producer_core_slices
++                            )
++                        ),
+                         producer_work_slice_dims=producer_work_slice_dims,
+                         consumer_work_slice_dims=consumer_work_slice_dims,
+                         consumer_core_id_to_device_slice=consumer_core_slices,
+diff --git a/torch_spyre/_inductor/op_spec.py b/torch_spyre/_inductor/op_spec.py
+index 1a9dc42..7bcf877 100644
+--- a/torch_spyre/_inductor/op_spec.py
++++ b/torch_spyre/_inductor/op_spec.py
+@@ -52,8 +52,9 @@ class TensorArg:
+         allocation: If present, the offset in scratchpad memory assigned to the Tensor.
+         lx_residency_core_id_to_wk_slice: Optional producer tensor distribution
+                 for an LX input whose physical ownership differs from this op's
+-                compute distribution. Keys are device-dim indices at this stage;
+-                SDSC codegen maps them to primary-dimension labels.
++                compute distribution. Keys are usually device-dim indices at this
++                stage; staged relayout contracts may provide SDSC dimension
++                labels directly.
+     """
+ 
+     is_input: bool
+diff --git a/torch_spyre/_inductor/spyre_kernel.py b/torch_spyre/_inductor/spyre_kernel.py
+index 834788c..61493e8 100644
+--- a/torch_spyre/_inductor/spyre_kernel.py
++++ b/torch_spyre/_inductor/spyre_kernel.py
+@@ -583,6 +583,8 @@ class SpyreKernel(Kernel[CSEVariable]):
+             )
+             if isinstance(relayout_plan, dict):
+                 tensor_arg.lx_residency_core_id_to_wk_slice = relayout_plan.get(
++                    "producer_core_id_to_consumer_slice"
++                ) or relayout_plan.get(
+                     "producer_core_id_to_device_slice"
+                 )
+         if (
