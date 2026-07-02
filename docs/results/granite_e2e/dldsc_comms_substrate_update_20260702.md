@@ -58,33 +58,34 @@ Backend support status:
 
 ## Flash Runtime Status
 
-Runtime validation on adnan-clc-spyre-dev-pf did not yet demonstrate flash spill removal.
+Runtime validation on adnan-clc-spyre-dev-pf now has two useful checkpoints.
 
-Latest repo test_flash.py failed before SDSC emission with:
+First, latest repo test_flash.py originally failed before SDSC emission with:
 
 - NotImplementedError: buf10 (Pointwise): no mechanism to resolve stick incompatibility
 - No mechanism to gather elements from multiple sticks into single stick
 
-The pod-local all-gather flash probe also failed before SDSC emission with:
+The zero-stick pointwise candidate patch gets past that frontend failure and emits SDSCs.
 
-- Unexpected stick expression 4*(Mod(d4, 16))
+Second, with full Torch LX planning, SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY=1, and the split DXP wrapper, the flash activation edge changes shape in emitted SDSCs:
 
-Existing replay artifacts show the planner saw candidates, but persisted SDSCs still had no LX residency metadata/classification and removed zero ReStickifyOpHBM rows. The remaining flash rows are still the activation path:
+- Before: 32 ReStickifyOpHBM rows, 0 layout_allgather_restickify classifications.
+- After: 0 ReStickifyOpHBM rows, 32 ReStickifyOpLx rows, and 32 layout_allgather_restickify classifications.
+- Each classification records transfer_count=256, max_fanout=8, and max_fanin=8.
 
-mul -> ReStickifyOpHBM -> batchmatmul
+Representative artifacts are in docs/results/granite_e2e/flash_contract_20260702.
 
-This is a layout/restickify plus grouped all-gather handoff, not the simple scatter class.
+The run is still not end-to-end correct. DXP aborts with: Scheduler failed to find a suitable op mapping for sdsc: 2_ReStickifyOpLx. This is now the backend physical-lowering gap after the frontend contract is visible.
 
 ## Interpretation
 
-The backend copy-movement substrate is ahead of the current frontend e2e path for scatter/gather/multicast-style movement. The next useful implementation work is getting Torch to emit the DLDSC contract for the flash/restickify edge and survive stick-layout codegen to SDSC. The narrow flash layout-allgather-restickify path still needs full physical lowering after the contract is emitted.
+The backend copy-movement substrate is ahead of the current frontend e2e path for scatter/gather/multicast-style movement. Torch can now emit the narrow flash layout-allgather-restickify contract into SDSC, including ReStickifyOpLx rows and batchmatmul classifications. The remaining narrow flash gap is full DXP/DSM physical lowering/scheduling for that ReStickifyOpLx plus grouped all-gather contract.
 
 The current branch now has the classification vocabulary needed for cost-model and artifact analysis. It does not yet prove that flash HBM round trips are removed.
 
 ## Next Tasks
 
-1. Fix the flash frontend pointwise stick-choice issue so latest test_flash.py reaches SDSC emission. A minimal patch now keeps the zero-stick candidate available for mixed zero/non-zero multi-arg pointwise joins.
-2. Preserve staged relayout metadata through the allocation/codegen path and confirm lxRelayoutClassifications_ appears in the batchmatmul SDSC.
-3. Make the activation mul -> restickify -> batchmatmul handoff emit an LX-resident ReStickifyOpLx/layout-all-gather contract instead of an HBM ReStickifyOpHBM row.
-4. Replay the emitted SDSC through current Deeptools and confirm no DXP/runtime failure.
-5. Only then rerun flash/granite profiling and claim HBM spill removal or speedup.
+1. Wire Deeptools physical lowering/scheduling for the emitted ReStickifyOpLx plus layout_allgather_restickify contract.
+2. Replay the emitted SDSC through current Deeptools and confirm no DXP/runtime failure.
+3. Then rerun flash/granite profiling and claim HBM spill removal or speedup only after correctness and profiler traces pass.
+4. Separately address the older pod-local all-gather probe failure: Unexpected stick expression 4*(Mod(d4, 16)).

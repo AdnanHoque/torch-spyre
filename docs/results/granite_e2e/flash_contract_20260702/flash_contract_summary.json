@@ -1,0 +1,408 @@
+{
+  "before_no_layout_contract": {
+    "run": "/home/adnan/codex-isolated/dldsc_runtime_validation_20260702_075517/runs/latest_after_zero_stick_optimized_20260702_084153",
+    "returncode": 0,
+    "wall_seconds": 435,
+    "sdsc_count": 550,
+    "top_ops": [
+      [
+        "mul",
+        128
+      ],
+      [
+        "add",
+        96
+      ],
+      [
+        "sub",
+        64
+      ],
+      [
+        "batchmatmul",
+        64
+      ],
+      [
+        "exp",
+        64
+      ],
+      [
+        "max",
+        34
+      ],
+      [
+        "sum",
+        32
+      ],
+      [
+        "ReStickifyOpHBM",
+        32
+      ],
+      [
+        "maximum",
+        32
+      ],
+      [
+        "identity",
+        3
+      ],
+      [
+        "realdiv",
+        1
+      ]
+    ],
+    "restickify_hbm": 32,
+    "restickify_lx": 0,
+    "classification_count": 0,
+    "first_classification": null,
+    "lx_residency_entries": 0,
+    "failure_tail": "    max_dim_sizes=[mb=-1, out=-1, x=-1],\n    allocation=[pool=117440512],\n    start_address=117440512\n    backGap={}\n    is_index_tensor=False\n    related_value_tensor_idx=-1\n    lx_residency_core_id_to_wk_slice=None\n  )\n  SDSCArgs(\n    layout=OUTPUT,\n    dim_order=[mb, x, out], \n    data_format=SEN169_FP16,\n    scales=[mb=1, x=1, out=-2],\n    strides=[mb=2048, x=8388608, out=8388608],\n    offsets=[mb=0, x=0, out=0],\n    max_dim_sizes=[mb=-1, x=-1, out=-1],\n    allocation=[pool=150994944],\n    start_address=150994944\n    backGap={}\n    is_index_tensor=False\n    related_value_tensor_idx=-1\n    lx_residency_core_id_to_wk_slice=None\n  )\n  SDSCArgs(\n    layout=OUTPUT,\n    dim_order=[mb, out, x], \n    data_format=SEN169_FP16,\n    scales=[mb=1, out=1, x=1],\n    strides=[mb=2048, out=4096, x=16777216],\n    offsets=[mb=0, out=0, x=0],\n    max_dim_sizes=[mb=-1, out=-1, x=-1],\n    allocation=[hbm=17179869184],\n    start_address=17179869184\n    backGap={}\n    is_index_tensor=False\n    related_value_tensor_idx=-1\n    lx_residency_core_id_to_wk_slice=None\n  )\n  ]\n)\n[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/dldsc_runtime_validation_20260702_075517/runs/latest_after_zero_stick_optimized_20260702_084153/cache/inductor-spyre/sdsc_fused_div_unsqueeze_2_6h1txmq8/sdsc_0.json\n[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/dldsc_runtime_validation_20260702_075517/runs/latest_after_zero_stick_optimized_20260702_084153/cache/inductor-spyre/sdsc_fused_div_unsqueeze_2_6h1txmq8/bundle.mlir\n[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused_amax_full_zeros_zeros_like_0 /home/adnan/codex-isolated/dldsc_runtime_validation_20260702_075517/runs/latest_after_zero_stick_optimized_20260702_084153/cache/inductor-spyre/sdsc_fused_amax_full_zeros_zeros_like_0_ktp78c9x\n[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1 /home/adnan/codex-isolated/dldsc_runtime_validation_20260702_075517/runs/latest_after_zero_stick_optimized_20260702_084153/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_ybaurku7\n[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused_div_unsqueeze_2 /home/adnan/codex-isolated/dldsc_runtime_validation_20260702_075517/runs/latest_after_zero_stick_optimized_20260702_084153/cache/inductor-spyre/sdsc_fused_div_unsqueeze_2_6h1txmq8"
+  },
+  "after_layout_contract_split_dxp": {
+    "run": "/home/adnan/codex-isolated/dldsc_runtime_validation_20260702_075517/runs/latest_after_zero_stick_split_lx_layout_allgather_20260702_085442",
+    "returncode": 1,
+    "wall_seconds": 106,
+    "sdsc_count": 549,
+    "top_ops": [
+      [
+        "mul",
+        128
+      ],
+      [
+        "add",
+        96
+      ],
+      [
+        "sub",
+        64
+      ],
+      [
+        "batchmatmul",
+        64
+      ],
+      [
+        "exp",
+        64
+      ],
+      [
+        "max",
+        34
+      ],
+      [
+        "sum",
+        32
+      ],
+      [
+        "ReStickifyOpLx",
+        32
+      ],
+      [
+        "maximum",
+        32
+      ],
+      [
+        "identity",
+        3
+      ]
+    ],
+    "restickify_hbm": 0,
+    "restickify_lx": 32,
+    "classification_count": 32,
+    "first_classification": {
+      "source_name": "buf27",
+      "producer_name": "buf27",
+      "consumer_name": "buf7",
+      "kind": "layout_allgather_restickify",
+      "producer_core_count": 32,
+      "consumer_core_count": 32,
+      "producer_core_id_to_device_slice": {
+        "0": {
+          "0": 0,
+          "2": 0
+        },
+        "1": {
+          "0": 1,
+          "2": 0
+        },
+        "2": {
+          "0": 2,
+          "2": 0
+        },
+        "3": {
+          "0": 3,
+          "2": 0
+        },
+        "4": {
+          "0": 0,
+          "2": 1
+        },
+        "5": {
+          "0": 1,
+          "2": 1
+        },
+        "6": {
+          "0": 2,
+          "2": 1
+        },
+        "7": {
+          "0": 3,
+          "2": 1
+        },
+        "8": {
+          "0": 0,
+          "2": 2
+        },
+        "9": {
+          "0": 1,
+          "2": 2
+        },
+        "10": {
+          "0": 2,
+          "2": 2
+        },
+        "11": {
+          "0": 3,
+          "2": 2
+        },
+        "12": {
+          "0": 0,
+          "2": 3
+        },
+        "13": {
+          "0": 1,
+          "2": 3
+        },
+        "14": {
+          "0": 2,
+          "2": 3
+        },
+        "15": {
+          "0": 3,
+          "2": 3
+        },
+        "16": {
+          "0": 0,
+          "2": 4
+        },
+        "17": {
+          "0": 1,
+          "2": 4
+        },
+        "18": {
+          "0": 2,
+          "2": 4
+        },
+        "19": {
+          "0": 3,
+          "2": 4
+        },
+        "20": {
+          "0": 0,
+          "2": 5
+        },
+        "21": {
+          "0": 1,
+          "2": 5
+        },
+        "22": {
+          "0": 2,
+          "2": 5
+        },
+        "23": {
+          "0": 3,
+          "2": 5
+        },
+        "24": {
+          "0": 0,
+          "2": 6
+        },
+        "25": {
+          "0": 1,
+          "2": 6
+        },
+        "26": {
+          "0": 2,
+          "2": 6
+        },
+        "27": {
+          "0": 3,
+          "2": 6
+        },
+        "28": {
+          "0": 0,
+          "2": 7
+        },
+        "29": {
+          "0": 1,
+          "2": 7
+        },
+        "30": {
+          "0": 2,
+          "2": 7
+        },
+        "31": {
+          "0": 3,
+          "2": 7
+        }
+      },
+      "producer_work_slice_dims": {
+        "0": 4,
+        "2": 8
+      },
+      "consumer_work_slice_dims": {
+        "0": 4
+      },
+      "consumer_core_id_to_device_slice": {
+        "0": {
+          "0": 0
+        },
+        "1": {
+          "0": 1
+        },
+        "2": {
+          "0": 2
+        },
+        "3": {
+          "0": 3
+        },
+        "4": {
+          "0": 0
+        },
+        "5": {
+          "0": 1
+        },
+        "6": {
+          "0": 2
+        },
+        "7": {
+          "0": 3
+        },
+        "8": {
+          "0": 0
+        },
+        "9": {
+          "0": 1
+        },
+        "10": {
+          "0": 2
+        },
+        "11": {
+          "0": 3
+        },
+        "12": {
+          "0": 0
+        },
+        "13": {
+          "0": 1
+        },
+        "14": {
+          "0": 2
+        },
+        "15": {
+          "0": 3
+        },
+        "16": {
+          "0": 0
+        },
+        "17": {
+          "0": 1
+        },
+        "18": {
+          "0": 2
+        },
+        "19": {
+          "0": 3
+        },
+        "20": {
+          "0": 0
+        },
+        "21": {
+          "0": 1
+        },
+        "22": {
+          "0": 2
+        },
+        "23": {
+          "0": 3
+        },
+        "24": {
+          "0": 0
+        },
+        "25": {
+          "0": 1
+        },
+        "26": {
+          "0": 2
+        },
+        "27": {
+          "0": 3
+        },
+        "28": {
+          "0": 0
+        },
+        "29": {
+          "0": 1
+        },
+        "30": {
+          "0": 2
+        },
+        "31": {
+          "0": 3
+        }
+      },
+      "read_index": 1,
+      "realized": false,
+      "communication_class": "all_gather",
+      "communication_pattern": "layout_allgather_restickify",
+      "max_fanout": 8,
+      "max_fanin": 8,
+      "transfer_count": 256,
+      "requires_staged_realization": true,
+      "unsupported_reason": "staged layout all-gather restickify metadata only",
+      "classification": "layout_allgather_restickify",
+      "producer_op": "mul",
+      "restickify_op": "ReStickifyOpLx",
+      "consumer_op": "batchmatmul",
+      "restickify_work_slice_dims": {
+        "0": 4,
+        "2": 8
+      },
+      "producer_layout": {
+        "layoutDimOrder_": [
+          "out",
+          "x",
+          "mb"
+        ],
+        "stickDimOrder_": [
+          "out"
+        ]
+      },
+      "restickify_kernel_layout": {
+        "layoutDimOrder_": [
+          "x",
+          "out",
+          "mb"
+        ],
+        "stickDimOrder_": [
+          "x"
+        ]
+      },
+      "consumer_kernel_layout": {
+        "layoutDimOrder_": [
+          "out",
+          "in",
+          "x"
+        ],
+        "stickDimOrder_": [
+          "out"
+        ]
+      },
+      "dimension_rename": {
+        "restickify.x": "batchmatmul.out",
+        "restickify.out": "batchmatmul.in",
+        "restickify.mb": "batchmatmul.x"
+      }
+    },
+    "lx_residency_entries": 32,
+    "failure_tail": "Traceback (most recent call last):\n  File \"/home/adnan/codex-isolated/dldsc_runtime_validation_20260702_075517/runs/latest_after_zero_stick_split_lx_layout_allgather_20260702_085442/bootstrap.py\", line 37, in <module>\n    exec(code, globs, globs)\n  File \"/home/adnan/codex-isolated/dldsc_runtime_validation_20260702_075517/repos/test-spyre-scripts/test_flash.py\", line 171, in <module>\n    attn_t_spyre = c_flash_spyre(\n                   ^^^^^^^^^^^^^^\n  File \"/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py\", line 1038, in compile_wrapper\n    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py\", line 1053, in _compile_fx_inner\n    raise InductorError(e, currentframe()).with_traceback(\n  File \"/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py\", line 1037, in _compile_fx_inner\n    mb_compiled_graph = fx_codegen_and_compile(\n                        ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py\", line 1798, in fx_codegen_and_compile\n    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py\", line 1570, in codegen_and_compile\n    compiled_module = graph.compile_to_module()\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py\", line 2499, in compile_to_module\n    return self._compile_to_module()\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py\", line 2509, in _compile_to_module\n    mod = self._compile_to_module_lines(wrapper_code)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py\", line 2584, in _compile_to_module_lines\n    mod = PyCodeCache.load_by_key_path(\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/codecache.py\", line 3764, in load_by_key_path\n    mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/runtime/compile_tasks.py\", line 35, in _reload_python_module\n    exec(code, mod.__dict__, mod.__dict__)\n  File \"/home/adnan/codex-isolated/dldsc_runtime_validation_20260702_075517/runs/latest_after_zero_stick_split_lx_layout_allgather_20260702_085442/cache/v2/cv2eoax5gxga6hrxmo7kdrkrd6hojrlee45kzrrh2c5obyutjnt6.py\", line 237, in <module>\n    sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1 = async_compile.sdsc('sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1',\n                                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan/codex-isolated/dldsc_runtime_path_20260702_074814/torch-spyre/torch_spyre/execution/async_compile.py\", line 63, in sdsc\n    subprocess.run([\"dxp_standalone\", \"--bundle\", \"-d\", output_dir], check=True)\n  File \"/usr/lib64/python3.12/subprocess.py\", line 571, in run\n    raise CalledProcessError(retcode, process.args,\ntorch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/home/adnan/codex-isolated/dldsc_runtime_validation_20260702_075517/runs/latest_after_zero_stick_split_lx_layout_allgather_20260702_085442/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_ihw4zzb8']' died with <Signals.SIGABRT: 6>.\n\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS=\"+dynamo\"\n"
+  }
+}
