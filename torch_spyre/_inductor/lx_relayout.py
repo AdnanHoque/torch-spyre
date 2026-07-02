@@ -67,13 +67,126 @@ class LXRelayoutPlan:
     producer_core_id_to_device_slice: dict[str, dict[str, int]]
     producer_work_slice_dims: dict[str, int]
     consumer_work_slice_dims: dict[str, int]
+    consumer_core_id_to_device_slice: dict[str, dict[str, int]] | None = None
     read_index: int | None = None
     realized: bool = True
     communication_class: str = "scatter"
     communication_pattern: str = "scatter"
+    max_fanout: int = 0
+    max_fanin: int = 0
+    transfer_count: int = 0
     requires_staged_realization: bool = False
     layout_contract: dict[str, Any] | None = None
     unsupported_reason: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
+class LXRelayoutTopology:
+    """Coordinate-overlap communication class for a producer/consumer edge."""
+
+    communication_class: str
+    communication_pattern: str
+    max_fanout: int
+    max_fanin: int
+    transfer_count: int
+
+
+def _int_keyed_map(
+    value: dict[str, dict[str, int]] | dict[int, dict[int, int]],
+) -> dict[int, dict[int, int]]:
+    return {
+        int(core): {int(dim): int(slot) for dim, slot in per_core.items()}
+        for core, per_core in value.items()
+    }
+
+
+def _int_keyed_dims(value: dict[str, int] | dict[int, int]) -> dict[int, int]:
+    return {int(dim): int(split) for dim, split in value.items()}
+
+
+def _intervals_overlap(
+    a_slot: int, a_split: int, b_slot: int, b_split: int
+) -> bool:
+    # Compare [slot/split, (slot+1)/split) without floating point.
+    return a_slot * b_split < (b_slot + 1) * a_split and b_slot * a_split < (
+        a_slot + 1
+    ) * b_split
+
+
+def _core_slices_overlap(
+    producer_slice: dict[int, int],
+    producer_splits: dict[int, int],
+    consumer_slice: dict[int, int],
+    consumer_splits: dict[int, int],
+) -> bool:
+    for dim in set(producer_splits) | set(consumer_splits):
+        producer_split = producer_splits.get(dim, 1)
+        consumer_split = consumer_splits.get(dim, 1)
+        producer_slot = producer_slice.get(dim, 0)
+        consumer_slot = consumer_slice.get(dim, 0)
+        if not _intervals_overlap(
+            producer_slot, producer_split, consumer_slot, consumer_split
+        ):
+            return False
+    return True
+
+
+def _classify_coordinate_topology(
+    producer_core_id_to_device_slice: dict[str, dict[str, int]],
+    producer_work_slice_dims: dict[str, int],
+    consumer_core_id_to_device_slice: dict[str, dict[str, int]],
+    consumer_work_slice_dims: dict[str, int],
+) -> LXRelayoutTopology:
+    """Classify movement cardinality from producer/consumer coordinate maps.
+
+    The backend owns physical realization. This helper only names the logical
+    overlap class so artifacts distinguish one-to-one scatter from multicast,
+    gather, and all-gather shaped coordinate mismatches.
+    """
+
+    producer_map = _int_keyed_map(producer_core_id_to_device_slice)
+    consumer_map = _int_keyed_map(consumer_core_id_to_device_slice)
+    producer_splits = _int_keyed_dims(producer_work_slice_dims)
+    consumer_splits = _int_keyed_dims(consumer_work_slice_dims)
+
+    fanout = {core: 0 for core in producer_map}
+    fanin = {core: 0 for core in consumer_map}
+    transfer_count = 0
+    for producer_core, producer_slice in producer_map.items():
+        for consumer_core, consumer_slice in consumer_map.items():
+            if _core_slices_overlap(
+                producer_slice, producer_splits, consumer_slice, consumer_splits
+            ):
+                fanout[producer_core] += 1
+                fanin[consumer_core] += 1
+                transfer_count += 1
+
+    max_fanout = max(fanout.values(), default=0)
+    max_fanin = max(fanin.values(), default=0)
+    if transfer_count == 0:
+        return LXRelayoutTopology("unsupported", "no_coordinate_overlap", 0, 0, 0)
+    if max_fanout <= 1 and max_fanin <= 1:
+        return LXRelayoutTopology(
+            "scatter", "one_to_one", max_fanout, max_fanin, transfer_count
+        )
+    if max_fanout > 1 and max_fanin <= 1:
+        communication_class = (
+            "broadcast" if max_fanout == len(consumer_map) else "multicast"
+        )
+        return LXRelayoutTopology(
+            communication_class,
+            "one_to_many",
+            max_fanout,
+            max_fanin,
+            transfer_count,
+        )
+    if max_fanout <= 1 and max_fanin > 1:
+        return LXRelayoutTopology(
+            "gather", "many_to_one", max_fanout, max_fanin, transfer_count
+        )
+    return LXRelayoutTopology(
+        COMM_CLASS_ALL_GATHER, "many_to_many", max_fanout, max_fanin, transfer_count
+    )
 
 
 def _op_num_cores(op: Operation) -> int:
@@ -306,6 +419,30 @@ def plan_lx_relayouts(
 
             producer_work_slice_dims = _work_slice_dims(producer_view)
             consumer_work_slice_dims = _work_slice_dims(consumer_view)
+            consumer_core_slices = _core_id_to_device_slice(
+                consumer_view, consumer_core_count
+            )
+            if consumer_core_slices is None:
+                logger.debug(
+                    "lx relayout skip: %s -> %s has non-static consumer slices",
+                    producer.name,
+                    consumer.name,
+                )
+                continue
+            topology = _classify_coordinate_topology(
+                producer_core_slices,
+                producer_work_slice_dims,
+                consumer_core_slices,
+                consumer_work_slice_dims,
+            )
+            if topology.communication_class == "unsupported":
+                logger.debug(
+                    "lx relayout skip: %s -> %s has unsupported coordinate topology: %s",
+                    producer.name,
+                    consumer.name,
+                    topology.communication_pattern,
+                )
+                continue
             read_index = _memory_read_index(consumer, dep)
             if is_matmul_consumer and read_index not in (0, None):
                 if (
@@ -330,29 +467,66 @@ def plan_lx_relayouts(
                         producer_core_id_to_device_slice=producer_core_slices,
                         producer_work_slice_dims=producer_work_slice_dims,
                         consumer_work_slice_dims=consumer_work_slice_dims,
+                        consumer_core_id_to_device_slice=consumer_core_slices,
                         read_index=read_index,
                         realized=False,
                         communication_class=COMM_CLASS_ALL_GATHER,
                         communication_pattern=LAYOUT_ALLGATHER_RESTICKIFY,
+                        max_fanout=topology.max_fanout,
+                        max_fanin=topology.max_fanin,
+                        transfer_count=topology.transfer_count,
                         requires_staged_realization=True,
                         layout_contract=layout_contract,
-                        unsupported_reason="backend lowering is not implemented",
+                        unsupported_reason="staged layout all-gather restickify metadata only",
                     )
                     _record_plan(consumer, plan)
                     setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
                     planned.append(plan)
+                    continue
+
+                if not config.lx_planner_relayout_collectives:
+                    continue
+
+                plan = LXRelayoutPlan(
+                    source_name=dep.name,
+                    producer_name=producer.get_name(),
+                    consumer_name=consumer.get_name(),
+                    kind=topology.communication_class,
+                    producer_core_count=producer_core_count,
+                    consumer_core_count=consumer_core_count,
+                    producer_core_id_to_device_slice=producer_core_slices,
+                    producer_work_slice_dims=producer_work_slice_dims,
+                    consumer_work_slice_dims=consumer_work_slice_dims,
+                    consumer_core_id_to_device_slice=consumer_core_slices,
+                    read_index=read_index,
+                    communication_class=topology.communication_class,
+                    communication_pattern=topology.communication_pattern,
+                    max_fanout=topology.max_fanout,
+                    max_fanin=topology.max_fanin,
+                    transfer_count=topology.transfer_count,
+                )
+                _record_plan(consumer, plan)
+                setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
+                planned.append(plan)
                 continue
 
             plan = LXRelayoutPlan(
                 source_name=dep.name,
                 producer_name=producer.get_name(),
                 consumer_name=consumer.get_name(),
-                kind="scatter",
+                kind=topology.communication_class,
                 producer_core_count=producer_core_count,
                 consumer_core_count=consumer_core_count,
                 producer_core_id_to_device_slice=producer_core_slices,
                 producer_work_slice_dims=producer_work_slice_dims,
                 consumer_work_slice_dims=consumer_work_slice_dims,
+                consumer_core_id_to_device_slice=consumer_core_slices,
+                read_index=read_index,
+                communication_class=topology.communication_class,
+                communication_pattern=topology.communication_pattern,
+                max_fanout=topology.max_fanout,
+                max_fanin=topology.max_fanin,
+                transfer_count=topology.transfer_count,
             )
             _record_plan(consumer, plan)
             setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)

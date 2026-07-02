@@ -673,8 +673,16 @@ def _multi_arg_pointwise_layouts(
         offset_free_stick_exprs = {
             e for e in stick_exprs if is_stick_expr_offset_free(e, stick_size)
         }
+        if any(expr == 0 for expr in offset_free_stick_exprs):
+            # Multi-arg joins may have both stickified and unsticked input
+            # candidates. Keep the zero-stick output candidate available so the
+            # cost model can avoid forcing a gather from zero-stick inputs into
+            # a stickified output layout.
+            _try_stick_dim(-1)
         # Sort stick exprs for determinism
         for stick_expr in sorted(offset_free_stick_exprs, key=iter_var_id):
+            if stick_expr == 0:
+                continue
             _try_stick_dim(_pick_stick_dim(stick_expr, out_coords))
 
     # Try alternative layouts if no valid layouts found

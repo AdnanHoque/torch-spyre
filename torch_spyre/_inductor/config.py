@@ -51,6 +51,13 @@ lx_planner_relayout_restickify_outputs: bool = (
     os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS", "0") == "1"
 )
 
+# Experimental research lane for non-primary matmul operand relayouts. These
+# are coordinate collectives such as multicast/gather/all-gather, but still keep
+# physical transfer derivation in Deeptools via dl-dsc coordinates.
+lx_planner_relayout_collectives: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES", "0") == "1"
+)
+
 # Experimental metadata lane for flash activation edges of the form
 # pointwise -> ReStickifyOpHBM -> batchmatmul KERNEL. The producer and consumer
 # need a layout-aware grouped all-gather, not the direct scatter class realized

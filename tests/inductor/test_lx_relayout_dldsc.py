@@ -18,6 +18,7 @@ from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.lx_relayout import (
     LXRelayoutPlan,
+    _classify_coordinate_topology,
     _core_id_to_device_slice,
     _record_plan,
     get_lx_relayout_inputs,
@@ -60,6 +61,86 @@ def test_core_view_residency_payload_is_static_per_core():
         "2": {"0": 0, "1": 1},
         "3": {"0": 1, "1": 1},
     }
+
+
+def test_coordinate_topology_classifies_one_to_one_scatter():
+    topology = _classify_coordinate_topology(
+        {"0": {"0": 0}, "1": {"0": 1}},
+        {"0": 2},
+        {"1": {"0": 0}, "0": {"0": 1}},
+        {"0": 2},
+    )
+
+    assert topology.communication_class == "scatter"
+    assert topology.communication_pattern == "one_to_one"
+    assert topology.max_fanout == 1
+    assert topology.max_fanin == 1
+    assert topology.transfer_count == 2
+
+
+def test_coordinate_topology_classifies_broadcast():
+    topology = _classify_coordinate_topology(
+        {"0": {"0": 0}},
+        {"0": 1},
+        {"0": {"0": 0}, "1": {"0": 1}, "2": {"0": 2}, "3": {"0": 3}},
+        {"0": 4},
+    )
+
+    assert topology.communication_class == "broadcast"
+    assert topology.communication_pattern == "one_to_many"
+    assert topology.max_fanout == 4
+    assert topology.max_fanin == 1
+    assert topology.transfer_count == 4
+
+
+def test_coordinate_topology_classifies_multicast():
+    topology = _classify_coordinate_topology(
+        {"0": {"0": 0}, "1": {"0": 1}},
+        {"0": 2},
+        {
+            "0": {"0": 0, "1": 0},
+            "1": {"0": 0, "1": 1},
+            "2": {"0": 1, "1": 0},
+            "3": {"0": 1, "1": 1},
+        },
+        {"0": 2, "1": 2},
+    )
+
+    assert topology.communication_class == "multicast"
+    assert topology.communication_pattern == "one_to_many"
+    assert topology.max_fanout == 2
+    assert topology.max_fanin == 1
+    assert topology.transfer_count == 4
+
+
+def test_coordinate_topology_classifies_gather():
+    topology = _classify_coordinate_topology(
+        {"0": {"0": 0}, "1": {"0": 1}, "2": {"0": 2}, "3": {"0": 3}},
+        {"0": 4},
+        {"0": {"0": 0}},
+        {"0": 1},
+    )
+
+    assert topology.communication_class == "gather"
+    assert topology.communication_pattern == "many_to_one"
+    assert topology.max_fanout == 1
+    assert topology.max_fanin == 4
+    assert topology.transfer_count == 4
+
+
+def test_coordinate_topology_classifies_all_gather():
+    topology = _classify_coordinate_topology(
+        {"0": {"0": 0}, "1": {"0": 1}},
+        {"0": 2},
+        {"0": {"1": 0}, "1": {"1": 1}},
+        {"1": 2},
+    )
+
+    assert topology.communication_class == "all_gather"
+    assert topology.communication_pattern == "many_to_many"
+    assert topology.max_fanout == 2
+    assert topology.max_fanin == 2
+    assert topology.transfer_count == 4
 
 
 def test_lx_relayout_reservation_names_are_identifiable():
