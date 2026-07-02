@@ -1,0 +1,50 @@
+Run:
+/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_lrfimm_split_autoload_20260702_151321
+
+Workload:
+latest aviros/test-spyre-scripts test_flash.py at afda166, B=1, H=32, Lq=4096, Lk=4096, D=128
+
+Branches:
+Torch ah/comms-collectives at 5809aa2
+Deeptools ah/comms-collectives at 3d54e87e
+
+Important local environment fixes:
+- Fresh CDX checkout used /home/adnan-cdx/dt-inductor-mixed to build deeptools.
+- The copied torch_spyre/_C.so from comms_collectives_20260629 was ABI-incompatible with CDX runtime.
+- Replaced it with /home/adnan-cdx/codex-isolated/flash_contract_validate_20260701_082005/torch-spyre/torch_spyre/_C.so.
+- Used /opt/ibm/spyre/runtime/lib before the mixed runtime lib so libflex exports the HostCallback symbols required by that _C.so.
+- Left TORCH_DEVICE_BACKEND_AUTOLOAD enabled; disabling it caused "unknown device string: spyre".
+
+Result:
+exit_code=1
+
+Failure:
+The script compiles and launches all three generated kernels, then fails torch.testing.assert_close.
+
+Mismatch:
+Mismatched elements: 16222516 / 16777216 (96.7%)
+Greatest absolute difference: inf at index (0, 0, 1, 1)
+
+Generated artifacts:
+SDSC JSON files: 550
+bundle.mlir files: 3
+backend layout_allgather_restickify plan files: 32
+
+SDSC op summary:
+mul: 128
+add: 96
+batchmatmul: 64
+exp: 64
+sub: 64
+max: 34
+maximum: 32
+sum: 32
+ReStickifyOpLx: 32
+identity: 3
+realdiv: 1
+ReStickifyOpHBM: 0
+
+Interpretation:
+This isolates the attention path from the full Granite block. The layout-allgather/restickify HBM spill is removed in the emitted bundle: the attention run has 32 ReStickifyOpLx rows and no ReStickifyOpHBM rows. Deeptools realizes the 32 layout-allgather plans and the kernels execute without a bus fence in this standalone flash case.
+
+The remaining blocker is value correctness of the realized all-gather/restickify movement. The likely bug class is destination coordinate/address mapping or schedule placement for the inserted movement, not frontend classification and not DXP/DCC legality.

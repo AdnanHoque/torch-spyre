@@ -27,6 +27,7 @@ Two DXP replays were run against the same bundle:
 | Staged standalone rows, one source shard per data row | /home/adnan/codex-isolated/dldsc_collectives_validate_20260702_112302/runs/dxp_replay_attention_kernel_staged_standalone_allgather_rows_20260702_142603 | Also fails in 10_batchmatmul with the same LX_MODLRFIMM :: lrfimm:-2101120. |
 | Staged standalone rows plus generic DCC LX LRF immediate split | /home/adnan/codex-isolated/dldsc_collectives_validate_20260702_112302/runs/dxp_replay_attention_kernel_staged_standalone_allgather_rows_lrfimm_split_20260702_144019 | Passes DXP replay, exit_code=0. Both 10_batchmatmul and 18_batchmatmul compile with 32 staged DataDsc PCFG sections. |
 | Full one-layer Granite prefill with the same DCC immediate split | /home/adnan/codex-isolated/dldsc_collectives_validate_20260702_112302/runs/granite_prefill_optimized_lrfimm_split_20260702_144212 | Reaches runtime, then fails with RAS::PCI::BusFence. This is no longer the previous DXP/DCC compile failure. |
+| Standalone latest flash attention on CDX with same Deeptools prototype | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_lrfimm_split_autoload_20260702_151321 | Compiles and runs three kernels, then fails correctness: 96.7% mismatched, greatest absolute difference inf. No ReStickifyOpHBM rows; 32 ReStickifyOpLx rows; 32 backend layout-allgather plans. |
 
 The staged replay emitted 32 Creating PCFG for DataDsc sections for 10_batchmatmul, so splitting the monolithic row reduces row size but does not by itself fix the address-encoding issue.
 
@@ -59,7 +60,7 @@ Backend/Deeptools should:
 
 ## Current next step
 
-Run the standalone flash script against the same patched backend. The full Granite run now reaches runtime and bus-fences, but it includes later fused block kernels after attention. The standalone flash run is the clean isolation point for deciding whether the staged attention all-gather/broadcast program itself is wrong, or whether the bus fence belongs to a later Granite communication class.
+The standalone flash run has now isolated the attention path: the movement is executable but value-wrong. The next backend task is to debug destination coordinate/address mapping and movement schedule placement for the realized layout-allgather/restickify transfers. The full Granite bus fence should be treated as a later integration symptom until the standalone flash value path is corrected.
 
 ## Files in this directory
 
@@ -71,6 +72,7 @@ Run the standalone flash script against the same patched backend. The full Grani
 - staged_replay_summary.txt
 - staged_replay_lrfimm_split_summary.txt
 - granite_runtime_lrfimm_split_summary.txt
+- flash_runtime_value_wrong_summary.txt
 - deeptools_experiment_diff_stat.txt
 - deeptools_experiment.patch
 - deeptools_experiment_lrfimm_split.patch
