@@ -61,4 +61,13 @@ DtException: Scheduler failed to find a suitable op mapping for sdsc: 2_ReSticki
    enter this lane; graph-input and weight relayouts stay out of scope.
 3. Close the Deeptools gap for `ReStickifyOpLx` / `layout_allgather_restickify`
    physical lowering and scheduling.
-4. Once flash schedules, rerun correctness and profiler traces before claiming a
+4. Once flash schedules, rerun correctness and profiler traces before claiming a speedup.
+
+
+## Backend Replay Update
+
+The backend `ReStickifyOpLx` scheduling failure described above was later
+unblocked on `Adnan-Hoque1/deeptools:ah/comms-collectives` at
+`00a37826a8c8e1b32f97c7d6edbc2527f1359076`. See
+`dldsc_flash_restickify_backend_gap_20260702.md` for the exact Deeptools delta
+and the passing CDX replay command.

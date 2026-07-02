@@ -124,3 +124,82 @@ One of these contracts has to become true:
 2. DXP recognizes standalone `ReStickifyOpLx` SDSCs and internally routes them
    through the same data-op / relayout realization path used for inserted LX
    relayouts;
+
+
+## CDX Backend Unblock Update
+
+The standalone `ReStickifyOpLx` backend gap was narrowed and unblocked on the
+Deeptools fork branch:
+
+```text
+repo: git@github.ibm.com:Adnan-Hoque1/deeptools.git
+branch: ah/comms-collectives
+sha: 00a37826a8c8e1b32f97c7d6edbc2527f1359076
+commit: [DDC] Support LX restickify DDL mapping
+```
+
+Two issues were found:
+
+1. The CDX replay binary was using rebuilt Deeptools libraries, but
+   `DEEPTOOLS_PATH` still pointed at `/opt/ibm/spyre/deeptools/share`, so DDC
+   loaded the installed DDL templates instead of the patched checkout. Replays
+   must pin `DEEPTOOLS_PATH` to the matching Deeptools checkout or install tree.
+2. The DD1/DD2 `restickify.ddl` template had a `ReStickifyOpHBM` bind but not a
+   `ReStickifyOpLx` bind. Once the LX bind was added, DDC matched the op but
+   exposed a schedule finalization issue: DDL-only staging dimensions can appear
+   as `PrimaryDimTypesCount`, which should not be used as tensor-storage offset
+   dimensions.
+
+The accepted backend delta is intentionally small:
+
+- add `ReStickifyOpLx` to `ddc/ddl_templates/restickify.ddl` beside the existing
+  `ReStickifyOpHBM` bind;
+- skip DDL-only staging dimensions when materializing loop/constant offsets in
+  `dsc/dsc2.cpp`;
+- keep the existing generic `STCDPOpLx` relayout data-op path for the downstream
+  batchmatmul relayout.
+
+Focused validation on CDX passed:
+
+```bash
+# Build
+cmake --build build-dxp-focused \
+  --target dxp_standalone util_unit_test dxp_unit_test -j 8
+
+# Unit tests
+build-dxp-focused/util/util_unit_test \
+  --gtest_filter="LayoutAllgatherRestickify.*"
+# 14/14 passing
+
+build-dxp-focused/dxp/dxp_unit_test \
+  --gtest_filter="DxpTestFixture.CoreWorkDivIncomptLxRelayout"
+# 1/1 passing
+
+# DDL sanity
+DEEPTOOLS_PATH=/home/adnan-cdx/codex-isolated/dldsc_backend_path_20260702_074814/deeptools \
+  build-dxp-focused/ddc/ddl/ddl_standalone \
+  -d ddc/ddl_templates/restickify.ddl
+# exits 0 and shows both ReStickifyOpHBM and ReStickifyOpLx binds
+
+# Full copied flash SuperDSC replay
+DEEPTOOLS_PATH=/home/adnan-cdx/codex-isolated/dldsc_backend_path_20260702_074814/deeptools \
+DXP_LX_FRAC_AVAIL=1 \
+DEEPTOOLS_LAYOUT_ALLGATHER_RESTICKIFY_PLAN_DIR=/tmp/flash_dldsc_dxp_debug_final_20260702 \
+  ./build-dxp-focused/dxp/dxp_standalone \
+  -d /home/adnan-cdx/codex-isolated/flash_dldsc_replay_20260702/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_ihw4zzb8 \
+  -b sentient
+# exits 0 and writes 32 layout_allgather_restickify plan artifacts
+```
+
+A representative generated plan now contains the expected flash cardinality:
+
+```text
+consumer_core_count: 32
+consumer_cores_per_group: 8
+replication_factor: 8
+logical_transfer_count: 256
+```
+
+This means the copied flash DLDSC/SuperDSC bundle now compiles through DXP. The
+next required gate is full AIU execution/profiling with the same patched
+Deeptools checkout or install path pinned into Torch runtime.
