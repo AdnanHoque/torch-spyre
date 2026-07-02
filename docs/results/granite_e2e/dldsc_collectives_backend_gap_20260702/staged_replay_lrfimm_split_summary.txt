@@ -1,0 +1,21 @@
+Run:
+/home/adnan/codex-isolated/dldsc_collectives_validate_20260702_112302/runs/dxp_replay_attention_kernel_staged_standalone_allgather_rows_lrfimm_split_20260702_144019
+
+Input bundle:
+/home/adnan/codex-isolated/dldsc_collectives_validate_20260702_112302/runs/granite_prefill_optimized_split_graphfix_20260702_114453/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_cypdouis
+
+Result:
+exit_code=0
+
+What changed versus the previous staged replay:
+- Added generic DCC lowering support to split out-of-range LX LRF ADD immediates into multiple legal MODLRFIMM instructions.
+- Changed ADD lowering to emit every instruction returned by ConstructLRFADDInstr, matching the existing SUB lowering pattern.
+
+Evidence:
+- The previous failure, "LX_MODLRFIMM :: lrfimm:-2101120", no longer appears.
+- 10_batchmatmul compiles through DL+Data with 32 staged DataDsc PCFG sections.
+- 18_batchmatmul compiles through DL+Data with 32 staged DataDsc PCFG sections.
+- DXP completes the whole replayed attention bundle.
+
+Interpretation:
+This proves the immediate-encoding blocker was real and narrow. It does not yet prove the staged all-gather schedule is hardware-correct; it only proves the generated bundle can pass DXP/DCC.

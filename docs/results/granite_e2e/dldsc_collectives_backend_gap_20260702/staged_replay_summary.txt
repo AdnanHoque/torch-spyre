@@ -1,0 +1,84 @@
+run_dir=/home/adnan/codex-isolated/dldsc_collectives_validate_20260702_112302/runs/dxp_replay_attention_kernel_staged_standalone_allgather_rows_20260702_142603
+exit_code=134
+8:Creating PCFG for DataDsc..
+11:[DeepRT]: Compilation time taken by DCC in - dummyProgForsdscProgCorrect0	7 millisec 
+125:[DeepRT]: Compilation time taken by DCC in - 0_identity	19 millisec 
+1177:[DeepRT]: Compilation time taken by DCC in - 1_mul	137 millisec 
+1205:[DeepRT]: Compilation time taken by DCC in - 2_sumnonstick	47 millisec 
+1573:[DeepRT]: Compilation time taken by DCC in - 3_mul	59 millisec 
+2489:[DeepRT]: Compilation time taken by DCC in - 4_mul	102 millisec 
+2517:[DeepRT]: Compilation time taken by DCC in - 5_sumnonstick	39 millisec 
+3425:[DeepRT]: Compilation time taken by DCC in - 6_identity	136 millisec 
+3452:[DeepRT]: Compilation time taken by DCC in - 7_identity	43 millisec 
+3820:[DeepRT]: Compilation time taken by DCC in - 8_mul	59 millisec 
+3845:[DeepRT]: Compilation time taken by DCC in - 9_ReStickifyOpLx	195 millisec 
+3846:Running L3 DL Ops Scheduler: Node-name: 10_batchmatmul
+4829:Running DCG for DL+Data Op: Node-name:10_batchmatmul
+4832:maxConsumers: 32
+4833:Creating PCFG for DataDsc..
+4868:maxConsumers: 32
+4869:Creating PCFG for DataDsc..
+4904:maxConsumers: 32
+4905:Creating PCFG for DataDsc..
+4940:maxConsumers: 32
+4941:Creating PCFG for DataDsc..
+4976:maxConsumers: 32
+4977:Creating PCFG for DataDsc..
+5012:maxConsumers: 32
+5013:Creating PCFG for DataDsc..
+5048:maxConsumers: 32
+5049:Creating PCFG for DataDsc..
+5084:maxConsumers: 32
+5085:Creating PCFG for DataDsc..
+5120:maxConsumers: 32
+5121:Creating PCFG for DataDsc..
+5156:maxConsumers: 32
+5157:Creating PCFG for DataDsc..
+5192:maxConsumers: 32
+5193:Creating PCFG for DataDsc..
+5228:maxConsumers: 32
+5229:Creating PCFG for DataDsc..
+5264:maxConsumers: 32
+5265:Creating PCFG for DataDsc..
+5300:maxConsumers: 32
+5301:Creating PCFG for DataDsc..
+5336:maxConsumers: 32
+5337:Creating PCFG for DataDsc..
+5372:maxConsumers: 32
+5373:Creating PCFG for DataDsc..
+5408:maxConsumers: 32
+5409:Creating PCFG for DataDsc..
+5444:maxConsumers: 32
+5445:Creating PCFG for DataDsc..
+5480:maxConsumers: 32
+5481:Creating PCFG for DataDsc..
+5516:maxConsumers: 32
+5517:Creating PCFG for DataDsc..
+5552:maxConsumers: 32
+5553:Creating PCFG for DataDsc..
+5588:maxConsumers: 32
+5589:Creating PCFG for DataDsc..
+5624:maxConsumers: 32
+5625:Creating PCFG for DataDsc..
+5660:maxConsumers: 32
+5661:Creating PCFG for DataDsc..
+5696:maxConsumers: 32
+5697:Creating PCFG for DataDsc..
+5732:maxConsumers: 32
+5733:Creating PCFG for DataDsc..
+5768:maxConsumers: 32
+5769:Creating PCFG for DataDsc..
+5804:maxConsumers: 32
+5805:Creating PCFG for DataDsc..
+5840:maxConsumers: 32
+5841:Creating PCFG for DataDsc..
+5876:maxConsumers: 32
+5877:Creating PCFG for DataDsc..
+5912:maxConsumers: 32
+5913:Creating PCFG for DataDsc..
+5948:maxConsumers: 32
+5949:Creating PCFG for DataDsc..
+5984:terminate called after throwing an instance of 'DtException'
+5985:  what():  DtException: Program verification failed for core 0 node 10_batchmatmul
+5986:Error message: Immediate value out of boundary in instruction:
+5987:LX_MODLRFIMM :: lrfimm:-2101120 src0:0

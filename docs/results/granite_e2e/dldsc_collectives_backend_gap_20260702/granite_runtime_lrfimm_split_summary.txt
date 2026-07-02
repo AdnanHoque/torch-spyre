@@ -1,0 +1,31 @@
+Run:
+/home/adnan/codex-isolated/dldsc_collectives_validate_20260702_112302/runs/granite_prefill_optimized_lrfimm_split_20260702_144212
+
+Workload:
+one-layer Granite prefill, B=1, S=512, E=4096, causal SDPA, fake/empty weights
+
+Environment:
+Torch branch: ah/comms-collectives
+Deeptools branch: ah/comms-collectives with local DCC LX LRF immediate split
+Torch LX planning: DXP_LX_FRAC_AVAIL=0
+Backend DXP LX: DXP_BACKEND_LX_FRAC_AVAIL=1 via wrapper
+
+Result:
+exit_code=255
+
+Failure:
+Runtime/hardware PCIe bus fence after kernels launched:
+RAS::PCI::BusFence, code 0xa35e
+
+What this means:
+- The older DXP/DCC compile blocker is cleared for the attention SDSC bundle.
+- Full Granite now reaches runtime execution.
+- The staged all-gather/broadcast program is not yet hardware-safe in this full-block execution.
+
+Important context:
+The log shows kernel_runner RUN entries for:
+- sdsc_fused_linear_rms_norm_0
+- sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1
+- sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_silu_split_with_sizes_transpose_view_2
+
+The bus fence occurs after these launch entries, so this run alone should not be used to claim the standalone attention movement is wrong. The next isolation step is to run the standalone flash script with the same backend to separate attention all-gather correctness from later Granite block collectives.

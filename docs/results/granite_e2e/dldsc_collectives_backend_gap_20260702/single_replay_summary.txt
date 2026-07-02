@@ -1,0 +1,22 @@
+run_dir=/home/adnan/codex-isolated/dldsc_collectives_validate_20260702_112302/runs/dxp_replay_attention_kernel_diag_operand1_allgathers_stcdp_20260702_140806
+exit_code=134
+8:Creating PCFG for DataDsc..
+11:[DeepRT]: Compilation time taken by DCC in - dummyProgForsdscProgCorrect0	7 millisec 
+125:[DeepRT]: Compilation time taken by DCC in - 0_identity	19 millisec 
+1177:[DeepRT]: Compilation time taken by DCC in - 1_mul	138 millisec 
+1205:[DeepRT]: Compilation time taken by DCC in - 2_sumnonstick	47 millisec 
+1573:[DeepRT]: Compilation time taken by DCC in - 3_mul	59 millisec 
+2489:[DeepRT]: Compilation time taken by DCC in - 4_mul	103 millisec 
+2517:[DeepRT]: Compilation time taken by DCC in - 5_sumnonstick	39 millisec 
+3425:[DeepRT]: Compilation time taken by DCC in - 6_identity	136 millisec 
+3452:[DeepRT]: Compilation time taken by DCC in - 7_identity	43 millisec 
+3820:[DeepRT]: Compilation time taken by DCC in - 8_mul	59 millisec 
+3845:[DeepRT]: Compilation time taken by DCC in - 9_ReStickifyOpLx	194 millisec 
+3846:Running L3 DL Ops Scheduler: Node-name: 10_batchmatmul
+4829:Running DCG for DL+Data Op: Node-name:10_batchmatmul
+4863:maxConsumers: 32
+4864:Creating PCFG for DataDsc..
+4899:terminate called after throwing an instance of 'DtException'
+4900:  what():  DtException: Program verification failed for core 0 node 10_batchmatmul
+4901:Error message: Immediate value out of boundary in instruction:
+4902:LX_MODLRFIMM :: lrfimm:-2101120 src0:0

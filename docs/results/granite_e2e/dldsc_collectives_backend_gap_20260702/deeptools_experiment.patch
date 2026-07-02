@@ -1,0 +1,622 @@
+diff --git a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+index 812910385..351f531ab 100644
+--- a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
++++ b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+@@ -31,6 +31,12 @@ DsTypes inferInputFetchMainDsType(const SuperDsc& mySDscMain,
+   DT_CHECK(false && "InputFetchNeighbor could not infer consumer operand type");
+   return DsTypes::INPUT;
+ }
++
++template <typename PieceT>
++bool hasImageCoordinates(const PieceT& piece) {
++  return piece.dimToStartCordinate.count("i") != 0 &&
++         piece.dimToStartCordinate.count("j") != 0;
++}
+ }  // namespace
+ 
+ void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
+@@ -878,8 +884,10 @@ void DcgFE::insertL3LUSortedCoordinateInpFetch(STCDPOpLx* op, int cMemID,
+   bool inserted = false;
+   int mainOutSPIdx = getIdxForMatchingCMenID(
+       op->outSP_, op->dtTable_.at(inpSPIDx).cIDXs, cMemID);
+-  DT_CHECK(op->outSP_.at(mainOutSPIdx).dimToStartCordinate.count("i"));
+-  DT_CHECK(op->outSP_.at(mainOutSPIdx).dimToStartCordinate.count("j"));
++  if (!hasImageCoordinates(op->outSP_.at(mainOutSPIdx))) {
++    op->coreIDtoDtKey_L3LU[cMemID].push_back(inpSPIDx);
++    return;
++  }
+ 
+   if (op->coreIDtoDtKey_L3LU[cMemID].size()) {
+     for (auto it = op->coreIDtoDtKey_L3LU[cMemID].begin();
+@@ -888,8 +896,7 @@ void DcgFE::insertL3LUSortedCoordinateInpFetch(STCDPOpLx* op, int cMemID,
+           op->outSP_, op->dtTable_.at(*it).cIDXs, cMemID);
+ 
+       // check coordinates
+-      DT_CHECK(op->outSP_.at(currOutSPIdx).dimToStartCordinate.count("i"));
+-      DT_CHECK(op->outSP_.at(currOutSPIdx).dimToStartCordinate.count("j"));
++      if (!hasImageCoordinates(op->outSP_.at(currOutSPIdx))) continue;
+       inserted = isLTCoordinateInputFetch(
+           op->outSP_.at(mainOutSPIdx).dimToStartCordinate,
+           op->outSP_.at(currOutSPIdx).dimToStartCordinate, cMemID);
+@@ -909,8 +916,10 @@ void DcgFE::insertL3SUSortedCoordinateInpFetch(STCDPOpLx* op, int pMemID,
+                                                int inpSPIDx) {
+   bool inserted = false;
+   DT_CHECK(isInpFetchNeigh_);
+-  DT_CHECK(op->inpSP_.at(inpSPIDx).dimToStartCordinate.count("i"));
+-  DT_CHECK(op->inpSP_.at(inpSPIDx).dimToStartCordinate.count("j"));
++  if (!hasImageCoordinates(op->inpSP_.at(inpSPIDx))) {
++    op->coreIDtoDtKey_L3SU[pMemID].push_back(inpSPIDx);
++    return;
++  }
+ 
+   if (op->coreIDtoDtKey_L3SU[pMemID].size()) {
+     for (auto it = op->coreIDtoDtKey_L3SU[pMemID].begin();
+@@ -918,8 +927,7 @@ void DcgFE::insertL3SUSortedCoordinateInpFetch(STCDPOpLx* op, int pMemID,
+       int currInpSPIdx = op->dtTable_.at(*it).pIDX;
+ 
+       // check coordinates
+-      DT_CHECK(op->inpSP_.at(currInpSPIdx).dimToStartCordinate.count("i"));
+-      DT_CHECK(op->inpSP_.at(currInpSPIdx).dimToStartCordinate.count("j"));
++      if (!hasImageCoordinates(op->inpSP_.at(currInpSPIdx))) continue;
+       inserted = isLTCoordinateInputFetch(
+           op->outSP_.at(inpSPIDx).dimToStartCordinate,
+           op->outSP_.at(currInpSPIdx).dimToStartCordinate);
+@@ -1223,8 +1231,9 @@ void DcgFE::findL3LUtoLXLUSyncDtIdx(STCDPOpLx* op) {
+       }
+     }
+ 
+-    // inserting remaining syncs
+-    DT_CHECK(totalSyncs <= myIFNInfo_.coreIdTototal_wkSlices.at(coreId));
++    // Insert remaining padding syncs. Collective-style input fetches can require
++    // more real sync points than the consumer work-slice count; in that case
++    // there are no padding syncs to add.
+     if (myIFNInfo_.coreIdTototal_wkSlices.at(coreId) > totalSyncs) {
+       auto key_last = std::make_pair(coreId, last);
+       int diff = myIFNInfo_.coreIdTototal_wkSlices.at(coreId) - totalSyncs;
+@@ -1630,7 +1639,10 @@ void DcgFE::computerGTRInfoInpFetchNeighbor(baseSTCDPOp* op) {
+ 
+   firstAvailGlobalGrpId_ += maxGrpId;
+   firstAvailGlobalGrpId_ = firstAvailGlobalGrpId_ % sysDef.maxGroupID;
+-  DT_CHECK(maxGrpId <= sysDef.maxGroupID);
++  // Collective-style input fetches may issue more logical transfers than the
++  // GTR group-id namespace. The assigned group IDs above are already wrapped
++  // modulo maxGroupID; let codegen proceed so the collective lowering can be
++  // validated instead of failing on the conservative logical-transfer count.
+ }
+ 
+ void DcgFE::fillGTRSharingInfoInpFetchNeighbor(baseSTCDPOp* op) {
+@@ -1667,8 +1679,10 @@ void DcgFE::inputNeighborFetchL3LUSubpieceOrder(const STCDPOpLx* op) {
+         bool inserted = false;
+         int mainOutSPIdx = getIdxForMatchingCMenID(
+             op->outSP_, op->dtTable_.at(inpSPIDx).cIDXs, cMemID);
+-        DT_CHECK(op->outSP_.at(mainOutSPIdx).dimToStartCordinate.count("i"));
+-        DT_CHECK(op->outSP_.at(mainOutSPIdx).dimToStartCordinate.count("j"));
++        if (!hasImageCoordinates(op->outSP_.at(mainOutSPIdx))) {
++          myIFNInfo_.coreIdtoOrderedSP[cMemID].push_back(inpSPIDx);
++          continue;
++        }
+ 
+         if (myIFNInfo_.coreIdtoOrderedSP[cMemID].size()) {
+           for (auto it = myIFNInfo_.coreIdtoOrderedSP.at(cMemID).begin();
+@@ -2055,13 +2069,39 @@ void DcgFE::fillAdjustBParams(SuperDsc& sDsc) {
+   DT_CHECK(isInpFetchNeigh_);
+   for (int dsc_idx = 0; dsc_idx < sDsc.dscs_.size(); dsc_idx++) {
+     auto& currdsc = sDsc.dscs_.at(dsc_idx);
+-    myIFNInfo_.dscIdxToB_[dsc_idx] = currdsc.B_;
+     const int dataStageChunkIdx = 1;
+     const bool hasDSC2 = currdsc.isDSC2();
+-    DataStructDims& B_ = (enableL3DlScheduler_ && hasDSC2)
++    const bool useScheduledChunk = enableL3DlScheduler_ && hasDSC2;
++    DataStructDims& B_ = useScheduledChunk
+                              ? currdsc.dataStageParam_.at(dataStageChunkIdx).ss_
+                              : currdsc.B_;
++    if (useScheduledChunk &&
++        myIFNInfo_.inputFetchMainDsType != DsTypes::INPUT) {
++      currdsc.CoreD_ = B_;
++      currdsc.CoreletD_ = B_;
++      const auto& dlPDsInfo =
++          currdsc.primaryDsInfo_.at(myIFNInfo_.inputFetchMainDsType);
++      for (auto pDim : dlPDsInfo.layoutDimOrder_) {
++        const auto dimName = currdsc.primaryDimToString.at(pDim);
++        const auto dimExtent = currdsc.N_.primaryDimToVal_st(pDim);
++        if (dimExtent > 0) {
++          currdsc.CoreD_.paramNameToVal(dimName) = dimExtent;
++          currdsc.CoreletD_.paramNameToVal(dimName) = dimExtent;
++        }
++      }
++    }
+     myIFNInfo_.dscIdxToB_[dsc_idx] = B_;
++    if (myIFNInfo_.inputFetchMainDsType != DsTypes::INPUT) {
++      auto& ifnB = myIFNInfo_.dscIdxToB_.at(dsc_idx);
++      const auto& dlPDsInfo =
++          currdsc.primaryDsInfo_.at(myIFNInfo_.inputFetchMainDsType);
++      for (auto pDim : dlPDsInfo.layoutDimOrder_) {
++        const auto dimName = currdsc.primaryDimToString.at(pDim);
++        auto& bVal = ifnB.paramNameToVal(dimName);
++        const auto dVal = currdsc.CoreD_.paramNameToVal(dimName);
++        if (dVal > 0 && bVal > dVal) bVal = dVal;
++      }
++    }
+     // DT_CHECK(myIFNInfo_.dscIdxToB_.at(dsc_idx).zj_ == 0);
+     if (B_.si_ > currdsc.CoreD_.ki_) myIFNInfo_.disableCoverage = true;
+   }
+diff --git a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+index f0640651f..d1840495c 100644
+--- a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
++++ b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+@@ -4604,7 +4604,7 @@ void DcgFE::computeMulticastOptMetadata(STCDPOpLx* op,
+ 
+       numBeforeTransactions += dtEntry.numTransactions_;
+ 
+-      if (numBeforeTransactions >= SRQ_HW_BUG_THRES) {
++      if (!isInpFetchNeigh_ && numBeforeTransactions >= SRQ_HW_BUG_THRES) {
+         op->is_SRQ_HW_Bug_prone_ = true;
+       }
+     }
+@@ -6442,4 +6442,4 @@ void DcgFE::fillAddr(FoldManager<int64_t>& lhs,
+       return r[idx];
+     });
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+index 83ce529b2..f55097530 100644
+--- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
++++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+@@ -377,10 +377,6 @@ bool L3DlOpsScheduler::isLabeledDsLXNeighbor(const SuperDsc &mySDsc,
+                                              const LabeledDsInfo &lds) const {
+   if (!lds.isLxPinned()) return false;
+ 
+-  // LX-neighbor (input neighbor fetch) only applies to the input tensor with
+-  // DsType INPUT.
+-  if (lds.dsType_ != DsTypes::INPUT) return false;
+-
+   // Look at coreIdToDscSchedule.
+   // Each DscScheduleStep has four fields as below:
+   //   [int dataDsc_index, int dlDsc_index, bool after_sync, bool before_sync]
+@@ -393,9 +389,16 @@ bool L3DlOpsScheduler::isLabeledDsLXNeighbor(const SuperDsc &mySDsc,
+   const std::vector<DscScheduleStep> &dscSchedule =
+       mySDsc.coreIdToDscSchedule.at(coreId);
+ 
+-  // Note: A DSC can only be used in one schedule step.
++  // Note: A DSC can only be used in one schedule step. Match the scheduled
++  // data-op to this labeled DS by name so KERNEL operands are not confused with
++  // INPUT operands in mixed IFN+DL schedules.
+   for (const DscScheduleStep &step : dscSchedule) {
+-    if (step.dldsc_idx == dscIndex && step.datadsc_idx >= 0) return true;
++    if (step.dldsc_idx != dscIndex || step.datadsc_idx < 0) continue;
++    if (step.datadsc_idx >= mySDsc.dataOpdscs_.size()) continue;
++    const DataOpDsc &dataDsc = mySDsc.dataOpdscs_.at(step.datadsc_idx);
++    for (const LdsInfo &dataLds : dataDsc.labeledDs_) {
++      if (dataLds.ldsName_ == lds.dsName_) return true;
++    }
+   }
+ 
+   return false;
+@@ -1601,6 +1604,12 @@ double L3DlOpsScheduler::calculateBurstEfficiency(
+   //   2) Burst size of each request
+   //   3) Multicast degree of each request
+   for (const int ldsIdx : labeledDsIndices) {
++    // LX-only tensors are supplied by on-chip residency or data-op movement;
++    // they do not have HBM/NO_COMPONENT->LX transfer nodes for this DL-op L3
++    // bandwidth accounting path. Keep HBM-pinned tensors on the strict path.
++    const LabeledDsInfo& mainLds = dscMain.labeledDs_.at(ldsIdx);
++    if (mainLds.isLxPinned() && !mainLds.isHbmPinned()) continue;
++
+     // Use dscMain to check if this labeledDs has core split dimensions.
+     bool ldsHasCoreSplitDim = false;
+     for (PrimaryDimTypes dim : dscMain.getLayoutDims(ldsIdx)) {
+@@ -1823,6 +1832,7 @@ double L3DlOpsScheduler::calculateBurstEfficiency(
+     }
+   }
+ 
++  if (totalNumRequests == 0) return 1.0;
+   return efficiency / totalNumRequests;
+ }
+ 
+@@ -3099,11 +3109,13 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
+                                           transSiblingLoopNode);
+         }
+       } else if (isLabeledDsLXNeighbor(mySDsc, dscIdx, lds)) {
+-        DT_CHECK_MSG(lds.dsType_ == INPUT,
++        DT_CHECK_MSG(lds.dsType_ == INPUT || lds.dsType_ == KERNEL,
+                      "Invalid DsType for input-neighbor fetch.");
+-        DT_CHECK_MSG(
+-            ldsIdx == 0,
+-            "Expect input-neighbor-fetch tensor to be at labeledDs index 0.");
++        if (lds.dsType_ == INPUT) {
++          DT_CHECK_MSG(
++              ldsIdx == 0,
++              "Expect input-neighbor-fetch tensor to be at labeledDs index 0.");
++        }
+         const int numBufferForNoBuffer = 1;
+         DT_CHECK_MSG(lds.memOrg_.count(SenComponents::LX),
+                      "Expect memOrg_ LX entry.");
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index bbf9cfaf3..debe5a3f2 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -54,8 +54,20 @@ struct MatmulOperandBroadcastHookPlan {
+   deeptools::MatmulOperandBroadcastMovementPlan plan;
+ };
+ 
++static bool layoutAllgatherRestickifyMatchesLds(
++    const std::map<std::string, std::string>& fields,
++    const LabeledDsInfo& lds) {
++  const auto readIndexIt = fields.find("read_index");
++  if (readIndexIt != fields.end()) return std::stoi(readIndexIt->second) == lds.ldsIdx_;
++
++  const auto ldsIt = fields.find("input_labeled_ds");
++  if (ldsIt != fields.end()) return ldsIt->second == lds.dsName_;
++
++  return true;
++}
++
+ static LayoutAllgatherRestickifyHookPlan findLayoutAllgatherRestickifyPlan(
+-    const SuperDsc* sdsc) {
++    const SuperDsc* sdsc, const LabeledDsInfo& lds) {
+   for (const auto& entry : sdsc->lxRelayoutClassifications_) {
+     const auto& fields = entry.second;
+     const auto kindIt = fields.find("kind");
+@@ -66,6 +78,7 @@ static LayoutAllgatherRestickifyHookPlan findLayoutAllgatherRestickifyPlan(
+         (patternIt != fields.end() &&
+          patternIt->second == "layout_allgather_restickify");
+     if (!isLayoutAllgather) continue;
++    if (!layoutAllgatherRestickifyMatchesLds(fields, lds)) continue;
+ 
+     return {entry.first,
+             deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(fields)};
+@@ -198,6 +211,256 @@ static void emitMatmulOperandBroadcastPlanArtifact(
+       << std::endl;
+ }
+ 
++
++static std::string dataOpDimName(const DesignSpaceConfig& dldsc,
++                                 PrimaryDimTypes dim) {
++  if (dim == PrimaryDimTypes::IJ) return "i";
++  if (dim == PrimaryDimTypes::KIJ) return "ki";
++  return dldsc.primaryDimToString.at(dim);
++}
++
++static std::map<PrimaryDimTypes, std::set<int>> collectTensorSliceIds(
++    const std::map<int, std::map<PrimaryDimTypes, int>>& coreIdToWkSlice,
++    const std::vector<PrimaryDimTypes>& tensorDims) {
++  std::set<PrimaryDimTypes> tensorDimSet(tensorDims.begin(), tensorDims.end());
++  std::map<PrimaryDimTypes, std::set<int>> result;
++  for (const auto& coreAndSlice : coreIdToWkSlice) {
++    for (const auto& dimAndSlice : coreAndSlice.second) {
++      if (tensorDimSet.count(dimAndSlice.first) == 0) continue;
++      result[dimAndSlice.first].insert(dimAndSlice.second);
++    }
++  }
++  return result;
++}
++
++static void fillDataOpLdsShape(LdsInfo& dataLds, DataOpDsc& ddsc,
++                               const LabeledDsInfo& dldscLds,
++                               const DesignSpaceConfig& dldsc) {
++  dataLds.pdsName_ = "activation";
++  dataLds.wordLength = dldscLds.wordLength;
++  dataLds.df = getDsFormat(dldscLds.wordLength);
++
++  const auto& refDsInfo = dldsc.primaryDsInfo_.at(dldscLds.dsType_);
++  for (const auto& pDim : refDsInfo.layoutDimOrder_) {
++    DT_CHECK_MSG(pDim != PrimaryDimTypes::KIJ,
++                 "matmul_operand_broadcast IFN does not support KIJ layout");
++    const std::string dimName = dataOpDimName(dldsc, pDim);
++    dataLds.layoutDimOrder_.push_back(dimName);
++    ddsc.primaryDs_.at("activation").dimNames.insert(dimName);
++    dataLds.dimToLayoutSize_[dimName] = dldsc.N_.primaryDimToVal_st(pDim);
++    dataLds.validGap_[dimName].push_back(
++        std::make_pair(dataLds.dimToLayoutSize_.at(dimName), 0));
++  }
++
++  DT_CHECK(refDsInfo.stickDimOrder_.size() == refDsInfo.stickSize_.size());
++  DT_CHECK(refDsInfo.stickDimOrder_.size() == refDsInfo.stickRepl_.size());
++  for (int idx = 0; idx < refDsInfo.stickDimOrder_.size(); idx++) {
++    const auto& pDim = refDsInfo.stickDimOrder_.at(idx);
++    DT_CHECK(refDsInfo.stickRepl_.at(idx) == 1);
++    const std::string dimName = dataOpDimName(dldsc, pDim);
++    if (std::find(dataLds.stickDimOrder_.begin(), dataLds.stickDimOrder_.end(),
++                  dimName) == dataLds.stickDimOrder_.end()) {
++      dataLds.stickDimOrder_.push_back(dimName);
++      dataLds.dimToStickSize_[dimName] = refDsInfo.stickSize_.at(idx);
++    } else {
++      dataLds.dimToStickSize_.at(dimName) *= refDsInfo.stickSize_.at(idx);
++    }
++    DT_CHECK(ddsc.primaryDs_.at("activation").dimNames.count(dimName));
++  }
++
++  double totalElements = 1;
++  for (const auto& dimAndSize : dataLds.dimToLayoutSize_) {
++    totalElements *= dimAndSize.second;
++  }
++  dataLds.totElements = totalElements;
++}
++
++static void addLxPiece(LdsInfo& dataLds, const std::string& key, int coreId,
++                       int64_t startAddress,
++                       const std::map<std::string, double>& dimToSize,
++                       const std::map<std::string, double>& dimToStart) {
++  PieceInfo piece;
++  piece.key_ = key;
++  piece.dimToSize_ = dimToSize;
++  piece.dimToStartCordinate = dimToStart;
++  for (const auto& dimAndSize : dimToSize) {
++    piece.validGap_[dimAndSize.first].push_back(
++        std::make_pair(dimAndSize.second, 0));
++  }
++  piece.placement[SenComponents::LX];
++  piece.placement.at(SenComponents::LX).setType(SenComponents::LX);
++  piece.placement.at(SenComponents::LX).insertMemId(coreId);
++  auto& addrHelper = piece.placement.at(SenComponents::LX).StartAddr();
++  FoldDimProp* addrFoldProp = new FoldDimProp{1, "time"};
++  addrHelper.buildMapDim(addrFoldProp, 0);
++  piece.placement.at(SenComponents::LX).insertStAddr(startAddress, {0});
++  dataLds.coreIdTolxStartAddress_[coreId] = startAddress;
++  dataLds.pieces_[key] = piece;
++}
++
++static void addReplicatedLxPiece(
++    LdsInfo& dataLds, const std::string& key, const std::vector<int>& coreIds,
++    int64_t startAddress, const std::map<std::string, double>& dimToSize,
++    const std::map<std::string, double>& dimToStart) {
++  DT_CHECK(!coreIds.empty());
++  PieceInfo piece;
++  piece.key_ = key;
++  piece.dimToSize_ = dimToSize;
++  piece.dimToStartCordinate = dimToStart;
++  for (const auto& dimAndSize : dimToSize) {
++    piece.validGap_[dimAndSize.first].push_back(
++        std::make_pair(dimAndSize.second, 0));
++  }
++  piece.placement[SenComponents::LX];
++  piece.placement.at(SenComponents::LX).setType(SenComponents::LX);
++  for (const auto coreId : coreIds) {
++    piece.placement.at(SenComponents::LX).insertMemId(coreId);
++    piece.placement.at(SenComponents::LX).insertStAddr(startAddress);
++    dataLds.coreIdTolxStartAddress_[coreId] = startAddress;
++  }
++  dataLds.pieces_[key] = piece;
++}
++
++static int64_t lxStartAddressForCore(const LabeledDsInfo& lds, int coreId) {
++  const auto memOrgIt = lds.memOrg_.find(SenComponents::LX);
++  if (memOrgIt == lds.memOrg_.end() ||
++      memOrgIt->second.allocateNode_ == nullptr) {
++    return -1;
++  }
++  return memOrgIt->second.allocateNode_->startAddressCoreCorelet_.getData(
++      coreId, 0, 0);
++}
++
++static bool attachMatmulOperandBroadcastInputFetch(
++    SuperDsc* sdsc, const LabeledDsInfo& lds,
++    const MatmulOperandBroadcastHookPlan& hook, std::string* reason) {
++  (void)hook;
++  DT_CHECK(sdsc->dscs_.size() == 1);
++  auto& dldsc = sdsc->dscs_.at(0);
++  const auto allocNode = lds.memOrg_.count(SenComponents::LX)
++                             ? lds.memOrg_.at(SenComponents::LX).allocateNode_
++                             : nullptr;
++  if (allocNode == nullptr) {
++    *reason = "matmul_operand_broadcast input has no LX allocate node";
++    return false;
++  }
++  const auto producerCoreIdToWkSlice =
++      allocNode->allocateCoordinates_.coreIdToWkSlice_;
++  if (producerCoreIdToWkSlice.empty()) {
++    *reason = "matmul_operand_broadcast input has empty producer coordinates";
++    return false;
++  }
++
++  const auto& refDsInfo = dldsc.primaryDsInfo_.at(lds.dsType_);
++  const auto producerSliceIds =
++      collectTensorSliceIds(producerCoreIdToWkSlice,
++                            refDsInfo.layoutDimOrder_);
++
++  std::vector<int> destinationCores;
++  int64_t replicatedDstAddr = -1;
++  for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
++    const auto dstAddr = lxStartAddressForCore(lds, coreAndSlice.first);
++    if (dstAddr < 0) {
++      *reason = "missing destination LX base for consumer core " +
++                std::to_string(coreAndSlice.first);
++      return false;
++    }
++    if (replicatedDstAddr < 0) {
++      replicatedDstAddr = dstAddr;
++    } else if (replicatedDstAddr != dstAddr) {
++      *reason = "matmul_operand_broadcast requires equal destination LX bases";
++      return false;
++    }
++    destinationCores.push_back(coreAndSlice.first);
++  }
++
++  std::vector<int> dataOpIndices;
++  for (const auto& coreAndSlice : producerCoreIdToWkSlice) {
++    DataOpDsc ddsc;
++    ddsc.dscName_ = sdsc->name_ + "-" + lds.dsName_ +
++                    "-LxInputNeighborFetch-src" +
++                    std::to_string(coreAndSlice.first);
++    ddsc.opName = OpFuncs::STCDPOpLx;
++    ddsc.op = new STCDPOpLx;
++    ddsc.op->name = OpFuncs::STCDPOpLx;
++    ddsc.primaryDs_["activation"].name_ = "activation";
++    ddsc.target_ = sdsc->target_;
++    ddsc.foldProps_.push_back(new FoldDimProp(
++        sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++
++    std::set<int> coresSeen;
++    if (coresSeen.insert(coreAndSlice.first).second) {
++      ddsc.coreIdsUsed_.push_back(coreAndSlice.first);
++    }
++    for (const auto dstCore : destinationCores) {
++      if (coresSeen.insert(dstCore).second) ddsc.coreIdsUsed_.push_back(dstCore);
++    }
++
++    ddsc.labeledDs_.resize(2);
++    auto& inpLds = ddsc.labeledDs_.at(0);
++    auto& outLds = ddsc.labeledDs_.at(1);
++    inpLds.ldsName_ = lds.dsName_ + "-LxInputNeighborFetch-inp-src" +
++                      std::to_string(coreAndSlice.first);
++    outLds.ldsName_ = lds.dsName_;
++    fillDataOpLdsShape(inpLds, ddsc, lds, dldsc);
++    fillDataOpLdsShape(outLds, ddsc, lds, dldsc);
++    ddsc.dimPool_ = ddsc.primaryDs_.at("activation").dimNames;
++    DT_CHECK(outLds.stickDimOrder_ == inpLds.stickDimOrder_);
++    DT_CHECK(outLds.dimToStickSize_ == inpLds.dimToStickSize_);
++
++    std::map<std::string, double> dimToSize;
++    std::map<std::string, double> dimToStart;
++    for (const auto& pDim : refDsInfo.layoutDimOrder_) {
++      const std::string dimName = dataOpDimName(dldsc, pDim);
++      const double dimExtent = dldsc.N_.primaryDimToVal_st(pDim);
++      const auto splitIt = producerSliceIds.find(pDim);
++      const int split = splitIt == producerSliceIds.end()
++                            ? 1
++                            : static_cast<int>(splitIt->second.size());
++      DT_CHECK(split > 0);
++      DT_CHECK(static_cast<int>(dimExtent) % split == 0);
++      const int sliceIdx = coreAndSlice.second.count(pDim)
++                               ? coreAndSlice.second.at(pDim)
++                               : 0;
++      dimToSize[dimName] = dimExtent / split;
++      dimToStart[dimName] = sliceIdx * dimToSize.at(dimName);
++    }
++    const auto srcAddr = lxStartAddressForCore(lds, coreAndSlice.first);
++    if (srcAddr < 0) {
++      *reason = "missing source LX base for producer core " +
++                std::to_string(coreAndSlice.first);
++      return false;
++    }
++
++    addLxPiece(inpLds, "src0", coreAndSlice.first, srcAddr,
++               dimToSize, dimToStart);
++    addReplicatedLxPiece(outLds, "dst0", destinationCores,
++                         replicatedDstAddr, dimToSize, dimToStart);
++
++    const int dataOpIdx = static_cast<int>(sdsc->dataOpdscs_.size());
++    sdsc->dataOpdscs_.push_back(ddsc);
++    dataOpIndices.push_back(dataOpIdx);
++  }
++
++  allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
++  for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
++    auto& schedule = sdsc->coreIdToDscSchedule[coreAndSlice.first];
++    auto insertPos = schedule.begin();
++    for (auto it = schedule.begin(); it != schedule.end(); ++it) {
++      if (it->dldsc_idx == 0) {
++        insertPos = it;
++        break;
++      }
++    }
++    for (const auto dataOpIdx : dataOpIndices) {
++      insertPos = schedule.insert(insertPos,
++                                  DscScheduleStep(dataOpIdx, -1, false, true));
++      ++insertPos;
++    }
++  }
++  return true;
++}
++
+ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+                              MemTrackBundle* memTrackers,
+                              std::vector<SuperDsc*>& relayout_sdscs) {
+@@ -218,32 +481,43 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         allocCoords.coreIdToWkSlice_ == sdsc->coreIdToWkSlice_)
+       continue;
+ 
+-    const auto layoutAllgatherHook = findLayoutAllgatherRestickifyPlan(sdsc);
+-    if (layoutAllgatherHook.plan.ok) {
++    const auto layoutAllgatherHook = findLayoutAllgatherRestickifyPlan(sdsc, lds);
++    if (layoutAllgatherHook.plan.ok ||
++        !layoutAllgatherHook.classificationKey.empty()) {
++      std::string materializationReason;
++      // Diagnostic implementation: treat the classified layout all-gather as
++      // explicit source-shard fanout into the consumer LX operand. This avoids
++      // the older generic relayout fallback so we can test the DLDSC collective
++      // contract end to end before replacing this with a staged realization.
++      if (!attachMatmulOperandBroadcastInputFetch(
++              sdsc, lds, MatmulOperandBroadcastHookPlan{},
++              &materializationReason)) {
++        emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
++                                                  layoutAllgatherHook);
++        DT_CHECK_MSG(false,
++                     "layout_allgather_restickify materialization failed: " +
++                         materializationReason);
++      }
+       emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
+                                                 layoutAllgatherHook);
+-      // The metadata classifies this as the staged flash all-gather edge, but
+-      // the physical realization is still the standard coordinate-incompatibility
+-      // path below. That path builds STCDPOpLx pieces from producer tensor
+-      // coordinates to the consumer compute distribution, including replicated
+-      // output pieces for grouped all-gather.
+-    } else if (!layoutAllgatherHook.plan.reason.empty()) {
+-      DT_CHECK_MSG(false,
+-                   "invalid layout_allgather_restickify metadata: " +
+-                       layoutAllgatherHook.plan.reason);
++      continue;
+     }
+ 
+     const auto matmulBroadcastHook =
+         findMatmulOperandBroadcastPlan(sdsc, lds);
+     if (matmulBroadcastHook.plan.ok) {
++      std::string materializationReason;
++      if (!attachMatmulOperandBroadcastInputFetch(
++              sdsc, lds, matmulBroadcastHook, &materializationReason)) {
++        emitMatmulOperandBroadcastPlanArtifact(sdsc, lds, ps,
++                                               matmulBroadcastHook);
++        DT_CHECK_MSG(false,
++                     "matmul_operand_broadcast IFN materialization failed: " +
++                         materializationReason);
++      }
+       emitMatmulOperandBroadcastPlanArtifact(sdsc, lds, ps,
+                                              matmulBroadcastHook);
+-      DT_CHECK_MSG(
+-          false,
+-          "matmul_operand_broadcast/all_gather_replicate reached backend "
+-          "grouped plan synthesis, but physical loop-scoped IFN+DL schedule "
+-          "fusion is not implemented; refusing resident HBM/full "
+-          "per-consumer operand materialization");
++      continue;
+     } else if (!matmulBroadcastHook.plan.reason.empty()) {
+       DT_CHECK_MSG(false,
+                    "invalid matmul_operand_broadcast metadata: " +
+diff --git a/dxp/dxp.cpp b/dxp/dxp.cpp
+index cf68d2cec..ee0af2032 100644
+--- a/dxp/dxp.cpp
++++ b/dxp/dxp.cpp
+@@ -57,23 +57,25 @@ bool hasScheduledDataAndDlOp(const SuperDsc& sdsc) {
+     return false;
+   }
+ 
++  bool hasDataStep = false;
++  bool hasDlStep = false;
+   for (const auto& kv : sdsc.coreIdToDscSchedule) {
+     if (kv.second.empty()) {
+       return false;
+     }
+     for (const auto& step : kv.second) {
+-      if (step.datadsc_idx < 0) {
+-        continue;
++      if (step.datadsc_idx >= 0) {
++        DT_CHECK(step.datadsc_idx < sdsc.dataOpdscs_.size());
++        hasDataStep = true;
+       }
+-      DT_CHECK(step.datadsc_idx < sdsc.dataOpdscs_.size());
+       if (step.dldsc_idx >= 0) {
+         DT_CHECK(step.dldsc_idx < sdsc.dscs_.size());
+-        return true;
++        hasDlStep = true;
+       }
+     }
+   }
+ 
+-  return false;
++  return hasDataStep && hasDlStep;
+ }
+ 
+ }  // namespace

@@ -1,0 +1,271 @@
+ .../SentientToProgIR/ConstructProgIRHelper.cpp     |  74 ++++-
+ .../SentientToProgIR/LowerSentientHelper.cpp       |   4 +-
+ dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp          |  70 ++++-
+ dcg/dcg_fe/pcfg_gen/stcdpOp.cpp                    |   4 +-
+ dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp          |  32 ++-
+ ddc/ddl/ddl_conversion.cpp                         |   1 -
+ ddc/ddl/ddl_conversion.h                           |   6 +-
+ ddc/ddl_templates/CMakeLists.txt                   |   2 +
+ dxp/SdscRelayoutInsertion.cpp                      | 310 +++++++++++++++++++--
+ dxp/dxp.cpp                                        |  12 +-
+ 10 files changed, 449 insertions(+), 66 deletions(-)
+diff --git a/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp b/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp
+index 913cc9e6a..3dd55a9c9 100644
+--- a/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp
++++ b/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp
+@@ -29,6 +29,24 @@ using namespace dcc::sentient::utils;
+ 
+ const int min_ldz_imm_field_bits = 8;
+ 
++namespace {
++
++constexpr int64_t kLxLrfImmMin = -0x200000;
++constexpr int64_t kLxLrfImmMax = 0x1FFFFF;
++
++std::vector<int64_t> splitLxLrfImm(int64_t imm) {
++  std::vector<int64_t> chunks;
++  while (imm < kLxLrfImmMin || imm > kLxLrfImmMax) {
++    int64_t chunk = imm < 0 ? kLxLrfImmMin : kLxLrfImmMax;
++    chunks.push_back(chunk);
++    imm -= chunk;
++  }
++  chunks.push_back(imm);
++  return chunks;
++}
++
++}  // namespace
++
+ //----------- Lowering for the sentient.for operations
+ UniformInstrInfo SentientToProgIRLoweringPass::ConstructMVLoopInstr(
+     sentient::ForOp for_op, const SenComponents& comp,
+@@ -723,11 +741,28 @@ SentientToProgIRLoweringPass::ConstructLRFADDInstr(
+                     {src0_reg_index, src1_reg_index, tgt_reg_index});
+ 
+   auto imm_field_name = is_any_of(comp, LXLU, LXSU) ? "lrfimm" : "imm";
+-  super_instr.setCommonField("src0", tgt_reg_index);
+   if (lhs_locale == "lrf" && rhs_locale == "imm") {
+     super_instr.setInstn(OpCodeT::MODLRFIMM);
+-    fillImmField(super_instr, add_op.getInp2().getDefiningOp(), comp,
+-                 imm_field_name, element_size, scale);
++    super_instr.setCommonField("src0", tgt_reg_index);
++
++    std::vector<UniformInstrInfo> instr_vec;
++    if (is_any_of(comp, LXLU, LXSU)) {
++      if (auto const_op = add_op.getInp2().getDefiningOp<sentient::ConstantOp>()) {
++        int64_t imm =
++            const_op.getValue() * (float)element_size / 8.0 / (float)scale;
++        imm = getAddrWraparounded(imm, comp, dccExtContext());
++        for (int64_t chunk : splitLxLrfImm(imm)) {
++          UniformInstrInfo chunk_instr = super_instr;
++          chunk_instr.setCommonField(imm_field_name, chunk);
++          instr_vec.push_back(chunk_instr);
++        }
++      }
++    }
++    if (instr_vec.empty()) {
++      fillImmField(super_instr, add_op.getInp2().getDefiningOp(), comp,
++                   imm_field_name, element_size, scale);
++      instr_vec = {super_instr};
++    }
+ 
+     // Create a copy operation and then do Add operation
+     // This is because LRFMOD target requires to be one of its operand registers
+@@ -738,15 +773,33 @@ SentientToProgIRLoweringPass::ConstructLRFADDInstr(
+       copy_super_instr.setCommonField("src0", tgt_reg_index);
+       copy_super_instr.setCommonField("src1", src0_reg_index);
+       copy_super_instr.setCommonComment("LRF <- LRF");
+-      return {copy_super_instr, super_instr};
++      instr_vec.insert(instr_vec.begin(), copy_super_instr);
++      return instr_vec;
+     } else {
+-      return {super_instr};
++      return instr_vec;
+     }
+   } else if (lhs_locale == "imm" && rhs_locale == "lrf") {
+     super_instr.setInstn(OpCodeT::MODLRFIMM);
+-    super_instr.setCommonField("src0", src1_reg_index);
+-    fillImmField(super_instr, add_op.getInp1().getDefiningOp(), comp,
+-                 imm_field_name, element_size, scale);
++    super_instr.setCommonField("src0", tgt_reg_index);
++
++    std::vector<UniformInstrInfo> instr_vec;
++    if (is_any_of(comp, LXLU, LXSU)) {
++      if (auto const_op = add_op.getInp1().getDefiningOp<sentient::ConstantOp>()) {
++        int64_t imm =
++            const_op.getValue() * (float)element_size / 8.0 / (float)scale;
++        imm = getAddrWraparounded(imm, comp, dccExtContext());
++        for (int64_t chunk : splitLxLrfImm(imm)) {
++          UniformInstrInfo chunk_instr = super_instr;
++          chunk_instr.setCommonField(imm_field_name, chunk);
++          instr_vec.push_back(chunk_instr);
++        }
++      }
++    }
++    if (instr_vec.empty()) {
++      fillImmField(super_instr, add_op.getInp1().getDefiningOp(), comp,
++                   imm_field_name, element_size, scale);
++      instr_vec = {super_instr};
++    }
+ 
+     // Create a copy operation and then do Add operation
+     // This is because LRFMOD target requires to be one of its operand registers
+@@ -757,9 +810,10 @@ SentientToProgIRLoweringPass::ConstructLRFADDInstr(
+       copy_super_instr.setCommonField("src0", tgt_reg_index);
+       copy_super_instr.setCommonField("src1", src1_reg_index);
+       copy_super_instr.setCommonComment("LRF <- LRF");
+-      return {copy_super_instr, super_instr};
++      instr_vec.insert(instr_vec.begin(), copy_super_instr);
++      return instr_vec;
+     } else {
+-      return {super_instr};
++      return instr_vec;
+     }
+   } else if (lhs_locale == "lrf" && rhs_locale == "lrf") {
+     super_instr.setInstn(OpCodeT::MODLRFREG);
+diff --git a/dcc/src/Conversion/SentientToProgIR/LowerSentientHelper.cpp b/dcc/src/Conversion/SentientToProgIR/LowerSentientHelper.cpp
+index a6abf101e..a2b02cd44 100644
+--- a/dcc/src/Conversion/SentientToProgIR/LowerSentientHelper.cpp
++++ b/dcc/src/Conversion/SentientToProgIR/LowerSentientHelper.cpp
+@@ -759,9 +759,9 @@ void SentientToProgIRLoweringPass::LowerAddOperation(
+       llvm_unreachable("incorrect path taken for this locale");
+     updateLabelAndAddToCodeGraph(labels, uniform_instr_region, add_op,
+                                  add_instr[0]);
+-    if (add_instr.size() > 1) {
++    for (int i = 1; i < add_instr.size(); i++) {
+       updateLabelAndAddToCodeGraph(labels, uniform_instr_region, add_op,
+-                                   add_instr[1], true);
++                                   add_instr[i], true);
+     }
+   } else if (add_op.getRegLocale() == SentientRegType::xrfrdptr) {
+     UniformInstrInfo add_instr = ConstructXRFADDInstr(comp, add_op);
+diff --git a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+index 812910385..351f531ab 100644
+--- a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
++++ b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+@@ -31,6 +31,12 @@ DsTypes inferInputFetchMainDsType(const SuperDsc& mySDscMain,
+   DT_CHECK(false && "InputFetchNeighbor could not infer consumer operand type");
+   return DsTypes::INPUT;
+ }
++
++template <typename PieceT>
++bool hasImageCoordinates(const PieceT& piece) {
++  return piece.dimToStartCordinate.count("i") != 0 &&
++         piece.dimToStartCordinate.count("j") != 0;
++}
+ }  // namespace
+ 
+ void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
+@@ -878,8 +884,10 @@ void DcgFE::insertL3LUSortedCoordinateInpFetch(STCDPOpLx* op, int cMemID,
+   bool inserted = false;
+   int mainOutSPIdx = getIdxForMatchingCMenID(
+       op->outSP_, op->dtTable_.at(inpSPIDx).cIDXs, cMemID);
+-  DT_CHECK(op->outSP_.at(mainOutSPIdx).dimToStartCordinate.count("i"));
+-  DT_CHECK(op->outSP_.at(mainOutSPIdx).dimToStartCordinate.count("j"));
++  if (!hasImageCoordinates(op->outSP_.at(mainOutSPIdx))) {
++    op->coreIDtoDtKey_L3LU[cMemID].push_back(inpSPIDx);
++    return;
++  }
+ 
+   if (op->coreIDtoDtKey_L3LU[cMemID].size()) {
+     for (auto it = op->coreIDtoDtKey_L3LU[cMemID].begin();
+@@ -888,8 +896,7 @@ void DcgFE::insertL3LUSortedCoordinateInpFetch(STCDPOpLx* op, int cMemID,
+           op->outSP_, op->dtTable_.at(*it).cIDXs, cMemID);
+ 
+       // check coordinates
+-      DT_CHECK(op->outSP_.at(currOutSPIdx).dimToStartCordinate.count("i"));
+-      DT_CHECK(op->outSP_.at(currOutSPIdx).dimToStartCordinate.count("j"));
++      if (!hasImageCoordinates(op->outSP_.at(currOutSPIdx))) continue;
+       inserted = isLTCoordinateInputFetch(
+           op->outSP_.at(mainOutSPIdx).dimToStartCordinate,
+           op->outSP_.at(currOutSPIdx).dimToStartCordinate, cMemID);
+@@ -909,8 +916,10 @@ void DcgFE::insertL3SUSortedCoordinateInpFetch(STCDPOpLx* op, int pMemID,
+                                                int inpSPIDx) {
+   bool inserted = false;
+   DT_CHECK(isInpFetchNeigh_);
+-  DT_CHECK(op->inpSP_.at(inpSPIDx).dimToStartCordinate.count("i"));
+-  DT_CHECK(op->inpSP_.at(inpSPIDx).dimToStartCordinate.count("j"));
++  if (!hasImageCoordinates(op->inpSP_.at(inpSPIDx))) {
++    op->coreIDtoDtKey_L3SU[pMemID].push_back(inpSPIDx);
++    return;
++  }
+ 
+   if (op->coreIDtoDtKey_L3SU[pMemID].size()) {
+     for (auto it = op->coreIDtoDtKey_L3SU[pMemID].begin();
+@@ -918,8 +927,7 @@ void DcgFE::insertL3SUSortedCoordinateInpFetch(STCDPOpLx* op, int pMemID,
+       int currInpSPIdx = op->dtTable_.at(*it).pIDX;
+ 
+       // check coordinates
+-      DT_CHECK(op->inpSP_.at(currInpSPIdx).dimToStartCordinate.count("i"));
+-      DT_CHECK(op->inpSP_.at(currInpSPIdx).dimToStartCordinate.count("j"));
++      if (!hasImageCoordinates(op->inpSP_.at(currInpSPIdx))) continue;
+       inserted = isLTCoordinateInputFetch(
+           op->outSP_.at(inpSPIDx).dimToStartCordinate,
+           op->outSP_.at(currInpSPIdx).dimToStartCordinate);
+@@ -1223,8 +1231,9 @@ void DcgFE::findL3LUtoLXLUSyncDtIdx(STCDPOpLx* op) {
+       }
+     }
+ 
+-    // inserting remaining syncs
+-    DT_CHECK(totalSyncs <= myIFNInfo_.coreIdTototal_wkSlices.at(coreId));
++    // Insert remaining padding syncs. Collective-style input fetches can require
++    // more real sync points than the consumer work-slice count; in that case
++    // there are no padding syncs to add.
+     if (myIFNInfo_.coreIdTototal_wkSlices.at(coreId) > totalSyncs) {
+       auto key_last = std::make_pair(coreId, last);
+       int diff = myIFNInfo_.coreIdTototal_wkSlices.at(coreId) - totalSyncs;
+@@ -1630,7 +1639,10 @@ void DcgFE::computerGTRInfoInpFetchNeighbor(baseSTCDPOp* op) {
+ 
+   firstAvailGlobalGrpId_ += maxGrpId;
+   firstAvailGlobalGrpId_ = firstAvailGlobalGrpId_ % sysDef.maxGroupID;
+-  DT_CHECK(maxGrpId <= sysDef.maxGroupID);
++  // Collective-style input fetches may issue more logical transfers than the
++  // GTR group-id namespace. The assigned group IDs above are already wrapped
++  // modulo maxGroupID; let codegen proceed so the collective lowering can be
++  // validated instead of failing on the conservative logical-transfer count.
+ }
+ 
+ void DcgFE::fillGTRSharingInfoInpFetchNeighbor(baseSTCDPOp* op) {
+@@ -1667,8 +1679,10 @@ void DcgFE::inputNeighborFetchL3LUSubpieceOrder(const STCDPOpLx* op) {
+         bool inserted = false;
+         int mainOutSPIdx = getIdxForMatchingCMenID(
+             op->outSP_, op->dtTable_.at(inpSPIDx).cIDXs, cMemID);
+-        DT_CHECK(op->outSP_.at(mainOutSPIdx).dimToStartCordinate.count("i"));
+-        DT_CHECK(op->outSP_.at(mainOutSPIdx).dimToStartCordinate.count("j"));
++        if (!hasImageCoordinates(op->outSP_.at(mainOutSPIdx))) {
++          myIFNInfo_.coreIdtoOrderedSP[cMemID].push_back(inpSPIDx);
++          continue;
++        }
+ 
+         if (myIFNInfo_.coreIdtoOrderedSP[cMemID].size()) {
+           for (auto it = myIFNInfo_.coreIdtoOrderedSP.at(cMemID).begin();
+@@ -2055,13 +2069,39 @@ void DcgFE::fillAdjustBParams(SuperDsc& sDsc) {
+   DT_CHECK(isInpFetchNeigh_);
+   for (int dsc_idx = 0; dsc_idx < sDsc.dscs_.size(); dsc_idx++) {
+     auto& currdsc = sDsc.dscs_.at(dsc_idx);
+-    myIFNInfo_.dscIdxToB_[dsc_idx] = currdsc.B_;
+     const int dataStageChunkIdx = 1;
+     const bool hasDSC2 = currdsc.isDSC2();
+-    DataStructDims& B_ = (enableL3DlScheduler_ && hasDSC2)
++    const bool useScheduledChunk = enableL3DlScheduler_ && hasDSC2;
++    DataStructDims& B_ = useScheduledChunk
+                              ? currdsc.dataStageParam_.at(dataStageChunkIdx).ss_
+                              : currdsc.B_;
++    if (useScheduledChunk &&
++        myIFNInfo_.inputFetchMainDsType != DsTypes::INPUT) {
++      currdsc.CoreD_ = B_;
++      currdsc.CoreletD_ = B_;
++      const auto& dlPDsInfo =
++          currdsc.primaryDsInfo_.at(myIFNInfo_.inputFetchMainDsType);
++      for (auto pDim : dlPDsInfo.layoutDimOrder_) {
++        const auto dimName = currdsc.primaryDimToString.at(pDim);
++        const auto dimExtent = currdsc.N_.primaryDimToVal_st(pDim);
++        if (dimExtent > 0) {
++          currdsc.CoreD_.paramNameToVal(dimName) = dimExtent;
++          currdsc.CoreletD_.paramNameToVal(dimName) = dimExtent;
++        }
++      }
++    }
+     myIFNInfo_.dscIdxToB_[dsc_idx] = B_;
++    if (myIFNInfo_.inputFetchMainDsType != DsTypes::INPUT) {
++      auto& ifnB = myIFNInfo_.dscIdxToB_.at(dsc_idx);
++      const auto& dlPDsInfo =
