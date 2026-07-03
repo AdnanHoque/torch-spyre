@@ -1,0 +1,111 @@
+diff --git a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+index 351f531ab..2623f113b 100644
+--- a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
++++ b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+@@ -112,8 +112,13 @@ void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
+   DT_CHECK(pDsInp.stickDimOrder_.size() == pDsInp.stickRepl_.size());
+   for (int idx = 0; idx < mySDscMain.dscs_.size(); idx++) {
+     const auto& dscMain_ = mySDscMain.dscs_.at(0);
+-    for (auto& lds : dscMain_.labeledDs_)
+-      DT_CHECK(!is_any_of(lds.pinnedComponent(), HBM, NO_COMPONENT));  // FIXME
++    const bool allowMixedHbmIfnDiagnostic =
++        std::getenv("DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC") != nullptr;
++    for (auto& lds : dscMain_.labeledDs_) {
++      if (!allowMixedHbmIfnDiagnostic) {
++        DT_CHECK(!is_any_of(lds.pinnedComponent(), HBM, NO_COMPONENT));
++      }
++    }
+     if (idx > 0) {
+       DT_CHECK(mySDscMain.dscs_.at(0).N_ == dscMain_.N_);
+       const auto& dscPDsInfo =
+diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+index f55097530..074b2c2ff 100644
+--- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
++++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+@@ -1286,10 +1286,14 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
+         isInputNeighborFetch = true;
+     }
+   }
++  const bool allowMixedHbmIfnDiagnostic =
++      std::getenv("DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC") != nullptr;
+   DT_CHECK_MSG(
+-      !(isDoubleBuffering && isInputNeighborFetch),
++      allowMixedHbmIfnDiagnostic ||
++          !(isDoubleBuffering && isInputNeighborFetch),
+       "Do not support double buffering and input-neighbor fetch coexisting "
+-      "in the same DSC.");
++      "in the same DSC. Set DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1 "
++      "only for diagnostic probes.");
+ 
+   // When all tensors are LX-local, the chunk parameters are the same as the
+   // core parameters. Set the chunk dataStageParam_ and return.
+@@ -3343,10 +3347,14 @@ void L3DlOpsScheduler::createSynchronization(SuperDsc &mySDsc) {
+     const bool hasLxNeighborTensor = !lxNeighborLdsIndexSet.empty();
+     const bool hasAllLxPinnedTensors =
+         !hasHbmPinnedTensor && !hasLxNeighborTensor;
+-    DT_CHECK_MSG(!(hasHbmPinnedTensor && hasLxNeighborTensor),
++    const bool allowMixedHbmIfnDiagnostic =
++        std::getenv("DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC") != nullptr;
++    DT_CHECK_MSG(allowMixedHbmIfnDiagnostic ||
++                     !(hasHbmPinnedTensor && hasLxNeighborTensor),
+                  "Do not support both HBM pinned tensor and input-neighbor "
+-                 "fetch tensor existing "
+-                 "in the same DSC.");
++                 "fetch tensor existing in the same DSC. Set "
++                 "DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1 only for "
++                 "diagnostic probes.");
+ 
+     bool syncL3LUAndLXLUInserted = false;
+     // Start to add sync nodes.
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 17291e7f1..d3fba66c0 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -440,8 +440,18 @@ static bool attachMatmulOperandBroadcastInputFetch(
+     const int dataOpIdx = static_cast<int>(sdsc->dataOpdscs_.size());
+     sdsc->dataOpdscs_.push_back(ddsc);
+     dataOpIndices.push_back(dataOpIdx);
++    if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONE_IFN_PROBE") !=
++        nullptr) {
++      break;
++    }
+   }
+ 
++  const bool useCombinedSchedule =
++      std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_COMBINED_IFN") !=
++      nullptr;
++  const bool replaceDlScheduleStep =
++      std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_REPLACE_DL_STEP") !=
++      nullptr;
+   allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
+   for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
+     auto& schedule = sdsc->coreIdToDscSchedule[coreAndSlice.first];
+@@ -452,9 +462,27 @@ static bool attachMatmulOperandBroadcastInputFetch(
+         break;
+       }
+     }
++    if (useCombinedSchedule && replaceDlScheduleStep) {
++      DT_CHECK_MSG(dataOpIndices.size() == 1,
++                   "replacement IFN probe expects exactly one data op");
++      bool replaced = false;
++      for (auto it = schedule.begin(); it != schedule.end(); ++it) {
++        if (it->dldsc_idx == 0) {
++          it->datadsc_idx = dataOpIndices.front();
++          it->before_sync = false;
++          it->after_sync = true;
++          replaced = true;
++          break;
++        }
++      }
++      DT_CHECK_MSG(replaced, "failed to find DL schedule step to replace");
++      continue;
++    }
+     for (const auto dataOpIdx : dataOpIndices) {
++      const int dldscIdx = useCombinedSchedule ? 0 : -1;
+       insertPos = schedule.insert(insertPos,
+-                                  DscScheduleStep(dataOpIdx, -1, false, true));
++                                  DscScheduleStep(dataOpIdx, dldscIdx, false,
++                                                  true));
+       ++insertPos;
+     }
+   }
