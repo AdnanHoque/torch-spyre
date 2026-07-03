@@ -1,0 +1,19 @@
+MatmulOperandBroadcast4 standalone offset-address memory-map check
+Expected: each destination core has four 128x128 fp16 chunks at windows 0x800..0x8ff.
+core0 window0 vs src0: 256/256
+core0 window1 vs src1: 256/256
+core0 window2 vs src2: 256/256
+core0 window3 vs src3: 256/256
+core1 window0 vs src0: 256/256
+core1 window1 vs src1: 256/256
+core1 window2 vs src2: 256/256
+core1 window3 vs src3: 256/256
+core2 window0 vs src0: 256/256
+core2 window1 vs src1: 256/256
+core2 window2 vs src2: 256/256
+core2 window3 vs src3: 256/256
+core3 window0 vs src0: 256/256
+core3 window1 vs src1: 256/256
+core3 window2 vs src2: 256/256
+core3 window3 vs src3: 256/256
+BROADCAST_MAP_OK True

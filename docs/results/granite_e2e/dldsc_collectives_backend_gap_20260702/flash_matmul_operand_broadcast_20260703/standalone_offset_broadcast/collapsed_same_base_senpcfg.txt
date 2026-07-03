@@ -1,0 +1,16 @@
+Added dirName /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_20260703_100107
+System architecture setup success...Cores: 4, Corelets/Core: 2
+===== [SENPCFG] Running /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_20260703_100107 =====
+Pcfgs loaded from sdsc: dataDSCtest
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_20260703_100107/memory_map_core0.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_20260703_100107/memory_map_core1.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_20260703_100107/memory_map_core2.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_20260703_100107/memory_map_core3.txt in hex format 
+simulation time: 0.0249446 seconds with 20 worker threads
+Program completed...
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_20260703_100107/memory_map_final_core0.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_20260703_100107/memory_map_final_core1.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_20260703_100107/memory_map_final_core2.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_20260703_100107/memory_map_final_core3.txt in hex format 
+Setup and execution and dump time for /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_20260703_100107: 0.073 seconds. 
+[SENPCFG] Execution successful!

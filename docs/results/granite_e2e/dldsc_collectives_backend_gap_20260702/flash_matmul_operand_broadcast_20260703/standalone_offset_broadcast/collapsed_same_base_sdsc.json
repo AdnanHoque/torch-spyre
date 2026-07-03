@@ -1,0 +1,2713 @@
+{
+  "dataDSCtest" : {
+    "sdscFoldProps_" : [
+    ],
+    "sdscFolds_" : "0",
+    "coreFoldProp_" : {},
+    "coreletFoldProp_" : {},
+    "folded_sdsc_name_" : "",
+    "fold_coord_" : [  ],
+    "numCoresUsed_" : 4,
+    "unpadN_" : {"name_" : "unpadn", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+    "N_" : {"name_" : "n", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+    "coreIdToDsc_" : { 
+    }, 
+    "numWkSlicesPerDim_" : {  },
+    "coreIdToWkSlice_" : { 
+    }, 
+    "opFuncsUsed_" : [  ], 
+    "lxRelayoutClassifications_" : { 
+    }, 
+    "ldsShareInfo_" : [
+    ],
+    "prodConsList" : {
+    },
+    "coreIdToDscSchedule" : {
+    },
+    "pcfg_" : {
+    },
+    "target_" : "senulator",
+    "dynamicExecutionAddr_" : "0",
+    "dscs_" : [ 
+    ],
+    "datadscs_" : [ 
+      {
+        "MatmulOperandBroadcast4" : {
+          "foldProps_" : [
+          ],
+          "coreIdsUsed_": [ 0, 1, 2, 3 ],
+          "dimPool_": ["in", "out"],
+          "primaryDs_": [
+            {
+              "name_" : "activation",
+              "dimNames" : ["in", "out"]
+            }
+          ],
+          "labeledDs_": [
+            {
+              "ldsName_" : "Tensor1-LxInputNeighborFetch-inp",
+              "pdsName_" : "activation",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 128, "out" : 512},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [128,0] ], "out" : [ [512,0] ]},
+              "totElements" : 65536,
+              "PieceInfo": [
+                {
+                  "key_" : "src0",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr": ["0"] }
+                  ]
+                },
+                {
+                  "key_" : "src1",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr": ["0"] }
+                  ]
+                },
+                {
+                  "key_" : "src2",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr": ["0"] }
+                  ]
+                },
+                {
+                  "key_" : "src3",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 384},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr": ["0"] }
+                  ]
+                }
+              ],
+              "hbmSize_" : 0,
+              "hbmStartAddress_" : "0",
+              "lxSize_" : 2097152,
+              "lxStartAddress_" : {}
+            },
+            {
+              "ldsName_" : "Tensor1",
+              "pdsName_" : "activation",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 128, "out" : 512},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [128,0] ], "out" : [ [512,0] ]},
+              "totElements" : 65536,
+              "PieceInfo": [
+                {
+                  "key_" : "dst_from_src0",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0, 1, 2, 3], "startAddr": ["1048576", "1048576", "1048576", "1048576"] }
+                  ]
+                },
+                {
+                  "key_" : "dst_from_src1",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0, 1, 2, 3], "startAddr": ["1048576", "1048576", "1048576", "1048576"] }
+                  ]
+                },
+                {
+                  "key_" : "dst_from_src2",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0, 1, 2, 3], "startAddr": ["1048576", "1048576", "1048576", "1048576"] }
+                  ]
+                },
+                {
+                  "key_" : "dst_from_src3",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 384},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0, 1, 2, 3], "startAddr": ["1048576", "1048576", "1048576", "1048576"] }
+                  ]
+                }
+              ],
+              "hbmSize_" : 0,
+              "hbmStartAddress_" : "0",
+              "lxSize_" : 2097152,
+              "lxStartAddress_" : {}
+            }
+          ],
+          "op" : {
+            "name" : "STCDPOpLx",
+            "gtrIdsUsed" : [0, 1, 2, 3, 4, 5],
+            "useUnicast" : 0,
+            "enOptMC" : 0,
+            "is_SRQ_HW_Bug_prone_" : 0,
+            "maxBeforeTransactions_" : 8,
+            "split_factor_per_dim" : {},
+            "forceModeMC" : {"force" : 0, "val" : 0},
+            "prodConsList" : {
+              "0" : [ 0, 1, 2, 3 ],
+              "1" : [ 0, 1, 2, 3 ],
+              "2" : [ 0, 1, 2, 3 ],
+              "3" : [ 0, 1, 2, 3 ]
+            },
+            "idealStWindowToDtKey" : {
+              "0" : [ 0 ],
+              "1" : [ 3 ],
+              "2" : [ 1, 5 ],
+              "3" : [ 4, 2 ]
+            },
+            "idealStWindowToContention" : {
+              "0" : [ 0, 0 ],
+              "1" : [ 0, 0 ],
+              "2" : [ 0, 0 ],
+              "3" : [ 0, 0 ]
+            },
+            "coreIDtoTrRank" : {"0" : 0, "1" : 2, "2" : 3, "3" : 1, "4" : 4, "5" : 5, "6" : 6, "7" : 7, "8" : 8, "9" : 9, "10" : 10, "11" : 11, "12" : 12, "13" : 13, "14" : 14, "15" : 15, "16" : 16, "17" : 17, "18" : 18, "19" : 19, "20" : 20, "21" : 21, "22" : 22, "23" : 23, "24" : 24, "25" : 25, "26" : 26, "27" : 27, "28" : 28, "29" : 29, "30" : 30, "31" : 31},
+            "segCoreGroups" : [ [0, 1, 2, 3]],
+            "inferredSegGroups" : [ [0, 1, 2, 3]],
+            "gateLXCodeGen" : 0,
+            "enSubPieceReuse" : 1,
+            "prodCoreGpList" : {
+            },
+            "interLeaveDtTableIdx" : [ [0,3]],
+            "pSubPiece" : [
+              {
+                "pIDX" : 0,
+                "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [0], "startAddr": ["0"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "pIDX" : 1,
+                "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [1], "startAddr": ["0"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "pIDX" : 2,
+                "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [2], "startAddr": ["0"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "pIDX" : 3,
+                "dimToStartCordinate" : {"in" : 0, "out" : 384},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [3], "startAddr": ["0"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "pIDX" : 4,
+                "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [1], "startAddr": ["0"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "pIDX" : 5,
+                "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [2], "startAddr": ["0"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              }
+            ],
+            "cSubPiece" : [
+              {
+                "cIDX" : 0,
+                "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [0], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 1,
+                "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [1], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 2,
+                "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [2], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 3,
+                "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [3], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 4,
+                "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [0], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 5,
+                "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [1], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 6,
+                "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [2], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 7,
+                "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [3], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 8,
+                "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [0], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 9,
+                "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [1], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 10,
+                "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [2], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 11,
+                "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [3], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 12,
+                "dimToStartCordinate" : {"in" : 0, "out" : 384},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [0], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 13,
+                "dimToStartCordinate" : {"in" : 0, "out" : 384},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [1], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 14,
+                "dimToStartCordinate" : {"in" : 0, "out" : 384},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [2], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              },
+              {
+                "cIDX" : 15,
+                "dimToStartCordinate" : {"in" : 0, "out" : 384},
+                "dimToSize_" : {"in" : 128, "out" : 128},
+                "PlacementInfo" : { "type":"lx", "memId": [3], "startAddr": ["1048576"] },
+                "bigDimToSize_" : {"in" : 128, "out" : 128}
+              }
+            ],
+            "dtTable_" : [
+              {
+                "pIDX" : 0,
+                "cIDXs" : [0, 1, 2, 3],
+                "pMemID" : 0,
+                "minCMemID" : 0,
+                "loopOrder" : ["in", "out"],
+                "useBurst" : "true",
+                "collapseFactor" : 2,
+                "bestMCMode" : 1,
+                "selectedMCMode" : 1,
+                "minHops" : 3,
+                "CCWHopCWHop" : [3,31],
+                "hop_Mode3" : 3,
+                "hopSplit_Mode3" : [3,0],
+                "idealStWindow" : 0,
+                "maxBurst" : 32,
+                "trVolume" : 16384,
+                "numTransactions_" : 8,
+                "numBeforeTransactions_" : 0,
+                "trCost" : 0.0117188,
+                "preSegTrMode" : 0,
+                "cMemIDs" : [0, 1, 2, 3],
+                "GTR" : {
+                  "groupID" : 0,
+                  "numSharers" : 3,
+                  "count" : 0,
+                  "srcNodeID" : 0
+                }
+              },
+              {
+                "pIDX" : 1,
+                "cIDXs" : [6, 7],
+                "pMemID" : 1,
+                "minCMemID" : 2,
+                "loopOrder" : ["in", "out"],
+                "useBurst" : "true",
+                "collapseFactor" : 2,
+                "bestMCMode" : 1,
+                "selectedMCMode" : 1,
+                "minHops" : 2,
+                "CCWHopCWHop" : [2,31],
+                "hop_Mode3" : 2,
+                "hopSplit_Mode3" : [2,0],
+                "idealStWindow" : 2,
+                "maxBurst" : 32,
+                "trVolume" : 16384,
+                "numTransactions_" : 8,
+                "numBeforeTransactions_" : 0,
+                "trCost" : 0.0078125,
+                "preSegTrMode" : 1,
+                "cMemIDs" : [2, 3],
+                "GTR" : {
+                  "groupID" : 1,
+                  "numSharers" : 2,
+                  "count" : 0,
+                  "srcNodeID" : 1
+                }
+              },
+              {
+                "pIDX" : 2,
+                "cIDXs" : [11],
+                "pMemID" : 2,
+                "minCMemID" : 3,
+                "loopOrder" : ["in", "out"],
+                "useBurst" : "true",
+                "collapseFactor" : 2,
+                "bestMCMode" : 1,
+                "selectedMCMode" : 1,
+                "minHops" : 1,
+                "CCWHopCWHop" : [1,31],
+                "hop_Mode3" : 1,
+                "hopSplit_Mode3" : [1,0],
+                "idealStWindow" : 3,
+                "maxBurst" : 32,
+                "trVolume" : 16384,
+                "numTransactions_" : 8,
+                "numBeforeTransactions_" : 8,
+                "trCost" : 0.00390625,
+                "preSegTrMode" : 1,
+                "cMemIDs" : [3],
+                "GTR" : {
+                  "groupID" : 2,
+                  "numSharers" : 1,
+                  "count" : 0,
+                  "srcNodeID" : 2
+                }
+              },
+              {
+                "pIDX" : 3,
+                "cIDXs" : [12, 13, 14, 15],
+                "pMemID" : 3,
+                "minCMemID" : 0,
+                "loopOrder" : ["in", "out"],
+                "useBurst" : "true",
+                "collapseFactor" : 2,
+                "bestMCMode" : 2,
+                "selectedMCMode" : 2,
+                "minHops" : 3,
+                "CCWHopCWHop" : [31,3],
+                "hop_Mode3" : 3,
+                "hopSplit_Mode3" : [0,3],
+                "idealStWindow" : 1,
+                "maxBurst" : 32,
+                "trVolume" : 16384,
+                "numTransactions_" : 8,
+                "numBeforeTransactions_" : 0,
+                "trCost" : 0.0117188,
+                "preSegTrMode" : 0,
+                "cMemIDs" : [0, 1, 2, 3],
+                "GTR" : {
+                  "groupID" : 3,
+                  "numSharers" : 3,
+                  "count" : 0,
+                  "srcNodeID" : 3
+                }
+              },
+              {
+                "pIDX" : 4,
+                "cIDXs" : [4, 5],
+                "pMemID" : 1,
+                "minCMemID" : 0,
+                "loopOrder" : ["in", "out"],
+                "useBurst" : "true",
+                "collapseFactor" : 2,
+                "bestMCMode" : 2,
+                "selectedMCMode" : 2,
+                "minHops" : 1,
+                "CCWHopCWHop" : [31,1],
+                "hop_Mode3" : 1,
+                "hopSplit_Mode3" : [0,1],
+                "idealStWindow" : 3,
+                "maxBurst" : 32,
+                "trVolume" : 16384,
+                "numTransactions_" : 8,
+                "numBeforeTransactions_" : 8,
+                "trCost" : 0.00390625,
+                "preSegTrMode" : 2,
+                "cMemIDs" : [0, 1],
+                "GTR" : {
+                  "groupID" : 4,
+                  "numSharers" : 1,
+                  "count" : 0,
+                  "srcNodeID" : 1
+                }
+              },
+              {
+                "pIDX" : 5,
+                "cIDXs" : [8, 9, 10],
+                "pMemID" : 2,
+                "minCMemID" : 0,
+                "loopOrder" : ["in", "out"],
+                "useBurst" : "true",
+                "collapseFactor" : 2,
+                "bestMCMode" : 2,
+                "selectedMCMode" : 2,
+                "minHops" : 2,
+                "CCWHopCWHop" : [31,2],
+                "hop_Mode3" : 2,
+                "hopSplit_Mode3" : [0,2],
+                "idealStWindow" : 2,
+                "maxBurst" : 32,
+                "trVolume" : 16384,
+                "numTransactions_" : 8,
+                "numBeforeTransactions_" : 0,
+                "trCost" : 0.0078125,
+                "preSegTrMode" : 2,
+                "cMemIDs" : [0, 1, 2],
+                "GTR" : {
+                  "groupID" : 5,
+                  "numSharers" : 2,
+                  "count" : 0,
+                  "srcNodeID" : 2
+                }
+              }
+            ],
+            "coreIDtoDtKey_L3SU" : [
+              {
+                "coreID" : 0,
+                "inpSPIDx" : [0]
+              },
+              {
+                "coreID" : 1,
+                "inpSPIDx" : [1, 4]
+              },
+              {
+                "coreID" : 2,
+                "inpSPIDx" : [5, 2]
+              },
+              {
+                "coreID" : 3,
+                "inpSPIDx" : [3]
+              }
+            ],
+            "coreIDtoDtKey_L3LU" : [
+              {
+                "coreID" : 0,
+                "inpSPIDx" : [3, 5, 4]
+              },
+              {
+                "coreID" : 1,
+                "inpSPIDx" : [0, 3, 5]
+              },
+              {
+                "coreID" : 2,
+                "inpSPIDx" : [0, 3, 1]
+              },
+              {
+                "coreID" : 3,
+                "inpSPIDx" : [0, 1, 2]
+              }
+            ],
+            "coreIDtoDtKey_LX" : [
+              {
+                "coreID" : 0,
+                "inpSPIDx" : [0]
+              },
+              {
+                "coreID" : 1,
+                "inpSPIDx" : [4]
+              },
+              {
+                "coreID" : 2,
+                "inpSPIDx" : [5]
+              },
+              {
+                "coreID" : 3,
+                "inpSPIDx" : [3]
+              }
+            ]
+          },
+          "pcfg_" : [
+            {
+              "l3su" : [
+                {
+                  "name" : "c0-l3su-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-l3su-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c0-l3su-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-l3su-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-l3su-ringDT-lx-ring-OL-0-0"],
+                  "prev" : ["c0-l3su-Outer-Loop-0-0"],
+                  "loopName" : "c0-l3su-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-l3su-ringDT-lx-ring-OL-0-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c0-l3su-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c0-l3su-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [1, 2, 3],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c0-l3su-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [1, 2, 3] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c0-l3su-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 0, "numSharers" : 3, "count" : 0, "NodeID" : 0, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["lx", "ring"],
+                  "srcStartAddr" : "0",
+                  "destStartAddr" : "-1",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 1},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c0-l3su-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c0-l3su-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-l3su-IL-outin-OL-0-0", "c0-l3su-Outer-LoopBranch-0-0"],
+                  "prev" : ["c0-l3su-ringDT-lx-ring-OL-0-0"],
+                  "loopNode" : "c0-l3su-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c0-l3su-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-l3su-Outer-Loop-0-0"],
+                  "prev" : ["c0-l3su-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c0-l3su-Outer-Loop-0-0"
+                }
+              ],
+              "l3lu" : [
+                {
+                  "name" : "c0-l3lu-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-l3lu-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c0-l3lu-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-l3lu-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-l3lu-ringDT-ring-lx-OL-0-0"],
+                  "prev" : ["c0-l3lu-Outer-Loop-0-0"],
+                  "loopName" : "c0-l3lu-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-l3lu-ringDT-ring-lx-OL-0-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c0-l3lu-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c0-l3lu-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [3],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c0-l3lu-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [3] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c0-l3lu-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 3, "numSharers" : 3, "count" : 0, "NodeID" : 3, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["ring", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 2},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c0-l3lu-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c0-l3lu-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-l3lu-IL-outin-OL-0-0", "c0-l3lu-Outer-LoopBranch-0-0"],
+                  "prev" : ["c0-l3lu-ringDT-ring-lx-OL-0-0"],
+                  "loopNode" : "c0-l3lu-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c0-l3lu-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-l3lu-Outer-Loop-0-0", "c0-l3lu-Outer-Loop-1-0"],
+                  "prev" : ["c0-l3lu-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c0-l3lu-Outer-Loop-0-0"
+                },
+                {
+                  "name" : "c0-l3lu-Outer-Loop-1-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-l3lu-IL-outin-OL-1-0"],
+                  "prev" : ["c0-l3lu-Outer-LoopBranch-0-0"],
+                  "loopName" : "c0-l3lu-Outer-Loop-1-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-l3lu-IL-outin-OL-1-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-l3lu-ringDT-ring-lx-OL-1-0"],
+                  "prev" : ["c0-l3lu-Outer-Loop-1-0"],
+                  "loopName" : "c0-l3lu-IL-outin-OL-1-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-l3lu-ringDT-ring-lx-OL-1-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c0-l3lu-ILBranch-outin-OL-1-0"],
+                  "prev" : ["c0-l3lu-IL-outin-OL-1-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [2],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c0-l3lu-Outer-Loop-1-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [2] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c0-l3lu-Outer-Loop-1-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 5, "numSharers" : 2, "count" : 0, "NodeID" : 2, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["ring", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 2},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c0-l3lu-IL-outin-OL-1-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c0-l3lu-ILBranch-outin-OL-1-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-l3lu-IL-outin-OL-1-0", "c0-l3lu-Outer-LoopBranch-1-0"],
+                  "prev" : ["c0-l3lu-ringDT-ring-lx-OL-1-0"],
+                  "loopNode" : "c0-l3lu-IL-outin-OL-1-0"
+                },
+                {
+                  "name" : "c0-l3lu-Outer-LoopBranch-1-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-l3lu-Outer-Loop-1-0", "c0-l3lu-Outer-Loop-2-0"],
+                  "prev" : ["c0-l3lu-ILBranch-outin-OL-1-0"],
+                  "loopNode" : "c0-l3lu-Outer-Loop-1-0"
+                },
+                {
+                  "name" : "c0-l3lu-Outer-Loop-2-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-l3lu-IL-outin-OL-2-0"],
+                  "prev" : ["c0-l3lu-Outer-LoopBranch-1-0"],
+                  "loopName" : "c0-l3lu-Outer-Loop-2-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-l3lu-IL-outin-OL-2-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-l3lu-ringDT-ring-lx-OL-2-0"],
+                  "prev" : ["c0-l3lu-Outer-Loop-2-0"],
+                  "loopName" : "c0-l3lu-IL-outin-OL-2-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-l3lu-ringDT-ring-lx-OL-2-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c0-l3lu-ILBranch-outin-OL-2-0"],
+                  "prev" : ["c0-l3lu-IL-outin-OL-2-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [1],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c0-l3lu-Outer-Loop-2-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [1] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c0-l3lu-Outer-Loop-2-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 4, "numSharers" : 1, "count" : 0, "NodeID" : 1, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["ring", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 2},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c0-l3lu-IL-outin-OL-2-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c0-l3lu-ILBranch-outin-OL-2-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-l3lu-IL-outin-OL-2-0", "c0-l3lu-Outer-LoopBranch-2-0"],
+                  "prev" : ["c0-l3lu-ringDT-ring-lx-OL-2-0"],
+                  "loopNode" : "c0-l3lu-IL-outin-OL-2-0"
+                },
+                {
+                  "name" : "c0-l3lu-Outer-LoopBranch-2-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-l3lu-Outer-Loop-2-0"],
+                  "prev" : ["c0-l3lu-ILBranch-outin-OL-2-0"],
+                  "loopNode" : "c0-l3lu-Outer-Loop-2-0"
+                }
+              ],
+              "lxlu0" : [
+                {
+                  "name" : "c0-lxlu0-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-lxlu0-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c0-lxlu0-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-lxlu0-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-lxlu0-ringDT-lx-pe0-0-0"],
+                  "prev" : ["c0-lxlu0-Outer-Loop-0-0"],
+                  "loopName" : "c0-lxlu0-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-lxlu0-ringDT-lx-pe0-0-0",
+                  "type" : "datatransfer",
+                  "next" : ["c0-lxlu0-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c0-lxlu0-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "isPartStick" : 0,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["lx", "pe0"],
+                  "srcStartAddr" : "0",
+                  "destStartAddr" : "-1",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "EAROffCondAndVal" : [
+                  ],
+                  "EBRTag" : {"isValid" : 0, "tag" : "null"},
+                  "LRFTag" : {"isValid" : 0, "tag" : "null"},
+                  "useBurst" : "true",
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myLitDimGap" : {  },
+                  "myLitDimSize_el" : {  },
+                  "myLitSubDimSize_el" : {  },
+                  "elCond" : [
+                  ],
+                  "bigStAddrOffsets" : { 
+                    "c0-lxlu0-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  },
+                  "wordLength" : -1,
+                  "stickSize" : -1,
+                  "dtFormat" : "SEN169_FP16",
+                  "auxLoopBigStAddrOffsets" : { 
+                  },
+                  "gapOffset" : 0,
+                  "GTRAndBurstCondAndVal": [
+                  ],
+                  "gtr_imm_opt_en" : 0,
+                  "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+                  "useSAMVCondAndVal" : [
+                  ],
+                  "litStAddrOffsets" : { 
+                  }
+                },
+                {
+                  "name" : "c0-lxlu0-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-lxlu0-IL-outin-OL-0-0", "c0-lxlu0-Outer-LoopBranch-0-0"],
+                  "prev" : ["c0-lxlu0-ringDT-lx-pe0-0-0"],
+                  "loopNode" : "c0-lxlu0-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c0-lxlu0-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-lxlu0-Outer-Loop-0-0"],
+                  "prev" : ["c0-lxlu0-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c0-lxlu0-Outer-Loop-0-0"
+                }
+              ],
+              "lxsu0" : [
+                {
+                  "name" : "c0-lxsu0-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-lxsu0-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c0-lxsu0-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-lxsu0-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-lxsu0-ringDT-pe0-lx-0-0"],
+                  "prev" : ["c0-lxsu0-Outer-Loop-0-0"],
+                  "loopName" : "c0-lxsu0-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-lxsu0-ringDT-pe0-lx-0-0",
+                  "type" : "datatransfer",
+                  "next" : ["c0-lxsu0-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c0-lxsu0-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "isPartStick" : 0,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["pe0", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "EAROffCondAndVal" : [
+                  ],
+                  "EBRTag" : {"isValid" : 0, "tag" : "null"},
+                  "LRFTag" : {"isValid" : 0, "tag" : "null"},
+                  "useBurst" : "true",
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myLitDimGap" : {  },
+                  "myLitDimSize_el" : {  },
+                  "myLitSubDimSize_el" : {  },
+                  "elCond" : [
+                  ],
+                  "bigStAddrOffsets" : { 
+                    "c0-lxsu0-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  },
+                  "wordLength" : -1,
+                  "stickSize" : -1,
+                  "dtFormat" : "SEN169_FP16",
+                  "auxLoopBigStAddrOffsets" : { 
+                  },
+                  "gapOffset" : 0,
+                  "GTRAndBurstCondAndVal": [
+                  ],
+                  "gtr_imm_opt_en" : 0,
+                  "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+                  "useSAMVCondAndVal" : [
+                  ],
+                  "litStAddrOffsets" : { 
+                  }
+                },
+                {
+                  "name" : "c0-lxsu0-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-lxsu0-IL-outin-OL-0-0", "c0-lxsu0-Outer-LoopBranch-0-0"],
+                  "prev" : ["c0-lxsu0-ringDT-pe0-lx-0-0"],
+                  "loopNode" : "c0-lxsu0-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c0-lxsu0-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-lxsu0-Outer-Loop-0-0"],
+                  "prev" : ["c0-lxsu0-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c0-lxsu0-Outer-Loop-0-0"
+                }
+              ],
+              "pe0" : [
+                {
+                  "name" : "c0-pe0-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c0-pe0-FIFO-lx-lx-0"],
+                  "prev" : [],
+                  "loopName" : "c0-pe0-Outer-Loop-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c0-pe0-FIFO-lx-lx-0",
+                  "type" : "ptsfpdatatransfer",
+                  "next" : ["c0-pe0-Outer-LoopBranch-0-0"],
+                  "prev" : ["c0-pe0-Outer-Loop-0-0"],
+                  "coreletId" : 0,
+                  "isPartStick" : 0,
+                  "dimLayoutOrder" : [],
+                  "srcDest" : ["lx", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "-1",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "EAROffCondAndVal" : [
+                  ],
+                  "EBRTag" : {"isValid" : 0, "tag" : "null"},
+                  "LRFTag" : {"isValid" : 0, "tag" : "null"},
+                  "useBurst" : "false",
+                  "myBigDimSize" : {  },
+                  "myBigSubDimSize" : {  },
+                  "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+                  "myLitDimSize" : {  },
+                  "myLitSubDimSize" : {  },
+                  "myLitDimGap" : {  },
+                  "myLitDimSize_el" : {  },
+                  "myLitSubDimSize_el" : {  },
+                  "elCond" : [
+                  ],
+                  "bigStAddrOffsets" : { 
+                    "c0-pe0-Outer-Loop-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  },
+                  "wordLength" : -1,
+                  "stickSize" : -1,
+                  "self" : "pe0",
+                  "reqXRFReset" : 1,
+                  "xrfRowIdx" : -1,
+                  "useImaOrFma" : 0,
+                  "padVal" : 0,
+                  "padValBin" : -1,
+                  "has_multiple_dest_" : 0,
+                  "multiple_dest_" : [],
+                  "dtFormat" : "SEN169_FP16",
+                  "auxLoopBigStAddrOffsets" : { 
+                  },
+                  "gapOffset" : 0,
+                  "GTRAndBurstCondAndVal": [
+                  ],
+                  "gtr_imm_opt_en" : 0,
+                  "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+                  "useSAMVCondAndVal" : [
+                  ],
+                  "litStAddrOffsets" : { 
+                  }
+                },
+                {
+                  "name" : "c0-pe0-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c0-pe0-Outer-Loop-0-0"],
+                  "prev" : ["c0-pe0-FIFO-lx-lx-0"],
+                  "loopNode" : "c0-pe0-Outer-Loop-0-0"
+                }
+              ]
+            },
+            {
+              "l3su" : [
+                {
+                  "name" : "c1-l3su-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-l3su-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c1-l3su-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-l3su-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-l3su-ringDT-lx-ring-OL-0-0"],
+                  "prev" : ["c1-l3su-Outer-Loop-0-0"],
+                  "loopName" : "c1-l3su-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-l3su-ringDT-lx-ring-OL-0-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c1-l3su-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c1-l3su-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [2, 3],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c1-l3su-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [2, 3] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c1-l3su-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 1, "numSharers" : 2, "count" : 0, "NodeID" : 1, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["lx", "ring"],
+                  "srcStartAddr" : "0",
+                  "destStartAddr" : "-1",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 1},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c1-l3su-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c1-l3su-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-l3su-IL-outin-OL-0-0", "c1-l3su-Outer-LoopBranch-0-0"],
+                  "prev" : ["c1-l3su-ringDT-lx-ring-OL-0-0"],
+                  "loopNode" : "c1-l3su-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c1-l3su-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-l3su-Outer-Loop-0-0", "c1-l3su-Outer-Loop-1-0"],
+                  "prev" : ["c1-l3su-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c1-l3su-Outer-Loop-0-0"
+                },
+                {
+                  "name" : "c1-l3su-Outer-Loop-1-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-l3su-IL-outin-OL-1-0"],
+                  "prev" : ["c1-l3su-Outer-LoopBranch-0-0"],
+                  "loopName" : "c1-l3su-Outer-Loop-1-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-l3su-IL-outin-OL-1-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-l3su-ringDT-lx-ring-OL-1-0"],
+                  "prev" : ["c1-l3su-Outer-Loop-1-0"],
+                  "loopName" : "c1-l3su-IL-outin-OL-1-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-l3su-ringDT-lx-ring-OL-1-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c1-l3su-ILBranch-outin-OL-1-0"],
+                  "prev" : ["c1-l3su-IL-outin-OL-1-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [0],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c1-l3su-Outer-Loop-1-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [0] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c1-l3su-Outer-Loop-1-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 4, "numSharers" : 1, "count" : 0, "NodeID" : 1, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["lx", "ring"],
+                  "srcStartAddr" : "0",
+                  "destStartAddr" : "-1",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 2},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c1-l3su-IL-outin-OL-1-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c1-l3su-ILBranch-outin-OL-1-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-l3su-IL-outin-OL-1-0", "c1-l3su-Outer-LoopBranch-1-0"],
+                  "prev" : ["c1-l3su-ringDT-lx-ring-OL-1-0"],
+                  "loopNode" : "c1-l3su-IL-outin-OL-1-0"
+                },
+                {
+                  "name" : "c1-l3su-Outer-LoopBranch-1-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-l3su-Outer-Loop-1-0"],
+                  "prev" : ["c1-l3su-ILBranch-outin-OL-1-0"],
+                  "loopNode" : "c1-l3su-Outer-Loop-1-0"
+                }
+              ],
+              "l3lu" : [
+                {
+                  "name" : "c1-l3lu-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-l3lu-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c1-l3lu-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-l3lu-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-l3lu-ringDT-ring-lx-OL-0-0"],
+                  "prev" : ["c1-l3lu-Outer-Loop-0-0"],
+                  "loopName" : "c1-l3lu-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-l3lu-ringDT-ring-lx-OL-0-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c1-l3lu-ringDT-ring-lx-OL-0-0IL-1"],
+                  "prev" : ["c1-l3lu-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [0],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c1-l3lu-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [0] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c1-l3lu-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 0, "numSharers" : 3, "count" : 0, "NodeID" : 0, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["ring", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 1},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c1-l3lu-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c1-l3lu-ringDT-ring-lx-OL-0-0IL-1",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c1-l3lu-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c1-l3lu-ringDT-ring-lx-OL-0-0"],
+                  "coreletId" : 0,
+                  "coreIdForRing" : [3],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c1-l3lu-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [3] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c1-l3lu-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 3, "numSharers" : 3, "count" : 0, "NodeID" : 3, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["ring", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 1},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c1-l3lu-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c1-l3lu-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-l3lu-IL-outin-OL-0-0", "c1-l3lu-Outer-LoopBranch-0-0"],
+                  "prev" : ["c1-l3lu-ringDT-ring-lx-OL-0-0IL-1"],
+                  "loopNode" : "c1-l3lu-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c1-l3lu-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-l3lu-Outer-Loop-0-0", "c1-l3lu-Outer-Loop-1-0"],
+                  "prev" : ["c1-l3lu-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c1-l3lu-Outer-Loop-0-0"
+                },
+                {
+                  "name" : "c1-l3lu-Outer-Loop-1-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-l3lu-IL-outin-OL-1-0"],
+                  "prev" : ["c1-l3lu-Outer-LoopBranch-0-0"],
+                  "loopName" : "c1-l3lu-Outer-Loop-1-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-l3lu-IL-outin-OL-1-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-l3lu-ringDT-ring-lx-OL-1-0"],
+                  "prev" : ["c1-l3lu-Outer-Loop-1-0"],
+                  "loopName" : "c1-l3lu-IL-outin-OL-1-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-l3lu-ringDT-ring-lx-OL-1-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c1-l3lu-ILBranch-outin-OL-1-0"],
+                  "prev" : ["c1-l3lu-IL-outin-OL-1-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [2],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c1-l3lu-Outer-Loop-1-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [2] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c1-l3lu-Outer-Loop-1-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 5, "numSharers" : 2, "count" : 0, "NodeID" : 2, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["ring", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 2},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c1-l3lu-IL-outin-OL-1-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c1-l3lu-ILBranch-outin-OL-1-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-l3lu-IL-outin-OL-1-0", "c1-l3lu-Outer-LoopBranch-1-0"],
+                  "prev" : ["c1-l3lu-ringDT-ring-lx-OL-1-0"],
+                  "loopNode" : "c1-l3lu-IL-outin-OL-1-0"
+                },
+                {
+                  "name" : "c1-l3lu-Outer-LoopBranch-1-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-l3lu-Outer-Loop-1-0"],
+                  "prev" : ["c1-l3lu-ILBranch-outin-OL-1-0"],
+                  "loopNode" : "c1-l3lu-Outer-Loop-1-0"
+                }
+              ],
+              "lxlu0" : [
+                {
+                  "name" : "c1-lxlu0-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-lxlu0-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c1-lxlu0-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-lxlu0-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-lxlu0-ringDT-lx-pe0-0-0"],
+                  "prev" : ["c1-lxlu0-Outer-Loop-0-0"],
+                  "loopName" : "c1-lxlu0-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-lxlu0-ringDT-lx-pe0-0-0",
+                  "type" : "datatransfer",
+                  "next" : ["c1-lxlu0-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c1-lxlu0-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "isPartStick" : 0,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["lx", "pe0"],
+                  "srcStartAddr" : "0",
+                  "destStartAddr" : "-1",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "EAROffCondAndVal" : [
+                  ],
+                  "EBRTag" : {"isValid" : 0, "tag" : "null"},
+                  "LRFTag" : {"isValid" : 0, "tag" : "null"},
+                  "useBurst" : "true",
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myLitDimGap" : {  },
+                  "myLitDimSize_el" : {  },
+                  "myLitSubDimSize_el" : {  },
+                  "elCond" : [
+                  ],
+                  "bigStAddrOffsets" : { 
+                    "c1-lxlu0-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  },
+                  "wordLength" : -1,
+                  "stickSize" : -1,
+                  "dtFormat" : "SEN169_FP16",
+                  "auxLoopBigStAddrOffsets" : { 
+                  },
+                  "gapOffset" : 0,
+                  "GTRAndBurstCondAndVal": [
+                  ],
+                  "gtr_imm_opt_en" : 0,
+                  "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+                  "useSAMVCondAndVal" : [
+                  ],
+                  "litStAddrOffsets" : { 
+                  }
+                },
+                {
+                  "name" : "c1-lxlu0-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-lxlu0-IL-outin-OL-0-0", "c1-lxlu0-Outer-LoopBranch-0-0"],
+                  "prev" : ["c1-lxlu0-ringDT-lx-pe0-0-0"],
+                  "loopNode" : "c1-lxlu0-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c1-lxlu0-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-lxlu0-Outer-Loop-0-0"],
+                  "prev" : ["c1-lxlu0-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c1-lxlu0-Outer-Loop-0-0"
+                }
+              ],
+              "lxsu0" : [
+                {
+                  "name" : "c1-lxsu0-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-lxsu0-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c1-lxsu0-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-lxsu0-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-lxsu0-ringDT-pe0-lx-0-0"],
+                  "prev" : ["c1-lxsu0-Outer-Loop-0-0"],
+                  "loopName" : "c1-lxsu0-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-lxsu0-ringDT-pe0-lx-0-0",
+                  "type" : "datatransfer",
+                  "next" : ["c1-lxsu0-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c1-lxsu0-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "isPartStick" : 0,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["pe0", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "EAROffCondAndVal" : [
+                  ],
+                  "EBRTag" : {"isValid" : 0, "tag" : "null"},
+                  "LRFTag" : {"isValid" : 0, "tag" : "null"},
+                  "useBurst" : "true",
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myLitDimGap" : {  },
+                  "myLitDimSize_el" : {  },
+                  "myLitSubDimSize_el" : {  },
+                  "elCond" : [
+                  ],
+                  "bigStAddrOffsets" : { 
+                    "c1-lxsu0-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  },
+                  "wordLength" : -1,
+                  "stickSize" : -1,
+                  "dtFormat" : "SEN169_FP16",
+                  "auxLoopBigStAddrOffsets" : { 
+                  },
+                  "gapOffset" : 0,
+                  "GTRAndBurstCondAndVal": [
+                  ],
+                  "gtr_imm_opt_en" : 0,
+                  "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+                  "useSAMVCondAndVal" : [
+                  ],
+                  "litStAddrOffsets" : { 
+                  }
+                },
+                {
+                  "name" : "c1-lxsu0-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-lxsu0-IL-outin-OL-0-0", "c1-lxsu0-Outer-LoopBranch-0-0"],
+                  "prev" : ["c1-lxsu0-ringDT-pe0-lx-0-0"],
+                  "loopNode" : "c1-lxsu0-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c1-lxsu0-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-lxsu0-Outer-Loop-0-0"],
+                  "prev" : ["c1-lxsu0-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c1-lxsu0-Outer-Loop-0-0"
+                }
+              ],
+              "pe0" : [
+                {
+                  "name" : "c1-pe0-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c1-pe0-FIFO-lx-lx-0"],
+                  "prev" : [],
+                  "loopName" : "c1-pe0-Outer-Loop-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c1-pe0-FIFO-lx-lx-0",
+                  "type" : "ptsfpdatatransfer",
+                  "next" : ["c1-pe0-Outer-LoopBranch-0-0"],
+                  "prev" : ["c1-pe0-Outer-Loop-0-0"],
+                  "coreletId" : 0,
+                  "isPartStick" : 0,
+                  "dimLayoutOrder" : [],
+                  "srcDest" : ["lx", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "-1",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "EAROffCondAndVal" : [
+                  ],
+                  "EBRTag" : {"isValid" : 0, "tag" : "null"},
+                  "LRFTag" : {"isValid" : 0, "tag" : "null"},
+                  "useBurst" : "false",
+                  "myBigDimSize" : {  },
+                  "myBigSubDimSize" : {  },
+                  "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+                  "myLitDimSize" : {  },
+                  "myLitSubDimSize" : {  },
+                  "myLitDimGap" : {  },
+                  "myLitDimSize_el" : {  },
+                  "myLitSubDimSize_el" : {  },
+                  "elCond" : [
+                  ],
+                  "bigStAddrOffsets" : { 
+                    "c1-pe0-Outer-Loop-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  },
+                  "wordLength" : -1,
+                  "stickSize" : -1,
+                  "self" : "pe0",
+                  "reqXRFReset" : 1,
+                  "xrfRowIdx" : -1,
+                  "useImaOrFma" : 0,
+                  "padVal" : 0,
+                  "padValBin" : -1,
+                  "has_multiple_dest_" : 0,
+                  "multiple_dest_" : [],
+                  "dtFormat" : "SEN169_FP16",
+                  "auxLoopBigStAddrOffsets" : { 
+                  },
+                  "gapOffset" : 0,
+                  "GTRAndBurstCondAndVal": [
+                  ],
+                  "gtr_imm_opt_en" : 0,
+                  "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+                  "useSAMVCondAndVal" : [
+                  ],
+                  "litStAddrOffsets" : { 
+                  }
+                },
+                {
+                  "name" : "c1-pe0-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c1-pe0-Outer-Loop-0-0"],
+                  "prev" : ["c1-pe0-FIFO-lx-lx-0"],
+                  "loopNode" : "c1-pe0-Outer-Loop-0-0"
+                }
+              ]
+            },
+            {
+              "l3su" : [
+                {
+                  "name" : "c2-l3su-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-l3su-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c2-l3su-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-l3su-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-l3su-ringDT-lx-ring-OL-0-0"],
+                  "prev" : ["c2-l3su-Outer-Loop-0-0"],
+                  "loopName" : "c2-l3su-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-l3su-ringDT-lx-ring-OL-0-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c2-l3su-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c2-l3su-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [0, 1],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c2-l3su-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [0, 1] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c2-l3su-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 5, "numSharers" : 2, "count" : 0, "NodeID" : 2, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["lx", "ring"],
+                  "srcStartAddr" : "0",
+                  "destStartAddr" : "-1",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 2},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c2-l3su-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c2-l3su-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-l3su-IL-outin-OL-0-0", "c2-l3su-Outer-LoopBranch-0-0"],
+                  "prev" : ["c2-l3su-ringDT-lx-ring-OL-0-0"],
+                  "loopNode" : "c2-l3su-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c2-l3su-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-l3su-Outer-Loop-0-0", "c2-l3su-Outer-Loop-1-0"],
+                  "prev" : ["c2-l3su-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c2-l3su-Outer-Loop-0-0"
+                },
+                {
+                  "name" : "c2-l3su-Outer-Loop-1-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-l3su-IL-outin-OL-1-0"],
+                  "prev" : ["c2-l3su-Outer-LoopBranch-0-0"],
+                  "loopName" : "c2-l3su-Outer-Loop-1-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-l3su-IL-outin-OL-1-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-l3su-ringDT-lx-ring-OL-1-0"],
+                  "prev" : ["c2-l3su-Outer-Loop-1-0"],
+                  "loopName" : "c2-l3su-IL-outin-OL-1-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-l3su-ringDT-lx-ring-OL-1-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c2-l3su-ILBranch-outin-OL-1-0"],
+                  "prev" : ["c2-l3su-IL-outin-OL-1-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [3],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c2-l3su-Outer-Loop-1-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [3] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c2-l3su-Outer-Loop-1-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 2, "numSharers" : 1, "count" : 0, "NodeID" : 2, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["lx", "ring"],
+                  "srcStartAddr" : "0",
+                  "destStartAddr" : "-1",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 1},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c2-l3su-IL-outin-OL-1-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c2-l3su-ILBranch-outin-OL-1-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-l3su-IL-outin-OL-1-0", "c2-l3su-Outer-LoopBranch-1-0"],
+                  "prev" : ["c2-l3su-ringDT-lx-ring-OL-1-0"],
+                  "loopNode" : "c2-l3su-IL-outin-OL-1-0"
+                },
+                {
+                  "name" : "c2-l3su-Outer-LoopBranch-1-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-l3su-Outer-Loop-1-0"],
+                  "prev" : ["c2-l3su-ILBranch-outin-OL-1-0"],
+                  "loopNode" : "c2-l3su-Outer-Loop-1-0"
+                }
+              ],
+              "l3lu" : [
+                {
+                  "name" : "c2-l3lu-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-l3lu-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c2-l3lu-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-l3lu-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-l3lu-ringDT-ring-lx-OL-0-0"],
+                  "prev" : ["c2-l3lu-Outer-Loop-0-0"],
+                  "loopName" : "c2-l3lu-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-l3lu-ringDT-ring-lx-OL-0-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c2-l3lu-ringDT-ring-lx-OL-0-0IL-1"],
+                  "prev" : ["c2-l3lu-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [0],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c2-l3lu-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [0] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c2-l3lu-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 0, "numSharers" : 3, "count" : 0, "NodeID" : 0, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["ring", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 1},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c2-l3lu-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c2-l3lu-ringDT-ring-lx-OL-0-0IL-1",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c2-l3lu-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c2-l3lu-ringDT-ring-lx-OL-0-0"],
+                  "coreletId" : 0,
+                  "coreIdForRing" : [3],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c2-l3lu-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [3] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c2-l3lu-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 3, "numSharers" : 3, "count" : 0, "NodeID" : 3, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["ring", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 1},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c2-l3lu-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c2-l3lu-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-l3lu-IL-outin-OL-0-0", "c2-l3lu-Outer-LoopBranch-0-0"],
+                  "prev" : ["c2-l3lu-ringDT-ring-lx-OL-0-0IL-1"],
+                  "loopNode" : "c2-l3lu-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c2-l3lu-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-l3lu-Outer-Loop-0-0", "c2-l3lu-Outer-Loop-1-0"],
+                  "prev" : ["c2-l3lu-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c2-l3lu-Outer-Loop-0-0"
+                },
+                {
+                  "name" : "c2-l3lu-Outer-Loop-1-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-l3lu-IL-outin-OL-1-0"],
+                  "prev" : ["c2-l3lu-Outer-LoopBranch-0-0"],
+                  "loopName" : "c2-l3lu-Outer-Loop-1-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-l3lu-IL-outin-OL-1-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-l3lu-ringDT-ring-lx-OL-1-0"],
+                  "prev" : ["c2-l3lu-Outer-Loop-1-0"],
+                  "loopName" : "c2-l3lu-IL-outin-OL-1-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-l3lu-ringDT-ring-lx-OL-1-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c2-l3lu-ILBranch-outin-OL-1-0"],
+                  "prev" : ["c2-l3lu-IL-outin-OL-1-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [1],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c2-l3lu-Outer-Loop-1-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [1] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c2-l3lu-Outer-Loop-1-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 1, "numSharers" : 2, "count" : 0, "NodeID" : 1, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["ring", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 1},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c2-l3lu-IL-outin-OL-1-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c2-l3lu-ILBranch-outin-OL-1-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-l3lu-IL-outin-OL-1-0", "c2-l3lu-Outer-LoopBranch-1-0"],
+                  "prev" : ["c2-l3lu-ringDT-ring-lx-OL-1-0"],
+                  "loopNode" : "c2-l3lu-IL-outin-OL-1-0"
+                },
+                {
+                  "name" : "c2-l3lu-Outer-LoopBranch-1-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-l3lu-Outer-Loop-1-0"],
+                  "prev" : ["c2-l3lu-ILBranch-outin-OL-1-0"],
+                  "loopNode" : "c2-l3lu-Outer-Loop-1-0"
+                }
+              ],
+              "lxlu0" : [
+                {
+                  "name" : "c2-lxlu0-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-lxlu0-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c2-lxlu0-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-lxlu0-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-lxlu0-ringDT-lx-pe0-0-0"],
+                  "prev" : ["c2-lxlu0-Outer-Loop-0-0"],
+                  "loopName" : "c2-lxlu0-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-lxlu0-ringDT-lx-pe0-0-0",
+                  "type" : "datatransfer",
+                  "next" : ["c2-lxlu0-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c2-lxlu0-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "isPartStick" : 0,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["lx", "pe0"],
+                  "srcStartAddr" : "0",
+                  "destStartAddr" : "-1",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "EAROffCondAndVal" : [
+                  ],
+                  "EBRTag" : {"isValid" : 0, "tag" : "null"},
+                  "LRFTag" : {"isValid" : 0, "tag" : "null"},
+                  "useBurst" : "true",
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myLitDimGap" : {  },
+                  "myLitDimSize_el" : {  },
+                  "myLitSubDimSize_el" : {  },
+                  "elCond" : [
+                  ],
+                  "bigStAddrOffsets" : { 
+                    "c2-lxlu0-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  },
+                  "wordLength" : -1,
+                  "stickSize" : -1,
+                  "dtFormat" : "SEN169_FP16",
+                  "auxLoopBigStAddrOffsets" : { 
+                  },
+                  "gapOffset" : 0,
+                  "GTRAndBurstCondAndVal": [
+                  ],
+                  "gtr_imm_opt_en" : 0,
+                  "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+                  "useSAMVCondAndVal" : [
+                  ],
+                  "litStAddrOffsets" : { 
+                  }
+                },
+                {
+                  "name" : "c2-lxlu0-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-lxlu0-IL-outin-OL-0-0", "c2-lxlu0-Outer-LoopBranch-0-0"],
+                  "prev" : ["c2-lxlu0-ringDT-lx-pe0-0-0"],
+                  "loopNode" : "c2-lxlu0-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c2-lxlu0-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-lxlu0-Outer-Loop-0-0"],
+                  "prev" : ["c2-lxlu0-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c2-lxlu0-Outer-Loop-0-0"
+                }
+              ],
+              "lxsu0" : [
+                {
+                  "name" : "c2-lxsu0-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-lxsu0-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c2-lxsu0-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-lxsu0-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-lxsu0-ringDT-pe0-lx-0-0"],
+                  "prev" : ["c2-lxsu0-Outer-Loop-0-0"],
+                  "loopName" : "c2-lxsu0-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-lxsu0-ringDT-pe0-lx-0-0",
+                  "type" : "datatransfer",
+                  "next" : ["c2-lxsu0-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c2-lxsu0-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "isPartStick" : 0,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["pe0", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "EAROffCondAndVal" : [
+                  ],
+                  "EBRTag" : {"isValid" : 0, "tag" : "null"},
+                  "LRFTag" : {"isValid" : 0, "tag" : "null"},
+                  "useBurst" : "true",
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myLitDimGap" : {  },
+                  "myLitDimSize_el" : {  },
+                  "myLitSubDimSize_el" : {  },
+                  "elCond" : [
+                  ],
+                  "bigStAddrOffsets" : { 
+                    "c2-lxsu0-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  },
+                  "wordLength" : -1,
+                  "stickSize" : -1,
+                  "dtFormat" : "SEN169_FP16",
+                  "auxLoopBigStAddrOffsets" : { 
+                  },
+                  "gapOffset" : 0,
+                  "GTRAndBurstCondAndVal": [
+                  ],
+                  "gtr_imm_opt_en" : 0,
+                  "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+                  "useSAMVCondAndVal" : [
+                  ],
+                  "litStAddrOffsets" : { 
+                  }
+                },
+                {
+                  "name" : "c2-lxsu0-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-lxsu0-IL-outin-OL-0-0", "c2-lxsu0-Outer-LoopBranch-0-0"],
+                  "prev" : ["c2-lxsu0-ringDT-pe0-lx-0-0"],
+                  "loopNode" : "c2-lxsu0-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c2-lxsu0-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-lxsu0-Outer-Loop-0-0"],
+                  "prev" : ["c2-lxsu0-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c2-lxsu0-Outer-Loop-0-0"
+                }
+              ],
+              "pe0" : [
+                {
+                  "name" : "c2-pe0-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c2-pe0-FIFO-lx-lx-0"],
+                  "prev" : [],
+                  "loopName" : "c2-pe0-Outer-Loop-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c2-pe0-FIFO-lx-lx-0",
+                  "type" : "ptsfpdatatransfer",
+                  "next" : ["c2-pe0-Outer-LoopBranch-0-0"],
+                  "prev" : ["c2-pe0-Outer-Loop-0-0"],
+                  "coreletId" : 0,
+                  "isPartStick" : 0,
+                  "dimLayoutOrder" : [],
+                  "srcDest" : ["lx", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "-1",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "EAROffCondAndVal" : [
+                  ],
+                  "EBRTag" : {"isValid" : 0, "tag" : "null"},
+                  "LRFTag" : {"isValid" : 0, "tag" : "null"},
+                  "useBurst" : "false",
+                  "myBigDimSize" : {  },
+                  "myBigSubDimSize" : {  },
+                  "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+                  "myLitDimSize" : {  },
+                  "myLitSubDimSize" : {  },
+                  "myLitDimGap" : {  },
+                  "myLitDimSize_el" : {  },
+                  "myLitSubDimSize_el" : {  },
+                  "elCond" : [
+                  ],
+                  "bigStAddrOffsets" : { 
+                    "c2-pe0-Outer-Loop-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  },
+                  "wordLength" : -1,
+                  "stickSize" : -1,
+                  "self" : "pe0",
+                  "reqXRFReset" : 1,
+                  "xrfRowIdx" : -1,
+                  "useImaOrFma" : 0,
+                  "padVal" : 0,
+                  "padValBin" : -1,
+                  "has_multiple_dest_" : 0,
+                  "multiple_dest_" : [],
+                  "dtFormat" : "SEN169_FP16",
+                  "auxLoopBigStAddrOffsets" : { 
+                  },
+                  "gapOffset" : 0,
+                  "GTRAndBurstCondAndVal": [
+                  ],
+                  "gtr_imm_opt_en" : 0,
+                  "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+                  "useSAMVCondAndVal" : [
+                  ],
+                  "litStAddrOffsets" : { 
+                  }
+                },
+                {
+                  "name" : "c2-pe0-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c2-pe0-Outer-Loop-0-0"],
+                  "prev" : ["c2-pe0-FIFO-lx-lx-0"],
+                  "loopNode" : "c2-pe0-Outer-Loop-0-0"
+                }
+              ]
+            },
+            {
+              "l3su" : [
+                {
+                  "name" : "c3-l3su-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-l3su-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c3-l3su-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-l3su-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-l3su-ringDT-lx-ring-OL-0-0"],
+                  "prev" : ["c3-l3su-Outer-Loop-0-0"],
+                  "loopName" : "c3-l3su-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-l3su-ringDT-lx-ring-OL-0-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c3-l3su-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c3-l3su-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [0, 1, 2],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c3-l3su-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [0, 1, 2] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c3-l3su-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 3, "numSharers" : 3, "count" : 0, "NodeID" : 3, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["lx", "ring"],
+                  "srcStartAddr" : "0",
+                  "destStartAddr" : "-1",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 2},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c3-l3su-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c3-l3su-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-l3su-IL-outin-OL-0-0", "c3-l3su-Outer-LoopBranch-0-0"],
+                  "prev" : ["c3-l3su-ringDT-lx-ring-OL-0-0"],
+                  "loopNode" : "c3-l3su-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c3-l3su-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-l3su-Outer-Loop-0-0"],
+                  "prev" : ["c3-l3su-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c3-l3su-Outer-Loop-0-0"
+                }
+              ],
+              "l3lu" : [
+                {
+                  "name" : "c3-l3lu-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-l3lu-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c3-l3lu-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-l3lu-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-l3lu-ringDT-ring-lx-OL-0-0"],
+                  "prev" : ["c3-l3lu-Outer-Loop-0-0"],
+                  "loopName" : "c3-l3lu-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-l3lu-ringDT-ring-lx-OL-0-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c3-l3lu-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c3-l3lu-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [0],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c3-l3lu-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [0] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c3-l3lu-Outer-Loop-0-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 0, "numSharers" : 3, "count" : 0, "NodeID" : 0, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["ring", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 1},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c3-l3lu-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c3-l3lu-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-l3lu-IL-outin-OL-0-0", "c3-l3lu-Outer-LoopBranch-0-0"],
+                  "prev" : ["c3-l3lu-ringDT-ring-lx-OL-0-0"],
+                  "loopNode" : "c3-l3lu-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c3-l3lu-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-l3lu-Outer-Loop-0-0", "c3-l3lu-Outer-Loop-1-0"],
+                  "prev" : ["c3-l3lu-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c3-l3lu-Outer-Loop-0-0"
+                },
+                {
+                  "name" : "c3-l3lu-Outer-Loop-1-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-l3lu-IL-outin-OL-1-0"],
+                  "prev" : ["c3-l3lu-Outer-LoopBranch-0-0"],
+                  "loopName" : "c3-l3lu-Outer-Loop-1-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-l3lu-IL-outin-OL-1-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-l3lu-ringDT-ring-lx-OL-1-0"],
+                  "prev" : ["c3-l3lu-Outer-Loop-1-0"],
+                  "loopName" : "c3-l3lu-IL-outin-OL-1-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-l3lu-ringDT-ring-lx-OL-1-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c3-l3lu-ILBranch-outin-OL-1-0"],
+                  "prev" : ["c3-l3lu-IL-outin-OL-1-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [1],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c3-l3lu-Outer-Loop-1-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [1] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c3-l3lu-Outer-Loop-1-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 1, "numSharers" : 2, "count" : 0, "NodeID" : 1, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["ring", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 1},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c3-l3lu-IL-outin-OL-1-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c3-l3lu-ILBranch-outin-OL-1-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-l3lu-IL-outin-OL-1-0", "c3-l3lu-Outer-LoopBranch-1-0"],
+                  "prev" : ["c3-l3lu-ringDT-ring-lx-OL-1-0"],
+                  "loopNode" : "c3-l3lu-IL-outin-OL-1-0"
+                },
+                {
+                  "name" : "c3-l3lu-Outer-LoopBranch-1-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-l3lu-Outer-Loop-1-0", "c3-l3lu-Outer-Loop-2-0"],
+                  "prev" : ["c3-l3lu-ILBranch-outin-OL-1-0"],
+                  "loopNode" : "c3-l3lu-Outer-Loop-1-0"
+                },
+                {
+                  "name" : "c3-l3lu-Outer-Loop-2-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-l3lu-IL-outin-OL-2-0"],
+                  "prev" : ["c3-l3lu-Outer-LoopBranch-1-0"],
+                  "loopName" : "c3-l3lu-Outer-Loop-2-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-l3lu-IL-outin-OL-2-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-l3lu-ringDT-ring-lx-OL-2-0"],
+                  "prev" : ["c3-l3lu-Outer-Loop-2-0"],
+                  "loopName" : "c3-l3lu-IL-outin-OL-2-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-l3lu-ringDT-ring-lx-OL-2-0",
+                  "type" : "ringdatatransfer",
+                  "next" : ["c3-l3lu-ILBranch-outin-OL-2-0"],
+                  "prev" : ["c3-l3lu-IL-outin-OL-2-0"],
+                  "coreletId" : -1,
+                  "coreIdForRing" : [2],
+                  "dtFormat" : "SEN169_FP16",
+                  "coreIDForRingCondAndVal": [
+                    { "loopName" : "c3-l3lu-Outer-Loop-2-0", "condOp" : "always", "condVal" : 0, "coreIdForRing" : [2] }
+                  ],
+                  "GTRAndBurstCondAndVal": [
+                    { "loopName" : "c3-l3lu-Outer-Loop-2-0", "condOp" : "always", "condVal" : 0, "GTRBurstInfo" : {"groupID" : 2, "numSharers" : 1, "count" : 0, "NodeID" : 2, "useBurst" : "true"} }
+                  ],
+                  "gtr_imm_opt_en" : 1,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["ring", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "addrSpan" : -1,
+                  "useBurst" : "false",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "forceModeMC" : {"force" : 1, "val" : 1},
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myBigStride" : {  },
+                  "bigStAddrOffsets" : { 
+                    "c3-l3lu-IL-outin-OL-2-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  }
+                },
+                {
+                  "name" : "c3-l3lu-ILBranch-outin-OL-2-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-l3lu-IL-outin-OL-2-0", "c3-l3lu-Outer-LoopBranch-2-0"],
+                  "prev" : ["c3-l3lu-ringDT-ring-lx-OL-2-0"],
+                  "loopNode" : "c3-l3lu-IL-outin-OL-2-0"
+                },
+                {
+                  "name" : "c3-l3lu-Outer-LoopBranch-2-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-l3lu-Outer-Loop-2-0"],
+                  "prev" : ["c3-l3lu-ILBranch-outin-OL-2-0"],
+                  "loopNode" : "c3-l3lu-Outer-Loop-2-0"
+                }
+              ],
+              "lxlu0" : [
+                {
+                  "name" : "c3-lxlu0-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-lxlu0-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c3-lxlu0-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-lxlu0-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-lxlu0-ringDT-lx-pe0-0-0"],
+                  "prev" : ["c3-lxlu0-Outer-Loop-0-0"],
+                  "loopName" : "c3-lxlu0-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-lxlu0-ringDT-lx-pe0-0-0",
+                  "type" : "datatransfer",
+                  "next" : ["c3-lxlu0-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c3-lxlu0-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "isPartStick" : 0,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["lx", "pe0"],
+                  "srcStartAddr" : "0",
+                  "destStartAddr" : "-1",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "EAROffCondAndVal" : [
+                  ],
+                  "EBRTag" : {"isValid" : 0, "tag" : "null"},
+                  "LRFTag" : {"isValid" : 0, "tag" : "null"},
+                  "useBurst" : "true",
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myLitDimGap" : {  },
+                  "myLitDimSize_el" : {  },
+                  "myLitSubDimSize_el" : {  },
+                  "elCond" : [
+                  ],
+                  "bigStAddrOffsets" : { 
+                    "c3-lxlu0-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  },
+                  "wordLength" : -1,
+                  "stickSize" : -1,
+                  "dtFormat" : "SEN169_FP16",
+                  "auxLoopBigStAddrOffsets" : { 
+                  },
+                  "gapOffset" : 0,
+                  "GTRAndBurstCondAndVal": [
+                  ],
+                  "gtr_imm_opt_en" : 0,
+                  "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+                  "useSAMVCondAndVal" : [
+                  ],
+                  "litStAddrOffsets" : { 
+                  }
+                },
+                {
+                  "name" : "c3-lxlu0-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-lxlu0-IL-outin-OL-0-0", "c3-lxlu0-Outer-LoopBranch-0-0"],
+                  "prev" : ["c3-lxlu0-ringDT-lx-pe0-0-0"],
+                  "loopNode" : "c3-lxlu0-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c3-lxlu0-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-lxlu0-Outer-Loop-0-0"],
+                  "prev" : ["c3-lxlu0-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c3-lxlu0-Outer-Loop-0-0"
+                }
+              ],
+              "lxsu0" : [
+                {
+                  "name" : "c3-lxsu0-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-lxsu0-IL-outin-OL-0-0"],
+                  "prev" : [],
+                  "loopName" : "c3-lxsu0-Outer-Loop-0-0",
+                  "loopCount" : 1,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-lxsu0-IL-outin-OL-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-lxsu0-ringDT-pe0-lx-0-0"],
+                  "prev" : ["c3-lxsu0-Outer-Loop-0-0"],
+                  "loopName" : "c3-lxsu0-IL-outin-OL-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-lxsu0-ringDT-pe0-lx-0-0",
+                  "type" : "datatransfer",
+                  "next" : ["c3-lxsu0-ILBranch-outin-OL-0-0"],
+                  "prev" : ["c3-lxsu0-IL-outin-OL-0-0"],
+                  "coreletId" : -1,
+                  "isPartStick" : 0,
+                  "dimLayoutOrder" : ["outin"],
+                  "srcDest" : ["pe0", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "1048576",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "EAROffCondAndVal" : [
+                  ],
+                  "EBRTag" : {"isValid" : 0, "tag" : "null"},
+                  "LRFTag" : {"isValid" : 0, "tag" : "null"},
+                  "useBurst" : "true",
+                  "myBigDimSize" : { "outin" : 256 },
+                  "myBigSubDimSize" : {  },
+                  "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+                  "myLitDimSize" : { "outin" : 1 },
+                  "myLitSubDimSize" : {  },
+                  "myLitDimGap" : {  },
+                  "myLitDimSize_el" : {  },
+                  "myLitSubDimSize_el" : {  },
+                  "elCond" : [
+                  ],
+                  "bigStAddrOffsets" : { 
+                    "c3-lxsu0-IL-outin-OL-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  },
+                  "wordLength" : -1,
+                  "stickSize" : -1,
+                  "dtFormat" : "SEN169_FP16",
+                  "auxLoopBigStAddrOffsets" : { 
+                  },
+                  "gapOffset" : 0,
+                  "GTRAndBurstCondAndVal": [
+                  ],
+                  "gtr_imm_opt_en" : 0,
+                  "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+                  "useSAMVCondAndVal" : [
+                  ],
+                  "litStAddrOffsets" : { 
+                  }
+                },
+                {
+                  "name" : "c3-lxsu0-ILBranch-outin-OL-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-lxsu0-IL-outin-OL-0-0", "c3-lxsu0-Outer-LoopBranch-0-0"],
+                  "prev" : ["c3-lxsu0-ringDT-pe0-lx-0-0"],
+                  "loopNode" : "c3-lxsu0-IL-outin-OL-0-0"
+                },
+                {
+                  "name" : "c3-lxsu0-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-lxsu0-Outer-Loop-0-0"],
+                  "prev" : ["c3-lxsu0-ILBranch-outin-OL-0-0"],
+                  "loopNode" : "c3-lxsu0-Outer-Loop-0-0"
+                }
+              ],
+              "pe0" : [
+                {
+                  "name" : "c3-pe0-Outer-Loop-0-0",
+                  "type" : "mvloop",
+                  "next" : ["c3-pe0-FIFO-lx-lx-0"],
+                  "prev" : [],
+                  "loopName" : "c3-pe0-Outer-Loop-0-0",
+                  "loopCount" : 256,
+                  "loopDim" : 0
+                },
+                {
+                  "name" : "c3-pe0-FIFO-lx-lx-0",
+                  "type" : "ptsfpdatatransfer",
+                  "next" : ["c3-pe0-Outer-LoopBranch-0-0"],
+                  "prev" : ["c3-pe0-Outer-Loop-0-0"],
+                  "coreletId" : 0,
+                  "isPartStick" : 0,
+                  "dimLayoutOrder" : [],
+                  "srcDest" : ["lx", "lx"],
+                  "srcStartAddr" : "-1",
+                  "destStartAddr" : "-1",
+                  "srcStartCondAndVal" : [
+                  ],
+                  "destStartCondAndVal" : [
+                  ],
+                  "EAROffCondAndVal" : [
+                  ],
+                  "EBRTag" : {"isValid" : 0, "tag" : "null"},
+                  "LRFTag" : {"isValid" : 0, "tag" : "null"},
+                  "useBurst" : "false",
+                  "myBigDimSize" : {  },
+                  "myBigSubDimSize" : {  },
+                  "myBigStride" : { "ij" : 1, "in" : 1, "kij" : 1, "mb" : 1, "out" : 1, "x" : 1, "y" : 1 },
+                  "myLitDimSize" : {  },
+                  "myLitSubDimSize" : {  },
+                  "myLitDimGap" : {  },
+                  "myLitDimSize_el" : {  },
+                  "myLitSubDimSize_el" : {  },
+                  "elCond" : [
+                  ],
+                  "bigStAddrOffsets" : { 
+                    "c3-pe0-Outer-Loop-0-0" : { "dimOffset" : 1, "subDimOffset" : 0, "uniDimOffset" : 0, "freq" : 1, "clSkipOffset" : 0, "clSkipFreq" : 1 }
+                  },
+                  "wordLength" : -1,
+                  "stickSize" : -1,
+                  "self" : "pe0",
+                  "reqXRFReset" : 1,
+                  "xrfRowIdx" : -1,
+                  "useImaOrFma" : 0,
+                  "padVal" : 0,
+                  "padValBin" : -1,
+                  "has_multiple_dest_" : 0,
+                  "multiple_dest_" : [],
+                  "dtFormat" : "SEN169_FP16",
+                  "auxLoopBigStAddrOffsets" : { 
+                  },
+                  "gapOffset" : 0,
+                  "GTRAndBurstCondAndVal": [
+                  ],
+                  "gtr_imm_opt_en" : 0,
+                  "SAMVInfo": { "isReq" : 0, "needReset" : 0, "stickToTrans" : 1, "validElem" : -1, "wordLength" : -1,"immValBin" : 0,"unmask_after_dt" : 0,"immVal" : 0 },
+                  "useSAMVCondAndVal" : [
+                  ],
+                  "litStAddrOffsets" : { 
+                  }
+                },
+                {
+                  "name" : "c3-pe0-Outer-LoopBranch-0-0",
+                  "type" : "mvloopbranch",
+                  "next" : ["c3-pe0-Outer-Loop-0-0"],
+                  "prev" : ["c3-pe0-FIFO-lx-lx-0"],
+                  "loopNode" : "c3-pe0-Outer-Loop-0-0"
+                }
+              ]
+            }
+          ],
+          "target_" : "senulator"
+        }
+      }
+    ],
+    "dimToSymbolMappingOpcodeCorrection_" : {  },
+    "inputSymbolsAndTags_" : {  },
+    "symbolDefinitions_" : {
+    }
+  }
+}

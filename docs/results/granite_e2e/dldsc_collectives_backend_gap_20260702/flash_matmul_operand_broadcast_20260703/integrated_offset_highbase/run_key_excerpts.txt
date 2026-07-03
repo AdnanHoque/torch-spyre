@@ -1,0 +1,22 @@
+2:matmul_operand_broadcast dst core=0 addr=1048576 bytes=131072
+3:matmul_operand_broadcast dst core=1 addr=1048576 bytes=131072
+4:matmul_operand_broadcast dst core=2 addr=1048576 bytes=131072
+5:matmul_operand_broadcast dst core=3 addr=1048576 bytes=131072
+6:matmul_operand_broadcast consumer base core=0 addr=1048576
+7:matmul_operand_broadcast consumer base core=1 addr=1048576
+8:matmul_operand_broadcast consumer base core=2 addr=1048576
+9:matmul_operand_broadcast consumer base core=3 addr=1048576
+10:dxp_exec_debug sdsc=0_mul dscs=1 datadscs=0 schedules=4 has_frame=1 frame_size=2176 frame_addr=19227496257049934
+11:dxp_exec_debug sdsc=1_batchmatmul-Tensor1-MatmulOperandBroadcastRelayout-Fission0 dscs=0 datadscs=1 schedules=4 has_frame=1 frame_size=2816 frame_addr=19227496257049934
+12:dxp_exec_debug sdsc=1_batchmatmul dscs=1 datadscs=0 schedules=4 has_frame=1 frame_size=3968 frame_addr=19227496257049934
+13:ALLCLOSE False
+14:MAX_DIFF 47.0
+15:MISMATCH 228312 / 262144
+16:ROW 0 OUT [32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0]
+17:ROW 0 REF [0.0, 0.0009765625, 0.001953125, 0.0029296875, 0.00390625, 0.0048828125, 0.005859375, 0.0068359375, 0.0078125, 0.0087890625, 0.009765625, 0.0107421875, 0.01171875, 0.0126953125, 0.013671875, 0.0146484375]
+18:ROW 1 OUT [32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5]
+19:ROW 1 REF [0.5, 0.5009765625, 0.501953125, 0.5029296875, 0.50390625, 0.5048828125, 0.505859375, 0.5068359375, 0.5078125, 0.5087890625, 0.509765625, 0.5107421875, 0.51171875, 0.5126953125, 0.513671875, 0.5146484375]
+20:ROW 127 OUT [63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5]
+21:ROW 127 REF [63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5]
+22:ROW 128 OUT [32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0]
+23:ROW 128 REF [0.0, 0.0009765625, 0.001953125, 0.0029296875, 0.00390625, 0.0048828125, 0.005859375, 0.0068359375, 0.0078125, 0.0087890625, 0.009765625, 0.0107421875, 0.01171875, 0.0126953125, 0.013671875, 0.0146484375]
