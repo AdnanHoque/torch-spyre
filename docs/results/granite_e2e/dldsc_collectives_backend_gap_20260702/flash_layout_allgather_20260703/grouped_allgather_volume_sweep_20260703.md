@@ -47,6 +47,21 @@ Why does grouped STCDPOpLx execution diverge from PCFG reference once each produ
 
 That is likely much easier for Deeptools/DCC owners to reason about than the original full flash attention failure.
 
+## DCC Flag Sweep
+
+I also tried a small DCC flag sweep on the first failing case, `FlashGroupedAllgatherFullIn32`:
+
+| Variant | `senpcfg` | `dcc-opt` | `senulator` | Store Check |
+| --- | ---: | ---: | ---: | --- |
+| baseline | 0 | 0 | 1 | failed |
+| `--dcc-multicast-canonicalization-disable` | 0 | 134 | skipped | unknown |
+| `--dcc-burst-splitting-disable` | 0 | 0 | 1 | failed |
+| `--dcc-sync-send-recv-fusion-disable` | 0 | 0 | 1 | failed |
+| `--dcc-store-and-forward-fusion-disable` | 0 | 0 | 1 | failed |
+| `--dcc-mutable-addr-splitting-disable` | 0 | 0 | 1 | failed |
+
+None of the obvious DCC toggles fixed the mismatch. Disabling multicast canonicalization aborts in DCC, which is also a useful clue: this path appears to rely on multicast canonicalization, but the resulting executable program is still value-wrong for larger transfer rows.
+
 ## Implication For Granite/Flash Collectives
 
 This confirms that `broadcast` / `multicast` / `layout_allgather` are plausible through the DLDSC coordinate contract, but the production path still needs a backend fix before we can use this class to remove the flash attention HBM round trips.
@@ -58,6 +73,6 @@ Scatter PR1 remains separate: it covers the smaller one-to-one class and is not 
 - [grouped_allgather_sweep/metadata_summary.csv](grouped_allgather_sweep/metadata_summary.csv)
 - [grouped_allgather_sweep/topology_sweep_summary.csv](grouped_allgather_sweep/topology_sweep_summary.csv)
 - [grouped_allgather_sweep/payload_sweep_summary.csv](grouped_allgather_sweep/payload_sweep_summary.csv)
+- [grouped_allgather_sweep/in32_dcc_flag_sweep_summary.csv](grouped_allgather_sweep/in32_dcc_flag_sweep_summary.csv)
 - [grouped_allgather_sweep/deeptools_grouped_allgather_sweep_experiment.patch](grouped_allgather_sweep/deeptools_grouped_allgather_sweep_experiment.patch)
 - [grouped_allgather_sweep/deeptools_grouped_allgather_sweep_experiment_diff_stat.txt](grouped_allgather_sweep/deeptools_grouped_allgather_sweep_experiment_diff_stat.txt)
-
