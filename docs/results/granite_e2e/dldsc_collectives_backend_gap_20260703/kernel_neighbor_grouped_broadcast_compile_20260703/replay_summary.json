@@ -1,0 +1,20 @@
+{
+  "created_at": "2026-07-03",
+  "pod": "adnan-clc-spyre-dev-pf",
+  "torch_branch": "ah/comms-collectives",
+  "torch_sha": "bad57f80cf898803c8e292cc56f4fb5c541c70d1",
+  "deeptools_branch": "ah/comms-collectives",
+  "deeptools_sha": "1446330381d84c6086e5131742011727f6883d5b",
+  "input_bundle": "/home/adnan/codex-isolated/dldsc_granite_clean_relayout_20260703_163108/runs/granite_relayout_s512_failclosed_20260703_173131/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_e0v78nrw",
+  "replay_run": "/home/adnan/codex-isolated/dldsc_granite_clean_relayout_20260703_163108/runs/dxp_replay_kernel_neighbor_realized_patch_20260703_233721",
+  "unit_test": "./util/util_unit_test --gtest_filter=LayoutAllgatherRestickify.*",
+  "unit_test_result": "22 passed",
+  "dxp_replay_result": "RC=0",
+  "plan_file": "8_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+  "plan_realized": true,
+  "physical_lowering_status": "lowered_loop_scoped_kernel_neighbor",
+  "communication_pattern": "all_gather_replicate",
+  "logical_transfer_count": "512",
+  "allocation_before_bytes": 2097152,
+  "allocation_after_bytes": 65536
+}

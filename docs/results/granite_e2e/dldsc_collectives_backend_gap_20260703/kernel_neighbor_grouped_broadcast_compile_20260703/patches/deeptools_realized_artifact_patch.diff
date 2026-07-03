@@ -1,0 +1,71 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 49a621050..5b6f98506 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -172,8 +172,13 @@ static void emitLayoutAllgatherRestickifyPlanArtifact(
+ 
+ static void emitMatmulOperandBroadcastPlanArtifact(
+     const SuperDsc* sdsc, const LabeledDsInfo& lds, int ps,
+-    const MatmulOperandBroadcastHookPlan& hook) {
+-  const auto& plan = hook.plan;
++    const MatmulOperandBroadcastHookPlan& hook,
++    bool kernelNeighborLowered = false) {
++  auto plan = hook.plan;
++  if (kernelNeighborLowered) {
++    plan.realized = true;
++    plan.realizationStrategy = "loop_scoped_input_fetch";
++  }
+   const char* outputDirEnv =
+       std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_PLAN_DIR");
+   const std::filesystem::path outputDir =
+@@ -186,21 +191,33 @@ static void emitMatmulOperandBroadcastPlanArtifact(
+       "_matmul_operand_broadcast_plan.json");
+   const auto outputPath = outputDir / fileName;
+ 
+-  const std::map<std::string, std::string> context = {
++  std::map<std::string, std::string> context = {
+       {"schema_version", "1"},
+       {"mutation_point",
+        "Dxp::insertRelayoutSdsc after LX pinned input coordinate mismatch"},
+-      {"physical_lowering_status", "blocked"},
+-      {"first_failing_boundary",
+-       "loop-scoped IFN/STCDP metadata exists, but DCC cannot yet fuse the IFN "
+-       "movement and DL matmul PCFG for one consumer schedule step"},
+-      {"fallback_policy",
+-       "refuse resident HBM/full per-consumer operand materialization"},
+       {"sdsc_name", sdsc->name_},
+       {"input_labeled_ds", lds.dsName_},
+       {"classification_key", hook.classificationKey},
+       {"program_step", std::to_string(ps)},
+   };
++  if (kernelNeighborLowered) {
++    context["realized"] = "true";
++    context["physical_lowering_status"] =
++        "lowered_loop_scoped_kernel_neighbor";
++    context["realization"] =
++        "marked as a loop-scoped KERNEL-neighbor matmul operand; DCC schedules "
++        "the LX-neighbor transfer inside the matmul transfer loop";
++    context["fallback_policy"] =
++        "refuse resident HBM/full per-consumer operand materialization";
++  } else {
++    context["realized"] = "false";
++    context["physical_lowering_status"] = "blocked";
++    context["first_failing_boundary"] =
++        "loop-scoped IFN/STCDP metadata exists, but DCC cannot yet fuse the IFN "
++        "movement and DL matmul PCFG for one consumer schedule step";
++    context["fallback_policy"] =
++        "refuse resident HBM/full per-consumer operand materialization";
++  }
+ 
+   std::ofstream out(outputPath);
+   DT_CHECK_MSG(out.good(),
+@@ -625,7 +642,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+                            markerReason);
+         }
+         emitMatmulOperandBroadcastPlanArtifact(sdsc, lds, ps,
+-                                               matmulBroadcastHook);
++                                               matmulBroadcastHook,
++                                               /*kernelNeighborLowered=*/true);
+         continue;
+       }
+       if (std::getenv("DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST") ==

@@ -1,0 +1,12 @@
+commit 1446330381d84c6086e5131742011727f6883d5b
+Author:     Adnan Hoque <adnan.hoque1@ibm.com>
+AuthorDate: Fri Jul 3 23:37:54 2026 +0000
+Commit:     Adnan Hoque <adnan.hoque1@ibm.com>
+CommitDate: Fri Jul 3 23:37:54 2026 +0000
+
+    [DXP] Mark staged matmul operand broadcast realized
+    
+    Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+
+ dxp/SdscRelayoutInsertion.cpp | 38 ++++++++++++++++++++++++++++----------
+ 1 file changed, 28 insertions(+), 10 deletions(-)
