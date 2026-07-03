@@ -1,0 +1,9 @@
+run_dir=/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_explicit_replicated_wkslice_20260703_104312
+exit_code=1
+
+matmul_operand_broadcast consumer base core=0 addr=1048576
+matmul_operand_broadcast consumer base core=1 addr=1048576
+matmul_operand_broadcast consumer base core=2 addr=1048576
+matmul_operand_broadcast consumer base core=3 addr=1048576
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Unexpected corelet cardinality mismatch for nodes allocate-Tensor1_lx and transfer_lds1_src:lxlu_dst:ptrow0, file /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/deeptools/ddc/ddc_fold.cpp line 1355

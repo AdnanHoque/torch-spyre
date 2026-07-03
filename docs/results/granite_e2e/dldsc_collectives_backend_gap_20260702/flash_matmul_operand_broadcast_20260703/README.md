@@ -42,6 +42,12 @@ All runs used the split frontend/backend LX knob setup:
 | Standalone 4-core STCDP broadcast, same destination base | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_20260703_100107` | `DataOpStandalone` and `senpcfg` complete | Destination windows collapse/overwrite | Replicating all producer chunks to the same output start address is not enough; later chunks overwrite the same physical destination slot. |
 | Standalone 4-core STCDP broadcast, destination chunk offsets | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_matmul_operand_broadcast4_chunk_offsets_20260703_101002` | `DataOpStandalone` and `senpcfg` complete | `BROADCAST_MAP_OK True`; every destination core receives all four chunks | STCDPOpLx can materialize the RHS broadcast if each source chunk is assigned its own logical destination offset. |
 | Integrated 4-core one-hot, high base + fission + destination chunk offsets | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_multiplacement_offsets_fission4_highbase_debug_20260703_102440` | DXP and runtime complete; relayout row executes before matmul | `228312 / 262144` mismatched, max diff `47.0` | The same offset idea is not sufficient once inserted before matmul. Movement is scheduled and the consumer base is rewritten, but the matmul KERNEL operand reader still consumes the staged RHS incorrectly. |
+| Integrated 4-core one-hot, explicit replicated wkSlice | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_explicit_replicated_wkslice_20260703_104312` | DXP aborts in DDC | `Unexpected corelet cardinality mismatch for nodes allocate-Tensor1_lx and transfer_lds1_src:lxlu_dst:ptrow0` | Naively representing the staged RHS as "all cores own the same full slice" is not accepted by existing DDC folding. |
+| Integrated 4-core one-hot, post-codegen KERNEL state debug | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_postcodegen_20260703_105302` | DXP and runtime complete | `coreStateInitSize=0`, `lxBufferSize=UINT64_MAX`, still `228312 / 262144` mismatched | The previous LBR-state hypothesis is not enough for this generated path; the KERNEL input is not represented through populated `coreStateInit_` here. |
+| 4-core one-hot, no-relayout control | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_control_no_relayout_20260703_105538` | DXP and runtime complete | `ALLCLOSE True`, max diff `0.03125` | The base matmul and input data are valid. The value error is introduced by the inserted relayout path, not by the probe itself. |
+| Integrated 4-core one-hot, min LDS base instead of last chunk base | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_minbase_core_lxstart_20260703_110300` | DXP and runtime complete | unchanged: `228312 / 262144` mismatched, max diff `47.0` | Keeping `coreIdTolxStartAddress_` at the first/min destination chunk does not fix the integrated matmul read. |
+| Integrated 4-core one-hot, DataInfo/unit-view dump | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_datainfo_view_20260703_111341` | DXP and runtime complete | `DataInfo.startAddr_` is `0`; unit view is `[(out,64),(in,16),(out,1)]` with only `in` outer loops | Pre-DDC allocation rewrite does not survive into the live MAC input address/view. |
+| Integrated 4-core one-hot, force `DataInfo.startAddr_ = 1048576` after DDC | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_force_datainfo_base_20260703_111728` | DXP and runtime complete | unchanged: `228312 / 262144` mismatched, max diff `47.0` | Rewriting `DataInfo.startAddr_` after DDC is still not enough; the remaining failure is lower than, or in addition to, the DataInfo base field. |
 
 ## Artifact Files
 
@@ -67,6 +73,13 @@ Additional focused artifacts from the 2026-07-03 offset-address probe:
 - `integrated_offset_highbase/matmul_operand_broadcast_plan.json`: logical 4x4 transfer plan used by the integrated probe.
 - `integrated_offset_highbase/run_key_excerpts.txt`: compact proof that the inserted relayout row executes before matmul and the final matmul output is still wrong.
 - `deeptools_current_dirty_matmul_broadcast_diff.patch`: full dirty CDX diagnostic diff for provenance only.
+- `explicit_replicated_wkslice/summary.txt`: DDC abort when the staged RHS is represented by a replicated `coreIdToWkSlice_`.
+- `post_codegen_kernel_state/summary.txt`: proof that the generated KERNEL input state has empty `coreStateInit_` even after DDC/codegen.
+- `control_no_relayout/summary.txt`: value-correct control with relayout disabled.
+- `minbase_core_lxstart/summary.txt`: negative result for the "LDS base overwritten by last chunk" hypothesis.
+- `deeptools_current_dirty_after_minbase_probe.patch`: full dirty CDX diagnostic diff after the min-base probe.
+- `datainfo_view/view_summary.txt`: post-DDC/post-codegen `DataInfo` and `UnitView` dump for the KERNEL RHS.
+- `force_datainfo_base/summary.txt`: negative result for forcing the live `DataInfo.startAddr_` to the staged RHS base.
 
 ## Current Read
 
@@ -75,6 +88,31 @@ The matmul-operand broadcast contract is correctly identified at the Torch/DLDSC
 The remaining failure is integration with the consumer matmul KERNEL operand. In the integrated one-hot probe, the inserted relayout SDSC executes before `batchmatmul`, and the consumer base is rewritten to the staged destination region. The final matmul output is still wrong. That means the next bug is not basic ring movement; it is the contract between the materialized RHS layout and the matmul operand reader/staging path.
 
 This is why PR1 scatter is not enough for this attention spill. Scatter is one producer shard to one consumer shard. This edge is all-gather/replicate: every consumer core needs the full producer-sharded operand.
+
+The latest probes also rule out three tempting explanations:
+
+- The problem is not the probe inputs: the no-relayout control is value-correct.
+- The problem is not simply an LBR rewrite bug: `coreStateInit_` is empty for this KERNEL input after DDC/codegen.
+- The problem is not simply the data-op LDS base being overwritten by the last destination chunk: forcing it to the first/min destination base leaves values unchanged.
+- The problem is not solved by a late `DataInfo.startAddr_` rewrite: forcing the MAC RHS input base to the staged high-base region leaves the same value pattern.
+
+Source inspection points to the active matmul RHS address path:
+
+- `L3DlOpsScheduler::fillDataInfo` copies `AllocateNode::startAddressCoreCorelet_` into `ComputeNode::inputsLdsAndLoopOffsets_[1].startAddr_`.
+- `DesignSpaceConfig::finalizeScheduleTree` builds `ComputeNode::coreletViews_[cl].inputsLoopsAndSizes_[1]` from that `DataInfo`.
+- DCC lowers the MAC RHS load from `inputsLdsAndLoopOffsets_[1].startAddr_` plus `coreletViews_[cl].inputsLoopsAndSizes_[1]`.
+
+So the next debug target is the post-DDC/post-codegen `DataInfo` and `UnitView` for KERNEL input 1, not `coreStateInit_`.
+
+The post-DDC view dump shows:
+
+```text
+DataInfo.startAddr_ = 0
+sizesNoGaps_ = [(out,64), (in,16), (out,1)]
+outerLoops_ = in only
+```
+
+Forcing `DataInfo.startAddr_` to the staged base changes the dumped address to `1048576`, but the output remains unchanged. That suggests either DCC's emitted vector-load path is using an already-derived/cached address form, or the KERNEL unit-view/layout contract still describes the original sharded operand rather than the post-relayout replicated RHS.
 
 ## Runbook: 4-Core Matmul Operand Probe
 
@@ -128,6 +166,9 @@ The latest probes narrow that further:
 - Forcing `[out,in]` instead of `[in,out]` is still value-wrong.
 - A standalone STCDPOpLx descriptor with explicit destination chunk offsets is value-correct, so the backend has enough low-level machinery for the ring copy itself.
 - The integrated pre-matmul version is still value-wrong, so the next investigation should target matmul KERNEL operand address/layout state, not another generic transfer-only tweak.
+- Explicitly encoding the staged RHS as a replicated work-slice map currently trips DDC cardinality checks.
+- `coreStateInit_`/LBR state is not the active KERNEL address path in this generated probe, so address debugging must move to the actual batchmatmul KERNEL descriptor/setup path.
+- A direct post-DDC `DataInfo.startAddr_` override is not sufficient, so the next likely fix needs a proper post-relayout logical allocation/view for the replicated RHS, not just a relocated address.
 
 The next check should not be another full attention run. It should be a Deeptools-level unit or hardware test for the exact STCDPOpLx piece model needed here: a sharded LX KERNEL operand, all-gathered into a full per-consumer-core RHS region, then consumed by a matmul descriptor. That test should verify bytes immediately after movement, before matmul, so we can separate movement materialization from matmul reader behavior.
 
