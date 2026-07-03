@@ -284,9 +284,39 @@ Conclusion: encoding destination chunk placement through byte address offsets di
 
 ## Current Read
 
-The invariant ~99.2% mismatch across materially different movement descriptions suggests STCDPOpLx cannot express this translated copy through the current piece-overlap interface, or DCG is interpreting the translated pieces differently than intended. The single-row and standalone-carrier prototypes make this sharper: row count, schedule-entry explosion, and mixed-SDSC placement are not sufficient explanations.
+The invariant ~99.2% mismatch across materially different movement descriptions suggests the edge is not a pure all-gather copy. The frontend classification says `layout_allgather_restickify`, not just `all_gather`.
 
-The backend gap is now narrower:
+Representative debug metadata from `runs/test_flash_standalone_relayout_20260703_003708/stderr.log`:
+
+```text
+producer_layout:
+  layoutDimOrder_ = [out, x, mb]
+  stickDimOrder_  = [out]
+
+restickify_kernel_layout:
+  layoutDimOrder_ = [x, out, mb]
+  stickDimOrder_  = [x]
+
+consumer_kernel_layout:
+  layoutDimOrder_ = [out, in, x]
+  stickDimOrder_  = [out]
+
+dimension_rename:
+  restickify.x   -> batchmatmul.out
+  restickify.out -> batchmatmul.in
+  restickify.mb  -> batchmatmul.x
+```
+
+This means a plain `STCDPOpLx` byte movement is insufficient unless the producer bytes already have the consumer's stick/layout interpretation. The failed prototypes likely moved ranges according to the right core fanout but with the wrong stick/layout transform semantics.
+
+The backend gap is therefore now narrower:
+
+1. Pure same-stick scatter is PR1.
+2. Same-stick all-gather/broadcast still looks like a natural extension of the PR1/DLDSC contract.
+3. Flash's current attention spill is a fused communication plus layout-transform class: `layout_allgather_restickify`.
+4. That class needs a transform-aware backend realization, for example local/on-chip restickify plus all-gather, gather plus per-destination restickify, or a first-class layout-changing STCDP/InputFetch primitive.
+
+What is already working:
 
 1. DLDSC sees the incompatible tensor distribution.
 2. Torch emits the classification and dimension rename.
@@ -296,13 +326,13 @@ The backend gap is now narrower:
 Likely missing backend capability:
 
 ```text
-translated LX->LX copy / grouped all-gather materialization
-source: local producer shard coordinates and source LX base
-destination: consumer-local/full operand placement and destination LX base/range
+layout-changing LX->LX grouped all-gather materialization
+source: local producer/restickify shard coordinates, stick layout, and source LX base
+destination: consumer-local/full operand placement, consumer stick layout, and destination LX base/range
 schedule: movement before consuming batchmatmul
 ```
 
-The existing STCDPOpLx overlap model appears naturally suited to same-coordinate overlap, but this class needs source-local to destination-global or destination-local translation.
+The existing STCDPOpLx overlap model appears naturally suited to same-stick/same-layout overlap. This class needs both source-local to destination-local translation and stick/layout transformation.
 
 ## Side Results
 

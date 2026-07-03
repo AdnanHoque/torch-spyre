@@ -34,9 +34,9 @@ The cleaner high-level representation is destination-grouped movement:
 
 This avoids mixing two meanings of LX start address: allocation base vs. chunk byte address.
 
-The latest CDX single-row prototype took this one step further by emitting one wide STCDP data-op row per consumer SDSC. It still compiled and executed but failed value correctness at 99.2% mismatch, so the gap is not just row granularity. The remaining issue is the physical translated LX-to-LX materialization/schedule semantics for grouped all-gather.
+The latest CDX single-row prototype took this one step further by emitting one wide STCDP data-op row per consumer SDSC. It still compiled and executed but failed value correctness at 99.2% mismatch, so the gap is not just row granularity.
 
-A later standalone-relayout SuperDSC prototype also compiled and executed but failed value correctness at the same 99.2% mismatch. That weakens mixed-SDSC placement as the main explanation; the problem is now more likely in translated STCDP subpiece/materialization semantics.
+A later standalone-relayout SuperDSC prototype also compiled and executed but failed value correctness at the same 99.2% mismatch. That weakens mixed-SDSC placement as the main explanation. The stronger diagnosis is that this is not pure all-gather: it is all-gather plus restickify/layout transformation. A byte-range STCDPOpLx copy can move the shards, but it cannot by itself reinterpret producer sticks as the consumer KERNEL layout.
 
 ## Granite state from dev-pf artifact
 
