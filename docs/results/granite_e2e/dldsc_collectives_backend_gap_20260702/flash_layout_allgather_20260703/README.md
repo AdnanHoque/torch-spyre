@@ -51,6 +51,12 @@ See [standalone_flash_grouped_allgather_20260703.md](standalone_flash_grouped_al
 
 The deeper executable check is still failing: `senpcfg` and `dcc-opt` pass, but `senulator -v store` reports `LX Store verification failed`. That makes this a backend executable-lowering/value issue for grouped LX all-gather, not just a full-flash integration issue.
 
+## Standalone Sweep Follow-Up
+
+The grouped all-gather issue was narrowed further with standalone samples. Small and mid-sized grouped all-gathers pass. The full 32-core/fanout-8 topology also passes with small payloads, but fails when each producer row reaches 32+ transactions.
+
+See [grouped_allgather_volume_sweep_20260703.md](grouped_allgather_volume_sweep_20260703.md).
+
 ## Current Interpretation
 
 This is no longer a basic DXP import/routing failure. DXP accepts the inserted movement, and the AIU runtime launches the affected bundle. The failure is now a value-correctness issue in physical materialization:
@@ -77,3 +83,4 @@ Only after this passes should we re-enable the full flash bundle.
 - [deeptools_current_direct_allgather_experiment_diff_stat.txt](deeptools_current_direct_allgather_experiment_diff_stat.txt)
 - [flash_layout_allgather_attempts_20260703_excerpts.md](flash_layout_allgather_attempts_20260703_excerpts.md)
 - [standalone_flash_grouped_allgather_20260703.md](standalone_flash_grouped_allgather_20260703.md)
+- [grouped_allgather_volume_sweep_20260703.md](grouped_allgather_volume_sweep_20260703.md)

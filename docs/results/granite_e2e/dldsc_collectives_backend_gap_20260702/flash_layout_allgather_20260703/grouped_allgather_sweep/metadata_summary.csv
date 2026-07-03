@@ -1,0 +1,9 @@
+sample,cores,pSubPiece,cSubPiece,fanout,trVolume,numTransactions,store
+FlashGroupedAllgatherSmall,4,4,8,2,8192,16,passed
+FlashGroupedAllgatherFanout4,8,8,32,4,8192,16,passed
+FlashGroupedAllgatherFanout8X1,8,14,64,8,8192,16,passed
+FlashGroupedAllgatherMid,16,16,64,4,8192,16,passed
+FlashGroupedAllgatherFullIn16,32,32,256,8,8192,16,passed
+FlashGroupedAllgatherFullIn32,32,32,256,8,16384,32,failed
+FlashGroupedAllgatherFullIn64,32,32,256,8,32768,64,failed
+FlashGroupedAllgather,32,32,256,8,65536,128,failed
