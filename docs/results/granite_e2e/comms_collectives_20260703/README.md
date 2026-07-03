@@ -5,6 +5,7 @@ This captures the CDX diagnostic run that separated three cases:
 1. direct synthetic LX gather works;
 2. Granite can emit matmul-operand all-gather metadata;
 3. Granite cannot yet realize that metadata because the current backend path tries to materialize the full post-relayout RHS in LX.
+4. the same mechanism can produce a measurable small-shape win when the live set is small enough for the current backend realization.
 
 ## Environment
 
@@ -128,6 +129,53 @@ DtException: matmul_operand_broadcast could not allocate 4194304 bytes in LX for
 
 This is the important failure. Once the computed restickify producer is LX-resident, Deeptools tries to realize the matmul RHS all-gather, but the current implementation materializes the full post-relayout RHS buffer per consumer core. That is too large for LX.
 
+### 6. Smaller Granite S=128 proves the path can realize on-chip movement
+
+Artifacts:
+
+- `s128_disabled/result.json`
+- `s128_enabled/result.json`
+- `s128_enabled/example_attention_relayout_sdsc_8.json`
+- `s128_enabled/backend_plans/*.json`
+
+Both runs used `B=1, S=128, H=4096`, causal prefill, two measured iterations, one warmup, and `DEEPTOOLS_PATH` pointed at the Deeptools source tree. That last part matters because the source checkout has `ddc/ddl_templates/restickify_lx.ddl`, while the installed `/opt/ibm/spyre/deeptools/share` path on this pod did not.
+
+Disabled control:
+
+- `returncode: 0`
+- `all_ms: [36.025, 31.452]`
+- `median_ms: 33.739`
+- attention rows include `ReStickifyOpHBM: 5`
+
+Enabled relayout:
+
+- `returncode: 0`
+- `all_ms: [17.523, 17.264]`
+- `median_ms: 17.394`
+- attention rows include `ReStickifyOpHBM: 4`
+- attention rows include `ReStickifyOpLx: 1`
+- backend emitted three relayout plans:
+  - `7_ReStickifyOpLx_7_ReStickifyOpLx-Relayout_auto_relayout_sdsc.json`
+  - `8_batchmatmul_8_batchmatmul-Relayout_auto_relayout_sdsc.json`
+  - `16_batchmatmul_16_batchmatmul-Relayout_auto_relayout_sdsc.json`
+
+The key `sdsc_8` contracts are:
+
+```text
+kind=all_gather
+communication_pattern=many_to_many
+transfer_count=128
+realized=true
+
+kind=matmul_operand_broadcast
+communication_pattern=all_gather_replicate
+transfer_count=1024
+requires_staged_realization=true
+realized=false
+```
+
+This is not a final performance claim: the run is short and wall-time only. It is still an important feasibility point. For a smaller sequence length, the current DLDSC + backend prototype can replace one HBM activation restickify with an LX restickify, emit backend relayout plans, and run end to end.
+
 ## Interpretation
 
 PR1-style scatter and small direct gather are not enough for Granite attention. The relevant attention communication class is a staged matmul-operand all-gather/replicate:
@@ -139,6 +187,8 @@ producer shards in LX
 ```
 
 The destination should not be a full resident RHS tensor. It needs to be fissioned or streamed into the matmul transfer loop, so only a tile/chunk is live at a time.
+
+The S=128 result shows the on-chip path is real when capacity is favorable. The S=512 failure shows why the next feature cannot be naive full-buffer materialization.
 
 This matches the current North Star:
 
@@ -159,4 +209,3 @@ Promising direction:
 - avoid requiring the full post-relayout RHS to exist in LX at once.
 
 The current full-materialization path is useful as a proof that the metadata routes to the right backend code, but it is not production-usable for Granite-sized attention.
-
