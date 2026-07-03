@@ -1,0 +1,23 @@
+RUN=/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_single_dst_highbase_20260703_092119
+matmul_operand_broadcast dst core=0 addr=1048576 bytes=131072
+matmul_operand_broadcast dst core=1 addr=1048576 bytes=131072
+matmul_operand_broadcast dst core=2 addr=1048576 bytes=131072
+matmul_operand_broadcast dst core=3 addr=1048576 bytes=131072
+matmul_operand_broadcast consumer base core=0 addr=1048576
+matmul_operand_broadcast consumer base core=1 addr=1048576
+matmul_operand_broadcast consumer base core=2 addr=1048576
+matmul_operand_broadcast consumer base core=3 addr=1048576
+dxp_exec_debug sdsc=0_mul dscs=1 datadscs=0 schedules=4 has_frame=1 frame_size=2176 frame_addr=19227496257049934
+dxp_exec_debug sdsc=1_batchmatmul-Tensor1-MatmulOperandBroadcastRelayout-Fission0 dscs=0 datadscs=4 schedules=4 has_frame=1 frame_size=2176 frame_addr=19227496257049934
+dxp_exec_debug sdsc=1_batchmatmul-Tensor1-MatmulOperandBroadcastRelayout-Fission1 dscs=0 datadscs=4 schedules=4 has_frame=1 frame_size=2176 frame_addr=19227496257049934
+dxp_exec_debug sdsc=1_batchmatmul-Tensor1-MatmulOperandBroadcastRelayout-Fission2 dscs=0 datadscs=4 schedules=4 has_frame=1 frame_size=2176 frame_addr=19227496257049934
+dxp_exec_debug sdsc=1_batchmatmul-Tensor1-MatmulOperandBroadcastRelayout-Fission3 dscs=0 datadscs=4 schedules=4 has_frame=1 frame_size=2176 frame_addr=19227496257049934
+dxp_exec_debug sdsc=1_batchmatmul dscs=1 datadscs=0 schedules=4 has_frame=1 frame_size=3968 frame_addr=19227496257049934
+ALLCLOSE False
+MAX_DIFF 64.0
+MISMATCH 262144 / 262144
+ROW 0 OUT [32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375]
+ROW 0 REF [0.0, 0.0009765625, 0.001953125, 0.0029296875, 0.00390625, 0.0048828125, 0.005859375, 0.0068359375, 0.0078125, 0.0087890625, 0.009765625, 0.0107421875, 0.01171875, 0.0126953125, 0.013671875, 0.0146484375]
+ROW 1 OUT [32.875, 32.875, 32.875, 32.875, 32.875, 32.875, 32.875, 32.875, 32.875, 32.875, 32.875, 32.875, 32.875, 32.875, 32.875, 32.875]
+ROW 127 OUT [63.875, 63.875, 63.875, 63.875, 63.875, 63.875, 63.875, 63.875, 63.875, 63.875, 63.875, 63.875, 63.875, 63.875, 63.875, 63.875]
+ROW 128 OUT [32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375, 32.375]

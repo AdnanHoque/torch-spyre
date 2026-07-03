@@ -1,0 +1,592 @@
+{
+  "1_batchmatmul-Tensor1-MatmulOperandBroadcastRelayout-Fission2" : {
+    "sdscFoldProps_" : [
+      {"factor_" : 1, "label_" : "time"}
+    ],
+    "sdscFolds_" :  {
+      "dim_prop_func" : [
+        { "Affine" : {"alpha_" : 1, "beta_" : 0} }
+      ],
+      "dim_prop_attr" : [
+        { "factor_" : 1, "label_" : "time" }
+      ],
+      "data_" : {
+        "[0]" :"0"
+      }
+    },
+    "coreFoldProp_" : {"factor_" : 4, "label_" : "core"},
+    "coreletFoldProp_" : {"factor_" : 1, "label_" : "corelet"},
+    "folded_sdsc_name_" : "",
+    "fold_coord_" : [  ],
+    "numCoresUsed_" : 4,
+    "unpadN_" : {"name_" : "unpadn", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+    "N_" : {"name_" : "n", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+    "coreIdToDsc_" : { 
+    }, 
+    "numWkSlicesPerDim_" : {  },
+    "coreIdToWkSlice_" : { 
+    }, 
+    "opFuncsUsed_" : [  ], 
+    "lxRelayoutClassifications_" : { 
+    }, 
+    "ldsShareInfo_" : [
+    ],
+    "prodConsList" : {
+    },
+    "coreIdToDscSchedule" : {
+      "0" : [[0 ,-1 ,0 ,1] ],
+      "1" : [[1 ,-1 ,0 ,1] ],
+      "2" : [[0 ,-1 ,0 ,1], [1 ,-1 ,0 ,1], [2 ,-1 ,0 ,1], [3 ,-1 ,0 ,1] ],
+      "3" : [[3 ,-1 ,0 ,1] ]
+    },
+    "pcfg_" : {
+    },
+    "target_" : "sentient",
+    "dynamicExecutionAddr_" : "0",
+    "dscs_" : [ 
+    ],
+    "datadscs_" : [ 
+      {
+        "1_batchmatmul-Tensor1-LxInputNeighborFetch-src2-dst0" : {
+          "foldProps_" : [
+            {"factor_" : 1, "label_" : "time"}
+          ],
+          "coreIdsUsed_": [ 2, 0 ],
+          "dimPool_": ["in", "out"],
+          "primaryDs_": [
+            {
+              "name_" : "activation",
+              "dimNames" : ["in", "out"]
+            }
+          ],
+          "labeledDs_": [
+            {
+              "ldsName_" : "Tensor1-LxInputNeighborFetch-inp-src2-dst0",
+              "pdsName_" : "activation",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 128, "out" : 512},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [128,0] ], "out" : [ [512,0] ]},
+              "totElements" : 65536,
+              "PieceInfo": [
+                {
+                  "key_" : "src0",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["0"]
+                        }
+                      } }
+                  ]
+                }
+              ],
+              "hbmSize_" : -1,
+              "hbmStartAddress_" : "-1",
+              "lxSize_" : 0,
+              "lxStartAddress_" : {"2" : 0}
+            },
+            {
+              "ldsName_" : "Tensor1",
+              "pdsName_" : "activation",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 128, "out" : 512},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [128,0] ], "out" : [ [512,0] ]},
+              "totElements" : 65536,
+              "PieceInfo": [
+                {
+                  "key_" : "dst0",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["1114112"]
+                        }
+                      } }
+                  ]
+                }
+              ],
+              "hbmSize_" : -1,
+              "hbmStartAddress_" : "-1",
+              "lxSize_" : 0,
+              "lxStartAddress_" : {"0" : 1114112}
+            }
+          ],
+          "op" : {
+            "name" : "STCDPOpLx",
+            "gtrIdsUsed" : [],
+            "useUnicast" : 0,
+            "enOptMC" : 0,
+            "is_SRQ_HW_Bug_prone_" : 0,
+            "maxBeforeTransactions_" : 0,
+            "split_factor_per_dim" : {},
+            "forceModeMC" : {"force" : 0, "val" : 0},
+            "prodConsList" : {
+            },
+            "idealStWindowToDtKey" : {
+            },
+            "idealStWindowToContention" : {
+            },
+            "coreIDtoTrRank" : {},
+            "segCoreGroups" : [],
+            "inferredSegGroups" : [],
+            "gateLXCodeGen" : 0,
+            "enSubPieceReuse" : 1,
+            "prodCoreGpList" : {
+            },
+            "interLeaveDtTableIdx" : [],
+            "pSubPiece" : [
+            ],
+            "cSubPiece" : [
+            ],
+            "dtTable_" : [
+            ],
+            "coreIDtoDtKey_L3SU" : [
+            ],
+            "coreIDtoDtKey_L3LU" : [
+            ],
+            "coreIDtoDtKey_LX" : [
+            ]
+          },
+          "pcfg_" : [
+          ],
+          "target_" : "sentient"
+        }
+      },
+      {
+        "1_batchmatmul-Tensor1-LxInputNeighborFetch-src2-dst1" : {
+          "foldProps_" : [
+            {"factor_" : 1, "label_" : "time"}
+          ],
+          "coreIdsUsed_": [ 2, 1 ],
+          "dimPool_": ["in", "out"],
+          "primaryDs_": [
+            {
+              "name_" : "activation",
+              "dimNames" : ["in", "out"]
+            }
+          ],
+          "labeledDs_": [
+            {
+              "ldsName_" : "Tensor1-LxInputNeighborFetch-inp-src2-dst1",
+              "pdsName_" : "activation",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 128, "out" : 512},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [128,0] ], "out" : [ [512,0] ]},
+              "totElements" : 65536,
+              "PieceInfo": [
+                {
+                  "key_" : "src0",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["0"]
+                        }
+                      } }
+                  ]
+                }
+              ],
+              "hbmSize_" : -1,
+              "hbmStartAddress_" : "-1",
+              "lxSize_" : 0,
+              "lxStartAddress_" : {"2" : 0}
+            },
+            {
+              "ldsName_" : "Tensor1",
+              "pdsName_" : "activation",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 128, "out" : 512},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [128,0] ], "out" : [ [512,0] ]},
+              "totElements" : 65536,
+              "PieceInfo": [
+                {
+                  "key_" : "dst1",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["1114112"]
+                        }
+                      } }
+                  ]
+                }
+              ],
+              "hbmSize_" : -1,
+              "hbmStartAddress_" : "-1",
+              "lxSize_" : 0,
+              "lxStartAddress_" : {"1" : 1114112}
+            }
+          ],
+          "op" : {
+            "name" : "STCDPOpLx",
+            "gtrIdsUsed" : [],
+            "useUnicast" : 0,
+            "enOptMC" : 0,
+            "is_SRQ_HW_Bug_prone_" : 0,
+            "maxBeforeTransactions_" : 0,
+            "split_factor_per_dim" : {},
+            "forceModeMC" : {"force" : 0, "val" : 0},
+            "prodConsList" : {
+            },
+            "idealStWindowToDtKey" : {
+            },
+            "idealStWindowToContention" : {
+            },
+            "coreIDtoTrRank" : {},
+            "segCoreGroups" : [],
+            "inferredSegGroups" : [],
+            "gateLXCodeGen" : 0,
+            "enSubPieceReuse" : 1,
+            "prodCoreGpList" : {
+            },
+            "interLeaveDtTableIdx" : [],
+            "pSubPiece" : [
+            ],
+            "cSubPiece" : [
+            ],
+            "dtTable_" : [
+            ],
+            "coreIDtoDtKey_L3SU" : [
+            ],
+            "coreIDtoDtKey_L3LU" : [
+            ],
+            "coreIDtoDtKey_LX" : [
+            ]
+          },
+          "pcfg_" : [
+          ],
+          "target_" : "sentient"
+        }
+      },
+      {
+        "1_batchmatmul-Tensor1-LxInputNeighborFetch-src2-dst2" : {
+          "foldProps_" : [
+            {"factor_" : 1, "label_" : "time"}
+          ],
+          "coreIdsUsed_": [ 2 ],
+          "dimPool_": ["in", "out"],
+          "primaryDs_": [
+            {
+              "name_" : "activation",
+              "dimNames" : ["in", "out"]
+            }
+          ],
+          "labeledDs_": [
+            {
+              "ldsName_" : "Tensor1-LxInputNeighborFetch-inp-src2-dst2",
+              "pdsName_" : "activation",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 128, "out" : 512},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [128,0] ], "out" : [ [512,0] ]},
+              "totElements" : 65536,
+              "PieceInfo": [
+                {
+                  "key_" : "src0",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["0"]
+                        }
+                      } }
+                  ]
+                }
+              ],
+              "hbmSize_" : -1,
+              "hbmStartAddress_" : "-1",
+              "lxSize_" : 0,
+              "lxStartAddress_" : {"2" : 0}
+            },
+            {
+              "ldsName_" : "Tensor1",
+              "pdsName_" : "activation",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 128, "out" : 512},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [128,0] ], "out" : [ [512,0] ]},
+              "totElements" : 65536,
+              "PieceInfo": [
+                {
+                  "key_" : "dst2",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["1114112"]
+                        }
+                      } }
+                  ]
+                }
+              ],
+              "hbmSize_" : -1,
+              "hbmStartAddress_" : "-1",
+              "lxSize_" : 0,
+              "lxStartAddress_" : {"2" : 1114112}
+            }
+          ],
+          "op" : {
+            "name" : "STCDPOpLx",
+            "gtrIdsUsed" : [],
+            "useUnicast" : 0,
+            "enOptMC" : 0,
+            "is_SRQ_HW_Bug_prone_" : 0,
+            "maxBeforeTransactions_" : 0,
+            "split_factor_per_dim" : {},
+            "forceModeMC" : {"force" : 0, "val" : 0},
+            "prodConsList" : {
+            },
+            "idealStWindowToDtKey" : {
+            },
+            "idealStWindowToContention" : {
+            },
+            "coreIDtoTrRank" : {},
+            "segCoreGroups" : [],
+            "inferredSegGroups" : [],
+            "gateLXCodeGen" : 0,
+            "enSubPieceReuse" : 1,
+            "prodCoreGpList" : {
+            },
+            "interLeaveDtTableIdx" : [],
+            "pSubPiece" : [
+            ],
+            "cSubPiece" : [
+            ],
+            "dtTable_" : [
+            ],
+            "coreIDtoDtKey_L3SU" : [
+            ],
+            "coreIDtoDtKey_L3LU" : [
+            ],
+            "coreIDtoDtKey_LX" : [
+            ]
+          },
+          "pcfg_" : [
+          ],
+          "target_" : "sentient"
+        }
+      },
+      {
+        "1_batchmatmul-Tensor1-LxInputNeighborFetch-src2-dst3" : {
+          "foldProps_" : [
+            {"factor_" : 1, "label_" : "time"}
+          ],
+          "coreIdsUsed_": [ 2, 3 ],
+          "dimPool_": ["in", "out"],
+          "primaryDs_": [
+            {
+              "name_" : "activation",
+              "dimNames" : ["in", "out"]
+            }
+          ],
+          "labeledDs_": [
+            {
+              "ldsName_" : "Tensor1-LxInputNeighborFetch-inp-src2-dst3",
+              "pdsName_" : "activation",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 128, "out" : 512},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [128,0] ], "out" : [ [512,0] ]},
+              "totElements" : 65536,
+              "PieceInfo": [
+                {
+                  "key_" : "src0",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["0"]
+                        }
+                      } }
+                  ]
+                }
+              ],
+              "hbmSize_" : -1,
+              "hbmStartAddress_" : "-1",
+              "lxSize_" : 0,
+              "lxStartAddress_" : {"2" : 0}
+            },
+            {
+              "ldsName_" : "Tensor1",
+              "pdsName_" : "activation",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 128, "out" : 512},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [128,0] ], "out" : [ [512,0] ]},
+              "totElements" : 65536,
+              "PieceInfo": [
+                {
+                  "key_" : "dst3",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 256},
+                  "dimToSize_" : {"in" : 128, "out" : 128},
+                  "validGap_" : {"in" : [ [128,0] ], "out" : [ [128,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["1114112"]
+                        }
+                      } }
+                  ]
+                }
+              ],
+              "hbmSize_" : -1,
+              "hbmStartAddress_" : "-1",
+              "lxSize_" : 0,
+              "lxStartAddress_" : {"3" : 1114112}
+            }
+          ],
+          "op" : {
+            "name" : "STCDPOpLx",
+            "gtrIdsUsed" : [],
+            "useUnicast" : 0,
+            "enOptMC" : 0,
+            "is_SRQ_HW_Bug_prone_" : 0,
+            "maxBeforeTransactions_" : 0,
+            "split_factor_per_dim" : {},
+            "forceModeMC" : {"force" : 0, "val" : 0},
+            "prodConsList" : {
+            },
+            "idealStWindowToDtKey" : {
+            },
+            "idealStWindowToContention" : {
+            },
+            "coreIDtoTrRank" : {},
+            "segCoreGroups" : [],
+            "inferredSegGroups" : [],
+            "gateLXCodeGen" : 0,
+            "enSubPieceReuse" : 1,
+            "prodCoreGpList" : {
+            },
+            "interLeaveDtTableIdx" : [],
+            "pSubPiece" : [
+            ],
+            "cSubPiece" : [
+            ],
+            "dtTable_" : [
+            ],
+            "coreIDtoDtKey_L3SU" : [
+            ],
+            "coreIDtoDtKey_L3LU" : [
+            ],
+            "coreIDtoDtKey_LX" : [
+            ]
+          },
+          "pcfg_" : [
+          ],
+          "target_" : "sentient"
+        }
+      }
+    ],
+    "dimToSymbolMappingOpcodeCorrection_" : {  },
+    "inputSymbolsAndTags_" : {  },
+    "symbolDefinitions_" : {
+    }
+  }
+}
+
