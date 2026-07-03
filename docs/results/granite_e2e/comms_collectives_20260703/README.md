@@ -269,7 +269,28 @@ PCIe bus master fence, code 0xa35e
 Signal Received: 6 (Aborted)
 ```
 
-So the clean branch does not fail closed soon enough for S=512. The dirty CDX diagnostic branch was useful because it converts that unsafe runtime behavior into an earlier explicit backend error.
+So the clean branch did not fail closed soon enough for S=512 at this point in the investigation. The dirty CDX diagnostic branch was useful because it converted that unsafe runtime behavior into an earlier explicit backend error.
+
+The same safety behavior has now been added to the experimental Deeptools fork branch:
+
+- Repo: `github.ibm.com/Adnan-Hoque1/deeptools`
+- Branch: `ah/comms-collectives`
+- Commit: `9397aa9c4`
+- Artifact: `failclosed_s512/`
+
+The guard keeps `matmul_operand_broadcast` physical lowering disabled by default. It still emits the backend plan artifact, then fails at DXP with:
+
+```text
+matmul_operand_broadcast metadata was classified, but physical lowering is blocked:
+current DL matmul lowering still consumes one resident LDS operand pointer and cannot
+bind staged RHS chunks from IFN/STCDP.
+```
+
+That is the desired behavior until staged matmul RHS consumption exists. The older unsafe path remains available only for diagnostics with:
+
+```bash
+DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST=1
+```
 
 ### 8. Flash attention probe shows the same communication class
 
