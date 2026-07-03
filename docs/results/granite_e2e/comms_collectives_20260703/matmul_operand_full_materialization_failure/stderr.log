@@ -1,0 +1,2 @@
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: matmul_operand_broadcast could not allocate 4194304 bytes in LX for consumer core 0, file /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/deeptools/dxp/SdscRelayoutInsertion.cpp line 1473

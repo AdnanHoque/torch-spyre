@@ -1,0 +1,1889 @@
+{
+  "8_batchmatmul": {
+    "sdscFoldProps_": [
+      {
+        "factor_": 1,
+        "label_": "time"
+      }
+    ],
+    "sdscFolds_": {
+      "dim_prop_func": [
+        {
+          "Affine": {
+            "alpha_": 1,
+            "beta_": 0
+          }
+        }
+      ],
+      "dim_prop_attr": [
+        {
+          "factor_": 1,
+          "label_": "time"
+        }
+      ],
+      "data_": {
+        "[0]": "0"
+      }
+    },
+    "coreFoldProp_": {
+      "factor_": 32,
+      "label_": "core"
+    },
+    "coreletFoldProp_": {
+      "factor_": 1,
+      "label_": "corelet"
+    },
+    "numCoresUsed_": 32,
+    "coreIdToDsc_": {
+      "0": 0,
+      "1": 0,
+      "2": 0,
+      "3": 0,
+      "4": 0,
+      "5": 0,
+      "6": 0,
+      "7": 0,
+      "8": 0,
+      "9": 0,
+      "10": 0,
+      "11": 0,
+      "12": 0,
+      "13": 0,
+      "14": 0,
+      "15": 0,
+      "16": 0,
+      "17": 0,
+      "18": 0,
+      "19": 0,
+      "20": 0,
+      "21": 0,
+      "22": 0,
+      "23": 0,
+      "24": 0,
+      "25": 0,
+      "26": 0,
+      "27": 0,
+      "28": 0,
+      "29": 0,
+      "30": 0,
+      "31": 0
+    },
+    "numWkSlicesPerDim_": {
+      "x": 16,
+      "mb": 1,
+      "out": 2,
+      "in": 1
+    },
+    "coreIdToWkSlice_": {
+      "0": {
+        "x": 0,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "1": {
+        "x": 1,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "2": {
+        "x": 2,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "3": {
+        "x": 3,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "4": {
+        "x": 4,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "5": {
+        "x": 5,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "6": {
+        "x": 6,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "7": {
+        "x": 7,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "8": {
+        "x": 8,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "9": {
+        "x": 9,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "10": {
+        "x": 10,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "11": {
+        "x": 11,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "12": {
+        "x": 12,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "13": {
+        "x": 13,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "14": {
+        "x": 14,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "15": {
+        "x": 15,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "16": {
+        "x": 0,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "17": {
+        "x": 1,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "18": {
+        "x": 2,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "19": {
+        "x": 3,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "20": {
+        "x": 4,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "21": {
+        "x": 5,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "22": {
+        "x": 6,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "23": {
+        "x": 7,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "24": {
+        "x": 8,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "25": {
+        "x": 9,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "26": {
+        "x": 10,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "27": {
+        "x": 11,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "28": {
+        "x": 12,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "29": {
+        "x": 13,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "30": {
+        "x": 14,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      },
+      "31": {
+        "x": 15,
+        "mb": 0,
+        "out": 1,
+        "in": 0
+      }
+    },
+    "coreIdToDscSchedule": {
+      "0": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "1": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "2": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "3": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "4": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "5": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "6": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "7": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "8": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "9": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "10": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "11": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "12": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "13": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "14": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "15": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "16": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "17": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "18": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "19": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "20": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "21": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "22": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "23": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "24": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "25": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "26": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "27": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "28": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "29": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "30": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "31": [
+        [
+          -1,
+          0,
+          0,
+          0
+        ]
+      ]
+    },
+    "lxRelayoutClassifications_": [
+      {
+        "source_name": "buf46",
+        "producer_name": "buf46",
+        "consumer_name": "buf14",
+        "kind": "matmul_operand_broadcast",
+        "producer_core_count": 32,
+        "consumer_core_count": 32,
+        "producer_core_id_to_device_slice": {
+          "0": {
+            "3": 0
+          },
+          "1": {
+            "3": 1
+          },
+          "2": {
+            "3": 2
+          },
+          "3": {
+            "3": 3
+          },
+          "4": {
+            "3": 4
+          },
+          "5": {
+            "3": 5
+          },
+          "6": {
+            "3": 6
+          },
+          "7": {
+            "3": 7
+          },
+          "8": {
+            "3": 8
+          },
+          "9": {
+            "3": 9
+          },
+          "10": {
+            "3": 10
+          },
+          "11": {
+            "3": 11
+          },
+          "12": {
+            "3": 12
+          },
+          "13": {
+            "3": 13
+          },
+          "14": {
+            "3": 14
+          },
+          "15": {
+            "3": 15
+          },
+          "16": {
+            "3": 16
+          },
+          "17": {
+            "3": 17
+          },
+          "18": {
+            "3": 18
+          },
+          "19": {
+            "3": 19
+          },
+          "20": {
+            "3": 20
+          },
+          "21": {
+            "3": 21
+          },
+          "22": {
+            "3": 22
+          },
+          "23": {
+            "3": 23
+          },
+          "24": {
+            "3": 24
+          },
+          "25": {
+            "3": 25
+          },
+          "26": {
+            "3": 26
+          },
+          "27": {
+            "3": 27
+          },
+          "28": {
+            "3": 28
+          },
+          "29": {
+            "3": 29
+          },
+          "30": {
+            "3": 30
+          },
+          "31": {
+            "3": 31
+          }
+        },
+        "producer_work_slice_dims": {
+          "3": 32
+        },
+        "consumer_work_slice_dims": {
+          "2": 2
+        },
+        "consumer_core_id_to_device_slice": {
+          "0": {
+            "2": 0
+          },
+          "1": {
+            "2": 0
+          },
+          "2": {
+            "2": 0
+          },
+          "3": {
+            "2": 0
+          },
+          "4": {
+            "2": 0
+          },
+          "5": {
+            "2": 0
+          },
+          "6": {
+            "2": 0
+          },
+          "7": {
+            "2": 0
+          },
+          "8": {
+            "2": 0
+          },
+          "9": {
+            "2": 0
+          },
+          "10": {
+            "2": 0
+          },
+          "11": {
+            "2": 0
+          },
+          "12": {
+            "2": 0
+          },
+          "13": {
+            "2": 0
+          },
+          "14": {
+            "2": 0
+          },
+          "15": {
+            "2": 0
+          },
+          "16": {
+            "2": 1
+          },
+          "17": {
+            "2": 1
+          },
+          "18": {
+            "2": 1
+          },
+          "19": {
+            "2": 1
+          },
+          "20": {
+            "2": 1
+          },
+          "21": {
+            "2": 1
+          },
+          "22": {
+            "2": 1
+          },
+          "23": {
+            "2": 1
+          },
+          "24": {
+            "2": 1
+          },
+          "25": {
+            "2": 1
+          },
+          "26": {
+            "2": 1
+          },
+          "27": {
+            "2": 1
+          },
+          "28": {
+            "2": 1
+          },
+          "29": {
+            "2": 1
+          },
+          "30": {
+            "2": 1
+          },
+          "31": {
+            "2": 1
+          }
+        },
+        "read_index": 1,
+        "realized": false,
+        "communication_class": "all_gather",
+        "communication_pattern": "all_gather_replicate",
+        "max_fanout": 32,
+        "max_fanin": 32,
+        "transfer_count": 1024,
+        "requires_staged_realization": true,
+        "unsupported_reason": "matmul operand all-gather/broadcast metadata only; backend must stage materialization through the matmul transfer loop",
+        "classification": "matmul_operand_broadcast",
+        "producer_op": "restickify",
+        "consumer_op": "batchmatmul",
+        "operand_read_index": 1,
+        "operand_role": "rhs",
+        "consumer_tensor_work_slice_dims": {
+          "2": 2
+        },
+        "consumer_compute_work_slice_dims": {
+          "16384": 16,
+          "1": 2
+        },
+        "operand_kernel_layout": {
+          "layoutDimOrder_": [
+            "out",
+            "in",
+            "x"
+          ],
+          "stickDimOrder_": [
+            "out"
+          ]
+        },
+        "staging_scope": "matmul_transfer_loop"
+      }
+    ],
+    "dscs_": [
+      {
+        "batchmatmul": {
+          "numCoresUsed_": 32,
+          "numCoreletsUsed_": 1,
+          "coreIdsUsed_": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31
+          ],
+          "N_": {
+            "name_": "n",
+            "x_": 512,
+            "mb_": 32,
+            "out_": 512,
+            "in_": 128
+          },
+          "coordinateMasking_": {},
+          "maskingConstId_": -1,
+          "dataStageParam_": {
+            "0": {
+              "ss_": {
+                "name_": "core",
+                "x_": 32,
+                "mb_": 32,
+                "out_": 256,
+                "in_": 128,
+                "symbolicDimInfo_": {},
+                "maxSymbolicVolume_": {},
+                "coreletSplit_": {},
+                "rowSplit_": {},
+                "peSfpSplit_": {},
+                "paddingSizes_": {}
+              },
+              "el_": {
+                "name_": "core",
+                "x_": 32,
+                "mb_": 32,
+                "out_": 256,
+                "in_": 128,
+                "symbolicDimInfo_": {},
+                "maxSymbolicVolume_": {},
+                "coreletSplit_": {},
+                "rowSplit_": {},
+                "peSfpSplit_": {},
+                "paddingSizes_": {}
+              }
+            }
+          },
+          "primaryDsInfo_": {
+            "INPUT": {
+              "layoutDimOrder_": [
+                "mb",
+                "in",
+                "x"
+              ],
+              "stickDimOrder_": [
+                "in"
+              ],
+              "stickSize_": [
+                64
+              ]
+            },
+            "KERNEL": {
+              "layoutDimOrder_": [
+                "mb",
+                "out",
+                "in"
+              ],
+              "stickDimOrder_": [
+                "out"
+              ],
+              "stickSize_": [
+                64
+              ]
+            },
+            "OUTPUT": {
+              "layoutDimOrder_": [
+                "out",
+                "x",
+                "mb"
+              ],
+              "stickDimOrder_": [
+                "out"
+              ],
+              "stickSize_": [
+                64
+              ]
+            }
+          },
+          "scheduleTree_": [
+            {
+              "nodeType_": "allocate",
+              "name_": "allocate-Tensor0_hbm",
+              "prev_": "",
+              "ldsIdx_": 0,
+              "component_": "hbm",
+              "isStartAddrSymbolic_": 1,
+              "layoutDimOrder_": [
+                "mb",
+                "in",
+                "x"
+              ],
+              "maxDimSizes_": [
+                -1,
+                -1,
+                -1
+              ],
+              "indirectAllocType_": "no_indirection",
+              "startAddressCoreCorelet_": {
+                "dim_prop_func": [
+                  {
+                    "Map": {}
+                  },
+                  {
+                    "Const": {}
+                  },
+                  {
+                    "Const": {}
+                  }
+                ],
+                "dim_prop_attr": [
+                  {
+                    "factor_": 32,
+                    "label_": "core"
+                  },
+                  {
+                    "factor_": 1,
+                    "label_": "corelet"
+                  },
+                  {
+                    "factor_": 1,
+                    "label_": "time"
+                  }
+                ],
+                "data_": {
+                  "[0, 0, 0]": "-355",
+                  "[1, 0, 0]": "-356",
+                  "[2, 0, 0]": "-357",
+                  "[3, 0, 0]": "-358",
+                  "[4, 0, 0]": "-359",
+                  "[5, 0, 0]": "-360",
+                  "[6, 0, 0]": "-361",
+                  "[7, 0, 0]": "-362",
+                  "[8, 0, 0]": "-363",
+                  "[9, 0, 0]": "-364",
+                  "[10, 0, 0]": "-365",
+                  "[11, 0, 0]": "-366",
+                  "[12, 0, 0]": "-367",
+                  "[13, 0, 0]": "-368",
+                  "[14, 0, 0]": "-369",
+                  "[15, 0, 0]": "-370",
+                  "[16, 0, 0]": "-355",
+                  "[17, 0, 0]": "-356",
+                  "[18, 0, 0]": "-357",
+                  "[19, 0, 0]": "-358",
+                  "[20, 0, 0]": "-359",
+                  "[21, 0, 0]": "-360",
+                  "[22, 0, 0]": "-361",
+                  "[23, 0, 0]": "-362",
+                  "[24, 0, 0]": "-363",
+                  "[25, 0, 0]": "-364",
+                  "[26, 0, 0]": "-365",
+                  "[27, 0, 0]": "-366",
+                  "[28, 0, 0]": "-367",
+                  "[29, 0, 0]": "-368",
+                  "[30, 0, 0]": "-369",
+                  "[31, 0, 0]": "-370"
+                }
+              },
+              "coordinates_": {
+                "coordInfo": {
+                  "mb": {
+                    "spatial": 3,
+                    "temporal": 0,
+                    "elemArr": 1,
+                    "padding": "nopad",
+                    "folds": {
+                      "dim_prop_func": [
+                        {
+                          "Affine": {
+                            "alpha_": 32,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 1,
+                            "beta_": 0
+                          }
+                        }
+                      ],
+                      "dim_prop_attr": [
+                        {
+                          "factor_": 1,
+                          "label_": "core_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "corelet_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "row_fold"
+                        },
+                        {
+                          "factor_": 32,
+                          "label_": "elem_arr_0"
+                        }
+                      ]
+                    }
+                  },
+                  "in": {
+                    "spatial": 3,
+                    "temporal": 0,
+                    "elemArr": 2,
+                    "padding": "nopad",
+                    "folds": {
+                      "dim_prop_func": [
+                        {
+                          "Affine": {
+                            "alpha_": 128,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 64,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 1,
+                            "beta_": 0
+                          }
+                        }
+                      ],
+                      "dim_prop_attr": [
+                        {
+                          "factor_": 1,
+                          "label_": "core_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "corelet_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "row_fold"
+                        },
+                        {
+                          "factor_": 2,
+                          "label_": "elem_arr_1"
+                        },
+                        {
+                          "factor_": 64,
+                          "label_": "elem_arr_0"
+                        }
+                      ]
+                    }
+                  },
+                  "x": {
+                    "spatial": 3,
+                    "temporal": 0,
+                    "elemArr": 1,
+                    "padding": "nopad",
+                    "folds": {
+                      "dim_prop_func": [
+                        {
+                          "Affine": {
+                            "alpha_": 32,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 1,
+                            "beta_": 0
+                          }
+                        }
+                      ],
+                      "dim_prop_attr": [
+                        {
+                          "factor_": 16,
+                          "label_": "core_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "corelet_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "row_fold"
+                        },
+                        {
+                          "factor_": 32,
+                          "label_": "elem_arr_0"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "coreIdToWkSlice_": {}
+              }
+            },
+            {
+              "nodeType_": "allocate",
+              "name_": "allocate-Tensor1_lx",
+              "prev_": "",
+              "ldsIdx_": 1,
+              "component_": "lx",
+              "layoutDimOrder_": [
+                "mb",
+                "out",
+                "in"
+              ],
+              "maxDimSizes_": [
+                -1,
+                -1,
+                -1
+              ],
+              "indirectAllocType_": "no_indirection",
+              "startAddressCoreCorelet_": {
+                "dim_prop_func": [
+                  {
+                    "Map": {}
+                  },
+                  {
+                    "Const": {}
+                  },
+                  {
+                    "Const": {}
+                  }
+                ],
+                "dim_prop_attr": [
+                  {
+                    "factor_": 32,
+                    "label_": "core"
+                  },
+                  {
+                    "factor_": 1,
+                    "label_": "corelet"
+                  },
+                  {
+                    "factor_": 1,
+                    "label_": "time"
+                  }
+                ],
+                "data_": {
+                  "[0, 0, 0]": "0",
+                  "[1, 0, 0]": "0",
+                  "[2, 0, 0]": "0",
+                  "[3, 0, 0]": "0",
+                  "[4, 0, 0]": "0",
+                  "[5, 0, 0]": "0",
+                  "[6, 0, 0]": "0",
+                  "[7, 0, 0]": "0",
+                  "[8, 0, 0]": "0",
+                  "[9, 0, 0]": "0",
+                  "[10, 0, 0]": "0",
+                  "[11, 0, 0]": "0",
+                  "[12, 0, 0]": "0",
+                  "[13, 0, 0]": "0",
+                  "[14, 0, 0]": "0",
+                  "[15, 0, 0]": "0",
+                  "[16, 0, 0]": "0",
+                  "[17, 0, 0]": "0",
+                  "[18, 0, 0]": "0",
+                  "[19, 0, 0]": "0",
+                  "[20, 0, 0]": "0",
+                  "[21, 0, 0]": "0",
+                  "[22, 0, 0]": "0",
+                  "[23, 0, 0]": "0",
+                  "[24, 0, 0]": "0",
+                  "[25, 0, 0]": "0",
+                  "[26, 0, 0]": "0",
+                  "[27, 0, 0]": "0",
+                  "[28, 0, 0]": "0",
+                  "[29, 0, 0]": "0",
+                  "[30, 0, 0]": "0",
+                  "[31, 0, 0]": "0"
+                }
+              },
+              "coordinates_": {
+                "coordInfo": {
+                  "mb": {
+                    "spatial": 3,
+                    "temporal": 0,
+                    "elemArr": 1,
+                    "padding": "nopad",
+                    "folds": {
+                      "dim_prop_func": [
+                        {
+                          "Affine": {
+                            "alpha_": 32,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 1,
+                            "beta_": 0
+                          }
+                        }
+                      ],
+                      "dim_prop_attr": [
+                        {
+                          "factor_": 1,
+                          "label_": "core_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "corelet_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "row_fold"
+                        },
+                        {
+                          "factor_": 32,
+                          "label_": "elem_arr_0"
+                        }
+                      ]
+                    }
+                  },
+                  "out": {
+                    "spatial": 3,
+                    "temporal": 0,
+                    "elemArr": 2,
+                    "padding": "nopad",
+                    "folds": {
+                      "dim_prop_func": [
+                        {
+                          "Affine": {
+                            "alpha_": 256,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 64,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 1,
+                            "beta_": 0
+                          }
+                        }
+                      ],
+                      "dim_prop_attr": [
+                        {
+                          "factor_": 2,
+                          "label_": "core_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "corelet_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "row_fold"
+                        },
+                        {
+                          "factor_": 4,
+                          "label_": "elem_arr_1"
+                        },
+                        {
+                          "factor_": 64,
+                          "label_": "elem_arr_0"
+                        }
+                      ]
+                    }
+                  },
+                  "in": {
+                    "spatial": 3,
+                    "temporal": 0,
+                    "elemArr": 1,
+                    "padding": "nopad",
+                    "folds": {
+                      "dim_prop_func": [
+                        {
+                          "Affine": {
+                            "alpha_": 128,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 1,
+                            "beta_": 0
+                          }
+                        }
+                      ],
+                      "dim_prop_attr": [
+                        {
+                          "factor_": 1,
+                          "label_": "core_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "corelet_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "row_fold"
+                        },
+                        {
+                          "factor_": 128,
+                          "label_": "elem_arr_0"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "coreIdToWkSlice_": {
+                  "0": {
+                    "mb": 0,
+                    "out": 0,
+                    "in": 0
+                  },
+                  "1": {
+                    "mb": 0,
+                    "out": 1,
+                    "in": 0
+                  },
+                  "2": {
+                    "mb": 0,
+                    "out": 2,
+                    "in": 0
+                  },
+                  "3": {
+                    "mb": 0,
+                    "out": 3,
+                    "in": 0
+                  },
+                  "4": {
+                    "mb": 0,
+                    "out": 4,
+                    "in": 0
+                  },
+                  "5": {
+                    "mb": 0,
+                    "out": 5,
+                    "in": 0
+                  },
+                  "6": {
+                    "mb": 0,
+                    "out": 6,
+                    "in": 0
+                  },
+                  "7": {
+                    "mb": 0,
+                    "out": 7,
+                    "in": 0
+                  },
+                  "8": {
+                    "mb": 0,
+                    "out": 8,
+                    "in": 0
+                  },
+                  "9": {
+                    "mb": 0,
+                    "out": 9,
+                    "in": 0
+                  },
+                  "10": {
+                    "mb": 0,
+                    "out": 10,
+                    "in": 0
+                  },
+                  "11": {
+                    "mb": 0,
+                    "out": 11,
+                    "in": 0
+                  },
+                  "12": {
+                    "mb": 0,
+                    "out": 12,
+                    "in": 0
+                  },
+                  "13": {
+                    "mb": 0,
+                    "out": 13,
+                    "in": 0
+                  },
+                  "14": {
+                    "mb": 0,
+                    "out": 14,
+                    "in": 0
+                  },
+                  "15": {
+                    "mb": 0,
+                    "out": 15,
+                    "in": 0
+                  },
+                  "16": {
+                    "mb": 0,
+                    "out": 16,
+                    "in": 0
+                  },
+                  "17": {
+                    "mb": 0,
+                    "out": 17,
+                    "in": 0
+                  },
+                  "18": {
+                    "mb": 0,
+                    "out": 18,
+                    "in": 0
+                  },
+                  "19": {
+                    "mb": 0,
+                    "out": 19,
+                    "in": 0
+                  },
+                  "20": {
+                    "mb": 0,
+                    "out": 20,
+                    "in": 0
+                  },
+                  "21": {
+                    "mb": 0,
+                    "out": 21,
+                    "in": 0
+                  },
+                  "22": {
+                    "mb": 0,
+                    "out": 22,
+                    "in": 0
+                  },
+                  "23": {
+                    "mb": 0,
+                    "out": 23,
+                    "in": 0
+                  },
+                  "24": {
+                    "mb": 0,
+                    "out": 24,
+                    "in": 0
+                  },
+                  "25": {
+                    "mb": 0,
+                    "out": 25,
+                    "in": 0
+                  },
+                  "26": {
+                    "mb": 0,
+                    "out": 26,
+                    "in": 0
+                  },
+                  "27": {
+                    "mb": 0,
+                    "out": 27,
+                    "in": 0
+                  },
+                  "28": {
+                    "mb": 0,
+                    "out": 28,
+                    "in": 0
+                  },
+                  "29": {
+                    "mb": 0,
+                    "out": 29,
+                    "in": 0
+                  },
+                  "30": {
+                    "mb": 0,
+                    "out": 30,
+                    "in": 0
+                  },
+                  "31": {
+                    "mb": 0,
+                    "out": 31,
+                    "in": 0
+                  }
+                }
+              }
+            },
+            {
+              "nodeType_": "allocate",
+              "name_": "allocate-Tensor2_hbm",
+              "prev_": "",
+              "ldsIdx_": 2,
+              "component_": "hbm",
+              "isStartAddrSymbolic_": 1,
+              "layoutDimOrder_": [
+                "out",
+                "x",
+                "mb"
+              ],
+              "maxDimSizes_": [
+                -1,
+                -1,
+                -1
+              ],
+              "indirectAllocType_": "no_indirection",
+              "startAddressCoreCorelet_": {
+                "dim_prop_func": [
+                  {
+                    "Map": {}
+                  },
+                  {
+                    "Const": {}
+                  },
+                  {
+                    "Const": {}
+                  }
+                ],
+                "dim_prop_attr": [
+                  {
+                    "factor_": 32,
+                    "label_": "core"
+                  },
+                  {
+                    "factor_": 1,
+                    "label_": "corelet"
+                  },
+                  {
+                    "factor_": 1,
+                    "label_": "time"
+                  }
+                ],
+                "data_": {
+                  "[0, 0, 0]": "-371",
+                  "[1, 0, 0]": "-372",
+                  "[2, 0, 0]": "-373",
+                  "[3, 0, 0]": "-374",
+                  "[4, 0, 0]": "-375",
+                  "[5, 0, 0]": "-376",
+                  "[6, 0, 0]": "-377",
+                  "[7, 0, 0]": "-378",
+                  "[8, 0, 0]": "-379",
+                  "[9, 0, 0]": "-380",
+                  "[10, 0, 0]": "-381",
+                  "[11, 0, 0]": "-382",
+                  "[12, 0, 0]": "-383",
+                  "[13, 0, 0]": "-384",
+                  "[14, 0, 0]": "-385",
+                  "[15, 0, 0]": "-386",
+                  "[16, 0, 0]": "-387",
+                  "[17, 0, 0]": "-388",
+                  "[18, 0, 0]": "-389",
+                  "[19, 0, 0]": "-390",
+                  "[20, 0, 0]": "-391",
+                  "[21, 0, 0]": "-392",
+                  "[22, 0, 0]": "-393",
+                  "[23, 0, 0]": "-394",
+                  "[24, 0, 0]": "-395",
+                  "[25, 0, 0]": "-396",
+                  "[26, 0, 0]": "-397",
+                  "[27, 0, 0]": "-398",
+                  "[28, 0, 0]": "-399",
+                  "[29, 0, 0]": "-400",
+                  "[30, 0, 0]": "-401",
+                  "[31, 0, 0]": "-402"
+                }
+              },
+              "coordinates_": {
+                "coordInfo": {
+                  "out": {
+                    "spatial": 3,
+                    "temporal": 0,
+                    "elemArr": 2,
+                    "padding": "nopad",
+                    "folds": {
+                      "dim_prop_func": [
+                        {
+                          "Affine": {
+                            "alpha_": 256,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 64,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 1,
+                            "beta_": 0
+                          }
+                        }
+                      ],
+                      "dim_prop_attr": [
+                        {
+                          "factor_": 2,
+                          "label_": "core_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "corelet_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "row_fold"
+                        },
+                        {
+                          "factor_": 4,
+                          "label_": "elem_arr_1"
+                        },
+                        {
+                          "factor_": 64,
+                          "label_": "elem_arr_0"
+                        }
+                      ]
+                    }
+                  },
+                  "x": {
+                    "spatial": 3,
+                    "temporal": 0,
+                    "elemArr": 1,
+                    "padding": "nopad",
+                    "folds": {
+                      "dim_prop_func": [
+                        {
+                          "Affine": {
+                            "alpha_": 32,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 1,
+                            "beta_": 0
+                          }
+                        }
+                      ],
+                      "dim_prop_attr": [
+                        {
+                          "factor_": 16,
+                          "label_": "core_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "corelet_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "row_fold"
+                        },
+                        {
+                          "factor_": 32,
+                          "label_": "elem_arr_0"
+                        }
+                      ]
+                    }
+                  },
+                  "mb": {
+                    "spatial": 3,
+                    "temporal": 0,
+                    "elemArr": 1,
+                    "padding": "nopad",
+                    "folds": {
+                      "dim_prop_func": [
+                        {
+                          "Affine": {
+                            "alpha_": 32,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 0,
+                            "beta_": 0
+                          }
+                        },
+                        {
+                          "Affine": {
+                            "alpha_": 1,
+                            "beta_": 0
+                          }
+                        }
+                      ],
+                      "dim_prop_attr": [
+                        {
+                          "factor_": 1,
+                          "label_": "core_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "corelet_fold"
+                        },
+                        {
+                          "factor_": 1,
+                          "label_": "row_fold"
+                        },
+                        {
+                          "factor_": 32,
+                          "label_": "elem_arr_0"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "coreIdToWkSlice_": {}
+              }
+            }
+          ],
+          "labeledDs_": [
+            {
+              "ldsIdx_": 0,
+              "dsName_": "Tensor0",
+              "dsType_": "INPUT",
+              "scale_": [
+                1,
+                1,
+                1
+              ],
+              "wordLength": 2,
+              "dataFormat_": "SEN169_FP16",
+              "memOrg_": {
+                "hbm": {
+                  "isPresent": 1
+                },
+                "lx": {
+                  "isPresent": 1
+                }
+              }
+            },
+            {
+              "ldsIdx_": 1,
+              "dsName_": "Tensor1",
+              "dsType_": "KERNEL",
+              "scale_": [
+                1,
+                1,
+                1
+              ],
+              "wordLength": 2,
+              "dataFormat_": "SEN169_FP16",
+              "memOrg_": {
+                "lx": {
+                  "isPresent": 1
+                }
+              }
+            },
+            {
+              "ldsIdx_": 2,
+              "dsName_": "Tensor2",
+              "dsType_": "OUTPUT",
+              "scale_": [
+                1,
+                1,
+                1
+              ],
+              "wordLength": 2,
+              "dataFormat_": "SEN169_FP16",
+              "memOrg_": {
+                "hbm": {
+                  "isPresent": 1
+                },
+                "lx": {
+                  "isPresent": 1
+                }
+              }
+            }
+          ],
+          "constantInfo_": "{}",
+          "computeOp_": [
+            {
+              "exUnit": "pt",
+              "opFuncName": "batchmatmul",
+              "attributes_": {
+                "dataFormat_": "SEN169_FP16",
+                "fidelity_": "regular"
+              },
+              "location": "Inner",
+              "inputLabeledDs": [
+                "Tensor0-idx0",
+                "Tensor1-idx1"
+              ],
+              "outputLabeledDs": [
+                "Tensor2-idx2"
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

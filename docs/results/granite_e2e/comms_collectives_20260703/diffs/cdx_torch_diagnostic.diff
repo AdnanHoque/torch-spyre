@@ -1,0 +1,165 @@
+ M torch_spyre/_inductor/codegen/compute_ops.py
+ M torch_spyre/_inductor/codegen/superdsc.py
+ M torch_spyre/_inductor/lx_relayout.py
+ M torch_spyre/_inductor/op_spec.py
+ M torch_spyre/_inductor/scratchpad/allocator.py
+ M torch_spyre/_inductor/spyre_kernel.py
+?? 20_batchmatmul_Tensor1_0_layout_allgather_restickify_plan.json
+?? 37_batchmatmul_Tensor1_0_layout_allgather_restickify_plan.json
+?? 3_batchmatmul_Tensor1_0_layout_allgather_restickify_plan.json
+?? 54_batchmatmul_Tensor1_0_layout_allgather_restickify_plan.json
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+index 09194fb..ce6b8af 100644
+--- a/torch_spyre/_inductor/lx_relayout.py
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -79,6 +79,7 @@ class LXRelayoutPlan:
+     max_fanin: int = 0
+     transfer_count: int = 0
+     requires_staged_realization: bool = False
++    consumer_core_id_to_lx_start_address: dict[str, int] | None = None
+     layout_contract: dict[str, Any] | None = None
+     unsupported_reason: str = ""
+ 
+@@ -355,6 +356,15 @@ def is_lx_relayout_reservation(name: str) -> bool:
+     return name.startswith(f"{LX_RELAYOUT_RESERVE_PREFIX}:")
+ 
+ 
++def parse_lx_relayout_reservation_name(name: str) -> tuple[str, str] | None:
++    if not is_lx_relayout_reservation(name):
++        return None
++    pieces = name.split(":", 2)
++    if len(pieces) != 3:
++        return None
++    return pieces[1], pieces[2]
++
++
+ def relayout_source_names(graph: GraphLowering) -> set[str]:
+     if not config.lx_planner_relayout:
+         return set()
+@@ -509,6 +519,10 @@ def plan_lx_relayouts(
+                         in (COMM_CLASS_ALL_GATHER, "broadcast")
+                     )
+                 ):
++                    if _op_name(producer) == "restickify" and not (
++                        _restickify_reads_computed_input(graph, producer)
++                    ):
++                        continue
+                     layout_contract = make_matmul_operand_allgather_contract(
+                         producer_op=_op_name(producer),
+                         consumer_op="batchmatmul",
+diff --git a/torch_spyre/_inductor/scratchpad/allocator.py b/torch_spyre/_inductor/scratchpad/allocator.py
+index 39fa15f..54b7889 100644
+--- a/torch_spyre/_inductor/scratchpad/allocator.py
++++ b/torch_spyre/_inductor/scratchpad/allocator.py
+@@ -69,6 +69,7 @@ from torch_spyre._inductor.lx_relayout import (
+     get_lx_relayout_inputs,
+     is_lx_relayout_reservation,
+     make_lx_relayout_reservation_name,
++    parse_lx_relayout_reservation_name,
+     plan_lx_relayouts,
+     relayout_source_names,
+ )
+@@ -392,10 +393,8 @@ class ScratchpadAllocator(ABC):
+             if consumer_idx is None:
+                 continue
+             for source_name, plan in get_lx_relayout_inputs(consumer).items():
+-                if (
+-                    plan.get("realized") is False
+-                    or plan.get("requires_staged_realization") is True
+-                ):
++                is_staged = plan.get("requires_staged_realization") is True
++                if plan.get("realized") is False and not is_staged:
+                     continue
+                 source = graph.name_to_buffer.get(source_name)
+                 if source is None:
+@@ -431,6 +430,27 @@ class ScratchpadAllocator(ABC):
+ 
+         return reservations
+ 
++    def _record_lx_relayout_reservation_addresses(
++        self, graph: GraphLowering, allocation: list[LifetimeBoundBuffer]
++    ) -> None:
++        for b in allocation:
++            parsed = parse_lx_relayout_reservation_name(b.name)
++            if parsed is None or b.address is None:
++                continue
++            consumer_name, source_name = parsed
++            consumer = graph.name_to_buffer.get(consumer_name)
++            if consumer is None:
++                continue
++            plan = get_lx_relayout_inputs(consumer).get(source_name)
++            if not isinstance(plan, dict):
++                continue
++            consumer_slices = plan.get("consumer_core_id_to_device_slice") or {}
++            if not isinstance(consumer_slices, dict):
++                continue
++            plan["consumer_core_id_to_lx_start_address"] = {
++                str(core): int(b.address) for core in consumer_slices
++            }
++
+     def _add_lx_relayout_reservations(
+         self,
+         graph: GraphLowering,
+@@ -574,6 +594,7 @@ class DefaultAllocator(ScratchpadAllocator):
+             lifetimes = calculate_liveness(graph)
+             buffers = self._generate_buffers(graph, lifetimes=lifetimes)
+             allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
++        self._record_lx_relayout_reservation_addresses(graph, allocation)
+         for b in allocation:
+             if is_lx_relayout_reservation(b.name):
+                 continue
+@@ -1059,6 +1080,7 @@ class StrategyBCoOptimizingAllocator(DefaultAllocator):
+             lifetimes = calculate_liveness(graph)
+             buffers = self._generate_buffers(graph, lifetimes=lifetimes)
+             allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
++        self._record_lx_relayout_reservation_addresses(graph, allocation)
+         for b in allocation:
+             if is_lx_relayout_reservation(b.name):
+                 continue
+diff --git a/torch_spyre/_inductor/spyre_kernel.py b/torch_spyre/_inductor/spyre_kernel.py
+index 834788c..173bb38 100644
+--- a/torch_spyre/_inductor/spyre_kernel.py
++++ b/torch_spyre/_inductor/spyre_kernel.py
+@@ -70,6 +70,10 @@ import logging
+ logger = get_inductor_logger("spyre_kernel")
+ 
+ DLDSC_CLASSIFICATION_PATTERNS = {
++    "many_to_one",
++    "many_to_many",
++    "one_to_many",
++    "one_to_one",
+     LAYOUT_ALLGATHER_RESTICKIFY,
+     MATMUL_OPERAND_ALLGATHER_REPLICATE,
+ }
+@@ -582,9 +586,15 @@ class SpyreKernel(Kernel[CSEVariable]):
+                 name
+             )
+             if isinstance(relayout_plan, dict):
+-                tensor_arg.lx_residency_core_id_to_wk_slice = relayout_plan.get(
++                producer_residency = relayout_plan.get(
+                     "producer_core_id_to_device_slice"
+                 )
++                tensor_arg.lx_residency_core_id_to_wk_slice = producer_residency
++                lx_base = tensor.layout.allocation.get("lx")
++                if isinstance(producer_residency, dict) and lx_base is not None:
++                    tensor_arg.lx_residency_core_id_to_lx_start_address = {
++                        str(core): lx_base for core in producer_residency
++                    }
+         if (
+             "lx" not in tensor.layout.allocation
+             and "pool" not in tensor.layout.allocation
+@@ -1118,6 +1128,14 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
+                                     "lx_residency_core_id_to_wk_slice="
+                                     f"{arg.lx_residency_core_id_to_wk_slice!r},"
+                                 )
++                            if (
++                                arg.lx_residency_core_id_to_lx_start_address
++                                is not None
++                            ):
++                                buf.writeline(
++                                    "lx_residency_core_id_to_lx_start_address="
++                                    f"{arg.lx_residency_core_id_to_lx_start_address!r},"
++                                )
+                         buf.writeline("),")
+                 buf.writeline("]")
+             buf.writeline("),")
