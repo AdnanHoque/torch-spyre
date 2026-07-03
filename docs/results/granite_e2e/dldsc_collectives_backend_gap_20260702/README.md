@@ -31,6 +31,8 @@ Two DXP replays were run against the same bundle:
 | Standalone latest flash attention with single-row translated all-gather | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_single_dataop_20260703_002453 | Compiles and runs three kernels, then fails correctness: 99.2% mismatched, greatest absolute difference inf. This rules out row-count alone as the cause. |
 | Standalone latest flash attention with separate relayout SuperDSC carrier | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_standalone_relayout_20260703_003708 | Compiles and runs three kernels, then fails correctness: 99.2% mismatched, greatest absolute difference inf. This weakens mixed-SDSC scheduling as the primary explanation. |
 | Standalone latest flash attention with layout-allgather disabled and matmul operand collective enabled | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_matmul_operand_only_20260703_005239 | DXP aborts before runtime with `query fold dimension with higher fold factor`; emits 32 `matmul_operand_broadcast` plans. This is a separate backend compiler gap from the layout-transform value-wrong path. |
+| Standalone latest flash attention, only `105_batchmatmul`, fissioned layout-allgather path | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_direct_allgather_only105_fission4_sourceonly_20260703_065227 | DXP/runtime completes, then fails correctness: 92.6% mismatched, greatest absolute difference inf. The emitted plan has 256 logical transfers. |
+| Standalone latest flash attention, only `105_batchmatmul`, generic matmul operand path | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_direct_matmul_operand_only105_filtered_20260703_070937 | Emits the expected 1024-transfer `matmul_operand_broadcast` plan, then DXP aborts with `query fold dimension with higher fold factor`. |
 
 The staged replay emitted 32 Creating PCFG for DataDsc sections for 10_batchmatmul, so splitting the monolithic row reduces row size but does not by itself fix the address-encoding issue.
 
@@ -63,7 +65,7 @@ Backend/Deeptools should:
 
 ## Current next step
 
-The standalone flash run has now isolated two backend gaps. First, the layout-changing attention edge is executable but value-wrong: destination-grouped transfer-coordinate (`runs/test_flash_grouped_materializer_transfercoords_20260703_000721`), single-row transfer-coordinate (`runs/test_flash_single_dataop_20260703_002453`), and standalone relayout SuperDSC (`runs/test_flash_standalone_relayout_20260703_003708`) all pass DXP/runtime and fail correctness at 99.2% mismatch. The diagnosis is that this edge is `layout_allgather_restickify`, not pure all-gather: the producer/restickify stick layout differs from the consumer KERNEL layout. Second, with that edge disabled, the later matmul operand all-gather/broadcast path still hits a DXP fold-dimension abort before runtime. The next backend tasks are therefore transform-aware many-source LX->LX realization for `layout_allgather_restickify`, plus a separate DXP/codegen fix for staged matmul operand broadcast/all-gather.
+The standalone flash run has now isolated two backend gaps. First, the layout-changing attention edge is executable but value-wrong: destination-grouped transfer-coordinate (`runs/test_flash_grouped_materializer_transfercoords_20260703_000721`), single-row transfer-coordinate (`runs/test_flash_single_dataop_20260703_002453`), standalone relayout SuperDSC (`runs/test_flash_standalone_relayout_20260703_003708`), and the isolated fission-4 `105_batchmatmul` run (`runs/test_flash_direct_allgather_only105_fission4_sourceonly_20260703_065227`) all pass DXP/runtime and fail correctness. The diagnosis is that this edge is `layout_allgather_restickify`, not pure all-gather: the producer/restickify stick layout differs from the consumer KERNEL layout, and the 256-transfer summary under-materializes the operand. Second, with that edge disabled, the generic matmul operand path emits the expected 1024-transfer plan but hits a DXP fold-dimension abort before runtime. The next backend tasks are therefore transform-aware many-source LX->LX realization for `layout_allgather_restickify`, plus a separate DXP/codegen fix for staged matmul operand broadcast/all-gather.
 
 ## Files in this directory
 
@@ -76,6 +78,10 @@ The standalone flash run has now isolated two backend gaps. First, the layout-ch
 - staged_replay_lrfimm_split_summary.txt
 - granite_runtime_lrfimm_split_summary.txt
 - flash_runtime_value_wrong_summary.txt
+- cdx_collective_investigation_update_20260703.md
 - deeptools_experiment_diff_stat.txt
+- attention_105_contract_isolation_20260703.md
+- 105_batchmatmul_Tensor1_layout_allgather_restickify_fission4_sourceonly_plan_20260703.json
+- 105_batchmatmul_Tensor1_matmul_operand_broadcast_filtered_plan_20260703.json
 - deeptools_experiment.patch
 - deeptools_experiment_lrfimm_split.patch
