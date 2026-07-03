@@ -1,0 +1,1232 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index debe5a3f2..92cd53769 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -2,13 +2,17 @@
+ #include <dsc/superdsc.h>
+ #include <sharedtools/mem_track_bundle.h>
+ 
++#include <algorithm>
+ #include <cctype>
++#include <cmath>
+ #include <cstdlib>
+ #include <filesystem>
+ #include <fstream>
++#include <iostream>
+ #include <map>
+ #include <set>
+ #include <string>
++#include <vector>
+ 
+ #include "dxp.h"
+ #include "util/LayoutAllgatherRestickify.h"
+@@ -68,6 +72,13 @@ static bool layoutAllgatherRestickifyMatchesLds(
+ 
+ static LayoutAllgatherRestickifyHookPlan findLayoutAllgatherRestickifyPlan(
+     const SuperDsc* sdsc, const LabeledDsInfo& lds) {
++  const char* onlySdsc =
++      std::getenv("DEEPTOOLS_LAYOUT_ALLGATHER_RESTICKIFY_ONLY_SDSC");
++  if (onlySdsc != nullptr && std::string(onlySdsc).size() > 0 &&
++      sdsc->name_.find(onlySdsc) == std::string::npos) {
++    return {};
++  }
++
+   for (const auto& entry : sdsc->lxRelayoutClassifications_) {
+     const auto& fields = entry.second;
+     const auto kindIt = fields.find("kind");
+@@ -104,6 +115,13 @@ static bool matmulOperandBroadcastMatchesLds(
+ 
+ static MatmulOperandBroadcastHookPlan findMatmulOperandBroadcastPlan(
+     const SuperDsc* sdsc, const LabeledDsInfo& lds) {
++  const char* onlySdsc =
++      std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_SDSC");
++  if (onlySdsc != nullptr && std::string(onlySdsc).size() > 0 &&
++      sdsc->name_.find(onlySdsc) == std::string::npos) {
++    return {};
++  }
++
+   for (const auto& entry : sdsc->lxRelayoutClassifications_) {
+     const auto& fields = entry.second;
+     const auto kindIt = fields.find("kind");
+@@ -211,6 +229,30 @@ static void emitMatmulOperandBroadcastPlanArtifact(
+       << std::endl;
+ }
+ 
++static void emitMatmulOperandBroadcastSdscArtifact(
++    const SuperDsc* sdsc, const LabeledDsInfo& lds,
++    const MatmulOperandBroadcastHookPlan& hook,
++    const SuperDsc* relayoutSdsc) {
++  const char* outputDirEnv =
++      std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_PLAN_DIR");
++  if (outputDirEnv == nullptr || std::string(outputDirEnv).empty()) return;
++
++  const std::filesystem::path outputDir(outputDirEnv);
++  std::filesystem::create_directories(outputDir);
++
++  const std::string fileName = sanitizeArtifactName(
++      sdsc->name_ + "_" + lds.dsName_ + "_" + hook.classificationKey + "_" +
++      relayoutSdsc->name_ + "_inserted_sdsc.json");
++  const auto outputPath = outputDir / fileName;
++
++  std::ofstream out(outputPath);
++  DT_CHECK_MSG(out.good(),
++               "Failed to open matmul_operand_broadcast inserted SDSC "
++               "artifact: " +
++                   outputPath.string());
++  out << relayoutSdsc->exportJsonStr(1) << std::endl;
++}
++
+ 
+ static std::string dataOpDimName(const DesignSpaceConfig& dldsc,
+                                  PrimaryDimTypes dim) {
+@@ -273,6 +315,16 @@ static void fillDataOpLdsShape(LdsInfo& dataLds, DataOpDsc& ddsc,
+     totalElements *= dimAndSize.second;
+   }
+   dataLds.totElements = totalElements;
++
++  if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_FORCE_OUT_IN_LAYOUT") !=
++      nullptr &&
++      dataLds.dimToLayoutSize_.count("out") != 0 &&
++      dataLds.dimToLayoutSize_.count("in") != 0 &&
++      dataLds.layoutDimOrder_.size() == 2) {
++    dataLds.layoutDimOrder_.clear();
++    dataLds.layoutDimOrder_.push_back("out");
++    dataLds.layoutDimOrder_.push_back("in");
++  }
+ }
+ 
+ static void addLxPiece(LdsInfo& dataLds, const std::string& key, int coreId,
+@@ -321,20 +373,217 @@ static void addReplicatedLxPiece(
+   dataLds.pieces_[key] = piece;
+ }
+ 
++
++static void addReplicatedLxPieceWithAddresses(
++    LdsInfo& dataLds, const std::string& key,
++    const std::map<int, int64_t>& startAddressByCore,
++    const std::map<std::string, double>& dimToSize,
++    const std::map<std::string, double>& dimToStart) {
++  DT_CHECK(!startAddressByCore.empty());
++  PieceInfo piece;
++  piece.key_ = key;
++  piece.dimToSize_ = dimToSize;
++  piece.dimToStartCordinate = dimToStart;
++  for (const auto& dimAndSize : dimToSize) {
++    piece.validGap_[dimAndSize.first].push_back(
++        std::make_pair(dimAndSize.second, 0));
++  }
++  piece.placement[SenComponents::LX];
++  piece.placement.at(SenComponents::LX).setType(SenComponents::LX);
++  for (const auto& coreAndAddress : startAddressByCore) {
++    piece.placement.at(SenComponents::LX).insertMemId(coreAndAddress.first);
++    piece.placement.at(SenComponents::LX).insertStAddr(coreAndAddress.second);
++    auto existingStart =
++        dataLds.coreIdTolxStartAddress_.find(coreAndAddress.first);
++    if (existingStart == dataLds.coreIdTolxStartAddress_.end()) {
++      dataLds.coreIdTolxStartAddress_[coreAndAddress.first] =
++          coreAndAddress.second;
++    } else if (coreAndAddress.second < existingStart->second) {
++      existingStart->second = coreAndAddress.second;
++    }
++  }
++  dataLds.pieces_[key] = piece;
++}
++
++static int64_t pieceSizeBytes(const std::map<std::string, double>& dimToSize,
++                              double wordLength) {
++  double total = wordLength;
++  for (const auto& dimAndSize : dimToSize) total *= dimAndSize.second;
++  return static_cast<int64_t>(std::ceil(total));
++}
++
++static bool containsDim(const std::vector<std::string>& dims,
++                        const std::string& dim) {
++  return std::find(dims.begin(), dims.end(), dim) != dims.end();
++}
++
++
++static bool containsPrimaryDim(const std::vector<PrimaryDimTypes>& dims,
++                               PrimaryDimTypes dim) {
++  return std::find(dims.begin(), dims.end(), dim) != dims.end();
++}
++
++static PrimaryDimTypes mapFlashRestickifyDimToConsumerKernelDim(
++    PrimaryDimTypes dim) {
++  // layout_allgather_restickify metadata for flash carries producer/restickify
++  // coordinates in the restickify tensor space. The batchmatmul KERNEL operand
++  // consumes the same values under a renamed coordinate system:
++  //   restickify.x   -> batchmatmul.out
++  //   restickify.out -> batchmatmul.in
++  //   restickify.mb  -> batchmatmul.x
++  if (dim == PrimaryDimTypes::X) return PrimaryDimTypes::OUT;
++  if (dim == PrimaryDimTypes::OUT) return PrimaryDimTypes::IN;
++  if (dim == PrimaryDimTypes::MB) return PrimaryDimTypes::X;
++  return dim;
++}
++
++static std::map<int, std::map<PrimaryDimTypes, int>>
++mapFlashRestickifyCoordsToConsumerKernelCoords(
++    const std::map<int, std::map<PrimaryDimTypes, int>>& sourceCoreIdToWkSlice,
++    const std::vector<PrimaryDimTypes>& consumerTensorDims) {
++  std::map<int, std::map<PrimaryDimTypes, int>> result;
++  for (const auto& coreAndSlice : sourceCoreIdToWkSlice) {
++    auto& mapped = result[coreAndSlice.first];
++    for (const auto& dimAndSlice : coreAndSlice.second) {
++      const auto mappedDim =
++          mapFlashRestickifyDimToConsumerKernelDim(dimAndSlice.first);
++      if (!containsPrimaryDim(consumerTensorDims, mappedDim)) continue;
++      mapped[mappedDim] = dimAndSlice.second;
++    }
++  }
++  return result;
++}
++
++static int64_t stickAdjustedExtent(const LdsInfo& lds,
++                                   const std::string& dimName,
++                                   double extent) {
++  if (!containsDim(lds.stickDimOrder_, dimName)) {
++    return static_cast<int64_t>(extent);
++  }
++  return static_cast<int64_t>(
++      std::ceil(extent / lds.dimToStickSize_.at(dimName)));
++}
++
++static int64_t byteOffsetWithinPiece(
++    const LdsInfo& lds, const std::map<std::string, double>& pieceDimToSize,
++    const std::map<std::string, double>& pieceDimToStart,
++    const std::map<std::string, double>& subpieceDimToStart) {
++  constexpr int64_t kBytesPerStick = 128;
++  int64_t offset = 0;
++  for (int idx = static_cast<int>(lds.layoutDimOrder_.size()) - 1; idx >= 0;
++       --idx) {
++    const std::string& dimName = lds.layoutDimOrder_.at(idx);
++    int64_t diff = static_cast<int64_t>(
++        subpieceDimToStart.at(dimName) - pieceDimToStart.at(dimName));
++    if (containsDim(lds.stickDimOrder_, dimName)) {
++      diff = static_cast<int64_t>(
++          std::ceil(static_cast<double>(diff) /
++                    lds.dimToStickSize_.at(dimName)));
++    }
++    DT_CHECK(diff >= 0);
++    if (diff == 0) continue;
++
++    int64_t elementsToSkip = 1;
++    for (int idx2 = idx - 1; idx2 >= 0; --idx2) {
++      const std::string& innerDimName = lds.layoutDimOrder_.at(idx2);
++      elementsToSkip *= stickAdjustedExtent(
++          lds, innerDimName, pieceDimToSize.at(innerDimName));
++    }
++    offset += diff * elementsToSkip * kBytesPerStick;
++  }
++  return offset;
++}
++
++
++static bool redirectMatmulOperandToStagedLds(
++    SuperDsc* sdsc, LabeledDsInfo& lds,
++    const MatmulOperandBroadcastHookPlan& hook,
++    const std::map<int, int64_t>& destinationStartAddressByCore,
++    std::string* reason) {
++  DT_CHECK(sdsc->dscs_.size() == 1);
++  auto& dldsc = sdsc->dscs_.at(0);
++  if (dldsc.computeOp_.empty()) {
++    *reason = "matmul_operand_broadcast staged LDS requires a compute op";
++    return false;
++  }
++  auto& computeOp = dldsc.computeOp_.at(0);
++  const int operandIndex = static_cast<int>(hook.plan.operandIndex);
++  if (operandIndex < 0 || operandIndex >=
++                              static_cast<int>(computeOp.inputLabeledDs.size())) {
++    *reason = "matmul_operand_broadcast staged LDS operand index is invalid";
++    return false;
++  }
++  auto oldAlloc = lds.memOrg_.count(SenComponents::LX)
++                      ? lds.memOrg_.at(SenComponents::LX).allocateNode_
++                      : nullptr;
++  if (oldAlloc == nullptr) {
++    *reason = "matmul_operand_broadcast staged LDS input has no LX allocate node";
++    return false;
++  }
++
++  const int oldLdsIdx = lds.ldsIdx_;
++  auto& stagedLds = dldsc.labeledDs_.at(oldLdsIdx);
++  stagedLds.coreStateInit_.clear();
++
++  auto* stagedAlloc = oldAlloc;
++  const auto oldCoreIdToWkSlice =
++      stagedAlloc->allocateCoordinates_.coreIdToWkSlice_;
++  stagedAlloc->allocateCoordinates_.clear();
++  stagedAlloc->allocateCoordinates_.coreIdToWkSlice_.clear();
++  stagedAlloc->sliceViewCoordinates_.clear();
++  stagedAlloc->sliceViewCoordinates_.coreIdToWkSlice_.clear();
++  auto& stAddr = stagedAlloc->startAddressCoreCorelet_;
++  for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
++    const auto dstIt = destinationStartAddressByCore.find(coreId);
++    stAddr.insertData(dstIt == destinationStartAddressByCore.end()
++                          ? -1
++                          : dstIt->second,
++                      coreId, 0, 0);
++  }
++
++  if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_REPLICATED_COORDS") !=
++          nullptr &&
++      !oldCoreIdToWkSlice.empty()) {
++    const auto replicatedSlice = oldCoreIdToWkSlice.begin()->second;
++    for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
++      stagedAlloc->allocateCoordinates_.coreIdToWkSlice_[coreId] =
++          replicatedSlice;
++    }
++  }
++
++  stagedLds.memOrg_.at(SenComponents::LX).allocateNode_ = stagedAlloc;
++
++  if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_DEBUG") != nullptr) {
++    std::cerr << "matmul_operand_broadcast staged lds in-place idx=" << oldLdsIdx
++              << " name=" << stagedLds.dsName_ << std::endl;
++  }
++  return true;
++}
++
+ static int64_t lxStartAddressForCore(const LabeledDsInfo& lds, int coreId) {
+   const auto memOrgIt = lds.memOrg_.find(SenComponents::LX);
+   if (memOrgIt == lds.memOrg_.end() ||
+       memOrgIt->second.allocateNode_ == nullptr) {
+     return -1;
+   }
+-  return memOrgIt->second.allocateNode_->startAddressCoreCorelet_.getData(
+-      coreId, 0, 0);
++  auto& startAddr =
++      memOrgIt->second.allocateNode_->startAddressCoreCorelet_;
++  const auto foldSpace = startAddr.getFoldSpaceSize();
++  int queryCore = coreId;
++  if (!foldSpace.empty() && queryCore >= foldSpace.at(0)) {
++    if (foldSpace.at(0) != 1) return -1;
++    queryCore = 0;
++  }
++  return startAddr.getData(queryCore, 0, 0);
+ }
+ 
+ static bool attachMatmulOperandBroadcastInputFetch(
+-    SuperDsc* sdsc, const LabeledDsInfo& lds,
+-    const MatmulOperandBroadcastHookPlan& hook, std::string* reason) {
++    SuperDsc* sdsc, SuperDsc* movementSdsc, const LabeledDsInfo& lds,
++    const MatmulOperandBroadcastHookPlan& hook, std::string* reason,
++    const std::map<int, int64_t>* destinationStartAddressOverride = nullptr,
++    int sourceCoreStart = 0, int sourceCoreLimit = -1) {
+   (void)hook;
++  if (movementSdsc == nullptr) movementSdsc = sdsc;
+   DT_CHECK(sdsc->dscs_.size() == 1);
+   auto& dldsc = sdsc->dscs_.at(0);
+   const auto allocNode = lds.memOrg_.count(SenComponents::LX)
+@@ -357,25 +606,149 @@ static bool attachMatmulOperandBroadcastInputFetch(
+                             refDsInfo.layoutDimOrder_);
+ 
+   std::vector<int> destinationCores;
+-  int64_t replicatedDstAddr = -1;
++  std::map<int, int64_t> destinationStartAddressByCore;
+   for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
+-    const auto dstAddr = lxStartAddressForCore(lds, coreAndSlice.first);
++    int64_t dstAddr = -1;
++    if (destinationStartAddressOverride != nullptr) {
++      const auto overrideIt =
++          destinationStartAddressOverride->find(coreAndSlice.first);
++      if (overrideIt != destinationStartAddressOverride->end()) {
++        dstAddr = overrideIt->second;
++      }
++    } else {
++      dstAddr = lxStartAddressForCore(lds, coreAndSlice.first);
++    }
+     if (dstAddr < 0) {
+       *reason = "missing destination LX base for consumer core " +
+                 std::to_string(coreAndSlice.first);
+       return false;
+     }
+-    if (replicatedDstAddr < 0) {
+-      replicatedDstAddr = dstAddr;
+-    } else if (replicatedDstAddr != dstAddr) {
+-      *reason = "matmul_operand_broadcast requires equal destination LX bases";
+-      return false;
+-    }
+     destinationCores.push_back(coreAndSlice.first);
++    destinationStartAddressByCore[coreAndSlice.first] = dstAddr;
+   }
+ 
+-  std::vector<int> dataOpIndices;
++  std::map<std::string, double> fullDimToSize;
++  std::map<std::string, double> fullDimToStart;
++  for (const auto& pDim : refDsInfo.layoutDimOrder_) {
++    const std::string dimName = dataOpDimName(dldsc, pDim);
++    fullDimToSize[dimName] = dldsc.N_.primaryDimToVal_st(pDim);
++    fullDimToStart[dimName] = 0;
++  }
++
++  std::vector<std::pair<int, std::vector<int>>> dataOpScheduleEntries;
++  if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_GROUPED_DATAOP") !=
++      nullptr) {
++    DataOpDsc groupedDdsc;
++    groupedDdsc.dscName_ =
++        sdsc->name_ + "-" + lds.dsName_ + "-LxInputNeighborFetch-grouped";
++    groupedDdsc.opName = OpFuncs::STCDPOpLx;
++    groupedDdsc.op = new STCDPOpLx;
++    groupedDdsc.op->name = OpFuncs::STCDPOpLx;
++    groupedDdsc.primaryDs_["activation"].name_ = "activation";
++    groupedDdsc.target_ = sdsc->target_;
++    groupedDdsc.foldProps_.push_back(
++        new FoldDimProp(sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++
++    groupedDdsc.labeledDs_.resize(2);
++    auto& groupedInpLds = groupedDdsc.labeledDs_.at(0);
++    auto& groupedOutLds = groupedDdsc.labeledDs_.at(1);
++    groupedInpLds.ldsName_ = lds.dsName_ + "-LxInputNeighborFetch-inp-grouped";
++    groupedOutLds.ldsName_ = lds.dsName_;
++    fillDataOpLdsShape(groupedInpLds, groupedDdsc, lds, dldsc);
++    fillDataOpLdsShape(groupedOutLds, groupedDdsc, lds, dldsc);
++    groupedDdsc.dimPool_ = groupedDdsc.primaryDs_.at("activation").dimNames;
++    DT_CHECK(groupedOutLds.stickDimOrder_ == groupedInpLds.stickDimOrder_);
++    DT_CHECK(groupedOutLds.dimToStickSize_ ==
++             groupedInpLds.dimToStickSize_);
++
++    const bool useMultiPlacementOutput =
++        std::getenv(
++            "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MULTIPLACEMENT_OUTPUT") !=
++        nullptr;
++    std::vector<std::pair<std::map<std::string, double>,
++                          std::map<std::string, double>>>
++        sourcePieceShapes;
++    std::set<int> coresSeen;
++    for (const auto& coreAndSlice : producerCoreIdToWkSlice) {
++      if (coreAndSlice.first < sourceCoreStart) continue;
++      if (sourceCoreLimit >= 0 && coreAndSlice.first >= sourceCoreLimit)
++        continue;
++      if (coresSeen.insert(coreAndSlice.first).second) {
++        groupedDdsc.coreIdsUsed_.push_back(coreAndSlice.first);
++      }
++
++      std::map<std::string, double> dimToSize;
++      std::map<std::string, double> dimToStart;
++      for (const auto& pDim : refDsInfo.layoutDimOrder_) {
++        const std::string dimName = dataOpDimName(dldsc, pDim);
++        const double dimExtent = dldsc.N_.primaryDimToVal_st(pDim);
++        const auto splitIt = producerSliceIds.find(pDim);
++        const int split = splitIt == producerSliceIds.end()
++                              ? 1
++                              : static_cast<int>(splitIt->second.size());
++        DT_CHECK(split > 0);
++        DT_CHECK(static_cast<int>(dimExtent) % split == 0);
++        const int sliceIdx = coreAndSlice.second.count(pDim)
++                                 ? coreAndSlice.second.at(pDim)
++                                 : 0;
++        dimToSize[dimName] = dimExtent / split;
++        dimToStart[dimName] = sliceIdx * dimToSize.at(dimName);
++      }
++      const auto srcAddr = lxStartAddressForCore(lds, coreAndSlice.first);
++      if (srcAddr < 0) {
++        *reason = "missing source LX base for producer core " +
++                  std::to_string(coreAndSlice.first);
++        return false;
++      }
++      addLxPiece(groupedInpLds,
++                 "src" + std::to_string(coreAndSlice.first), coreAndSlice.first,
++                 srcAddr, dimToSize, dimToStart);
++      if (useMultiPlacementOutput) {
++        sourcePieceShapes.push_back({dimToSize, dimToStart});
++      }
++    }
++
++    if (useMultiPlacementOutput) {
++      for (const auto& dstCoreAndAddress : destinationStartAddressByCore) {
++        if (coresSeen.insert(dstCoreAndAddress.first).second) {
++          groupedDdsc.coreIdsUsed_.push_back(dstCoreAndAddress.first);
++        }
++      }
++      int dstPieceIdx = 0;
++      for (const auto& sourceShape : sourcePieceShapes) {
++        const int64_t destinationOffset = byteOffsetWithinPiece(
++            groupedOutLds, fullDimToSize, fullDimToStart,
++            sourceShape.second);
++        std::map<int, int64_t> destinationAddressByCoreWithOffset;
++        for (const auto& dstCoreAndAddress : destinationStartAddressByCore) {
++          destinationAddressByCoreWithOffset[dstCoreAndAddress.first] =
++              dstCoreAndAddress.second + destinationOffset;
++        }
++        addReplicatedLxPieceWithAddresses(
++            groupedOutLds, "dst_from_src" + std::to_string(dstPieceIdx++),
++            destinationAddressByCoreWithOffset, sourceShape.first,
++            sourceShape.second);
++      }
++    } else {
++      for (const auto& dstCoreAndAddress : destinationStartAddressByCore) {
++        if (coresSeen.insert(dstCoreAndAddress.first).second) {
++          groupedDdsc.coreIdsUsed_.push_back(dstCoreAndAddress.first);
++        }
++        addLxPiece(groupedOutLds,
++                   "dst" + std::to_string(dstCoreAndAddress.first),
++                   dstCoreAndAddress.first, dstCoreAndAddress.second,
++                   fullDimToSize, fullDimToStart);
++      }
++    }
++
++    const int dataOpIdx = static_cast<int>(movementSdsc->dataOpdscs_.size());
++    const auto dataOpCoreIds = groupedDdsc.coreIdsUsed_;
++    movementSdsc->dataOpdscs_.push_back(groupedDdsc);
++    dataOpScheduleEntries.push_back({dataOpIdx, dataOpCoreIds});
++  } else {
+   for (const auto& coreAndSlice : producerCoreIdToWkSlice) {
++    if (coreAndSlice.first < sourceCoreStart) continue;
++    if (sourceCoreLimit >= 0 && coreAndSlice.first >= sourceCoreLimit) continue;
+     DataOpDsc ddsc;
+     ddsc.dscName_ = sdsc->name_ + "-" + lds.dsName_ +
+                     "-LxInputNeighborFetch-src" +
+@@ -410,9 +783,13 @@ static bool attachMatmulOperandBroadcastInputFetch(
+ 
+     std::map<std::string, double> dimToSize;
+     std::map<std::string, double> dimToStart;
++    std::map<std::string, double> fullDimToSize;
++    std::map<std::string, double> fullDimToStart;
+     for (const auto& pDim : refDsInfo.layoutDimOrder_) {
+       const std::string dimName = dataOpDimName(dldsc, pDim);
+       const double dimExtent = dldsc.N_.primaryDimToVal_st(pDim);
++      fullDimToSize[dimName] = dimExtent;
++      fullDimToStart[dimName] = 0;
+       const auto splitIt = producerSliceIds.find(pDim);
+       const int split = splitIt == producerSliceIds.end()
+                             ? 1
+@@ -432,30 +809,397 @@ static bool attachMatmulOperandBroadcastInputFetch(
+       return false;
+     }
+ 
++    if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_SINGLE_DST_DATAOPS") !=
++        nullptr) {
++      for (const auto& dstCoreAndAddress : destinationStartAddressByCore) {
++        DataOpDsc singleDdsc;
++        singleDdsc.dscName_ = sdsc->name_ + "-" + lds.dsName_ +
++                              "-LxInputNeighborFetch-src" +
++                              std::to_string(coreAndSlice.first) + "-dst" +
++                              std::to_string(dstCoreAndAddress.first);
++        singleDdsc.opName = OpFuncs::STCDPOpLx;
++        singleDdsc.op = new STCDPOpLx;
++        singleDdsc.op->name = OpFuncs::STCDPOpLx;
++        singleDdsc.primaryDs_["activation"].name_ = "activation";
++        singleDdsc.target_ = sdsc->target_;
++        singleDdsc.foldProps_.push_back(new FoldDimProp(
++            sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++
++        singleDdsc.coreIdsUsed_.push_back(coreAndSlice.first);
++        if (dstCoreAndAddress.first != coreAndSlice.first)
++          singleDdsc.coreIdsUsed_.push_back(dstCoreAndAddress.first);
++
++        singleDdsc.labeledDs_.resize(2);
++        auto& singleInpLds = singleDdsc.labeledDs_.at(0);
++        auto& singleOutLds = singleDdsc.labeledDs_.at(1);
++        singleInpLds.ldsName_ = lds.dsName_ + "-LxInputNeighborFetch-inp-src" +
++                                std::to_string(coreAndSlice.first) + "-dst" +
++                                std::to_string(dstCoreAndAddress.first);
++        singleOutLds.ldsName_ = lds.dsName_;
++        fillDataOpLdsShape(singleInpLds, singleDdsc, lds, dldsc);
++        fillDataOpLdsShape(singleOutLds, singleDdsc, lds, dldsc);
++        singleDdsc.dimPool_ =
++            singleDdsc.primaryDs_.at("activation").dimNames;
++        DT_CHECK(singleOutLds.stickDimOrder_ == singleInpLds.stickDimOrder_);
++        DT_CHECK(singleOutLds.dimToStickSize_ ==
++                 singleInpLds.dimToStickSize_);
++
++        addLxPiece(singleInpLds, "src0", coreAndSlice.first, srcAddr,
++                   dimToSize, dimToStart);
++        const auto dstPhysicalOffset = byteOffsetWithinPiece(
++            singleOutLds, fullDimToSize, fullDimToStart, dimToStart);
++        addLxPiece(singleOutLds, "dst" + std::to_string(dstCoreAndAddress.first),
++                   dstCoreAndAddress.first,
++                   dstCoreAndAddress.second + dstPhysicalOffset, dimToSize,
++                   dimToStart);
++
++        const int dataOpIdx =
++            static_cast<int>(movementSdsc->dataOpdscs_.size());
++        const auto dataOpCoreIds = singleDdsc.coreIdsUsed_;
++        movementSdsc->dataOpdscs_.push_back(singleDdsc);
++        dataOpScheduleEntries.push_back({dataOpIdx, dataOpCoreIds});
++      }
++      continue;
++    }
++
+     addLxPiece(inpLds, "src0", coreAndSlice.first, srcAddr,
+                dimToSize, dimToStart);
+-    addReplicatedLxPiece(outLds, "dst0", destinationCores,
+-                         replicatedDstAddr, dimToSize, dimToStart);
++    for (const auto& dstCoreAndAddress : destinationStartAddressByCore) {
++      const auto dstPhysicalOffset =
++          byteOffsetWithinPiece(outLds, fullDimToSize, fullDimToStart, dimToStart);
++      addLxPiece(outLds, "dst" + std::to_string(dstCoreAndAddress.first),
++                 dstCoreAndAddress.first,
++                 dstCoreAndAddress.second + dstPhysicalOffset, dimToSize,
++                 dimToStart);
++    }
+ 
+-    const int dataOpIdx = static_cast<int>(sdsc->dataOpdscs_.size());
+-    sdsc->dataOpdscs_.push_back(ddsc);
+-    dataOpIndices.push_back(dataOpIdx);
++    const int dataOpIdx = static_cast<int>(movementSdsc->dataOpdscs_.size());
++    const auto dataOpCoreIds = ddsc.coreIdsUsed_;
++    movementSdsc->dataOpdscs_.push_back(ddsc);
++    dataOpScheduleEntries.push_back({dataOpIdx, dataOpCoreIds});
++  }
+   }
+ 
+-  allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
+-  for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
+-    auto& schedule = sdsc->coreIdToDscSchedule[coreAndSlice.first];
+-    auto insertPos = schedule.begin();
+-    for (auto it = schedule.begin(); it != schedule.end(); ++it) {
+-      if (it->dldsc_idx == 0) {
+-        insertPos = it;
+-        break;
++  if (dataOpScheduleEntries.empty()) {
++    *reason = "matmul_operand_broadcast emitted no source-core dataops";
++    return false;
++  }
++
++  if (movementSdsc == sdsc) {
++    for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
++      auto& schedule = sdsc->coreIdToDscSchedule[coreAndSlice.first];
++      auto insertPos = schedule.begin();
++      for (auto it = schedule.begin(); it != schedule.end(); ++it) {
++        if (it->dldsc_idx == 0) {
++          insertPos = it;
++          break;
++        }
++      }
++      for (const auto& dataOpEntry : dataOpScheduleEntries) {
++        const auto& dataOpCoreIds = dataOpEntry.second;
++        if (std::find(dataOpCoreIds.begin(), dataOpCoreIds.end(),
++                      coreAndSlice.first) == dataOpCoreIds.end()) {
++          continue;
++        }
++        insertPos = schedule.insert(
++            insertPos, DscScheduleStep(dataOpEntry.first, -1, false, true));
++        ++insertPos;
+       }
+     }
+-    for (const auto dataOpIdx : dataOpIndices) {
+-      insertPos = schedule.insert(insertPos,
+-                                  DscScheduleStep(dataOpIdx, -1, false, true));
+-      ++insertPos;
++  } else {
++    std::set<int> activeCores;
++    for (const auto& dataOpEntry : dataOpScheduleEntries) {
++      const auto& dataOpCoreIds = dataOpEntry.second;
++      activeCores.insert(dataOpCoreIds.begin(), dataOpCoreIds.end());
++      for (const auto coreId : dataOpCoreIds) {
++        movementSdsc->coreIdToDscSchedule[coreId].push_back(
++            DscScheduleStep(dataOpEntry.first, -1, false, true));
++      }
++    }
++    movementSdsc->numCoresUsed_ = activeCores.size();
++  }
++  return true;
++}
++
++
++static bool attachLayoutAllgatherRestickifyInputFetch(
++    SuperDsc* sdsc, SuperDsc* movementSdsc, LabeledDsInfo& lds,
++    const LayoutAllgatherRestickifyHookPlan& hook, int ps,
++    MemTrackBundle* memTrackers, std::string* reason,
++    const std::map<int, int64_t>* destinationStartAddressOverride = nullptr,
++    std::map<int, int64_t>* destinationStartAddressOut = nullptr,
++    int fissionDimStart = 0, int fissionDimSize = -1,
++    bool updateConsumerAllocation = true) {
++  if (movementSdsc == nullptr) movementSdsc = sdsc;
++  DT_CHECK(sdsc->dscs_.size() == 1);
++  if (!hook.plan.ok) {
++    *reason = "layout_allgather_restickify plan is not valid: " +
++              hook.plan.reason;
++    return false;
++  }
++
++  auto& dldsc = sdsc->dscs_.at(0);
++  auto allocNode = lds.memOrg_.count(SenComponents::LX)
++                       ? lds.memOrg_.at(SenComponents::LX).allocateNode_
++                       : nullptr;
++  if (allocNode == nullptr) {
++    *reason = "layout_allgather_restickify input has no LX allocate node";
++    return false;
++  }
++
++  const auto producerCoreIdToWkSlice =
++      allocNode->allocateCoordinates_.coreIdToWkSlice_;
++  if (producerCoreIdToWkSlice.empty()) {
++    *reason =
++        "layout_allgather_restickify input has empty producer coordinates";
++    return false;
++  }
++
++  const auto logicalTransfers =
++      deeptools::layoutAllgatherRestickifyLogicalTransfers(hook.plan);
++  std::map<int, std::vector<deeptools::LayoutAllgatherRestickifyLogicalTransfer>>
++      transfersByDestination;
++  for (const auto& transfer : logicalTransfers) {
++    transfersByDestination[static_cast<int>(transfer.destinationCore)].push_back(
++        transfer);
++  }
++  if (transfersByDestination.empty()) {
++    *reason = "layout_allgather_restickify produced no logical transfers";
++    return false;
++  }
++
++  const auto& refDsInfo = dldsc.primaryDsInfo_.at(lds.dsType_);
++  // The flash layout_allgather_restickify contract maps restickify.x chunks
++  // into the batchmatmul KERNEL out dimension, while restickify.mb maps to the
++  // consumer x dimension. Use the logical transfer table for exact group/chunk
++  // placement instead of re-inferring it from enum-valued producer coordinates.
++  const auto chunkDim = PrimaryDimTypes::OUT;
++  const auto groupDim = PrimaryDimTypes::X;
++  if (!containsPrimaryDim(refDsInfo.layoutDimOrder_, chunkDim) ||
++      !containsPrimaryDim(refDsInfo.layoutDimOrder_, groupDim)) {
++    *reason = "layout_allgather_restickify expected OUT chunk and X group dims";
++    return false;
++  }
++
++  const bool hasFissionSlice = fissionDimSize > 0;
++  const auto fissionDim = PrimaryDimTypes::IN;
++  if (hasFissionSlice) {
++    if (!containsPrimaryDim(refDsInfo.layoutDimOrder_, fissionDim)) {
++      *reason = "layout_allgather_restickify fission dim IN is not in layout";
++      return false;
++    }
++    const int fissionDimExtent =
++        static_cast<int>(dldsc.N_.primaryDimToVal_st(fissionDim));
++    if (fissionDimStart < 0 || fissionDimSize <= 0 ||
++        fissionDimStart + fissionDimSize > fissionDimExtent) {
++      *reason = "layout_allgather_restickify invalid fission slice";
++      return false;
++    }
++  }
++
++  std::map<std::string, double> allocationDstDimToSize;
++  std::map<std::string, double> dataOpDstDimToSize;
++  for (const auto& pDim : refDsInfo.layoutDimOrder_) {
++    const std::string dimName = dataOpDimName(dldsc, pDim);
++    const double dimExtent = dldsc.N_.primaryDimToVal_st(pDim);
++    int split = 1;
++    if (pDim == groupDim) {
++      split = static_cast<int>(hook.plan.groupCount);
++    } else if (pDim == chunkDim) {
++      split = static_cast<int>(hook.plan.producerChunksPerGroup);
++    }
++    DT_CHECK(split > 0);
++    DT_CHECK(static_cast<int>(dimExtent) % split == 0);
++    double dimSize = dimExtent / split;
++    if (pDim == chunkDim) {
++      dimSize *= hook.plan.producerChunksPerGroup;
++    }
++    allocationDstDimToSize[dimName] = dimSize;
++    dataOpDstDimToSize[dimName] = dimSize;
++    if (hasFissionSlice && pDim == fissionDim) {
++      dataOpDstDimToSize[dimName] = fissionDimSize;
++    }
++  }
++  const auto dstSliceBytes =
++      pieceSizeBytes(allocationDstDimToSize, lds.wordLength);
++  if (dstSliceBytes <= 0) {
++    *reason = "layout_allgather_restickify destination slice size is not positive";
++    return false;
++  }
++
++  std::map<int, int64_t> destinationStartAddressByCore;
++  if (destinationStartAddressOverride != nullptr) {
++    destinationStartAddressByCore = *destinationStartAddressOverride;
++  } else {
++    memTrackers->insertPsBefore(ps);
++    for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
++      auto& memTracker = memTrackers->lxTrackPerCore.at(coreAndSlice.first);
++      const auto dsName = sdsc->name_ + "-" + lds.dsName_ +
++                          "-LayoutAllgatherRestickify-out";
++      const auto stAddr =
++          memTracker.checkAndAddDs(dsName, "dynamic", dstSliceBytes, {ps});
++      if (stAddr < 0) {
++        *reason = "layout_allgather_restickify could not allocate " +
++                  std::to_string(static_cast<long long>(dstSliceBytes)) +
++                  " bytes in LX for consumer core " +
++                  std::to_string(coreAndSlice.first);
++        return false;
++      }
++      destinationStartAddressByCore[coreAndSlice.first] = stAddr;
++    }
++  }
++  if (destinationStartAddressOut != nullptr) {
++    *destinationStartAddressOut = destinationStartAddressByCore;
++  }
++
++  DataOpDsc ddsc;
++  ddsc.dscName_ = sdsc->name_ + "-" + lds.dsName_ +
++                  "-LayoutAllgatherRestickify";
++  ddsc.opName = OpFuncs::STCDPOpLx;
++  ddsc.op = new STCDPOpLx;
++  ddsc.op->name = OpFuncs::STCDPOpLx;
++  ddsc.primaryDs_["activation"].name_ = "activation";
++  ddsc.target_ = sdsc->target_;
++  ddsc.foldProps_.push_back(new FoldDimProp(
++      sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++
++  std::set<int> coresSeen;
++  for (const auto& transfer : logicalTransfers) {
++    coresSeen.insert(static_cast<int>(transfer.sourceCore));
++    coresSeen.insert(static_cast<int>(transfer.destinationCore));
++  }
++  for (const auto coreId : coresSeen) ddsc.coreIdsUsed_.push_back(coreId);
++
++  ddsc.labeledDs_.resize(2);
++  auto& inpLds = ddsc.labeledDs_.at(0);
++  auto& outLds = ddsc.labeledDs_.at(1);
++  inpLds.ldsName_ = lds.dsName_ + "-LayoutAllgatherRestickify-inp";
++  outLds.ldsName_ = lds.dsName_;
++  fillDataOpLdsShape(inpLds, ddsc, lds, dldsc);
++  fillDataOpLdsShape(outLds, ddsc, lds, dldsc);
++  ddsc.dimPool_ = ddsc.primaryDs_.at("activation").dimNames;
++  DT_CHECK(outLds.stickDimOrder_ == inpLds.stickDimOrder_);
++  DT_CHECK(outLds.dimToStickSize_ == inpLds.dimToStickSize_);
++
++  std::set<int> sourcePiecesSeen;
++  for (const auto& transfer : logicalTransfers) {
++    const int srcCore = static_cast<int>(transfer.sourceCore);
++    if (!sourcePiecesSeen.insert(srcCore).second) continue;
++
++    std::map<std::string, double> srcDimToSize;
++    std::map<std::string, double> srcDimToStart;
++    for (const auto& pDim : refDsInfo.layoutDimOrder_) {
++      const std::string dimName = dataOpDimName(dldsc, pDim);
++      const double dimExtent = dldsc.N_.primaryDimToVal_st(pDim);
++      if (hasFissionSlice && pDim == fissionDim) {
++        srcDimToSize[dimName] = fissionDimSize;
++        srcDimToStart[dimName] = fissionDimStart;
++        continue;
++      }
++      int split = 1;
++      int sliceIdx = 0;
++      if (pDim == groupDim) {
++        split = static_cast<int>(hook.plan.groupCount);
++        sliceIdx = static_cast<int>(transfer.group);
++      } else if (pDim == chunkDim) {
++        split = static_cast<int>(hook.plan.producerChunksPerGroup);
++        sliceIdx = static_cast<int>(transfer.producerChunk);
++      }
++      DT_CHECK(split > 0);
++      DT_CHECK(static_cast<int>(dimExtent) % split == 0);
++      const double srcSize = dimExtent / split;
++      srcDimToSize[dimName] = srcSize;
++      srcDimToStart[dimName] = sliceIdx * srcSize;
++    }
++    const auto srcAddr = lxStartAddressForCore(lds, srcCore);
++    if (srcAddr < 0) {
++      *reason = "missing source LX base for producer core " +
++                std::to_string(srcCore);
++      return false;
++    }
++    addLxPiece(inpLds, "src" + std::to_string(srcCore), srcCore, srcAddr,
++               srcDimToSize, srcDimToStart);
++  }
++
++  for (const auto& dstCoreAndTransfers : transfersByDestination) {
++    const int dstCore = dstCoreAndTransfers.first;
++    const auto baseIt = destinationStartAddressByCore.find(dstCore);
++    if (baseIt == destinationStartAddressByCore.end()) {
++      *reason = "layout_allgather_restickify destination core is not in consumer schedule: " +
++                std::to_string(dstCore);
++      return false;
++    }
++    if (dstCoreAndTransfers.second.empty()) {
++      *reason = "layout_allgather_restickify destination has no sources: " +
++                std::to_string(dstCore);
++      return false;
++    }
++    const auto& firstTransfer = dstCoreAndTransfers.second.front();
++    std::map<std::string, double> dstDimToStart;
++    for (const auto& pDim : refDsInfo.layoutDimOrder_) {
++      const std::string dimName = dataOpDimName(dldsc, pDim);
++      dstDimToStart[dimName] = 0;
++      if (pDim == groupDim) {
++        const double groupExtent = dldsc.N_.primaryDimToVal_st(pDim) /
++                                  static_cast<double>(hook.plan.groupCount);
++        dstDimToStart[dimName] = firstTransfer.group * groupExtent;
++      }
++      if (hasFissionSlice && pDim == fissionDim) {
++        dstDimToStart[dimName] = fissionDimStart;
++      }
++    }
++    addLxPiece(outLds, "dst" + std::to_string(dstCore), dstCore,
++               baseIt->second, dataOpDstDimToSize, dstDimToStart);
++  }
++
++  const int dataOpIdx = static_cast<int>(movementSdsc->dataOpdscs_.size());
++  const auto dataOpCoreIds = ddsc.coreIdsUsed_;
++  movementSdsc->dataOpdscs_.push_back(ddsc);
++
++  if (updateConsumerAllocation) {
++    allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
++    auto& stAddr = allocNode->startAddressCoreCorelet_;
++    for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
++      const auto dstIt = destinationStartAddressByCore.find(coreId);
++      stAddr.insertData(dstIt == destinationStartAddressByCore.end()
++                            ? -1
++                            : dstIt->second,
++                        coreId, 0, 0);
++    }
++    if (!lds.coreStateInit_.empty()) {
++      for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
++        if (static_cast<size_t>(coreId) >= lds.coreStateInit_.size()) continue;
++        auto& coreState = lds.coreStateInit_.at(coreId);
++        if (coreState.lbrInit_.empty()) continue;
++        const auto newBase = stAddr.getData(coreId, 0, 0);
++        if (newBase < 0) {
++          for (auto& lbr : coreState.lbrInit_) lbr = -1;
++          continue;
++        }
++        const auto oldBase = coreState.lbrInit_.at(0);
++        const auto delta = static_cast<int>(newBase - oldBase);
++        for (auto& lbr : coreState.lbrInit_) lbr += delta;
++      }
++    }
++  }
++
++  if (movementSdsc == sdsc) {
++    for (const auto coreId : dataOpCoreIds) {
++      auto& schedule = movementSdsc->coreIdToDscSchedule[coreId];
++      auto insertPos = schedule.begin();
++      for (auto it = schedule.begin(); it != schedule.end(); ++it) {
++        if (it->dldsc_idx == 0) {
++          insertPos = it;
++          break;
++        }
++      }
++      schedule.insert(insertPos, DscScheduleStep(dataOpIdx, -1, false, true));
++    }
++  } else {
++    movementSdsc->numCoresUsed_ = dataOpCoreIds.size();
++    for (const auto coreId : dataOpCoreIds) {
++      movementSdsc->coreIdToDscSchedule[coreId].push_back(
++          DscScheduleStep(dataOpIdx, -1, false, true));
+     }
+   }
+   return true;
+@@ -484,14 +1228,120 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+     const auto layoutAllgatherHook = findLayoutAllgatherRestickifyPlan(sdsc, lds);
+     if (layoutAllgatherHook.plan.ok ||
+         !layoutAllgatherHook.classificationKey.empty()) {
++      auto makeLayoutAllgatherRelayoutSdsc = [&](const std::string& suffix) {
++        SuperDsc* relayout_sdsc = new SuperDsc;
++        relayout_sdsc->name_ = sdsc->name_ + "-" + lds.dsName_ +
++                               "-LayoutAllgatherRestickifyRelayout" + suffix;
++        relayout_sdsc->sdscFoldProps_.emplace_back(std::make_unique<FoldDimProp>(
++            sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++        relayout_sdsc->sdscFolds_.clone(sdsc->sdscFolds_);
++        relayout_sdsc->coreFoldProp_ = std::make_unique<FoldDimProp>(
++            sdsc->coreFoldProp_->getSize(), "core");
++        relayout_sdsc->coreletFoldProp_ = std::make_unique<FoldDimProp>(
++            sdsc->coreletFoldProp_->getSize(), "corelet");
++        relayout_sdsc->unpadN_ = sdsc->unpadN_;
++        relayout_sdsc->N_ = sdsc->N_;
++        relayout_sdsc->target_ = sdsc->target_;
++        return relayout_sdsc;
++      };
++
++      const char* fissionRowsEnv = std::getenv(
++          "DEEPTOOLS_LAYOUT_ALLGATHER_RESTICKIFY_FISSION_ROWS");
++      const int fissionRows =
++          fissionRowsEnv == nullptr ? 0 : std::atoi(fissionRowsEnv);
++      const char* fissionSliceEnv = std::getenv(
++          "DEEPTOOLS_LAYOUT_ALLGATHER_RESTICKIFY_FISSION_SLICE");
++      const int fissionSlice =
++          fissionSliceEnv == nullptr ? 16 : std::atoi(fissionSliceEnv);
++
++      if (fissionRows > 0) {
++        DT_CHECK(fissionSlice > 0);
++        const int fissionDimExtent =
++            static_cast<int>(dldsc.N_.primaryDimToVal_st(PrimaryDimTypes::IN));
++        DT_CHECK(fissionDimExtent > 0);
++        DT_CHECK(fissionDimExtent % fissionSlice == 0);
++
++        std::map<int, int64_t> destinationStartAddressByCore;
++        bool destinationAllocated = false;
++        int relayoutIndex = 0;
++        for (int groupStart = 0; groupStart < fissionDimExtent;
++             groupStart += fissionRows * fissionSlice) {
++          if (destinationAllocated) {
++            // The first fission group allocates the destination and inserts one
++            // execution phase through attachLayoutAllgatherRestickifyInputFetch.
++            // Each additional movement SDSC also needs a matching phase before
++            // the consumer phase is shifted again.
++            memTrackers->insertPsBefore(ps);
++          }
++          SuperDsc* relayout_sdsc = makeLayoutAllgatherRelayoutSdsc(
++              "-Fission" + std::to_string(relayoutIndex++));
++          const int groupEnd =
++              std::min(fissionDimExtent, groupStart + fissionRows * fissionSlice);
++          for (int sliceStart = groupStart; sliceStart < groupEnd;
++               sliceStart += fissionSlice) {
++            std::string materializationReason;
++            const std::map<int, int64_t>* destinationOverride =
++                destinationAllocated ? &destinationStartAddressByCore : nullptr;
++            std::map<int, int64_t>* destinationOut =
++                destinationAllocated ? nullptr : &destinationStartAddressByCore;
++            if (!attachLayoutAllgatherRestickifyInputFetch(
++                    sdsc, relayout_sdsc, lds, layoutAllgatherHook, ps,
++                    memTrackers, &materializationReason, destinationOverride,
++                    destinationOut, sliceStart, fissionSlice,
++                    /*updateConsumerAllocation=*/false)) {
++              delete relayout_sdsc;
++              emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
++                                                        layoutAllgatherHook);
++              DT_CHECK_MSG(
++                  false,
++                  "layout_allgather_restickify fission materialization failed: " +
++                      materializationReason);
++            }
++            destinationAllocated = true;
++          }
++          relayout_sdscs.push_back(relayout_sdsc);
++        }
++
++        auto allocNode = lds.memOrg_.at(LX).allocateNode_;
++        allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
++        auto& stAddr = allocNode->startAddressCoreCorelet_;
++        for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
++          const auto dstIt = destinationStartAddressByCore.find(coreId);
++          stAddr.insertData(dstIt == destinationStartAddressByCore.end()
++                                ? -1
++                                : dstIt->second,
++                            coreId, 0, 0);
++        }
++        if (!lds.coreStateInit_.empty()) {
++          for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0);
++               ++coreId) {
++            if (static_cast<size_t>(coreId) >= lds.coreStateInit_.size()) {
++              continue;
++            }
++            auto& coreState = lds.coreStateInit_.at(coreId);
++            if (coreState.lbrInit_.empty()) continue;
++            const auto newBase = stAddr.getData(coreId, 0, 0);
++            if (newBase < 0) {
++              for (auto& lbr : coreState.lbrInit_) lbr = -1;
++              continue;
++            }
++            const auto oldBase = coreState.lbrInit_.at(0);
++            const auto delta = static_cast<int>(newBase - oldBase);
++            for (auto& lbr : coreState.lbrInit_) lbr += delta;
++          }
++        }
++
++        emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
++                                                  layoutAllgatherHook);
++        continue;
++      }
++
++      SuperDsc* relayout_sdsc = makeLayoutAllgatherRelayoutSdsc("");
+       std::string materializationReason;
+-      // Diagnostic implementation: treat the classified layout all-gather as
+-      // explicit source-shard fanout into the consumer LX operand. This avoids
+-      // the older generic relayout fallback so we can test the DLDSC collective
+-      // contract end to end before replacing this with a staged realization.
+-      if (!attachMatmulOperandBroadcastInputFetch(
+-              sdsc, lds, MatmulOperandBroadcastHookPlan{},
++      if (!attachLayoutAllgatherRestickifyInputFetch(
++              sdsc, relayout_sdsc, lds, layoutAllgatherHook, ps, memTrackers,
+               &materializationReason)) {
++        delete relayout_sdsc;
+         emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
+                                                   layoutAllgatherHook);
+         DT_CHECK_MSG(false,
+@@ -500,21 +1350,195 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       }
+       emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
+                                                 layoutAllgatherHook);
++      relayout_sdscs.push_back(relayout_sdsc);
+       continue;
+     }
+ 
+     const auto matmulBroadcastHook =
+         findMatmulOperandBroadcastPlan(sdsc, lds);
+     if (matmulBroadcastHook.plan.ok) {
++      auto makeMatmulOperandBroadcastRelayoutSdsc = [&](const std::string& suffix) {
++        SuperDsc* relayout_sdsc = new SuperDsc;
++        relayout_sdsc->name_ = sdsc->name_ + "-" + lds.dsName_ +
++                               "-MatmulOperandBroadcastRelayout" + suffix;
++        relayout_sdsc->sdscFoldProps_.emplace_back(std::make_unique<FoldDimProp>(
++            sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++        relayout_sdsc->sdscFolds_.clone(sdsc->sdscFolds_);
++        relayout_sdsc->coreFoldProp_ = std::make_unique<FoldDimProp>(
++            sdsc->coreFoldProp_->getSize(), "core");
++        relayout_sdsc->coreletFoldProp_ = std::make_unique<FoldDimProp>(
++            sdsc->coreletFoldProp_->getSize(), "corelet");
++        relayout_sdsc->unpadN_ = sdsc->unpadN_;
++        relayout_sdsc->N_ = sdsc->N_;
++        relayout_sdsc->target_ = sdsc->target_;
++        return relayout_sdsc;
++      };
++
++      const char* fissionRowsEnv =
++          std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_FISSION_ROWS");
++      const int fissionRows =
++          fissionRowsEnv == nullptr ? 0 : std::atoi(fissionRowsEnv);
++      const auto& matmulRefDsInfo = dldsc.primaryDsInfo_.at(lds.dsType_);
++      std::map<std::string, double> matmulDestinationDimToSize;
++      for (const auto& pDim : matmulRefDsInfo.layoutDimOrder_) {
++        const std::string dimName = dataOpDimName(dldsc, pDim);
++        matmulDestinationDimToSize[dimName] = dldsc.N_.primaryDimToVal_st(pDim);
++      }
++      const auto matmulDstBytes =
++          pieceSizeBytes(matmulDestinationDimToSize, lds.wordLength);
++      DT_CHECK(matmulDstBytes > 0);
++      std::map<int, int64_t> destinationStartAddressByCore;
++      memTrackers->insertPsBefore(ps);
++      for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
++        auto& memTracker = memTrackers->lxTrackPerCore.at(coreAndSlice.first);
++        const auto dsName = sdsc->name_ + "-" + lds.dsName_ +
++                            "-MatmulOperandBroadcast-out";
++        auto stAddr =
++            memTracker.checkAndAddDs(dsName, "dynamic", matmulDstBytes, {ps});
++        const char* forcedDstBaseEnv =
++            std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_FORCE_DST_BASE");
++        if (forcedDstBaseEnv != nullptr) {
++          stAddr = std::atoll(forcedDstBaseEnv);
++        }
++        if (stAddr < 0) {
++          DT_CHECK_MSG(false,
++                       "matmul_operand_broadcast could not allocate " +
++                           std::to_string(static_cast<long long>(
++                               matmulDstBytes)) +
++                           " bytes in LX for consumer core " +
++                           std::to_string(coreAndSlice.first));
++        }
++        destinationStartAddressByCore[coreAndSlice.first] = stAddr;
++        if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_DEBUG") != nullptr) {
++          std::cerr << "matmul_operand_broadcast dst core="
++                    << coreAndSlice.first << " addr=" << stAddr
++                    << " bytes=" << matmulDstBytes << std::endl;
++        }
++      }
++
++      if (fissionRows > 0) {
++        DT_CHECK(fissionRows > 0);
++        int relayoutIndex = 0;
++        const int sourceCoreCount =
++            static_cast<int>(matmulBroadcastHook.plan.sourceCoreCount);
++        for (int sourceStart = 0; sourceStart < sourceCoreCount;
++             sourceStart += fissionRows) {
++          memTrackers->insertPsBefore(ps);
++          SuperDsc* relayout_sdsc = makeMatmulOperandBroadcastRelayoutSdsc(
++              "-Fission" + std::to_string(relayoutIndex++));
++          const int sourceLimit =
++              std::min(sourceCoreCount, sourceStart + fissionRows);
++          std::string materializationReason;
++          if (!attachMatmulOperandBroadcastInputFetch(
++                  sdsc, relayout_sdsc, lds, matmulBroadcastHook,
++                  &materializationReason, &destinationStartAddressByCore,
++                  sourceStart, sourceLimit)) {
++            delete relayout_sdsc;
++            emitMatmulOperandBroadcastPlanArtifact(sdsc, lds, ps,
++                                                   matmulBroadcastHook);
++            DT_CHECK_MSG(
++                false,
++                "matmul_operand_broadcast fission materialization failed: " +
++                    materializationReason);
++          }
++          emitMatmulOperandBroadcastSdscArtifact(
++              sdsc, lds, matmulBroadcastHook, relayout_sdsc);
++          relayout_sdscs.push_back(relayout_sdsc);
++        }
++        if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_STAGED_LDS") != nullptr) {
++          std::string stagedReason;
++          if (!redirectMatmulOperandToStagedLds(
++                  sdsc, lds, matmulBroadcastHook, destinationStartAddressByCore,
++                  &stagedReason)) {
++            DT_CHECK_MSG(false,
++                         "matmul_operand_broadcast staged LDS failed: " +
++                             stagedReason);
++          }
++        } else {
++          auto allocNode = lds.memOrg_.count(SenComponents::LX)
++                               ? lds.memOrg_.at(SenComponents::LX).allocateNode_
++                               : nullptr;
++          if (allocNode != nullptr) {
++            if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_CLEAR_COORDS") != nullptr) {
++              allocNode->allocateCoordinates_.clear();
++              allocNode->sliceViewCoordinates_.clear();
++            } else if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_USE_CONSUMER_COORDS") != nullptr) {
++              allocNode->allocateCoordinates_.coreIdToWkSlice_ = sdsc->coreIdToWkSlice_;
++            } else if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_PRESERVE_COORDS") == nullptr) {
++              allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
++            }
++            auto& stAddr = allocNode->startAddressCoreCorelet_;
++            for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0);
++                 ++coreId) {
++              const auto dstIt = destinationStartAddressByCore.find(coreId);
++              const auto newAddr = dstIt == destinationStartAddressByCore.end()
++                                       ? -1
++                                       : dstIt->second;
++              stAddr.insertData(newAddr, coreId, 0, 0);
++              if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_DEBUG") != nullptr) {
++                std::cerr << "matmul_operand_broadcast consumer base core="
++                          << coreId << " addr=" << newAddr << std::endl;
++              }
++            }
++            if (!lds.coreStateInit_.empty()) {
++              for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0);
++                   ++coreId) {
++                if (static_cast<size_t>(coreId) >= lds.coreStateInit_.size())
++                  continue;
++                auto& coreState = lds.coreStateInit_.at(coreId);
++                if (coreState.lbrInit_.empty()) continue;
++                const auto newBase = stAddr.getData(coreId, 0, 0);
++                if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_DEBUG") != nullptr) {
++                  std::cerr << "matmul_operand_broadcast before_lbr core="
++                            << coreId;
++                  for (const auto lbr : coreState.lbrInit_) std::cerr << " " << lbr;
++                  std::cerr << std::endl;
++                }
++                if (newBase < 0) {
++                  for (auto& lbr : coreState.lbrInit_) lbr = -1;
++                  continue;
++                }
++                const auto oldBase = coreState.lbrInit_.at(0);
++                const auto delta = static_cast<int>(newBase - oldBase);
++                for (auto& lbr : coreState.lbrInit_) lbr += delta;
++                if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_DEBUG") != nullptr) {
++                  std::cerr << "matmul_operand_broadcast after_lbr core="
++                            << coreId << " delta=" << delta;
++                  for (const auto lbr : coreState.lbrInit_) std::cerr << " " << lbr;
++                  std::cerr << std::endl;
++                }
++              }
++            }
++          }
++        }
++        emitMatmulOperandBroadcastPlanArtifact(sdsc, lds, ps,
++                                               matmulBroadcastHook);
++        continue;
++      }
++
+       std::string materializationReason;
+       if (!attachMatmulOperandBroadcastInputFetch(
+-              sdsc, lds, matmulBroadcastHook, &materializationReason)) {
++              sdsc, nullptr, lds, matmulBroadcastHook,
++              &materializationReason, &destinationStartAddressByCore)) {
+         emitMatmulOperandBroadcastPlanArtifact(sdsc, lds, ps,
+                                                matmulBroadcastHook);
+         DT_CHECK_MSG(false,
+                      "matmul_operand_broadcast IFN materialization failed: " +
+                          materializationReason);
+       }
++      auto allocNode = lds.memOrg_.count(SenComponents::LX)
++                           ? lds.memOrg_.at(SenComponents::LX).allocateNode_
++                           : nullptr;
++      if (allocNode != nullptr) {
++        if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_CLEAR_COORDS") != nullptr) {
++          allocNode->allocateCoordinates_.clear();
++          allocNode->sliceViewCoordinates_.clear();
++        } else if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_USE_CONSUMER_COORDS") != nullptr) {
++          allocNode->allocateCoordinates_.coreIdToWkSlice_ = sdsc->coreIdToWkSlice_;
++        } else {
++          allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
++        }
++      }
+       emitMatmulOperandBroadcastPlanArtifact(sdsc, lds, ps,
+                                              matmulBroadcastHook);
+       continue;
