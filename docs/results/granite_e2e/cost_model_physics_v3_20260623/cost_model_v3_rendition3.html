@@ -13,29 +13,29 @@
 /* ---- 1. TOKENS ------------------------------------------- */
 :root{
   /* Surface & ink (cool blueprint white, graphite-navy ink) */
-  --paper:#EFF2F6;   /* page ground */
-  --plate:#FFFFFF;   /* raised figure / table plate */
-  --grid:#D8E0EA;    /* graph-paper substrate, hairline rules, chart gridlines */
-  --line:#C4CFDB;    /* figure frames, table borders (one step darker than grid) */
-  --ink:#14202B;     /* PRIMARY text, headings, figure outlines  (~14:1 on paper) */
-  --muted:#55636F;   /* secondary text, captions, axis labels     (~5:1 on paper) */
+  --paper:#0B2C63;   /* page ground */
+  --plate:#12377C;   /* raised figure / table plate */
+  --grid:#1E4E97;    /* graph-paper substrate, hairline rules, chart gridlines */
+  --line:#2E67B5;    /* figure frames, table borders (one step darker than grid) */
+  --ink:#EAF3FF;     /* PRIMARY text, headings, figure outlines  (~14:1 on paper) */
+  --muted:#A9C4E8;   /* secondary text, captions, axis labels     (~5:1 on paper) */
 
   /* PHYSICS HUES — hue = operand state (the semantic backbone) */
-  --stream:#1257C7;      /* COOL = data in flight: streaming M, HBM traffic, K-reduction,
+  --stream:#58C7FF;      /* COOL = data in flight: streaming M, HBM traffic, K-reduction,
                             PSUM hops. Doubles as v3 / shipped / PT-fed path & primary chart accent. */
-  --stream-wash:#1257C71a;/* 10% cobalt fill for regions */
-  --stationary:#A66A17;  /* WARM = resident: the weight tile [K,N], PT stationary cells,
+  --stream-wash:#58C7FF22;/* 10% cobalt fill for regions */
+  --stationary:#F5B942;  /* WARM = resident: the weight tile [K,N], PT stationary cells,
                             the compute fabric. Diagram fills/marks only — never body text. */
-  --stationary-wash:#A66A171f;
+  --stationary-wash:#F5B94226;
 
   /* STATUS — reserved, rare, ALWAYS also encoded by label + shape */
-  --fed:#0E7A57;      /* PT fed / win / device-best reached  (~4.6:1) */
-  --fed-wash:#0E7A5714;
-  --starved:#C4392A;  /* PT starved / penalty firing / big gap / regression  (~4.7:1) */
-  --starved-wash:#C4392A14;
+  --fed:#3DDC97;      /* PT fed / win / device-best reached  (~4.6:1) */
+  --fed-wash:#3DDC9722;
+  --starved:#FF7A8A;  /* PT starved / penalty firing / big gap / regression  (~4.7:1) */
+  --starved-wash:#FF7A8A22;
 
   /* COMPARISON — the deprecated 196d768 series, drained & ghosted */
-  --baseline:#7A8794; /* old-model data series: slate hatch/outline, never a solid hero fill */
+  --baseline:#8AA6CE; /* old-model data series: slate hatch/outline, never a solid hero fill */
 
   /* ---- Type ---- */
   --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
@@ -63,7 +63,7 @@
   --r-sm:2px; --r-md:3px;              /* barely-rounded — datasheet, NOT rounded-lg */
   --hair:1px solid var(--grid);
   --frame:1px solid var(--line);
-  --shadow:0 1px 2px rgba(20,32,43,.05),0 6px 20px rgba(20,32,43,.05);
+  --shadow:0 0 0 1px rgba(88,199,255,.07),0 12px 34px rgba(0,8,26,.45);
 }
 
 /* ---- 2. RESET / BASE ------------------------------------- */
@@ -311,6 +311,18 @@ table.tbl{border-collapse:collapse;width:100%;font-size:.9rem;background:var(--p
   .hero__readouts{gap:var(--sp-md)}
   .sec-h{flex-wrap:wrap}
 }
+
+/* ---- BLUEPRINT richness (rendition 3) ---- */
+.sec-h__no{color:var(--stream)}
+.hero{position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:-30% -10% auto -10%;height:72%;
+  background:radial-gradient(52% 72% at 22% 8%,rgba(88,199,255,.18),transparent 70%);
+  pointer-events:none;z-index:0}
+.hero>*{position:relative;z-index:1}
+.readout-val__n{text-shadow:0 0 24px rgba(88,199,255,.28)}
+.figure,.tbl-scroll{box-shadow:var(--shadow)}
+.hero__stamp .ship{text-shadow:0 0 18px rgba(61,220,151,.4)}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
 </style>
 </head>
 <body>
