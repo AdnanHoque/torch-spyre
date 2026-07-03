@@ -33,6 +33,9 @@ Two DXP replays were run against the same bundle:
 | Standalone latest flash attention with layout-allgather disabled and matmul operand collective enabled | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_matmul_operand_only_20260703_005239 | DXP aborts before runtime with `query fold dimension with higher fold factor`; emits 32 `matmul_operand_broadcast` plans. This is a separate backend compiler gap from the layout-transform value-wrong path. |
 | Standalone latest flash attention, only `105_batchmatmul`, fissioned layout-allgather path | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_direct_allgather_only105_fission4_sourceonly_20260703_065227 | DXP/runtime completes, then fails correctness: 92.6% mismatched, greatest absolute difference inf. The emitted plan has 256 logical transfers. |
 | Standalone latest flash attention, only `105_batchmatmul`, generic matmul operand path | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_direct_matmul_operand_only105_filtered_20260703_070937 | Emits the expected 1024-transfer `matmul_operand_broadcast` plan, then DXP aborts with `query fold dimension with higher fold factor`. |
+| Standalone latest flash attention, only `105_batchmatmul`, generic matmul operand path with fission/phase fixes | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_direct_matmul_operand_only105_fission4_phasefix_20260703_075649 | DXP/runtime completes, then fails correctness: 92.9% mismatched, greatest absolute difference inf. This proves the backend can run the 1024-transfer path after clearing stale coords and adding one memory phase per movement SDSC, but the physical movement is value-wrong. |
+| Same, with destination shard physical offsets | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_direct_matmul_operand_only105_fission4_dstoffset_20260703_080553 | DXP/runtime completes, then fails correctness: 88.9% mismatched, greatest absolute difference inf. Destination offsets help slightly, so overwrite/address placement is part of the bug but not sufficient. |
+| Same, with source and destination shard offsets | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_direct_matmul_operand_only105_fission4_srcdstoffset_20260703_081110 | DXP/runtime completes, then fails correctness: 93.1% mismatched, greatest absolute difference inf. Source offsets make it worse, implying source shards are already addressed as per-core local shards. |
 
 The staged replay emitted 32 Creating PCFG for DataDsc sections for 10_batchmatmul, so splitting the monolithic row reduces row size but does not by itself fix the address-encoding issue.
 
@@ -46,7 +49,7 @@ The first backend blocker was immediate encoding: staged source-shard fanout ask
 
 The current backend blocker is hardware-safe physical realization. Full Granite now reaches runtime execution, then bus-fences. That means the staged movement is no longer merely a descriptor/import problem; the remaining work is to validate the generated schedule and addresses on hardware.
 
-Separately, full resident materialization is not the production target for this class. It has poor scaling: 32 producer shards x 32 consumers creates 1024 logical transfers. The production shape should be staged or loop-scoped all-gather/broadcast that feeds the consumer operand without pretending the entire replicated operand is permanently resident.
+Separately, full resident materialization is not the production target for this class. It has poor scaling: 32 producer shards x 32 consumers creates 1024 logical transfers. The production shape should be staged or loop-scoped all-gather/broadcast that feeds the consumer operand without pretending the entire replicated operand is permanently resident. The 2026-07-03 `105_batchmatmul` experiments show the current prototype can now run that 1024-transfer path, but it still lacks value-correct logical chunk placement for the consumer operand.
 
 ## Current split of responsibility
 
@@ -65,7 +68,7 @@ Backend/Deeptools should:
 
 ## Current next step
 
-The standalone flash run has now isolated two backend gaps. First, the layout-changing attention edge is executable but value-wrong: destination-grouped transfer-coordinate (`runs/test_flash_grouped_materializer_transfercoords_20260703_000721`), single-row transfer-coordinate (`runs/test_flash_single_dataop_20260703_002453`), standalone relayout SuperDSC (`runs/test_flash_standalone_relayout_20260703_003708`), and the isolated fission-4 `105_batchmatmul` run (`runs/test_flash_direct_allgather_only105_fission4_sourceonly_20260703_065227`) all pass DXP/runtime and fail correctness. The diagnosis is that this edge is `layout_allgather_restickify`, not pure all-gather: the producer/restickify stick layout differs from the consumer KERNEL layout, and the 256-transfer summary under-materializes the operand. Second, with that edge disabled, the generic matmul operand path emits the expected 1024-transfer plan but hits a DXP fold-dimension abort before runtime. The next backend tasks are therefore transform-aware many-source LX->LX realization for `layout_allgather_restickify`, plus a separate DXP/codegen fix for staged matmul operand broadcast/all-gather.
+The standalone flash run has now isolated two backend gaps. First, the layout-changing attention edge is executable but value-wrong: destination-grouped transfer-coordinate (`runs/test_flash_grouped_materializer_transfercoords_20260703_000721`), single-row transfer-coordinate (`runs/test_flash_single_dataop_20260703_002453`), standalone relayout SuperDSC (`runs/test_flash_standalone_relayout_20260703_003708`), and the isolated fission-4 `105_batchmatmul` run (`runs/test_flash_direct_allgather_only105_fission4_sourceonly_20260703_065227`) all pass DXP/runtime and fail correctness. The diagnosis is that this edge is `layout_allgather_restickify`, not pure all-gather: the producer/restickify stick layout differs from the consumer KERNEL layout, and the 256-transfer summary under-materializes the operand. Second, with that edge disabled, the generic matmul operand path now emits and runs the expected 1024-transfer plan, but it is still value-wrong. The next backend task is a value-pattern unit test for `matmul_operand_broadcast` that proves every producer chunk lands in the correct destination logical slot before returning to full flash attention.
 
 ## Files in this directory
 
@@ -83,5 +86,7 @@ The standalone flash run has now isolated two backend gaps. First, the layout-ch
 - attention_105_contract_isolation_20260703.md
 - 105_batchmatmul_Tensor1_layout_allgather_restickify_fission4_sourceonly_plan_20260703.json
 - 105_batchmatmul_Tensor1_matmul_operand_broadcast_filtered_plan_20260703.json
+- flash_matmul_operand_broadcast_20260703/README.md
+- flash_matmul_operand_broadcast_20260703/cdx_deeptools_current_experimental_diff.patch
 - deeptools_experiment.patch
 - deeptools_experiment_lrfimm_split.patch
