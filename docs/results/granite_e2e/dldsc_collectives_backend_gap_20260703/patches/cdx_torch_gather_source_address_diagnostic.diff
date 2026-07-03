@@ -1,0 +1,153 @@
+diff --git a/torch_spyre/_inductor/codegen/compute_ops.py b/torch_spyre/_inductor/codegen/compute_ops.py
+index bfdab8a..6f6678b 100644
+--- a/torch_spyre/_inductor/codegen/compute_ops.py
++++ b/torch_spyre/_inductor/codegen/compute_ops.py
+@@ -549,10 +549,25 @@ def generate_sdsc(
+                     )
+                 affine_strides.append(per_level_strides)
+ 
++        def _lx_start_addr_core_count(tensor):
++            source_addresses = tensor.lx_residency_core_id_to_lx_start_address
++            if "lx" not in tensor.allocation or not source_addresses:
++                return sdsc_spec.num_cores
++            return max(
++                sdsc_spec.num_cores,
++                max(int(core) for core in source_addresses) + 1,
++            )
++
+         def _start_addr_data(tensor):
+             # All per-core addresses were already registered by the per-tensor loop
+             # above. Look them up directly rather than re-computing SymbolKind.
+             if "lx" in tensor.allocation:
++                source_addresses = tensor.lx_residency_core_id_to_lx_start_address
++                if source_addresses:
++                    return {
++                        f"[{c}, 0, 0]": str(source_addresses.get(str(c), -1))
++                        for c in range(_lx_start_addr_core_count(tensor))
++                    }
+                 return {
+                     f"[{c}, 0, 0]": str(tensor.start_address)
+                     for c in range(sdsc_spec.num_cores)
+@@ -570,8 +585,23 @@ def generate_sdsc(
+         # symbols and local_symbols are not modified.
+         affine_strides = [[{} for _ in tiled_symbols] for _ in sdsc_spec.args]
+ 
++        def _lx_start_addr_core_count(tensor):
++            source_addresses = tensor.lx_residency_core_id_to_lx_start_address
++            if "lx" not in tensor.allocation or not source_addresses:
++                return sdsc_spec.num_cores
++            return max(
++                sdsc_spec.num_cores,
++                max(int(core) for core in source_addresses) + 1,
++            )
++
+         def _start_addr_data(tensor):
+             if "lx" in tensor.allocation:
++                source_addresses = tensor.lx_residency_core_id_to_lx_start_address
++                if source_addresses:
++                    return {
++                        f"[{c}, 0, 0]": str(source_addresses.get(str(c), -1))
++                        for c in range(_lx_start_addr_core_count(tensor))
++                    }
+                 return {
+                     f"[{c}, 0, 0]": str(tensor.start_address)
+                     for c in range(sdsc_spec.num_cores)
+@@ -731,7 +761,9 @@ def generate_sdsc(
+                                         ],
+                                         "dim_prop_attr": [
+                                             {
+-                                                "factor_": sdsc_spec.num_cores,
++                                                "factor_": _lx_start_addr_core_count(
++                                                    tensor
++                                                ),
+                                                 "label_": "core",
+                                             },
+                                             {"factor_": 1, "label_": "corelet"},
+diff --git a/torch_spyre/_inductor/codegen/superdsc.py b/torch_spyre/_inductor/codegen/superdsc.py
+index 911b73f..40cfbba 100644
+--- a/torch_spyre/_inductor/codegen/superdsc.py
++++ b/torch_spyre/_inductor/codegen/superdsc.py
+@@ -66,6 +66,7 @@ class SDSCArgs:
+     is_index_tensor: bool = False
+     related_value_tensor_idx: int = -1
+     lx_residency_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
++    lx_residency_core_id_to_lx_start_address: dict[str, Any] | None = None
+ 
+     def __str__(self) -> str:
+         scales = ", ".join(f"{k}={v}" for k, v in self.scales.items())
+@@ -88,6 +89,8 @@ class SDSCArgs:
+             f"  is_index_tensor={self.is_index_tensor}\n"
+             f"  related_value_tensor_idx={self.related_value_tensor_idx}\n"
+             f"  lx_residency_core_id_to_wk_slice={self.lx_residency_core_id_to_wk_slice}\n"
++            "  lx_residency_core_id_to_lx_start_address="
++            f"{self.lx_residency_core_id_to_lx_start_address}\n"
+             f")"
+         )
+ 
+@@ -620,6 +623,9 @@ def _create_sdsc_tensors(
+                     dim_order,
+                     effective_stick,
+                 ),
++                lx_residency_core_id_to_lx_start_address=(
++                    arg.lx_residency_core_id_to_lx_start_address
++                ),
+             )
+         )
+ 
+diff --git a/torch_spyre/_inductor/op_spec.py b/torch_spyre/_inductor/op_spec.py
+index 1a9dc42..f415152 100644
+--- a/torch_spyre/_inductor/op_spec.py
++++ b/torch_spyre/_inductor/op_spec.py
+@@ -54,6 +54,8 @@ class TensorArg:
+                 for an LX input whose physical ownership differs from this op's
+                 compute distribution. Keys are device-dim indices at this stage;
+                 SDSC codegen maps them to primary-dimension labels.
++        lx_residency_core_id_to_lx_start_address: Optional producer tensor
++                per-core LX base addresses for the same producer residency map.
+     """
+ 
+     is_input: bool
+@@ -65,6 +67,7 @@ class TensorArg:
+     per_tile_fixed: bool = False
+     name: str | None = None
+     lx_residency_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
++    lx_residency_core_id_to_lx_start_address: dict[str, Any] | None = None
+ 
+ 
+ @dataclasses.dataclass
+diff --git a/torch_spyre/_inductor/spyre_kernel.py b/torch_spyre/_inductor/spyre_kernel.py
+index 834788c..b6bf119 100644
+--- a/torch_spyre/_inductor/spyre_kernel.py
++++ b/torch_spyre/_inductor/spyre_kernel.py
+@@ -582,9 +582,15 @@ class SpyreKernel(Kernel[CSEVariable]):
+                 name
+             )
+             if isinstance(relayout_plan, dict):
+-                tensor_arg.lx_residency_core_id_to_wk_slice = relayout_plan.get(
++                producer_residency = relayout_plan.get(
+                     "producer_core_id_to_device_slice"
+                 )
++                tensor_arg.lx_residency_core_id_to_wk_slice = producer_residency
++                lx_base = tensor.layout.allocation.get("lx")
++                if isinstance(producer_residency, dict) and lx_base is not None:
++                    tensor_arg.lx_residency_core_id_to_lx_start_address = {
++                        str(core): lx_base for core in producer_residency
++                    }
+         if (
+             "lx" not in tensor.layout.allocation
+             and "pool" not in tensor.layout.allocation
+@@ -1118,6 +1124,14 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
+                                     "lx_residency_core_id_to_wk_slice="
+                                     f"{arg.lx_residency_core_id_to_wk_slice!r},"
+                                 )
++                            if (
++                                arg.lx_residency_core_id_to_lx_start_address
++                                is not None
++                            ):
++                                buf.writeline(
++                                    "lx_residency_core_id_to_lx_start_address="
++                                    f"{arg.lx_residency_core_id_to_lx_start_address!r},"
++                                )
+                         buf.writeline("),")
+                 buf.writeline("]")
+             buf.writeline("),")

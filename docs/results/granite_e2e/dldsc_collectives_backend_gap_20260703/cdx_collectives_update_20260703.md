@@ -123,13 +123,68 @@ This is baseline DXP behavior for that script and should not be counted against 
 | --- | --- | --- |
 | Scatter / same cardinality remap | Works in PR1 path | Earlier PR1 unit/device evidence |
 | 1:many broadcast / all-gather with compatible source/consumer core set | Works with backend `0.2` | `min_matmul_auto_relayout_nosplit_scale*_backend02` runs |
-| Source core set wider than consumer core set | Not yet supported | `N=8` synthetic fold/address failure |
+| Source core set wider than consumer core set | DXP lowering unblocked by local diagnostics; runtime correctness requires frontend-safe destination allocation | pure gather source-address/fold reset plus forced-base run |
 | Attention layout-allgather/restickify | Not yet supported without streaming/full-buffer capacity | 4-head flash allocation failure |
 | Reduction / all-reduce | Not exercised in this CDX slice | Needs separate probes |
+
+## Pure Gather Update
+
+After the first CDX update, I chased a pure many-source-to-one-consumer gather:
+
+- Script: `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/min_lx_gather_probe.py`
+- Shape: `M=128, N=64`
+- Producer: `x + 1` under `work_div={"M": 4}` or `work_div={"M": 2}`
+- Consumer: `mul` under `work_div={"M": 1}`
+- Communication class: gather. Multiple producer cores own disjoint `M` shards, one consumer core needs the full `M` slice.
+
+The path exposed three backend/frontend-contract gaps:
+
+1. The frontend consumer input carried producer coordinates, but not source-core LX start addresses for all source cores. A local Torch diagnostic patch added `lx_residency_core_id_to_lx_start_address`.
+2. Deeptools JSON import assumed an allocate-node start-address fold used the caller SDSC fold cardinality. A local importer diagnostic patch allowed tensor-local start-address fold cardinality.
+3. Deeptools relayout insertion then had to reset the post-relayout consumer allocation back to the consumer fold. This used `FoldManager::clone()`; plain assignment preserves the old fold shape and fails when source and consumer core cardinalities differ.
+
+After those fixes, DXP replay passed for the generated pure-gather SuperDSC bundle.
+
+The exact local diagnostic diffs are archived under `patches/`. They are intentionally recorded as evidence, not as clean PR-ready patches.
+
+Runtime status:
+
+- Dynamic backend destination allocation:
+  - Run log: `artifacts/gather_20260703/min_lx_gather_common_refinement_bad_dynamic_run.log`
+  - Result: runtime completes, but `ALLCLOSE False`
+  - True movement corruption: only row `64` has a large error; row `64` starts at destination offset `8192` bytes.
+- Forced frontend-safe destination base:
+  - Run log: `artifacts/gather_20260703/min_lx_gather_srcsplit2_forcedbase_run.log`
+  - Relayout SDSC: `artifacts/gather_20260703/min_lx_gather_forcedbase_relayout_sdsc.json`
+  - Env addition: `DEEPTOOLS_RELAYOUT_FORCE_DST_BASE=65536`
+  - Result: `ALLCLOSE True`, `MAX_DIFF 0.25`, no large-diff rows.
+
+Interpretation:
+
+The high-level gather plan is now correct when the destination address is safe. The remaining issue is not the coordinate classification itself; it is ownership of the destination LX buffer. Backend-only dynamic allocation picked a high backend-reserved address that corrupted the gathered tensor at the 8KB offset. Forcing a lower frontend-safe LX base made the same movement plan value-correct.
+
+Architectural implication:
+
+For gather/all-gather that materializes a new consumer-shaped LX tensor, the cleaner production direction is for the frontend LX planner to allocate the destination buffer and emit the tensor distribution/address contract. Deeptools should synthesize the physical ring movement into that provided destination. Letting Deeptools invent an untracked destination address is fragile because the consumer compute row is still part of the frontend-planned LX lifetime.
+
+## Granite Sidecar Update
+
+Volta ran the one-layer Granite causal prefill sidecar on `adnan-spyre-dev-pf`:
+
+- Report: `artifacts/granite_sidecar_20260703/sidecar_granite_prefill_sanity_report_20260703_145128.md`
+- Disabled control:
+  - Wall median: `26.672 ms`
+  - Trace kernel: `14.671 ms/iter`
+- Enabled collectives:
+  - Failed before timing with `Can not propagate coordinates for coreletSplit dimensionmb from allocateNode allocate-Tensor0_lx with custom coreIdToWkSlice`.
+  - Backend plans were emitted for `10_batchmatmul_Tensor1_0_layout_allgather_restickify` and `18_batchmatmul_Tensor1_0_matmul_operand_broadcast`.
+
+This failure is consistent with the pure-gather findings: broader collectives need a stronger tensor-address/distribution contract and frontend-planned destination buffers before Granite can remove the remaining non-weight HBM spills end to end.
 
 ## Practical Next Steps
 
 1. Treat backend `DXP_BACKEND_LX_FRAC_AVAIL=0.2` as required for current DLDSC relayout correctness tests until the frontend/backend LX budget contract is cleaned up.
 2. Add a frontend/backend contract for source LX address metadata when a consumer input references source cores outside the consumer SDSC core fold.
-3. For attention, do not try to force full layout-allgather/restickify into PR1. The current edge needs either WSR/streaming consumer scheduling or an explicit on-chip restickify primitive that avoids full dense materialization.
-4. Add reduction/all-reduce probes separately; do not infer them from scatter/all-gather success.
+3. Add frontend LX planner support for destination buffers for gather/all-gather materialization. Deeptools should realize movement into those provided addresses instead of allocating opaque backend scratch for tensors consumed by frontend-planned compute.
+4. For attention, do not try to force full layout-allgather/restickify into PR1. The current edge needs either WSR/streaming consumer scheduling or an explicit on-chip restickify primitive that avoids full dense materialization.
+5. Add reduction/all-reduce probes separately; do not infer them from scatter/all-gather success.

@@ -23,6 +23,18 @@ This directory contains the compact proof artifacts for `cdx_collectives_update_
   - This is the source-core-set-wider-than-consumer-core-set case.
   - The backend needs source LX address metadata for producer cores not present in the consumer SDSC fold, or it needs to synthesize/widen that metadata before lowering.
 
+## Pure Gather Diagnostic
+
+- `gather_20260703/min_lx_gather_common_refinement_bad_dynamic_run.log`
+  - Pure gather lowers and runs, but the dynamically allocated destination base corrupts row 64.
+  - This isolates the remaining issue to destination LX allocation/address ownership, not high-level coordinate classification.
+- `gather_20260703/min_lx_gather_srcsplit2_forcedbase_run.log`
+  - Same pure gather with `DEEPTOOLS_RELAYOUT_FORCE_DST_BASE=65536`.
+  - `ALLCLOSE True`, no large-diff rows.
+- `gather_20260703/min_lx_gather_forcedbase_relayout_sdsc.json`
+  - Backend relayout SDSC for the value-correct forced-base gather run.
+  - The output side is split into common-refinement cells that match the input pieces.
+
 ## Attention Layout-AllGather / Restickify Gap
 
 - `flash_4_head_relayout_backend02_20260703_143107/run.log`
@@ -37,4 +49,18 @@ This directory contains the compact proof artifacts for `cdx_collectives_update_
 
 ## Readout
 
-The current DLDSC path has evidence for simple scatter and compatible-core-set broadcast/all-gather. The remaining attention spill is not removed by PR1 scatter because materializing the consumer's full dense tile would exceed the per-core LX budget. That edge needs streaming/WSR or an on-chip restickify form that does not require the full destination tile at once.
+The current DLDSC path has evidence for simple scatter and compatible-core-set broadcast/all-gather. Pure gather can be value-correct when the destination LX base is frontend-safe, but backend-only dynamic destination allocation is not yet a production contract. The remaining attention spill is not removed by PR1 scatter because materializing the consumer's full dense tile would exceed the per-core LX budget. That edge needs streaming/WSR or an on-chip restickify form that does not require the full destination tile at once.
+
+## Granite Sidecar
+
+- `granite_sidecar_20260703/sidecar_granite_prefill_sanity_report_20260703_145128.md`
+  - Disabled one-layer Granite causal prefill control passed.
+  - Enabled collectives emitted backend plans but failed before timing on custom `coreIdToWkSlice` fold propagation.
+
+## Diagnostic Patch Diffs
+
+- `../patches/cdx_torch_gather_source_address_diagnostic.diff`
+  - Torch-side diagnostic contract extension for source-core LX start addresses.
+- `../patches/cdx_deeptools_gather_diagnostic.diff`
+  - CDX Deeptools diagnostic diff used during this exploration.
+  - This is not a clean PR patch; it records the local state needed to reproduce the gather lowering/runtime findings.
