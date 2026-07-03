@@ -6,6 +6,7 @@ This captures the CDX diagnostic run that separated three cases:
 2. Granite can emit matmul-operand all-gather metadata;
 3. Granite cannot yet realize that metadata because the current backend path tries to materialize the full post-relayout RHS in LX.
 4. the same mechanism can produce a measurable small-shape win when the live set is small enough for the current backend realization.
+5. the standalone flash-attention script exposes the same `matmul_operand_broadcast` class as Granite attention.
 
 ## Environment
 
@@ -270,6 +271,49 @@ Signal Received: 6 (Aborted)
 
 So the clean branch does not fail closed soon enough for S=512. The dirty CDX diagnostic branch was useful because it converts that unsafe runtime behavior into an earlier explicit backend error.
 
+### 8. Flash attention probe shows the same communication class
+
+Artifacts:
+
+- `flash_attention_probe/flash_attention_probe_summary.json`
+- `flash_attention_probe/baseline_first_restickify_hbm.json`
+- `flash_attention_probe/baseline_first_following_batchmatmul.json`
+- `flash_attention_probe/metadata_first_restickify_hbm.json`
+- `flash_attention_probe/metadata_first_following_batchmatmul.json`
+- `flash_attention_probe/baseline_env.txt`
+- `flash_attention_probe/metadata_env.txt`
+
+The tested script was `github.ibm.com/aviros/test-spyre-scripts/test_flash.py` at `afda166`, using compile probes with `no_h2d,skip_cpu_ref`. That means these runs verify compile/backend/runner success, not full numerical correctness.
+
+Summary:
+
+```text
+baseline:
+  returncode=0
+  total_sdsc_json=550
+  ReStickifyOpHBM=32
+  nonempty_lxRelayoutClassifications_=0
+
+metadata:
+  returncode=0
+  total_sdsc_json=550
+  ReStickifyOpHBM=32
+  nonempty_lxRelayoutClassifications_=32
+  classification_kinds={"matmul_operand_broadcast": 32}
+```
+
+Every HBM restickify in the flash main kernel is immediately followed by a `batchmatmul` SDSC carrying:
+
+```text
+kind=matmul_operand_broadcast
+communication_class=all_gather
+communication_pattern=all_gather_replicate
+operand_read_index=1
+operand_role=rhs
+```
+
+So flash attention does not introduce a separate primitive for this spill. It hits the same unresolved staged RHS all-gather/replicate problem as Granite attention.
+
 ## Interpretation
 
 PR1-style scatter and small direct gather are not enough for Granite attention. The relevant attention communication class is a staged matmul-operand all-gather/replicate:
@@ -285,6 +329,8 @@ The destination should not be a full resident RHS tensor. It needs to be fission
 The S=128 result shows the on-chip path is real when capacity is favorable. The S=512 failure shows why the next feature cannot be naive full-buffer materialization.
 
 The chunked fission diagnostic narrows the S=512 gap further: compact movement SDSCs are feasible, but the DL matmul consumer cannot yet consume those chunks.
+
+The flash-attention probe reinforces that this backend feature is shared. Solving staged matmul-operand all-gather should address both the Granite attention spill class and the standalone flash attention spill class.
 
 This matches the current North Star:
 
