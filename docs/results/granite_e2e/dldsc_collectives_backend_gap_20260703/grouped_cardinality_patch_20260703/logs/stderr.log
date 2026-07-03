@@ -1,0 +1,3 @@
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: op->inpSP_.at(inpSPIdx).dimToSize_.at(dimNameOuter) >= stickDim, file /home/adnan/codex-isolated/dldsc_granite_clean_relayout_20260703_163108/deeptools/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp line 4342
+timeout: the monitored command dumped core
