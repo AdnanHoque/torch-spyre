@@ -61,6 +61,8 @@ This is recorded in `diffs/cdx_deeptools_diagnostic.diff`.
 Artifact:
 
 - `disabled_control/result.json`
+- `clean_clc_disabled_control/result.json`
+- `clean_clc_disabled_control/trace_summary.json`
 
 Run:
 
@@ -77,6 +79,16 @@ Result:
 - later non-profile paired control stabilized near `30.57 ms`
 
 The profiled run has empty Kineto kernel timing in this environment, so wall timing is only used as a local sanity signal here.
+
+A separate clean CLC lane reproduced the disabled S=512 control from clean pushed branches:
+
+- Torch SHA: `fef3c8916484e846a394d2a20b0d521345d41338`
+- Deeptools SHA: `3d54e87eb404b54c0ba74b98d6caa83945b2ef5b`
+- FMS SHA: `b4f36b5af526b938db506a17dcd32d468a7a91d8`
+- `returncode: 0`
+- wall `median_ms: 27.223`
+- Kineto `kernel_ms_per_iter: 14.734`
+- all `lxRelayoutClassifications_` entries were empty.
 
 ### 4. Metadata-only Granite collectives do not speed up the block
 
@@ -176,6 +188,47 @@ realized=false
 
 This is not a final performance claim: the run is short and wall-time only. It is still an important feasibility point. For a smaller sequence length, the current DLDSC + backend prototype can replace one HBM activation restickify with an LX restickify, emit backend relayout plans, and run end to end.
 
+### 7. Chunked fission avoids full allocation but still cannot feed matmul
+
+Artifacts:
+
+- `matmul_operand_chunked_fission_failure/result.json`
+- `matmul_operand_chunked_fission_failure/error.txt`
+- `matmul_operand_chunked_fission_failure/backend_plans/10_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json`
+- `matmul_operand_chunked_fission_failure/backend_plans/fission0_inserted_sdsc.json`
+- `matmul_operand_chunked_fission_failure/backend_plans/fission31_inserted_sdsc.json`
+
+The backend worker added an env-gated diagnostic path:
+
+```bash
+DEEPTOOLS_MATMUL_OPERAND_BROADCAST_FISSION_ROWS=1
+DEEPTOOLS_MATMUL_OPERAND_BROADCAST_CHUNKED_FISSION_DST=1
+```
+
+This path gets past the earlier full-buffer allocation failure. It emits one compact movement SDSC per source-core chunk, so the movement side can be represented as 32 fissioned transfers. The representative plan records:
+
+```text
+kind=matmul_operand_broadcast
+communication_pattern=all_gather_replicate
+source_core_count=32
+producer_chunks_per_group=32
+replication_factor=32
+logical_transfer_count=1024
+realization_strategy=loop_scoped_input_fetch
+physical_lowering_status=blocked
+```
+
+The final failure is intentional:
+
+```text
+matmul_operand_broadcast chunked fission emitted compact movement SDSCs
+but cannot redirect the matmul operand: current DL matmul lowering has
+one resident LDS operand pointer and no valid staged partial matmul
+transfer-loop path
+```
+
+This proves the next missing piece is not just "generate more ring transfers." The backend can describe the chunked movement. The missing implementation is a matmul-consumer path that accepts staged operand chunks instead of requiring a complete resident RHS tensor.
+
 ## Interpretation
 
 PR1-style scatter and small direct gather are not enough for Granite attention. The relevant attention communication class is a staged matmul-operand all-gather/replicate:
@@ -189,6 +242,8 @@ producer shards in LX
 The destination should not be a full resident RHS tensor. It needs to be fissioned or streamed into the matmul transfer loop, so only a tile/chunk is live at a time.
 
 The S=128 result shows the on-chip path is real when capacity is favorable. The S=512 failure shows why the next feature cannot be naive full-buffer materialization.
+
+The chunked fission diagnostic narrows the S=512 gap further: compact movement SDSCs are feasible, but the DL matmul consumer cannot yet consume those chunks.
 
 This matches the current North Star:
 
