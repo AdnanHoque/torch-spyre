@@ -8,7 +8,7 @@ This probe isolates one flash-attention relayout edge from the full `test_flash.
 Can Deeptools/DCG lower the exact grouped all-gather descriptor shape that the flash bundle wants?
 ```
 
-Answer: yes, for the isolated descriptor. `DataOpStandalone` exits `0`, emits PCFG/MLIR, and computes a transfer table with the expected 1-to-8 fanout.
+Answer: partially. `DataOpStandalone` exits `0`, emits PCFG/MLIR, and computes a transfer table with the expected 1-to-8 fanout. The deeper `senpcfg -> dcc-opt -> senulator -v store` path then fails store verification, so the bug is no longer descriptor import. It is in executable lowering/runtime semantics for this grouped all-gather shape.
 
 This does not prove full flash correctness. The full flash graph is currently value-wrong even when all relayout flags are off in this experimental checkout, so the full graph is not a clean correctness oracle yet.
 
@@ -38,6 +38,28 @@ Exit:
 
 ```text
 0
+```
+
+Follow-up lowering/runtime check:
+
+```bash
+SENARCH=sen1p5 ./senulator/senpcfg -p "$OUT" -g -dformat hex
+SENARCH=sen1p5 ./dcc/bin/dcc-opt \
+  --kEmitProgIR="dump-progir=true progir-format=senprog progir-outfile=$OUT/senprog.txt" \
+  --print-final-ir=false "$OUT/dataOp_out.mlir"
+SENARCH=sen1p5 ./dcc/bin/dcc-opt \
+  --kEmitProgIR="dump-progir=true progir-format=smc progir-outfile=$OUT/smc.txt" \
+  --print-final-ir=false "$OUT/dataOp_out.mlir"
+SENARCH=sen1p5 ./senulator/senulator -p "$OUT" -v store -c 32
+```
+
+Result:
+
+```text
+senpcfg: successful
+dcc-opt senprog: pass
+dcc-opt smc: pass
+senulator: LX Store verification failed
 ```
 
 ## Descriptor Shape
@@ -130,6 +152,14 @@ This strongly suggests the direct `STCDPOpLx` carrier can represent this grouped
 - It does not prove runtime value correctness after the movement.
 - It does not prove that the full mixed compute/data schedule binds the consumer batchmatmul to the post-relayout LX location correctly.
 
+In fact, the standalone senulator check currently fails:
+
+```text
+LX Store verification failed
+```
+
+That is useful because it removes the full flash graph from the equation. The same grouped-all-gather descriptor that DCG accepts is not yet value-correct through the executable senulator path.
+
 The full flash control runs are currently value-wrong even with relayout disabled:
 
 ```text
@@ -142,14 +172,14 @@ So the full graph cannot yet be used as the only oracle for this communication c
 
 ## Current Best Read
 
-The backend transfer primitive can lower the grouped all-gather descriptor. The remaining risk has moved to integration:
+The backend transfer primitive can plan the grouped all-gather descriptor, but the executable path is not value-correct yet. The remaining risk is now narrower:
 
-- consumer operand rebinding to the relayout output allocation;
-- schedule placement relative to producer/consumer compute;
-- source/destination address lifetime overlap in the full bundle;
-- or a broader value issue in the current flash test environment.
+- DCC lowering may mishandle this fanout/multicast pattern;
+- `STCDPOpLx` may need an additional lowering constraint for this kind of grouped LX-to-LX all-gather;
+- the generated descriptor may still be missing a field that PCFG can tolerate but senulator/DCC cannot execute equivalently;
+- full flash integration issues may still exist later, but they are not the first blocker.
 
-The next useful test is a small patterned runtime harness that writes known values into the producer LX shards, runs exactly this grouped all-gather, and checks the destination LX bytes before any downstream attention math.
+The next useful test is a smaller patterned data-op sample that reduces the same communication class to fewer cores/chunks. That should tell us whether the failure is intrinsic to 1-to-many LX multicast or specific to the flash-sized 32-core, 8-fanout descriptor.
 
 ## Captured Files
 
@@ -158,5 +188,6 @@ The next useful test is a small patterned runtime harness that writes known valu
 - [standalone_flash_grouped_allgather/dataop_stdout.txt](standalone_flash_grouped_allgather/dataop_stdout.txt)
 - [standalone_flash_grouped_allgather/dataop_stderr.txt](standalone_flash_grouped_allgather/dataop_stderr.txt)
 - [standalone_flash_grouped_allgather/dataop_exit.txt](standalone_flash_grouped_allgather/dataop_exit.txt)
+- [standalone_flash_grouped_allgather/standalone_lowering_and_senulator.txt](standalone_flash_grouped_allgather/standalone_lowering_and_senulator.txt)
 - [standalone_flash_grouped_allgather/deeptools_flash_grouped_allgather_experiment.patch](standalone_flash_grouped_allgather/deeptools_flash_grouped_allgather_experiment.patch)
 - [standalone_flash_grouped_allgather/deeptools_flash_grouped_allgather_experiment_diff_stat.txt](standalone_flash_grouped_allgather/deeptools_flash_grouped_allgather_experiment_diff_stat.txt)

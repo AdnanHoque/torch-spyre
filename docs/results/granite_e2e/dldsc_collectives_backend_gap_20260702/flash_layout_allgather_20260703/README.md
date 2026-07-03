@@ -37,7 +37,7 @@ See [flash_layout_allgather_attempts_20260703_excerpts.md](flash_layout_allgathe
 
 A standalone `DataOpStandalone` sample was added after the full flash runs to isolate one grouped all-gather edge from `test_flash.py`.
 
-That standalone sample passes DCG lowering and emits the same core transfer shape as the full flash debug descriptor:
+That standalone sample passes descriptor generation/DCG lowering and emits the same core transfer shape as the full flash debug descriptor:
 
 ```text
 pSubPiece rows: 32
@@ -48,6 +48,8 @@ maxConsumers: 8
 ```
 
 See [standalone_flash_grouped_allgather_20260703.md](standalone_flash_grouped_allgather_20260703.md).
+
+The deeper executable check is still failing: `senpcfg` and `dcc-opt` pass, but `senulator -v store` reports `LX Store verification failed`. That makes this a backend executable-lowering/value issue for grouped LX all-gather, not just a full-flash integration issue.
 
 ## Current Interpretation
 

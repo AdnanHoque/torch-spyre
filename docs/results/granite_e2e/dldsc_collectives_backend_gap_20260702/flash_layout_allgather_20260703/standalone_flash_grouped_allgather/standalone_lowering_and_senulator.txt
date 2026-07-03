@@ -1,0 +1,214 @@
+== senpcfg ==
+Added dirName /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921
+System architecture setup success...Cores: 32, Corelets/Core: 2
+===== [SENPCFG] Running /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921 =====
+Pcfgs loaded from sdsc: dataDSCtest
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core0.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core1.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core2.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core3.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core4.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core5.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core6.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core7.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core8.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core9.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core10.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core11.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core12.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core13.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core14.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core15.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core16.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core17.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core18.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core19.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core20.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core21.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core22.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core23.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core24.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core25.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core26.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core27.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core28.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core29.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core30.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core31.txt in hex format 
+simulation time: 0.293339 seconds with 160 worker threads
+Program completed...
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core0.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core1.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core2.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core3.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core4.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core5.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core6.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core7.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core8.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core9.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core10.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core11.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core12.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core13.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core14.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core15.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core16.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core17.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core18.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core19.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core20.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core21.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core22.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core23.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core24.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core25.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core26.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core27.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core28.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core29.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core30.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_final_core31.txt in hex format 
+Setup and execution and dump time for /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921: 1.472 seconds. 
+[SENPCFG] Execution successful!
+== dcc-opt senprog ==
+== dcc-opt smc ==
+== senulator ==
+System architecture setup success...Cores: 32, Corelets/Core: 2
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core0.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core1.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core2.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core3.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core4.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core5.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core6.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core7.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core8.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core9.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core10.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core11.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core12.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core13.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core14.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core15.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core16.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core17.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core18.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core19.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core20.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core21.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core22.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core23.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core24.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core25.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core26.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core27.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core28.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core29.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core30.txt (load time: 0.002 seconds)
+LX memory loaded from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/memory_map_core31.txt (load time: 0.002 seconds)
+Parsing completed from /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921/senprog.txt
+Instructions loaded...
+senulator starts executing a program dataDSCtest
+simulation time: 0.0376422 seconds with 192 worker threads
+Program completed...
+execution time: 0.04 seconds. 
+Unmatch count: 26162 / 524288
+Max error: 1.98438 (1.98438/1 at 31)
+Total error: 0.0671093
+Unmatch count: 9432 / 80000
+Max error: 1.98926 (1.98926/1 at 1dc5)
+Total error: 0.0959824
+Unmatch count: 63fd / 80000
+Max error: 1.99316 (1.99316/1 at 124a)
+Total error: 0.0650393
+Unmatch count: 93f8 / 80000
+Max error: 1.99316 (1.99316/1 at 7c6)
+Total error: 0.0955744
+Unmatch count: 89f0 / 80000
+Max error: 1.98926 (1.98926/1 at 804)
+Total error: 0.090133
+Unmatch count: 91f2 / 80000
+Max error: 1.98145 (1.98145/1 at 1db2)
+Total error: 0.0947169
+Unmatch count: 8bfc / 80000
+Max error: 1.99316 (1.99316/1 at 64a)
+Total error: 0.0910791
+Unmatch count: 93f8 / 80000
+Max error: 1.99316 (1.99316/1 at 1e06)
+Total error: 0.0954677
+Unmatch count: 8fef / 80000
+Max error: 1.98926 (1.98926/1 at 804)
+Total error: 0.0941333
+Unmatch count: 8ff2 / 80000
+Max error: 1.98145 (1.98145/1 at 1db2)
+Total error: 0.0929251
+Unmatch count: 8dfa / 80000
+Max error: 1.99316 (1.99316/1 at 124a)
+Total error: 0.0923135
+Unmatch count: 93f7 / 80000
+Max error: 1.99316 (1.99316/1 at bd4)
+Total error: 0.0955608
+Unmatch count: 8df1 / 80000
+Max error: 1.98926 (1.98926/1 at 804)
+Total error: 0.0926885
+Unmatch count: 91f2 / 80000
+Max error: 1.98145 (1.98145/1 at 1db2)
+Total error: 0.0946098
+Unmatch count: 87fa / 80000
+Max error: 1.99316 (1.99316/1 at 124a)
+Total error: 0.088587
+Unmatch count: 8df8 / 80000
+Max error: 1.99316 (1.99316/1 at 1e06)
+Total error: 0.0917901
+Unmatch count: 89ed / 80000
+Max error: 1.98926 (1.98926/1 at 804)
+Total error: 0.0902766
+Unmatch count: 93f2 / 80000
+Max error: 1.98926 (1.98926/1 at 1fe6)
+Total error: 0.0958761
+Unmatch count: 89f9 / 80000
+Max error: 1.99316 (1.99316/1 at 124a)
+Total error: 0.0896409
+Unmatch count: 93f6 / 80000
+Max error: 1.99316 (1.99316/1 at 1e06)
+Total error: 0.0955454
+Unmatch count: 8dec / 80000
+Max error: 1.98926 (1.98926/1 at 804)
+Total error: 0.0931053
+Unmatch count: 93f4 / 80000
+Max error: 1.98145 (1.98145/1 at 1db2)
+Total error: 0.0957981
+Unmatch count: 89fb / 80000
+Max error: 1.99316 (1.99316/1 at 124a)
+Total error: 0.0899937
+Unmatch count: 91f7 / 80000
+Max error: 1.99512 (1.99512/1 at fef)
+Total error: 0.0941975
+Unmatch count: 91ef / 80000
+Max error: 1.98926 (1.98926/1 at 804)
+Total error: 0.0954518
+Unmatch count: 95ef / 80000
+Max error: 1.9834 (1.9834/1 at ff3)
+Total error: 0.0969684
+Unmatch count: 8bfa / 80000
+Max error: 1.99316 (1.99316/1 at 124a)
+Total error: 0.0908342
+Unmatch count: 99f4 / 80000
+Max error: 1.99316 (1.99316/1 at 1e06)
+Total error: 0.0994606
+Unmatch count: 85f0 / 80000
+Max error: 1.98926 (1.98926/1 at 804)
+Total error: 0.0873492
+Unmatch count: 75f4 / 80000
+Max error: 1.98145 (1.98145/1 at 1db2)
+Total error: 0.0762073
+Unmatch count: 91fe / 80000
+Max error: 1.99316 (1.99316/1 at 124a)
+Total error: 0.094853
+Unmatch count: 77f9 / 80000
+Max error: 1.99316 (1.99316/1 at 1e06)
+Total error: 0.0773284
+LX Store verification [1;31mfailed[0m
+prolog time: 0.219 seconds., epilog time: 0.812 seconds.  
+Setup and execution time for dir:/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_20260703_032921: 1.072 seconds. 
