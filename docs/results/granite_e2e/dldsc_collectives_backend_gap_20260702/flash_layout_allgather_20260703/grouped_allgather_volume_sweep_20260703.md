@@ -62,6 +62,16 @@ I also tried a small DCC flag sweep on the first failing case, `FlashGroupedAllg
 
 None of the obvious DCC toggles fixed the mismatch. Disabling multicast canonicalization aborts in DCC, which is also a useful clue: this path appears to rely on multicast canonicalization, but the resulting executable program is still value-wrong for larger transfer rows.
 
+## Chunking Experiment
+
+I also tried splitting the full flash-sized payload into smaller logical `in=16` chunks while preserving the full `32-core, fanout-8` grouped all-gather topology.
+
+| Sample | Producer Pieces | Consumer Pieces | Fanout | `trVolume` | `numTransactions_` | Store Check |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `FlashGroupedAllgatherChunkedIn16` | 256 | 2048 | 8 | 8192 | 16 | failed |
+
+This rules out a purely per-row transaction-count explanation. The failure may also involve the number of grouped rows, repeated multicast groups targeting the same destination allocation, or a DCC lowering state issue across many `STCDPOpLx` grouped transfer rows.
+
 ## Implication For Granite/Flash Collectives
 
 This confirms that `broadcast` / `multicast` / `layout_allgather` are plausible through the DLDSC coordinate contract, but the production path still needs a backend fix before we can use this class to remove the flash attention HBM round trips.
@@ -74,5 +84,8 @@ Scatter PR1 remains separate: it covers the smaller one-to-one class and is not 
 - [grouped_allgather_sweep/topology_sweep_summary.csv](grouped_allgather_sweep/topology_sweep_summary.csv)
 - [grouped_allgather_sweep/payload_sweep_summary.csv](grouped_allgather_sweep/payload_sweep_summary.csv)
 - [grouped_allgather_sweep/in32_dcc_flag_sweep_summary.csv](grouped_allgather_sweep/in32_dcc_flag_sweep_summary.csv)
+- [grouped_allgather_sweep/chunked_in16_summary.csv](grouped_allgather_sweep/chunked_in16_summary.csv)
+- [grouped_allgather_sweep/chunked_in16_lowering_and_senulator.txt](grouped_allgather_sweep/chunked_in16_lowering_and_senulator.txt)
 - [grouped_allgather_sweep/deeptools_grouped_allgather_sweep_experiment.patch](grouped_allgather_sweep/deeptools_grouped_allgather_sweep_experiment.patch)
+- [grouped_allgather_sweep/deeptools_grouped_allgather_chunked_experiment.patch](grouped_allgather_sweep/deeptools_grouped_allgather_chunked_experiment.patch)
 - [grouped_allgather_sweep/deeptools_grouped_allgather_sweep_experiment_diff_stat.txt](grouped_allgather_sweep/deeptools_grouped_allgather_sweep_experiment_diff_stat.txt)

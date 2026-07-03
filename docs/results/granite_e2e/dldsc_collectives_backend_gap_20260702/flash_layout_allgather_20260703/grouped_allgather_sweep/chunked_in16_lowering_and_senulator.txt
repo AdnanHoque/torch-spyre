@@ -1,0 +1,206 @@
+== first 80 lines ==
+Added dirName /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16
+System architecture setup success...Cores: 32, Corelets/Core: 2
+===== [SENPCFG] Running /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16 =====
+Pcfgs loaded from sdsc: dataDSCtest
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core0.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core1.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core2.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core3.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core4.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core5.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core6.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core7.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core8.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core9.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core10.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core11.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core12.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core13.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core14.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core15.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core16.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core17.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core18.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core19.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core20.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core21.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core22.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core23.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core24.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core25.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core26.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core27.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core28.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core29.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core30.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_core31.txt in hex format 
+simulation time: 0.274509 seconds with 160 worker threads
+Program completed...
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core0.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core1.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core2.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core3.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core4.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core5.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core6.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core7.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core8.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core9.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core10.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core11.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core12.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core13.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core14.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core15.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core16.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core17.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core18.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core19.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core20.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core21.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core22.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core23.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core24.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core25.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core26.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core27.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core28.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core29.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core30.txt in hex format 
+LX memory dumped to /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16/memory_map_final_core31.txt in hex format 
+Setup and execution and dump time for /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16: 0.905 seconds. 
+[SENPCFG] Execution successful!
+dataflow.program_unit iter_arg : %arg0 -> (%85) : {
+  %245 = dataflow.create_multicast_group(%226 -> ()) {count = 0 : i32, group_id = 0 : i32, num_consumers = 7 : i32, regLocale = #sentient<reg_type imm>} : index
+  %246 = sentient.scalar_copy %245 {element_size = -1 : i32, regIndex = 0 : i32, regLocale = #sentient<reg_type gtr>} : index
+  %247 = sentient.for %arg1 = %82 iter_args(%arg2 = %14) -> (index) {dbgName = "c0-l3lu-IL-in-OL-0-0", element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [true], regIndices = [0 : i32, 0 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lar>, #sentient<reg_type lar>]}{
+    %338 = sentient.scalar_add %arg2, %76 {element_size = 16 : i32, regIndex = 0 : i32, regLocale = #sentient<reg_type lar>} : index, index
+    %339 = sentient.receive_and_store mutable_addr(%338), immutable_addr(%14), increment(%57), producer(%226), multicast_info(%246) {burst_size = 8 : i32, coalesce = false, dbgName = "c0-l3lu-ringDT-ring-lx-OL-0-0", element_size = 16 : i32, interleaved_group = 0 : i32, permute = false, regIndex = 0 : i32, regLocale = #sentient<reg_type lar>, stride = 1 : i32, subword_length = 1 : i32, total_elements = 64 : i32} : index, index, index, index, index : index
+    sentient.yield %339 : index
+  }
+
+== lines containing LX Store verification ==
+LX Store verification [1;31mfailed[0m
+
+== final 120 lines ==
+Not written at LX31 addr 8078 expected: SEN169_FP16
+Not written at LX31 addr 8079 expected: SEN169_FP16
+Not written at LX31 addr 8080 expected: SEN169_FP16
+Not written at LX31 addr 8081 expected: SEN169_FP16
+Not written at LX31 addr 8082 expected: SEN169_FP16
+Not written at LX31 addr 8083 expected: SEN169_FP16
+Not written at LX31 addr 8084 expected: SEN169_FP16
+Not written at LX31 addr 8085 expected: SEN169_FP16
+Not written at LX31 addr 8086 expected: SEN169_FP16
+Not written at LX31 addr 8087 expected: SEN169_FP16
+Not written at LX31 addr 8088 expected: SEN169_FP16
+Not written at LX31 addr 8089 expected: SEN169_FP16
+Not written at LX31 addr 8090 expected: SEN169_FP16
+Not written at LX31 addr 8091 expected: SEN169_FP16
+Not written at LX31 addr 8092 expected: SEN169_FP16
+Not written at LX31 addr 8093 expected: SEN169_FP16
+Not written at LX31 addr 8094 expected: SEN169_FP16
+Not written at LX31 addr 8095 expected: SEN169_FP16
+Not written at LX31 addr 8096 expected: SEN169_FP16
+Not written at LX31 addr 8097 expected: SEN169_FP16
+Not written at LX31 addr 8098 expected: SEN169_FP16
+Not written at LX31 addr 8099 expected: SEN169_FP16
+Not written at LX31 addr 8100 expected: SEN169_FP16
+Not written at LX31 addr 8101 expected: SEN169_FP16
+Not written at LX31 addr 8102 expected: SEN169_FP16
+Not written at LX31 addr 8103 expected: SEN169_FP16
+Not written at LX31 addr 8104 expected: SEN169_FP16
+Not written at LX31 addr 8105 expected: SEN169_FP16
+Not written at LX31 addr 8106 expected: SEN169_FP16
+Not written at LX31 addr 8107 expected: SEN169_FP16
+Not written at LX31 addr 8108 expected: SEN169_FP16
+Not written at LX31 addr 8109 expected: SEN169_FP16
+Not written at LX31 addr 8110 expected: SEN169_FP16
+Not written at LX31 addr 8111 expected: SEN169_FP16
+Not written at LX31 addr 8112 expected: SEN169_FP16
+Not written at LX31 addr 8113 expected: SEN169_FP16
+Not written at LX31 addr 8114 expected: SEN169_FP16
+Not written at LX31 addr 8115 expected: SEN169_FP16
+Not written at LX31 addr 8116 expected: SEN169_FP16
+Not written at LX31 addr 8117 expected: SEN169_FP16
+Not written at LX31 addr 8118 expected: SEN169_FP16
+Not written at LX31 addr 8119 expected: SEN169_FP16
+Not written at LX31 addr 8120 expected: SEN169_FP16
+Not written at LX31 addr 8121 expected: SEN169_FP16
+Not written at LX31 addr 8122 expected: SEN169_FP16
+Not written at LX31 addr 8123 expected: SEN169_FP16
+Not written at LX31 addr 8124 expected: SEN169_FP16
+Not written at LX31 addr 8125 expected: SEN169_FP16
+Not written at LX31 addr 8126 expected: SEN169_FP16
+Not written at LX31 addr 8127 expected: SEN169_FP16
+Not written at LX31 addr 8128 expected: SEN169_FP16
+Not written at LX31 addr 8129 expected: SEN169_FP16
+Not written at LX31 addr 8130 expected: SEN169_FP16
+Not written at LX31 addr 8131 expected: SEN169_FP16
+Not written at LX31 addr 8132 expected: SEN169_FP16
+Not written at LX31 addr 8133 expected: SEN169_FP16
+Not written at LX31 addr 8134 expected: SEN169_FP16
+Not written at LX31 addr 8135 expected: SEN169_FP16
+Not written at LX31 addr 8136 expected: SEN169_FP16
+Not written at LX31 addr 8137 expected: SEN169_FP16
+Not written at LX31 addr 8138 expected: SEN169_FP16
+Not written at LX31 addr 8139 expected: SEN169_FP16
+Not written at LX31 addr 8140 expected: SEN169_FP16
+Not written at LX31 addr 8141 expected: SEN169_FP16
+Not written at LX31 addr 8142 expected: SEN169_FP16
+Not written at LX31 addr 8143 expected: SEN169_FP16
+Not written at LX31 addr 8144 expected: SEN169_FP16
+Not written at LX31 addr 8145 expected: SEN169_FP16
+Not written at LX31 addr 8146 expected: SEN169_FP16
+Not written at LX31 addr 8147 expected: SEN169_FP16
+Not written at LX31 addr 8148 expected: SEN169_FP16
+Not written at LX31 addr 8149 expected: SEN169_FP16
+Not written at LX31 addr 8150 expected: SEN169_FP16
+Not written at LX31 addr 8151 expected: SEN169_FP16
+Not written at LX31 addr 8152 expected: SEN169_FP16
+Not written at LX31 addr 8153 expected: SEN169_FP16
+Not written at LX31 addr 8154 expected: SEN169_FP16
+Not written at LX31 addr 8155 expected: SEN169_FP16
+Not written at LX31 addr 8156 expected: SEN169_FP16
+Not written at LX31 addr 8157 expected: SEN169_FP16
+Not written at LX31 addr 8158 expected: SEN169_FP16
+Not written at LX31 addr 8159 expected: SEN169_FP16
+Not written at LX31 addr 8160 expected: SEN169_FP16
+Not written at LX31 addr 8161 expected: SEN169_FP16
+Not written at LX31 addr 8162 expected: SEN169_FP16
+Not written at LX31 addr 8163 expected: SEN169_FP16
+Not written at LX31 addr 8164 expected: SEN169_FP16
+Not written at LX31 addr 8165 expected: SEN169_FP16
+Not written at LX31 addr 8166 expected: SEN169_FP16
+Not written at LX31 addr 8167 expected: SEN169_FP16
+Not written at LX31 addr 8168 expected: SEN169_FP16
+Not written at LX31 addr 8169 expected: SEN169_FP16
+Not written at LX31 addr 8170 expected: SEN169_FP16
+Not written at LX31 addr 8171 expected: SEN169_FP16
+Not written at LX31 addr 8172 expected: SEN169_FP16
+Not written at LX31 addr 8173 expected: SEN169_FP16
+Not written at LX31 addr 8174 expected: SEN169_FP16
+Not written at LX31 addr 8175 expected: SEN169_FP16
+Not written at LX31 addr 8176 expected: SEN169_FP16
+Not written at LX31 addr 8177 expected: SEN169_FP16
+Not written at LX31 addr 8178 expected: SEN169_FP16
+Not written at LX31 addr 8179 expected: SEN169_FP16
+Not written at LX31 addr 8180 expected: SEN169_FP16
+Not written at LX31 addr 8181 expected: SEN169_FP16
+Not written at LX31 addr 8182 expected: SEN169_FP16
+Not written at LX31 addr 8183 expected: SEN169_FP16
+Not written at LX31 addr 8184 expected: SEN169_FP16
+Not written at LX31 addr 8185 expected: SEN169_FP16
+Not written at LX31 addr 8186 expected: SEN169_FP16
+Not written at LX31 addr 8187 expected: SEN169_FP16
+Not written at LX31 addr 8188 expected: SEN169_FP16
+Not written at LX31 addr 8189 expected: SEN169_FP16
+Not written at LX31 addr 8190 expected: SEN169_FP16
+Not written at LX31 addr 8191 expected: SEN169_FP16
+Unmatch count: 1fff / 2000
+Max error: 1.97949 (1.97949/1 at 41a)
+Total error: 1.34529
+LX Store verification [1;31mfailed[0m
+prolog time: 0.098 seconds., epilog time: 1.432 seconds.  
+Setup and execution time for dir:/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/dataop_flash_grouped_allgather_chunked_20260703_035554/FlashGroupedAllgatherChunkedIn16: 1.533 seconds. 
