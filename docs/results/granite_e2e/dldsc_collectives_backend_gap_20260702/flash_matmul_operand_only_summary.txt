@@ -1,0 +1,9 @@
+run: /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_matmul_operand_only_20260703_005239
+exit_code: 1
+backend_plan_files: 32
+backend_plan_kind: matmul_operand_broadcast
+failure: DXP abort before runtime
+43638:terminate called after throwing an instance of 'DtException'
+43639:  what():  DtException: query fold dimension with higher fold factor
+43679:    raise CalledProcessError(retcode, process.args,
+43680:torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_matmul_operand_only_20260703_005239/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_4077u0te']' died with <Signals.SIGABRT: 6>.

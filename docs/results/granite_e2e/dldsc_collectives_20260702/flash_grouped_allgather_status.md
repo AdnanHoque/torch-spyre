@@ -54,3 +54,9 @@ Remaining non-weight HBM outputs still exist outside explicit ReStickify rows. T
 - CDX flash run with transfer-coordinate destination grouping: DXP/runtime passes, value check fails.
 - CDX flash run with single-row transfer-coordinate materialization: DXP/runtime passes, value check fails.
 - CDX flash run with standalone relayout SuperDSC materialization: DXP/runtime passes, value check fails.
+- CDX flash run with layout-allgather disabled and matmul operand collective enabled: emits 32 matmul operand broadcast plans, then DXP aborts with `query fold dimension with higher fold factor`.
+
+## Current backend gaps
+
+- `layout_allgather_restickify`: needs transform-aware movement, not a pure STCDPOpLx byte copy.
+- `matmul_operand_broadcast` / `all_gather_replicate`: still needs a DXP/codegen fix for staged operand materialization; the current prototype aborts before runtime.
