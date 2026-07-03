@@ -1,0 +1,47 @@
+{
+  "created_at": "2026-07-03",
+  "pod": "adnan-clc-spyre-dev-pf",
+  "torch_sha": "f0b7b5748d0381b6c5bb41cd5639718d986ef425",
+  "deeptools_sha": "1446330381d84c6086e5131742011727f6883d5b",
+  "run": "/home/adnan/codex-isolated/dldsc_granite_clean_relayout_20260703_163108/runs/granite_relayout_s512_kernel_neighbor_after_20260703_234640",
+  "returncode": 1,
+  "error_head": [
+    "  File \"/home/adnan/codex-isolated/dldsc_granite_clean_relayout_20260703_163108/torch-spyre/torch_spyre/execution/async_compile.py\", line 63, in sdsc",
+    "    subprocess.run([\"dxp_standalone\", \"--bundle\", \"-d\", output_dir], check=True)",
+    "  File \"/usr/lib64/python3.12/subprocess.py\", line 571, in run",
+    "    raise CalledProcessError(retcode, process.args,",
+    "torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/home/adnan/codex-isolated/dldsc_granite_clean_relayout_20260703_163108/runs/granite_relayout_s512_kernel_neighbor_after_20260703_234640/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_silu_split_with_sizes_transpose_view_2_vulwbn__']' died with <Signals.SIGABRT: 6>.",
+    "",
+    "Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS=\"+dynamo\"",
+    ""
+  ],
+  "backend_plans": [
+    {
+      "artifact_kind": "layout_allgather_restickify_backend_plan",
+      "sdsc_name": "10_batchmatmul",
+      "input_labeled_ds": "Tensor1",
+      "realized": true,
+      "physical_lowering_status": null,
+      "movement_pattern": "",
+      "communication_pattern": null,
+      "logical_transfer_count": "0",
+      "source_core_count": "0",
+      "consumer_core_count": "0",
+      "group_count": "0"
+    },
+    {
+      "artifact_kind": "matmul_operand_broadcast_backend_plan",
+      "sdsc_name": "18_batchmatmul",
+      "input_labeled_ds": "Tensor1",
+      "realized": true,
+      "physical_lowering_status": "lowered_loop_scoped_kernel_neighbor",
+      "movement_pattern": null,
+      "communication_pattern": "all_gather_replicate",
+      "logical_transfer_count": "1024",
+      "source_core_count": "32",
+      "consumer_core_count": "32",
+      "group_count": "1"
+    }
+  ],
+  "next_gap": "layout_allgather_restickify currently enters generic relayout/IFN glue with a zeroed movement plan and DDC fails propagating custom LX allocation coordinates for allocate-Tensor0_lx."
+}
