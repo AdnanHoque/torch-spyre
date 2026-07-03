@@ -36,6 +36,8 @@ This avoids mixing two meanings of LX start address: allocation base vs. chunk b
 
 The latest CDX single-row prototype took this one step further by emitting one wide STCDP data-op row per consumer SDSC. It still compiled and executed but failed value correctness at 99.2% mismatch, so the gap is not just row granularity. The remaining issue is the physical translated LX-to-LX materialization/schedule semantics for grouped all-gather.
 
+A later standalone-relayout SuperDSC prototype also compiled and executed but failed value correctness at the same 99.2% mismatch. That weakens mixed-SDSC placement as the main explanation; the problem is now more likely in translated STCDP subpiece/materialization semantics.
+
 ## Granite state from dev-pf artifact
 
 The current dev-pf Granite profile artifact contains five restickify rows:
@@ -51,3 +53,4 @@ Remaining non-weight HBM outputs still exist outside explicit ReStickify rows. T
 - CDX flash run with source-row materialization: DXP/runtime passes, value check fails.
 - CDX flash run with transfer-coordinate destination grouping: DXP/runtime passes, value check fails.
 - CDX flash run with single-row transfer-coordinate materialization: DXP/runtime passes, value check fails.
+- CDX flash run with standalone relayout SuperDSC materialization: DXP/runtime passes, value check fails.

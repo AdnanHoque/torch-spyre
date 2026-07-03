@@ -214,6 +214,45 @@ Even a single wide STCDPOpLx row with explicit source and destination pieces is 
 That pushes the gap toward translated LX->LX materialization semantics, address interpretation, or schedule semantics for mixed data-op rows, not frontend classification or row granularity.
 ```
 
+### Standalone Relayout SuperDSC Carrier Prototype
+
+Run:
+
+```text
+runs/test_flash_standalone_relayout_20260703_003708
+```
+
+Change tested:
+
+```text
+Moves the grouped layout-allgather STCDPOpLx row out of the consumer SDSC and into a separate relayout SuperDSC inserted before the consumer.
+Keeps the same logical transfer table and destination LX allocation/rewrite.
+This mirrors the existing Deeptools generic relayout insertion shape more closely than a mixed consumer SDSC.
+```
+
+Result:
+
+```text
+DXP compile: passes.
+Runtime execution: reaches all three kernels.
+Backend plans emitted: 32 layout_allgather_restickify plans.
+Correctness: fails.
+Mismatch: 16646944 / 16777216 (99.2%)
+Greatest absolute difference: inf at index (0, 0, 0, 0)
+```
+
+Artifact caveat:
+
+```text
+The exported Torch cache does not show obvious relayout JSON filenames for the inserted SuperDSC; DXP may keep the inserted nodes internal to its bundle/codegen path. The run still proves this carrier shape does not immediately recover value correctness.
+```
+
+Interpretation:
+
+```text
+The failure persists even when the movement is staged as a standalone relayout program before the consumer. This weakens the hypothesis that mixed-SDSC scheduling is the primary bug. The remaining likely gap is how STCDPOpLx/DCG derives subpieces and byte movement for source-local-to-destination-local translated ranges.
+```
+
 ### Materialization Debug / Local-Range Prototype
 
 Run:
@@ -245,7 +284,7 @@ Conclusion: encoding destination chunk placement through byte address offsets di
 
 ## Current Read
 
-The invariant ~99.2% mismatch across materially different movement descriptions suggests the inserted mixed `dataOpdscs_` rows may not actually be realized/executed in this scheduled path, or STCDPOpLx cannot express this translated copy through the current piece-overlap interface. The single-row prototype makes this sharper: row count and schedule-entry explosion are not sufficient explanations.
+The invariant ~99.2% mismatch across materially different movement descriptions suggests STCDPOpLx cannot express this translated copy through the current piece-overlap interface, or DCG is interpreting the translated pieces differently than intended. The single-row and standalone-carrier prototypes make this sharper: row count, schedule-entry explosion, and mixed-SDSC placement are not sufficient explanations.
 
 The backend gap is now narrower:
 
