@@ -101,6 +101,7 @@ Additional focused artifacts from the 2026-07-03 offset-address probe:
 - `staged_lds_inplace_mutate/`: DDC abort proving in-place allocation retargeting still has stale producer-coordinate semantics.
 - `staged_lds_inplace_clear_wkslice/`: DXP abort proving explicit stale-map clearing gets farther but still does not define a complete post-relayout RHS view.
 - `staged_lds_replicated_coords/`: DDC abort proving a naive replicated `coreIdToWkSlice_` map is not enough for the matmul KERNEL reader.
+- `staged_lds_inplace_clear_wkslice/gdb_catch_throw_bt.log`: backtrace pinning the vector-range abort to `ddc::Ddc::buildFoldForAllocation` during coordinate capture.
 
 ## Current Read
 
