@@ -121,6 +121,40 @@ The second option is not existing `ReStickifyOpLx`; it would require relaxing th
 piece-size/equal-piece assumptions and adding explicit intra-stick destination
 offsets plus tests such as `4 x out=16 -> 1 x out=64`.
 
+
+## Whole-Block Inventory For This Run
+
+Scanning the full `block_prefill/cache/inductor-spyre` directory in the same run
+found 26 SDSC JSON files:
+
+```text
+ReStickifyOpHBM: 1
+ReStickifyOpLx: 1
+batchmatmul: 3
+other pointwise/reduction rows: 21
+```
+
+The only `ReStickifyOpHBM` is in `sdsc_fused_linear_rms_norm_0_3nb14dcr/sdsc_6.json`:
+
+```text
+op = ReStickifyOpHBM
+N = mb:6144, out:4096
+layout = [mb, out] -> [out, mb]
+```
+
+That row feeds `sdsc_fused_linear_rms_norm_0_3nb14dcr/sdsc_7.json`, a
+`batchmatmul` whose Tensor1/KERNEL operand is the `6144 x 4096` projection
+weight. This is weight-prelayout scope, not the activation-spill scope of this
+collectives work.
+
+The remaining in-scope non-weight classified collectives are the two attention
+RHS/KERNEL rows:
+
+```text
+attention sdsc_8.json  -> matmul_operand_broadcast / all_gather_replicate
+attention sdsc_16.json -> matmul_operand_broadcast / all_gather_replicate
+```
+
 ## Status
 
 - Frontend classification: present and useful.
