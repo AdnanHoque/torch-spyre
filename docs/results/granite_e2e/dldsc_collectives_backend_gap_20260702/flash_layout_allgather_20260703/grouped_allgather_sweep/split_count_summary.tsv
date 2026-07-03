@@ -1,0 +1,7 @@
+sample	dataop	senpcfg	dcc_senprog	dcc_smc	senulator	note
+FlashGroupedAllgatherSplitDataOpsIn16Start0Count1	0	0	0	0	0	LX Store verification passed
+FlashGroupedAllgatherSplitDataOpsIn16Start0Count2	0	0	0	0	0	LX Store verification passed
+FlashGroupedAllgatherSplitDataOpsIn16Start32Count2	0	0	0	0	0	LX Store verification passed
+FlashGroupedAllgatherSplitDataOpsIn16Start0Count4	0	0	0	0	0	LX Store verification passed
+FlashGroupedAllgatherSplitDataOpsIn16Start64Count4	0	0	0	0	0	LX Store verification passed
+FlashGroupedAllgatherSplitDataOpsIn16Start0Count8	0	0	134	1	1	LX Store verification failed

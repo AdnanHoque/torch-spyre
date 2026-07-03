@@ -60,6 +60,19 @@ Putting all eight `in=16` slices into one scheduled data-op program fails:
 
 See `flash_layout_allgather_20260703/grouped_allgather_sweep/split_dataops_summary.tsv`.
 
+### Fission Granularity
+
+A follow-up variable-count sweep shows the safe chunk size for this flash-sized grouped all-gather:
+
+- `count=1`: pass
+- `count=2`: pass
+- `count=4`: pass, including nonzero start `64`
+- `count=8`: fail with the same DCC/program capacity and store verification failure
+
+See `flash_layout_allgather_20260703/grouped_allgather_sweep/split_count_summary.tsv`.
+
+This means the current full edge can likely be represented as two standalone relayout SDSCs, each carrying four `in=16` slice rows.
+
 ## Interpretation
 
 The slice-by-slice result is the critical positive result: the ring movement is correct for every destination slice and every nonzero `in` offset. The current failure is not that the transfer is impossible. It is that fusing the whole flash-sized grouped all-gather into one generated L3LU program exceeds backend program capacity and then fails store verification.
