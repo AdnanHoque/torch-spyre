@@ -1,0 +1,7 @@
+ dcg/dcg_fe/pcfg_gen/stcdpOp.cpp  |  11 ++
+ dcg/unit_tests/datadsc_gen.cpp   |  81 ++++++++
+ dcg/unit_tests/dcg_test_init.cpp |   2 +
+ dcg/unit_tests/dcg_unit_tests.h  |   3 +
+ dsm/sen_data_ops.cpp             |   2 +-
+ dxp/SdscRelayoutInsertion.cpp    | 406 +++++++++++++++++++++++++++++++++++++--
+ 6 files changed, 492 insertions(+), 13 deletions(-)

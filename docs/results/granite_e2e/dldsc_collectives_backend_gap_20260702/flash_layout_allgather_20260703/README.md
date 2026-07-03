@@ -33,6 +33,22 @@ Greatest absolute difference: inf at index (0, 0, 0, 0)
 
 See [flash_layout_allgather_attempts_20260703_excerpts.md](flash_layout_allgather_attempts_20260703_excerpts.md) for run directories and log excerpts.
 
+## Standalone DataOp Follow-Up
+
+A standalone `DataOpStandalone` sample was added after the full flash runs to isolate one grouped all-gather edge from `test_flash.py`.
+
+That standalone sample passes DCG lowering and emits the same core transfer shape as the full flash debug descriptor:
+
+```text
+pSubPiece rows: 32
+cSubPiece rows: 256
+dtTable rows: 32
+fanout per producer row: 8
+maxConsumers: 8
+```
+
+See [standalone_flash_grouped_allgather_20260703.md](standalone_flash_grouped_allgather_20260703.md).
+
 ## Current Interpretation
 
 This is no longer a basic DXP import/routing failure. DXP accepts the inserted movement, and the AIU runtime launches the affected bundle. The failure is now a value-correctness issue in physical materialization:
@@ -58,4 +74,4 @@ Only after this passes should we re-enable the full flash bundle.
 - [deeptools_current_direct_allgather_experiment.patch](deeptools_current_direct_allgather_experiment.patch)
 - [deeptools_current_direct_allgather_experiment_diff_stat.txt](deeptools_current_direct_allgather_experiment_diff_stat.txt)
 - [flash_layout_allgather_attempts_20260703_excerpts.md](flash_layout_allgather_attempts_20260703_excerpts.md)
-
+- [standalone_flash_grouped_allgather_20260703.md](standalone_flash_grouped_allgather_20260703.md)
