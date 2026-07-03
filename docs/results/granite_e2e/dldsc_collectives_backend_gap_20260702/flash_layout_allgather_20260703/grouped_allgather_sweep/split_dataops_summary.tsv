@@ -1,0 +1,2 @@
+sample	dataop	senpcfg	dcc_senprog	dcc_smc	senulator	note
+FlashGroupedAllgatherSplitDataOpsIn16	0	0	134	1	1	DCC senprog aborts with empty graph after L3LU program verification failure; SMC reports Require larger IBUFF Max IBUFF(256) Current IBUFF(328); senulator store verification misses tail writes on LX31.

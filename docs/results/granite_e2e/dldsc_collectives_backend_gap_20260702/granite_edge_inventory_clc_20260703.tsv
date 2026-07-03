@@ -1,0 +1,6 @@
+edge	class	status
+buf13 -> buf46 inside old 9_ReStickifyOpHBM	scatter	Covered by PR1 scatter; realized=true; not remaining.
+buf9 -> buf14 into old 10_batchmatmul	scatter	Covered by PR1 scatter; realized=true; not remaining.
+mul/buf46 -> batchmatmul/buf14	all-gather + layout-restickify/form-changing	Needs staged ReStickifyOpLx/form-changing path; current metadata: layout_allgather_restickify, transfer_count=1024.
+clone/buf21/Tensor1 -> batchmatmul/buf22	all-gather/broadcast, all_gather_replicate	Needs same-layout grouped STCDP/IFN collective in matmul transfer loop; current plan: logical_transfer_count=1024, 32 producer chunks, 32 consumer replicas.
+weight/prelayout restickifies for buf45, buf47, buf48, buf49	weight/prelayout	Excluded from scope; expected to be handled by offline weight preload/prelayout work.

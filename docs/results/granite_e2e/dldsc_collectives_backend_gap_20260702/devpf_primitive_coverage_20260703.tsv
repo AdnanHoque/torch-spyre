@@ -1,0 +1,14 @@
+sample	class	result	note
+relayoutComplex	relayout/STCDPOpLx	PASS	store verification passed
+MultiCast1	multicast/STCDPOpLx	PASS	store verification passed
+multicastSimple	multicast/STCDPOpLx	PASS	store verification passed
+GatherHBMLX	gather	PASS	store verification passed
+GatherHBMSimple	gather	PASS	store verification passed
+ScatterHBMSimple	scatter	FAIL	senpcfg abort: valInt % 2 == 0
+ReStickfyLX	restickify	PASS	store verification passed
+ReStickfyLX4Cores	restickify	PASS	store verification passed
+hw_lx_load_multicast	STCDP multicast	FAIL	generator rejects volume < 16128 check
+hw_16_hmi_multicast	STCDP multicast	FAIL	senpcfg abort: f_srcAddr >= 0 && f_srcAddr < srcComponent->size()
+hw_1p5_sample_dti	STCDP mixed read/write	PASS	store verification passed
+hw_t3_multicast_onehmi	STCDP mixed read/write	FAIL	senulator store mismatch
+hw_16_hmi_read_write	STCDP mixed read/write	FAIL	senpcfg abort: f_srcAddr >= 0 && f_srcAddr < srcComponent->size()

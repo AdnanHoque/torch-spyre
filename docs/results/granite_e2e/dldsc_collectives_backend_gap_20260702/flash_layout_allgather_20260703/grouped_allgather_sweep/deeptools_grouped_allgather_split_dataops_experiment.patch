@@ -1,0 +1,790 @@
+diff --git a/dcc/tools/DataOpStandalone/DataOpStandalone.cpp b/dcc/tools/DataOpStandalone/DataOpStandalone.cpp
+index 2d3850bb3..854ab75c1 100644
+--- a/dcc/tools/DataOpStandalone/DataOpStandalone.cpp
++++ b/dcc/tools/DataOpStandalone/DataOpStandalone.cpp
+@@ -242,6 +242,30 @@ int main(int argc, char* argv[]) {
+       sdsc.coreIdToDscSchedule[2].push_back(
+           DscScheduleStep(1, -1, false, false));
+ 
++    } else if (dataop_opt.data_op.rfind(
++                   "FlashGroupedAllgatherSliceIn16Start", 0) == 0) {
++      const std::string prefix = "FlashGroupedAllgatherSliceIn16Start";
++      const int in_chunk_start =
++          std::stoi(dataop_opt.data_op.substr(prefix.size()));
++      DCGDataDSCGenerator::populateDataDSCwithFlashGroupedAllgatherSlice(
++          dataop_dsc_, in_chunk_start, 16);
++
++    } else if (dataop_opt.data_op ==
++               "FlashGroupedAllgatherSplitDataOpsIn16") {
++      const int num_slices = 8;
++      sdsc.dataOpdscs_.resize(num_slices);
++      for (int slice = 0; slice < num_slices; ++slice) {
++        DCGDataDSCGenerator::populateDataDSCwithFlashGroupedAllgatherSlice(
++            sdsc.dataOpdscs_.at(slice), slice * 16, 16);
++      }
++      for (int core = 0; core < 32; ++core) {
++        for (int slice = 0; slice < num_slices; ++slice) {
++          sdsc.coreIdToDscSchedule[core].push_back(
++              DscScheduleStep(slice, -1, false, slice != num_slices - 1));
++        }
++      }
++
++
+     } else if (dataop_opt.data_op == "HBM2HBMStress") {
+       DCGDataDSCGenerator::populateDataDSCwithHBMtoHBMStress(dataop_dsc_);
+     } else if (dataop_opt.data_op == "CopyToDDR") {
+diff --git a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+index d1840495c..6cac190a5 100644
+--- a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
++++ b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+@@ -341,6 +341,17 @@ void DcgFE::mapDtEntryToSenComponent(STCDPOpHBM* op) {
+ 
+ void DcgFE::determineInnerLoopOrder(baseSTCDPOp* op) {
+   for (auto& dtTableEntry : op->dtTable_) {
++    DT_CHECK_MSG(dtTableEntry.second.pIDX >= 0 &&
++                     dtTableEntry.second.pIDX < op->inpSP_.size(),
++                 "STCDP dtTable entry has invalid producer subpiece index: " +
++                     std::to_string(dtTableEntry.second.pIDX) +
++                     ", inpSP size=" + std::to_string(op->inpSP_.size()));
++    DT_CHECK_MSG(!dtTableEntry.second.cIDXs.empty(),
++                 "STCDP dtTable entry has no consumer subpieces: key=" +
++                     std::to_string(dtTableEntry.first) +
++                     ", producer index=" +
++                     std::to_string(dtTableEntry.second.pIDX) +
++                     ", outSP size=" + std::to_string(op->outSP_.size()));
+     // loop order is same as producer layout order
+     if (op->outSP_[dtTableEntry.second.cIDXs[0]].placement.Type() ==
+         SenComponents::HBM) {
+diff --git a/dcg/unit_tests/datadsc_gen.cpp b/dcg/unit_tests/datadsc_gen.cpp
+index 0462e1a9a..5d02490c4 100644
+--- a/dcg/unit_tests/datadsc_gen.cpp
++++ b/dcg/unit_tests/datadsc_gen.cpp
+@@ -193,6 +193,171 @@ void populateDataDSCwithDimSplit(DataOpDsc& myDataOpDsc,
+   myDataOpDsc.labeledDs_.push_back(outDs0);
+ }
+ 
++
++static void populateDataDSCwithFlashGroupedAllgatherImpl(
++    DataOpDsc& myDataOpDsc, const std::string& name, int outSize, int inSize,
++    int xGroups, int outChunkSize, int srcLxBase, int dstLxBase,
++    int inChunkSize = 0, int inChunkStart = 0, bool singleInSlice = false) {
++  myDataOpDsc.dscName_ = name;
++  myDataOpDsc.opName = OpFuncs::STCDPOpLx;
++  if (inChunkSize == 0) inChunkSize = inSize;
++
++  const std::vector<std::string> layoutDims = {"out", "in", "x"};
++  const std::vector<double> fullSize = {double(outSize), double(inSize),
++                                        double(xGroups)};
++  const std::vector<double> srcSize = {double(outChunkSize),
++                                       double(inChunkSize), 1};
++  const int dstInSize = singleInSlice ? inChunkSize : inSize;
++  const int dstInStart = singleInSlice ? inChunkStart : 0;
++  const std::vector<double> dstSize = {double(outSize), double(dstInSize), 1};
++  const std::vector<std::vector<std::pair<double, double>>> fullGap = {
++      {{double(outSize), 0}}, {{double(inSize), 0}}, {{double(xGroups), 0}}};
++  const std::vector<std::vector<std::pair<double, double>>> srcGap = {
++      {{double(outChunkSize), 0}}, {{double(inChunkSize), 0}}, {{1, 0}}};
++  const std::vector<std::vector<std::pair<double, double>>> dstGap = {
++      {{double(outSize), 0}}, {{double(dstInSize), 0}}, {{1, 0}}};
++  const int outChunks = outSize / outChunkSize;
++  const int inChunks = singleInSlice ? 1 : inSize / inChunkSize;
++  const int numCores = outChunks * xGroups;
++  DT_CHECK(outSize % outChunkSize == 0);
++  DT_CHECK(inSize % inChunkSize == 0);
++  DT_CHECK(inChunkStart >= 0);
++  DT_CHECK(inChunkStart + inChunkSize * inChunks <= inSize);
++  if (!singleInSlice) DT_CHECK(inChunkStart == 0);
++  DT_CHECK(numCores <= 32);
++
++  for (const auto& dim : layoutDims) myDataOpDsc.dimPool_.insert(dim);
++  myDataOpDsc.primaryDs_["activation"].dimNames = {"out", "in", "x"};
++  myDataOpDsc.primaryDs_["activation"].name_ = "activation";
++
++  LdsInfo inpDs;
++  inpDs.ldsName_ = "Tensor1-LayoutAllgatherRestickify-inp";
++  inpDs.wordLength = 2;
++  inpDs.pdsName_ = "activation";
++  inpDs.layoutDimOrder_ = layoutDims;
++  inpDs.stickDimOrder_ = {"out"};
++  inpDs.df = DataFormats::SEN169_FP16;
++  inpDs.dimToLayoutSize_ = DCGUtils::createNFillMap(layoutDims, fullSize);
++  inpDs.dimToStickSize_ = DCGUtils::createNFillMap(inpDs.stickDimOrder_, std::vector<double>{64});
++  inpDs.validGap_ = DCGUtils::createNFillMap(layoutDims, fullGap);
++  inpDs.totElements = outSize * inSize * xGroups;
++
++  for (int core = 0; core < numCores; ++core) {
++    const int producerMb = core % xGroups;
++    const int producerX = core / xGroups;
++    for (int inChunk = 0; inChunk < inChunks; ++inChunk) {
++      const std::string key =
++          "src" + std::to_string(core) + "_" + std::to_string(inChunk);
++      auto& piece = inpDs.pieces_[key];
++      piece.key_ = key;
++      piece.dimToSize_ = DCGUtils::createNFillMap(layoutDims, srcSize);
++      piece.dimToStartCordinate = DCGUtils::createNFillMap(
++          layoutDims,
++          std::vector<double>{double(producerX * outChunkSize),
++                              double(inChunkStart + inChunk * inChunkSize),
++                              double(producerMb)});
++      piece.validGap_ = DCGUtils::createNFillMap(layoutDims, srcGap);
++      piece.placement[SenComponents::LX];
++      piece.placement[SenComponents::LX].setType(SenComponents::LX);
++      piece.placement[SenComponents::LX].insertMemId(core);
++      piece.placement[SenComponents::LX].insertStAddr(srcLxBase);
++    }
++    myDataOpDsc.coreIdsUsed_.push_back(core);
++  }
++  inpDs.lxSize_ = int64_t(pow(2, 21));
++  myDataOpDsc.labeledDs_.push_back(inpDs);
++
++  LdsInfo outDs;
++  outDs.ldsName_ = "Tensor1";
++  outDs.wordLength = 2;
++  outDs.pdsName_ = "activation";
++  outDs.layoutDimOrder_ = layoutDims;
++  outDs.stickDimOrder_ = {"out"};
++  outDs.df = DataFormats::SEN169_FP16;
++  outDs.dimToLayoutSize_ = DCGUtils::createNFillMap(layoutDims, fullSize);
++  outDs.dimToStickSize_ = DCGUtils::createNFillMap(outDs.stickDimOrder_, std::vector<double>{64});
++  outDs.validGap_ = DCGUtils::createNFillMap(layoutDims, fullGap);
++  outDs.totElements = outSize * inSize * xGroups;
++
++  for (int core = 0; core < numCores; ++core) {
++    const int consumerX = core % xGroups;
++    const std::string key = "dst" + std::to_string(core);
++    auto& piece = outDs.pieces_[key];
++    piece.key_ = key;
++    piece.dimToSize_ = DCGUtils::createNFillMap(layoutDims, dstSize);
++    piece.dimToStartCordinate =
++        DCGUtils::createNFillMap(layoutDims,
++                                 std::vector<double>{0, double(dstInStart),
++                                                     double(consumerX)});
++    piece.validGap_ = DCGUtils::createNFillMap(layoutDims, dstGap);
++    piece.placement[SenComponents::LX];
++    piece.placement[SenComponents::LX].setType(SenComponents::LX);
++    piece.placement[SenComponents::LX].insertMemId(core);
++    piece.placement[SenComponents::LX].insertStAddr(dstLxBase);
++  }
++  outDs.lxSize_ = int64_t(pow(2, 21));
++  myDataOpDsc.labeledDs_.push_back(outDs);
++}
++
++void populateDataDSCwithFlashGroupedAllgather(DataOpDsc& myDataOpDsc) {
++  populateDataDSCwithFlashGroupedAllgatherImpl(
++      myDataOpDsc, "FlashGroupedAllgather", 4096, 128, 4, 512, 131072, 0);
++}
++
++void populateDataDSCwithFlashGroupedAllgatherSmall(DataOpDsc& myDataOpDsc) {
++  populateDataDSCwithFlashGroupedAllgatherImpl(
++      myDataOpDsc, "FlashGroupedAllgatherSmall", 1024, 16, 2, 512, 131072, 0);
++}
++
++void populateDataDSCwithFlashGroupedAllgatherFanout4(DataOpDsc& myDataOpDsc) {
++  populateDataDSCwithFlashGroupedAllgatherImpl(
++      myDataOpDsc, "FlashGroupedAllgatherFanout4", 2048, 16, 2, 512, 131072,
++      0);
++}
++
++void populateDataDSCwithFlashGroupedAllgatherFanout8X1(DataOpDsc& myDataOpDsc) {
++  populateDataDSCwithFlashGroupedAllgatherImpl(
++      myDataOpDsc, "FlashGroupedAllgatherFanout8X1", 4096, 16, 1, 512,
++      131072, 0);
++}
++
++void populateDataDSCwithFlashGroupedAllgatherMid(DataOpDsc& myDataOpDsc) {
++  populateDataDSCwithFlashGroupedAllgatherImpl(
++      myDataOpDsc, "FlashGroupedAllgatherMid", 2048, 16, 4, 512, 131072, 0);
++}
++
++void populateDataDSCwithFlashGroupedAllgatherFullIn16(DataOpDsc& myDataOpDsc) {
++  populateDataDSCwithFlashGroupedAllgatherImpl(
++      myDataOpDsc, "FlashGroupedAllgatherFullIn16", 4096, 16, 4, 512, 131072,
++      0);
++}
++
++void populateDataDSCwithFlashGroupedAllgatherFullIn32(DataOpDsc& myDataOpDsc) {
++  populateDataDSCwithFlashGroupedAllgatherImpl(
++      myDataOpDsc, "FlashGroupedAllgatherFullIn32", 4096, 32, 4, 512, 131072,
++      0);
++}
++
++void populateDataDSCwithFlashGroupedAllgatherFullIn64(DataOpDsc& myDataOpDsc) {
++  populateDataDSCwithFlashGroupedAllgatherImpl(
++      myDataOpDsc, "FlashGroupedAllgatherFullIn64", 4096, 64, 4, 512, 131072,
++      0);
++}
++
++void populateDataDSCwithFlashGroupedAllgatherChunkedIn16(DataOpDsc& myDataOpDsc) {
++  populateDataDSCwithFlashGroupedAllgatherImpl(
++      myDataOpDsc, "FlashGroupedAllgatherChunkedIn16", 4096, 128, 4, 512,
++      131072, 0, 16);
++}
++
++void populateDataDSCwithFlashGroupedAllgatherSlice(
++    DataOpDsc& myDataOpDsc, int inChunkStart, int inChunkSize) {
++  populateDataDSCwithFlashGroupedAllgatherImpl(
++      myDataOpDsc,
++      "FlashGroupedAllgatherSlice" + std::to_string(inChunkStart), 4096, 128,
++      4, 512, 131072, 0, inChunkSize, inChunkStart, true);
++}
++
+ void populateDataDSCwithMultiCast(DataOpDsc& myDataOpDsc, double pad_val,
+                                   int prodID,
+                                   std::vector<int> CoreIDs) {  // consCoreIDS
+diff --git a/dcg/unit_tests/dcg_test_init.cpp b/dcg/unit_tests/dcg_test_init.cpp
+index ae2b1bca3..6d18b84c2 100644
+--- a/dcg/unit_tests/dcg_test_init.cpp
++++ b/dcg/unit_tests/dcg_test_init.cpp
+@@ -34,6 +34,24 @@ void populateDataDSCwithSample(DataOpDsc& myDataOpDsc, std::string dataOp,
+   } else if (dataOp == "DimSplit") {
+     populateDataDSCwithDimSplit(myDataOpDsc, {1, 4, 1, 2}, {1, 2, 2, 1},
+                                 {0, 1, 2, 3, 4, 5, 6, 7}, {0, 1, 2, 3});
++  } else if (dataOp == "FlashGroupedAllgather") {
++    populateDataDSCwithFlashGroupedAllgather(myDataOpDsc);
++  } else if (dataOp == "FlashGroupedAllgatherSmall") {
++    populateDataDSCwithFlashGroupedAllgatherSmall(myDataOpDsc);
++  } else if (dataOp == "FlashGroupedAllgatherFanout4") {
++    populateDataDSCwithFlashGroupedAllgatherFanout4(myDataOpDsc);
++  } else if (dataOp == "FlashGroupedAllgatherFanout8X1") {
++    populateDataDSCwithFlashGroupedAllgatherFanout8X1(myDataOpDsc);
++  } else if (dataOp == "FlashGroupedAllgatherMid") {
++    populateDataDSCwithFlashGroupedAllgatherMid(myDataOpDsc);
++  } else if (dataOp == "FlashGroupedAllgatherFullIn16") {
++    populateDataDSCwithFlashGroupedAllgatherFullIn16(myDataOpDsc);
++  } else if (dataOp == "FlashGroupedAllgatherFullIn32") {
++    populateDataDSCwithFlashGroupedAllgatherFullIn32(myDataOpDsc);
++  } else if (dataOp == "FlashGroupedAllgatherFullIn64") {
++    populateDataDSCwithFlashGroupedAllgatherFullIn64(myDataOpDsc);
++  } else if (dataOp == "FlashGroupedAllgatherChunkedIn16") {
++    populateDataDSCwithFlashGroupedAllgatherChunkedIn16(myDataOpDsc);
+   } else if (dataOp == "MultiCast1") {
+     populateDataDSCwithMultiCast(myDataOpDsc, 1, 0, {0, 1, 2, 3});
+   } else if (dataOp == "HBM2HBMCopy") {
+diff --git a/dcg/unit_tests/dcg_unit_tests.h b/dcg/unit_tests/dcg_unit_tests.h
+index 059c7a3a9..05176f98e 100644
+--- a/dcg/unit_tests/dcg_unit_tests.h
++++ b/dcg/unit_tests/dcg_unit_tests.h
+@@ -25,6 +25,19 @@ void populateDataDSCwithDimSplit(DataOpDsc& myDataOpDsc,
+ void populateDataDSCwithMultiCast(DataOpDsc& myDataOpDsc, double pad_val,
+                                   int prodID, std::vector<int> CoreIDs);
+ 
++void populateDataDSCwithFlashGroupedAllgather(DataOpDsc& myDataOpDsc);
++void populateDataDSCwithFlashGroupedAllgatherSmall(DataOpDsc& myDataOpDsc);
++void populateDataDSCwithFlashGroupedAllgatherFanout4(DataOpDsc& myDataOpDsc);
++void populateDataDSCwithFlashGroupedAllgatherFanout8X1(DataOpDsc& myDataOpDsc);
++void populateDataDSCwithFlashGroupedAllgatherMid(DataOpDsc& myDataOpDsc);
++void populateDataDSCwithFlashGroupedAllgatherFullIn16(DataOpDsc& myDataOpDsc);
++void populateDataDSCwithFlashGroupedAllgatherFullIn32(DataOpDsc& myDataOpDsc);
++void populateDataDSCwithFlashGroupedAllgatherFullIn64(DataOpDsc& myDataOpDsc);
++void populateDataDSCwithFlashGroupedAllgatherChunkedIn16(DataOpDsc& myDataOpDsc);
++void populateDataDSCwithFlashGroupedAllgatherSlice(
++    DataOpDsc& myDataOpDsc, int inChunkStart, int inChunkSize);
++
++
+ void populateDataDSCwithSampleRelayout(DataOpDsc& myDataOpDsc);
+ 
+ void populateDataDSCwithSimpleMultiCast(DataOpDsc& myDataOpDsc);
+@@ -220,4 +233,4 @@ void populateDataDSCwithsegmentedAllToALL(DataOpDsc& myDataOpDsc,
+ void populateDataDSCwithNearNeighborUnicast(DataOpDsc& myDataOpDsc,
+                                             int num_cores = 32);
+ 
+-}  // namespace DCGDataDSCGenerator
+\ No newline at end of file
++}  // namespace DCGDataDSCGenerator
+diff --git a/dsm/sen_data_ops.cpp b/dsm/sen_data_ops.cpp
+index f01703602..11197aaf2 100644
+--- a/dsm/sen_data_ops.cpp
++++ b/dsm/sen_data_ops.cpp
+@@ -5122,7 +5122,7 @@ void Dsm::doStcdpDataDscFission(sengraph::Node* currNode,
+             auto& inpPiece = pieces.at(p);
+             bool matchedOutPieceFound = false;
+             for (auto op = 0; op < outPieces.size(); op++) {
+-              auto& outPiece = pieces.at(op);
++              auto& outPiece = outPieces.at(op);
+               if (outPiece->dimToSize_ == inpPiece->dimToSize_ &&
+                   outPiece->dimToStartCordinate ==
+                       inpPiece->dimToStartCordinate) {
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index debe5a3f2..8683495da 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -2,13 +2,16 @@
+ #include <dsc/superdsc.h>
+ #include <sharedtools/mem_track_bundle.h>
+ 
++#include <algorithm>
+ #include <cctype>
++#include <cmath>
+ #include <cstdlib>
+ #include <filesystem>
+ #include <fstream>
+ #include <map>
+ #include <set>
+ #include <string>
++#include <vector>
+ 
+ #include "dxp.h"
+ #include "util/LayoutAllgatherRestickify.h"
+@@ -68,6 +71,13 @@ static bool layoutAllgatherRestickifyMatchesLds(
+ 
+ static LayoutAllgatherRestickifyHookPlan findLayoutAllgatherRestickifyPlan(
+     const SuperDsc* sdsc, const LabeledDsInfo& lds) {
++  const char* onlySdsc =
++      std::getenv("DEEPTOOLS_LAYOUT_ALLGATHER_RESTICKIFY_ONLY_SDSC");
++  if (onlySdsc != nullptr && std::string(onlySdsc).size() > 0 &&
++      sdsc->name_.find(onlySdsc) == std::string::npos) {
++    return {};
++  }
++
+   for (const auto& entry : sdsc->lxRelayoutClassifications_) {
+     const auto& fields = entry.second;
+     const auto kindIt = fields.find("kind");
+@@ -321,6 +331,121 @@ static void addReplicatedLxPiece(
+   dataLds.pieces_[key] = piece;
+ }
+ 
++
++static void addReplicatedLxPieceWithAddresses(
++    LdsInfo& dataLds, const std::string& key,
++    const std::map<int, int64_t>& startAddressByCore,
++    const std::map<std::string, double>& dimToSize,
++    const std::map<std::string, double>& dimToStart) {
++  DT_CHECK(!startAddressByCore.empty());
++  PieceInfo piece;
++  piece.key_ = key;
++  piece.dimToSize_ = dimToSize;
++  piece.dimToStartCordinate = dimToStart;
++  for (const auto& dimAndSize : dimToSize) {
++    piece.validGap_[dimAndSize.first].push_back(
++        std::make_pair(dimAndSize.second, 0));
++  }
++  piece.placement[SenComponents::LX];
++  piece.placement.at(SenComponents::LX).setType(SenComponents::LX);
++  for (const auto& coreAndAddress : startAddressByCore) {
++    piece.placement.at(SenComponents::LX).insertMemId(coreAndAddress.first);
++    piece.placement.at(SenComponents::LX).insertStAddr(coreAndAddress.second);
++    dataLds.coreIdTolxStartAddress_[coreAndAddress.first] =
++        coreAndAddress.second;
++  }
++  dataLds.pieces_[key] = piece;
++}
++
++static int64_t pieceSizeBytes(const std::map<std::string, double>& dimToSize,
++                              double wordLength) {
++  double total = wordLength;
++  for (const auto& dimAndSize : dimToSize) total *= dimAndSize.second;
++  return static_cast<int64_t>(std::ceil(total));
++}
++
++static bool containsDim(const std::vector<std::string>& dims,
++                        const std::string& dim) {
++  return std::find(dims.begin(), dims.end(), dim) != dims.end();
++}
++
++
++static bool containsPrimaryDim(const std::vector<PrimaryDimTypes>& dims,
++                               PrimaryDimTypes dim) {
++  return std::find(dims.begin(), dims.end(), dim) != dims.end();
++}
++
++static PrimaryDimTypes mapFlashRestickifyDimToConsumerKernelDim(
++    PrimaryDimTypes dim) {
++  // layout_allgather_restickify metadata for flash carries producer/restickify
++  // coordinates in the restickify tensor space. The batchmatmul KERNEL operand
++  // consumes the same values under a renamed coordinate system:
++  //   restickify.x   -> batchmatmul.out
++  //   restickify.out -> batchmatmul.in
++  //   restickify.mb  -> batchmatmul.x
++  if (dim == PrimaryDimTypes::X) return PrimaryDimTypes::OUT;
++  if (dim == PrimaryDimTypes::OUT) return PrimaryDimTypes::IN;
++  if (dim == PrimaryDimTypes::MB) return PrimaryDimTypes::X;
++  return dim;
++}
++
++static std::map<int, std::map<PrimaryDimTypes, int>>
++mapFlashRestickifyCoordsToConsumerKernelCoords(
++    const std::map<int, std::map<PrimaryDimTypes, int>>& sourceCoreIdToWkSlice,
++    const std::vector<PrimaryDimTypes>& consumerTensorDims) {
++  std::map<int, std::map<PrimaryDimTypes, int>> result;
++  for (const auto& coreAndSlice : sourceCoreIdToWkSlice) {
++    auto& mapped = result[coreAndSlice.first];
++    for (const auto& dimAndSlice : coreAndSlice.second) {
++      const auto mappedDim =
++          mapFlashRestickifyDimToConsumerKernelDim(dimAndSlice.first);
++      if (!containsPrimaryDim(consumerTensorDims, mappedDim)) continue;
++      mapped[mappedDim] = dimAndSlice.second;
++    }
++  }
++  return result;
++}
++
++static int64_t stickAdjustedExtent(const LdsInfo& lds,
++                                   const std::string& dimName,
++                                   double extent) {
++  if (!containsDim(lds.stickDimOrder_, dimName)) {
++    return static_cast<int64_t>(extent);
++  }
++  return static_cast<int64_t>(
++      std::ceil(extent / lds.dimToStickSize_.at(dimName)));
++}
++
++static int64_t byteOffsetWithinPiece(
++    const LdsInfo& lds, const std::map<std::string, double>& pieceDimToSize,
++    const std::map<std::string, double>& pieceDimToStart,
++    const std::map<std::string, double>& subpieceDimToStart) {
++  constexpr int64_t kBytesPerStick = 128;
++  int64_t offset = 0;
++  for (int idx = static_cast<int>(lds.layoutDimOrder_.size()) - 1; idx >= 0;
++       --idx) {
++    const std::string& dimName = lds.layoutDimOrder_.at(idx);
++    int64_t diff = static_cast<int64_t>(
++        subpieceDimToStart.at(dimName) - pieceDimToStart.at(dimName));
++    if (containsDim(lds.stickDimOrder_, dimName)) {
++      diff = static_cast<int64_t>(
++          std::ceil(static_cast<double>(diff) /
++                    lds.dimToStickSize_.at(dimName)));
++    }
++    DT_CHECK(diff >= 0);
++    if (diff == 0) continue;
++
++    int64_t elementsToSkip = 1;
++    for (int idx2 = idx - 1; idx2 >= 0; --idx2) {
++      const std::string& innerDimName = lds.layoutDimOrder_.at(idx2);
++      elementsToSkip *= stickAdjustedExtent(
++          lds, innerDimName, pieceDimToSize.at(innerDimName));
++    }
++    offset += diff * elementsToSkip * kBytesPerStick;
++  }
++  return offset;
++}
++
+ static int64_t lxStartAddressForCore(const LabeledDsInfo& lds, int coreId) {
+   const auto memOrgIt = lds.memOrg_.find(SenComponents::LX);
+   if (memOrgIt == lds.memOrg_.end() ||
+@@ -374,7 +499,7 @@ static bool attachMatmulOperandBroadcastInputFetch(
+     destinationCores.push_back(coreAndSlice.first);
+   }
+ 
+-  std::vector<int> dataOpIndices;
++  std::vector<std::pair<int, std::vector<int>>> dataOpScheduleEntries;
+   for (const auto& coreAndSlice : producerCoreIdToWkSlice) {
+     DataOpDsc ddsc;
+     ddsc.dscName_ = sdsc->name_ + "-" + lds.dsName_ +
+@@ -438,11 +563,11 @@ static bool attachMatmulOperandBroadcastInputFetch(
+                          replicatedDstAddr, dimToSize, dimToStart);
+ 
+     const int dataOpIdx = static_cast<int>(sdsc->dataOpdscs_.size());
++    const auto dataOpCoreIds = ddsc.coreIdsUsed_;
+     sdsc->dataOpdscs_.push_back(ddsc);
+-    dataOpIndices.push_back(dataOpIdx);
++    dataOpScheduleEntries.push_back({dataOpIdx, dataOpCoreIds});
+   }
+ 
+-  allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
+   for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
+     auto& schedule = sdsc->coreIdToDscSchedule[coreAndSlice.first];
+     auto insertPos = schedule.begin();
+@@ -452,15 +577,260 @@ static bool attachMatmulOperandBroadcastInputFetch(
+         break;
+       }
+     }
+-    for (const auto dataOpIdx : dataOpIndices) {
+-      insertPos = schedule.insert(insertPos,
+-                                  DscScheduleStep(dataOpIdx, -1, false, true));
++    for (const auto& dataOpEntry : dataOpScheduleEntries) {
++      const auto& dataOpCoreIds = dataOpEntry.second;
++      if (std::find(dataOpCoreIds.begin(), dataOpCoreIds.end(),
++                    coreAndSlice.first) == dataOpCoreIds.end()) {
++        continue;
++      }
++      insertPos = schedule.insert(
++          insertPos, DscScheduleStep(dataOpEntry.first, -1, false, true));
+       ++insertPos;
+     }
+   }
+   return true;
+ }
+ 
++
++static bool attachLayoutAllgatherRestickifyInputFetch(
++    SuperDsc* sdsc, SuperDsc* movementSdsc, LabeledDsInfo& lds,
++    const LayoutAllgatherRestickifyHookPlan& hook, int ps,
++    MemTrackBundle* memTrackers, std::string* reason) {
++  if (movementSdsc == nullptr) movementSdsc = sdsc;
++  DT_CHECK(sdsc->dscs_.size() == 1);
++  if (!hook.plan.ok) {
++    *reason = "layout_allgather_restickify plan is not valid: " +
++              hook.plan.reason;
++    return false;
++  }
++
++  auto& dldsc = sdsc->dscs_.at(0);
++  auto allocNode = lds.memOrg_.count(SenComponents::LX)
++                       ? lds.memOrg_.at(SenComponents::LX).allocateNode_
++                       : nullptr;
++  if (allocNode == nullptr) {
++    *reason = "layout_allgather_restickify input has no LX allocate node";
++    return false;
++  }
++
++  const auto producerCoreIdToWkSlice =
++      allocNode->allocateCoordinates_.coreIdToWkSlice_;
++  if (producerCoreIdToWkSlice.empty()) {
++    *reason =
++        "layout_allgather_restickify input has empty producer coordinates";
++    return false;
++  }
++
++  const auto logicalTransfers =
++      deeptools::layoutAllgatherRestickifyLogicalTransfers(hook.plan);
++  std::map<int, std::vector<deeptools::LayoutAllgatherRestickifyLogicalTransfer>>
++      transfersByDestination;
++  for (const auto& transfer : logicalTransfers) {
++    transfersByDestination[static_cast<int>(transfer.destinationCore)].push_back(
++        transfer);
++  }
++  if (transfersByDestination.empty()) {
++    *reason = "layout_allgather_restickify produced no logical transfers";
++    return false;
++  }
++
++  const auto& refDsInfo = dldsc.primaryDsInfo_.at(lds.dsType_);
++  // The flash layout_allgather_restickify contract maps restickify.x chunks
++  // into the batchmatmul KERNEL out dimension, while restickify.mb maps to the
++  // consumer x dimension. Use the logical transfer table for exact group/chunk
++  // placement instead of re-inferring it from enum-valued producer coordinates.
++  const auto chunkDim = PrimaryDimTypes::OUT;
++  const auto groupDim = PrimaryDimTypes::X;
++  if (!containsPrimaryDim(refDsInfo.layoutDimOrder_, chunkDim) ||
++      !containsPrimaryDim(refDsInfo.layoutDimOrder_, groupDim)) {
++    *reason = "layout_allgather_restickify expected OUT chunk and X group dims";
++    return false;
++  }
++
++  std::map<std::string, double> dstSliceDimToSize;
++  for (const auto& pDim : refDsInfo.layoutDimOrder_) {
++    const std::string dimName = dataOpDimName(dldsc, pDim);
++    const double dimExtent = dldsc.N_.primaryDimToVal_st(pDim);
++    int split = 1;
++    if (pDim == groupDim) {
++      split = static_cast<int>(hook.plan.groupCount);
++    } else if (pDim == chunkDim) {
++      split = static_cast<int>(hook.plan.producerChunksPerGroup);
++    }
++    DT_CHECK(split > 0);
++    DT_CHECK(static_cast<int>(dimExtent) % split == 0);
++    dstSliceDimToSize[dimName] = dimExtent / split;
++    if (pDim == chunkDim) {
++      dstSliceDimToSize[dimName] *= hook.plan.producerChunksPerGroup;
++    }
++  }
++  const auto dstSliceBytes = pieceSizeBytes(dstSliceDimToSize, lds.wordLength);
++  if (dstSliceBytes <= 0) {
++    *reason = "layout_allgather_restickify destination slice size is not positive";
++    return false;
++  }
++
++  memTrackers->insertPsBefore(ps);
++  std::map<int, int64_t> destinationStartAddressByCore;
++  for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
++    auto& memTracker = memTrackers->lxTrackPerCore.at(coreAndSlice.first);
++    const auto dsName = sdsc->name_ + "-" + lds.dsName_ +
++                        "-LayoutAllgatherRestickify-out";
++    const auto stAddr =
++        memTracker.checkAndAddDs(dsName, "dynamic", dstSliceBytes, {ps});
++    if (stAddr < 0) {
++      *reason = "layout_allgather_restickify could not allocate " +
++                std::to_string(static_cast<long long>(dstSliceBytes)) +
++                " bytes in LX for consumer core " +
++                std::to_string(coreAndSlice.first);
++      return false;
++    }
++    destinationStartAddressByCore[coreAndSlice.first] = stAddr;
++  }
++
++  DataOpDsc ddsc;
++  ddsc.dscName_ = sdsc->name_ + "-" + lds.dsName_ +
++                  "-LayoutAllgatherRestickify";
++  ddsc.opName = OpFuncs::STCDPOpLx;
++  ddsc.op = new STCDPOpLx;
++  ddsc.op->name = OpFuncs::STCDPOpLx;
++  ddsc.primaryDs_["activation"].name_ = "activation";
++  ddsc.target_ = sdsc->target_;
++  ddsc.foldProps_.push_back(new FoldDimProp(
++      sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++
++  std::set<int> coresSeen;
++  for (const auto& transfer : logicalTransfers) {
++    coresSeen.insert(static_cast<int>(transfer.sourceCore));
++    coresSeen.insert(static_cast<int>(transfer.destinationCore));
++  }
++  for (const auto coreId : coresSeen) ddsc.coreIdsUsed_.push_back(coreId);
++
++  ddsc.labeledDs_.resize(2);
++  auto& inpLds = ddsc.labeledDs_.at(0);
++  auto& outLds = ddsc.labeledDs_.at(1);
++  inpLds.ldsName_ = lds.dsName_ + "-LayoutAllgatherRestickify-inp";
++  outLds.ldsName_ = lds.dsName_;
++  fillDataOpLdsShape(inpLds, ddsc, lds, dldsc);
++  fillDataOpLdsShape(outLds, ddsc, lds, dldsc);
++  ddsc.dimPool_ = ddsc.primaryDs_.at("activation").dimNames;
++  DT_CHECK(outLds.stickDimOrder_ == inpLds.stickDimOrder_);
++  DT_CHECK(outLds.dimToStickSize_ == inpLds.dimToStickSize_);
++
++  std::set<int> sourcePiecesSeen;
++  for (const auto& transfer : logicalTransfers) {
++    const int srcCore = static_cast<int>(transfer.sourceCore);
++    if (!sourcePiecesSeen.insert(srcCore).second) continue;
++
++    std::map<std::string, double> srcDimToSize;
++    std::map<std::string, double> srcDimToStart;
++    for (const auto& pDim : refDsInfo.layoutDimOrder_) {
++      const std::string dimName = dataOpDimName(dldsc, pDim);
++      const double dimExtent = dldsc.N_.primaryDimToVal_st(pDim);
++      int split = 1;
++      int sliceIdx = 0;
++      if (pDim == groupDim) {
++        split = static_cast<int>(hook.plan.groupCount);
++        sliceIdx = static_cast<int>(transfer.group);
++      } else if (pDim == chunkDim) {
++        split = static_cast<int>(hook.plan.producerChunksPerGroup);
++        sliceIdx = static_cast<int>(transfer.producerChunk);
++      }
++      DT_CHECK(split > 0);
++      DT_CHECK(static_cast<int>(dimExtent) % split == 0);
++      const double srcSize = dimExtent / split;
++      srcDimToSize[dimName] = srcSize;
++      srcDimToStart[dimName] = sliceIdx * srcSize;
++    }
++    const auto srcAddr = lxStartAddressForCore(lds, srcCore);
++    if (srcAddr < 0) {
++      *reason = "missing source LX base for producer core " +
++                std::to_string(srcCore);
++      return false;
++    }
++    addLxPiece(inpLds, "src" + std::to_string(srcCore), srcCore, srcAddr,
++               srcDimToSize, srcDimToStart);
++  }
++
++  for (const auto& dstCoreAndTransfers : transfersByDestination) {
++    const int dstCore = dstCoreAndTransfers.first;
++    const auto baseIt = destinationStartAddressByCore.find(dstCore);
++    if (baseIt == destinationStartAddressByCore.end()) {
++      *reason = "layout_allgather_restickify destination core is not in consumer schedule: " +
++                std::to_string(dstCore);
++      return false;
++    }
++    if (dstCoreAndTransfers.second.empty()) {
++      *reason = "layout_allgather_restickify destination has no sources: " +
++                std::to_string(dstCore);
++      return false;
++    }
++    const auto& firstTransfer = dstCoreAndTransfers.second.front();
++    std::map<std::string, double> dstDimToStart;
++    for (const auto& pDim : refDsInfo.layoutDimOrder_) {
++      const std::string dimName = dataOpDimName(dldsc, pDim);
++      dstDimToStart[dimName] = 0;
++      if (pDim == groupDim) {
++        const double groupExtent = dldsc.N_.primaryDimToVal_st(pDim) /
++                                  static_cast<double>(hook.plan.groupCount);
++        dstDimToStart[dimName] = firstTransfer.group * groupExtent;
++      }
++    }
++    addLxPiece(outLds, "dst" + std::to_string(dstCore), dstCore,
++               baseIt->second, dstSliceDimToSize, dstDimToStart);
++  }
++
++  const int dataOpIdx = static_cast<int>(movementSdsc->dataOpdscs_.size());
++  const auto dataOpCoreIds = ddsc.coreIdsUsed_;
++  movementSdsc->dataOpdscs_.push_back(ddsc);
++
++  allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
++  auto& stAddr = allocNode->startAddressCoreCorelet_;
++  for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
++    const auto dstIt = destinationStartAddressByCore.find(coreId);
++    stAddr.insertData(dstIt == destinationStartAddressByCore.end()
++                          ? -1
++                          : dstIt->second,
++                      coreId, 0, 0);
++  }
++  if (!lds.coreStateInit_.empty()) {
++    for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
++      if (static_cast<size_t>(coreId) >= lds.coreStateInit_.size()) continue;
++      auto& coreState = lds.coreStateInit_.at(coreId);
++      if (coreState.lbrInit_.empty()) continue;
++      const auto newBase = stAddr.getData(coreId, 0, 0);
++      if (newBase < 0) {
++        for (auto& lbr : coreState.lbrInit_) lbr = -1;
++        continue;
++      }
++      const auto oldBase = coreState.lbrInit_.at(0);
++      const auto delta = static_cast<int>(newBase - oldBase);
++      for (auto& lbr : coreState.lbrInit_) lbr += delta;
++    }
++  }
++
++  if (movementSdsc == sdsc) {
++    for (const auto coreId : dataOpCoreIds) {
++      auto& schedule = movementSdsc->coreIdToDscSchedule[coreId];
++      auto insertPos = schedule.begin();
++      for (auto it = schedule.begin(); it != schedule.end(); ++it) {
++        if (it->dldsc_idx == 0) {
++          insertPos = it;
++          break;
++        }
++      }
++      schedule.insert(insertPos, DscScheduleStep(dataOpIdx, -1, false, true));
++    }
++  } else {
++    movementSdsc->numCoresUsed_ = dataOpCoreIds.size();
++    for (const auto coreId : dataOpCoreIds) {
++      movementSdsc->coreIdToDscSchedule[coreId].push_back(
++          DscScheduleStep(dataOpIdx, -1, false, true));
++    }
++  }
++  return true;
++}
++
+ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+                              MemTrackBundle* memTrackers,
+                              std::vector<SuperDsc*>& relayout_sdscs) {
+@@ -484,14 +854,25 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+     const auto layoutAllgatherHook = findLayoutAllgatherRestickifyPlan(sdsc, lds);
+     if (layoutAllgatherHook.plan.ok ||
+         !layoutAllgatherHook.classificationKey.empty()) {
++      SuperDsc* relayout_sdsc = new SuperDsc;
++      relayout_sdsc->name_ =
++          sdsc->name_ + "-" + lds.dsName_ + "-LayoutAllgatherRestickifyRelayout";
++      relayout_sdsc->sdscFoldProps_.emplace_back(std::make_unique<FoldDimProp>(
++          sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++      relayout_sdsc->sdscFolds_.clone(sdsc->sdscFolds_);
++      relayout_sdsc->coreFoldProp_ =
++          std::make_unique<FoldDimProp>(sdsc->coreFoldProp_->getSize(), "core");
++      relayout_sdsc->coreletFoldProp_ = std::make_unique<FoldDimProp>(
++          sdsc->coreletFoldProp_->getSize(), "corelet");
++      relayout_sdsc->unpadN_ = sdsc->unpadN_;
++      relayout_sdsc->N_ = sdsc->N_;
++      relayout_sdsc->target_ = sdsc->target_;
++
+       std::string materializationReason;
+-      // Diagnostic implementation: treat the classified layout all-gather as
+-      // explicit source-shard fanout into the consumer LX operand. This avoids
+-      // the older generic relayout fallback so we can test the DLDSC collective
+-      // contract end to end before replacing this with a staged realization.
+-      if (!attachMatmulOperandBroadcastInputFetch(
+-              sdsc, lds, MatmulOperandBroadcastHookPlan{},
++      if (!attachLayoutAllgatherRestickifyInputFetch(
++              sdsc, relayout_sdsc, lds, layoutAllgatherHook, ps, memTrackers,
+               &materializationReason)) {
++        delete relayout_sdsc;
+         emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
+                                                   layoutAllgatherHook);
+         DT_CHECK_MSG(false,
+@@ -500,6 +881,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       }
+       emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
+                                                 layoutAllgatherHook);
++      relayout_sdscs.push_back(relayout_sdsc);
+       continue;
+     }
+ 
