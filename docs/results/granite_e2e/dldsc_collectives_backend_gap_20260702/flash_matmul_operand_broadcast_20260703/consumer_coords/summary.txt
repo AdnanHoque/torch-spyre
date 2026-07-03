@@ -1,0 +1,10 @@
+2:matmul_operand_broadcast dst core=0 addr=1048576 bytes=131072
+3:matmul_operand_broadcast dst core=1 addr=1048576 bytes=131072
+4:matmul_operand_broadcast dst core=2 addr=1048576 bytes=131072
+5:matmul_operand_broadcast dst core=3 addr=1048576 bytes=131072
+6:matmul_operand_broadcast consumer base core=0 addr=1048576
+7:matmul_operand_broadcast consumer base core=1 addr=1048576
+8:matmul_operand_broadcast consumer base core=2 addr=1048576
+9:matmul_operand_broadcast consumer base core=3 addr=1048576
+14:  what():  DtException: Unexpected corelet cardinality mismatch for nodes allocate-Tensor1_lx and transfer_lds1_src:lxlu_dst:ptrow0, file /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/deeptools/ddc/ddc_fold.cpp line 1355
+20:  File "/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/min_matmul_operand_broadcast_onehot.py", line 43, in <module>

@@ -48,6 +48,9 @@ All runs used the split frontend/backend LX knob setup:
 | Integrated 4-core one-hot, min LDS base instead of last chunk base | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_minbase_core_lxstart_20260703_110300` | DXP and runtime complete | unchanged: `228312 / 262144` mismatched, max diff `47.0` | Keeping `coreIdTolxStartAddress_` at the first/min destination chunk does not fix the integrated matmul read. |
 | Integrated 4-core one-hot, DataInfo/unit-view dump | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_datainfo_view_20260703_111341` | DXP and runtime complete | `DataInfo.startAddr_` is `0`; unit view is `[(out,64),(in,16),(out,1)]` with only `in` outer loops | Pre-DDC allocation rewrite does not survive into the live MAC input address/view. |
 | Integrated 4-core one-hot, force `DataInfo.startAddr_ = 1048576` after DDC | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_force_datainfo_base_20260703_111728` | DXP and runtime complete | unchanged: `228312 / 262144` mismatched, max diff `47.0` | Rewriting `DataInfo.startAddr_` after DDC is still not enough; the remaining failure is lower than, or in addition to, the DataInfo base field. |
+| Integrated 4-core one-hot, preserve producer `coreIdToWkSlice_` | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_preserve_coords_autoload_20260703_113418` | DXP aborts in DDC | `Can not propagate coordinates for coreletSplit dimensionout from allocateNode allocate-Tensor1_lx with custom coreIdToWkSlice` | The original producer shard map cannot simply be preserved for the staged broadcast operand. DDC needs a valid post-relayout allocation/view contract rather than the old producer map plus address rewrites. |
+| Integrated 4-core one-hot, rewrite staged allocation to consumer `coreIdToWkSlice_` | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_consumer_coords_20260703_114626` | DXP aborts in DDC | `Unexpected corelet cardinality mismatch for nodes allocate-Tensor1_lx and transfer_lds1_src:lxlu_dst:ptrow0` | Consumer compute coordinates are not a valid drop-in replacement for the existing KERNEL allocation. The staged operand still needs a view that DDC can reconcile with the transfer rows. |
+| Integrated 4-core one-hot, clear allocation coordinates entirely | `/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_clear_coords_20260703_114846` | DXP aborts in DDC | `Coordinates of transfer transfer_lds1_src:lxlu_dst:ptrow1 and allocateNode allocate-Tensor1_lx are not consistent` | Clearing the coordinate object is also insufficient. DDC reconstructs/uses an allocation coordinate that is still inconsistent with the transfer rows, so in-place mutation is not isolated enough. |
 
 ## Artifact Files
 
@@ -80,6 +83,10 @@ Additional focused artifacts from the 2026-07-03 offset-address probe:
 - `deeptools_current_dirty_after_minbase_probe.patch`: full dirty CDX diagnostic diff after the min-base probe.
 - `datainfo_view/view_summary.txt`: post-DDC/post-codegen `DataInfo` and `UnitView` dump for the KERNEL RHS.
 - `force_datainfo_base/summary.txt`: negative result for forcing the live `DataInfo.startAddr_` to the staged RHS base.
+- `preserve_producer_coords/summary.txt`: DDC abort proving that preserving the original producer coordinate map is not a valid staged broadcast representation.
+- `consumer_coords/summary.txt`: DDC abort proving that replacing producer coordinates with consumer compute coordinates is not a valid staged broadcast representation.
+- `clear_coords/summary.txt`: DDC abort proving that clearing the original allocation coordinates in place is not enough to create a fresh staged RHS view.
+- `cdx_deeptools_current_experimental_diff_after_clear_coords.patch`: dirty CDX diagnostic diff after the latest coordinate probes.
 
 ## Current Read
 
@@ -95,6 +102,9 @@ The latest probes also rule out three tempting explanations:
 - The problem is not simply an LBR rewrite bug: `coreStateInit_` is empty for this KERNEL input after DDC/codegen.
 - The problem is not simply the data-op LDS base being overwritten by the last destination chunk: forcing it to the first/min destination base leaves values unchanged.
 - The problem is not solved by a late `DataInfo.startAddr_` rewrite: forcing the MAC RHS input base to the staged high-base region leaves the same value pattern.
+- The problem is not solved by preserving the producer coordinate map: DDC rejects that representation because the old producer `coreIdToWkSlice_` does not propagate through the consumer's `out` corelet split.
+- The problem is not solved by replacing the producer map with the consumer map: DDC rejects that representation with a corelet cardinality mismatch.
+- The problem is not solved by clearing the original allocation coordinates in place: DDC still sees coordinates inconsistent with the transfer rows.
 
 Source inspection points to the active matmul RHS address path:
 
@@ -113,6 +123,10 @@ outerLoops_ = in only
 ```
 
 Forcing `DataInfo.startAddr_` to the staged base changes the dumped address to `1048576`, but the output remains unchanged. That suggests either DCC's emitted vector-load path is using an already-derived/cached address form, or the KERNEL unit-view/layout contract still describes the original sharded operand rather than the post-relayout replicated RHS.
+
+Preserving the original producer `coreIdToWkSlice_` makes DDC abort before codegen. This rules out the smallest backend-only fix of "keep the producer coordinates and update addresses." For matmul-operand broadcast, the backend or frontend must construct a real post-relayout logical allocation/view: per destination core, the staged RHS has all source chunks in a layout that the matmul KERNEL reader can consume.
+
+Two follow-on coordinate probes were also negative. Replacing the staged operand map with the consumer compute map trips a corelet cardinality mismatch. Clearing the coordinate object in place trips a transfer/allocation coordinate mismatch. Together, these rule out simple in-place mutation of the existing `Tensor1` allocation. The next viable prototype should either clone the KERNEL labeled DS and redirect the consumer matmul input to that staged DS before DDC, or have Torch emit a named post-relayout operand contract that Deeptools binds to a staged allocation.
 
 ## Runbook: 4-Core Matmul Operand Probe
 
