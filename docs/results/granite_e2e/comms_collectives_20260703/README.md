@@ -149,6 +149,8 @@ Artifacts:
 - `s128_enabled/result.json`
 - `s128_enabled/example_attention_relayout_sdsc_8.json`
 - `s128_enabled/backend_plans/*.json`
+- `clean_clc_s128_enabled/result.json`
+- `clean_clc_s128_enabled/trace_summary.json`
 
 Both runs used `B=1, S=128, H=4096`, causal prefill, two measured iterations, one warmup, and `DEEPTOOLS_PATH` pointed at the Deeptools source tree. That last part matters because the source checkout has `ddc/ddl_templates/restickify_lx.ddl`, while the installed `/opt/ibm/spyre/deeptools/share` path on this pod did not.
 
@@ -187,6 +189,19 @@ realized=false
 ```
 
 This is not a final performance claim: the run is short and wall-time only. It is still an important feasibility point. For a smaller sequence length, the current DLDSC + backend prototype can replace one HBM activation restickify with an LX restickify, emit backend relayout plans, and run end to end.
+
+The same smaller-shape enabled run was reproduced on the clean CLC lane from clean pushed branches:
+
+- `returncode: 0`
+- wall `median_ms: 15.133`
+- Kineto `kernel_ms_per_iter: 10.725`
+- SDSC JSON files: `44`
+- `ReStickifyOpHBM: 4`
+- `ReStickifyOpLx: 1`
+- relayout classification entries: `6`
+- all six entries are `kind=matmul_operand_broadcast`, `communication_class=all_gather`, `realized=false`
+
+This clean-lane result means the branch can compile and run the smaller case with an LX restickify present. It does not by itself prove the full S=512 Granite target is solved.
 
 ### 7. Chunked fission avoids full allocation but still cannot feed matmul
 
@@ -228,6 +243,32 @@ transfer-loop path
 ```
 
 This proves the next missing piece is not just "generate more ring transfers." The backend can describe the chunked movement. The missing implementation is a matmul-consumer path that accepts staged operand chunks instead of requiring a complete resident RHS tensor.
+
+The clean CLC S=512 enabled run shows the same area is not production-safe yet:
+
+- `clean_clc_s512_enabled/stdout.log`
+- `clean_clc_s512_enabled/stderr.log`
+
+It emitted the same class of metadata before aborting at runtime:
+
+```text
+ReStickifyOpHBM: 4
+ReStickifyOpLx: 1
+classification entries: 6
+kind: matmul_operand_broadcast
+communication_class: all_gather
+realized: false
+```
+
+The runtime failure was:
+
+```text
+RuntimeStream::synchronize() still waiting after 60000ms
+PCIe bus master fence, code 0xa35e
+Signal Received: 6 (Aborted)
+```
+
+So the clean branch does not fail closed soon enough for S=512. The dirty CDX diagnostic branch was useful because it converts that unsafe runtime behavior into an earlier explicit backend error.
 
 ## Interpretation
 

@@ -1,0 +1,14 @@
+{
+  "active_iters": 1,
+  "kernel_durations_ms": {
+    "<unnamed>": 10.725152
+  },
+  "kernel_event_counts": {
+    "<unnamed>": 4
+  },
+  "kernel_ms_per_iter": 10.725152,
+  "kernel_ms_total": 10.725152,
+  "memory_ms_per_iter": 0.22610399999999997,
+  "memory_ms_total": 0.22610399999999997,
+  "trace": "/home/adnan/codex-isolated/dldsc_granite_clean_relayout_20260703_163108/runs/granite_relayout_s128_20260703_174220/block_prefill/profile/adnan-clc-spyre-dev-pf_86475.1783098593393150491.pt.trace.json"
+}
