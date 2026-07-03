@@ -332,6 +332,46 @@ The chunked fission diagnostic narrows the S=512 gap further: compact movement S
 
 The flash-attention probe reinforces that this backend feature is shared. Solving staged matmul-operand all-gather should address both the Granite attention spill class and the standalone flash attention spill class.
 
+## Backend Seam For Staged Matmul RHS
+
+The current backend has useful pieces, but they do not yet compose into a valid staged matmul operand.
+
+Existing pieces:
+
+- `InputFetchNeighbor` / STCDP can describe LX-to-LX movement.
+- The scheduler has some `KERNEL`-operand awareness, not only `INPUT`.
+- The relayout diagnostic can emit compact fission movement SDSCs for every producer-core chunk.
+
+Missing piece:
+
+- DL matmul still consumes its RHS through one resident `DataInfo` / LDS base pointer.
+- Separate chunked movement SDSCs do not become a live per-chunk RHS value for the matmul compute.
+
+Relevant files from the CDX checkout:
+
+```text
+dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+  Partial KERNEL/RHS IFN awareness.
+
+dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+  Detects LX-neighbor only when data-op and DL op are paired in one schedule step.
+  Has the likely schedule-tree hook for chunked transfer before compute.
+
+dcg/dcg_manager/dcg_manager.cpp
+  Classifies paired datadsc+dldsc steps as IFN and calls generatePcfgIRForDataOpInpFetch.
+
+dsc/dsc2.h
+  DataInfo has one myLdsIdx_ / startAddr_ model.
+
+dcc/src/Conversion/DSC2ToDataflowIR/V3/SNComputeLowering.cpp
+  Lowers compute inputs from the resident DataInfo address.
+
+dxp/SdscRelayoutInsertion.cpp
+  Current prototype emits movement SDSCs, but the staged-matmul path fails closed.
+```
+
+The likely production direction is to reuse the existing LX-neighbor scheduling machinery, but represent the matmul RHS relayout as a paired IFN+DL schedule step or a fused schedule tree. The STCDP movement and the batchmatmul RHS chunk loop need to share the same schedule context. A separate pre-matmul movement SDSC is not enough for Granite-sized attention because it either materializes the whole RHS or leaves matmul pointing at a stale/static LDS base.
+
 This matches the current North Star:
 
 1. Torch should classify the edge and decide that this is an all-gather/replicate communication.
