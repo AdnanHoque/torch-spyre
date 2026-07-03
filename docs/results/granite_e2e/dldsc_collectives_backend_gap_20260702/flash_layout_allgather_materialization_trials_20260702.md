@@ -142,6 +142,78 @@ Mismatch: ~99.2%
 
 Conclusion: missing resident destination capacity was also a real gap, but not sufficient.
 
+
+
+### Destination-Grouped Transfer-Coordinate Prototype
+
+Run:
+
+```text
+runs/test_flash_grouped_materializer_transfercoords_20260703_000721
+```
+
+Change tested:
+
+```text
+Groups logical transfers by destination core.
+Allocates one full gathered KERNEL operand per destination core.
+Places source pieces from the explicit logical transfer tuple:
+  group -> consumer x coordinate
+  producer_chunk -> consumer out coordinate
+Schedules each STCDPOpLx row only on its destination plus participating source cores.
+```
+
+Result:
+
+```text
+DXP compile: passes.
+Runtime execution: reaches all three kernels.
+Correctness: fails.
+Mismatch: 16646934 / 16777216 (99.2%)
+Greatest absolute difference: inf at index (0, 0, 0, 0)
+```
+
+Interpretation:
+
+```text
+This removes the earlier DXP abort from chunk-dimension inference and proves the grouped transfer-coordinate plan is syntactically executable. It does not recover value correctness. The remaining gap is therefore below classification and high-level grouping: either STCDPOpLx is not realizing this many-source translated copy as intended, or the mixed data-op schedule does not have the required semantics for this shape.
+```
+
+### Single Data-Op Row Transfer-Coordinate Prototype
+
+Run:
+
+```text
+runs/test_flash_single_dataop_20260703_002453
+```
+
+Change tested:
+
+```text
+Collapses each grouped layout-allgather remap into one STCDPOpLx data-op row.
+The row owns all unique source pieces and all destination pieces for the consumer operand.
+The row is scheduled on the union of source and destination cores before the consuming batchmatmul.
+```
+
+Result:
+
+```text
+DXP compile: passes.
+Runtime execution: reaches all three kernels.
+Backend plans emitted: 32 layout_allgather_restickify plans.
+Correctness: fails.
+Mismatch: 16646916 / 16777216 (99.2%)
+Greatest absolute difference: inf at index (0, 0, 0, 0)
+```
+
+Interpretation:
+
+```text
+The previous 99.2% failure was not caused only by emitting too many data-op rows.
+Even a single wide STCDPOpLx row with explicit source and destination pieces is value-wrong.
+That pushes the gap toward translated LX->LX materialization semantics, address interpretation, or schedule semantics for mixed data-op rows, not frontend classification or row granularity.
+```
+
 ### Materialization Debug / Local-Range Prototype
 
 Run:
@@ -173,7 +245,7 @@ Conclusion: encoding destination chunk placement through byte address offsets di
 
 ## Current Read
 
-The invariant ~99.2% mismatch across materially different movement descriptions suggests the inserted mixed `dataOpdscs_` rows may not actually be realized/executed in this scheduled path, or STCDPOpLx cannot express this translated copy through the current piece-overlap interface.
+The invariant ~99.2% mismatch across materially different movement descriptions suggests the inserted mixed `dataOpdscs_` rows may not actually be realized/executed in this scheduled path, or STCDPOpLx cannot express this translated copy through the current piece-overlap interface. The single-row prototype makes this sharper: row count and schedule-entry explosion are not sufficient explanations.
 
 The backend gap is now narrower:
 

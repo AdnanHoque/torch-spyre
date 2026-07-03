@@ -28,6 +28,7 @@ Two DXP replays were run against the same bundle:
 | Staged standalone rows plus generic DCC LX LRF immediate split | /home/adnan/codex-isolated/dldsc_collectives_validate_20260702_112302/runs/dxp_replay_attention_kernel_staged_standalone_allgather_rows_lrfimm_split_20260702_144019 | Passes DXP replay, exit_code=0. Both 10_batchmatmul and 18_batchmatmul compile with 32 staged DataDsc PCFG sections. |
 | Full one-layer Granite prefill with the same DCC immediate split | /home/adnan/codex-isolated/dldsc_collectives_validate_20260702_112302/runs/granite_prefill_optimized_lrfimm_split_20260702_144212 | Reaches runtime, then fails with RAS::PCI::BusFence. This is no longer the previous DXP/DCC compile failure. |
 | Standalone latest flash attention on CDX with same Deeptools prototype | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_lrfimm_split_autoload_20260702_151321 | Compiles and runs three kernels, then fails correctness: 96.7% mismatched, greatest absolute difference inf. No ReStickifyOpHBM rows; 32 ReStickifyOpLx rows; 32 backend layout-allgather plans. |
+| Standalone latest flash attention with single-row translated all-gather | /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/test_flash_single_dataop_20260703_002453 | Compiles and runs three kernels, then fails correctness: 99.2% mismatched, greatest absolute difference inf. This rules out row-count alone as the cause. |
 
 The staged replay emitted 32 Creating PCFG for DataDsc sections for 10_batchmatmul, so splitting the monolithic row reduces row size but does not by itself fix the address-encoding issue.
 
@@ -60,7 +61,7 @@ Backend/Deeptools should:
 
 ## Current next step
 
-The standalone flash run has now isolated the attention path: the movement is executable but value-wrong. The next backend task is to debug destination coordinate/address mapping and movement schedule placement for the realized layout-allgather/restickify transfers. The full Granite bus fence should be treated as a later integration symptom until the standalone flash value path is corrected.
+The standalone flash run has now isolated the attention path: the movement is executable but value-wrong. Both the destination-grouped transfer-coordinate prototype (`runs/test_flash_grouped_materializer_transfercoords_20260703_000721`) and the single-row transfer-coordinate prototype (`runs/test_flash_single_dataop_20260703_002453`) pass DXP/runtime and fail correctness at 99.2% mismatch. The next backend task is the physical realization contract for translated many-source LX->LX copies, not frontend classification or data-op row granularity. The full Granite bus fence should be treated as a later integration symptom until the standalone flash value path is corrected.
 
 ## Files in this directory
 
