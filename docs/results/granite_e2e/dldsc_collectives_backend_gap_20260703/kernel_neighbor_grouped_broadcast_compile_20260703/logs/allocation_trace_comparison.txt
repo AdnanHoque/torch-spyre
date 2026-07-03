@@ -1,0 +1,13 @@
+# Allocation trace comparison
+
+## Before loop-scoped KERNEL-neighbor allocation
+[TRACE_KERNEL_NEIGHBOR_ALLOC] sdsc=8_batchmatmul dscIdx=0 ldsIdx=1 lds=Tensor1 dsType=2 alloc=allocate_lds1_lx numBuffers=1 perBufferSize=2097152 allocationSize=2097152
+[TRACE_KERNEL_NEIGHBOR_ALLOC_FAIL] sdsc=8_batchmatmul dscIdx=0 ds=Tensor1 size=2097152 capacity=2031616 comp=lx core=0 corelet=0 row=0
+
+## After loop-scoped KERNEL-neighbor allocation
+[TRACE_KERNEL_NEIGHBOR_ALLOC] sdsc=8_batchmatmul dscIdx=0 ldsIdx=1 lds=Tensor1 dsType=2 alloc=allocate_lds1_lx numBuffers=1 perBufferSize=65536 allocationSize=65536
+[TRACE_KERNEL_NEIGHBOR_ALLOC] sdsc=8_batchmatmul dscIdx=0 ldsIdx=1 lds=Tensor1 dsType=2 alloc=allocate_lds1_lx numBuffers=1 perBufferSize=65536 allocationSize=65536
+[TRACE_KERNEL_NEIGHBOR_ALLOC] sdsc=8_batchmatmul dscIdx=0 ldsIdx=1 lds=Tensor1 dsType=2 alloc=allocate_lds1_lx numBuffers=1 perBufferSize=65536 allocationSize=65536
+[TRACE_KERNEL_NEIGHBOR_ALLOC] sdsc=8_batchmatmul dscIdx=0 ldsIdx=1 lds=Tensor1 dsType=2 alloc=allocate_lds1_lx numBuffers=1 perBufferSize=65536 allocationSize=65536
+[TRACE_KERNEL_NEIGHBOR_ALLOC] sdsc=8_batchmatmul dscIdx=0 ldsIdx=1 lds=Tensor1 dsType=2 alloc=allocate_lds1_lx numBuffers=1 perBufferSize=65536 allocationSize=65536
+[TRACE_KERNEL_NEIGHBOR_ALLOC] sdsc=8_batchmatmul dscIdx=0 ldsIdx=1 lds=Tensor1 dsType=2 alloc=allocate_lds1_lx numBuffers=1 perBufferSize=65536 allocationSize=65536
