@@ -68,7 +68,7 @@ Backend/Deeptools should:
 
 ## Current next step
 
-The standalone flash run has now isolated two backend gaps. First, the layout-changing attention edge is executable but value-wrong: destination-grouped transfer-coordinate (`runs/test_flash_grouped_materializer_transfercoords_20260703_000721`), single-row transfer-coordinate (`runs/test_flash_single_dataop_20260703_002453`), standalone relayout SuperDSC (`runs/test_flash_standalone_relayout_20260703_003708`), and the isolated fission-4 `105_batchmatmul` run (`runs/test_flash_direct_allgather_only105_fission4_sourceonly_20260703_065227`) all pass DXP/runtime and fail correctness. The diagnosis is that this edge is `layout_allgather_restickify`, not pure all-gather: the producer/restickify stick layout differs from the consumer KERNEL layout, and the 256-transfer summary under-materializes the operand. Second, with that edge disabled, the generic matmul operand path now emits and runs the expected 1024-transfer plan, but it is still value-wrong. The next backend task is a value-pattern unit test for `matmul_operand_broadcast` that proves every producer chunk lands in the correct destination logical slot before returning to full flash attention.
+The standalone flash run has now isolated two backend gaps. First, the layout-changing attention edge is executable but value-wrong: destination-grouped transfer-coordinate (`runs/test_flash_grouped_materializer_transfercoords_20260703_000721`), single-row transfer-coordinate (`runs/test_flash_single_dataop_20260703_002453`), standalone relayout SuperDSC (`runs/test_flash_standalone_relayout_20260703_003708`), and the isolated fission-4 `105_batchmatmul` run (`runs/test_flash_direct_allgather_only105_fission4_sourceonly_20260703_065227`) all pass DXP/runtime and fail correctness. The diagnosis is that this edge is `layout_allgather_restickify`, not pure all-gather: the producer/restickify stick layout differs from the consumer KERNEL layout, and the 256-transfer summary under-materializes the operand. Second, with that edge disabled, the generic matmul operand path now emits and runs the expected 1024-transfer plan, but it is still value-wrong. The current fast repro is the 4-core `matmul_operand_broadcast` probe documented in `flash_matmul_operand_broadcast_20260703/README.md`: DXP initially inserted the relayout rows after the consumer because `SdscTree::getAllSdscNodes()` returned storage order instead of tree order; after an experimental traversal fix, relayout rows execute before matmul but still materialize the wrong RHS layout. The next backend task is to debug the STCDPOpLx piece/address semantics for multi-destination LX output pieces on that 4-core repro before returning to full flash attention.
 
 ## Files in this directory
 
@@ -87,6 +87,9 @@ The standalone flash run has now isolated two backend gaps. First, the layout-ch
 - 105_batchmatmul_Tensor1_layout_allgather_restickify_fission4_sourceonly_plan_20260703.json
 - 105_batchmatmul_Tensor1_matmul_operand_broadcast_filtered_plan_20260703.json
 - flash_matmul_operand_broadcast_20260703/README.md
+- flash_matmul_operand_broadcast_20260703/onehot_execdebug/summary.txt
+- flash_matmul_operand_broadcast_20260703/onehot_treeorder/summary.txt
+- flash_matmul_operand_broadcast_20260703/onehot_no_dstoffset/summary.txt
 - flash_matmul_operand_broadcast_20260703/cdx_deeptools_current_experimental_diff.patch
 - deeptools_experiment.patch
 - deeptools_experiment_lrfimm_split.patch

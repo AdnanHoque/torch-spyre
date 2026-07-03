@@ -1,0 +1,19 @@
+# onehot_treeorder
+RUN=/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/min_matmul_operand_broadcast_onehot_treeorder_20260703_090751
+dxp_exec_debug sdsc=0_mul dscs=1 datadscs=0 schedules=4 has_frame=1 frame_size=2176 frame_addr=19227496257049934
+dxp_exec_debug sdsc=1_batchmatmul-Tensor1-MatmulOperandBroadcastRelayout-Fission0 dscs=0 datadscs=1 schedules=4 has_frame=1 frame_size=1920 frame_addr=19227496257049934
+dxp_exec_debug sdsc=1_batchmatmul-Tensor1-MatmulOperandBroadcastRelayout-Fission1 dscs=0 datadscs=1 schedules=4 has_frame=1 frame_size=1920 frame_addr=19227496257049934
+dxp_exec_debug sdsc=1_batchmatmul-Tensor1-MatmulOperandBroadcastRelayout-Fission2 dscs=0 datadscs=1 schedules=4 has_frame=1 frame_size=1920 frame_addr=19227496257049934
+dxp_exec_debug sdsc=1_batchmatmul-Tensor1-MatmulOperandBroadcastRelayout-Fission3 dscs=0 datadscs=1 schedules=4 has_frame=1 frame_size=1920 frame_addr=19227496257049934
+dxp_exec_debug sdsc=1_batchmatmul dscs=1 datadscs=0 schedules=4 has_frame=1 frame_size=3968 frame_addr=19227496257049934
+ALLCLOSE False
+MAX_DIFF 62.75
+MISMATCH 249432 / 262144
+ROW 0 OUT [32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0]
+ROW 0 REF [0.0, 0.0009765625, 0.001953125, 0.0029296875, 0.00390625, 0.0048828125, 0.005859375, 0.0068359375, 0.0078125, 0.0087890625, 0.009765625, 0.0107421875, 0.01171875, 0.0126953125, 0.013671875, 0.0146484375]
+ROW 1 OUT [32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5, 32.5]
+ROW 1 REF [0.5, 0.5009765625, 0.501953125, 0.5029296875, 0.50390625, 0.5048828125, 0.505859375, 0.5068359375, 0.5078125, 0.5087890625, 0.509765625, 0.5107421875, 0.51171875, 0.5126953125, 0.513671875, 0.5146484375]
+ROW 127 OUT [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+ROW 127 REF [63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5, 63.5]
+ROW 128 OUT [32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0, 32.0]
+ROW 128 REF [0.0, 0.0009765625, 0.001953125, 0.0029296875, 0.00390625, 0.0048828125, 0.005859375, 0.0068359375, 0.0078125, 0.0087890625, 0.009765625, 0.0107421875, 0.01171875, 0.0126953125, 0.013671875, 0.0146484375]
