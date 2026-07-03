@@ -1,0 +1,68 @@
+[WARNING] [spyre.inductor.propagate_named_dims] buf1: loop var d0 has no named dim mapping -- using _untracked_4
+[WARNING] [spyre.inductor.propagate_named_dims] buf1: loop var d1 has no named dim mapping -- using _untracked_4096
+[WARNING] [spyre.inductor.propagate_named_dims] buf1: loop var d2 has no named dim mapping -- using _untracked_128
+[WARNING] [spyre.inductor.propagate_named_dims] buf3: loop var d0 has no named dim mapping -- using _untracked_4
+[WARNING] [spyre.inductor.propagate_named_dims] buf3: loop var d1 has no named dim mapping -- using _untracked_4096
+[WARNING] [spyre.inductor.propagate_named_dims] buf3: loop var d2 has no named dim mapping -- using _untracked_64
+[WARNING] [spyre.inductor.propagate_named_dims] _consume_names: no prefix of ['B', 'H', 'Lq', 'Lk'] multiplies to 4096
+[WARNING] [spyre.inductor.propagate_named_dims] buf19: loop var d0 has no named dim mapping -- using _untracked_4
+[WARNING] [spyre.inductor.propagate_named_dims] buf19: loop var d1 has no named dim mapping -- using _untracked_4096
+[WARNING] [spyre.inductor.propagate_named_dims] buf19: loop var d2 has no named dim mapping -- using _untracked_64
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf7 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf8 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf9 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf14 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf15 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf16 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf22 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: layout_allgather_restickify materialization failed: layout_allgather_restickify could not allocate 1048576 bytes in LX for consumer core 0, file /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/deeptools/dxp/SdscRelayoutInsertion.cpp line 1358
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/test_flash_4_head.py", line 167, in <module>
+    attn_t_spyre = c_flash_spyre(
+                   ^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-mixed/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1038, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-mixed/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1053, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/home/adnan-cdx/dt-inductor-mixed/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1037, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-mixed/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1798, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-mixed/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1570, in codegen_and_compile
+    compiled_module = graph.compile_to_module()
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-mixed/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2499, in compile_to_module
+    return self._compile_to_module()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-mixed/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2509, in _compile_to_module
+    mod = self._compile_to_module_lines(wrapper_code)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-mixed/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2584, in _compile_to_module_lines
+    mod = PyCodeCache.load_by_key_path(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-mixed/.venv/lib64/python3.12/site-packages/torch/_inductor/codecache.py", line 3764, in load_by_key_path
+    mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-mixed/.venv/lib64/python3.12/site-packages/torch/_inductor/runtime/compile_tasks.py", line 35, in _reload_python_module
+    exec(code, mod.__dict__, mod.__dict__)
+  File "/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/flash_4_head_relayout_backend02_noforcedbase_20260703_143157/cache/l2/cl2oultxidvppaiyvqiaij5stj3e3l5fjodag6o55wm44gduwz5z.py", line 237, in <module>
+    sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1 = async_compile.sdsc('sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1',
+                                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/torch-spyre/torch_spyre/execution/async_compile.py", line 63, in sdsc
+    subprocess.run(["dxp_standalone", "--bundle", "-d", output_dir], check=True)
+  File "/usr/lib64/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/runs/flash_4_head_relayout_backend02_noforcedbase_20260703_143157/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_yn5qi8b8']' died with <Signals.SIGABRT: 6>.
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+
