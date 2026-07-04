@@ -1,0 +1,52 @@
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+    lx_residency_core_id_to_lx_start_address=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan-cdx/codex-isolated/flash_attention_verify_reuse_20260704_023339/runs/dldsc_ah_comms_relayout/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_z0b08c9_/sdsc_543.json
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan-cdx/codex-isolated/flash_attention_verify_reuse_20260704_023339/runs/dldsc_ah_comms_relayout/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_z0b08c9_/bundle.mlir
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: layout_allgather_restickify materialization failed: layout_allgather_restickify could not allocate 1048576 bytes in LX for consumer core 0, file /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/deeptools/dxp/SdscRelayoutInsertion.cpp line 1426
+Traceback (most recent call last):
+  File "/home/adnan-cdx/codex-isolated/flash_attention_verify_reuse_20260704_023339/runs/dldsc_ah_comms_relayout/bootstrap.py", line 50, in <module>
+    exec(code, globs, globs)
+  File "/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/test-spyre-scripts/test_flash.py", line 171, in <module>
+    attn_t_spyre = c_flash_spyre(
+                   ^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1038, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1026, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1022, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+
+---
+    lx_residency_core_id_to_wk_slice=None
+    lx_residency_core_id_to_lx_start_address=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan-cdx/codex-isolated/flash_attention_verify_reuse_20260704_023339/runs/dldsc_ah_comms_relayout/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_z0b08c9_/sdsc_543.json
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan-cdx/codex-isolated/flash_attention_verify_reuse_20260704_023339/runs/dldsc_ah_comms_relayout/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_z0b08c9_/bundle.mlir
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: layout_allgather_restickify materialization failed: layout_allgather_restickify could not allocate 1048576 bytes in LX for consumer core 0, file /home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/deeptools/dxp/SdscRelayoutInsertion.cpp line 1426
+Traceback (most recent call last):
+  File "/home/adnan-cdx/codex-isolated/flash_attention_verify_reuse_20260704_023339/runs/dldsc_ah_comms_relayout/bootstrap.py", line 50, in <module>
+    exec(code, globs, globs)
+  File "/home/adnan-cdx/codex-isolated/dldsc_flash_runtime_lrfimm_20260702_145525/test-spyre-scripts/test_flash.py", line 171, in <module>
+    attn_t_spyre = c_flash_spyre(
+                   ^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1038, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1026, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1022, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1798, in fx_codegen_and_compile
+
+---

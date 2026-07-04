@@ -122,3 +122,13 @@ New passing Granite S512 run with both relayout flags enabled and the source Dee
 - observed speedup vs disabled control: about `1.06x`
 
 The useful conclusion is that both frontend flags can remain enabled for Granite if the frontend chooses the matmul-operand staged contract first and the run pins Deeptools templates to the source checkout. Dense resident `layout_allgather_restickify` is still not production-safe; it remains fail-closed pending a real staged implementation.
+
+## Flash Attention CDX Probe
+
+A compact flash `test_flash.py` probe from `adnan-cdx-spyre-dev-pf` is archived under:
+
+- `docs/results/granite_e2e/dldsc_collectives_artifacts_20260704/flash_attention_cdx/`
+
+Current-main baseline failed early with an LX capacity error before useful relayout metadata. The DLDSC collectives path generated 549 SDSCs and one `layout_allgather_restickify` backend plan, then failed because dense resident all-gather attempted to allocate `1048576` bytes in LX for a consumer core.
+
+This confirms flash is exercising the not-yet-solved class: form-changing layout all-gather/restickify into a matmul operand. It needs staged lowering; dense materialization remains the wrong carrier.
