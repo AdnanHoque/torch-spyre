@@ -28,6 +28,8 @@ from torch_spyre._inductor.lx_relayout import (
     LXRelayoutTopology,
     _classify_coordinate_topology,
     _core_id_to_device_slice,
+    _dense_core_id_to_device_slice,
+    _dense_work_slice_dims,
     _prefer_matmul_operand_contract,
     _record_plan,
     get_lx_relayout_inputs,
@@ -85,6 +87,15 @@ def test_coordinate_topology_classifies_one_to_one_scatter():
     assert topology.max_fanout == 1
     assert topology.max_fanin == 1
     assert topology.transfer_count == 2
+
+
+def test_dense_coordinate_payload_expands_unsplit_dims():
+    dims = {"0", "1"}
+
+    assert _dense_work_slice_dims({"1": 4}, dims) == {"0": 1, "1": 4}
+    assert _dense_core_id_to_device_slice(
+        {"7": {"1": 2}, "15": {}}, dims
+    ) == {"7": {"0": 0, "1": 2}, "15": {"0": 0, "1": 0}}
 
 
 def test_coordinate_topology_classifies_broadcast():

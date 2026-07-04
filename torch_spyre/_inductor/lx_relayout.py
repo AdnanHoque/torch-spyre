@@ -261,6 +261,27 @@ def _work_slice_dims(view: PerCoreView) -> dict[str, int]:
     return {str(int(dim)): int(split) for dim, split in view.work_slice_dims}
 
 
+def _sorted_dim_keys(dims: set[str]) -> list[str]:
+    return sorted(
+        dims, key=lambda dim: (0, int(dim)) if dim.isdigit() else (1, dim)
+    )
+
+
+def _dense_work_slice_dims(
+    work_slice_dims: dict[str, int], dims: set[str]
+) -> dict[str, int]:
+    return {dim: int(work_slice_dims.get(dim, 1)) for dim in _sorted_dim_keys(dims)}
+
+
+def _dense_core_id_to_device_slice(
+    core_id_to_device_slice: dict[str, dict[str, int]], dims: set[str]
+) -> dict[str, dict[str, int]]:
+    return {
+        str(core): {dim: int(per_core.get(dim, 0)) for dim in _sorted_dim_keys(dims)}
+        for core, per_core in core_id_to_device_slice.items()
+    }
+
+
 def _op_work_slice_dims(op: Operation) -> dict[str, int]:
     splits: tuple[dict, dict] = getattr(op, "op_it_space_splits", ({}, {}))
     result: dict[str, int] = {}
@@ -455,6 +476,23 @@ def plan_lx_relayouts(
                     consumer.name,
                 )
                 continue
+
+            relayout_dims = set(producer_work_slice_dims) | set(
+                consumer_work_slice_dims
+            )
+            producer_work_slice_dims = _dense_work_slice_dims(
+                producer_work_slice_dims, relayout_dims
+            )
+            consumer_work_slice_dims = _dense_work_slice_dims(
+                consumer_work_slice_dims, relayout_dims
+            )
+            producer_core_slices = _dense_core_id_to_device_slice(
+                producer_core_slices, relayout_dims
+            )
+            consumer_core_slices = _dense_core_id_to_device_slice(
+                consumer_core_slices, relayout_dims
+            )
+
             topology = _classify_coordinate_topology(
                 producer_core_slices,
                 producer_work_slice_dims,
