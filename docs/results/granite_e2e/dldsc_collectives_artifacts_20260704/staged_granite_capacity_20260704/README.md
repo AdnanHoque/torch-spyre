@@ -39,7 +39,7 @@ The capacity math is the core result. The consumer KERNEL RHS has dimensions `{m
 32 * (512 / 2) * 128 * 2 bytes = 2 MiB per core
 ```
 
-That exceeds the ~1.6 MiB usable LX budget before temporary gather pieces. Therefore the next viable backend design is not resident materialization; it is loop/tile-scoped staged movement and local restickify bound to the matmul transfer loop.
+That exceeds the ~1.6 MiB usable LX budget before temporary gather pieces. Therefore the next viable backend design is not resident materialization; it is loop/tile-scoped staged movement and local restickify bound to the matmul transfer loop. A repeat run with `DXP_BACKEND_LX_FRAC_AVAIL=1` still failed to allocate the resident final region, confirming this is not just a backend-LX-fraction artifact.
 
 ## Archived Files
 

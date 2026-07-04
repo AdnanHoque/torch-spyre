@@ -45,7 +45,7 @@ Using the correct eager-spyre FMS checkout, Granite S512 now reaches DXP with `D
 - class: `matmul_operand_broadcast` / `all_gather_replicate_with_layout_conversion`
 - logical transfers: 512
 
-A resident final-materialization strategy is not viable for this edge. Reusing the imported final LX address overlaps the source allocation. Allocating a fresh final region fails capacity: the converted KERNEL RHS is roughly `32 * (512 / 2) * 128 * 2 = 2 MiB` per consumer core, which exceeds the usable LX budget before temporary gather pieces.
+A resident final-materialization strategy is not viable for this edge. Reusing the imported final LX address overlaps the source allocation. Allocating a fresh final region fails capacity: the converted KERNEL RHS is roughly `32 * (512 / 2) * 128 * 2 = 2 MiB` per consumer core, which exceeds the usable LX budget before temporary gather pieces. The same allocation failure reproduces with `DXP_BACKEND_LX_FRAC_AVAIL=1`, so this is a resident-materialization size problem rather than a 0.2-fraction artifact.
 
 Archived evidence:
 
