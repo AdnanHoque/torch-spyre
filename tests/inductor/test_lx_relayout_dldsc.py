@@ -12,10 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+
 from sympy import Integer, Mod, Symbol, floor
 
 from torch_spyre._inductor import config
 from torch_spyre._C import DataFormats
+from torch_spyre._inductor.codegen.bundle import generate_bundle
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.layout_allgather_restickify import (
     COMM_CLASS_ALL_GATHER,
@@ -308,6 +311,145 @@ def test_lx_relayout_plan_records_matmul_operand_all_gather_contract():
     assert plan["requires_layout_conversion"]
     assert plan["layout_transform"]["kind"] == "activation_lx_to_matmul_kernel_operand"
     assert plan["staging_scope"] == "matmul_transfer_loop"
+
+
+def test_bundle_enriches_matmul_operand_contract_with_source_target_layouts(
+    tmp_path,
+):
+    mb = Symbol("c0")
+    out = Symbol("c1")
+    in_dim = Symbol("c2")
+    producer_residency = {
+        "0": {"0": 0},
+        "1": {"0": 1},
+        "2": {"0": 2},
+        "3": {"0": 3},
+    }
+    contract = make_matmul_operand_allgather_contract(
+        producer_op="mul",
+        consumer_op="batchmatmul",
+        read_index=1,
+        producer_work_slice_dims={"0": 4},
+        consumer_tensor_work_slice_dims={"0": 1},
+        consumer_compute_work_slice_dims={"0": 4},
+        communication_class=COMM_CLASS_ALL_GATHER,
+    )
+    contract.update(
+        {
+            "source_name": "buf0",
+            "producer_name": "buf0",
+            "consumer_name": "buf1",
+            "producer_core_id_to_device_slice": producer_residency,
+            "consumer_core_id_to_device_slice": {
+                str(core): {"0": 0} for core in range(4)
+            },
+        }
+    )
+
+    producer = OpSpec(
+        op="mul",
+        is_reduction=False,
+        iteration_space={mb: (Integer(64), 1), out: (Integer(512), 4)},
+        op_info={},
+        args=[
+            TensorArg(
+                is_input=True,
+                arg_index=0,
+                device_dtype=DataFormats.SEN169_FP16,
+                device_size=[8, 64, 64],
+                device_coordinates=[floor(out / 64), mb, Mod(out, 64)],
+                allocation={"hbm": 0},
+                name="arg0",
+            ),
+            TensorArg(
+                is_input=True,
+                arg_index=1,
+                device_dtype=DataFormats.SEN169_FP16,
+                device_size=[8, 64, 64],
+                device_coordinates=[floor(out / 64), mb, Mod(out, 64)],
+                allocation={"hbm": 0x1000},
+                name="arg1",
+            ),
+            TensorArg(
+                is_input=False,
+                arg_index=-1,
+                device_dtype=DataFormats.SEN169_FP16,
+                device_size=[8, 64, 64],
+                device_coordinates=[floor(out / 64), mb, Mod(out, 64)],
+                allocation={"lx": 0},
+                name="buf0",
+            ),
+        ],
+    )
+    consumer = OpSpec(
+        op="batchmatmul",
+        is_reduction=True,
+        iteration_space={
+            mb: (Integer(64), 4),
+            out: (Integer(512), 1),
+            in_dim: (Integer(64), 1),
+        },
+        op_info={"lx_relayout_classifications": [contract]},
+        args=[
+            TensorArg(
+                is_input=True,
+                arg_index=2,
+                device_dtype=DataFormats.SEN169_FP16,
+                device_size=[1, 64, 64],
+                device_coordinates=[floor(in_dim / 64), mb, Mod(in_dim, 64)],
+                allocation={"hbm": 0x2000},
+                name="arg2",
+            ),
+            TensorArg(
+                is_input=True,
+                arg_index=-1,
+                device_dtype=DataFormats.SEN169_FP16,
+                device_size=[8, 64, 64],
+                device_coordinates=[floor(out / 64), in_dim, Mod(out, 64)],
+                allocation={"lx": 0},
+                name="buf0",
+                lx_residency_core_id_to_wk_slice=producer_residency,
+            ),
+            TensorArg(
+                is_input=False,
+                arg_index=3,
+                device_dtype=DataFormats.SEN169_FP16,
+                device_size=[8, 64, 64],
+                device_coordinates=[floor(out / 64), mb, Mod(out, 64)],
+                allocation={"hbm": 0x3000},
+                name="buf1",
+            ),
+        ],
+    )
+
+    generate_bundle("lx_relayout_contract", str(tmp_path), [producer, consumer])
+
+    sdsc_1 = json.loads((tmp_path / "sdsc_1.json").read_text())
+    root = next(iter(sdsc_1.values()))
+    classification = root["lxRelayoutClassifications_"][0]
+
+    assert classification["source_lx_tensor"]["buffer_name"] == "buf0"
+    assert classification["source_lx_tensor"]["dsName_"] == "Tensor2"
+    assert classification["source_lx_tensor"]["dsType_"] == "OUTPUT"
+    assert classification["source_lx_tensor"]["layoutDimOrder_"] == ["mb", "out"]
+    assert classification["source_lx_tensor"]["stickDimOrder_"] == ["out"]
+    assert classification["source_lx_tensor"]["coreIdToWkSlice_"] == {
+        "0": {"mb": 0, "out": 0},
+        "1": {"mb": 0, "out": 1},
+        "2": {"mb": 0, "out": 2},
+        "3": {"mb": 0, "out": 3},
+    }
+    assert classification["target_kernel_tensor"]["dsName_"] == "Tensor1"
+    assert classification["target_kernel_tensor"]["dsType_"] == "KERNEL"
+    assert classification["target_kernel_tensor"]["layoutDimOrder_"] == [
+        "in",
+        "out",
+    ]
+    assert classification["target_kernel_tensor"]["stickDimOrder_"] == ["out"]
+    assert (
+        classification["layout_transform"]["conversion_stage"]
+        == "local_restickify_to_kernel"
+    )
 
 
 def test_lx_input_allocation_coordinates_describe_producer_residency():

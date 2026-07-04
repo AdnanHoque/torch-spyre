@@ -834,7 +834,11 @@ class SpyreKernel(Kernel[CSEVariable]):
                     args.append(self.create_tensor_arg(True, input.name, input))
                 else:
                     raise Unsupported(f"unexpected argument {input} to {value.op}")
-            args.append(self.create_tensor_arg(False, real_dst_name, dst))
+            args.append(
+                self.create_tensor_arg(
+                    False, real_dst_name, dst, opspec_name=real_dst_name
+                )
+            )
             op_info.update(value.op_info)
             self.op_specs.append(
                 self.create_op_spec(
@@ -861,12 +865,16 @@ class SpyreKernel(Kernel[CSEVariable]):
                 ]
                 args += [
                     self.create_tensor_arg(True, value.name, value),
-                    self.create_tensor_arg(False, real_dst_name, dst),
+                    self.create_tensor_arg(
+                        False, real_dst_name, dst, opspec_name=real_dst_name
+                    ),
                 ]
             else:
                 args = [
                     self.create_tensor_arg(True, value.name, value),
-                    self.create_tensor_arg(False, real_dst_name, dst),
+                    self.create_tensor_arg(
+                        False, real_dst_name, dst, opspec_name=real_dst_name
+                    ),
                 ]
             in_coords = args[-2].device_coordinates
             out_coords = args[-1].device_coordinates
@@ -927,7 +935,9 @@ class SpyreKernel(Kernel[CSEVariable]):
             args = [
                 self.create_tensor_arg(True, x.name, x),
                 self.create_tensor_arg(True, y.name, y),
-                self.create_tensor_arg(False, real_dst_name, dst),
+                self.create_tensor_arg(
+                    False, real_dst_name, dst, opspec_name=real_dst_name
+                ),
             ]
             self.op_specs.append(self.create_op_spec(value.op, True, args, op_info))
         else:
@@ -939,7 +949,9 @@ class SpyreKernel(Kernel[CSEVariable]):
             x = value.arguments[0]
             args = [
                 self.create_tensor_arg(True, x.name, x),
-                self.create_tensor_arg(False, real_dst_name, dst),
+                self.create_tensor_arg(
+                    False, real_dst_name, dst, opspec_name=real_dst_name
+                ),
             ]
             self.op_specs.append(self.create_op_spec(value.op, True, args, op_info))
 
