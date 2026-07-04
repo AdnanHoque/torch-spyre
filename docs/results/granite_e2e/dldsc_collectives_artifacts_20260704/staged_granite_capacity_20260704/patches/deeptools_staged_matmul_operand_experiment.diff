@@ -1,0 +1,1919 @@
+diff --git a/dcg/dcg_fe/pcfg_gen/dlOps.cpp b/dcg/dcg_fe/pcfg_gen/dlOps.cpp
+index a59e0c8b2..165c9bc1c 100644
+--- a/dcg/dcg_fe/pcfg_gen/dlOps.cpp
++++ b/dcg/dcg_fe/pcfg_gen/dlOps.cpp
+@@ -595,6 +595,30 @@ int DcgFE::createPcfgForUnitPerCore(SuperDsc& sdsc, SenPcfg& pcfg,
+   std::deque<std::pair<SenPcfgNode*, SenPcfgNode*>>
+       outerBotSubgraphSeqeunce;  // insert in rev order..
+ 
++  std::vector<const dsc2::TransferNode*> lxNeighborTransferNodes;
++  {
++    auto transferNodes = myDsc->scheduleTree_.traverseTreeDFS(
++        nullptr, {dsc2::ScheduleNode::TRANSFER});
++    for (const auto node : transferNodes) {
++      DT_CHECK_MSG(node->nodeType_ == dsc2::ScheduleNode::TRANSFER,
++                   "Expect a transfer node.");
++      const auto* transNode = dynamic_cast<const dsc2::TransferNode*>(node);
++      DT_CHECK_MSG(transNode != nullptr, "Expect a valid transfer node.");
++      if (!transNode->lxNeighborRingTransfers_.empty()) {
++        lxNeighborTransferNodes.push_back(transNode);
++      }
++    }
++    if (!lxNeighborTransferNodes.empty()) {
++      std::cerr << "[lx_neighbor_pcfg_old] transfer_nodes="
++                << lxNeighborTransferNodes.size() << "\n";
++      for (const auto* node : lxNeighborTransferNodes) {
++        std::cerr << "[lx_neighbor_pcfg_old] node=" << node->name_
++                  << " transfers=" << node->lxNeighborRingTransfers_.size()
++                  << "\n";
++      }
++    }
++  }
++
+   // step 3. Putting in data-transfer nodes..
+   for (int dtidx = 0; dtidx < dtList.size(); dtidx++) {
+     auto& myDtInfo = dtList.at(dtidx);
+@@ -3644,6 +3668,85 @@ int DcgFE::createPcfgForUnitPerCore(SuperDsc& sdsc, SenPcfg& pcfg,
+     }
+   }
+ 
++  for (const auto* transNode : lxNeighborTransferNodes) {
++    DT_CHECK_MSG(transNode->isDstLabeledDs(),
++                 "Expect LX-neighbor transfer to target a labeled DS.");
++    const int dstLdsIdx = transNode->dstLdsAndLoopOffsets_.front().myLdsIdx_;
++    DT_CHECK_MSG(dstLdsIdx >= 0 && dstLdsIdx < myDsc->labeledDs_.size(),
++                 "Invalid LX-neighbor destination labeled DS.");
++    auto* myLabeledDs = &myDsc->labeledDs_.at(dstLdsIdx);
++    auto dimLayoutOrder = myDsc->getDimOrderStr(myLabeledDs, false, true);
++    DT_CHECK_MSG(!dimLayoutOrder.empty(),
++                 "Expect LX-neighbor transfer to have a layout.");
++
++    constexpr int64_t kBytesPerStick = 128;
++    for (const auto& transfer : transNode->lxNeighborRingTransfers_) {
++      const bool isSend =
++          unit == SenComponents::L3SU && transfer.sourceCoreId_ == coreid;
++      const bool isReceive =
++          unit == SenComponents::L3LU && transfer.destinationCoreId_ == coreid;
++      if (!isSend && !isReceive) continue;
++      DT_CHECK_MSG(transfer.byteCount_ > 0,
++                   "Invalid LX-neighbor ring transfer byte count.");
++      DT_CHECK_MSG(transfer.byteCount_ % kBytesPerStick == 0,
++                   "LX-neighbor ring transfers must be stick aligned.");
++
++      for (int64_t byteOffset = 0; byteOffset < transfer.byteCount_;
++           byteOffset += kBytesPerStick) {
++        if (byteOffset == 0) {
++          std::cerr << "[lx_neighbor_pcfg_old] emit "
++                    << (isSend ? "send" : "recv") << " core=" << coreid
++                    << " src=" << transfer.sourceCoreId_
++                    << " dst=" << transfer.destinationCoreId_
++                    << " bytes=" << transfer.byteCount_ << "\n";
++        }
++        auto* newRingDtNode = static_cast<SenPcfgRingDtNode*>(
++            pcfg.createPcfgNode(SenPcfgNode::Type::RINGDATATRANSFER));
++        newRingDtNode->name =
++            nodeNamePrefix + myLabeledDs->dsName_ + "-lx_neighbor_ring_" +
++            (isSend ? "send" : "recv") + "_src" +
++            std::to_string(transfer.sourceCoreId_) + "_dst" +
++            std::to_string(transfer.destinationCoreId_) + "_chunk" +
++            std::to_string(transfer.producerChunk_) + "_stick" +
++            std::to_string(byteOffset / kBytesPerStick);
++        newRingDtNode->coreletId = -1;
++        newRingDtNode->dtInfo = nullptr;
++        newRingDtNode->dsInfo = nullptr;
++        newRingDtNode->dtFormat = myLabeledDs->dataFormat_;
++        newRingDtNode->srcDest.src_ =
++            isSend ? SenComponents::LX : SenComponents::RING;
++        newRingDtNode->srcDest.dst_ =
++            isSend ? SenComponents::RING : SenComponents::LX;
++        newRingDtNode->dimLayoutOrder = dimLayoutOrder;
++        newRingDtNode->coreIdForRing = {
++            static_cast<int64_t>(isSend ? transfer.destinationCoreId_
++                                        : transfer.sourceCoreId_)};
++        newRingDtNode->coreIDForRingCondAndVal.clear();
++        newRingDtNode->useBurst = false;
++        newRingDtNode->gtr_imm_opt_en = false;
++        newRingDtNode->GTRAndBurstCondAndVal.clear();
++        newRingDtNode->myBigSubDimSize.clear();
++        newRingDtNode->myBigStride.clear();
++        newRingDtNode->myLitSubDimSize.clear();
++        newRingDtNode->bigStAddrOffsets.clear();
++        for (const auto& dimStr : newRingDtNode->dimLayoutOrder) {
++          newRingDtNode->myBigDimSize[dimStr] = 1;
++          newRingDtNode->myLitDimSize[dimStr] = 1;
++        }
++        if (isSend) {
++          newRingDtNode->setSrcStAddr(transfer.sourceStartAddress_ +
++                                      byteOffset);
++          newRingDtNode->setDestStAddr(-1);
++        } else {
++          newRingDtNode->setSrcStAddr(-1);
++          newRingDtNode->setDestStAddr(transfer.destinationStartAddress_ +
++                                       byteOffset);
++        }
++        innerSubgraphSeqeunce.push_back({newRingDtNode, newRingDtNode});
++      }
++    }
++  }
++
+   // Add SyncNodes..
+   if (unit == SenComponents::L3LU && !skipL3LXSync) {
+     std::vector<SenComponents> lxUnits;
+diff --git a/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp b/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
+index ea141b39e..c48475dee 100644
+--- a/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
++++ b/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
+@@ -570,6 +570,15 @@ int DcgFE::createPcfgForUnitPerCoreNew(SuperDsc& sdsc, SenPcfg& pcfg,
+     if (!node->lxNeighborRingTransfers_.empty())
+       lxNeighborTransferNodes.push_back(node);
+   }
++  if (!lxNeighborTransferNodes.empty()) {
++    std::cerr << "[lx_neighbor_pcfg] transfer_nodes="
++              << lxNeighborTransferNodes.size() << "\n";
++    for (const auto* node : lxNeighborTransferNodes) {
++      std::cerr << "[lx_neighbor_pcfg] node=" << node->name_
++                << " transfers=" << node->lxNeighborRingTransfers_.size()
++                << "\n";
++    }
++  }
+ 
+   // Function to get the most inner L3 transfer nodes, by iterating the chunk
+   // loop nodes from inner to outer.
+@@ -2667,6 +2676,13 @@ int DcgFE::createPcfgForUnitPerCoreNew(SuperDsc& sdsc, SenPcfg& pcfg,
+ 
+       for (int64_t byteOffset = 0; byteOffset < transfer.byteCount_;
+            byteOffset += kBytesPerStick) {
++        if (byteOffset == 0) {
++          std::cerr << "[lx_neighbor_pcfg] emit "
++                    << (isSend ? "send" : "recv") << " core=" << coreid
++                    << " src=" << transfer.sourceCoreId_
++                    << " dst=" << transfer.destinationCoreId_
++                    << " bytes=" << transfer.byteCount_ << "\n";
++        }
+         auto* newRingDtNode =
+             static_cast<SenPcfgRingDtNode*>(pcfg.createPcfgNode(
+                 SenPcfgNode::Type::RINGDATATRANSFER));
+diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+index a8427c700..fc44b0f05 100644
+--- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
++++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+@@ -455,6 +455,289 @@ static CoreDeviceSliceMap parseCoreDeviceSliceMap(
+   return result;
+ }
+ 
++static bool parseMetadataJsonObject(
++    const std::map<std::string, std::string>& fields, const std::string& key,
++    json11::Json* parsed, std::string* reason) {
++  const auto fieldIt = fields.find(key);
++  if (fieldIt == fields.end()) {
++    *reason = "missing " + key;
++    return false;
++  }
++  std::string parseError;
++  *parsed = json11::Json::parse(fieldIt->second, parseError);
++  if (!parseError.empty() || !parsed->is_object()) {
++    *reason = "invalid JSON object in " + key;
++    return false;
++  }
++  return true;
++}
++
++static std::vector<std::string> jsonStringArray(const json11::Json& object,
++                                                const std::string& key) {
++  std::vector<std::string> result;
++  for (const auto& value : object[key].array_items()) {
++    result.push_back(value.string_value());
++  }
++  return result;
++}
++
++static int64_t jsonIntValue(const json11::Json& value) {
++  if (value.is_number()) return static_cast<int64_t>(value.number_value());
++  if (value.is_string()) return std::atoll(value.string_value().c_str());
++  return 0;
++}
++
++static std::map<std::string, int64_t> tensorDimExtentsFromCoordinateInfo(
++    const json11::Json& tensorJson) {
++  std::map<std::string, int64_t> result;
++  for (const auto& dim : jsonStringArray(tensorJson, "layoutDimOrder_")) {
++    int64_t extent = 1;
++    for (const auto& prop :
++         tensorJson["coordinateInfo_"][dim]["folds"]["dim_prop_attr"]
++             .array_items()) {
++      const auto factor = jsonIntValue(prop["factor_"]);
++      if (factor > 0) extent *= factor;
++    }
++    result[dim] = extent;
++  }
++  return result;
++}
++
++static std::map<std::string, int64_t> tensorNumWkSlices(
++    const json11::Json& tensorJson) {
++  std::map<std::string, int64_t> result;
++  for (const auto& [dim, value] :
++       tensorJson["numWkSlicesPerDim_"].object_items()) {
++    result[dim] = jsonIntValue(value);
++  }
++  return result;
++}
++
++static CoreDeviceSliceMap tensorCoreIdToSlice(
++    const json11::Json& tensorJson,
++    const std::string& key = "coreIdToWkSlice_") {
++  CoreDeviceSliceMap result;
++  for (const auto& [coreIdString, sliceJson] :
++       tensorJson[key].object_items()) {
++    char* end = nullptr;
++    const long coreId = std::strtol(coreIdString.c_str(), &end, 10);
++    if (end == nullptr || *end != '\0' || coreId < 0 ||
++        !sliceJson.is_object()) {
++      return {};
++    }
++    auto& slice = result[static_cast<int>(coreId)];
++    for (const auto& [dim, value] : sliceJson.object_items()) {
++      slice[dim] = static_cast<CoordinateBaseType>(jsonIntValue(value));
++    }
++  }
++  return result;
++}
++
++static std::map<int, int64_t> tensorCoreStartAddresses(
++    const json11::Json& tensorJson) {
++  std::map<int, int64_t> result;
++  for (const auto& [coordString, value] :
++       tensorJson["startAddressCoreCorelet_"]["data_"].object_items()) {
++    const auto comma = coordString.find(',');
++    if (coordString.size() < 2 || coordString.front() != '[' ||
++        comma == std::string::npos) {
++      continue;
++    }
++    const int coreId = std::atoi(coordString.substr(1, comma - 1).c_str());
++    result[coreId] = jsonIntValue(value);
++  }
++  return result;
++}
++
++static bool populateMatmulOperandBroadcastStickRingTransfers(
++    const std::map<std::string, std::string>& fields,
++    const dsc2::AllocateNode& destinationAlloc,
++    const std::vector<deeptools::MatmulOperandBroadcastLogicalTransfer>&
++        logicalTransfers,
++    dsc2::TransferNode* transNode, std::string* reason) {
++  json11::Json sourceTensor;
++  json11::Json targetTensor;
++  if (!parseMetadataJsonObject(fields, "source_lx_tensor", &sourceTensor,
++                               reason) ||
++      !parseMetadataJsonObject(fields, "target_kernel_tensor", &targetTensor,
++                               reason)) {
++    return false;
++  }
++
++  const auto sourceDims = jsonStringArray(sourceTensor, "layoutDimOrder_");
++  const auto targetDims = jsonStringArray(targetTensor, "layoutDimOrder_");
++  const auto stickDims = jsonStringArray(targetTensor, "stickDimOrder_");
++  if (sourceDims.size() != 2 || targetDims.size() != 2 ||
++      stickDims.size() != 1) {
++    *reason = "stick ring transfer prototype only supports 2-D out-stick tensors";
++    return false;
++  }
++  const std::string sourceRowDim = sourceDims.at(0);
++  const std::string sourceOutDim = sourceDims.at(1);
++  const std::string targetRowDim = targetDims.at(0);
++  const std::string targetOutDim = targetDims.at(1);
++  if (stickDims.at(0) != targetOutDim) {
++    *reason = "target KERNEL stick dim must be the output dimension";
++    return false;
++  }
++  json11::Json operandKernelLayout;
++  std::string ignoredKernelLayoutReason;
++  const bool hasOperandKernelLayout = parseMetadataJsonObject(
++      fields, "operand_kernel_layout", &operandKernelLayout,
++      &ignoredKernelLayoutReason);
++  const auto operandKernelDims =
++      hasOperandKernelLayout
++          ? jsonStringArray(operandKernelLayout, "layoutDimOrder_")
++          : std::vector<std::string>{};
++  const bool targetUsesOutMajorKernelLayout =
++      operandKernelDims.size() >= 2 && operandKernelDims.at(0) == targetOutDim &&
++      operandKernelDims.at(1) == targetRowDim;
++  const bool targetUsesOutInXKernelLayout =
++      targetUsesOutMajorKernelLayout && operandKernelDims.size() >= 3 &&
++      operandKernelDims.at(2) == "x";
++
++  const auto sourceExtents = tensorDimExtentsFromCoordinateInfo(sourceTensor);
++  const auto targetExtents = tensorDimExtentsFromCoordinateInfo(targetTensor);
++  const auto sourceSplits = tensorNumWkSlices(sourceTensor);
++  const auto targetSplits = tensorNumWkSlices(targetTensor);
++  const auto sourceSlices = tensorCoreIdToSlice(sourceTensor);
++  const auto targetComputeSlices =
++      tensorCoreIdToSlice(targetTensor, "computeCoreIdToWkSlice_");
++  const auto sourceStarts = tensorCoreStartAddresses(sourceTensor);
++  if (sourceExtents.empty() || targetExtents.empty() ||
++      sourceSplits.empty() || sourceSlices.empty() || sourceStarts.empty()) {
++    *reason = "incomplete source/target tensor coordinate metadata";
++    return false;
++  }
++
++  constexpr int64_t kBytesPerStick = 128;
++  const int64_t wordLength = jsonIntValue(targetTensor["wordLength"]);
++  const int64_t stickElems =
++      jsonIntValue(targetTensor["stickSize_"].array_items().at(0));
++  if (wordLength <= 0 || stickElems <= 0 ||
++      stickElems * wordLength != kBytesPerStick) {
++    *reason = "matmul operand stick transfers must be 128-byte aligned";
++    return false;
++  }
++
++  const int64_t rowExtent = targetExtents.at(targetRowDim);
++  const int64_t targetOutExtent = targetExtents.at(targetOutDim);
++  const int64_t sourceOutExtent = sourceExtents.at(sourceOutDim);
++  const int64_t sourceOutSplit = sourceSplits.count(sourceOutDim)
++                                     ? sourceSplits.at(sourceOutDim)
++                                     : 1;
++  if (rowExtent <= 0 || targetOutExtent <= 0 || sourceOutExtent <= 0 ||
++      sourceOutSplit <= 0 || targetOutExtent % stickElems != 0 ||
++      sourceOutExtent % sourceOutSplit != 0) {
++    *reason = "invalid matmul operand broadcast tensor extents";
++    return false;
++  }
++
++  const int64_t sourceOutShardExtent = sourceOutExtent / sourceOutSplit;
++  if (sourceOutShardExtent % stickElems != 0) {
++    *reason = "source out shard must be stick aligned";
++    return false;
++  }
++  const int64_t sourceLocalOutSticks = sourceOutShardExtent / stickElems;
++  const int64_t targetOutSticks = targetOutExtent / stickElems;
++  if (targetUsesOutInXKernelLayout && targetComputeSlices.empty()) {
++    *reason = "missing target x/mb compute slices for KERNEL layout";
++    return false;
++  }
++
++  transNode->lxNeighborRingTransfers_.clear();
++  transNode->lxNeighborRingTransfers_.reserve(
++      logicalTransfers.size() * rowExtent * sourceLocalOutSticks);
++
++  std::cerr << "[matmul_operand_stick_transfer] logicalTransfers="
++            << logicalTransfers.size() << " rowExtent=" << rowExtent
++            << " sourceLocalOutSticks=" << sourceLocalOutSticks
++            << " targetOutSticks=" << targetOutSticks << "\n";
++
++  if (sourceOutSplit != static_cast<int64_t>(sourceStarts.size())) {
++    *reason = "neighbor-carousel prototype requires one source chunk per core";
++    return false;
++  }
++
++  const bool forceRowMajorTargetAddress =
++      std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_FORCE_ROW_MAJOR") !=
++      nullptr;
++  auto targetAddress = [&](int core, int64_t chunk, int64_t row,
++                           int64_t localStick) {
++    const int64_t destinationBase =
++        destinationAlloc.startAddressCoreCorelet_.getData(core, 0, 0);
++    if (destinationBase < 0) {
++      return static_cast<int64_t>(-1);
++    }
++    const int64_t globalStickBase = chunk * sourceLocalOutSticks;
++    int64_t destinationStickIndex = 0;
++    destinationStickIndex =
++        (!forceRowMajorTargetAddress && targetUsesOutMajorKernelLayout)
++            ? ((globalStickBase + localStick) * rowExtent + row)
++            : (row * targetOutSticks + globalStickBase + localStick);
++    return destinationBase + destinationStickIndex * kBytesPerStick;
++  };
++
++  for (int64_t phase = 1; phase <= sourceOutSplit; ++phase) {
++    for (int64_t sourceCore = 0; sourceCore < sourceOutSplit; ++sourceCore) {
++      const int64_t destinationCore = (sourceCore + 1) % sourceOutSplit;
++      const int64_t producerChunk =
++          (sourceCore - (phase - 1) + sourceOutSplit) % sourceOutSplit;
++      const auto sourceStartIt =
++          sourceStarts.find(static_cast<int>(producerChunk));
++      if (sourceStartIt == sourceStarts.end()) {
++        *reason = "missing source core start address for carousel chunk";
++        return false;
++      }
++      for (int64_t row = 0; row < rowExtent; ++row) {
++        for (int64_t localStick = 0; localStick < sourceLocalOutSticks;
++             ++localStick) {
++          dsc2::TransferNode::LxNeighborRingTransfer physicalTransfer;
++          physicalTransfer.sourceCoreId_ = static_cast<int>(sourceCore);
++          physicalTransfer.destinationCoreId_ =
++              static_cast<int>(destinationCore);
++          if (phase == 1) {
++            physicalTransfer.sourceStartAddress_ =
++                sourceStartIt->second +
++                (row * sourceLocalOutSticks + localStick) * kBytesPerStick;
++          } else {
++            physicalTransfer.sourceStartAddress_ =
++                targetAddress(static_cast<int>(sourceCore), producerChunk, row,
++                              localStick);
++          }
++          physicalTransfer.destinationStartAddress_ =
++              targetAddress(static_cast<int>(destinationCore), producerChunk,
++                            row, localStick);
++          if (physicalTransfer.sourceStartAddress_ < 0 ||
++              physicalTransfer.destinationStartAddress_ < 0) {
++            *reason = "invalid carousel LX address";
++            return false;
++          }
++          physicalTransfer.byteCount_ = kBytesPerStick;
++          physicalTransfer.group_ = phase;
++          physicalTransfer.producerChunk_ = producerChunk;
++          physicalTransfer.consumerReplica_ = destinationCore;
++          transNode->lxNeighborRingTransfers_.push_back(physicalTransfer);
++          if (transNode->lxNeighborRingTransfers_.size() <= 8 ||
++              (row >= 7 && row <= 9 && localStick == 0)) {
++            std::cerr << "[matmul_operand_stick_transfer] phase=" << phase
++                      << " chunk=" << producerChunk
++                      << " row=" << row
++                      << " stick=" << localStick
++                      << " srcCore=" << physicalTransfer.sourceCoreId_
++                      << " dstCore=" << physicalTransfer.destinationCoreId_
++                      << " srcAddr=" << physicalTransfer.sourceStartAddress_
++                      << " dstAddr="
++                      << physicalTransfer.destinationStartAddress_
++                      << " bytes=" << physicalTransfer.byteCount_ << "\n";
++          }
++        }
++      }
++    }
++  }
++  return true;
++}
++
+ static dsc2::AllocateNode* findFoldedLxAllocationForLds(
+     DesignSpaceConfig& dsc, const int ldsIdx,
+     const dsc2::AllocateNode* excludeNode) {
+@@ -596,6 +879,17 @@ static bool populateMatmulOperandBroadcastRingTransfers(
+     *reason = "producerChunksPerGroup must be non-zero";
+     return false;
+   }
++  const auto logicalTransfers =
++      deeptools::matmulOperandBroadcastLogicalTransfers(plan);
++  if (logicalTransfers.empty()) {
++    *reason = "matmul_operand_broadcast expanded to no logical transfers";
++    return false;
++  }
++  if (plan.requiresLayoutConversion) {
++    return populateMatmulOperandBroadcastStickRingTransfers(
++        *fields, destinationAlloc, logicalTransfers, transNode, reason);
++  }
++
+   if (lds.lxSize_ <= 0 ||
+       lds.lxSize_ % static_cast<int64_t>(plan.producerChunksPerGroup) != 0) {
+     *reason = "cannot derive per-producer-chunk LX byte size";
+@@ -604,12 +898,6 @@ static bool populateMatmulOperandBroadcastRingTransfers(
+ 
+   const int64_t bytesPerProducerChunk =
+       lds.lxSize_ / static_cast<int64_t>(plan.producerChunksPerGroup);
+-  const auto logicalTransfers =
+-      deeptools::matmulOperandBroadcastLogicalTransfers(plan);
+-  if (logicalTransfers.empty()) {
+-    *reason = "matmul_operand_broadcast expanded to no logical transfers";
+-    return false;
+-  }
+ 
+   transNode->lxNeighborRingTransfers_.clear();
+   transNode->lxNeighborRingTransfers_.reserve(logicalTransfers.size());
+@@ -651,26 +939,70 @@ static bool populateMatmulOperandBroadcastRingTransfers(
+ 
+ static void populateMatmulOperandBroadcastRingTransfersAfterAllocation(
+     SuperDsc& mySDsc) {
++  std::cerr << "[matmul_operand_ring_populate] begin sdsc=" << mySDsc.name_
++            << " classifications=" << mySDsc.lxRelayoutClassifications_.size()
++            << "\n";
+   for (auto& dsc : mySDsc.dscs_) {
+     auto transferNodes = dsc.scheduleTree_.traverseTreeDFSMutable(
+         nullptr, {dsc2::ScheduleNode::TRANSFER});
++    std::cerr << "[matmul_operand_ring_populate] transfer_nodes="
++              << transferNodes.size() << "\n";
+     for (auto* node : transferNodes) {
+       auto* transNode = dynamic_cast<dsc2::TransferNode*>(node);
+       DT_CHECK_MSG(transNode, "Expect a valid transfer node.");
+-      if (transNode->name_.find("_lx_neighbor") == std::string::npos) {
++      if (std::getenv("DEEPTOOLS_LX_NEIGHBOR_VIEW_PROBE") != nullptr) {
++        std::cerr << "[matmul_operand_ring_populate_node] name="
++                  << transNode->name_ << " srcUnit="
++                  << EnumsConversion::senComponentsToString.at(transNode->src_.unit_)
++                  << " srcStorage="
++                  << EnumsConversion::senComponentsToString.at(transNode->src_.storage_)
++                  << " srcLds=" << transNode->srcLdsAndLoopOffsets_.myLdsIdx_
++                  << " dsts=" << transNode->dstVias_.size() << " dst=";
++        for (const auto& via : transNode->dstVias_) {
++          std::cerr << EnumsConversion::senComponentsToString.at(via.loc_.unit_)
++                    << ":"
++                    << EnumsConversion::senComponentsToString.at(via.loc_.storage_)
++                    << ",";
++        }
++        std::cerr << " dstLds=";
++        for (const auto& di : transNode->dstLdsAndLoopOffsets_) {
++          std::cerr << di.myLdsIdx_ << ",";
++        }
++        std::cerr << "\n";
++      }
++      if (transNode->dstVias_.empty()) continue;
++
++      const bool isFinalizedRhsTransfer =
++          transNode->srcLdsAndLoopOffsets_.myLdsIdx_ >= 0 &&
++          transNode->src_.unit_ == SenComponents::LXLU &&
++          transNode->src_.storage_ == SenComponents::LX &&
++          EnumsConversion::senCompToRowId.count(
++              transNode->dstVias_.front().loc_.unit_) &&
++          EnumsConversion::senCompToRowId.at(
++              transNode->dstVias_.front().loc_.unit_) == 0;
++      const bool isPreFinalizeTemplateTransfer =
++          transNode->src_.unit_ == SenComponents::NO_COMPONENT &&
++          transNode->dstVias_.front().loc_.storage_ == SenComponents::LX &&
++          !transNode->dstLdsAndLoopOffsets_.empty() &&
++          transNode->dstLdsAndLoopOffsets_.front().myLdsIdx_ >= 0;
++      if (!isFinalizedRhsTransfer && !isPreFinalizeTemplateTransfer) {
+         continue;
+       }
+-      if (transNode->dstLdsAndLoopOffsets_.empty()) continue;
+-      if (transNode->dstVias_.empty() ||
+-          transNode->dstVias_.front().loc_.storage_ != SenComponents::LX) {
++
++      const int ldsIdx = isFinalizedRhsTransfer
++                             ? transNode->srcLdsAndLoopOffsets_.myLdsIdx_
++                             : transNode->dstLdsAndLoopOffsets_.front().myLdsIdx_;
++      if (ldsIdx < 0 || ldsIdx >= static_cast<int>(dsc.labeledDs_.size())) {
+         continue;
+       }
+-      const int ldsIdx = transNode->dstLdsAndLoopOffsets_.front().myLdsIdx_;
+-      if (ldsIdx < 0) continue;
+       auto& lds = dsc.labeledDs_.at(ldsIdx);
+       if (findMatmulOperandBroadcastClassification(mySDsc, lds) == nullptr) {
+         continue;
+       }
++      std::cerr << "[matmul_operand_ring_populate] attaching to "
++                << (isFinalizedRhsTransfer ? "loop transfer="
++                                           : "prefinalize template=")
++                << transNode->name_ << " lds=" << lds.dsName_ << "\n";
+       DT_CHECK_MSG(lds.memOrg_.count(SenComponents::LX),
+                    "Expect LX in memOrg_ for matmul operand broadcast.");
+       auto* allocNode = lds.memOrg_.at(SenComponents::LX).allocateNode_;
+@@ -679,6 +1011,10 @@ static void populateMatmulOperandBroadcastRingTransfersAfterAllocation(
+       DT_CHECK_MSG(populateMatmulOperandBroadcastRingTransfers(
+                        mySDsc, lds, *allocNode, transNode, &reason),
+                    reason);
++      if (isFinalizedRhsTransfer || isPreFinalizeTemplateTransfer) {
++        transNode->addRelevantCompToNodeAndAncestors(SenComponents::L3LU);
++        transNode->addRelevantCompToNodeAndAncestors(SenComponents::L3SU);
++      }
+     }
+   }
+ }
+@@ -3501,8 +3837,11 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
+                                       EnumsConversion::senComponentsToString.at(
+                                           SenComponents::NO_COMPONENT) +
+                                       "_lx_neighbor";
+-        // Create a dummy transfer node with src ldsIdx == -1.
+-        constexpr int srcLdsIdx = -1;
++        // Keep this as an artificial transfer, but bind it to the same LDS on
++        // both sides so finalizeScheduleTree can see the operand's loop view.
++        // The physical source addresses are supplied later by
++        // lxNeighborRingTransfers_; the LDS binding is only for loop metadata.
++        const int srcLdsIdx = ldsIdx;
+         dsc2::TransferNode* transInNode = createTransferNode(
+             SenComponents::NO_COMPONENT, SenComponents::NO_COMPONENT,
+             {SenComponents::NO_COMPONENT}, {SenComponents::LX}, srcLdsIdx,
+@@ -8234,6 +8573,10 @@ void L3DlOpsScheduler::run(SuperDsc &mySDsc) {
+     fillLoopOffsetsAndAddresses(mySDsc, dscIdx, true);
+ 
+   dsc2::transformLxZeroPadInfoInScheduleTree(mySDsc);
++  if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
++      nullptr) {
++    populateMatmulOperandBroadcastRingTransfersAfterAllocation(mySDsc);
++  }
+ 
+   // Propagate coordinates.
+   propagateCoordinate(mySDsc);
+diff --git a/dsc/dsc2.cpp b/dsc/dsc2.cpp
+index 2d64ebc1c..1868a3721 100644
+--- a/dsc/dsc2.cpp
++++ b/dsc/dsc2.cpp
+@@ -644,6 +644,32 @@ void DesignSpaceConfig::exportJsonDSC2Fields(std::ostream& json,
+         if (--c1 > 0) json << ", ";
+       }
+       json << "},\n";
++      json << ps2 << QUOTE("lxNeighborRingTransfers_") << " : [\n";
++      for (int j = 0; j < tn->lxNeighborRingTransfers_.size(); j++) {
++        const auto& transfer = tn->lxNeighborRingTransfers_.at(j);
++        json << ps3 << "{\n";
++        json << ps4 << QUOTE("sourceCoreId_") << " : "
++             << transfer.sourceCoreId_ << ",\n";
++        json << ps4 << QUOTE("destinationCoreId_") << " : "
++             << transfer.destinationCoreId_ << ",\n";
++        json << ps4 << QUOTE("sourceStartAddress_") << " : "
++             << transfer.sourceStartAddress_ << ",\n";
++        json << ps4 << QUOTE("destinationStartAddress_") << " : "
++             << transfer.destinationStartAddress_ << ",\n";
++        json << ps4 << QUOTE("byteCount_") << " : " << transfer.byteCount_
++             << ",\n";
++        json << ps4 << QUOTE("group_") << " : " << transfer.group_ << ",\n";
++        json << ps4 << QUOTE("producerChunk_") << " : "
++             << transfer.producerChunk_ << ",\n";
++        json << ps4 << QUOTE("consumerReplica_") << " : "
++             << transfer.consumerReplica_ << "\n";
++        if (j != tn->lxNeighborRingTransfers_.size() - 1) {
++          json << ps3 << "},\n";
++        } else {
++          json << ps3 << "}\n";
++        }
++      }
++      json << ps2 << "],\n";
+       json << ps2 << QUOTE("coreletViews_") << " : {\n";
+       c1 = tn->coreletViews_.size();
+       for (auto& clView : tn->coreletViews_) {
+@@ -1595,6 +1621,27 @@ bool DesignSpaceConfig::importJsonObjDSC2Fields(const json11::Json& json,
+                       EnumsConversion::stringToPrimaryDim.at(dim),
+                       val.int_value());
+                 }
++              } else if (field.first == "lxNeighborRingTransfers_") {
++                tn->lxNeighborRingTransfers_.clear();
++                for (const auto& transferJson : field.second.array_items()) {
++                  auto& transfer = tn->lxNeighborRingTransfers_.emplace_back();
++                  transfer.sourceCoreId_ =
++                      transferJson["sourceCoreId_"].int_value();
++                  transfer.destinationCoreId_ =
++                      transferJson["destinationCoreId_"].int_value();
++                  transfer.sourceStartAddress_ = static_cast<int64_t>(
++                      transferJson["sourceStartAddress_"].number_value());
++                  transfer.destinationStartAddress_ = static_cast<int64_t>(
++                      transferJson["destinationStartAddress_"].number_value());
++                  transfer.byteCount_ =
++                      static_cast<int64_t>(transferJson["byteCount_"].number_value());
++                  transfer.group_ =
++                      static_cast<int64_t>(transferJson["group_"].number_value());
++                  transfer.producerChunk_ = static_cast<int64_t>(
++                      transferJson["producerChunk_"].number_value());
++                  transfer.consumerReplica_ = static_cast<int64_t>(
++                      transferJson["consumerReplica_"].number_value());
++                }
+               } else if (field.first == "coreletViews_") {
+                 for (const auto& clViewJson : field.second.object_items()) {
+                   auto& clView = tn->coreletViews_[std::stoi(clViewJson.first)];
+@@ -1931,6 +1978,28 @@ std::map<int, std::set<int>> ScheduleNode::getRelevantCoreCl(
+   return allCoreCl;
+ }
+ 
++void ScheduleNode::addRelevantCompToNodeAndAncestors(SenComponents comp) {
++  if (comp == SenComponents::NO_COMPONENT) return;
++  std::map<int, std::set<int>> coreCls;
++  if (relevantComps_.count(SenComponents::NO_COMPONENT)) {
++    coreCls = relevantComps_.at(SenComponents::NO_COMPONENT);
++  } else {
++    coreCls = getRelevantCoreCl();
++  }
++  addRelevantCompToNodeAndAncestors(comp, coreCls);
++}
++
++void ScheduleNode::addRelevantCompToNodeAndAncestors(
++    SenComponents comp, const std::map<int, std::set<int>>& coreCls) {
++  if (comp == SenComponents::NO_COMPONENT) return;
++  for (auto* location = this; location != nullptr; location = location->prev_) {
++    auto& relCoreCls = location->relevantComps_[comp];
++    for (const auto& [core, cls] : coreCls) {
++      relCoreCls[core].insert(cls.begin(), cls.end());
++    }
++  }
++}
++
+ std::set<SenComponents> ScheduleNode::getRelevantComps(int coreId,
+                                                        int clId) const {
+   std::set<SenComponents> allComps;
+@@ -2960,6 +3029,8 @@ void DesignSpaceConfig::finalizeScheduleTree(SuperDsc& sdsc,
+   };
+ 
+   std::unordered_set<std::string> names;
++  std::map<int, std::vector<dsc2::TransferNode::LxNeighborRingTransfer>>
++      lxNeighborRingTemplatesByLds;
+   scheduleTree_.getHeadMutable()->relevantComps_.erase(NO_COMPONENT);
+   for (auto& node : treeTraverseVect) {
+     // remove NO_COMPONENT from relevantComps_
+@@ -3039,6 +3110,63 @@ void DesignSpaceConfig::finalizeScheduleTree(SuperDsc& sdsc,
+       }
+     } else if (node->nodeType_ == dsc2::ScheduleNode::TRANSFER) {
+       auto* tn = static_cast<dsc2::TransferNode*>(node);
++      const bool isLxNeighborTemplateTransfer =
++          tn->src_.unit_ == SenComponents::NO_COMPONENT &&
++          !tn->lxNeighborRingTransfers_.empty() &&
++          !tn->dstLdsAndLoopOffsets_.empty() &&
++          tn->dstLdsAndLoopOffsets_.front().myLdsIdx_ >= 0;
++      if (isLxNeighborTemplateTransfer) {
++        const int ldsIdx = tn->dstLdsAndLoopOffsets_.front().myLdsIdx_;
++        lxNeighborRingTemplatesByLds[ldsIdx] = tn->lxNeighborRingTransfers_;
++        std::map<int, std::set<int>> ringCoreCls;
++        for (const auto& transfer : tn->lxNeighborRingTransfers_) {
++          ringCoreCls[transfer.sourceCoreId_].insert(0);
++          ringCoreCls[transfer.destinationCoreId_].insert(0);
++        }
++        tn->addRelevantCompToNodeAndAncestors(SenComponents::L3LU, ringCoreCls);
++        tn->addRelevantCompToNodeAndAncestors(SenComponents::L3SU, ringCoreCls);
++      }
++      if (false && tn->lxNeighborRingTransfers_.empty() && !tn->dstVias_.empty() &&
++          tn->srcLdsAndLoopOffsets_.myLdsIdx_ >= 0 &&
++          tn->src_.unit_ == SenComponents::LXLU &&
++          tn->src_.storage_ == SenComponents::LX &&
++          DesignSpaceConfig::senCompToRowId.count(
++              tn->dstVias_.front().loc_.unit_) &&
++          DesignSpaceConfig::senCompToRowId.at(
++              tn->dstVias_.front().loc_.unit_) == 0) {
++        const int ldsIdx = tn->srcLdsAndLoopOffsets_.myLdsIdx_;
++        const auto templateIt = lxNeighborRingTemplatesByLds.find(ldsIdx);
++        if (templateIt != lxNeighborRingTemplatesByLds.end()) {
++          tn->lxNeighborRingTransfers_ = templateIt->second;
++          tn->addRelevantCompToNodeAndAncestors(SenComponents::L3LU);
++          tn->addRelevantCompToNodeAndAncestors(SenComponents::L3SU);
++          if (std::getenv("DEEPTOOLS_LX_NEIGHBOR_VIEW_PROBE") != nullptr) {
++            std::cerr << "[lx_neighbor_template_attach] node=" << tn->name_
++                      << " lds=" << ldsIdx
++                      << " transfers=" << tn->lxNeighborRingTransfers_.size()
++                      << "\n";
++          }
++        }
++      }
++      if (std::getenv("DEEPTOOLS_LX_NEIGHBOR_VIEW_PROBE") != nullptr &&
++          (tn->name_.find("lds1") != std::string::npos ||
++           tn->name_.find("lx_neighbor") != std::string::npos ||
++           tn->name_.find("ptrow") != std::string::npos ||
++           !tn->lxNeighborRingTransfers_.empty())) {
++        std::cerr << "[transfer_finalize_probe] node=" << tn->name_
++                  << " srcUnit="
++                  << EnumsConversion::senComponentsToString.at(tn->src_.unit_)
++                  << " srcStorage="
++                  << EnumsConversion::senComponentsToString.at(tn->src_.storage_)
++                  << " dsts=" << tn->dstVias_.size()
++                  << " srcLds=" << tn->srcLdsAndLoopOffsets_.myLdsIdx_
++                  << " dstLds=";
++        for (const auto& di : tn->dstLdsAndLoopOffsets_) {
++          std::cerr << di.myLdsIdx_ << ",";
++        }
++        std::cerr << " ring=" << tn->lxNeighborRingTransfers_.size()
++                  << "\n";
++      }
+       if (tn->src_.unit_ == NO_COMPONENT) continue;
+       /* for (auto coreId : coreIdsUsed_) */ {
+         // do not insert view for each core until we have expanded coreletViews
+@@ -3058,6 +3186,42 @@ void DesignSpaceConfig::finalizeScheduleTree(SuperDsc& sdsc,
+             clView.dstLoopsAndSizes_.push_back(buildUnitView(
+                 tn->dstVias_[i].loc_, tn->dstLdsAndLoopOffsets_.at(i),
+                 tn->lastFusableParentLoopDst_.at(i), tn, coreId, clId));
++            if (std::getenv("DEEPTOOLS_LX_NEIGHBOR_VIEW_PROBE") != nullptr &&
++                (tn->name_.find("lds1") != std::string::npos ||
++                 tn->name_.find("ptrow") != std::string::npos ||
++                 !tn->lxNeighborRingTransfers_.empty())) {
++              auto dumpView = [&](const char* label,
++                                  const dsc2::ScheduleNode::UnitView& view) {
++                std::cerr << "[transfer_view_probe] node=" << tn->name_
++                          << " cl=" << clId << " " << label
++                          << " sizes=";
++                for (const auto& size : view.getSizesForCoreId(coreId)) {
++                  std::cerr << EnumsConversion::primaryDimToString.at(size.dim_)
++                            << ":" << size.size_ << ",";
++                }
++                std::cerr << " compositeLoops=";
++                for (const auto& loopInfo : view.compositeLoops_) {
++                  std::cerr << "("
++                            << (loopInfo.loop_ ? loopInfo.loop_->name_ : "const")
++                            << ","
++                            << EnumsConversion::primaryDimToString.at(loopInfo.dim_)
++                            << ",sizeIdx=" << loopInfo.sizeIdx_
++                            << ",elemOffset=" << loopInfo.elemOffset_ << ")";
++                }
++                std::cerr << " outerLoops=";
++                for (const auto& loopInfo : view.outerLoops_) {
++                  std::cerr << "("
++                            << (loopInfo.loop_ ? loopInfo.loop_->name_ : "const")
++                            << ","
++                            << EnumsConversion::primaryDimToString.at(loopInfo.dim_)
++                            << ",sizeIdx=" << loopInfo.sizeIdx_
++                            << ",elemOffset=" << loopInfo.elemOffset_ << ")";
++                }
++                std::cerr << "\n";
++              };
++              dumpView("src", clView.srcLoopsAndSize_);
++              dumpView("dst", clView.dstLoopsAndSizes_.back());
++            }
+             if (tn->isDstIndirect()) {
+               clView.dstIndirectLoopsAndSizes_.push_back(buildUnitView(
+                   tn->dstVias_[i].locIndirect_,
+diff --git a/dsc/dsc2.h b/dsc/dsc2.h
+index 9c355d022..358c4afd8 100644
+--- a/dsc/dsc2.h
++++ b/dsc/dsc2.h
+@@ -472,6 +472,9 @@ class ScheduleNode {
+       SenComponents comp = SenComponents::ALL) const;
+   std::set<SenComponents> getRelevantComps(int coreId = -1,
+                                            int clId = -1) const;
++  void addRelevantCompToNodeAndAncestors(SenComponents comp);
++  void addRelevantCompToNodeAndAncestors(
++      SenComponents comp, const std::map<int, std::set<int>>& coreCls);
+ 
+   void moveNode(DesignSpaceConfig* ownerDsc, BlockNode* newParent,
+                 bool addBefore = false,
+diff --git a/dsc/dsc2Pcfg.cpp b/dsc/dsc2Pcfg.cpp
+index ab1f53d4c..d51402571 100644
+--- a/dsc/dsc2Pcfg.cpp
++++ b/dsc/dsc2Pcfg.cpp
+@@ -7,6 +7,11 @@
+ 
+ #include <dataType.h>
+ 
++static bool buildLxNeighborRingTransfers(
++    DscPcfgTranslator::TranslatorGlobals& globals,
++    DscPcfgTranslator::PcfgInfo& pcfgInfo,
++    const dsc2::TransferNode* treeNode);
++
+ // =========================================================
+ // Entry points
+ // =========================================================
+@@ -310,6 +315,283 @@ void DscPcfgTranslator::translateDscCondition(
+   connectPcfgConditionBranches(globals, pcfgInfo, treeNode, condNode);
+ }
+ 
++static std::vector<std::string> getLxNeighborRingLayoutOrder(
++    const DesignSpaceConfig& dsc, const LabeledDsInfo& lds) {
++  std::vector<std::string> dimLayoutOrder;
++  const auto& primaryInfo = dsc.primaryDsInfo_.at(lds.dsType_);
++  for (const auto dim : primaryInfo.layoutDimOrder_) {
++    if (dim == PrimaryDimTypes::IJ) {
++      dimLayoutOrder.push_back("j");
++      dimLayoutOrder.push_back("i");
++    } else {
++      dimLayoutOrder.push_back(EnumsConversion::primaryDimToString.at(dim));
++    }
++  }
++  if (dimLayoutOrder.empty()) {
++    dimLayoutOrder.push_back("x");
++  }
++  return dimLayoutOrder;
++}
++
++static bool buildLxNeighborRingTransfers(
++    DscPcfgTranslator::TranslatorGlobals& globals,
++    DscPcfgTranslator::PcfgInfo& pcfgInfo,
++    const dsc2::TransferNode* treeNode) {
++  if (treeNode->lxNeighborRingTransfers_.empty()) {
++    return false;
++  }
++
++  auto& pcfg = pcfgInfo.pcfg;
++  const int coreId = pcfgInfo.c;
++  const SenComponents genComp = pcfgInfo.genComp;
++  auto& scopeStack = globals.scopeStack;
++  auto& nameMap = globals.nameMap;
++  const auto& dsc = globals.dsc;
++
++  if (genComp != SenComponents::L3LU && genComp != SenComponents::L3SU) {
++    return false;
++  }
++
++  DT_CHECK_MSG(treeNode->isDstLabeledDs(),
++               "Expect LX-neighbor transfer to target a labeled DS.");
++  const int dstLdsIdx = treeNode->dstLdsAndLoopOffsets_.front().myLdsIdx_;
++  DT_CHECK_MSG(dstLdsIdx >= 0 && dstLdsIdx < dsc.labeledDs_.size(),
++               "Invalid LX-neighbor destination labeled DS.");
++  const auto& dstLds = dsc.labeledDs_.at(dstLdsIdx);
++  const auto dimLayoutOrder = getLxNeighborRingLayoutOrder(dsc, dstLds);
++
++  std::cerr << "[lx_neighbor_pcfg_dsc2] node=" << treeNode->name_
++            << " transfers=" << treeNode->lxNeighborRingTransfers_.size()
++            << " core=" << coreId
++            << " unit=" << EnumsConversion::senComponentsToString.at(genComp)
++            << "\n";
++
++  constexpr int64_t kBytesPerStick = 128;
++  const auto& transfers = treeNode->lxNeighborRingTransfers_;
++  size_t maxRunLength = transfers.size();
++  if (const char* maxRunEnv =
++          std::getenv("DEEPTOOLS_LX_NEIGHBOR_MAX_RUN")) {
++    const int parsedMaxRun = std::atoi(maxRunEnv);
++    if (parsedMaxRun > 0) maxRunLength = static_cast<size_t>(parsedMaxRun);
++  }
++
++
++  auto isRelevantTransfer = [&](const auto& transfer) {
++    if (transfer.sourceCoreId_ == transfer.destinationCoreId_) {
++      return false;
++    }
++    const bool isSend =
++        genComp == SenComponents::L3SU && transfer.sourceCoreId_ == coreId;
++    const bool isReceive = genComp == SenComponents::L3LU &&
++                           transfer.destinationCoreId_ == coreId;
++    return isSend || isReceive;
++  };
++
++  auto isSendTransfer = [&](const auto& transfer) {
++    return genComp == SenComponents::L3SU && transfer.sourceCoreId_ == coreId;
++  };
++
++  auto isSameRun = [](const auto& first, const auto& previous,
++                      const auto& current, int64_t sourceStride,
++                      int64_t destinationStride) {
++    return current.sourceCoreId_ == first.sourceCoreId_ &&
++           current.destinationCoreId_ == first.destinationCoreId_ &&
++           current.byteCount_ == first.byteCount_ &&
++           current.group_ == first.group_ &&
++           current.producerChunk_ == first.producerChunk_ &&
++           current.consumerReplica_ == first.consumerReplica_ &&
++           current.sourceStartAddress_ - previous.sourceStartAddress_ ==
++               sourceStride &&
++           current.destinationStartAddress_ -
++                   previous.destinationStartAddress_ ==
++               destinationStride;
++  };
++
++  auto validateTransfer = [](const auto& transfer) {
++    DT_CHECK_MSG(transfer.byteCount_ > 0,
++                 "Invalid LX-neighbor ring transfer byte count.");
++    DT_CHECK_MSG(transfer.byteCount_ % kBytesPerStick == 0,
++                 "LX-neighbor ring transfers must be stick aligned.");
++  };
++
++  int64_t ringCoreCount = 0;
++  for (const auto& transfer : transfers) {
++    ringCoreCount =
++        std::max(ringCoreCount, static_cast<int64_t>(transfer.sourceCoreId_ + 1));
++    ringCoreCount = std::max(
++        ringCoreCount, static_cast<int64_t>(transfer.destinationCoreId_ + 1));
++  }
++  DT_CHECK_MSG(ringCoreCount > 0,
++               "LX-neighbor ring transfer list must name at least one core.");
++
++  auto ringPhase = [&](const auto& transfer) {
++    int64_t phase =
++        (static_cast<int64_t>(transfer.destinationCoreId_) -
++         static_cast<int64_t>(transfer.sourceCoreId_) + ringCoreCount) %
++        ringCoreCount;
++    if (phase == 0) {
++      phase = ringCoreCount;
++    }
++    return phase;
++  };
++
++  std::vector<size_t> relevantTransfers;
++  relevantTransfers.reserve(transfers.size());
++  for (size_t idx = 0; idx < transfers.size(); ++idx) {
++    if (isRelevantTransfer(transfers.at(idx))) {
++      validateTransfer(transfers.at(idx));
++      relevantTransfers.push_back(idx);
++    }
++  }
++  std::stable_sort(relevantTransfers.begin(), relevantTransfers.end(),
++                   [&](size_t lhs, size_t rhs) {
++                     const auto& lhsTransfer = transfers.at(lhs);
++                     const auto& rhsTransfer = transfers.at(rhs);
++                     if (lhsTransfer.group_ != rhsTransfer.group_) {
++                       return lhsTransfer.group_ < rhsTransfer.group_;
++                     }
++                     const int64_t lhsPhase = ringPhase(lhsTransfer);
++                     const int64_t rhsPhase = ringPhase(rhsTransfer);
++                     if (lhsPhase != rhsPhase) {
++                       return lhsPhase < rhsPhase;
++                     }
++                     if (lhsTransfer.sourceCoreId_ !=
++                         rhsTransfer.sourceCoreId_) {
++                       return lhsTransfer.sourceCoreId_ <
++                              rhsTransfer.sourceCoreId_;
++                     }
++                     if (lhsTransfer.destinationCoreId_ !=
++                         rhsTransfer.destinationCoreId_) {
++                       return lhsTransfer.destinationCoreId_ <
++                              rhsTransfer.destinationCoreId_;
++                     }
++                     return lhs < rhs;
++                   });
++
++  size_t transferIndex = 0;
++  bool emittedAny = false;
++  while (transferIndex < relevantTransfers.size()) {
++    const size_t firstIdx = relevantTransfers.at(transferIndex);
++    const auto& first = transfers.at(firstIdx);
++
++    size_t runEnd = transferIndex + 1;
++    int64_t sourceStride = 0;
++    int64_t destinationStride = 0;
++    if (std::getenv("DEEPTOOLS_LX_NEIGHBOR_DISABLE_RUN_COALESCE") ==
++            nullptr &&
++        runEnd < relevantTransfers.size()) {
++      const auto& second = transfers.at(relevantTransfers.at(runEnd));
++      if (second.sourceCoreId_ == first.sourceCoreId_ &&
++          second.destinationCoreId_ == first.destinationCoreId_ &&
++          second.byteCount_ == first.byteCount_ &&
++          second.group_ == first.group_ &&
++          second.producerChunk_ == first.producerChunk_ &&
++          second.consumerReplica_ == first.consumerReplica_) {
++        sourceStride = second.sourceStartAddress_ - first.sourceStartAddress_;
++        destinationStride =
++            second.destinationStartAddress_ - first.destinationStartAddress_;
++        ++runEnd;
++        while (runEnd < relevantTransfers.size() &&
++               isSameRun(first, transfers.at(relevantTransfers.at(runEnd - 1)),
++                         transfers.at(relevantTransfers.at(runEnd)),
++                         sourceStride, destinationStride)) {
++          ++runEnd;
++        }
++      }
++    }
++    if (runEnd - transferIndex > maxRunLength) {
++      runEnd = transferIndex + maxRunLength;
++    }
++
++
++    const size_t runLength = runEnd - transferIndex;
++    const bool isSend = isSendTransfer(first);
++    std::cerr << "[lx_neighbor_pcfg_dsc2] emit "
++              << (isSend ? "send" : "recv") << " core=" << coreId
++              << " src=" << first.sourceCoreId_
++              << " dst=" << first.destinationCoreId_
++              << " bytes=" << first.byteCount_ << " run=" << runLength
++              << " group=" << first.group_
++              << " phase=" << ringPhase(first)
++              << " srcStride=" << sourceStride
++              << " dstStride=" << destinationStride << "\n";
++
++    auto* ringNode = static_cast<SenPcfgRingDtNode*>(
++        pcfg.createPcfgNode(SenPcfgNode::Type::RINGDATATRANSFER));
++    const std::string endName =
++        "-lx-neighbor-ring-" + std::string(isSend ? "send" : "recv") +
++        "-src" + std::to_string(first.sourceCoreId_) + "-dst" +
++        std::to_string(first.destinationCoreId_) + "-chunk" +
++        std::to_string(first.producerChunk_) + "-run" +
++        std::to_string(firstIdx);
++    ringNode->name = DscPcfgTranslator::createPcfgNodeName(
++        nameMap, coreId, pcfgInfo.clComp, endName);
++    ringNode->coreletId = -1;
++    ringNode->dtInfo = nullptr;
++    ringNode->dsInfo = nullptr;
++    ringNode->dtFormat = dstLds.dataFormat_;
++    ringNode->srcDest.src_ = isSend ? SenComponents::LX : SenComponents::RING;
++    ringNode->srcDest.dst_ = isSend ? SenComponents::RING : SenComponents::LX;
++    ringNode->dimLayoutOrder = dimLayoutOrder;
++    ringNode->coreIdForRing = {
++        static_cast<int64_t>(isSend ? first.destinationCoreId_
++                                    : first.sourceCoreId_)};
++    ringNode->coreIDForRingCondAndVal.clear();
++    ringNode->useBurst = false;
++    ringNode->gtr_imm_opt_en = false;
++    ringNode->GTRAndBurstCondAndVal.clear();
++    ringNode->myBigDimSize.clear();
++    ringNode->myBigSubDimSize.clear();
++    ringNode->myBigStride.clear();
++    ringNode->myLitDimSize.clear();
++    ringNode->myLitSubDimSize.clear();
++    ringNode->bigStAddrOffsets.clear();
++    for (const auto& dim : ringNode->dimLayoutOrder) {
++      ringNode->myBigDimSize[dim] = 1;
++      ringNode->myLitDimSize[dim] = 1;
++    }
++    if (isSend) {
++      ringNode->setSrcStAddr(first.sourceStartAddress_);
++      ringNode->setDestStAddr(-1);
++    } else {
++      ringNode->setSrcStAddr(-1);
++      ringNode->setDestStAddr(first.destinationStartAddress_);
++    }
++
++    if (runLength > 1) {
++      const int64_t activeStride = isSend ? sourceStride : destinationStride;
++      DT_CHECK_MSG(activeStride % kBytesPerStick == 0,
++                   "LX-neighbor ring loop stride must be stick aligned.");
++      const std::string loopName = DscPcfgTranslator::createPcfgNodeName(
++          nameMap, coreId, pcfgInfo.clComp,
++          "-lx-neighbor-ring-loop-" + std::to_string(firstIdx));
++      auto [loopNode, branchNode] = SenPcfg::createLoopAndBranchEnd(
++          pcfg, loopName, static_cast<int>(runLength));
++      PcfgDtOffsets offsets;
++      offsets.dimOffset = activeStride / kBytesPerStick;
++      offsets.subDimOffset = 0;
++      offsets.uniDimOffset = 0;
++      offsets.freq = 1;
++      offsets.clSkipOffset = 0;
++      offsets.clSkipFreq = 1;
++      ringNode->bigStAddrOffsets[loopNode->name] = offsets;
++
++      SenPcfg::pcfgInsertBelow(loopNode, scopeStack.getPos());
++      SenPcfg::pcfgInsertBelow(ringNode, loopNode);
++      SenPcfg::pcfgInsertBelow(branchNode, ringNode);
++      scopeStack.updatePos(branchNode);
++    } else {
++      SenPcfg::pcfgInsertBelow(ringNode, scopeStack.getPos());
++      scopeStack.updatePos(ringNode);
++    }
++    emittedAny = true;
++
++    transferIndex = runEnd;
++  }
++
++  return emittedAny;
++}
++
+ void DscPcfgTranslator::translateDscDataTransfer(
+     TranslatorGlobals& globals, PcfgInfo& pcfgInfo,
+     const dsc2::TransferNode* treeNode) {
+@@ -319,6 +601,10 @@ void DscPcfgTranslator::translateDscDataTransfer(
+   auto& scopeStack = globals.scopeStack;
+   auto& dtMap = globals.dtMap;
+ 
++  if (buildLxNeighborRingTransfers(globals, pcfgInfo, treeNode)) {
++    return;
++  }
++
+   // Special DT conditions for current PCFG
+   const bool isSrc = genComp == treeNode->src_.unit_;
+   const bool isConstant = treeNode->src_.unit_ == SenComponents::CONSTANT;
+@@ -1617,6 +1903,54 @@ void DscPcfgTranslator::buildComputeNode(
+   // Opaque ops
+   auto& attr = treeNode->instrAttribute_;
+   if (treeNode->isOpaqueOp_) {
++    if (std::getenv("DEEPTOOLS_LX_NEIGHBOR_VIEW_PROBE") != nullptr) {
++      std::cerr << "[opaque_compute_probe] node=" << treeNode->name_
++                << " core=" << c << " cl=" << cl
++                << " comp=" << EnumsConversion::senComponentsToString.at(genComp)
++                << " inputs=" << treeNode->inputsLdsAndLoopOffsets_.size()
++                << "\n";
++      const auto viewIt = treeNode->coreletViews_.find(cl);
++      for (size_t inputIdx = 0; inputIdx < treeNode->inputsLdsAndLoopOffsets_.size();
++           ++inputIdx) {
++        const auto& di = treeNode->inputsLdsAndLoopOffsets_.at(inputIdx);
++        std::cerr << "[opaque_input_probe] node=" << treeNode->name_
++                  << " input=" << inputIdx
++                  << " lds=" << di.myLdsIdx_
++                  << " dataConnect=" << di.dataConnect_
++                  << " startSymbolic=" << di.isStartAddrSymbolic_;
++        if (di.myLdsIdx_ >= 0 && di.myLdsIdx_ < dsc.labeledDs_.size()) {
++          std::cerr << " dsName=" << dsc.labeledDs_.at(di.myLdsIdx_).dsName_;
++        }
++        if (viewIt != treeNode->coreletViews_.end() &&
++            inputIdx < viewIt->second.inputsLoopsAndSizes_.size()) {
++          const auto& view = viewIt->second.inputsLoopsAndSizes_.at(inputIdx);
++          std::cerr << " sizes=";
++          for (const auto& size : view.getSizesForCoreId(c)) {
++            std::cerr << EnumsConversion::primaryDimToString.at(size.dim_)
++                      << ":" << size.size_ << ",";
++          }
++          std::cerr << " compositeLoops=";
++          for (const auto& loopInfo : view.compositeLoops_) {
++            std::cerr << "("
++                      << (loopInfo.loop_ ? loopInfo.loop_->name_ : "const")
++                      << ","
++                      << EnumsConversion::primaryDimToString.at(loopInfo.dim_)
++                      << ",sizeIdx=" << loopInfo.sizeIdx_
++                      << ",elemOffset=" << loopInfo.elemOffset_ << ")";
++          }
++          std::cerr << " outerLoops=";
++          for (const auto& loopInfo : view.outerLoops_) {
++            std::cerr << "("
++                      << (loopInfo.loop_ ? loopInfo.loop_->name_ : "const")
++                      << ","
++                      << EnumsConversion::primaryDimToString.at(loopInfo.dim_)
++                      << ",sizeIdx=" << loopInfo.sizeIdx_
++                      << ",elemOffset=" << loopInfo.elemOffset_ << ")";
++          }
++        }
++        std::cerr << "\n";
++      }
++    }
+     const auto regIds =
+         parseOpaqueRegMap(attr.read_only_reg_map_, attr.read_write_reg_map_);
+     computeNode->build(nodeName, cl, genComp, format, attr.param_map_, regIds,
+@@ -1747,6 +2081,41 @@ void DscPcfgTranslator::buildComputeTransfers(
+         pcfg.createPcfgNode(SenPcfgNode::Type::DATATRANSFER2));
+ 
+     // NFWD
++    if (!output) {
++      std::cerr << "[compute_input_view] input=" << i << " core=" << c
++                << " cl=" << cl << " storage="
++                << EnumsConversion::senComponentsToString.at(storage);
++      if (compLoops.isLabeledDs()) {
++        const auto& lds = dsc.labeledDs_.at(compLoops.myLdsIdx_);
++        std::cerr << " lds=" << lds.dsName_ << " idx="
++                  << compLoops.myLdsIdx_;
++      }
++      std::cerr << " sizes=";
++      for (const auto& size : allViews.at(i).getSizesForCoreId(c)) {
++        std::cerr << EnumsConversion::primaryDimToString.at(size.dim_) << ":"
++                  << size.size_ << ",";
++      }
++      std::cerr << " compositeLoops=";
++      for (const auto& loopInfo : allViews.at(i).compositeLoops_) {
++        std::cerr << "("
++                  << (loopInfo.loop_ ? loopInfo.loop_->name_ : "const")
++                  << ","
++                  << EnumsConversion::primaryDimToString.at(loopInfo.dim_)
++                  << ",sizeIdx=" << loopInfo.sizeIdx_
++                  << ",elemOffset=" << loopInfo.elemOffset_ << ")";
++      }
++      std::cerr << " outerLoops=";
++      for (const auto& loopInfo : allViews.at(i).outerLoops_) {
++        std::cerr << "("
++                  << (loopInfo.loop_ ? loopInfo.loop_->name_ : "const")
++                  << ","
++                  << EnumsConversion::primaryDimToString.at(loopInfo.dim_)
++                  << ",sizeIdx=" << loopInfo.sizeIdx_
++                  << ",elemOffset=" << loopInfo.elemOffset_ << ")";
++      }
++      std::cerr << "\n";
++    }
++
+     if (is_any_of(storage, NFWD0, NFWD2)) {
+       DT_CHECK(!output);
+       auto& outDtInfo = treeNode->outputsLdsAndLoopOffsets_.front();
+@@ -1755,6 +2124,37 @@ void DscPcfgTranslator::buildComputeTransfers(
+                               dtFormats.back(), latchId,
+                               treeNode->outputs_.front(), false);
+     } else if (compLoops.isLabeledDs()) {
++      if (!output && storage == SenComponents::LX) {
++        const auto& lds = dsc.labeledDs_.at(compLoops.myLdsIdx_);
++        std::cerr << "[lx_neighbor_compute_view] lds=" << lds.dsName_
++                  << " idx=" << compLoops.myLdsIdx_ << " core=" << c
++                  << " cl=" << cl << " storage="
++                  << EnumsConversion::senComponentsToString.at(storage)
++                  << " sizes=";
++        for (const auto& size : allViews.at(i).getSizesForCoreId(c)) {
++          std::cerr << EnumsConversion::primaryDimToString.at(size.dim_) << ":"
++                    << size.size_ << ",";
++        }
++        std::cerr << " compositeLoops=";
++        for (const auto& loopInfo : allViews.at(i).compositeLoops_) {
++          std::cerr << "("
++                    << (loopInfo.loop_ ? loopInfo.loop_->name_ : "const")
++                    << ","
++                    << EnumsConversion::primaryDimToString.at(loopInfo.dim_)
++                    << ",sizeIdx=" << loopInfo.sizeIdx_
++                    << ",elemOffset=" << loopInfo.elemOffset_ << ")";
++        }
++        std::cerr << " outerLoops=";
++        for (const auto& loopInfo : allViews.at(i).outerLoops_) {
++          std::cerr << "("
++                    << (loopInfo.loop_ ? loopInfo.loop_->name_ : "const")
++                    << ","
++                    << EnumsConversion::primaryDimToString.at(loopInfo.dim_)
++                    << ",sizeIdx=" << loopInfo.sizeIdx_
++                    << ",elemOffset=" << loopInfo.elemOffset_ << ")";
++        }
++        std::cerr << "\n";
++      }
+       // Regular LDS path
+       DataFormats format = output ? dtFormats.back() : dtFormats.at(i);
+       populateComputeTransfer(globals, pcfgInfo, dtNode, compLoops,
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 52fe6c7fa..9f1e3ac14 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -1,5 +1,6 @@
+ #include <dsc/dataOpDsc.h>
+ #include <dsc/superdsc.h>
++#include <external/json11/json11.hpp>
+ #include <sharedtools/mem_track_bundle.h>
+ 
+ #include <cctype>
+@@ -9,6 +10,7 @@
+ #include <map>
+ #include <set>
+ #include <string>
++#include <vector>
+ 
+ #include "dxp.h"
+ #include "util/LayoutAllgatherRestickify.h"
+@@ -181,11 +183,15 @@ static void emitLayoutAllgatherRestickifyPlanArtifact(
+ static void emitMatmulOperandBroadcastPlanArtifact(
+     const SuperDsc* sdsc, const LabeledDsInfo& lds, int ps,
+     const MatmulOperandBroadcastHookPlan& hook,
+-    bool kernelNeighborLowered = false) {
++    bool kernelNeighborLowered = false,
++    bool gatherRestickifyLowered = false) {
+   auto plan = hook.plan;
+   if (kernelNeighborLowered) {
+     plan.realized = true;
+     plan.realizationStrategy = "loop_scoped_input_fetch";
++  } else if (gatherRestickifyLowered) {
++    plan.realized = true;
++    plan.realizationStrategy = "gather_then_restickify";
+   }
+   const char* outputDirEnv =
+       std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_PLAN_DIR");
+@@ -217,6 +223,16 @@ static void emitMatmulOperandBroadcastPlanArtifact(
+         "the LX-neighbor transfer inside the matmul transfer loop";
+     context["fallback_policy"] =
+         "refuse resident HBM/full per-consumer operand materialization";
++  } else if (gatherRestickifyLowered) {
++    context["realized"] = "true";
++    context["physical_lowering_status"] =
++        "lowered_gather_then_restickify";
++    context["realization"] =
++        "emitted STCDPOpLx grouped gather into a temporary LX tensor, then "
++        "ReStickifyOpLx into the matmul KERNEL operand layout before compute";
++    context["fallback_policy"] =
++        "use HBM fallback only if temporary LX allocation or layout metadata is "
++        "insufficient";
+   } else {
+     context["realized"] = "false";
+     context["physical_lowering_status"] = "blocked";
+@@ -319,7 +335,11 @@ static void addLxPiece(LdsInfo& dataLds, const std::string& key, int coreId,
+   FoldDimProp* addrFoldProp = new FoldDimProp{1, "time"};
+   addrHelper.buildMapDim(addrFoldProp, 0);
+   piece.placement.at(SenComponents::LX).insertStAddr(startAddress, {0});
+-  dataLds.coreIdTolxStartAddress_[coreId] = startAddress;
++  const auto existingBase = dataLds.coreIdTolxStartAddress_.find(coreId);
++  if (existingBase == dataLds.coreIdTolxStartAddress_.end() ||
++      startAddress < existingBase->second) {
++    dataLds.coreIdTolxStartAddress_[coreId] = startAddress;
++  }
+   dataLds.pieces_[key] = piece;
+ }
+ 
+@@ -356,6 +376,553 @@ static int64_t lxStartAddressForCore(const LabeledDsInfo& lds, int coreId) {
+       coreId, 0, 0);
+ }
+ 
++static bool parseJsonObject(const std::string& jsonString,
++                            const std::string& fieldName,
++                            json11::Json* parsed, std::string* reason) {
++  std::string err;
++  *parsed = json11::Json::parse(jsonString, err);
++  if (!err.empty() || !parsed->is_object()) {
++    *reason = fieldName + " must be a JSON object";
++    if (!err.empty()) *reason += ": " + err;
++    return false;
++  }
++  return true;
++}
++
++static std::vector<std::string> jsonStringArray(const json11::Json& object,
++                                                const std::string& key) {
++  std::vector<std::string> result;
++  for (const auto& item : object[key].array_items()) {
++    result.push_back(item.string_value());
++  }
++  return result;
++}
++
++static double jsonNumberOrString(const json11::Json& value,
++                                 double defaultValue = 0) {
++  if (value.is_number()) return value.number_value();
++  if (value.is_string()) return std::stod(value.string_value());
++  return defaultValue;
++}
++
++static int parseCoreIdKey(const std::string& key) {
++  std::size_t pos = 0;
++  while (pos < key.size() && !std::isdigit(static_cast<unsigned char>(key[pos])) &&
++         key[pos] != '-') {
++    ++pos;
++  }
++  if (pos == key.size()) return -1;
++  std::size_t end = pos + 1;
++  while (end < key.size() && std::isdigit(static_cast<unsigned char>(key[end]))) {
++    ++end;
++  }
++  return std::stoi(key.substr(pos, end - pos));
++}
++
++static std::map<int, std::map<std::string, int>> jsonCoreIdToSlice(
++    const json11::Json& tensorJson) {
++  std::map<int, std::map<std::string, int>> result;
++  for (const auto& coreAndSlice :
++       tensorJson["coreIdToWkSlice_"].object_items()) {
++    const int coreId = std::stoi(coreAndSlice.first);
++    for (const auto& dimAndSlice : coreAndSlice.second.object_items()) {
++      result[coreId][dimAndSlice.first] =
++          static_cast<int>(jsonNumberOrString(dimAndSlice.second));
++    }
++  }
++  return result;
++}
++
++static std::map<int, int64_t> jsonCoreStartAddresses(
++    const json11::Json& tensorJson) {
++  std::map<int, int64_t> result;
++  for (const auto& keyAndAddr :
++       tensorJson["startAddressCoreCorelet_"]["data_"].object_items()) {
++    const int coreId = parseCoreIdKey(keyAndAddr.first);
++    if (coreId < 0) continue;
++    result[coreId] = static_cast<int64_t>(jsonNumberOrString(keyAndAddr.second));
++  }
++  return result;
++}
++
++static std::map<std::string, std::string> buildDimRenameByPosition(
++    const json11::Json& sourceTensorJson, const json11::Json& targetTensorJson,
++    std::string* reason) {
++  const auto sourceDims = jsonStringArray(sourceTensorJson, "layoutDimOrder_");
++  const auto targetDims = jsonStringArray(targetTensorJson, "layoutDimOrder_");
++  if (sourceDims.empty() || sourceDims.size() != targetDims.size()) {
++    *reason = "source and target layoutDimOrder_ must have the same rank";
++    return {};
++  }
++  std::map<std::string, std::string> rename;
++  for (std::size_t idx = 0; idx < sourceDims.size(); ++idx) {
++    rename[sourceDims.at(idx)] = targetDims.at(idx);
++  }
++  return rename;
++}
++
++static std::string renamedDim(const std::map<std::string, std::string>& rename,
++                              const std::string& dim) {
++  const auto it = rename.find(dim);
++  return it == rename.end() ? dim : it->second;
++}
++
++static std::map<std::string, std::set<int>> collectStringTensorSliceIds(
++    const std::map<int, std::map<std::string, int>>& coreIdToSlice,
++    const std::vector<std::string>& tensorDims) {
++  std::set<std::string> dimSet(tensorDims.begin(), tensorDims.end());
++  std::map<std::string, std::set<int>> result;
++  for (const auto& coreAndSlice : coreIdToSlice) {
++    for (const auto& dimAndSlice : coreAndSlice.second) {
++      if (!dimSet.count(dimAndSlice.first)) continue;
++      result[dimAndSlice.first].insert(dimAndSlice.second);
++    }
++  }
++  return result;
++}
++
++static bool fillTensorContractLdsShape(
++    LdsInfo& dataLds, DataOpDsc& ddsc, const json11::Json& tensorJson,
++    DesignSpaceConfig& dldsc,
++    const std::map<std::string, std::string>& dimRename,
++    const std::string& pdsName, std::string* reason) {
++  const auto layoutDims = jsonStringArray(tensorJson, "layoutDimOrder_");
++  const auto stickDims = jsonStringArray(tensorJson, "stickDimOrder_");
++  const auto stickSizes = tensorJson["stickSize_"].array_items();
++  if (layoutDims.empty()) {
++    *reason = "tensor contract is missing layoutDimOrder_";
++    return false;
++  }
++  if (stickDims.size() != stickSizes.size()) {
++    *reason = "tensor contract stickDimOrder_ and stickSize_ ranks differ";
++    return false;
++  }
++
++  dataLds.pdsName_ = pdsName;
++  dataLds.wordLength = jsonNumberOrString(tensorJson["wordLength"], 2);
++  dataLds.df = getDsFormat(dataLds.wordLength);
++  ddsc.primaryDs_[pdsName].name_ = pdsName;
++
++  for (const auto& sourceDim : layoutDims) {
++    const auto dimName = renamedDim(dimRename, sourceDim);
++    dataLds.layoutDimOrder_.push_back(dimName);
++    ddsc.primaryDs_.at(pdsName).dimNames.insert(dimName);
++    dataLds.dimToLayoutSize_[dimName] = dldsc.N_.paramNameToVal(dimName);
++    dataLds.validGap_[dimName].push_back(
++        std::make_pair(dataLds.dimToLayoutSize_.at(dimName), 0));
++  }
++
++  for (std::size_t idx = 0; idx < stickDims.size(); ++idx) {
++    const auto dimName = renamedDim(dimRename, stickDims.at(idx));
++    if (std::find(dataLds.stickDimOrder_.begin(), dataLds.stickDimOrder_.end(),
++                  dimName) == dataLds.stickDimOrder_.end()) {
++      dataLds.stickDimOrder_.push_back(dimName);
++      dataLds.dimToStickSize_[dimName] = jsonNumberOrString(stickSizes.at(idx));
++    } else {
++      dataLds.dimToStickSize_.at(dimName) *= jsonNumberOrString(stickSizes.at(idx));
++    }
++    DT_CHECK(ddsc.primaryDs_.at(pdsName).dimNames.count(dimName));
++  }
++
++  double totalElements = 1;
++  for (const auto& dimAndSize : dataLds.dimToLayoutSize_) {
++    totalElements *= dimAndSize.second;
++  }
++  dataLds.totElements = totalElements;
++  return true;
++}
++
++static int64_t fullByteSizeForLds(const LdsInfo& dataLds) {
++  return static_cast<int64_t>(std::ceil(dataLds.totElements * dataLds.wordLength));
++}
++
++static int64_t byteSizeForCell(
++    const LdsInfo& dataLds, const std::map<std::string, double>& dimToSize) {
++  double elements = 1;
++  for (const auto& dim : dataLds.layoutDimOrder_) {
++    elements *= dimToSize.at(dim);
++  }
++  return static_cast<int64_t>(std::ceil(elements * dataLds.wordLength));
++}
++
++static int64_t densePieceOffsetBytes(
++    const LdsInfo& dataLds, const std::map<std::string, double>& dimToSize,
++    const std::map<std::string, double>& dimToStart) {
++  int64_t ordinal = 0;
++  for (const auto& dim : dataLds.layoutDimOrder_) {
++    const auto dimExtent = dataLds.dimToLayoutSize_.at(dim);
++    const auto pieceExtent = dimToSize.at(dim);
++    const int64_t split = static_cast<int64_t>(dimExtent / pieceExtent);
++    const int64_t slot = static_cast<int64_t>(dimToStart.at(dim) / pieceExtent);
++    ordinal = ordinal * split + slot;
++  }
++  return ordinal * byteSizeForCell(dataLds, dimToSize);
++}
++
++static std::vector<std::pair<std::map<std::string, double>,
++                             std::map<std::string, double>>>
++splitCellByStickDims(const LdsInfo& dataLds,
++                     const std::map<std::string, double>& dimToSize,
++                     const std::map<std::string, double>& dimToStart) {
++  std::vector<std::pair<std::map<std::string, double>,
++                        std::map<std::string, double>>>
++      cells = {{dimToSize, dimToStart}};
++  for (const auto& dim : dataLds.stickDimOrder_) {
++    const auto stickIt = dataLds.dimToStickSize_.find(dim);
++    if (stickIt == dataLds.dimToStickSize_.end() || stickIt->second <= 0) {
++      continue;
++    }
++    const auto stick = stickIt->second;
++    std::vector<std::pair<std::map<std::string, double>,
++                          std::map<std::string, double>>>
++        nextCells;
++    for (const auto& cell : cells) {
++      const auto extent = cell.first.at(dim);
++      if (extent <= stick) {
++        nextCells.push_back(cell);
++        continue;
++      }
++      double offset = 0;
++      while (offset < extent) {
++        auto size = cell.first;
++        auto start = cell.second;
++        size[dim] = std::min(stick, extent - offset);
++        start[dim] += offset;
++        nextCells.push_back({size, start});
++        offset += stick;
++      }
++    }
++    cells = nextCells;
++  }
++  return cells;
++}
++
++static int64_t localDensePieceOffsetBytes(
++    const LdsInfo& dataLds, const std::map<std::string, double>& parentDimToSize,
++    const std::map<std::string, double>& parentDimToStart,
++    const std::map<std::string, double>& pieceDimToStart) {
++  double elementOffset = 0;
++  double stride = 1;
++  for (auto it = dataLds.layoutDimOrder_.rbegin();
++       it != dataLds.layoutDimOrder_.rend(); ++it) {
++    const auto& dim = *it;
++    const double diff = pieceDimToStart.at(dim) - parentDimToStart.at(dim);
++    DT_CHECK(diff >= 0);
++    elementOffset += diff * stride;
++    stride *= parentDimToSize.at(dim);
++  }
++  return static_cast<int64_t>(std::ceil(elementOffset * dataLds.wordLength));
++}
++
++static void fullTensorCell(const LdsInfo& dataLds,
++                           std::map<std::string, double>* dimToSize,
++                           std::map<std::string, double>* dimToStart) {
++  dimToSize->clear();
++  dimToStart->clear();
++  for (const auto& dim : dataLds.layoutDimOrder_) {
++    (*dimToSize)[dim] = dataLds.dimToLayoutSize_.at(dim);
++    (*dimToStart)[dim] = 0;
++  }
++}
++
++static bool sourceShardCell(
++    DesignSpaceConfig& dldsc,
++    const std::map<std::string, int>& sourceSlice,
++    const std::map<std::string, std::set<int>>& sourceSliceIds,
++    const std::vector<std::string>& sourceLayoutDims,
++    const std::map<std::string, std::string>& sourceToTargetDim,
++    std::map<std::string, double>* dimToSize,
++    std::map<std::string, double>* dimToStart, std::string* reason) {
++  dimToSize->clear();
++  dimToStart->clear();
++  for (const auto& sourceDim : sourceLayoutDims) {
++    const auto targetDim = renamedDim(sourceToTargetDim, sourceDim);
++    const auto splitIt = sourceSliceIds.find(sourceDim);
++    const int split = splitIt == sourceSliceIds.end()
++                          ? 1
++                          : static_cast<int>(splitIt->second.size());
++    if (split <= 0) {
++      *reason = "source shard split must be positive for dim " + sourceDim;
++      return false;
++    }
++    const double dimExtent = dldsc.N_.paramNameToVal(targetDim);
++    if (static_cast<int>(dimExtent) % split != 0) {
++      *reason = "source shard extent is not evenly divisible for dim " +
++                sourceDim;
++      return false;
++    }
++    const auto slotIt = sourceSlice.find(sourceDim);
++    const int slot = slotIt == sourceSlice.end() ? 0 : slotIt->second;
++    (*dimToSize)[targetDim] = dimExtent / split;
++    (*dimToStart)[targetDim] = slot * dimToSize->at(targetDim);
++  }
++  return true;
++}
++
++static void insertDataOpBeforeDl(SuperDsc* sdsc, int coreId, int dataOpIdx) {
++  auto& schedule = sdsc->coreIdToDscSchedule[coreId];
++  auto insertPos = schedule.begin();
++  for (auto it = schedule.begin(); it != schedule.end(); ++it) {
++    if (it->dldsc_idx == 0) {
++      insertPos = it;
++      break;
++    }
++  }
++  schedule.insert(insertPos, DscScheduleStep(dataOpIdx, -1, false, true));
++}
++
++struct GatheredPieceSpec {
++  std::string key;
++  int coreId = -1;
++  std::map<std::string, double> dimToSize;
++  std::map<std::string, double> dimToStart;
++};
++
++static bool attachMatmulOperandBroadcastGatherThenRestickify(
++    SuperDsc* sdsc, LabeledDsInfo& lds,
++    const MatmulOperandBroadcastHookPlan& hook, MemTrackBundle* memTrackers,
++    int ps, std::string* reason) {
++  if (!hook.plan.requiresLayoutConversion) {
++    *reason = "gather-then-restickify path requires layout conversion metadata";
++    return false;
++  }
++  DT_CHECK(sdsc->dscs_.size() == 1);
++  auto& dldsc = sdsc->dscs_.at(0);
++  const auto allocNode = lds.memOrg_.count(SenComponents::LX)
++                             ? lds.memOrg_.at(SenComponents::LX).allocateNode_
++                             : nullptr;
++  if (allocNode == nullptr) {
++    *reason = "matmul operand broadcast input has no LX allocate node";
++    return false;
++  }
++
++  json11::Json sourceTensor;
++  json11::Json targetTensor;
++  if (!parseJsonObject(hook.plan.sourceLxTensorJson, "source_lx_tensor",
++                       &sourceTensor, reason) ||
++      !parseJsonObject(hook.plan.targetKernelTensorJson,
++                       "target_kernel_tensor", &targetTensor, reason)) {
++    return false;
++  }
++  const auto sourceToTargetDim =
++      buildDimRenameByPosition(sourceTensor, targetTensor, reason);
++  if (sourceToTargetDim.empty()) return false;
++
++  const auto sourceLayoutDims = jsonStringArray(sourceTensor, "layoutDimOrder_");
++  const auto sourceCoreIdToSlice = jsonCoreIdToSlice(sourceTensor);
++  const auto sourceStartAddresses = jsonCoreStartAddresses(sourceTensor);
++  if (sourceCoreIdToSlice.empty() || sourceStartAddresses.empty()) {
++    *reason = "source_lx_tensor must contain coreIdToWkSlice_ and start addresses";
++    return false;
++  }
++  const auto sourceSliceIds =
++      collectStringTensorSliceIds(sourceCoreIdToSlice, sourceLayoutDims);
++  const auto transfers = deeptools::matmulOperandBroadcastLogicalTransfers(hook.plan);
++  if (transfers.empty()) {
++    *reason = "matmul_operand_broadcast has no logical transfers";
++    return false;
++  }
++
++  DataOpDsc gatherDdsc;
++  gatherDdsc.dscName_ = sdsc->name_ + "-" + lds.dsName_ +
++                        "-MatmulOperandGather";
++  gatherDdsc.opName = OpFuncs::STCDPOpLx;
++  gatherDdsc.op = new STCDPOpLx;
++  gatherDdsc.op->name = OpFuncs::STCDPOpLx;
++  static_cast<STCDPOpLx*>(gatherDdsc.op)->enSubPieceReuse = false;
++  gatherDdsc.primaryDs_["activation"].name_ = "activation";
++  gatherDdsc.target_ = sdsc->target_;
++  gatherDdsc.foldProps_.push_back(
++      new FoldDimProp(sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++  gatherDdsc.labeledDs_.resize(2);
++  auto& gatherIn = gatherDdsc.labeledDs_.at(0);
++  auto& gatherOut = gatherDdsc.labeledDs_.at(1);
++  gatherIn.ldsName_ = lds.dsName_ + "-MatmulOperandGather-inp";
++  gatherOut.ldsName_ = lds.dsName_ + "-MatmulOperandGather-tmp";
++  if (!fillTensorContractLdsShape(gatherIn, gatherDdsc, sourceTensor, dldsc,
++                                  sourceToTargetDim, "activation", reason)) {
++    return false;
++  }
++  if (!fillTensorContractLdsShape(gatherOut, gatherDdsc, sourceTensor, dldsc,
++                                  sourceToTargetDim, "activation", reason)) {
++    return false;
++  }
++  gatherDdsc.dimPool_ = gatherDdsc.primaryDs_.at("activation").dimNames;
++
++  std::map<int, int64_t> finalAddressByCore;
++  std::set<int> destinationCores;
++  for (const auto& transfer : transfers) {
++    destinationCores.insert(static_cast<int>(transfer.destinationCore));
++  }
++  LdsInfo targetShapeForTempReservation;
++  DataOpDsc targetShapeDdsc;
++  targetShapeDdsc.primaryDs_["dataOUT"].name_ = "dataOUT";
++  if (!fillTensorContractLdsShape(targetShapeForTempReservation, targetShapeDdsc,
++                                  targetTensor, dldsc, {}, "dataOUT", reason)) {
++    return false;
++  }
++  const auto finalTensorBytes = fullByteSizeForLds(targetShapeForTempReservation);
++  for (const auto dstCore : destinationCores) {
++    auto& tracker = memTrackers->lxTrackPerCore.at(dstCore);
++    const auto reserveName = sdsc->name_ + "-" + lds.dsName_ +
++                             "-MatmulOperandFinalReserve-core" +
++                             std::to_string(dstCore);
++    const auto reservedAddr =
++        tracker.checkAndAddDs(reserveName, "dynamic", finalTensorBytes, {ps});
++    if (reservedAddr < 0) {
++      *reason = "unable to allocate final matmul operand LX region on core " +
++                std::to_string(dstCore);
++      return false;
++    }
++    finalAddressByCore[dstCore] = reservedAddr;
++  }
++
++  std::set<int> gatherCores;
++  std::set<std::string> sourcePiecesAdded;
++  std::vector<GatheredPieceSpec> gatheredPieceSpecs;
++  int transferPieceIdx = 0;
++  for (const auto& transfer : transfers) {
++    const int sourceCore = static_cast<int>(transfer.sourceCore);
++    const int dstCore = static_cast<int>(transfer.destinationCore);
++    const auto sourceSliceIt = sourceCoreIdToSlice.find(sourceCore);
++    const auto sourceAddrIt = sourceStartAddresses.find(sourceCore);
++    if (sourceSliceIt == sourceCoreIdToSlice.end() ||
++        sourceAddrIt == sourceStartAddresses.end()) {
++      *reason = "logical transfer references source core without source metadata";
++      return false;
++    }
++    std::map<std::string, double> dimToSize;
++    std::map<std::string, double> dimToStart;
++    if (!sourceShardCell(dldsc, sourceSliceIt->second, sourceSliceIds,
++                         sourceLayoutDims, sourceToTargetDim, &dimToSize,
++                         &dimToStart, reason)) {
++      return false;
++    }
++    const auto subCells = splitCellByStickDims(gatherOut, dimToSize, dimToStart);
++    for (const auto& subCell : subCells) {
++      const auto& subDimToSize = subCell.first;
++      const auto& subDimToStart = subCell.second;
++      const auto sourcePieceKey =
++          "src" + std::to_string(sourceCore) + "_" +
++          std::to_string(static_cast<int64_t>(
++              densePieceOffsetBytes(gatherIn, subDimToSize, subDimToStart)));
++      if (sourcePiecesAdded.insert(sourcePieceKey).second) {
++        int64_t sourcePieceAddr = sourceAddrIt->second;
++        sourcePieceAddr += localDensePieceOffsetBytes(
++            gatherIn, dimToSize, dimToStart, subDimToStart);
++        addLxPiece(gatherIn, sourcePieceKey, sourceCore, sourcePieceAddr,
++                   subDimToSize, subDimToStart);
++      }
++      const int pieceIndex = transferPieceIdx++;
++      const std::string gatheredPieceKey =
++          "dst" + std::to_string(sourceCore) + "_" + std::to_string(dstCore) +
++          "_" + std::to_string(pieceIndex);
++      const auto tempPieceBytes = byteSizeForCell(gatherOut, subDimToSize);
++      const auto tempName = sdsc->name_ + "-" + lds.dsName_ +
++                            "-MatmulOperandGatherTmp-core" +
++                            std::to_string(dstCore) + "-piece" +
++                            std::to_string(pieceIndex);
++      auto& tracker = memTrackers->lxTrackPerCore.at(dstCore);
++      const auto tempAddr =
++          tracker.checkAndAddDs(tempName, "dynamic", tempPieceBytes, {ps});
++      if (tempAddr < 0) {
++        *reason = "no LX room for matmul operand gather temp on core " +
++                  std::to_string(dstCore) + " piece " +
++                  std::to_string(pieceIndex);
++        return false;
++      }
++      addLxPiece(gatherOut, gatheredPieceKey, dstCore, tempAddr, subDimToSize,
++                 subDimToStart);
++      gatheredPieceSpecs.push_back(
++          {gatheredPieceKey, dstCore, subDimToSize, subDimToStart});
++    }
++    gatherCores.insert(sourceCore);
++    gatherCores.insert(dstCore);
++  }
++  gatherDdsc.coreIdsUsed_.assign(gatherCores.begin(), gatherCores.end());
++
++  DataOpDsc restickifyDdsc;
++  restickifyDdsc.dscName_ = sdsc->name_ + "-" + lds.dsName_ +
++                            "-MatmulOperandRestickify";
++  restickifyDdsc.opName = OpFuncs::ReStickifyOpLx;
++  restickifyDdsc.op = new ReStickifyOpLx;
++  restickifyDdsc.op->name = OpFuncs::ReStickifyOpLx;
++  restickifyDdsc.primaryDs_["dataIN"].name_ = "dataIN";
++  restickifyDdsc.primaryDs_["dataOUT"].name_ = "dataOUT";
++  restickifyDdsc.target_ = sdsc->target_;
++  restickifyDdsc.foldProps_.push_back(
++      new FoldDimProp(sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++  restickifyDdsc.labeledDs_.resize(2);
++  auto& restickifyIn = restickifyDdsc.labeledDs_.at(0);
++  auto& restickifyOut = restickifyDdsc.labeledDs_.at(1);
++  restickifyIn = gatherOut;
++  restickifyIn.ldsName_ = lds.dsName_ + "-MatmulOperandRestickify-inp";
++  restickifyIn.pdsName_ = "dataIN";
++  for (const auto& dim : restickifyIn.layoutDimOrder_) {
++    restickifyDdsc.primaryDs_.at("dataIN").dimNames.insert(dim);
++  }
++  restickifyOut.ldsName_ = lds.dsName_;
++  if (!fillTensorContractLdsShape(restickifyOut, restickifyDdsc, targetTensor,
++                                  dldsc, {}, "dataOUT", reason)) {
++    return false;
++  }
++  for (const auto& piece : gatheredPieceSpecs) {
++    const auto finalPieceAddr =
++        finalAddressByCore.at(piece.coreId) +
++        densePieceOffsetBytes(restickifyOut, piece.dimToSize, piece.dimToStart);
++    addLxPiece(restickifyOut, piece.key, piece.coreId, finalPieceAddr,
++               piece.dimToSize, piece.dimToStart);
++  }
++  restickifyDdsc.coreIdsUsed_.assign(destinationCores.begin(),
++                                     destinationCores.end());
++  for (const auto& dim : restickifyOut.layoutDimOrder_) {
++    restickifyDdsc.primaryDs_.at("dataOUT").dimNames.insert(dim);
++  }
++  restickifyDdsc.dimPool_ = restickifyDdsc.primaryDs_.at("dataIN").dimNames;
++  restickifyDdsc.dimPool_.insert(
++      restickifyDdsc.primaryDs_.at("dataOUT").dimNames.begin(),
++      restickifyDdsc.primaryDs_.at("dataOUT").dimNames.end());
++
++  const int gatherIdx = static_cast<int>(sdsc->dataOpdscs_.size());
++  sdsc->dataOpdscs_.push_back(gatherDdsc);
++  const int restickifyIdx = static_cast<int>(sdsc->dataOpdscs_.size());
++  sdsc->dataOpdscs_.push_back(restickifyDdsc);
++
++  for (const auto coreId : gatherCores) insertDataOpBeforeDl(sdsc, coreId, gatherIdx);
++  for (const auto coreId : destinationCores)
++    insertDataOpBeforeDl(sdsc, coreId, restickifyIdx);
++
++  if (const char* dumpDir = std::getenv("DEEPTOOLS_DEBUG_RELAYOUT_SDSC_DIR")) {
++    std::filesystem::create_directories(dumpDir);
++    sdsc->exportJson(std::string(dumpDir) + "/" + sdsc->name_ +
++                     "_post_matmul_operand_broadcast.json");
++  }
++
++  allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
++  auto& stAddr = allocNode->startAddressCoreCorelet_;
++  for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
++    const auto finalIt = finalAddressByCore.find(coreId);
++    stAddr.insertData(finalIt == finalAddressByCore.end() ? -1 : finalIt->second,
++                      coreId, 0, 0);
++  }
++  if (!lds.coreStateInit_.empty()) {
++    for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
++      if (static_cast<size_t>(coreId) >= lds.coreStateInit_.size()) continue;
++      auto& coreState = lds.coreStateInit_.at(coreId);
++      if (coreState.lbrInit_.empty()) continue;
++      const auto newBase = stAddr.getData(coreId, 0, 0);
++      if (newBase < 0) {
++        for (auto& lbr : coreState.lbrInit_) lbr = -1;
++        continue;
++      }
++      const auto oldBase = coreState.lbrInit_.at(0);
++      const auto delta = static_cast<int>(newBase - oldBase);
++      for (auto& lbr : coreState.lbrInit_) lbr += delta;
++    }
++  }
++  return true;
++}
++
+ static int sliceSplitForDim(
+     const std::map<PrimaryDimTypes, std::set<int>>& sliceIds,
+     PrimaryDimTypes dim) {
+@@ -736,6 +1303,26 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+                                                /*kernelNeighborLowered=*/true);
+         continue;
+       }
++      if (std::getenv(
++              "DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY") != nullptr) {
++        std::string materializationReason;
++        if (!attachMatmulOperandBroadcastGatherThenRestickify(
++                sdsc, lds, matmulBroadcastHook, memTrackers, ps,
++                &materializationReason)) {
++          emitMatmulOperandBroadcastPlanArtifact(sdsc, lds, ps,
++                                                 matmulBroadcastHook);
++          DT_CHECK_MSG(
++              false,
++              "matmul_operand_broadcast gather/restickify materialization "
++              "failed: " +
++                  materializationReason);
++        }
++        emitMatmulOperandBroadcastPlanArtifact(
++            sdsc, lds, ps, matmulBroadcastHook,
++            /*kernelNeighborLowered=*/false,
++            /*gatherRestickifyLowered=*/true);
++        continue;
++      }
+       if (std::getenv("DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST") ==
+           nullptr) {
+         emitMatmulOperandBroadcastPlanArtifact(sdsc, lds, ps,
+@@ -746,6 +1333,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             "lowering is blocked: current DL matmul lowering still consumes "
+             "one resident LDS operand pointer and cannot bind staged RHS "
+             "chunks from IFN/STCDP. Set "
++            "DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1 for the "
++            "two-stage gather/restickify prototype, or set "
+             "DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST=1 only for "
+             "diagnostic small-shape experiments.");
+       }

@@ -16,27 +16,42 @@ This note records the current state of the `ah/comms-collectives` exploration.
 
 ## 2026-07-04 Late Update: Matmul Operand Requires Staged Layout Conversion
 
-A focused synthetic row-pattern probe showed that the direct loop-scoped
-KERNEL-neighbor write is not value-correct for matmul RHS/KERNEL operands once
-M reaches 16. It emits ring transfers at the right schedule point, but writes
-producer shards directly into the consumer KERNEL operand address space and
-skips the local PT/KERNEL layout conversion. The failure is deterministic: M16
-maps rows 8-15 to rows 2-9.
+A focused synthetic row-pattern probe showed that the direct loop-scoped KERNEL-neighbor write is not value-correct for matmul RHS/KERNEL operands once M reaches 16. It emits ring transfers at the right schedule point, but writes producer shards directly into the consumer KERNEL operand address space and skips the local PT/KERNEL layout conversion. The failure is deterministic: M16 maps rows 8-15 to rows 2-9.
 
-The existing two-stage path is value-correct through M64:
+The two-stage path is value-correct through M64:
 
 ```bash
 DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1
 ```
 
-That path inserts `STCDPOpLx` gather/all-gather into temporary LX, followed by
-`ReStickifyOpLx` into the consumer matmul operand layout. Artifact bundle:
+That path inserts `STCDPOpLx` gather/all-gather into temporary LX, followed by `ReStickifyOpLx` into the consumer matmul operand layout. Artifact bundle:
 
 - `docs/results/granite_e2e/dldsc_collectives_artifacts_20260704/matmul_operand_staged_gather_20260704/`
 
-A one-layer Granite S512 smoke with the staged path currently fails before DXP
-planning in Torch lowering with a mixed element-arrangement `mul` error, so it
-does not yet validate full-block performance for this staged backend path.
+A one-layer Granite S512 smoke with the staged path must use the runbook `foundation-model-stack-eager_spyre` checkout. With the wrong clean FMS checkout it fails before DXP in Torch lowering with a mixed element-arrangement `mul` error; with the runbook FMS checkout it reaches DXP and exposes the backend capacity issue below.
+
+## 2026-07-04 Update: Staged Matmul Operand Capacity Boundary
+
+After replacing the debug source-stick offset with a geometric source subpiece address, the staged `STCDPOpLx` gather plus `ReStickifyOpLx` path remains value-correct on the synthetic row-pattern matmul operand probe:
+
+- M16: `ALLCLOSE True`, `MISMATCH 0 / 4096`
+- M32: `ALLCLOSE True`, `MISMATCH 0 / 8192`
+- M64: `ALLCLOSE True`, `MISMATCH 0 / 16384`
+
+Using the correct eager-spyre FMS checkout, Granite S512 now reaches DXP with `DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1`. The first attention edge is `10_batchmatmul` Tensor1:
+
+- source distribution: 32 `mb` shards
+- consumer split: `{x:16, out:2}`
+- class: `matmul_operand_broadcast` / `all_gather_replicate_with_layout_conversion`
+- logical transfers: 512
+
+A resident final-materialization strategy is not viable for this edge. Reusing the imported final LX address overlaps the source allocation. Allocating a fresh final region fails capacity: the converted KERNEL RHS is roughly `32 * (512 / 2) * 128 * 2 = 2 MiB` per consumer core, which exceeds the usable LX budget before temporary gather pieces.
+
+Archived evidence:
+
+- `docs/results/granite_e2e/dldsc_collectives_artifacts_20260704/staged_granite_capacity_20260704/`
+
+Conclusion: for Granite/flash attention matmul RHS all-gather, the next backend implementation must be loop/tile-scoped staged movement plus local restickify, not full resident KERNEL operand materialization.
 
 ## Failing all-gather path
 

@@ -1,0 +1,341 @@
+{
+  "attn_name": "sdpa_causal",
+  "cache_extra": [
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1",
+    "sdsc_fused_linear_rms_norm_0"
+  ],
+  "cache_match": false,
+  "cache_missing": [
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_clone_expand_linear_mul_rms_norm_transpose_unsqueeze_view_2",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_clone_expand_linear_mul_rms_norm_unsqueeze_view_3",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_cat_clone_expand_linear_transpose_unsqueeze_view_4",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_cat_clone_expand_transpose_unsqueeze_view_2",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_linear_mul_sum_transpose_unsqueeze_view_1",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_linear_mul_sum_transpose_unsqueeze_view_2",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_mul_sum_transpose_unsqueeze_view_1",
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_3",
+    "sdsc_fused_add_linear_mul_4",
+    "sdsc_fused_add_linear_mul_rms_norm_silu_5",
+    "sdsc_fused_add_linear_mul_silu_6",
+    "sdsc_fused_add_mean_mul_rsqrt_0",
+    "sdsc_fused_add_mul_5",
+    "sdsc_fused_bmm_transpose_unsqueeze_0",
+    "sdsc_fused_div_0",
+    "sdsc_fused_linear_mul_rms_norm_silu_3",
+    "sdsc_fused_linear_mul_rms_norm_silu_4",
+    "sdsc_fused_linear_mul_rms_norm_sum_unsqueeze_view_0",
+    "sdsc_fused_linear_overwrite_slice_transpose_view_1",
+    "sdsc_fused_mul_0"
+  ],
+  "cache_overlap": [],
+  "cache_summary": [
+    {
+      "kernel_dir": "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_dzsqgk18",
+      "normalized": "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1",
+      "splits": [
+        {
+          "file": "sdsc_0.json",
+          "op": "0_identity",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "file": "sdsc_1.json",
+          "op": "1_mul",
+          "split": {
+            "i": 1,
+            "mb": 32,
+            "out": 1,
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "file": "sdsc_10.json",
+          "op": "10_batchmatmul",
+          "split": {
+            "in": 1,
+            "mb": 1,
+            "out": 2,
+            "x": 16
+          }
+        },
+        {
+          "file": "sdsc_11.json",
+          "op": "11_add",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_12.json",
+          "op": "12_max",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_13.json",
+          "op": "13_sub",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_14.json",
+          "op": "14_exp",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_15.json",
+          "op": "15_sum",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_16.json",
+          "op": "16_realdiv",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_17.json",
+          "op": "17_identity",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 1,
+            "y": 32
+          }
+        },
+        {
+          "file": "sdsc_18.json",
+          "op": "18_batchmatmul",
+          "split": {
+            "in": 1,
+            "mb": 32,
+            "out": 1,
+            "x": 1
+          }
+        },
+        {
+          "file": "sdsc_19.json",
+          "op": "19_identity",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_2.json",
+          "op": "2_sumnonstick",
+          "split": {
+            "i": 1,
+            "mb": 32,
+            "out": 1,
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "file": "sdsc_3.json",
+          "op": "3_mul",
+          "split": {
+            "mb": 32,
+            "out": 1,
+            "x": 1
+          }
+        },
+        {
+          "file": "sdsc_4.json",
+          "op": "4_mul",
+          "split": {
+            "i": 1,
+            "mb": 32,
+            "out": 1,
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "file": "sdsc_5.json",
+          "op": "5_sumnonstick",
+          "split": {
+            "i": 1,
+            "mb": 32,
+            "out": 1,
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "file": "sdsc_6.json",
+          "op": "6_identity",
+          "split": {
+            "mb": 32,
+            "out": 1,
+            "x": 1,
+            "y": 1
+          }
+        },
+        {
+          "file": "sdsc_7.json",
+          "op": "7_identity",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 1,
+            "y": 32
+          }
+        },
+        {
+          "file": "sdsc_8.json",
+          "op": "8_mul",
+          "split": {
+            "mb": 1,
+            "out": 1,
+            "x": 32
+          }
+        },
+        {
+          "file": "sdsc_9.json",
+          "op": "9_ReStickifyOpLx",
+          "split": {
+            "mb": 32,
+            "out": 1,
+            "x": 1
+          }
+        }
+      ]
+    },
+    {
+      "kernel_dir": "sdsc_fused_linear_rms_norm_0_qkwywj08",
+      "normalized": "sdsc_fused_linear_rms_norm_0",
+      "splits": [
+        {
+          "file": "sdsc_0.json",
+          "op": "0_identity",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_1.json",
+          "op": "1_mul",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_2.json",
+          "op": "2_mean",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_3.json",
+          "op": "3_add",
+          "split": {
+            "out": 32,
+            "x": 1
+          }
+        },
+        {
+          "file": "sdsc_4.json",
+          "op": "4_rsqrt",
+          "split": {
+            "out": 32,
+            "x": 1
+          }
+        },
+        {
+          "file": "sdsc_5.json",
+          "op": "5_mul",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_6.json",
+          "op": "6_mul",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_7.json",
+          "op": "7_ReStickifyOpHBM",
+          "split": {
+            "mb": 32,
+            "out": 1
+          }
+        },
+        {
+          "file": "sdsc_8.json",
+          "op": "8_batchmatmul",
+          "split": {
+            "in": 1,
+            "mb": 4,
+            "out": 8
+          }
+        }
+      ]
+    }
+  ],
+  "case": "prefill",
+  "compile_block": true,
+  "error": "Traceback (most recent call last):\n  File \"/home/adnan-cdx/spyre-granite-e2e-bench/benchmarks/granite_block_layer_probe.py\", line 364, in run_case\n    out, elapsed_ms = call_block(args.warmups + index + 1, total)\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan-cdx/spyre-granite-e2e-bench/benchmarks/granite_block_layer_probe.py\", line 322, in call_block\n    value = block(x=x, **kwargs)\n            ^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/nn/modules/module.py\", line 1776, in _wrapped_call_impl\n    return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py\", line 1062, in compile_wrapper\n    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py\", line 1038, in _compile_fx_inner\n    raise InductorError(e, currentframe()).with_traceback(\n  File \"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py\", line 1030, in _compile_fx_inner\n    mb_compiled_graph = fx_codegen_and_compile(\n                        ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py\", line 1836, in fx_codegen_and_compile\n    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py\", line 1597, in codegen_and_compile\n    compiled_module = graph.compile_to_module()\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/graph.py\", line 2613, in compile_to_module\n    return self._compile_to_module()\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/graph.py\", line 2623, in _compile_to_module\n    mod = self._compile_to_module_lines(wrapper_code)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/graph.py\", line 2698, in _compile_to_module_lines\n    mod = PyCodeCache.load_by_key_path(\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/codecache.py\", line 3976, in load_by_key_path\n    mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)\n          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/runtime/compile_tasks.py\", line 35, in _reload_python_module\n    exec(code, mod.__dict__, mod.__dict__)\n  File \"/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/granite_eagerfms_staged_backend02_geometric_20260704_232053/block_prefill/cache/kt/ckta7xtwsobzkfru6z3i6pxn3mqvhumgum24tlqznz3ojlj7kezk.py\", line 407, in <module>\n    sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1 = async_compile.sdsc('sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1',\n                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/repos/torch-spyre/torch_spyre/execution/async_compile.py\", line 63, in sdsc\n    subprocess.run([\"dxp_standalone\", \"--bundle\", \"-d\", output_dir], check=True)\n  File \"/usr/lib64/python3.12/subprocess.py\", line 571, in run\n    raise CalledProcessError(retcode, process.args,\ntorch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '--bundle', '-d', '/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/granite_eagerfms_staged_backend02_geometric_20260704_232053/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_dzsqgk18']' died with <Signals.SIGABRT: 6>.\n\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS=\"+dynamo\"\n\n",
+  "fused_weights": true,
+  "input_shape": [
+    1,
+    512,
+    4096
+  ],
+  "iters": 1,
+  "mask_shape": [
+    1,
+    512,
+    512
+  ],
+  "past_key_value_shape": null,
+  "position_ids_shape": [
+    1,
+    512
+  ],
+  "profile_dir": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/granite_eagerfms_staged_backend02_geometric_20260704_232053/block_prefill/trace",
+  "profile_enabled": false,
+  "profile_memory": true,
+  "record_shapes": false,
+  "returncode": 1,
+  "trace_path": null,
+  "trace_summary": null,
+  "trace_summary_path": null,
+  "warmups": 0
+}
