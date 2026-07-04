@@ -111,6 +111,21 @@ def make_matmul_operand_allgather_contract(
         },
         "communication_class": communication_class,
         "communication_pattern": MATMUL_OPERAND_ALLGATHER_REPLICATE,
+        "materialization_pattern": "all_gather_replicate_with_layout_conversion",
+        "requires_layout_conversion": True,
+        "layout_transform": {
+            "kind": "activation_lx_to_matmul_kernel_operand",
+            "source": "producer_lx_residency",
+            "target": "consumer_matmul_kernel_operand",
+            "source_coordinates": "producer_tensor_distribution",
+            "target_coordinates": "consumer_compute_distribution",
+            "carrier_hint": "lx_all_gather_then_local_restickify",
+        },
+        "staged_destination": {
+            "component_": "KERNEL",
+            "operand_read_index": int(read_index),
+            "scope": "matmul_transfer_loop",
+        },
         "requires_staged_realization": True,
         "staging_scope": "matmul_transfer_loop",
     }

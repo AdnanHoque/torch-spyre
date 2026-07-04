@@ -194,11 +194,29 @@ def test_matmul_operand_contract_marks_tensor1_all_gather_not_scatter():
     assert contract["classification"] == MATMUL_OPERAND_BROADCAST
     assert contract["communication_class"] == COMM_CLASS_ALL_GATHER
     assert contract["communication_pattern"] == MATMUL_OPERAND_ALLGATHER_REPLICATE
+    assert (
+        contract["materialization_pattern"]
+        == "all_gather_replicate_with_layout_conversion"
+    )
+    assert contract["requires_layout_conversion"]
     assert contract["requires_staged_realization"]
     assert contract["operand_role"] == "rhs"
     assert contract["operand_kernel_layout"] == {
         "layoutDimOrder_": ["out", "in", "x"],
         "stickDimOrder_": ["out"],
+    }
+    assert contract["layout_transform"] == {
+        "kind": "activation_lx_to_matmul_kernel_operand",
+        "source": "producer_lx_residency",
+        "target": "consumer_matmul_kernel_operand",
+        "source_coordinates": "producer_tensor_distribution",
+        "target_coordinates": "consumer_compute_distribution",
+        "carrier_hint": "lx_all_gather_then_local_restickify",
+    }
+    assert contract["staged_destination"] == {
+        "component_": "KERNEL",
+        "operand_read_index": 1,
+        "scope": "matmul_transfer_loop",
     }
 
 
@@ -284,6 +302,11 @@ def test_lx_relayout_plan_records_matmul_operand_all_gather_contract():
     assert plan["transfer_count"] == 1024
     assert plan["consumer_tensor_work_slice_dims"] == {}
     assert plan["consumer_compute_work_slice_dims"] == {"mb": 32}
+    assert plan["materialization_pattern"] == (
+        "all_gather_replicate_with_layout_conversion"
+    )
+    assert plan["requires_layout_conversion"]
+    assert plan["layout_transform"]["kind"] == "activation_lx_to_matmul_kernel_operand"
     assert plan["staging_scope"] == "matmul_transfer_loop"
 
 

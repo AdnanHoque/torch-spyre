@@ -746,3 +746,119 @@ Deeptools: synthesize the layout-aware movement/restickify and bind the staged
 The next implementation step is not adding more transfer pairs. It is teaching
 the backend relayout insertion to materialize a logical producer-to-consumer
 layout transform for KERNEL operands.
+
+## 2026-07-04 Contract Update
+
+After the fresh STCDPOpLx rerun, the Torch-side metadata was tightened so this
+edge cannot be mistaken for a plain same-layout all-gather.
+
+Focused Torch test:
+
+```text
+TORCH_DEVICE_BACKEND_AUTO=0 \
+PYTHONPATH=$ROOT/repos/torch-spyre \
+/home/adnan-cdx/dt-inductor-mixed/.venv/bin/python \
+  -m pytest tests/inductor/test_lx_relayout_dldsc.py -q
+
+15 passed in 0.17s
+```
+
+The generated consumer SDSC now contains:
+
+```json
+{
+  "kind": "matmul_operand_broadcast",
+  "communication_pattern": "all_gather_replicate",
+  "materialization_pattern": "all_gather_replicate_with_layout_conversion",
+  "requires_layout_conversion": true,
+  "layout_transform": {
+    "kind": "activation_lx_to_matmul_kernel_operand",
+    "source": "producer_lx_residency",
+    "target": "consumer_matmul_kernel_operand",
+    "source_coordinates": "producer_tensor_distribution",
+    "target_coordinates": "consumer_compute_distribution",
+    "carrier_hint": "lx_all_gather_then_local_restickify"
+  },
+  "staged_destination": {
+    "component_": "KERNEL",
+    "operand_read_index": 1,
+    "scope": "matmul_transfer_loop"
+  }
+}
+```
+
+Deeptools was updated to preserve those fields in its backend plan artifact.
+This is still not the physical lowering; it is the contract checkpoint that
+makes the remaining backend gap explicit.
+
+Focused Deeptools test:
+
+```text
+$ROOT/build-deeptools/util/util_unit_test \
+  --gtest_filter=LayoutAllgatherRestickify.matmulOperandBroadcastRecordsLayoutConversionContract
+
+[  PASSED  ] 1 test.
+```
+
+DXP rebuild:
+
+```text
+cmake --build $ROOT/build-deeptools --target dxp_standalone -j8
+```
+
+Fresh metadata-preservation run:
+
+```text
+runs/min_stable_matmul_operand_broadcast_20260704_100506/contract_preserved_backend_171115
+```
+
+The run intentionally fails closed at DXP because physical lowering is still
+blocked, but the emitted backend plan now records the correct class:
+
+```json
+{
+  "kind": "matmul_operand_broadcast",
+  "communication_pattern": "all_gather_replicate",
+  "materialization_pattern": "all_gather_replicate_with_layout_conversion",
+  "requires_layout_conversion": true,
+  "stages": [
+    "source_operand_shards",
+    "grouped_all_gather_replicate",
+    "local_layout_conversion",
+    "loop_scoped_input_fetch",
+    "bind_matmul_kernel_operand"
+  ],
+  "physical_lowering_status": "blocked"
+}
+```
+
+### Updated Gap
+
+The consumer SDSC has the target matmul/KERNEL layout:
+
+```text
+Tensor1_lx: layoutDimOrder_ = [in, out], stickDimOrder_ = [out]
+```
+
+The producer SDSC has the source activation layout:
+
+```text
+Tensor2_lx: layoutDimOrder_ = [mb, out], stickDimOrder_ = [out]
+```
+
+The backend mutation point currently sees the consumer input LDS and producer
+residency coordinates, but the source physical layout is not yet carried in a
+backend-consumable way. The next concrete implementation decision is therefore:
+
+1. Torch carries the producer output layout in the relayout classification, or
+2. DXP resolves the producer layout by looking across the SuperDSC bundle.
+
+Either way, the final carrier should be two-stage:
+
+```text
+STCDPOpLx same-layout gather/multicast into temporary LX
+then ReStickifyOpLx/ReStickifyOpWithPTLx into the matmul KERNEL operand layout
+```
+
+Until that exists, enabling the unsafe flat STCDPOpLx path is expected to be
+value-wrong on this class.
