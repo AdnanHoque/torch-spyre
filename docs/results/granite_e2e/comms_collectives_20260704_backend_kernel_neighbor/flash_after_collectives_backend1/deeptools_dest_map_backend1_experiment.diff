@@ -1,0 +1,935 @@
+diff --git a/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp b/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
+index 5d4447973..ea141b39e 100644
+--- a/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
++++ b/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
+@@ -548,21 +548,27 @@ int DcgFE::createPcfgForUnitPerCoreNew(SuperDsc& sdsc, SenPcfg& pcfg,
+     const dsc2::TransferNode* transNode =
+         dynamic_cast<const dsc2::TransferNode*>(node);
+ 
+-    // We only look at L3 units that have transfers between HBM and LX.
++    // We only look at L3 units that have transfers between HBM and LX, plus
++    // explicit LX-neighbor transfers that the scheduler tagged with ring
++    // movement metadata.
+     if ((transNode->src_.storage_ == SenComponents::HBM &&
+          transNode->dstVias_[0].loc_.storage_ == SenComponents::LX) ||
+         (transNode->src_.storage_ == SenComponents::LX &&
+-         transNode->dstVias_[0].loc_.storage_ == SenComponents::HBM))
++         transNode->dstVias_[0].loc_.storage_ == SenComponents::HBM) ||
++        !transNode->lxNeighborRingTransfers_.empty())
+       l3TransferNodes.push_back(transNode);
+   }
+ 
+   std::vector<const dsc2::TransferNode*> l3UnitTransferNodes;
++  std::vector<const dsc2::TransferNode*> lxNeighborTransferNodes;
+   for (const auto node : l3TransferNodes) {
+     if ((unit == SenComponents::L3LU &&
+          node->src_.storage_ == SenComponents::HBM) ||
+         (unit == SenComponents::L3SU &&
+          node->src_.storage_ == SenComponents::LX))
+       l3UnitTransferNodes.push_back(node);
++    if (!node->lxNeighborRingTransfers_.empty())
++      lxNeighborTransferNodes.push_back(node);
+   }
+ 
+   // Function to get the most inner L3 transfer nodes, by iterating the chunk
+@@ -2636,6 +2642,73 @@ int DcgFE::createPcfgForUnitPerCoreNew(SuperDsc& sdsc, SenPcfg& pcfg,
+     }
+   }
+ 
++  for (const auto transNode : lxNeighborTransferNodes) {
++    DT_CHECK_MSG(transNode->isDstLabeledDs(),
++                 "Expect LX-neighbor transfer to target a labeled DS.");
++    const int dstLdsIdx = transNode->dstLdsAndLoopOffsets_.front().myLdsIdx_;
++    DT_CHECK_MSG(dstLdsIdx >= 0 && dstLdsIdx < myDsc->labeledDs_.size(),
++                 "Invalid LX-neighbor destination labeled DS.");
++    auto* myLabeledDs = &myDsc->labeledDs_.at(dstLdsIdx);
++    auto dimLayoutOrder = myDsc->getDimOrderStr(myLabeledDs, false, true);
++    DT_CHECK_MSG(!dimLayoutOrder.empty(),
++                 "Expect LX-neighbor transfer to have a layout.");
++
++    constexpr int64_t kBytesPerStick = 128;
++    for (const auto& transfer : transNode->lxNeighborRingTransfers_) {
++      const bool isSend = unit == SenComponents::L3SU &&
++                          transfer.sourceCoreId_ == coreid;
++      const bool isReceive = unit == SenComponents::L3LU &&
++                             transfer.destinationCoreId_ == coreid;
++      if (!isSend && !isReceive) continue;
++      DT_CHECK_MSG(transfer.byteCount_ > 0,
++                   "Invalid LX-neighbor ring transfer byte count.");
++      DT_CHECK_MSG(transfer.byteCount_ % kBytesPerStick == 0,
++                   "LX-neighbor ring transfers must be stick aligned.");
++
++      for (int64_t byteOffset = 0; byteOffset < transfer.byteCount_;
++           byteOffset += kBytesPerStick) {
++        auto* newRingDtNode =
++            static_cast<SenPcfgRingDtNode*>(pcfg.createPcfgNode(
++                SenPcfgNode::Type::RINGDATATRANSFER));
++        newRingDtNode->name =
++            nodeNamePrefix + myLabeledDs->dsName_ + "-lx_neighbor_ring_" +
++            (isSend ? "send" : "recv") + "_src" +
++            std::to_string(transfer.sourceCoreId_) + "_dst" +
++            std::to_string(transfer.destinationCoreId_) + "_chunk" +
++            std::to_string(transfer.producerChunk_) + "_stick" +
++            std::to_string(byteOffset / kBytesPerStick);
++        newRingDtNode->coreletId = -1;
++        newRingDtNode->dtInfo = nullptr;
++        newRingDtNode->dsInfo = nullptr;
++        newRingDtNode->dtFormat = myLabeledDs->dataFormat_;
++        newRingDtNode->srcDest.src_ =
++            isSend ? SenComponents::LX : SenComponents::RING;
++        newRingDtNode->srcDest.dst_ =
++            isSend ? SenComponents::RING : SenComponents::LX;
++        newRingDtNode->dimLayoutOrder = dimLayoutOrder;
++        newRingDtNode->coreIdForRing = {
++            static_cast<int64_t>(isSend ? transfer.destinationCoreId_
++                                        : transfer.sourceCoreId_)};
++        newRingDtNode->useBurst = false;
++        newRingDtNode->gtr_imm_opt_en = false;
++
++        for (const auto& dimStr : newRingDtNode->dimLayoutOrder) {
++          newRingDtNode->myBigDimSize[dimStr] = 1;
++          newRingDtNode->myLitDimSize[dimStr] = 1;
++        }
++
++        if (isSend) {
++          newRingDtNode->SrcStartAddr().insertData(
++              transfer.sourceStartAddress_ + byteOffset);
++        } else {
++          newRingDtNode->DestStartAddr().insertData(
++              transfer.destinationStartAddress_ + byteOffset);
++        }
++        innerSubgraphSeqeunce.push_back({newRingDtNode, newRingDtNode});
++      }
++    }
++  }
++
+   // Add SyncNodes..
+   // ZQ: Write code to insert sync node in PCFG
+   // For L3LU or L3SU <- get the list of sync that needs to be added from
+diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+index 5eb5fad92..97ce82a36 100644
+--- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
++++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+@@ -14,10 +14,13 @@
+ #include <dsc/designSpaceConfig.h>
+ #include <dsc/dsc2.h>
+ #include <dsc/superdsc.h>
++#include <external/json11/json11.hpp>
+ #include <sharedtools/mem_track.h>
+ #include <util/sendefs.h>
++#include <util/LayoutAllgatherRestickify.h>
+ 
+ #include <algorithm>
++#include <cstdlib>
+ #include <deque>
+ #include <iostream>
+ #include <iterator>
+@@ -397,6 +400,289 @@ static bool isMatmulOperandBroadcastClassification(
+          patternIt->second == "all_gather_replicate";
+ }
+ 
++static const std::map<std::string, std::string>*
++findMatmulOperandBroadcastClassification(
++    const SuperDsc& mySDsc, const LabeledDsInfo& lds) {
++  for (const auto& entry : mySDsc.lxRelayoutClassifications_) {
++    const auto& fields = entry.second;
++    if (isMatmulOperandBroadcastClassification(fields) &&
++        relayoutClassificationMatchesLds(fields, lds)) {
++      return &fields;
++    }
++  }
++  return nullptr;
++}
++
++using CoreDeviceSliceMap =
++    std::map<int, std::map<std::string, CoordinateBaseType>>;
++
++static CoreDeviceSliceMap parseCoreDeviceSliceMap(
++    const std::map<std::string, std::string>& fields,
++    const std::string& key, std::string* reason) {
++  const auto fieldIt = fields.find(key);
++  if (fieldIt == fields.end()) {
++    *reason = "missing " + key;
++    return {};
++  }
++
++  std::string parseError;
++  const auto parsed = json11::Json::parse(fieldIt->second, parseError);
++  if (!parseError.empty() || !parsed.is_object()) {
++    *reason = "invalid JSON object in " + key;
++    return {};
++  }
++
++  CoreDeviceSliceMap result;
++  for (const auto& [coreIdString, coordJson] : parsed.object_items()) {
++    char* end = nullptr;
++    const long coreId = std::strtol(coreIdString.c_str(), &end, 10);
++    if (end == nullptr || *end != '\0' || coreId < 0 ||
++        !coordJson.is_object()) {
++      *reason = "invalid core entry in " + key;
++      return {};
++    }
++    auto& coord = result[static_cast<int>(coreId)];
++    for (const auto& [dim, value] : coordJson.object_items()) {
++      if (!value.is_number()) {
++        *reason = "invalid dimension value in " + key;
++        return {};
++      }
++      coord[dim] = static_cast<CoordinateBaseType>(value.number_value());
++    }
++  }
++
++  if (result.empty()) *reason = "empty " + key;
++  return result;
++}
++
++static dsc2::AllocateNode* findFoldedLxAllocationForLds(
++    DesignSpaceConfig& dsc, const int ldsIdx,
++    const dsc2::AllocateNode* excludeNode) {
++  auto allocNodes = dsc.scheduleTree_.traverseTreeDFSMutable(
++      nullptr, {dsc2::ScheduleNode::ALLOCATE});
++  for (auto* node : allocNodes) {
++    auto* allocNode = dynamic_cast<dsc2::AllocateNode*>(node);
++    DT_CHECK_MSG(allocNode, "Expect a valid allocate node.");
++    if (allocNode == excludeNode || allocNode->ldsIdx_ != ldsIdx ||
++        allocNode->component_ != SenComponents::LX ||
++        !allocNode->allocateCoordinates_.foldConstructed() ||
++        allocNode->allocateCoordinates_.coreIdToWkSlice_.empty()) {
++      continue;
++    }
++    return allocNode;
++  }
++  return nullptr;
++}
++
++static bool valuesMatchForAllCommonCores(
++    const CoreDeviceSliceMap& deviceSlices,
++    const std::map<int, std::map<PrimaryDimTypes, int>>& wkSlices,
++    const std::string& deviceDim, const PrimaryDimTypes wkDim) {
++  bool sawCore = false;
++  for (const auto& [coreId, deviceCoord] : deviceSlices) {
++    const auto deviceDimIt = deviceCoord.find(deviceDim);
++    const auto wkCoreIt = wkSlices.find(coreId);
++    if (deviceDimIt == deviceCoord.end() || wkCoreIt == wkSlices.end()) {
++      continue;
++    }
++    const auto wkDimIt = wkCoreIt->second.find(wkDim);
++    if (wkDimIt == wkCoreIt->second.end() ||
++        static_cast<CoordinateBaseType>(wkDimIt->second) !=
++            deviceDimIt->second) {
++      return false;
++    }
++    sawCore = true;
++  }
++  return sawCore;
++}
++
++static bool seedMatmulOperandBroadcastDestinationCoordinates(
++    const SuperDsc& mySDsc, DesignSpaceConfig& dsc, const LabeledDsInfo& lds,
++    dsc2::AllocateNode* destinationAlloc, std::string* reason) {
++  const auto* fields = findMatmulOperandBroadcastClassification(mySDsc, lds);
++  if (fields == nullptr) {
++    *reason = "missing matmul_operand_broadcast classification";
++    return false;
++  }
++
++  const auto* sourceAlloc =
++      findFoldedLxAllocationForLds(dsc, lds.ldsIdx_, destinationAlloc);
++  if (sourceAlloc == nullptr) {
++    *reason = "missing folded source LX allocation";
++    return false;
++  }
++
++  const auto& sourceWkSlices =
++      sourceAlloc->allocateCoordinates_.coreIdToWkSlice_;
++  auto producerSlices =
++      parseCoreDeviceSliceMap(*fields, "producer_core_id_to_device_slice",
++                              reason);
++  if (producerSlices.empty()) return false;
++  auto consumerSlices =
++      parseCoreDeviceSliceMap(*fields, "consumer_core_id_to_device_slice",
++                              reason);
++  if (consumerSlices.empty()) return false;
++
++  std::set<PrimaryDimTypes> usedDims;
++  std::map<std::string, PrimaryDimTypes> deviceDimToWkDim;
++  for (const auto& [_, deviceCoord] : producerSlices) {
++    for (const auto& [deviceDim, __] : deviceCoord) {
++      if (deviceDimToWkDim.count(deviceDim)) continue;
++      for (const auto& [___, wkCoord] : sourceWkSlices) {
++        for (const auto& [candidateDim, ____] : wkCoord) {
++          if (usedDims.count(candidateDim)) continue;
++          if (valuesMatchForAllCommonCores(producerSlices, sourceWkSlices,
++                                           deviceDim, candidateDim)) {
++            deviceDimToWkDim[deviceDim] = candidateDim;
++            usedDims.insert(candidateDim);
++            break;
++          }
++        }
++        if (deviceDimToWkDim.count(deviceDim)) break;
++      }
++      if (!deviceDimToWkDim.count(deviceDim)) {
++        *reason = "could not map device dim " + deviceDim +
++                  " to source coordinate dim";
++        return false;
++      }
++    }
++    break;
++  }
++
++  std::map<int, std::map<PrimaryDimTypes, int>> destinationWkSlices;
++  for (const auto& [coreId, consumerCoord] : consumerSlices) {
++    const auto sourceCoreIt = sourceWkSlices.find(coreId);
++    if (sourceCoreIt != sourceWkSlices.end()) {
++      destinationWkSlices[coreId] = sourceCoreIt->second;
++    }
++    for (const auto& [deviceDim, value] : consumerCoord) {
++      const auto dimIt = deviceDimToWkDim.find(deviceDim);
++      if (dimIt == deviceDimToWkDim.end()) {
++        *reason = "consumer device dim " + deviceDim +
++                  " was not present in producer mapping";
++        return false;
++      }
++      destinationWkSlices[coreId][dimIt->second] = static_cast<int>(value);
++    }
++  }
++
++  if (destinationWkSlices.empty()) {
++    *reason = "empty destination coordinate map";
++    return false;
++  }
++
++  destinationAlloc->allocateCoordinates_.coreIdToWkSlice_ =
++      std::move(destinationWkSlices);
++  return true;
++}
++
++static bool populateMatmulOperandBroadcastRingTransfers(
++    const SuperDsc& mySDsc, const LabeledDsInfo& lds,
++    const dsc2::AllocateNode& destinationAlloc,
++    dsc2::TransferNode* transNode, std::string* reason) {
++  const auto* fields = findMatmulOperandBroadcastClassification(mySDsc, lds);
++  if (fields == nullptr) {
++    *reason = "missing matmul_operand_broadcast classification";
++    return false;
++  }
++
++  const auto plan =
++      deeptools::synthesizeMatmulOperandBroadcastMovementPlan(*fields);
++  if (!plan.ok) {
++    *reason = plan.reason;
++    return false;
++  }
++  if (plan.producerChunksPerGroup == 0) {
++    *reason = "producerChunksPerGroup must be non-zero";
++    return false;
++  }
++  if (lds.lxSize_ <= 0 ||
++      lds.lxSize_ % static_cast<int64_t>(plan.producerChunksPerGroup) != 0) {
++    *reason = "cannot derive per-producer-chunk LX byte size";
++    return false;
++  }
++
++  const int64_t bytesPerProducerChunk =
++      lds.lxSize_ / static_cast<int64_t>(plan.producerChunksPerGroup);
++  const auto logicalTransfers =
++      deeptools::matmulOperandBroadcastLogicalTransfers(plan);
++  if (logicalTransfers.empty()) {
++    *reason = "matmul_operand_broadcast expanded to no logical transfers";
++    return false;
++  }
++
++  transNode->lxNeighborRingTransfers_.clear();
++  transNode->lxNeighborRingTransfers_.reserve(logicalTransfers.size());
++  for (const auto& logicalTransfer : logicalTransfers) {
++    const int sourceCore = static_cast<int>(logicalTransfer.sourceCore);
++    const int destinationCore =
++        static_cast<int>(logicalTransfer.destinationCore);
++    if (lds.lxStartAddress_ < 0) {
++      *reason = "missing source LX address";
++      return false;
++    }
++
++    const int64_t destinationBase =
++        destinationAlloc.startAddressCoreCorelet_.getData(destinationCore, 0,
++                                                         0);
++    if (destinationBase < 0) {
++      *reason = "invalid source or destination LX address";
++      return false;
++    }
++
++    dsc2::TransferNode::LxNeighborRingTransfer physicalTransfer;
++    physicalTransfer.sourceCoreId_ = sourceCore;
++    physicalTransfer.destinationCoreId_ = destinationCore;
++    physicalTransfer.sourceStartAddress_ = lds.lxStartAddress_;
++    physicalTransfer.destinationStartAddress_ =
++        destinationBase +
++        static_cast<int64_t>(logicalTransfer.producerChunk) *
++            bytesPerProducerChunk;
++    physicalTransfer.byteCount_ = bytesPerProducerChunk;
++    physicalTransfer.group_ = static_cast<int64_t>(logicalTransfer.group);
++    physicalTransfer.producerChunk_ =
++        static_cast<int64_t>(logicalTransfer.producerChunk);
++    physicalTransfer.consumerReplica_ =
++        static_cast<int64_t>(logicalTransfer.consumerReplica);
++    transNode->lxNeighborRingTransfers_.push_back(physicalTransfer);
++  }
++  return true;
++}
++
++static void populateMatmulOperandBroadcastRingTransfersAfterAllocation(
++    SuperDsc& mySDsc) {
++  for (auto& dsc : mySDsc.dscs_) {
++    auto transferNodes = dsc.scheduleTree_.traverseTreeDFSMutable(
++        nullptr, {dsc2::ScheduleNode::TRANSFER});
++    for (auto* node : transferNodes) {
++      auto* transNode = dynamic_cast<dsc2::TransferNode*>(node);
++      DT_CHECK_MSG(transNode, "Expect a valid transfer node.");
++      if (transNode->name_.find("_lx_neighbor") == std::string::npos) {
++        continue;
++      }
++      if (transNode->dstLdsAndLoopOffsets_.empty()) continue;
++      if (transNode->dstVias_.empty() ||
++          transNode->dstVias_.front().loc_.storage_ != SenComponents::LX) {
++        continue;
++      }
++      const int ldsIdx = transNode->dstLdsAndLoopOffsets_.front().myLdsIdx_;
++      if (ldsIdx < 0) continue;
++      auto& lds = dsc.labeledDs_.at(ldsIdx);
++      if (findMatmulOperandBroadcastClassification(mySDsc, lds) == nullptr) {
++        continue;
++      }
++      DT_CHECK_MSG(lds.memOrg_.count(SenComponents::LX),
++                   "Expect LX in memOrg_ for matmul operand broadcast.");
++      auto* allocNode = lds.memOrg_.at(SenComponents::LX).allocateNode_;
++      DT_CHECK_MSG(allocNode, "Expect allocated LX destination.");
++      std::string reason;
++      DT_CHECK_MSG(populateMatmulOperandBroadcastRingTransfers(
++                       mySDsc, lds, *allocNode, transNode, &reason),
++                   reason);
++    }
++  }
++}
++
+ bool L3DlOpsScheduler::isLabeledDsLXNeighbor(const SuperDsc &mySDsc,
+                                              const int dscIndex,
+                                              const LabeledDsInfo &lds) const {
+@@ -408,7 +694,13 @@ bool L3DlOpsScheduler::isLabeledDsLXNeighbor(const SuperDsc &mySDsc,
+       const auto &fields = entry.second;
+       if (isMatmulOperandBroadcastClassification(fields) &&
+           relayoutClassificationMatchesLds(fields, lds)) {
+-        return true;
++        const auto plan =
++            deeptools::synthesizeMatmulOperandBroadcastMovementPlan(fields);
++        if (!plan.ok || plan.producerChunksPerGroup == 0) return false;
++        return lds.lxSize_ > 0 &&
++               lds.lxSize_ %
++                       static_cast<int64_t>(plan.producerChunksPerGroup) ==
++                   0;
+       }
+     }
+   }
+@@ -3178,6 +3470,10 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
+           allocNode =
+               createAllocateNode(dsc, ldsIdx, allocStorage,
+                                  numBufferForNoBuffer, allocNodeName, dscIdx);
++          std::string coordinateSeedReason;
++          DT_CHECK_MSG(seedMatmulOperandBroadcastDestinationCoordinates(
++                           mySDsc, dsc, lds, allocNode, &coordinateSeedReason),
++                       coordinateSeedReason);
+           DT_CHECK_MSG(dscMetadata.count(dscIdx), "Expect a metadata entry.");
+           auto& newAllocations = dscMetadata.at(dscIdx).newAllocations_;
+           if (newAllocations.find(allocStorage) == newAllocations.end()) {
+@@ -3236,6 +3532,16 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
+           allocNode =
+               createAllocateNode(dsc, ldsIdx, allocStorage,
+                                  numBufferForNoBuffer, allocNodeName, dscIdx);
++          DT_CHECK_MSG(dscMetadata.count(dscIdx), "Expect a metadata entry.");
++          auto& newAllocations = dscMetadata.at(dscIdx).newAllocations_;
++          if (newAllocations.find(allocStorage) == newAllocations.end()) {
++            newAllocations.emplace(allocStorage, Metadata::Allocation());
++          }
++          auto& allocMetadata =
++              newAllocations.at(allocStorage).ldsIdxAndAllocNode;
++          DT_CHECK_MSG(allocMetadata.find(ldsIdx) == allocMetadata.end(),
++                       "Do not expect an existing LX-local allocation.");
++          allocMetadata[ldsIdx] = allocNode;
+           // Insert allocate node at root level before the ref node.
+           parentNode->addChildNode(allocNode, /*addBefore*/ true, refNode);
+         }
+@@ -4890,6 +5196,9 @@ void L3DlOpsScheduler::fillFinalStartAddressAndOffset(
+   auto coordinates =
+       allocNode->startAddressCoreCorelet_.getFlattenedCoordinates(
+           {{0, 0}, {1, 0}});
++  DT_CHECK_MSG(!coordinates.empty(),
++               "Missing LX start address coordinates for " + lds.dsName_ +
++                   " allocation " + allocNode->name_);
+   DT_CHECK(coordinates.begin()->size() >= 2);
+   for (auto &coord : coordinates) {
+     for (auto coreId : dsc.coreIdsUsed_) {
+@@ -7914,6 +8223,7 @@ void L3DlOpsScheduler::run(SuperDsc &mySDsc) {
+ 
+   // Set start address, offset in allocations.
+   fillAllocationStartAddrAndOffset(mySDsc);
++  populateMatmulOperandBroadcastRingTransfersAfterAllocation(mySDsc);
+ 
+   // Finalize the schedule tree by filling the loop address and offset in the
+   // transfer nodes.
+diff --git a/ddc/ddc_fold.cpp b/ddc/ddc_fold.cpp
+index 0acf07556..821ebc5b9 100644
+--- a/ddc/ddc_fold.cpp
++++ b/ddc/ddc_fold.cpp
+@@ -15,6 +15,83 @@ namespace ddc {
+ 
+ using dsc2::LoopDistributionInfo;
+ 
++bool isFoldedLxNeighborAllocation(const dsc2::AllocateNode *allocNode) {
++  if (allocNode == nullptr || allocNode->component_ != SenComponents::LX ||
++      !allocNode->allocateCoordinates_.foldConstructed()) {
++    return false;
++  }
++  for (const auto &[userNode, _] : allocNode->allocUsers_) {
++    if (userNode != nullptr &&
++        userNode->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
++        userNode->name_.find("_lx_neighbor") != std::string::npos) {
++      return true;
++    }
++  }
++  return false;
++}
++
++bool seedLxNeighborAllocationFromFoldedPeer(DesignSpaceConfig *currDsc,
++                                            dsc2::AllocateNode *allocNode) {
++  return false;
++  if (currDsc == nullptr || allocNode == nullptr ||
++      allocNode->component_ != SenComponents::LX ||
++      allocNode->name_.find("allocate_lds") == std::string::npos ||
++      allocNode->allocateCoordinates_.foldConstructed()) {
++    return false;
++  }
++  auto allocNodes = currDsc->scheduleTree_.traverseTreeDFSMutable(
++      nullptr, {dsc2::ScheduleNode::ALLOCATE});
++  for (auto *node : allocNodes) {
++    auto *peer = dynamic_cast<dsc2::AllocateNode *>(node);
++    if (peer == nullptr || peer == allocNode || peer->ldsIdx_ != allocNode->ldsIdx_ ||
++        peer->component_ != SenComponents::LX ||
++        !peer->allocateCoordinates_.foldConstructed() ||
++        peer->allocateCoordinates_.coordinates_.empty()) {
++      continue;
++    }
++    allocNode->allocateCoordinates_ = peer->allocateCoordinates_;
++    allocNode->allocateCoordinates_.completeFoldConstruction();
++    return true;
++  }
++  return false;
++}
++
++std::map<std::pair<std::string, int>,
++         dsc2::CoordinateType<CoordinateBaseType>>&
++lxNeighborCoordinateCache() {
++  static std::map<std::pair<std::string, int>,
++                  dsc2::CoordinateType<CoordinateBaseType>>
++      cache;
++  return cache;
++}
++
++void rememberLxNeighborCoordinates(const dsc2::AllocateNode *allocNode) {
++  return;
++  if (allocNode == nullptr || allocNode->component_ != SenComponents::LX ||
++      allocNode->name_.find("allocate_lds") == std::string::npos ||
++      !allocNode->allocateCoordinates_.foldConstructed() ||
++      allocNode->allocateCoordinates_.coordinates_.empty()) {
++    return;
++  }
++  lxNeighborCoordinateCache()[{allocNode->name_, allocNode->ldsIdx_}] =
++      allocNode->allocateCoordinates_;
++}
++
++bool seedLxNeighborAllocationFromCache(dsc2::AllocateNode *allocNode) {
++  return false;
++  if (allocNode == nullptr || allocNode->component_ != SenComponents::LX ||
++      allocNode->name_.find("allocate_lds") == std::string::npos ||
++      allocNode->allocateCoordinates_.foldConstructed()) {
++    return false;
++  }
++  const auto it =
++      lxNeighborCoordinateCache().find({allocNode->name_, allocNode->ldsIdx_});
++  if (it == lxNeighborCoordinateCache().end()) return false;
++  allocNode->allocateCoordinates_ = it->second;
++  allocNode->allocateCoordinates_.completeFoldConstruction();
++  return true;
++}
++
+ void dbgPrint(const dsc2::ComputeNode *computeNode) {
+   std::cout << " ComputeNode: " << computeNode->name_ << "(" << computeNode
+             << ") "
+@@ -1863,14 +1940,17 @@ void Ddc::buildAndPropagateFold() {
+                     static_cast<dsc2::ComputeNode *>(coordPropInfo.refNode),
+                     reverseCoordPropInfo, inputCoords, outputCoords, ldsIdx);
+       if (buildFoldForAllocation(coordPropInfo, refCoordinate, allocNode)) {
+-        dsc2::computeLoopElemOffsetsFromCoordinates(
+-            currDsc, coordPropInfo.refNode,
+-            const_cast<dsc2::CoordinateType<CoordinateBaseType> &>(
+-                refCoordinate),
+-            allocNode,
+-            loopDistributionParamInfo.at(coordPropInfo.refNode).at(allocNode),
+-            coordPropInfo.dimsToPropagate, coordPropReportLevel_);
+-        if (allocNode->allocateCoordinates_.coreIdToWkSlice_.empty()) {
++        if (!isFoldedLxNeighborAllocation(allocNode)) {
++          dsc2::computeLoopElemOffsetsFromCoordinates(
++              currDsc, coordPropInfo.refNode,
++              const_cast<dsc2::CoordinateType<CoordinateBaseType> &>(
++                  refCoordinate),
++              allocNode,
++              loopDistributionParamInfo.at(coordPropInfo.refNode).at(allocNode),
++              coordPropInfo.dimsToPropagate, coordPropReportLevel_);
++        }
++        if (!isFoldedLxNeighborAllocation(allocNode) &&
++            allocNode->allocateCoordinates_.coreIdToWkSlice_.empty()) {
+           for (auto &[userNode, refCount] : allocNode->allocUsers_) {
+             if (!is_any_of(userNode->nodeType_, dsc2::ScheduleNode::COMPUTE,
+                            dsc2::ScheduleNode::TRANSFER)) {
+@@ -2358,6 +2438,27 @@ bool Ddc::buildFoldForAllocation(
+     const dsc2::CoordinateType<CoordinateBaseType> &inputRefCoord,
+     dsc2::AllocateNode *allocNode) {
+   dsc2::ScheduleNode *refNode = coordPropInfo.refNode;
++  rememberLxNeighborCoordinates(allocNode);
++  const bool seededFromCache = seedLxNeighborAllocationFromCache(allocNode);
++  if (allocNode != nullptr &&
++      allocNode->name_.find("allocate_lds1_lx") != std::string::npos) {
++    std::cout << "\n[LX-neighbor diagnostic] " << allocNode->name_
++              << " foldConstructed="
++              << (allocNode->allocateCoordinates_.foldConstructed() ? "true"
++                                                                    : "false")
++              << " coordDims="
++              << allocNode->allocateCoordinates_.coordinates_.size()
++              << " coreIdToWkSlice="
++              << allocNode->allocateCoordinates_.coreIdToWkSlice_.size()
++              << " users=" << allocNode->allocUsers_.size()
++              << " seededFromCache=" << (seededFromCache ? "true" : "false")
++              << std::endl;
++  }
++  if (seedLxNeighborAllocationFromFoldedPeer(currDsc, allocNode) &&
++      coordPropReportLevel_ > 0) {
++    std::cout << "\n[buildFoldForAllocation] Seeded " << allocNode->name_
++              << " from folded LX peer allocation." << std::endl;
++  }
+   dsc2::CoordinateType<CoordinateBaseType> refNodeCoordinates;
+   refNodeCoordinates = inputRefCoord;
+   if (coordPropInfo.scaleDown) {
+@@ -2366,6 +2467,15 @@ bool Ddc::buildFoldForAllocation(
+         const_cast<dsc2::CoordinateType<CoordinateBaseType> &>(inputRefCoord),
+         allocNode->ldsIdx_);
+   }
++  if (isFoldedLxNeighborAllocation(allocNode)) {
++    loopDistributionParamInfo[coordPropInfo.refNode][allocNode];
++    if (coordPropReportLevel_ > 0) {
++      std::cout << "\n[buildFoldForAllocation] Reusing explicit coordinates for "
++                << allocNode->name_ << " from LX-neighbor relayout."
++                << std::endl;
++    }
++    return true;
++  }
+   if (coordPropReportLevel_ > 0) {
+     std::cout << "\n\n>>> buildFoldForAllocation:"
+               << "\n  allocNode= ";
+@@ -2640,6 +2750,30 @@ bool Ddc::buildFoldForAllocation(
+           //      (inner to outer) of related enclosing loops
+           int relatedLoopIndex = relatedLoopsForRefNode.size() -
+                                  (i - numSpatialFoldsOfRefNode) - 1;
++          if (relatedLoopIndex < 0 ||
++              relatedLoopIndex >=
++                  static_cast<int>(relatedLoopsForRefNode.size())) {
++            std::cout << "\n[LX-neighbor diagnostic] skipping missing "
++                         "related loop binding"
++                      << " alloc=" << allocNode->name_
++                      << " ref=" << refNode->name_
++                      << " dim="
++                      << EnumsConversion::primaryDimToString.at(dim)
++                      << " i=" << i
++                      << " foldDimCount=" << foldDimCount
++                      << " numSpatialFoldsOfRefNode="
++                      << numSpatialFoldsOfRefNode
++                      << " origNumElemArrFoldsOfRefNode="
++                      << origNumElemArrFoldsOfRefNode
++                      << " numElemArrFoldsOfAllocNode="
++                      << numElemArrFoldsOfAllocNode
++                      << " relatedLoopIndex=" << relatedLoopIndex
++                      << " relatedLoopsForRefNode="
++                      << relatedLoopsForRefNode.size()
++                      << " relatedLoopsForAlloc="
++                      << relatedLoopsForAlloc.size() << std::endl;
++            continue;
++          }
+           auto &currLoopParam =
+               loopParamInfo[relatedLoopsForRefNode.at(relatedLoopIndex)
+                                 .loopNode][dim];
+diff --git a/ddc/ddcv1.cpp b/ddc/ddcv1.cpp
+index e8d03207e..e254f756c 100644
+--- a/ddc/ddcv1.cpp
++++ b/ddc/ddcv1.cpp
+@@ -8,6 +8,7 @@
+ #include <util/utils.h>
+ 
+ #include <climits>
++#include <exception>
+ 
+ #include "ddc.h"
+ #include "util/dt_exception.hpp"
+@@ -2302,6 +2303,8 @@ void Ddc::fillLoopOffsetsAndAddresses(
+                           dsc2::ScheduleNode* processorNode, bool isProducer,
+                           const dsc2::CoordinateType<CoordinateBaseType>&
+                               coordinates) {
++    std::string debugAllocationName = "<unresolved>";
++    try {
+     if (di.myLdsIdx_ < 0 && di.constantId_ < 0) return;
+     if (dsc2::memories.count(loc.storage_) == 0) return;
+     // fill start address here
+@@ -2326,6 +2329,7 @@ void Ddc::fillLoopOffsetsAndAddresses(
+                                        .allocateNode_
+                                  : currDsc->constantInfo_.at(di.constantId_)
+                                        .allocations_.at(loc.storage_);
++    debugAllocationName = allocation ? allocation->name_ : "<null>";
+     di.startAddr_.clone(allocation->startAddressCoreCorelet_);
+     auto genericUnit = EnumsConversion::senCompToGenericComp.at(loc.unit_);
+     auto addrScale = dscGlobal.sysDef.addressGranularityScalePerUnit.at(
+@@ -2689,6 +2693,14 @@ void Ddc::fillLoopOffsetsAndAddresses(
+                 !coreIdToWkSliceAlloc.count(coreId)) {
+               continue;
+             }
++            const auto nodeDimSliceIt =
++                coreIdToWkSliceNode.at(coreId).find(dim);
++            const auto allocDimSliceIt =
++                coreIdToWkSliceAlloc.at(coreId).find(dim);
++            if (nodeDimSliceIt == coreIdToWkSliceNode.at(coreId).end() ||
++                allocDimSliceIt == coreIdToWkSliceAlloc.at(coreId).end()) {
++              continue;
++            }
+             if (!useCoreIdNode && !useCoreIdAlloc &&
+                 coreId != currDsc->coreIdsUsed_[0]) {
+               constOffsetField =
+@@ -2699,8 +2711,8 @@ void Ddc::fillLoopOffsetsAndAddresses(
+               constOffsetField = di.constEleOffsets_[coreId][0][dim];
+               continue;
+             }
+-            const auto& sliceIdNode = coreIdToWkSliceNode.at(coreId).at(dim);
+-            const auto& sliceIdAlloc = coreIdToWkSliceAlloc.at(coreId).at(dim);
++            const auto& sliceIdNode = nodeDimSliceIt->second;
++            const auto& sliceIdAlloc = allocDimSliceIt->second;
+             const auto coreFoldPos =
+                 static_cast<int>(dsc2::CoordinateFoldPosition::Core);
+             const auto coreletFoldPos =
+@@ -2782,6 +2794,24 @@ void Ddc::fillLoopOffsetsAndAddresses(
+         }
+       }
+     }
++    } catch (const std::exception& ex) {
++      std::cerr << "\n[fillDataInfo diagnostic] exception=" << ex.what()
++                << " processor="
++                << (processorNode ? processorNode->name_ : std::string("<null>"))
++                << " allocation=" << debugAllocationName
++                << " loop="
++                << (loopLocation ? loopLocation->name_ : std::string("<null>"))
++                << " myLdsIdx=" << di.myLdsIdx_
++                << " constantId=" << di.constantId_
++                << " dataConnect=" << di.dataConnect_
++                << " locUnit=" << static_cast<int>(loc.unit_)
++                << " locStorage=" << static_cast<int>(loc.storage_)
++                << " isProducer=" << isProducer
++                << " coordDims=" << coordinates.coordinates_.size()
++                << " coordCoreMap=" << coordinates.coreIdToWkSlice_.size()
++                << "\n";
++      throw;
++    }
+   };
+ 
+   for (auto* node : scheduleTreeTraverse) {
+diff --git a/dsc/dsc2.h b/dsc/dsc2.h
+index d84445e76..9c355d022 100644
+--- a/dsc/dsc2.h
++++ b/dsc/dsc2.h
+@@ -19,6 +19,8 @@
+ #include "util/dt_exception.hpp"
+ #include "util/utils.h"
+ 
++#include <cstdint>
++
+ class DesignSpaceConfig;
+ namespace ddc {
+ class Ddc;
+@@ -849,6 +851,18 @@ struct TransferNode : public InheritWithClone<ScheduleNode, TransferNode> {
+   std::map<int, CoreletView> coreletViews_;
+   CoordinateType<CoordinateBaseType> transferCoordinates_;
+ 
++  struct LxNeighborRingTransfer {
++    int sourceCoreId_ = -1;
++    int destinationCoreId_ = -1;
++    int64_t sourceStartAddress_ = -1;
++    int64_t destinationStartAddress_ = -1;
++    int64_t byteCount_ = 0;
++    int64_t group_ = -1;
++    int64_t producerChunk_ = -1;
++    int64_t consumerReplica_ = -1;
++  };
++  std::vector<LxNeighborRingTransfer> lxNeighborRingTransfers_;
++
+   enum TransferType {
+     CONSTANT_TO_CONSTANT,
+     CONSTANT_TO_TENSOR,
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 3a1f3da46..52fe6c7fa 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -478,6 +478,36 @@ static bool attachMatmulOperandBroadcastInputFetch(
+   }
+ 
+   std::vector<int> dataOpIndices;
++  const bool useSingleIfnDataOp =
++      std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_SINGLE_IFN") !=
++      nullptr;
++  DataOpDsc singleDdsc;
++  std::set<int> singleCoresSeen;
++  LdsInfo* singleInpLds = nullptr;
++  LdsInfo* singleOutLds = nullptr;
++  if (useSingleIfnDataOp) {
++    singleDdsc.dscName_ = sdsc->name_ + "-" + lds.dsName_ +
++                          "-LxInputNeighborFetch-combined";
++    singleDdsc.opName = OpFuncs::STCDPOpLx;
++    singleDdsc.op = new STCDPOpLx;
++    singleDdsc.op->name = OpFuncs::STCDPOpLx;
++    singleDdsc.primaryDs_["activation"].name_ = "activation";
++    singleDdsc.target_ = sdsc->target_;
++    singleDdsc.foldProps_.push_back(new FoldDimProp(
++        sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++    singleDdsc.labeledDs_.resize(2);
++    singleInpLds = &singleDdsc.labeledDs_.at(0);
++    singleOutLds = &singleDdsc.labeledDs_.at(1);
++    singleInpLds->ldsName_ = lds.dsName_ + "-LxInputNeighborFetch-inp";
++    singleOutLds->ldsName_ = lds.dsName_;
++    fillDataOpLdsShape(*singleInpLds, singleDdsc, lds, dldsc);
++    fillDataOpLdsShape(*singleOutLds, singleDdsc, lds, dldsc);
++    singleDdsc.dimPool_ = singleDdsc.primaryDs_.at("activation").dimNames;
++    DT_CHECK(singleOutLds->stickDimOrder_ == singleInpLds->stickDimOrder_);
++    DT_CHECK(singleOutLds->dimToStickSize_ ==
++             singleInpLds->dimToStickSize_);
++  }
++
+   for (const auto& coreAndSlice : producerCoreIdToWkSlice) {
+     std::vector<int> destinationCores;
+     for (const auto& dstCoreAndSlice : sdsc->coreIdToWkSlice_) {
+@@ -499,36 +529,50 @@ static bool attachMatmulOperandBroadcastInputFetch(
+     }
+ 
+     DataOpDsc ddsc;
+-    ddsc.dscName_ = sdsc->name_ + "-" + lds.dsName_ +
+-                    "-LxInputNeighborFetch-src" +
+-                    std::to_string(coreAndSlice.first);
+-    ddsc.opName = OpFuncs::STCDPOpLx;
+-    ddsc.op = new STCDPOpLx;
+-    ddsc.op->name = OpFuncs::STCDPOpLx;
+-    ddsc.primaryDs_["activation"].name_ = "activation";
+-    ddsc.target_ = sdsc->target_;
+-    ddsc.foldProps_.push_back(new FoldDimProp(
+-        sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
+-
++    LdsInfo* inpLdsPtr = singleInpLds;
++    LdsInfo* outLdsPtr = singleOutLds;
+     std::set<int> coresSeen;
+-    if (coresSeen.insert(coreAndSlice.first).second) {
+-      ddsc.coreIdsUsed_.push_back(coreAndSlice.first);
+-    }
+-    for (const auto dstCore : destinationCores) {
+-      if (coresSeen.insert(dstCore).second) ddsc.coreIdsUsed_.push_back(dstCore);
+-    }
+-
+-    ddsc.labeledDs_.resize(2);
+-    auto& inpLds = ddsc.labeledDs_.at(0);
+-    auto& outLds = ddsc.labeledDs_.at(1);
+-    inpLds.ldsName_ = lds.dsName_ + "-LxInputNeighborFetch-inp-src" +
++    if (!useSingleIfnDataOp) {
++      ddsc.dscName_ = sdsc->name_ + "-" + lds.dsName_ +
++                      "-LxInputNeighborFetch-src" +
+                       std::to_string(coreAndSlice.first);
+-    outLds.ldsName_ = lds.dsName_;
+-    fillDataOpLdsShape(inpLds, ddsc, lds, dldsc);
+-    fillDataOpLdsShape(outLds, ddsc, lds, dldsc);
+-    ddsc.dimPool_ = ddsc.primaryDs_.at("activation").dimNames;
+-    DT_CHECK(outLds.stickDimOrder_ == inpLds.stickDimOrder_);
+-    DT_CHECK(outLds.dimToStickSize_ == inpLds.dimToStickSize_);
++      ddsc.opName = OpFuncs::STCDPOpLx;
++      ddsc.op = new STCDPOpLx;
++      ddsc.op->name = OpFuncs::STCDPOpLx;
++      ddsc.primaryDs_["activation"].name_ = "activation";
++      ddsc.target_ = sdsc->target_;
++      ddsc.foldProps_.push_back(new FoldDimProp(
++          sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++      if (coresSeen.insert(coreAndSlice.first).second) {
++        ddsc.coreIdsUsed_.push_back(coreAndSlice.first);
++      }
++      for (const auto dstCore : destinationCores) {
++        if (coresSeen.insert(dstCore).second)
++          ddsc.coreIdsUsed_.push_back(dstCore);
++      }
++
++      ddsc.labeledDs_.resize(2);
++      auto& inpLds = ddsc.labeledDs_.at(0);
++      auto& outLds = ddsc.labeledDs_.at(1);
++      inpLds.ldsName_ = lds.dsName_ + "-LxInputNeighborFetch-inp-src" +
++                        std::to_string(coreAndSlice.first);
++      outLds.ldsName_ = lds.dsName_;
++      fillDataOpLdsShape(inpLds, ddsc, lds, dldsc);
++      fillDataOpLdsShape(outLds, ddsc, lds, dldsc);
++      ddsc.dimPool_ = ddsc.primaryDs_.at("activation").dimNames;
++      DT_CHECK(outLds.stickDimOrder_ == inpLds.stickDimOrder_);
++      DT_CHECK(outLds.dimToStickSize_ == inpLds.dimToStickSize_);
++      inpLdsPtr = &inpLds;
++      outLdsPtr = &outLds;
++    } else {
++      if (singleCoresSeen.insert(coreAndSlice.first).second) {
++        singleDdsc.coreIdsUsed_.push_back(coreAndSlice.first);
++      }
++      for (const auto dstCore : destinationCores) {
++        if (singleCoresSeen.insert(dstCore).second)
++          singleDdsc.coreIdsUsed_.push_back(dstCore);
++      }
++    }
+ 
+     std::map<std::string, double> dimToSize;
+     std::map<std::string, double> dimToStart;
+@@ -554,20 +598,31 @@ static bool attachMatmulOperandBroadcastInputFetch(
+       return false;
+     }
+ 
+-    addLxPiece(inpLds, "src0", coreAndSlice.first, srcAddr,
++    const std::string pieceSuffix = useSingleIfnDataOp
++                                        ? std::to_string(coreAndSlice.first)
++                                        : "0";
++    addLxPiece(*inpLdsPtr, "src" + pieceSuffix, coreAndSlice.first, srcAddr,
+                dimToSize, dimToStart);
+-    addReplicatedLxPiece(outLds, "dst0", destinationCores,
++    addReplicatedLxPiece(*outLdsPtr, "dst" + pieceSuffix, destinationCores,
+                          replicatedDstAddr, dimToSize, dimToStart);
+ 
+-    const int dataOpIdx = static_cast<int>(sdsc->dataOpdscs_.size());
+-    sdsc->dataOpdscs_.push_back(ddsc);
+-    dataOpIndices.push_back(dataOpIdx);
++    if (!useSingleIfnDataOp) {
++      const int dataOpIdx = static_cast<int>(sdsc->dataOpdscs_.size());
++      sdsc->dataOpdscs_.push_back(ddsc);
++      dataOpIndices.push_back(dataOpIdx);
++    }
+     if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONE_IFN_PROBE") !=
+         nullptr) {
+       break;
+     }
+   }
+ 
++  if (useSingleIfnDataOp) {
++    const int dataOpIdx = static_cast<int>(sdsc->dataOpdscs_.size());
++    sdsc->dataOpdscs_.push_back(singleDdsc);
++    dataOpIndices.push_back(dataOpIdx);
++  }
++
+   const bool useCombinedSchedule =
+       std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_COMBINED_IFN") !=
+       nullptr;

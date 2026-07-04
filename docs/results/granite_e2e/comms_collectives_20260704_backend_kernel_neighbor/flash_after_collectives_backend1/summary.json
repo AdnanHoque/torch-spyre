@@ -1,0 +1,41 @@
+{
+  "assert_close_skipped": true,
+  "backend_plan_count": 32,
+  "compile_probe_patches": [
+    "no_h2d",
+    "skip_cpu_ref"
+  ],
+  "direct_replay_backend_0p2_failure": "initial chunk parameters must fit in LX",
+  "dxp_backend_lx_frac_avail": "1",
+  "first_plan_summary": {
+    "artifact_kind": "matmul_operand_broadcast_backend_plan",
+    "communication_pattern": "all_gather_replicate",
+    "estimated_tensor_bytes": "0",
+    "fallback_policy": "refuse resident HBM/full per-consumer operand materialization",
+    "group_count": "4",
+    "kind": "matmul_operand_broadcast",
+    "logical_transfer_count": "256",
+    "physical_lowering_status": "lowered_loop_scoped_kernel_neighbor",
+    "producer_chunks_per_group": "8",
+    "realization_strategy": "loop_scoped_input_fetch",
+    "realized": true,
+    "replication_factor": "8",
+    "stages": [
+      "source_operand_shards",
+      "grouped_all_gather_replicate",
+      "loop_scoped_input_fetch",
+      "bind_matmul_kernel_operand"
+    ]
+  },
+  "important_observation": "Destination LX allocation must not inherit producer coordinate folds for grouped all-gather; seed destination ownership and let DDC derive the consumer-sized allocation.",
+  "remaining_gaps": [
+    "diagnostic Deeptools patch still has instrumentation and guard code",
+    "ring lowering proof is currently indirect through plan metadata and successful dxp/runtime smoke; generated ring-node artifact is not cleanly exposed",
+    "backend plan estimated_tensor_bytes is still 0",
+    "full value correctness is not proven in this run because H2D and CPU assert were skipped for compile/runtime probing"
+  ],
+  "returncode": "0",
+  "run_dir": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/flash_after_collectives_backend1_20260704_085439",
+  "sdsc_count": 550,
+  "stdout_success": true
+}
