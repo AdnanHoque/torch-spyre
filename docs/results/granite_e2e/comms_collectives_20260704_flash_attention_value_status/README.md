@@ -48,6 +48,36 @@ out_reuse_dim.size() == 1
 
 Inspection showed this assertion is triggered by non-relayout batchmatmul SDSCs in the smaller `test_flash_no_scalar.py` graph, not by the relayout-classified matmuls. It appears to be a separate L3 scheduler/layout assumption exposed by that smaller probe shape.
 
+## Follow-up checks
+
+After the initial artifact snapshot, we gated the synthetic per-stick ring metadata so it only runs when `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR=1`.
+
+Deeptools diagnostic commit:
+
+```text
+352919bf3f9c0efb2430568c667111aeb0a99e95 [diagnostic] gate synthetic matmul broadcast ring lowering
+```
+
+Then we reran the built-in unsafe path without the manual ring metadata:
+
+| path | run | result | interpretation |
+| --- | --- | --- | --- |
+| Built-in unsafe IFN/STCDP path, manual ring disabled | `flash_builtin_ifn_unsafe_value_noring_20260704_093946` | Fails CPU comparison: 99.2% mismatched, max abs diff `inf` | The built-in path still does not bind the staged RHS operand correctly. |
+| Baseline `test_flash.py`, relayout disabled | `flash_baseline_relayout_off_value_20260704_094500` | Fails CPU comparison: 75.1% mismatched, max abs diff `inf` | The full `test_flash.py` CPU comparison is not a reliable correctness oracle in this environment. |
+
+We also built several smaller value probes. A simple rank-4 batched matmul passes, and a direct RHS-broadcast matmul with `work_div={"H":4,"M":8}` passes, but that direct case does not create an LX-resident producer edge and emits no `matmul_operand_broadcast` plan. Probes that force a separate RHS producer with `exp` or `neg` fail even with relayout disabled, so they are not clean correctness harnesses.
+
+Current reliable statement:
+
+```text
+The DLDSC metadata and DXP/runtime smoke path for flash attention are unblocked,
+but value correctness for grouped all-gather / matmul operand broadcast remains
+unproven. The next requirement is a clean value harness with a known-good
+LX-resident producer edge, or a backend implementation that binds staged
+collective RHS chunks into the matmul transfer loop and is then checked against
+that harness.
+```
+
 ## Files
 
 - `manual_ring_value_stderr_tail.txt`: tail of the value failure for the manual diagnostic ring lowering.

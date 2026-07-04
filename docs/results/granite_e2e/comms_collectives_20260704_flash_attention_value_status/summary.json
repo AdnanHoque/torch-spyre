@@ -3,6 +3,7 @@
   "root": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507",
   "script": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/repos/test-spyre-scripts/test_flash.py",
   "result": "compile/runtime smoke unblocked, value correctness not achieved",
+  "latest_deeptools_diagnostic_sha": "352919bf3f9c0efb2430568c667111aeb0a99e95",
   "runs": [
     {
       "name": "manual_diagnostic_ring_value",
@@ -46,6 +47,33 @@
       "status": "dxp_scheduler_assertion",
       "assertion": "out_reuse_dim.size() == 1",
       "notes": "Separate scheduler/layout assumption on smaller test graph; not the same relayout-classified matmul failure."
+    },
+    {
+      "name": "builtin_path_unsafe_value_manual_ring_disabled",
+      "path": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/flash_builtin_ifn_unsafe_value_noring_20260704_093946",
+      "returncode": 1,
+      "status": "cpu_compare_failed",
+      "mismatched_elements": "16646957 / 16777216",
+      "mismatch_percent": 99.2,
+      "max_abs_diff": "inf",
+      "notes": "After gating the manual ring metadata, the built-in IFN/STCDP path still fails value correctness."
+    },
+    {
+      "name": "baseline_test_flash_relayout_disabled",
+      "path": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/flash_baseline_relayout_off_value_20260704_094500",
+      "returncode": 1,
+      "status": "cpu_compare_failed",
+      "mismatched_elements": "12602291 / 16777216",
+      "mismatch_percent": 75.1,
+      "max_abs_diff": "inf",
+      "notes": "The full test_flash.py CPU assertion is not a clean correctness oracle in this environment."
+    },
+    {
+      "name": "rank4_bmm_rhs_broadcast_baseline_off",
+      "path": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/rank4_bmm_rhs_broadcast_baseline_off_20260704_095505",
+      "returncode": 0,
+      "status": "success",
+      "notes": "Clean rank-4 RHS broadcast matmul baseline passes, but emits no matmul_operand_broadcast plan because the RHS remains HBM-backed in one batchmatmul SDSC."
     }
   ],
   "next_backend_gap": "Bind staged grouped-all-gather RHS chunks into the matmul transfer loop using coordinate-derived addressing instead of flat scalar per-stick ring copies."
