@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Carousel RFC ROI Plan</title>
+</head>
+<body>
+<style>
+.cr-root{--cr-bg:#0f1420;--cr-panel:#161d2e;--cr-panel2:#1b2438;--cr-ink:#e8edf7;--cr-dim:#96a2ba;--cr-line:#28324a;
+  --cr-green:#37d39a;--cr-amber:#f2b350;--cr-red:#f06a6a;--cr-blue:#5aa2f5;--cr-violet:#b490f0;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--cr-ink);background:var(--cr-bg);line-height:1.55;padding:0;margin:0;
+  -webkit-font-smoothing:antialiased;font-size:15px;}
+.cr-root *{box-sizing:border-box;}
+.cr-wrap{max-width:1120px;margin:0 auto;padding:0 22px 80px;}
+.cr-hero{padding:56px 0 30px;border-bottom:1px solid var(--cr-line);}
+.cr-kicker{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--cr-blue);font-weight:700;margin-bottom:14px;}
+.cr-h1{font-size:clamp(28px,4.4vw,46px);line-height:1.08;font-weight:800;letter-spacing:-.02em;margin:0 0 20px;}
+.cr-h1 .cr-em{background:linear-gradient(100deg,#5aa2f5,#37d39a);-webkit-background-clip:text;background-clip:text;color:transparent;}
+.cr-lede{font-size:17px;color:var(--cr-dim);max-width:860px;margin:0;}
+.cr-lede b{color:var(--cr-ink);font-weight:650;}
+.cr-tldr{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:28px 0 6px;}
+.cr-stat{background:var(--cr-panel);border:1px solid var(--cr-line);border-radius:12px;padding:16px 18px;}
+.cr-stat .cr-big{font-size:26px;font-weight:800;letter-spacing:-.01em;}
+.cr-stat .cr-lbl{font-size:12.5px;color:var(--cr-dim);margin-top:4px;}
+.cr-stat.g .cr-big{color:var(--cr-green);}
+.cr-stat.b .cr-big{color:var(--cr-blue);}
+.cr-stat.a .cr-big{color:var(--cr-amber);}
+.cr-stat.r .cr-big{color:var(--cr-red);}
+.cr-sec{margin-top:52px;}
+.cr-sec>h2{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--cr-dim);font-weight:700;
+  margin:0 0 6px;padding-bottom:10px;border-bottom:1px solid var(--cr-line);}
+.cr-sec>.cr-sub{color:var(--cr-dim);font-size:14.5px;margin:12px 0 22px;max-width:900px;}
+/* tags */
+.cr-tag{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:2px 7px;border-radius:999px;vertical-align:middle;white-space:nowrap;line-height:1.5;}
+.cr-tag.meas{color:var(--cr-green);background:rgba(55,211,154,.12);border:1px solid rgba(55,211,154,.4);}
+.cr-tag.mod{color:var(--cr-violet);background:rgba(180,144,240,.12);border:1px solid rgba(180,144,240,.4);}
+.cr-legend{display:flex;flex-wrap:wrap;gap:16px;margin:0 0 24px;font-size:13px;color:var(--cr-dim);align-items:center;}
+.cr-legend .cr-li{display:flex;align-items:center;gap:7px;}
+.cr-dot{width:11px;height:11px;border-radius:50%;display:inline-block;}
+/* premise chips */
+.cr-chip{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+  padding:3px 9px;border-radius:6px;white-space:nowrap;}
+.cr-chip.conf{color:#062;background:var(--cr-green);}
+.cr-chip.ref{color:#3a0808;background:var(--cr-red);}
+.cr-chip.open{color:#3a2a05;background:var(--cr-amber);}
+/* tables */
+.cr-tblwrap{overflow-x:auto;border:1px solid var(--cr-line);border-radius:12px;}
+table.cr-tbl{border-collapse:collapse;width:100%;min-width:640px;font-size:14px;}
+table.cr-tbl th{text-align:left;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--cr-dim);
+  font-weight:700;padding:12px 14px;border-bottom:1px solid var(--cr-line);background:var(--cr-panel2);position:sticky;top:0;}
+table.cr-tbl td{padding:12px 14px;border-bottom:1px solid var(--cr-line);vertical-align:top;}
+table.cr-tbl tr:last-child td{border-bottom:none;}
+table.cr-tbl tbody tr:hover td{background:rgba(90,162,245,.04);}
+.cr-rfc-w{color:var(--cr-amber);font-weight:700;font-size:11px;letter-spacing:.05em;}
+.cr-rfc-k{color:var(--cr-blue);font-weight:700;font-size:11px;letter-spacing:.05em;}
+.cr-ev{color:var(--cr-dim);font-size:13px;}
+/* disposition cards */
+.cr-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:20px;}
+.cr-card{background:var(--cr-panel);border:1px solid var(--cr-line);border-radius:14px;padding:22px 22px 20px;position:relative;overflow:hidden;}
+.cr-card.shelve{border-top:3px solid var(--cr-red);}
+.cr-card.reshape{border-top:3px solid var(--cr-amber);}
+.cr-card h3{margin:0 0 4px;font-size:19px;font-weight:800;letter-spacing:-.01em;}
+.cr-badge{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  padding:4px 11px;border-radius:7px;margin-bottom:14px;}
+.cr-badge.shelve{color:#3a0808;background:var(--cr-red);}
+.cr-badge.reshape{color:#3a2a05;background:var(--cr-amber);}
+.cr-card p{margin:0 0 12px;font-size:14px;color:var(--cr-dim);}
+.cr-card p b{color:var(--cr-ink);font-weight:650;}
+.cr-card .cr-keep{border-left:2px solid var(--cr-green);padding-left:12px;margin:14px 0 0;}
+.cr-card .cr-kill{border-left:2px solid var(--cr-red);padding-left:12px;margin:12px 0 0;}
+.cr-card .cr-lab{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;display:block;margin-bottom:3px;}
+.cr-card .cr-keep .cr-lab{color:var(--cr-green);}
+.cr-card .cr-kill .cr-lab{color:var(--cr-red);}
+/* roadmap rank pill */
+.cr-rank{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;
+  font-weight:800;font-size:13px;color:var(--cr-bg);}
+.cr-roi{display:inline-block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:5px;}
+.cr-roi.high{color:#062;background:rgba(55,211,154,.85);}
+.cr-roi.med{color:#3a2a05;background:rgba(242,179,80,.85);}
+.cr-roi.low{color:var(--cr-dim);background:rgba(150,162,186,.18);border:1px solid var(--cr-line);}
+.cr-evs{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+.cr-evs.dv{color:var(--cr-green);}
+.cr-evs.md{color:var(--cr-violet);}
+/* callout */
+.cr-callout{margin-top:30px;background:linear-gradient(120deg,rgba(90,162,245,.1),rgba(55,211,154,.08));
+  border:1px solid rgba(90,162,245,.35);border-radius:16px;padding:28px 30px;}
+.cr-callout .cr-cl-k{font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--cr-green);font-weight:800;margin-bottom:10px;}
+.cr-callout h3{margin:0 0 12px;font-size:22px;font-weight:800;letter-spacing:-.01em;}
+.cr-callout ol{margin:10px 0 0;padding-left:22px;}
+.cr-callout li{margin-bottom:9px;font-size:15px;color:var(--cr-ink);}
+.cr-callout li b{color:#fff;}
+.cr-callout li .cr-owner{color:var(--cr-dim);font-size:13px;}
+.cr-foot{margin-top:44px;padding-top:18px;border-top:1px solid var(--cr-line);color:var(--cr-dim);font-size:12.5px;}
+.cr-svgwrap{overflow-x:auto;border:1px solid var(--cr-line);border-radius:14px;background:var(--cr-panel);padding:6px;}
+.cr-note{font-size:12.5px;color:var(--cr-dim);margin-top:10px;font-style:italic;}
+</style>
+
+<div class="cr-root"><div class="cr-wrap">
+
+<header class="cr-hero">
+  <div class="cr-kicker">Carousel RFC · ROI Disposition · torch-spyre / deeptools</div>
+  <h1 class="cr-h1">Both carousels lose to <span class="cr-em">cheaper, device-verified levers</span> on their own goals.</h1>
+  <p class="cr-lede">The prefill layout fix and the cost-model fix are <b>banked wins covering 3 of 4 production goals</b> at near-zero cost. The single ring-aware mechanism worth building is the <b>cross-bundle co-bundling redesign</b> that the attention all-gather and any reshaped KV work both require — that is where the one surviving carousel premise (the <b>130&nbsp;GB/s uniform-shift ring transport</b>) belongs.</p>
+
+  <div class="cr-tldr">
+    <div class="cr-stat g"><div class="cr-big">29.8 → 72.7%</div><div class="cr-lbl">Prefill MLP-proj array util, pure-inductor layout+planner fix <span class="cr-tag meas">measured</span></div></div>
+    <div class="cr-stat b"><div class="cr-big">+76% → +13%</div><div class="cr-lbl">Aggregate matmul gap, cost-model min-cores fix (10/12 within 3%) <span class="cr-tag meas">measured</span></div></div>
+    <div class="cr-stat a"><div class="cr-big">130 GB/s</div><div class="cr-lbl">Uniform p→p+1 shift — the sole surviving carousel premise <span class="cr-tag meas">measured</span></div></div>
+    <div class="cr-stat r"><div class="cr-big">≤ 8× not 32×</div><div class="cr-lbl">Real weight replication — the ×32 headline is refuted <span class="cr-tag mod">modeled</span></div></div>
+  </div>
+</header>
+
+<!-- ===================== ROI QUADRANT ===================== -->
+<section class="cr-sec">
+  <h2>ROI landscape · production vs intellectual</h2>
+  <p class="cr-sub">Every ranked move plotted by <b>production ROI</b> (x) against <b>intellectual ROI</b> (y). Banked, device-verified inductor levers sit top-right of the value line; the two carousels sit bottom-left — high effort, low selectable payoff.</p>
+  <div class="cr-legend">
+    <span class="cr-li"><span class="cr-dot" style="background:var(--cr-green)"></span> Banked win (ship now)</span>
+    <span class="cr-li"><span class="cr-dot" style="background:var(--cr-blue)"></span> Build — flagship bet</span>
+    <span class="cr-li"><span class="cr-dot" style="background:var(--cr-amber);transform:rotate(45deg)"></span> KV Carousel · reshape</span>
+    <span class="cr-li"><span class="cr-dot" style="background:var(--cr-red);transform:rotate(45deg)"></span> Weight Carousel · shelve</span>
+  </div>
+
+  <div class="cr-svgwrap">
+  <svg viewBox="0 0 760 560" width="100%" role="img" aria-label="ROI scatter: production ROI on x-axis, intellectual ROI on y-axis">
+    <defs>
+      <linearGradient id="crQuad" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#f06a6a" stop-opacity="0.06"/>
+        <stop offset="0.55" stop-color="#161d2e" stop-opacity="0"/>
+        <stop offset="1" stop-color="#37d39a" stop-opacity="0.10"/>
+      </linearGradient>
+    </defs>
+    <rect x="90" y="40" width="630" height="440" fill="url(#crQuad)"/>
+    <g stroke="#28324a" stroke-width="1">
+      <line x1="90" y1="40" x2="90" y2="480"/>
+      <line x1="90" y1="480" x2="720" y2="480"/>
+      <line x1="405" y1="40" x2="405" y2="480" stroke-dasharray="3 5" stroke-opacity="0.55"/>
+      <line x1="90" y1="260" x2="720" y2="260" stroke-dasharray="3 5" stroke-opacity="0.55"/>
+    </g>
+    <text x="405" y="516" text-anchor="middle" fill="#96a2ba" font-size="14" font-weight="700" letter-spacing="0.08em">PRODUCTION ROI  →</text>
+    <text x="30" y="260" text-anchor="middle" fill="#96a2ba" font-size="14" font-weight="700" letter-spacing="0.08em" transform="rotate(-90 30 260)">INTELLECTUAL ROI  →</text>
+    <g fill="#6f7c94" font-size="12">
+      <text x="203" y="500" text-anchor="middle">low</text>
+      <text x="405" y="500" text-anchor="middle">medium</text>
+      <text x="607" y="500" text-anchor="middle">high</text>
+      <text x="80" y="405" text-anchor="end">low</text>
+      <text x="80" y="264" text-anchor="end">medium</text>
+      <text x="80" y="123" text-anchor="end">high</text>
+    </g>
+    <line x1="120" y1="470" x2="700" y2="70" stroke="#5aa2f5" stroke-width="1" stroke-dasharray="2 6" stroke-opacity="0.35"/>
+    <text x="638" y="92" fill="#5aa2f5" font-size="11" opacity="0.7" text-anchor="end">ship-worthiness →</text>
+
+    <g>
+      <circle cx="607" cy="401" r="10" fill="#37d39a" stroke="#0f1420" stroke-width="2"/>
+      <text x="607" y="405" text-anchor="middle" font-size="11" font-weight="800" fill="#062">5</text>
+      <text x="607" y="428" text-anchor="middle" font-size="11.5" fill="#c7d0e2">Split-K decode</text>
+    </g>
+    <g>
+      <circle cx="585" cy="246" r="11" fill="#37d39a" stroke="#0f1420" stroke-width="2"/>
+      <text x="585" y="250" text-anchor="middle" font-size="11" font-weight="800" fill="#062">1</text>
+      <text x="585" y="224" text-anchor="middle" font-size="11.5" fill="#c7d0e2">Layout+planner fix</text>
+    </g>
+    <g>
+      <circle cx="631" cy="276" r="11" fill="#37d39a" stroke="#0f1420" stroke-width="2"/>
+      <text x="631" y="280" text-anchor="middle" font-size="11" font-weight="800" fill="#062">2</text>
+      <text x="631" y="300" text-anchor="middle" font-size="11.5" fill="#c7d0e2">Cost-model fix</text>
+    </g>
+    <g>
+      <circle cx="383" cy="112" r="11" fill="#5aa2f5" stroke="#0f1420" stroke-width="2"/>
+      <text x="383" y="116" text-anchor="middle" font-size="11" font-weight="800" fill="#04203f">3</text>
+      <text x="383" y="90" text-anchor="middle" font-size="11.5" fill="#c7d0e2">Co-bundling redesign</text>
+    </g>
+    <g>
+      <circle cx="429" cy="130" r="10" fill="#5aa2f5" stroke="#0f1420" stroke-width="2"/>
+      <text x="429" y="134" text-anchor="middle" font-size="11" font-weight="800" fill="#04203f">4</text>
+      <text x="452" y="150" text-anchor="start" font-size="11.5" fill="#c7d0e2">Ring cost-model</text>
+    </g>
+    <g transform="translate(203,244)">
+      <rect x="-10" y="-10" width="20" height="20" transform="rotate(45)" fill="#f2b350" stroke="#0f1420" stroke-width="2"/>
+      <text x="0" y="4" text-anchor="middle" font-size="11" font-weight="800" fill="#3a2a05">6</text>
+      <text x="0" y="-20" text-anchor="middle" font-size="11.5" fill="#f2b350" font-weight="600">KV Carousel · reshape</text>
+    </g>
+    <g transform="translate(203,290)">
+      <rect x="-10" y="-10" width="20" height="20" transform="rotate(45)" fill="#f06a6a" stroke="#0f1420" stroke-width="2"/>
+      <text x="0" y="4" text-anchor="middle" font-size="11" font-weight="800" fill="#3a0808">7</text>
+      <text x="0" y="30" text-anchor="middle" font-size="11.5" fill="#f06a6a" font-weight="600">Weight Carousel · shelve</text>
+    </g>
+  </svg>
+  </div>
+  <p class="cr-note">Both carousels cluster at low production ROI. The value they were built to capture (prefill array-fill, decode projections) is already banked by moves 1, 2 and 5 to their upper-right.</p>
+</section>
+
+<!-- ===================== PREMISE TABLE ===================== -->
+<section class="cr-sec">
+  <h2>Premise ledger · what survived the measurements</h2>
+  <p class="cr-sub">Each RFC premise confirmed against the cited ground-truth. Confirmed premises are all <b>mechanism / numerics</b>; every refuted or open premise is a <b>motivation, selectability, or speed</b> claim.</p>
+  <div class="cr-tblwrap">
+  <table class="cr-tbl">
+    <thead><tr><th>RFC</th><th>Premise</th><th>Status</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td><span class="cr-rfc-w">WEIGHT</span></td><td>W replicated ×32 in DRAM ("×32 headline")</td><td><span class="cr-chip ref">refuted</span></td><td class="cr-ev">Cost model counts each operand once; cohort_penalty forces max(m,n)≤8 → ≤8× <span class="cr-tag mod">modeled</span></td></tr>
+      <tr><td><span class="cr-rfc-w">WEIGHT</span></td><td>Prefill runs ~30× under roofline, gated by DRAM weight hauling</td><td><span class="cr-chip ref">refuted</span></td><td class="cr-ev">Gap was a layout artifact: 29.8→72.7% util via layout+planner, zero transport change <span class="cr-tag meas">measured</span></td></tr>
+      <tr><td><span class="cr-rfc-w">WEIGHT</span></td><td>#2407 prices the replication penalty & prunes token-split</td><td><span class="cr-chip ref">refuted</span></td><td class="cr-ev">No replication byte term exists; token-split limited by cohort_penalty, not a priced penalty <span class="cr-tag mod">modeled</span></td></tr>
+      <tr><td><span class="cr-rfc-w">WEIGHT</span></td><td>Carousel rotation = uniform p→p+1 shift at ring speed</td><td><span class="cr-chip conf">confirmed</span></td><td class="cr-ev">ρ = 54 / 90 / 130 GB/s, R²≥0.9985 — 2.5–3.6× the 36 GB/s scatter floor <span class="cr-tag meas">measured</span></td></tr>
+      <tr><td><span class="cr-rfc-w">WEIGHT</span></td><td>SHUFFLE accepts δ=±1 rotation (A1)</td><td><span class="cr-chip conf">confirmed</span></td><td class="cr-ev">Forced relayout device-fired 2 OnChipMoveSTCDPOpLx SDSCs; A1 not needed <span class="cr-tag meas">measured</span></td></tr>
+      <tr><td><span class="cr-rfc-w">WEIGHT</span></td><td>LX→LX transfer without an LPDDR bounce (P3)</td><td><span class="cr-chip conf">confirmed</span></td><td class="cr-ev">−147 µs on fused SwiGLU (N=20); same STCDPOpLx op as stcdp_range (~1.017×) <span class="cr-tag meas">measured</span></td></tr>
+      <tr><td><span class="cr-rfc-w">WEIGHT</span></td><td>Full-overlap perf model (async SHUFFLE hides rotation)</td><td><span class="cr-chip open">open</span></td><td class="cr-ev">overlapInpFetchWithCompute fires only for Conv2D, not matmul → overlap=False is honest today <span class="cr-tag mod">modeled</span></td></tr>
+      <tr><td><span class="cr-rfc-w">WEIGHT</span></td><td>Compute-bound gate at full-sequence prefill</td><td><span class="cr-chip open">open</span></td><td class="cr-ev">Roofline NO-GO at S≤512 (ρ_min 176 &gt; 166 GB/s); production Granite blocks are S≤512 <span class="cr-tag mod">modeled</span></td></tr>
+      <tr><td><span class="cr-rfc-w">WEIGHT</span></td><td>Channel-affine LPDDR placement (A3)</td><td><span class="cr-chip ref">refuted</span></td><td class="cr-ev">HBM is one flat memId=-1 space, no channel field; survivable via interleaved fallback <span class="cr-tag mod">modeled</span></td></tr>
+      <tr><td><span class="cr-rfc-w">WEIGHT</span></td><td>Bit-exact, numerics-inert rewrite</td><td><span class="cr-chip conf">confirmed</span></td><td class="cr-ev">reference.py 12/12 PASS incl. padded last-tile, r/kt invariance <span class="cr-tag meas">measured</span></td></tr>
+      <tr><td><span class="cr-rfc-k">KV</span></td><td>Decode attention at BS=1 is bandwidth-bound</td><td><span class="cr-chip conf">confirmed</span></td><td class="cr-ev">AI ~4 vs ~1800 balance; HBM is one shared ~170 GB/s pipe across 32 cores <span class="cr-tag mod">modeled</span></td></tr>
+      <tr><td><span class="cr-rfc-k">KV</span></td><td>Head-split caps concurrency at H_kv=8 (25% ceiling)</td><td><span class="cr-chip open">open</span></td><td class="cr-ev">No flash lowering: SDPA → dense QK^T + full softmax; fill factor u unmeasured <span class="cr-tag mod">modeled</span></td></tr>
+      <tr><td><span class="cr-rfc-k">KV</span></td><td>Seq-shard lifts ceiling to P·β (≥4×) via 32 channels</td><td><span class="cr-chip ref">refuted</span></td><td class="cr-ev">Channel affinity blocked (flat HBM); gain collapses to unmeasured core-ownership u <span class="cr-tag mod">modeled</span></td></tr>
+      <tr><td><span class="cr-rfc-k">KV</span></td><td>Transport de-risked — fold runs at the fast ring rate</td><td><span class="cr-chip ref">refuted</span></td><td class="cr-ev">130 GB/s is the weight-carousel's shift; the KV LSE fold is a contention chain (16.5 KiB / link) <span class="cr-tag meas">measured</span></td></tr>
+      <tr><td><span class="cr-rfc-k">KV</span></td><td>Merge = libring compose, no new collective op</td><td><span class="cr-chip ref">refuted</span></td><td class="cr-ev">No single-AIU move-then-reduce; fold = STCDPOpLx move + separate SFP per hop, behind a barrier <span class="cr-tag mod">modeled</span></td></tr>
+      <tr><td><span class="cr-rfc-k">KV</span></td><td>Local flash partial pass is an "ordinary local op"</td><td><span class="cr-chip ref">refuted</span></td><td class="cr-ev">local_flash_partial_pass is a NotImplementedError stub; online-softmax + GQA-fan lowering absent <span class="cr-tag mod">modeled</span></td></tr>
+      <tr><td><span class="cr-rfc-k">KV</span></td><td>λ crossover L_min is solvable</td><td><span class="cr-chip open">open</span></td><td class="cr-ev">λ has no device signal; profiler granularity is the fused bundle → crossover undetermined <span class="cr-tag mod">modeled</span></td></tr>
+      <tr><td><span class="cr-rfc-k">KV</span></td><td>attn→out-proj chains with zero relayout</td><td><span class="cr-chip open">open</span></td><td class="cr-ev">Rests on cross-op LX residency — the same cross-bundle wall the all-gather already hit <span class="cr-tag meas">measured</span></td></tr>
+      <tr><td><span class="cr-rfc-k">KV</span></td><td>LSE ring-fold numerics are inert / bit-exact</td><td><span class="cr-chip conf">confirmed</span></td><td class="cr-ev">reference.py 12/12 incl. ±80-logit overflow, GQA read-once, permutation invariance <span class="cr-tag meas">measured</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ===================== DISPOSITION CARDS ===================== -->
+<section class="cr-sec">
+  <h2>Disposition · one card per carousel</h2>
+  <div class="cr-cards" style="margin-top:22px;">
+    <div class="cr-card shelve">
+      <span class="cr-badge shelve">Shelve</span>
+      <h3>Weight Carousel</h3>
+      <p>Rotating-operand W-carousel to cut prefill DRAM weight replication and make prefill compute-bound.</p>
+      <p><b>Why shelve:</b> the entire problem framing is refuted at the root — replication is <b>≤8× not 32×</b> <span class="cr-tag mod">modeled</span>, the "30× under roofline" gap was a layout artifact already closed to <b>~73% util</b> <span class="cr-tag meas">measured</span> by a non-carousel fix, and the carousel changes only DRAM bytes — a saving <b>invisible to the planner</b> with no cost term to reward it. At production S≤512 the compute-bound gate is a roofline <b>NO-GO</b> <span class="cr-tag mod">modeled</span>.</p>
+      <div class="cr-keep"><span class="cr-lab">Harvest</span>The 130 GB/s uniform-shift transport finding <span class="cr-tag meas">measured</span> — move it into the co-bundling / ring-fold work (moves 3–4), its value here is only ~1.7% of the layer.</div>
+      <div class="cr-kill"><span class="cr-lab">Drop</span>The ×32 replication headline, the "#2407 prunes token-split" claim, A3 channel-affinity, and the "prefill becomes compute-bound" claim at S≤512.</div>
+    </div>
+
+    <div class="cr-card reshape">
+      <span class="cr-badge reshape">Reshape</span>
+      <h3>KV Carousel</h3>
+      <p>Sequence-sharded decode attention with a deterministic LSE ring-fold for long-context.</p>
+      <p><b>Why reshape:</b> the structural idea and its numerics are sound, but every <b>speed</b> premise is refuted or unmeasured — the 4× ceiling depends on blocked channel affinity, the "fast transport" probe validated the <b>wrong movement pattern</b>, the fold needs an absent primitive behind a closed barrier, and the flash lowering is a stub. The decode-projection goal is already won cheaply by split-K + the cost-model fix, so the real remaining target shrinks to <b>attention-over-cache</b>.</p>
+      <div class="cr-keep"><span class="cr-lab">Keep</span>Seq-shard + LSE-fold + long-context <b>capacity</b> thesis (numerics de-risked 12/12 <span class="cr-tag meas">measured</span>); it is independent of the collapsed bandwidth story.</div>
+      <div class="cr-kill"><span class="cr-lab">Replace</span>The channel-affinity 4× ceiling → a measured core-ownership fill factor <b>u</b>; converge the fold onto the same cross-bundle co-bundling redesign as the all-gather (fund one vehicle, not two).</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== ROADMAP ===================== -->
+<section class="cr-sec">
+  <h2>ROI-ranked roadmap</h2>
+  <p class="cr-sub">Rank order is banked wins first (moves 1–2, 5), then the flagship intellectual bet (3), the free cost-model correction (4), and finally the two carousels' reduced scopes. Every number tagged measured vs modeled.</p>
+  <div class="cr-tblwrap">
+  <table class="cr-tbl">
+    <thead><tr><th>#</th><th>Move</th><th>Prod ROI</th><th>Intel ROI</th><th>Evidence</th><th>Cost / owner &amp; first step</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="cr-rank" style="background:var(--cr-green)">1</span></td>
+        <td><b>Shared-weight unit-BMM layout + planner tie-break</b><br><span class="cr-ev">Restructures matmul it-space to 4-D, flips planner N-heavy. MLP-proj 3.122→1.024 ms, util 29.8→72.7% <span class="cr-tag meas">measured</span></span></td>
+        <td><span class="cr-roi high">high</span></td><td><span class="cr-roi med">medium</span></td>
+        <td><span class="cr-evs dv">device-verified</span></td>
+        <td class="cr-ev"><b>Low</b> · ~4 files + one tie-break edit, pure inductor (branch <code>pr-mlp-fix-prefill</code>).<br>Re-run 10 fix + 117 coarse-tiling tests on latest main + latest deeptools, confirm ~1.024 ms / 73.7% reproduce, open PR.</td>
+      </tr>
+      <tr>
+        <td><span class="cr-rank" style="background:var(--cr-green)">2</span></td>
+        <td><b>Cost-model min-cores fix</b><br><span class="cr-ev">One-file work_division.py edit (psum-per-core + sqrt-batch + target_m 25→12). +76→+13% aggregate, 10/12 within 3% <span class="cr-tag meas">measured</span></span></td>
+        <td><span class="cr-roi high">high</span></td><td><span class="cr-roi med">medium</span></td>
+        <td><span class="cr-evs dv">device-verified</span></td>
+        <td class="cr-ev"><b>Low</b> · single cost-term edit (branch <code>cost-model-min-cores-fix</code> @ 7fb4e55).<br>Re-profile the 240-split sweep; add a tiny-M guard so QK^T-decode does not regress (+64→+401% on 1_32_1_1 <span class="cr-tag meas">measured</span>), then land.</td>
+      </tr>
+      <tr>
+        <td><span class="cr-rank" style="background:var(--cr-blue)">3</span></td>
+        <td><b>Cross-bundle co-bundling redesign</b><br><span class="cr-ev">Keep producer K-shard LX-resident into the QK^T consumer so the sendnn-proven multicast all-gather operates on true shards and kills the HBM re-read. The real home for the 130 GB/s finding.</span></td>
+        <td><span class="cr-roi med">medium</span></td><td><span class="cr-roi high">high</span></td>
+        <td><span class="cr-evs dv">substrate/P0 banked</span></td>
+        <td class="cr-ev"><b>High</b> · deeptools + inductor SDSC wiring so LX persists across programs.<br>On <code>allgather-on-latest</code>, fuse mul(K) into the QK^T bundle so K never round-trips the in-bundle ReStickify; re-run the correctness probe, check flag-ON → 1e-3.</td>
+      </tr>
+      <tr>
+        <td><span class="cr-rank" style="background:var(--cr-blue)">4</span></td>
+        <td><b>Pattern-aware ring cost-model correction</b><br><span class="cr-ev">Per-link contention-degree term so the planner distinguishes the 36 GB/s scatter floor from the 130 GB/s uniform shift <span class="cr-tag meas">measured</span>, instead of flat bytes/128.</span></td>
+        <td><span class="cr-roi med">medium</span></td><td><span class="cr-roi high">high</span></td>
+        <td><span class="cr-evs dv">device-verified (ρ, R²≥0.998)</span></td>
+        <td class="cr-ev"><b>Low–med</b> · comm_cost / work_division Python; owner inductor.<br>Key cost on per-link transfer count (1 vs 4–9), validate against the 36-vs-130 RING_SPEED measurements. Blocker: none.</td>
+      </tr>
+      <tr>
+        <td><span class="cr-rank" style="background:var(--cr-green)">5</span></td>
+        <td><b>Split-K decode — keep &amp; verify it fires</b><br><span class="cr-ev">Reduction-dim split fills the array on B=1 M=1 narrow-N decode: KV n=16→(16,2) 1.73×; Qwen (8,4) 1.79× <span class="cr-tag meas">measured</span>. Already picked by the heuristic.</span></td>
+        <td><span class="cr-roi high">high</span></td><td><span class="cr-roi low">low</span></td>
+        <td><span class="cr-evs dv">device-verified</span></td>
+        <td class="cr-ev"><b>~Zero</b> · already in production; no new build.<br>Regression guard: confirm the fallback still selects (n=16,k=2)/(n=8,k=4). Risk: forcing it on prefill SwiGLU down_proj HURTS +19% <span class="cr-tag meas">measured</span> — keep it gated to memory-bound decode.</td>
+      </tr>
+      <tr>
+        <td><span class="cr-rank" style="background:var(--cr-amber)">6</span></td>
+        <td><b>KV Carousel — reshape (honest M0)</b><br><span class="cr-ev">Keep seq-shard + LSE-fold + capacity thesis (numerics 12/12 <span class="cr-tag meas">measured</span>); replace the refuted 4× ceiling with a measured core-ownership u; converge onto move 3.</span></td>
+        <td><span class="cr-roi low">low</span></td><td><span class="cr-roi med">medium</span></td>
+        <td><span class="cr-evs md">modeled (speed refuted/unmeasured)</span></td>
+        <td class="cr-ev"><b>M0 low, full build high</b> · needs a new flash-decode lowering + composed move+SFP fold.<br>Measure whether decode attention is bandwidth-capped today and what u it delivers; only fund the fold if u beats the all-gather vehicle.</td>
+      </tr>
+      <tr>
+        <td><span class="cr-rank" style="background:var(--cr-red)">7</span></td>
+        <td><b>Weight Carousel — shelve</b><br><span class="cr-ev">Rotating-operand W-carousel. Motivation refuted at the root; byte win invisible to the planner; NO-GO at S≤512 <span class="cr-tag mod">modeled</span>.</span></td>
+        <td><span class="cr-roi low">low</span></td><td><span class="cr-roi med">medium</span></td>
+        <td><span class="cr-evs md">refuted motivation; 1 confirmed premise</span></td>
+        <td class="cr-ev"><b>High for zero selectable payoff.</b><br>Harvest the uniform-shift transport finding into moves 3 &amp; 4; close the RFC as a prefill-matmul lever.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ===================== CALLOUT ===================== -->
+<section class="cr-sec">
+  <div class="cr-callout">
+    <div class="cr-cl-k">Do this next — the one thing</div>
+    <h3>Land the two banked inductor levers, then spend the ring finding on co-bundling.</h3>
+    <p class="cr-lede" style="margin-bottom:6px;">Moves 1 + 2 are pure-inductor, branch-ready, and device-verified. Together they already reach the prefill/matmul array-fill goal the weight carousel chased, plus most of the decode-projection goal the KV carousel targets — at near-zero cost. Shipping them <b>retires the weight carousel's entire motivation</b> and <b>shrinks the KV carousel's target to attention-over-cache</b>. They are the baseline any carousel claim must be measured on top of.</p>
+    <ol>
+      <li><b>Rebase &amp; land move 1</b> (shared-weight unit-BMM layout + planner) on latest main + latest deeptools; confirm MLP-proj ~1.024 ms and QO-proj ~73.7% still reproduce. <span class="cr-owner">— owner: inductor</span></li>
+      <li><b>Land move 2</b> (cost-model min-cores) with a tiny-M guard so QK^T-decode does not regress. <span class="cr-owner">— owner: inductor</span></li>
+      <li><b>Only then</b> fund move 3 — the cross-bundle co-bundling redesign — as the single flagship bet, and put the confirmed <b>130 GB/s uniform-shift</b> transport into that all-gather / ring-fold vehicle, not a weight rotation. <span class="cr-owner">— owner: deeptools + inductor</span></li>
+    </ol>
+  </div>
+</section>
+
+<div class="cr-foot">
+  <b>Tag key:</b> <span class="cr-tag meas">measured</span> = device-verified or executed on hardware/reference. <span class="cr-tag mod">modeled</span> = analytic, static-analysis, or roofline (not device-clocked). Sources: RING_SPEED / UNIFORM_SHIFT logs, M0_GROUNDTRUTH &amp; M0_CLOSURE, project_mlp_gap_final, project_costmodel_240sweep_verdict, reference_split_k_decode, project_attn_allgather_substrate. Verified against the cited files 2026-07.
+</div>
+
+</div></div>
+</body>
+</html>
