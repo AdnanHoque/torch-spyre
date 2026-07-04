@@ -1,0 +1,120 @@
+  work_slices=[mb=4, out=8, y=1]
+  core_id_to_work_slice=[mb=Mod(core_id, 4), out=Mod(floor(core_id/4), 8), y=0]
+  layouts=[
+    OUTPUT: dim_order=[mb, out, y], stick_dim_order=y, stick_size=64
+  ]
+  args=[
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, out, y], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, out=1, y=1],
+    strides=[mb=256, out=262144, y=262144],
+    offsets=[mb=0, out=0, y=0],
+    max_dim_sizes=[mb=-1, out=-1, y=-1],
+    allocation=[lx=1048576],
+    start_address=1048576
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, out, y], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, out=1, y=1],
+    strides=[mb=256, out=262144, y=262144],
+    offsets=[mb=0, out=0, y=0],
+    max_dim_sizes=[mb=-1, out=-1, y=-1],
+    allocation=[lx=1064960],
+    start_address=1064960
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, out, y], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, out=1, y=1],
+    strides=[mb=256, out=2097152, y=2097152],
+    offsets=[mb=0, out=0, y=0],
+    max_dim_sizes=[mb=-1, out=-1, y=-1],
+    allocation=[pool=130027008],
+    start_address=130027008
+    backGap={mb: 28}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_2em9vke0/sdsc_543.json
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_2em9vke0/bundle.mlir
+[DEBUG] [spyre.inductor.codegen.superdsc] symbol mapping: c0 -> mb, c1 -> x, c2 -> out
+[DEBUG] [spyre.inductor.codegen.superdsc] SDSCSpec(
+  opfunc=realdiv
+  exec_unit=sfp
+  data_format=SEN169_FP16
+  num_inputs=2
+  iteration_space=[mb=32, x=4096, out=128]
+  work_slices=[mb=1, x=32, out=1]
+  core_id_to_work_slice=[mb=0, x=Mod(core_id, 32), out=0]
+  layouts=[
+    OUTPUT: dim_order=[mb, out, x], stick_dim_order=out, stick_size=64
+  ]
+  args=[
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, out, x], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, out=1, x=1],
+    strides=[mb=2048, out=4096, x=16777216],
+    offsets=[mb=0, out=0, x=0],
+    max_dim_sizes=[mb=-1, out=-1, x=-1],
+    allocation=[pool=83886080],
+    start_address=83886080
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, x, out], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, x=1, out=-2],
+    strides=[mb=2048, x=8388608, out=8388608],
+    offsets=[mb=0, x=0, out=0],
+    max_dim_sizes=[mb=-1, x=-1, out=-1],
+    allocation=[pool=117440512],
+    start_address=117440512
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, out, x], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, out=1, x=1],
+    strides=[mb=2048, out=4096, x=16777216],
+    offsets=[mb=0, out=0, x=0],
+    max_dim_sizes=[mb=-1, out=-1, x=-1],
+    allocation=[hbm=17179869184],
+    start_address=17179869184
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on/cache/inductor-spyre/sdsc_fused_div_unsqueeze_2_j826ep89/sdsc_0.json
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on/cache/inductor-spyre/sdsc_fused_div_unsqueeze_2_j826ep89/bundle.mlir
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused_amax_full_zeros_zeros_like_0 /home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on/cache/inductor-spyre/sdsc_fused_amax_full_zeros_zeros_like_0_ipkzchqy
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1 /home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_2em9vke0
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused_div_unsqueeze_2 /home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on/cache/inductor-spyre/sdsc_fused_div_unsqueeze_2_j826ep89

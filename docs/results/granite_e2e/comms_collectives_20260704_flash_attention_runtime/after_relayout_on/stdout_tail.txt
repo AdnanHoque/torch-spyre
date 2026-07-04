@@ -1,0 +1,6 @@
+[runtime_patch] no_h2d Tensor.to(device=spyre) compile probe enabled
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[runtime_patch] assert_close skipped for compile probe
+SUCCESS

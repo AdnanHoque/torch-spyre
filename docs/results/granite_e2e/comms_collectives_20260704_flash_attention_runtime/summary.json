@@ -1,0 +1,41 @@
+{
+  "after": {
+    "backend_plan_count": 32,
+    "backend_plan_kinds": {
+      "matmul_operand_broadcast_backend_plan": 32
+    },
+    "backend_plan_movements": {
+      "<missing>": 32
+    },
+    "backend_plan_rest_ops": {
+      "<missing>": 32
+    },
+    "failure_tail": [],
+    "returncode": "0",
+    "run_dir": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on",
+    "sdsc_hbm_restickify_files": 0,
+    "sdsc_lx_restickify_files": 32,
+    "sdsc_total": 550,
+    "stage": "runtime_success"
+  },
+  "before": {
+    "backend_plan_count": 0,
+    "backend_plan_kinds": {},
+    "backend_plan_movements": {},
+    "backend_plan_rest_ops": {},
+    "failure_tail": [],
+    "returncode": "0",
+    "run_dir": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/before_relayout_off",
+    "sdsc_hbm_restickify_files": 32,
+    "sdsc_lx_restickify_files": 0,
+    "sdsc_total": 550,
+    "stage": "runtime_success"
+  },
+  "delta": {
+    "backend_plans_added": 32,
+    "hbm_restickify_removed": 32,
+    "lx_restickify_added": 32
+  },
+  "source_run_root": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507",
+  "torch_sha": "c913c2b8474d2a3a09ee8b13121818377d489c65"
+}

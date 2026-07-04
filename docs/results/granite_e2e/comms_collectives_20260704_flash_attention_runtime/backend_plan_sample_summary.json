@@ -1,0 +1,42 @@
+[
+  {
+    "artifact_kind": "matmul_operand_broadcast_backend_plan",
+    "file": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on/backend_plans/105_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+    "group_count": "4",
+    "logical_transfer_count": "256",
+    "physical_lowering_status": "lowered_loop_scoped_kernel_neighbor",
+    "realization_strategy": "loop_scoped_input_fetch"
+  },
+  {
+    "artifact_kind": "matmul_operand_broadcast_backend_plan",
+    "file": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on/backend_plans/122_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+    "group_count": "4",
+    "logical_transfer_count": "256",
+    "physical_lowering_status": "lowered_loop_scoped_kernel_neighbor",
+    "realization_strategy": "loop_scoped_input_fetch"
+  },
+  {
+    "artifact_kind": "matmul_operand_broadcast_backend_plan",
+    "file": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on/backend_plans/139_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+    "group_count": "4",
+    "logical_transfer_count": "256",
+    "physical_lowering_status": "lowered_loop_scoped_kernel_neighbor",
+    "realization_strategy": "loop_scoped_input_fetch"
+  },
+  {
+    "artifact_kind": "matmul_operand_broadcast_backend_plan",
+    "file": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on/backend_plans/156_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+    "group_count": "4",
+    "logical_transfer_count": "256",
+    "physical_lowering_status": "lowered_loop_scoped_kernel_neighbor",
+    "realization_strategy": "loop_scoped_input_fetch"
+  },
+  {
+    "artifact_kind": "matmul_operand_broadcast_backend_plan",
+    "file": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/after_relayout_on/backend_plans/173_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+    "group_count": "4",
+    "logical_transfer_count": "256",
+    "physical_lowering_status": "lowered_loop_scoped_kernel_neighbor",
+    "realization_strategy": "loop_scoped_input_fetch"
+  }
+]

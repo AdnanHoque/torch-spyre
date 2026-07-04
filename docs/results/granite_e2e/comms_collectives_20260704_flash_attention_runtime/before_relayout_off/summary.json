@@ -1,0 +1,13 @@
+{
+  "backend_plan_count": 0,
+  "backend_plan_kinds": {},
+  "backend_plan_movements": {},
+  "backend_plan_rest_ops": {},
+  "failure_tail": [],
+  "returncode": "0",
+  "run_dir": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/before_relayout_off",
+  "sdsc_hbm_restickify_files": 32,
+  "sdsc_lx_restickify_files": 0,
+  "sdsc_total": 550,
+  "stage": "runtime_success"
+}
