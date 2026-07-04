@@ -5,6 +5,8 @@
     "no_h2d",
     "skip_cpu_ref"
   ],
+  "deeptools_diagnostic_commit": "ba981112a48c72a9e5f14720bf5fe6d537b3caa1",
+  "deeptools_fork_branch": "Adnan-Hoque1/deeptools ah/comms-collectives",
   "direct_replay_backend_0p2_failure": "initial chunk parameters must fit in LX",
   "dxp_backend_lx_frac_avail": "1",
   "first_plan_summary": {
@@ -37,5 +39,6 @@
   "returncode": "0",
   "run_dir": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/flash_after_collectives_backend1_20260704_085439",
   "sdsc_count": 550,
-  "stdout_success": true
+  "stdout_success": true,
+  "torch_artifact_commit": "855b048ca86896d7c61a65a85c66f8f72a528051"
 }

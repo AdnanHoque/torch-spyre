@@ -10,6 +10,7 @@ The CDX compile/runtime smoke now passes for `test_flash.py` with the DLDSC grou
 - SDSC files: `550`
 - Backend `matmul_operand_broadcast` plans: `32`
 - Backend DXP LX fraction: `DXP_BACKEND_LX_FRAC_AVAIL=1`
+- Deeptools diagnostic branch: `Adnan-Hoque1/deeptools ah/comms-collectives` at `ba981112a48c72a9e5f14720bf5fe6d537b3caa1`
 - Probe mode: `no_h2d,skip_cpu_ref`; this proves compile/runtime smoke, not numeric correctness.
 
 ## What Changed In The Experiment
