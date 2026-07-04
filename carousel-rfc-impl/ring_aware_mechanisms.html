@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ring-Aware Mechanisms for Spyre</title>
+</head>
+<body>
+<style>
+.rng-root{--rng-bg:#0d1117;--rng-panel:#161b22;--rng-panel2:#1c2230;--rng-ink:#e6edf3;--rng-mut:#8b949e;--rng-line:#30363d;--rng-fast:#3fb950;--rng-slow:#f85149;--rng-amber:#d29922;--rng-blue:#58a6ff;--rng-purple:#bc8cff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--rng-bg);color:var(--rng-ink);line-height:1.55;padding:0 20px 80px;max-width:1180px;margin:0 auto;-webkit-font-smoothing:antialiased}
+.rng-root *{box-sizing:border-box}
+.rng-hero{padding:52px 0 28px;border-bottom:1px solid var(--rng-line)}
+.rng-eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:12px;font-weight:700;color:var(--rng-blue);margin:0 0 14px}
+.rng-hero h1{font-size:40px;line-height:1.12;margin:0 0 18px;font-weight:800;letter-spacing:-.02em}
+.rng-hero h1 .rng-hl{color:var(--rng-fast)}
+.rng-lede{font-size:18px;color:var(--rng-mut);max-width:860px;margin:0}
+.rng-metastrip{display:flex;flex-wrap:wrap;gap:10px;margin-top:24px}
+.rng-pill{font-size:12.5px;padding:6px 12px;border-radius:999px;border:1px solid var(--rng-line);background:var(--rng-panel);color:var(--rng-mut)}
+.rng-pill b{color:var(--rng-ink)}
+.rng-sec{margin-top:52px}
+.rng-sec>h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--rng-mut);margin:0 0 6px;font-weight:700}
+.rng-sec>.rng-sub{font-size:22px;font-weight:700;margin:0 0 20px;letter-spacing:-.01em}
+.rng-panel{background:var(--rng-panel);border:1px solid var(--rng-line);border-radius:14px;padding:24px}
+.rng-svgwrap{overflow-x:auto}
+.rng-tag{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.05em;padding:2px 7px;border-radius:5px;vertical-align:middle;text-transform:uppercase}
+.rng-tag.m{background:rgba(63,185,80,.16);color:var(--rng-fast);border:1px solid rgba(63,185,80,.35)}
+.rng-tag.d{background:rgba(210,153,34,.14);color:var(--rng-amber);border:1px solid rgba(210,153,34,.35)}
+.rng-legend{display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;font-size:13px;color:var(--rng-mut)}
+.rng-legend span{display:inline-flex;align-items:center;gap:7px}
+.rng-dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+.rng-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:18px}
+.rng-card{background:var(--rng-panel);border:1px solid var(--rng-line);border-radius:14px;padding:20px;display:flex;flex-direction:column;position:relative;overflow:hidden}
+.rng-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--rng-blue)}
+.rng-card.c1::before{background:var(--rng-fast)}
+.rng-card.c2::before{background:var(--rng-blue)}
+.rng-card.c3::before{background:var(--rng-purple)}
+.rng-card.c4::before{background:var(--rng-amber)}
+.rng-card.c5::before{background:var(--rng-mut)}
+.rng-rank{font-size:12px;font-weight:800;color:var(--rng-mut);letter-spacing:.08em}
+.rng-card h3{font-size:17px;margin:6px 0 12px;line-height:1.3;font-weight:700}
+.rng-badges{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px}
+.rng-badge{font-size:11px;font-weight:700;padding:4px 9px;border-radius:6px;letter-spacing:.03em}
+.rng-badge.ind{background:rgba(63,185,80,.15);color:var(--rng-fast);border:1px solid rgba(63,185,80,.4)}
+.rng-badge.hyb{background:rgba(88,166,255,.14);color:var(--rng-blue);border:1px solid rgba(88,166,255,.4)}
+.rng-badge.prim{background:rgba(248,81,73,.14);color:var(--rng-slow);border:1px solid rgba(248,81,73,.4)}
+.rng-badge.cls{background:var(--rng-panel2);color:var(--rng-mut);border:1px solid var(--rng-line)}
+.rng-card p{font-size:14px;margin:0 0 14px;color:#c9d1d9}
+.rng-fs{margin-top:auto;background:var(--rng-panel2);border:1px solid var(--rng-line);border-radius:9px;padding:12px 14px}
+.rng-fs .rng-fslab{font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--rng-blue);font-weight:700;margin-bottom:5px}
+.rng-fs p{font-size:13px;margin:0;color:var(--rng-mut)}
+.rng-tblwrap{overflow-x:auto;border:1px solid var(--rng-line);border-radius:14px}
+table.rng-tbl{border-collapse:collapse;width:100%;min-width:820px;font-size:13.5px}
+.rng-tbl th{text-align:left;padding:12px 14px;background:var(--rng-panel2);color:var(--rng-mut);font-size:11px;text-transform:uppercase;letter-spacing:.07em;font-weight:700;border-bottom:1px solid var(--rng-line);position:sticky;top:0}
+.rng-tbl td{padding:12px 14px;border-bottom:1px solid var(--rng-line);vertical-align:top}
+.rng-tbl tr:last-child td{border-bottom:none}
+.rng-tbl tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+.rng-tbl .rng-nm{font-weight:600;color:var(--rng-ink)}
+.rng-tbl .rng-ol{color:var(--rng-mut);font-size:12.5px}
+.rng-chip{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;white-space:nowrap;display:inline-block}
+.rng-chip.now{background:rgba(63,185,80,.16);color:var(--rng-fast);border:1px solid rgba(63,185,80,.4)}
+.rng-chip.prom{background:rgba(210,153,34,.14);color:var(--rng-amber);border:1px solid rgba(210,153,34,.4)}
+.rng-chip.prim{background:rgba(248,81,73,.14);color:var(--rng-slow);border:1px solid rgba(248,81,73,.4)}
+.rng-roi{font-size:11px;font-weight:700;letter-spacing:.03em}
+.rng-roi.hi{color:var(--rng-fast)}.rng-roi.md{color:var(--rng-amber)}.rng-roi.lo{color:var(--rng-mut)}
+.rng-class{font-size:11px;color:var(--rng-mut);white-space:nowrap}
+.rng-kill{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.rng-killc{background:var(--rng-panel);border:1px solid var(--rng-line);border-left:3px solid var(--rng-slow);border-radius:10px;padding:14px 16px}
+.rng-killc .rng-kn{font-weight:700;font-size:13.5px;margin-bottom:5px}
+.rng-killc .rng-kw{font-size:12.5px;color:var(--rng-mut)}
+.rng-next{margin-top:52px;background:linear-gradient(135deg,rgba(63,185,80,.09),rgba(88,166,255,.07));border:1px solid rgba(63,185,80,.35);border-radius:16px;padding:30px}
+.rng-next h2{margin:0 0 8px;font-size:22px;font-weight:800}
+.rng-next .rng-do{font-size:15px;color:#c9d1d9;margin:0 0 22px;max-width:900px}
+.rng-track{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.rng-tk{background:var(--rng-panel);border:1px solid var(--rng-line);border-radius:12px;padding:18px}
+.rng-tk .rng-tkh{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.rng-tk .rng-tkn{font-size:11px;font-weight:800;letter-spacing:.06em;color:var(--rng-mut)}
+.rng-tk h4{margin:0 0 8px;font-size:15.5px}
+.rng-tk p{margin:0;font-size:13px;color:var(--rng-mut)}
+.rng-note{font-size:12.5px;color:var(--rng-mut);margin-top:14px;padding-left:14px;border-left:2px solid var(--rng-line)}
+@media(max-width:720px){.rng-hero h1{font-size:29px}.rng-track{grid-template-columns:1fr}}
+</style>
+
+<div class="rng-root">
+
+<header class="rng-hero">
+  <p class="rng-eyebrow">Ring-aware mechanisms · torch-spyre / deeptools</p>
+  <h1>Build the <span class="rng-hl">flash-in-a-loop</span> substrate now — and land the per-link contention cost term in parallel to make every ring plan selectable.</h1>
+  <p class="rng-lede">Eleven surviving mechanisms, deduped from 19, ranked by next-step ROI. Two are pure-inductor and prototype-now; the rest are the ring family that layers on top. The physics below is device-measured and treated as fixed: what distinguishes a fast plan from a slow one is <b>per-link transfer count</b>, not payload.</p>
+  <div class="rng-metastrip">
+    <span class="rng-pill"><b>~130 GB/s</b> uniform shift <span class="rng-tag m">measured</span></span>
+    <span class="rng-pill"><b>~36 GB/s</b> scatter floor <span class="rng-tag m">measured</span></span>
+    <span class="rng-pill"><b>32 MB/head</b> score spill killed <span class="rng-tag d">modeled</span></span>
+    <span class="rng-pill">multicast STCDPOpLx <b>−147 µs</b> <span class="rng-tag m">measured</span></span>
+    <span class="rng-pill">array-fill <b>29.8→73%</b> banked <span class="rng-tag m">measured</span></span>
+  </div>
+</header>
+
+<!-- ================= RING PHYSICS ================= -->
+<section class="rng-sec">
+  <h2>The physics (treat as fixed)</h2>
+  <p class="rng-sub">Per-link transfer count sets bandwidth — not burst size</p>
+  <div class="rng-panel rng-svgwrap">
+    <svg width="1080" height="340" viewBox="0 0 1080 340" role="img" aria-label="Ring physics: uniform shift vs scatter contention">
+      <!-- LEFT: uniform shift -->
+      <text x="70" y="34" fill="#e6edf3" font-size="16" font-weight="700">Uniform p→p+1 shift · reduce-scatter · multicast</text>
+      <text x="70" y="56" fill="#3fb950" font-size="13" font-weight="700">1 transfer / link → ~130 GB/s (250 streaming)</text>
+      <!-- ring nodes left -->
+      <g>
+        <!-- circle of 8 cores -->
+        <!-- centers computed around (270,200) r=95 -->
+        <g stroke="#3fb950" stroke-width="2.5" fill="none" marker-end="url(#arrF)">
+          <path d="M341,168 A95,95 0 0 1 341,232"/>
+          <path d="M341,232 A95,95 0 0 1 305,281"/>
+          <path d="M305,281 A95,95 0 0 1 249,289"/>
+          <path d="M249,289 A95,95 0 0 1 202,258"/>
+          <path d="M202,258 A95,95 0 0 1 184,203"/>
+          <path d="M184,203 A95,95 0 0 1 199,148"/>
+          <path d="M199,148 A95,95 0 0 1 246,113"/>
+          <path d="M246,113 A95,95 0 0 1 320,127"/>
+        </g>
+        <!-- nodes -->
+        <g fill="#161b22" stroke="#3fb950" stroke-width="2">
+          <circle cx="352" cy="200" r="15"/><circle cx="325" cy="264" r="15"/>
+          <circle cx="270" cy="295" r="15"/><circle cx="215" cy="264" r="15"/>
+          <circle cx="188" cy="200" r="15"/><circle cx="215" cy="136" r="15"/>
+          <circle cx="270" cy="105" r="15"/><circle cx="325" cy="136" r="15"/>
+        </g>
+        <g fill="#3fb950" font-size="11" font-weight="700" text-anchor="middle">
+          <text x="352" y="204">p</text><text x="325" y="268">+1</text>
+          <text x="270" y="299">+2</text><text x="215" y="268">+3</text>
+          <text x="188" y="204">+4</text><text x="215" y="140">+5</text>
+          <text x="270" y="109">+6</text><text x="325" y="140">+7</text>
+        </g>
+      </g>
+      <text x="270" y="332" fill="#8b949e" font-size="12" text-anchor="middle">every link carries exactly one transfer — congestion-free</text>
+
+      <!-- divider -->
+      <line x1="540" y1="70" x2="540" y2="300" stroke="#30363d" stroke-width="1" stroke-dasharray="4 5"/>
+
+      <!-- RIGHT: scatter -->
+      <text x="620" y="34" fill="#e6edf3" font-size="16" font-weight="700">All-to-all scatter · linear fold-to-one</text>
+      <text x="620" y="56" fill="#f85149" font-size="13" font-weight="700">4–9 transfers / link → ~36 GB/s CONTENTION FLOOR</text>
+      <g>
+        <!-- root node center -->
+        <circle cx="800" cy="200" r="22" fill="#161b22" stroke="#f85149" stroke-width="2.5"/>
+        <text x="800" y="205" fill="#f85149" font-size="12" font-weight="700" text-anchor="middle">root</text>
+        <!-- source nodes -->
+        <g fill="#161b22" stroke="#8b949e" stroke-width="1.8">
+          <circle cx="930" cy="120" r="13"/><circle cx="955" cy="200" r="13"/>
+          <circle cx="930" cy="280" r="13"/><circle cx="870" cy="315" r="13"/>
+          <circle cx="670" cy="120" r="13"/><circle cx="645" cy="200" r="13"/>
+          <circle cx="670" cy="280" r="13"/><circle cx="730" cy="315" r="13"/>
+        </g>
+        <!-- all piling onto root's inbound links -->
+        <g stroke="#f85149" stroke-width="2" fill="none" opacity="0.85" marker-end="url(#arrS)">
+          <path d="M918,127 Q860,150 820,188"/>
+          <path d="M942,200 Q890,200 823,200"/>
+          <path d="M918,273 Q860,250 820,212"/>
+          <path d="M859,308 Q835,270 810,222"/>
+          <path d="M682,127 Q740,150 780,188"/>
+          <path d="M658,200 Q710,200 777,200"/>
+          <path d="M682,273 Q740,250 780,212"/>
+          <path d="M741,308 Q765,270 790,222"/>
+        </g>
+      </g>
+      <text x="800" y="332" fill="#8b949e" font-size="12" text-anchor="middle">8 transfers converge on the root's links — everything queues</text>
+
+      <defs>
+        <marker id="arrF" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#3fb950"/></marker>
+        <marker id="arrS" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#f85149"/></marker>
+      </defs>
+    </svg>
+  </div>
+  <div class="rng-legend">
+    <span><span class="rng-dot" style="background:#3fb950"></span> Fast band — nearest-neighbor pipelines, uniform rotations, reduce-scatter, multicast forwarding</span>
+    <span><span class="rng-dot" style="background:#f85149"></span> Contention floor — anything piling many transfers on one link</span>
+    <span style="color:#8b949e">Enlarging bursts 50–100× did <b style="color:#e6edf3">nothing</b> — count, not size.</span>
+  </div>
+  <p class="rng-note">The matmul cost model prices every move at flat <b>bytes/128</b> — no contention, hop-distance, or multicast term. It cannot tell these two pictures apart, so it will never <em>select</em> a green plan over a red one of equal bytes. Selectability is a first-class requirement, not an afterthought.</p>
+</section>
+
+<!-- ================= ROI QUADRANT ================= -->
+<section class="rng-sec">
+  <h2>Where the bets land</h2>
+  <p class="rng-sub">Intellectual ROI × production ROI — every ranked mechanism</p>
+  <div class="rng-panel rng-svgwrap">
+    <svg width="1080" height="520" viewBox="0 0 1080 520" role="img" aria-label="ROI quadrant plotting all mechanisms">
+      <!-- axes frame -->
+      <rect x="90" y="40" width="900" height="420" fill="none" stroke="#30363d" stroke-width="1"/>
+      <!-- gridlines -->
+      <line x1="390" y1="40" x2="390" y2="460" stroke="#21262d" stroke-width="1"/>
+      <line x1="690" y1="40" x2="690" y2="460" stroke="#21262d" stroke-width="1"/>
+      <line x1="90" y1="180" x2="990" y2="180" stroke="#21262d" stroke-width="1"/>
+      <line x1="90" y1="320" x2="990" y2="320" stroke="#21262d" stroke-width="1"/>
+      <!-- top-right quadrant highlight -->
+      <rect x="690" y="40" width="300" height="140" fill="rgba(63,185,80,.06)"/>
+      <text x="982" y="60" fill="#3fb950" font-size="11" font-weight="700" text-anchor="end" opacity=".8">BUILD NOW</text>
+      <!-- axis labels -->
+      <text x="540" y="498" fill="#8b949e" font-size="13" font-weight="700" text-anchor="middle">Production ROI →</text>
+      <text x="240" y="483" fill="#8b949e" font-size="11" text-anchor="middle">low</text>
+      <text x="540" y="483" fill="#8b949e" font-size="11" text-anchor="middle">medium</text>
+      <text x="840" y="483" fill="#8b949e" font-size="11" text-anchor="middle">high</text>
+      <text x="34" y="255" fill="#8b949e" font-size="13" font-weight="700" text-anchor="middle" transform="rotate(-90 34 255)">Intellectual ROI →</text>
+      <text x="74" y="404" fill="#8b949e" font-size="11" text-anchor="end">low</text>
+      <text x="74" y="254" fill="#8b949e" font-size="11" text-anchor="end">med</text>
+      <text x="74" y="114" fill="#8b949e" font-size="11" text-anchor="end">high</text>
+
+      <!-- POINTS: cx per prod (low=240,med=540,high=840), cy per intel (low=390,med=250,high=110) -->
+      <!-- top-right: M1 flash-loop (high/high) -->
+      <g>
+        <circle cx="840" cy="110" r="14" fill="#3fb950" stroke="#0d1117" stroke-width="2"/>
+        <text x="840" y="115" fill="#0d1117" font-size="12" font-weight="800" text-anchor="middle">1</text>
+      </g>
+      <!-- med prod / high intel cluster: M2 cost term, M3 LSE fold, M6 layout, M7 rotation -->
+      <g fill="#58a6ff" stroke="#0d1117" stroke-width="2">
+        <circle cx="512" cy="92" r="13"/><circle cx="568" cy="92" r="13"/>
+        <circle cx="512" cy="128" r="13"/><circle cx="568" cy="128" r="13"/>
+      </g>
+      <g fill="#0d1117" font-size="11" font-weight="800" text-anchor="middle">
+        <text x="512" y="96">2</text><text x="568" y="96">3</text>
+        <text x="512" y="132">6</text><text x="568" y="132">7</text>
+      </g>
+      <!-- low prod / high intel: M8 MoE, M10 cross-bundle handoff -->
+      <g fill="#bc8cff" stroke="#0d1117" stroke-width="2">
+        <circle cx="218" cy="100" r="13"/><circle cx="262" cy="122" r="13"/>
+      </g>
+      <g fill="#0d1117" font-size="11" font-weight="800" text-anchor="middle">
+        <text x="218" y="104">8</text><text x="262" y="126">10</text>
+      </g>
+      <!-- med prod / med intel: M4 GQA -->
+      <g>
+        <circle cx="540" cy="250" r="13" fill="#d29922" stroke="#0d1117" stroke-width="2"/>
+        <text x="540" y="254" fill="#0d1117" font-size="11" font-weight="800" text-anchor="middle">4</text>
+      </g>
+      <!-- low prod / med intel cluster: M5 reduce-scatter fold, M9 overlap gate, M11 occupancy -->
+      <g fill="#8b949e" stroke="#0d1117" stroke-width="2">
+        <circle cx="214" cy="238" r="13"/><circle cx="262" cy="228" r="13"/><circle cx="240" cy="270" r="13"/>
+      </g>
+      <g fill="#0d1117" font-size="11" font-weight="800" text-anchor="middle">
+        <text x="214" y="242">5</text><text x="262" y="232">9</text><text x="240" y="274">11</text>
+      </g>
+
+      <!-- inline legend right -->
+      <g font-size="12.5">
+        <rect x="700" y="210" width="285" height="238" rx="9" fill="#161b22" stroke="#30363d"/>
+        <text x="716" y="232" fill="#8b949e" font-size="11" font-weight="700" letter-spacing="1">MECHANISM</text>
+        <text x="716" y="256" fill="#e6edf3">1 · Flash-in-a-loop (Lk online-softmax)</text>
+        <text x="716" y="278" fill="#e6edf3">2 · Per-link contention cost term</text>
+        <text x="716" y="300" fill="#e6edf3">3 · Flash LSE ring-fold merge</text>
+        <text x="716" y="322" fill="#e6edf3">4 · GQA KV multicast-forward</text>
+        <text x="716" y="344" fill="#e6edf3">5 · Neighbor reduce-scatter fold</text>
+        <text x="716" y="366" fill="#e6edf3">6 · Layout-dividend endpoint select</text>
+        <text x="716" y="388" fill="#e6edf3">7 · Ring-attention Q rotation</text>
+        <text x="716" y="410" fill="#e6edf3">8 · MoE expert token-rotation</text>
+        <text x="716" y="432" fill="#e6edf3">9 · overlap gate → matmul · 10 · x-bundle · 11 · occupancy</text>
+      </g>
+    </svg>
+  </div>
+  <div class="rng-legend">
+    <span><span class="rng-dot" style="background:#3fb950"></span> prototype-now, prod-high</span>
+    <span><span class="rng-dot" style="background:#58a6ff"></span> high-intel, prod-med</span>
+    <span><span class="rng-dot" style="background:#d29922"></span> promising-unproven</span>
+    <span><span class="rng-dot" style="background:#bc8cff"></span> high-intel, prod-low (primitive-gated)</span>
+    <span><span class="rng-dot" style="background:#8b949e"></span> supporting / needs-primitive</span>
+  </div>
+</section>
+
+<!-- ================= TOP BET CARDS ================= -->
+<section class="rng-sec">
+  <h2>The five bets</h2>
+  <p class="rng-sub">Ranked by next-step ROI · ownership badge + first step</p>
+  <div class="rng-cards">
+
+    <div class="rng-card c1">
+      <span class="rng-rank">BET 1 · THE ONE THING · flash-paged</span>
+      <h3>Flash-in-a-loop: online-softmax as a coarse-tiled Lk reduction</h3>
+      <div class="rng-badges">
+        <span class="rng-badge hyb">inductor-only core</span>
+        <span class="rng-badge ind">prototype-now</span>
+        <span class="rng-badge cls">intel HIGH · prod HIGH</span>
+      </div>
+      <p>The only unmet goal with <b>zero banked coverage</b>. Today <code>test_flash.py:18</code> forces <code>kv_block_size=Lk</code>, so the streaming loop runs once and the full [Lq,Lk] scores (<b>32 MB/head <span class="rng-tag d">modeled</span></b>, ~12 ms HBM round-trip) materialize and spill — defeating flash. Stream Lk as a Stage-1 reduction keeping only O(Lq) running (m,l,A) state. Selectable today: the win is deleting real HBM bytes the flat pricer <em>already counts</em>, and flash is hint-driven. It is the mandatory substrate under the entire flash ring family.</p>
+      <div class="rng-fs">
+        <div class="rng-fslab">First step</div>
+        <p>Adopt paged's <code>scores.transpose(-1,-2)</code> off-stick pattern, set <code>kv_block_size&lt;Lk</code>; compile <code>test_flash.py</code> and confirm via <code>TORCH_COMPILE_DEBUG</code> that full scores no longer materialize and the reduction lands off-stick (no Stage-2 RuntimeError) — before touching the compound combine.</p>
+      </div>
+    </div>
+
+    <div class="rng-card c2">
+      <span class="rng-rank">BET 2 · THE LINCHPIN · cross-cutting</span>
+      <h3>Per-link-transfer-count contention cost term (+ cohort-penalty fix)</h3>
+      <div class="rng-badges">
+        <span class="rng-badge ind">inductor-only</span>
+        <span class="rng-badge ind">prototype-now</span>
+        <span class="rng-badge cls">intel HIGH · prod MED</span>
+      </div>
+      <p>Without it <b>no ring plan is cost-selectable</b> — flat bytes/128 rates a fast uniform shift identical to a slow scatter. Sharpest live slice: <code>work_division.py:684</code> charges a linear <code>cohort_penalty=max(1,max(m,n)/8)</code> to every broadcast, mis-modeling the proven multicast STCDPOpLx as a 36 GB/s scatter — actively suppressing the wide-N splits the banked array-fill / min-cores fixes want, and the attn all-gather past cohort 8 that flash needs.</p>
+      <div class="rng-fs">
+        <div class="rng-fslab">First step</div>
+        <p>Gate <code>cohort_penalty</code> on identical-operand (multicast: ~const+hops) vs distinct-data (scatter: linear). Behind an ablation flag, prove it re-ranks one mispriced wide/narrow-N reduction matmul toward the device-faster split <b>and</b> leaves the banked min-cores/shared-weight picks unchanged.</p>
+      </div>
+    </div>
+
+    <div class="rng-card c3">
+      <span class="rng-rank">BET 3 · THE RING WIN · flash-paged</span>
+      <h3>Flash LSE ring-fold merge (neighbor reduce-scatter of (m,l,O))</h3>
+      <div class="rng-badges">
+        <span class="rng-badge hyb">hybrid</span>
+        <span class="rng-badge prim">needs-primitive</span>
+        <span class="rng-badge cls">intel HIGH · prod MED</span>
+      </div>
+      <p>Where the topology physics earns its keep. Once Lk is split across cores, merge the per-core flash partials with a neighbor reduce-scatter (uniform p→p+1, <b>~130 GB/s <span class="rng-tag m">measured</span></b>) instead of the linear fold-to-one that piles the O payload on one link (<b>~36 GB/s floor</b>). Associative+commutative monoid → Rabenseifner valid. Co-bundles into one SDSC bundle by construction (CountedLoop), dodging the cross-bundle wall. Honest: the spill-kill credit belongs to bet 1.</p>
+      <div class="rng-fs">
+        <div class="rng-fslab">First step</div>
+        <p>After bet 1 lands, extend <code>_propagate_tiled_reduction_op</code> so Lk is a cross-<em>core</em> split; emit the (m,l,O) combine as a neighbor-ordered LX fold and diff its device-ms against linear gather-to-one on the prefill shape to size the ring-specific increment.</p>
+      </div>
+    </div>
+
+    <div class="rng-card c4">
+      <span class="rng-rank">BET 4 · NEW DECODE AXIS · decode</span>
+      <h3>GQA KV multicast-forward to the query-head cohort</h3>
+      <div class="rng-badges">
+        <span class="rng-badge hyb">hybrid</span>
+        <span class="rng-badge prom">promising-unproven</span>
+        <span class="rng-badge cls">intel MED · prod MED</span>
+      </div>
+      <p>Distinct lever on the GQA head-group axis (not the banked reduction-axis all-gather). Granite H_kv=8 / H_q=32 → each KV head is shared by 4 query heads. In the 1-head-per-core decode split those 4 cores are a multicast cohort: read the head once, forward on the fast ring, save <b>3 of 4</b> redundant HBM KV reads at the decode bandwidth bottleneck. The 32768-slot paged cache can't be pinned — so this is <em>not</em> residency.</p>
+      <div class="rng-fs">
+        <div class="rng-fslab">First step</div>
+        <p>Cheap pure-inductor probe: remove the <code>expand+contiguous</code> restickify in the GQA lowering (<code>test_attn_k.py</code>) and confirm the K/V share survives to QK^T; separately check whether decode work_div actually emits 1-head-per-core. Both prerequisites, both answerable with no deeptools work.</p>
+      </div>
+    </div>
+
+    <div class="rng-card c5">
+      <span class="rng-rank">BET 5 · REUSABLE FOLD · matmul</span>
+      <h3>Neighbor reduce-scatter for cross-core reduction fold</h3>
+      <div class="rng-badges">
+        <span class="rng-badge hyb">hybrid</span>
+        <span class="rng-badge prom">promising-unproven</span>
+        <span class="rng-badge cls">intel MED · prod LOW</span>
+      </div>
+      <p>The reusable primitive bet 3 depends on: replace gather-all-K-partials-to-one with a nearest-neighbor reduce-scatter for any cross-core reduction (split-K matmul, flash @V sum). Moves the accumulate off the 36 GB/s scatter floor onto the 130 GB/s band. Primitives already exist (STCDPOpLx move + per-hop SFP add), so not primitive-first for correctness — but payoff scales with shard count, marginal at split-K's banked 2–4-way home.</p>
+      <div class="rng-fs">
+        <div class="rng-fslab">First step</div>
+        <p>On the banked <b>1.7× <span class="rng-tag m">measured</span></b> split-K decode path, measure the fold-tax (device-ms of the linear (k−1) accumulate vs the extra 2(P−1) neighbor hops) to confirm whether the crossover ever favors the ring at real shard counts — cheap measurement, no new codegen.</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ================= FULL RANKED TABLE ================= -->
+<section class="rng-sec">
+  <h2>Full ranking</h2>
+  <p class="rng-sub">All 11 distinct mechanisms · color-coded verdict</p>
+  <div class="rng-tblwrap">
+    <table class="rng-tbl">
+      <thead>
+        <tr>
+          <th style="width:26px">#</th><th>Mechanism</th><th>Class</th>
+          <th>Intel</th><th>Prod</th><th>Verdict</th><th>One-liner</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>1</td><td class="rng-nm">Flash-in-a-loop (temporal Lk online-softmax)</td>
+          <td class="rng-class">flash-paged</td><td class="rng-roi hi">HIGH</td><td class="rng-roi hi">HIGH</td>
+          <td><span class="rng-chip now">prototype-now</span></td>
+          <td class="rng-ol">Stream Lk as a Stage-1 reduction with a compound (m,l,A) combine; kills the 32 MB/head spill. Substrate for the whole flash ring family.</td>
+        </tr>
+        <tr>
+          <td>2</td><td class="rng-nm">Per-link contention cost term (+ cohort-penalty fix)</td>
+          <td class="rng-class">cross-cutting</td><td class="rng-roi hi">HIGH</td><td class="rng-roi md">MED</td>
+          <td><span class="rng-chip now">prototype-now</span></td>
+          <td class="rng-ol">Classify each split's collective and price at its measured BW in <code>_matmul_split_cost</code>:684; the only thing that makes any ring plan selectable.</td>
+        </tr>
+        <tr>
+          <td>3</td><td class="rng-nm">Flash LSE ring-fold merge (neighbor reduce-scatter of (m,l,O))</td>
+          <td class="rng-class">flash-paged</td><td class="rng-roi hi">HIGH</td><td class="rng-roi md">MED</td>
+          <td><span class="rng-chip prim">needs-primitive</span></td>
+          <td class="rng-ol">Merge per-core partials via neighbor reduce-scatter (130 GB/s) not linear fold-to-one (36 GB/s floor); the genuine ring-aware flash win.</td>
+        </tr>
+        <tr>
+          <td>4</td><td class="rng-nm">GQA KV multicast-forward to query-head cohort</td>
+          <td class="rng-class">decode</td><td class="rng-roi md">MED</td><td class="rng-roi md">MED</td>
+          <td><span class="rng-chip prom">promising-unproven</span></td>
+          <td class="rng-ol">Read a shared KV head once, multicast to the 4 query-head cores; saves 3/4 HBM reads. Must first delete the expand+contiguous restickify.</td>
+        </tr>
+        <tr>
+          <td>5</td><td class="rng-nm">Neighbor reduce-scatter cross-core fold (split-K ring-aware)</td>
+          <td class="rng-class">matmul</td><td class="rng-roi md">MED</td><td class="rng-roi lo">LOW</td>
+          <td><span class="rng-chip prom">promising-unproven</span></td>
+          <td class="rng-ol">Ring reduce-scatter for any cross-core accumulate; primitives exist but marginal at split-K's 2–4-way home, wins at high shard count.</td>
+        </tr>
+        <tr>
+          <td>6</td><td class="rng-nm">Layout-dividend collective endpoint selection</td>
+          <td class="rng-class">cross-cutting</td><td class="rng-roi hi">HIGH</td><td class="rng-roi md">MED</td>
+          <td><span class="rng-chip prim">needs-primitive</span></td>
+          <td class="rng-ol">Set the reduce-scatter's free endpoint permutation = the O-projection's stick/M map so the ring does the post-attention relayout for free.</td>
+        </tr>
+        <tr>
+          <td>7</td><td class="rng-nm">Ring-attention rotation (stationary KV, uniform Q rotation)</td>
+          <td class="rng-class">flash-paged</td><td class="rng-roi hi">HIGH</td><td class="rng-roi md">MED</td>
+          <td><span class="rng-chip prim">needs-primitive</span></td>
+          <td class="rng-ol">Rotate the streaming Q slab p→p+1 while KV stays resident; KV read from HBM once. Only beats fold-flash when LX capacity binds (long-context).</td>
+        </tr>
+        <tr>
+          <td>8</td><td class="rng-nm">MoE expert token-rotation (skim resident expert)</td>
+          <td class="rng-class">cross-cutting</td><td class="rng-roi hi">HIGH</td><td class="rng-roi lo">LOW</td>
+          <td><span class="rng-chip prim">needs-primitive</span></td>
+          <td class="rng-ol">Convert MoE all-to-all dispatch (36 GB/s) into E−1 uniform shifts (130 GB/s). Elegant + highest-novelty, but granite-3.3-8b is DENSE → no-ops today.</td>
+        </tr>
+        <tr>
+          <td>9</td><td class="rng-nm">Extend overlapInpFetchWithCompute to matmul/BMM</td>
+          <td class="rng-class">matmul-prefill</td><td class="rng-roi md">MED</td><td class="rng-roi lo">LOW</td>
+          <td><span class="rng-chip prim">needs-primitive</span></td>
+          <td class="rng-ol">Double-buffer slab prefetch behind MACs — the one thing co-bundling does not give free. Conv-only gate; banked 73% cap is a layout under-fill, so uncertain surface.</td>
+        </tr>
+        <tr>
+          <td>10</td><td class="rng-nm">Costed cross-bundle ring-handoff</td>
+          <td class="rng-class">cross-cutting</td><td class="rng-roi hi">HIGH</td><td class="rng-roi lo">LOW</td>
+          <td><span class="rng-chip prim">needs-primitive</span></td>
+          <td class="rng-ol">Price the co-bundle seam so shift-vs-HBM-bounce is a cost choice; provably can't reduce to residency. SwiGLU home came back HBM-neutral on the 5-tensor budget.</td>
+        </tr>
+        <tr>
+          <td>11</td><td class="rng-nm">Ring-occupancy as a costed resource (link-hours budget)</td>
+          <td class="rng-class">cross-cutting</td><td class="rng-roi md">MED</td><td class="rng-roi lo">LOW</td>
+          <td><span class="rng-chip prim">needs-primitive</span></td>
+          <td class="rng-ol">Price concurrent co-bundled link collisions. Conv-only overlap gate means collectives serialize today — no concurrency to derate yet.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ================= WHAT WE KILLED ================= -->
+<section class="rng-sec">
+  <h2>What we killed upstream</h2>
+  <p class="rng-sub">Six mechanisms did not survive the specific device killers — not resurrected</p>
+  <div class="rng-kill">
+    <div class="rng-killc"><div class="rng-kn">Weight-multicast for M-split</div><div class="rng-kw">The banked shared-weight unit-BMM fix at 73% util IS the load-once-distribute mechanism it rediscovers — self-defeating.</div></div>
+    <div class="rng-killc"><div class="rng-kn">Split-K partial-sum ring all-reduce</div><div class="rng-kw">Device-NEGATIVE on prefill SwiGLU <b>+19% <span class="rng-tag m">measured</span></b>; latency-bound at M=1 decode where step-count, not bandwidth, caps.</div></div>
+    <div class="rng-killc"><div class="rng-kn">Ring-pipelined paged handoff</div><div class="rng-kw">Paged has no temporal loop — reduces to residency across a seam.</div></div>
+    <div class="rng-killc"><div class="rng-kn">Page→core channel-affinity placement</div><div class="rng-kw">HBM is one flat memId=−1 space with no bank affinity; runtime block fragmentation floors real serving at 36 GB/s.</div></div>
+    <div class="rng-killc"><div class="rng-kn">Multicast-Q GQA</div><div class="rng-kw">M=1 Q payload ~1 KB — below the win floor.</div></div>
+    <div class="rng-killc"><div class="rng-kn">Speculative-decode amortizer</div><div class="rng-kw">Needs out-of-scope serving infrastructure.</div></div>
+  </div>
+  <p class="rng-note"><b>The bar:</b> "just pin the tensors to LX" is the trivial residency baseline and is <em>not</em> an answer. Every surviving mechanism adds a ring-aware algorithmic layer on top — uniform-shift speed, multicast forwarding, neighbor reduce-scatter, hop-distance, or ring-pipelining across the cross-bundle seam. If a proposal reduces to residency, it fails.</p>
+</section>
+
+<!-- ================= DO THIS NEXT ================= -->
+<section class="rng-next">
+  <h2>Do this next</h2>
+  <p class="rng-do">Run <b>two inductor-only tracks in parallel</b> — non-overlapping code, no dependency between them. Flash-in-a-loop wins alone and unblocks the whole flash ring family; the cost term makes every downstream ring plan selectable. Everything in the needs-primitive tier waits behind these two.</p>
+  <div class="rng-track">
+    <div class="rng-tk">
+      <div class="rng-tkh"><span class="rng-dot" style="background:#3fb950"></span><span class="rng-tkn">TRACK A · inductor-only · prototype-now</span></div>
+      <h4>Flash-in-a-loop substrate</h4>
+      <p>Adopt paged's off-stick transpose + <code>kv_block_size&lt;Lk</code> in <code>flash_spyre</code>; verify via <code>TORCH_COMPILE_DEBUG</code> that the 32 MB/head score spill is gone and the reduction is Stage-1. Then teach the reduction-tiling pass the compound 3-tensor (m,l,A) combine. Wins standalone; de-risks bets 3, 6, 7 at once.</p>
+    </div>
+    <div class="rng-tk">
+      <div class="rng-tkh"><span class="rng-dot" style="background:#58a6ff"></span><span class="rng-tkn">TRACK B · inductor-only · prototype-now</span></div>
+      <h4>Per-link contention cost term</h4>
+      <p>Gate <code>cohort_penalty</code> at <code>work_division.py:684</code> on identical-operand (multicast) vs distinct-data (scatter). Behind an ablation flag, prove one re-rank toward the device-faster split with <b>zero regression</b> on the banked min-cores / shared-weight picks. Device-measure the forwarding constant — never a tuned scalar.</p>
+    </div>
+  </div>
+  <p class="rng-note" style="margin-top:18px">Honest deltas: the flash spill-kill credit belongs to Track A, not the ring-fold — bet 3's production ROI is kept at MED for that reason. The cost term makes nothing faster on its own; its new wins are gated on runnable ring consumers that mostly don't exist yet, so it ships behind an ablation gate proving no regression, not as a universal unlock.</p>
+</section>
+
+</div>
+</body>
+</html>
