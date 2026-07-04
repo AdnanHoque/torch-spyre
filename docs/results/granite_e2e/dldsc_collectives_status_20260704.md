@@ -13,6 +13,31 @@ This note records the current state of the `ah/comms-collectives` exploration.
   - disabled control `runs/granite_disabled_control_fms_b4f36_20260703_171030`: `kernel_ms_per_iter=14.6977`
   - observed speedup: about `1.06x` for this isolated one-layer run.
 
+
+## 2026-07-04 Late Update: Matmul Operand Requires Staged Layout Conversion
+
+A focused synthetic row-pattern probe showed that the direct loop-scoped
+KERNEL-neighbor write is not value-correct for matmul RHS/KERNEL operands once
+M reaches 16. It emits ring transfers at the right schedule point, but writes
+producer shards directly into the consumer KERNEL operand address space and
+skips the local PT/KERNEL layout conversion. The failure is deterministic: M16
+maps rows 8-15 to rows 2-9.
+
+The existing two-stage path is value-correct through M64:
+
+```bash
+DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1
+```
+
+That path inserts `STCDPOpLx` gather/all-gather into temporary LX, followed by
+`ReStickifyOpLx` into the consumer matmul operand layout. Artifact bundle:
+
+- `docs/results/granite_e2e/dldsc_collectives_artifacts_20260704/matmul_operand_staged_gather_20260704/`
+
+A one-layer Granite S512 smoke with the staged path currently fails before DXP
+planning in Torch lowering with a mixed element-arrangement `mul` error, so it
+does not yet validate full-block performance for this staged backend path.
+
 ## Failing all-gather path
 
 - Enabling `SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY=1` classifies the same attention edge as `layout_allgather_restickify` / `all_gather`.
