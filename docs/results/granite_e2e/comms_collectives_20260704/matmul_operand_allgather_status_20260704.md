@@ -387,3 +387,362 @@ step is to introduce a separate staged matmul RHS LDS/buffer in Deeptools for
 instead of mutating the original producer-shard LDS in place. The staged LDS must
 be allocated with the consumer KERNEL transfer layout and populated by the
 all-gather in that same layout.
+
+## 2026-07-04 update: matmul RHS all-gather is actually all-gather plus KERNEL restickify
+
+Latest focused repro:
+
+- Pod/root: `adnan-cdx-spyre-dev-pf:/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507`
+- Repro harness: `runs/min_stable_matmul_operand_broadcast_20260704_100506/run_one.sh`
+- Representative failing run: `compute_read_debug_mul_one_M64K64N512_151848`
+- Existing DCC dump inspected: `unicast_pairs_mul_one_M64K64N512_144000/dxp_dcc_dump_unicast_144310`
+- Shape: `mul_one`, `M=64`, `K=64`, `N=512`
+- Producer split: `mul` with `{out:4}` owns RHS activation column chunks on cores 0..3
+- Consumer split: `batchmatmul` with `{mb:4,out:1,in:1}` expects a replicated full RHS KERNEL operand per consumer core
+
+Observed correctness:
+
+```text
+ALLCLOSE False
+MAX_DIFF 15.9609375
+MISMATCH 28544 / 32768
+CHUNK_ROW 0 COLS 128..136 repeats COLS 0..8
+CHUNK_ROW 0 COLS 256..264 repeats COLS 0..8
+CHUNK_ROW 0 COLS 384..392 repeats COLS 0..8
+```
+
+What is proven now:
+
+1. Torch correctly classifies the edge as `matmul_operand_broadcast` / `all_gather_replicate`.
+2. Deeptools diagnostic lowering emits 16 logical producer-to-consumer transfers and schedules those rows before the DL matmul row.
+3. The producer-only and tuple-return controls are value-correct, so the producer math and logical input values are not the issue.
+4. Refreshing the scheduled `DataInfo.startAddr_` is not sufficient. The scheduler-side debug shows the matmul RHS `Tensor1` sees the rewritten LX base, but the result is still wrong.
+5. The failure is therefore not a pure stale-base problem. The missing piece is layout/form conversion: the producer owns an activation-layout RHS shard, while the consumer reads a `KERNEL`-layout matmul operand.
+
+DCC evidence:
+
+- The inserted STCDP/ring rows move producer chunks between LX locations.
+- The downstream matmul does not read a flat dense activation slab. Its RHS loader builds PT row-local KERNEL staging, with reads like:
+
+```text
+transfer_lds1_src:lxlu_dst:ptrow0
+memref<64x64x8xf16>
+vector_load ... [0, arg13 + arg12 * 8 + arg11 * 64 + arg8 * 64, arg10 + arg2 * 8]
+```
+
+- That means the resident destination must match the consumer KERNEL coordinate/layout contract, not merely contain the logical full `[K,N]` tensor bytes in activation order.
+
+Interpretation:
+
+This edge should be classified as:
+
+```text
+activation shard -> replicated matmul KERNEL operand
+communication: all-gather / multicast
+layout conversion: activation layout -> KERNEL layout
+required carrier: staged KERNEL LDS + ReStickifyOpLx-style layout realization, or backend KERNEL staging support
+```
+
+The current raw `STCDPOpLx` prototype is useful as a diagnostic, but it is not the production carrier for this class because it moves bytes without satisfying the consumer KERNEL restickify/layout contract.
+
+Recommended next implementation step:
+
+1. Allocate a separate staged RHS `LabeledDsInfo` for the consumer KERNEL operand.
+2. Materialize it using an LX-side restickify-aware path (`ReStickifyOpLx` or equivalent KERNEL staging), not only raw STCDP movement.
+3. Rebind the consumer matmul input to that staged LDS before `L3DlOpsScheduler::fillLoopOffsetsAndAddresses()` runs.
+4. Let `fillLoopOffsetsAndAddresses()` recompute `ComputeNode.inputsLdsAndLoopOffsets_[rhs].startAddr_`, `loopEleOffsets_`, `bufferAddrOffset_`, and corelet views.
+5. Keep pure same-layout scatter as PR1. Treat `matmul_operand_broadcast` as a second communication class: all-gather plus layout conversion.
+
+Useful code references from inspection:
+
+- `dsc/dsc2.h`: `dsc2::DataInfo` contains the scheduled truth for `myLdsIdx_`, `startAddr_`, and offsets.
+- `dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp`: `fillLoopOffsetsAndAddresses()` clones allocation addresses and derives offsets for scheduled compute nodes.
+- `dcc/src/Conversion/DSC2ToDataflowIR/V3/SNComputeLowering.cpp`: lowering consumes `ComputeNode.inputsLdsAndLoopOffsets_`, not only high-level `ComputeOpInfo.inputLabeledDs`.
+- `dcg/dcg_fe/pcfg_gen/restickifyOp.cpp` and `dcg/dcg_fe/transfer_compute/transfer_compute.cpp`: existing `ReStickifyOpLx` infrastructure can express LX-side restickification.
+
+This is the current blocker for using the DLDSC path to remove the Granite/attention matmul RHS HBM round trip.
+
+## 2026-07-04 update: backend carrier experiments after KERNEL-layout diagnosis
+
+After the KERNEL-layout diagnosis above, we tested both backend carrier
+directions on the same stable repro. These results are intentionally recorded
+before moving back to Granite/attention, because they distinguish "movement was
+not emitted" from "movement was emitted but the consumer read contract was
+wrong."
+
+### Custom KERNEL-neighbor carrier
+
+Representative runs:
+
+```text
+runs/min_stable_matmul_operand_broadcast_20260704_100506/kernel_neighbor_forced_dst_base_155628
+runs/min_stable_matmul_operand_broadcast_20260704_100506/kernel_neighbor_localcopy_forced_dst_161303
+runs/min_stable_matmul_operand_broadcast_20260704_100506/kernel_neighbor_localcopy_forced_dst_161539
+```
+
+Forcing the destination base away from the source base changed the output from
+mostly zero to nonzero wrong values:
+
+```text
+ALLCLOSE False
+MAX_DIFF 24.0
+MISMATCH 32621 / 32768
+```
+
+Interpretation: source/destination aliasing was a real bug in that diagnostic
+path, but fixing aliasing was not enough to make the KERNEL operand correct.
+
+We then tried to include same-core transfers as local `LX -> LX` movement rather
+than skipping them. That hit two DCC/runtime constraints:
+
+```text
+RegisterTypeAssignment.cpp: expected transfers between LX and HBM
+ConstructProgIRHelper.cpp: wrong locale for dst operand
+```
+
+Interpretation: pushing local `LX -> LX` through the custom L3 ring-transfer
+path is the wrong shape. The existing STCDP path already knows how to do
+same-core LX copies through LX-side units; the custom KERNEL-neighbor path would
+need separate local-copy support before it is a credible production carrier.
+
+### Existing STCDPOpLx materialization carrier
+
+Representative runs:
+
+```text
+runs/min_stable_matmul_operand_broadcast_20260704_100506/unsafe_stcdp_materialized_broadcast_162106
+runs/min_stable_matmul_operand_broadcast_20260704_100506/unsafe_stcdp_base_162242
+runs/min_stable_matmul_operand_broadcast_20260704_100506/unsafe_stcdp_single_162242
+runs/min_stable_matmul_operand_broadcast_20260704_100506/unsafe_stcdp_combined_162242
+runs/min_stable_matmul_operand_broadcast_20260704_100506/unsafe_stcdp_combined_allow_162500
+runs/min_stable_matmul_operand_broadcast_20260704_100506/unsafe_stcdp_single_combined_allow_162500
+runs/min_stable_matmul_operand_broadcast_20260704_100506/unsafe_stcdp_single_combined_replace_allow_162500
+runs/min_stable_matmul_operand_broadcast_20260704_100506/unsafe_stcdp_standalone_ifn_162739
+runs/min_stable_matmul_operand_broadcast_20260704_100506/unsafe_stcdp_standalone_ifn_single_162739
+runs/min_stable_matmul_operand_broadcast_20260704_100506/unsafe_stcdp_standalone_ifn_unicast_162739
+```
+
+Base STCDP materialization compiles and schedules data-op modules before the DL
+matmul module:
+
+```text
+module order per core: 1 2 3 4 0
+```
+
+But it remains value-wrong:
+
+```text
+ALLCLOSE False
+MAX_DIFF 15.9609375
+MISMATCH 28544 / 32768
+```
+
+Single-dataop mode changes the mismatch count but not correctness:
+
+```text
+ALLCLOSE False
+MAX_DIFF 15.9609375
+MISMATCH 20992 / 32768
+```
+
+Combined IFN/data-op scheduling variants hit existing DCG guards:
+
+```text
+Do not support double buffering and input-neighbor fetch coexisting in the same DSC
+data_dldscIdx_inf.first == scheduleStep.datadsc_idx
+reqInpFetch ^ reqDLOp
+```
+
+Replacing the DL schedule step with a combined IFN/DL probe runs, but is even
+more wrong:
+
+```text
+ALLCLOSE False
+MAX_DIFF 32.0
+MISMATCH 32759 / 32768
+```
+
+Standalone IFN routing is not usable for this case yet:
+
+```text
+inputNeighFetchOp.cpp: !is_any_of(lds.pinnedComponent(), HBM, NO_COMPONENT)
+```
+
+Interpretation: STCDPOpLx can realize the ring movement and can handle same-core
+pieces better than the custom L3 carrier, but the current prototype writes a
+logical activation-layout replica while the consumer matmul reads a KERNEL/PT
+feed layout. The remaining issue is therefore not "emit more transfers"; it is
+"materialize and bind the staged operand in the exact layout the matmul loader
+will read."
+
+### Current backend handoff point
+
+The important code path is:
+
+```text
+dxp/SdscRelayoutInsertion.cpp
+  attachMatmulOperandBroadcastInputFetch()
+    allocates a replicated destination
+    emits STCDPOpLx rows
+    mutates the existing KERNEL LDS allocation/start address
+
+dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+  fillLoopOffsetsAndAddresses()
+    derives scheduled DataInfo for compute nodes
+
+dcc/src/Conversion/DSC2ToDataflowIR/V3/SNComputeLowering.cpp
+  constructComputeInputOperand()
+    lowers matmul input reads from inputsLdsAndLoopOffsets_ plus corelet views
+```
+
+This explains why simply refreshing `DataInfo.startAddr_` was insufficient:
+the address changed, but the consumer read layout/corelet view did not become a
+valid staged KERNEL layout.
+
+### Updated conclusion
+
+For this communication class, the clean design is:
+
+```text
+Torch/DLDSC:
+  classify edge as matmul_operand_broadcast / all_gather_replicate
+  provide producer and consumer logical coordinate maps
+
+Deeptools:
+  allocate a backend-owned staged RHS/KERNEL LDS
+  populate it with all-gather movement in the consumer matmul's KERNEL layout
+  bind the consumer matmul RHS transfer to that staged LDS before compute lowering
+```
+
+PR1 scatter remains the right first feature for one-to-one same-layout LX
+relayout. The Granite/attention RHS edge is a second class: all-gather/multicast
+plus KERNEL restickification/staging.
+
+## 2026-07-04 follow-up: fresh STCDP run and sharper diagnosis
+
+Fresh repro on `adnan-cdx-spyre-dev-pf` after rebuilding the current dirty
+Deeptools tree:
+
+```text
+runs/min_stable_matmul_operand_broadcast_20260704_100506/fresh_unsafe_stcdp_current_164204
+```
+
+Result:
+
+```text
+ALLCLOSE False
+MAX_DIFF 15.9609375
+MISMATCH 28544 / 32768
+```
+
+With `CODEGEN_DUMP_IRS=1`:
+
+```text
+runs/min_stable_matmul_operand_broadcast_20260704_100506/fresh_unsafe_stcdp_dump_164517
+```
+
+The value signature is structured, not random. Output columns in later chunks
+repeat data from earlier chunks, for example row 0 columns `128:136` repeat row
+0 columns `0:8` instead of containing the `0.125...` range.
+
+### What the fresh IR shows
+
+The frontend metadata is correct for the broad class:
+
+```text
+producer: mul, work split out=4
+consumer: batchmatmul, work split mb=4
+classification: matmul_operand_broadcast
+communication_pattern: all_gather_replicate
+logical_transfer_count: 16
+```
+
+The lower IR shows the current backend prototype is too simple. It treats the
+producer shard as a flat LX byte stream, but the producer pointwise output is
+not a flat KERNEL operand.
+
+Producer `0_mul` stores its LX output through a pointwise activation view:
+
+```text
+codegen_dumps/0_mul/stitcher_dataflow_ir_dldsc_.mlir
+  #map3 = affine_map<(d0, d1, d2) -> (d2 * 4096 + d1 * 64 + d0)>
+  dataflow.get_logical_memory_view ..., memref<64x64x2xf16>
+  agen.composite_store ... dbgName="transfer_lds2_src:sfp_dst:lxsu"
+```
+
+The store is also corelet-aware:
+
+```text
+corelet 0 base: 0
+corelet 1 base: 4096
+```
+
+The injected STCDPOpLx rows read/write through a flat `memref<64xf16>` stream:
+
+```text
+codegen_dumps/1_batchmatmul/stitcher_dataflow_ir_datadsc_2.mlir
+  lxlu0 reads base 0 + arg2 * 64
+  lxsu0 writes base 8192 + arg2 * 64
+```
+
+The consumer matmul then reads RHS through its KERNEL/PT-feed view:
+
+```text
+codegen_dumps/1_batchmatmul/stitcher_dataflow_ir_dldsc_.mlir
+  #map9 = affine_map<(d0, d1, d2) -> (d2 * 4096 + d1 * 64 + d0)>
+  dataflow.get_logical_memory_view ..., memref<64x64x8xf16>
+  agen.vector_load ... dbgName="transfer_lds1_src:lxlu_dst:ptrow*"
+```
+
+So the bug is not just "wrong destination base." The data movement is copying
+producer activation-layout bytes into a consumer KERNEL-layout staging region
+without performing the logical relayout/restickify between the two views.
+
+### Corelet diagnostic
+
+Run:
+
+```text
+runs/min_stable_matmul_operand_broadcast_20260704_100506/unsafe_stcdp_sencorelets1_165051
+```
+
+With `SENCORELETS=1`, correctness still fails:
+
+```text
+ALLCLOSE False
+MAX_DIFF 0.375
+MISMATCH 29632 / 32768
+```
+
+The error shape changes, which confirms corelet layout participates in the
+failure, but disabling corelet split does not make the flat-copy carrier value
+correct. This points to the broader requirement: the carrier must be
+layout-aware, not merely corelet-aware.
+
+### Implication for the Granite/attention communication roadmap
+
+This edge should be classified as:
+
+```text
+matmul RHS all-gather/multicast + activation-to-KERNEL restickify
+```
+
+It is not covered by PR1 scatter, and it is not covered by a naive STCDPOpLx
+flat copy. A production implementation needs one of these shapes:
+
+1. A backend-owned staged KERNEL LDS whose population path understands producer
+   coordinates, producer layout/corelet split, and consumer KERNEL layout.
+2. An explicit `ReStickifyOpLx`/DLDSC relayout op that materializes the operand
+   in the consumer layout, followed by the existing matmul consumer.
+
+The clean North Star still holds:
+
+```text
+Torch: classify/cost the edge and expose producer/consumer coordinate contracts.
+Deeptools: synthesize the layout-aware movement/restickify and bind the staged
+           KERNEL operand to the matmul.
+```
+
+The next implementation step is not adding more transfer pairs. It is teaching
+the backend relayout insertion to materialize a logical producer-to-consumer
+layout transform for KERNEL operands.
