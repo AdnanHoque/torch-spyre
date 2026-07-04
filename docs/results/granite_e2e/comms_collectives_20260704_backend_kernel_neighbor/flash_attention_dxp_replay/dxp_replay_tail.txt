@@ -1,0 +1,20 @@
+[DeepRT]: Compilation time taken by DCC in - 526_add	151 millisec 
+[DeepRT]: Compilation time taken by DCC in - 527_mul	202 millisec 
+[DeepRT]: Compilation time taken by DCC in - 528_mul	135 millisec 
+[DeepRT]: Compilation time taken by DCC in - 529_ReStickifyOpLx	176 millisec 
+[DeepRT]: Compilation time taken by DCC in - 530_batchmatmul	518 millisec 
+[DeepRT]: Compilation time taken by DCC in - 531_add	303 millisec 
+[DeepRT]: Compilation time taken by DCC in - 532_max	63 millisec 
+[DeepRT]: Compilation time taken by DCC in - 533_maximum	263 millisec 
+[DeepRT]: Compilation time taken by DCC in - 534_sub	263 millisec 
+[DeepRT]: Compilation time taken by DCC in - 535_exp	161 millisec 
+[DeepRT]: Compilation time taken by DCC in - 536_mul	255 millisec 
+[DeepRT]: Compilation time taken by DCC in - 537_sub	153 millisec 
+[DeepRT]: Compilation time taken by DCC in - 538_exp	49 millisec 
+[DeepRT]: Compilation time taken by DCC in - 539_batchmatmul	458 millisec 
+[DeepRT]: Compilation time taken by DCC in - 540_add	166 millisec 
+[DeepRT]: Compilation time taken by DCC in - 541_mul	266 millisec 
+[DeepRT]: Compilation time taken by DCC in - 542_sum	63 millisec 
+[DeepRT]: Compilation time taken by DCC in - 543_add	150 millisec 
+ProgCorrectionScatter0 with translator version: -1
+[DeepRT]: Compilation time taken by DCC in - ProgCorrectionScatter0	721 millisec 

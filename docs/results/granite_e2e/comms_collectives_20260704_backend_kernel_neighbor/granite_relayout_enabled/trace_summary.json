@@ -1,0 +1,14 @@
+{
+  "active_iters": 1,
+  "kernel_durations_ms": {
+    "<unnamed>": 13.869813
+  },
+  "kernel_event_counts": {
+    "<unnamed>": 4
+  },
+  "kernel_ms_per_iter": 13.869813,
+  "kernel_ms_total": 13.869813,
+  "memory_ms_per_iter": 0.33081600000000005,
+  "memory_ms_total": 0.33081600000000005,
+  "trace": "/home/adnan/codex-isolated/dldsc_granite_clean_relayout_20260703_163108/runs/granite_relayout_s512_both_flags_prefer_matmul_fixed_env_20260704_022432/block_prefill/profile/adnan-clc-spyre-dev-pf_177434.1783131970591600763.pt.trace.json"
+}
