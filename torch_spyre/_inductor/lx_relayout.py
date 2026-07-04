@@ -192,6 +192,16 @@ def _classify_coordinate_topology(
     )
 
 
+def _prefer_matmul_operand_contract(
+    read_index: int | None, topology: LXRelayoutTopology
+) -> bool:
+    return (
+        config.lx_planner_relayout_collectives
+        and config.lx_planner_relayout_matmul_operand_contract
+        and read_index == 1
+        and topology.communication_class in (COMM_CLASS_ALL_GATHER, "broadcast")
+    )
+
 def _op_num_cores(op: Operation) -> int:
     splits: tuple[dict, dict] = getattr(op, "op_it_space_splits", ({}, {}))
     factors = [int(factor) for per_dim in splits for factor in per_dim.values()]
@@ -463,6 +473,7 @@ def plan_lx_relayouts(
             if is_matmul_consumer and read_index not in (0, None):
                 if (
                     config.lx_planner_relayout_layout_allgather_restickify
+                    and not _prefer_matmul_operand_contract(read_index, topology)
                     and _restickify_reads_computed_input(graph, producer)
                 ):
                     layout_contract = make_layout_allgather_restickify_contract(
@@ -501,13 +512,7 @@ def plan_lx_relayouts(
                     continue
 
                 if (
-                    config.lx_planner_relayout_collectives
-                    and config.lx_planner_relayout_matmul_operand_contract
-                    and read_index == 1
-                    and (
-                        topology.communication_class
-                        in (COMM_CLASS_ALL_GATHER, "broadcast")
-                    )
+                    _prefer_matmul_operand_contract(read_index, topology)
                 ):
                     layout_contract = make_matmul_operand_allgather_contract(
                         producer_op=_op_name(producer),

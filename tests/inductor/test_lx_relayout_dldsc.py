@@ -14,6 +14,7 @@
 
 from sympy import Integer, Mod, Symbol, floor
 
+from torch_spyre._inductor import config
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.layout_allgather_restickify import (
@@ -24,8 +25,10 @@ from torch_spyre._inductor.layout_allgather_restickify import (
 )
 from torch_spyre._inductor.lx_relayout import (
     LXRelayoutPlan,
+    LXRelayoutTopology,
     _classify_coordinate_topology,
     _core_id_to_device_slice,
+    _prefer_matmul_operand_contract,
     _record_plan,
     get_lx_relayout_inputs,
     is_lx_relayout_reservation,
@@ -147,6 +150,22 @@ def test_coordinate_topology_classifies_all_gather():
     assert topology.max_fanout == 2
     assert topology.max_fanin == 2
     assert topology.transfer_count == 4
+
+
+def test_matmul_operand_contract_is_preferred_for_rhs_all_gather(monkeypatch):
+    monkeypatch.setattr(config, "lx_planner_relayout_collectives", True)
+    monkeypatch.setattr(config, "lx_planner_relayout_matmul_operand_contract", True)
+    topology = LXRelayoutTopology(
+        COMM_CLASS_ALL_GATHER,
+        "many_to_many",
+        max_fanout=32,
+        max_fanin=32,
+        transfer_count=1024,
+    )
+
+    assert _prefer_matmul_operand_contract(1, topology)
+    assert not _prefer_matmul_operand_contract(0, topology)
+    assert not _prefer_matmul_operand_contract(None, topology)
 
 
 def test_matmul_operand_contract_marks_tensor1_all_gather_not_scatter():

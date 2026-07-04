@@ -77,3 +77,48 @@ After removing the non-working metadata-only and kernel-neighbor probe routes fr
     - `18_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json`
 
 This preserves the current Granite activation-spill removal win while preventing the unsafe dense layout-allgather path from reaching hardware by default.
+
+## 2026-07-04 Update: Both Flags Can Stay Enabled
+
+A frontend precedence bug made `layout_allgather_restickify` win before the safer matmul-operand staged path when both flags were enabled:
+
+```bash
+SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY=1
+SPYRE_LX_PLANNER_RELAYOUT_MATMUL_OPERAND_CONTRACT=1
+```
+
+The Torch-side fix is to prefer `matmul_operand_broadcast` for eligible RHS `batchmatmul` KERNEL operands with `all_gather` or `broadcast` topology. `layout_allgather_restickify` remains available as the fallback/diagnostic path for cases that are not covered by the matmul operand contract.
+
+Focused Torch tests after the change:
+
+```text
+python -m pytest tests/inductor/test_lx_relayout_dldsc.py tests/inductor/test_layout_allgather_restickify_import_light.py -q
+16 passed
+```
+
+A first full Granite run failed with:
+
+```text
+cannot open input file /home/adnan/dt-inductor/sentient/deeptools/share/ddc/ddl_templates/restickify_lx.ddl
+```
+
+This was not an SDSC-generation regression. The generated relayout classifications were all `matmul_operand_broadcast`; no `layout_allgather_restickify` rows were emitted. The failure came from inherited stale Deeptools path state. Direct DXP replay of both the previous passing bundle and the new bundle passes when the run pins:
+
+```bash
+DEEPTOOLS_PATH=$ROOT/deeptools
+DEEPTOOLS_INSTALL_DIR=$ROOT/deeptools
+DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1
+DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR=1
+```
+
+New passing Granite S512 run with both relayout flags enabled and the source Deeptools path pinned:
+
+- run path: `runs/granite_relayout_s512_both_flags_prefer_matmul_fixed_env_20260704_022432`
+- checked-in compact artifacts: `docs/results/granite_e2e/dldsc_collectives_artifacts_20260704/both_flags_prefer_matmul/`
+- `RC=0`
+- `kernel_ms_per_iter=13.869813`
+- previous matmul-operand-only run: `13.853844`
+- disabled control: `14.6977`
+- observed speedup vs disabled control: about `1.06x`
+
+The useful conclusion is that both frontend flags can remain enabled for Granite if the frontend chooses the matmul-operand staged contract first and the run pins Deeptools templates to the source checkout. Dense resident `layout_allgather_restickify` is still not production-safe; it remains fail-closed pending a real staged implementation.
