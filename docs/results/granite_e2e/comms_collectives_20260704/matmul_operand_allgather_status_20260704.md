@@ -213,3 +213,177 @@ The next useful backend change should be one of:
 The smallest next diagnostic is to dump or inspect post-subpiece `DataOpDsc`
 state for each STCDPOpLx and confirm the exact source/output subpieces and
 their placement addresses before PCFG generation.
+
+## Update - 2026-07-04 15:10
+
+Additional diagnostics narrowed the all-gather/replicate blocker. This section
+supersedes the earlier chunk-pattern description where it differs.
+
+### Confirmed Frontend Contract
+
+Single-output repro:
+
+```text
+before_sync_mul_one_M64K64N512_150459
+```
+
+The generated SDSC contract is the intended one:
+
+```text
+sdsc_0: 0_mul
+  compute split: {mb:1, out:4}
+  output: allocate-Tensor2_lx on cores 0..3, each core owns one out chunk
+
+sdsc_1: 1_batchmatmul
+  compute split: {mb:4, out:1, in:1}
+  input Tensor1_lx carries classification:
+    kind                  = matmul_operand_broadcast
+    communication_class   = all_gather
+    communication_pattern = all_gather_replicate
+    transfer_count        = 16
+```
+
+So Torch is exposing the mismatch. The next issue is backend realization, not
+frontend classification.
+
+### Data-op Realization Observed
+
+With:
+
+```bash
+DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST=1
+DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1
+DEEPTOOLS_STITCH_DATA_ONLY_BEFORE_DLDSC=1
+DEEPTOOLS_MATMUL_OPERAND_BROADCAST_UNICAST_PAIRS=1
+```
+
+DCC emits 16 data modules before the DL module:
+
+```text
+module order: 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 0
+```
+
+Representative data modules store the four RHS chunks into distinct per-core
+LX offsets:
+
+```text
+chunk 0 -> offset 0
+chunk 1 -> offset 8192
+chunk 2 -> offset 16384
+chunk 3 -> offset 24576
+```
+
+The later matmul RHS loader reads `transfer_lds1_src:lxlu_dst:ptrow*` from a
+folded view of the same logical RHS tensor. The generated read view is not a
+simple flat `{0,8192,16384,24576}` pattern; it uses the matmul KERNEL/PT-feed
+layout, for example bases like `0..3584` and `16384..19968` across ptrow/corelet
+folds. That means the collective materialization must match the consumer KERNEL
+transfer layout exactly; a naive contiguous concat is not enough evidence by
+itself.
+
+### Value Result
+
+The single-output repro still fails value correctness:
+
+```text
+ALLCLOSE False
+MAX_DIFF 15.9609375
+MISMATCH 28544 / 32768
+```
+
+The failure is structured: every 128-column output chunk repeats chunk 0:
+
+```text
+row 0 cols 0:    correct chunk 0
+row 0 cols 128:  repeats chunk 0
+row 0 cols 256:  repeats chunk 0
+row 0 cols 384:  repeats chunk 0
+```
+
+This points to either stale source reads or a mismatch between the data-op write
+layout and the matmul KERNEL read layout.
+
+### Experiments Since The First Writeup
+
+1. Full destination allocation per consumer core:
+   - Allocate full RHS-sized LX space with `checkAndAddDs` per consumer core.
+   - Result: compiles/runs, but still repeats chunk 0.
+
+2. Refresh scheduled compute `DataInfo.startAddr_`:
+   - After changing the allocation base, refresh `ComputeNode.inputsLdsAndLoopOffsets_` for the RHS LDS.
+   - Result: generated matmul reads use updated bases, but output still repeats chunk 0.
+
+3. Unicast-pair mode:
+   - Emit one STCDPOpLx per `(source core, destination core)` pair.
+   - Result: still repeats chunk 0, so grouped/multicast STCDP is not the only issue.
+
+4. Producer-only control:
+   - Run only `rhs = v * aux` with producer split `{N:4}`.
+   - Result: RHS returned to host is correct. Producer math and basic work split are valid.
+
+5. Tuple-return control:
+   - Return both `rhs` and `x @ rhs` from the graph.
+   - Result: both are correct, but SDSCs become HBM-backed and no backend plan is emitted. This is a useful control but not proof that LX all-gather works.
+
+6. Destination coordinate experiments:
+   - Setting destination allocation coordinates to the consumer compute split fails DDC consistency.
+   - Setting destination allocation coordinates to full replicated `{in:0,out:0}` on each consumer core also fails DDC consistency.
+   - DDC reports the matmul RHS transfer has row/ptrow-specific coordinates, so normal KERNEL-to-PT transfers expect an empty allocation `coreIdToWkSlice_` or a very specific matching coordinate model.
+
+7. Data-op `before_sync`:
+   - Insert data-op schedule rows with both `before_sync=true` and `after_sync=true`.
+   - Result: still repeats chunk 0. The failure is not fixed by a simple data-op local barrier.
+
+8. Kernel-neighbor diagnostic path:
+   - `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR=1` lowers the plan as `lowered_loop_scoped_kernel_neighbor`.
+   - Without diagnostic override it hits the known double-buffering/input-neighbor coexistence guard.
+   - With `DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1`, it triggered a PCIe bus-fence RAS error on CDX. Treat this path as unsafe for now.
+
+### Current Best Hypothesis
+
+The all-gather/replicate class is not blocked by Torch classification. It is
+blocked by backend materialization semantics for a matmul KERNEL operand:
+
+```text
+producer LX shard layout      != consumer KERNEL/PT-feed read layout
+simple STCDPOpLx concat       != sufficient to satisfy matmul read contract
+```
+
+The current in-place mutation of the consumer input LDS is also too hacky for a
+production design. The cleaner direction is likely a real staged RHS LDS/buffer
+whose lifetime, allocation, coordinates, and KERNEL transfer binding are planned
+together. That staged buffer must be laid out exactly as the consumer matmul
+loader reads it, not merely as logical contiguous tensor order.
+
+### Device Note
+
+The kernel-neighbor diagnostic bus-fenced CDX. The hot-reset utility takes PCI
+BDF, not VFIO group. For CDX:
+
+```text
+/dev/vfio/80 -> /sys/kernel/iommu_groups/80/devices/0000:b0:00.0
+```
+
+The attempted reset was:
+
+```bash
+/opt/ibm/spyre/senlib/bin/aiu_dd2_hot_reset -t chip -d b0:00.0
+```
+
+It opened `/dev/vfio/80` but aborted with:
+
+```text
+RISCV config not found
+```
+
+The Linux reset variant requires root. Do not reuse CDX for hardware runs until
+it is restarted or reset cleanly.
+
+### Next Step
+
+Do not move this class to Granite/attention yet. The next useful implementation
+step is to introduce a separate staged matmul RHS LDS/buffer in Deeptools for
+`matmul_operand_broadcast`, then bind the matmul RHS transfer to that staged LDS
+instead of mutating the original producer-shard LDS in place. The staged LDS must
+be allocated with the consumer KERNEL transfer layout and populated by the
+all-gather in that same layout.
