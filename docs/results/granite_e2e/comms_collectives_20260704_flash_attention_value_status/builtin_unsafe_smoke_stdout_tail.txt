@@ -1,0 +1,80 @@
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=2 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=2 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=2 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=2 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=2 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=2 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=2 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=2 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=2 seededFromCache=false
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=3 coreIdToWkSlice=0 users=2 seededFromCache=false
+[runtime_patch] assert_close skipped for compile probe
+SUCCESS

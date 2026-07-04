@@ -1,0 +1,80 @@
+    dim_order=[mb, out, x], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, out=1, x=1],
+    strides=[mb=2048, out=4096, x=16777216],
+    offsets=[mb=0, out=0, x=0],
+    max_dim_sizes=[mb=-1, out=-1, x=-1],
+    allocation=[pool=83886080],
+    start_address=83886080
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, x, out], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, x=1, out=-2],
+    strides=[mb=2048, x=8388608, out=8388608],
+    offsets=[mb=0, x=0, out=0],
+    max_dim_sizes=[mb=-1, x=-1, out=-1],
+    allocation=[pool=117440512],
+    start_address=117440512
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[mb, out, x], 
+    data_format=SEN169_FP16,
+    scales=[mb=1, out=1, x=1],
+    strides=[mb=2048, out=4096, x=16777216],
+    offsets=[mb=0, out=0, x=0],
+    max_dim_sizes=[mb=-1, out=-1, x=-1],
+    allocation=[hbm=17179869184],
+    start_address=17179869184
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/value_correct_after_relayout_on_20260704_044752/cache/inductor-spyre/sdsc_fused_div_unsqueeze_2_6f7c_vnk/sdsc_0.json
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/value_correct_after_relayout_on_20260704_044752/cache/inductor-spyre/sdsc_fused_div_unsqueeze_2_6f7c_vnk/bundle.mlir
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused_amax_full_zeros_zeros_like_0 /home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/value_correct_after_relayout_on_20260704_044752/cache/inductor-spyre/sdsc_fused_amax_full_zeros_zeros_like_0_kyx5ibd0
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1 /home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/value_correct_after_relayout_on_20260704_044752/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_trjzsmy1
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused_div_unsqueeze_2 /home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/value_correct_after_relayout_on_20260704_044752/cache/inductor-spyre/sdsc_fused_div_unsqueeze_2_6f7c_vnk
+Traceback (most recent call last):
+  File "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/value_correct_after_relayout_on_20260704_044752/bootstrap.py", line 52, in <module>
+    runpy.run_path(script, run_name="__main__")
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/repos/test-spyre-scripts/test_flash.py", line 177, in <module>
+    torch.testing.assert_close(attn_t, attn_t_spyre.cpu(), atol=0.1, rtol=0.1)
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/testing/_comparison.py", line 1600, in assert_close
+    raise error_metas[0].to_error(msg)
+AssertionError: Tensor-likes are not close!
+
+Mismatched elements: 5285717 / 16777216 (31.5%)
+Greatest absolute difference: 3.841796875 at index (0, 5, 1, 5) (up to 0.1 allowed)
+Greatest relative difference: inf at index (0, 0, 160, 52) (up to 0.1 allowed)
+Traceback (most recent call last):
+  File "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/value_correct_after_relayout_on_20260704_044752/bootstrap.py", line 52, in <module>
+    runpy.run_path(script, run_name="__main__")
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/repos/test-spyre-scripts/test_flash.py", line 177, in <module>
+    torch.testing.assert_close(attn_t, attn_t_spyre.cpu(), atol=0.1, rtol=0.1)
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/testing/_comparison.py", line 1600, in assert_close
+    raise error_metas[0].to_error(msg)
+AssertionError: Tensor-likes are not close!
+
+Mismatched elements: 5285717 / 16777216 (31.5%)
+Greatest absolute difference: 3.841796875 at index (0, 5, 1, 5) (up to 0.1 allowed)
+Greatest relative difference: inf at index (0, 0, 160, 52) (up to 0.1 allowed)

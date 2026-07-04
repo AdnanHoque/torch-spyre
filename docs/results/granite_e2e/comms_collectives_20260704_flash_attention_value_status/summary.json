@@ -1,0 +1,52 @@
+{
+  "date": "2026-07-04",
+  "root": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507",
+  "script": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/repos/test-spyre-scripts/test_flash.py",
+  "result": "compile/runtime smoke unblocked, value correctness not achieved",
+  "runs": [
+    {
+      "name": "manual_diagnostic_ring_value",
+      "path": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/value_correct_after_relayout_on_20260704_044752",
+      "returncode": 1,
+      "status": "cpu_compare_failed",
+      "mismatched_elements": "5285717 / 16777216",
+      "mismatch_percent": 31.5,
+      "max_abs_diff": 3.841796875,
+      "notes": "Manual per-stick synthetic ring lowering executes but moves wrong data."
+    },
+    {
+      "name": "builtin_path_guarded",
+      "path": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/flash_builtin_ifn_no_manual_20260704_091946",
+      "returncode": 1,
+      "status": "dxp_guard_failed",
+      "guard": "matmul_operand_broadcast metadata was classified, but physical lowering is blocked",
+      "notes": "Deeptools intentionally blocks staged RHS chunks because matmul lowering cannot safely bind them yet."
+    },
+    {
+      "name": "builtin_path_unsafe_smoke",
+      "path": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/flash_builtin_ifn_unsafe_20260704_092108",
+      "returncode": 0,
+      "status": "compile_runtime_smoke_passed",
+      "notes": "CPU comparison was skipped; this is not a correctness result."
+    },
+    {
+      "name": "builtin_path_unsafe_value",
+      "path": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/flash_builtin_ifn_unsafe_value_20260704_092645",
+      "returncode": 1,
+      "status": "cpu_compare_failed",
+      "mismatched_elements": "16250636 / 16777216",
+      "mismatch_percent": 96.9,
+      "max_abs_diff": "inf",
+      "notes": "Guard override is not value-correct."
+    },
+    {
+      "name": "small_no_scalar_value",
+      "path": "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/flash_no_scalar_value_backend1_20260704_091125",
+      "returncode": 1,
+      "status": "dxp_scheduler_assertion",
+      "assertion": "out_reuse_dim.size() == 1",
+      "notes": "Separate scheduler/layout assumption on smaller test graph; not the same relayout-classified matmul failure."
+    }
+  ],
+  "next_backend_gap": "Bind staged grouped-all-gather RHS chunks into the matmul transfer loop using coordinate-derived addressing instead of flat scalar per-stick ring copies."
+}
