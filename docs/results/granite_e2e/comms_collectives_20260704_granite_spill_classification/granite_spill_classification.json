@@ -1,0 +1,193 @@
+{
+  "run": "/home/adnan/codex-isolated/dldsc_granite_clean_relayout_20260703_163108/runs/granite_relayout_s512_both_flags_prefer_matmul_fixed_env_20260704_022432/block_prefill/cache/inductor-spyre",
+  "torch_sha": "99192b8a140f2e48ba9284161a460f7cf5470e0f",
+  "deeptools_sha": "fa36c57166ed4541216c55cf97527f96819d7d5e",
+  "restickify_rows": [
+    {
+      "bundle": "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_u7ziutnz",
+      "file": "sdsc_9.json",
+      "op": "9_ReStickifyOpLx",
+      "cores": 32,
+      "split": {
+        "mb": 32,
+        "x": 1,
+        "out": 1
+      },
+      "N": {
+        "name_": "n",
+        "mb_": 32,
+        "x_": 512,
+        "out_": 128
+      },
+      "classification": "activation on-chip relayout"
+    },
+    {
+      "bundle": "sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_silu_split_with_sizes_transpose_view_2_awctlogs",
+      "file": "sdsc_0.json",
+      "op": "0_ReStickifyOpHBM",
+      "cores": 32,
+      "split": {
+        "mb": 32,
+        "out": 1
+      },
+      "N": {
+        "name_": "n",
+        "mb_": 4096,
+        "out_": 4096
+      },
+      "classification": "weight/layout-preload"
+    },
+    {
+      "bundle": "sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_silu_split_with_sizes_transpose_view_2_awctlogs",
+      "file": "sdsc_10.json",
+      "op": "10_ReStickifyOpHBM",
+      "cores": 25,
+      "split": {
+        "mb": 25,
+        "out": 1
+      },
+      "N": {
+        "name_": "n",
+        "mb_": 25600,
+        "out_": 4096
+      },
+      "classification": "weight/layout-preload"
+    },
+    {
+      "bundle": "sdsc_fused_add_linear_mul_3_e4nnnbwu",
+      "file": "sdsc_0.json",
+      "op": "0_ReStickifyOpHBM",
+      "cores": 25,
+      "split": {
+        "mb": 1,
+        "out": 25
+      },
+      "N": {
+        "name_": "n",
+        "mb_": 4096,
+        "out_": 12800
+      },
+      "classification": "weight/layout-preload"
+    },
+    {
+      "bundle": "sdsc_fused_linear_rms_norm_0_a32x0r6r",
+      "file": "sdsc_7.json",
+      "op": "7_ReStickifyOpHBM",
+      "cores": 32,
+      "split": {
+        "mb": 32,
+        "out": 1
+      },
+      "N": {
+        "name_": "n",
+        "mb_": 6144,
+        "out_": 4096
+      },
+      "classification": "weight/layout-preload"
+    }
+  ],
+  "lx_relayout_classifications": [
+    {
+      "bundle": "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_u7ziutnz",
+      "file": "sdsc_10.json",
+      "op": "10_batchmatmul",
+      "kind": "matmul_operand_broadcast",
+      "communication_class": "all_gather",
+      "communication_pattern": "all_gather_replicate",
+      "max_fanout": 32,
+      "max_fanin": 32,
+      "transfer_count": 1024,
+      "producer_op": "restickify",
+      "consumer_op": "batchmatmul",
+      "operand_role": "rhs",
+      "staging_scope": "matmul_transfer_loop",
+      "realized": false,
+      "requires_staged_realization": true
+    },
+    {
+      "bundle": "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_u7ziutnz",
+      "file": "sdsc_18.json",
+      "op": "18_batchmatmul",
+      "kind": "matmul_operand_broadcast",
+      "communication_class": "all_gather",
+      "communication_pattern": "all_gather_replicate",
+      "max_fanout": 32,
+      "max_fanin": 32,
+      "transfer_count": 1024,
+      "producer_op": "clone",
+      "consumer_op": "batchmatmul",
+      "operand_role": "rhs",
+      "staging_scope": "matmul_transfer_loop",
+      "realized": false,
+      "requires_staged_realization": true
+    },
+    {
+      "bundle": "sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_silu_split_with_sizes_transpose_view_2_awctlogs",
+      "file": "sdsc_1.json",
+      "op": "1_batchmatmul",
+      "kind": "matmul_operand_broadcast",
+      "communication_class": "all_gather",
+      "communication_pattern": "all_gather_replicate",
+      "max_fanout": 4,
+      "max_fanin": 4,
+      "transfer_count": 128,
+      "producer_op": "restickify",
+      "consumer_op": "batchmatmul",
+      "operand_role": "rhs",
+      "staging_scope": "matmul_transfer_loop",
+      "realized": false,
+      "requires_staged_realization": true
+    },
+    {
+      "bundle": "sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_silu_split_with_sizes_transpose_view_2_awctlogs",
+      "file": "sdsc_11.json",
+      "op": "11_batchmatmul",
+      "kind": "matmul_operand_broadcast",
+      "communication_class": "all_gather",
+      "communication_pattern": "all_gather_replicate",
+      "max_fanout": 8,
+      "max_fanin": 4,
+      "transfer_count": 128,
+      "producer_op": "restickify",
+      "consumer_op": "batchmatmul",
+      "operand_role": "rhs",
+      "staging_scope": "matmul_transfer_loop",
+      "realized": false,
+      "requires_staged_realization": true
+    },
+    {
+      "bundle": "sdsc_fused_add_linear_mul_3_e4nnnbwu",
+      "file": "sdsc_1.json",
+      "op": "1_batchmatmul",
+      "kind": "matmul_operand_broadcast",
+      "communication_class": "all_gather",
+      "communication_pattern": "all_gather_replicate",
+      "max_fanout": 32,
+      "max_fanin": 25,
+      "transfer_count": 800,
+      "producer_op": "restickify",
+      "consumer_op": "batchmatmul",
+      "operand_role": "rhs",
+      "staging_scope": "matmul_transfer_loop",
+      "realized": false,
+      "requires_staged_realization": true
+    },
+    {
+      "bundle": "sdsc_fused_linear_rms_norm_0_a32x0r6r",
+      "file": "sdsc_8.json",
+      "op": "8_batchmatmul",
+      "kind": "matmul_operand_broadcast",
+      "communication_class": "all_gather",
+      "communication_pattern": "all_gather_replicate",
+      "max_fanout": 4,
+      "max_fanin": 4,
+      "transfer_count": 128,
+      "producer_op": "restickify",
+      "consumer_op": "batchmatmul",
+      "operand_role": "rhs",
+      "staging_scope": "matmul_transfer_loop",
+      "realized": false,
+      "requires_staged_realization": true
+    }
+  ]
+}
