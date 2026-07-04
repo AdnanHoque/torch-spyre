@@ -148,3 +148,33 @@ This run used the Torch dense-coordinate payload patch, which emits split-1 rela
 Focused Torch unit status with the patch:
 
 `tests/inductor/test_lx_relayout_dldsc.py`: 15 passed.
+
+## Deeptools cardinality unit coverage
+
+Deeptools branch:
+
+`Adnan-Hoque1/deeptools:ah/comms-collectives`
+
+Commit:
+
+`dd2f45483 [DXP] add LX relayout cardinality unit coverage`
+
+The new test extends the existing `test_core_work_div_incompt` bundle fixture at runtime, so it does not add large copied SDSC JSON files. It verifies that generic DLDSC coordinate mismatch insertion produces an `LxRelayout` data descriptor with expected source and destination LX memIds for:
+
+| Case | Source distribution | Consumer distribution | Expected class |
+|---|---|---|---|
+| existing baseline | four y-slices | four y-slices on different cores | scatter / one-to-one shuffle |
+| new cardinality case 1 | one full-y producer | four y-slice consumers | broadcast / one-to-many |
+| new cardinality case 2 | four y-slice producers | one full-y consumer | gather / many-to-one |
+| new cardinality case 3 | four y-slice producers | four full-y consumers | all-gather / many-to-many |
+
+Focused test command:
+
+```bash
+cd /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools/build-deeptools
+./dxp/dxp_unit_test --gtest_filter="DxpTestFixture.CoreWorkDivIncomptLxRelayout*"
+```
+
+Result:
+
+`2 tests passed` covering the original relayout test and the new cardinality test.
