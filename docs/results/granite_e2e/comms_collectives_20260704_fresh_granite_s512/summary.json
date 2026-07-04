@@ -1,0 +1,14 @@
+{
+  "torch_sha": "796e0fb1998f599e5b058336335ff290334dfc54",
+  "workspace": "/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404",
+  "disabled_run": "/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_disabled_control_20260704_035333",
+  "enabled_run": "/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_relayout_backend02_20260704_035559",
+  "disabled_kernel_ms_per_iter": 14.725790199999999,
+  "enabled_kernel_ms_per_iter": 13.8212856,
+  "kernel_speedup": 1.0654428702348788,
+  "kernel_improvement_percent": 6.142316220150952,
+  "disabled_wall_median_ms": 27.607440948486328,
+  "enabled_wall_median_ms": 26.520490646362305,
+  "wall_speedup": 1.0409853013889514,
+  "wall_improvement_percent": 3.937164274487452
+}
