@@ -1,0 +1,471 @@
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[matmul_operand_ring_populate] begin sdsc=0_mul classifications=0
+[matmul_operand_ring_populate] transfer_nodes=3
+[matmul_operand_ring_populate] begin sdsc=0_mul classifications=0
+[matmul_operand_ring_populate] transfer_nodes=3
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=2 coreIdToWkSlice=0 users=2 seededFromCache=false
+[matmul_operand_ring_populate] begin sdsc=1_batchmatmul classifications=1
+[matmul_operand_ring_populate] transfer_nodes=3
+[matmul_operand_ring_populate] attaching to prefinalize template=transfer_lds1_src:no_component_dst:lx_lx_local lds=Tensor1
+[matmul_operand_stick_transfer] logicalTransfers=16 rowExtent=64 sourceLocalOutSticks=1 targetOutSticks=4
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=0 stick=0 srcCore=0 dstCore=1 srcAddr=0 dstAddr=0 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=1 stick=0 srcCore=0 dstCore=1 srcAddr=128 dstAddr=128 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=2 stick=0 srcCore=0 dstCore=1 srcAddr=256 dstAddr=256 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=3 stick=0 srcCore=0 dstCore=1 srcAddr=384 dstAddr=384 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=4 stick=0 srcCore=0 dstCore=1 srcAddr=512 dstAddr=512 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=5 stick=0 srcCore=0 dstCore=1 srcAddr=640 dstAddr=640 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=6 stick=0 srcCore=0 dstCore=1 srcAddr=768 dstAddr=768 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=7 stick=0 srcCore=0 dstCore=1 srcAddr=896 dstAddr=896 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=8 stick=0 srcCore=0 dstCore=1 srcAddr=1024 dstAddr=1024 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=9 stick=0 srcCore=0 dstCore=1 srcAddr=1152 dstAddr=1152 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=1 row=7 stick=0 srcCore=1 dstCore=2 srcAddr=896 dstAddr=9088 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=1 row=8 stick=0 srcCore=1 dstCore=2 srcAddr=1024 dstAddr=9216 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=1 row=9 stick=0 srcCore=1 dstCore=2 srcAddr=1152 dstAddr=9344 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=2 row=7 stick=0 srcCore=2 dstCore=3 srcAddr=896 dstAddr=17280 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=2 row=8 stick=0 srcCore=2 dstCore=3 srcAddr=1024 dstAddr=17408 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=2 row=9 stick=0 srcCore=2 dstCore=3 srcAddr=1152 dstAddr=17536 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=3 row=7 stick=0 srcCore=3 dstCore=0 srcAddr=896 dstAddr=25472 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=3 row=8 stick=0 srcCore=3 dstCore=0 srcAddr=1024 dstAddr=25600 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=3 row=9 stick=0 srcCore=3 dstCore=0 srcAddr=1152 dstAddr=25728 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=3 row=7 stick=0 srcCore=0 dstCore=1 srcAddr=25472 dstAddr=25472 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=3 row=8 stick=0 srcCore=0 dstCore=1 srcAddr=25600 dstAddr=25600 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=3 row=9 stick=0 srcCore=0 dstCore=1 srcAddr=25728 dstAddr=25728 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=0 row=7 stick=0 srcCore=1 dstCore=2 srcAddr=896 dstAddr=896 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=0 row=8 stick=0 srcCore=1 dstCore=2 srcAddr=1024 dstAddr=1024 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=0 row=9 stick=0 srcCore=1 dstCore=2 srcAddr=1152 dstAddr=1152 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=1 row=7 stick=0 srcCore=2 dstCore=3 srcAddr=9088 dstAddr=9088 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=1 row=8 stick=0 srcCore=2 dstCore=3 srcAddr=9216 dstAddr=9216 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=1 row=9 stick=0 srcCore=2 dstCore=3 srcAddr=9344 dstAddr=9344 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=2 row=7 stick=0 srcCore=3 dstCore=0 srcAddr=17280 dstAddr=17280 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=2 row=8 stick=0 srcCore=3 dstCore=0 srcAddr=17408 dstAddr=17408 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=2 row=9 stick=0 srcCore=3 dstCore=0 srcAddr=17536 dstAddr=17536 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=2 row=7 stick=0 srcCore=0 dstCore=1 srcAddr=17280 dstAddr=17280 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=2 row=8 stick=0 srcCore=0 dstCore=1 srcAddr=17408 dstAddr=17408 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=2 row=9 stick=0 srcCore=0 dstCore=1 srcAddr=17536 dstAddr=17536 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=3 row=7 stick=0 srcCore=1 dstCore=2 srcAddr=25472 dstAddr=25472 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=3 row=8 stick=0 srcCore=1 dstCore=2 srcAddr=25600 dstAddr=25600 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=3 row=9 stick=0 srcCore=1 dstCore=2 srcAddr=25728 dstAddr=25728 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=0 row=7 stick=0 srcCore=2 dstCore=3 srcAddr=896 dstAddr=896 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=0 row=8 stick=0 srcCore=2 dstCore=3 srcAddr=1024 dstAddr=1024 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=0 row=9 stick=0 srcCore=2 dstCore=3 srcAddr=1152 dstAddr=1152 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=1 row=7 stick=0 srcCore=3 dstCore=0 srcAddr=9088 dstAddr=9088 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=1 row=8 stick=0 srcCore=3 dstCore=0 srcAddr=9216 dstAddr=9216 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=1 row=9 stick=0 srcCore=3 dstCore=0 srcAddr=9344 dstAddr=9344 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=1 row=7 stick=0 srcCore=0 dstCore=1 srcAddr=9088 dstAddr=9088 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=1 row=8 stick=0 srcCore=0 dstCore=1 srcAddr=9216 dstAddr=9216 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=1 row=9 stick=0 srcCore=0 dstCore=1 srcAddr=9344 dstAddr=9344 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=2 row=7 stick=0 srcCore=1 dstCore=2 srcAddr=17280 dstAddr=17280 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=2 row=8 stick=0 srcCore=1 dstCore=2 srcAddr=17408 dstAddr=17408 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=2 row=9 stick=0 srcCore=1 dstCore=2 srcAddr=17536 dstAddr=17536 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=3 row=7 stick=0 srcCore=2 dstCore=3 srcAddr=25472 dstAddr=25472 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=3 row=8 stick=0 srcCore=2 dstCore=3 srcAddr=25600 dstAddr=25600 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=3 row=9 stick=0 srcCore=2 dstCore=3 srcAddr=25728 dstAddr=25728 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=0 row=7 stick=0 srcCore=3 dstCore=0 srcAddr=896 dstAddr=896 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=0 row=8 stick=0 srcCore=3 dstCore=0 srcAddr=1024 dstAddr=1024 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=0 row=9 stick=0 srcCore=3 dstCore=0 srcAddr=1152 dstAddr=1152 bytes=128
+[matmul_operand_ring_populate] begin sdsc=1_batchmatmul classifications=1
+[matmul_operand_ring_populate] transfer_nodes=3
+[matmul_operand_ring_populate] attaching to prefinalize template=transfer_lds1_src:no_component_dst:lx_lx_local lds=Tensor1
+[matmul_operand_stick_transfer] logicalTransfers=16 rowExtent=64 sourceLocalOutSticks=1 targetOutSticks=4
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=0 stick=0 srcCore=0 dstCore=1 srcAddr=0 dstAddr=0 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=1 stick=0 srcCore=0 dstCore=1 srcAddr=128 dstAddr=128 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=2 stick=0 srcCore=0 dstCore=1 srcAddr=256 dstAddr=256 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=3 stick=0 srcCore=0 dstCore=1 srcAddr=384 dstAddr=384 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=4 stick=0 srcCore=0 dstCore=1 srcAddr=512 dstAddr=512 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=5 stick=0 srcCore=0 dstCore=1 srcAddr=640 dstAddr=640 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=6 stick=0 srcCore=0 dstCore=1 srcAddr=768 dstAddr=768 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=7 stick=0 srcCore=0 dstCore=1 srcAddr=896 dstAddr=896 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=8 stick=0 srcCore=0 dstCore=1 srcAddr=1024 dstAddr=1024 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=0 row=9 stick=0 srcCore=0 dstCore=1 srcAddr=1152 dstAddr=1152 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=1 row=7 stick=0 srcCore=1 dstCore=2 srcAddr=896 dstAddr=9088 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=1 row=8 stick=0 srcCore=1 dstCore=2 srcAddr=1024 dstAddr=9216 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=1 row=9 stick=0 srcCore=1 dstCore=2 srcAddr=1152 dstAddr=9344 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=2 row=7 stick=0 srcCore=2 dstCore=3 srcAddr=896 dstAddr=17280 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=2 row=8 stick=0 srcCore=2 dstCore=3 srcAddr=1024 dstAddr=17408 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=2 row=9 stick=0 srcCore=2 dstCore=3 srcAddr=1152 dstAddr=17536 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=3 row=7 stick=0 srcCore=3 dstCore=0 srcAddr=896 dstAddr=25472 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=3 row=8 stick=0 srcCore=3 dstCore=0 srcAddr=1024 dstAddr=25600 bytes=128
+[matmul_operand_stick_transfer] phase=1 chunk=3 row=9 stick=0 srcCore=3 dstCore=0 srcAddr=1152 dstAddr=25728 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=3 row=7 stick=0 srcCore=0 dstCore=1 srcAddr=25472 dstAddr=25472 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=3 row=8 stick=0 srcCore=0 dstCore=1 srcAddr=25600 dstAddr=25600 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=3 row=9 stick=0 srcCore=0 dstCore=1 srcAddr=25728 dstAddr=25728 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=0 row=7 stick=0 srcCore=1 dstCore=2 srcAddr=896 dstAddr=896 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=0 row=8 stick=0 srcCore=1 dstCore=2 srcAddr=1024 dstAddr=1024 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=0 row=9 stick=0 srcCore=1 dstCore=2 srcAddr=1152 dstAddr=1152 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=1 row=7 stick=0 srcCore=2 dstCore=3 srcAddr=9088 dstAddr=9088 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=1 row=8 stick=0 srcCore=2 dstCore=3 srcAddr=9216 dstAddr=9216 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=1 row=9 stick=0 srcCore=2 dstCore=3 srcAddr=9344 dstAddr=9344 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=2 row=7 stick=0 srcCore=3 dstCore=0 srcAddr=17280 dstAddr=17280 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=2 row=8 stick=0 srcCore=3 dstCore=0 srcAddr=17408 dstAddr=17408 bytes=128
+[matmul_operand_stick_transfer] phase=2 chunk=2 row=9 stick=0 srcCore=3 dstCore=0 srcAddr=17536 dstAddr=17536 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=2 row=7 stick=0 srcCore=0 dstCore=1 srcAddr=17280 dstAddr=17280 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=2 row=8 stick=0 srcCore=0 dstCore=1 srcAddr=17408 dstAddr=17408 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=2 row=9 stick=0 srcCore=0 dstCore=1 srcAddr=17536 dstAddr=17536 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=3 row=7 stick=0 srcCore=1 dstCore=2 srcAddr=25472 dstAddr=25472 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=3 row=8 stick=0 srcCore=1 dstCore=2 srcAddr=25600 dstAddr=25600 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=3 row=9 stick=0 srcCore=1 dstCore=2 srcAddr=25728 dstAddr=25728 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=0 row=7 stick=0 srcCore=2 dstCore=3 srcAddr=896 dstAddr=896 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=0 row=8 stick=0 srcCore=2 dstCore=3 srcAddr=1024 dstAddr=1024 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=0 row=9 stick=0 srcCore=2 dstCore=3 srcAddr=1152 dstAddr=1152 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=1 row=7 stick=0 srcCore=3 dstCore=0 srcAddr=9088 dstAddr=9088 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=1 row=8 stick=0 srcCore=3 dstCore=0 srcAddr=9216 dstAddr=9216 bytes=128
+[matmul_operand_stick_transfer] phase=3 chunk=1 row=9 stick=0 srcCore=3 dstCore=0 srcAddr=9344 dstAddr=9344 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=1 row=7 stick=0 srcCore=0 dstCore=1 srcAddr=9088 dstAddr=9088 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=1 row=8 stick=0 srcCore=0 dstCore=1 srcAddr=9216 dstAddr=9216 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=1 row=9 stick=0 srcCore=0 dstCore=1 srcAddr=9344 dstAddr=9344 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=2 row=7 stick=0 srcCore=1 dstCore=2 srcAddr=17280 dstAddr=17280 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=2 row=8 stick=0 srcCore=1 dstCore=2 srcAddr=17408 dstAddr=17408 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=2 row=9 stick=0 srcCore=1 dstCore=2 srcAddr=17536 dstAddr=17536 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=3 row=7 stick=0 srcCore=2 dstCore=3 srcAddr=25472 dstAddr=25472 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=3 row=8 stick=0 srcCore=2 dstCore=3 srcAddr=25600 dstAddr=25600 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=3 row=9 stick=0 srcCore=2 dstCore=3 srcAddr=25728 dstAddr=25728 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=0 row=7 stick=0 srcCore=3 dstCore=0 srcAddr=896 dstAddr=896 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=0 row=8 stick=0 srcCore=3 dstCore=0 srcAddr=1024 dstAddr=1024 bytes=128
+[matmul_operand_stick_transfer] phase=4 chunk=0 row=9 stick=0 srcCore=3 dstCore=0 srcAddr=1152 dstAddr=1152 bytes=128
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=false coordDims=0 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] skipping missing related loop binding alloc=allocate_lds1_lx ref=transfer_lds1_src:lxlu_dst:ptrow0 dim=in i=2 foldDimCount=10 numSpatialFoldsOfRefNode=3 origNumElemArrFoldsOfRefNode=4 numElemArrFoldsOfAllocNode=8 relatedLoopIndex=3 relatedLoopsForRefNode=3 relatedLoopsForAlloc=0
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=false coordDims=1 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=false coordDims=1 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=false coordDims=1 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=false coordDims=1 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=false coordDims=1 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=false coordDims=1 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=false coordDims=1 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=false coordDims=1 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=2 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=2 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=2 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=2 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=2 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=2 coreIdToWkSlice=0 users=9 seededFromCache=false
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=2 coreIdToWkSlice=0 users=9 seededFromCache=false
+[lx_neighbor_pcfg_dsc2] node=transfer_lds1_src:no_component_dst:lx_lx_local transfers=1024 core=0 unit=l3lu
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=0 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] node=transfer_lds1_src:no_component_dst:lx_lx_local transfers=1024 core=0 unit=l3su
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=0 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] node=transfer_lds1_src:no_component_dst:lx_lx_local transfers=1024 core=1 unit=l3lu
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=1 src=0 dst=1 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] node=transfer_lds1_src:no_component_dst:lx_lx_local transfers=1024 core=1 unit=l3su
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=1 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] node=transfer_lds1_src:no_component_dst:lx_lx_local transfers=1024 core=2 unit=l3lu
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=2 src=1 dst=2 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] node=transfer_lds1_src:no_component_dst:lx_lx_local transfers=1024 core=2 unit=l3su
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=2 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] node=transfer_lds1_src:no_component_dst:lx_lx_local transfers=1024 core=3 unit=l3lu
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit recv core=3 src=2 dst=3 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] node=transfer_lds1_src:no_component_dst:lx_lx_local transfers=1024 core=3 unit=l3su
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=1 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=2 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=3 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+[lx_neighbor_pcfg_dsc2] emit send core=3 src=3 dst=0 bytes=128 run=8 group=4 phase=1 srcStride=128 dstStride=128
+CASE mul_one M 32 K 64 N 256
+ALLCLOSE False
+MAX_DIFF 4.5
+MISMATCH 6144 / 8192
+TOP_DIFF 0 ROW 24 COL 4 OUT 1.50390625 REF 6.00390625 DIFF 4.5
+TOP_DIFF 1 ROW 24 COL 3 OUT 1.50390625 REF 6.00390625 DIFF 4.5
+TOP_DIFF 2 ROW 24 COL 6 OUT 1.505859375 REF 6.0078125 DIFF 4.5
+TOP_DIFF 3 ROW 24 COL 5 OUT 1.505859375 REF 6.00390625 DIFF 4.5
+TOP_DIFF 4 ROW 24 COL 1 OUT 1.501953125 REF 6.0 DIFF 4.5
+TOP_DIFF 5 ROW 24 COL 7 OUT 1.5078125 REF 6.0078125 DIFF 4.5
+TOP_DIFF 6 ROW 24 COL 2 OUT 1.501953125 REF 6.0 DIFF 4.5
+TOP_DIFF 7 ROW 24 COL 0 OUT 1.5 REF 6.0 DIFF 4.5
+ROWMAP_OUT0 [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25]
+ROWMAP_REF0 [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75, 4.0, 4.25, 4.5, 4.75, 5.0, 5.25, 5.5, 5.75, 6.0, 6.25, 6.5, 6.75, 7.0, 7.25, 7.5, 7.75]
+ROW 0 OUT [0.0, 0.0009765625, 0.001953125, 0.0029296875, 0.00390625, 0.0048828125, 0.005859375, 0.0068359375, 0.0078125, 0.0087890625, 0.009765625, 0.0107421875, 0.01171875, 0.0126953125, 0.013671875, 0.0146484375]
+ROW 0 REF [0.0, 0.0009765625, 0.001953125, 0.0029296875, 0.00390625, 0.0048828125, 0.005859375, 0.0068359375, 0.0078125, 0.0087890625, 0.009765625, 0.0107421875, 0.01171875, 0.0126953125, 0.013671875, 0.0146484375]
+ROW 1 OUT [0.25, 0.2509765625, 0.251953125, 0.2529296875, 0.25390625, 0.2548828125, 0.255859375, 0.2568359375, 0.2578125, 0.2587890625, 0.259765625, 0.2607421875, 0.26171875, 0.2626953125, 0.263671875, 0.2646484375]
+ROW 1 REF [0.25, 0.2509765625, 0.251953125, 0.2529296875, 0.25390625, 0.2548828125, 0.255859375, 0.2568359375, 0.2578125, 0.2587890625, 0.259765625, 0.2607421875, 0.26171875, 0.2626953125, 0.263671875, 0.2646484375]
+ROW 31 OUT [3.25, 3.25, 3.25390625, 3.25390625, 3.25390625, 3.25390625, 3.2578125, 3.2578125, 3.2578125, 3.2578125, 3.26171875, 3.26171875, 3.26171875, 3.26171875, 3.265625, 3.265625]
+ROW 31 REF [7.75, 7.75, 7.75, 7.75390625, 7.75390625, 7.75390625, 7.7578125, 7.7578125, 7.7578125, 7.7578125, 7.7578125, 7.76171875, 7.76171875, 7.76171875, 7.765625, 7.765625]
+ROW 31 OUT [3.25, 3.25, 3.25390625, 3.25390625, 3.25390625, 3.25390625, 3.2578125, 3.2578125, 3.2578125, 3.2578125, 3.26171875, 3.26171875, 3.26171875, 3.26171875, 3.265625, 3.265625]
+ROW 31 REF [7.75, 7.75, 7.75, 7.75390625, 7.75390625, 7.75390625, 7.7578125, 7.7578125, 7.7578125, 7.7578125, 7.7578125, 7.76171875, 7.76171875, 7.76171875, 7.765625, 7.765625]
+ROW 31 OUT [3.25, 3.25, 3.25390625, 3.25390625, 3.25390625, 3.25390625, 3.2578125, 3.2578125, 3.2578125, 3.2578125, 3.26171875, 3.26171875, 3.26171875, 3.26171875, 3.265625, 3.265625]
+ROW 31 REF [7.75, 7.75, 7.75, 7.75390625, 7.75390625, 7.75390625, 7.7578125, 7.7578125, 7.7578125, 7.7578125, 7.7578125, 7.76171875, 7.76171875, 7.76171875, 7.765625, 7.765625]
+CHUNK_ROW 0 COLS 0 8 OUT [0.0, 0.0009765625, 0.001953125, 0.0029296875, 0.00390625, 0.0048828125, 0.005859375, 0.0068359375]
+CHUNK_ROW 0 COLS 0 8 REF [0.0, 0.0009765625, 0.001953125, 0.0029296875, 0.00390625, 0.0048828125, 0.005859375, 0.0068359375]
+CHUNK_ROW 0 COLS 64 72 OUT [0.0625, 0.0634765625, 0.064453125, 0.0654296875, 0.06640625, 0.0673828125, 0.068359375, 0.0693359375]
+CHUNK_ROW 0 COLS 64 72 REF [0.0625, 0.0634765625, 0.064453125, 0.0654296875, 0.06640625, 0.0673828125, 0.068359375, 0.0693359375]
+CHUNK_ROW 0 COLS 128 136 OUT [0.125, 0.1259765625, 0.126953125, 0.1279296875, 0.12890625, 0.1298828125, 0.130859375, 0.1318359375]
+CHUNK_ROW 0 COLS 128 136 REF [0.125, 0.1259765625, 0.126953125, 0.1279296875, 0.12890625, 0.1298828125, 0.130859375, 0.1318359375]
+CHUNK_ROW 0 COLS 192 200 OUT [0.1875, 0.1884765625, 0.189453125, 0.1904296875, 0.19140625, 0.1923828125, 0.193359375, 0.1943359375]
+CHUNK_ROW 0 COLS 192 200 REF [0.1875, 0.1884765625, 0.189453125, 0.1904296875, 0.19140625, 0.1923828125, 0.193359375, 0.1943359375]
+CHUNK_ROW 1 COLS 0 8 OUT [0.25, 0.2509765625, 0.251953125, 0.2529296875, 0.25390625, 0.2548828125, 0.255859375, 0.2568359375]
+CHUNK_ROW 1 COLS 0 8 REF [0.25, 0.2509765625, 0.251953125, 0.2529296875, 0.25390625, 0.2548828125, 0.255859375, 0.2568359375]
+CHUNK_ROW 1 COLS 64 72 OUT [0.3125, 0.3134765625, 0.314453125, 0.3154296875, 0.31640625, 0.3173828125, 0.318359375, 0.3193359375]
+CHUNK_ROW 1 COLS 64 72 REF [0.3125, 0.3134765625, 0.314453125, 0.3154296875, 0.31640625, 0.3173828125, 0.318359375, 0.3193359375]
+CHUNK_ROW 1 COLS 128 136 OUT [0.375, 0.3759765625, 0.376953125, 0.3779296875, 0.37890625, 0.3798828125, 0.380859375, 0.3818359375]
+CHUNK_ROW 1 COLS 128 136 REF [0.375, 0.3759765625, 0.376953125, 0.3779296875, 0.37890625, 0.3798828125, 0.380859375, 0.3818359375]
+CHUNK_ROW 1 COLS 192 200 OUT [0.4375, 0.4384765625, 0.439453125, 0.4404296875, 0.44140625, 0.4423828125, 0.443359375, 0.4443359375]
+CHUNK_ROW 1 COLS 192 200 REF [0.4375, 0.4384765625, 0.439453125, 0.4404296875, 0.44140625, 0.4423828125, 0.443359375, 0.4443359375]
+CHUNK_ROW 31 COLS 0 8 OUT [3.25, 3.25, 3.25390625, 3.25390625, 3.25390625, 3.25390625, 3.2578125, 3.2578125]
+CHUNK_ROW 31 COLS 0 8 REF [7.75, 7.75, 7.75, 7.75390625, 7.75390625, 7.75390625, 7.7578125, 7.7578125]
+CHUNK_ROW 31 COLS 64 72 OUT [3.3125, 3.3125, 3.31640625, 3.31640625, 3.31640625, 3.31640625, 3.3203125, 3.3203125]
+CHUNK_ROW 31 COLS 64 72 REF [7.8125, 7.8125, 7.8125, 7.81640625, 7.81640625, 7.81640625, 7.8203125, 7.8203125]
+CHUNK_ROW 31 COLS 128 136 OUT [3.375, 3.375, 3.37890625, 3.37890625, 3.37890625, 3.37890625, 3.3828125, 3.3828125]
+CHUNK_ROW 31 COLS 128 136 REF [7.875, 7.875, 7.875, 7.87890625, 7.87890625, 7.87890625, 7.8828125, 7.8828125]
+CHUNK_ROW 31 COLS 192 200 OUT [3.4375, 3.4375, 3.44140625, 3.44140625, 3.44140625, 3.44140625, 3.4453125, 3.4453125]
+CHUNK_ROW 31 COLS 192 200 REF [7.9375, 7.9375, 7.9375, 7.94140625, 7.94140625, 7.94140625, 7.9453125, 7.9453125]
