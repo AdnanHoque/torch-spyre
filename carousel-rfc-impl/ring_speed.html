@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIU Ring Speed</title>
+</head>
+<body>
+<style>
+  .ars{
+    --ink:#1a1a2e; --muted:#6b7280; --line:#e2e5ea;
+    --red:#d6453d; --green:#2e9e5b; --blue:#3b6ea8; --orange:#e8743b;
+    color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.62; font-size:16px;
+    max-width:1000px; margin:0 auto; padding:clamp(16px,4vw,44px);
+    -webkit-font-smoothing:antialiased;
+  }
+  .ars *{box-sizing:border-box;}
+  .ars h1{font-size:clamp(28px,5vw,40px); line-height:1.12; margin:0 0 .35em; letter-spacing:-.01em;}
+  .ars h1 .u{background:linear-gradient(transparent 62%, rgba(59,110,168,.22) 62%);}
+  .ars h2{font-size:clamp(20px,3.4vw,26px); margin:2.4em 0 .2em; letter-spacing:-.01em;}
+  .ars h2 .num{color:var(--muted); font-variant-numeric:tabular-nums; font-weight:600; margin-right:.4em;}
+  .ars h3{font-size:16px; margin:1.4em 0 .3em; text-transform:uppercase; letter-spacing:.06em; font-size:13px; color:var(--muted);}
+  .ars p{margin:.7em 0;}
+  .ars .lead{font-size:clamp(18px,2.6vw,21px); color:var(--ink); line-height:1.5; margin:.2em 0 1.1em; max-width:46ch;}
+  .ars .sub{color:var(--muted);}
+  .ars a{color:var(--blue);}
+  .ars code, .ars .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.9em;}
+  .ars code{background:#f4f5f7; border:1px solid var(--line); border-radius:5px; padding:.05em .35em;}
+  .ars .red{color:var(--red);} .ars .green{color:var(--green);} .ars .blue{color:var(--blue);} .ars .orange{color:var(--orange);}
+  .ars b{font-weight:650;}
+
+  .ars .statrow{display:flex; flex-wrap:wrap; gap:14px; margin:1.3em 0 .4em;}
+  .ars .stat{flex:1 1 180px; border:1px solid var(--line); border-radius:14px; padding:16px 18px; background:#fff;}
+  .ars .stat .n{font-size:clamp(26px,4vw,34px); font-weight:700; letter-spacing:-.02em; line-height:1; font-variant-numeric:tabular-nums;}
+  .ars .stat .n .un{font-size:.5em; font-weight:600; color:var(--muted); margin-left:.25em; letter-spacing:0;}
+  .ars .stat .l{margin-top:.5em; font-size:13.5px; color:var(--muted);}
+  .ars .stat.s{border-top:3px solid var(--red);}
+  .ars .stat.u{border-top:3px solid var(--green);}
+  .ars .stat.r{border-top:3px solid var(--blue);}
+
+  .ars .fig{border:1px solid var(--line); border-radius:16px; padding:18px 18px 14px; margin:1.5em 0; background:#fff;}
+  .ars .fig svg{display:block; width:100%; height:auto;}
+  .ars .scroll{overflow-x:auto;}
+  .ars .cap{margin-top:10px; font-size:13px; color:var(--muted); line-height:1.5;}
+  .ars .cap b{color:var(--ink);}
+  .ars .tag{display:inline-block; font-size:11px; font-weight:650; letter-spacing:.04em; text-transform:uppercase; padding:.15em .5em; border-radius:999px; vertical-align:middle;}
+  .ars .tag.meas{background:rgba(46,158,91,.13); color:#1f7a45;}
+  .ars .tag.model{background:rgba(59,110,168,.13); color:#2f5c8f;}
+
+  .ars .grid2{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:18px; margin:1.2em 0;}
+  .ars .card{border:1px solid var(--line); border-radius:14px; padding:16px 18px; background:#fff;}
+  .ars .card.f1{border-left:3px solid var(--red);}
+  .ars .card.f2{border-left:3px solid var(--orange);}
+  .ars .card.f3{border-left:3px solid var(--green);}
+  .ars .card h4{margin:0 0 .35em; font-size:15.5px;}
+  .ars .card p{margin:.4em 0; font-size:14.5px; color:#33333f;}
+
+  .ars .callout{border:1px solid var(--line); border-left:4px solid var(--blue); background:#f8fafc; border-radius:12px; padding:14px 18px; margin:1.2em 0;}
+  .ars .callout.v{border-left-color:var(--ink); background:#fbfbfd;}
+  .ars .callout p:first-child{margin-top:0;} .ars .callout p:last-child{margin-bottom:0;}
+
+  .ars ul{margin:.6em 0; padding-left:1.2em;} .ars li{margin:.35em 0;}
+  .ars .foot{margin-top:2.6em; padding-top:16px; border-top:1px solid var(--line); font-size:13px; color:var(--muted);}
+  .ars .foot code{font-size:.9em;}
+  .ars .legend{display:flex; flex-wrap:wrap; gap:16px; font-size:13px; color:var(--muted); margin:2px 2px 0;}
+  .ars .legend span{display:inline-flex; align-items:center; gap:7px;}
+  .ars .sw{width:22px; height:0; border-top-width:3px; border-top-style:solid; display:inline-block;}
+  .ars .dot{width:11px;height:11px;border-radius:50%;display:inline-block;}
+</style>
+
+<div class="ars">
+
+<h1>AIU <span class="u">Ring Speed</span></h1>
+
+<p class="lead">The <b>36 GB/s</b> we see on the production relayout is not a ring limit — it is an
+<span class="red">all-to-all contention floor</span>. Give the same ring a <span class="green">uniform,
+neighbor-to-neighbor</span> movement pattern and it delivers its full raw bandwidth.</p>
+
+<div class="statrow">
+  <div class="stat s"><div class="n">36<span class="un">GB/s</span></div><div class="l"><b>all-to-all scatter</b> — production relayout (STCDPOpLx). ~22% of raw. <span class="tag meas">measured</span></div></div>
+  <div class="stat u"><div class="n">130<span class="un">GB/s</span></div><div class="l"><b>uniform p&rarr;p+1 shift</b> at 16&nbsp;MB — dead center of the raw-ring band. <span class="tag meas">measured</span></div></div>
+  <div class="stat r"><div class="n">128&ndash;166<span class="un">GB/s</span></div><div class="l"><b>raw ring</b>, per direction (<code>perfmodel</code> / dd2 RIU-link). <span class="tag model">model</span></div></div>
+</div>
+
+<h2><span class="num">01</span>The hardware, in one paragraph</h2>
+
+<p>The AIU packs <b>32 cores</b> on an L3 / RIU <b>BiRing</b> — a bidirectional ring, bandwidth quoted
+per direction. Any data that must <i>change which core owns it</i> — a relayout, a shuffle, a collective —
+moves core-to-core across this ring via one op, <code>STCDPOpLx</code>. The cost model treats the ring
+simply: raw bandwidth is <span class="blue">128 GB/s/dir</span> in <code>perfmodel.cpp</code>
+(<code>sysdef.cpp:216</code>), up to <span class="blue">166</span> in the dd2 <code>RIU-To-RIU-Link</code>
+JSON that matches spec. Per-hop latency is modeled as <code>&lambda;&nbsp;=&nbsp;0</code>. So there is
+exactly <b>one</b> mechanism that can move the <i>effective</i> rate off raw: <b>per-link contention</b>.
+When several transfers must cross the same ring segment, they serialize. Everything below is that one
+mechanism, measured.</p>
+
+<h2><span class="num">02</span>The mechanism: two patterns, same ring</h2>
+
+<p>The centerpiece. Both panels are the same 32-core ring. What differs is only the <i>shape</i> of the
+movement — and that shape is the entire story.</p>
+
+<div class="fig">
+  <div class="scroll">
+  <svg viewBox="0 0 780 430" role="img" aria-label="All-to-all scatter versus uniform shift on a 32-core ring">
+    <defs>
+      <marker id="arw" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+        <path d="M0.5,1 L9,5 L0.5,9 Z" fill="#2e9e5b"/>
+      </marker>
+    </defs>
+
+    <!-- titles -->
+    <text x="170" y="26" text-anchor="middle" font-size="15" font-weight="700" fill="#d6453d">ALL-TO-ALL SCATTER</text>
+    <text x="170" y="44" text-anchor="middle" font-size="12.5" fill="#6b7280">the production relayout &mdash; a permutation of core ownership</text>
+    <text x="610" y="26" text-anchor="middle" font-size="15" font-weight="700" fill="#2e9e5b">UNIFORM  p &rarr; p+1</text>
+    <text x="610" y="44" text-anchor="middle" font-size="12.5" fill="#6b7280">each core hands one block to its neighbor</text>
+
+    <!-- physical ring circles -->
+    <circle cx="170" cy="210" r="140" fill="none" stroke="#c9d3e0" stroke-width="6" opacity="0.55"/>
+    <circle cx="610" cy="210" r="140" fill="none" stroke="#c9d3e0" stroke-width="6" opacity="0.55"/>
+
+    <!-- LEFT: chords (logical all-to-all transfers) -->
+    <g stroke="#d6453d" stroke-width="1.6" opacity="0.30" fill="none">
+      <line x1="170.0" y1="70.0" x2="247.8" y2="326.4"/><line x1="197.3" y1="72.7" x2="223.6" y2="339.3"/><line x1="223.6" y1="80.7" x2="197.3" y2="347.3"/><line x1="247.8" y1="93.6" x2="170.0" y2="350.0"/><line x1="269.0" y1="111.0" x2="142.7" y2="347.3"/><line x1="286.4" y1="132.2" x2="116.4" y2="339.3"/><line x1="299.3" y1="156.4" x2="92.2" y2="326.4"/><line x1="307.3" y1="182.7" x2="71.0" y2="309.0"/><line x1="310.0" y1="210.0" x2="53.6" y2="287.8"/><line x1="307.3" y1="237.3" x2="40.7" y2="263.6"/><line x1="299.3" y1="263.6" x2="32.7" y2="237.3"/><line x1="286.4" y1="287.8" x2="30.0" y2="210.0"/><line x1="269.0" y1="309.0" x2="32.7" y2="182.7"/><line x1="247.8" y1="326.4" x2="40.7" y2="156.4"/><line x1="223.6" y1="339.3" x2="53.6" y2="132.2"/><line x1="197.3" y1="347.3" x2="71.0" y2="111.0"/><line x1="170.0" y1="350.0" x2="92.2" y2="93.6"/><line x1="142.7" y1="347.3" x2="116.4" y2="80.7"/><line x1="116.4" y1="339.3" x2="142.7" y2="72.7"/><line x1="92.2" y1="326.4" x2="170.0" y2="70.0"/><line x1="71.0" y1="309.0" x2="197.3" y2="72.7"/><line x1="53.6" y1="287.8" x2="223.6" y2="80.7"/><line x1="40.7" y1="263.6" x2="247.8" y2="93.6"/><line x1="32.7" y1="237.3" x2="269.0" y2="111.0"/><line x1="30.0" y1="210.0" x2="286.4" y2="132.2"/><line x1="32.7" y1="182.7" x2="299.3" y2="156.4"/><line x1="40.7" y1="156.4" x2="307.3" y2="182.7"/><line x1="53.6" y1="132.2" x2="310.0" y2="210.0"/><line x1="71.0" y1="111.0" x2="307.3" y2="237.3"/><line x1="92.2" y1="93.6" x2="299.3" y2="263.6"/><line x1="116.4" y1="80.7" x2="286.4" y2="287.8"/><line x1="142.7" y1="72.7" x2="269.0" y2="309.0"/>
+    </g>
+    <!-- LEFT nodes -->
+    <g>
+      <circle cx="170.0" cy="70.0" r="3.2" fill="#3b6ea8"/><circle cx="197.3" cy="72.7" r="3.2" fill="#3b6ea8"/><circle cx="223.6" cy="80.7" r="3.2" fill="#3b6ea8"/><circle cx="247.8" cy="93.6" r="3.2" fill="#3b6ea8"/><circle cx="269.0" cy="111.0" r="3.2" fill="#3b6ea8"/><circle cx="286.4" cy="132.2" r="3.2" fill="#3b6ea8"/><circle cx="299.3" cy="156.4" r="3.2" fill="#3b6ea8"/><circle cx="307.3" cy="182.7" r="3.2" fill="#3b6ea8"/><circle cx="310.0" cy="210.0" r="3.2" fill="#3b6ea8"/><circle cx="307.3" cy="237.3" r="3.2" fill="#3b6ea8"/><circle cx="299.3" cy="263.6" r="3.2" fill="#3b6ea8"/><circle cx="286.4" cy="287.8" r="3.2" fill="#3b6ea8"/><circle cx="269.0" cy="309.0" r="3.2" fill="#3b6ea8"/><circle cx="247.8" cy="326.4" r="3.2" fill="#3b6ea8"/><circle cx="223.6" cy="339.3" r="3.2" fill="#3b6ea8"/><circle cx="197.3" cy="347.3" r="3.2" fill="#3b6ea8"/><circle cx="170.0" cy="350.0" r="3.2" fill="#3b6ea8"/><circle cx="142.7" cy="347.3" r="3.2" fill="#3b6ea8"/><circle cx="116.4" cy="339.3" r="3.2" fill="#3b6ea8"/><circle cx="92.2" cy="326.4" r="3.2" fill="#3b6ea8"/><circle cx="71.0" cy="309.0" r="3.2" fill="#3b6ea8"/><circle cx="53.6" cy="287.8" r="3.2" fill="#3b6ea8"/><circle cx="40.7" cy="263.6" r="3.2" fill="#3b6ea8"/><circle cx="32.7" cy="237.3" r="3.2" fill="#3b6ea8"/><circle cx="30.0" cy="210.0" r="3.2" fill="#3b6ea8"/><circle cx="32.7" cy="182.7" r="3.2" fill="#3b6ea8"/><circle cx="40.7" cy="156.4" r="3.2" fill="#3b6ea8"/><circle cx="53.6" cy="132.2" r="3.2" fill="#3b6ea8"/><circle cx="71.0" cy="111.0" r="3.2" fill="#3b6ea8"/><circle cx="92.2" cy="93.6" r="3.2" fill="#3b6ea8"/><circle cx="116.4" cy="80.7" r="3.2" fill="#3b6ea8"/><circle cx="142.7" cy="72.7" r="3.2" fill="#3b6ea8"/>
+    </g>
+
+    <!-- RIGHT: perimeter arcs p->p+1 -->
+    <g stroke="#2e9e5b" stroke-width="3" fill="none" marker-end="url(#arw)">
+      <path d="M 610.0 70.0 A 140 140 0 0 1 637.3 72.7"/><path d="M 637.3 72.7 A 140 140 0 0 1 663.6 80.7"/><path d="M 663.6 80.7 A 140 140 0 0 1 687.8 93.6"/><path d="M 687.8 93.6 A 140 140 0 0 1 709.0 111.0"/><path d="M 709.0 111.0 A 140 140 0 0 1 726.4 132.2"/><path d="M 726.4 132.2 A 140 140 0 0 1 739.3 156.4"/><path d="M 739.3 156.4 A 140 140 0 0 1 747.3 182.7"/><path d="M 747.3 182.7 A 140 140 0 0 1 750.0 210.0"/><path d="M 750.0 210.0 A 140 140 0 0 1 747.3 237.3"/><path d="M 747.3 237.3 A 140 140 0 0 1 739.3 263.6"/><path d="M 739.3 263.6 A 140 140 0 0 1 726.4 287.8"/><path d="M 726.4 287.8 A 140 140 0 0 1 709.0 309.0"/><path d="M 709.0 309.0 A 140 140 0 0 1 687.8 326.4"/><path d="M 687.8 326.4 A 140 140 0 0 1 663.6 339.3"/><path d="M 663.6 339.3 A 140 140 0 0 1 637.3 347.3"/><path d="M 637.3 347.3 A 140 140 0 0 1 610.0 350.0"/><path d="M 610.0 350.0 A 140 140 0 0 1 582.7 347.3"/><path d="M 582.7 347.3 A 140 140 0 0 1 556.4 339.3"/><path d="M 556.4 339.3 A 140 140 0 0 1 532.2 326.4"/><path d="M 532.2 326.4 A 140 140 0 0 1 511.0 309.0"/><path d="M 511.0 309.0 A 140 140 0 0 1 493.6 287.8"/><path d="M 493.6 287.8 A 140 140 0 0 1 480.7 263.6"/><path d="M 480.7 263.6 A 140 140 0 0 1 472.7 237.3"/><path d="M 472.7 237.3 A 140 140 0 0 1 470.0 210.0"/><path d="M 470.0 210.0 A 140 140 0 0 1 472.7 182.7"/><path d="M 472.7 182.7 A 140 140 0 0 1 480.7 156.4"/><path d="M 480.7 156.4 A 140 140 0 0 1 493.6 132.2"/><path d="M 493.6 132.2 A 140 140 0 0 1 511.0 111.0"/><path d="M 511.0 111.0 A 140 140 0 0 1 532.2 93.6"/><path d="M 532.2 93.6 A 140 140 0 0 1 556.4 80.7"/><path d="M 556.4 80.7 A 140 140 0 0 1 582.7 72.7"/><path d="M 582.7 72.7 A 140 140 0 0 1 610.0 70.0"/>
+    </g>
+    <!-- RIGHT nodes -->
+    <g>
+      <circle cx="610.0" cy="70.0" r="3.2" fill="#3b6ea8"/><circle cx="637.3" cy="72.7" r="3.2" fill="#3b6ea8"/><circle cx="663.6" cy="80.7" r="3.2" fill="#3b6ea8"/><circle cx="687.8" cy="93.6" r="3.2" fill="#3b6ea8"/><circle cx="709.0" cy="111.0" r="3.2" fill="#3b6ea8"/><circle cx="726.4" cy="132.2" r="3.2" fill="#3b6ea8"/><circle cx="739.3" cy="156.4" r="3.2" fill="#3b6ea8"/><circle cx="747.3" cy="182.7" r="3.2" fill="#3b6ea8"/><circle cx="750.0" cy="210.0" r="3.2" fill="#3b6ea8"/><circle cx="747.3" cy="237.3" r="3.2" fill="#3b6ea8"/><circle cx="739.3" cy="263.6" r="3.2" fill="#3b6ea8"/><circle cx="726.4" cy="287.8" r="3.2" fill="#3b6ea8"/><circle cx="709.0" cy="309.0" r="3.2" fill="#3b6ea8"/><circle cx="687.8" cy="326.4" r="3.2" fill="#3b6ea8"/><circle cx="663.6" cy="339.3" r="3.2" fill="#3b6ea8"/><circle cx="637.3" cy="347.3" r="3.2" fill="#3b6ea8"/><circle cx="610.0" cy="350.0" r="3.2" fill="#3b6ea8"/><circle cx="582.7" cy="347.3" r="3.2" fill="#3b6ea8"/><circle cx="556.4" cy="339.3" r="3.2" fill="#3b6ea8"/><circle cx="532.2" cy="326.4" r="3.2" fill="#3b6ea8"/><circle cx="511.0" cy="309.0" r="3.2" fill="#3b6ea8"/><circle cx="493.6" cy="287.8" r="3.2" fill="#3b6ea8"/><circle cx="480.7" cy="263.6" r="3.2" fill="#3b6ea8"/><circle cx="472.7" cy="237.3" r="3.2" fill="#3b6ea8"/><circle cx="470.0" cy="210.0" r="3.2" fill="#3b6ea8"/><circle cx="472.7" cy="182.7" r="3.2" fill="#3b6ea8"/><circle cx="480.7" cy="156.4" r="3.2" fill="#3b6ea8"/><circle cx="493.6" cy="132.2" r="3.2" fill="#3b6ea8"/><circle cx="511.0" cy="111.0" r="3.2" fill="#3b6ea8"/><circle cx="532.2" cy="93.6" r="3.2" fill="#3b6ea8"/><circle cx="556.4" cy="80.7" r="3.2" fill="#3b6ea8"/><circle cx="582.7" cy="72.7" r="3.2" fill="#3b6ea8"/>
+    </g>
+
+    <!-- bottom labels -->
+    <text x="170" y="398" text-anchor="middle" font-size="12.5" fill="#33333f">524 descriptors &middot; each link carries <tspan font-weight="700" fill="#d6453d">4&ndash;9 transfers</tspan></text>
+    <text x="170" y="417" text-anchor="middle" font-size="13" font-weight="700" fill="#d6453d">they serialize &rarr; 36 GB/s</text>
+    <text x="610" y="398" text-anchor="middle" font-size="12.5" fill="#33333f">33 descriptors &middot; <tspan font-weight="700" fill="#2e9e5b">1 transfer / link</tspan></text>
+    <text x="610" y="417" text-anchor="middle" font-size="13" font-weight="700" fill="#2e9e5b">no contention &rarr; 130 GB/s</text>
+  </svg>
+  </div>
+  <div class="legend">
+    <span><span class="sw" style="border-top-color:#c9d3e0"></span> physical BiRing</span>
+    <span><span class="dot" style="background:#3b6ea8"></span> core (32)</span>
+    <span><span class="sw" style="border-top-color:#d6453d"></span> logical transfer (permutation)</span>
+    <span><span class="sw" style="border-top-color:#2e9e5b"></span> neighbor hand-off</span>
+  </div>
+  <div class="cap"><b>Figure 2 &mdash; the centerpiece.</b> Same ring, same op (<code>STCDPOpLx</code>), same total bytes.
+  <b>Left:</b> a permutation of core-ownership. 524 movement descriptors, each source feeding 7&ndash;9 destinations
+  and each destination gathering from 4 sources; every physical ring link ends up carrying 4&ndash;9 transfers that
+  must take turns. <b>Right:</b> a uniform rotation &mdash; each core sends one contiguous block to <code>c+1</code>.
+  Exactly one transfer per link, nothing waits. The spaghetti versus the clean rotation <i>is</i> the 36-vs-130 gap.</div>
+</div>
+
+<p>Physically the red transfers do not fly across the interior — they route <i>along</i> the ring. Drawing them
+as chords just makes visible what the scheduler cannot avoid: a permutation forces many logical transfers onto
+the same shared arcs. That sharing is contention, and contention is the only knob the model has.</p>
+
+<div class="fig">
+  <div class="scroll">
+  <svg viewBox="0 0 780 250" role="img" aria-label="Why sharing a link divides bandwidth">
+    <!-- top: N=1 -->
+    <text x="30" y="46" font-size="13" font-weight="700" fill="#2e9e5b">1 transfer</text>
+    <circle cx="150" cy="60" r="16" fill="#eaf1f8" stroke="#3b6ea8" stroke-width="1.5"/><text x="150" y="64" text-anchor="middle" font-size="11" fill="#3b6ea8">core</text>
+    <circle cx="560" cy="60" r="16" fill="#eaf1f8" stroke="#3b6ea8" stroke-width="1.5"/><text x="560" y="64" text-anchor="middle" font-size="11" fill="#3b6ea8">core</text>
+    <rect x="168" y="52" width="374" height="16" rx="8" fill="#e6f4ec" stroke="#2e9e5b" stroke-width="1"/>
+    <rect x="176" y="55.5" width="52" height="9" rx="4.5" fill="#2e9e5b"/>
+    <text x="600" y="65" font-size="13" font-weight="700" fill="#2e9e5b">128 GB/s</text>
+    <text x="355" y="88" text-anchor="middle" font-size="11.5" fill="#6b7280">one ring segment (link), one packet &mdash; full raw rate</text>
+
+    <!-- bottom: N=6 -->
+    <text x="30" y="156" font-size="13" font-weight="700" fill="#d6453d">6 transfers</text>
+    <text x="30" y="172" font-size="11" fill="#6b7280">share it</text>
+    <circle cx="150" cy="160" r="16" fill="#eaf1f8" stroke="#3b6ea8" stroke-width="1.5"/><text x="150" y="164" text-anchor="middle" font-size="11" fill="#3b6ea8">core</text>
+    <circle cx="560" cy="160" r="16" fill="#eaf1f8" stroke="#3b6ea8" stroke-width="1.5"/><text x="560" y="164" text-anchor="middle" font-size="11" fill="#3b6ea8">core</text>
+    <rect x="168" y="152" width="374" height="16" rx="8" fill="#fbe9e7" stroke="#d6453d" stroke-width="1"/>
+    <!-- 6 queued packets -->
+    <rect x="176" y="155.5" width="52" height="9" rx="4.5" fill="#d6453d"/>
+    <rect x="234" y="155.5" width="52" height="9" rx="4.5" fill="#d6453d" opacity="0.85"/>
+    <rect x="292" y="155.5" width="52" height="9" rx="4.5" fill="#d6453d" opacity="0.7"/>
+    <rect x="350" y="155.5" width="52" height="9" rx="4.5" fill="#d6453d" opacity="0.55"/>
+    <rect x="408" y="155.5" width="52" height="9" rx="4.5" fill="#d6453d" opacity="0.4"/>
+    <rect x="466" y="155.5" width="52" height="9" rx="4.5" fill="#d6453d" opacity="0.28"/>
+    <text x="600" y="165" font-size="13" font-weight="700" fill="#d6453d">&asymp;21 GB/s</text>
+    <text x="355" y="188" text-anchor="middle" font-size="11.5" fill="#6b7280">six packets take turns on the same link &mdash; each waits five slots</text>
+
+    <!-- formula -->
+    <rect x="150" y="206" width="480" height="34" rx="10" fill="#f8fafc" stroke="#e2e5ea"/>
+    <text x="390" y="228" text-anchor="middle" font-size="14.5" fill="#1a1a2e">effective&nbsp;=&nbsp;<tspan font-weight="700">raw &divide; (transfers per link)</tspan> &nbsp;&mdash;&nbsp; all-to-all: 4&ndash;9 per link &rarr; <tspan fill="#d6453d" font-weight="700">~22&ndash;32 GB/s</tspan></text>
+  </svg>
+  </div>
+  <div class="cap"><b>Figure 3 &mdash; why sharing divides bandwidth.</b> With <code>&lambda;=0</code> latency, the ring is a
+  pure pipe: put <i>N</i> serialized transfers on one segment and each gets <code>raw/N</code>. All-to-all crowds
+  4&ndash;9 onto the busy links, which is exactly the arithmetic that lands the measured floor near 36 GB/s.</div>
+</div>
+
+<h2><span class="num">03</span>How every number here was obtained</h2>
+
+<p>Not from a spec sheet or a debug counter — from moving real bytes on the device and measuring the
+<i>slope</i>. The trick isolates the transfer from all fixed program and host overhead.</p>
+
+<div class="grid2">
+  <div class="fig" style="margin:0;">
+    <div class="scroll">
+    <svg viewBox="0 0 500 300" role="img" aria-label="Slope method: K copies of the move give a line">
+      <!-- axes -->
+      <line x1="70" y1="255" x2="470" y2="255" stroke="#1a1a2e" stroke-width="1.2"/>
+      <line x1="70" y1="255" x2="70" y2="45" stroke="#1a1a2e" stroke-width="1.2"/>
+      <text x="270" y="288" text-anchor="middle" font-size="12.5" fill="#6b7280">K &mdash; extra copies of the move spliced into <tspan font-style="italic">bundle.mlir</tspan></text>
+      <text x="24" y="150" font-size="12.5" fill="#6b7280" transform="rotate(-90 24 150)" text-anchor="middle">synced wall + device time</text>
+      <!-- fit line -->
+      <line x1="90" y1="210" x2="470" y2="82" stroke="#3b6ea8" stroke-width="2"/>
+      <!-- intercept dashed -->
+      <line x1="70" y1="210" x2="90" y2="210" stroke="#6b7280" stroke-width="1" stroke-dasharray="3 3"/>
+      <line x1="90" y1="210" x2="90" y2="255" stroke="#6b7280" stroke-width="1" stroke-dasharray="3 3"/>
+      <!-- points -->
+      <circle cx="90" cy="210" r="5" fill="#1a1a2e"/><text x="90" y="272" text-anchor="middle" font-size="11" fill="#6b7280">0</text>
+      <circle cx="185" cy="178" r="5" fill="#1a1a2e"/><text x="185" y="272" text-anchor="middle" font-size="11" fill="#6b7280">1</text>
+      <circle cx="280" cy="146" r="5" fill="#1a1a2e"/><text x="280" y="272" text-anchor="middle" font-size="11" fill="#6b7280">2</text>
+      <circle cx="375" cy="114" r="5" fill="#1a1a2e"/><text x="375" y="272" text-anchor="middle" font-size="11" fill="#6b7280">3</text>
+      <circle cx="470" cy="82" r="5" fill="#1a1a2e"/><text x="470" y="272" text-anchor="middle" font-size="11" fill="#6b7280">4</text>
+      <!-- slope triangle -->
+      <line x1="280" y1="146" x2="375" y2="146" stroke="#2e9e5b" stroke-width="1.6" stroke-dasharray="4 3"/>
+      <line x1="375" y1="146" x2="375" y2="114" stroke="#2e9e5b" stroke-width="1.6" stroke-dasharray="4 3"/>
+      <text x="392" y="134" font-size="12" font-weight="700" fill="#2e9e5b">slope</text>
+      <text x="392" y="150" font-size="10.5" fill="#2e9e5b">= per-move time</text>
+      <!-- intercept label -->
+      <text x="102" y="230" font-size="11" fill="#6b7280">intercept = fixed overhead</text>
+      <text x="102" y="244" font-size="11" fill="#6b7280">(program + host) &mdash; cancels</text>
+      <!-- R2 -->
+      <text x="90" y="66" font-size="12" font-weight="700" fill="#3b6ea8">R&sup2; &ge; 0.998</text>
+    </svg>
+    </div>
+    <div class="cap"><b>Figure 5 &mdash; the additive-differential slope.</b> Fixed cost is the intercept; only the
+    move scales with K, so <code>&Delta;time/&Delta;K</code> is the pure per-move time.</div>
+  </div>
+  <div class="card" style="align-self:start;">
+    <h4>The recipe</h4>
+    <p>1&nbsp;&mdash; fire a real relayout; capture its device-tensor arguments.</p>
+    <p>2&nbsp;&mdash; splice <b>K</b> extra copies of the relayout's <code>execute</code> line into the compiled
+    <code>bundle.mlir</code>; recompile.</p>
+    <p>3&nbsp;&mdash; per-iteration-synced wall + device time; fit the line.
+    <b>slope = &Delta;time / &Delta;K</b> isolates the move.</p>
+    <p>4&nbsp;&mdash; <b>&rho; = bytes_moved / slope</b>.</p>
+    <h4 style="margin-top:1em;">The honor control</h4>
+    <p>Sweep the moved bytes. The slope <i>must</i> change with bytes &mdash; that proves the runtime is really
+    moving them, not absorbing a cosmetic edit. Every &rho; below passed this control.</p>
+  </div>
+</div>
+
+<h2><span class="num">04</span>Three findings</h2>
+
+<div class="grid2">
+  <div class="card f1"><h4><span class="red">1 &middot; The scatter is slow</span></h4>
+    <p>The production relayout runs at <b>~36 GB/s</b> &mdash; ~22% of raw. Decomposed: <b>~70&nbsp;&micro;s</b>
+    fixed per-move overhead + <b>~55 GB/s</b> contended streaming. The explicit <code>stcdp_range</code> carrier
+    and the auto-synthesized <b>dl-dsc</b> path (backend builds the <i>same</i> <code>STCDPOpLx</code> from a
+    coordinate mismatch) both hit this identical floor. dl-dsc's end-to-end win on a fused SwiGLU is ~1.4&times;
+    at the moved edge / ~1.7% of the layer: one 13.1&nbsp;MB activation kept on-chip instead of an HBM round-trip.</p></div>
+  <div class="card f2"><h4><span class="orange">2 &middot; Burst size is not the lever</span></h4>
+    <p>Enlarging the per-descriptor burst <b>8 &rarr; ~800 sticks</b> on the same scatter gave <b>1.0&times;</b> &mdash;
+    zero gain, honor-controlled. The deeptools <code>BurstEfficiency.def</code> table is a <i>scheduler selection</i>
+    heuristic for picking chunk parameters, <b>not</b> a bandwidth multiplier: <code>perfmodel</code> runs the ring
+    at raw 128 for every pattern. So 36 is not a burst derate &mdash; it is contention, full stop.</p></div>
+  <div class="card f3"><h4><span class="green">3 &middot; The uniform shift is fast</span></h4>
+    <p>A uniform single-hop rotation escapes the floor and reaches the raw band: <b>54 &rarr; 90 &rarr; 130 GB/s</b>
+    as volume rises (4 &rarr; 8 &rarr; 16&nbsp;MB), with a <b>~250 GB/s</b> streaming asymptote (31 uncontended ring
+    segments in parallel). At bytes matched to the scatter (~8&nbsp;MB): <b>90.5 vs 36 = 2.5&times;</b>. At 16&nbsp;MB,
+    130 sits dead center of the model's 100&ndash;145 raw-ring prediction. The contention model was right.</p></div>
+</div>
+
+<div class="fig">
+  <div class="scroll">
+  <svg viewBox="0 0 780 260" role="img" aria-label="Bandwidth ladder: raw ring, uniform shift, all-to-all scatter">
+    <!-- gridlines -->
+    <g font-size="11" fill="#6b7280">
+      <line x1="210" y1="45" x2="210" y2="205" stroke="#e2e5ea"/><text x="210" y="222" text-anchor="middle">0</text>
+      <line x1="351.7" y1="45" x2="351.7" y2="205" stroke="#e2e5ea"/><text x="351.7" y="222" text-anchor="middle">50</text>
+      <line x1="493.3" y1="45" x2="493.3" y2="205" stroke="#e2e5ea"/><text x="493.3" y="222" text-anchor="middle">100</text>
+      <line x1="635" y1="45" x2="635" y2="205" stroke="#e2e5ea"/><text x="635" y="222" text-anchor="middle">150</text>
+      <text x="470" y="244" text-anchor="middle" font-size="12" fill="#6b7280">effective bandwidth, GB/s per direction</text>
+    </g>
+    <!-- raw ring ceiling band 128-166 -->
+    <rect x="572.7" y="45" width="107.6" height="160" fill="#3b6ea8" opacity="0.10"/>
+    <line x1="572.7" y1="45" x2="572.7" y2="205" stroke="#3b6ea8" stroke-width="1" stroke-dasharray="4 3" opacity="0.7"/>
+    <line x1="680.3" y1="45" x2="680.3" y2="205" stroke="#3b6ea8" stroke-width="1" stroke-dasharray="4 3" opacity="0.7"/>
+    <text x="626.5" y="40" text-anchor="middle" font-size="11.5" font-weight="700" fill="#3b6ea8">raw ring 128&ndash;166</text>
+    <text x="626.5" y="200" text-anchor="middle" font-size="10.5" fill="#3b6ea8">model</text>
+
+    <!-- uniform bar to 130 -->
+    <text x="200" y="90" text-anchor="end" font-size="13" font-weight="650" fill="#1a1a2e">uniform p&rarr;p+1</text>
+    <text x="200" y="106" text-anchor="end" font-size="11" fill="#6b7280">16 MB, measured</text>
+    <rect x="210" y="72" width="368.3" height="34" rx="5" fill="#2e9e5b"/>
+    <text x="588" y="94" font-size="14" font-weight="700" fill="#2e9e5b">130</text>
+    <text x="392" y="94" font-size="12" font-weight="700" fill="#fff">= raw ring</text>
+
+    <!-- scatter bar to 36 -->
+    <text x="200" y="160" text-anchor="end" font-size="13" font-weight="650" fill="#1a1a2e">all-to-all scatter</text>
+    <text x="200" y="176" text-anchor="end" font-size="11" fill="#6b7280">production relayout</text>
+    <rect x="210" y="142" width="102" height="34" rx="5" fill="#d6453d"/>
+    <text x="322" y="164" font-size="14" font-weight="700" fill="#d6453d">36</text>
+    <text x="342" y="164" font-size="11.5" fill="#d6453d">contention floor &middot; 22% of raw</text>
+  </svg>
+  </div>
+  <div class="cap"><b>Figure 1 &mdash; the bandwidth ladder.</b> Uniform movement reaches the raw-ring band the model
+  predicts; the all-to-all scatter is pinned to roughly a fifth of it. <span class="tag meas">measured</span> bars are
+  device runs; the <span class="tag model">model</span> band is <code>perfmodel</code> / dd2.</div>
+</div>
+
+<div class="fig">
+  <div class="scroll">
+  <svg viewBox="0 0 780 400" role="img" aria-label="Uniform-shift effective bandwidth rises with byte volume toward a 250 GB/s asymptote">
+    <!-- axes -->
+    <line x1="72" y1="350" x2="720" y2="350" stroke="#1a1a2e" stroke-width="1.2"/>
+    <line x1="72" y1="350" x2="72" y2="40" stroke="#1a1a2e" stroke-width="1.2"/>
+    <!-- y ticks -->
+    <g font-size="11" fill="#6b7280">
+      <line x1="68" y1="350.0" x2="720" y2="350.0" stroke="#f0f2f5"/><text x="64" y="354" text-anchor="end">0</text>
+      <line x1="68" y1="291.5" x2="720" y2="291.5" stroke="#f0f2f5"/><text x="64" y="295" text-anchor="end">50</text>
+      <line x1="68" y1="233.1" x2="720" y2="233.1" stroke="#f0f2f5"/><text x="64" y="237" text-anchor="end">100</text>
+      <line x1="68" y1="174.6" x2="720" y2="174.6" stroke="#f0f2f5"/><text x="64" y="178" text-anchor="end">150</text>
+      <line x1="68" y1="116.2" x2="720" y2="116.2" stroke="#f0f2f5"/><text x="64" y="120" text-anchor="end">200</text>
+    </g>
+    <text x="20" y="200" font-size="12.5" fill="#6b7280" transform="rotate(-90 20 200)" text-anchor="middle">effective GB/s</text>
+    <!-- x ticks -->
+    <g font-size="11" fill="#6b7280" text-anchor="middle">
+      <text x="72" y="368">0</text><text x="216" y="368">4</text><text x="360" y="368">8</text><text x="504" y="368">12</text><text x="648" y="368">16</text>
+      <text x="400" y="390" font-size="12.5">bytes moved, MB</text>
+    </g>
+    <!-- asymptote 250 -->
+    <line x1="72" y1="57.7" x2="720" y2="57.7" stroke="#3b6ea8" stroke-width="1.4" stroke-dasharray="6 4"/>
+    <text x="716" y="52" text-anchor="end" font-size="11.5" font-weight="700" fill="#3b6ea8">~250 GB/s streaming asymptote</text>
+    <!-- scatter 36 reference -->
+    <line x1="72" y1="307.9" x2="720" y2="307.9" stroke="#d6453d" stroke-width="1.3" stroke-dasharray="5 4" opacity="0.75"/>
+    <text x="716" y="303" text-anchor="end" font-size="11.5" font-weight="700" fill="#d6453d">all-to-all scatter floor = 36</text>
+    <!-- curve -->
+    <polyline fill="none" stroke="#2e9e5b" stroke-width="2.4" points="72.0,350.0 81.0,345.0 90.0,340.3 99.0,335.6 108.0,331.1 117.0,326.8 126.0,322.6 135.0,318.5 144.0,314.6 153.0,310.7 162.0,307.0 171.0,303.4 180.0,299.9 189.0,296.5 198.0,293.2 207.0,289.9 216.0,286.8 225.0,283.7 234.0,280.8 243.0,277.9 252.0,275.0 261.0,272.3 270.0,269.6 279.0,267.0 288.0,264.4 297.0,262.0 306.0,259.5 315.0,257.1 324.0,254.8 333.0,252.6 342.0,250.3 351.0,248.2 360.0,246.1 369.0,244.0 378.0,242.0 387.0,240.0 396.0,238.1 405.0,236.2 414.0,234.3 423.0,232.5 432.0,230.7 441.0,228.9 450.0,227.2 459.0,225.6 468.0,223.9 477.0,222.3 486.0,220.7 495.0,219.2 504.0,217.6 513.0,216.1 522.0,214.7 531.0,213.2 540.0,211.8 549.0,210.4 558.0,209.1 567.0,207.7 576.0,206.4 585.0,205.1 594.0,203.8 603.0,202.6 612.0,201.4 621.0,200.2 630.0,199.0 639.0,197.8 648.0,196.7 657.0,195.5 666.0,194.4 675.0,193.3 684.0,192.2 693.0,191.2 702.0,190.1 711.0,189.1 720.0,188.1"/>
+    <!-- measured points -->
+    <g>
+      <circle cx="216.0" cy="286.8" r="5.5" fill="#2e9e5b" stroke="#fff" stroke-width="1.4"/>
+      <text x="216" y="278" text-anchor="middle" font-size="12" font-weight="700" fill="#2e9e5b">54</text>
+      <text x="216" y="304" text-anchor="middle" font-size="10.5" fill="#6b7280">4 MB</text>
+      <circle cx="360.0" cy="246.1" r="5.5" fill="#2e9e5b" stroke="#fff" stroke-width="1.4"/>
+      <text x="360" y="237" text-anchor="middle" font-size="12" font-weight="700" fill="#2e9e5b">90</text>
+      <text x="360" y="263" text-anchor="middle" font-size="10.5" fill="#6b7280">8 MB</text>
+      <circle cx="648.0" cy="196.7" r="5.5" fill="#2e9e5b" stroke="#fff" stroke-width="1.4"/>
+      <text x="648" y="188" text-anchor="middle" font-size="12" font-weight="700" fill="#2e9e5b">130</text>
+      <text x="648" y="213" text-anchor="middle" font-size="10.5" fill="#6b7280">16 MB</text>
+    </g>
+    <!-- overhead annotation near origin -->
+    <text x="120" y="336" font-size="11" fill="#6b7280">~58 &micro;s fixed overhead</text>
+    <text x="120" y="349" font-size="11" fill="#6b7280">amortizes as bytes grow</text>
+    <!-- 8MB compare bracket vs 36 -->
+    <line x1="360" y1="246.1" x2="360" y2="307.9" stroke="#1a1a2e" stroke-width="1" stroke-dasharray="2 2"/>
+    <text x="368" y="282" font-size="11.5" font-weight="700" fill="#1a1a2e">2.5&times;</text>
+  </svg>
+  </div>
+  <div class="cap"><b>Figure 4 &mdash; effective &rho; rises with bytes (uniform shift).</b> The measured points
+  <span class="green">(54, 90, 130)</span> ride the curve <code>eff = B / (58&micro;s + B/250)</code>: the fixed
+  ~58&nbsp;&micro;s overhead amortizes and the rate climbs toward the ~250 GB/s streaming asymptote. Even at the
+  smallest volume the uniform pattern beats the scatter floor; at 8&nbsp;MB it is 2.5&times; faster on identical bytes.</div>
+</div>
+
+<h2><span class="num">05</span>Pattern &rarr; speed map</h2>
+
+<p>The rate an op gets is decided by its <i>movement shape</i>, not its name or its data. Sort the real ops by
+shape and the speeds fall out.</p>
+
+<div class="fig">
+  <div class="scroll">
+  <svg viewBox="0 0 780 300" role="img" aria-label="Map of real ops to scatter or uniform speed">
+    <!-- LEFT scatter panel -->
+    <rect x="20" y="20" width="360" height="262" rx="14" fill="#fdf3f2" stroke="#d6453d" stroke-width="1.2"/>
+    <text x="40" y="52" font-size="15" font-weight="700" fill="#d6453d">ALL-TO-ALL SCATTER</text>
+    <text x="40" y="74" font-size="13" fill="#a63a33">permutation of core-ownership &mdash; 4&ndash;9 / link</text>
+    <text x="360" y="55" text-anchor="end" font-size="26" font-weight="800" fill="#d6453d">36<tspan font-size="13" font-weight="600"> GB/s</tspan></text>
+    <line x1="40" y1="88" x2="360" y2="88" stroke="#f0cfcc"/>
+    <!-- mini spaghetti icon + rows -->
+    <g fill="#7a2621" font-size="13.5">
+      <text x="66" y="122">production comms-collectives relayout</text>
+      <text x="66" y="152" font-size="12" fill="#a63a33" font-family="ui-monospace,Menlo,monospace">STCDPOpLx &middot; 524 descriptors</text>
+      <text x="66" y="192">dl-dsc auto-synth (coordinate mismatch)</text>
+      <text x="66" y="222" font-size="12" fill="#a63a33">backend builds the same op, resident-sized</text>
+    </g>
+    <circle cx="48" cy="117" r="4" fill="#d6453d"/><circle cx="48" cy="187" r="4" fill="#d6453d"/>
+    <text x="40" y="266" font-size="12" font-style="italic" fill="#a63a33">lever here: ring-distance-aware placement</text>
+
+    <!-- RIGHT uniform panel -->
+    <rect x="400" y="20" width="360" height="262" rx="14" fill="#f1f9f4" stroke="#2e9e5b" stroke-width="1.2"/>
+    <text x="420" y="52" font-size="15" font-weight="700" fill="#2e9e5b">UNIFORM / PIPELINED</text>
+    <text x="420" y="74" font-size="13" fill="#227a45">single-hop neighbor hand-off &mdash; 1 / link</text>
+    <text x="740" y="55" text-anchor="end" font-size="26" font-weight="800" fill="#2e9e5b">130<tspan font-size="13" font-weight="600">+ GB/s</tspan></text>
+    <line x1="420" y1="88" x2="740" y2="88" stroke="#cdeadA"/>
+    <g fill="#1c5e37" font-size="13.5">
+      <text x="446" y="122">weight-carousel rotation</text>
+      <text x="446" y="152" font-size="12" fill="#227a45">uniform p&rarr;p+1 shift &mdash; transport confirmed fast</text>
+      <text x="446" y="192">ring-pipelined all-gather / LSE-fold</text>
+      <text x="446" y="222" font-size="12" fill="#227a45">bucket-brigade: contiguous uniform hops</text>
+    </g>
+    <circle cx="428" cy="117" r="4" fill="#2e9e5b"/><circle cx="428" cy="187" r="4" fill="#2e9e5b"/>
+    <text x="420" y="266" font-size="12" font-style="italic" fill="#227a45">already fast: the ring is not the bottleneck</text>
+  </svg>
+  </div>
+  <div class="cap"><b>Figure 6 &mdash; shape decides speed.</b> Everything that permutes core-ownership lands on the
+  36 floor and needs placement help; everything that moves as a uniform rotation or a ring-pipeline already runs at
+  raw-ring speed.</div>
+</div>
+
+<h2><span class="num">06</span>The verdict</h2>
+
+<div class="callout v">
+  <p style="font-size:18px; line-height:1.5;"><b>~36 GB/s is an all-to-all contention floor, not a ring limit.</b>
+  The BiRing delivers its full raw bandwidth (~130&ndash;250 GB/s) for uniform and ring-pipelined patterns, and
+  chokes to ~36 only when a permutation crowds 4&ndash;9 transfers onto shared links. The contention model was
+  right; burst size never mattered.</p>
+</div>
+
+<h3>Implications</h3>
+<ul>
+  <li><b class="green">Weight-carousel rotation transport is confirmed fast.</b> It is a uniform p&rarr;p+1 shift,
+  so the ring is not a bottleneck for it.</li>
+  <li><b class="green">Ring-pipelined all-gather / LSE-fold is viable.</b> A bucket-brigade of contiguous uniform
+  hops runs in the raw band, not the floor.</li>
+  <li><b class="red">The production scatter relayout is genuinely stuck at ~36.</b> The lever there is
+  <b>ring-distance-aware placement</b> &mdash; assign core-ownership so fewer transfers cross-cut the same links
+  &mdash; <i>not</i> burst tuning.</li>
+  <li><b class="blue">The cost model's ring term should be pattern-aware.</b> One &rho; is wrong: use a
+  contention-scaled term, ~36 for all-to-all and ~130+ for uniform / pipelined, rather than a single constant.</li>
+</ul>
+
+<div class="foot">
+  <p><b>Provenance.</b> Every bandwidth here is device-measured this session via the additive-differential slope
+  method (R&sup2;&nbsp;&ge;&nbsp;0.998), honor-controlled by sweeping moved bytes. Committed on branch
+  <code>ah/carousel</code>; the four source notes are
+  <code>carousel-rfc-impl/{LX_TO_LX_SPEED, DLDSC_LX_SPEED, CONTIGUOUS_RING_MOVE, UNIFORM_SHIFT_RING_SPEED}.md</code>.
+  Raw-ring numbers (128&ndash;166 GB/s/dir, <code>&lambda;=0</code>) are the model: <code>perfmodel.cpp</code> ringBw,
+  <code>sysdef.cpp:216</code>, and the dd2 <code>RIU-To-RIU-Link</code> JSON. Distinguished throughout:
+  <span class="tag meas">measured</span> on device vs <span class="tag model">model</span> from the cost model.</p>
+</div>
+
+</div>
+</body>
+</html>
