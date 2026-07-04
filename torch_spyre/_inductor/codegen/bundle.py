@@ -96,8 +96,13 @@ def _tensor_layout_contract(
         "layoutDimOrder_": list(
             alloc.get("layoutDimOrder_", primary_info.get("layoutDimOrder_", []))
         ),
+        "maxDimSizes_": list(alloc.get("maxDimSizes_", [])),
         "stickDimOrder_": list(primary_info.get("stickDimOrder_", [])),
         "stickSize_": list(primary_info.get("stickSize_", [])),
+        "dataFormat_": lds.get("dataFormat_", ""),
+        "wordLength": lds.get("wordLength"),
+        "startAddressCoreCorelet_": alloc.get("startAddressCoreCorelet_", {}),
+        "coordinateInfo_": alloc.get("coordinates_", {}).get("coordInfo", {}),
         "numWkSlicesPerDim_": dict(root.get("numWkSlicesPerDim_", {})),
         "coreIdToWkSlice_": dict(core_id_to_wk_slice or tensor_core_map),
         "computeCoreIdToWkSlice_": dict(root.get("coreIdToWkSlice_", {})),

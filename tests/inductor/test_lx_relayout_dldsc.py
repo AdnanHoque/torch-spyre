@@ -433,6 +433,10 @@ def test_bundle_enriches_matmul_operand_contract_with_source_target_layouts(
     assert classification["source_lx_tensor"]["dsType_"] == "OUTPUT"
     assert classification["source_lx_tensor"]["layoutDimOrder_"] == ["mb", "out"]
     assert classification["source_lx_tensor"]["stickDimOrder_"] == ["out"]
+    assert classification["source_lx_tensor"]["dataFormat_"] == "SEN169_FP16"
+    assert classification["source_lx_tensor"]["wordLength"] == 2
+    assert classification["source_lx_tensor"]["startAddressCoreCorelet_"]
+    assert classification["source_lx_tensor"]["coordinateInfo_"]
     assert classification["source_lx_tensor"]["coreIdToWkSlice_"] == {
         "0": {"mb": 0, "out": 0},
         "1": {"mb": 0, "out": 1},
@@ -446,6 +450,10 @@ def test_bundle_enriches_matmul_operand_contract_with_source_target_layouts(
         "out",
     ]
     assert classification["target_kernel_tensor"]["stickDimOrder_"] == ["out"]
+    assert classification["target_kernel_tensor"]["dataFormat_"] == "SEN169_FP16"
+    assert classification["target_kernel_tensor"]["wordLength"] == 2
+    assert classification["target_kernel_tensor"]["startAddressCoreCorelet_"]
+    assert classification["target_kernel_tensor"]["coordinateInfo_"]
     assert (
         classification["layout_transform"]["conversion_stage"]
         == "local_restickify_to_kernel"

@@ -822,7 +822,7 @@ cmake --build $ROOT/build-deeptools --target dxp_standalone -j8
 Fresh metadata-preservation run:
 
 ```text
-runs/min_stable_matmul_operand_broadcast_20260704_100506/source_target_contract_173530
+runs/min_stable_matmul_operand_broadcast_20260704_100506/rich_source_target_contract_174821
 ```
 
 The run intentionally fails closed at DXP because physical lowering is still
@@ -836,15 +836,23 @@ blocked, but the emitted backend plan now records the correct class:
   "requires_layout_conversion": true,
   "source_lx_tensor": {
     "allocation_name": "allocate-Tensor2_lx",
+    "dataFormat_": "SEN169_FP16",
     "dsType_": "OUTPUT",
     "layoutDimOrder_": ["mb", "out"],
-    "stickDimOrder_": ["out"]
+    "stickDimOrder_": ["out"],
+    "wordLength": 2,
+    "startAddressCoreCorelet_": "...",
+    "coordinateInfo_": "..."
   },
   "target_kernel_tensor": {
     "allocation_name": "allocate-Tensor1_lx",
+    "dataFormat_": "SEN169_FP16",
     "dsType_": "KERNEL",
     "layoutDimOrder_": ["in", "out"],
-    "stickDimOrder_": ["out"]
+    "stickDimOrder_": ["out"],
+    "wordLength": 2,
+    "startAddressCoreCorelet_": "...",
+    "coordinateInfo_": "..."
   },
   "stages": [
     "source_operand_shards",
@@ -872,8 +880,9 @@ Tensor2_lx: layoutDimOrder_ = [mb, out], stickDimOrder_ = [out]
 ```
 
 The backend mutation point now sees the consumer input LDS, producer residency
-coordinates, and the explicit source and target layout objects. The remaining
-implementation is the two-stage physical carrier:
+coordinates, and explicit source and target layout objects, including
+`startAddressCoreCorelet_`, `coordinateInfo_`, `wordLength`, and `dataFormat_`.
+The remaining implementation is the two-stage physical carrier:
 
 ```text
 STCDPOpLx same-layout gather/multicast into temporary LX
@@ -882,3 +891,47 @@ then ReStickifyOpLx/ReStickifyOpWithPTLx into the matmul KERNEL operand layout
 
 Until that exists, enabling the unsafe flat STCDPOpLx path is expected to be
 value-wrong on this class.
+
+### Smallest Correct Backend Hook
+
+The next Deeptools implementation should stay in:
+
+```text
+dxp/SdscRelayoutInsertion.cpp
+```
+
+Specifically, add a helper near the current
+`attachMatmulOperandBroadcastInputFetch` experiment:
+
+```text
+attachMatmulOperandBroadcastGatherThenRestickify(...)
+```
+
+That helper should only accept:
+
+```text
+plan.requiresLayoutConversion == true
+```
+
+and emit normal mixed-SDSC data ops before the consumer batchmatmul:
+
+```text
+1. STCDPOpLx
+   producer activation-layout LX shards
+   -> backend-owned temporary LX, still in producer/source layout
+
+2. ReStickifyOpLx
+   temporary producer-layout LX
+   -> final KERNEL-layout LX consumed by the matmul RHS
+```
+
+The existing `ReStickifyOpLx` backend is already wired through DCG/PCFG
+generation. The construction reference is:
+
+```text
+dcg/unit_tests/datadsc_gen.cpp::populateDataDSCwithReStickfyLX
+```
+
+Do not continue the scheduler-side LX-neighbor experiment for this path. That
+route generated useful diagnostics, but it still left the key correctness issue:
+the matmul saw bytes gathered into the wrong layout.
