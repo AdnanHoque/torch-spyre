@@ -1,0 +1,253 @@
+{
+  "marker_kernel_neighbor": {
+    "returncode": 1,
+    "mismatched_elements": "5290616",
+    "total_elements": "16777216",
+    "mismatch_percent": 31.5,
+    "max_abs_diff": "5.6875",
+    "group_count": "4",
+    "producer_chunks_per_group": "8",
+    "consumer_replicas_per_group": "8",
+    "logical_transfer_count": "256",
+    "first_16_logical_transfers": [
+      {
+        "consumer_replica": "0",
+        "destination_core": "0",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "1",
+        "destination_core": "4",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "2",
+        "destination_core": "8",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "3",
+        "destination_core": "12",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "4",
+        "destination_core": "16",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "5",
+        "destination_core": "20",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "6",
+        "destination_core": "24",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "7",
+        "destination_core": "28",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "0",
+        "destination_core": "0",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "1",
+        "destination_core": "4",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "2",
+        "destination_core": "8",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "3",
+        "destination_core": "12",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "4",
+        "destination_core": "16",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "5",
+        "destination_core": "20",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "6",
+        "destination_core": "24",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "7",
+        "destination_core": "28",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      }
+    ]
+  },
+  "unsafe_explicit_stcdp": {
+    "returncode": 1,
+    "mismatched_elements": "15213507",
+    "total_elements": "16777216",
+    "mismatch_percent": 90.7,
+    "max_abs_diff": "inf",
+    "group_count": "4",
+    "producer_chunks_per_group": "8",
+    "consumer_replicas_per_group": "8",
+    "logical_transfer_count": "256",
+    "first_16_logical_transfers": [
+      {
+        "consumer_replica": "0",
+        "destination_core": "0",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "1",
+        "destination_core": "4",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "2",
+        "destination_core": "8",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "3",
+        "destination_core": "12",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "4",
+        "destination_core": "16",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "5",
+        "destination_core": "20",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "6",
+        "destination_core": "24",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "7",
+        "destination_core": "28",
+        "group": "0",
+        "producer_chunk": "0",
+        "source_core": "0"
+      },
+      {
+        "consumer_replica": "0",
+        "destination_core": "0",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "1",
+        "destination_core": "4",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "2",
+        "destination_core": "8",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "3",
+        "destination_core": "12",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "4",
+        "destination_core": "16",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "5",
+        "destination_core": "20",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "6",
+        "destination_core": "24",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      },
+      {
+        "consumer_replica": "7",
+        "destination_core": "28",
+        "group": "0",
+        "producer_chunk": "1",
+        "source_core": "4"
+      }
+    ]
+  },
+  "conclusion": "Coordinate-derived logical transfer groups are now correct, but both tested physical lowerings are value-wrong. Remaining blocker is physical loop-scoped input-neighbor lowering consuming exact source/destination groups."
+}
