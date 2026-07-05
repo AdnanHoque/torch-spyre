@@ -61,6 +61,38 @@ consumer compute:     split includes x and out
 
 So the handoff changes both ownership and stick/layout form. A same-layout all-gather can be realized as ring movement, but this edge also needs a local source-layout-to-KERNEL-layout conversion before the matmul can consume the operand.
 
+## Local-Copy Diagnostic
+
+After the direct ring-to-final-KERNEL path failed, we tested whether the problem was simply that same-core pieces were being dropped. A diagnostic variant added an explicit same-core local-copy path using the existing `LX -> LXLUSUFIFO -> LX` mechanism while keeping the direct KERNEL all-gather experiment enabled.
+
+Run root:
+
+```text
+/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/min_stable_matmul_operand_broadcast_20260704_100506/kernel_neighbor_direct_localcopy_mixed_M16_013136
+```
+
+Diagnostic env:
+
+```text
+DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR=1
+DEEPTOOLS_MATMUL_OPERAND_BROADCAST_DIRECT_ALLGATHER_DIAGNOSTIC=1
+DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1
+DEEPTOOLS_LX_NEIGHBOR_MAX_RUN=8
+DEEPTOOLS_LX_NEIGHBOR_VIEW_PROBE=1
+```
+
+Result:
+
+```text
+ALLCLOSE False
+MAX_DIFF 4.0
+MISMATCH 4085 / 4096
+ROWMAP_OUT0 [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+ROWMAP_REF0 [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5, 3.75]
+```
+
+Interpretation: explicit local copying is not sufficient. The direct KERNEL path is wrong because it still bypasses the required loop-scoped layout conversion/restickify into the KERNEL operand format. The diagnostic code was reverted after this test.
+
 ## Correct Backend Hook
 
 The coarse DXP `dataOpdscs_` path can schedule `STCDPOpLx` and `ReStickifyOpLx` before a DL op, but that is the wrong granularity for Granite-scale attention. It materializes too much at once.
