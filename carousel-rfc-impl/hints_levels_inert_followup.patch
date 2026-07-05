@@ -1,0 +1,86 @@
+diff --git a/torch_spyre/_inductor/coarse_tile.py b/torch_spyre/_inductor/coarse_tile.py
+index 566ed7c..cf4225d 100644
+--- a/torch_spyre/_inductor/coarse_tile.py
++++ b/torch_spyre/_inductor/coarse_tile.py
+@@ -93,19 +93,34 @@ def _loop_var_to_ranges_pos(out_coords: list, sym: sympy.Symbol) -> int | None:
+ 
+ 
+ def _hints_levels(ops: list[Operation]) -> list[tuple]:
+-    """Build (hint_id, K, is_reduction) level triples from the first hinted op.
+-
+-    All ops in the group share the same hint IDs and split counts.  Any op
+-    with a non-None loop_var is representative.  Each op reads its own
+-    loop_var from dim_hints in _stamp_group.
++    """Build (hint_id, K, is_reduction) level triples for the group.
++
++    All ops in the group share the same hint IDs and split counts, so the
++    first op with a non-None loop_var fixes the level order, hint IDs, and
++    split counts.  Each op reads its own loop_var from dim_hints in
++    _stamp_group.
++
++    A level is a reduction level if the hinted dim is a reduction dim in *any*
++    op of the group — not just the representative op.  In a flash-style group
++    the leading pointwise op (e.g. keys*scale) iterates the dim as an output
++    dim while a later reduction (block_max / block_sum) reduces over it; taking
++    is_reduction from the first op alone would misclassify the whole level as
++    an output level and leave loop_tiled_reduction_dims empty.  OR-reducing
++    across ops classifies it correctly; _stamp_group still tiles each op's own
++    dim as output or reduction based on that op's own dim_hints.
+ 
+     Returns a list of (hint_id, count, is_reduction_level) triples, outermost
+-    first.  Previously this skipped is_reduction hints; it now includes them so
+-    that _stamp_group can divide reduction_ranges for reduction-dim tiling.
++    first.
+     """
++    reduces = {
++        h.hint_id
++        for op in ops
++        for h in getattr(op, "dim_hints", [])
++        if h.loop_var is not None and h.is_reduction
++    }
+     for op in ops:
+         levels = [
+-            (h.hint_id, sympy.Integer(h.split_count), h.is_reduction)
++            (h.hint_id, sympy.Integer(h.split_count), h.hint_id in reduces)
+             for h in getattr(op, "dim_hints", [])
+             if h.loop_var is not None
+         ]
+@@ -1059,22 +1074,24 @@ def _stamp_group(
+         op_tiled_dims: list[list[int]] = []
+         op_tiled_reduction_dims: list[list[int]] = []
+         for hint_id, count, is_reduction_level in levels:
+-            if is_reduction_level:
+-                rpos = hint_id_to_reduction_ranges_pos.get(hint_id)
++            rpos = hint_id_to_reduction_ranges_pos.get(hint_id)
++            opos = hint_id_to_ranges_pos.get(hint_id)
++            if is_reduction_level and rpos is not None:
++                # This op reduces over the hinted dim: tile its reduction range.
+                 op_tiled_dims.append([])
+-                op_tiled_reduction_dims.append([rpos] if rpos is not None else [])
+-                if isinstance(op.data, Reduction):
+-                    # NOTE: _divide_reduction_ranges mutates data.reduction_ranges
+-                    # before _validate_reduction_tiling runs in the later
+-                    # insert_tiling_propagation pass.  If validation raises (e.g.
+-                    # stick-dim tiling, Stage 2), the mutated ranges are never
+-                    # observed: the RuntimeError propagates uncaught through the
+-                    # pass runner and aborts compilation.
+-                    _divide_reduction_ranges(
+-                        op, count, [rpos] if rpos is not None else []
+-                    )
++                op_tiled_reduction_dims.append([rpos])
++                # NOTE: _divide_reduction_ranges mutates data.reduction_ranges
++                # before _validate_reduction_tiling runs in the later
++                # insert_tiling_propagation pass.  If validation raises (e.g.
++                # stick-dim tiling, Stage 2), the mutated ranges are never
++                # observed: the RuntimeError propagates uncaught through the
++                # pass runner and aborts compilation.
++                _divide_reduction_ranges(op, count, [rpos])
+             else:
+-                opos = hint_id_to_ranges_pos.get(hint_id)
++                # Output-dim tiling.  This covers plain output levels and, on a
++                # reduction level, ops that iterate the hinted dim as an output
++                # dim (e.g. the leading pointwise keys*scale of a flash group)
++                # — those still tile their output range, not a reduction range.
+                 op_tiled_dims.append([opos] if opos is not None else [])
+                 op_tiled_reduction_dims.append([])
+                 _divide_ranges(op, count, [opos] if opos is not None else [])

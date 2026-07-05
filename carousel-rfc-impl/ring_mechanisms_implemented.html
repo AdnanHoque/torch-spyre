@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ring-Aware Mechanisms Implemented</title>
+</head>
+<body>
+<style>
+.rab-root{--rab-bg:#0d1117;--rab-panel:#161b22;--rab-panel2:#1c2430;--rab-line:#2d3644;--rab-ink:#e6edf3;--rab-dim:#9aa7b4;--rab-fast:#3fb950;--rab-slow:#f0883e;--rab-warn:#d29922;--rab-blue:#58a6ff;--rab-purple:#bc8cff;--rab-red:#f85149;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--rab-ink);background:var(--rab-bg);line-height:1.55;padding:0 20px 80px;max-width:1080px;margin:0 auto;}
+.rab-root *{box-sizing:border-box;}
+.rab-hero{padding:54px 0 26px;border-bottom:1px solid var(--rab-line);}
+.rab-kicker{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--rab-blue);font-weight:700;margin-bottom:14px;}
+.rab-hero h1{font-size:40px;line-height:1.1;margin:0 0 16px;font-weight:800;letter-spacing:-.02em;}
+.rab-hero h1 em{font-style:normal;color:var(--rab-fast);}
+.rab-lede{font-size:17px;color:var(--rab-dim);max-width:760px;margin:0;}
+.rab-lede b{color:var(--rab-ink);font-weight:600;}
+.rab-section{margin-top:48px;}
+.rab-h2{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--rab-purple);font-weight:700;margin:0 0 18px;}
+.rab-physics{background:var(--rab-panel);border:1px solid var(--rab-line);border-radius:14px;padding:22px 22px 12px;}
+.rab-physcap{display:flex;flex-wrap:wrap;gap:14px;margin-top:6px;}
+.rab-physcap div{flex:1 1 220px;font-size:13px;color:var(--rab-dim);}
+.rab-physcap b{color:var(--rab-ink);}
+.rab-svgwrap{overflow-x:auto;}
+.rab-board{display:grid;grid-template-columns:1fr;gap:18px;}
+.rab-card{background:var(--rab-panel);border:1px solid var(--rab-line);border-radius:14px;padding:22px 24px;position:relative;overflow:hidden;}
+.rab-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;}
+.rab-card.done::before{background:var(--rab-fast);}
+.rab-card.partial::before{background:var(--rab-warn);}
+.rab-card.design::before{background:var(--rab-blue);}
+.rab-cardhead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px;}
+.rab-betno{font-size:12px;font-weight:700;letter-spacing:.1em;color:var(--rab-dim);}
+.rab-cardhead h3{font-size:21px;margin:0;font-weight:700;flex:1 1 auto;}
+.rab-badge{font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;padding:5px 11px;border-radius:20px;white-space:nowrap;}
+.rab-badge.done{background:rgba(63,185,80,.15);color:var(--rab-fast);border:1px solid rgba(63,185,80,.4);}
+.rab-badge.partial{background:rgba(210,153,34,.15);color:var(--rab-warn);border:1px solid rgba(210,153,34,.4);}
+.rab-badge.design{background:rgba(88,166,255,.15);color:var(--rab-blue);border:1px solid rgba(88,166,255,.4);}
+.rab-branch{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--rab-purple);margin-bottom:14px;}
+.rab-pf{display:grid;grid-template-columns:auto 1fr;gap:8px 14px;font-size:14px;margin-bottom:14px;}
+.rab-pf .lab{color:var(--rab-dim);font-weight:700;font-size:11px;letter-spacing:.08em;text-transform:uppercase;padding-top:2px;}
+.rab-pf code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:var(--rab-panel2);padding:1px 6px;border-radius:5px;color:var(--rab-blue);}
+.rab-verify{background:var(--rab-panel2);border:1px solid var(--rab-line);border-radius:9px;padding:12px 15px;font-size:13.5px;}
+.rab-verify .vt{font-size:11px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--rab-dim);margin-bottom:5px;}
+.rab-tag{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:2px 7px;border-radius:4px;vertical-align:middle;margin-left:3px;}
+.rab-tag.meas{background:rgba(63,185,80,.16);color:var(--rab-fast);}
+.rab-tag.model{background:rgba(188,140,255,.16);color:var(--rab-purple);}
+.rab-callout{background:linear-gradient(180deg,rgba(210,153,34,.08),rgba(210,153,34,.02));border:1px solid rgba(210,153,34,.45);border-radius:14px;padding:22px 24px;}
+.rab-callout h3{margin:0 0 6px;font-size:19px;color:var(--rab-warn);display:flex;align-items:center;gap:10px;}
+.rab-callout .verdict{font-size:22px;font-weight:800;color:var(--rab-red);margin:8px 0 12px;letter-spacing:-.01em;}
+.rab-callout p{margin:0 0 10px;font-size:14px;color:var(--rab-dim);}
+.rab-callout p b{color:var(--rab-ink);}
+.rab-callout code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:var(--rab-panel2);padding:1px 6px;border-radius:5px;color:var(--rab-blue);}
+.rab-blockers{margin:12px 0 0;padding-left:0;list-style:none;}
+.rab-blockers li{font-size:13.5px;color:var(--rab-dim);padding:8px 0 8px 26px;position:relative;border-top:1px solid var(--rab-line);}
+.rab-blockers li::before{content:"⛔";position:absolute;left:0;top:8px;font-size:13px;}
+.rab-blockers b{color:var(--rab-ink);}
+table.rab-tbl{width:100%;border-collapse:collapse;font-size:13.5px;}
+table.rab-tbl th{text-align:left;padding:10px 12px;border-bottom:2px solid var(--rab-line);color:var(--rab-dim);font-size:11px;letter-spacing:.08em;text-transform:uppercase;}
+table.rab-tbl td{padding:11px 12px;border-bottom:1px solid var(--rab-line);vertical-align:top;}
+.rab-chip{display:inline-block;font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:20px;white-space:nowrap;}
+.rab-chip.ok{background:rgba(63,185,80,.15);color:var(--rab-fast);border:1px solid rgba(63,185,80,.4);}
+.rab-chip.mod{background:rgba(188,140,255,.15);color:var(--rab-purple);border:1px solid rgba(188,140,255,.4);}
+.rab-chip.no{background:rgba(248,81,73,.13);color:var(--rab-red);border:1px solid rgba(248,81,73,.4);}
+.rab-foot{margin-top:48px;padding-top:22px;border-top:1px solid var(--rab-line);font-size:13px;color:var(--rab-dim);}
+.rab-foot b{color:var(--rab-ink);}
+.rab-mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;}
+</style>
+<div class="rab-root">
+
+<div class="rab-hero">
+  <div class="rab-kicker">torch-spyre · deeptools · ring-aware algorithms</div>
+  <h1>Three ring-aware bets,<br><em>turned into real code</em>.</h1>
+  <p class="rab-lede">Residency (pinning to LX) is the trivial floor. The interesting layer is <b>ring-aware algorithms</b> that respect what the fabric actually does: a uniform neighbor shift runs at <b>~130 GB/s</b>, an all-to-all scatter or linear fold hits a <b>~36 GB/s floor</b> — because <b>per-link transfer count</b> is the variable, not burst size. Each bet was scouted at its live code site, built in an isolated worktree, verified device-free where the deeptools boundary allowed, and pushed to the AdnanHoque fork as a branch (never a PR).</p>
+</div>
+
+<div class="rab-section">
+  <h2 class="rab-h2">The device physics these bets play by <span class="rab-tag meas">measured</span></h2>
+  <div class="rab-physics">
+    <div class="rab-svgwrap">
+    <svg viewBox="0 0 960 250" width="960" height="250" role="img" aria-label="Uniform shift 130 GB/s one transfer per link versus scatter 36 GB/s many per link">
+      <!-- FAST: uniform shift -->
+      <text x="30" y="30" fill="#3fb950" font-size="15" font-weight="700" font-family="sans-serif">Uniform p → p+1 shift · 1 transfer / link</text>
+      <text x="30" y="52" fill="#9aa7b4" font-size="13" font-family="sans-serif">multicast STCDPOpLx, live + proven</text>
+      <!-- nodes -->
+      <g font-family="monospace" font-size="12" fill="#e6edf3" text-anchor="middle">
+        <circle cx="70" cy="100" r="18" fill="#12281a" stroke="#3fb950" stroke-width="2"/><text x="70" y="105">c0</text>
+        <circle cx="190" cy="100" r="18" fill="#12281a" stroke="#3fb950" stroke-width="2"/><text x="190" y="105">c1</text>
+        <circle cx="310" cy="100" r="18" fill="#12281a" stroke="#3fb950" stroke-width="2"/><text x="310" y="105">c2</text>
+        <circle cx="430" cy="100" r="18" fill="#12281a" stroke="#3fb950" stroke-width="2"/><text x="430" y="105">c3</text>
+      </g>
+      <defs>
+        <marker id="rabFast" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="#3fb950"/></marker>
+        <marker id="rabSlow" markerWidth="8" markerHeight="8" refX="6.5" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 Z" fill="#f0883e"/></marker>
+      </defs>
+      <g stroke="#3fb950" stroke-width="3" marker-end="url(#rabFast)">
+        <line x1="90" y1="100" x2="170" y2="100"/>
+        <line x1="210" y1="100" x2="290" y2="100"/>
+        <line x1="330" y1="100" x2="410" y2="100"/>
+      </g>
+      <text x="250" y="150" fill="#3fb950" font-size="26" font-weight="800" font-family="sans-serif" text-anchor="middle">~130 GB/s</text>
+      <text x="250" y="172" fill="#9aa7b4" font-size="12" font-family="sans-serif" text-anchor="middle">fast band — one payload per link</text>
+
+      <!-- divider -->
+      <line x1="500" y1="20" x2="500" y2="230" stroke="#2d3644" stroke-width="1"/>
+
+      <!-- SLOW: scatter / fold -->
+      <text x="540" y="30" fill="#f0883e" font-size="15" font-weight="700" font-family="sans-serif">All-to-all scatter / linear fold-to-one</text>
+      <text x="540" y="52" fill="#9aa7b4" font-size="13" font-family="sans-serif">many transfers pile on one link</text>
+      <g font-family="monospace" font-size="12" fill="#e6edf3" text-anchor="middle">
+        <circle cx="600" cy="95" r="16" fill="#2a1a10" stroke="#f0883e" stroke-width="2"/><text x="600" y="99">c0</text>
+        <circle cx="600" cy="150" r="16" fill="#2a1a10" stroke="#f0883e" stroke-width="2"/><text x="600" y="154">c1</text>
+        <circle cx="600" cy="205" r="16" fill="#2a1a10" stroke="#f0883e" stroke-width="2"/><text x="600" y="209">c2</text>
+        <circle cx="820" cy="150" r="18" fill="#3a2410" stroke="#f0883e" stroke-width="2.5"/><text x="820" y="154">root</text>
+      </g>
+      <g stroke="#f0883e" stroke-width="2" marker-end="url(#rabSlow)">
+        <line x1="618" y1="93" x2="800" y2="143"/>
+        <line x1="618" y1="150" x2="798" y2="150"/>
+        <line x1="618" y1="207" x2="800" y2="158"/>
+      </g>
+      <text x="905" y="90" fill="#f0883e" font-size="26" font-weight="800" font-family="sans-serif" text-anchor="end">~36 GB/s</text>
+      <text x="905" y="112" fill="#9aa7b4" font-size="12" font-family="sans-serif" text-anchor="end">contention floor</text>
+    </svg>
+    </div>
+    <div class="rab-physcap">
+      <div><b>HBM is one flat space</b> (memId = −1, no channel affinity) — the fabric, not the memory, is where the ordering matters.</div>
+      <div><b>Matmul is weight-stationary</b>: M streams past resident weights, M is never a stick.</div>
+      <div><b>Cross-bundle wall</b>: LX does not persist across bundles — but a coarse-tile loop <em>is</em> one bundle, so ops inside co-bundle for free.</div>
+    </div>
+  </div>
+</div>
+
+<div class="rab-section">
+  <h2 class="rab-h2">The three-bet board</h2>
+  <div class="rab-board">
+
+    <!-- BET 2 -->
+    <div class="rab-card done">
+      <div class="rab-cardhead">
+        <span class="rab-betno">BET 2</span>
+        <h3>Per-link contention cost term</h3>
+        <span class="rab-badge done">Done</span>
+      </div>
+      <div class="rab-branch">ah/ring-cost-term · 2dfb2cc</div>
+      <div class="rab-pf">
+        <span class="lab">Problem</span>
+        <span>The matmul cost model priced every operand move at flat <code>bytes/128</code> with one lumped <code>cohort_penalty = max(1, max(m,n)/8)</code> on the whole byte total — so the device-proven <b>multicast</b> (one→many, ~130 GB/s) was priced identically to a scatter (~36 GB/s). Ring-aware wide-cohort plans were <b>unselectable</b>.</span>
+        <span class="lab">Fix</span>
+        <span>Decompose the HBM term into its three real streams. LHS <code>[M,K]</code> is identical across the n-cohort, RHS <code>[K,N]</code> identical across the m-cohort — both one→many multicasts, capped at the fast band by <code>_cohort_penalty(cohort, identical=True) = min(max(1,cohort/8), peak/130)</code>. The output tile is distinct (no penalty); a distinct-data scatter caps at <code>peak/36</code>.</span>
+        <span class="lab">Site</span>
+        <span><code>work_division.py</code> · <code>_cohort_penalty()</code>, HBM cost term</span>
+      </div>
+      <div class="rab-verify">
+        <div class="vt">Verification · device-free</div>
+        No-regression is <b>structural</b>: <code>_cohort_penalty</code> returns exactly <code>1.0</code> for cohort ≤ 8, so banked shared-weight / min-cores cases are byte-identical to before. <b>7/7</b> new unit tests <span class="rab-tag meas">measured</span> incl. the exact earlier mispricing — <code>(m2,n16)</code> now costs less than <code>(m8,n4)</code>. <b>153</b> device-free inductor tests pass <span class="rab-tag meas">measured</span>, ruff clean.
+      </div>
+    </div>
+
+    <!-- BET 1 -->
+    <div class="rab-card partial">
+      <div class="rab-cardhead">
+        <span class="rab-betno">BET 1</span>
+        <h3>Flash-in-a-loop</h3>
+        <span class="rab-badge partial">Partial</span>
+      </div>
+      <div class="rab-branch">ah/flash-ring · e47f268 + uncommitted _hints_levels follow-up</div>
+      <div class="rab-pf">
+        <span class="lab">Problem</span>
+        <span><code>test_flash.py:17</code> disallows coarse-tiling in Lk (<code>kv_block_size = Lk//1</code>), so the online-softmax loop runs <b>once</b> and materializes the full <code>[1,32,4096,4096]</code> scores = 32 MB/head — a ~12 ms HBM round-trip <span class="rab-tag meas">measured</span> that defeats the point of flash.</span>
+        <span class="lab">Fix</span>
+        <span>(a) an off-stick <code>scores.transpose(-1,-2).contiguous()</code> (mirroring paged) that clears the stick-incompat error and collapses scores to <code>[1,4,1024,4096]</code>; (b) a committed guard <code>_reduction_consumed_only_inside</code> that diverts flash reductions off the fill+combine path and marks per-tile <code>block_max</code>/<code>block_sum</code> as <code>per_tile_fixed</code> lx-resident scratch — so the running <code>(m,l,A)</code> state co-bundles for free.</span>
+        <span class="lab">Site</span>
+        <span><code>coarse_tile.py</code> · <code>_reduction_consumed_only_inside</code>, <code>_hints_levels</code> (L95), <code>_stamp_group</code> (L1061)</span>
+      </div>
+      <div class="rab-verify">
+        <div class="vt">Verification · honest gap</div>
+        The review caught that the committed guard was <b>inert</b>: <code>_hints_levels</code> read <code>is_reduction</code> from the first (pointwise) op, so Lk never routed through the reduction path. The follow-up fix is described in the callout below — <b>and it still does not fire.</b> Unit safety net: <b>146 passed / 0 failed</b> <span class="rab-tag meas">measured</span> with the fix applied.
+      </div>
+    </div>
+
+    <!-- BET 3 -->
+    <div class="rab-card design">
+      <div class="rab-cardhead">
+        <span class="rab-betno">BET 3</span>
+        <h3>LSE ring-fold merge</h3>
+        <span class="rab-badge design">Design-complete</span>
+      </div>
+      <div class="rab-branch">ah/flash-ring · b36236a · math + schedule validated, not compiler-wired</div>
+      <div class="rab-pf">
+        <span class="lab">Problem</span>
+        <span>Once Lk splits across <b>cores</b> (not just time), each core owns a KV shard and emits a partial <code>(m,l,O)</code>. A <b>linear fold-to-one root</b> piles full payload on one link → 36 GB/s floor.</span>
+        <span class="lab">Fix</span>
+        <span>A <b>neighbor reduce-scatter</b> (1 transfer/link) stays on the ~130 GB/s band <span class="rab-tag model">modeled</span> and lands the output <b>head-split</b> — exactly the layout the O-projection wants, relayout-free. Frontend composition is buildable now: ring order + per-hop <code>STCDPOpLx</code> cross-core move + a separate SFP <code>lse_combine</code> sub-run; fp32 <code>(m,l,A)</code> combine with dead-lane guard; P−1 combining hops + optional all-gather.</span>
+        <span class="lab">Site</span>
+        <span>Frontend composition; deeptools ask filed to <code>deeptools-change-log.md</code> — a single fused move-then-reduce hop, <em>only if</em> per-hop overhead proves too high (not hacked in).</span>
+      </div>
+      <div class="rab-verify">
+        <div class="vt">Verification · device-free reference</div>
+        <b>13/13</b> reference checks <span class="rab-tag meas">measured</span> incl. fold == single-pass softmax (rtol 1e-4), every round distance-1, head-split endpoint. Bandwidth advantage is <span class="rab-tag model">modeled</span> from the 130 vs 36 GB/s device physics.
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="rab-section">
+  <h2 class="rab-h2">Bet 1 in one picture · what "flash-in-a-loop" is supposed to do</h2>
+  <div class="rab-physics">
+    <div class="rab-svgwrap">
+    <svg viewBox="0 0 960 300" width="960" height="300" role="img" aria-label="Before: full 4096 by 4096 scores materialized. After: streamed Lk tile with persistent m l A state.">
+      <!-- BEFORE -->
+      <text x="30" y="28" fill="#f0883e" font-size="15" font-weight="700" font-family="sans-serif">BEFORE · loop runs once</text>
+      <rect x="40" y="45" width="180" height="180" fill="#2a1a10" stroke="#f0883e" stroke-width="2"/>
+      <text x="130" y="140" fill="#f0883e" font-size="14" font-family="monospace" text-anchor="middle">scores</text>
+      <text x="130" y="160" fill="#e6edf3" font-size="13" font-family="monospace" text-anchor="middle">[1,32,4096,4096]</text>
+      <text x="130" y="248" fill="#9aa7b4" font-size="12.5" font-family="sans-serif" text-anchor="middle">32 MB/head → HBM round-trip</text>
+      <text x="130" y="266" fill="#f0883e" font-size="13" font-family="sans-serif" text-anchor="middle" font-weight="700">~12 ms</text>
+
+      <!-- arrow -->
+      <defs>
+        <marker id="rabBig" markerWidth="12" markerHeight="12" refX="9" refY="4" orient="auto"><path d="M0,0 L9,4 L0,8 Z" fill="#58a6ff"/></marker>
+      </defs>
+      <line x1="255" y1="135" x2="345" y2="135" stroke="#58a6ff" stroke-width="3" marker-end="url(#rabBig)"/>
+      <text x="300" y="122" fill="#58a6ff" font-size="12" font-family="sans-serif" text-anchor="middle">transpose</text>
+      <text x="300" y="158" fill="#58a6ff" font-size="12" font-family="sans-serif" text-anchor="middle">+ tile Lk</text>
+
+      <!-- AFTER -->
+      <text x="380" y="28" fill="#3fb950" font-size="15" font-weight="700" font-family="sans-serif">AFTER · online-softmax loop over Lk tiles</text>
+      <!-- streamed tiles -->
+      <g>
+        <rect x="390" y="55" width="42" height="150" fill="#12281a" stroke="#3fb950" stroke-width="2"/>
+        <rect x="440" y="55" width="42" height="150" fill="#12281a" stroke="#3fb950" stroke-width="1.4" opacity=".6"/>
+        <rect x="490" y="55" width="42" height="150" fill="#12281a" stroke="#3fb950" stroke-width="1.4" opacity=".4"/>
+        <rect x="540" y="55" width="42" height="150" fill="#12281a" stroke="#3fb950" stroke-width="1.4" opacity=".25"/>
+      </g>
+      <text x="486" y="228" fill="#3fb950" font-size="13" font-family="monospace" text-anchor="middle">streamed tile [1,4,1024,Lk_blk]</text>
+      <text x="486" y="246" fill="#9aa7b4" font-size="12" font-family="sans-serif" text-anchor="middle">one SDSC bundle — no full-scores materialization</text>
+
+      <!-- persistent state -->
+      <rect x="640" y="70" width="290" height="120" rx="10" fill="#161b22" stroke="#bc8cff" stroke-width="2"/>
+      <text x="785" y="95" fill="#bc8cff" font-size="13" font-weight="700" font-family="sans-serif" text-anchor="middle">LX-resident running state</text>
+      <g font-family="monospace" font-size="14" fill="#e6edf3" text-anchor="middle">
+        <text x="690" y="140">m</text><text x="785" y="140">l</text><text x="880" y="140">A</text>
+      </g>
+      <text x="785" y="168" fill="#9aa7b4" font-size="11.5" font-family="sans-serif" text-anchor="middle">(max, denom, accum) co-bundle for free</text>
+      <!-- loop arrow -->
+      <path d="M640,130 C610,130 600,205 640,205 L925,205 C955,205 950,130 930,130" fill="none" stroke="#bc8cff" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#rabBig)"/>
+      <text x="785" y="222" fill="#bc8cff" font-size="11.5" font-family="sans-serif" text-anchor="middle">persists across tile iterations (same bundle)</text>
+    </svg>
+    </div>
+  </div>
+</div>
+
+<div class="rab-section">
+  <h2 class="rab-h2">Follow-up fix · the honest outcome</h2>
+  <div class="rab-callout">
+    <h3>⚠️ The <span class="rab-mono">_hints_levels</span> guard — does it fire now?</h3>
+    <div class="verdict">No. Still inert. Nothing was committed.</div>
+    <p><b>The fix is logically correct</b> and was applied as two coupled edits in <code>coarse_tile.py</code> (left <b>uncommitted</b> in the worktree, no commit created):</p>
+    <p>1. <code>_hints_levels</code> (L95) now <b>OR-reduces</b> <code>is_reduction</code> across every op in the group, so a level is a reduction level when the hinted dim reduces in <em>any</em> op (e.g. <code>block_max</code>/<code>block_sum</code> over Lk), not just the leading pointwise <code>keys*scale</code>.<br>
+    2. <code>_stamp_group</code> (L1061) now chooses the branch <b>per-op</b>, not from the global level flag — required because once the level flips to reduction, the leading pointwise would get <code>rpos=None</code> and be left un-tiled (iterating full Lk every loop). This is exactly the safety adjustment the task flagged as conditional — <b>it did not hold on its own.</b></p>
+    <p><b>Why it can't be exercised e2e</b> — both vehicles exhausted:</p>
+    <ul class="rab-blockers">
+      <li><b>Faithful probe</b> (<code>tiles={"Lk"}</code>) aborts at <code>optimize_restickify_locations</code> (pass idx 2) on <code>buf12</code>: "no mechanism to gather elements from multiple sticks into single stick" (the sparse <code>amax(dim=-1)</code> real_max/denominator chain). <code>_maybe_coarse_tile</code> is <b>pass idx 10 — coarse_tile never runs.</b> Identical on base <code>b36236a</code>, guard <code>e47f268</code>, and the fix → pre-existing, cross-commit.</li>
+      <li><b>Reachable e2e test</b> (<code>test_hint_flash_attention</code>, tiles Lk by 2) compiles fully and reaches coarse_tile — but every stamp is H-only (<code>loop_tiled_dims=[[1]]</code>, 0 fill/combine ops). The group's representative op has <b>Lk range=0 / loop_var=None</b>, so Lk never becomes a level. <code>_hints_levels</code> only reclassifies <em>existing</em> levels, so the OR-reduce is moot. Decisive ablation: base vs fix stamps are <b>byte-identical</b>.</li>
+    </ul>
+    <p style="margin-top:14px;"><b>Per the task's own rule</b> ("if it still does not fire, commit nothing") the edit sits uncommitted for inspection. Two upstream blockers — both independent of this change — gate firing: (1) <code>optimize_restickify</code> must handle the sparse multi-stick→single-stick gather; (2) <code>assign_dim_hints</code> must surface an Lk level whose representative op iterates Lk while a peer reduces it. Note the harvestenv restickify abort is <em>far upstream</em> of the known deeptools/VFIO end-of-pipeline abort — likely the author's confirming run used a different LD/senlib env where restickify succeeded.</p>
+  </div>
+</div>
+
+<div class="rab-section">
+  <h2 class="rab-h2">Status ledger · every claim tagged</h2>
+  <div class="rab-svgwrap">
+  <table class="rab-tbl">
+    <thead>
+      <tr><th>Bet / claim</th><th>Branch · commit</th><th>Evidence</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><b>Bet 2</b> — per-link contention cost term; wide-cohort plans selectable</td>
+        <td class="rab-mono">ah/ring-cost-term · 2dfb2cc</td>
+        <td>7/7 unit tests, 153 inductor tests pass, structural no-regression (penalty=1.0 ≤ cohort 8) <span class="rab-tag meas">measured</span></td>
+        <td><span class="rab-chip ok">device-free verified</span></td>
+      </tr>
+      <tr>
+        <td><b>Bet 1</b> — transpose collapses scores <code>[1,32,4096,4096]</code>→<code>[1,4,1024,4096]</code></td>
+        <td class="rab-mono">ah/flash-ring · e47f268</td>
+        <td>observed on faithful probe before the restickify abort <span class="rab-tag meas">measured</span></td>
+        <td><span class="rab-chip ok">device-free verified</span></td>
+      </tr>
+      <tr>
+        <td><b>Bet 1</b> — <code>_hints_levels</code> follow-up routes flash reduction through the guard</td>
+        <td class="rab-mono">uncommitted · on b36236a</td>
+        <td>146/146 unit tests green <span class="rab-tag meas">measured</span>, but guard never observed firing on any reachable graph</td>
+        <td><span class="rab-chip no">still inert — uncommitted</span></td>
+      </tr>
+      <tr>
+        <td><b>Bet 1</b> — online-softmax <code>(m,l,A)</code> stays LX-resident (coarse-loop = 1 bundle)</td>
+        <td class="rab-mono">ah/flash-ring · e47f268</td>
+        <td>guard committed but inert; property holds by bundle construction <span class="rab-tag model">modeled</span></td>
+        <td><span class="rab-chip mod">modeled</span></td>
+      </tr>
+      <tr>
+        <td><b>Bet 3</b> — LSE fold == single-pass softmax; distance-1 rounds; head-split endpoint</td>
+        <td class="rab-mono">ah/flash-ring · b36236a</td>
+        <td>13/13 reference checks (rtol 1e-4) <span class="rab-tag meas">measured</span></td>
+        <td><span class="rab-chip ok">device-free verified</span></td>
+      </tr>
+      <tr>
+        <td><b>Bet 3</b> — neighbor reduce-scatter stays on ~130 GB/s band; relayout-free O-proj</td>
+        <td class="rab-mono">ah/flash-ring · b36236a</td>
+        <td>bandwidth from device physics; schedule composed, not compiler-wired <span class="rab-tag model">modeled</span></td>
+        <td><span class="rab-chip mod">modeled</span></td>
+      </tr>
+      <tr>
+        <td><b>Bet 1/3</b> — full flash e2e on device (both blocked by upstream restickify + dim-hint gaps)</td>
+        <td class="rab-mono">—</td>
+        <td>never reached coarse_tile / never wired into a bundle</td>
+        <td><span class="rab-chip no">unverified</span></td>
+      </tr>
+      <tr>
+        <td><b>Physics</b> — 130 GB/s shift vs 36 GB/s scatter; per-link count is the variable</td>
+        <td class="rab-mono">prior device runs</td>
+        <td>measured on the fabric <span class="rab-tag meas">measured</span></td>
+        <td><span class="rab-chip ok">device-free verified</span></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="rab-foot">
+  <b>Throughline.</b> Residency is the floor; ring-aware algorithms are the layer above it. <b>Bet 2</b> makes ring-aware plans <em>selectable at all</em> — done and structurally safe. <b>Bet 1</b> exploits coarse-tile-loop-is-one-bundle to keep online-softmax state resident with no new primitive — prototype-now, but the guard is still inert against two upstream blockers, so nothing was committed. <b>Bet 3</b> is the genuinely novel collective — a neighbor reduce-scatter fold on the fast band, design-complete with a precise, un-hacked deeptools ask. Two of three are pure-inductor prototypes; one is design-complete. All numbers above are tagged <span class="rab-tag meas">measured</span> or <span class="rab-tag model">modeled</span>; nothing here was device-run e2e.
+</div>
+
+</div>
+</body>
+</html>
