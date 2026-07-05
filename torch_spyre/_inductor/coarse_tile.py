@@ -411,7 +411,27 @@ def _propagate_tiled_op(
             dims for dims in getattr(loop_info, "loop_tiled_reduction_dims", [])
         )
         if has_tiled_reduction:
-            _propagate_tiled_reduction_op(op, operations)
+            if _reduction_consumed_only_inside(op, operations):
+                # Flash-style online-softmax: the per-tile block_max / block_sum
+                # feed the in-loop correction chain (the user-written
+                # maximum/exp/mul/add merge) and are discarded each iteration;
+                # the running (m, l, A) state is carried by copy_ buffers.  The
+                # full reduction result is never needed after the loop, so skip
+                # the accum buffer, fill, and combine — just mark the per-tile
+                # output loop-internal scratch so the unroller reuses its
+                # address every iteration.
+                from .ir import FixedTiledLayout
+
+                if not isinstance(op.layout, FixedTiledLayout):
+                    raise RuntimeError(
+                        f"coarse_tile: inside-only tiled reduction "
+                        f"{op.get_name()!r} has layout "
+                        f"{type(op.layout).__name__}, expected FixedTiledLayout; "
+                        "cannot mark per_tile_fixed"
+                    )
+                op.layout.per_tile_fixed = True
+            else:
+                _propagate_tiled_reduction_op(op, operations)
             return
 
     if loop_info is None:
@@ -544,6 +564,28 @@ def _has_inside_consumers(
         if _reads_buffer(op, buf_name):
             return True
     return False
+
+
+def _reduction_consumed_only_inside(
+    op: ComputedBuffer,
+    operations: list[Operation],
+) -> bool:
+    """Return True if a tiled reduction's output feeds only in-loop consumers.
+
+    Used to divert flash-style reductions away from the fill+combine path.
+    The gate is intentionally exact — inside consumers present, zero outside
+    consumers, and not a graph output — so plain outside-consumed reductions
+    (whose full result IS needed after the loop) still take the accumulation
+    path and their result is never silently dropped.
+    """
+    loop_group_id = op.loop_info.loop_group_id
+    buf_name = op.get_name()
+    outside_consumers, is_graph_output = _find_outside_consumers(
+        buf_name, loop_group_id, operations
+    )
+    if outside_consumers or is_graph_output:
+        return False
+    return _has_inside_consumers(buf_name, loop_group_id, operations)
 
 
 def _graph_output_names() -> set[str]:
