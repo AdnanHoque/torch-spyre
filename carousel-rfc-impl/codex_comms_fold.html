@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codex comms-collectives fold</title>
+</head>
+<body>
+<style>
+.cxr-root{
+  --cxr-ground:#eef2f6;
+  --cxr-paper:#f9fbfd;
+  --cxr-ink:#141d27;
+  --cxr-mut:#54657a;
+  --cxr-line:#d3dde6;
+  --cxr-codex:#1f6f8c;
+  --cxr-codex-bg:#e2f0f4;
+  --cxr-ours:#6a3fb0;
+  --cxr-ours-bg:#eee7f8;
+  --cxr-copper:#bd5f1c;
+  --cxr-copper-bg:#f7 e8;
+  --cxr-good:#2c7a56;
+  --cxr-warn:#a9761a;
+  --cxr-crit:#b23a34;
+  --cxr-mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  --cxr-sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--cxr-ink);
+  background:
+    linear-gradient(var(--cxr-ground),var(--cxr-ground));
+  font-family:var(--cxr-sans);
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+  padding:0 0 5rem;
+}
+.cxr-root *{box-sizing:border-box;}
+.cxr-wrap{max-width:1120px;margin:0 auto;padding:0 1.5rem;}
+.cxr-eyebrow{
+  font-family:var(--cxr-mono);
+  font-size:.72rem;
+  letter-spacing:.22em;
+  text-transform:uppercase;
+  color:var(--cxr-mut);
+  margin:0;
+}
+.cxr-root h2{
+  font-size:1.55rem;
+  letter-spacing:-.015em;
+  text-wrap:balance;
+  margin:.35rem 0 .35rem;
+  font-weight:680;
+}
+.cxr-root h3{font-size:1.05rem;letter-spacing:-.01em;margin:0 0 .3rem;font-weight:650;}
+.cxr-root p{margin:0 0 .8rem;}
+.cxr-lead{color:var(--cxr-mut);max-width:66ch;}
+
+/* HERO */
+.cxr-hero{
+  background:
+    radial-gradient(120% 140% at 88% -10%, rgba(31,111,140,.16), transparent 55%),
+    radial-gradient(120% 140% at 6% 120%, rgba(106,63,176,.15), transparent 55%),
+    linear-gradient(160deg,#0f1922,#182634);
+  color:#eaf1f6;
+  padding:3.2rem 0 2.6rem;
+  border-bottom:1px solid #0a1219;
+  position:relative;
+  overflow:hidden;
+}
+.cxr-hero .cxr-eyebrow{color:#8fb6c4;}
+.cxr-hero h1{
+  font-size:clamp(1.9rem,4.4vw,3rem);
+  line-height:1.06;
+  letter-spacing:-.025em;
+  text-wrap:balance;
+  margin:.6rem 0 1rem;
+  font-weight:720;
+  max-width:20ch;
+}
+.cxr-hero h1 .cxr-hl{
+  background:linear-gradient(180deg,transparent 62%, rgba(189,95,28,.45) 62%);
+  padding:0 .06em;
+}
+.cxr-hero-sub{color:#b7c8d3;max-width:64ch;font-size:1.05rem;}
+.cxr-verdict{
+  display:inline-flex;align-items:center;gap:.5rem;
+  margin-top:1.4rem;padding:.5rem .9rem;
+  border:1px solid rgba(143,182,196,.35);border-radius:2rem;
+  font-family:var(--cxr-mono);font-size:.78rem;letter-spacing:.02em;color:#dff0f6;
+  background:rgba(31,111,140,.16);
+}
+.cxr-verdict b{color:#fff;font-weight:640;}
+.cxr-ringfig{position:absolute;right:-40px;top:50%;transform:translateY(-50%);opacity:.5;pointer-events:none;}
+@media(max-width:720px){.cxr-ringfig{display:none;}}
+
+/* SECTION spacing */
+.cxr-sec{padding-top:2.8rem;}
+.cxr-sec > .cxr-wrap > .cxr-lead{margin-bottom:1.4rem;}
+
+/* CHIPS */
+.cxr-chip{
+  display:inline-flex;align-items:center;gap:.32em;
+  font-family:var(--cxr-mono);font-size:.66rem;font-weight:600;
+  letter-spacing:.06em;text-transform:uppercase;
+  padding:.2em .55em;border-radius:.35em;white-space:nowrap;
+  border:1px solid transparent;line-height:1.2;
+}
+.cxr-chip::before{content:"";width:.5em;height:.5em;border-radius:50%;background:currentColor;flex:0 0 auto;}
+.cxr-chip.same{color:#8a3f2f;background:#f6e4de;border-color:#e6c2b6;}
+.cxr-chip.comp{color:#1f6f8c;background:var(--cxr-codex-bg);border-color:#bcdde6;}
+.cxr-chip.indep{color:#5a6577;background:#e6e9ee;border-color:#cdd3dc;}
+.cxr-chip.extend{color:var(--cxr-ours);background:var(--cxr-ours-bg);border-color:#d8c9ef;}
+.cxr-chip.blocker{color:#b23a34;background:#f7e2e0;border-color:#eac3bf;}
+/* number-provenance tags */
+.cxr-tag{
+  display:inline-flex;align-items:center;
+  font-family:var(--cxr-mono);font-size:.6rem;font-weight:600;
+  letter-spacing:.08em;text-transform:uppercase;
+  padding:.12em .42em;border-radius:.3em;vertical-align:middle;
+  border:1px solid transparent;
+}
+.cxr-tag.meas{color:#8a4a12;background:#f4e6d4;border-color:#e6cfac;}
+.cxr-tag.struct{color:#2c5566;background:#dceef3;border-color:#bfdde5;}
+.cxr-tag.model{color:#54408a;background:#e8e0f6;border-color:#d3c5ee;}
+
+/* MAPPING TABLE */
+.cxr-map{display:flex;flex-direction:column;gap:.9rem;}
+.cxr-row{
+  background:var(--cxr-paper);
+  border:1px solid var(--cxr-line);
+  border-radius:.7rem;
+  overflow:hidden;
+}
+.cxr-row-head{
+  display:flex;align-items:center;justify-content:space-between;gap:1rem;
+  padding:.7rem 1rem;
+  border-bottom:1px solid var(--cxr-line);
+  background:linear-gradient(180deg,#f2f6f9,#eaf0f4);
+}
+.cxr-row-head .cxr-rn{font-family:var(--cxr-mono);font-size:.72rem;color:var(--cxr-mut);letter-spacing:.1em;}
+.cxr-row-body{display:grid;grid-template-columns:1fr auto 1fr;gap:0;}
+@media(max-width:800px){.cxr-row-body{grid-template-columns:1fr;}}
+.cxr-cell{padding:.9rem 1.1rem;}
+.cxr-cell.codex{border-right:1px solid var(--cxr-line);}
+.cxr-cell.codex .cxr-side{color:var(--cxr-codex);}
+.cxr-cell.ours .cxr-side{color:var(--cxr-ours);}
+.cxr-side{font-family:var(--cxr-mono);font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;margin:0 0 .35rem;}
+.cxr-cell h4{margin:0 0 .3rem;font-size:.92rem;font-weight:640;letter-spacing:-.005em;}
+.cxr-cell p{margin:0;font-size:.86rem;color:var(--cxr-mut);}
+.cxr-mid{
+  display:flex;align-items:center;justify-content:center;
+  padding:.6rem;border-right:1px solid var(--cxr-line);
+  min-width:112px;background:#fbfdfe;
+}
+@media(max-width:800px){
+  .cxr-cell.codex,.cxr-mid{border-right:0;border-bottom:1px solid var(--cxr-line);}
+  .cxr-mid{min-width:0;}
+}
+.cxr-detail{padding:.75rem 1.1rem;border-top:1px dashed var(--cxr-line);font-size:.83rem;color:#3f4d5c;background:#fbfcfe;}
+.cxr-detail b{color:var(--cxr-ink);font-weight:640;}
+
+/* MEASURED PANEL */
+.cxr-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;}
+@media(max-width:760px){.cxr-metrics{grid-template-columns:1fr;}}
+.cxr-metric{
+  background:var(--cxr-paper);border:1px solid var(--cxr-line);border-radius:.7rem;
+  padding:1.1rem 1.15rem;position:relative;
+}
+.cxr-metric .cxr-mlabel{font-family:var(--cxr-mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--cxr-mut);margin:0 0 .5rem;}
+.cxr-flow{display:flex;align-items:baseline;gap:.5rem;font-variant-numeric:tabular-nums;}
+.cxr-num{font-family:var(--cxr-mono);font-weight:640;letter-spacing:-.01em;}
+.cxr-num.big{font-size:1.9rem;color:var(--cxr-ink);}
+.cxr-num.from{font-size:1.15rem;color:var(--cxr-mut);}
+.cxr-num.to{font-size:1.15rem;color:var(--cxr-copper);}
+.cxr-arrow{color:var(--cxr-mut);font-size:1rem;}
+.cxr-metric .cxr-unit{font-family:var(--cxr-mono);font-size:.72rem;color:var(--cxr-mut);}
+.cxr-metric .cxr-mfoot{margin:.7rem 0 0;font-size:.8rem;color:#3f4d5c;}
+.cxr-tagrow{display:flex;gap:.4rem;margin-top:.7rem;flex-wrap:wrap;}
+
+/* BLOCKERS */
+.cxr-blk{
+  background:linear-gradient(180deg,#fbf3f2,#f8ecea);
+  border:1px solid #ecc9c4;border-left:4px solid var(--cxr-crit);
+  border-radius:.7rem;padding:1.2rem 1.3rem;margin-bottom:1rem;
+}
+.cxr-blk h3{color:#8f2e28;display:flex;align-items:center;gap:.5rem;}
+.cxr-blk-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:.8rem;}
+@media(max-width:760px){.cxr-blk-grid{grid-template-columns:1fr;}}
+.cxr-blk-col{background:#fffdfd;border:1px solid #ecd4d1;border-radius:.5rem;padding:.75rem .85rem;}
+.cxr-blk-col .cxr-who{font-family:var(--cxr-mono);font-size:.64rem;letter-spacing:.1em;text-transform:uppercase;margin:0 0 .35rem;}
+.cxr-blk-col.codex .cxr-who{color:var(--cxr-codex);}
+.cxr-blk-col.ours .cxr-who{color:var(--cxr-ours);}
+.cxr-blk-col p{margin:0;font-size:.82rem;color:#43505e;}
+.cxr-blk-col code{font-family:var(--cxr-mono);font-size:.76rem;background:#f1e3e1;padding:.05em .3em;border-radius:.25em;color:#7a352f;}
+.cxr-impl{margin-top:.85rem;padding:.7rem .9rem;background:#241318;color:#f3e3e0;border-radius:.5rem;font-size:.84rem;}
+.cxr-impl b{color:#ffd9b0;}
+
+/* NEXT STEPS STRIP */
+.cxr-steps{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;}
+@media(max-width:820px){.cxr-steps{grid-template-columns:1fr;}}
+.cxr-step{
+  background:var(--cxr-paper);border:1px solid var(--cxr-line);border-radius:.7rem;
+  padding:1.1rem 1.15rem;display:flex;flex-direction:column;gap:.55rem;
+  border-top:3px solid var(--cxr-ours);
+}
+.cxr-step.b1{border-top-color:var(--cxr-mut);}
+.cxr-step.b2{border-top-color:var(--cxr-good);}
+.cxr-step.b3{border-top-color:var(--cxr-ours);}
+.cxr-step .cxr-bet{font-family:var(--cxr-mono);font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--cxr-mut);margin:0;}
+.cxr-step h4{margin:0;font-size:.98rem;font-weight:650;letter-spacing:-.01em;}
+.cxr-step .cxr-move{font-size:.84rem;color:#3f4d5c;margin:0;}
+.cxr-step ul{margin:.15rem 0 0;padding-left:1.05rem;font-size:.82rem;color:#43505e;}
+.cxr-step li{margin-bottom:.3rem;}
+.cxr-verdchip{align-self:flex-start;}
+
+/* LANES legend */
+.cxr-legend{display:flex;flex-wrap:wrap;gap:.6rem 1.2rem;padding:1rem 1.1rem;background:var(--cxr-paper);border:1px solid var(--cxr-line);border-radius:.6rem;margin-bottom:1.4rem;font-size:.8rem;}
+.cxr-legend .cxr-lg{display:flex;align-items:center;gap:.45rem;color:var(--cxr-mut);}
+.cxr-swatch{width:.85rem;height:.85rem;border-radius:.2rem;flex:0 0 auto;}
+.cxr-foot{margin-top:3rem;padding-top:1.2rem;border-top:1px solid var(--cxr-line);font-size:.76rem;color:var(--cxr-mut);font-family:var(--cxr-mono);}
+.cxr-foot span{color:var(--cxr-copper);}
+</style>
+
+<div class="cxr-root">
+
+  <header class="cxr-hero">
+    <svg class="cxr-ringfig" width="340" height="340" viewBox="0 0 340 340" aria-hidden="true">
+      <circle cx="170" cy="170" r="120" fill="none" stroke="#2f6f8f" stroke-width="1.2" opacity=".6"/>
+      <circle cx="170" cy="170" r="150" fill="none" stroke="#6a3fb0" stroke-width="1" opacity=".4" stroke-dasharray="3 6"/>
+      <g fill="#8fb6c4">
+        <circle cx="170" cy="50" r="5"/><circle cx="255" cy="85" r="5"/><circle cx="290" cy="170" r="5"/>
+        <circle cx="255" cy="255" r="5"/><circle cx="170" cy="290" r="5"/><circle cx="85" cy="255" r="5"/>
+        <circle cx="50" cy="170" r="5"/><circle cx="85" cy="85" r="5"/>
+      </g>
+      <path d="M170 50 A120 120 0 0 1 255 85" fill="none" stroke="#bd5f1c" stroke-width="2.4"/>
+    </svg>
+    <div class="cxr-wrap">
+      <p class="cxr-eyebrow">Ring substrate · convergence brief · for torch-spyre / deeptools</p>
+      <h1>Codex is building the <span class="cxr-hl">mechanism half</span> of the exact ring substrate our three bets attack.</h1>
+      <p class="cxr-hero-sub">Codex's <code>ah/comms-collectives</code> work makes the on-chip collective <b>legal and value-correct</b> via DLDSC metadata + backend synthesis. Our three ring bets attack the <b>same substrate</b> from the selectability and arithmetic-collective sides. Strongly convergent — not competing.</p>
+      <div class="cxr-verdict">
+        <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7l3.5 3.5L12 3.5" fill="none" stroke="#7fe0b4" stroke-width="2"/></svg>
+        <span><b>3 seams to converge hard</b>, 1 lane we own alone</span>
+      </div>
+    </div>
+  </header>
+
+  <section class="cxr-sec">
+    <div class="cxr-wrap">
+      <p class="cxr-eyebrow">The mapping</p>
+      <h2>Codex lane vs. our mechanism</h2>
+      <p class="cxr-lead">Five edges where the two bodies of work meet. The relationship chip states whether it is the same class, complementary halves, our extension of a lane codex left open, or genuinely independent.</p>
+
+      <div class="cxr-legend">
+        <span class="cxr-lg"><span class="cxr-swatch" style="background:#1f6f8c"></span>codex lane — mechanism / lowering (DLDSC)</span>
+        <span class="cxr-lg"><span class="cxr-swatch" style="background:#6a3fb0"></span>our mechanism — selectability / arithmetic</span>
+        <span class="cxr-lg"><span class="cxr-swatch" style="background:#bd5f1c"></span>measured hardware number</span>
+      </div>
+
+      <div class="cxr-map">
+
+        <!-- ROW 1 -->
+        <article class="cxr-row">
+          <div class="cxr-row-head">
+            <span class="cxr-rn">EDGE 01 · pick vs. make-legal</span>
+            <span class="cxr-chip comp">complement</span>
+          </div>
+          <div class="cxr-row-body">
+            <div class="cxr-cell codex">
+              <p class="cxr-side">Codex lane</p>
+              <h4>PR1 scatter — DLDSC metadata insertion</h4>
+              <p>1:1 disjoint same-layout ownership relayout. Rewrites DLDSC metadata (not Torch graph nodes) so Deeptools inserts the LX move. <b>+1.065×</b> Granite S=512.</p>
+            </div>
+            <div class="cxr-mid"><span class="cxr-chip comp">complement</span></div>
+            <div class="cxr-cell ours">
+              <p class="cxr-side">Our mechanism</p>
+              <h4>Bet 2 — per-link contention cost term</h4>
+              <p><code>ah/ring-cost-term</code>, done + 7/7 unit tests. Prices identical-operand multicast at ~130 GB/s vs distinct-data scatter at the ~36 GB/s floor — the selectability layer.</p>
+            </div>
+          </div>
+          <p class="cxr-detail">Codex makes the move <b>legal</b>; nothing in his lane prices it so the planner <b>prefers</b> it — he lists reshard-aware work-division as future intent. Our cost term is exactly that missing half. Non-overlapping halves of one pipeline.</p>
+        </article>
+
+        <!-- ROW 2 -->
+        <article class="cxr-row">
+          <div class="cxr-row-head">
+            <span class="cxr-rn">EDGE 02 · same-named pass, different subclass</span>
+            <span class="cxr-chip indep">independent · refuted link</span>
+          </div>
+          <div class="cxr-row-body">
+            <div class="cxr-cell codex">
+              <p class="cxr-side">Codex lane</p>
+              <h4>Flash restickify-on (layout relayout)</h4>
+              <p>32 <code>ReStickifyOpHBM</code> → 32 <code>ReStickifyOpLx</code>, a layout-form change on a <b>dense</b> operand. Structural transform proven.</p>
+            </div>
+            <div class="cxr-mid"><span class="cxr-chip indep">independent</span></div>
+            <div class="cxr-cell ours">
+              <p class="cxr-side">Our mechanism</p>
+              <h4>Bet 1 — flash-in-a-loop</h4>
+              <p>Blocked at <code>optimize_restickify</code> gathering the <b>sparse</b> <code>amax(dim=-1)</code> real_max/denominator multi-stick→single-stick — a reduction. Lk also not surfaced as a tiling level.</p>
+            </div>
+          </div>
+          <p class="cxr-detail"><b>Refutes the hopeful connection.</b> Codex's machinery relayouts a dense operand's stick-form; our wall is a many:1 reduction gather — which codex's own taxonomy parks in the uncovered reduce lane. Same pass name, different subclass; his handle does not and by his taxonomy cannot gather our amax.</p>
+        </article>
+
+        <!-- ROW 3 -->
+        <article class="cxr-row">
+          <div class="cxr-row-head">
+            <span class="cxr-rn">EDGE 03 · byte-for-byte the same class</span>
+            <span class="cxr-chip same">same thing</span>
+          </div>
+          <div class="cxr-row-body">
+            <div class="cxr-cell codex">
+              <p class="cxr-side">Codex lane</p>
+              <h4>matmul_operand_broadcast / kernel-neighbor carousel</h4>
+              <p>all_gather_replicate + layout_conversion into a <b>KERNEL</b> matmul operand. Hits the AV value-operand (Tensor1 / buf21). <b>Active blocker.</b></p>
+            </div>
+            <div class="cxr-mid"><span class="cxr-chip same">same thing</span></div>
+            <div class="cxr-cell ours">
+              <p class="cxr-side">Our mechanism</p>
+              <h4>Attention all-gather substrate</h4>
+              <p>QK<sup>T</sup> mul(K)→BMM multicast <code>STCDPOpLx</code>, 8 K-shards → full K replicated to the cohort. P0 PASS; hits the QK<sup>T</sup> K-operand.</p>
+            </div>
+          </div>
+          <p class="cxr-detail">Same mechanism, same backend region — different operand only. Both have a <b>passing/archived correct run</b> (codex <code>kernel_neighbor_carousel_M4</code> ALLCLOSE; our P0 PASS) that the production loop-scoped path can't reproduce clean. Both stuck in the DCG coordinate→placement layer for <code>DsTypes::KERNEL</code>.</p>
+        </article>
+
+        <!-- ROW 4 -->
+        <article class="cxr-row">
+          <div class="cxr-row-head">
+            <span class="cxr-rn">EDGE 04 · the uncovered lane</span>
+            <span class="cxr-chip extend">ours extends theirs</span>
+          </div>
+          <div class="cxr-row-body">
+            <div class="cxr-cell codex">
+              <p class="cxr-side">Codex lane</p>
+              <h4>Reduce / all-reduce</h4>
+              <p>Explicitly <b>NOT covered</b> by the relayout/copy lane. Needs op / axes / dtype / identity + arithmetic fan-in scheduling. No positive single-AIU evidence.</p>
+            </div>
+            <div class="cxr-mid"><span class="cxr-chip extend">extends</span></div>
+            <div class="cxr-cell ours">
+              <p class="cxr-side">Our mechanism</p>
+              <h4>Bet 3 — LSE ring-fold merge</h4>
+              <p><code>ah/flash-ring</code>, math-validated 13/13. Neighbor reduce-scatter of (m,l,O) attention partials with an LSE-combine — a move-then-reduce hop.</p>
+            </div>
+          </div>
+          <p class="cxr-detail">Both taxonomies agree reduce is out of the copy lane. Our LSE ring-fold is a frontend-composed entry into it (<code>STCDPOpLx</code> move + SFP <code>lse_combine</code> per hop — a primitive the backend does not offer as one). We pioneer what codex flags as absent. No duplication.</p>
+        </article>
+
+        <!-- ROW 5 -->
+        <article class="cxr-row">
+          <div class="cxr-row-head">
+            <span class="cxr-rn">EDGE 05 · capacity ceiling + per-link physics</span>
+            <span class="cxr-chip comp">complement</span>
+          </div>
+          <div class="cxr-row-body">
+            <div class="cxr-cell codex">
+              <p class="cxr-side">Codex lane</p>
+              <h4>Two-stage loop-scoped design</h4>
+              <p>Full-resident staged = value-correct but Granite-scale alloc fails. Ring-into-KERNEL = capacity-safe but value-wrong. Self-ring triggers a PCI BusFence.</p>
+            </div>
+            <div class="cxr-mid"><span class="cxr-chip comp">complement</span></div>
+            <div class="cxr-cell ours">
+              <p class="cxr-side">Our mechanism</p>
+              <h4>Substrate scoping + RING_SPEED physics</h4>
+              <p>Uniform shift ~130 GB/s vs scatter ~36 GB/s floor; per-link transfer count is the variable. Full-resident substrate needs the same loop/tile scoping.</p>
+            </div>
+          </div>
+          <p class="cxr-detail">Codex independently derived our capacity constraint and fix shape: ring-gather into tile-sized staging → local <code>ReStickifyOpLx</code> → KERNEL. His self-ring failure <b>refines our cost model</b>: same-core replicas are a free local copy; only genuinely cross-core links ride the ~130-vs-36 band.</p>
+        </article>
+
+      </div>
+    </div>
+  </section>
+
+  <section class="cxr-sec">
+    <div class="cxr-wrap">
+      <p class="cxr-eyebrow">What codex actually landed</p>
+      <h2>Measured &amp; structural results</h2>
+      <p class="cxr-lead">Kernel-ms is trace-derived and trustable; structural counts are compile-artifact deltas (SDSC / restickify rows), not value-correctness or wall-time claims.</p>
+
+      <div class="cxr-metrics">
+
+        <div class="cxr-metric">
+          <p class="cxr-mlabel">PR1 scatter · Granite S=512</p>
+          <div class="cxr-flow">
+            <span class="cxr-num from">14.726</span>
+            <span class="cxr-arrow">→</span>
+            <span class="cxr-num to">13.821</span>
+            <span class="cxr-unit">kernel ms/iter</span>
+          </div>
+          <p class="cxr-mfoot"><b>~1.065×</b> by removing explicit non-weight <code>ReStickifyOpHBM</code> rows. Changes DLDSC metadata, adds zero Torch graph nodes. Run at LX frac 0.2.</p>
+          <div class="cxr-tagrow"><span class="cxr-tag meas">measured</span><span class="cxr-tag struct">trace-derived</span></div>
+        </div>
+
+        <div class="cxr-metric">
+          <p class="cxr-mlabel">Flash relayout OFF → ON</p>
+          <div class="cxr-flow">
+            <span class="cxr-num big">32</span>
+            <span class="cxr-arrow">→</span>
+            <span class="cxr-num big" style="color:var(--cxr-copper)">0</span>
+            <span class="cxr-unit">HBM restickifies</span>
+          </div>
+          <p class="cxr-mfoot">Becomes <b>32 <code>ReStickifyOpLx</code></b> + 32 backend plans. Both runs 550 SDSC, rc 0. Structural transform proven — <b>not</b> value-correct (31.5% mismatch; baseline oracle itself dirty at 75.1%).</p>
+          <div class="cxr-tagrow"><span class="cxr-tag struct">structural</span><span class="cxr-tag struct">rc 0</span></div>
+        </div>
+
+        <div class="cxr-metric">
+          <p class="cxr-mlabel">M=4 operand-broadcast probe</p>
+          <div class="cxr-flow">
+            <span class="cxr-num big" style="color:var(--cxr-good)">0</span>
+            <span class="cxr-unit">/1024 mismatch — archived carousel</span>
+          </div>
+          <p class="cxr-mfoot">Archived <code>kernel_neighbor_carousel_M4</code> ALLCLOSE True. Current loop-scoped repro is <b style="color:var(--cxr-crit)">949/1024 wrong</b>; full-resident staged is correct but capacity-fails at Granite scale.</p>
+          <div class="cxr-tagrow"><span class="cxr-tag meas">measured</span><span class="cxr-tag model">synthetic</span></div>
+        </div>
+
+      </div>
+
+      <p class="cxr-lead" style="margin-top:1.2rem">One more de-risking result: <code>dxp_standalone</code> cardinality probes + a deeptools gtest confirm DLDSC can <b>express all four cardinalities</b> (scatter / broadcast / gather / all-gather) when coordinate maps are dense. <span class="cxr-tag struct">structural</span> The representation layer is not the bottleneck — the DCG placement plumbing is.</p>
+    </div>
+  </section>
+
+  <section class="cxr-sec">
+    <div class="cxr-wrap">
+      <p class="cxr-eyebrow">Where both efforts stall</p>
+      <h2>Shared blockers</h2>
+
+      <div class="cxr-blk">
+        <h3><span class="cxr-chip blocker">shared</span> DCG coordinate-metadata → physical placement for a KERNEL operand</h3>
+        <p style="color:#5a3330;font-size:.9rem;margin:.2rem 0 0">Both efforts have a passing-but-unreproducible run gated on coordinate-map → physical placement for a replicated/gathered <code style="background:#f1ddda;padding:.05em .3em;border-radius:.25em;color:#7a352f">DsTypes::KERNEL</code> operand. Adjacent stages of one pipeline.</p>
+        <div class="cxr-blk-grid">
+          <div class="cxr-blk-col codex">
+            <p class="cxr-who">Codex side — metadata absent upstream</p>
+            <p><code>fillDataInfo</code> throws <code>std::out_of_range map::at</code> on the generated <code>_lx_local</code> transfer <code>transfer_lds1_src:lxlu_dst:ptrow0</code> because <code>coordDims=0 / coordCoreMap=0</code> — the coordinate maps are <b>empty</b>. M=4 loop-scoped run value-wrong (949/1024).</p>
+          </div>
+          <div class="cxr-blk-col ours">
+            <p class="cxr-who">Our side — maps present, mispacked downstream</p>
+            <p>On the fixed latest dxp (<code>a1ec02a</code>), maps are present and <code>assert_multicast_partition</code> passes, but the DCG packer places the 8 replicated dest bands physically wrong. <code>runDcgForInputFetchNeighbor</code> is present-but-dead in-pipeline and hard-pinned to <code>DsTypes::INPUT</code> while the operand is KERNEL.</p>
+          </div>
+        </div>
+        <div class="cxr-impl">
+          <b>Implication.</b> Not the literal same exception, but the same deeptools region and the same missing capability. Wiring the <code>DsTypes::KERNEL</code> loop-scoped operand-fetch coordinate path — generalize <code>runDcgForInputFetchNeighbor</code> off INPUT-only + populate/consume the coordinate maps — is the <b>single deeptools task most likely to unblock BOTH</b> passing-but-unreproducible runs. A Deeptools tooling task, not a Torch-frontend gap for either side.
+        </div>
+      </div>
+
+      <div class="cxr-blk">
+        <h3><span class="cxr-chip blocker">shared</span> Coordinate-fidelity in the planner → backend handoff</h3>
+        <p style="color:#5a3330;font-size:.9rem;margin:.2rem 0 0">Count-based grouping loses the true coordinate stride.</p>
+        <div class="cxr-blk-grid">
+          <div class="cxr-blk-col codex">
+            <p class="cxr-who">Codex side</p>
+            <p>Flash's first-failing edge is value-wrong because the count-based plan groups cores contiguously (<code>0,1,…,7</code>) while the real SDSC coordinate map is strided (<code>0,4,…,28</code>). Count/group metadata alone is too weak.</p>
+          </div>
+          <div class="cxr-blk-col ours">
+            <p class="cxr-who">Our side</p>
+            <p>Bet 2's edge descriptor must price the <b>true per-link topology</b>. If it emits a cohort count rather than the coordinate stride, the selected plan is mispriced the same way — the same stride-vs-count mismatch as our sendnn-head-grouped vs tsp-Lk-band lineage.</p>
+          </div>
+        </div>
+        <div class="cxr-impl">
+          <b>Implication.</b> Bet 2 must carry the true coordinate stride, not a cohort count, and the two-stage plan must key grouping off the actual coordinate maps. Converge the descriptor format with codex's backend-plan JSON (<code>consumer_operand_ds_type: KERNEL</code>, <code>group_count</code>, <code>consumer_replicas_per_group</code>) so the priced edge and the lowered plan agree.
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cxr-sec">
+    <div class="cxr-wrap">
+      <p class="cxr-eyebrow">Revised next steps</p>
+      <h2>What this changes for each bet</h2>
+      <p class="cxr-lead">Converge hard on three seams; stay independent on one. The verdict chip states the posture per bet.</p>
+
+      <div class="cxr-steps">
+
+        <div class="cxr-step b2">
+          <p class="cxr-bet">Bet 2 · cost term</p>
+          <h4>Per-link contention pricing</h4>
+          <span class="cxr-chip comp cxr-verdchip">converge — selectability layer</span>
+          <p class="cxr-move">Promote from independent experiment to the selectability layer on codex's DLDSC lane — the reshard-aware work-division he names as future intent but hasn't built.</p>
+          <ul>
+            <li>Make the edge cost carry the <b>true coordinate stride</b>, not a cohort count, so priced edge == lowered plan.</li>
+            <li>Device-measure on codex's Granite S=512 harness — confirm the planner <b>picks</b> the on-chip broadcast; quantify beyond his structural 1.065×.</li>
+            <li>Add the <b>same-core-is-free-local-copy</b> refinement (his self-ring BusFence): only cross-core links pay the ~130-vs-36 band.</li>
+          </ul>
+        </div>
+
+        <div class="cxr-step b1">
+          <p class="cxr-bet">Bet 1 · flash-in-a-loop</p>
+          <h4>Online-softmax Lk streaming</h4>
+          <span class="cxr-chip indep cxr-verdchip">independent — link refuted</span>
+          <p class="cxr-move">Codex's restickify-on does <b>not</b> unblock this. No help arrives from the layout-relayout lane; his taxonomy confirms our amax gather is a reduction.</p>
+          <ul>
+            <li>Stop waiting on codex's restickify machinery.</li>
+            <li>Reframe the blocker as a <b>reduce-lane</b> problem (amax multi→single-stick is arithmetic fan-in) and couple it to Bet 3's framing.</li>
+            <li>Track Stage-1 reduction-dim tiling (<code>coarse_tile</code> #2596) to surface Lk as a tiling level — that upstream pass is the real dependency.</li>
+          </ul>
+        </div>
+
+        <div class="cxr-step b3">
+          <p class="cxr-bet">Bet 3 · LSE ring-fold</p>
+          <h4>Arithmetic reduce-scatter merge</h4>
+          <span class="cxr-chip extend cxr-verdchip">own the reduce lane</span>
+          <p class="cxr-move">The reduce/all-reduce lane is uncontested and ours. But the move half of our move-then-reduce hop needs the same DCG plumbing codex is fixing.</p>
+          <ul>
+            <li>Keep implementation independent — we pioneer the reduce lane.</li>
+            <li><b>Sequence after</b> codex's <code>fillDataInfo</code> / coordinate-metadata fix lands; reuse his <code>STCDPOpLx</code> move + two-stage staging for transport.</li>
+            <li>Add the SFP <code>lse_combine</code> as the arithmetic half he does not offer. Position it as the first concrete entry into his declared-empty reduce lane.</li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <div class="cxr-wrap">
+    <p class="cxr-foot">
+      Sources: <span>/tmp/cdx_handoff.md</span> · <span>/tmp/cdx-comms/docs/results/granite_e2e</span> · <span>/tmp/carousel-wt/carousel-rfc-impl/{RING_MECHANISMS_IMPLEMENTED,RING_SPEED}.md</span> · <span>comms-progress-report/{01-taxonomy,04-deeptools-capability}.md</span> · branch heads: torch-spyre <span>ah/comms-collectives @ 42d8a29</span>, deeptools <span>@ fa30750</span> · Number tags — measured = device/trace-derived · structural = compile-artifact delta · modeled = synthetic / analytic.
+    </p>
+  </div>
+
+</div>
+</body>
+</html>
