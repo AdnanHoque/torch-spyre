@@ -4,6 +4,65 @@ This is the first-principles handoff for the current Granite DLDSC/LX-relayout c
 
 Update note: this file was refreshed on 2026-07-05 after the DEV flash verification run and the CLC Granite S512 rerun. It intentionally records an experiment/artifact branch state, not a production PR state.
 
+## 0. Operational Index For The Next Agent
+
+Start here before opening old clones or rerunning broad sweeps.
+
+Current truth:
+
+- The artifact/progress branch is `AdnanHoque/torch-spyre:ah/comms-collectives`.
+- The Deeptools experiment branch is `Adnan-Hoque1/deeptools:ah/comms-collectives`.
+- The production scatter lane is separate. Keep it lean; do not move this artifact doc or large run output there.
+- PR1-style scatter is the first production-shaped class. It covers same-layout tensor-distribution-vs-consumer-compute mismatches.
+- The remaining Granite/attention blocker is not plain scatter. It is `all_gather_replicate + layout_conversion` into a matmul RHS/KERNEL operand.
+- Weight restickifies are out of scope. They should be handled by weight preload/prelayout, not this communication lane.
+- Current backend exploratory work can describe and often emit movement, but loop-scoped all-gather into the exact matmul KERNEL view is not value-correct yet.
+- Do not claim the flash relayout run is value-correct: the successful DEV flash run used `PATCH_MODE=no_h2d,skip_cpu_ref`.
+- Do not claim speedup from wall time alone. Use archived Kineto trace-derived kernel time and record correctness/fallback status.
+
+Most important live paths:
+
+| Purpose | Path |
+|---|---|
+| CDX root | `/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507` |
+| CDX Torch artifact checkout | `/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/repos/torch-spyre` |
+| CDX Deeptools experiment checkout | `/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/repos/deeptools-comms-clean` |
+| CDX DXP build | `/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/build-deeptools-comms-clean-fast` |
+| CDX DXP split wrapper | `/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/tools/dxp-split-wrapper/dxp_standalone` |
+| CDX synthetic M4/M16 root | `/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/min_stable_matmul_operand_broadcast_20260704_100506` |
+| DEV flash verification root | `/home/adnan/codex-isolated/flash_attention_devpf_verify_20260705_070129` |
+| CLC Granite S512 root | `/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404` |
+
+Read these companion notes next:
+
+| Question | Document |
+|---|---|
+| What happened in the latest backend all-gather diagnostics? | `docs/results/granite_e2e/comms_collectives_20260705/backend_allgather_diagnostic_checkpoint_20260705.md` |
+| Which communication classes are covered or open? | `docs/results/granite_e2e/comms_collectives_20260705/collective_class_status_20260705.md` |
+| What is the matmul operand broadcast class? | `docs/results/granite_e2e/comms_collectives_20260705/matmul_operand_broadcast_status_20260705.md` |
+| Why does loop-scoped all-gather matter? | `docs/results/granite_e2e/comms_collectives_20260705/matmul_operand_broadcast_loop_scoped_checkpoint_20260705.md` |
+
+Fast orientation commands:
+
+```bash
+oc exec -n a6-quantization adnan-cdx-spyre-dev-pf -- bash -lc '
+set -euo pipefail
+ROOT=/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507
+for d in "$ROOT/repos/torch-spyre" "$ROOT/repos/deeptools-comms-clean"; do
+  echo "== $d =="
+  cd "$d"
+  git status --short --branch
+  git rev-parse HEAD
+done
+'
+```
+
+Next useful diagnostic:
+
+1. Prove or disprove the standalone local LX-to-LX copy/restickify leg before extending the current ring path.
+2. If the local leg fails, stop using the free-standing LXLU/LXSU copy pair and route the local conversion through an existing `ReStickifyOpLx`/`STCDPOpLx`-style carrier or a new backend-owned loop-scoped local-copy primitive.
+3. Only after synthetic M4 is value-correct should you rerun flash value correctness and Granite S512 performance.
+
 ## 1. North-Star Goal And Scope
 
 The long-term goal is to remove in-scope non-weight HBM round trips in Granite by using DLDSC-described LX-to-LX relayout and on-chip communication.
