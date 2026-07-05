@@ -1573,7 +1573,7 @@ index 26c1bcb20..a79b91299 100644
 \ No newline at end of file
 +}
 diff --git a/ddc/ddc_fold.cpp b/ddc/ddc_fold.cpp
-index 821ebc5b9..43f45e321 100644
+index 821ebc5b9..97e3e1b53 100644
 --- a/ddc/ddc_fold.cpp
 +++ b/ddc/ddc_fold.cpp
 @@ -16,15 +16,19 @@ namespace ddc {
@@ -1601,7 +1601,123 @@ index 821ebc5b9..43f45e321 100644
      }
    }
    return false;
-@@ -4474,6 +4478,28 @@ bool Ddc::buildFoldForTransfer(dsc2::TransferNode *transferNode,
+@@ -3332,26 +3336,59 @@ void Ddc::buildFoldFromAllocation(
+       // Construct an iterator for the insertion point (beginning of element
+       // arrangement folds).
+       auto iter = foldParams.begin() + temporalFoldEnds + 1;
+-      std::string foldDimStr = EnumsConversion::primaryDimToString.at(dim);
+-
+-      for (auto &[loop, loopDim, cat] : loopsToDistribute) {
+-        int iterationCount = -1;
+-        if (cat ==
+-            dsc2::LoopDistributionInfo::LoopDistributionCat::CORELET_SLICE) {
++	      std::string foldDimStr = EnumsConversion::primaryDimToString.at(dim);
++
++	      for (auto &[loop, loopDim, cat] : loopsToDistribute) {
++	        const bool useLxNeighborMissingLoopGuard =
++	            std::getenv("DEEPTOOLS_LX_NEIGHBOR_SKIP_MISSING_LOOP_FOLD") !=
++	                nullptr &&
++	            node != nullptr &&
++	            node->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
++	            node->name_.find("transfer_lds") != std::string::npos &&
++	            node->name_.find("src:lxlu") != std::string::npos &&
++	            node->name_.find("dst:ptrow") != std::string::npos;
++	        int iterationCount = -1;
++	        if (cat ==
++	            dsc2::LoopDistributionInfo::LoopDistributionCat::CORELET_SLICE) {
+           // Corelet-slicing distribution result is placed under loop==nullptr
+           // in loopParamsAfterDistribution.
+-          foldParams[FOLD_POS_CORELET] = {
+-              loopParamsAfterDistribution.at(nullptr).at(dim).alpha,
+-              loopParamsAfterDistribution.at(nullptr).at(dim).beta,
+-              currDsc->numCoreletsUsed_DSC2_, "corelet_fold"};
+-          --temporalDiff;
+-          continue;
+-        } else if (loop->isParametricLoop()) {
+-          iterationCount = loop->parametricIterCount(
+-              currDsc, 0 /* To generalize*/, SenComponents::NO_COMPONENT, -1);
+-        } else {
+-          auto &numDs = currDsc->dataStageParam_.at(loop->numId_).ss_;
+-          auto &denDs = currDsc->dataStageParam_.at(loop->denId_).ss_;
++          const bool useNeutralLxNeighborCoreletFold =
++              std::getenv("DEEPTOOLS_LX_NEIGHBOR_NEUTRAL_CORELET_FOLD") !=
++                  nullptr &&
++              node != nullptr &&
++              node->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
++              node->name_.find("transfer_lds") != std::string::npos &&
++              node->name_.find("src:lxlu") != std::string::npos &&
++              node->name_.find("dst:ptrow") != std::string::npos;
++          auto nullptrIt = loopParamsAfterDistribution.find(nullptr);
++          const bool hasCoreletFoldParams =
++              nullptrIt != loopParamsAfterDistribution.end() &&
++              nullptrIt->second.find(dim) != nullptrIt->second.end();
++          if (useNeutralLxNeighborCoreletFold && !hasCoreletFoldParams) {
++            foldParams[FOLD_POS_CORELET] = {
++                0, 0, 1, "corelet_fold_lx_neighbor_neutral"};
++            if (coordPropReportLevel_ > 0 ||
++                std::getenv("DEEPTOOLS_LX_NEIGHBOR_FOLD_GUARD_DIAGNOSTIC") !=
++                    nullptr) {
++              std::cerr << "[lx_neighbor_ddc_corelet_neutral] node="
++                        << node->name_ << " dim="
++                        << EnumsConversion::primaryDimToString.at(dim)
++                        << "\n";
++            }
++          } else {
++            foldParams[FOLD_POS_CORELET] = {
++                loopParamsAfterDistribution.at(nullptr).at(dim).alpha,
++                loopParamsAfterDistribution.at(nullptr).at(dim).beta,
++                currDsc->numCoreletsUsed_DSC2_, "corelet_fold"};
++	          }
++	          --temporalDiff;
++	          continue;
++	        } else if (loop->isParametricLoop()) {
++	          iterationCount = loop->parametricIterCount(
++	              currDsc, 0 /* To generalize*/, SenComponents::NO_COMPONENT, -1);
++	        } else {
++	          auto &numDs = currDsc->dataStageParam_.at(loop->numId_).ss_;
++	          auto &denDs = currDsc->dataStageParam_.at(loop->denId_).ss_;
+           // Assumption: Spatial fold includes a level for corelets. Therefore,
+           // get the datastage values per corelet.
+           //
+@@ -3362,13 +3399,30 @@ void Ddc::buildFoldFromAllocation(
+               denDs.dataStageDimToVal_compView_st(loopDim.dim_, propRefComp, 0);
+           iterationCount = numDs.dataStageDimToVal_compView_st(loopDim.dim_,
+                                                                propRefComp, 0) /
+-                           denVal;
+-        }
+-        iter = foldParams.insert(
+-            iter, {loopParamsAfterDistribution.at(loop).at(dim).alpha,
+-                   loopParamsAfterDistribution.at(loop).at(dim).beta,
+-                   iterationCount, loop->name_ + " " + foldDimStr});
+-      }
++	                           denVal;
++	        }
++	        auto loopParamIt = loopParamsAfterDistribution.find(loop);
++	        const bool hasLoopParam =
++	            loopParamIt != loopParamsAfterDistribution.end() &&
++	            loopParamIt->second.find(dim) != loopParamIt->second.end();
++	        if (useLxNeighborMissingLoopGuard && !hasLoopParam) {
++	          if (coordPropReportLevel_ > 0 ||
++	              std::getenv("DEEPTOOLS_LX_NEIGHBOR_FOLD_GUARD_DIAGNOSTIC") !=
++	                  nullptr) {
++	            std::cerr << "[lx_neighbor_ddc_missing_loop_fold] node="
++	                      << node->name_ << " loop=" << loop->name_
++	                      << " dim="
++	                      << EnumsConversion::primaryDimToString.at(dim)
++	                      << "\n";
++	          }
++	          --temporalDiff;
++	          continue;
++	        }
++	        iter = foldParams.insert(
++	            iter, {loopParamIt->second.at(dim).alpha,
++	                   loopParamIt->second.at(dim).beta,
++	                   iterationCount, loop->name_ + " " + foldDimStr});
++	      }
+       temporalFoldEnds += temporalDiff;
+     }
+ 
+@@ -4474,6 +4528,28 @@ bool Ddc::buildFoldForTransfer(dsc2::TransferNode *transferNode,
      return false;
    }
  

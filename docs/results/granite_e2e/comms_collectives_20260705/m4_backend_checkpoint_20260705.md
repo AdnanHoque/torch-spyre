@@ -197,13 +197,46 @@ Interpretation:
 - Simply skipping that fold lets the program run, but it is value-wrong. The fold is not just optional metadata; it is needed to make the PT consumer read the correct logical row/chunk placement.
 - Ring movement alone is not sufficient. The backend must either construct valid coordinates/folds for the artificial transfer or lower the local conversion through a real backend-owned carrier that already has valid coordinate/fold semantics.
 
+### Follow-up DDC Guard Probe
+
+After the first checkpoint, a narrower DDC diagnostic patch was tested:
+
+- keep the artificial transfer fold instead of skipping it wholesale;
+- neutralize a missing synthetic corelet fold only for `transfer_lds*_src:lxlu_dst:ptrow*`;
+- skip missing loop-distribution entries only for that same artificial transfer class.
+
+Run:
+
+```text
+single_stage_missing_loop_guard_M4_175509
+```
+
+Result:
+
+```text
+[lx_neighbor_ddc_missing_loop_fold] node=transfer_lds1_src:lxlu_dst:ptrow0 loop=loop_ds1_ds7_out dim=out
+[computeLoopElemOffsetsFromCoordinates] Node= transfer_lds1_src:lxlu_dst:ptrow0, allocation= allocate_lds1_lx
+  Considering loop= loop_ds2_ds3_in, dim= in
+  Considering loop= loop_ds1_ds2_in, dim= in
+terminate called after throwing an instance of 'std::out_of_range'
+what(): map::at
+```
+
+Interpretation:
+
+- The diagnostic guard moved the failure forward: DDC gets past the earlier fold-construction `map::at`.
+- The next failure is loop-element-offset computation for the same artificial `lxlu -> ptrow` transfer.
+- This is stronger evidence that the current free-standing synthetic transfer needs either full loop/fold/offset metadata, or it should be replaced by a backend-owned carrier whose schedule tree already has those semantics.
+- The known value-wrong fold-skip result means we should not simply bypass this metadata path.
+
 ## Next Backend Hypothesis
 
 The current free-standing LX-neighbor transfer path is too fragile unless it carries full DDC coordinate metadata. The next useful implementation step is:
 
 1. Either populate valid coordinate/fold metadata for the artificial `transfer_lds1_src:lxlu_dst:ptrow*` nodes so DDC can build folds without `map::at`;
-2. or stop representing the local leg as a synthetic transfer and route the local layout conversion through an existing `ReStickifyOpLx`/`STCDPOpLx`-style carrier;
-3. keep the ring all-gather staging loop-scoped, because full resident materialization is too large for Granite attention.
+2. and populate loop-element-offset metadata for the same transfer so `computeLoopElemOffsetsFromCoordinates` does not fail;
+3. or stop representing the local leg as a synthetic transfer and route the local layout conversion through an existing `ReStickifyOpLx`/`STCDPOpLx`-style carrier;
+4. keep the ring all-gather staging loop-scoped, because full resident materialization is too large for Granite attention.
 
 Acceptance for the next probe:
 
