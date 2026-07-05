@@ -1,0 +1,12 @@
+run_dir=/home/adnan/codex-isolated/flash_attention_devpf_verify_20260705_070129/runs/baseline_relayout_off_backend1_20260705_082034
+rc=0
+DXP_LX_FRAC_AVAIL=0
+DXP_BACKEND_LX_FRAC_AVAIL=1
+sdsc_files=550
+backend_plan_files=0
+matmul_operand_plan_files=0
+ReStickifyOpHBM_files=33
+ReStickifyOpHBM_occurrences=97
+ReStickifyOpLx_files=0
+ReStickifyOpLx_occurrences=0
+value_correctness=[runtime_patch] assert_close skipped for compile probe|SUCCESS|

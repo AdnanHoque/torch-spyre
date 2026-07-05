@@ -1,0 +1,26 @@
+variant=relayout_on_current_main_backend1
+run_dir=/home/adnan/codex-isolated/flash_attention_devpf_verify_20260705_070129/runs/relayout_on_current_main_backend1_20260705_191932
+pod=adnan-spyre-dev-pf
+namespace=a6-quantization
+torch_root=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre
+torch_sha=8960d88af18e31033a75e36450d8b6efcf9cf301
+torch_branch=ah/comms-collectives
+torch_status=
+deeptools_root=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools
+deeptools_sha=352919bf3f9c0efb2430568c667111aeb0a99e95
+deeptools_branch=ah/comms-collectives
+deeptools_status= M util/LayoutAllgatherRestickify.cpp;
+dxp_wrapper=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/tools/dxp-split-wrapper/dxp_standalone
+dxp_real=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools/build-deeptools/dxp/dxp_standalone
+script=/tmp/test-spyre-scripts/test_flash.py
+script_git_sha=afda166e58b23519d0b4ca871350b011b56d91a3
+script_git_branch=main
+script_status=
+script_file_sha256=622622e262e9829868d82cbb5632522625073bde9d49945d7a1385370e0a7818
+python=/home/adnan/dt-inductor/.venv/bin/python3
+patch_mode=no_h2d,skip_cpu_ref
+relayout=1
+matmul_contract=1
+backend_lx_frac=1
+command=timeout 900 env PATH=<captured in env.txt> LD_LIBRARY_PATH=<captured in env.txt> PYTHONPATH=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre:/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/tests/inductor:/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/foundation-model-stack:/home/adnan/dt-inductor/sentient/runtime/lib TORCHINDUCTOR_CACHE_DIR=/home/adnan/codex-isolated/flash_attention_devpf_verify_20260705_070129/runs/relayout_on_current_main_backend1_20260705_191932/cache DEEPTOOLS_LAYOUT_ALLGATHER_RESTICKIFY_PLAN_DIR=/home/adnan/codex-isolated/flash_attention_devpf_verify_20260705_070129/runs/relayout_on_current_main_backend1_20260705_191932/backend_plans DEEPTOOLS_MATMUL_OPERAND_BROADCAST_PLAN_DIR=/home/adnan/codex-isolated/flash_attention_devpf_verify_20260705_070129/runs/relayout_on_current_main_backend1_20260705_191932/backend_plans PATCH_MODE=no_h2d,skip_cpu_ref DXP_LX_FRAC_AVAIL=0 DXP_BACKEND_LX_FRAC_AVAIL=1 SPYRE_LX_PLANNER_RELAYOUT=1 SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES=1 SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY=1 SPYRE_LX_PLANNER_RELAYOUT_MATMUL_OPERAND_CONTRACT=1 SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS=1 LX_BOUNDARY_CLONES=1 TEST_FLASH_SCRIPT=/tmp/test-spyre-scripts/test_flash.py /home/adnan/dt-inductor/.venv/bin/python3 /home/adnan/codex-isolated/flash_attention_devpf_verify_20260705_070129/runs/relayout_on_current_main_backend1_20260705_191932/bootstrap.py
+outer_command=oc exec -n a6-quantization adnan-spyre-dev-pf -- bash -lc <fresh relayout-on run harness>

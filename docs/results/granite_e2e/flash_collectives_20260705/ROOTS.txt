@@ -1,0 +1,4 @@
+run_root=/home/adnan/codex-isolated/flash_attention_devpf_verify_20260705_070129
+torch=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre
+deeptools=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools
+script=/tmp/test-spyre-scripts/test_flash.py
