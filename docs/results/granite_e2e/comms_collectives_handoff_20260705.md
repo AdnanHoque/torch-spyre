@@ -4,6 +4,13 @@ This is the first-principles handoff for the current Granite DLDSC/LX-relayout c
 
 Update note: this file was refreshed on 2026-07-05 after the DEV flash verification run and the CLC Granite S512 rerun. It intentionally records an experiment/artifact branch state, not a production PR state.
 
+Latest artifact update:
+
+- Torch artifact branch `ah/comms-collectives` includes checkpoint commit `3feb8afb` (`docs: update M4 backend fold diagnostics`).
+- The latest M4 checkpoint is `docs/results/granite_e2e/comms_collectives_20260705/m4_backend_checkpoint_20260705.md`.
+- The matching live Deeptools exploratory diff snapshot is `docs/results/granite_e2e/comms_collectives_20260705/patches/cdx_deeptools_m4_backend_diagnostic_20260705.diff`.
+- That snapshot records the current diagnostic state, including the missing-loop-fold guard result: the artificial `lxlu -> ptrow` transfer now gets past the first DDC fold crash but fails later in loop-element-offset computation. Treat this as evidence for the next implementation choice, not as a production patch.
+
 ## 0. Operational Index For The Next Agent
 
 Start here before opening old clones or rerunning broad sweeps.
