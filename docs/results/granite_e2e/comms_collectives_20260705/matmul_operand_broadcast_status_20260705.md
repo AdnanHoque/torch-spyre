@@ -129,6 +129,51 @@ Interpretation:
 
 Even direct source-to-destination transfers are chunk-rotated/mislaid relative to the matmul KERNEL read view. The remaining problem is therefore the layout-converting placement contract, not simply the ring route.
 
+### 4. Same-core-as-ring is not a valid local-copy workaround
+
+Run:
+
+```text
+kernel_neighbor_direct_selfring_shift_M16_003720
+```
+
+Diagnostic env:
+
+```text
+DEEPTOOLS_LX_NEIGHBOR_ALLOW_SELF_RING_DIAGNOSTIC=1
+DEEPTOOLS_MATMUL_OPERAND_BROADCAST_DIRECT_ALLGATHER_DIAGNOSTIC=1
+DEEPTOOLS_MATMUL_OPERAND_BROADCAST_AVOID_SOURCE_ALIAS_DIAGNOSTIC=1
+```
+
+Result:
+
+```text
+RAS::PCI::BusFence
+message="PCIe bus master fence"
+```
+
+Interpretation:
+
+The ring path should not be used for source-core == destination-core transfers. Once the destination is moved away from the source shard to avoid aliasing, same-core pieces need an actual local LX copy or a two-stage data-op path. Treating a local copy as a self-ring transfer is unsafe.
+
+## Granite S=512 Checkpoint
+
+An earlier Granite block checkpoint with the loop-scoped matmul operand broadcast path classified two attention-side RHS edges:
+
+```text
+10_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json
+18_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json
+```
+
+The archived timing from that run was:
+
+| Variant | kernel_ms_per_iter | wall median ms |
+|---|---:|---:|
+| relayout disabled | 14.7258 | 27.6074 |
+| relayout enabled, backend LX frac 0.2 | 13.8213 | 26.5205 |
+
+This is about `1.07x` kernel speedup for that checkpoint. It is useful evidence that removing these attention-side HBM handoffs can matter, but it should not be treated as the final performance result while the synthetic KERNEL operand all-gather path is still value-wrong.
+
 ## Design Implication
 
 The `matmul_operand_broadcast` class is not the same as PR1 scatter.
@@ -160,4 +205,3 @@ The older full resident staged path was value-correct on small synthetic cases b
 2. Stop trying to fold all-gather and KERNEL restickify into one address formula until the KERNEL physical view is formally derived.
 3. Prototype loop-scoped `source-layout all-gather -> local ReStickifyOpLx/KERNEL layout` for the synthetic M16/M32/M64 cases.
 4. Once synthetic correctness passes, replay the Granite attention RHS spill and measure whether it removes the HBM round trip without exceeding LX.
-
