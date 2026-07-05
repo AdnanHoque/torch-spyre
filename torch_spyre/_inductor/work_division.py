@@ -647,8 +647,26 @@ _HBM_BW_GBS = 204.8  # LPDDR5 aggregate peak bandwidth
 _DTYPE_BYTES = 2  # fp16
 _PSUM_PER_ELEM_US = 1.4e-4  # per output element, per K-split ring reduction hop
 _COHORT_LIMIT = 8  # cores sharing a broadcast before it contends for bandwidth
+_MULTICAST_BW_GBS = 130.0  # identical operand sent one->many: ~1 transfer per link
+_SCATTER_BW_GBS = 36.0  # distinct data scattered: per-link transfer count grows to floor
 _BATCH_SPLIT_EXPONENT = 1.4  # batch-split cost grows ~ b ** this (fit to bmm sweeps)
 _TARGET_M_PENALTY_US = 50.0  # tie-break weight when per-core M under-fills PT
+
+
+def _cohort_penalty(cohort: int, identical: bool) -> float:
+    """Bandwidth derate for replicating one operand to a cohort of cores.
+
+    Up to _COHORT_LIMIT cores the ring is not saturated and the move runs near
+    peak (derate 1.0), so small-cohort pricing is unchanged. Past that the
+    variable is the per-link transfer count: an IDENTICAL operand is a one->many
+    multicast (STCDPOpLx) that keeps one transfer per link and holds the fast
+    ~130 GB/s band however wide the cohort, so its derate caps at peak/130;
+    DISTINCT data is a scatter whose per-link count keeps growing until bandwidth
+    hits the ~36 GB/s floor, so its derate rises linearly and caps at peak/36.
+    """
+    linear = max(1.0, cohort / _COHORT_LIMIT)
+    floor_band = _MULTICAST_BW_GBS if identical else _SCATTER_BW_GBS
+    return min(linear, _HBM_BW_GBS / floor_band)
 
 
 def _matmul_split_cost(
@@ -677,12 +695,18 @@ def _matmul_split_cost(
     pt_eff = min(1.0, (pt_passes / _TARGET_PT_PASSES) ** 0.5)
     compute_us = (B * M * N * K / cores_used) / (_PEAK_MACS_US_CORE * pt_eff)
 
-    # HBM: every input operand is broadcast to the cohort of cores splitting the
-    # orthogonal dim. Past _COHORT_LIMIT the broadcasts contend for the shared
-    # link, so effective bandwidth falls off linearly with cohort size.
-    bytes_total = (B * M * K + B * K * N + B * M * N) * _DTYPE_BYTES
-    cohort_penalty = max(1.0, max(m, n) / _COHORT_LIMIT)
-    hbm_us = bytes_total / (_HBM_BW_GBS * 1000) * cohort_penalty
+    # HBM: each input is an IDENTICAL operand replicated to the cohort of cores
+    # that split the orthogonal output dim -- the n-cohort all read the same LHS
+    # activations (LHS has no N index) and the m-cohort all read the same RHS
+    # weight (RHS has no M index). Identical bytes go out as a one->many
+    # multicast that holds the fast band however wide the cohort, so their derate
+    # is capped there instead of charged as a linear scatter. The output tile is
+    # distinct per core (written once, no replication).
+    hbm_us = (
+        B * M * K * _DTYPE_BYTES * _cohort_penalty(n, identical=True)
+        + B * K * N * _DTYPE_BYTES * _cohort_penalty(m, identical=True)
+        + B * M * N * _DTYPE_BYTES
+    ) / (_HBM_BW_GBS * 1000)
 
     # PSUM: a K-split spreads the reduction over k cores, costing (k-1) partial-
     # sum hops around the ring, each touching every output element.
