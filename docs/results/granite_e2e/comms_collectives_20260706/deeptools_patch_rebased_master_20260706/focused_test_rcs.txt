@@ -1,3 +1,12 @@
-util=0
-dxp=0
-dcg=0
+adnan-cdx-spyre-dev-pf, Deeptools head 9092d48e0ae6af1d7cc66e4bd6128f2196e7f495
+
+Commands:
+./build-deeptools/util/util_unit_test --gtest_filter="LayoutAllgatherRestickify.*" --gtest_brief=1
+./build-deeptools/dxp/dxp_unit_test --gtest_filter="DxpTestFixture.CoreWorkDivIncomptLxRelayout*" --gtest_brief=1
+
+Results:
+LayoutAllgatherRestickify.*: 32 passed
+DxpTestFixture.CoreWorkDivIncomptLxRelayout*: 2 passed
+
+Known full-shape replay gap:
+Granite S512 matmul_operand_broadcast reaches corrected logical transfers but fails in DCC with Max IBUFF 128, Current IBUFF 134 using the current data-op + ReStickifyOpLx carrier. See ../granite_s512_coord_overlap_ibuff_20260706/.

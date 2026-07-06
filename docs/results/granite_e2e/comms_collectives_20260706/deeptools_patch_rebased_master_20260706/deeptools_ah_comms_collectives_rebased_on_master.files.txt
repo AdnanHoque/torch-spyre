@@ -1,29 +1,29 @@
-M	dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp
-M	dcc/src/Conversion/SentientToProgIR/LowerSentientHelper.cpp
-M	dcg/dcg_fe/dcg_frontend.h
-M	dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
-M	dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
-M	dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
-M	dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
-M	dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
-M	dcg/dcg_manager/dcg_common.h
-M	ddc/ddc.h
-M	ddc/ddc_fold.cpp
-M	ddc/ddcv1.cpp
-M	ddc/ddl/ddl_conversion.cpp
-M	ddc/ddl/ddl_conversion.h
-M	ddc/ddl_templates/CMakeLists.txt
-M	ddc/ddl_templates/restickify.ddl
-A	ddc/ddl_templates/restickify_lx.ddl
-A	ddc/ddl_templates/restickify_lx_sen1p5.ddl
-M	dsc/dsc2.cpp
-M	dsc/dsc2.h
-M	dsc/superdsc.cpp
-M	dsc/superdsc.h
-M	dxp/SdscRelayoutInsertion.cpp
-M	dxp/dxp.cpp
-M	dxp/test/dxp_unittest.cpp
-M	util/CMakeLists.txt
-A	util/LayoutAllgatherRestickify.cpp
-A	util/LayoutAllgatherRestickify.h
-A	util/test/LayoutAllgatherRestickify_unit_test.cpp
+dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp
+dcc/src/Conversion/SentientToProgIR/LowerSentientHelper.cpp
+dcg/dcg_fe/dcg_frontend.h
+dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
+dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
+dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
+dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+dcg/dcg_manager/dcg_common.h
+ddc/ddc.h
+ddc/ddc_fold.cpp
+ddc/ddcv1.cpp
+ddc/ddl/ddl_conversion.cpp
+ddc/ddl/ddl_conversion.h
+ddc/ddl_templates/CMakeLists.txt
+ddc/ddl_templates/restickify.ddl
+ddc/ddl_templates/restickify_lx.ddl
+ddc/ddl_templates/restickify_lx_sen1p5.ddl
+dsc/dsc2.cpp
+dsc/dsc2.h
+dsc/superdsc.cpp
+dsc/superdsc.h
+dxp/SdscRelayoutInsertion.cpp
+dxp/dxp.cpp
+dxp/test/dxp_unittest.cpp
+util/CMakeLists.txt
+util/LayoutAllgatherRestickify.cpp
+util/LayoutAllgatherRestickify.h
+util/test/LayoutAllgatherRestickify_unit_test.cpp

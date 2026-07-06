@@ -1,17 +1,6 @@
-Deeptools collectives patch, rebased on upstream master.
+Source: Adnan-Hoque1/deeptools ah/comms-collectives
+Base: origin/master 0a9da5eb19d08712383312bb7dec18fbd7caf711
+Head: 9092d48e0ae6af1d7cc66e4bd6128f2196e7f495
+Generated: 2026-07-06 from adnan-cdx-spyre-dev-pf
 
-Upstream master: 949cfeea885e05cb12dd37ea07d480d82f1ee27c
-Patch branch: ah/comms-collectives-master
-Patch head: 6243bcc4bfdd3ea90eda4c5f6a10b9ae396f2d10
-Remote branch: Adnan-Hoque1/deeptools:ah/comms-collectives-master
-
-Feature gate for reproduction:
-  SPYRE_LX_PLANNER_RELAYOUT=1
-
-Compatibility alias still accepted:
-  DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1
-
-Notes:
-- Torch already fans SPYRE_LX_PLANNER_RELAYOUT into its LX relayout subfeatures.
-- This Deeptools patch now honors the same SPYRE_LX_PLANNER_RELAYOUT flag for matmul operand gather/restickify physical lowering.
-- Debug/unsafe alternate paths remain separately gated.
+This patch includes the SPYRE_LX_PLANNER_RELAYOUT gate and the coordinate-overlap transfer grouping fix.
