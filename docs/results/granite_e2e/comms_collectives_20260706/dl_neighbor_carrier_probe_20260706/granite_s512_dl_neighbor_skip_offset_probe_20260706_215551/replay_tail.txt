@@ -1,0 +1,2 @@
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Retry threshold for propagation reached for allocate_lds1_lx -> transfer_lds1_src:lxlu_dst:ptrow0, dim= in., file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/ddc/ddc.h line 448

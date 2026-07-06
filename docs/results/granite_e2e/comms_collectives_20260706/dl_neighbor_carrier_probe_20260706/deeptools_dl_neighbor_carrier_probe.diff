@@ -1,0 +1,82 @@
+diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+index dd59885fe..ea8d804a2 100644
+--- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
++++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+@@ -3540,7 +3540,9 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
+         DT_CHECK_MSG(lds.memOrg_.count(SenComponents::LX),
+                      "Expect memOrg_ LX entry.");
+         auto& allocNode = lds.memOrg_.at(SenComponents::LX).allocateNode_;
+-        if (allocNode == nullptr) {
++        const bool needsDedicatedMatmulNeighborDestination =
++            findMatmulOperandBroadcastClassification(mySDsc, lds) != nullptr;
++        if (allocNode == nullptr || needsDedicatedMatmulNeighborDestination) {
+           const SenComponents allocStorage = SenComponents::LX;
+           const std::string allocNodeName =
+               "allocate_lds" + std::to_string(lds.ldsIdx_) + "_" +
+diff --git a/ddc/ddc_fold.cpp b/ddc/ddc_fold.cpp
+index f7e18aa7f..cabb9b62d 100644
+--- a/ddc/ddc_fold.cpp
++++ b/ddc/ddc_fold.cpp
+@@ -1940,13 +1940,15 @@ void Ddc::buildAndPropagateFold() {
+                     static_cast<dsc2::ComputeNode *>(coordPropInfo.refNode),
+                     reverseCoordPropInfo, inputCoords, outputCoords, ldsIdx);
+       if (buildFoldForAllocation(coordPropInfo, refCoordinate, allocNode)) {
+-        dsc2::computeLoopElemOffsetsFromCoordinates(
+-            currDsc, coordPropInfo.refNode,
+-            const_cast<dsc2::CoordinateType<CoordinateBaseType> &>(
+-                refCoordinate),
+-            allocNode,
+-            loopDistributionParamInfo.at(coordPropInfo.refNode).at(allocNode),
+-            coordPropInfo.dimsToPropagate, coordPropReportLevel_);
++        if (!isFoldedLxNeighborAllocation(allocNode)) {
++          dsc2::computeLoopElemOffsetsFromCoordinates(
++              currDsc, coordPropInfo.refNode,
++              const_cast<dsc2::CoordinateType<CoordinateBaseType> &>(
++                  refCoordinate),
++              allocNode,
++              loopDistributionParamInfo.at(coordPropInfo.refNode).at(allocNode),
++              coordPropInfo.dimsToPropagate, coordPropReportLevel_);
++        }
+         if (!isFoldedLxNeighborAllocation(allocNode) &&
+             allocNode->allocateCoordinates_.coreIdToWkSlice_.empty()) {
+           for (auto &[userNode, refCount] : allocNode->allocUsers_) {
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 0d5dd45ce..42bf82e55 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -1452,8 +1452,9 @@ static bool tensorSliceIntersectionCell(
+ 
+ static bool markMatmulOperandBroadcastKernelNeighbor(
+     DesignSpaceConfig& dldsc, LabeledDsInfo& lds, std::string* reason) {
+-  if (lds.dsType_ != DsTypes::KERNEL) {
+-    *reason = "matmul_operand_broadcast kernel-neighbor path requires KERNEL LDS";
++  if (lds.dsType_ != DsTypes::KERNEL && lds.dsType_ != DsTypes::INPUT) {
++    *reason =
++        "matmul_operand_broadcast neighbor path requires INPUT or KERNEL LDS";
+     return false;
+   }
+   if (!lds.memOrg_.count(SenComponents::LX)) {
+@@ -1470,7 +1471,6 @@ static bool markMatmulOperandBroadcastKernelNeighbor(
+   // Keep the producer allocation in the schedule tree.  The DL scheduler uses
+   // it as the source coordinate anchor when it creates the consumer allocation
+   // for the loop-scoped KERNEL-neighbor operand.
+-  lds.memOrg_.at(SenComponents::LX).allocateNode_ = nullptr;
+   return true;
+ }
+ 
+diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
+index bbe306661..012d375f6 100644
+--- a/util/LayoutAllgatherRestickify.cpp
++++ b/util/LayoutAllgatherRestickify.cpp
+@@ -855,9 +855,9 @@ synthesizeMatmulOperandBroadcastMovementPlan(const std::string &jsonString) {
+   const std::string dsType = json["consumer_operand_ds_type"].is_string()
+                                  ? json["consumer_operand_ds_type"].string_value()
+                                  : "KERNEL";
+-  if (dsType != "KERNEL") {
++  if (dsType != "KERNEL" && dsType != "INPUT") {
+     return matmulMovementFail(
+-        "consumer_operand_ds_type must be KERNEL for matmul operand broadcast");
++        "consumer_operand_ds_type must be INPUT or KERNEL for matmul operand broadcast");
+   }
+ 
+   const bool realized = json["realized"].bool_value();

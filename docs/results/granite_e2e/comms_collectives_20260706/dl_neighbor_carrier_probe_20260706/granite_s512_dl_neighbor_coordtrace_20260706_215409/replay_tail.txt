@@ -1,0 +1,220 @@
+  Building folds for outputs: []
+
+>>> buildFoldFromNonAllocRef:
+  node= compute_ptrow5_fma16(0x7a82360)
+  refNode= transfer_lds0_src:l0lurow5_dst:ptrow5(0x69c4590)
+
+====================================================
+Reference fold: 
+DDC Coordinates<int64_t>: 1 coordinate entries
+
+Primary Dim= mb
+  Fold dimension= "factor_" : 8, "label_" : "core_fold"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "corelet_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "rowsplit_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "loop_ds0_ds1_mb mb"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 16, "label_" : "loop_ds1_ds5_mb mb"
+    Affine:"alpha_" : 4, "beta_" : 0
+  Fold dimension= "factor_" : 4, "label_" : "loop_ds5_ds7_mb mb"
+    Affine:"alpha_" : 1, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "elem_arr_0"
+    Affine: "alpha_" : 1, "beta_" : 0
+  #Spatial  = 3
+  #Temporal = 3
+  #ElemArr  = 1
+  Padding: { (mb, nopad) }
+[buildFoldFromNonAllocRef] scheduleNode compute_ptrow5_fma16's coordinates already includes fold for dimension mb
+
+
+====================================================
+
+[buildFoldFromNonAllocRef] fold at end:
+  ref  = transfer_lds0_src:l0lurow5_dst:ptrow5
+  node = compute_ptrow5_fma16
+DDC Coordinates<int64_t>: 1 coordinate entries
+
+Primary Dim= mb
+  Fold dimension= "factor_" : 8, "label_" : "core_fold"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "corelet_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "rowsplit_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "loop_ds0_ds1_mb mb"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 16, "label_" : "loop_ds1_ds5_mb mb"
+    Affine:"alpha_" : 4, "beta_" : 0
+  Fold dimension= "factor_" : 4, "label_" : "loop_ds5_ds7_mb mb"
+    Affine:"alpha_" : 1, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "elem_arr_0"
+    Affine: "alpha_" : 1, "beta_" : 0
+  #Spatial  = 3
+  #Temporal = 3
+  #ElemArr  = 1
+  Padding: { (mb, nopad) }
+
+  propagateToDataStream: (inputs) rhsDataConnect = pt_input rhsLdsIdx= 0 rhsAllocNode= <none>.
+  propagateToDataStream: (outputs) rhsDataConnect = pt_input rhsLdsIdx= 0 rhsAllocNode= <none>.
+>>> CoordinatePropagationInfo:
+      refNode= TransferNode: transfer_lds0_src:l0lurow5_dst:ptrow5(0x69c4590) ['l0lurow5(l0_input)'] -> [ 'ptrow5(pt_input)']
+      nodeTofold=  ComputeNode: compute_ptrow5_fma16(0x710b4e0) fma16 [ 'l0lu(pt_input)' 'ptxrf(xrf_kernel)' 'ptarf(arf_ptsum)'] -> [ 'ptsouth(arf_ptsum)']
+      data_connect= pt_input, refIsProducer= T
+      Dims: mb
+
+
+>>> buildFoldForCompute:
+ ComputeNode: compute_ptrow5_fma16(0x710b4e0) fma16 [ 'l0lu(pt_input)' 'ptxrf(xrf_kernel)' 'ptarf(arf_ptsum)'] -> [ 'ptsouth(arf_ptsum)']
+  refNode=  TransferNode: transfer_lds0_src:l0lurow5_dst:ptrow5(0x69c4590) ['l0lurow5(l0_input)'] -> [ 'ptrow5(pt_input)']
+  dataconnect= pt_input
+  refIsProducer= T, scaleDown= F
+
+  Building folds for inputs: [ 0]
+  Building folds for outputs: []
+
+>>> buildFoldFromNonAllocRef:
+  node= compute_ptrow5_fma16(0x710b4e0)
+  refNode= transfer_lds0_src:l0lurow5_dst:ptrow5(0x69c4590)
+
+====================================================
+Reference fold: 
+DDC Coordinates<int64_t>: 1 coordinate entries
+
+Primary Dim= mb
+  Fold dimension= "factor_" : 8, "label_" : "core_fold"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "corelet_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "rowsplit_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "loop_ds0_ds1_mb mb"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 16, "label_" : "loop_ds1_ds5_mb mb"
+    Affine:"alpha_" : 4, "beta_" : 0
+  Fold dimension= "factor_" : 4, "label_" : "loop_ds5_ds7_mb mb"
+    Affine:"alpha_" : 1, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "elem_arr_0"
+    Affine: "alpha_" : 1, "beta_" : 0
+  #Spatial  = 3
+  #Temporal = 3
+  #ElemArr  = 1
+  Padding: { (mb, nopad) }
+[buildFoldFromNonAllocRef] scheduleNode compute_ptrow5_fma16's coordinates already includes fold for dimension mb
+
+
+====================================================
+
+[buildFoldFromNonAllocRef] fold at end:
+  ref  = transfer_lds0_src:l0lurow5_dst:ptrow5
+  node = compute_ptrow5_fma16
+DDC Coordinates<int64_t>: 1 coordinate entries
+
+Primary Dim= mb
+  Fold dimension= "factor_" : 8, "label_" : "core_fold"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "corelet_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "rowsplit_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "loop_ds0_ds1_mb mb"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 16, "label_" : "loop_ds1_ds5_mb mb"
+    Affine:"alpha_" : 4, "beta_" : 0
+  Fold dimension= "factor_" : 4, "label_" : "loop_ds5_ds7_mb mb"
+    Affine:"alpha_" : 1, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "elem_arr_0"
+    Affine: "alpha_" : 1, "beta_" : 0
+  #Spatial  = 3
+  #Temporal = 3
+  #ElemArr  = 1
+  Padding: { (mb, nopad) }
+
+  propagateToDataStream: (inputs) rhsDataConnect = pt_input rhsLdsIdx= 0 rhsAllocNode= <none>.
+  propagateToDataStream: (outputs) rhsDataConnect = pt_input rhsLdsIdx= 0 rhsAllocNode= <none>.
+>>> CoordinatePropagationInfo:
+      refNode= TransferNode: transfer_lds0_src:l0lurow5_dst:ptrow5(0x69c4590) ['l0lurow5(l0_input)'] -> [ 'ptrow5(pt_input)']
+      nodeTofold=  ComputeNode: compute_ptrow5_fma16(0x6f9af40) fma16 [ 'l0lu(pt_input)' 'ptxrf(xrf_kernel)' 'ptarf(arf_ptsum)'] -> [ 'ptarf(arf_ptsum)']
+      data_connect= pt_input, refIsProducer= T
+      Dims: mb
+
+
+>>> buildFoldForCompute:
+ ComputeNode: compute_ptrow5_fma16(0x6f9af40) fma16 [ 'l0lu(pt_input)' 'ptxrf(xrf_kernel)' 'ptarf(arf_ptsum)'] -> [ 'ptarf(arf_ptsum)']
+  refNode=  TransferNode: transfer_lds0_src:l0lurow5_dst:ptrow5(0x69c4590) ['l0lurow5(l0_input)'] -> [ 'ptrow5(pt_input)']
+  dataconnect= pt_input
+  refIsProducer= T, scaleDown= F
+
+  Building folds for inputs: [ 0]
+  Building folds for outputs: []
+
+>>> buildFoldFromNonAllocRef:
+  node= compute_ptrow5_fma16(0x6f9af40)
+  refNode= transfer_lds0_src:l0lurow5_dst:ptrow5(0x69c4590)
+
+====================================================
+Reference fold: 
+DDC Coordinates<int64_t>: 1 coordinate entries
+
+Primary Dim= mb
+  Fold dimension= "factor_" : 8, "label_" : "core_fold"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "corelet_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "rowsplit_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "loop_ds0_ds1_mb mb"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 16, "label_" : "loop_ds1_ds5_mb mb"
+    Affine:"alpha_" : 4, "beta_" : 0
+  Fold dimension= "factor_" : 4, "label_" : "loop_ds5_ds7_mb mb"
+    Affine:"alpha_" : 1, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "elem_arr_0"
+    Affine: "alpha_" : 1, "beta_" : 0
+  #Spatial  = 3
+  #Temporal = 3
+  #ElemArr  = 1
+  Padding: { (mb, nopad) }
+[buildFoldFromNonAllocRef] scheduleNode compute_ptrow5_fma16's coordinates already includes fold for dimension mb
+
+
+====================================================
+
+[buildFoldFromNonAllocRef] fold at end:
+  ref  = transfer_lds0_src:l0lurow5_dst:ptrow5
+  node = compute_ptrow5_fma16
+DDC Coordinates<int64_t>: 1 coordinate entries
+
+Primary Dim= mb
+  Fold dimension= "factor_" : 8, "label_" : "core_fold"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "corelet_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "rowsplit_fold"
+    Affine:"alpha_" : 0, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "loop_ds0_ds1_mb mb"
+    Affine:"alpha_" : 64, "beta_" : 0
+  Fold dimension= "factor_" : 16, "label_" : "loop_ds1_ds5_mb mb"
+    Affine:"alpha_" : 4, "beta_" : 0
+  Fold dimension= "factor_" : 4, "label_" : "loop_ds5_ds7_mb mb"
+    Affine:"alpha_" : 1, "beta_" : 0
+  Fold dimension= "factor_" : 1, "label_" : "elem_arr_0"
+    Affine: "alpha_" : 1, "beta_" : 0
+  #Spatial  = 3
+  #Temporal = 3
+  #ElemArr  = 1
+  Padding: { (mb, nopad) }
+
+  propagateToDataStream: (inputs) rhsDataConnect = pt_input rhsLdsIdx= 0 rhsAllocNode= <none>.
+  propagateToDataStream: (outputs) rhsDataConnect = pt_input rhsLdsIdx= 0 rhsAllocNode= <none>.
+>>> CoordinatePropagationInfo:
+      refNode= TransferNode: transfer_lds0_src:lxlu_dst:l0su(0x830f2a0) ['lxlu(l3_lx_input)'] -> [ 'l0su(l0_input)']
+      nodeTofold=  AllocateNode: allocate_lds0_lx(0x6f93b10)
+      data_connect= , refIsProducer= F
+      Dims: mb
+
+[buildFoldForAllocation] Reusing explicit coordinates for allocate_lds0_lx from LX-neighbor relayout.
+terminate called after throwing an instance of 'std::out_of_range'
+  what():  map::at

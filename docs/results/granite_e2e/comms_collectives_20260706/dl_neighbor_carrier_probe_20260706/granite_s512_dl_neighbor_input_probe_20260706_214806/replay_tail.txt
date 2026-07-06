@@ -1,0 +1,2 @@
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: Do not support double buffering and input-neighbor fetch coexisting in the same DSC. Set DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1 only for diagnostic probes., file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1702

@@ -1,0 +1,2 @@
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: matmul_operand_broadcast kernel-neighbor marker failed: matmul_operand_broadcast kernel-neighbor path requires KERNEL LDS, file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dxp/SdscRelayoutInsertion.cpp line 1806
