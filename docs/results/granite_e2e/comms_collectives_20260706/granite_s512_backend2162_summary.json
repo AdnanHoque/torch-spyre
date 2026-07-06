@@ -18,8 +18,30 @@
     }
   ],
   "baseline_disabled_kernel_ms_per_iter": 12.546643199999998,
+  "baseline_removed_explicit_hbm_restickify": {
+    "enabled_replacement": "ReStickifyOpLx plus backend matmul_operand_broadcast plan",
+    "file": "sdsc_7.json",
+    "kernel": "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_*",
+    "logical_size": "mb=32, x=512, out=128"
+  },
+  "current_disabled_control": {
+    "backend_plan_count": 0,
+    "kernel_ms_per_iter": 12.547999599999999,
+    "restickify_hbm_rows": 5,
+    "restickify_lx_rows": 0,
+    "run_root": "/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_collectives_archive_20260705_081840/relayout_disabled_current_backend2162_retry_20260706_005549",
+    "wall_median_ms": 30.8380126953125
+  },
   "deeptools_branch": "ah/comms-collectives",
   "deeptools_commit": "2162efb3e",
+  "enabled_current": {
+    "backend_plan_count": 2,
+    "kernel_ms_per_iter": 11.918180199999998,
+    "restickify_hbm_rows": 4,
+    "restickify_lx_rows": 1,
+    "run_root": "/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_collectives_archive_20260705_081840/relayout_enabled_clone_source_patch_backend2162_20260706_003302",
+    "wall_median_ms": 30.447006225585938
+  },
   "kernel_ms_per_iter": 11.918180199999998,
   "memory_ms_per_iter": 0.4227786,
   "pod": "adnan-clc-spyre-dev-pf",
@@ -58,6 +80,8 @@
     "hidden": 4096,
     "seq": 512
   },
+  "speedup_vs_current_disabled_kernel": 1.0528452657562604,
+  "speedup_vs_current_disabled_wall": 1.0128421975819082,
   "speedup_vs_disabled_kernel": 1.0527314564349346,
   "speedup_vs_previous_enabled_kernel": 1.0155746596279858,
   "torch_branch": "ah/comms-collectives",

@@ -26,22 +26,30 @@
 - Kernel time per iter: `11.918180 ms`
 - Memory time per iter: `0.422779 ms`
 
-For comparison, the previous enabled run before the clone-source eligibility patch was:
+Current same-branch disabled control:
+
+- Run: `relayout_disabled_current_backend2162_retry_20260706_005549`
+- Kernel time per iter: `12.548000 ms`
+- Wall median: `30.838013 ms`
+- Backend plans: `0`
+- Explicit restickify rows: `5 x ReStickifyOpHBM`, `0 x ReStickifyOpLx`
+
+Previous enabled run before the clone-source eligibility patch:
 
 - Run: `relayout_enabled_after_allgather_fix_20260705_234646`
 - Kernel time per iter: `12.103802 ms`
 - Backend plans: `1`
 
-The latest run adds one more realized backend plan and reduces trace kernel time by about `1.5%` versus that previous enabled run. Compared with the clean disabled baseline retry (`12.546643 ms/kernel_iter`), the latest enabled run is about `1.053x` faster in kernel time.
+The latest run adds one more realized backend plan and reduces trace kernel time by about `1.5%` versus that previous enabled run. Compared with the same-branch disabled control (`12.548000 ms/kernel_iter`), the latest enabled run is about `1.053x` faster in kernel time. Wall median changes from `30.838013 ms` to `30.447006 ms` (`1.013x`).
 
 ## Realized On-Chip Movement
 
 Two activation-side attention handoffs are now realized by DLDSC/LX relayout:
 
-| edge | SDSC evidence | communication class | backend evidence |
-|---|---|---|---|
-| Attention pointwise/context output into value-side BMM operand | `sdsc_7 ReStickifyOpLx -> sdsc_8 batchmatmul Tensor1` in `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_*` | all-gather / replicate | `8_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json`, `512` logical transfers, `lowered_loop_scoped_kernel_neighbor`, `realized=true` |
-| Attention clone/identity output into later BMM operand | `sdsc_15 identity/clone -> sdsc_16 batchmatmul Tensor1` in the same attention kernel | all-gather / replicate | `16_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json`, `1024` logical transfers, `lowered_loop_scoped_kernel_neighbor`, `realized=true` |
+| edge | baseline evidence | enabled evidence | communication class | backend evidence |
+|---|---|---|---|---|
+| Attention pointwise/context output into value-side BMM operand | baseline `sdsc_7 ReStickifyOpHBM`, logical size `mb=32, x=512, out=128` | enabled `sdsc_7 ReStickifyOpLx -> sdsc_8 batchmatmul Tensor1` in `sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_*` | all-gather / replicate | `8_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json`, `512` logical transfers, `lowered_loop_scoped_kernel_neighbor`, `realized=true` |
+| Attention clone/identity output into later BMM operand | baseline tensor is HBM-backed by consumer metadata rather than an explicit restickify row | enabled `sdsc_15 identity/clone -> sdsc_16 batchmatmul Tensor1` in the same attention kernel | all-gather / replicate | `16_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json`, `1024` logical transfers, `lowered_loop_scoped_kernel_neighbor`, `realized=true` |
 
 The second row is the new coverage from the Torch clone-source eligibility patch. Before that patch, this edge was classified but its consumer tensor stayed HBM-backed; now Deeptools receives an LX `Tensor1` target and emits the second ring-transfer plan.
 
