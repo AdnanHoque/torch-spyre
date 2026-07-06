@@ -223,15 +223,22 @@ class ScratchpadAllocator(ABC):
     ) -> list[Operation]:
         core_div_mismatch = get_ncores_for_buffers(graph, cache, rw_cache)
         drop_list = set()
+        relayout_sources = relayout_source_names(graph)
 
-        # filter out by permitted operations
+        # filter out by permitted operations.  Relayout-planned producers are
+        # already vetted by the LX relayout planner, and some of them appear as
+        # layout/view ops at IR level even though codegen fuses them into an
+        # allowed compute op. Keep them eligible so their dl-dsc residency can
+        # be described to Deeptools.
         for op in graph.operations:
-            if not self._op_output_good_for_lx_reuse(graph, op):
+            if (
+                op.name not in relayout_sources
+                and not self._op_output_good_for_lx_reuse(graph, op)
+            ):
                 drop_list.add(op.name)
                 self.reject_reasons[op.name] = "op not allowed"
 
         # filter out core division mismatches
-        relayout_sources = relayout_source_names(graph)
         for key, mismatch in core_div_mismatch.items():
             if mismatch == -1 and key not in relayout_sources:
                 drop_list.add(key)

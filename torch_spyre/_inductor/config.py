@@ -74,7 +74,22 @@ lx_planner_relayout_layout_allgather_restickify: bool = _get_env_bool(
     "SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY", lx_planner_relayout
 )
 
-dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
+# Frontend LX reservation fraction.  When LX relayout is enabled, default
+# Torch planning to full frontend LX and give the DXP subprocess its backend
+# relayout workspace separately via ``dxp_backend_lx_frac_avail`` below.
+dxp_lx_frac_avail: float = float(
+    os.environ.get("DXP_LX_FRAC_AVAIL", "0" if lx_planner_relayout else "0.2")
+)
+
+# Backend LX fraction used only for the DXP subprocess launched by Torch. This
+# hides the old wrapper trick behind the same top-level relayout flag while
+# preserving explicit overrides for backend debugging.
+dxp_backend_lx_frac_avail: float = float(
+    os.environ.get(
+        "DXP_BACKEND_LX_FRAC_AVAIL",
+        "1" if lx_planner_relayout else str(dxp_lx_frac_avail),
+    )
+)
 
 sencores: int = int(os.getenv("SENCORES", "32"))
 
