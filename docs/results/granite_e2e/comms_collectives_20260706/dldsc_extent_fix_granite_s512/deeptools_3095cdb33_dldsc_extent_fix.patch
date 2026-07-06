@@ -1,0 +1,100 @@
+commit 3095cdb332c410e6159f3361f8f3d59de0ae8b29
+Author: Adnan Hoque <adnan.hoque1@ibm.com>
+Date:   Mon Jul 6 16:29:09 2026 +0000
+
+    [DXP] derive LX relayout pieces from DLDSC extents
+    
+    Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+    (cherry picked from commit c07b49ebf5c775b433f84248a8fb0042384b958f)
+---
+ dxp/SdscRelayoutInsertion.cpp | 26 +++++++++++++++++++-------
+ dxp/test/dxp_unittest.cpp     | 32 ++++++++++++++++++++++++++++++++
+ 2 files changed, 51 insertions(+), 7 deletions(-)
+
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 920940b60..208b0de64 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -2016,13 +2016,25 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+             // Fill dimToSize_
+             std::string dimName = dldsc.primaryDimToString.at(kv2.first);
+-            DT_CHECK(wkslices_in_dim.at(kv2.first).size() >= 1);
+-            new_piece.dimToSize_[dimName] =
+-                sdsc->N_.paramNameToVal(dimName) /
+-                wkslices_in_dim.at(kv2.first).size();
+-
+-            // Fill dimToStartCordinate
+-            new_piece.dimToStartCordinate[dimName] = kv2.second;
++            const auto sliceCount = wkslices_in_dim.at(kv2.first).size();
++            const auto dimExtent = dldsc.N_.paramNameToVal(dimName);
++            DT_CHECK(sliceCount >= 1);
++            DT_CHECK_MSG(dimExtent > 0,
++                         "LX relayout requires concrete DLDSC extent for dim " +
++                             dimName);
++            DT_CHECK(kv2.second >= 0);
++            DT_CHECK(kv2.second < static_cast<int>(sliceCount));
++
++            // coreIdToWkSlice_ stores slice ordinals. PieceInfo uses logical
++            // element coordinates.  Use interval arithmetic instead of requiring
++            // exact divisibility so the relayout path can support general
++            // coordinate-derived cardinality.
++            const double pieceStart =
++                dimExtent * static_cast<double>(kv2.second) / sliceCount;
++            const double pieceEnd =
++                dimExtent * static_cast<double>(kv2.second + 1) / sliceCount;
++            new_piece.dimToSize_[dimName] = pieceEnd - pieceStart;
++            new_piece.dimToStartCordinate[dimName] = pieceStart;
+ 
+             // Fill validGap_
+             new_piece.validGap_[dimName] = {
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index e9df8bb5e..6aa35ba42 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -184,6 +184,30 @@ void rewriteCoreWorkDivRelayoutFixture(
+   jsonOut << json11::Json(top).dump() << std::endl;
+ }
+ 
++void makeOuterSdscDimDynamic(const std::string& testDataDir,
++                             const std::string& dimName) {
++  const auto path = std::filesystem::path(testDataDir) / "test-scale.json";
++  std::ifstream jsonIn(path);
++  std::ostringstream jsonBuf;
++  jsonBuf << jsonIn.rdbuf();
++  std::string err;
++  auto json = json11::Json::parse(jsonBuf.str(), err);
++  ASSERT_TRUE(err.empty()) << "Failed to parse " << path << ": " << err;
++  ASSERT_TRUE(json.is_object());
++  ASSERT_EQ(json.object_items().size(), 1);
++
++  auto top = json.object_items();
++  const auto sdscName = top.begin()->first;
++  auto sdsc = top.begin()->second.object_items();
++  auto n = sdsc["N_"].object_items();
++  n[dimName + "_"] = -1;
++  sdsc["N_"] = n;
++  top[sdscName] = sdsc;
++
++  std::ofstream jsonOut(path);
++  jsonOut << json11::Json(top).dump() << std::endl;
++}
++
+ void runCoreWorkDivRelayoutCase(
+     const std::string& testDataDir,
+     const json11::Json::object& producerCoreIdToWkSlice,
+@@ -983,6 +1007,14 @@ TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayoutCardinality) {
+       testDataDir, slicedProducer, replicatedFullConsumers,
+       /*expectedInputMemIds=*/{7, 15, 23, 31},
+       /*expectedOutputMemIds=*/{0, 8, 16, 24});
++  TearDown();
++
++  SetUpTestData("test_core_work_div_incompt");
++  makeOuterSdscDimDynamic(testDataDir, "y");
++  runCoreWorkDivRelayoutCase(
++      testDataDir, slicedProducer, replicatedFullConsumers,
++      /*expectedInputMemIds=*/{7, 15, 23, 31},
++      /*expectedOutputMemIds=*/{0, 8, 16, 24});
+ }
+ 
+ TEST_F(DxpTestFixture, SoftmaxSencore1BundleDummyProg) {
