@@ -52,8 +52,8 @@ export DEEPTOOLS_PATH=/home/adnan-cdx/codex-isolated/gather_restickify_clean_202
 
 Logs are archived next to this README:
 
-- `torch_lx_relayout_dldsc_pytest.log`
-- `deeptools_core_work_div_relayout_gtest.log`
+- `torch_lx_relayout_dldsc_pytest.txt`
+- `deeptools_core_work_div_relayout_gtest.txt`
 
 ## Caveats
 
