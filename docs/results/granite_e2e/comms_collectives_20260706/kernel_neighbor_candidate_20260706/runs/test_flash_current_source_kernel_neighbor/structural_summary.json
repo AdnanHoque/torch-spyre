@@ -1,0 +1,42 @@
+{
+  "run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_current_source_kernel_neighbor_20260706_143957",
+  "returncode": "0",
+  "source_sha": "afda166e58b23519d0b4ca871350b011b56d91a3",
+  "torch": "c9e0e9ae",
+  "deeptools": "e3e265d22",
+  "plan_count": 32,
+  "plan_kind_counts": {
+    "matmul_operand_broadcast": 32
+  },
+  "plan_strategy_counts": {
+    "<missing>": 32
+  },
+  "plan_lowering_counts": {
+    "<missing>": 32
+  },
+  "sdsc_file_count": 550,
+  "ReStickifyOpHBM_total": 0,
+  "ReStickifyOpLx_total": 32,
+  "op_counts_top": [
+    [
+      "ReStickifyOpLx",
+      32
+    ],
+    [
+      "batchmatmul",
+      32
+    ]
+  ],
+  "stdout_tail": "[runtime_patch] no_h2d Tensor.to(device=spyre) compile probe enabled\n[runtime_patch] assert_close skipped for compile probe\nSUCCESS\n",
+  "stderr_tail": "[WARNING] [spyre.inductor.propagate_named_dims] buf1: loop var d0 has no named dim mapping -- using _untracked_32\n[WARNING] [spyre.inductor.propagate_named_dims] buf1: loop var d1 has no named dim mapping -- using _untracked_4096\n[WARNING] [spyre.inductor.propagate_named_dims] buf1: loop var d2 has no named dim mapping -- using _untracked_128\n[WARNING] [spyre.inductor.propagate_named_dims] buf3: loop var d0 has no named dim mapping -- using _untracked_32\n[WARNING] [spyre.inductor.propagate_named_dims] buf3: loop var d1 has no named dim mapping -- using _untracked_4096\n[WARNING] [spyre.inductor.propagate_named_dims] buf3: loop var d2 has no named dim mapping -- using _untracked_64\n[WARNING] [spyre.inductor.propagate_named_dims] _consume_names: no prefix of ['B', 'H', 'Lq', 'Lk'] multiplies to 4096\n[WARNING] [spyre.inductor.propagate_named_dims] buf19: loop var d0 has no named dim mapping -- using _untracked_32\n[WARNING] [spyre.inductor.propagate_named_dims] buf19: loop var d1 has no named dim mapping -- using _untracked_4096\n[WARNING] [spyre.inductor.propagate_named_dims] buf19: loop var d2 has no named dim mapping -- using _untracked_64\n",
+  "plan_realization_strategy_counts": {
+    "loop_scoped_input_fetch": 32
+  },
+  "plan_physical_lowering_counts": {
+    "lowered_loop_scoped_kernel_neighbor": 32
+  },
+  "plan_communication_pattern_counts": {
+    "all_gather_replicate": 32
+  },
+  "sample_plan": "54_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json"
+}
