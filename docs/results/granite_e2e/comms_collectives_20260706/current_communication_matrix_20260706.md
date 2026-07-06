@@ -8,6 +8,43 @@ This note records the current state of the Granite/flash LX communication work a
 - whether it has been validated on a useful Granite or flash workload.
 
 
+## 2026-07-06 DL-neighbor carrier update
+
+New evidence is archived under:
+
+- `dl_neighbor_carrier_probe_20260706/`
+- `dev_validation_20260706/`
+
+This supersedes the earlier optimistic read that loop-scoped matmul-neighbor lowering was already enough for Granite/flash. The logical contract is useful, but the physical carrier is still incomplete.
+
+Current state:
+
+| item | status |
+|---|---|
+| one-flag gate | present in current patches: `SPYRE_LX_PLANNER_RELAYOUT=1` |
+| flash structural SDSC | `ReStickifyOpHBM` can be structurally reduced to 0 in generated SDSCs |
+| Granite S512 all-gather map | logical transfer map is now correct: 128 transfers, 8 groups, 4 producer chunks/group, 4 replicas/group |
+| STCDP + ReStickify carrier | not sufficient for full Granite S512: DCC IBUFF failure `134/128` |
+| DL-neighbor carrier | gets past STCDP IBUFF class, but currently exposes missing mixed HBM+LX-neighbor/staged-conversion support |
+| value-correct profiled Granite/flash run | not achieved for all-gather/restickify yet |
+
+The Granite S512 down-projection operand edge is activation `INPUT`, not a weight/KERNEL preload case:
+
+- `source_lx_tensor`: SwiGLU product, producer 32-way LX activation shards
+- `target_kernel_tensor` metadata name is historical; its `dsType_` is `INPUT` for this edge
+- `staged_destination.component_` is `KERNEL` because the matmul transfer loop wants a matmul operand layout/conversion stage
+
+The DL-neighbor diagnostic probe showed the next backend gaps in order:
+
+1. existing neighbor marker rejected `INPUT` because it only allowed `KERNEL`;
+2. allowing `INPUT` reached the existing mixed HBM + input-neighbor guard;
+3. bypassing that guard reached DDC coordinate propagation failures;
+4. preserving the source allocation and forcing a separate destination allocation progressed further;
+5. skipping normal loop-offset computation for folded LX-neighbor allocations progressed to retry threshold on the normal weight/KERNEL HBM transfer in the same matmul DSC.
+
+The next production backend slice is therefore not broad many-to-one `ReStickifyOpLx`. It is a staged matmul-operand neighbor carrier that supports mixed normal HBM operand transfers plus LX-neighbor activation transfers in one matmul DSC, and then performs value-safe staged layout conversion.
+
+
 ## 2026-07-06 Coordinate-Start Update
 
 New evidence is archived under `dldsc_coordinate_start_fix_20260706/`.
