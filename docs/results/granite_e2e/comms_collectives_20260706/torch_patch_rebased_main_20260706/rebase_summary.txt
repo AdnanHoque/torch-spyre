@@ -1,5 +1,5 @@
-Torch patch regenerated: 2026-07-06T22:11:32Z
-Base: origin/main 7e45168f1d56ca1cec4889a3e19b14719dcdd23f
-Head: gather-restickify cc29ba259ec190e62f760f032ffd3355581a57df
-Single feature gate: SPYRE_LX_PLANNER_RELAYOUT=1
-This gate enables the Torch LX relayout planner subfeatures and sets the DXP subprocess LX workspace fraction through torch_spyre._inductor.config.dxp_backend_lx_frac_avail.
+Torch patch regenerated: 2026-07-06T23:55:30+00:00
+Base upstream/main: 7e45168f1d56ca1cec4889a3e19b14719dcdd23f
+Head gather-restickify: cc29ba259ec190e62f760f032ffd3355581a57df
+Public feature gate: SPYRE_LX_PLANNER_RELAYOUT=1
+Patch includes DXP_BACKEND_LX_FRAC_AVAIL propagation when the feature gate is on.

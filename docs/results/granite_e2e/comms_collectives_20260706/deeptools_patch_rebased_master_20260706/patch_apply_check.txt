@@ -1,4 +1,1 @@
-Generated: 2026-07-06
-Command: git apply --check deeptools_ah_comms_collectives_rebased_on_master.patch
-Base: upstream master 949cfeea885e05cb12dd37ea07d480d82f1ee27c
-Result: pass
+Deeptools patch apply-check: PASS

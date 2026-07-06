@@ -1,18 +1,18 @@
-A	tests/configs/torch_spyre_tests/inductor/test_lx_relayout_dldsc_config.yaml
-A	tests/inductor/test_layout_allgather_restickify_import_light.py
-A	tests/inductor/test_lx_relayout_dldsc.py
-A	tests/inductor/test_scratchpad_graph_editor.py
-M	torch_spyre/_inductor/codegen/bundle.py
-M	torch_spyre/_inductor/codegen/compute_ops.py
-M	torch_spyre/_inductor/codegen/superdsc.py
-M	torch_spyre/_inductor/config.py
-M	torch_spyre/_inductor/constants.py
-A	torch_spyre/_inductor/layout_allgather_restickify.py
-A	torch_spyre/_inductor/lx_relayout.py
-M	torch_spyre/_inductor/op_spec.py
-M	torch_spyre/_inductor/propagate_layouts.py
-M	torch_spyre/_inductor/scratchpad/allocator.py
-M	torch_spyre/_inductor/scratchpad/graph_editor.py
-M	torch_spyre/_inductor/scratchpad/utils.py
-M	torch_spyre/_inductor/spyre_kernel.py
-M	torch_spyre/execution/async_compile.py
+tests/configs/torch_spyre_tests/inductor/test_lx_relayout_dldsc_config.yaml
+tests/inductor/test_layout_allgather_restickify_import_light.py
+tests/inductor/test_lx_relayout_dldsc.py
+tests/inductor/test_scratchpad_graph_editor.py
+torch_spyre/_inductor/codegen/bundle.py
+torch_spyre/_inductor/codegen/compute_ops.py
+torch_spyre/_inductor/codegen/superdsc.py
+torch_spyre/_inductor/config.py
+torch_spyre/_inductor/constants.py
+torch_spyre/_inductor/layout_allgather_restickify.py
+torch_spyre/_inductor/lx_relayout.py
+torch_spyre/_inductor/op_spec.py
+torch_spyre/_inductor/propagate_layouts.py
+torch_spyre/_inductor/scratchpad/allocator.py
+torch_spyre/_inductor/scratchpad/graph_editor.py
+torch_spyre/_inductor/scratchpad/utils.py
+torch_spyre/_inductor/spyre_kernel.py
+torch_spyre/execution/async_compile.py

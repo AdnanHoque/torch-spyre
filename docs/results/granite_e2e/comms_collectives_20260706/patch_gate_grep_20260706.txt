@@ -1,0 +1,26 @@
+Torch gate grep:
+1579:+lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
+1585:+    "SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS", lx_planner_relayout
+1592:+    "SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES", lx_planner_relayout
+1600:+    "SPYRE_LX_PLANNER_RELAYOUT_MATMUL_OPERAND_CONTRACT", lx_planner_relayout
+1608:+    "SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY", lx_planner_relayout
+1623:+        "DXP_BACKEND_LX_FRAC_AVAIL",
+
+Deeptools gate grep:
+165:+  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT") ||
+216:+        "or set SPYRE_LX_PLANNER_RELAYOUT=1 for the LX relayout "
+304:+  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT") ||
+618:+  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT");
+622:+  return envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
+1095:+      "in the same DSC. Set SPYRE_LX_PLANNER_RELAYOUT=1 for the LX "
+1234:+                 "SPYRE_LX_PLANNER_RELAYOUT=1 for the LX relayout "
+1438:+  return envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
+1930:+  return envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
+2007:+                (std::getenv("SPYRE_LX_PLANNER_RELAYOUT") != nullptr &&
+2042:+        std::getenv("SPYRE_LX_PLANNER_RELAYOUT") != nullptr &&
+2537:+      std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
+2886:+  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT");
+2891:+         envFlagEnabled("DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY");
+2900:+  return envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
+4425:+            "SPYRE_LX_PLANNER_RELAYOUT=1 for the relayout prototype.");
+4521:+            "chunks from IFN/STCDP. Set SPYRE_LX_PLANNER_RELAYOUT=1 for "
