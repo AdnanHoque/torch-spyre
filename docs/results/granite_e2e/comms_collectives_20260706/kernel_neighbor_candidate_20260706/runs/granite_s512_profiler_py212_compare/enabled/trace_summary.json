@@ -1,0 +1,20 @@
+{
+  "active_iters": 5,
+  "kernel_durations_ms": {
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsque": 2.821797,
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2_wkgi00mv/spyreCodeDir/bund": 5.180527999999999,
+    "sdsc_fused_add_linear_mul_silu_split_with_sizes_3_l0vnwvyf/spyreCodeDir/bundle.mlir#2": 43.959083,
+    "sdsc_fused_linear_rms_norm_0_i4dogoht/spyreCodeDir/bundle.mlir#2": 7.4155
+  },
+  "kernel_event_counts": {
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsque": 5,
+    "sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2_wkgi00mv/spyreCodeDir/bund": 5,
+    "sdsc_fused_add_linear_mul_silu_split_with_sizes_3_l0vnwvyf/spyreCodeDir/bundle.mlir#2": 5,
+    "sdsc_fused_linear_rms_norm_0_i4dogoht/spyreCodeDir/bundle.mlir#2": 5
+  },
+  "kernel_ms_per_iter": 11.875381599999999,
+  "kernel_ms_total": 59.37690799999999,
+  "memory_ms_per_iter": 0.8837222000000001,
+  "memory_ms_total": 4.418611000000001,
+  "trace": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_kernel_neighbor_profile_profpy212_20260706_145100/block_prefill/trace/adnan-cdx-spyre-dev-pf_158334.1783349503048970612.pt.trace.json"
+}

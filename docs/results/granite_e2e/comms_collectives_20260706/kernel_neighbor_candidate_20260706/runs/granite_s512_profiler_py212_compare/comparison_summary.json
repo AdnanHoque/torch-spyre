@@ -1,0 +1,20 @@
+{
+  "disabled_run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_profile_profpy212_relayout_disabled_20260706_145218",
+  "enabled_run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_kernel_neighbor_profile_profpy212_20260706_145100",
+  "disabled_wall_median_ms": 29.46782112121582,
+  "enabled_wall_median_ms": 29.418468475341797,
+  "wall_speedup": 1.001677607585704,
+  "disabled_kernel_ms_per_iter": 12.5646926,
+  "enabled_kernel_ms_per_iter": 11.875381599999999,
+  "kernel_speedup": 1.058045376832354,
+  "disabled_memory_ms_per_iter": 0.9590026000000004,
+  "enabled_memory_ms_per_iter": 0.8837222000000001,
+  "memory_speedup": 1.0851855933912267,
+  "disabled_attention_kernel_total_ms": 5.861828,
+  "enabled_attention_kernel_total_ms": 2.821797,
+  "attention_kernel_speedup": 2.0773386604351765,
+  "disabled_attention_kernel_name": "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsque",
+  "enabled_attention_kernel_name": "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsque",
+  "disabled_handoff_op": "sdsc_7 ReStickifyOpHBM in attention kernel",
+  "enabled_handoff_op": "sdsc_7 ReStickifyOpLx in attention kernel"
+}
