@@ -40,6 +40,9 @@ spyre_decompositions: dict = {}
 spyre_decompositions_to_exclude = [
     torch.ops.aten.triu,
     torch.ops.aten.tril,
+    # Keep silu as a single fusable op so it can attach as a matmul
+    # (FEST %silu_op) epilogue instead of decomposing to neg/exp/add/realdiv.
+    torch.ops.aten.silu,
 ]
 
 # Dict for Spyre-specific decompositions to be registered via DispatchKey

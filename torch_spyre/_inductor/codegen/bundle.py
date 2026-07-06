@@ -21,7 +21,11 @@ import sympy
 
 from torch_spyre._inductor import config as _spyre_config
 from torch_spyre._inductor.codegen.compute_ops import SymbolKind
-from torch_spyre._inductor.codegen.superdsc import compile_op_spec
+from torch_spyre._inductor.codegen.superdsc import (
+    compile_op_spec,
+    compile_fused_matmul_silu,
+    is_matmul_silu_fusion,
+)
 from torch_spyre._inductor.codegen.unroll import unroll_loop_specs
 from torch_spyre._inductor.op_spec import LoopSpec, OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
@@ -84,6 +88,8 @@ def generate_bundle(
     use_symbols = symbolic_args
 
     specs_list: list = unroll_loop_specs(list(specs)) if unroll_loops else list(specs)
+    if _spyre_config.enable_matmul_silu_epilogue:
+        specs_list = _fold_matmul_silu(specs_list)
 
     # -----------------------------------------------------------------------
     # Pass 1: compile all OpSpecs depth-first.
@@ -320,15 +326,31 @@ def _compile_specs(
         elif isinstance(entry, OpSpec):
             idx = sdsc_counter[0]
             sdsc_counter[0] += 1
-            sdsc_json, local_sym_values, affine_strides, local_symbol_kinds = (
-                compile_op_spec(
-                    idx,
-                    entry,
-                    symbols,
-                    symbol_id_offset_counter[0],
-                    use_symbols=use_symbols,
+            fused_silu = getattr(entry, "_fused_silu", None)
+            if fused_silu is not None:
+                logger.info(
+                    "Fusing matmul + SiLU into one SDSC (%silu_op inner epilogue)"
                 )
-            )
+                sdsc_json, local_sym_values, affine_strides, local_symbol_kinds = (
+                    compile_fused_matmul_silu(
+                        idx,
+                        entry,
+                        fused_silu,
+                        symbols,
+                        symbol_id_offset_counter[0],
+                        use_symbols=use_symbols,
+                    )
+                )
+            else:
+                sdsc_json, local_sym_values, affine_strides, local_symbol_kinds = (
+                    compile_op_spec(
+                        idx,
+                        entry,
+                        symbols,
+                        symbol_id_offset_counter[0],
+                        use_symbols=use_symbols,
+                    )
+                )
             symbol_id_offset_counter[0] += len(local_sym_values)
             compiled.append(
                 (sdsc_json, local_sym_values, affine_strides, local_symbol_kinds)
@@ -581,3 +603,48 @@ def _collect_loop_counts(specs: list) -> list:
             counts.append(entry.count)
             counts.extend(_collect_loop_counts(entry.body))
     return counts
+
+
+# ---------------------------------------------------------------------------
+# Matmul + SiLU epilogue folding
+# ---------------------------------------------------------------------------
+
+
+def _fold_matmul_silu(specs: list) -> list:
+    """Rewrite ``specs`` so each matmul immediately followed by a fusible unary
+    SiLU sibling absorbs the SiLU as an inner epilogue.
+
+    The SiLU OpSpec is dropped from the returned tree and the matmul OpSpec is
+    tagged with ``_fused_silu`` (the SiLU OpSpec) so ``_compile_specs`` emits a
+    single 2-entry computeOp_ SDSC.  Recurses into ``LoopSpec`` bodies.  All
+    other entries pass through untouched, so plain matmuls and standalone SiLUs
+    keep their one-to-one lowering.
+    """
+    out: list = []
+    i = 0
+    n = len(specs)
+    while i < n:
+        cur = specs[i]
+        if isinstance(cur, LoopSpec):
+            out.append(
+                LoopSpec(
+                    count=cur.count,
+                    body=_fold_matmul_silu(cur.body),
+                    tiled_symbols=cur.tiled_symbols,
+                )
+            )
+            i += 1
+            continue
+        nxt = specs[i + 1] if i + 1 < n else None
+        if (
+            isinstance(cur, OpSpec)
+            and isinstance(nxt, OpSpec)
+            and is_matmul_silu_fusion(cur, nxt)
+        ):
+            cur._fused_silu = nxt
+            out.append(cur)
+            i += 2
+        else:
+            out.append(cur)
+            i += 1
+    return out

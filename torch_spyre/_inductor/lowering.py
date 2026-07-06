@@ -683,6 +683,22 @@ def lower_mean_default(x, *, dtype=None):
     return lower_mean(x, axis=axis, keepdim=False, dtype=dtype)
 
 
+@register_spyre_lowering(torch.ops.aten.silu.default)
+def lower_silu(x):
+    pw = Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=lambda index: lowering.ops_wrapper("silu")(
+            x.make_loader()(index)
+        ),
+        ranges=x.get_size(),
+        origin_node=x.get_origin_node(),
+        traceback=x.get_traceback(),
+    )
+    pw.realize()
+    return pw
+
+
 @register_spyre_lowering(torch.ops.spyre.gelu)
 def lower_gelu(x, approximate="none"):
     pw = Pointwise.create(

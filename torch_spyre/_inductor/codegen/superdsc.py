@@ -21,6 +21,9 @@ from sympy import Integer, Symbol, Expr, Mod, floor
 from torch._inductor.virtualized import V
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.constants import (
+    BATCH_MATMUL_OP,
+    SILU_OP,
+    SILU_EPILOGUE_OP,
     IDENTITY_OP,
     INPUT_DIM_LABELS,
     OUTPUT_DIM_LABELS,
@@ -77,6 +80,23 @@ class SDSCArgs:
 
 
 @dataclasses.dataclass
+class Epilogue:
+    """A compute op fused onto the tail of a primary op in a single SDSC.
+
+    The epilogue runs on the SFP after the primary (matmul) op and shares the
+    primary's iteration space and output (PSUM) tensor.  ``input_indices`` and
+    ``output_index`` index into the enclosing ``SDSCSpec.args`` list.  For the
+    matmul-SiLU inner epilogue the SiLU is unary: it reads the matmul output
+    and writes it back in place (``input_indices == [output_index]``).
+    """
+
+    opfunc: str
+    execution_unit: str
+    input_indices: list
+    output_index: int
+
+
+@dataclasses.dataclass
 class SDSCSpec:
     opfunc: str
     execution_unit: str
@@ -91,6 +111,7 @@ class SDSCSpec:
     args: list[SDSCArgs]
     constants: dict[str, Any]
     coordinate_masking: dict[Symbol, Any]
+    epilogues: list = dataclasses.field(default_factory=list)
 
     def __str__(self) -> str:
         iter_space = ", ".join(f"{k}={v}" for k, v in self.iteration_space.items())
@@ -129,6 +150,16 @@ class SDSCSpec:
         if self.constants:
             parts.append(
                 f"  constants=[{', '.join(f'{k}={v}' for k, v in self.constants.items())}]"
+            )
+        if self.epilogues:
+            parts.append(
+                "  epilogues=["
+                + ", ".join(
+                    f"{e.opfunc}(exUnit={e.execution_unit}, "
+                    f"in={e.input_indices}, out={e.output_index})"
+                    for e in self.epilogues
+                )
+                + "]"
             )
         return "SDSCSpec(\n" + "\n".join(parts) + "\n)"
 
@@ -695,3 +726,152 @@ def compile_op_spec(
         tiled_symbols=tiled_symbols,
         use_symbols=use_symbols,
     )
+
+
+# ---------------------------------------------------------------------------
+# Matmul + SiLU inner-epilogue fusion (bmm.ddl %silu_op, mode-6/7 PE_FEST).
+#
+# This mirrors the matmul + residual-add stridedadd epilogue, but SiLU is a
+# UNARY op: it consumes only the matmul output and writes the result in place.
+# There is no auxiliary residual tensor to splice into the input section, so
+# the fused SDSC keeps the matmul's arg list unchanged and appends a single
+# ``silu`` computeOp (exUnit "sfp") that reads and writes the matmul output.
+# ---------------------------------------------------------------------------
+
+
+def _matmul_silu_fusion(matmul: OpSpec, silu: OpSpec) -> bool:
+    """True if ``silu`` is a full-shape unary SiLU consuming ``matmul``'s output.
+
+    The fusible pattern is ``out = silu(matmul(x, y))`` where the SiLU reads the
+    matmul output and its output has the same device element count (a full-shape
+    unary, not a reduction / broadcast).  bmm.ddl's ``%silu_op`` inner epilogue
+    runs the SiLU on the SFP over the matmul PSUM tile, so the standalone SiLU
+    SDSC is suppressed and folded in.
+    """
+    if matmul.op != BATCH_MATMUL_OP or silu.op != SILU_OP:
+        return False
+    if silu.is_reduction:
+        return False
+    # matmul: args = [x, y, mm_out]; silu: args = [silu_in, silu_out].
+    if len(matmul.args) != 3 or len(silu.args) != 2:
+        return False
+    mm_out = matmul.args[-1]
+    silu_inputs = [a for a in silu.args if a.is_input]
+    silu_outputs = [a for a in silu.args if not a.is_input]
+    if len(silu_inputs) != 1 or len(silu_outputs) != 1:
+        return False
+    if not _same_tensor(silu_inputs[0], mm_out):
+        return False
+    out_elems = math.prod(mm_out.device_size)
+    if math.prod(silu_outputs[0].device_size) != out_elems:
+        return False
+    return True
+
+
+def _matmul_silu_final_out(matmul: OpSpec, silu: OpSpec) -> TensorArg:
+    """Return the SiLU's final output TensorArg for buffer retargeting."""
+    return [a for a in silu.args if not a.is_input][0]
+
+
+def parse_fused_matmul_silu(matmul: OpSpec, silu: OpSpec):
+    """Parse a fused matmul + SiLU pair into one SDSC spec.
+
+    The matmul is parsed normally (computeOp_[0], exUnit "pt").  A ``silu``
+    epilogue (computeOp_[1], exUnit "sfp") is appended that reads AND writes the
+    matmul output tensor (unary, in place), sharing the matmul's iteration space
+    and PSUM output.
+
+    The matmul-output tensor is retargeted to the SiLU's *final* output buffer:
+    on device the ``%silu_op`` inner epilogue writes its result into the matmul
+    output tensor, so the matmul must produce its product directly in the fused
+    kernel's output buffer for downstream consumers to read the SiLU'd data.
+    The original matmul-output intermediate buffer is then unused.
+
+    Returns ``(SDSCSpec, symbol_mapping)`` to match ``parse_op_spec``.
+    """
+    assert _matmul_silu_fusion(matmul, silu), (
+        "parse_fused_matmul_silu called on a non-fusible pair"
+    )
+    final_out = _matmul_silu_final_out(matmul, silu)
+
+    spec, symbol_mapping = parse_op_spec(matmul)
+    out_index = len(spec.args) - 1  # matmul output (last arg)
+    # Retarget the matmul output to the fused kernel's final output buffer.
+    spec.args[out_index] = _retarget_buffer(spec.args[out_index], final_out)
+
+    spec.epilogues.append(
+        Epilogue(
+            opfunc=SILU_EPILOGUE_OP,
+            execution_unit="sfp",
+            input_indices=[out_index],
+            output_index=out_index,
+        )
+    )
+    return spec, symbol_mapping
+
+
+def compile_fused_matmul_silu(
+    idx: int,
+    matmul: OpSpec,
+    silu: OpSpec,
+    symbols: list,
+    symbol_id_offset: int = 0,
+    use_symbols: bool = False,
+):
+    """Compile a fused matmul+SiLU pair, matching ``compile_op_spec``'s ABI."""
+    sdsc_spec, symbol_mapping = parse_fused_matmul_silu(matmul, silu)
+    logger.debug("%s", sdsc_spec)
+    tiled_symbols = [
+        symbol_mapping[s] for s in matmul.tiled_symbols if s in symbol_mapping
+    ]
+    return generate_sdsc(
+        idx,
+        sdsc_spec,
+        symbols,
+        symbol_id_offset,
+        tiled_symbols=tiled_symbols,
+        use_symbols=use_symbols,
+    )
+
+
+def is_matmul_silu_fusion(matmul: OpSpec, silu: OpSpec) -> bool:
+    """Public predicate: can ``silu`` be folded into ``matmul`` as a %silu_op
+    inner epilogue in a single SDSC?"""
+    return _matmul_silu_fusion(matmul, silu)
+
+
+def _retarget_buffer(out_arg, target):
+    """Clone the matmul-output SDSCArgs, pointing it at ``target``'s buffer.
+
+    The SiLU output is elementwise-aligned with the matmul output (same [M, N]
+    device shape), so it shares the OUTPUT layout/scales/strides; only the
+    buffer address differs.
+    """
+    return dataclasses.replace(
+        out_arg,
+        allocation=target.allocation,
+        start_address=(
+            target.allocation.get("pool")
+            if "pool" in target.allocation
+            else target.allocation.get("lx")
+            if "lx" in target.allocation
+            else target.allocation.get("hbm")
+        ),
+    )
+
+
+def _same_tensor(a, b) -> bool:
+    """Two TensorArgs refer to the same device buffer.
+
+    Buffers are linked by their allocation dict (HBM/pool/lx address), which is
+    shared object-identity across ops that read/write the same buffer.  Falls
+    back to comparing the resolved address values for robustness after the
+    OpSpec list round-trips through wrapper serialisation (where the dicts are
+    reconstructed and no longer share identity).
+    """
+    if a.allocation is b.allocation:
+        return True
+    for key in ("pool", "lx", "hbm"):
+        if key in a.allocation and key in b.allocation:
+            return a.allocation[key] == b.allocation[key]
+    return False

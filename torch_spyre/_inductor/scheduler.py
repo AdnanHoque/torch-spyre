@@ -36,8 +36,100 @@ from .spyre_kernel import SpyreKernel
 from .pass_utils import iteration_space
 from .logging_utils import get_inductor_logger
 from .op_spec import LoopSpec
+from .constants import BATCH_MATMUL_OP
+from . import config as _spyre_config
+import torch
 
 logger = get_inductor_logger("scheduler")
+
+
+_SILU_ATEN_TARGETS = (
+    torch.ops.aten.silu.default,
+    torch.ops.aten.silu,
+)
+
+
+def _is_matmul_node(node: BaseSchedulerNode) -> bool:
+    """True if ``node`` is a matmul reduction SchedulerNode (batchmatmul)."""
+    if not isinstance(node, SchedulerNode) or not node.is_reduction():
+        return False
+    ir_node = node.node
+    get_rtype = getattr(ir_node, "get_reduction_type", None)
+    return get_rtype is not None and get_rtype() == BATCH_MATMUL_OP
+
+
+def _is_silu_node(node: BaseSchedulerNode) -> bool:
+    """True if ``node`` is a full-shape unary ``aten.silu`` pointwise node."""
+    if not isinstance(node, SchedulerNode) or node.is_reduction():
+        return False
+    ir_node = node.node
+    origins = getattr(ir_node, "origins", None) or getattr(
+        getattr(ir_node, "data", None), "origins", None
+    )
+    if not origins:
+        return False
+    return any(getattr(fx, "target", None) in _SILU_ATEN_TARGETS for fx in origins)
+
+
+def _silu_numel(name: str):
+    """Best-effort element count for buffer ``name`` (None if unavailable)."""
+    buf = V.graph.get_buffer(name)
+    if buf is None:
+        return None
+    try:
+        return V.graph.sizevars.size_hint(buf.get_numel())
+    except Exception:
+        return None
+
+
+def _silu_consumes_full_matmul(
+    node1: BaseSchedulerNode, node2: BaseSchedulerNode
+) -> bool:
+    """The SiLU must read exactly the matmul output and be full-shape (unary).
+
+    A SiLU is unary: its only non-constant read is the matmul output buffer, and
+    its output has the same element count as the matmul output (no broadcast /
+    reduction).  This mirrors the full-shape check on the residual-add gate.
+    """
+    mm_buffers = node1.get_buffer_names()
+    silu_reads = [
+        dep.name for dep in node2.read_writes.reads if dep.name not in mm_buffers
+    ]
+    # The only real read is the matmul output; no auxiliary tensor.
+    if silu_reads:
+        return False
+    if not any(dep.name in mm_buffers for dep in node2.read_writes.reads):
+        return False
+    out_numel = None
+    for w in node2.read_writes.writes:
+        out_numel = _silu_numel(w.name)
+        break
+    mm_out_numel = None
+    for w in node1.read_writes.writes:
+        mm_out_numel = _silu_numel(w.name)
+        break
+    if out_numel is None or mm_out_numel is None:
+        return False
+    return out_numel == mm_out_numel
+
+
+def can_fuse_matmul_silu(
+    node1: BaseSchedulerNode, node2: BaseSchedulerNode
+) -> bool:
+    """Narrow vertical-fusion gate: a matmul absorbing a consuming unary SiLU.
+
+    ``silu`` is exposed by bmm.ddl as the ``%silu_op`` mode-6/7 inner epilogue
+    (PE_FEST), so a 2-entry computeOp_ SDSC ([batchmatmul, silu]) is consumed
+    correctly end-to-end.  Only a full-shape unary SiLU consuming the matmul
+    output is folded; anything else stays unfused.  Gated behind
+    ``config.enable_matmul_silu_epilogue``.
+    """
+    if not _spyre_config.enable_matmul_silu_epilogue:
+        return False
+    if not _is_matmul_node(node1) or not _is_silu_node(node2):
+        return False
+    return _silu_consumes_full_matmul(node1, node2)
+
 
 
 def _find_leaf_sched_node(node: BaseSchedulerNode):
@@ -298,9 +390,13 @@ class SuperDSCScheduling(BaseScheduling):
     ) -> bool:
         """
         Check whether node1 and node2 can be vertically fused or not.
+
+        Narrowly enabled for a matmul SchedulerNode absorbing a consuming
+        unary SiLU (``%silu_op`` inner epilogue), which folds into one SDSC
+        with a 2-entry computeOp_.  All other vertical fusion stays off
+        (issue #826), and horizontal fusion stays off too.
         """
-        # TODO: Revisit this as part of https://github.com/torch-spyre/torch-spyre/issues/826
-        return False
+        return can_fuse_matmul_silu(node1, node2)
 
     def can_fuse_horizontal(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode

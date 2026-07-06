@@ -52,6 +52,14 @@ bundle_symbolic_args: bool = os.environ.get("BUNDLE_SYMBOLIC_ARGS", "0") == "1"
 # for the scf.for / affine.apply path.
 unroll_loops: bool = os.environ.get("UNROLL_LOOPS", "1") == "1"
 
+# When True, a full-shape unary SiLU consuming a matmul output is folded
+# into the matmul as a bmm.ddl %silu_op inner epilogue (one SDSC, 2-entry
+# computeOp_ [batchmatmul, silu]) instead of emitting a standalone SiLU
+# segment.  Default-on for test; set to 0 to disable the auto-fusion.
+enable_matmul_silu_epilogue: bool = (
+    os.environ.get("SPYRE_ENABLE_MATMUL_SILU_EPILOGUE", "1") == "1"
+)
+
 # Layout solver class used by default in scratchpad.allocator.DefaultAllocator.
 # Options:
 #  "greedy":   GreedyLayoutSolver (default),

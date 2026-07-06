@@ -321,6 +321,10 @@ class SpyreOpFuncs:
         return PointwiseOp("sigmoid", [x])
 
     @staticmethod
+    def silu(x):
+        return PointwiseOp("silu", [x])
+
+    @staticmethod
     def softplus(x, beta, threshold):
         op_info = {
             "constants": {

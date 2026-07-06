@@ -270,6 +270,52 @@ def _tiled_byte_stride(tensor, tiled_sym, iteration_space) -> int:
     )
 
 
+
+def _compute_ops(sdsc_spec, out_idx):
+    """Build the computeOp_ vector: the primary op plus any fused epilogues.
+
+    For a plain op this is a single-entry list (identical to the pre-fusion
+    behaviour).  When epilogues are attached (e.g. a matmul-SiLU inner
+    epilogue) each is appended as an additional computeOp sharing the primary's
+    iteration space / PSUM output.  ``sdsc_spec.num_inputs`` counts only the
+    primary op's real inputs, so the primary ``inputLabeledDs`` excludes any
+    epilogue-only auxiliary tensor.
+    """
+    primary = {
+        "exUnit": sdsc_spec.execution_unit,
+        "opFuncName": sdsc_spec.opfunc,
+        "attributes_": {
+            "dataFormat_": sdsc_spec.data_format.name,
+            "fidelity_": "regular",
+        },
+        "location": "Inner",
+        "inputLabeledDs": [
+            f"Tensor{i}-idx{i}" for i in range(sdsc_spec.num_inputs)
+        ],
+        "outputLabeledDs": [f"Tensor{out_idx}-idx{out_idx}"],
+    }
+    compute_ops = [primary]
+    for epilogue in sdsc_spec.epilogues:
+        compute_ops.append(
+            {
+                "exUnit": epilogue.execution_unit,
+                "opFuncName": epilogue.opfunc,
+                "attributes_": {
+                    "dataFormat_": sdsc_spec.data_format.name,
+                    "fidelity_": "regular",
+                },
+                "location": "Inner",
+                "inputLabeledDs": [
+                    f"Tensor{i}-idx{i}" for i in epilogue.input_indices
+                ],
+                "outputLabeledDs": [
+                    f"Tensor{epilogue.output_index}-idx{epilogue.output_index}"
+                ],
+            }
+        )
+    return compute_ops
+
+
 def generate_sdsc(
     idx,
     sdsc_spec,
@@ -630,24 +676,7 @@ def generate_sdsc(
                                 sdsc_spec.constants,
                                 sdsc_spec.num_cores,
                             ),
-                            "computeOp_": [
-                                {
-                                    "exUnit": sdsc_spec.execution_unit,
-                                    "opFuncName": sdsc_spec.opfunc,
-                                    "attributes_": {
-                                        "dataFormat_": sdsc_spec.data_format.name,
-                                        "fidelity_": "regular",
-                                    },
-                                    "location": "Inner",
-                                    "inputLabeledDs": [
-                                        f"Tensor{i}-idx{i}"
-                                        for i in range(sdsc_spec.num_inputs)
-                                    ],
-                                    "outputLabeledDs": [
-                                        f"Tensor{out_idx}-idx{out_idx}"
-                                    ],
-                                }
-                            ],
+                            "computeOp_": _compute_ops(sdsc_spec, out_idx),
                         }
                     }
                 ],

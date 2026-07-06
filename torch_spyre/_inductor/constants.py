@@ -13,6 +13,15 @@
 # limitations under the License.
 
 BATCH_MATMUL_OP = "batchmatmul"
+
+# The unary pointwise op name that the matmul-SiLU epilogue fuses on.  This is
+# the single recognized SiLU op (decompositions.py keeps aten.silu whole).
+SILU_OP = "silu"
+
+# opFuncName emitted for the SiLU matmul epilogue.  bmm.ddl exposes %silu_op as
+# a mode-6/7 inner epilogue (PE_FEST) that runs on the SFP after the matmul,
+# reading the matmul PSUM output and writing the SiLU result in place.
+SILU_EPILOGUE_OP = "silu"
 IDENTITY_OP = "identity"
 RESTICKIFY_OP = "ReStickifyOpHBM"
 BATCH_MATMUL_FP8_OP = "batchmatmulfp8"
@@ -67,6 +76,7 @@ SPYRE_FP32_OPS = [
     "neg",
     "exp",
     "sigmoid",
+    "silu",
     "exx2",
     "layernormnorm",
     "identity",
