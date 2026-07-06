@@ -16,9 +16,10 @@ The key Deeptools fix for replay was to mirror the generic `LxRelayout` timeline
 | `replay_gather_plus_restickify_minimal` | rc=0 | Standalone gather plus local `ReStickifyOpLx` replay succeeds with the same fix. |
 | `aiu_full_chunk1_timeout` | rc=124 | Hardware reaches attention `run()` return, then hangs at final `torch.accelerator.synchronize()`. |
 | `aiu_gather_only_chunk1_timeout` | rc=124 | Same lost-completion behavior with only the gather `STCDPOpLx`, so `ReStickifyOpLx` is not required for the runtime failure. |
+| `aiu_gather_only_splitcb_timeout` | rc=124 | Setting `DXP_SPLIT_CORRECTION_CB=1` did not clear the hang; copied `attention_spyrecode.json` still contains a single `ComputeOnDevice`, so the split path did not materially change this job plan. |
 
 ## Current Read
-The standalone DataOp carrier is structurally accepted by DXP after the timeline fix, but is not yet a working hardware carrier for the attention relayout. This keeps pointing us away from both mixed data-op rows and pure DataOp-only standalone rows as production carriers for this path.
+The standalone DataOp carrier is structurally accepted by DXP after the timeline fix, but is not yet a working hardware carrier for the attention relayout. `DXP_SPLIT_CORRECTION_CB=1` was also tried; the emitted job plan remained a single `ComputeOnDevice`, and hardware still lost completion. This keeps pointing us away from both mixed data-op rows and pure DataOp-only standalone rows as production carriers for this path.
 
 The remaining direction is to either:
 
