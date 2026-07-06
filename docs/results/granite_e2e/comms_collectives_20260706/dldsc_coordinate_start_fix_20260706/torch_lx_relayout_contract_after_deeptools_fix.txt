@@ -1,0 +1,9 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.1.0, pluggy-1.6.0
+rootdir: /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/torch-spyre
+configfile: pyproject.toml
+collected 23 items
+
+tests/inductor/test_lx_relayout_dldsc.py .......................         [100%]
+
+============================== 23 passed in 2.36s ==============================

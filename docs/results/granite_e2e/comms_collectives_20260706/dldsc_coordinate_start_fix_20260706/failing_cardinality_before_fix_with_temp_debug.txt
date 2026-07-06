@@ -1,0 +1,28 @@
+Note: Google Test filter = DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from DxpTestFixture
+[ RUN      ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality
+STCDP debug: dt key 0 pIDX=0 cIDX0=0 cIDXs=1 inpOrder=3 outOrder=3 inpSP=4 outSP=4
+STCDP debug: dt key 1 pIDX=1 cIDX0=1 cIDXs=1 inpOrder=3 outOrder=3 inpSP=4 outSP=4
+STCDP debug: dt key 2 pIDX=2 cIDX0=2 cIDXs=1 inpOrder=3 outOrder=3 inpSP=4 outSP=4
+STCDP debug: dt key 3 pIDX=3 cIDX0=3 cIDXs=1 inpOrder=3 outOrder=3 inpSP=4 outSP=4
+STCDP debug: dt key 0 pIDX=0 cIDX0=0 cIDXs=1 inpOrder=3 outOrder=3 inpSP=4 outSP=4
+STCDP debug: dt key 1 pIDX=1 cIDX0=1 cIDXs=1 inpOrder=3 outOrder=3 inpSP=4 outSP=4
+STCDP debug: dt key 2 pIDX=2 cIDX0=2 cIDXs=1 inpOrder=3 outOrder=3 inpSP=4 outSP=4
+STCDP debug: dt key 3 pIDX=3 cIDX0=3 cIDXs=1 inpOrder=3 outOrder=3 inpSP=4 outSP=4
+STCDP debug: dt key 0 pIDX=0 cIDX0=0 cIDXs=1 inpOrder=3 outOrder=3 inpSP=4 outSP=3
+STCDP debug: dt key 1 pIDX=1 cIDX0=1 cIDXs=1 inpOrder=3 outOrder=3 inpSP=4 outSP=3
+STCDP debug: empty cIDXs for dt key 2 pIDX=2 inpSP=4 outSP=3
+unknown file: Failure
+C++ exception with description "DtException: !dtTableEntry.second.cIDXs.empty(), file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp line 349" thrown in the test body.
+[  FAILED  ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality (153 ms)
+[----------] 1 test from DxpTestFixture (153 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (153 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality
+
+ 1 FAILED TEST
