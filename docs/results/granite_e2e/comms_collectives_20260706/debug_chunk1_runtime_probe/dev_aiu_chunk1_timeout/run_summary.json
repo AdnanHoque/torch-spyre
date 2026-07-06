@@ -1,0 +1,27 @@
+{
+  "run": "/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_debug_chunk1_aiu_localdxp_20260706_090131",
+  "returncode": "124",
+  "backend_plan_count": 2,
+  "plans": [
+    {
+      "file": "16_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+      "sdsc_name": "16_batchmatmul",
+      "status": "lowered_gather_then_restickify",
+      "realized": true,
+      "strategy": "gather_then_restickify",
+      "logical_transfer_count": "1024",
+      "debug_max_chunks": 1
+    },
+    {
+      "file": "8_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+      "sdsc_name": "8_batchmatmul",
+      "status": "lowered_gather_then_restickify",
+      "realized": true,
+      "strategy": "gather_then_restickify",
+      "logical_transfer_count": "512",
+      "debug_max_chunks": 1
+    }
+  ],
+  "stdout_tail": "[block-probe] constructing one-layer Granite\n[block-probe] materializing empty spyre parameters\n[block-probe] installing block compile wrapper\n[block-probe] creating inputs\n[block-probe] calling block iteration 1/2\n[WARN] dxp_standalone --bundle option is deprecated (always on)\n[WARN] dxp_standalone --bundle option is deprecated (always on)\n[WARN] dxp_standalone --bundle option is deprecated (always on)\n[WARN] dxp_standalone --bundle option is deprecated (always on)\n",
+  "stderr_tail": "nductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x886d71)[0x7f4dd277ad71]\n/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x88935d)[0x7f4dd277d35d]\n/lib64/libpython3.12.so.1.0(PyObject_Vectorcall+0x36)[0x7f4dd4ade0e6]\n/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x786)[0x7f4dd4ac8ce6]\n/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(dynamo_eval_custom_code+0x1ce)[0x7f4dd277ab9e]\n/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x888850)[0x7f4dd277c850]\n/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x889331)[0x7f4dd277d331]\n/lib64/libpython3.12.so.1.0(+0xb7998)[0x7f4dd49f9998]\n/lib64/libpython3.12.so.1.0(+0x1cfcb6)[0x7f4dd4b11cb6]\n/lib64/libpython3.12.so.1.0(_PyObject_Call+0x130)[0x7f4dd4af97a0]\n/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x5caa)[0x7f4dd4ace20a]\n/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x886d71)[0x7f4dd277ad71]\n/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x88957d)[0x7f4dd277d57d]\n/lib64/libpython3.12.so.1.0(+0xb7998)[0x7f4dd49f9998]\n/lib64/libpython3.12.so.1.0(+0x1cfcb6)[0x7f4dd4b11cb6]\n/lib64/libpython3.12.so.1.0(_PyObject_Call+0x130)[0x7f4dd4af97a0]\n/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x5caa)[0x7f4dd4ace20a]\n/lib64/libpython3.12.so.1.0(_PyObject_FastCallDictTstate+0x27b)[0x7f4dd4ac165b]\n/lib64/libpython3.12.so.1.0(_PyObject_Call_Prepend+0x6a)[0x7f4dd4af750a]\n/lib64/libpython3.12.so.1.0(+0x287718)[0x7f4dd4bc9718]\n/lib64/libpython3.12.so.1.0(_PyObject_Call+0xb9)[0x7f4dd4af9729]\n/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x5caa)[0x7f4dd4ace20a]\n/lib64/libpython3.12.so.1.0(PyEval_EvalCode+0xaa)[0x7f4dd4b80d9a]\n/lib64/libpython3.12.so.1.0(+0x27ac61)[0x7f4dd4bbcc61]\n/lib64/libpython3.12.so.1.0(+0x27560b)[0x7f4dd4bb760b]\n/lib64/libpython3.12.so.1.0(+0x272522)[0x7f4dd4bb4522]\n/lib64/libpython3.12.so.1.0(_PyRun_SimpleFileObject+0x1cb)[0x7f4dd4bb3f4b]\n/lib64/libpython3.12.so.1.0(_PyRun_AnyFileObject+0x48)[0x7f4dd4bb3b68]\n/lib64/libpython3.12.so.1.0(Py_RunMain+0x3b0)[0x7f4dd4bb0850]\n/lib64/libpython3.12.so.1.0(Py_BytesMain+0x3b)[0x7f4dd4b6a37b]\n/lib64/libc.so.6(+0x2a58e)[0x7f4dd479358e]\n/lib64/libc.so.6(__libc_start_main+0x89)[0x7f4dd4793649]\n/home/adnan/dt-inductor/.venv/bin/python3(_start+0x25)[0x55de9e10e095]\n*****************\n"
+}

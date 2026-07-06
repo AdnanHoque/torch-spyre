@@ -1,0 +1,30 @@
+{
+  "run": "/home/adnan-cdx/codex-isolated/comms_collectives_gather_reduce_probe_20260706_005444/runs/granite_attention_debug_chunks_only_replay_20260706_084358",
+  "bundle": "/home/adnan-cdx/codex-isolated/comms_collectives_gather_reduce_probe_20260706_005444/runs/granite_attention_bundle_fddxa8_from_dev",
+  "returncode": "0",
+  "plan_count": 2,
+  "plans": [
+    {
+      "file": "16_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+      "sdsc_name": "16_batchmatmul",
+      "status": "lowered_gather_then_restickify",
+      "realized": true,
+      "strategy": "gather_then_restickify",
+      "logical_transfer_count": "1024",
+      "logical_transfers_len": 1024,
+      "debug_max_chunks": 1
+    },
+    {
+      "file": "8_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+      "sdsc_name": "8_batchmatmul",
+      "status": "lowered_gather_then_restickify",
+      "realized": true,
+      "strategy": "gather_then_restickify",
+      "logical_transfer_count": "512",
+      "logical_transfers_len": 512,
+      "debug_max_chunks": 1
+    }
+  ],
+  "stdout_tail": "[WARN] dxp_standalone --bundle option is deprecated (always on)\n",
+  "stderr_tail": ""
+}
