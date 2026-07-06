@@ -194,11 +194,15 @@ def _classify_coordinate_topology(
 def _prefer_matmul_operand_contract(
     read_index: int | None, topology: LXRelayoutTopology
 ) -> bool:
+    supported_matmul_operand_classes = (
+        COMM_CLASS_ALL_GATHER,
+        "broadcast",
+    )
     return (
         config.lx_planner_relayout_collectives
         and config.lx_planner_relayout_matmul_operand_contract
-        and read_index == 1
-        and topology.communication_class in (COMM_CLASS_ALL_GATHER, "broadcast")
+        and read_index in (0, 1)
+        and topology.communication_class in supported_matmul_operand_classes
     )
 
 def _op_num_cores(op: Operation) -> int:
@@ -507,7 +511,7 @@ def plan_lx_relayouts(
                 )
                 continue
             read_index = _memory_read_index(consumer, dep)
-            if is_matmul_consumer and read_index not in (0, None):
+            if is_matmul_consumer and read_index is not None:
                 if (
                     config.lx_planner_relayout_layout_allgather_restickify
                     and not _prefer_matmul_operand_contract(read_index, topology)

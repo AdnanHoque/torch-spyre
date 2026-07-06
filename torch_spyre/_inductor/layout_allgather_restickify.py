@@ -96,14 +96,15 @@ def make_matmul_operand_allgather_contract(
     consumer_compute_work_slice_dims: dict[str, int],
     communication_class: str,
 ) -> dict[str, Any]:
-    """Return the logical contract for Granite AV Tensor1 materialization.
+    """Return the logical contract for staged matmul operand materialization.
 
-    Tensor1 is the non-primary batchmatmul operand.  The Granite evidence has
-    the value tensor resident across producer ``out`` slices while each
-    consumer core computes a different ``mb`` slice.  That edge is a grouped
-    all-gather/broadcast into the matmul transfer loop, not a one-to-one
-    scatter relayout.
+    The operand tensor is resident across producer-owned slices while each
+    consumer core may need a different compute slice.  That edge is a grouped
+    all-gather/broadcast/multicast into the matmul transfer loop, not a
+    one-to-one resident scatter relayout.
     """
+
+    operand_role = {0: "lhs", 1: "rhs"}.get(int(read_index), f"input_{read_index}")
 
     return {
         "kind": MATMUL_OPERAND_BROADCAST,
@@ -111,7 +112,7 @@ def make_matmul_operand_allgather_contract(
         "producer_op": producer_op,
         "consumer_op": consumer_op,
         "operand_read_index": int(read_index),
-        "operand_role": "rhs" if int(read_index) == 1 else f"input_{read_index}",
+        "operand_role": operand_role,
         "producer_work_slice_dims": dict(producer_work_slice_dims),
         "consumer_tensor_work_slice_dims": dict(consumer_tensor_work_slice_dims),
         "consumer_compute_work_slice_dims": dict(consumer_compute_work_slice_dims),
