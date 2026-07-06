@@ -561,6 +561,64 @@ def test_matmul_operand_classification_metadata_is_emitted_top_level():
     assert root["lxRelayoutClassifications_"] == classification
 
 
+def test_generic_gather_classification_and_producer_residency_emit_dldsc_contract():
+    mb = Symbol("x0")
+    out = Symbol("x1")
+    producer_residency = {
+        "0": {"0": 0},
+        "1": {"0": 1},
+        "2": {"0": 2},
+        "3": {"0": 3},
+    }
+    classification = [
+        {
+            "kind": "gather",
+            "source_name": "buf0",
+            "producer_name": "producer",
+            "consumer_name": "consumer",
+            "producer_core_count": 4,
+            "consumer_core_count": 1,
+            "producer_core_id_to_device_slice": producer_residency,
+            "producer_work_slice_dims": {"0": 4},
+            "consumer_work_slice_dims": {"0": 1},
+            "consumer_core_id_to_device_slice": {"0": {"0": 0}},
+            "communication_class": "gather",
+            "communication_pattern": "many_to_one",
+            "max_fanout": 1,
+            "max_fanin": 4,
+            "transfer_count": 4,
+        }
+    ]
+    op_spec = OpSpec(
+        op="neg",
+        is_reduction=False,
+        iteration_space={mb: (Integer(512), 1), out: (Integer(12800), 1)},
+        args=[
+            _fixed_tile_arg(
+                is_input=True,
+                allocation={"lx": 0},
+                lx_residency_core_id_to_wk_slice=producer_residency,
+            ),
+            _fixed_tile_arg(is_input=False, allocation={"hbm": 0x1000}),
+        ],
+        op_info={"lx_relayout_classifications": classification},
+    )
+
+    sdsc, _symbols, _affine_strides, _symbol_kinds = compile_op_spec(0, op_spec, [])
+
+    root = next(iter(sdsc.values()))
+    compute_dsc = next(iter(root["dscs_"][0].values()))
+    input_alloc = compute_dsc["scheduleTree_"][0]
+    assert root["lxRelayoutClassifications_"] == classification
+    assert input_alloc["component_"] == "lx"
+    assert input_alloc["coordinates_"]["coreIdToWkSlice_"] == {
+        "0": {"mb": 0, "out": 0},
+        "1": {"mb": 1, "out": 0},
+        "2": {"mb": 2, "out": 0},
+        "3": {"mb": 3, "out": 0},
+    }
+
+
 def _make_test_scratchpad_allocator():
     from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
 
