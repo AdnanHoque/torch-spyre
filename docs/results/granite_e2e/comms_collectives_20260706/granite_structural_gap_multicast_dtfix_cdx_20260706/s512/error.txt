@@ -1,0 +1,49 @@
+Traceback (most recent call last):
+  File "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_multicast_dtfix_structural_20260706_131533/granite_block_layer_probe_structural.py", line 364, in run_case
+    out, elapsed_ms = call_block(args.warmups + index + 1, total)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_multicast_dtfix_structural_20260706_131533/granite_block_layer_probe_structural.py", line 322, in call_block
+    value = block(x=x, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/nn/modules/module.py", line 1777, in _wrapped_call_impl
+    return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1038, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1053, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1037, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1798, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1570, in codegen_and_compile
+    compiled_module = graph.compile_to_module()
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2499, in compile_to_module
+    return self._compile_to_module()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2509, in _compile_to_module
+    mod = self._compile_to_module_lines(wrapper_code)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2584, in _compile_to_module_lines
+    mod = PyCodeCache.load_by_key_path(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/codecache.py", line 3764, in load_by_key_path
+    mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/runtime/compile_tasks.py", line 35, in _reload_python_module
+    exec(code, mod.__dict__, mod.__dict__)
+  File "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_multicast_dtfix_structural_20260706_131533/block_prefill/cache/4c/c4cl57lvcolonvqowpilhmt3wlxozhmmq7zu4isbybhvgwnxtmkm.py", line 380, in <module>
+    sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1 = async_compile.sdsc('sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1',
+                                                                                                                                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/torch-spyre/torch_spyre/execution/async_compile.py", line 63, in sdsc
+    subprocess.run(["dxp_standalone", "-d", output_dir], check=True)
+  File "/usr/lib64/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '-d', '/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_multicast_dtfix_structural_20260706_131533/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_sestxhwe']' died with <Signals.SIGABRT: 6>.
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+
