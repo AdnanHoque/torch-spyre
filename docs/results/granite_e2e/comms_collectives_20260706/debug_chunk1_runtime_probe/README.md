@@ -82,3 +82,16 @@ Next debugging should focus on a smaller AIU reproducer around one attention mat
 Artifact: `focused_attention_sync_timeout/summary.json`
 
 A smaller reproducer runs only the first RMS bundle, the relayout-bearing attention bundle, and then `torch.accelerator.synchronize()`. It also times out with `in_flight_=1` after the attention bundle. This confirms the relayout-bearing attention bundle itself leaves unresolved runtime work; the downstream Granite bundle is not needed to reproduce the completion failure.
+
+## Focused attention no-dataop-sync repro
+
+Artifact: `focused_attention_no_dataop_sync_timeout/summary.json`
+
+A local DEV-only Deeptools experiment added `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_NO_DATAOP_SYNC=1`, which schedules the inserted gather/restickify data-op rows without the `after_sync` bit. The same focused attention reproducer still timed out at `torch.accelerator.synchronize()`.
+
+- return code: `124` from the 180s timeout wrapper
+- backend plans: `2`
+- both plans still capped with `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS=1`
+- runtime signature still includes `RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0`
+
+This rules out the simplest schedule-flag explanation. The remaining runtime gap is more likely in the mixed data-op/compute schedule shape, the participating-core schedule coverage, or the `STCDPOpLx -> ReStickifyOpLx -> matmul operand` carrier sequence itself.
