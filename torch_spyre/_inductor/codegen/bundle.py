@@ -48,6 +48,148 @@ logger = get_inductor_logger("sdsc_compile")
 _CompiledEntry = tuple[Any, list[int], list[list[dict]], list[SymbolKind]]
 
 
+def _first_sdsc_dsc(sdsc_json: dict) -> tuple[str, dict, str, dict]:
+    if not sdsc_json:
+        return "", {}, "", {}
+    top_key, root = next(iter(sdsc_json.items()))
+    dscs = root.get("dscs_", [])
+    dsc_map = dscs[0] if dscs else {}
+    if not dsc_map:
+        return top_key, root, "", {}
+    dsc_name, dsc = next(iter(dsc_map.items()))
+    return top_key, root, dsc_name, dsc
+
+
+def _labeled_ds_for_tensor(dsc: dict, tensor_idx: int) -> dict:
+    for lds in dsc.get("labeledDs_", []):
+        if int(lds.get("ldsIdx_", -1)) == tensor_idx:
+            return lds
+    return {}
+
+
+def _tensor_layout_contract(
+    *,
+    sdsc_idx: int,
+    sdsc_json: dict,
+    tensor_idx: int,
+    buffer_name: str | None = None,
+    core_id_to_wk_slice: dict | None = None,
+) -> dict[str, Any] | None:
+    top_key, root, dsc_name, dsc = _first_sdsc_dsc(sdsc_json)
+    schedule_tree = dsc.get("scheduleTree_", [])
+    if tensor_idx < 0 or tensor_idx >= len(schedule_tree):
+        return None
+    alloc = schedule_tree[tensor_idx]
+    lds = _labeled_ds_for_tensor(dsc, tensor_idx)
+    ds_type = lds.get("dsType_", "")
+    primary_info = dsc.get("primaryDsInfo_", {}).get(ds_type, {})
+    tensor_core_map = (
+        alloc.get("coordinates_", {}).get("coreIdToWkSlice_", {}) or {}
+    )
+
+    result: dict[str, Any] = {
+        "sdsc_file": f"sdsc_{sdsc_idx}.json",
+        "top_key": top_key,
+        "op": dsc_name,
+        "ldsIdx_": tensor_idx,
+        "dsName_": lds.get("dsName_", f"Tensor{tensor_idx}"),
+        "dsType_": ds_type,
+        "allocation_name": alloc.get("name_", ""),
+        "component_": alloc.get("component_", ""),
+        "layoutDimOrder_": list(
+            alloc.get("layoutDimOrder_", primary_info.get("layoutDimOrder_", []))
+        ),
+        "maxDimSizes_": list(alloc.get("maxDimSizes_", [])),
+        "stickDimOrder_": list(primary_info.get("stickDimOrder_", [])),
+        "stickSize_": list(primary_info.get("stickSize_", [])),
+        "dataFormat_": lds.get("dataFormat_", ""),
+        "wordLength": lds.get("wordLength"),
+        "startAddressCoreCorelet_": alloc.get("startAddressCoreCorelet_", {}),
+        "coordinateInfo_": alloc.get("coordinates_", {}).get("coordInfo", {}),
+        "numWkSlicesPerDim_": dict(root.get("numWkSlicesPerDim_", {})),
+        "coreIdToWkSlice_": dict(core_id_to_wk_slice or tensor_core_map),
+        "computeCoreIdToWkSlice_": dict(root.get("coreIdToWkSlice_", {})),
+    }
+    if buffer_name is not None:
+        result["buffer_name"] = buffer_name
+    return result
+
+
+def _record_lx_output_layout(
+    *,
+    op_spec: OpSpec,
+    sdsc_idx: int,
+    sdsc_json: dict,
+    producer_lx_outputs: dict[str, dict[str, Any]],
+) -> None:
+    if not op_spec.args:
+        return
+    output_arg = op_spec.args[-1]
+    if not output_arg.name or "lx" not in output_arg.allocation:
+        return
+    _top_key, root, _dsc_name, _dsc = _first_sdsc_dsc(sdsc_json)
+    contract = _tensor_layout_contract(
+        sdsc_idx=sdsc_idx,
+        sdsc_json=sdsc_json,
+        tensor_idx=len(op_spec.args) - 1,
+        buffer_name=output_arg.name,
+        core_id_to_wk_slice=root.get("coreIdToWkSlice_", {}),
+    )
+    if contract is not None:
+        producer_lx_outputs[output_arg.name] = contract
+
+
+def _enrich_lx_relayout_classifications(
+    *,
+    op_spec: OpSpec,
+    sdsc_idx: int,
+    sdsc_json: dict,
+    producer_lx_outputs: dict[str, dict[str, Any]],
+) -> None:
+    _top_key, root, _dsc_name, _dsc = _first_sdsc_dsc(sdsc_json)
+    classifications = root.get("lxRelayoutClassifications_", [])
+    if not isinstance(classifications, list):
+        return
+
+    for classification in classifications:
+        if not isinstance(classification, dict):
+            continue
+        if classification.get("kind") != "matmul_operand_broadcast":
+            continue
+
+        source_name = (
+            classification.get("source_name") or classification.get("producer_name")
+        )
+        source_layout = producer_lx_outputs.get(str(source_name))
+        if source_layout is not None:
+            classification.setdefault("source_lx_tensor", source_layout)
+
+        read_index = classification.get("operand_read_index")
+        if read_index is None:
+            read_index = classification.get("read_index")
+        try:
+            target_tensor_idx = int(read_index)
+        except (TypeError, ValueError):
+            target_tensor_idx = -1
+        target_layout = _tensor_layout_contract(
+            sdsc_idx=sdsc_idx,
+            sdsc_json=sdsc_json,
+            tensor_idx=target_tensor_idx,
+        )
+        if target_layout is not None:
+            classification.setdefault("target_kernel_tensor", target_layout)
+
+        layout_transform = dict(classification.get("layout_transform") or {})
+        layout_transform.setdefault("source_component", "lx")
+        layout_transform.setdefault("target_component", "KERNEL")
+        layout_transform.setdefault("movement_stage", "all_gather_replicate")
+        layout_transform.setdefault("conversion_stage", "local_restickify_to_kernel")
+        layout_transform.setdefault(
+            "carrier_hint", "lx_all_gather_then_local_restickify"
+        )
+        classification["layout_transform"] = layout_transform
+
+
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
@@ -373,8 +515,11 @@ def _compile_specs(
     symbol_id_offset_counter: list,
     output_dir: str,
     use_symbols: bool = False,
+    producer_lx_outputs: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Recursively compile all OpSpecs in specs depth-first."""
+    if producer_lx_outputs is None:
+        producer_lx_outputs = {}
     for entry in specs:
         if isinstance(entry, LoopSpec):
             _compile_specs(
@@ -385,6 +530,7 @@ def _compile_specs(
                 symbol_id_offset_counter,
                 output_dir,
                 use_symbols=use_symbols,
+                producer_lx_outputs=producer_lx_outputs,
             )
         elif isinstance(entry, OpSpec):
             idx = sdsc_counter[0]
@@ -398,9 +544,21 @@ def _compile_specs(
                     use_symbols=use_symbols,
                 )
             )
+            _enrich_lx_relayout_classifications(
+                op_spec=entry,
+                sdsc_idx=idx,
+                sdsc_json=sdsc_json,
+                producer_lx_outputs=producer_lx_outputs,
+            )
             symbol_id_offset_counter[0] += len(local_sym_values)
             compiled.append(
                 (sdsc_json, local_sym_values, affine_strides, local_symbol_kinds)
+            )
+            _record_lx_output_layout(
+                op_spec=entry,
+                sdsc_idx=idx,
+                sdsc_json=sdsc_json,
+                producer_lx_outputs=producer_lx_outputs,
             )
             file_name = f"sdsc_{idx}.json"
             with open(os.path.join(output_dir, file_name), "w") as f:

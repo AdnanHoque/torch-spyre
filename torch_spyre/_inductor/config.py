@@ -44,6 +44,36 @@ lx_boundary_clones: bool = os.environ.get("LX_BOUNDARY_CLONES", "0") == "1"
 # synthesize the on-chip relayout from the coordinate mismatch.
 lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
 
+# Experimental research lane for layout-restickify spills. This only makes
+# computed-source synthetic spyre.restickify outputs eligible for LX planning;
+# graph-input/weight restickifies are intentionally left to offline prelayout.
+lx_planner_relayout_restickify_outputs: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS", "0") == "1"
+)
+
+# Experimental research lane for non-primary matmul operand relayouts. These
+# are coordinate collectives such as multicast/gather/all-gather, but still keep
+# physical transfer derivation in Deeptools via dl-dsc coordinates.
+lx_planner_relayout_collectives: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES", "0") == "1"
+)
+
+# Experimental metadata-only contract for Granite attention-value Tensor1
+# materialization. Requires lx_planner_relayout_collectives and records the
+# non-primary matmul operand as grouped all-gather/broadcast rather than
+# allowing it to look like resident scatter.
+lx_planner_relayout_matmul_operand_contract: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_MATMUL_OPERAND_CONTRACT", "0") == "1"
+)
+
+# Experimental metadata lane for flash activation edges of the form
+# pointwise -> ReStickifyOpHBM -> batchmatmul KERNEL. The producer and consumer
+# need a layout-aware grouped all-gather, not the direct scatter class realized
+# by PR1. Keep this opt-in until backend lowering is value-correct.
+lx_planner_relayout_layout_allgather_restickify: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY", "0") == "1"
+)
+
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))

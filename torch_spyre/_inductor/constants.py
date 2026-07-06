@@ -15,6 +15,8 @@
 BATCH_MATMUL_OP = "batchmatmul"
 IDENTITY_OP = "identity"
 RESTICKIFY_OP = "ReStickifyOpHBM"
+RESTICKIFY_LX_OP = "ReStickifyOpLx"
+RESTICKIFY_OPS = {RESTICKIFY_OP, RESTICKIFY_LX_OP}
 BATCH_MATMUL_FP8_OP = "batchmatmulfp8"
 
 # Reduction ops that cannot reduce along the stick dimension.
