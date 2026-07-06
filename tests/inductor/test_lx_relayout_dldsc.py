@@ -16,6 +16,7 @@ import json
 
 from sympy import Integer, Mod, Symbol, floor
 
+from torch._inductor.dependencies import MemoryDep
 from torch._inductor.ir import ComputedBuffer
 
 from torch_spyre._inductor import config
@@ -43,6 +44,7 @@ from torch_spyre._inductor.lx_relayout import (
     get_lx_relayout_inputs,
     is_lx_relayout_reservation,
     make_lx_relayout_reservation_name,
+    plan_lx_relayouts,
 )
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.pass_utils import PerCoreView
@@ -805,6 +807,42 @@ def test_generic_gather_classification_and_producer_residency_emit_dldsc_contrac
         "3": {"mb": 3, "out": 0},
     }
 
+
+def test_partial_reduction_outputs_are_not_copy_relayout_candidates(monkeypatch):
+    dep = MemoryDep("buf0", Symbol("i"), (Symbol("i"),), (Integer(4),))
+
+    class FakeReadWrites:
+        def __init__(self, *, reads=(), writes=()):
+            self.reads = list(reads)
+            self.writes = list(writes)
+
+    producer = ComputedBuffer.__new__(ComputedBuffer)
+    producer.name = "buf0"
+    producer.data = object()
+    producer.get_name = lambda: "buf0"
+    producer.get_read_writes = lambda: FakeReadWrites(writes=(dep,))
+
+    consumer = ComputedBuffer.__new__(ComputedBuffer)
+    consumer.name = "consumer"
+    consumer.data = object()
+    consumer.get_name = lambda: "consumer"
+    consumer.get_read_writes = lambda: FakeReadWrites(reads=(dep,))
+
+    class FakeGraph:
+        operations = [producer, consumer]
+
+    def fake_per_core_view(op, _dep, _buf_name, _cache):
+        assert op is producer
+        view = PerCoreView(work_slice_dims=((0, 4),), core_to_slot=())
+        return view, True
+
+    monkeypatch.setattr(config, "lx_planner_relayout", True)
+    monkeypatch.setattr(
+        "torch_spyre._inductor.lx_relayout._per_core_view_on_buf",
+        fake_per_core_view,
+    )
+
+    assert plan_lx_relayouts(FakeGraph()) == []
 
 def _make_test_scratchpad_allocator():
     from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
