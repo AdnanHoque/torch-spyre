@@ -230,6 +230,15 @@ def test_matmul_operand_contract_is_preferred_for_matmul_operands(monkeypatch):
 
     assert _prefer_matmul_operand_contract(1, topology)
     assert _prefer_matmul_operand_contract(0, topology)
+    multicast_topology = LXRelayoutTopology(
+        "multicast",
+        "one_to_many",
+        max_fanout=4,
+        max_fanin=1,
+        transfer_count=32,
+    )
+    assert _prefer_matmul_operand_contract(1, multicast_topology)
+    assert _prefer_matmul_operand_contract(0, multicast_topology)
     assert not _prefer_matmul_operand_contract(None, topology)
 
 

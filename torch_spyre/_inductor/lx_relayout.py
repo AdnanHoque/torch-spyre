@@ -198,6 +198,7 @@ def _prefer_matmul_operand_contract(
         COMM_CLASS_ALL_GATHER,
         "gather",
         "broadcast",
+        "multicast",
     )
     return (
         config.lx_planner_relayout_collectives
