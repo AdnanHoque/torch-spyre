@@ -1,0 +1,105 @@
+[
+  {
+    "ReStickifyOpHBM_files": 0,
+    "ReStickifyOpHBM_occurrences": 0,
+    "ReStickifyOpLx_files": 64,
+    "ReStickifyOpLx_occurrences": 160,
+    "backend_plan_files": 64,
+    "command_file": "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_existing_a493/command.txt",
+    "env_file": "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_existing_a493/env.txt",
+    "failure_key_tail": [
+      "\u001b[31m ERRR 06.07.2026 21:15:30.203330 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 \u2014 possible lost completion\u001b[0m",
+      "\u001b[31m ERRR 06.07.2026 21:15:30.203646 [            runtime_stream.cpp: 150] RuntimeStream::synchronize() device=0 completed after 60000ms (1 timeout warning(s))\u001b[0m",
+      "error: Unable to lower successfully the module for sdsc: 3_batchmatmul",
+      "terminate called after throwing an instance of 'DtException'",
+      "  what():  DtException: DCC causes the compilation failure, file /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools/dcc/src/Driver/dcc.cpp line 563",
+      "    raise InductorError(e, currentframe()).with_traceback(",
+      "    raise CalledProcessError(retcode, process.args,",
+      "torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '-d', '/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_existing_a493/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_nlt3_p6a']' died with <Signals.SIGABRT: 6>.",
+      "    raise InductorError(e, currentframe()).with_traceback(",
+      "    raise CalledProcessError(retcode, process.args,",
+      "torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '-d', '/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_existing_a493/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_nlt3_p6a']' died with <Signals.SIGABRT: 6>."
+    ],
+    "kind_counts": {
+      "matmul_operand_broadcast": 64
+    },
+    "logical_transfer_total": 40960,
+    "returncode": "1",
+    "run": "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_existing_a493",
+    "sdsc_files": 549,
+    "status_counts": {
+      "lowered_gather_then_restickify": 64
+    },
+    "strategy_counts": {
+      "gather_then_restickify": 64
+    }
+  },
+  {
+    "ReStickifyOpHBM_files": 0,
+    "ReStickifyOpHBM_occurrences": 0,
+    "ReStickifyOpLx_files": 64,
+    "ReStickifyOpLx_occurrences": 160,
+    "backend_plan_files": 64,
+    "command_file": "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_limited_existing_a493/command.txt",
+    "env_file": "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_limited_existing_a493/env.txt",
+    "failure_key_tail": [
+      "\u001b[31m ERRR 06.07.2026 21:19:11.269047 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 \u2014 possible lost completion\u001b[0m",
+      "\u001b[31m ERRR 06.07.2026 21:19:11.269332 [            runtime_stream.cpp: 150] RuntimeStream::synchronize() device=0 completed after 60000ms (1 timeout warning(s))\u001b[0m",
+      "terminate called after throwing an instance of 'DtException'",
+      "  what():  DtException: Invalid start address or buffer offset., file /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 5256",
+      "    raise InductorError(e, currentframe()).with_traceback(",
+      "    raise CalledProcessError(retcode, process.args,",
+      "torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '-d', '/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_limited_existing_a493/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_k7nvkdby']' died with <Signals.SIGABRT: 6>.",
+      "    raise InductorError(e, currentframe()).with_traceback(",
+      "    raise CalledProcessError(retcode, process.args,",
+      "torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '-d', '/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_limited_existing_a493/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_k7nvkdby']' died with <Signals.SIGABRT: 6>."
+    ],
+    "kind_counts": {
+      "matmul_operand_broadcast": 64
+    },
+    "logical_transfer_total": 1280,
+    "returncode": "1",
+    "run": "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_limited_existing_a493",
+    "sdsc_files": 549,
+    "status_counts": {
+      "lowered_gather_then_restickify": 64
+    },
+    "strategy_counts": {
+      "gather_then_restickify": 64
+    }
+  },
+  {
+    "ReStickifyOpHBM_files": 0,
+    "ReStickifyOpHBM_occurrences": 0,
+    "ReStickifyOpLx_files": 64,
+    "ReStickifyOpLx_occurrences": 160,
+    "backend_plan_files": 1,
+    "command_file": "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/oneflag_existing_a493_control/command.txt",
+    "env_file": "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/oneflag_existing_a493_control/env.txt",
+    "failure_key_tail": [
+      "\u001b[31m ERRR 06.07.2026 21:05:14.122601 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 \u2014 possible lost completion\u001b[0m",
+      "\u001b[31m ERRR 06.07.2026 21:05:14.122917 [            runtime_stream.cpp: 150] RuntimeStream::synchronize() device=0 completed after 60000ms (1 timeout warning(s))\u001b[0m",
+      "terminate called after throwing an instance of 'DtException'",
+      "  what():  DtException: matmul_operand_broadcast metadata was classified, but physical lowering is blocked: current DL matmul lowering still consumes one resident LDS operand pointer and cannot bind staged RHS chunks from IFN/STCDP. Set DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1 for the two-stage gather/restickify prototype, or set DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST=1 only for diagnostic small-shape experiments., file /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools/dxp/SdscRelayoutInsertion.cpp line 1855",
+      "    raise InductorError(e, currentframe()).with_traceback(",
+      "    raise CalledProcessError(retcode, process.args,",
+      "torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '-d', '/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/oneflag_existing_a493_control/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_j9v_dp2u']' died with <Signals.SIGABRT: 6>.",
+      "    raise InductorError(e, currentframe()).with_traceback(",
+      "    raise CalledProcessError(retcode, process.args,",
+      "torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '-d', '/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/oneflag_existing_a493_control/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_j9v_dp2u']' died with <Signals.SIGABRT: 6>."
+    ],
+    "kind_counts": {
+      "matmul_operand_broadcast": 1
+    },
+    "logical_transfer_total": 1024,
+    "returncode": "1",
+    "run": "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/oneflag_existing_a493_control",
+    "sdsc_files": 549,
+    "status_counts": {
+      "blocked": 1
+    },
+    "strategy_counts": {
+      "loop_scoped_input_fetch": 1
+    }
+  }
+]

@@ -1,0 +1,18 @@
+# b594 gate source grep
+201:static bool lxPlannerRelayoutEnabled() {
+202:  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT");
+205:static bool matmulOperandGatherRestickifyEnabled() {
+206:  return lxPlannerRelayoutEnabled() ||
+207:         envFlagEnabled("DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY");
+210:static bool layoutAllgatherRestickifyEnabled() {
+211:  return lxPlannerRelayoutEnabled() ||
+212:         envFlagEnabled("DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY");
+1741:      if (!layoutAllgatherRestickifyEnabled()) {
+1750:            "SPYRE_LX_PLANNER_RELAYOUT=1 for the relayout prototype. "
+1751:            "DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY=1 remains "
+1817:      if (matmulOperandGatherRestickifyEnabled()) {
+1849:            "chunks from IFN/STCDP. Set SPYRE_LX_PLANNER_RELAYOUT=1 or "
+1850:            "DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1 for the "
+
+# granite a493 source SPYRE_LX_PLANNER_RELAYOUT grep
+not present in a493 source

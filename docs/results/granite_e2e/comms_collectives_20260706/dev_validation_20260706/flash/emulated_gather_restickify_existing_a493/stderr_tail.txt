@@ -1,0 +1,120 @@
+      sentient.sync {dbgName = "SSRF(MSSync #4211, MSSync #4212)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxluN>, #sentient<consumer_unit lxlu>, #sentient<consumer_unit l3su>]}
+      sentient.sync {dbgName = "SSRF(MSSync #4213, MSSync #4214)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxluN>, #sentient<consumer_unit lxlu>, #sentient<consumer_unit l3su>]}
+      sentient.sync {dbgName = "SSRF(MSSync #4215, MSSync #4216)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxluN>, #sentient<consumer_unit lxlu>, #sentient<consumer_unit l3su>]}
+      sentient.sync {dbgName = "SSRF(MSSync #4217, MSSync #4218)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxluN>, #sentient<consumer_unit lxlu>, #sentient<consumer_unit l3su>]}
+      sentient.sync {dbgName = "SSRF(MSSync #4219, MSSync #4220)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxluN>, #sentient<consumer_unit lxlu>, #sentient<consumer_unit l3su>]}
+      sentient.sync {dbgName = "SSRF(MSSync #4221, MSSync #4222)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxluN>, #sentient<consumer_unit lxlu>, #sentient<consumer_unit l3su>]}
+      sentient.sync {dbgName = "SSRF(MSSync #4223, MSSync #4224)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxluN>, #sentient<consumer_unit lxlu>, #sentient<consumer_unit l3su>]}
+      uniform.yield
+    }
+  } {element_sizes = []}
+  %1200 = uniform.def_immutable_mapping([%977 -> %721], [%978 -> %722], [%979 -> %723], [%980 -> %724], [%981 -> %725], [%982 -> %726], [%983 -> %727], [%984 -> %728], [%985 -> %729], [%986 -> %730], [%987 -> %731], [%988 -> %732], [%989 -> %733], [%990 -> %734], [%991 -> %735], [%992 -> %736], [%993 -> %737], [%994 -> %738], [%995 -> %739], [%996 -> %740], [%997 -> %741], [%998 -> %742], [%999 -> %743], [%1000 -> %744], [%1001 -> %745], [%1002 -> %746], [%1003 -> %747], [%1004 -> %748], [%1005 -> %749], [%1006 -> %750], [%1007 -> %751], [%1008 -> %752], [%1009 -> %753], [%1010 -> %754], [%1011 -> %755], [%1012 -> %756], [%1013 -> %757], [%1014 -> %758], [%1015 -> %759], [%1016 -> %760], [%1017 -> %761], [%1018 -> %762], [%1019 -> %763], [%1020 -> %764], [%1021 -> %765], [%1022 -> %766], [%1023 -> %767], [%1024 -> %768], [%1025 -> %769], [%1026 -> %770], [%1027 -> %771], [%1028 -> %772], [%1029 -> %773], [%1030 -> %774], [%1031 -> %775], [%1032 -> %776], [%1033 -> %777], [%1034 -> %778], [%1035 -> %779], [%1036 -> %780], [%1037 -> %781], [%1038 -> %782], [%1039 -> %783], [%1040 -> %784]):index
+  %1201 = uniform.query_map(map:%1200, key:%arg0) : index
+  %1202 = sentient.for %arg1 = %1 iter_args(%arg2 = %1197) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [0 : i32, 13 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+    %1203 = sentient.for %arg3 = %109 iter_args(%arg4 = %arg2) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [1 : i32, 13 : i32, 13 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+      %1205 = sentient.scalar_copy %143 {element_size = 16 : i32, programHeader = true, regIndex = 15 : i32, regLocale = #sentient<reg_type lrf>} : index
+      %1206 = sentient.receive_and_store mutable_addr(%arg4), immutable_addr(%1205), increment(%143), producer(%1201) {burst_size = 64 : i32, coalesce = false, dbgName = "transfer_lds4_src:pe_dst:lxsu", element_size = 16 : i32, interleaved_group = 0 : i32, permute = false, regIndex = 13 : i32, regLocale = #sentient<reg_type lrf>, stride = 1 : i32, subword_length = 1 : i32, total_elements = 64 : i32} : index, index, index, index : index
+      %1207 = sentient.scalar_add %1206, %12 {element_size = 16 : i32, regIndex = 13 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+      sentient.yield %1207 : index
+    }
+    sentient.sync {dbgName = "SSRF(sync_send_lxsu_to_l3su, sync_receive_lxsu_from_l3su)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit l3su>]}
+    %1204 = sentient.scalar_sub %1199, %1203 {element_size = 16 : i32, regIndex = 13 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+    sentient.yield %1204 : index
+  }
+}
+Require larger IBUFF
+Max IBUFF(128) Current IBUFF(147) for unit:
+%977 = dataflow.get_unit {core = 0 : i32, corelet = 0 : i32, name = "lxsu-CL0", num_folds = 1 : i32, type = "lxsu"} : index
+error: Unable to lower successfully the module for sdsc: 3_batchmatmul
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: DCC causes the compilation failure, file /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools/dcc/src/Driver/dcc.cpp line 563
+Traceback (most recent call last):
+  File "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_existing_a493/bootstrap.py", line 46, in <module>
+    exec(code, globs, globs)
+  File "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/repos/test-spyre-scripts/test_flash.py", line 171, in <module>
+    attn_t_spyre = c_flash_spyre(
+                   ^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1038, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1026, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1022, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1798, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1570, in codegen_and_compile
+    compiled_module = graph.compile_to_module()
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2499, in compile_to_module
+    return self._compile_to_module()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2509, in _compile_to_module
+    mod = self._compile_to_module_lines(wrapper_code)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2584, in _compile_to_module_lines
+    mod = PyCodeCache.load_by_key_path(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/codecache.py", line 3764, in load_by_key_path
+    mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/runtime/compile_tasks.py", line 35, in _reload_python_module
+    exec(code, mod.__dict__, mod.__dict__)
+  File "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_existing_a493/cache/s5/cs5bkbbqla5huoavyne7dlds4c4gkw6bbaqrwq6e3xnwd4esof3h.py", line 242, in <module>
+    sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1 = async_compile.sdsc('sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1',
+                                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/codex-isolated/gather_restickify_clean_20260706_110953/torch-spyre/torch_spyre/execution/async_compile.py", line 73, in sdsc
+    subprocess.run(
+  File "/usr/lib64/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '-d', '/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_existing_a493/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_nlt3_p6a']' died with <Signals.SIGABRT: 6>.
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+
+Traceback (most recent call last):
+  File "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_existing_a493/bootstrap.py", line 46, in <module>
+    exec(code, globs, globs)
+  File "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/repos/test-spyre-scripts/test_flash.py", line 171, in <module>
+    attn_t_spyre = c_flash_spyre(
+                   ^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1038, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1026, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1022, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1798, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1570, in codegen_and_compile
+    compiled_module = graph.compile_to_module()
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2499, in compile_to_module
+    return self._compile_to_module()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2509, in _compile_to_module
+    mod = self._compile_to_module_lines(wrapper_code)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2584, in _compile_to_module_lines
+    mod = PyCodeCache.load_by_key_path(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/codecache.py", line 3764, in load_by_key_path
+    mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/runtime/compile_tasks.py", line 35, in _reload_python_module
+    exec(code, mod.__dict__, mod.__dict__)
+  File "/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_existing_a493/cache/s5/cs5bkbbqla5huoavyne7dlds4c4gkw6bbaqrwq6e3xnwd4esof3h.py", line 242, in <module>
+    sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1 = async_compile.sdsc('sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1',
+                                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/codex-isolated/gather_restickify_clean_20260706_110953/torch-spyre/torch_spyre/execution/async_compile.py", line 73, in sdsc
+    subprocess.run(
+  File "/usr/lib64/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '-d', '/home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/runs/emulated_gather_restickify_existing_a493/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_nlt3_p6a']' died with <Signals.SIGABRT: 6>.
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+

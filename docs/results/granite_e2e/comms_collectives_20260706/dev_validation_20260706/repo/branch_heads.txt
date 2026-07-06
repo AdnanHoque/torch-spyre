@@ -1,0 +1,40 @@
+[flash_deeptools] /home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/repos/deeptools
+branch=ah/comms-collectives
+head=b594b3afc725b693d074a64fc027ac7a6024d5fd
+head_short=b594b3afc725
+log1=b594b3afc [DXP] gate LX relayout prototypes behind frontend flag
+origin=git@github.ibm.com:Adnan-Hoque1/deeptools.git
+upstream=
+
+[flash_torch] /home/adnan/codex-isolated/gather_restickify_clean_20260706_110953/torch-spyre
+branch=gather-restickify
+head=cc29ba259ec190e62f760f032ffd3355581a57df
+head_short=cc29ba259ec1
+log1=cc29ba25 inductor: gate LX relayout workspace behind feature flag
+origin=git@github.com:AdnanHoque/torch-spyre.git
+upstream=
+
+[granite_deeptools] /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools
+branch=ah/comms-collectives
+head=a4930be14b6e7d01f7447b7692a79a20487c09c3
+head_short=a4930be14b6e
+log1=a4930be14b [DXP] stage Granite matmul operand relayout chunks
+origin=git@github.ibm.com:Adnan-Hoque1/deeptools.git
+upstream=git@github.ibm.com:ai-chip-toolchain/deeptools.git
+
+[granite_torch] /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre
+branch=ah/comms-collectives
+head=6f9b17c7b654533629a6dd9a00516de5ded16401
+head_short=6f9b17c7b654
+log1=6f9b17c docs: record gather restickify branch split
+origin=git@github.com:AdnanHoque/torch-spyre.git
+upstream=git@github.com:torch-spyre/torch-spyre.git
+
+[test_spyre_scripts] /home/adnan/codex-isolated/flash_attention_gather_relayout_20260706_204130/repos/test-spyre-scripts
+branch=main
+head=afda166e58b23519d0b4ca871350b011b56d91a3
+head_short=afda166e58b2
+log1=afda166 Fix mask computation with lk tiling on cpu
+origin=git@github.ibm.com:aviros/test-spyre-scripts.git
+upstream=
+

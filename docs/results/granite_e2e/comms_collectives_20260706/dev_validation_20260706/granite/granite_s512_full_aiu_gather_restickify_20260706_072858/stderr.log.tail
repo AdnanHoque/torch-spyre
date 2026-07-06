@@ -1,0 +1,120 @@
+  iteration_space=[mb=512, out=4096]
+  work_slices=[mb=32, out=1]
+  core_id_to_work_slice=[mb=Mod(core_id, 32), out=0]
+  layouts=[
+    OUTPUT: dim_order=[out, mb], stick_dim_order=out, stick_size=64
+  ]
+  args=[
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[lx=131072],
+    start_address=131072
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[lx=0],
+    start_address=0
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[hbm=68719476736],
+    start_address=68719476736
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_mul_silu_split_with_sizes_3_99wj9n5f/sdsc_7.json
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_mul_silu_split_with_sizes_3_99wj9n5f/bundle.mlir
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused_linear_rms_norm_0 /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_linear_rms_norm_0_bjzjbtat
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1 /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1___fddxa8
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2 /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2_femxzkwk
+Signal Received: 15 (Terminated)
+Signal Received from pid=1144252 
+*** BACKTRACE ***
+/opt/ibm/spyre/senlib/lib/libsenlib-dd2.so(+0x42accf)[0x7fbc942ffccf]
+/lib64/libc.so.6(+0x411c0)[0x7fbd57d831c0]
+/lib64/libc.so.6(syscall+0x1d)[0x7fbd57e4631d]
+/lib64/libstdc++.so.6(_ZNSt28__atomic_futex_unsigned_base26_M_futex_wait_until_steadyEPjjbNSt6chrono8durationIlSt5ratioILl1ELl1EEEENS2_IlS3_ILl1ELl1000000000EEEE+0xc4)[0x7fbd4013a5d4]
+/home/adnan/opt-newer/runtime/lib/libflex.so(_ZN4flex16RuntimeScheduler12issueBarrierENS_20RuntimeOperationTypeEPNS_13RuntimeStreamE+0x7ff)[0x7fbc966001bf]
+/home/adnan/opt-newer/runtime/lib/libflex.so(_ZN4flex16RuntimeScheduler8scheduleEPNS_13RuntimeStreamERKNS_19RuntimeOperationH2DE+0x555)[0x7fbc965fc435]
+/home/adnan/opt-newer/runtime/lib/libflex.so(_ZN4flex13RuntimeStream15launchOperationERKSt6vectorISt10unique_ptrINS_16RuntimeOperationESt14default_deleteIS3_EESaIS6_EE+0x2f)[0x7fbc965c55bf]
+/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/torch_spyre/_C.so(_ZNK5spyre11SpyreStream6launchERKNS_7JobPlanERKSt6vectorIN2at6TensorESaIS6_EE+0x372)[0x7fbc968eec82]
+/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/torch_spyre/_C.so(_ZN5spyre13launchJobPlanERKNS_7JobPlanERKSt6vectorIN2at6TensorESaIS5_EE+0x2d)[0x7fbc968d5ced]
+/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/torch_spyre/_C.so(+0xe9281)[0x7fbc9685c281]
+/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/torch_spyre/_C.so(+0xb064b)[0x7fbc9682364b]
+/lib64/libpython3.12.so.1.0(+0x1a60d0)[0x7fbd580c10d0]
+/lib64/libpython3.12.so.1.0(_PyObject_MakeTpCall+0x2db)[0x7fbd5809780b]
+/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x786)[0x7fbd580a1ce6]
+/lib64/libpython3.12.so.1.0(_PyObject_FastCallDictTstate+0x1dc)[0x7fbd5809a5bc]
+/lib64/libpython3.12.so.1.0(_PyObject_Call_Prepend+0x6a)[0x7fbd580d050a]
+/lib64/libpython3.12.so.1.0(+0x287718)[0x7fbd581a2718]
+/lib64/libpython3.12.so.1.0(_PyObject_MakeTpCall+0x2db)[0x7fbd5809780b]
+/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x786)[0x7fbd580a1ce6]
+/lib64/libpython3.12.so.1.0(_PyObject_FastCallDictTstate+0x1dc)[0x7fbd5809a5bc]
+/lib64/libpython3.12.so.1.0(_PyObject_Call_Prepend+0x6a)[0x7fbd580d050a]
+/lib64/libpython3.12.so.1.0(+0x287718)[0x7fbd581a2718]
+/lib64/libpython3.12.so.1.0(_PyObject_MakeTpCall+0x2db)[0x7fbd5809780b]
+/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x786)[0x7fbd580a1ce6]
+/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x886d71)[0x7fbd55d7ad71]
+/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x88935d)[0x7fbd55d7d35d]
+/lib64/libpython3.12.so.1.0(PyObject_Vectorcall+0x36)[0x7fbd580b70e6]
+/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x786)[0x7fbd580a1ce6]
+/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(dynamo_eval_custom_code+0x1ce)[0x7fbd55d7ab9e]
+/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x888850)[0x7fbd55d7c850]
+/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x889331)[0x7fbd55d7d331]
+/lib64/libpython3.12.so.1.0(+0xb7998)[0x7fbd57fd2998]
+/lib64/libpython3.12.so.1.0(+0x1cfcb6)[0x7fbd580eacb6]
+/lib64/libpython3.12.so.1.0(_PyObject_Call+0x130)[0x7fbd580d27a0]
+/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x5caa)[0x7fbd580a720a]
+/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x886d71)[0x7fbd55d7ad71]
+/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x88957d)[0x7fbd55d7d57d]
+/lib64/libpython3.12.so.1.0(+0xb7998)[0x7fbd57fd2998]
+/lib64/libpython3.12.so.1.0(+0x1cfcb6)[0x7fbd580eacb6]
+/lib64/libpython3.12.so.1.0(_PyObject_Call+0x130)[0x7fbd580d27a0]
+/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x5caa)[0x7fbd580a720a]
+/lib64/libpython3.12.so.1.0(_PyObject_FastCallDictTstate+0x27b)[0x7fbd5809a65b]
+/lib64/libpython3.12.so.1.0(_PyObject_Call_Prepend+0x6a)[0x7fbd580d050a]
+/lib64/libpython3.12.so.1.0(+0x287718)[0x7fbd581a2718]
+/lib64/libpython3.12.so.1.0(_PyObject_Call+0xb9)[0x7fbd580d2729]
+/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x5caa)[0x7fbd580a720a]
+/lib64/libpython3.12.so.1.0(PyEval_EvalCode+0xaa)[0x7fbd58159d9a]
+/lib64/libpython3.12.so.1.0(+0x27ac61)[0x7fbd58195c61]
+/lib64/libpython3.12.so.1.0(+0x27560b)[0x7fbd5819060b]
+/lib64/libpython3.12.so.1.0(+0x272522)[0x7fbd5818d522]
+/lib64/libpython3.12.so.1.0(_PyRun_SimpleFileObject+0x1cb)[0x7fbd5818cf4b]
+/lib64/libpython3.12.so.1.0(_PyRun_AnyFileObject+0x48)[0x7fbd5818cb68]
+/lib64/libpython3.12.so.1.0(Py_RunMain+0x3b0)[0x7fbd58189850]
+/lib64/libpython3.12.so.1.0(Py_BytesMain+0x3b)[0x7fbd5814337b]
+/lib64/libc.so.6(+0x2a58e)[0x7fbd57d6c58e]
+/lib64/libc.so.6(__libc_start_main+0x89)[0x7fbd57d6c649]
+/home/adnan/dt-inductor/.venv/bin/python3(_start+0x25)[0x5609e07ef095]
+*****************

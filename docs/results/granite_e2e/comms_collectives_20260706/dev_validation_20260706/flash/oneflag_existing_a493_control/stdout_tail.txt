@@ -1,0 +1,1 @@
+[runtime_patch] no_h2d Tensor.to(device=spyre) compile probe enabled

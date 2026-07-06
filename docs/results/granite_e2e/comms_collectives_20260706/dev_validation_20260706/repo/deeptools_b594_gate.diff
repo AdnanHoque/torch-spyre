@@ -1,0 +1,734 @@
+commit b594b3afc725b693d074a64fc027ac7a6024d5fd
+Author: Adnan Hoque <adnan.hoque1@ibm.com>
+Date:   Mon Jul 6 20:36:36 2026 +0000
+
+    [DXP] gate LX relayout prototypes behind frontend flag
+    
+    Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 28fccb65e..0d5dd45ce 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -1,288 +1,360 @@
+ #include <dsc/dataOpDsc.h>
+ #include <dsc/superdsc.h>
+ #include <external/json11/json11.hpp>
+ #include <sharedtools/mem_track_bundle.h>
+ 
+ #include <algorithm>
+ #include <cctype>
+ #include <cmath>
+ #include <cstdint>
+ #include <cstdlib>
+ #include <filesystem>
+ #include <fstream>
+ #include <map>
+ #include <set>
+ #include <string>
+ #include <vector>
+ 
+ #include "dxp.h"
+ #include "util/LayoutAllgatherRestickify.h"
+ 
+ // #define DEBUG_RELAYOUT 1
+ 
+ static DataFormats getDsFormat(double wl) {
+   if (wl == 2) {
+     return DataFormats::SEN169_FP16;
+   } else if (wl == 1) {
+     return DataFormats::SEN143_FP8;
+   } else if (wl == 0.5) {
+     return DataFormats::SENINT4;
+   }
+   return DataFormats::INVALID;
+ }
+ 
+ static double getRelayoutPieceSize(
+     double form_size,
+     const std::map<int, std::map<PrimaryDimTypes, int>>& coreIdToWkSlice,
+     const std::set<PrimaryDimTypes>& tensorDims) {
+   double num_pieces = 1;
+   std::map<PrimaryDimTypes, std::set<int>> wkslices_in_dim;
+   for (const auto& core_to_slice : coreIdToWkSlice) {
+     for (const auto& dim_to_slice : core_to_slice.second) {
+       if (tensorDims.count(dim_to_slice.first) == 0) continue;
+       wkslices_in_dim[dim_to_slice.first].insert(dim_to_slice.second);
+     }
+   }
+   for (const auto& dim_to_slices : wkslices_in_dim) {
+     num_pieces *= dim_to_slices.second.size();
+   }
+   return std::ceil(form_size / num_pieces);
+ }
+ 
+ struct LayoutAllgatherRestickifyHookPlan {
+   std::string classificationKey;
+   deeptools::LayoutAllgatherRestickifyMovementPlan plan;
+ };
+ 
+ struct MatmulOperandBroadcastHookPlan {
+   std::string classificationKey;
+   deeptools::MatmulOperandBroadcastMovementPlan plan;
++  int classificationOperandIndex = -1;
+ };
+ 
+ static bool layoutAllgatherRestickifyMatchesLds(
+     const std::map<std::string, std::string>& fields,
+     const LabeledDsInfo& lds) {
+   const auto readIndexIt = fields.find("read_index");
+   if (readIndexIt != fields.end()) return std::stoi(readIndexIt->second) == lds.ldsIdx_;
+ 
+   const auto ldsIt = fields.find("input_labeled_ds");
+   if (ldsIt != fields.end()) return ldsIt->second == lds.dsName_;
+ 
+   return true;
+ }
+ 
+ static LayoutAllgatherRestickifyHookPlan findLayoutAllgatherRestickifyPlan(
+     const SuperDsc* sdsc, const LabeledDsInfo& lds) {
+   for (const auto& entry : sdsc->lxRelayoutClassifications_) {
+     const auto& fields = entry.second;
+     const auto kindIt = fields.find("kind");
+     const auto patternIt = fields.find("communication_pattern");
+     const bool isLayoutAllgather =
+         (kindIt != fields.end() &&
+          kindIt->second == "layout_allgather_restickify") ||
+         (patternIt != fields.end() &&
+          patternIt->second == "layout_allgather_restickify");
+     if (!isLayoutAllgather) continue;
+     if (!layoutAllgatherRestickifyMatchesLds(fields, lds)) continue;
+ 
+     return {entry.first,
+             deeptools::synthesizeLayoutAllgatherRestickifyMovementPlan(fields)};
+   }
+ 
+   return {};
+ }
+ 
+ static bool matmulOperandBroadcastMatchesLds(
+     const std::map<std::string, std::string>& fields,
+     const LabeledDsInfo& lds) {
+-  for (const auto& key : {"read_index", "operand_index"}) {
++  for (const auto& key : {"read_index", "operand_index",
++                          "operand_read_index"}) {
+     const auto it = fields.find(key);
+     if (it == fields.end()) continue;
+     return std::stoi(it->second) == lds.ldsIdx_;
+   }
+ 
+   const auto ldsIt = fields.find("input_labeled_ds");
+   if (ldsIt != fields.end()) return ldsIt->second == lds.dsName_;
+ 
+   return true;
+ }
+ 
++static int matmulOperandBroadcastOperandIndexFromFields(
++    const std::map<std::string, std::string>& fields) {
++  for (const auto& key : {"read_index", "operand_index",
++                          "operand_read_index"}) {
++    const auto it = fields.find(key);
++    if (it == fields.end()) continue;
++    char* end = nullptr;
++    const long parsed = std::strtol(it->second.c_str(), &end, 10);
++    if (end == it->second.c_str() ||
++        (end != nullptr && *end != '\0') || parsed < 0) {
++      return -1;
++    }
++    return static_cast<int>(parsed);
++  }
++  return -1;
++}
++
+ static MatmulOperandBroadcastHookPlan findMatmulOperandBroadcastPlan(
+     const SuperDsc* sdsc, const LabeledDsInfo& lds) {
+   for (const auto& entry : sdsc->lxRelayoutClassifications_) {
+     const auto& fields = entry.second;
+     const auto kindIt = fields.find("kind");
+     const auto patternIt = fields.find("communication_pattern");
+     const bool isMatmulOperandBroadcast =
+         (kindIt != fields.end() &&
+          kindIt->second == "matmul_operand_broadcast") ||
+         (patternIt != fields.end() &&
+          (patternIt->second == "all_gather_replicate" ||
+           patternIt->second == "broadcast" ||
+           patternIt->second == "multicast"));
+     if (!isMatmulOperandBroadcast) continue;
+     if (!matmulOperandBroadcastMatchesLds(fields, lds)) continue;
+ 
+-    return {entry.first,
+-            deeptools::synthesizeMatmulOperandBroadcastMovementPlan(fields)};
++    const auto plan =
++        deeptools::synthesizeMatmulOperandBroadcastMovementPlan(fields);
++    int operandIndex = matmulOperandBroadcastOperandIndexFromFields(fields);
++    if (operandIndex < 0 && plan.operandIndex >= 0) {
++      operandIndex = static_cast<int>(plan.operandIndex);
++    }
++    return {entry.first, plan, operandIndex};
+   }
+ 
+   return {};
+ }
+ 
+ static std::string sanitizeArtifactName(std::string value) {
+   for (char& ch : value) {
+     const auto c = static_cast<unsigned char>(ch);
+     if (!std::isalnum(c) && ch != '-' && ch != '_' && ch != '.') ch = '_';
+   }
+   return value;
+ }
+ 
+ static std::string getDebugEnvString(const char* name) {
+   const char* value = std::getenv(name);
+   return value == nullptr ? std::string() : std::string(value);
+ }
+ 
+ static int getPositiveDebugEnvInt(const char* name) {
+   const char* value = std::getenv(name);
+   if (value == nullptr || value[0] == '\0') return -1;
+   char* end = nullptr;
+   const long parsed = std::strtol(value, &end, 10);
+   if (end == value || (end != nullptr && *end != '\0') || parsed <= 0) {
+     return -1;
+   }
+   return static_cast<int>(parsed);
+ }
+ 
++static int getMatmulOperandBroadcastOnlyOperandIndex() {
++  const auto value = getDebugEnvString(
++      "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_OPERAND_INDEX");
++  if (value.empty()) return -1;
++  if (value == "0") return 0;
++  if (value == "1") return 1;
++  DT_CHECK_MSG(
++      false,
++      "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_OPERAND_INDEX accepts only "
++      "0 or 1");
++  return -1;
++}
++
++static bool envFlagEnabled(const char* name) {
++  const char* value = std::getenv(name);
++  return value != nullptr && std::string(value) != "0" &&
++         std::string(value) != "false" && std::string(value) != "False" &&
++         std::string(value) != "FALSE";
++}
++
++static bool lxPlannerRelayoutEnabled() {
++  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT");
++}
++
++static bool matmulOperandGatherRestickifyEnabled() {
++  return lxPlannerRelayoutEnabled() ||
++         envFlagEnabled("DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY");
++}
++
++static bool layoutAllgatherRestickifyEnabled() {
++  return lxPlannerRelayoutEnabled() ||
++         envFlagEnabled("DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY");
++}
++
+ static bool matmulOperandBroadcastDebugMatchesSdsc(const SuperDsc* sdsc) {
+   const auto onlySdsc = getDebugEnvString(
+       "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_SDSC");
+   return onlySdsc.empty() || sdsc->name_.find(onlySdsc) != std::string::npos;
+ }
+ 
++static bool matmulOperandBroadcastDebugMatchesOperand(
++    const MatmulOperandBroadcastHookPlan& hook) {
++  const int onlyOperandIndex =
++      getMatmulOperandBroadcastOnlyOperandIndex();
++  return onlyOperandIndex < 0 ||
++         hook.classificationOperandIndex == onlyOperandIndex;
++}
++
+ static std::map<std::string, std::string>
+ matmulOperandBroadcastDebugContext() {
+   std::map<std::string, std::string> context;
+   const auto onlySdsc = getDebugEnvString(
+       "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_SDSC");
+   if (!onlySdsc.empty()) context["debug_only_sdsc"] = onlySdsc;
++  const int onlyOperandIndex =
++      getMatmulOperandBroadcastOnlyOperandIndex();
++  if (onlyOperandIndex >= 0) {
++    context["debug_only_operand_index"] =
++        std::to_string(onlyOperandIndex);
++  }
+   const int maxDstCores = getPositiveDebugEnvInt(
+       "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_DST_CORES");
+   if (maxDstCores > 0) {
+     context["debug_max_dst_cores"] = std::to_string(maxDstCores);
+   }
+   const int maxChunks = getPositiveDebugEnvInt(
+       "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS");
+   if (maxChunks > 0) {
+     context["debug_max_chunks"] = std::to_string(maxChunks);
+   }
+   return context;
+ }
+ 
+ static MatmulOperandBroadcastHookPlan applyMatmulOperandBroadcastDebugLimits(
+     const MatmulOperandBroadcastHookPlan& hook,
+     std::map<std::string, std::string>* debugContext) {
+   auto limitedHook = hook;
+   const int maxDstCores = getPositiveDebugEnvInt(
+       "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_DST_CORES");
+   if (maxDstCores <= 0) return limitedHook;
+ 
+   if (!limitedHook.plan.destinationCoresByGroup.empty()) {
+     std::vector<std::vector<std::uint64_t>> limitedSourceCoresByGroup;
+     std::vector<std::vector<std::uint64_t>> limitedDestinationCoresByGroup;
+     std::set<std::uint64_t> sourceCoreSet;
+     std::set<std::uint64_t> destinationCoreSet;
+     std::uint64_t logicalTransfers = 0;
+     std::uint64_t maxSourcesPerGroup = 0;
+     std::uint64_t maxDestinationsPerGroup = 0;
+     int remainingDstCores = maxDstCores;
+ 
+     for (std::size_t group = 0;
+          group < limitedHook.plan.destinationCoresByGroup.size() &&
+          remainingDstCores > 0;
+          ++group) {
+       const auto& sourceCores = limitedHook.plan.sourceCoresByGroup.at(group);
+       const auto& destinationCores =
+           limitedHook.plan.destinationCoresByGroup.at(group);
+       if (sourceCores.empty() || destinationCores.empty()) continue;
+       const int take = std::min<int>(remainingDstCores, destinationCores.size());
+       std::vector<std::uint64_t> limitedDestinationCores(
+           destinationCores.begin(), destinationCores.begin() + take);
+       limitedSourceCoresByGroup.push_back(sourceCores);
+       limitedDestinationCoresByGroup.push_back(limitedDestinationCores);
+       sourceCoreSet.insert(sourceCores.begin(), sourceCores.end());
+       destinationCoreSet.insert(limitedDestinationCores.begin(),
+                                 limitedDestinationCores.end());
+       logicalTransfers += sourceCores.size() * limitedDestinationCores.size();
+       maxSourcesPerGroup = std::max<std::uint64_t>(maxSourcesPerGroup,
+                                                   sourceCores.size());
+       maxDestinationsPerGroup = std::max<std::uint64_t>(
+           maxDestinationsPerGroup, limitedDestinationCores.size());
+       remainingDstCores -= take;
+     }
+ 
+     limitedHook.plan.sourceCoresByGroup = limitedSourceCoresByGroup;
+     limitedHook.plan.destinationCoresByGroup = limitedDestinationCoresByGroup;
+     limitedHook.plan.groupCount = limitedDestinationCoresByGroup.size();
+     limitedHook.plan.sourceCoreCount = sourceCoreSet.size();
+     limitedHook.plan.consumerCoreCount = destinationCoreSet.size();
+     limitedHook.plan.producerChunksPerGroup = maxSourcesPerGroup;
+     limitedHook.plan.consumerReplicasPerGroup = maxDestinationsPerGroup;
+     limitedHook.plan.replicationFactor = maxDestinationsPerGroup;
+     limitedHook.plan.logicalTransferCount = logicalTransfers;
+     if (debugContext != nullptr) {
+       (*debugContext)["debug_limit_mode"] = "exact_core_groups";
+       (*debugContext)["debug_effective_destination_cores"] =
+           std::to_string(destinationCoreSet.size());
+       (*debugContext)["debug_effective_logical_transfers"] =
+           std::to_string(logicalTransfers);
+     }
+     return limitedHook;
+   }
+ 
+   if (limitedHook.plan.groupCount == 0 ||
+       limitedHook.plan.consumerReplicasPerGroup == 0) {
+     return limitedHook;
+   }
+ 
+   const std::uint64_t requestedDst = static_cast<std::uint64_t>(maxDstCores);
+   const std::uint64_t oldReplicas = limitedHook.plan.consumerReplicasPerGroup;
+   const std::uint64_t newGroups =
+       std::max<std::uint64_t>(1, (requestedDst + oldReplicas - 1) / oldReplicas);
+   limitedHook.plan.groupCount =
+       std::min<std::uint64_t>(limitedHook.plan.groupCount, newGroups);
+   if (requestedDst < oldReplicas) {
+     limitedHook.plan.consumerReplicasPerGroup = requestedDst;
+   }
+   limitedHook.plan.consumerCoreCount = std::min<std::uint64_t>(
+       limitedHook.plan.consumerCoreCount, requestedDst);
+   limitedHook.plan.replicationFactor = limitedHook.plan.consumerReplicasPerGroup;
+   limitedHook.plan.sourceCoreCount = std::min<std::uint64_t>(
+       limitedHook.plan.sourceCoreCount,
+       limitedHook.plan.groupCount * limitedHook.plan.producerChunksPerGroup);
+   limitedHook.plan.logicalTransferCount =
+       limitedHook.plan.groupCount * limitedHook.plan.producerChunksPerGroup *
+       limitedHook.plan.consumerReplicasPerGroup;
+   if (debugContext != nullptr) {
+     (*debugContext)["debug_limit_mode"] = "compact_group_counts";
+     (*debugContext)["debug_effective_destination_cores"] =
+         std::to_string(limitedHook.plan.consumerCoreCount);
+     (*debugContext)["debug_effective_logical_transfers"] =
+         std::to_string(limitedHook.plan.logicalTransferCount);
+   }
+   return limitedHook;
+ }
+ 
+ static void emitLayoutAllgatherRestickifyPlanArtifact(
+     const SuperDsc* sdsc, const LabeledDsInfo& lds, int ps,
+     const LayoutAllgatherRestickifyHookPlan& hook) {
+   const auto& plan = hook.plan;
+   const char* outputDirEnv =
+       std::getenv("DEEPTOOLS_LAYOUT_ALLGATHER_RESTICKIFY_PLAN_DIR");
+   const std::filesystem::path outputDir =
+       outputDirEnv == nullptr ? std::filesystem::path(".")
+                               : std::filesystem::path(outputDirEnv);
+   std::filesystem::create_directories(outputDir);
+ 
+   const std::string fileName = sanitizeArtifactName(
+       sdsc->name_ + "_" + lds.dsName_ + "_" + hook.classificationKey +
+@@ -1549,333 +1621,349 @@ static bool attachMatmulOperandBroadcastInputFetch(
+       const double dimExtent = dldsc.N_.primaryDimToVal_st(pDim);
+       const auto splitIt = producerSliceIds.find(pDim);
+       const int split = splitIt == producerSliceIds.end()
+                             ? 1
+                             : static_cast<int>(splitIt->second.size());
+       DT_CHECK(split > 0);
+       DT_CHECK(static_cast<int>(dimExtent) % split == 0);
+       const int sliceIdx = coreAndSlice.second.count(pDim)
+                                ? coreAndSlice.second.at(pDim)
+                                : 0;
+       dimToSize[dimName] = dimExtent / split;
+       dimToStart[dimName] = sliceIdx * dimToSize.at(dimName);
+     }
+     const auto srcAddr = lxStartAddressForCore(lds, coreAndSlice.first);
+     if (srcAddr < 0) {
+       *reason = "missing source LX base for producer core " +
+                 std::to_string(coreAndSlice.first);
+       return false;
+     }
+ 
+     const std::string pieceSuffix = useSingleIfnDataOp
+                                         ? std::to_string(coreAndSlice.first)
+                                         : "0";
+     addLxPiece(*inpLdsPtr, "src" + pieceSuffix, coreAndSlice.first, srcAddr,
+                dimToSize, dimToStart);
+     addReplicatedLxPiece(*outLdsPtr, "dst" + pieceSuffix, destinationCores,
+                          replicatedDstAddr, dimToSize, dimToStart);
+ 
+     if (!useSingleIfnDataOp) {
+       const int dataOpIdx = static_cast<int>(sdsc->dataOpdscs_.size());
+       sdsc->dataOpdscs_.push_back(ddsc);
+       dataOpIndices.push_back(dataOpIdx);
+     }
+     if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONE_IFN_PROBE") !=
+         nullptr) {
+       break;
+     }
+   }
+ 
+   if (useSingleIfnDataOp) {
+     const int dataOpIdx = static_cast<int>(sdsc->dataOpdscs_.size());
+     sdsc->dataOpdscs_.push_back(singleDdsc);
+     dataOpIndices.push_back(dataOpIdx);
+   }
+ 
+   const bool useCombinedSchedule =
+       std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_COMBINED_IFN") !=
+       nullptr;
+   const bool replaceDlScheduleStep =
+       std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_REPLACE_DL_STEP") !=
+       nullptr;
+   allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
+   for (const auto& coreAndSlice : sdsc->coreIdToWkSlice_) {
+     auto& schedule = sdsc->coreIdToDscSchedule[coreAndSlice.first];
+     auto insertPos = schedule.begin();
+     for (auto it = schedule.begin(); it != schedule.end(); ++it) {
+       if (it->dldsc_idx == 0) {
+         insertPos = it;
+         break;
+       }
+     }
+     if (useCombinedSchedule && replaceDlScheduleStep) {
+       DT_CHECK_MSG(dataOpIndices.size() == 1,
+                    "replacement IFN probe expects exactly one data op");
+       bool replaced = false;
+       for (auto it = schedule.begin(); it != schedule.end(); ++it) {
+         if (it->dldsc_idx == 0) {
+           it->datadsc_idx = dataOpIndices.front();
+           it->before_sync = false;
+           it->after_sync = true;
+           replaced = true;
+           break;
+         }
+       }
+       DT_CHECK_MSG(replaced, "failed to find DL schedule step to replace");
+       continue;
+     }
+     for (const auto dataOpIdx : dataOpIndices) {
+       const int dldscIdx = useCombinedSchedule ? 0 : -1;
+       insertPos = schedule.insert(insertPos,
+                                   DscScheduleStep(dataOpIdx, dldscIdx, false,
+                                                   true));
+       ++insertPos;
+     }
+   }
+   return true;
+ }
+ 
+ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+                              MemTrackBundle* memTrackers,
+                              std::vector<SuperDsc*>& relayout_sdscs) {
+   auto& lxTrackPerCore = memTrackers->lxTrackPerCore;
+   auto& hbmTrack = memTrackers->hbmTrack.at(LdsSegment::STACK);
+   auto& dldsc = sdsc->dscs_.at(0);
+   for (int iter = 0; iter < dldsc.labeledDs_.size() - 1; iter++) {
+     auto& lds = dldsc.labeledDs_.at(iter);
+     // Step 1: For each input lds, check if relayout is needed. Relayout
+     // is needed if (1) lds is lx pinned, and (2) lds layout does not match
+     // compute distribution
+     if (lds.pinnedComponent() == HBM || lds.pinnedComponent() == NO_COMPONENT)
+       continue;
+ 
+     auto pre_relayout_allocNode = lds.memOrg_.at(LX).allocateNode_;
+     auto& allocCoords = lds.memOrg_.at(LX).allocateNode_->allocateCoordinates_;
+     if (allocCoords.coreIdToWkSlice_.empty() ||
+         allocCoords.coreIdToWkSlice_ == sdsc->coreIdToWkSlice_)
+       continue;
+ 
+     const auto layoutAllgatherHook = findLayoutAllgatherRestickifyPlan(sdsc, lds);
+     if (!layoutAllgatherHook.classificationKey.empty()) {
+       if (!layoutAllgatherHook.plan.ok) {
+         emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
+                                                   layoutAllgatherHook);
+         DT_CHECK_MSG(false,
+                      "layout_allgather_restickify contract invalid: " +
+                          layoutAllgatherHook.plan.reason);
+       }
+       // Dense resident all-gather materialization is not safe for Granite
+       // attention shapes. Keep it behind an explicit diagnostic escape hatch
+       // until a staged layout-allgather lowering is implemented.
+-      if (std::getenv(
+-              "DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY") ==
+-          nullptr) {
++      if (!layoutAllgatherRestickifyEnabled()) {
+         emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
+                                                   layoutAllgatherHook);
+         DT_CHECK_MSG(
+             false,
+             "layout_allgather_restickify metadata was classified, but "
+             "physical lowering is blocked: dense resident all-gather "
+             "materialization is unsafe on Granite attention shapes. Use "
+             "matmul_operand_broadcast for loop-scoped matmul operands, or set "
+-            "DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY=1 only for "
+-            "diagnostic replay experiments.");
++            "SPYRE_LX_PLANNER_RELAYOUT=1 for the relayout prototype. "
++            "DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY=1 remains "
++            "available for direct diagnostic replay experiments.");
+       }
+       emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
+                                                 layoutAllgatherHook);
+     }
+ 
+     const auto matmulBroadcastHook =
+         findMatmulOperandBroadcastPlan(sdsc, lds);
+     if (matmulBroadcastHook.plan.ok) {
+       auto matmulBroadcastDebugContext =
+           matmulOperandBroadcastDebugContext();
++      if (matmulBroadcastHook.classificationOperandIndex >= 0) {
++        matmulBroadcastDebugContext["debug_classification_operand_index"] =
++            std::to_string(matmulBroadcastHook.classificationOperandIndex);
++      }
+       const auto effectiveMatmulBroadcastHook =
+           applyMatmulOperandBroadcastDebugLimits(
+               matmulBroadcastHook, &matmulBroadcastDebugContext);
+       if (!matmulOperandBroadcastDebugMatchesSdsc(sdsc)) {
+         matmulBroadcastDebugContext["realized"] = "false";
+         matmulBroadcastDebugContext["physical_lowering_status"] =
+             "debug_skipped";
+         matmulBroadcastDebugContext["debug_skip_reason"] =
+             "sdsc name did not match "
+             "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_SDSC";
+         emitMatmulOperandBroadcastPlanArtifact(
+             sdsc, lds, ps, effectiveMatmulBroadcastHook,
+             /*kernelNeighborLowered=*/false,
+             /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+         continue;
+       }
++      if (!matmulOperandBroadcastDebugMatchesOperand(
++              effectiveMatmulBroadcastHook)) {
++        matmulBroadcastDebugContext["realized"] = "false";
++        matmulBroadcastDebugContext["physical_lowering_status"] =
++            "debug_skipped";
++        matmulBroadcastDebugContext["debug_skip_reason"] =
++            "operand index did not match "
++            "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_OPERAND_INDEX";
++        emitMatmulOperandBroadcastPlanArtifact(
++            sdsc, lds, ps, effectiveMatmulBroadcastHook,
++            /*kernelNeighborLowered=*/false,
++            /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
++        continue;
++      }
+       if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
+           nullptr) {
+         std::string markerReason;
+         if (!markMatmulOperandBroadcastKernelNeighbor(dldsc, lds,
+                                                       &markerReason)) {
+           emitMatmulOperandBroadcastPlanArtifact(
+               sdsc, lds, ps, effectiveMatmulBroadcastHook,
+               /*kernelNeighborLowered=*/false,
+               /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+           DT_CHECK_MSG(false,
+                        "matmul_operand_broadcast kernel-neighbor marker "
+                        "failed: " +
+                            markerReason);
+         }
+         emitMatmulOperandBroadcastPlanArtifact(
+             sdsc, lds, ps, effectiveMatmulBroadcastHook,
+             /*kernelNeighborLowered=*/true,
+             /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+         continue;
+       }
+-      if (std::getenv(
+-              "DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY") != nullptr) {
++      if (matmulOperandGatherRestickifyEnabled()) {
+         std::string materializationReason;
+         if (!attachMatmulOperandBroadcastGatherThenRestickify(
+                 sdsc, lds, effectiveMatmulBroadcastHook, memTrackers, ps,
+                 &materializationReason)) {
+           emitMatmulOperandBroadcastPlanArtifact(
+               sdsc, lds, ps, effectiveMatmulBroadcastHook,
+               /*kernelNeighborLowered=*/false,
+               /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+           DT_CHECK_MSG(
+               false,
+               "matmul_operand_broadcast gather/restickify materialization "
+               "failed: " +
+                   materializationReason);
+         }
+         emitMatmulOperandBroadcastPlanArtifact(
+             sdsc, lds, ps, effectiveMatmulBroadcastHook,
+             /*kernelNeighborLowered=*/false,
+             /*gatherRestickifyLowered=*/true, matmulBroadcastDebugContext);
+         continue;
+       }
+       if (std::getenv("DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST") ==
+           nullptr) {
+         emitMatmulOperandBroadcastPlanArtifact(
+             sdsc, lds, ps, effectiveMatmulBroadcastHook,
+             /*kernelNeighborLowered=*/false,
+             /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+         DT_CHECK_MSG(
+             false,
+             "matmul_operand_broadcast metadata was classified, but physical "
+             "lowering is blocked: current DL matmul lowering still consumes "
+             "one resident LDS operand pointer and cannot bind staged RHS "
+-            "chunks from IFN/STCDP. Set "
++            "chunks from IFN/STCDP. Set SPYRE_LX_PLANNER_RELAYOUT=1 or "
+             "DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1 for the "
+             "two-stage gather/restickify prototype, or set "
+             "DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST=1 only for "
+             "diagnostic small-shape experiments.");
+       }
+       std::string materializationReason;
+       if (!attachMatmulOperandBroadcastInputFetch(
+               sdsc, lds, effectiveMatmulBroadcastHook, &materializationReason)) {
+         emitMatmulOperandBroadcastPlanArtifact(
+             sdsc, lds, ps, effectiveMatmulBroadcastHook,
+             /*kernelNeighborLowered=*/false,
+             /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+         DT_CHECK_MSG(false,
+                      "matmul_operand_broadcast IFN materialization failed: " +
+                          materializationReason);
+       }
+       emitMatmulOperandBroadcastPlanArtifact(
+           sdsc, lds, ps, effectiveMatmulBroadcastHook,
+           /*kernelNeighborLowered=*/false,
+           /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+       continue;
+     } else if (!matmulBroadcastHook.plan.reason.empty()) {
+       DT_CHECK_MSG(false,
+                    "invalid matmul_operand_broadcast metadata: " +
+                        matmulBroadcastHook.plan.reason);
+     }
+ 
+ #ifdef DEBUG_RELAYOUT
+     std::cout << "Inserting relayout for: " << lds.dsName_ << std::endl;
+ #endif
+ 
+     // Step 2a: Create new sdsc for the relayout, and copy relevant properties
+     // from the consumer sdsc
+     SuperDsc* relayout_sdsc = new SuperDsc;
+     relayout_sdsc->name_ = sdsc->name_ + "-Relayout";
+     relayout_sdsc->sdscFoldProps_.emplace_back(std::make_unique<FoldDimProp>(
+         sdsc->sdscFoldProps_.at(0)->getSize(), "time"));
+     relayout_sdsc->sdscFolds_.clone(sdsc->sdscFolds_);
+     relayout_sdsc->coreFoldProp_ =
+         std::make_unique<FoldDimProp>(sdsc->coreFoldProp_->getSize(), "core");
+     relayout_sdsc->coreletFoldProp_ = std::make_unique<FoldDimProp>(
+         sdsc->coreletFoldProp_->getSize(), "corelet");
+     relayout_sdsc->unpadN_ = sdsc->unpadN_;
+     relayout_sdsc->N_ = sdsc->N_;
+     relayout_sdsc->target_ = sdsc->target_;
+ 
+     // Step 2b: Insert the relayout program step and check if there is
+     // sufficient contiguous space in LX for the post-relayout form. This must
+     // use the same tracker state as the eventual allocation below; a pure free
+     // capacity check before the inserted step can pass even when no common
+     // contiguous block is available at the real relayout step.
+     memTrackers->insertPsBefore(ps);
+     auto out_form_size = lds.wordLength;
+     auto N_ = sdsc->dscs_.front().N_;
+     auto dim_count = 0;
+     std::set<PrimaryDimTypes> relayout_tensor_dims;
+     for (auto dimid :
+          sdsc->dscs_.front().primaryDsInfo_.at(lds.dsType_).layoutDimOrder_) {
+       relayout_tensor_dims.insert(dimid);
+       if (lds.scale_[dim_count] == -2)
+         out_form_size *= 64;
+       else
+         out_form_size *= N_.primaryDimToVal_st(dimid);
+       dim_count++;
+     }
+     auto out_piece_size =
+         getRelayoutPieceSize(out_form_size, sdsc->coreIdToWkSlice_,
+                              relayout_tensor_dims);
+ 
+     bool lx_space_found = true;
+     for (const auto& mapkv : sdsc->coreIdToWkSlice_) {
+       auto& memTracker = lxTrackPerCore.at(mapkv.first);
+       auto probe_ds = sdsc->name_ + "-" + lds.dsName_ + "-LxRelayout-probe";
+       auto stAddr =
+           memTracker.checkDsForStartAddr(probe_ds, "dynamic", out_piece_size,
+                                          {ps}, -1);
+       if (stAddr < 0) {
+         lx_space_found = false;
+         break;
+       }
+     }
+ 
+     if (lx_space_found ||
+         dldsc.computeOp_.at(0).opFuncName == OpFuncs::IDENTITY) {
+ #ifdef DEBUG_RELAYOUT
+       std::cout << "Lx space found, inserting stcdpLx" << std::endl;
+ #endif
+       // Step 3-lx: Lx space has been found for the post-relayout form, so
+       // relayout will be achieved through stcdpLx. Create a new datadsc for the
+       // relayout node
+       DataOpDsc ddsc;
+       ddsc.dscName_ = sdsc->name_ + "-LxRelayout";
+       ddsc.opName = OpFuncs::STCDPOpLx;
+       ddsc.op = new STCDPOpLx;
+       ddsc.op->name = OpFuncs::STCDPOpLx;
+       ddsc.primaryDs_["activation"].name_ = "activation";
+       ddsc.target_ = sdsc->target_;
+       FoldDimProp* x =
+           new FoldDimProp(sdsc->sdscFoldProps_.at(0)->getSize(), "time");
+       ddsc.foldProps_.push_back(x);
+ 
+       // Step 3a-lx: Create new input and output lds for the relayout node, and
+       // fill their properties
+       ddsc.labeledDs_.resize(2);
+       auto& inpLds = ddsc.labeledDs_.at(0);
+       auto& outLds = ddsc.labeledDs_.at(1);
+       outLds.ldsName_ = lds.dsName_ + "-LxRelayout-out";
+       inpLds.ldsName_ = lds.dsName_ + "-LxRelayout-inp";
+ 
+       // fill coreIDsUsed for the datadsc
+       std::set<int> cores_seen;
+       for (const auto& mapkv : sdsc->coreIdToWkSlice_) {
+         if (cores_seen.count(mapkv.first) == 0) {
+           ddsc.coreIdsUsed_.push_back(mapkv.first);
+           cores_seen.insert(mapkv.first);
+         }
+       }
+       for (const auto& mapkv : allocCoords.coreIdToWkSlice_) {
+         if (cores_seen.count(mapkv.first) == 0) {
+           ddsc.coreIdsUsed_.push_back(mapkv.first);

@@ -1,0 +1,30 @@
+{
+  "run": "/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_staged_rank_group_chunked_4slot_replay_20260706_071147",
+  "returncode": "0",
+  "backend_plan_count": 2,
+  "logical_transfer_total": 1536,
+  "plans": [
+    {
+      "sdsc_name": "16_batchmatmul",
+      "kind": "matmul_operand_broadcast",
+      "communication_pattern": "all_gather_replicate",
+      "logical_transfer_count": "1024",
+      "realization_strategy": "gather_then_restickify",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "requires_layout_conversion": true,
+      "realized": true
+    },
+    {
+      "sdsc_name": "8_batchmatmul",
+      "kind": "matmul_operand_broadcast",
+      "communication_pattern": "all_gather_replicate",
+      "logical_transfer_count": "512",
+      "realization_strategy": "gather_then_restickify",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "requires_layout_conversion": true,
+      "realized": true
+    }
+  ],
+  "stderr_tail": "",
+  "stdout_tail": "[WARN] dxp_standalone --bundle option is deprecated (always on)"
+}
