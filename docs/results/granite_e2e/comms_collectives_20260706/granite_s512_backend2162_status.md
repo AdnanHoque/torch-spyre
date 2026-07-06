@@ -86,6 +86,28 @@ A separate successful DEV-pod flash run already shows the same direction on the 
 
 Later flash attempts were interrupted or device-busy, so this is SDSC/classification evidence rather than a fresh timing conclusion.
 
+### Flash Correctness Caveat
+
+Do not use the current flash attention value result as the oracle for DLDSC relayout correctness. Jamie's analysis points to an unrelated baseline lowering issue: an `unsqueeze`/broadcast view can lose zero-stride information before SDSC generation. The producer writes the dense source layout, but the consumer may recompute dense strides from a broadcasted `device_size`, so a broadcast dimension incorrectly changes the linear offset.
+
+For this collectives track, the correctness question is narrower:
+
+1. Does DLDSC/LX relayout preserve values on controlled cases where the baseline view lowering is already valid?
+2. Does enabling relayout introduce any new mismatch relative to a non-relayout baseline on those controlled cases?
+3. Does the flash bundle structurally expose the right communication pattern and backend lowering gap?
+
+Until the zero-stride issue is fixed separately, flash attention should be treated as a structural stress case for relayout insertion and backend lowering, not as a value-correctness source of truth.
+
+Current independent correctness evidence for the communication layer:
+
+| scope | result | interpretation |
+|---|---:|---|
+| Torch focused relayout tests, `tests/inductor/test_lx_relayout_dldsc.py` | `18 passed` | frontend planning/classification and SDSC metadata path are covered |
+| Torch import-light all-gather/restickify tests | `2 passed` | import-level all-gather/restickify helpers still load cleanly |
+| Deeptools `CoreWorkDivIncomptLxRelayout*` unit tests | `2 passed` | backend coordinate-incompatibility relayout insertion still passes |
+| Deeptools `LayoutAllgatherRestickify.*` util tests | `25 passed` after rebuilding stale `util_unit_test` | helper planner passes; stale binaries can segfault after struct/header changes |
+| Granite S512 causal prefill with relayout enabled | return code `0`, no added runtime failure | useful non-flash workload continues to run with relayout enabled |
+
 ## Current Communication-Class Coverage
 
 | class | current evidence | status |

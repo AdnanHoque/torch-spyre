@@ -18,7 +18,7 @@ The key distinction:
 | Broadcast / multicast | One producer shard maps to multiple consumer cores for the same logical tensor/layout. | Same-layout 4-way RHS broadcast/all-gather synthetic runs pass. | Partially working for same-layout fanout. | Add a dedicated multicast test and productionize metadata/allocator contract. |
 | Gather | Multiple producer shards map to one consumer core for the same logical tensor/layout. | Synthetic gather passes when destination base is frontend-safe; dynamic backend destination can corrupt. | Mechanically possible, not production-safe yet. | Destination allocation ownership and non-overlap contract. |
 | All-gather | Every consumer receives all producer shards. | Same-layout small RHS all-gather passes; wider source-core case has metadata/fold gaps. | Partial for same-layout. | Source address metadata and fold/cardinality handling for wider producer groups. |
-| Matmul operand broadcast | All-gather source activation shards, then convert into PT `KERNEL` operand layout. | Full resident staged path is value-correct synthetically; loop-scoped direct KERNEL ring emits traffic but is value-wrong. | Not value-correct in the current loop-scoped prototype. | Need two-stage loop-scoped source-layout gather plus local KERNEL layout conversion. |
+| Matmul operand broadcast | All-gather source activation shards, then convert into PT `KERNEL` operand layout. | Full resident staged path is value-correct synthetically; loop-scoped direct KERNEL ring emits traffic but does not yet prove value correctness. | Structural lowering works; loop-scoped KERNEL conversion remains the backend gap. | Need two-stage loop-scoped source-layout gather plus local KERNEL layout conversion. |
 | Form-changing restickify | Coordinates plus source/destination stick/layout metadata. | `ReStickifyOpLx` exists; full staged synthetic path can use it; standalone attention replays hit DDL/op mapping gaps. | Partial. | Backend support for `ReStickifyOpLx` in the target schedule shape, or a streaming equivalent. |
 | Reduce | Many producer values combine arithmetically into one output shard. | No positive single-AIU LX collective evidence in this branch. | Not covered by relayout alone. | Requires op, axes, dtype/accumulation, identity, and scheduling of arithmetic fan-in. |
 | All-reduce | Reduce plus redistribute/broadcast result. | No positive single-AIU LX collective evidence in this branch. | Not covered by relayout alone. | Build reduce, then broadcast result; likely a separate arithmetic collective feature. |
@@ -49,7 +49,7 @@ ALLCLOSE True
 MAX_DIFF 0.25
 ```
 
-Matmul operand broadcast:
+Matmul operand broadcast structural probes:
 
 ```text
 kernel_neighbor_skipviews_M16_001835
@@ -66,6 +66,8 @@ kernel_neighbor_direct_selfring_shift_M16_003720
 Same-core-as-ring workaround is unsafe.
 RAS::PCI::BusFence
 ```
+
+Treat these as backend layout-conversion probes, not as flash-attention correctness conclusions. The current flash attention value path has an independent zero-stride/broadcast-view lowering issue: `TensorArg` does not preserve `stride_map`, and SDSC generation recomputes dense strides from `device_size`. That can make an `unsqueeze` broadcast dimension incorrectly participate in linear address calculation even when relayout is disabled. Until that baseline bug is fixed elsewhere, flash value correctness is not a clean oracle for this communication track.
 
 Full resident staged matmul operand path:
 
@@ -97,4 +99,3 @@ This keeps the frontend/backend contract aligned with the DLDSC model:
 - Torch describes tensor distribution and consumer compute distribution.
 - Deeptools derives the movement cardinality and synthesizes physical ring/local movement.
 - Layout-changing cases carry enough metadata for backend layout conversion, not just core ownership.
-
