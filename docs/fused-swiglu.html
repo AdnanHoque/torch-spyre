@@ -1,0 +1,267 @@
+<title>Fused SwiGLU on Spyre — the SiLU-in-registers epilogue</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#171b22; --panel2:#1e232c; --line:#2a313c;
+    --ink:#e6e9ef; --mut:#8b93a1; --dim:#666e7d;
+    --hot:#e0a13c;      /* in-register: fast */
+    --cool:#4bb8c9;     /* off-chip / LX: slow */
+    --win:#5fb87a;      /* the winning path */
+    --hotdim:#5a4a2a; --cooldim:#274249; --windim:#28402f;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Roboto Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0}
+  .wrap{
+    background:var(--bg); color:var(--ink); font-family:var(--sans);
+    font-size:16px; line-height:1.62; letter-spacing:.005em;
+    -webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(120% 60% at 50% -10%, #141a24 0%, var(--bg) 60%);
+    min-height:100vh;
+  }
+  .col{max-width:760px; margin:0 auto; padding:0 22px 96px}
+  .prose{max-width:64ch}
+  h1,h2,h3{text-wrap:balance; font-weight:640; letter-spacing:-.01em; line-height:1.15}
+  h1{font-size:clamp(1.9rem,6vw,2.9rem); margin:.2em 0 .1em}
+  h2{font-size:clamp(1.3rem,3.6vw,1.7rem); margin:2.6em 0 .5em; padding-top:.4em}
+  h3{font-size:1.06rem; margin:1.8em 0 .3em; color:var(--ink)}
+  p{margin:.7em 0; color:#d5dae2}
+  a{color:var(--hot); text-decoration:none; border-bottom:1px solid var(--hotdim)}
+  code,.k{font-family:var(--mono); font-size:.86em}
+  code{background:var(--panel2); border:1px solid var(--line); border-radius:4px; padding:.08em .38em; color:#dfe4ec}
+  strong{color:#fff; font-weight:620}
+  .eyebrow{font-family:var(--mono); font-size:.72rem; letter-spacing:.22em; text-transform:uppercase; color:var(--hot); margin:0 0 .3em}
+  .lede{font-size:1.12rem; color:var(--mut); max-width:60ch}
+  .rule{height:1px; background:linear-gradient(90deg,var(--line),transparent); border:0; margin:2.4em 0}
+
+  /* header band */
+  header{padding:64px 0 8px}
+  .chip{display:inline-flex; gap:.5em; align-items:center; font-family:var(--mono); font-size:.7rem;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--mut);
+    border:1px solid var(--line); border-radius:100px; padding:.32em .8em; margin-top:1.2em; background:#12161d}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--win);box-shadow:0 0 8px var(--win)}
+
+  /* memory hierarchy strip */
+  .mem{display:grid; gap:8px; margin:1.4em 0}
+  .tier{display:grid; grid-template-columns:96px 1fr auto; align-items:center; gap:14px;
+    background:var(--panel); border:1px solid var(--line); border-left-width:3px; border-radius:8px; padding:12px 16px}
+  .tier .name{font-family:var(--mono); font-weight:600; font-size:.86rem; letter-spacing:.02em}
+  .tier .desc{color:var(--mut); font-size:.92rem}
+  .tier .speed{font-family:var(--mono); font-size:.72rem; color:var(--dim); text-align:right; white-space:nowrap}
+  .t-lrf{border-left-color:var(--hot)} .t-lrf .name{color:var(--hot)}
+  .t-lx{border-left-color:var(--cool)} .t-lx .name{color:var(--cool)}
+  .t-hbm{border-left-color:var(--dim)} .t-hbm .name{color:var(--mut)}
+
+  /* three-option comparison */
+  .opts{display:grid; gap:14px; margin:1.6em 0}
+  @media(min-width:720px){.opts{grid-template-columns:1fr 1fr 1fr}}
+  .opt{background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; display:flex; flex-direction:column; gap:10px}
+  .opt.win{border-color:var(--windim); background:linear-gradient(180deg,#182219,var(--panel))}
+  .opt .num{font-family:var(--mono); font-size:.72rem; letter-spacing:.14em; color:var(--mut)}
+  .opt.win .num{color:var(--win)}
+  .opt h4{margin:0; font-size:.98rem; line-height:1.3; font-weight:620}
+  .flow{font-family:var(--mono); font-size:.74rem; line-height:1.9; color:var(--mut); background:#10141b; border:1px solid var(--line); border-radius:7px; padding:10px 12px}
+  .flow .lx{color:var(--cool)} .flow .lrf{color:var(--hot)} .flow .drop{color:var(--win)}
+  .cost{font-size:.82rem; color:var(--mut); margin-top:auto}
+  .cost b{color:var(--ink); font-weight:600}
+  .tag{display:inline-block; font-family:var(--mono); font-size:.64rem; letter-spacing:.1em; text-transform:uppercase; padding:.2em .5em; border-radius:4px; margin-top:2px}
+  .tag.bad{background:var(--cooldim); color:var(--cool)}
+  .tag.good{background:var(--windim); color:var(--win)}
+
+  /* data table */
+  .scroll{overflow-x:auto; margin:1.2em 0; border:1px solid var(--line); border-radius:10px}
+  table{border-collapse:collapse; width:100%; font-size:.9rem; min-width:440px}
+  th,td{text-align:left; padding:11px 16px; border-bottom:1px solid var(--line)}
+  th{font-family:var(--mono); font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--mut); font-weight:500; background:#12161d}
+  td{color:#d5dae2}
+  tr:last-child td{border-bottom:0}
+  .num-c{font-family:var(--mono); font-variant-numeric:tabular-nums; text-align:right}
+  .pass{color:var(--win); font-weight:600} .fail{color:var(--cool)}
+
+  /* callout */
+  .note{background:var(--panel2); border:1px solid var(--line); border-left:3px solid var(--hot); border-radius:8px; padding:14px 18px; margin:1.4em 0; font-size:.94rem; color:var(--mut)}
+  .note b{color:var(--ink)}
+
+  /* segment vectors */
+  .seg{font-family:var(--mono); font-size:.8rem; display:flex; flex-wrap:wrap; gap:6px; margin:.5em 0}
+  .seg span{padding:.28em .6em; border-radius:5px; border:1px solid var(--line); background:#12161d; color:var(--mut)}
+  .seg .mm{color:var(--ink); border-color:#333}
+  .seg .si{color:var(--hot); border-color:var(--hotdim); background:#1c1710}
+  .seg .fold{color:var(--win); border-color:var(--windim); background:#111a13}
+  .arrow{color:var(--dim); align-self:center}
+
+  .kv{display:grid; grid-template-columns:auto 1fr; gap:2px 16px; font-size:.9rem; margin:1em 0}
+  .kv dt{font-family:var(--mono); color:var(--mut); font-size:.82rem}
+  .kv dd{margin:0; color:#d5dae2}
+  footer{margin-top:3em; padding-top:1.4em; border-top:1px solid var(--line); color:var(--dim); font-size:.82rem; font-family:var(--mono)}
+</style>
+
+<div class="wrap">
+<div class="col">
+
+<header>
+  <p class="eyebrow">Spyre / torch-inductor · fusion note</p>
+  <h1>Keeping SiLU in the registers</h1>
+  <p class="lede">Fusing a matmul and its SiLU activation into one on-chip kernel — so the gate tensor is computed, activated, and consumed without ever touching memory.</p>
+  <span class="chip"><span class="dot"></span> Auto-fusing · device-validated · <code style="background:none;border:none;padding:0;color:var(--mut)">ah/fused-swiglu-prod @ f51346c</code></span>
+</header>
+
+<hr class="rule">
+
+<div class="prose">
+
+<h2>The shape of the problem: SwiGLU</h2>
+<p>Modern transformer MLPs use a <strong>gated</strong> feed-forward block. Granite-3-8B's is a <strong>SwiGLU</strong>: two parallel projections of the input, one of which is passed through a <strong>SiLU</strong> activation and used as a gate on the other.</p>
+<p style="font-family:var(--mono);font-size:.9rem;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px 18px;color:var(--ink)">out = down_proj(&nbsp;<span style="color:var(--hot)">silu(gate_proj(x))</span>&nbsp;*&nbsp;up_proj(x)&nbsp;)</p>
+<p><strong>SiLU</strong> (a.k.a. swish) is <code>silu(x) = x · sigmoid(x)</code> — a smooth, self-gating activation. The interesting term for us is the highlighted one: a <strong>matmul immediately followed by an elementwise SiLU</strong> over its full output. That <code>gate_proj(x)</code> result — call it the <em>gate tensor</em> — is <code>d_ff</code> = 12,800 wide. It exists only to be activated and multiplied away. The question is where it lives while that happens.</p>
+
+<h2>The Spyre data path, and why "where" matters</h2>
+<p>A matmul on Spyre flows through a fixed pipeline of compute units, each with its own memory close by. The speed gap between those memories is enormous — and it is the entire story of this optimization.</p>
+
+<div class="mem">
+  <div class="tier t-lrf">
+    <div class="name">SFP · PE&nbsp;LRF</div>
+    <div class="desc">Register files right inside the compute units. Where a tile lives while it is being worked on.</div>
+    <div class="speed">fastest<br>/ smallest</div>
+  </div>
+  <div class="tier t-lx">
+    <div class="name">LX</div>
+    <div class="desc">On-chip SRAM. Staging area between compute and HBM. Fast — but a full round-trip still costs a write and a read.</div>
+    <div class="speed">on-chip</div>
+  </div>
+  <div class="tier t-hbm">
+    <div class="name">HBM</div>
+    <div class="desc">Off-chip high-bandwidth memory. Where weights and activations ultimately reside.</div>
+    <div class="speed">slowest<br>/ largest</div>
+  </div>
+</div>
+
+<p>The compute path itself is: the <strong>PE array</strong> (a systolic grid that does the multiply-accumulate) hands results to the <strong>SFP</strong> (a scalar/float unit that applies pointwise math over its LRF registers), which can spill to <strong>LX</strong>, which can spill to <strong>HBM</strong>.</p>
+<p style="font-family:var(--mono);font-size:.86rem;color:var(--mut);text-align:center;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px">PE <span style="color:var(--dim)">→</span> SFP <span style="color:var(--dim)">→</span> <span style="color:var(--cool)">LX</span> <span style="color:var(--dim)">→</span> HBM</p>
+<p>The key fact: an output <strong>tile</strong> produced by the PE array is <strong>already sitting in the SFP/PE LRF registers</strong>. If you can apply SiLU to it right there, before it is written anywhere, the gate tensor never becomes a real buffer.</p>
+
+<h2>Three ways to fuse — and one that wins</h2>
+<p>There are three granularities at which you can run "matmul, then SiLU." They differ in how many device kernels launch and, crucially, in whether the <code>d_ff</code>-wide gate tensor gets materialized in LX.</p>
+
+</div>
+
+<div class="opts">
+  <div class="opt">
+    <div class="num">OPTION 1</div>
+    <h4>Matmul → decomposed SiLU</h4>
+    <div class="flow">
+      matmul<br>
+      <span class="lx">↓ write gate → LX</span><br>
+      <span class="lx">↑ read gate ← LX</span><br>
+      neg·exp·add·<br>recip·mul <span style="color:var(--cool)">(~6 ops)</span>
+    </div>
+    <div class="cost"><b>2 segments.</b> Gate written + read on LX. SiLU explodes into ~6 pointwise ops.<br><span class="tag bad">leaky · default</span></div>
+  </div>
+  <div class="opt">
+    <div class="num">OPTION 2</div>
+    <h4>Matmul → single fused-SiLU op</h4>
+    <div class="flow">
+      matmul<br>
+      <span class="lx">↓ write gate → LX</span><br>
+      <span class="lx">↑ read gate ← LX</span><br>
+      silu <span style="color:var(--mut)">(one op)</span>
+    </div>
+    <div class="cost"><b>2 segments.</b> Gate still written + read on LX. SiLU is one op, not six.<br><span class="tag bad">stepping stone</span></div>
+  </div>
+  <div class="opt win">
+    <div class="num">OPTION 3 — BUILT</div>
+    <h4>Matmul with SiLU in the epilogue</h4>
+    <div class="flow">
+      matmul <span class="lrf">→ tile in LRF</span><br>
+      <span class="lrf">silu on tile (in-register)</span><br>
+      <span class="drop">✗ gate never materialized</span><br>
+      write activated result
+    </div>
+    <div class="cost"><b>1 segment.</b> Tile stays in the SFP LRF across the matmul→silu boundary. The gate tensor is never a buffer.<br><span class="tag good">this work</span></div>
+  </div>
+</div>
+
+<div class="prose">
+<p><strong>Why 3 wins is exact, not hand-wavy.</strong> Options 1 and 2 both force the full gate tensor out to LX and back — one write and one read of a 12,800-wide tensor — plus a second kernel launch to read it. Option 3 applies SiLU to each output tile <em>while it is still in the SFP LRF</em>, then writes only the finished result. The structural saving is guaranteed: <strong>−1 device segment, −1 LX write, −1 LX read</strong> of the gate tensor.</p>
+
+<h2>How the SiLU is computed in-register (FEST)</h2>
+<p>Applying SiLU inside the matmul kernel means computing <code>sigmoid(x)·x</code> using only the units that already hold the tile. Sigmoid is the hard part — so we lean on the PE array's <strong>FEST</strong> unit (Fast Exponential / Sigmoid Transcendental), which produces a <strong>piecewise-linear fast-sigmoid</strong> as a slope + offset pair, then finish with a couple of SFP fused-multiply-adds. No transcendental library call, no memory spill.</p>
+<p>The recipe, all in registers, folded into the matmul's final accumulation iteration:</p>
+<dl class="kv">
+  <dt>PE FEST mode 7</dt><dd>→ <code>cs</code> (fast-sigmoid offset / curve term), reading the fp16 matmul result still in PE LRF</dd>
+  <dt>PE FEST mode 6</dt><dd>→ <code>ss</code> (fast-sigmoid slope term), same input</dd>
+  <dt>SFP FMA16</dt><dd><code>t = cs·1.0 + 0.5</code> — the <code>+0.5</code> is a staged fp16 constant <code>0x3c00</code></dd>
+  <dt>SFP FMA16</dt><dd><code>sig = x·ss + t</code> → the fast-sigmoid value</dd>
+  <dt>SFP FMUL</dt><dd><code>out = sig · x</code>, written in place — this is the SiLU result</dd>
+</dl>
+<p>This lives in <code>bmm.ddl</code> as a new <code>%silu_op</code> guarded by <code>ddl.if(%silu_op)</code>, mutually exclusive with the relu / bias / batchnorm epilogues (a v1 register-pressure guard). The PE-side FEST outputs get PE-LRF allocations so the 128-wide FEST path resolves.</p>
+
+<h2>Making the compiler fuse it automatically</h2>
+<p>The device kernel is only half the work; Inductor has to <em>recognize</em> the pattern and emit one fused segment. A real vertical-fusion gate in <code>scheduler.py</code> — <code>can_fuse_matmul_silu</code> — fires when three things hold:</p>
+<dl class="kv">
+  <dt>matmul node</dt><dd>a reduction whose type is <code>batchmatmul</code></dd>
+  <dt>silu node</dt><dd>a pointwise node whose origins target <code>aten.silu</code></dd>
+  <dt>full consume</dt><dd>the SiLU's only non-constant read is the matmul output, and its numel matches (no broadcast, unary)</dd>
+</dl>
+<p>When it fires, the two ops collapse into one <code>FusedSchedulerNode</code> (<code>sdsc_fused_mm_silu_0</code>), and the SDSC codegen emits a length-2 <code>computeOp_</code> vector via an <code>Epilogue</code> record threaded through <code>superdsc.py</code> → <code>bundle.py</code> → <code>compute_ops.py</code>:</p>
+<div class="seg">
+  <span class="mm">batchmatmul</span><span class="arrow">+</span><span class="si">silu</span>
+  <span style="color:var(--dim);align-self:center;margin-left:8px">exUnits [pt, sfp] · one segment</span>
+</div>
+<p>A plain <code>a @ b</code> still emits a length-1 <code>computeOp_ = [batchmatmul]</code> — the change is behavior-preserving. The whole thing is default-on (<code>SPYRE_ENABLE_MATMUL_SILU_EPILOGUE=1</code>); setting it to <code>0</code> restores the two-op path, which is exactly the benchmark control.</p>
+<div class="note"><b>No forced hook.</b> The prototype used an <code>SPYRE_EXP_FORCE_MM_SILU</code> env switch. That is gone. Production fusion is driven entirely by the detection gate above.</div>
+
+<h2>Does it work? Device numerics</h2>
+<p>Scored on device against the oracle that isolates the epilogue — <code>silu(device_mm)</code>, i.e. SiLU applied to the device's own fp16 matmul output:</p>
+</div>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Oracle</th><th class="num-c">Cosine</th><th class="num-c">Max rel</th><th class="num-c">Max abs</th><th>Verdict</th></tr></thead>
+  <tbody>
+    <tr><td>silu(device_mm) <span style="color:var(--mut)">— acceptance</span></td><td class="num-c">1.000000</td><td class="num-c">0.21%</td><td class="num-c">0.0084</td><td class="pass">PASS</td></tr>
+    <tr><td>silu(fp32_mm) <span style="color:var(--mut)">— pure fp32 math</span></td><td class="num-c">0.999998</td><td class="num-c">11.4%</td><td class="num-c">0.212</td><td class="fail">n/a*</td></tr>
+  </tbody>
+</table>
+</div>
+<div class="prose">
+<p style="font-size:.9rem;color:var(--mut)">* The fp32 oracle "fails" only because it folds in the <em>matmul's own fp16 quantization</em> — not an epilogue defect. Against the correct acceptance oracle the epilogue is clean. A separate check (<code>cos_vs_raw_matmul = 0.699</code>) confirms SiLU actually applied, rather than raw matmul passing through.</p>
+
+<h2>Does it help? Benchmark</h2>
+<p>Measured on the real FMS Granite <code>GraniteBlock.ff_sub_layer</code> SwiGLU (hidden 4096, d_ff 12800, fp16), median device wall-clock over 10 iters. Fused vs. baseline differ only by the gate.</p>
+</div>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Regime</th><th class="num-c">Fused</th><th class="num-c">Baseline</th><th class="num-c">Δ</th><th class="num-c">Faster</th></tr></thead>
+  <tbody>
+    <tr><td>Prefill · seq 512</td><td class="num-c">16.948 ms</td><td class="num-c">17.127 ms</td><td class="num-c">−0.180</td><td class="num-c pass">1.05%</td></tr>
+    <tr><td>Decode · seq 1</td><td class="num-c">7.996 ms</td><td class="num-c">8.000 ms</td><td class="num-c">−0.004</td><td class="num-c" style="color:var(--mut)">noise</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="prose">
+<p>The fusion <strong>demonstrably engages</strong> on device — the SDSC segment vector changes, identically for prefill and decode:</p>
+<div class="seg" style="align-items:center">
+  <span style="color:var(--mut);font-size:.72rem;letter-spacing:.1em">BASELINE</span>
+  <span class="mm">bmm</span><span class="si">silu</span><span class="mm">bmm</span><span class="mm">mul</span><span class="mm">bmm</span>
+</div>
+<div class="seg" style="align-items:center">
+  <span style="color:var(--mut);font-size:.72rem;letter-spacing:.1em">FUSED&nbsp;&nbsp;&nbsp;</span>
+  <span class="fold">bmm+silu</span><span class="mm">bmm</span><span class="mm">mul</span><span class="mm">bmm</span>
+  <span style="color:var(--dim);border:none;background:none">standalone silu eliminated</span>
+</div>
+<p><strong>Honest read.</strong> The plumbing is correct end-to-end and the structural win (one fewer segment, no LX round-trip of the gate) is real — but at Granite <em>batch=1</em> the payoff is small: ~1% on prefill, noise on decode. That is expected. Three large 4096×12800 matmuls dominate the block, and the eliminated SiLU is a cheap elementwise op over a modest tensor; the saved LX round-trip and launch is tiny against that. The fusion pays off more where the activated tensor is large relative to the matmul, or where launch overhead is a bigger fraction of the total — not this shape.</p>
+
+<div class="note"><b>Caveats.</b> v1 is unary-SiLU only and mutually exclusive with other epilogues (enforced in both the DDL and the frontend). HPM / bandwidth counters were not captured — the perf-suite profiler hung and was abandoned for the lighter probe; wall-clock only. Kept local, not pushed, per pre-publish convention.</div>
+
+</div>
+
+<footer>
+  bmm_silu_festfix.patch · torch_spyre_prod.patch (9 files, +442/−29) · prod_auto_numerics.json · probe_bench_results.json<br>
+  worktree torch-spyre-prod · ah/fused-swiglu-prod · f51346c
+</footer>
+
+</div>
+</div>
