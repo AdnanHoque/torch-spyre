@@ -147,6 +147,41 @@ then matmul reads the converted tile
 
 That matches the value-correct staged synthetic evidence while avoiding full-resident materialization.
 
+## Implementation Direction
+
+Two independent inspections agreed on the same next backend shape:
+
+1. Do not complete the direct `KERNEL_NEIGHBOR` shortcut as the production path. That path can emit ring traffic, but it asks producer-layout bytes to behave like the matmul PT `KERNEL` operand and eventually fails or becomes value-unsafe.
+2. Keep the DLDSC frontend contract as the logical handoff. For `matmul_operand_broadcast`, Torch already emits the necessary fields:
+   - `communication_class`
+   - `communication_pattern=all_gather_replicate`
+   - producer and consumer core maps
+   - `operand_read_index`
+   - `staging_scope=matmul_transfer_loop`
+   - `requires_layout_conversion=true`
+   - `layout_transform`
+   - enriched `source_lx_tensor` and `target_kernel_tensor`
+3. Deeptools should realize that contract as staged lowering:
+   - create a loop/tile-scoped source-layout LX staging buffer;
+   - populate that staging buffer with LX-neighbor ring/local movement;
+   - run a local `ReStickifyOpLx` or equivalent layout conversion into the consumer KERNEL RHS view;
+   - bind the matmul input to the converted KERNEL-layout tile.
+
+The smallest useful first test is a two- or four-core synthetic RHS case with different source and KERNEL layouts. The assertions should be:
+
+- ring transfers target the source-layout staging buffer, not the PTXRF/KERNEL allocation;
+- `ReStickifyOpLx` is scheduled before the matmul in the same loop/tile scope;
+- KERNEL RHS/PTXRF coordinates use the consumer layout, not the producer source map;
+- no dense full-resident relayout path or unsafe fallback is required.
+
+Potential Deeptools touch points:
+
+- `util/LayoutAllgatherRestickify.{h,cpp}`: expose staged/layout-conversion plan fields if needed.
+- `dxp/SdscRelayoutInsertion.cpp`: add a `lowerMatmulOperandBroadcastStagedRestickify(...)` path behind an experimental env flag.
+- `dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp`: split source staging allocation from KERNEL target allocation.
+- `dcg/dcg_manager/dcg_manager.cpp`: support scheduling the local `ReStickifyOpLx` conversion alongside the DL matmul.
+- `ddc/ddc_fold.cpp` and `ddc/ddcv1.cpp`: keep source-stage custom maps from leaking into the consumer KERNEL/PTXRF target.
+
 ## Artifacts
 
 Synthetic correctness and fresh rerun logs:
