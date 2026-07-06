@@ -1,0 +1,6 @@
+run=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_multicast_dtfix_structural_20260706_130645
+torch_root=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/torch-spyre
+torch_sha=c9e0e9ae039303714b531742ea96c6c05b54faf0
+deeptools_root=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools
+deeptools_sha=b8c8a8a4e6d2eaf8b397426c73fc3fd31b7232fd
+script=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_multicast_dtfix_structural_20260706_130645/test_flash.py

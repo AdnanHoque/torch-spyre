@@ -1,0 +1,3 @@
+[runtime_patch] no_h2d Tensor.to(device=spyre) compile probe enabled
+[runtime_patch] assert_close skipped for compile probe
+SUCCESS
