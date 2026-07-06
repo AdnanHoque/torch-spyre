@@ -16,6 +16,7 @@
 import dataclasses
 import math
 import itertools
+import os
 from sympy import Expr, Integer, Symbol, divisors
 from .ir import SpyreConstantFallback, SpyreEmptyFallback
 
@@ -960,6 +961,17 @@ _PSUM_PER_CORE_ELEM_US = 1.0e-3
 _BMM_PSUM_PER_CORE_ELEM_US = 1.0e-4
 _COHORT_LIMIT = 8  # cores sharing a broadcast before it contends for bandwidth
 _COHORT_PENALTY_EXPONENT = 0.75
+# G3 communication-cost seam (opt-in). When enabled, collective/broadcast
+# contention is priced by comm_cost.py as a SEPARATE additive edge cost at the
+# planner seam (op_cost + edge_cost) instead of being folded into hbm_us via the
+# tuned _cohort_penalty. Default OFF preserves the device-verified selections
+# until the seam is device-validated; see comm_cost.py.
+_COMM_COST_SEAM = os.environ.get("SPYRE_COMM_COST_SEAM", "0") not in (
+    "0",
+    "",
+    "false",
+    "False",
+)
 _M_LANE_UNDERUSE_PENALTY_US = 10.0  # tie-break when too few M lanes are used
 _M_TILE_UNDERFILL_TARGET = 16  # rows/core below this pay PT startup overhead
 _M_TILE_UNDERFILL_PENALTY_US = 30.0
@@ -1006,11 +1018,16 @@ def _matmul_split_cost(
     # link, so effective bandwidth falls off linearly with cohort size.
     weight_batches = 1 if shared_weight else B
     bytes_total = (B * M * K + weight_batches * K * N + B * M * N) * _DTYPE_BYTES
-    fanout_split = max(m, n) if shared_weight else n
-    cohort_penalty = max(
-        1.0, (fanout_split / _COHORT_LIMIT) ** _COHORT_PENALTY_EXPONENT
-    )
-    hbm_us = bytes_total / (_HBM_BW_GBS * 1000) * cohort_penalty
+    if _COMM_COST_SEAM:
+        # Broadcast/collective contention is priced separately by comm_cost.py at
+        # the planner seam (op_cost + edge_cost); keep hbm_us a pure HBM term.
+        hbm_us = bytes_total / (_HBM_BW_GBS * 1000)
+    else:
+        fanout_split = max(m, n) if shared_weight else n
+        cohort_penalty = max(
+            1.0, (fanout_split / _COHORT_LIMIT) ** _COHORT_PENALTY_EXPONENT
+        )
+        hbm_us = bytes_total / (_HBM_BW_GBS * 1000) * cohort_penalty
 
     # PSUM: a K-split spreads the reduction over k cores, costing (k-1)
     # partial-sum hops. Charge each core's output tile rather than the whole
@@ -1101,6 +1118,51 @@ def _matmul_split_cost(
         + core_underuse_us
         + batch_split_us
     )
+
+
+def _matmul_broadcast_edge_cost_us(
+    b_axis: tuple[int, int],
+    m_axis: tuple[int, int],
+    n_axis: tuple[int, int],
+    k_axis: tuple[int, int],
+) -> float:
+    """G3 edge cost (us) of the operand-broadcast collectives a (b, m, n, k)
+    split induces, priced by ``comm_cost`` as a resource SEPARATE from hbm_us.
+
+    The RHS ([K, N]) is shared by the M-split cohort (m cores read the same RHS
+    tile); the LHS ([M, K]) is shared by the N-split cohort. Both are
+    all-gather/replicate broadcasts G3 prices per-core. This is the physically
+    grounded successor to the tuned ``_cohort_penalty`` (which multiplied
+    hbm_us); here it is an ADDITIVE term on a distinct resource, added at the
+    planner seam. Only used when ``_COMM_COST_SEAM`` is enabled, and NOT yet
+    device-validated to reproduce the tuned selections -- keep behind the flag.
+    """
+    from . import comm_cost
+
+    (_, _), (M, m), (N, n), (K, k) = b_axis, m_axis, n_axis, k_axis
+    k_eff = max(1, k)
+    total = 0.0
+    if m > 1:
+        rhs_tile = (K // k_eff) * (N // max(1, n)) * _DTYPE_BYTES
+        total += comm_cost.comm_edge_cost_us(
+            comm_cost.CommEdge(
+                comm_class=comm_cost.COMM_CLASS_ALL_GATHER,
+                operand_bytes=int(rhs_tile),
+                dtype_bytes=_DTYPE_BYTES,
+                group_size=int(m),
+            )
+        )
+    if n > 1:
+        lhs_tile = (M // max(1, m)) * (K // k_eff) * _DTYPE_BYTES
+        total += comm_cost.comm_edge_cost_us(
+            comm_cost.CommEdge(
+                comm_class=comm_cost.COMM_CLASS_ALL_GATHER,
+                operand_bytes=int(lhs_tile),
+                dtype_bytes=_DTYPE_BYTES,
+                group_size=int(n),
+            )
+        )
+    return total
 
 
 def _single_input_row_dims(
@@ -1242,6 +1304,15 @@ def _cost_model_matmul_planner(
                         max_cores,
                         shared_weight=rhs_loaded_once,
                     )
+                    if _COMM_COST_SEAM:
+                        # Separate resource: the on-chip broadcast the split
+                        # induces, priced by comm_cost and ADDED (never merged).
+                        c += _matmul_broadcast_edge_cost_us(
+                            (B_total, b_prod),
+                            (M_e, mm),
+                            (N_e, nn),
+                            (K_e, kk),
+                        )
                     if c < best_cost:
                         best_cost = c
                         best = (b_combo, mm, nn, kk)

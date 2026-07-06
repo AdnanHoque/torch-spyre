@@ -1,0 +1,1123 @@
+{
+  "sdsc_1_mul": {
+    "path": "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_1.json",
+    "top_key": "1_mul",
+    "op": "mul",
+    "numCoresUsed_": 32,
+    "numWkSlicesPerDim_": {
+      "mb": 4,
+      "x": 8,
+      "out": 1
+    },
+    "coreIdToWkSlice_sample_0_7": {
+      "0": {
+        "mb": 0,
+        "x": 0,
+        "out": 0
+      },
+      "1": {
+        "mb": 1,
+        "x": 0,
+        "out": 0
+      },
+      "2": {
+        "mb": 2,
+        "x": 0,
+        "out": 0
+      },
+      "3": {
+        "mb": 3,
+        "x": 0,
+        "out": 0
+      },
+      "4": {
+        "mb": 0,
+        "x": 1,
+        "out": 0
+      },
+      "5": {
+        "mb": 1,
+        "x": 1,
+        "out": 0
+      },
+      "6": {
+        "mb": 2,
+        "x": 1,
+        "out": 0
+      },
+      "7": {
+        "mb": 3,
+        "x": 1,
+        "out": 0
+      }
+    },
+    "coreIdToWkSlice_": {
+      "0": {
+        "mb": 0,
+        "x": 0,
+        "out": 0
+      },
+      "1": {
+        "mb": 1,
+        "x": 0,
+        "out": 0
+      },
+      "2": {
+        "mb": 2,
+        "x": 0,
+        "out": 0
+      },
+      "3": {
+        "mb": 3,
+        "x": 0,
+        "out": 0
+      },
+      "4": {
+        "mb": 0,
+        "x": 1,
+        "out": 0
+      },
+      "5": {
+        "mb": 1,
+        "x": 1,
+        "out": 0
+      },
+      "6": {
+        "mb": 2,
+        "x": 1,
+        "out": 0
+      },
+      "7": {
+        "mb": 3,
+        "x": 1,
+        "out": 0
+      },
+      "8": {
+        "mb": 0,
+        "x": 2,
+        "out": 0
+      },
+      "9": {
+        "mb": 1,
+        "x": 2,
+        "out": 0
+      },
+      "10": {
+        "mb": 2,
+        "x": 2,
+        "out": 0
+      },
+      "11": {
+        "mb": 3,
+        "x": 2,
+        "out": 0
+      },
+      "12": {
+        "mb": 0,
+        "x": 3,
+        "out": 0
+      },
+      "13": {
+        "mb": 1,
+        "x": 3,
+        "out": 0
+      },
+      "14": {
+        "mb": 2,
+        "x": 3,
+        "out": 0
+      },
+      "15": {
+        "mb": 3,
+        "x": 3,
+        "out": 0
+      },
+      "16": {
+        "mb": 0,
+        "x": 4,
+        "out": 0
+      },
+      "17": {
+        "mb": 1,
+        "x": 4,
+        "out": 0
+      },
+      "18": {
+        "mb": 2,
+        "x": 4,
+        "out": 0
+      },
+      "19": {
+        "mb": 3,
+        "x": 4,
+        "out": 0
+      },
+      "20": {
+        "mb": 0,
+        "x": 5,
+        "out": 0
+      },
+      "21": {
+        "mb": 1,
+        "x": 5,
+        "out": 0
+      },
+      "22": {
+        "mb": 2,
+        "x": 5,
+        "out": 0
+      },
+      "23": {
+        "mb": 3,
+        "x": 5,
+        "out": 0
+      },
+      "24": {
+        "mb": 0,
+        "x": 6,
+        "out": 0
+      },
+      "25": {
+        "mb": 1,
+        "x": 6,
+        "out": 0
+      },
+      "26": {
+        "mb": 2,
+        "x": 6,
+        "out": 0
+      },
+      "27": {
+        "mb": 3,
+        "x": 6,
+        "out": 0
+      },
+      "28": {
+        "mb": 0,
+        "x": 7,
+        "out": 0
+      },
+      "29": {
+        "mb": 1,
+        "x": 7,
+        "out": 0
+      },
+      "30": {
+        "mb": 2,
+        "x": 7,
+        "out": 0
+      },
+      "31": {
+        "mb": 3,
+        "x": 7,
+        "out": 0
+      }
+    },
+    "N_": {
+      "name_": "n",
+      "mb_": 4,
+      "x_": 4096,
+      "out_": 128
+    },
+    "dataStageParam_": {
+      "0": {
+        "ss_": {
+          "name_": "core",
+          "mb_": 1,
+          "x_": 512,
+          "out_": 128,
+          "symbolicDimInfo_": {},
+          "maxSymbolicVolume_": {},
+          "coreletSplit_": {},
+          "rowSplit_": {},
+          "peSfpSplit_": {},
+          "paddingSizes_": {}
+        },
+        "el_": {
+          "name_": "core",
+          "mb_": 1,
+          "x_": 512,
+          "out_": 128,
+          "symbolicDimInfo_": {},
+          "maxSymbolicVolume_": {},
+          "coreletSplit_": {},
+          "rowSplit_": {},
+          "peSfpSplit_": {},
+          "paddingSizes_": {}
+        }
+      }
+    },
+    "primaryDsInfo_": {
+      "OUTPUT": {
+        "layoutDimOrder_": [
+          "out",
+          "x",
+          "mb"
+        ],
+        "stickDimOrder_": [
+          "out"
+        ],
+        "stickSize_": [
+          64
+        ]
+      }
+    },
+    "allocates": [
+      {
+        "name": "allocate-Tensor0_hbm",
+        "ldsIdx_": 0,
+        "component_": "hbm",
+        "layoutDimOrder_": [
+          "out",
+          "x",
+          "mb"
+        ],
+        "coordInfo_summary": {
+          "out": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 2,
+            "padding": "nopad"
+          },
+          "x": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          },
+          "mb": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          }
+        }
+      },
+      {
+        "name": "allocate-Tensor1_hbm",
+        "ldsIdx_": 1,
+        "component_": "hbm",
+        "layoutDimOrder_": [
+          "out",
+          "x",
+          "mb"
+        ],
+        "coordInfo_summary": {
+          "out": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 2,
+            "padding": "nopad"
+          },
+          "x": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          },
+          "mb": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          }
+        }
+      },
+      {
+        "name": "allocate-Tensor2_lx",
+        "ldsIdx_": 2,
+        "component_": "lx",
+        "layoutDimOrder_": [
+          "out",
+          "x",
+          "mb"
+        ],
+        "coordInfo_summary": {
+          "out": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 2,
+            "padding": "nopad"
+          },
+          "x": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          },
+          "mb": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          }
+        }
+      }
+    ]
+  },
+  "sdsc_2_restickify": {
+    "path": "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_2.json",
+    "top_key": "2_ReStickifyOpHBM",
+    "op": "ReStickifyOpHBM",
+    "numCoresUsed_": 32,
+    "numWkSlicesPerDim_": {
+      "mb": 4,
+      "x": 8,
+      "out": 1
+    },
+    "coreIdToWkSlice_sample_0_7": {
+      "0": {
+        "mb": 0,
+        "x": 0,
+        "out": 0
+      },
+      "1": {
+        "mb": 1,
+        "x": 0,
+        "out": 0
+      },
+      "2": {
+        "mb": 2,
+        "x": 0,
+        "out": 0
+      },
+      "3": {
+        "mb": 3,
+        "x": 0,
+        "out": 0
+      },
+      "4": {
+        "mb": 0,
+        "x": 1,
+        "out": 0
+      },
+      "5": {
+        "mb": 1,
+        "x": 1,
+        "out": 0
+      },
+      "6": {
+        "mb": 2,
+        "x": 1,
+        "out": 0
+      },
+      "7": {
+        "mb": 3,
+        "x": 1,
+        "out": 0
+      }
+    },
+    "coreIdToWkSlice_": {
+      "0": {
+        "mb": 0,
+        "x": 0,
+        "out": 0
+      },
+      "1": {
+        "mb": 1,
+        "x": 0,
+        "out": 0
+      },
+      "2": {
+        "mb": 2,
+        "x": 0,
+        "out": 0
+      },
+      "3": {
+        "mb": 3,
+        "x": 0,
+        "out": 0
+      },
+      "4": {
+        "mb": 0,
+        "x": 1,
+        "out": 0
+      },
+      "5": {
+        "mb": 1,
+        "x": 1,
+        "out": 0
+      },
+      "6": {
+        "mb": 2,
+        "x": 1,
+        "out": 0
+      },
+      "7": {
+        "mb": 3,
+        "x": 1,
+        "out": 0
+      },
+      "8": {
+        "mb": 0,
+        "x": 2,
+        "out": 0
+      },
+      "9": {
+        "mb": 1,
+        "x": 2,
+        "out": 0
+      },
+      "10": {
+        "mb": 2,
+        "x": 2,
+        "out": 0
+      },
+      "11": {
+        "mb": 3,
+        "x": 2,
+        "out": 0
+      },
+      "12": {
+        "mb": 0,
+        "x": 3,
+        "out": 0
+      },
+      "13": {
+        "mb": 1,
+        "x": 3,
+        "out": 0
+      },
+      "14": {
+        "mb": 2,
+        "x": 3,
+        "out": 0
+      },
+      "15": {
+        "mb": 3,
+        "x": 3,
+        "out": 0
+      },
+      "16": {
+        "mb": 0,
+        "x": 4,
+        "out": 0
+      },
+      "17": {
+        "mb": 1,
+        "x": 4,
+        "out": 0
+      },
+      "18": {
+        "mb": 2,
+        "x": 4,
+        "out": 0
+      },
+      "19": {
+        "mb": 3,
+        "x": 4,
+        "out": 0
+      },
+      "20": {
+        "mb": 0,
+        "x": 5,
+        "out": 0
+      },
+      "21": {
+        "mb": 1,
+        "x": 5,
+        "out": 0
+      },
+      "22": {
+        "mb": 2,
+        "x": 5,
+        "out": 0
+      },
+      "23": {
+        "mb": 3,
+        "x": 5,
+        "out": 0
+      },
+      "24": {
+        "mb": 0,
+        "x": 6,
+        "out": 0
+      },
+      "25": {
+        "mb": 1,
+        "x": 6,
+        "out": 0
+      },
+      "26": {
+        "mb": 2,
+        "x": 6,
+        "out": 0
+      },
+      "27": {
+        "mb": 3,
+        "x": 6,
+        "out": 0
+      },
+      "28": {
+        "mb": 0,
+        "x": 7,
+        "out": 0
+      },
+      "29": {
+        "mb": 1,
+        "x": 7,
+        "out": 0
+      },
+      "30": {
+        "mb": 2,
+        "x": 7,
+        "out": 0
+      },
+      "31": {
+        "mb": 3,
+        "x": 7,
+        "out": 0
+      }
+    },
+    "N_": {
+      "name_": "n",
+      "mb_": 4,
+      "x_": 4096,
+      "out_": 128
+    },
+    "dataStageParam_": {
+      "0": {
+        "ss_": {
+          "name_": "core",
+          "mb_": 1,
+          "x_": 512,
+          "out_": 128,
+          "symbolicDimInfo_": {},
+          "maxSymbolicVolume_": {},
+          "coreletSplit_": {},
+          "rowSplit_": {},
+          "peSfpSplit_": {},
+          "paddingSizes_": {}
+        },
+        "el_": {
+          "name_": "core",
+          "mb_": 1,
+          "x_": 512,
+          "out_": 128,
+          "symbolicDimInfo_": {},
+          "maxSymbolicVolume_": {},
+          "coreletSplit_": {},
+          "rowSplit_": {},
+          "peSfpSplit_": {},
+          "paddingSizes_": {}
+        }
+      }
+    },
+    "primaryDsInfo_": {
+      "OUTPUT": {
+        "layoutDimOrder_": [
+          "out",
+          "x",
+          "mb"
+        ],
+        "stickDimOrder_": [
+          "out"
+        ],
+        "stickSize_": [
+          64
+        ]
+      },
+      "KERNEL": {
+        "layoutDimOrder_": [
+          "x",
+          "out",
+          "mb"
+        ],
+        "stickDimOrder_": [
+          "x"
+        ],
+        "stickSize_": [
+          64
+        ]
+      }
+    },
+    "allocates": [
+      {
+        "name": "allocate-Tensor0_lx",
+        "ldsIdx_": 0,
+        "component_": "lx",
+        "layoutDimOrder_": [
+          "out",
+          "x",
+          "mb"
+        ],
+        "coordInfo_summary": {
+          "out": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 2,
+            "padding": "nopad"
+          },
+          "x": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          },
+          "mb": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          }
+        }
+      },
+      {
+        "name": "allocate-Tensor1_hbm",
+        "ldsIdx_": 1,
+        "component_": "hbm",
+        "layoutDimOrder_": [
+          "x",
+          "out",
+          "mb"
+        ],
+        "coordInfo_summary": {
+          "x": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 2,
+            "padding": "nopad"
+          },
+          "out": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          },
+          "mb": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          }
+        }
+      }
+    ]
+  },
+  "sdsc_3_batchmatmul": {
+    "path": "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1/sdsc_3.json",
+    "top_key": "3_batchmatmul",
+    "op": "batchmatmul",
+    "numCoresUsed_": 32,
+    "numWkSlicesPerDim_": {
+      "x": 4,
+      "mb": 8,
+      "out": 1,
+      "in": 1
+    },
+    "coreIdToWkSlice_sample_0_7": {
+      "0": {
+        "x": 0,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "1": {
+        "x": 1,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "2": {
+        "x": 2,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "3": {
+        "x": 3,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "4": {
+        "x": 0,
+        "mb": 1,
+        "out": 0,
+        "in": 0
+      },
+      "5": {
+        "x": 1,
+        "mb": 1,
+        "out": 0,
+        "in": 0
+      },
+      "6": {
+        "x": 2,
+        "mb": 1,
+        "out": 0,
+        "in": 0
+      },
+      "7": {
+        "x": 3,
+        "mb": 1,
+        "out": 0,
+        "in": 0
+      }
+    },
+    "coreIdToWkSlice_": {
+      "0": {
+        "x": 0,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "1": {
+        "x": 1,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "2": {
+        "x": 2,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "3": {
+        "x": 3,
+        "mb": 0,
+        "out": 0,
+        "in": 0
+      },
+      "4": {
+        "x": 0,
+        "mb": 1,
+        "out": 0,
+        "in": 0
+      },
+      "5": {
+        "x": 1,
+        "mb": 1,
+        "out": 0,
+        "in": 0
+      },
+      "6": {
+        "x": 2,
+        "mb": 1,
+        "out": 0,
+        "in": 0
+      },
+      "7": {
+        "x": 3,
+        "mb": 1,
+        "out": 0,
+        "in": 0
+      },
+      "8": {
+        "x": 0,
+        "mb": 2,
+        "out": 0,
+        "in": 0
+      },
+      "9": {
+        "x": 1,
+        "mb": 2,
+        "out": 0,
+        "in": 0
+      },
+      "10": {
+        "x": 2,
+        "mb": 2,
+        "out": 0,
+        "in": 0
+      },
+      "11": {
+        "x": 3,
+        "mb": 2,
+        "out": 0,
+        "in": 0
+      },
+      "12": {
+        "x": 0,
+        "mb": 3,
+        "out": 0,
+        "in": 0
+      },
+      "13": {
+        "x": 1,
+        "mb": 3,
+        "out": 0,
+        "in": 0
+      },
+      "14": {
+        "x": 2,
+        "mb": 3,
+        "out": 0,
+        "in": 0
+      },
+      "15": {
+        "x": 3,
+        "mb": 3,
+        "out": 0,
+        "in": 0
+      },
+      "16": {
+        "x": 0,
+        "mb": 4,
+        "out": 0,
+        "in": 0
+      },
+      "17": {
+        "x": 1,
+        "mb": 4,
+        "out": 0,
+        "in": 0
+      },
+      "18": {
+        "x": 2,
+        "mb": 4,
+        "out": 0,
+        "in": 0
+      },
+      "19": {
+        "x": 3,
+        "mb": 4,
+        "out": 0,
+        "in": 0
+      },
+      "20": {
+        "x": 0,
+        "mb": 5,
+        "out": 0,
+        "in": 0
+      },
+      "21": {
+        "x": 1,
+        "mb": 5,
+        "out": 0,
+        "in": 0
+      },
+      "22": {
+        "x": 2,
+        "mb": 5,
+        "out": 0,
+        "in": 0
+      },
+      "23": {
+        "x": 3,
+        "mb": 5,
+        "out": 0,
+        "in": 0
+      },
+      "24": {
+        "x": 0,
+        "mb": 6,
+        "out": 0,
+        "in": 0
+      },
+      "25": {
+        "x": 1,
+        "mb": 6,
+        "out": 0,
+        "in": 0
+      },
+      "26": {
+        "x": 2,
+        "mb": 6,
+        "out": 0,
+        "in": 0
+      },
+      "27": {
+        "x": 3,
+        "mb": 6,
+        "out": 0,
+        "in": 0
+      },
+      "28": {
+        "x": 0,
+        "mb": 7,
+        "out": 0,
+        "in": 0
+      },
+      "29": {
+        "x": 1,
+        "mb": 7,
+        "out": 0,
+        "in": 0
+      },
+      "30": {
+        "x": 2,
+        "mb": 7,
+        "out": 0,
+        "in": 0
+      },
+      "31": {
+        "x": 3,
+        "mb": 7,
+        "out": 0,
+        "in": 0
+      }
+    },
+    "N_": {
+      "name_": "n",
+      "x_": 4,
+      "mb_": 1024,
+      "out_": 4096,
+      "in_": 128
+    },
+    "dataStageParam_": {
+      "0": {
+        "ss_": {
+          "name_": "core",
+          "x_": 1,
+          "mb_": 128,
+          "out_": 4096,
+          "in_": 128,
+          "symbolicDimInfo_": {},
+          "maxSymbolicVolume_": {},
+          "coreletSplit_": {},
+          "rowSplit_": {},
+          "peSfpSplit_": {},
+          "paddingSizes_": {}
+        },
+        "el_": {
+          "name_": "core",
+          "x_": 1,
+          "mb_": 128,
+          "out_": 4096,
+          "in_": 128,
+          "symbolicDimInfo_": {},
+          "maxSymbolicVolume_": {},
+          "coreletSplit_": {},
+          "rowSplit_": {},
+          "peSfpSplit_": {},
+          "paddingSizes_": {}
+        }
+      }
+    },
+    "primaryDsInfo_": {
+      "INPUT": {
+        "layoutDimOrder_": [
+          "in",
+          "mb",
+          "x"
+        ],
+        "stickDimOrder_": [
+          "in"
+        ],
+        "stickSize_": [
+          64
+        ]
+      },
+      "KERNEL": {
+        "layoutDimOrder_": [
+          "out",
+          "in",
+          "x"
+        ],
+        "stickDimOrder_": [
+          "out"
+        ],
+        "stickSize_": [
+          64
+        ]
+      },
+      "OUTPUT": {
+        "layoutDimOrder_": [
+          "out",
+          "mb",
+          "x"
+        ],
+        "stickDimOrder_": [
+          "out"
+        ],
+        "stickSize_": [
+          64
+        ]
+      }
+    },
+    "allocates": [
+      {
+        "name": "allocate-Tensor0_hbm",
+        "ldsIdx_": 0,
+        "component_": "hbm",
+        "layoutDimOrder_": [
+          "in",
+          "mb",
+          "x"
+        ],
+        "coordInfo_summary": {
+          "in": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 2,
+            "padding": "nopad"
+          },
+          "mb": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          },
+          "x": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          }
+        }
+      },
+      {
+        "name": "allocate-Tensor1_hbm",
+        "ldsIdx_": 1,
+        "component_": "hbm",
+        "layoutDimOrder_": [
+          "out",
+          "in",
+          "x"
+        ],
+        "coordInfo_summary": {
+          "out": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 2,
+            "padding": "nopad"
+          },
+          "in": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          },
+          "x": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          }
+        }
+      },
+      {
+        "name": "allocate-Tensor2_hbm",
+        "ldsIdx_": 2,
+        "component_": "hbm",
+        "layoutDimOrder_": [
+          "out",
+          "mb",
+          "x"
+        ],
+        "coordInfo_summary": {
+          "out": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 2,
+            "padding": "nopad"
+          },
+          "mb": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          },
+          "x": {
+            "spatial": 3,
+            "temporal": 0,
+            "elemArr": 1,
+            "padding": "nopad"
+          }
+        }
+      }
+    ]
+  }
+}

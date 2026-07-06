@@ -286,6 +286,46 @@ def _classify_communication_class(
     return COMM_CLASS_SCATTER
 
 
+def comm_edge_from_plan(plan: "LXRelayoutPlan"):
+    """Build a G3 ``comm_cost.CommEdge`` from a realized LX relayout plan.
+
+    Closes the ``estimated_tensor_bytes``-with-no-time-model gap: prices a plan
+    with the SAME model the planner uses at the seam, so plan-time and
+    realize-time costs stay consistent (see ``comm_cost.py``). The
+    ``communication_class`` (from :func:`_classify_communication_class`) selects
+    the schedule family; a mislabelled edge prices the wrong schedule, so the
+    classifier is the accuracy-critical input here.
+
+    Group derivation is APPROXIMATE and marked for follow-up: ``group_size`` is
+    the replica cohort and ``group_count`` the number of disjoint cohorts,
+    estimated from the distinct producer slices (the operand's chunk count).
+    TODO(comm-cost): derive the exact ``(group_count, replicas, producer_chunks)``
+    from the fan-in/out overlap map rather than slice cardinality, and confirm
+    against a realized ``*_matmul_operand_broadcast_plan.json`` (anchor:
+    group_count=4, replicas/group=8).
+    """
+    from . import comm_cost
+
+    n_chunks = max(1, len(_unique_slices(plan.producer_core_id_to_device_slice)))
+    consumers = max(1, plan.consumer_core_count)
+    group_size = max(1, min(consumers, n_chunks))
+    group_count = max(1, consumers // group_size)
+    return comm_cost.CommEdge(
+        comm_class=plan.communication_class,
+        operand_bytes=int(plan.estimated_tensor_bytes or 0),
+        group_count=group_count,
+        group_size=group_size,
+        is_reduction=plan.communication_class in comm_cost._REDUCE_LIKE,
+    )
+
+
+def comm_edge_cost_us_for_plan(plan: "LXRelayoutPlan") -> float:
+    """Scalar wall-time (us) G3 assigns to a realized relayout plan."""
+    from . import comm_cost
+
+    return comm_cost.comm_edge_cost_us(comm_edge_from_plan(plan))
+
+
 def _static_buffer_nbytes(graph: GraphLowering, name: str) -> int | None:
     buf = graph.name_to_buffer.get(name)
     if buf is None or not hasattr(buf, "get_size"):

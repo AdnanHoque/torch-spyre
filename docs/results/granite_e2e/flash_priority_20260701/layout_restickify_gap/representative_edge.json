@@ -1,0 +1,154 @@
+{
+  "source": "existing SDSCs only; no rerun",
+  "artifact_root": "/home/adnan/codex-isolated/flash-sdsc-20260701-033044",
+  "baseline_dir": "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/baseline_noh2d_20260701_040758/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_41uw4ts1",
+  "optimized_dir": "/home/adnan/codex-isolated/flash-sdsc-20260701-033044/runs/optimized_noh2d_20260701_041326/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_eg9zimnr",
+  "restickify_ids": [
+    2,
+    19,
+    36,
+    53,
+    70,
+    87,
+    104,
+    121,
+    138,
+    155,
+    172,
+    189,
+    206,
+    223,
+    240,
+    257,
+    274,
+    291,
+    308,
+    325,
+    342,
+    359,
+    376,
+    393,
+    410,
+    427,
+    444,
+    461,
+    478,
+    495,
+    512,
+    529
+  ],
+  "structural_identity": {
+    "baseline_identical_count": 32,
+    "baseline_total": 32,
+    "baseline_diff_ids": [],
+    "optimized_identical_count": 32,
+    "optimized_total": 32,
+    "optimized_diff_ids": [],
+    "baseline_vs_optimized_same": true
+  },
+  "edge": {
+    "producer": {
+      "sdsc": "sdsc_1.json",
+      "op": "mul",
+      "output_component": "lx",
+      "output_ds_type": "OUTPUT",
+      "layoutDimOrder_": [
+        "out",
+        "x",
+        "mb"
+      ],
+      "stickDimOrder_": [
+        "out"
+      ],
+      "shape_dims": {
+        "mb": 4,
+        "x": 4096,
+        "out": 128
+      },
+      "work_slices": {
+        "mb": 4,
+        "x": 8,
+        "out": 1
+      },
+      "core_id_to_work_slice_formula": "mb=core_id%4, x=floor(core_id/4)%8, out=0",
+      "per_core_tile": {
+        "mb": 1,
+        "x": 512,
+        "out": 128
+      }
+    },
+    "restickify": {
+      "sdsc": "sdsc_2.json",
+      "op": "ReStickifyOpHBM",
+      "input": {
+        "component": "lx",
+        "layout": "OUTPUT",
+        "dim_order": [
+          "out",
+          "x",
+          "mb"
+        ],
+        "stick": "out"
+      },
+      "output": {
+        "component": "hbm/pool",
+        "layout": "KERNEL",
+        "dim_order": [
+          "x",
+          "out",
+          "mb"
+        ],
+        "stick": "x"
+      },
+      "work_slices": {
+        "mb": 4,
+        "x": 8,
+        "out": 1
+      },
+      "core_id_to_work_slice_formula": "mb=core_id%4, x=floor(core_id/4)%8, out=0"
+    },
+    "consumer": {
+      "sdsc": "sdsc_3.json",
+      "op": "batchmatmul",
+      "consumes_restickify_as": "KERNEL operand",
+      "dimension_rename": {
+        "restickify.x": "batchmatmul.out",
+        "restickify.out": "batchmatmul.in",
+        "restickify.mb": "batchmatmul.x"
+      },
+      "kernel_layout_expected": {
+        "dim_order": [
+          "out",
+          "in",
+          "x"
+        ],
+        "stick": "out"
+      },
+      "shape_dims": {
+        "x": 4,
+        "mb": 1024,
+        "out": 4096,
+        "in": 128
+      },
+      "work_slices": {
+        "x": 4,
+        "mb": 8,
+        "out": 1,
+        "in": 1
+      },
+      "core_id_to_work_slice_formula": "x=core_id%4, mb=floor(core_id/4)%8, out=0, in=0",
+      "per_core_tile": {
+        "x": 1,
+        "mb": 128,
+        "out": 4096,
+        "in": 128
+      }
+    },
+    "classification": "layout-aware on-chip restickify plus grouped all-gather/broadcast into batchmatmul KERNEL; not scatter-only and not capacity/streaming",
+    "why": "For each batch x/restickify mb, the same eight cores are reused, but producer core k owns one 512-wide BMM-out chunk while every consumer mb-slice core needs the full 4096x128 KERNEL for that batch. Removing HBM requires replicating/gathering all eight chunks across the batch-local core group while preserving the restickified KERNEL stick/layout."
+  },
+  "diagnostics": {
+    "lx_pinning": "optimized stderr.log:11776 reports buf27 (restickify) -> core div mismatch",
+    "lx_residency": "all optimized SDSCArgs in this region print lx_residency_core_id_to_wk_slice=None"
+  }
+}

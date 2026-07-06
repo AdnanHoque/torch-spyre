@@ -390,8 +390,13 @@ def cost(edge: CommEdge) -> CommCost:
     ~2 MiB/core LX capacity it is force-tiled to n_tiles = ceil(bytes/LX_CAP)
     tiles, each priced independently and summed.  Because the ring-vs-naive
     crossover (5.2 MiB) exceeds LX_CAP (2 MiB), every LX-resident tile sits
-    BELOW the crossover, so naive-1-exec wins each tile and the ring NEVER wins
-    for an LX-resident broadcast.
+    BELOW that crossover, so the bandwidth-optimal ring carousel NEVER wins for
+    an LX-resident broadcast.  (Precisely: the cheapest resident-tile schedule is
+    always a low-execute one -- naive_all2all below ~1.73 MiB/tile,
+    recursive_doubling in [1.73, 2.0] MiB -- never ring_carousel, because
+    F-per-execute dominates at tile scale.  The 5.2 MiB figure is specifically
+    the ring_carousel-vs-naive crossover; do not read it as "naive wins each
+    tile.")
     """
     # No-communication classes (seam-transparent M-split, unsupported): 0 cost.
     if edge.comm_class == COMM_CLASS_UNSUPPORTED and not edge.is_reduction:

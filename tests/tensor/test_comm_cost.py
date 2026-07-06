@@ -183,16 +183,22 @@ def test_c3_16mib_operand_is_tiled_to_lx_cap():
 
 
 def test_c3_ring_never_wins_for_resident_tile():
-    # Every LX-resident tile is <= 2 MiB < 5.2 MiB crossover, so naive wins each
-    # tile: the ring NEVER wins for an LX-resident broadcast.
+    # Every LX-resident tile is <= 2 MiB < 5.2 MiB (the ring_carousel-vs-naive
+    # crossover), so the bandwidth-optimal ring carousel is NEVER the cheapest
+    # schedule for a resident tile. NB the per-tile winner is a low-execute
+    # schedule -- naive below ~1.73 MiB, recursive_doubling in [1.73, 2.0] MiB --
+    # not necessarily naive; assert the real theorem (carousel is never argmin).
     tile = 2 * MiB
     chunk = tile // 8
     scheds = cc._broadcast_schedules(chunk, 8)
-    naive = scheds["naive_all2all_1exec"][0] * 1e6
-    ring = scheds["ring_carousel"][0] * 1e6
-    assert naive == pytest.approx(37.3, abs=0.3)
-    assert ring == pytest.approx(64.2, abs=0.3)
-    assert naive < ring
+    assert scheds["naive_all2all_1exec"][0] * 1e6 == pytest.approx(37.3, abs=0.3)
+    assert scheds["ring_carousel"][0] * 1e6 == pytest.approx(64.2, abs=0.3)
+    # The interception theorem: ring_carousel is not the argmin at any resident
+    # tile size up to the LX cap.
+    for mib in (0.25, 0.5, 1.0, 1.73, 2.0):
+        sc = cc._broadcast_schedules(int(mib * MiB) // 8, 8)
+        best = min(sc, key=lambda name: sc[name][0])
+        assert best != "ring_carousel", f"carousel won at {mib} MiB tile"
 
 
 # --------------------------------------------------------------------
