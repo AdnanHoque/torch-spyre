@@ -195,11 +195,16 @@ def _classify_coordinate_topology(
 def _prefer_matmul_operand_contract(
     read_index: int | None, topology: LXRelayoutTopology
 ) -> bool:
+    supported_rhs_fanout_classes = (
+        COMM_CLASS_ALL_GATHER,
+        "broadcast",
+        "multicast",
+    )
     return (
         config.lx_planner_relayout_collectives
         and config.lx_planner_relayout_matmul_operand_contract
         and read_index == 1
-        and topology.communication_class in (COMM_CLASS_ALL_GATHER, "broadcast")
+        and topology.communication_class in supported_rhs_fanout_classes
     )
 
 def _op_num_cores(op: Operation) -> int:
