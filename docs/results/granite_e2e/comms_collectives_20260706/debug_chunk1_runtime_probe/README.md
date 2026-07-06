@@ -76,3 +76,9 @@ This narrows the issue substantially. The bug is not just that the full all-gath
 Most likely remaining gap: the generated data-op/compute schedule or barrier interaction for the staged `STCDPOpLx -> ReStickifyOpLx -> consumer matmul operand` path is invalid for runtime, even though DXP replay accepts the bundle.
 
 Next debugging should focus on a smaller AIU reproducer around one attention matmul-operand broadcast site, not another full Granite sweep.
+
+## Focused attention sync repro
+
+Artifact: `focused_attention_sync_timeout/summary.json`
+
+A smaller reproducer runs only the first RMS bundle, the relayout-bearing attention bundle, and then `torch.accelerator.synchronize()`. It also times out with `in_flight_=1` after the attention bundle. This confirms the relayout-bearing attention bundle itself leaves unresolved runtime work; the downstream Granite bundle is not needed to reproduce the completion failure.
