@@ -1,0 +1,13 @@
+Note: Google Test filter = stcdpLibtest.relayout*
+[==========] Running 2 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 2 tests from stcdpLibtest
+[ RUN      ] stcdpLibtest.relayoutComplex
+[       OK ] stcdpLibtest.relayoutComplex (9 ms)
+[ RUN      ] stcdpLibtest.relayoutDynMVLoop
+[       OK ] stcdpLibtest.relayoutDynMVLoop (8 ms)
+[----------] 2 tests from stcdpLibtest (17 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (17 ms total)
+[  PASSED  ] 2 tests.

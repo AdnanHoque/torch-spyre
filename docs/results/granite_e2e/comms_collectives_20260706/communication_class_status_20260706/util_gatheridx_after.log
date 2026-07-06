@@ -1,0 +1,15 @@
+Note: Google Test filter = *gatherIdx*
+[==========] Running 3 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 3 tests from SenDataConvertUnittest
+[ RUN      ] SenDataConvertUnittest.gatherIdxBasic
+[       OK ] SenDataConvertUnittest.gatherIdxBasic (6 ms)
+[ RUN      ] SenDataConvertUnittest.gatherIdxCompressAndExpand
+[       OK ] SenDataConvertUnittest.gatherIdxCompressAndExpand (0 ms)
+[ RUN      ] SenDataConvertUnittest.gatherIdxMultiCoordinates
+[       OK ] SenDataConvertUnittest.gatherIdxMultiCoordinates (0 ms)
+[----------] 3 tests from SenDataConvertUnittest (6 ms total)
+
+[----------] Global test environment tear-down
+[==========] 3 tests from 1 test suite ran. (7 ms total)
+[  PASSED  ] 3 tests.
