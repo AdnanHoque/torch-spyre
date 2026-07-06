@@ -1,0 +1,1 @@
+SUCCESS synthetic_value_matmul_operand_broadcast torch.Size([1, 4, 256, 64])
