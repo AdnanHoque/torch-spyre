@@ -16,6 +16,8 @@ import json
 
 from sympy import Integer, Mod, Symbol, floor
 
+from torch._inductor.ir import ComputedBuffer
+
 from torch_spyre._inductor import config
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.bundle import generate_bundle
@@ -549,3 +551,59 @@ def test_matmul_operand_classification_metadata_is_emitted_top_level():
 
     root = next(iter(sdsc.values()))
     assert root["lxRelayoutClassifications_"] == classification
+
+
+def _make_test_scratchpad_allocator():
+    from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
+
+    class _TestScratchpadAllocator(ScratchpadAllocator):
+        def plan_allocation(self, graph):
+            return None
+
+    return _TestScratchpadAllocator()
+
+
+class _FakeDep:
+    def __init__(self, name):
+        self.name = name
+
+
+def test_computed_source_clone_is_lx_relayout_eligible(monkeypatch):
+    class FakeReadWrites:
+        reads = [_FakeDep("producer")]
+
+    class FakeComputedBuffer(ComputedBuffer):
+        pass
+
+    class FakeGraph:
+        name_to_buffer = {"producer": FakeComputedBuffer.__new__(FakeComputedBuffer)}
+
+    class FakeTarget:
+        __name__ = "clone"
+
+    op = FakeComputedBuffer.__new__(FakeComputedBuffer)
+    op.origin_node = type("Origin", (), {"target": FakeTarget()})()
+    op.get_read_writes = lambda: FakeReadWrites()
+
+    monkeypatch.setattr(config, "lx_planner_relayout_collectives", True)
+    allocator = _make_test_scratchpad_allocator()
+    assert allocator._clone_output_good_for_lx_relayout(FakeGraph(), op)
+
+
+def test_graph_input_clone_is_not_lx_relayout_eligible(monkeypatch):
+    class FakeReadWrites:
+        reads = [_FakeDep("arg0")]
+
+    class FakeGraph:
+        name_to_buffer = {}
+
+    class FakeTarget:
+        __name__ = "clone"
+
+    op = ComputedBuffer.__new__(ComputedBuffer)
+    op.origin_node = type("Origin", (), {"target": FakeTarget()})()
+    op.get_read_writes = lambda: FakeReadWrites()
+
+    monkeypatch.setattr(config, "lx_planner_relayout_collectives", True)
+    allocator = _make_test_scratchpad_allocator()
+    assert not allocator._clone_output_good_for_lx_relayout(FakeGraph(), op)

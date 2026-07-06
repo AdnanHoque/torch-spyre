@@ -147,6 +147,14 @@ class ScratchpadAllocator(ABC):
         )
         return org_op_name
 
+    def _computed_source_unary_output(self, graph: GraphLowering, op: Any) -> bool:
+        if not isinstance(op, ComputedBuffer):
+            return False
+        return any(
+            isinstance(graph.name_to_buffer.get(dep.name), ComputedBuffer)
+            for dep in op.get_read_writes().reads
+        )
+
     def _restickify_output_good_for_lx_relayout(
         self, graph: GraphLowering, op: Any
     ) -> bool:
@@ -161,11 +169,22 @@ class ScratchpadAllocator(ABC):
             or self._get_op_name(op) != "restickify"
         ):
             return False
-        if not isinstance(op, ComputedBuffer):
-            return False
-        return any(
-            isinstance(graph.name_to_buffer.get(dep.name), ComputedBuffer)
-            for dep in op.get_read_writes().reads
+        return self._computed_source_unary_output(graph, op)
+
+    def _clone_output_good_for_lx_relayout(
+        self, graph: GraphLowering, op: Any
+    ) -> bool:
+        """Allow computed activation clones to serve as LX relayout sources.
+
+        Boundary/input clones are still controlled by ``LX_BOUNDARY_CLONES``.
+        This path only covers clone-like layout steps whose input is another
+        computed buffer, such as the attention value-side layout handoff before
+        the second batchmatmul.
+        """
+        return (
+            config.lx_planner_relayout_collectives
+            and self._get_op_name(op) == "clone"
+            and self._computed_source_unary_output(graph, op)
         )
 
     def _op_output_good_for_lx_reuse(self, graph: GraphLowering, op: Any) -> bool:
@@ -176,6 +195,7 @@ class ScratchpadAllocator(ABC):
                 config.allow_all_ops_in_lx_planning
                 or (self._get_op_name(op) in OP_OUTPUT_GOOD_FOR_LX_REUSE)
                 or self._restickify_output_good_for_lx_relayout(graph, op)
+                or self._clone_output_good_for_lx_relayout(graph, op)
                 # Clones are only pinned when the boundary-clone path is on; they
                 # are never in the whitelist, so without this they would be ineligible
                 # and the inserted clones would not land in LX.
