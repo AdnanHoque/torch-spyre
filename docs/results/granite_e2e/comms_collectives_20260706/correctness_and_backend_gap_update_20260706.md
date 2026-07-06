@@ -84,6 +84,35 @@ The important observation from the backend investigation:
 
 The smallest principled backend fix direction is to propagate an explicit `coreIdToWkSlice_` from the effective reference coordinate onto the transfer coordinate when the transfer is derived from an explicitly mapped LX allocation. This should be implemented carefully in Deeptools, not as the current local diagnostic bypass.
 
+### Map Propagation Replay
+
+A local Deeptools experiment added that map propagation rule in `ddc/ddc_fold.cpp` and rebuilt `dxp_standalone` successfully:
+
+```text
+cmake --build build-deeptools --target dxp_standalone -j8
+```
+
+Replaying the minimized flash bundle moved the failure:
+
+```text
+before: coordCoreMap=0, allocation=allocate_lds1_lx
+after:  coordCoreMap=32, allocation=allocate_lds1_ptxrf
+```
+
+The replay log after the map propagation experiment:
+
+```text
+/home/adnan/codex-isolated/flash_attention_comms_backend2162_20260706_005751/ddc_replay_after_map_propagation_20260706_015429.log
+```
+
+The new failure still occurs in `lexiAffineSolve`, but now the transfer coordinate carries the explicit core map. That means the first bug was real and fixed by the experiment, and the remaining blocker is the deeper KERNEL operand layout conversion: direct LX/LXLU-to-PTXRF movement is still not enough to materialize the PT KERNEL view.
+
+This strengthens the design conclusion:
+
+- Preserve explicit `coreIdToWkSlice_` through DDC propagation; this is a legitimate backend fix.
+- Do not rely on direct ring writes into the KERNEL operand as the production path.
+- Implement a loop/tile-scoped staged path: source-layout gather/all-gather into LX, then local `ReStickifyOpLx` or equivalent KERNEL layout conversion, then matmul consumption.
+
 ## Current Architecture Takeaway
 
 The useful distinction is:
@@ -122,4 +151,3 @@ Minimized flash DDC reproducer:
 ```text
 /home/adnan/codex-isolated/flash_attention_comms_backend2162_20260706_005751/ddc_abort_minimize_20260706_012508/subset_2_3_trimmed
 ```
-
