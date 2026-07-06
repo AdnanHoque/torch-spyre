@@ -1,0 +1,13 @@
+[probe] creating runtime context
+[probe] context allocated torch.Size([1])
+[probe] importing /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_debug_chunk1_aiu_localdxp_20260706_090131/block_prefill/cache/uk/cukhcvwecrqvloj3hwysrure5xanfwswuhvubfbpy7zra4eeavwb.py
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[probe] imported
+[probe] BEFORE rms 1783334312.4281456
+[probe] AFTER rms 1783334312.4287784
+[probe] BEFORE attention 1783334312.4288116
+[probe] AFTER attention 1783334312.4305162
+[probe] BEFORE torch.accelerator.synchronize 1783334312.4305313

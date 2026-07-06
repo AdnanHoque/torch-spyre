@@ -1,0 +1,180 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 920940b600..2ef37df97c 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -910,6 +910,44 @@ static bool sourceShardCell(
+   return true;
+ }
+ 
++static bool matmulOperandBroadcastUseDataOpAfterSync() {
++  return std::getenv(
++             "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_NO_DATAOP_SYNC") ==
++      nullptr;
++}
++
++static bool matmulOperandBroadcastScheduleAllConsumerCores() {
++  return std::getenv(
++             "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_SCHEDULE_ALL_CORES") !=
++      nullptr;
++}
++
++static bool matmulOperandBroadcastGatherOnlyProbe() {
++  return std::getenv(
++             "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_GATHER_ONLY_PROBE") !=
++      nullptr;
++}
++
++static bool matmulOperandBroadcastStandaloneRelayout() {
++  return std::getenv(
++             "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_STANDALONE_RELAYOUT") !=
++      nullptr;
++}
++
++static std::set<int> scheduledConsumerCores(const SuperDsc* sdsc) {
++  std::set<int> cores;
++  for (const auto& item : sdsc->coreIdToDscSchedule) {
++    cores.insert(item.first);
++  }
++  if (!cores.empty()) {
++    return cores;
++  }
++  for (const auto& item : sdsc->coreIdToWkSlice_) {
++    cores.insert(item.first);
++  }
++  return cores;
++}
++
+ static void insertDataOpBeforeDl(SuperDsc* sdsc, int coreId, int dataOpIdx) {
+   auto& schedule = sdsc->coreIdToDscSchedule[coreId];
+   auto insertPos = schedule.begin();
+@@ -919,7 +957,38 @@ static void insertDataOpBeforeDl(SuperDsc* sdsc, int coreId, int dataOpIdx) {
+       break;
+     }
+   }
+-  schedule.insert(insertPos, DscScheduleStep(dataOpIdx, -1, false, true));
++  schedule.insert(
++      insertPos,
++      DscScheduleStep(dataOpIdx, -1, false,
++                      matmulOperandBroadcastUseDataOpAfterSync()));
++}
++
++static void appendStandaloneDataOpSchedule(SuperDsc* sdsc,
++                                           const std::set<int>& coreIds,
++                                           int dataOpIdx) {
++  for (const auto coreId : coreIds) {
++    sdsc->coreIdToDscSchedule[coreId].push_back(
++        DscScheduleStep(dataOpIdx, -1, false, false));
++  }
++}
++
++static SuperDsc* makeStandaloneMatmulOperandRelayoutSdsc(
++    const SuperDsc* consumerSdsc, const LabeledDsInfo& lds) {
++  SuperDsc* relayoutSdsc = new SuperDsc;
++  relayoutSdsc->name_ =
++      consumerSdsc->name_ + "-" + lds.dsName_ + "-MatmulOperandRelayout";
++  relayoutSdsc->sdscFoldProps_.emplace_back(
++      std::make_unique<FoldDimProp>(
++          consumerSdsc->sdscFoldProps_.at(0)->getSize(), "time"));
++  relayoutSdsc->sdscFolds_.clone(consumerSdsc->sdscFolds_);
++  relayoutSdsc->coreFoldProp_ = std::make_unique<FoldDimProp>(
++      consumerSdsc->coreFoldProp_->getSize(), "core");
++  relayoutSdsc->coreletFoldProp_ = std::make_unique<FoldDimProp>(
++      consumerSdsc->coreletFoldProp_->getSize(), "corelet");
++  relayoutSdsc->unpadN_ = consumerSdsc->unpadN_;
++  relayoutSdsc->N_ = consumerSdsc->N_;
++  relayoutSdsc->target_ = consumerSdsc->target_;
++  return relayoutSdsc;
+ }
+ 
+ struct GatheredPieceSpec {
+@@ -934,7 +1003,7 @@ struct GatheredPieceSpec {
+ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     SuperDsc* sdsc, LabeledDsInfo& lds,
+     const MatmulOperandBroadcastHookPlan& hook, MemTrackBundle* memTrackers,
+-    int ps, std::string* reason) {
++    int ps, std::vector<SuperDsc*>* relayoutSdscs, std::string* reason) {
+   if (!hook.plan.requiresLayoutConversion) {
+     *reason = "gather-then-restickify path requires layout conversion metadata";
+     return false;
+@@ -949,6 +1018,12 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     return false;
+   }
+ 
++  const bool useStandaloneRelayout =
++      matmulOperandBroadcastStandaloneRelayout() && relayoutSdscs != nullptr;
++  if (useStandaloneRelayout) {
++    memTrackers->insertPsBefore(ps);
++  }
++
+   json11::Json sourceTensor;
+   json11::Json targetTensor;
+   if (!parseJsonObject(hook.plan.sourceLxTensorJson, "source_lx_tensor",
+@@ -1242,6 +1317,11 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     chunks.resize(static_cast<size_t>(maxDebugChunks));
+   }
+ 
++  SuperDsc* dataOpSdsc = sdsc;
++  if (useStandaloneRelayout) {
++    dataOpSdsc = makeStandaloneMatmulOperandRelayoutSdsc(sdsc, lds);
++  }
++
+   for (size_t chunkIdx = 0; chunkIdx < chunks.size(); ++chunkIdx) {
+     auto chunkGatherDdsc = gatherDdsc;
+     chunkGatherDdsc.dscName_ += "-chunk" + std::to_string(chunkIdx);
+@@ -1290,18 +1370,39 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     chunkRestickifyDdsc.coreIdsUsed_.assign(chunkRestickifyCores.begin(),
+                                             chunkRestickifyCores.end());
+ 
+-    const int gatherIdx = static_cast<int>(sdsc->dataOpdscs_.size());
+-    sdsc->dataOpdscs_.push_back(chunkGatherDdsc);
+-    const int restickifyIdx = static_cast<int>(sdsc->dataOpdscs_.size());
+-    sdsc->dataOpdscs_.push_back(chunkRestickifyDdsc);
++    const int gatherIdx = static_cast<int>(dataOpSdsc->dataOpdscs_.size());
++    dataOpSdsc->dataOpdscs_.push_back(chunkGatherDdsc);
+ 
+-    for (const auto coreId : chunkGatherCores) {
+-      insertDataOpBeforeDl(sdsc, coreId, gatherIdx);
++    const auto scheduleCores =
++        matmulOperandBroadcastScheduleAllConsumerCores()
++            ? scheduledConsumerCores(sdsc)
++            : chunkGatherCores;
++    if (useStandaloneRelayout) {
++      appendStandaloneDataOpSchedule(dataOpSdsc, scheduleCores, gatherIdx);
++    } else {
++      for (const auto coreId : scheduleCores) {
++        insertDataOpBeforeDl(sdsc, coreId, gatherIdx);
++      }
+     }
+-    for (const auto coreId : chunkRestickifyCores) {
+-      insertDataOpBeforeDl(sdsc, coreId, restickifyIdx);
++    if (!matmulOperandBroadcastGatherOnlyProbe()) {
++      const int restickifyIdx =
++          static_cast<int>(dataOpSdsc->dataOpdscs_.size());
++      dataOpSdsc->dataOpdscs_.push_back(chunkRestickifyDdsc);
++      if (useStandaloneRelayout) {
++        appendStandaloneDataOpSchedule(dataOpSdsc, scheduleCores,
++                                       restickifyIdx);
++      } else {
++        for (const auto coreId : scheduleCores) {
++          insertDataOpBeforeDl(sdsc, coreId, restickifyIdx);
++        }
++      }
+     }
+   }
++  if (useStandaloneRelayout) {
++    dataOpSdsc->numCoresUsed_ =
++        static_cast<int>(dataOpSdsc->coreIdToDscSchedule.size());
++    relayoutSdscs->push_back(dataOpSdsc);
++  }
+ 
+   allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
+   auto& stAddr = allocNode->startAddressCoreCorelet_;
+@@ -1728,7 +1829,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         std::string materializationReason;
+         if (!attachMatmulOperandBroadcastGatherThenRestickify(
+                 sdsc, lds, effectiveMatmulBroadcastHook, memTrackers, ps,
+-                &materializationReason)) {
++                &relayout_sdscs, &materializationReason)) {
+           emitMatmulOperandBroadcastPlanArtifact(
+               sdsc, lds, ps, effectiveMatmulBroadcastHook,
+               /*kernelNeighborLowered=*/false,

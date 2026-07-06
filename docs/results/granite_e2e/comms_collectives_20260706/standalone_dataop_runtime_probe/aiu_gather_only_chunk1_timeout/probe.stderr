@@ -1,0 +1,31 @@
+[31m ERRR 06.07.2026 10:38:20.046643 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 — possible lost completion[0m
+[31m ERRR 06.07.2026 10:38:20.046943 [            runtime_stream.cpp: 150] RuntimeStream::synchronize() device=0 completed after 60000ms (1 timeout warning(s))[0m
+[31m ERRR 06.07.2026 10:39:32.430699 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 — possible lost completion[0m
+[31m ERRR 06.07.2026 10:40:32.430831 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 120000ms: in_flight_=1 device=0 — possible lost completion[0m
+Signal Received: 15 (Terminated)
+Signal Received from pid=1185962 
+*** BACKTRACE ***
+/opt/ibm/spyre/senlib/lib/libsenlib-dd2.so(+0x42accf)[0x7f52eee70ccf]
+/lib64/libc.so.6(+0x411c0)[0x7f53b28fd1c0]
+/lib64/libc.so.6(+0x9293e)[0x7f53b294e93e]
+/lib64/libc.so.6(pthread_cond_clockwait+0x175)[0x7f53b29513e5]
+/home/adnan/opt-newer/runtime/lib/libflex.so(_ZN4flex13RuntimeStream11synchronizeEv+0x3df)[0x7f52f114113f]
+/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/torch_spyre/_C.so(+0x179d38)[0x7f52f1469d38]
+/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/torch_spyre/_C.so(_ZN5spyre17synchronizeDeviceESt8optionalIN3c106DeviceEE+0x5a)[0x7f52f146a44a]
+/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x706b91)[0x7f53b09fab91]
+/home/adnan/dt-inductor/.venv/lib/python3.12/site-packages/torch/lib/libtorch_python.so(+0x3f1840)[0x7f53b06e5840]
+/lib64/libpython3.12.so.1.0(+0x1a60d0)[0x7f53b2c3d0d0]
+/lib64/libpython3.12.so.1.0(_PyObject_MakeTpCall+0x2db)[0x7f53b2c1380b]
+/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x786)[0x7f53b2c1dce6]
+/lib64/libpython3.12.so.1.0(PyEval_EvalCode+0xaa)[0x7f53b2cd5d9a]
+/lib64/libpython3.12.so.1.0(+0x27ac61)[0x7f53b2d11c61]
+/lib64/libpython3.12.so.1.0(+0x27560b)[0x7f53b2d0c60b]
+/lib64/libpython3.12.so.1.0(+0x272522)[0x7f53b2d09522]
+/lib64/libpython3.12.so.1.0(_PyRun_SimpleFileObject+0x1cb)[0x7f53b2d08f4b]
+/lib64/libpython3.12.so.1.0(_PyRun_AnyFileObject+0x48)[0x7f53b2d08b68]
+/lib64/libpython3.12.so.1.0(Py_RunMain+0x3b0)[0x7f53b2d05850]
+/lib64/libpython3.12.so.1.0(Py_BytesMain+0x3b)[0x7f53b2cbf37b]
+/lib64/libc.so.6(+0x2a58e)[0x7f53b28e658e]
+/lib64/libc.so.6(__libc_start_main+0x89)[0x7f53b28e6649]
+python(_start+0x25)[0x556074ba0095]
+*****************
