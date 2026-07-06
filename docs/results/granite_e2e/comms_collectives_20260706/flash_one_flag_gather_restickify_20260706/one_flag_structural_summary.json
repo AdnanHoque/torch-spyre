@@ -1,0 +1,28 @@
+{
+  "files_mentioning_restickify": {
+    "ReStickifyOpHBM": 0,
+    "ReStickifyOpLx": 64
+  },
+  "logical_transfer_count_total": 8192,
+  "plan_communication_counts": {
+    "all_gather_replicate": 32
+  },
+  "plan_files": 32,
+  "plan_kind_counts": {
+    "matmul_operand_broadcast": 32
+  },
+  "plan_realization_strategy_counts": {
+    "gather_then_restickify": 32
+  },
+  "plan_realized_counts": {
+    "True": 32
+  },
+  "returncode": "0",
+  "root_op_counts_subset": {
+    "ReStickifyOpHBM": 0,
+    "ReStickifyOpLx": 32,
+    "batchmatmul": 64
+  },
+  "run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_one_flag_gather_restickify_20260706_175419",
+  "sdsc_json_files": 550
+}
