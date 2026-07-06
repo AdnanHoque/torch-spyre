@@ -1,0 +1,30 @@
+{
+  "errors": [
+    "Require larger IBUFF",
+    "error: Unable to lower successfully the module for sdsc: 16_batchmatmul"
+  ],
+  "pieces_per_core_per_chunk": 2,
+  "plan_count": 2,
+  "plans": [
+    {
+      "file": "16_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+      "group_count": "2",
+      "kind": "matmul_operand_broadcast",
+      "logical_transfer_count": "512",
+      "physical": "lowered_gather_then_restickify",
+      "replication_factor": "16",
+      "strategy": "gather_then_restickify"
+    },
+    {
+      "file": "8_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+      "group_count": "4",
+      "kind": "matmul_operand_broadcast",
+      "logical_transfer_count": "256",
+      "physical": "lowered_gather_then_restickify",
+      "replication_factor": "8",
+      "strategy": "gather_then_restickify"
+    }
+  ],
+  "returncode": 1,
+  "run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s256_gather_restickify_chunk2_20260706_132927"
+}

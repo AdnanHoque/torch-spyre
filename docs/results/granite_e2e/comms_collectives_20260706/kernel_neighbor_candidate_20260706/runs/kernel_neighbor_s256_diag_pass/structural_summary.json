@@ -1,0 +1,26 @@
+{
+  "path": "kernel_neighbor_consumercoords_diag",
+  "plan_count": 2,
+  "plans": [
+    {
+      "file": "16_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+      "group_count": "2",
+      "kind": "matmul_operand_broadcast",
+      "logical_transfer_count": "512",
+      "physical": "lowered_loop_scoped_kernel_neighbor",
+      "replication_factor": "16",
+      "strategy": "loop_scoped_input_fetch"
+    },
+    {
+      "file": "8_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+      "group_count": "4",
+      "kind": "matmul_operand_broadcast",
+      "logical_transfer_count": "256",
+      "physical": "lowered_loop_scoped_kernel_neighbor",
+      "replication_factor": "8",
+      "strategy": "loop_scoped_input_fetch"
+    }
+  ],
+  "returncode": 0,
+  "run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s256_matmul_kernel_neighbor_consumercoords_diag_20260706_134029"
+}

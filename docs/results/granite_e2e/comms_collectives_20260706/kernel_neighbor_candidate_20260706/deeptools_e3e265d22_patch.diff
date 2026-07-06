@@ -1,0 +1,73 @@
+commit e3e265d22c7283054dd36e147a7e7ec919606441
+Author: Adnan Hoque <adnan.hoque1@ibm.com>
+Date:   Mon Jul 6 13:52:51 2026 +0000
+
+    [DCG] allow matmul operand kernel-neighbor relayout
+    
+    Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp |  6 +++++-
+ dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp | 17 +++++++++++++----
+ 2 files changed, 18 insertions(+), 5 deletions(-)
+
+diff --git a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+index 2623f113b..d10aa8343 100644
+--- a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
++++ b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
+@@ -114,8 +114,12 @@ void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
+     const auto& dscMain_ = mySDscMain.dscs_.at(0);
+     const bool allowMixedHbmIfnDiagnostic =
+         std::getenv("DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC") != nullptr;
++    const bool isMatmulOperandBroadcastKernelNeighbor =
++        std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
++        nullptr;
+     for (auto& lds : dscMain_.labeledDs_) {
+-      if (!allowMixedHbmIfnDiagnostic) {
++      if (!allowMixedHbmIfnDiagnostic &&
++          !isMatmulOperandBroadcastKernelNeighbor) {
+         DT_CHECK(!is_any_of(lds.pinnedComponent(), HBM, NO_COMPONENT));
+       }
+     }
+diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+index 8bb8f2e67..bc3e19332 100644
+--- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
++++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+@@ -600,9 +600,14 @@ static bool seedMatmulOperandBroadcastDestinationCoordinates(
+ 
+   std::map<int, std::map<PrimaryDimTypes, int>> destinationWkSlices;
+   for (const auto& [coreId, consumerCoord] : consumerSlices) {
+-    const auto sourceCoreIt = sourceWkSlices.find(coreId);
+-    if (sourceCoreIt != sourceWkSlices.end()) {
+-      destinationWkSlices[coreId] = sourceCoreIt->second;
++    const auto consumerCoreIt = mySDsc.coreIdToWkSlice_.find(coreId);
++    if (consumerCoreIt != mySDsc.coreIdToWkSlice_.end()) {
++      destinationWkSlices[coreId] = consumerCoreIt->second;
++    } else {
++      const auto sourceCoreIt = sourceWkSlices.find(coreId);
++      if (sourceCoreIt != sourceWkSlices.end()) {
++        destinationWkSlices[coreId] = sourceCoreIt->second;
++      }
+     }
+     for (const auto& [deviceDim, value] : consumerCoord) {
+       const auto dimIt = deviceDimToWkDim.find(deviceDim);
+@@ -1698,7 +1703,7 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
+   const bool allowMixedHbmIfnDiagnostic =
+       std::getenv("DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC") != nullptr;
+   DT_CHECK_MSG(
+-      allowMixedHbmIfnDiagnostic ||
++      allowMixedHbmIfnDiagnostic || isMatmulOperandBroadcastKernelNeighbor ||
+           !(isDoubleBuffering && isInputNeighborFetch),
+       "Do not support double buffering and input-neighbor fetch coexisting "
+       "in the same DSC. Set DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1 "
+@@ -3786,7 +3791,11 @@ void L3DlOpsScheduler::createSynchronization(SuperDsc &mySDsc) {
+         !hasHbmPinnedTensor && !hasLxNeighborTensor;
+     const bool allowMixedHbmIfnDiagnostic =
+         std::getenv("DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC") != nullptr;
++    const bool isMatmulOperandBroadcastKernelNeighbor =
++        std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
++        nullptr;
+     DT_CHECK_MSG(allowMixedHbmIfnDiagnostic ||
++                     isMatmulOperandBroadcastKernelNeighbor ||
+                      !(hasHbmPinnedTensor && hasLxNeighborTensor),
+                  "Do not support both HBM pinned tensor and input-neighbor "
+                  "fetch tensor existing in the same DSC. Set "

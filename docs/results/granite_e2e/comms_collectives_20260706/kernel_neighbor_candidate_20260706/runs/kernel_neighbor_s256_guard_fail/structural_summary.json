@@ -1,0 +1,29 @@
+{
+  "errors": [
+    "DtException: Do not support double buffering and input-neighbor fetch coexisting in the same DSC. Set DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1 only for diagnostic probes., file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 1700"
+  ],
+  "path": "kernel_neighbor",
+  "plan_count": 2,
+  "plans": [
+    {
+      "file": "16_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+      "group_count": "2",
+      "kind": "matmul_operand_broadcast",
+      "logical_transfer_count": "512",
+      "physical": "lowered_loop_scoped_kernel_neighbor",
+      "replication_factor": "16",
+      "strategy": "loop_scoped_input_fetch"
+    },
+    {
+      "file": "8_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+      "group_count": "4",
+      "kind": "matmul_operand_broadcast",
+      "logical_transfer_count": "256",
+      "physical": "lowered_loop_scoped_kernel_neighbor",
+      "replication_factor": "8",
+      "strategy": "loop_scoped_input_fetch"
+    }
+  ],
+  "returncode": 1,
+  "run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s256_matmul_kernel_neighbor_20260706_133312"
+}
