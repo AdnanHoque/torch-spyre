@@ -1,0 +1,10 @@
+{
+  "run": "/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/attention_bundle_sync_probe_chunk1_gather_only_20260706_094633",
+  "returncode": "124",
+  "stdout": "[probe] creating runtime context\n[probe] context allocated torch.Size([1])\n[probe] importing /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_debug_chunk1_aiu_localdxp_20260706_090131/block_prefill/cache/uk/cukhcvwecrqvloj3hwysrure5xanfwswuhvubfbpy7zra4eeavwb.py\n[WARN] dxp_standalone --bundle option is deprecated (always on)\n[WARN] dxp_standalone --bundle option is deprecated (always on)\n[WARN] dxp_standalone --bundle option is deprecated (always on)\n[WARN] dxp_standalone --bundle option is deprecated (always on)\n[probe] imported\n[probe] BEFORE rms 1783331286.9030247\n[probe] AFTER rms 1783331286.9035404\n[probe] BEFORE attention 1783331286.90356\n[probe] AFTER attention 1783331286.905174\n[probe] BEFORE torch.accelerator.synchronize 1783331286.905178\n",
+  "stderr_signature": "\u001b[31m ERRR 06.07.2026 09:47:54.509183 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 \u2014 possible lost completion\u001b[0m\n\u001b[31m ERRR 06.07.2026 09:47:54.510375 [            runtime_stream.cpp: 150] RuntimeStream::synchronize() device=0 completed after 60001ms (1 timeout warning(s))\u001b[0m\n\u001b[31m ERRR 06.07.2026 09:49:06.905333 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 \u2014 possible lost completion\u001b[0m\nSignal Received: 15 (Terminated)\nSignal Received from pid=1176898 ",
+  "plan_files": [
+    "16_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+    "8_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json"
+  ]
+}

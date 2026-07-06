@@ -108,3 +108,29 @@ A second local DEV-only Deeptools experiment added `DEEPTOOLS_MATMUL_OPERAND_BRO
 - runtime signature still includes `RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0`
 
 This rules out the second simple explanation: sparse participating-core schedule coverage was not sufficient to explain the lost completion. The next useful split is not another schedule-flag tweak; it should isolate whether `STCDPOpLx` alone completes, whether `ReStickifyOpLx` inside the same mixed bundle is the failing carrier, or whether runtime does not support this staged data-op-plus-matmul shape in a single consumer SDSC.
+
+## Focused attention gather-only repro
+
+Artifact: `focused_attention_gather_only_timeout/summary.json`
+
+A third local DEV-only Deeptools experiment added `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_GATHER_ONLY_PROBE=1`, which emits and schedules only the first `STCDPOpLx` gather chunk and suppresses the following `ReStickifyOpLx` row. This intentionally makes the matmul operand value-invalid, but it isolates runtime completion of the gather carrier.
+
+- return code: `124` from the 180s timeout wrapper
+- backend plans: `2`
+- both plans still capped with `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS=1`
+- runtime signature still includes `RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0`
+
+This is the sharpest narrowing result in this set. `ReStickifyOpLx` is not required to reproduce the lost completion. The failure appears with an inserted `STCDPOpLx` data-op row in the relayout-bearing attention consumer bundle.
+
+## Focused attention no-backend-insertion control
+
+Artifact: `focused_attention_no_backend_insertion_blocked/summary.json`
+
+The same generated attention module was run with `DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY` unset. This does not produce a clean no-relayout runtime control. DXP aborts during module import because it classifies the matmul-operand broadcast metadata but has no production physical lowering enabled for it.
+
+- return code: `1`
+- backend plans: `1`
+- plan status: `physical_lowering_status = blocked`
+- failure text: `matmul_operand_broadcast metadata was classified, but physical lowering is blocked`
+
+This confirms that the generated DLDSC bundle is exposing the intended metadata. It also confirms that, today, the only attempted physical realization for this edge is the staged gather/restickify prototype. With that prototype disabled, the backend intentionally stops instead of silently falling back to a valid HBM path.
