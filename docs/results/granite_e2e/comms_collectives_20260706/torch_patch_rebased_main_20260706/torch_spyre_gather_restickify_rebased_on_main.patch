@@ -107,10 +107,10 @@ index 00000000..12851543
 +    assert classify_layout_allgather_restickify_sdsc_triplet(triplet) is None
 diff --git a/tests/inductor/test_lx_relayout_dldsc.py b/tests/inductor/test_lx_relayout_dldsc.py
 new file mode 100644
-index 00000000..05dbfafe
+index 00000000..a109f90e
 --- /dev/null
 +++ b/tests/inductor/test_lx_relayout_dldsc.py
-@@ -0,0 +1,858 @@
+@@ -0,0 +1,973 @@
 +# Copyright 2026 The Torch-Spyre Authors.
 +#
 +# Licensed under the Apache License, Version 2.0 (the "License");
@@ -285,7 +285,7 @@ index 00000000..05dbfafe
 +    assert topology.transfer_count == 4
 +
 +
-+def test_matmul_operand_contract_is_preferred_for_rhs_all_gather(monkeypatch):
++def test_matmul_operand_contract_is_preferred_for_matmul_operands(monkeypatch):
 +    monkeypatch.setattr(config, "lx_planner_relayout_collectives", True)
 +    monkeypatch.setattr(config, "lx_planner_relayout_matmul_operand_contract", True)
 +    topology = LXRelayoutTopology(
@@ -297,6 +297,16 @@ index 00000000..05dbfafe
 +    )
 +
 +    assert _prefer_matmul_operand_contract(1, topology)
++    assert _prefer_matmul_operand_contract(0, topology)
++    gather_topology = LXRelayoutTopology(
++        "gather",
++        "many_to_one",
++        max_fanout=1,
++        max_fanin=4,
++        transfer_count=128,
++    )
++    assert _prefer_matmul_operand_contract(1, gather_topology)
++    assert _prefer_matmul_operand_contract(0, gather_topology)
 +    multicast_topology = LXRelayoutTopology(
 +        "multicast",
 +        "one_to_many",
@@ -305,7 +315,7 @@ index 00000000..05dbfafe
 +        transfer_count=32,
 +    )
 +    assert _prefer_matmul_operand_contract(1, multicast_topology)
-+    assert not _prefer_matmul_operand_contract(0, topology)
++    assert _prefer_matmul_operand_contract(0, multicast_topology)
 +    assert not _prefer_matmul_operand_contract(None, topology)
 +
 +
@@ -348,6 +358,45 @@ index 00000000..05dbfafe
 +        "operand_read_index": 1,
 +        "scope": "matmul_transfer_loop",
 +    }
++
++
++def test_matmul_operand_contract_marks_tensor0_lhs_all_gather():
++    contract = make_matmul_operand_allgather_contract(
++        producer_op="mul",
++        consumer_op="batchmatmul",
++        read_index=0,
++        producer_work_slice_dims={"0": 32},
++        consumer_tensor_work_slice_dims={"0": 8},
++        consumer_compute_work_slice_dims={"0": 8, "1": 4},
++        communication_class=COMM_CLASS_ALL_GATHER,
++    )
++
++    assert contract["kind"] == MATMUL_OPERAND_BROADCAST
++    assert contract["communication_class"] == COMM_CLASS_ALL_GATHER
++    assert contract["communication_pattern"] == MATMUL_OPERAND_ALLGATHER_REPLICATE
++    assert contract["operand_read_index"] == 0
++    assert contract["operand_role"] == "lhs"
++    assert contract["staged_destination"] == {
++        "component_": "KERNEL",
++        "operand_read_index": 0,
++        "scope": "matmul_transfer_loop",
++    }
++
++
++def test_matmul_operand_contract_maps_gather_to_all_gather_replicate():
++    contract = make_matmul_operand_allgather_contract(
++        producer_op="mul",
++        consumer_op="batchmatmul",
++        read_index=0,
++        producer_work_slice_dims={"0": 32},
++        consumer_tensor_work_slice_dims={"0": 8},
++        consumer_compute_work_slice_dims={"0": 8, "1": 4},
++        communication_class="gather",
++    )
++
++    assert contract["communication_class"] == "gather"
++    assert contract["communication_pattern"] == MATMUL_OPERAND_ALLGATHER_REPLICATE
++    assert contract["operand_role"] == "lhs"
 +
 +
 +def test_matmul_operand_contract_marks_broadcast_pattern():
@@ -618,6 +667,72 @@ index 00000000..05dbfafe
 +        == "local_restickify_to_kernel"
 +    )
 +
++
++def test_bundle_drops_matmul_operand_contract_without_source_lx_tensor(tmp_path):
++    mb = Symbol("c0")
++    out = Symbol("c1")
++    in_dim = Symbol("c2")
++    contract = make_matmul_operand_allgather_contract(
++        producer_op="clone",
++        consumer_op="batchmatmul",
++        read_index=0,
++        producer_work_slice_dims={"0": 4},
++        consumer_tensor_work_slice_dims={"0": 1},
++        consumer_compute_work_slice_dims={"0": 4},
++        communication_class=COMM_CLASS_ALL_GATHER,
++    )
++    contract.update(
++        {
++            "source_name": "missing_source",
++            "producer_name": "missing_source",
++            "consumer_name": "matmul",
++        }
++    )
++    consumer = OpSpec(
++        op="batchmatmul",
++        is_reduction=True,
++        iteration_space={
++            mb: (Integer(64), 4),
++            out: (Integer(512), 1),
++            in_dim: (Integer(64), 1),
++        },
++        op_info={"lx_relayout_classifications": [contract]},
++        args=[
++            TensorArg(
++                is_input=True,
++                arg_index=-1,
++                device_dtype=DataFormats.SEN169_FP16,
++                device_size=[1, 64, 64],
++                device_coordinates=[floor(in_dim / 64), mb, Mod(in_dim, 64)],
++                allocation={"lx": 0},
++                name="missing_source",
++            ),
++            TensorArg(
++                is_input=True,
++                arg_index=2,
++                device_dtype=DataFormats.SEN169_FP16,
++                device_size=[8, 64, 64],
++                device_coordinates=[floor(out / 64), in_dim, Mod(out, 64)],
++                allocation={"hbm": 0x2000},
++                name="arg1",
++            ),
++            TensorArg(
++                is_input=False,
++                arg_index=3,
++                device_dtype=DataFormats.SEN169_FP16,
++                device_size=[8, 64, 64],
++                device_coordinates=[floor(out / 64), mb, Mod(out, 64)],
++                allocation={"hbm": 0x3000},
++                name="buf1",
++            ),
++        ],
++    )
++
++    generate_bundle("missing_source_contract", str(tmp_path), [consumer])
++
++    sdsc_0 = json.loads((tmp_path / "sdsc_0.json").read_text())
++    root = next(iter(sdsc_0.values()))
++    assert root["lxRelayoutClassifications_"] == []
 +
 +def test_lx_input_allocation_coordinates_describe_producer_residency():
 +    mb = Symbol("x0")
@@ -1076,10 +1191,10 @@ index 00000000..7a126d61
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/torch_spyre/_inductor/codegen/bundle.py b/torch_spyre/_inductor/codegen/bundle.py
-index c0e27aaa..cf845e17 100644
+index c0e27aaa..d08774b8 100644
 --- a/torch_spyre/_inductor/codegen/bundle.py
 +++ b/torch_spyre/_inductor/codegen/bundle.py
-@@ -48,6 +48,148 @@ logger = get_inductor_logger("sdsc_compile")
+@@ -48,6 +48,165 @@ logger = get_inductor_logger("sdsc_compile")
  _CompiledEntry = tuple[Any, list[int], list[list[dict]], list[SymbolKind]]
  
  
@@ -1186,10 +1301,12 @@ index c0e27aaa..cf845e17 100644
 +    if not isinstance(classifications, list):
 +        return
 +
++    finalized_classifications = []
 +    for classification in classifications:
 +        if not isinstance(classification, dict):
 +            continue
 +        if classification.get("kind") != "matmul_operand_broadcast":
++            finalized_classifications.append(classification)
 +            continue
 +
 +        source_name = (
@@ -1224,11 +1341,26 @@ index c0e27aaa..cf845e17 100644
 +        )
 +        classification["layout_transform"] = layout_transform
 +
++        if classification.get("requires_layout_conversion"):
++            source = classification.get("source_lx_tensor") or {}
++            target = classification.get("target_kernel_tensor") or {}
++            if source.get("component_") != "lx" or target.get("component_") != "lx":
++                logger.debug(
++                    "lx relayout skip: incomplete matmul operand contract for %s -> %s",
++                    classification.get("producer_name"),
++                    classification.get("consumer_name"),
++                )
++                continue
++
++        finalized_classifications.append(classification)
++
++    root["lxRelayoutClassifications_"] = finalized_classifications
++
 +
  # ---------------------------------------------------------------------------
  # Public entry point
  # ---------------------------------------------------------------------------
-@@ -373,8 +515,11 @@ def _compile_specs(
+@@ -373,8 +532,11 @@ def _compile_specs(
      symbol_id_offset_counter: list,
      output_dir: str,
      use_symbols: bool = False,
@@ -1240,7 +1372,7 @@ index c0e27aaa..cf845e17 100644
      for entry in specs:
          if isinstance(entry, LoopSpec):
              _compile_specs(
-@@ -385,6 +530,7 @@ def _compile_specs(
+@@ -385,6 +547,7 @@ def _compile_specs(
                  symbol_id_offset_counter,
                  output_dir,
                  use_symbols=use_symbols,
@@ -1248,7 +1380,7 @@ index c0e27aaa..cf845e17 100644
              )
          elif isinstance(entry, OpSpec):
              idx = sdsc_counter[0]
-@@ -398,10 +544,22 @@ def _compile_specs(
+@@ -398,10 +561,22 @@ def _compile_specs(
                      use_symbols=use_symbols,
                  )
              )
@@ -1432,13 +1564,14 @@ index 32066800..911b73fb 100644
          symbol_mapping,
      )
 diff --git a/torch_spyre/_inductor/config.py b/torch_spyre/_inductor/config.py
-index c945e760..8e6b93f9 100644
+index c945e760..e64063c4 100644
 --- a/torch_spyre/_inductor/config.py
 +++ b/torch_spyre/_inductor/config.py
-@@ -38,6 +38,42 @@ allow_all_ops_in_lx_planning: bool = False
+@@ -38,7 +38,58 @@ allow_all_ops_in_lx_planning: bool = False
  # eligibility and must not, on its own, enable boundary clone insertion.
  lx_boundary_clones: bool = os.environ.get("LX_BOUNDARY_CLONES", "0") == "1"
  
+-dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 +# Experimental extension to LX planning: keep producer-owned LX tensors resident
 +# across producer/consumer core-division mismatches and describe the producer
 +# tensor distribution in dl-dsc allocation coordinates. Deeptools may then
@@ -1452,17 +1585,17 @@ index c945e760..8e6b93f9 100644
 +    "SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS", lx_planner_relayout
 +)
 +
-+# Experimental research lane for non-primary matmul operand relayouts. These
-+# are coordinate collectives such as multicast/gather/all-gather, but still keep
-+# physical transfer derivation in Deeptools via dl-dsc coordinates.
++# Experimental research lane for matmul operand relayouts. These are coordinate
++# collectives such as multicast/gather/all-gather, but still keep physical
++# transfer derivation in Deeptools via dl-dsc coordinates.
 +lx_planner_relayout_collectives: bool = _get_env_bool(
 +    "SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES", lx_planner_relayout
 +)
 +
-+# Experimental metadata-only contract for Granite attention-value Tensor1
++# Experimental metadata-only contract for Granite/attention matmul operand
 +# materialization. Requires lx_planner_relayout_collectives and records the
-+# non-primary matmul operand as grouped all-gather/broadcast rather than
-+# allowing it to look like resident scatter.
++# matmul operand as grouped all-gather/broadcast rather than allowing it to look
++# like resident scatter.
 +lx_planner_relayout_matmul_operand_contract: bool = _get_env_bool(
 +    "SPYRE_LX_PLANNER_RELAYOUT_MATMUL_OPERAND_CONTRACT", lx_planner_relayout
 +)
@@ -1475,9 +1608,25 @@ index c945e760..8e6b93f9 100644
 +    "SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY", lx_planner_relayout
 +)
 +
- dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
++# Frontend LX reservation fraction.  When LX relayout is enabled, default
++# Torch planning to full frontend LX and give the DXP subprocess its backend
++# relayout workspace separately via ``dxp_backend_lx_frac_avail`` below.
++dxp_lx_frac_avail: float = float(
++    os.environ.get("DXP_LX_FRAC_AVAIL", "0" if lx_planner_relayout else "0.2")
++)
++
++# Backend LX fraction used only for the DXP subprocess launched by Torch. This
++# hides the old wrapper trick behind the same top-level relayout flag while
++# preserving explicit overrides for backend debugging.
++dxp_backend_lx_frac_avail: float = float(
++    os.environ.get(
++        "DXP_BACKEND_LX_FRAC_AVAIL",
++        "1" if lx_planner_relayout else str(dxp_lx_frac_avail),
++    )
++)
  
  sencores: int = int(os.getenv("SENCORES", "32"))
+ 
 diff --git a/torch_spyre/_inductor/constants.py b/torch_spyre/_inductor/constants.py
 index 4dacb06a..cdd595f0 100644
 --- a/torch_spyre/_inductor/constants.py
@@ -1493,10 +1642,10 @@ index 4dacb06a..cdd595f0 100644
  # Reduction ops that cannot reduce along the stick dimension.
 diff --git a/torch_spyre/_inductor/layout_allgather_restickify.py b/torch_spyre/_inductor/layout_allgather_restickify.py
 new file mode 100644
-index 00000000..97a1688b
+index 00000000..3de60409
 --- /dev/null
 +++ b/torch_spyre/_inductor/layout_allgather_restickify.py
-@@ -0,0 +1,258 @@
+@@ -0,0 +1,259 @@
 +# Copyright 2026 The Torch-Spyre Authors.
 +#
 +# Licensed under the Apache License, Version 2.0 (the "License");
@@ -1595,14 +1744,15 @@ index 00000000..97a1688b
 +    consumer_compute_work_slice_dims: dict[str, int],
 +    communication_class: str,
 +) -> dict[str, Any]:
-+    """Return the logical contract for Granite AV Tensor1 materialization.
++    """Return the logical contract for staged matmul operand materialization.
 +
-+    Tensor1 is the non-primary batchmatmul operand.  The Granite evidence has
-+    the value tensor resident across producer ``out`` slices while each
-+    consumer core computes a different ``mb`` slice.  That edge is a grouped
-+    all-gather/broadcast into the matmul transfer loop, not a one-to-one
-+    scatter relayout.
++    The operand tensor is resident across producer-owned slices while each
++    consumer core may need a different compute slice.  That edge is a grouped
++    all-gather/broadcast/multicast into the matmul transfer loop, not a
++    one-to-one resident scatter relayout.
 +    """
++
++    operand_role = {0: "lhs", 1: "rhs"}.get(int(read_index), f"input_{read_index}")
 +
 +    return {
 +        "kind": MATMUL_OPERAND_BROADCAST,
@@ -1610,7 +1760,7 @@ index 00000000..97a1688b
 +        "producer_op": producer_op,
 +        "consumer_op": consumer_op,
 +        "operand_read_index": int(read_index),
-+        "operand_role": "rhs" if int(read_index) == 1 else f"input_{read_index}",
++        "operand_role": operand_role,
 +        "producer_work_slice_dims": dict(producer_work_slice_dims),
 +        "consumer_tensor_work_slice_dims": dict(consumer_tensor_work_slice_dims),
 +        "consumer_compute_work_slice_dims": dict(consumer_compute_work_slice_dims),
@@ -1757,10 +1907,10 @@ index 00000000..97a1688b
 +    }
 diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
 new file mode 100644
-index 00000000..ca3af7ae
+index 00000000..d12e752b
 --- /dev/null
 +++ b/torch_spyre/_inductor/lx_relayout.py
-@@ -0,0 +1,651 @@
+@@ -0,0 +1,675 @@
 +# Copyright 2026 The Torch-Spyre Authors.
 +#
 +# Licensed under the Apache License, Version 2.0 (the "License");
@@ -1957,16 +2107,17 @@ index 00000000..ca3af7ae
 +def _prefer_matmul_operand_contract(
 +    read_index: int | None, topology: LXRelayoutTopology
 +) -> bool:
-+    supported_rhs_fanout_classes = (
++    supported_matmul_operand_classes = (
 +        COMM_CLASS_ALL_GATHER,
++        "gather",
 +        "broadcast",
 +        "multicast",
 +    )
 +    return (
 +        config.lx_planner_relayout_collectives
 +        and config.lx_planner_relayout_matmul_operand_contract
-+        and read_index == 1
-+        and topology.communication_class in supported_rhs_fanout_classes
++        and read_index in (0, 1)
++        and topology.communication_class in supported_matmul_operand_classes
 +    )
 +
 +def _op_num_cores(op: Operation) -> int:
@@ -2084,6 +2235,21 @@ index 00000000..ca3af7ae
 +        isinstance(graph.name_to_buffer.get(dep.name), ComputedBuffer)
 +        for dep in op.get_read_writes().reads
 +        if isinstance(dep, MemoryDep)
++    )
++
++
++def _matmul_operand_source_good_for_lx_relayout(
++    graph: GraphLowering, op: Operation
++) -> bool:
++    """Return whether a matmul operand producer belongs to this relayout lane.
++
++    Graph-input/weight restickifies are handled by weight prelayout/preload work.
++    This lane only stages computed activation operands and restickifies whose
++    input is another computed buffer.
++    """
++
++    return _op_name(op) != "restickify" or _restickify_reads_computed_input(
++        graph, op
 +    )
 +
 +
@@ -2275,7 +2441,15 @@ index 00000000..ca3af7ae
 +                )
 +                continue
 +            read_index = _memory_read_index(consumer, dep)
-+            if is_matmul_consumer and read_index not in (0, None):
++            if is_matmul_consumer and read_index is not None:
++                if not _matmul_operand_source_good_for_lx_relayout(graph, producer):
++                    logger.debug(
++                        "lx relayout skip: %s -> %s is a weight/input restickify",
++                        producer.name,
++                        consumer.name,
++                    )
++                    continue
++
 +                if (
 +                    config.lx_planner_relayout_layout_allgather_restickify
 +                    and not _prefer_matmul_operand_contract(read_index, topology)
@@ -2457,7 +2631,7 @@ index 47531b7f..d2d37ec9 100644
  
      # Try alternative layouts if no valid layouts found
 diff --git a/torch_spyre/_inductor/scratchpad/allocator.py b/torch_spyre/_inductor/scratchpad/allocator.py
-index d39c69c2..8f1844c6 100644
+index d39c69c2..ecf4e92f 100644
 --- a/torch_spyre/_inductor/scratchpad/allocator.py
 +++ b/torch_spyre/_inductor/scratchpad/allocator.py
 @@ -65,6 +65,14 @@ from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
@@ -2535,24 +2709,35 @@ index d39c69c2..8f1844c6 100644
                  # and the inserted clones would not land in LX.
                  or (config.lx_boundary_clones and self._get_op_name(op) == "clone")
              )
-@@ -176,13 +226,14 @@ class ScratchpadAllocator(ABC):
+@@ -173,16 +223,24 @@ class ScratchpadAllocator(ABC):
+     ) -> list[Operation]:
+         core_div_mismatch = get_ncores_for_buffers(graph, cache, rw_cache)
+         drop_list = set()
++        relayout_sources = relayout_source_names(graph)
  
-         # filter out by permitted operations
+-        # filter out by permitted operations
++        # filter out by permitted operations.  Relayout-planned producers are
++        # already vetted by the LX relayout planner, and some of them appear as
++        # layout/view ops at IR level even though codegen fuses them into an
++        # allowed compute op. Keep them eligible so their dl-dsc residency can
++        # be described to Deeptools.
          for op in graph.operations:
 -            if not self._op_output_good_for_lx_reuse(op):
-+            if not self._op_output_good_for_lx_reuse(graph, op):
++            if (
++                op.name not in relayout_sources
++                and not self._op_output_good_for_lx_reuse(graph, op)
++            ):
                  drop_list.add(op.name)
                  self.reject_reasons[op.name] = "op not allowed"
  
          # filter out core division mismatches
-+        relayout_sources = relayout_source_names(graph)
          for key, mismatch in core_div_mismatch.items():
 -            if mismatch == -1:
 +            if mismatch == -1 and key not in relayout_sources:
                  drop_list.add(key)
                  self.reject_reasons[key] = "core div mismatch"
  
-@@ -367,6 +418,84 @@ class ScratchpadAllocator(ABC):
+@@ -367,6 +425,84 @@ class ScratchpadAllocator(ABC):
          )
          return buffers
  
@@ -2637,7 +2822,7 @@ index d39c69c2..8f1844c6 100644
      def _log_lx_pinning(self, graph: GraphLowering) -> None:
          """Log the final LX pinning decision for every op in the graph."""
          # Skip the per-op getattr walk unless DEBUG is on.
-@@ -404,6 +533,8 @@ class ScratchpadAllocator(ABC):
+@@ -404,6 +540,8 @@ class ScratchpadAllocator(ABC):
          graph_editor = GraphEditor(graph)
  
          for b in buffers:
@@ -2646,7 +2831,7 @@ index d39c69c2..8f1844c6 100644
              if b.address is None:
                  continue
  
-@@ -478,9 +609,24 @@ class DefaultAllocator(ScratchpadAllocator):
+@@ -478,9 +616,24 @@ class DefaultAllocator(ScratchpadAllocator):
          self.reject_reasons = {}
          for p in self.pre_optimization_passes:
              p.apply_pass(graph)
@@ -2672,7 +2857,7 @@ index d39c69c2..8f1844c6 100644
              if b.address is None:
                  self.reject_reasons[b.name] = "no room on scratchpad"
          self._push_allocation(graph, allocation)
-@@ -933,6 +1079,8 @@ class StrategyBCoOptimizingAllocator(DefaultAllocator):
+@@ -933,6 +1086,8 @@ class StrategyBCoOptimizingAllocator(DefaultAllocator):
          for p in self.pre_optimization_passes:
              p.apply_pass(graph)
  
@@ -2681,7 +2866,7 @@ index d39c69c2..8f1844c6 100644
          # Standard downstream flow on the now-fixed winning splits. Mirrors
          # DefaultAllocator.plan_allocation past the pre-passes. Reuse the search's
          # per-core-view cache + liveness only if the clone pass left the graph
-@@ -941,13 +1089,29 @@ class StrategyBCoOptimizingAllocator(DefaultAllocator):
+@@ -941,13 +1096,29 @@ class StrategyBCoOptimizingAllocator(DefaultAllocator):
          # the clone (changes the (op, splits, dep) cache key), so on any op-count
          # change both are stale and we rebuild from scratch (cache=lifetimes=None).
          clone_inserted = len(graph.operations) != n_ops_before_clone
@@ -2712,7 +2897,7 @@ index d39c69c2..8f1844c6 100644
              if b.address is None:
                  self.reject_reasons[b.name] = "no room on scratchpad"
          self._push_allocation(graph, allocation)
-@@ -1087,6 +1251,7 @@ def scratchpad_planning(
+@@ -1087,6 +1258,7 @@ def scratchpad_planning(
          graph: Lowered graph to plan scratchpad memory for.
          allocator: Allocator strategy to use. Defaults to DefaultAllocator.
      """
@@ -3014,3 +3199,40 @@ index bf1cbc6d..c32ff212 100644
                          buf.writeline("),")
                  buf.writeline("]")
              buf.writeline("),")
+diff --git a/torch_spyre/execution/async_compile.py b/torch_spyre/execution/async_compile.py
+index 964073eb..8118c14f 100644
+--- a/torch_spyre/execution/async_compile.py
++++ b/torch_spyre/execution/async_compile.py
+@@ -20,6 +20,7 @@ import subprocess
+ import torch
+ 
+ from torch._inductor.runtime.runtime_utils import cache_dir
++from torch_spyre._inductor import config
+ from torch_spyre._inductor.logging_utils import get_inductor_logger
+ from torch_spyre._inductor.op_spec import (
+     LoopSpec,
+@@ -58,9 +59,22 @@ class SpyreAsyncCompile:
+         output_dir = get_output_dir(kernel_name)
+         generate_bundle(kernel_name, output_dir, specs)
+ 
+-        # Invoke backend compiler of SDSC Bundle
++        # Invoke backend compiler of SDSC Bundle. When the LX relayout
++        # prototype is enabled, Torch plans with its frontend LX fraction, but
++        # DXP needs backend workspace for inserted relayout materialization.
++        # Pass that split through the subprocess env instead of requiring an
++        # external dxp_standalone wrapper.
++        dxp_env = None
++        if config.lx_planner_relayout:
++            dxp_env = os.environ.copy()
++            dxp_env["DXP_LX_FRAC_AVAIL"] = str(config.dxp_backend_lx_frac_avail)
++
+         with torch.profiler.record_function(f"dxp_standalone:{kernel_name}"):
+-            subprocess.run(["dxp_standalone", "-d", output_dir], check=True)
++            subprocess.run(
++                ["dxp_standalone", "-d", output_dir],
++                check=True,
++                env=dxp_env,
++            )
+ 
+         return SpyreSDSCKernelRunner(kernel_name, output_dir)
+ 

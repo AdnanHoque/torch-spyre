@@ -1,33 +1,52 @@
-# Deeptools comms-collectives patch rebased on upstream master
+# Deeptools collectives patch rebased on master
 
 Generated: 2026-07-06
 
-This directory contains the portable Deeptools patch for the DLDSC LX relayout communication-collectives prototype, rebased cleanly on current upstream Deeptools master.
+This directory contains the portable Deeptools-side patch for the DLDSC LX relayout gather/restickify and collectives prototype.
 
-## Branches
+## Patch context
 
-- Upstream master: `949cfeea885e05cb12dd37ea07d480d82f1ee27c`
-- Rebased branch: `Adnan-Hoque1/deeptools:ah/comms-collectives-master`
-- Rebased branch head: `f3e1f6c04cd209c63d3746e889e1e64b91dd6fd2`
+- Upstream Deeptools master: `0a9da5eb19d08712383312bb7dec18fbd7caf711`
+- Patch branch/source: `Adnan-Hoque1/deeptools:ah/comms-collectives`
+- Patch head: `b594b3afc725b693d074a64fc027ac7a6024d5fd`
+- Ahead/behind upstream master: `0	43`
 
 ## Patch file
 
 - `deeptools_ah_comms_collectives_rebased_on_master.patch`
 
-Apply from a current upstream Deeptools master checkout with:
+Apply from a current Deeptools checkout with:
 
 ```bash
 git apply deeptools_ah_comms_collectives_rebased_on_master.patch
 ```
 
-## Focused validation
+Then rebuild the DXP binary used by Torch:
 
-The rebased tree built `dxp_standalone`, `util_unit_test`, `dxp_unit_test`, and `dcg_unit_test` on CDX.
+```bash
+cmake --build build-deeptools --target dxp_standalone dxp_unit_test -j8
+```
 
-Passing focused tests:
+## Runtime flag
 
-- `LayoutAllgatherRestickify.*`: 31/31
-- `DxpTestFixture.CoreWorkDivIncomptLxRelayout*`: 2/2
-- `stcdpLibtest.multicast*`: 2/2
+Normal Torch-launched runs should use the same single feature flag as Torch:
 
-See the copied test logs in this directory.
+```bash
+export SPYRE_LX_PLANNER_RELAYOUT=1
+```
+
+Deeptools treats that flag as enabling the gather/restickify relayout prototype gates. The older `DEEPTOOLS_ENABLE_*` flags remain as narrow diagnostic aliases.
+
+For direct manual SDSC replay that bypasses Torch, also provide backend LX workspace explicitly:
+
+```bash
+SPYRE_LX_PLANNER_RELAYOUT=1 DXP_LX_FRAC_AVAIL=1 dxp_standalone -d path/to/sdsc_bundle
+```
+
+## Validation
+
+Focused Deeptools gate after this flag update:
+
+```text
+DxpTestFixture.CoreWorkDivIncomptLxRelayout*: 2 passed
+```

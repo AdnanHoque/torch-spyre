@@ -15,3 +15,4 @@ M	torch_spyre/_inductor/scratchpad/allocator.py
 M	torch_spyre/_inductor/scratchpad/graph_editor.py
 M	torch_spyre/_inductor/scratchpad/utils.py
 M	torch_spyre/_inductor/spyre_kernel.py
+M	torch_spyre/execution/async_compile.py

@@ -1,5 +1,5 @@
 diff --git a/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp b/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp
-index 913cc9e6a3..3dd55a9c97 100644
+index 913cc9e6a..3dd55a9c9 100644
 --- a/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp
 +++ b/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp
 @@ -29,6 +29,24 @@ using namespace dcc::sentient::utils;
@@ -112,7 +112,7 @@ index 913cc9e6a3..3dd55a9c97 100644
    } else if (lhs_locale == "lrf" && rhs_locale == "lrf") {
      super_instr.setInstn(OpCodeT::MODLRFREG);
 diff --git a/dcc/src/Conversion/SentientToProgIR/LowerSentientHelper.cpp b/dcc/src/Conversion/SentientToProgIR/LowerSentientHelper.cpp
-index a6abf101e2..a2b02cd44d 100644
+index a6abf101e..a2b02cd44 100644
 --- a/dcc/src/Conversion/SentientToProgIR/LowerSentientHelper.cpp
 +++ b/dcc/src/Conversion/SentientToProgIR/LowerSentientHelper.cpp
 @@ -759,9 +759,9 @@ void SentientToProgIRLoweringPass::LowerAddOperation(
@@ -128,7 +128,7 @@ index a6abf101e2..a2b02cd44d 100644
    } else if (add_op.getRegLocale() == SentientRegType::xrfrdptr) {
      UniformInstrInfo add_instr = ConstructXRFADDInstr(comp, add_op);
 diff --git a/dcg/dcg_fe/dcg_frontend.h b/dcg/dcg_fe/dcg_frontend.h
-index 72d9c5ae8b..4f0bc52fbc 100644
+index 72d9c5ae8..4f0bc52fb 100644
 --- a/dcg/dcg_fe/dcg_frontend.h
 +++ b/dcg/dcg_fe/dcg_frontend.h
 @@ -373,7 +373,8 @@ class DcgFE {
@@ -142,7 +142,7 @@ index 72d9c5ae8b..4f0bc52fbc 100644
    void createPcfgForInputFetchNeighbor(
        SuperDsc& mySDscMain, DataOpDsc& ddsc, int uniqueId = 0,
 diff --git a/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp b/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
-index 5d44479731..ff2dfbc8b5 100644
+index 5d4447973..ff2dfbc8b 100644
 --- a/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
 +++ b/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
 @@ -11,6 +11,7 @@
@@ -269,7 +269,7 @@ index 5d44479731..ff2dfbc8b5 100644
    // ZQ: Write code to insert sync node in PCFG
    // For L3LU or L3SU <- get the list of sync that needs to be added from
 diff --git a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
-index baa1181ddd..2623f113b9 100644
+index baa1181dd..2623f113b 100644
 --- a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
 +++ b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
 @@ -10,6 +10,35 @@
@@ -520,7 +520,7 @@ index baa1181ddd..2623f113b9 100644
      if (B_.si_ > currdsc.CoreD_.ki_) myIFNInfo_.disableCoverage = true;
    }
 diff --git a/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp b/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
-index 2f09a103c0..22a2e2f2f0 100644
+index 2f09a103c..22a2e2f2f 100644
 --- a/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
 +++ b/dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
 @@ -166,11 +166,11 @@ DataOpDsc* DcgFE::generatePcfgIRForDataOpInpFetch(
@@ -540,7 +540,7 @@ index 2f09a103c0..22a2e2f2f0 100644
      masterDDsc = new DataOpDsc;
      checkDLDSCForInputFetchNeighborOp(
 diff --git a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
-index f0640651f4..d1840495c2 100644
+index f0640651f..d1840495c 100644
 --- a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
 +++ b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
 @@ -4604,7 +4604,7 @@ void DcgFE::computeMulticastOptMetadata(STCDPOpLx* op,
@@ -560,7 +560,7 @@ index f0640651f4..d1840495c2 100644
 \ No newline at end of file
 +}
 diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
-index 83ce529b2c..dd59885fee 100644
+index 83ce529b2..dd59885fe 100644
 --- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
 +++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
 @@ -14,10 +14,13 @@
@@ -1211,7 +1211,7 @@ index 83ce529b2c..dd59885fee 100644
    // Finalize the schedule tree by filling the loop address and offset in the
    // transfer nodes.
 diff --git a/dcg/dcg_manager/dcg_common.h b/dcg/dcg_manager/dcg_common.h
-index 6eb25e5f51..e8b8abccb6 100644
+index 6eb25e5f5..e8b8abccb 100644
 --- a/dcg/dcg_manager/dcg_common.h
 +++ b/dcg/dcg_manager/dcg_common.h
 @@ -62,6 +62,9 @@ struct InputFetchNeigh {
@@ -1225,7 +1225,7 @@ index 6eb25e5f51..e8b8abccb6 100644
    std::map<std::pair<int, std::vector<int>>, int>
        pIdCIDsToMainSisDtidx;  // used for filling sister dt node info
 diff --git a/ddc/ddc.h b/ddc/ddc.h
-index 97b1efe6c0..24e17df649 100644
+index 97b1efe6c..24e17df64 100644
 --- a/ddc/ddc.h
 +++ b/ddc/ddc.h
 @@ -51,6 +51,11 @@ class Ddc {
@@ -1249,7 +1249,7 @@ index 97b1efe6c0..24e17df649 100644
          ddcCoordEnvOption->find("verify_loopelemoff") != std::string::npos) {
        verifyCoordinateBasedLoopElemOff = true;
 diff --git a/ddc/ddc_fold.cpp b/ddc/ddc_fold.cpp
-index 4df32c50cc..f7e18aa7fe 100644
+index 4df32c50c..f7e18aa7f 100644
 --- a/ddc/ddc_fold.cpp
 +++ b/ddc/ddc_fold.cpp
 @@ -15,6 +15,83 @@ namespace ddc {
@@ -1664,7 +1664,7 @@ index 4df32c50cc..f7e18aa7fe 100644
    const auto &refLds = currDsc->labeledDs_.at(refLdsIdx);
  
 diff --git a/ddc/ddcv1.cpp b/ddc/ddcv1.cpp
-index 3c418973e8..346e4a5f94 100644
+index 3c418973e..346e4a5f9 100644
 --- a/ddc/ddcv1.cpp
 +++ b/ddc/ddcv1.cpp
 @@ -8,6 +8,7 @@
@@ -1865,7 +1865,7 @@ index 3c418973e8..346e4a5f94 100644
          const dsc2::LoopNode* lastFusableLoop = nullptr;
          if (transfer->isNodeRelevant(unit)) {
 diff --git a/ddc/ddl/ddl_conversion.cpp b/ddc/ddl/ddl_conversion.cpp
-index 19a3de5e5e..e3bbc1252a 100644
+index 19a3de5e5..e3bbc1252 100644
 --- a/ddc/ddl/ddl_conversion.cpp
 +++ b/ddc/ddl/ddl_conversion.cpp
 @@ -2277,7 +2277,6 @@ bool DdlConversion::matchDdl2Dsc() {
@@ -1877,7 +1877,7 @@ index 19a3de5e5e..e3bbc1252a 100644
    }
  
 diff --git a/ddc/ddl/ddl_conversion.h b/ddc/ddl/ddl_conversion.h
-index 3a85ad1d6f..b148a25dc8 100644
+index 3a85ad1d6..b148a25dc 100644
 --- a/ddc/ddl/ddl_conversion.h
 +++ b/ddc/ddl/ddl_conversion.h
 @@ -252,9 +252,9 @@ const std::map<OpFuncs, std::vector<DdlArch>> opFuncToDdlTemplate = {
@@ -1894,7 +1894,7 @@ index 3a85ad1d6f..b148a25dc8 100644
       {{"restickify.ddl", RCUDD1A_ISA},
        {"restickify.ddl", MPW4_ISA},
 diff --git a/ddc/ddl_templates/CMakeLists.txt b/ddc/ddl_templates/CMakeLists.txt
-index 124b95a4f0..815cff3076 100644
+index 124b95a4f..815cff307 100644
 --- a/ddc/ddl_templates/CMakeLists.txt
 +++ b/ddc/ddl_templates/CMakeLists.txt
 @@ -35,7 +35,9 @@ set(DDL_TEMPLATES
@@ -1908,7 +1908,7 @@ index 124b95a4f0..815cff3076 100644
  
  add_custom_target(obfuscate_ddl_templates)
 diff --git a/ddc/ddl_templates/restickify.ddl b/ddc/ddl_templates/restickify.ddl
-index 8c794432f3..bbea28177a 100644
+index 8c794432f..bbea28177 100644
 --- a/ddc/ddl_templates/restickify.ddl
 +++ b/ddc/ddl_templates/restickify.ddl
 @@ -29,10 +29,11 @@ module {
@@ -1926,7 +1926,7 @@ index 8c794432f3..bbea28177a 100644
  // const
 diff --git a/ddc/ddl_templates/restickify_lx.ddl b/ddc/ddl_templates/restickify_lx.ddl
 new file mode 100644
-index 0000000000..f345ee24e3
+index 000000000..f345ee24e
 --- /dev/null
 +++ b/ddc/ddl_templates/restickify_lx.ddl
 @@ -0,0 +1,105 @@
@@ -2037,7 +2037,7 @@ index 0000000000..f345ee24e3
 +
 diff --git a/ddc/ddl_templates/restickify_lx_sen1p5.ddl b/ddc/ddl_templates/restickify_lx_sen1p5.ddl
 new file mode 100644
-index 0000000000..559b5d7f9f
+index 000000000..559b5d7f9
 --- /dev/null
 +++ b/ddc/ddl_templates/restickify_lx_sen1p5.ddl
 @@ -0,0 +1,135 @@
@@ -2177,7 +2177,7 @@ index 0000000000..559b5d7f9f
 +}
 +
 diff --git a/dsc/dsc2.cpp b/dsc/dsc2.cpp
-index a50eac1bfd..2d64ebc1c9 100644
+index a50eac1bf..2d64ebc1c 100644
 --- a/dsc/dsc2.cpp
 +++ b/dsc/dsc2.cpp
 @@ -2838,6 +2838,13 @@ void DesignSpaceConfig::finalizeScheduleTree(SuperDsc& sdsc,
@@ -2230,7 +2230,7 @@ index a50eac1bfd..2d64ebc1c9 100644
    DT_CHECK(!allocNode->layoutDimOrder_.empty());
    return allocNode->layoutDimOrder_;
 diff --git a/dsc/dsc2.h b/dsc/dsc2.h
-index d84445e768..e7110d152c 100644
+index d84445e76..e7110d152 100644
 --- a/dsc/dsc2.h
 +++ b/dsc/dsc2.h
 @@ -19,6 +19,8 @@
@@ -2274,7 +2274,7 @@ index d84445e768..e7110d152c 100644
      CONSTANT_TO_CONSTANT,
      CONSTANT_TO_TENSOR,
 diff --git a/dsc/superdsc.cpp b/dsc/superdsc.cpp
-index 6049c26b99..a301f75118 100644
+index 6049c26b9..a301f7511 100644
 --- a/dsc/superdsc.cpp
 +++ b/dsc/superdsc.cpp
 @@ -266,6 +266,29 @@ void SuperDsc::exportJson(std::ostream& json, int verbosity /*=1*/) const {
@@ -2354,7 +2354,7 @@ index 6049c26b99..a301f75118 100644
 \ No newline at end of file
 +}
 diff --git a/dsc/superdsc.h b/dsc/superdsc.h
-index 2e4482af1c..a7def47038 100644
+index 2e4482af1..a7def4703 100644
 --- a/dsc/superdsc.h
 +++ b/dsc/superdsc.h
 @@ -69,6 +69,8 @@ class SuperDsc {
@@ -2367,7 +2367,7 @@ index 2e4482af1c..a7def47038 100644
    // DataDsc related fields..
    std::map<int, std::set<int>> prodConsList;  // key: prod, val: set of cons..
 diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
-index f09891ab9c..3db8712487 100644
+index f09891ab9..0d5dd45ce 100644
 --- a/dxp/SdscRelayoutInsertion.cpp
 +++ b/dxp/SdscRelayoutInsertion.cpp
 @@ -1,8 +1,22 @@
@@ -2393,7 +2393,7 @@ index f09891ab9c..3db8712487 100644
  
  // #define DEBUG_RELAYOUT 1
  
-@@ -17,6 +31,1625 @@ static DataFormats getDsFormat(double wl) {
+@@ -17,6 +31,1681 @@ static DataFormats getDsFormat(double wl) {
    return DataFormats::INVALID;
  }
  
@@ -2423,23 +2423,8 @@ index f09891ab9c..3db8712487 100644
 +struct MatmulOperandBroadcastHookPlan {
 +  std::string classificationKey;
 +  deeptools::MatmulOperandBroadcastMovementPlan plan;
++  int classificationOperandIndex = -1;
 +};
-+
-+static bool envValueIsEnabled(const char* value) {
-+  if (value == nullptr) return false;
-+  std::string normalized(value);
-+  std::transform(normalized.begin(), normalized.end(), normalized.begin(),
-+                 [](unsigned char c) { return std::tolower(c); });
-+  return !normalized.empty() && normalized != "0" && normalized != "false" &&
-+         normalized != "off";
-+}
-+
-+static bool matmulOperandGatherRestickifyEnabled() {
-+  if (std::getenv("DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY") !=
-+      nullptr)
-+    return true;
-+  return envValueIsEnabled(std::getenv("SPYRE_LX_PLANNER_RELAYOUT"));
-+}
 +
 +static bool layoutAllgatherRestickifyMatchesLds(
 +    const std::map<std::string, std::string>& fields,
@@ -2477,7 +2462,8 @@ index f09891ab9c..3db8712487 100644
 +static bool matmulOperandBroadcastMatchesLds(
 +    const std::map<std::string, std::string>& fields,
 +    const LabeledDsInfo& lds) {
-+  for (const auto& key : {"read_index", "operand_index"}) {
++  for (const auto& key : {"read_index", "operand_index",
++                          "operand_read_index"}) {
 +    const auto it = fields.find(key);
 +    if (it == fields.end()) continue;
 +    return std::stoi(it->second) == lds.ldsIdx_;
@@ -2487,6 +2473,23 @@ index f09891ab9c..3db8712487 100644
 +  if (ldsIt != fields.end()) return ldsIt->second == lds.dsName_;
 +
 +  return true;
++}
++
++static int matmulOperandBroadcastOperandIndexFromFields(
++    const std::map<std::string, std::string>& fields) {
++  for (const auto& key : {"read_index", "operand_index",
++                          "operand_read_index"}) {
++    const auto it = fields.find(key);
++    if (it == fields.end()) continue;
++    char* end = nullptr;
++    const long parsed = std::strtol(it->second.c_str(), &end, 10);
++    if (end == it->second.c_str() ||
++        (end != nullptr && *end != '\0') || parsed < 0) {
++      return -1;
++    }
++    return static_cast<int>(parsed);
++  }
++  return -1;
 +}
 +
 +static MatmulOperandBroadcastHookPlan findMatmulOperandBroadcastPlan(
@@ -2505,8 +2508,13 @@ index f09891ab9c..3db8712487 100644
 +    if (!isMatmulOperandBroadcast) continue;
 +    if (!matmulOperandBroadcastMatchesLds(fields, lds)) continue;
 +
-+    return {entry.first,
-+            deeptools::synthesizeMatmulOperandBroadcastMovementPlan(fields)};
++    const auto plan =
++        deeptools::synthesizeMatmulOperandBroadcastMovementPlan(fields);
++    int operandIndex = matmulOperandBroadcastOperandIndexFromFields(fields);
++    if (operandIndex < 0 && plan.operandIndex >= 0) {
++      operandIndex = static_cast<int>(plan.operandIndex);
++    }
++    return {entry.first, plan, operandIndex};
 +  }
 +
 +  return {};
@@ -2536,10 +2544,52 @@ index f09891ab9c..3db8712487 100644
 +  return static_cast<int>(parsed);
 +}
 +
++static int getMatmulOperandBroadcastOnlyOperandIndex() {
++  const auto value = getDebugEnvString(
++      "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_OPERAND_INDEX");
++  if (value.empty()) return -1;
++  if (value == "0") return 0;
++  if (value == "1") return 1;
++  DT_CHECK_MSG(
++      false,
++      "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_OPERAND_INDEX accepts only "
++      "0 or 1");
++  return -1;
++}
++
++static bool envFlagEnabled(const char* name) {
++  const char* value = std::getenv(name);
++  return value != nullptr && std::string(value) != "0" &&
++         std::string(value) != "false" && std::string(value) != "False" &&
++         std::string(value) != "FALSE";
++}
++
++static bool lxPlannerRelayoutEnabled() {
++  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT");
++}
++
++static bool matmulOperandGatherRestickifyEnabled() {
++  return lxPlannerRelayoutEnabled() ||
++         envFlagEnabled("DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY");
++}
++
++static bool layoutAllgatherRestickifyEnabled() {
++  return lxPlannerRelayoutEnabled() ||
++         envFlagEnabled("DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY");
++}
++
 +static bool matmulOperandBroadcastDebugMatchesSdsc(const SuperDsc* sdsc) {
 +  const auto onlySdsc = getDebugEnvString(
 +      "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_SDSC");
 +  return onlySdsc.empty() || sdsc->name_.find(onlySdsc) != std::string::npos;
++}
++
++static bool matmulOperandBroadcastDebugMatchesOperand(
++    const MatmulOperandBroadcastHookPlan& hook) {
++  const int onlyOperandIndex =
++      getMatmulOperandBroadcastOnlyOperandIndex();
++  return onlyOperandIndex < 0 ||
++         hook.classificationOperandIndex == onlyOperandIndex;
 +}
 +
 +static std::map<std::string, std::string>
@@ -2548,6 +2598,12 @@ index f09891ab9c..3db8712487 100644
 +  const auto onlySdsc = getDebugEnvString(
 +      "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_SDSC");
 +  if (!onlySdsc.empty()) context["debug_only_sdsc"] = onlySdsc;
++  const int onlyOperandIndex =
++      getMatmulOperandBroadcastOnlyOperandIndex();
++  if (onlyOperandIndex >= 0) {
++    context["debug_only_operand_index"] =
++        std::to_string(onlyOperandIndex);
++  }
 +  const int maxDstCores = getPositiveDebugEnvInt(
 +      "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_DST_CORES");
 +  if (maxDstCores > 0) {
@@ -4019,7 +4075,7 @@ index f09891ab9c..3db8712487 100644
  void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
                               MemTrackBundle* memTrackers,
                               std::vector<SuperDsc*>& relayout_sdscs) {
-@@ -37,6 +1670,138 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -37,6 +1726,154 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          allocCoords.coreIdToWkSlice_ == sdsc->coreIdToWkSlice_)
        continue;
  
@@ -4035,9 +4091,7 @@ index f09891ab9c..3db8712487 100644
 +      // Dense resident all-gather materialization is not safe for Granite
 +      // attention shapes. Keep it behind an explicit diagnostic escape hatch
 +      // until a staged layout-allgather lowering is implemented.
-+      if (std::getenv(
-+              "DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY") ==
-+          nullptr) {
++      if (!layoutAllgatherRestickifyEnabled()) {
 +        emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
 +                                                  layoutAllgatherHook);
 +        DT_CHECK_MSG(
@@ -4046,8 +4100,9 @@ index f09891ab9c..3db8712487 100644
 +            "physical lowering is blocked: dense resident all-gather "
 +            "materialization is unsafe on Granite attention shapes. Use "
 +            "matmul_operand_broadcast for loop-scoped matmul operands, or set "
-+            "DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY=1 only for "
-+            "diagnostic replay experiments.");
++            "SPYRE_LX_PLANNER_RELAYOUT=1 for the relayout prototype. "
++            "DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY=1 remains "
++            "available for direct diagnostic replay experiments.");
 +      }
 +      emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
 +                                                layoutAllgatherHook);
@@ -4058,6 +4113,10 @@ index f09891ab9c..3db8712487 100644
 +    if (matmulBroadcastHook.plan.ok) {
 +      auto matmulBroadcastDebugContext =
 +          matmulOperandBroadcastDebugContext();
++      if (matmulBroadcastHook.classificationOperandIndex >= 0) {
++        matmulBroadcastDebugContext["debug_classification_operand_index"] =
++            std::to_string(matmulBroadcastHook.classificationOperandIndex);
++      }
 +      const auto effectiveMatmulBroadcastHook =
 +          applyMatmulOperandBroadcastDebugLimits(
 +              matmulBroadcastHook, &matmulBroadcastDebugContext);
@@ -4068,6 +4127,20 @@ index f09891ab9c..3db8712487 100644
 +        matmulBroadcastDebugContext["debug_skip_reason"] =
 +            "sdsc name did not match "
 +            "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_SDSC";
++        emitMatmulOperandBroadcastPlanArtifact(
++            sdsc, lds, ps, effectiveMatmulBroadcastHook,
++            /*kernelNeighborLowered=*/false,
++            /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
++        continue;
++      }
++      if (!matmulOperandBroadcastDebugMatchesOperand(
++              effectiveMatmulBroadcastHook)) {
++        matmulBroadcastDebugContext["realized"] = "false";
++        matmulBroadcastDebugContext["physical_lowering_status"] =
++            "debug_skipped";
++        matmulBroadcastDebugContext["debug_skip_reason"] =
++            "operand index did not match "
++            "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_ONLY_OPERAND_INDEX";
 +        emitMatmulOperandBroadcastPlanArtifact(
 +            sdsc, lds, ps, effectiveMatmulBroadcastHook,
 +            /*kernelNeighborLowered=*/false,
@@ -4126,9 +4199,8 @@ index f09891ab9c..3db8712487 100644
 +            "matmul_operand_broadcast metadata was classified, but physical "
 +            "lowering is blocked: current DL matmul lowering still consumes "
 +            "one resident LDS operand pointer and cannot bind staged RHS "
-+            "chunks from IFN/STCDP. Set "
-+            "SPYRE_LX_PLANNER_RELAYOUT=1, or legacy "
-+            "DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1, for the "
++            "chunks from IFN/STCDP. Set SPYRE_LX_PLANNER_RELAYOUT=1 or "
++            "DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1 for the "
 +            "two-stage gather/restickify prototype, or set "
 +            "DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST=1 only for "
 +            "diagnostic small-shape experiments.");
@@ -4158,7 +4230,7 @@ index f09891ab9c..3db8712487 100644
  #ifdef DEBUG_RELAYOUT
      std::cout << "Inserting relayout for: " << lds.dsName_ << std::endl;
  #endif
-@@ -56,23 +1821,37 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -56,23 +1893,37 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
      relayout_sdsc->N_ = sdsc->N_;
      relayout_sdsc->target_ = sdsc->target_;
  
@@ -4198,7 +4270,7 @@ index f09891ab9c..3db8712487 100644
          lx_space_found = false;
          break;
        }
-@@ -133,8 +1912,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -133,8 +1984,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          myLds.pdsName_ = "activation";
          myLds.wordLength = lds.wordLength;
          myLds.df = getDsFormat(lds.wordLength);
@@ -4208,7 +4280,7 @@ index f09891ab9c..3db8712487 100644
  
          // Fill dimNames, layoutDimOrder_, dimToLayoutSize_ and validGap_
          auto& N_ = dldsc.N_;
-@@ -244,6 +2022,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -244,6 +2094,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          for (auto kv :
               (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
            for (auto kv2 : kv.second) {
@@ -4216,7 +4288,7 @@ index f09891ab9c..3db8712487 100644
              wkslices_in_dim[kv2.first].insert(kv2.second);
            }
          }
-@@ -252,15 +2031,28 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -252,15 +2103,28 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
               (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
            PieceInfo new_piece;
            for (auto kv2 : kv.second) {
@@ -4251,7 +4323,7 @@ index f09891ab9c..3db8712487 100644
  
              // Fill validGap_
              new_piece.validGap_[dimName] = {
-@@ -302,13 +2094,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -302,13 +2166,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
              } else {
                // For the output piece, find an empty space in the lx
                auto& memTracker = lxTrackPerCore.at(kv.first);
@@ -4266,7 +4338,7 @@ index f09891ab9c..3db8712487 100644
                DT_CHECK_MSG(stAddr >= 0, "Must find space in LX\n");
                new_piece.placement.at(SenComponents::LX)
                    .insertStAddr(stAddr, {0});
-@@ -345,6 +2132,24 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -345,6 +2204,24 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
            }
          }
        }
@@ -4291,7 +4363,7 @@ index f09891ab9c..3db8712487 100644
      } else {
  #ifdef DEBUG_RELAYOUT
        std::cout << "Lx space not found, inserting stcdpHBM" << std::endl;
-@@ -476,7 +2281,6 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -476,7 +2353,6 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          out_allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
  
          // find space in HBM for the output of relayout
@@ -4299,7 +4371,7 @@ index f09891ab9c..3db8712487 100644
          auto hbm_stAddr = hbmTrack.checkAndAddDs(outLds.dsName_, "dynamic",
                                                   out_form_size, {ps});
          DT_CHECK_MSG(hbm_stAddr >= 0, "Must find space in HBM\n");
-@@ -516,6 +2320,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -516,6 +2392,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
              auto offset_addr = hbm_stAddr;
              for (auto kv : sdsc->coreIdToWkSlice_.at(coreid)) {
                if (sdsc->numWkSlicesPerDim_.at(kv.first) == 1) continue;
@@ -4307,7 +4379,7 @@ index f09891ab9c..3db8712487 100644
                offset_addr += (kv.second *
                                (N_.primaryDimToVal_st(kv.first) /
                                 sdsc->numWkSlicesPerDim_.at(kv.first)) *
-@@ -563,4 +2368,4 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -563,4 +2440,4 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
    std::string filename = "origsdsc_debug_out.json";
    sdsc->exportJson(filename);
  #endif
@@ -4315,10 +4387,10 @@ index f09891ab9c..3db8712487 100644
 \ No newline at end of file
 +}
 diff --git a/dxp/dxp.cpp b/dxp/dxp.cpp
-index 855288ae64..d8d92ead11 100644
+index fb507f4c3..ee0af2032 100644
 --- a/dxp/dxp.cpp
 +++ b/dxp/dxp.cpp
-@@ -52,6 +52,37 @@
+@@ -49,6 +49,37 @@
  #include "util/dt_exception.hpp"
  #include "util/utils.h"
  
@@ -4356,7 +4428,7 @@ index 855288ae64..d8d92ead11 100644
  Dxp::Dxp(const DesignSpaceConfigGlobal& dscGlobal) : dscGlobal(dscGlobal) {
    Isa::generateIsaPerUnit(isaPerUnit, dscGlobal.sysDef);
    // set segment for backend controlled tensors
-@@ -279,7 +310,9 @@ void Dxp::runCodegen(SuperDsc* sdsc) {
+@@ -276,7 +307,9 @@ void Dxp::runCodegen(SuperDsc* sdsc) {
    dcg.createSenProg = false;
  
    // DCG to generate L3 programs
@@ -4368,7 +4440,7 @@ index 855288ae64..d8d92ead11 100644
    } else {
      dcg.runDcgForDlOpsStandalone(*sdsc);
 diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
-index db94b4e587..6aa35ba42e 100644
+index db94b4e58..6aa35ba42 100644
 --- a/dxp/test/dxp_unittest.cpp
 +++ b/dxp/test/dxp_unittest.cpp
 @@ -69,6 +69,198 @@ class DxpTestFixture : public ::testing::Test {
@@ -4633,7 +4705,7 @@ index db94b4e587..6aa35ba42e 100644
    // The test should be launched with env var DEEPTOOLS_PATH set correctly.
    // Verifies that running dxp on test_softmax_1core in bundle mode with
 diff --git a/util/CMakeLists.txt b/util/CMakeLists.txt
-index d269f445ea..87854c6417 100644
+index d269f445e..87854c641 100644
 --- a/util/CMakeLists.txt
 +++ b/util/CMakeLists.txt
 @@ -22,6 +22,7 @@ set(UTIL_SOURCES
@@ -4662,7 +4734,7 @@ index d269f445ea..87854c6417 100644
          )
 diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
 new file mode 100644
-index 0000000000..cdf0f03c69
+index 000000000..cdf0f03c6
 --- /dev/null
 +++ b/util/LayoutAllgatherRestickify.cpp
 @@ -0,0 +1,1078 @@
@@ -5746,7 +5818,7 @@ index 0000000000..cdf0f03c69
 +}  // namespace deeptools
 diff --git a/util/LayoutAllgatherRestickify.h b/util/LayoutAllgatherRestickify.h
 new file mode 100644
-index 0000000000..6ee3d1a358
+index 000000000..6ee3d1a35
 --- /dev/null
 +++ b/util/LayoutAllgatherRestickify.h
 @@ -0,0 +1,144 @@
@@ -5896,7 +5968,7 @@ index 0000000000..6ee3d1a358
 +#endif  // UTIL_LAYOUT_ALLGATHER_RESTICKIFY_H_
 diff --git a/util/test/LayoutAllgatherRestickify_unit_test.cpp b/util/test/LayoutAllgatherRestickify_unit_test.cpp
 new file mode 100644
-index 0000000000..fd0194617d
+index 000000000..fd0194617
 --- /dev/null
 +++ b/util/test/LayoutAllgatherRestickify_unit_test.cpp
 @@ -0,0 +1,1109 @@
