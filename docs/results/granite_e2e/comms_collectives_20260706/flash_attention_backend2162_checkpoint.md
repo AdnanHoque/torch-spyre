@@ -80,11 +80,24 @@ This is not a device wedge and not a missing frontend classification. The Torch 
 
 The current blocker is a Deeptools DDC folding gap: an internal LX allocation with custom `coreIdToWkSlice` cannot propagate coordinates for the `out` corelet split dimension. This is the next backend/runtime issue to debug before claiming flash correctness or performance.
 
+There is also a separate baseline flash correctness concern under investigation outside this communication-collectives lane: broadcasted/unsqueezed views can lose zero-stride layout information before SDSC generation. That means the baseline flash kernel may already read the wrong logical values for some broadcasted view dimensions. Until that is fixed, use this flash script primarily as an SDSC/structure probe for whether HBM relayout rows are replaced by LX movement. Do not use it as the primary proof that the LX communication path is value-correct.
+
 ## What This Proves
 
 - The relayout-on flash bundle structurally removes the HBM restickify rows that appear in the relayout-off baseline.
 - The current backend prototype recognizes the flash matmul operand handoffs as `matmul_operand_broadcast` / `all_gather_replicate`.
-- The path is not yet value-correct or performance-measured for this standalone flash script because DDC aborts before a completed run.
+- The path is not yet value-correct or performance-measured for this standalone flash script because DDC aborts before a completed run, and the baseline kernel has an independent zero-stride broadcast-view correctness concern.
+
+## Communication-Correctness Scope
+
+For this track, the correctness question is narrower than full flash correctness:
+
+1. Does each planned LX movement cover exactly the destination logical cells, with no gaps or overlaps?
+2. Does each destination cell receive bytes from the producer cell with the same logical coordinates?
+3. Does backend lowering preserve source and destination LX addresses without clobbering live allocations?
+4. Does the on-chip path match the HBM fallback on synthetic patterned tensors that avoid the known zero-stride view bug?
+
+Until the baseline flash view issue is fixed, those synthetic communication tests and Granite handoff artifacts are the right evidence for whether our on-chip movement introduces an additional correctness issue.
 
 ## Next Debug Step
 
