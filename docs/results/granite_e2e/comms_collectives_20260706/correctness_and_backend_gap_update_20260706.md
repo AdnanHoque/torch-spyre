@@ -6,6 +6,14 @@ This note updates the communication-collectives status after separating flash at
 
 Jamie's current read is that the standalone flash attention baseline still has an unrelated value-correctness issue: an `unsqueeze`/broadcast view can lose zero-stride layout information before SDSC generation. `TensorArg` carries `device_size` and `device_coordinates`, but not the original `stride_map`, so SDSC generation can recompute dense strides that make a broadcast dimension change the linear offset.
 
+The specific failure mode is a broadcasted `running_max.unsqueeze(-1)`-style view. Logically, the inserted trailing dimension has zero stride, so indexing along that dimension should keep reading the same original `running_max[b, h, lq]` value. Today the layout path can represent that through `SpyreTensorLayout.stride_map`, but the information is dropped before SDSC emission:
+
+- `TensorArg` records `device_size` and `device_coordinates`, but not `stride_map`.
+- `create_tensor_arg()` drops `tensor.layout.device_layout.stride_map`.
+- `superdsc.py` later reconstructs dense strides from `device_size` alone.
+
+That turns a broadcasted device view like `[1, 512, 4, 2, 64]` into a dense-strided view where the broadcast `2` incorrectly changes earlier offsets. This can make a producer writing `[1, 512, 4, 64]` and a consumer reading the same allocation as `[1, 512, 4, 2, 64]` disagree even without any on-chip relayout involved.
+
 That is not the communication-collectives bug we are chasing here.
 
 For this track, the clean question is:
