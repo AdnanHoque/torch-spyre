@@ -112,4 +112,4 @@ A clean no-profile wall-sync comparison was added under `runs/kernel_neighbor_s5
 - wall-only speedup: `1.010x`
 - profiler overlay status: blocked by `_C.so` ABI mismatch (`PrivateUse1ProfilerRegistry` undefined symbol), so this is not a Kineto `kernel_ms` claim.
 
-The SDSC delta is the useful proof point: the attention first-kernel handoff changes from `sdsc_7: ReStickifyOpHBM` to `sdsc_7: ReStickifyOpLx`, with two backend `matmul_operand_broadcast` plans lowered as loop-scoped kernel-neighbor movement. Remaining HBM rows are post-attention/RMS and MLP/SwiGLU activation/layout handoffs, not weight preload restickifies.
+The SDSC delta is the useful proof point: the attention first-kernel handoff changes from `sdsc_7: ReStickifyOpHBM` to `sdsc_7: ReStickifyOpLx`, with two backend `matmul_operand_broadcast` plans lowered as loop-scoped kernel-neighbor movement. Follow-up debug logging shows the remaining HBM rows in this run are projection weight/prelayout restickifies, not computed activation spills. Those rows are out of scope for this communication pass and should be handled by the separate weight preload/prelayout lane.

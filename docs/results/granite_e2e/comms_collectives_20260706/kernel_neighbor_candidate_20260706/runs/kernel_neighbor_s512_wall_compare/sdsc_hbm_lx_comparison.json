@@ -195,6 +195,51 @@
       }
     ]
   },
+  "remaining_hbm_interpretation": {
+    "rows": [
+      {
+        "buffer": "buf45",
+        "kernel": "sdsc_fused_linear_rms_norm_0",
+        "meaning": "QKV/front attention projection weight",
+        "row": "sdsc_6",
+        "shape": [
+          6144,
+          4096
+        ]
+      },
+      {
+        "buffer": "buf47",
+        "kernel": "sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2",
+        "meaning": "attention output projection weight",
+        "row": "sdsc_0",
+        "shape": [
+          4096,
+          4096
+        ]
+      },
+      {
+        "buffer": "buf48",
+        "kernel": "sdsc_fused_add_linear_mul_silu_split_with_sizes_3",
+        "meaning": "MLP gate/up projection weight",
+        "row": "sdsc_0",
+        "shape": [
+          25600,
+          4096
+        ]
+      },
+      {
+        "buffer": "buf49",
+        "kernel": "sdsc_fused_add_linear_mul_silu_split_with_sizes_3",
+        "meaning": "MLP down projection weight",
+        "row": "sdsc_4",
+        "shape": [
+          4096,
+          12800
+        ]
+      }
+    ],
+    "scope": "weight/prelayout rows, not computed activation spills"
+  },
   "timing": {
     "disabled": {
       "all_ms": [

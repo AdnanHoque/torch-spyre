@@ -20,10 +20,10 @@ Wall speedup: `1.010x` (0.286 ms).
 
 The solved edge in this candidate is the attention value-side matmul operand handoff inside the first attention kernel. In the disabled run it appears as `sdsc_7: ReStickifyOpHBM`; in the enabled run the same row is `sdsc_7: ReStickifyOpLx`, with two backend `matmul_operand_broadcast` plans lowered as loop-scoped kernel-neighbor movement.
 
-Remaining `ReStickifyOpHBM` rows are activation/layout handoffs outside that solved attention operand edge:
+Remaining `ReStickifyOpHBM` rows are weight/prelayout restickifies outside the on-chip activation communication scope:
 - `sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2_i8_4ggpw/sdsc_0.json`: `0_ReStickifyOpHBM`, split `{'mb': 32, 'out': 1}`
 - `sdsc_fused_add_linear_mul_silu_split_with_sizes_3_21f9_3dl/sdsc_0.json`: `0_ReStickifyOpHBM`, split `{'mb': 25, 'out': 1}`
 - `sdsc_fused_add_linear_mul_silu_split_with_sizes_3_21f9_3dl/sdsc_4.json`: `4_ReStickifyOpHBM`, split `{'mb': 1, 'out': 25}`
 - `sdsc_fused_linear_rms_norm_0_d7zujvzt/sdsc_6.json`: `6_ReStickifyOpHBM`, split `{'mb': 32, 'out': 1}`
 
-These are not weight preloads in this run; they are `OUTPUT -> KERNEL` activation/layout restickifies that need the next communication classes or layout-changing LX restickify support.
+Debug logging maps these remaining rows to projection weights, not computed activations: QKV/front attention projection `[6144,4096]`, attention output projection `[4096,4096]`, MLP gate/up projection `[25600,4096]`, and MLP down projection `[4096,12800]`. These are expected to be handled by offline weight preload/prelayout work, so they are out of scope for the activation communication pass.
