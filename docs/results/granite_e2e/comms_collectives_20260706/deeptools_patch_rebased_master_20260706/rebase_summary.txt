@@ -1,7 +1,11 @@
-source_branch=Adnan-Hoque1/deeptools ah/comms-collectives-mixed-neighbor-probe
-source_head=da52ebdee91a5cee0a933e0adba9cb8f689fe213
-upstream_master=949cfeea885e05cb12dd37ea07d480d82f1ee27c
-merge_base=0a9da5eb19d08712383312bb7dec18fbd7caf711
-generated=2026-07-06T22:58:45Z
-focused_tests=LayoutAllgatherRestickify 32/32, CoreWorkDivIncomptLxRelayout 2/2
-granite_s512_one_gate_replay=rc0 plan_count1
+Generated: 2026-07-06
+Source branch: Adnan-Hoque1/deeptools ah/comms-collectives
+Source head: 5faca11015753999da1d26b87ecccdb08e4975ce
+Upstream master observed: 949cfeea885e05cb12dd37ea07d480d82f1ee27c
+Merge base: 0a9da5eb19d08712383312bb7dec18fbd7caf711
+Focused validation on CDX:
+- cmake --build build-deeptools --target dxp_standalone dxp_unit_test util_unit_test -j8: passed
+- LayoutAllgatherRestickify.*: 32/32 passed
+- DxpTestFixture.CoreWorkDivIncomptLxRelayout*: 2/2 passed
+- Direct replay of previously failing flash SDSC with SPYRE_LX_PLANNER_RELAYOUT=1 and legacy flags unset: rc=0, 64 backend plans
+- Full test_flash.py structural probe with SPYRE_LX_PLANNER_RELAYOUT=1 and legacy flags unset: rc=0, ReStickifyOpHBM=0, ReStickifyOpLx=64, 64 gather_then_restickify plans

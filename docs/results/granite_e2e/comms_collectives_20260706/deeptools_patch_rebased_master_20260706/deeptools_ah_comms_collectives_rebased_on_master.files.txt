@@ -6,6 +6,7 @@ dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
 dcg/dcg_fe/pcfg_gen/pcfg_gen.cpp
 dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
 dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+dcg/dcg_fe/scheduler/L3DlOpsScheduler.h
 dcg/dcg_manager/dcg_common.h
 ddc/ddc.h
 ddc/ddc_fold.cpp
