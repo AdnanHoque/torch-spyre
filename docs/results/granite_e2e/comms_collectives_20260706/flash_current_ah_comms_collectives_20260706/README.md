@@ -2,7 +2,7 @@
 
 Date: 2026-07-06
 
-This records a fresh CDX rerun of the flash compile/lowering probe using the current Deeptools `ah/comms-collectives` head after the DLDSC extent fix.
+This records fresh CDX reruns of the flash compile/lowering probe using the current Deeptools `ah/comms-collectives` head after the DLDSC extent fix.
 
 This is not a value-correctness claim. The run uses the existing compile-probe patch that skips host-to-device copies and skips the CPU reference assertion so we can isolate Torch/DXP lowering behavior.
 
@@ -19,13 +19,19 @@ Deeptools branch: ah/comms-collectives
 
 ## Runs
 
-Default current run:
+Gather/restickify carrier only:
+
+```text
+/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_current_ah_comms_collectives_gather_only_20260706_165643
+```
+
+Kernel-neighbor carrier enabled:
 
 ```text
 /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_current_ah_comms_collectives_20260706_164837
 ```
 
-Diagnostic run with `DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1`:
+Kernel-neighbor carrier with `DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1`:
 
 ```text
 /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_current_ah_comms_collectives_diag_20260706_165024
@@ -33,18 +39,29 @@ Diagnostic run with `DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1`:
 
 ## Result
 
-Both runs fail before successful DXP lowering.
+The current branch succeeds when flash uses the `gather_then_restickify` carrier. The experimental kernel-neighbor/input-fetch carrier still fails on this flash shape.
 
 | Run | rc | SDSC files | ReStickifyOpHBM string hits | ReStickifyOpLx string hits | Backend plan files |
 |---|---:|---:|---:|---:|---:|
-| default | 1 | 549 | 0 | 160 | 0 |
-| diagnostic | 1 | 549 | 0 | 160 | 0 |
+| gather/restickify carrier only | 0 | 550 | 0 | 160 | 32 |
+| kernel-neighbor carrier | 1 | 549 | 0 | 160 | 0 |
+| kernel-neighbor diagnostic | 1 | 549 | 0 | 160 | 0 |
 
-The structural frontend side is still doing the expected thing: no HBM restickify rows appear and LX restickify rows are generated. The failure is in backend realization/scheduling before plan artifacts are emitted.
+The successful gather/restickify run emits:
+
+```text
+realization_strategy: gather_then_restickify
+communication_pattern: all_gather_replicate
+backend plans: 32
+logical_transfer_count per plan: 256
+stdout: SUCCESS
+```
+
+This means the current branch can still remove the flash activation HBM restickifies structurally, as long as the carrier selection stays on the staged gather/restickify path.
 
 ## Failure Modes
 
-Default run fails on a backend scheduling guard:
+The kernel-neighbor carrier fails on a backend scheduling guard:
 
 ```text
 DtException: Do not support double buffering and input-neighbor fetch coexisting in the same DSC.
@@ -69,25 +86,23 @@ file .../dsc/foldManager/foldInfrastructure.h line 2983
 
 ## Interpretation
 
-The older clean `gather-restickify` split branch had a successful flash compile/lowering probe:
+The older clean `gather-restickify` split branch and the current `ah/comms-collectives` branch agree on the important structural result when the carrier is gather/restickify:
 
 ```text
 ReStickifyOpHBM: 0
-ReStickifyOpLx: 32 top-level rows
 backend plans: 32
 kind: matmul_operand_broadcast
 communication_pattern: all_gather_replicate
 realization_strategy: gather_then_restickify
 ```
 
-The current prototype branch regressed for flash because the newer kernel-neighbor / input-fetch path collides with double buffering and then fails fold solving even under the diagnostic escape hatch. This is the next backend gap for flash attention.
+The current prototype branch only regresses for flash when the newer kernel-neighbor/input-fetch path is forced. That path collides with double buffering and then fails fold solving even under the diagnostic escape hatch. This is the next backend gap for the more aggressive carrier, not for the staged gather/restickify carrier.
 
 Granite S512 is not blocked by this specific flash failure: Granite causal prefill successfully replaces the in-scope attention activation/layout HBM spill with `ReStickifyOpLx` on the current branch.
 
 ## Next Work
 
-1. Decide whether flash matmul operand all-gather should use the older `gather_then_restickify` realization instead of the newer kernel-neighbor/input-fetch route for this shape.
-2. If kernel-neighbor remains the intended carrier, define a production scheduling rule for coexistence with double buffering instead of relying on the diagnostic env.
-3. Fix the fold-solving failure for `lxlu -> ptrow0` coordinate offsets after the diagnostic guard is bypassed.
-4. Re-run the compile probe and archive backend plan files once DXP lowering succeeds.
-
+1. Treat `gather_then_restickify` as the current production candidate carrier for flash all-gather/restickify.
+2. Keep kernel-neighbor/input-fetch behind an experimental gate until double-buffer coexistence has a real scheduling rule.
+3. Fix the fold-solving failure for `lxlu -> ptrow0` coordinate offsets before using the kernel-neighbor path for this flash shape.
+4. Re-run value correctness only after the known baseline zero-stride/broadcast issue is fixed or bypassed.

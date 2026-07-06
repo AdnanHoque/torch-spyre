@@ -1,0 +1,21 @@
+{
+  "run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_current_ah_comms_collectives_gather_only_20260706_165643",
+  "returncode": 0,
+  "counts": {
+    "ReStickifyOpHBM": 0,
+    "ReStickifyOpLx": 160,
+    "sdsc_files": 550,
+    "backend_plans": 32
+  },
+  "realization_strategies": {
+    "gather_then_restickify": 32
+  },
+  "communication_patterns": {
+    "all_gather_replicate": 32
+  },
+  "logical_transfer_counts_unique": [
+    "256"
+  ],
+  "stdout_tail": "[runtime_patch] no_h2d Tensor.to(device=spyre) compile probe enabled\n[runtime_patch] assert_close skipped for compile probe\nSUCCESS",
+  "stderr_key_lines": []
+}
