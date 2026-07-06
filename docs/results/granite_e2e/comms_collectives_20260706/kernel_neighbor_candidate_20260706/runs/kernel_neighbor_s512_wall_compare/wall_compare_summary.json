@@ -1,0 +1,26 @@
+{
+  "disabled": {
+    "all_ms": [
+      29.825,
+      28.777,
+      28.891,
+      28.787,
+      28.714
+    ],
+    "error": null,
+    "median_ms": 28.786897659301758,
+    "returncode": 0
+  },
+  "kernel_neighbor": {
+    "all_ms": [
+      29.117,
+      28.501,
+      28.396,
+      28.187,
+      28.941
+    ],
+    "error": null,
+    "median_ms": 28.500795364379883,
+    "returncode": 0
+  }
+}
