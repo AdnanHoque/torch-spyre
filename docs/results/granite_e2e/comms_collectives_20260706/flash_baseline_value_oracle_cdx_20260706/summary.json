@@ -1,0 +1,8 @@
+{
+  "run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_baseline_value_oracle_20260706_122337",
+  "returncode": "1",
+  "assert_close_failed": true,
+  "mismatched_line": "Mismatched elements: 12602561 / 16777216 (75.1%)",
+  "absdiff_line": "Greatest absolute difference: inf at index (0, 0, 1, 1) (up to 0.1 allowed)",
+  "reldiff_line": "Greatest relative difference: nan at index (0, 0, 1, 1) (up to 0.1 allowed)"
+}
