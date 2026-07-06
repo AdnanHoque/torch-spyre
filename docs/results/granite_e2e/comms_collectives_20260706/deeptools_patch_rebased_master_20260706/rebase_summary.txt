@@ -1,6 +1,6 @@
-Source: Adnan-Hoque1/deeptools ah/comms-collectives
+Deeptools patch regenerated: 2026-07-06T22:11:33Z
 Base: origin/master 0a9da5eb19d08712383312bb7dec18fbd7caf711
-Head: 9092d48e0ae6af1d7cc66e4bd6128f2196e7f495
-Generated: 2026-07-06 from adnan-cdx-spyre-dev-pf
-
-This patch includes the SPYRE_LX_PLANNER_RELAYOUT gate and the coordinate-overlap transfer grouping fix.
+Head: ah/comms-collectives 9092d48e0ae6af1d7cc66e4bd6128f2196e7f495
+Single feature gate: SPYRE_LX_PLANNER_RELAYOUT=1
+This gate aliases the Deeptools gather/restickify relayout path that previously required DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY.
+For direct dxp_standalone replay outside Torch, set DXP_LX_FRAC_AVAIL=1 manually because Torch is not launching DXP in that mode.
