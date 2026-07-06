@@ -95,3 +95,16 @@ A local DEV-only Deeptools experiment added `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_
 - runtime signature still includes `RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0`
 
 This rules out the simplest schedule-flag explanation. The remaining runtime gap is more likely in the mixed data-op/compute schedule shape, the participating-core schedule coverage, or the `STCDPOpLx -> ReStickifyOpLx -> matmul operand` carrier sequence itself.
+
+## Focused attention schedule-all-cores repro
+
+Artifact: `focused_attention_schedule_all_cores_timeout/summary.json`
+
+A second local DEV-only Deeptools experiment added `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_SCHEDULE_ALL_CORES=1`, which inserts the staged gather/restickify rows into every consumer schedule core instead of only the source/destination cores used by the capped chunk. The focused attention reproducer still timed out at `torch.accelerator.synchronize()`.
+
+- return code: `124` from the 180s timeout wrapper
+- backend plans: `2`
+- both plans still capped with `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS=1`
+- runtime signature still includes `RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0`
+
+This rules out the second simple explanation: sparse participating-core schedule coverage was not sufficient to explain the lost completion. The next useful split is not another schedule-flag tweak; it should isolate whether `STCDPOpLx` alone completes, whether `ReStickifyOpLx` inside the same mixed bundle is the failing carrier, or whether runtime does not support this staged data-op-plus-matmul shape in a single consumer SDSC.

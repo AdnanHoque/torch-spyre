@@ -1,0 +1,5 @@
+[31m ERRR 06.07.2026 09:40:21.009782 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 — possible lost completion[0m
+[31m ERRR 06.07.2026 09:40:21.010933 [            runtime_stream.cpp: 150] RuntimeStream::synchronize() device=0 completed after 60001ms (1 timeout warning(s))[0m
+[31m ERRR 06.07.2026 09:41:33.755596 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 — possible lost completion[0m
+Signal Received: 15 (Terminated)
+Signal Received from pid=1175480 
