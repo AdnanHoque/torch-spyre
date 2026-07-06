@@ -22,11 +22,12 @@ Do not require this older backend flag for new repros:
 # export DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1
 ```
 
-For full-LX Granite or flash experiments, the split DXP capacity setup is still needed when using the wrapper. This is runtime capacity plumbing, not a second relayout feature flag:
+If Antoni applies both portable patches, normal Torch-launched Granite or flash runs should not need the old split-LX wrapper. The Torch patch defaults frontend LX planning to full LX and passes backend workspace to the `dxp_standalone` subprocess under the same umbrella flag.
+
+Only direct manual SDSC replay that bypasses Torch needs an explicit backend workspace setting:
 
 ```bash
-export DXP_LX_FRAC_AVAIL=0
-export DXP_BACKEND_LX_FRAC_AVAIL=1
+SPYRE_LX_PLANNER_RELAYOUT=1 DXP_LX_FRAC_AVAIL=1 dxp_standalone -d path/to/sdsc_bundle
 ```
 
-If Antoni is applying portable patches to his own environment, give him both patches and the single feature flag above. If his environment already uses the split DXP wrapper, the capacity split is the only extra setup detail.
+If Antoni is applying portable patches to his own environment, give him both patches and the single feature flag above.

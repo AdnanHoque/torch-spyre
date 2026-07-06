@@ -29,14 +29,13 @@ export SPYRE_LX_PLANNER_RELAYOUT=1
 
 The old `DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1` flag remains as a compatibility alias only. Do not ask new users to set it.
 
-For Granite-style full-LX experiments, keep the LX capacity split as a separate runtime setup detail, not as a feature flag:
+For patched Torch-launched Granite/flash experiments, the old split-LX wrapper is not required. With `SPYRE_LX_PLANNER_RELAYOUT=1`, Torch defaults frontend planning to full LX and passes `DXP_LX_FRAC_AVAIL=1` only to the `dxp_standalone` subprocess.
+
+Only direct manual SDSC replay that bypasses Torch needs explicit backend workspace:
 
 ```bash
-export DXP_LX_FRAC_AVAIL=0
-export DXP_BACKEND_LX_FRAC_AVAIL=1
+SPYRE_LX_PLANNER_RELAYOUT=1 DXP_LX_FRAC_AVAIL=1 dxp_standalone -d path/to/sdsc_bundle
 ```
-
-The split LX setting remains important: Torch sees `DXP_LX_FRAC_AVAIL=0` for full frontend LX planning, while the DXP wrapper rewrites `DXP_BACKEND_LX_FRAC_AVAIL=1` for the backend subprocess.
 
 ## Historical artifacts
 
