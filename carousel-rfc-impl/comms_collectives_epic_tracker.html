@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Granite Comms-Collectives Epic Tracker</title>
+</head>
+<body>
+<style>
+  .cc3049 {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel2: #1c232d;
+    --ink: #e8edf3;
+    --muted: #9aa7b4;
+    --faint: #6b7787;
+    --line: #2a323d;
+    --accent: #6ea8fe;
+    /* status categorical (accessible, label always present too) */
+    --measured: #2fbf71;
+    --structural: #e0a53d;
+    --validated: #4aa8d8;
+    --design: #8a94a3;
+    --inprogress: #b083e0;
+    --blocked: #e0645f;
+    /* owner */
+    --codex: #6c8cff;
+    --claude: #46c3a6;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--ink);
+    font-family: var(--font);
+    line-height: 1.55;
+    font-size: 15px;
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  @media (prefers-color-scheme: light) {
+    .cc3049 {
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --panel2: #eef2f7;
+      --ink: #16202b;
+      --muted: #55636f;
+      --faint: #8a97a4;
+      --line: #dbe2ea;
+      --measured: #1f9d5a;
+      --structural: #b7791f;
+      --validated: #2f88b3;
+      --design: #6b7684;
+      --inprogress: #8a52c9;
+      --blocked: #c9463f;
+    }
+  }
+  .cc3049 :root[data-theme="dark"] & { color-scheme: dark; }
+  .cc3049 * { box-sizing: border-box; }
+  .cc3049 .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 22px 80px; }
+  .cc3049 h1, .cc3049 h2, .cc3049 h3, .cc3049 h4 { line-height: 1.2; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
+  .cc3049 p { margin: 0 0 12px; }
+  .cc3049 a { color: var(--accent); }
+  .cc3049 code, .cc3049 .mono { font-family: var(--mono); font-size: 0.85em; }
+
+  /* ---- HERO ---- */
+  .cc3049 .hero {
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: linear-gradient(160deg, var(--panel2), var(--panel));
+    padding: 30px 30px 26px;
+    position: relative;
+    overflow: hidden;
+  }
+  .cc3049 .epic-tag {
+    display: inline-block; font-family: var(--mono); font-size: 12px; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--accent); border: 1px solid var(--line);
+    background: rgba(110,168,254,0.08); padding: 4px 10px; border-radius: 999px; margin-bottom: 14px;
+  }
+  .cc3049 .hero h1 { font-size: clamp(26px, 4vw, 40px); }
+  .cc3049 .hero .sub { color: var(--muted); font-size: 16px; margin-top: 14px; max-width: 900px; }
+  .cc3049 .northstar {
+    margin-top: 20px; padding: 16px 18px; border-left: 3px solid var(--measured);
+    background: rgba(47,191,113,0.07); border-radius: 0 10px 10px 0; font-size: 15px;
+  }
+  .cc3049 .northstar b { color: var(--ink); }
+
+  /* ---- summary tiles ---- */
+  .cc3049 .glance { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 22px; }
+  .cc3049 .gtile { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 14px 16px; }
+  .cc3049 .gtile .big { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+  .cc3049 .gtile .lbl { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+
+  /* ---- section scaffolding ---- */
+  .cc3049 .sec { margin-top: 48px; }
+  .cc3049 .sec > h2 { font-size: 22px; display: flex; align-items: baseline; gap: 12px; }
+  .cc3049 .sec > h2 .num { font-family: var(--mono); font-size: 14px; color: var(--faint); }
+  .cc3049 .sec > .lede { color: var(--muted); margin-top: 10px; max-width: 940px; }
+  .cc3049 .panel { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 20px 22px; margin-top: 16px; }
+
+  /* ---- chips ---- */
+  .cc3049 .chip {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700;
+    letter-spacing: 0.02em; padding: 3px 9px; border-radius: 999px; text-transform: uppercase;
+    border: 1px solid transparent; white-space: nowrap;
+  }
+  .cc3049 .chip .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .cc3049 .chip.measured   { color: var(--measured);   border-color: var(--measured);   background: rgba(47,191,113,0.10); }
+  .cc3049 .chip.structural { color: var(--structural); border-color: var(--structural); background: rgba(224,165,61,0.10); }
+  .cc3049 .chip.validated  { color: var(--validated);  border-color: var(--validated);  background: rgba(74,168,216,0.10); }
+  .cc3049 .chip.design     { color: var(--design);     border-color: var(--design);     background: rgba(138,148,163,0.10); }
+  .cc3049 .chip.inprogress { color: var(--inprogress); border-color: var(--inprogress); background: rgba(176,131,224,0.10); }
+  .cc3049 .chip.blocked    { color: var(--blocked);    border-color: var(--blocked);    background: rgba(224,100,95,0.10); }
+  .cc3049 .chip.measured .dot{background:var(--measured);} .cc3049 .chip.structural .dot{background:var(--structural);}
+  .cc3049 .chip.validated .dot{background:var(--validated);} .cc3049 .chip.design .dot{background:var(--design);}
+  .cc3049 .chip.inprogress .dot{background:var(--inprogress);} .cc3049 .chip.blocked .dot{background:var(--blocked);}
+
+  .cc3049 .owner { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 800;
+    padding: 3px 10px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .cc3049 .owner.codex  { color: #fff; background: var(--codex); }
+  .cc3049 .owner.claude { color: #06231d; background: var(--claude); }
+  .cc3049 .owner.shared { color: #fff; background: linear-gradient(90deg, var(--codex), var(--claude)); }
+  .cc3049 .owner.epic   { color: var(--ink); background: var(--panel2); border: 1px solid var(--line); }
+
+  /* ---- legend ---- */
+  .cc3049 .legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 14px; align-items: center; }
+  .cc3049 .legend .li { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
+  .cc3049 .legend .sw { width: 12px; height: 12px; border-radius: 3px; }
+
+  /* ---- primer / physics ---- */
+  .cc3049 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 820px){ .cc3049 .two { grid-template-columns: 1fr; } }
+  .cc3049 .figwrap { border: 1px solid var(--line); border-radius: 12px; background: var(--panel2); padding: 16px; text-align: center; }
+  .cc3049 .figcap { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .cc3049 svg { max-width: 100%; height: auto; }
+
+  /* ---- convergence ---- */
+  .cc3049 .svgscroll { overflow-x: auto; }
+
+  /* ---- phase board ---- */
+  .cc3049 .phases { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 820px){ .cc3049 .phases { grid-template-columns: 1fr; } }
+  .cc3049 .phase { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); overflow: hidden; }
+  .cc3049 .phase .ph-head { padding: 16px 18px 14px; border-bottom: 1px solid var(--line); }
+  .cc3049 .phase .ph-head h3 { font-size: 16px; }
+  .cc3049 .phase .ph-goal { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .cc3049 .phase .ph-body { padding: 14px 18px 18px; }
+  .cc3049 .clist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .cc3049 .clist li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+  .cc3049 .clist li .cname { flex: 1 1 auto; min-width: 160px; }
+  .cc3049 .ph-gaps { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+  .cc3049 .ph-gaps .g-h { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--blocked); font-weight: 700; }
+  .cc3049 .ph-gaps ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; }
+  .cc3049 .ph-gaps li { margin-bottom: 5px; }
+  .cc3049 .status-badge { font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; padding: 4px 11px; border-radius: 999px; }
+  .cc3049 .sb-landed { background: rgba(47,191,113,0.15); color: var(--measured); border: 1px solid var(--measured); }
+  .cc3049 .sb-inprog { background: rgba(176,131,224,0.15); color: var(--inprogress); border: 1px solid var(--inprogress); }
+  .cc3049 .sb-blocked { background: rgba(224,100,95,0.15); color: var(--blocked); border: 1px solid var(--blocked); }
+  .cc3049 .sb-notstarted { background: rgba(138,148,163,0.12); color: var(--design); border: 1px solid var(--design); }
+
+  /* ---- taxonomy matrix ---- */
+  .cc3049 .taxwrap { overflow-x: auto; }
+  .cc3049 table.tax { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 13.5px; }
+  .cc3049 table.tax th, .cc3049 table.tax td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .cc3049 table.tax th { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--faint); font-weight: 700; }
+  .cc3049 table.tax td.cls { font-weight: 700; white-space: nowrap; }
+  .cc3049 .cov { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; padding: 3px 10px; border-radius: 999px; }
+  .cc3049 .cov-done { color: var(--measured); background: rgba(47,191,113,0.12); border: 1px solid var(--measured); }
+  .cc3049 .cov-prototype { color: var(--inprogress); background: rgba(176,131,224,0.12); border: 1px solid var(--inprogress); }
+  .cc3049 .cov-partial { color: var(--structural); background: rgba(224,165,61,0.12); border: 1px solid var(--structural); }
+  .cc3049 .cov-notstarted { color: var(--design); background: rgba(138,148,163,0.12); border: 1px solid var(--design); }
+  .cc3049 .covbar { height: 6px; border-radius: 3px; background: var(--line); margin-top: 8px; overflow: hidden; }
+  .cc3049 .covbar > span { display: block; height: 100%; }
+
+  /* ---- contribution ledger ---- */
+  .cc3049 .ledger-group { margin-top: 22px; }
+  .cc3049 .ledger-group > h3 { font-size: 15px; color: var(--muted); display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+  .cc3049 .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 860px){ .cc3049 .cards { grid-template-columns: 1fr; } }
+  .cc3049 .card { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 16px 17px; display: flex; flex-direction: column; }
+  .cc3049 .card .c-top { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+  .cc3049 .card h4 { font-size: 14.5px; margin: 4px 0 8px; }
+  .cc3049 .card .c-detail { font-size: 13px; color: var(--ink); }
+  .cc3049 .card .c-why { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .cc3049 .card .c-ev { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin-top: 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; word-break: break-word; }
+  .cc3049 .card .c-gap { font-size: 12.5px; margin-top: 10px; padding-left: 12px; border-left: 2px solid var(--blocked); color: var(--muted); }
+  .cc3049 .card .c-gap b { color: var(--blocked); font-weight: 700; }
+
+  /* ---- measured results ---- */
+  .cc3049 .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+  .cc3049 .stat { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 14px 15px; position: relative; }
+  .cc3049 .stat .kind { position: absolute; top: 12px; right: 12px; }
+  .cc3049 .stat .val { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; margin: 22px 0 4px; }
+  .cc3049 .stat .lbl2 { font-size: 12.5px; color: var(--muted); }
+  .cc3049 .stat .src { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-top: 8px; word-break: break-word; }
+  .cc3049 .stat.k-measured { border-left: 3px solid var(--measured); }
+  .cc3049 .stat.k-structural { border-left: 3px solid var(--structural); }
+  .cc3049 .stat.k-validated { border-left: 3px solid var(--validated); }
+  .cc3049 .stat.k-modeled { border-left: 3px solid var(--inprogress); }
+
+  /* ---- gaps ---- */
+  .cc3049 .gap-item { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); padding: 16px 18px; margin-top: 12px; }
+  .cc3049 .gap-item h4 { font-size: 14.5px; display: flex; gap: 10px; align-items: flex-start; }
+  .cc3049 .gap-item h4 .gnum { font-family: var(--mono); color: var(--blocked); font-weight: 800; }
+  .cc3049 .gap-item .row { display: grid; grid-template-columns: 90px 1fr; gap: 6px 14px; margin-top: 10px; font-size: 13px; }
+  .cc3049 .gap-item .row .k { color: var(--faint); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; padding-top: 2px; }
+  .cc3049 .shared-blocker { border: 1px solid var(--blocked); border-radius: 12px; background: rgba(224,100,95,0.06); padding: 18px 20px; margin-top: 20px; }
+  .cc3049 .shared-blocker h4 { color: var(--blocked); font-size: 15px; margin-bottom: 8px; }
+
+  /* ---- honesty footer ---- */
+  .cc3049 .honesty { border: 1px solid var(--line); border-radius: 14px; background: var(--panel2); padding: 20px 22px; margin-top: 24px; }
+  .cc3049 .honesty .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 14px; margin-top: 12px; }
+  .cc3049 .honesty .hi { font-size: 13px; }
+  .cc3049 .honesty .hi .h { font-weight: 800; display: inline-flex; align-items: center; gap: 7px; }
+  .cc3049 .foot { margin-top: 30px; color: var(--faint); font-size: 12px; text-align: center; }
+  .cc3049 .divider-note { font-size: 12.5px; color: var(--faint); margin-top: 6px; }
+</style>
+
+<div class="cc3049">
+<div class="wrap">
+
+  <!-- ============ 1. HERO ============ -->
+  <div class="hero">
+    <span class="epic-tag">Epic #3049 · Master First-Principles Progress Tracker</span>
+    <h1>Remove Avoidable Granite HBM Activation Spills With On-Chip LX Communication Collectives</h1>
+    <p class="sub">
+      Scatter is productionized and <b>MEASURED</b> (~1.065&times; kernel on Granite S512). The work is one ring
+      substrate split into two converging halves: <span class="owner codex">codex</span> builds the
+      <b>mechanism / lowering</b> half (make the on-chip collective legal and value-correct), and
+      <span class="owner claude">claude</span> builds the <b>selectability + arithmetic-collective</b> halves
+      (the cost model that makes the planner <i>pick</i> the on-chip move, and the LSE reduce lane codex parks).
+    </p>
+    <div class="northstar">
+      <b>North star.</b> When an intermediate Granite activation is already resident in on-chip LX scratchpad,
+      spilling it to HBM and reloading it only to satisfy a different consumer layout / work-division is pure waste.
+      Move it <b>core-to-core over the ring (LX&#8594;LX relayout)</b> instead. Express the move as
+      <b>DLDSC coordinate metadata</b>: Inductor records the residency/compute contract &#8594; the LX planner
+      classifies (and eventually costs) the comms class &#8594; Deeptools checks legality and synthesizes the
+      physical move &#8594; later work overlaps it with compute.
+      <span class="divider-note">Weight restickifies are explicitly <b>out of scope</b> (handled by offline preload / prelayout).</span>
+    </div>
+
+    <div class="glance">
+      <div class="gtile"><div class="big" style="color:var(--measured)">1 / 7</div><div class="lbl">comms classes <b>done</b> (scatter, measured)</div></div>
+      <div class="gtile"><div class="big" style="color:var(--inprogress)">4 / 7</div><div class="lbl">classes in prototype / partial</div></div>
+      <div class="gtile"><div class="big" style="color:var(--measured)">~1.065&times;</div><div class="lbl">kernel, Granite S512 (MEASURED)</div></div>
+      <div class="gtile"><div class="big" style="color:var(--validated)">6</div><div class="lbl">phases scoped &middot; P1 landed</div></div>
+      <div class="gtile"><div class="big" style="color:var(--blocked)">1</div><div class="lbl">shared upstream blocker (KERNEL-operand all-gather)</div></div>
+    </div>
+  </div>
+
+  <div class="legend" aria-label="status legend">
+    <span class="li"><span class="sw" style="background:var(--measured)"></span> MEASURED — device / trace</span>
+    <span class="li"><span class="sw" style="background:var(--structural)"></span> STRUCTURAL — compile-artifact delta, value not verified</span>
+    <span class="li"><span class="sw" style="background:var(--validated)"></span> VALIDATED — device-free reference / unit</span>
+    <span class="li"><span class="sw" style="background:var(--inprogress)"></span> MODELED / IN-PROGRESS — analytic or partial</span>
+    <span class="li"><span class="sw" style="background:var(--blocked)"></span> BLOCKED</span>
+    <span class="li"><span class="sw" style="background:var(--codex)"></span> codex (mechanism)</span>
+    <span class="li"><span class="sw" style="background:var(--claude)"></span> claude (selectability + reduce)</span>
+  </div>
+
+  <!-- ============ 2. PRIMER ============ -->
+  <div class="sec">
+    <h2><span class="num">02</span> First principles: why HBM round-trips are the enemy, and the ring physics</h2>
+    <p class="lede">
+      A Spyre accelerator is up to 32 cores, each with a small (~2&nbsp;MiB) on-chip <b>LX scratchpad</b>, wired into a
+      ring fabric. HBM is one flat off-chip space (~166&nbsp;GB/s, no channel affinity). The matmul array is
+      weight-stationary: activations stream past resident weights. When a producer computes an activation that already
+      lives in LX, and the next consumer needs the <i>same values</i> under a different per-core ownership or layout,
+      the compiler today <b>spills the whole tensor to HBM and reloads it</b> — a full write + read of bytes that never
+      had to leave the chip. The epic replaces that round-trip with a direct on-chip LX&#8594;LX move.
+    </p>
+
+    <div class="panel">
+      <p style="margin-bottom:16px">
+        <b>The ring is not one flat "bandwidth number."</b> Device measurement (additive-differential slope method,
+        R&sup2;&nbsp;&ge;&nbsp;0.998) shows the variable that sets effective bandwidth is the <b>peak per-link transfer
+        count</b> — not burst size, not a hidden hardware cap. A uniform <span class="mono">p&#8594;p+1</span> shift puts
+        exactly one transfer on each link and reaches <b>~130&nbsp;GB/s</b>; an all-to-all scatter / linear fold piles
+        many transfers onto the busiest link and collapses to a <b>~36&nbsp;GB/s contention floor</b>.
+      </p>
+
+      <div class="two">
+        <div class="figwrap">
+          <svg viewBox="0 0 300 240" role="img" aria-label="Uniform p to p+1 ring shift: one transfer per link, fast">
+            <defs>
+              <marker id="cc-ar-fast" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#2fbf71" />
+              </marker>
+            </defs>
+            <!-- 8 nodes on circle, cx150 cy120 r90 -->
+            <circle cx="150" cy="30"  r="13" fill="#161b22" stroke="#2fbf71" stroke-width="2" />
+            <circle cx="214" cy="56"  r="13" fill="#161b22" stroke="#2fbf71" stroke-width="2" />
+            <circle cx="240" cy="120" r="13" fill="#161b22" stroke="#2fbf71" stroke-width="2" />
+            <circle cx="214" cy="184" r="13" fill="#161b22" stroke="#2fbf71" stroke-width="2" />
+            <circle cx="150" cy="210" r="13" fill="#161b22" stroke="#2fbf71" stroke-width="2" />
+            <circle cx="86"  cy="184" r="13" fill="#161b22" stroke="#2fbf71" stroke-width="2" />
+            <circle cx="60"  cy="120" r="13" fill="#161b22" stroke="#2fbf71" stroke-width="2" />
+            <circle cx="86"  cy="56"  r="13" fill="#161b22" stroke="#2fbf71" stroke-width="2" />
+            <!-- arcs each one transfer -->
+            <path d="M162,36 A90,90 0 0,1 205,49" fill="none" stroke="#2fbf71" stroke-width="2.4" marker-end="url(#cc-ar-fast)" />
+            <path d="M224,66 A90,90 0 0,1 236,108" fill="none" stroke="#2fbf71" stroke-width="2.4" marker-end="url(#cc-ar-fast)" />
+            <path d="M236,132 A90,90 0 0,1 224,174" fill="none" stroke="#2fbf71" stroke-width="2.4" marker-end="url(#cc-ar-fast)" />
+            <path d="M205,191 A90,90 0 0,1 162,204" fill="none" stroke="#2fbf71" stroke-width="2.4" marker-end="url(#cc-ar-fast)" />
+            <path d="M138,204 A90,90 0 0,1 95,191" fill="none" stroke="#2fbf71" stroke-width="2.4" marker-end="url(#cc-ar-fast)" />
+            <path d="M76,174 A90,90 0 0,1 64,132" fill="none" stroke="#2fbf71" stroke-width="2.4" marker-end="url(#cc-ar-fast)" />
+            <path d="M64,108 A90,90 0 0,1 76,66" fill="none" stroke="#2fbf71" stroke-width="2.4" marker-end="url(#cc-ar-fast)" />
+            <path d="M95,49 A90,90 0 0,1 138,36" fill="none" stroke="#2fbf71" stroke-width="2.4" marker-end="url(#cc-ar-fast)" />
+            <text x="150" y="118" text-anchor="middle" font-size="13" font-weight="700" fill="#2fbf71">1 xfer</text>
+            <text x="150" y="134" text-anchor="middle" font-size="13" font-weight="700" fill="#2fbf71">/ link</text>
+          </svg>
+          <div class="figcap"><b>Uniform p&#8594;p+1 shift</b> — one transfer per link, occ&nbsp;=&nbsp;1<br>
+          <b style="color:var(--measured)">~130 GB/s</b> (54@4MB &middot; 90@8MB &middot; 130@16MB) &middot; MEASURED</div>
+        </div>
+
+        <div class="figwrap">
+          <svg viewBox="0 0 300 240" role="img" aria-label="All-to-all scatter: many transfers per link, contention floor">
+            <defs>
+              <marker id="cc-ar-slow" markerWidth="7" markerHeight="7" refX="5.5" refY="2.7" orient="auto">
+                <path d="M0,0 L5.5,2.7 L0,5.4 Z" fill="#e0645f" />
+              </marker>
+            </defs>
+            <circle cx="150" cy="30"  r="13" fill="#161b22" stroke="#e0a53d" stroke-width="2" />
+            <circle cx="214" cy="56"  r="13" fill="#161b22" stroke="#e0a53d" stroke-width="2" />
+            <circle cx="240" cy="120" r="13" fill="#161b22" stroke="#e0a53d" stroke-width="2" />
+            <circle cx="214" cy="184" r="13" fill="#161b22" stroke="#e0a53d" stroke-width="2" />
+            <circle cx="150" cy="210" r="13" fill="#161b22" stroke="#e0a53d" stroke-width="2" />
+            <circle cx="86"  cy="184" r="13" fill="#161b22" stroke="#e0a53d" stroke-width="2" />
+            <circle cx="60"  cy="120" r="13" fill="#161b22" stroke="#e0a53d" stroke-width="2" />
+            <circle cx="86"  cy="56"  r="13" fill="#161b22" stroke="#e0a53d" stroke-width="2" />
+            <!-- many crossing chords -->
+            <line x1="150" y1="43" x2="150" y2="197" stroke="#e0645f" stroke-width="1.6" marker-end="url(#cc-ar-slow)" opacity="0.8" />
+            <line x1="227" y1="56" x2="73" y2="184" stroke="#e0645f" stroke-width="1.6" marker-end="url(#cc-ar-slow)" opacity="0.8" />
+            <line x1="240" y1="133" x2="60" y2="107" stroke="#e0645f" stroke-width="1.6" marker-end="url(#cc-ar-slow)" opacity="0.8" />
+            <line x1="214" y1="171" x2="86" y2="69" stroke="#e0645f" stroke-width="1.6" marker-end="url(#cc-ar-slow)" opacity="0.8" />
+            <line x1="163" y1="34" x2="201" y2="180" stroke="#e0645f" stroke-width="1.6" marker-end="url(#cc-ar-slow)" opacity="0.7" />
+            <line x1="99" y1="52" x2="227" y2="120" stroke="#e0645f" stroke-width="1.6" marker-end="url(#cc-ar-slow)" opacity="0.7" />
+            <line x1="73" y1="120" x2="201" y2="60" stroke="#e0645f" stroke-width="1.6" marker-end="url(#cc-ar-slow)" opacity="0.7" />
+            <line x1="99" y1="188" x2="201" y2="66" stroke="#e0645f" stroke-width="1.6" marker-end="url(#cc-ar-slow)" opacity="0.6" />
+            <rect x="118" y="108" width="64" height="26" rx="6" fill="#161b22" stroke="#e0645f" stroke-width="1.4" />
+            <text x="150" y="125" text-anchor="middle" font-size="11.5" font-weight="700" fill="#e0645f">4&ndash;9 / link</text>
+          </svg>
+          <div class="figcap"><b>All-to-all scatter / linear fold</b> — 4&ndash;9 transfers on the busy link<br>
+          <b style="color:var(--structural)">~34&ndash;36 GB/s floor</b> (524 descriptors) &middot; MEASURED</div>
+        </div>
+      </div>
+
+      <p style="margin-top:16px; margin-bottom:0">
+        <b>Two hard consequences banked so far.</b> (1) <b>Burst is not the lever</b>: enlarging per-descriptor burst
+        50&ndash;100&times; at fixed bytes moved effective bandwidth by 0.958&times; median (zero improvement) — the
+        perf model assigns raw 128 to every link and only per-link contention pulls it down. (2) The bandwidth-optimal
+        ring is <b>unreachable for LX-resident operands</b>: the ring-carousel-vs-naive crossover (~5.2&nbsp;MiB/head)
+        sits <i>above</i> the ~2&nbsp;MiB/core LX cap, so any operand is force-tiled below the crossover and moves are
+        <b>F-dominated</b> (~7.3&nbsp;&micro;s fixed per STCDP execute). The only real win banked to date is therefore
+        <b>HBM round-trip elimination</b>, not ring transport efficiency — and every measured/modeled result below is
+        tagged to keep that honest.
+      </p>
+    </div>
+  </div>
+
+  <!-- ============ 3. CONVERGENCE ============ -->
+  <div class="sec">
+    <h2><span class="num">03</span> The convergence: two halves of one pipeline</h2>
+    <p class="lede">
+      Both halves meet at the <b>DLDSC coordinate-metadata contract</b>. Codex makes the move legal and value-correct;
+      claude makes the planner select it and adds the arithmetic (reduce) collective codex explicitly parks. They are
+      provably the same substrate at three points: codex's <code>matmul_operand_broadcast</code> == claude's attention
+      QK&#7488; all-gather (same class, same DCG region); codex's PR1 scatter is the complement of claude's Bet-2 cost
+      term (mechanism + selectability of one edge); claude's reduce lane extends codex's parked reduce lane.
+    </p>
+
+    <div class="panel svgscroll">
+      <svg viewBox="0 0 980 340" role="img" aria-label="Convergence pipeline: codex mechanism half and claude selectability + reduce half meeting at the DLDSC contract">
+        <!-- lane labels -->
+        <rect x="10" y="12" width="220" height="30" rx="8" fill="var(--codex)" opacity="0.15" stroke="var(--codex)" />
+        <text x="120" y="32" text-anchor="middle" font-size="14" font-weight="800" fill="var(--codex)">CODEX &mdash; mechanism / lowering</text>
+        <rect x="750" y="12" width="220" height="30" rx="8" fill="var(--claude)" opacity="0.15" stroke="var(--claude)" />
+        <text x="860" y="32" text-anchor="middle" font-size="14" font-weight="800" fill="var(--claude)">CLAUDE &mdash; select + reduce</text>
+
+        <!-- central contract -->
+        <rect x="360" y="120" width="260" height="70" rx="12" fill="var(--panel2)" stroke="var(--accent)" stroke-width="2" />
+        <text x="490" y="150" text-anchor="middle" font-size="15" font-weight="800" fill="var(--ink)">DLDSC coordinate</text>
+        <text x="490" y="171" text-anchor="middle" font-size="15" font-weight="800" fill="var(--ink)">metadata contract</text>
+
+        <!-- codex nodes -->
+        <rect x="40" y="70" width="230" height="48" rx="10" fill="var(--panel)" stroke="var(--codex)" stroke-width="1.6" />
+        <text x="155" y="90" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">Inductor records residency</text>
+        <text x="155" y="107" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">+ compute contract</text>
+
+        <rect x="40" y="200" width="230" height="48" rx="10" fill="var(--panel)" stroke="var(--codex)" stroke-width="1.6" />
+        <text x="155" y="220" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">Deeptools synthesizes</text>
+        <text x="155" y="237" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">the physical LX&#8594;LX move</text>
+
+        <rect x="40" y="270" width="230" height="46" rx="10" fill="var(--panel)" stroke="var(--codex)" stroke-width="1.2" opacity="0.9" />
+        <text x="155" y="290" text-anchor="middle" font-size="11.5" fill="var(--muted)">classifier + SuperDsc plumbing</text>
+        <text x="155" y="305" text-anchor="middle" font-size="11.5" fill="var(--muted)">scatter &middot; flash &middot; operand-broadcast</text>
+
+        <!-- claude nodes -->
+        <rect x="710" y="70" width="230" height="48" rx="10" fill="var(--panel)" stroke="var(--claude)" stroke-width="1.6" />
+        <text x="825" y="90" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">Per-link contention cost term</text>
+        <text x="825" y="107" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">&#8594; planner PICKS the move</text>
+
+        <rect x="710" y="200" width="230" height="48" rx="10" fill="var(--panel)" stroke="var(--claude)" stroke-width="1.6" />
+        <text x="825" y="220" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">LSE ring-fold reduce lane</text>
+        <text x="825" y="237" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">(arithmetic collective)</text>
+
+        <rect x="710" y="270" width="230" height="46" rx="10" fill="var(--panel)" stroke="var(--claude)" stroke-width="1.2" opacity="0.9" />
+        <text x="825" y="290" text-anchor="middle" font-size="11.5" fill="var(--muted)">G3 comm_cost.py &middot; Bet-2 term</text>
+        <text x="825" y="305" text-anchor="middle" font-size="11.5" fill="var(--muted)">flag-gated planner seam</text>
+
+        <!-- arrows into contract -->
+        <defs>
+          <marker id="cc-arr" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto"><path d="M0,0 L7,3.2 L0,6.4 Z" fill="var(--accent)" /></marker>
+        </defs>
+        <path d="M270,94 C330,94 340,140 358,148" fill="none" stroke="var(--codex)" stroke-width="2" marker-end="url(#cc-arr)" />
+        <path d="M270,224 C330,224 340,175 358,166" fill="none" stroke="var(--codex)" stroke-width="2" marker-end="url(#cc-arr)" />
+        <path d="M710,94 C650,94 640,140 622,148" fill="none" stroke="var(--claude)" stroke-width="2" marker-end="url(#cc-arr)" />
+        <path d="M710,224 C650,224 640,175 622,166" fill="none" stroke="var(--claude)" stroke-width="2" marker-end="url(#cc-arr)" />
+
+        <!-- converge callout -->
+        <rect x="330" y="255" width="320" height="62" rx="10" fill="rgba(110,168,254,0.07)" stroke="var(--accent)" stroke-dasharray="4 3" />
+        <text x="490" y="278" text-anchor="middle" font-size="12" font-weight="700" fill="var(--accent)">SAME edge, two owners</text>
+        <text x="490" y="296" text-anchor="middle" font-size="11" fill="var(--muted)">operand-broadcast == QK&#7488; all-gather &middot; scatter &harr; Bet-2</text>
+        <text x="490" y="310" text-anchor="middle" font-size="11" fill="var(--muted)">reduce lane parked by codex &harr; extended by claude</text>
+      </svg>
+    </div>
+  </div>
+
+  <!-- ============ 4. PHASE BOARD ============ -->
+  <div class="sec">
+    <h2><span class="num">04</span> Phase board &mdash; the six epic phases</h2>
+    <p class="lede">Each phase carries a status badge and its logged contributions (owner + status per line). Gaps are the honest "not done yet" for that phase.</p>
+
+    <div class="phases">
+
+      <!-- P1 -->
+      <div class="phase">
+        <div class="ph-head">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h3>P1 &mdash; Productionize scatter / permutation</h3><span class="status-badge sb-landed">Landed</span></div>
+          <div class="ph-goal">Minimal reviewable first slice: DLDSC coordinate metadata on existing ops flips a disjoint 1:1 producer/consumer handoff from an HBM restickify to an LX relayout, with a profiled model-shaped speedup.</div>
+        </div>
+        <div class="ph-body">
+          <ul class="clist">
+            <li><span class="cname">PR1 scatter / same-layout 1:1 LX relayout</span><span class="owner codex">codex</span><span class="chip measured"><span class="dot"></span>measured</span></li>
+            <li><span class="cname">DLDSC coordinate-topology classifier</span><span class="owner codex">codex</span><span class="chip validated"><span class="dot"></span>validated</span></li>
+            <li><span class="cname">Resident-LX scatter sizing fix (deeptools)</span><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></li>
+            <li><span class="cname">LX class metadata on SuperDsc (plumbing)</span><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></li>
+            <li><span class="cname">Clone-source + backend2162 incremental numbers</span><span class="owner codex">codex</span><span class="chip measured"><span class="dot"></span>measured</span></li>
+          </ul>
+          <div class="ph-gaps"><div class="g-h">Gaps</div><ul>
+            <li>Scatter branch kept intentionally lean &mdash; artifact branch + dirty deeptools fork must never merge into it.</li>
+            <li>Scatter alone does not remove the remaining Granite attention spills (the matmul-operand all-gather).</li>
+            <li>Clone-source kernel deltas are small and per-run baselines drift; guardrail forbids claiming speedup from wall time.</li>
+          </ul></div>
+        </div>
+      </div>
+
+      <!-- P2 -->
+      <div class="phase">
+        <div class="ph-head">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h3>P2 &mdash; Granite spill audit</h3><span class="status-badge sb-inprog">In progress</span></div>
+          <div class="ph-goal">Complete Granite block inventory: before/after SDSC tables classifying EVERY non-weight HBM activation spill by comms class, each marked covered/blocked/future, plus a reproduction runbook.</div>
+        </div>
+        <div class="ph-body">
+          <ul class="clist">
+            <li><span class="cname">Residual in-scope class identification</span><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></li>
+            <li><span class="cname">Current-state audit summary (partial)</span><span class="owner codex">codex</span><span class="chip inprogress"><span class="dot"></span>in-progress</span></li>
+          </ul>
+          <div class="ph-gaps"><div class="g-h">Gaps</div><ul>
+            <li>Full classified inventory (every spill covered/blocked/future + reproduction runbook) not yet produced.</li>
+            <li>The FFN/SwiGLU activation boundary is a separate fused-region/pool-boundary residency problem (likely WSR/streaming), NOT the explicit-restickify class already solved &mdash; not yet addressed.</li>
+          </ul></div>
+        </div>
+      </div>
+
+      <!-- P3 -->
+      <div class="phase">
+        <div class="ph-head">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h3>P3 &mdash; Broadcast &amp; multicast</h3><span class="status-badge sb-inprog">In progress</span></div>
+          <div class="ph-goal">One-to-many LX movement: synthetic broadcast/multicast correctness, allocator safety for replicated destination residency (no clobber of live source ranges), and one real Granite/attention edge.</div>
+        </div>
+        <div class="ph-body">
+          <ul class="clist">
+            <li><span class="cname">DCG input-neighbor fetch extended to KERNEL operands</span><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></li>
+            <li><span class="cname">Matmul-operand-broadcast synth + insertion hooks</span><span class="owner codex">codex</span><span class="chip inprogress"><span class="dot"></span>in-progress</span></li>
+            <li><span class="cname">Broadcast-group derivation from coordinates</span><span class="owner codex">codex</span><span class="chip validated"><span class="dot"></span>validated</span></li>
+            <li><span class="cname">Overflow-safe transfer expansion + diagnostics</span><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></li>
+            <li><span class="cname">Staged layout-conversion contract (fail-closed)</span><span class="owner codex">codex</span><span class="chip blocked"><span class="dot"></span>blocked</span></li>
+            <li><span class="cname">DDC fold core-map preservation / map::at localization</span><span class="owner codex">codex</span><span class="chip blocked"><span class="dot"></span>blocked</span></li>
+            <li><span class="cname">Cardinality unit coverage + dense-coordinate rule</span><span class="owner codex">codex</span><span class="chip validated"><span class="dot"></span>validated</span></li>
+          </ul>
+          <div class="ph-gaps"><div class="g-h">Gaps</div><ul>
+            <li>No isolated pure-broadcast/gather Granite spill exists &mdash; they appear only FOLDED inside the matmul-operand all-gather.</li>
+            <li>Physical execution of the derived groups shares the blocked DDC fold / fillDataInfo path.</li>
+            <li>Allocator live-range safety for replicated destinations not yet demonstrated on a real edge.</li>
+          </ul></div>
+        </div>
+      </div>
+
+      <!-- P4 -->
+      <div class="phase">
+        <div class="ph-head">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h3>P4 &mdash; Gather &amp; all-gather</h3><span class="status-badge sb-inprog">In progress</span></div>
+          <div class="ph-goal">Many-to-one and many-to-many assembly: gather + all-gather correctness on patterned tensors, a capacity-aware lowering (the LX-explosion guard), and an attention value-side / matmul-operand case with no HBM fallback.</div>
+        </div>
+        <div class="ph-body">
+          <ul class="clist">
+            <li><span class="cname">matmul_operand_broadcast frontend contract</span><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></li>
+            <li><span class="cname">Flash restickify 32 HBM&#8594;32 LX transform</span><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></li>
+            <li><span class="cname">Flash layout-allgather: checker + synth + artifact</span><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></li>
+            <li><span class="cname">LX restickify DDL realization (op-bind + templates)</span><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></li>
+            <li><span class="cname">DLDSC collective realization prototype (ProgIR)</span><span class="owner codex">codex</span><span class="chip inprogress"><span class="dot"></span>in-progress</span></li>
+            <li><span class="cname">Physical lowering via kernel-neighbor carousel</span><span class="owner codex">codex</span><span class="chip blocked"><span class="dot"></span>blocked</span></li>
+            <li><span class="cname">Staged gather_then_restickify strategy</span><span class="owner codex">codex</span><span class="chip inprogress"><span class="dot"></span>in-progress</span></li>
+            <li><span class="cname">Clone-source LX eligibility</span><span class="owner codex">codex</span><span class="chip validated"><span class="dot"></span>validated</span></li>
+            <li><span class="cname">Cardinality + operand-broadcast unit suite (26 gtests)</span><span class="owner codex">codex</span><span class="chip validated"><span class="dot"></span>validated</span></li>
+            <li><span class="cname">Attn QK&#7488; all-gather substrate (multicast)</span><span class="owner claude">claude</span><span class="chip blocked"><span class="dot"></span>blocked</span></li>
+            <li><span class="cname">Measured grounding: broadcast banks 1.053&times; via HBM elim</span><span class="owner claude">claude</span><span class="chip measured"><span class="dot"></span>measured</span></li>
+          </ul>
+          <div class="ph-gaps"><div class="g-h">Gaps</div><ul>
+            <li>All-gather&#8594;KERNEL operand is blocked upstream: value-correct and capacity-safe are currently mutually exclusive.</li>
+            <li>Flash all-gather value-correctness is not a clean signal &mdash; the flash baseline is independently value-wrong (zero-stride broadcast bug, 31.5% mismatch).</li>
+            <li>Capacity-aware two-stage loop-scoped lowering (the LX-explosion guard) is required not optional; full-resident gather does not fit Granite attention in LX.</li>
+            <li>Most-leveraged shared task: generalize <code>runDcgForInputFetchNeighbor</code> off <code>DsTypes::INPUT</code>-only for a replicated KERNEL operand under loop-scoped fetch (needs mul(K) co-bundling).</li>
+          </ul></div>
+        </div>
+      </div>
+
+      <!-- P5 -->
+      <div class="phase">
+        <div class="ph-head">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h3>P5 &mdash; Reduce &amp; all-reduce</h3><span class="status-badge sb-inprog">In progress</span></div>
+          <div class="ph-goal">Arithmetic collectives: a reduce primitive/lowering, split-K correctness, gather-vs-reduce separation, reduce-before-relayout ordering, all-reduce only after reduce &amp; broadcast are independently correct. Home of the LSE ring-fold.</div>
+        </div>
+        <div class="ph-body">
+          <ul class="clist">
+            <li><span class="cname">Reduce/all-reduce lane parked (out of copy scope)</span><span class="owner codex">codex</span><span class="chip design"><span class="dot"></span>design</span></li>
+            <li><span class="cname">G2 LSE ring-fold value oracle</span><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></li>
+            <li><span class="cname">Bet 3 LSE ring-fold merge (neighbor reduce-scatter)</span><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></li>
+            <li><span class="cname">G2 reduce-lane cost wiring (F-dominated)</span><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></li>
+            <li><span class="cname">lx_relayout reduce-lane reroute (gated)</span><span class="owner claude">claude</span><span class="chip inprogress"><span class="dot"></span>in-progress</span></li>
+            <li><span class="cname">make_lse_ring_fold_contract (DLDSC reduce)</span><span class="owner claude">claude</span><span class="chip design"><span class="dot"></span>design</span></li>
+            <li><span class="cname">Bet 1 flash-in-a-loop (coarse-tiled Lk reduction)</span><span class="owner claude">claude</span><span class="chip blocked"><span class="dot"></span>blocked</span></li>
+          </ul>
+          <div class="ph-gaps"><div class="g-h">Gaps</div><ul>
+            <li>The backend SFP <code>lse_combine</code> device primitive that must value-match the oracle is NOT lowered &mdash; no device value-correctness.</li>
+            <li>Bet 1 needs Stage-1 reduction-dim tiling (design doc on main) to lift the Lk coarse-tile limit + sparse amax gather + an Lk hint.</li>
+            <li>Bet 3 depends on cross-CORE Lk work-division (spatial split) + Bet-2 selectability + codex's fillDataInfo/coordinate fix.</li>
+            <li>All-reduce explicitly deferred until reduce and broadcast are independently correct.</li>
+          </ul></div>
+        </div>
+      </div>
+
+      <!-- P6 -->
+      <div class="phase">
+        <div class="ph-head">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h3>P6 &mdash; Costing &amp; scheduling</h3><span class="status-badge sb-inprog">In progress</span></div>
+          <div class="ph-goal">Make the planner relayout-AWARE not merely relayout-capable: a comms cost model by class, work-division that accounts for relayout cost (reshard-aware selection), schedule/overlap experiments judged by kernel-time from archived traces (not wall time).</div>
+        </div>
+        <div class="ph-body">
+          <ul class="clist">
+            <li><span class="cname">G3 standalone comm cost model (comm_cost.py)</span><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></li>
+            <li><span class="cname">Per-link contention pricing (band + occupancy)</span><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></li>
+            <li><span class="cname">LX-capacity interception theorem</span><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></li>
+            <li><span class="cname">Ring-speed physics (bandwidth ladder)</span><span class="owner claude">claude</span><span class="chip measured"><span class="dot"></span>measured</span></li>
+            <li><span class="cname">Finding 2: burst-is-not-the-lever</span><span class="owner claude">claude</span><span class="chip measured"><span class="dot"></span>measured</span></li>
+            <li><span class="cname">Bet 2 per-link contention cost term</span><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></li>
+            <li><span class="cname">Flag-gated planner seam (SPYRE_COMM_COST_SEAM)</span><span class="owner claude">claude</span><span class="chip inprogress"><span class="dot"></span>in-progress</span></li>
+            <li><span class="cname">comm_edge_from_plan adapter</span><span class="owner claude">claude</span><span class="chip structural"><span class="dot"></span>structural</span></li>
+            <li><span class="cname">Ring-aware mechanism catalog + carousel ROI</span><span class="owner claude">claude</span><span class="chip design"><span class="dot"></span>design</span></li>
+            <li><span class="cname">Granite S512 e2e blocker isolation (LX capacity)</span><span class="owner codex">codex</span><span class="chip blocked"><span class="dot"></span>blocked</span></li>
+          </ul>
+          <div class="ph-gaps"><div class="g-h">Gaps</div><ul>
+            <li>Seam + Bet-2 term validated at unit level but NOT device-validated to reproduce the device-verified Granite selections (all AIU devices degraded at authoring time).</li>
+            <li>Productionizing Bet 2 onto codex's lowering needs the edge cost to carry true coordinate STRIDE (not a cohort count) + same-core-is-free refinement.</li>
+            <li>Schedule/overlap experiments not started; kernel-time-from-archived-traces guardrail must hold.</li>
+            <li>The cross-bundle co-bundling redesign is high-cost deeptools+inductor SDSC wiring, blocked by the cross-bundle wall (LX not persistent across programs).</li>
+          </ul></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============ 5. TAXONOMY ============ -->
+  <div class="sec">
+    <h2><span class="num">05</span> Taxonomy coverage &mdash; the 7 comms classes</h2>
+    <p class="lede">The organizing spine of the epic. Each class is a distinct movement pattern; the coverage bar and badge show how far each has been carried, with the owning half and the honest note.</p>
+    <div class="panel taxwrap">
+      <table class="tax">
+        <thead><tr><th>Comms class</th><th>Coverage</th><th>Owner</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr>
+            <td class="cls">1. Scatter / permutation<br><span style="font-weight:400;color:var(--faint);font-size:12px">N&#8594;N 1:1, pure relabel</span></td>
+            <td><span class="cov cov-done">done</span><div class="covbar"><span style="width:100%;background:var(--measured)"></span></div></td>
+            <td><span class="owner codex">codex</span></td>
+            <td>PR1 productionized and MEASURED ~1.065&times; kernel on Granite S512 &mdash; the proven contract direction. Classifier + sizing fix + SuperDsc plumbing landed. Other classes build on it.</td>
+          </tr>
+          <tr>
+            <td class="cls">2. Broadcast<br><span style="font-weight:400;color:var(--faint);font-size:12px">1&#8594;all, full-chip</span></td>
+            <td><span class="cov cov-prototype">prototype</span><div class="covbar"><span style="width:55%;background:var(--inprogress)"></span></div></td>
+            <td><span class="owner codex">codex</span></td>
+            <td>Backend synthesizer + coordinate-driven group derivation (validated unit) + overflow-safe expansion exist, but only FOLDED inside the matmul-operand all-gather; no isolated pure-broadcast spill; physical exec blocked on staged-conversion + DDC fold.</td>
+          </tr>
+          <tr>
+            <td class="cls">3. Multicast<br><span style="font-weight:400;color:var(--faint);font-size:12px">1&#8594;subset, cohort</span></td>
+            <td><span class="cov cov-prototype">prototype</span><div class="covbar"><span style="width:55%;background:var(--inprogress)"></span></div></td>
+            <td><span class="owner shared">codex + claude</span></td>
+            <td>The live ring primitive. Cohort/group derivation validated device-free; claude's cost model prices multicast-vs-scatter per-link contention (validated). Planner cohort representation partial; physical exec shares the blocked DDC path; cost-gated over-replication guard not built.</td>
+          </tr>
+          <tr>
+            <td class="cls">4. Gather<br><span style="font-weight:400;color:var(--faint);font-size:12px">many&#8594;1 copy, no arith</span></td>
+            <td><span class="cov cov-partial">partial</span><div class="covbar"><span style="width:38%;background:var(--structural)"></span></div></td>
+            <td><span class="owner codex">codex</span></td>
+            <td>The gather-vs-reduce split exists in the classifier; gather appears only folded inside the matmul-operand all-gather. No pure-gather Granite spill and no standalone assembly-correctness suite yet.</td>
+          </tr>
+          <tr>
+            <td class="cls">5. All-gather<br><span style="font-weight:400;color:var(--faint);font-size:12px">N&#8594;N, every consumer all pieces</span></td>
+            <td><span class="cov cov-partial">partial</span><div class="covbar"><span style="width:45%;background:var(--structural)"></span></div></td>
+            <td><span class="owner shared">codex + claude</span></td>
+            <td>Flash restickify 32 HBM&#8594;32 LX STRUCTURAL; matmul_operand_broadcast frontend contract + backend synth exist but BLOCKED (value-correct XOR capacity-safe); clone-source eligibility validated; incremental 1.053&times; MEASURED on CLC. Capacity-aware two-stage lowering is the required unbuilt piece. claude's QK&#7488; all-gather is the same class, blocked on cross-bundle source provenance.</td>
+          </tr>
+          <tr>
+            <td class="cls">6. Reduce<br><span style="font-weight:400;color:var(--faint);font-size:12px">many&#8594;1 WITH arithmetic</span></td>
+            <td><span class="cov cov-prototype">prototype</span><div class="covbar"><span style="width:50%;background:var(--inprogress)"></span></div></td>
+            <td><span class="owner claude">claude</span></td>
+            <td>Codex parks this lane (out of copy-relayout scope); claude owns it. LSE ring-fold oracle + tree-fold cost VALIDATED device-free (16 + 13 tests); frontend reroute + DLDSC contract wired (in-progress/design). The backend SFP <code>lse_combine</code> primitive is NOT lowered &mdash; no device value-correctness.</td>
+          </tr>
+          <tr>
+            <td class="cls">7. All-reduce<br><span style="font-weight:400;color:var(--faint);font-size:12px">many&#8594;many reduce + replicate</span></td>
+            <td><span class="cov cov-notstarted">not started</span><div class="covbar"><span style="width:8%;background:var(--design)"></span></div></td>
+            <td><span class="owner claude">claude</span></td>
+            <td>Explicitly sequenced LAST &mdash; gated behind reduce AND broadcast landing independently. Contract builder can emit an all_reduce class but no acceptance criteria enumerated, no backend, no Granite evidence.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============ 6. CONTRIBUTION LEDGER ============ -->
+  <div class="sec">
+    <h2><span class="num">06</span> Contribution ledger</h2>
+    <p class="lede">One card per contribution: owner + status chips, what it is / why it matters at first principles, the load-bearing evidence (path or number), and its honest gap. Grouped by phase.</p>
+
+    <!-- P1 group -->
+    <div class="ledger-group">
+      <h3><span class="status-badge sb-landed">P1</span> Scatter / permutation &mdash; the productionized substrate</h3>
+      <div class="cards">
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip measured"><span class="dot"></span>measured</span></div>
+          <h4>PR1 scatter / same-layout disjoint 1:1 LX relayout</h4>
+          <div class="c-detail">Producer and consumer own different core slices but the physical stick/layout form is already compatible, so Deeptools derives + inserts the LX move from DLDSC tensor-distribution-vs-compute metadata. Adds <b>no new GraphLowering nodes</b> &mdash; only changes coordinate metadata on existing ops.</div>
+          <div class="c-why">Why it matters: proves the tensor-vs-compute mismatch contract without taking on fanout/fanin/layout conversion &mdash; the only class treated as production-ready, on a lean branch of its own.</div>
+          <div class="c-ev">granite_s512: kernel 14.7258&#8594;13.8213 ms/iter (1.065&times;), wall 27.6074&#8594;26.5205 (1.039&times;); dense-coord variant 13.8503 preserves win. lx_relayout.py _classify_coordinate_topology &#8594; ('scatter','one_to_one')</div>
+          <div class="c-gap"><b>Gap:</b> kept intentionally lean; artifact branch + dirty deeptools must never merge in. Scatter alone does not remove the remaining attention spills.</div>
+        </div>
+
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip validated"><span class="dot"></span>validated</span></div>
+          <h4>DLDSC coordinate-topology classifier (shared substrate contract)</h4>
+          <div class="c-detail">One helper names the logical overlap class (scatter/broadcast/multicast/gather/all-gather) from producer/consumer core-slice maps + work-slice dims, emitting communication_class / pattern / transfer_count / max_fanout / max_fanin.</div>
+          <div class="c-why">Why it matters: Torch describes logical residency + consumer need as dense coordinate metadata; Deeptools synthesizes the move. This is the contract the whole taxonomy rides on.</div>
+          <div class="c-ev">lx_relayout.py:137-192 _classify_coordinate_topology; test_lx_relayout_dldsc.py 15 passing (18 after clone patch). Rule: coordinate maps must be DENSE over relayout dims (split-1 dims explicit slice 0) or Deeptools aborts map::at.</div>
+          <div class="c-gap"><b>Gap:</b> classifier only names topology; it does not yet drive selection/cost &mdash; that is claude's Bet-2 half.</div>
+        </div>
+
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></div>
+          <h4>Resident-LX scatter relayout sizing fix (deeptools)</h4>
+          <div class="c-detail">Corrects byte sizing of the resident-LX destination so the inserted SDSC allocates the right per-core LX footprint &mdash; robustness hardening of the scatter substrate PR1 productionized.</div>
+          <div class="c-ev">/tmp/dt-comms b8c09743c4 [DXP] (SdscRelayoutInsertion.cpp +54, ddc_fold.cpp +26)</div>
+          <div class="c-gap"><b>Gap:</b> no in-branch device re-measurement; compile-artifact only.</div>
+        </div>
+
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></div>
+          <h4>LX relayout classification metadata on SuperDsc (plumbing)</h4>
+          <div class="c-detail">Threads the class metadata (scatter vs flash-allgather vs matmul-operand-broadcast) through SuperDsc so downstream dxp/ddc passes dispatch by class.</div>
+          <div class="c-why">Why it matters: the shared plumbing the whole taxonomy rides on &mdash; substrate, not itself a collective.</div>
+          <div class="c-ev">/tmp/dt-comms c4cf6a4356 (superdsc.cpp +40); lxRelayoutClassifications_ consumed in SdscRelayoutInsertion.cpp:71,107</div>
+          <div class="c-gap"><b>Gap:</b> none structurally; it is substrate.</div>
+        </div>
+
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip measured"><span class="dot"></span>measured</span></div>
+          <h4>Granite S512 clone-source + backend2162 incremental numbers</h4>
+          <div class="c-detail">Each step converts one more attention activation HBM handoff to ReStickifyOpLx + a realized matmul_operand_broadcast plan. Progression: scatter 13.8213 &#8594; clone-source 1 plan 12.1038 &#8594; +backend2162 2 plans 11.9182.</div>
+          <div class="c-ev">granite_s512_backend2162_status.md: enabled 11.9182 vs same-branch disabled 12.548 = 1.053&times; kernel, wall 30.447 vs 30.838 = 1.013&times;, 2 realized backend plans</div>
+          <div class="c-gap"><b>Gap:</b> baselines differ between run epochs (not stackable); wall time flat-to-noise; guardrail forbids wall-time speedup claims.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P2 group -->
+    <div class="ledger-group">
+      <h3><span class="status-badge sb-inprog">P2</span> Granite spill audit</h3>
+      <div class="cards">
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></div>
+          <h4>Residual in-scope class identification</h4>
+          <div class="c-detail">Of 5 baseline ReStickifyOpHBM rows, 4 are weight/prelayout (out of scope) and 1 attention activation row flips to ReStickifyOpLx. Establishes the <b>attention value matmul-operand all-gather</b> (buf21: producer out-sharded 32 cores, consumer mb-sharded 32 cores) as THE remaining non-flash Granite class.</div>
+          <div class="c-ev">dldsc_remaining_hbm_spill_classes_20260702.md + granite_s512_relayout_clc_20260705.md</div>
+          <div class="c-gap"><b>Gap:</b> cleanly separates in-scope from out-of-scope, but the full class-by-class covered/blocked/future table is not the deliverable here.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip inprogress"><span class="dot"></span>in-progress</span></div>
+          <h4>Current-state audit summary (partial inventory)</h4>
+          <div class="c-detail">The enumeration that scopes every later phase: same-core LX persistence handled; scatter converts HBM restickify &#8594; LX; flash 32 rows replaceable; two realized all-gather activation handoffs; weight-format remainder excluded.</div>
+          <div class="c-ev">comms_collectives_20260704_current_state.md</div>
+          <div class="c-gap"><b>Gap:</b> full classified inventory + reproduction runbook not yet produced; FFN/SwiGLU fused-region residency boundary is a separate WSR/streaming problem, unaddressed.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P3 group -->
+    <div class="ledger-group">
+      <h3><span class="status-badge sb-inprog">P3</span> Broadcast &amp; multicast</h3>
+      <div class="cards">
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></div>
+          <h4>DCG input-neighbor fetch extended to KERNEL operands</h4>
+          <div class="c-detail">Widens input-neighbor fetch so a matmul weight/KERNEL operand (not just an INPUT activation) can be fetched from a neighbor core over LX &mdash; the enabling change letting broadcast/all-gather land its result in a <code>DsTypes::KERNEL</code> operand (the attention QK&#7488; target).</div>
+          <div class="c-ev">15d39ece49 [DCG] (inputNeighFetchOp.cpp +56/-17, dcg_frontend.h, pcfg_gen.cpp)</div>
+          <div class="c-gap"><b>Gap:</b> enables the path; correctness of the KERNEL landing is gated by the staged-conversion contract.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip inprogress"><span class="dot"></span>in-progress</span></div>
+          <h4>Matmul-operand-broadcast planning: synthesizer + insertion hooks</h4>
+          <div class="c-detail">Synthesizes the grouped all-gather replicating activation/weight shards into a matmul KERNEL operand (the sendnn-proven on-chip all-gather for attention QK&#7488; mul(K)&#8594;BMM), then hooks it into relayout insertion.</div>
+          <div class="c-ev">6ef1771a61 (util/LayoutAllgatherRestickify +205, SdscRelayoutInsertion +99); synthesizeMatmulOperandBroadcastMovementPlan; hooks at SdscRelayoutInsertion.cpp:407,431</div>
+          <div class="c-gap"><b>Gap:</b> env-gated; full E2E blocked by the DDC fold + fillDataInfo path.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip validated"><span class="dot"></span>validated</span></div>
+          <h4>Broadcast-group derivation from DLDSC coordinates</h4>
+          <div class="c-detail">Parses producer/consumer core&#8594;device-slice coordinate maps, intersects common dims, and partitions cores into broadcast groups purely from coordinate metadata &mdash; the coordinate-driven multicast group derivation.</div>
+          <div class="c-ev">ebb662cb7a (deriveExactGroupedCoreMaps/parseCoreCoordinateMap); 293e56fc0d grouped cardinality; 375837d9af filter fanout by overlap</div>
+          <div class="c-gap"><b>Gap:</b> group derivation unit-validated; physical execution shares the blocked DDC path.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></div>
+          <h4>Overflow-safe transfer expansion + gated diagnostics</h4>
+          <div class="c-detail">Hardens group&#8594;core-pair transfer expansion against integer overflow, caps it, and records an expansion status/reason so an oversized fanout skips expansion instead of exploding.</div>
+          <div class="c-ev">2162efb3e0 (checkedMul/checkedAddProduct, kMaxArtifactLogicalTransfers=1e6); ba981112a4/352919bf3f [diagnostic] gate synthetic ring lowering</div>
+          <div class="c-gap"><b>Gap:</b> safety/diagnostic scaffolding; flag-gated, not a shippable default.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip blocked"><span class="dot"></span>blocked</span></div>
+          <h4>Staged layout-conversion contract: fail-closed on direct KERNEL-neighbor bytes</h4>
+          <div class="c-detail">The key invariant: the LX source-shard layout differs from the final matmul KERNEL-operand layout, so moving bytes core-to-core is NOT sufficient &mdash; a local ReStickifyOpLx must run after the ring gather. Code fails closed on the direct bypass.</div>
+          <div class="c-ev">6337829800 &amp; fa30750e12 (preserve layout-conversion contract); f23ab8b853 (dsc2.h StagedLayoutConversionInfo; DT_CHECK 'direct LX-neighbor into final KERNEL operand is value-unsafe'); eb68de6f70 (accept gather_then_restickify + unit tests)</div>
+          <div class="c-gap"><b>Gap:</b> the staged gather_then_restickify strategy is contracted and unit-accepted but not yet executing value-correct end-to-end.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip blocked"><span class="dot"></span>blocked</span></div>
+          <h4>DDC fold-propagation core-map preservation + map::at localization</h4>
+          <div class="c-detail">The loop-scoped KERNEL-neighbor operand needs its per-core <code>coreIdToWkSlice_</code> maps to survive DDC fold; the default fold clobbers them, producing a value-wrong offset and a map::at throw. <b>This is the active integration frontier.</b></div>
+          <div class="c-ev">16e9c4f4eb (ddc_fold.cpp: preserve relayout core maps, seed loopDistributionParamInfo, guard corelet-split fold); 2162efb3e0 ddcv1.cpp fillLoopOffsetsAndAddresses debugPhase + skip lxNeighborRingTransfers_</div>
+          <div class="c-gap"><b>Gap:</b> being localized (allocation_lookup &#8594; loop_offsets &#8594; coordinate_offsets), not yet resolved to value-correct execution.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip validated"><span class="dot"></span>validated</span></div>
+          <h4>Deeptools cardinality unit coverage + dense-coordinate rule</h4>
+          <div class="c-detail">Device-free validation that the coordinate-metadata contract expresses all four cardinalities (scatter, one-to-many, many-to-one, many-to-many) at the descriptor level.</div>
+          <div class="c-ev">DxpTestFixture.CoreWorkDivIncomptLxRelayout* 2 pass; cardinality bundle probes all pass through dxp_standalone -b ddc</div>
+          <div class="c-gap"><b>Gap:</b> unit-level only; a generic all-gather descriptor is NOT enough for matmul RHS KERNEL operands because the final view/layout binding differs from source activation layout.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P4 group -->
+    <div class="ledger-group">
+      <h3><span class="status-badge sb-inprog">P4</span> Gather &amp; all-gather &mdash; the active frontier</h3>
+      <div class="cards">
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></div>
+          <h4>matmul_operand_broadcast frontend contract (Granite/attention RHS all-gather)</h4>
+          <div class="c-detail">Producer operand sharded on an operand dim, consumer batchmatmul sharded on mb &mdash; a naive resident relayout would materialize a full operand per core. Torch names the logical handoff + class; Deeptools derives loop-scoped movement. <b>The north-star DLDSC contract shape.</b></div>
+          <div class="c-ev">dldsc_matmul_operand_broadcast_checkpoint_20260702.md + lx_relayout.py:195-203. Backend plan (buf21): 32 shards, 32 replicas, 1024 logical transfers</div>
+          <div class="c-gap"><b>Gap:</b> backend fails closed for this class.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></div>
+          <h4>Flash-attention restickify &#8594; on-chip LX transform</h4>
+          <div class="c-detail">The 32 HBM restickifies in flash attention become 32 on-chip ReStickifyOpLx + 32 all-gather layout-restickify plans. Proves the flash HBM-restickify class is representable as on-chip movement.</div>
+          <div class="c-ev">off: 550 SDSC, 32 ReStickifyOpHBM, 0 LX, 0 plans. on: 0 HBM, 32 LX, 32 plans (all_gather, transfer_count=256, fanout/fanin=8). Wall 435s&#8594;243s (compile-probe)</div>
+          <div class="c-gap"><b>Gap:</b> compile-artifact delta only &mdash; NOT a speedup, NOT value-verified.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></div>
+          <h4>Flash layout-allgather: checker + plan synthesis + backend-plan artifact</h4>
+          <div class="c-detail">Validates a flash layout-allgather contract, synthesizes the 32 HBM&#8594;32 LX all-gather plan, and emits a deterministic backend-plan JSON. The all-gather class realized for the flash/SDPA operand.</div>
+          <div class="c-ev">4afc4d9f53 (contract checker), c3c4aa52fa (synth), 454756c7ad (hook), 96c00ed16a (artifact)</div>
+          <div class="c-gap"><b>Gap:</b> plan synthesis + artifact only; no device trace of it executing.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip structural"><span class="dot"></span>structural</span></div>
+          <h4>LX restickify DDL realization (ReStickifyOpLx op-bind + templates)</h4>
+          <div class="c-detail">Adds the DDL op-bind + templates so a local layout conversion targets LX not HBM, and teaches finalizeScheduleTree to ignore DDL-only staging dims &mdash; the on-chip local-layout-conversion primitive the staged KERNEL-operand path depends on.</div>
+          <div class="c-ev">00a37826a8 (restickify.ddl %rst_lx_fp16_op bind); 3d54e87eb4 (restickify_lx.ddl +105, restickify_lx_sen1p5.ddl +135)</div>
+          <div class="c-gap"><b>Gap:</b> scaffolding present; value-correct wiring is the blocked frontier.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip inprogress"><span class="dot"></span>in-progress</span></div>
+          <h4>DLDSC collective realization prototype (ProgIR lowering + input-neighbor-fetch)</h4>
+          <div class="c-detail">The end-to-end scaffold turning a DLDSC classification into a physically lowered on-chip move spanning dxp &#8594; dcg &#8594; ProgIR.</div>
+          <div class="c-ev">3d54e87eb4 (SdscRelayoutInsertion +310, ConstructProgIRHelper +74, inputNeighFetchOp +70, stcdpOp.cpp, L3DlOpsScheduler +32)</div>
+          <div class="c-gap"><b>Gap:</b> prototype-level; DDC fold + fillDataInfo not yet value-stable for the KERNEL-operand case.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip blocked"><span class="dot"></span>blocked</span></div>
+          <h4>Physical lowering via kernel-neighbor carousel</h4>
+          <div class="c-detail">The backend CAN emit L3 ring send/recv PCFG nodes, but the gathered bytes are not in the physical PT KERNEL layout the matmul reads. Direct fused ring writes into final KERNEL layout are value-wrong; ring for same-core pieces caused a PCI bus fence.</div>
+          <div class="c-ev">Synthetic M4 archived pass 0/1024; current repro 949/1024 mismatch ROWMAP_OUT0 [0,0,0,0.75]. _lx_local &#8594; distributeElemArrToTemporalLoops assert then fillDataInfo map::at</div>
+          <div class="c-gap"><b>Gap:</b> needs the true two-stage realization: ring-gather to source-layout staging, local copy for same-core, local ReStickifyOpLx to final KERNEL.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip inprogress"><span class="dot"></span>in-progress</span></div>
+          <h4>Staged 'gather_then_restickify' matmul-operand strategy</h4>
+          <div class="c-detail">The production-leaning value-correct alternative to the value-wrong direct KERNEL-neighbor path: separate the all-gather from local layout conversion into an explicit restickify stage.</div>
+          <div class="c-ev">staged_contract_checkpoint_20260706.md, deeptools eb68de6f7. Stages: source_operand_shards &#8594; grouped_all_gather_replicate &#8594; local_layout_conversion &#8594; gather_then_restickify &#8594; bind_matmul_kernel_operand</div>
+          <div class="c-gap"><b>Gap:</b> still contract-level; backend fails closed until the staged path is realized + verified.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip validated"><span class="dot"></span>validated</span></div>
+          <h4>Clone-source LX eligibility</h4>
+          <div class="c-detail">Surgical eligibility fix (<code>_clone_output_good_for_lx_relayout</code>) targeting the attention value-side handoff whose all_gather_replicate source clone was still HBM-pinned. Narrows eligibility to internal computed activation clones only.</div>
+          <div class="c-ev">commit e4ae105 allocator.py (active under SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES=1, clone ops only). test_lx_relayout_dldsc.py 18 passed</div>
+          <div class="c-gap"><b>Gap:</b> hardware verification pending &mdash; needs a Granite rerun to confirm Tensor1 flips to LX-backed.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip validated"><span class="dot"></span>validated</span></div>
+          <h4>LX cardinality + matmul-operand-broadcast unit coverage (26 gtests)</h4>
+          <div class="c-detail">The VALIDATED reference backstop for the mechanism half: correct group/core-pair expansion, rejection of scatter/resident-replication/incomplete-rename metadata, coordinate-derived grouping, layout-conversion contract.</div>
+          <div class="c-ev">/tmp/dt-comms dd2f454836 + LayoutAllgatherRestickify_unit_test.cpp (synthesizesFlash*, synthesizesGroupedMatmulOperandBroadcast*, AcceptsGatherThenRestickifyRealization, RejectsResidentReplication)</div>
+          <div class="c-gap"><b>Gap:</b> unit-level only; does not prove on-device value correctness of the blocked loop-scoped path.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip blocked"><span class="dot"></span>blocked</span></div>
+          <h4>Attention QK&#7488; all-gather substrate (multicast 8 K-shards &#8594; full K to Lq cohort)</h4>
+          <div class="c-detail"><code>broadcast_reshard.py</code> is the structural DUAL of reduction_reshard &mdash; SAME class as codex's matmul_operand_broadcast in the same DCG region (his AV value-operand vs our QK&#7488; K-operand). P0 PASS (patched dxp accepts the multicast STCDPOpLx, EBR inert).</div>
+          <div class="c-ev">Branch swiglu-ws-v2, flag SPYRE_ONCHIP_ATTN_ALLGATHER. DXP-on-latest: flag-OFF SDPA matches CPU eager at 1e-3 (was 0.02); flag-ON still mis-gathers ~0.02</div>
+          <div class="c-gap"><b>Gap:</b> ROOT CAUSE: mul(K) is a SEPARATE device program, so the consumer bundle re-reads K from HBM via an in-bundle ReStickify sharded x:32, not the gather's assumed out/Lk-band:32. As architected the substrate cannot be value-correct; real fix = co-bundling mul(K) into the QK&#7488; program (a redesign).</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip measured"><span class="dot"></span>measured</span></div>
+          <h4>Measured grounding: realized broadcast banks 1.053&times; via HBM-round-trip elimination, NOT ring efficiency</h4>
+          <div class="c-detail">The cost model attributes the entire win to <code>dram_bytes_saved_vs_spill</code> (HBM write+read elimination), a resource distinct from ring-transport time. Establishes codex's matmul_operand_broadcast == the attention all-gather the seam prices.</div>
+          <div class="c-ev">ORCHESTRATION_PLAN.md sec9: 12.55&#8594;11.92 = 1.053&times;; realized move is 256 transfers, max link occ 16/link (32 same-core free + 224 cross-core) &mdash; worse than the 36 GB/s scatter floor. comm_cost.py:443-457 dram_saved=2*operand</div>
+          <div class="c-gap"><b>Gap:</b> the mechanism half is BLOCKED (value-correct XOR capacity-safe; 232 ALLCLOSE-False / 26 True on CDX M4).</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P5 group -->
+    <div class="ledger-group">
+      <h3><span class="status-badge sb-inprog">P5</span> Reduce &amp; all-reduce &mdash; the arithmetic-collective lane</h3>
+      <div class="cards">
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip design"><span class="dot"></span>design</span></div>
+          <h4>Reduce / all-reduce lane parked as out of copy-relayout scope</h4>
+          <div class="c-detail">Codex's copy-based DLDSC relayout deliberately stops at byte-movement classes; reduce/all-reduce combine values arithmetically and need reduction axes/op/dtype/identity, not a coordinate copy. <b>This is the lane codex parks and claude owns.</b></div>
+          <div class="c-ev">handoff sec 8 taxonomy: 'reduce/all_reduce: not covered by relayout; value-combining collectives need separate semantics'</div>
+          <div class="c-gap"><b>Gap:</b> no frontend contract, no backend, no Granite evidence on codex's side &mdash; entirely the claude convergence lane.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></div>
+          <h4>G2 LSE ring-fold value oracle</h4>
+          <div class="c-detail">Merges two flash partials (m,l,A) over DISJOINT key sets (m=max; a&#7522;=exp(m&#7522;&minus;m); A=&#931;a&#7522;A&#7522;; l=&#931;a&#7522;l&#7522;; O=A/l once at fold end), fp32 carry + static ring order for bit determinism. The folded payload is the <b>L-independent</b> (m,l,A) triple, so the reduce is F-dominated regardless of key-tile count.</div>
+          <div class="c-ev">lse_fold_ref.py:158-223; test_lse_fold.py 16 tests pass &mdash; associativity, commutativity, bit determinism, equivalence to single-pass softmax, tree==linear, L-independent payload</div>
+          <div class="c-gap"><b>Gap:</b> device-free / unit-validated only; frontend owns the OPERATOR, backend owns realization.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></div>
+          <h4>Bet 3 LSE ring-fold merge (neighbor reduce-scatter)</h4>
+          <div class="c-detail">A genuinely novel collective: merge Lk-shard softmax partials with a neighbor reduce-scatter (1 transfer/link, ~130 band) instead of a linear fold-to-one that piles O on one link at the ~36 floor. Lands the output <b>head-split</b> &mdash; exactly the layout the O-projection wants &mdash; so the merge is relayout-free.</div>
+          <div class="c-ev">Branch ah/flash-ring b36236a; carousel/fold.py + reference.py 13/13 device-free checks pass incl. fold == single-pass softmax at rtol 1e-4</div>
+          <div class="c-gap"><b>Gap:</b> MODELED collective, not compiler-wired, not device-measured.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></div>
+          <h4>G2 reduce-lane cost wiring (LSE fold priced F-dominated)</h4>
+          <div class="c-detail">Selects reduce_tree_fold (ceil(log&#8322;P) hops) over reduce_plain_ring (P&minus;1 hops); &ge;98% of plain-ring cost is fixed F, not payload. Reduce is NOT tiled by LX_CAP (payload tiny / L-independent). Corrects the earlier K3 assumption that the fold rides the 130 GB/s uniform shift.</div>
+          <div class="c-ev">comm_cost.py:335-347 _reduce_schedules; test_reduce_prices_tree_fold_at_P32 (37.10 tree vs 230.04 plain_ring) and C6 (~6.2&times;). P = split factor along Lk, NOT a full 32-core ring</div>
+          <div class="c-gap"><b>Gap:</b> realization gated behind the reduce-lane flag + missing SFP primitive.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip inprogress"><span class="dot"></span>in-progress</span></div>
+          <h4>lx_relayout reduce-lane reroute (SPYRE_LX_PLANNER_RELAYOUT_REDUCE gate)</h4>
+          <div class="c-detail">When gated ON and the class is reduce-like, realizes the edge as an lse_ring_fold plan priced as a G3 is_reduction CommEdge &mdash; closing the loop from the existing reduce classifier to the G3 tree-fold cost without touching the value path.</div>
+          <div class="c-ev">lx_relayout.py:612-692 reroute, 271-291 reduction branch, config.py:79-81 gate; commit d73c6c7</div>
+          <div class="c-gap"><b>Gap:</b> DEFAULT OFF; a pricing/routing wire &mdash; the backend reduction-collective lowering is absent.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip design"><span class="dot"></span>design</span></div>
+          <h4>make_lse_ring_fold_contract (DLDSC reduce contract builder)</h4>
+          <div class="c-detail">Encodes the LAYOUT DIVIDEND: reduce-over-Lk-within-head + scatter-result-over-heads lands the output HEAD-SPLIT == k_fast out-projection input layout &#8658; ZERO relayout at attention&#8594;out-proj. Carries class, LSE-combine operator identity, (m,l,A) payload, participant_count, tree_fold_hops.</div>
+          <div class="c-ev">layout_allgather_restickify.py:79-170; contract tests (target_schedule=reduce_tree_fold, rejects participant_count&lt;1)</div>
+          <div class="c-gap"><b>Gap:</b> authored but not emitted into a real compile path nor consumed by a backend lowering; design-only.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip blocked"><span class="dot"></span>blocked</span></div>
+          <h4>Bet 1 flash-in-a-loop (online-softmax as coarse-tiled Lk reduction)</h4>
+          <div class="c-detail">The transpose proves the mechanism is real (scores never materialize), but the resident-scratch guard is inert, BLOCKED UPSTREAM of coarse_tile. A byte-identical base-vs-fix stamp ablation proved the "one-step fix" does NOT fire.</div>
+          <div class="c-ev">Branch ah/flash-ring e47f268. scores.transpose(-1,-2) collapses [1,32,4096,4096]&#8594;[1,4,1024,4096]. 146 tests green but ablation-inert; committed nothing</div>
+          <div class="c-gap"><b>Gap:</b> real blockers: optimize_restickify_locations can't gather the sparse amax(dim=-1); the e2e test never surfaces Lk as a tiling level; an in-code limit disallows Lk coarse tiling. Reframed as a reduce-lane problem &mdash; codex's flash restickify-on does not help (refuted).</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P6 group -->
+    <div class="ledger-group">
+      <h3><span class="status-badge sb-inprog">P6</span> Costing &amp; scheduling &mdash; the selectability half</h3>
+      <div class="cards">
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></div>
+          <h4>G3 standalone communication cost model (comm_cost.py)</h4>
+          <div class="c-detail">Prices the on-chip LX-ring EDGE as a resource SEPARATE from the matmul OP model. On-chip moves are F-dominated (F=7.3&micro;s per STCDP execute, MEASURED), not bandwidth-bound; t_step=F+max_link_bytes/RAW_RATE(140e9) on the busiest link.</div>
+          <div class="c-why">Why it matters: the successor to the Bet-2 _cohort_penalty multiply-into-hbm_us hack &mdash; returns a CommCost resource vector (time_us, executes, schedule, max_link_occupancy, effective_bw_bps, lx_highwater, n_tiles, dram_bytes_saved).</div>
+          <div class="c-ev">comm_cost.py:15-467; test_comm_cost.py 20 tests pass (36/36 with lse_fold). Pure-Python, zero backend dep</div>
+          <div class="c-gap"><b>Gap:</b> none for the standalone model; its planner consumption is flag-gated.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></div>
+          <h4>Per-link contention pricing (band() + link_occupancy())</h4>
+          <div class="c-detail">Maps peak per-link transfer COUNT to effective aggregate bandwidth: occ&le;1 &#8594; 140 GB/s uniform shift, occ 2..9 &#8594; 36 GB/s plateau, occ&gt;9 &#8594; 36&times;(9/occ). Routes each transfer on the shortest ring arc, treats same-core as FREE, models disjoint groups as independent rings.</div>
+          <div class="c-ev">comm_cost.py:84-105 band(), 209-264 link_occupancy(); anchor (4 groups of 8) = 32 same-core free + 224 cross-core, MAX occ 16/link. Grounds MEASURED 54/90/130 vs 36 GB/s, R&sup2;&ge;0.998</div>
+          <div class="c-gap"><b>Gap:</b> the realized attention broadcast lands occ=16/link &#8594; slower than the 36 GB/s floor, so the model attributes its win to HBM-round-trip elimination not ring efficiency.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></div>
+          <h4>LX-capacity interception theorem</h4>
+          <div class="c-detail">Because the ring-carousel-vs-naive crossover (~5.2 MiB/head) sits ABOVE the ~2 MiB/core LX cap, cost() force-tiles any operand&gt;LX_CAP into ceil(bytes/LX_CAP) tiles each priced below the crossover &mdash; so the bandwidth-optimal ring NEVER wins for an LX-resident broadcast. <b>This is why the two carousel RFCs are shelved.</b></div>
+          <div class="c-ev">comm_cost.py:386-458 cost() + crossover_mib_per_head(); C2 (5.20 MiB crossover), C3 (16 MiB &#8594; 8 tiles, carousel never argmin)</div>
+          <div class="c-gap"><b>Gap:</b> MODELED/VALIDATED, consistent with the MEASURED 1.053&times; being pure HBM-round-trip elimination.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip measured"><span class="dot"></span>measured</span></div>
+          <h4>Ring-speed physics (device-measured bandwidth ladder)</h4>
+          <div class="c-detail">Device-measured that per-link transfer count &mdash; not burst size, not a hidden HW cap &mdash; sets effective ring bandwidth. At byte-matched volume uniform-shift beats scatter 2.5&times; (8MB) to 3.6&times; (16MB). The empirical law all three bets and the cost term rest on.</div>
+          <div class="c-ev">RING_SPEED.md additive-differential slope (R&sup2;&ge;0.998). Scatter 34-36 GB/s; uniform shift 54@4.06MB / 90.5@8.13MB / 130.3@16.25MB; streaming asymptote ~244-254</div>
+          <div class="c-gap"><b>Gap:</b> the fold/all-gather bandwidth arithmetic derived from it remains MODELED until device-confirmed at each bet's first-step gate.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip measured"><span class="dot"></span>measured</span></div>
+          <h4>Finding 2: burst-is-not-the-lever</h4>
+          <div class="c-detail">Enlarging per-descriptor burst 50-100&times; at fixed bytes gave &rho;_contig/&rho;_strided = 0.958 median / 1.004 min (vs BurstEfficiency's predicted 2.9&times;). The model predicts raw 128 for every pattern; only per-link contention pulls effective bandwidth down.</div>
+          <div class="c-ev">RING_SPEED.md Finding 2. perfmodel.cpp assigns raw ringBw=128 to every link (1889/1897/1987/1997); BurstEfficiency.def consumed only by L3DlOpsScheduler as a chunk-selection objective</div>
+          <div class="c-gap"><b>Gap:</b> directly motivates a pattern-aware ring cost term (~36 all-to-all, ~130+ uniform, +~7&micro;s fixed per STCDP execute).</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip validated"><span class="dot"></span>validated</span></div>
+          <h4>Bet 2 per-link contention cost term</h4>
+          <div class="c-detail">Replaced the lumped cohort_penalty=max(1,max(m,n)/8) with a structural identical-operand gate (LHS multicast over n-cohort, RHS over m-cohort, capped at ~130 band; output distinct at peak/36). Prices the transport topology the flat bytes/128 model ignores so a ring-aware wide-cohort plan becomes selectable.</div>
+          <div class="c-ev">commit 2dfb2cc. 7/7 new unit + 153 inductor tests pass, ruff clean. Decisive test: wide-N (m2,n16) now costs LESS than (m8,n4) &mdash; the mispricing inversion is gone</div>
+          <div class="c-gap"><b>Gap:</b> no-regression is STRUCTURAL not empirical (_cohort_penalty returns 1.0 for cohort&le;8). Not device-measured.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip inprogress"><span class="dot"></span>in-progress</span></div>
+          <h4>Flag-gated planner seam (SPYRE_COMM_COST_SEAM)</h4>
+          <div class="c-detail">When ON, hbm_us stays a pure HBM term and the split search ADDS the broadcast edge cost as a separate ADDITIVE term (op_cost + edge_cost), never multiplied into hbm_us. Prices RHS[K,N] all-gather to the M-split cohort and LHS[M,K] to the N-split cohort as G3 ALL_GATHER CommEdges &mdash; the reshard-aware selectability half.</div>
+          <div class="c-ev">work_division.py:969 env gate, 1021-1030 pure-hbm branch, 1123-1165 _matmul_broadcast_edge_cost_us, 1307-1315 additive call. Flag OFF by default, zero-change no-op</div>
+          <div class="c-gap"><b>Gap:</b> DEFAULT OFF and NOT device-validated to reproduce the device-verified Granite selections; pending device gate.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip structural"><span class="dot"></span>structural</span></div>
+          <h4>comm_edge_from_plan adapter (plan-time == realize-time pricing)</h4>
+          <div class="c-detail">Builds a G3 CommEdge from a realized LXRelayoutPlan so plan-time and realize-time costs use the SAME model, enforcing a one-directional dep (work_division imports comm_cost; the adapter lives in lx_relayout so comm_cost keeps zero backend dep).</div>
+          <div class="c-ev">lx_relayout.py:294-331 comm_edge_from_plan / comm_edge_cost_us_for_plan</div>
+          <div class="c-gap"><b>Gap:</b> group derivation is APPROXIMATE (group_size/count from producer-slice cardinality); TODO to derive exact (group_count, replicas, producer_chunks) from the fan-in/out overlap map.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner claude">claude</span><span class="chip design"><span class="dot"></span>design</span></div>
+          <h4>Ring-aware mechanism catalog + carousel ROI dispositions</h4>
+          <div class="c-detail">The organizing analysis separating residency (trivial floor) from the ring-aware algorithm layer, gating every mechanism on 'disqualified if it collapses to just pin it.' Killed 6 upstream with reasons; concludes: fund ONE vehicle &mdash; the cross-bundle co-bundling redesign.</div>
+          <div class="c-ev">RING_AWARE_MECHANISMS.md (11 mechanisms, 5 bets, 6 killed); CAROUSEL_ROI_PLAN.md (10 premises). Weight carousel SHELVED (W2 29.8&#8594;72.7% util zero transport); KV carousel RESHAPED (K2/K3 refuted)</div>
+          <div class="c-gap"><b>Gap:</b> Bets 6-11 structurally sound but speculative-on-payoff and needs-deeptools.</div>
+        </div>
+        <div class="card">
+          <div class="c-top"><span class="owner codex">codex</span><span class="chip blocked"><span class="dot"></span>blocked</span></div>
+          <h4>Granite S512 e2e blocker isolation (batchmatmul does not fit in LX)</h4>
+          <div class="c-detail">The matmul_operand_broadcast plan generates but DXP cannot fit the batchmatmul in LX (capacity/schedule realization, not metadata). Confirms full-resident gather is too large for Granite attention and the loop-scoped staging is required not optional.</div>
+          <div class="c-ev">granite_s512_relayout_clc_20260705.md: 8_batchmatmul plan (all_gather_replicate, logical_transfer_count=512, group_count=2) then DtException 'initial chunk must fit in LX' L3DlOpsScheduler.cpp:1701, rc=134</div>
+          <div class="c-gap"><b>Gap:</b> the scheduling frontier the P6 reshard-aware cost term is meant to steer, but the cost/selection term is not present in codex's branches.</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ============ 7. MEASURED RESULTS ============ -->
+  <div class="sec">
+    <h2><span class="num">07</span> Results panel &mdash; every concrete number, tagged</h2>
+    <p class="lede">Each tile carries its evidence kind as a text label (never color alone). MEASURED = device/trace; STRUCTURAL = compile-artifact delta, value not verified; VALIDATED = device-free reference/unit; MODELED = analytic.</p>
+    <div class="stats">
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val" style="color:var(--measured)">14.7258 &#8594; 13.8213 ms</div><div class="lbl2">PR1 scatter, Granite S512 kernel (1.065&times;); dense-coord 13.8503 preserves</div><div class="src">current_state.md &middot; LX frac 0.2</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val">27.6074 &#8594; 26.5205</div><div class="lbl2">PR1 scatter, Granite S512 wall (1.039&times;)</div><div class="src">current_state.md</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val" style="color:var(--measured)">12.548 &#8594; 11.9182 ms</div><div class="lbl2">Clone-source + backend2162 kernel, 2 plans (1.053&times; vs same-branch disabled); wall 30.838&#8594;30.447</div><div class="src">granite_s512_backend2162_status.md</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val">12.1038 ms</div><div class="lbl2">Clone-source, 1 plan kernel</div><div class="src">granite_s512_backend2162_status.md</div></div>
+
+      <div class="stat k-structural"><span class="kind chip structural"><span class="dot"></span>structural</span><div class="val">32 HBM &#8594; 32 LX</div><div class="lbl2">Flash relayout SDSC delta: 550 SDSC, 0&#8594;32 plans; wall 435s&#8594;243s (compile-probe)</div><div class="src">dldsc_remaining_hbm_spill_classes_20260702.md</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val" style="color:var(--blocked)">31.5% mismatch</div><div class="lbl2">Flash value-correct run (PATCH_MODE unset): 5285717/16777216 &mdash; partly a pre-existing zero-stride baseline bug</div><div class="src">value_correctness_boundary_20260706.md</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val" style="color:var(--blocked)">949/1024 mismatch</div><div class="lbl2">Synthetic M4 kernel-neighbor carousel (BLOCKED); archived pass was 0/1024</div><div class="src">comms_collectives_handoff_20260705.md sec5-6</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val" style="color:var(--blocked)">232 False / 26 True</div><div class="lbl2">CDX M4 operand-broadcast ALLCLOSE (BLOCKED: value-correct XOR capacity-safe)</div><div class="src">ORCHESTRATION_PLAN.md</div></div>
+
+      <div class="stat k-structural"><span class="kind chip structural"><span class="dot"></span>structural</span><div class="val" style="color:var(--blocked)">rc=134</div><div class="lbl2">Granite e2e all-gather blocker: transfer_count=512, group_count=2; DtException 'chunk must fit in LX' L3DlOpsScheduler.cpp:1701</div><div class="src">granite_s512_relayout_clc_20260705.md</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val">34&ndash;36 GB/s</div><div class="lbl2">Ring physics: all-to-all scatter (524 descriptors, 4-9 xfers/link); R&sup2;&ge;0.998</div><div class="src">RING_SPEED.md</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val" style="color:var(--measured)">54 / 90 / 130 GB/s</div><div class="lbl2">Ring physics: uniform p&#8594;p+1 shift @4/8/16 MB (1 xfer/link); streaming asymptote ~244-254</div><div class="src">RING_SPEED.md</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val">0.958&times; median</div><div class="lbl2">Burst-is-not-the-lever null: &rho;_contig/&rho;_strided (vs BurstEfficiency-predicted 2.9&times;) &mdash; zero improvement</div><div class="src">RING_SPEED.md Finding 2</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val">16 / link</div><div class="lbl2">Realized attention broadcast link occupancy: 256 transfers, 32 same-core free + 224 cross-core &mdash; slower than the 36 GB/s floor</div><div class="src">ORCHESTRATION_PLAN.md sec9b</div></div>
+
+      <div class="stat k-validated"><span class="kind chip validated"><span class="dot"></span>validated</span><div class="val" style="color:var(--validated)">37.1 vs 230.0 &micro;s</div><div class="lbl2">Reduce tree-fold vs plain-ring at P=32 (~6.2&times;); &ge;98% of plain-ring cost is fixed F</div><div class="src">comm_cost.py + test_lse_fold.py / C6</div></div>
+
+      <div class="stat k-modeled"><span class="kind chip inprogress"><span class="dot"></span>modeled</span><div class="val">~5.20 MiB/head</div><div class="lbl2">Ring-carousel crossover sits ABOVE ~2 MiB/core LX cap; 16 MiB operand &#8594; 8 tiles, carousel never argmin</div><div class="src">comm_cost.py:386-458 + C2/C3</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val">7.3 &micro;s</div><div class="lbl2">F fixed cost per STCDP execute, used as F in t_step = F + max_link_bytes/RAW_RATE(140e9)</div><div class="src">comm_cost.py:15-467</div></div>
+
+      <div class="stat k-validated"><span class="kind chip validated"><span class="dot"></span>validated</span><div class="val" style="color:var(--validated)">13/13 + 16/16</div><div class="lbl2">LSE fold reference: device-free tests pass; fold == single-pass softmax at rtol 1e-4 (&plusmn;80-logit)</div><div class="src">ah/flash-ring b36236a; test_lse_fold.py</div></div>
+
+      <div class="stat k-validated"><span class="kind chip validated"><span class="dot"></span>validated</span><div class="val">20/20 (36/36)</div><div class="lbl2">comm_cost model tests pass (with lse_fold); pure-Python zero backend dep</div><div class="src">test_comm_cost.py</div></div>
+
+      <div class="stat k-validated"><span class="kind chip validated"><span class="dot"></span>validated</span><div class="val">7/7 + 153</div><div class="lbl2">Bet 2 ring-cost-term unit + inductor tests; wide-N (m2,n16) now costs LESS than (m8,n4)</div><div class="src">ah/ring-cost-term 2dfb2cc</div></div>
+
+      <div class="stat k-validated"><span class="kind chip validated"><span class="dot"></span>validated</span><div class="val">26 gtests</div><div class="lbl2">Deeptools cardinality / matmul-operand unit suite (flash all-gather + grouped broadcast + rejection cases)</div><div class="src">/tmp/dt-comms dd2f454836</div></div>
+
+      <div class="stat k-validated"><span class="kind chip validated"><span class="dot"></span>validated</span><div class="val">15 (18)</div><div class="lbl2">Torch DLDSC classifier unit passing (18 after clone-source patch)</div><div class="src">test_lx_relayout_dldsc.py</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val" style="color:var(--blocked)">~0.02 mis-gather</div><div class="lbl2">Attn QK&#7488; all-gather substrate (BLOCKED): flag-OFF matches CPU at 1e-3; flag-ON still mis-gathers</div><div class="src">swiglu-ws-v2 (SPYRE_ONCHIP_ATTN_ALLGATHER)</div></div>
+
+      <div class="stat k-measured"><span class="kind chip measured"><span class="dot"></span>measured</span><div class="val" style="color:var(--measured)">29.8% &#8594; 72.7%</div><div class="lbl2">W2 array-fill layout fix, PT-Util, ZERO transport (refutes 30&times;-under-roofline carousel premise)</div><div class="src">CAROUSEL_ROI_PLAN.md</div></div>
+
+    </div>
+  </div>
+
+  <!-- ============ 8. REMAINING WORK ============ -->
+  <div class="sec">
+    <h2><span class="num">08</span> Remaining work &amp; the shared blocker</h2>
+    <p class="lede">The top gaps, in dependency order &mdash; what each blocks and who owns the next step.</p>
+
+    <div class="shared-blocker">
+      <h4>&#9888; The shared upstream blocker: all-gather &#8594; DsTypes::KERNEL operand</h4>
+      <p style="margin-bottom:8px">
+        One deeptools DCG plumbing problem gates the entire attention matmul-operand comms class (the last remaining
+        non-flash Granite spill) and blocks BOTH halves at once. The all-gather is <b>value-correct XOR capacity-safe</b>:
+        the direct KERNEL-neighbor path is value-wrong (949/1024, fail-closed asserted), the staged
+        <code>gather_then_restickify</code> path is contract-level only, and full-resident gather does not fit Granite
+        attention in LX. The single most-leveraged shared task is to generalize
+        <code>runDcgForInputFetchNeighbor</code> off <code>DsTypes::INPUT</code>-only and populate/consume coordinate
+        maps for a replicated KERNEL operand under loop-scoped fetch &mdash; with the descriptor carrying true
+        coordinate STRIDE, not a cohort count (codex's flash value-bug root was count-based grouping). Claude's
+        prerequisite: mul(K) must be co-bundled into the QK&#7488; program so the consumer doesn't re-read K from HBM.
+      </p>
+    </div>
+
+    <div class="gap-item">
+      <h4><span class="gnum">G1</span> All-gather &#8594; KERNEL operand is value-correct XOR capacity-safe</h4>
+      <div class="row"><span class="k">Blocks</span><span>P4 completion, P3 physical execution, any device-validated speedup for the entire attention matmul-operand comms class.</span></div>
+      <div class="row"><span class="k">Next</span><span><span class="owner codex">codex</span> realize the two-stage loop-scoped gather_then_restickify (ring-gather to source-layout staging + local ReStickifyOpLx to final KERNEL) and land it value-correct end-to-end.</span></div>
+    </div>
+
+    <div class="gap-item">
+      <h4><span class="gnum">G2</span> DDC fold propagation clobbers per-core coreIdToWkSlice_ coordinate maps</h4>
+      <div class="row"><span class="k">Blocks</span><span>The active integration frontier &mdash; both the Granite matmul_operand_broadcast and the synthetic M4 carousel throw map::at / produce wrong offsets in fillLoopOffsetsAndAddresses here.</span></div>
+      <div class="row"><span class="k">Next</span><span><span class="owner codex">codex</span> resolve the localized (allocation_lookup &#8594; loop_offsets &#8594; coordinate_offsets) fold-preservation crash under debugPhase instrumentation.</span></div>
+    </div>
+
+    <div class="gap-item">
+      <h4><span class="gnum">G3</span> Generalize runDcgForInputFetchNeighbor for a replicated KERNEL operand (true coordinate STRIDE)</h4>
+      <div class="row"><span class="k">Blocks</span><span>The single most-leveraged shared task &mdash; likely clears BOTH codex's and claude's passing-but-unreproducible runs; also the productionization anchor for claude's Bet-2 edge cost.</span></div>
+      <div class="row"><span class="k">Next</span><span><span class="owner shared">shared</span> codex mechanism + claude co-bundling prerequisite (mul(K) into the QK&#7488; program).</span></div>
+    </div>
+
+    <div class="gap-item">
+      <h4><span class="gnum">G4</span> Planner seam + Bet-2 term not device-validated to reproduce Granite selections</h4>
+      <div class="row"><span class="k">Blocks</span><span>P6 relayout-aware planning shipping ON by default &mdash; closing the loop so the planner actually PICKS the on-chip move on cost grounds.</span></div>
+      <div class="row"><span class="k">Next</span><span><span class="owner claude">claude</span> run the KV-proj [4096,1024] wide-N + banked shared-weight device sweep on a stable pod once devices recover.</span></div>
+    </div>
+
+    <div class="gap-item">
+      <h4><span class="gnum">G5</span> Backend SFP lse_combine primitive not lowered</h4>
+      <div class="row"><span class="k">Blocks</span><span>P5 reduce/all-reduce &mdash; the arithmetic-collective lane; Bet 3 device measurement.</span></div>
+      <div class="row"><span class="k">Next</span><span><span class="owner shared">shared</span> deeptools lowers the SFP reduce primitive (written as a deeptools ask); claude's oracle is the value reference; also needs cross-CORE Lk work-division (spatial split).</span></div>
+    </div>
+
+    <div class="gap-item">
+      <h4><span class="gnum">G6</span> Bet-1 flash-in-a-loop blocked upstream of coarse_tile</h4>
+      <div class="row"><span class="k">Blocks</span><span>Killing the 32MB/head score spill and making the LSE fold reachable in a real compile (the temporal prerequisite for Bet 3).</span></div>
+      <div class="row"><span class="k">Next</span><span><span class="owner claude">claude</span> / upstream &mdash; the in-progress Stage-1 reduction-dim-tiling work (design doc on main) must lift the Lk coarse-tile limit; then surface an Lk hint + handle the sparse amax gather.</span></div>
+    </div>
+
+    <div class="gap-item">
+      <h4><span class="gnum">G7</span> Granite spill audit only partial</h4>
+      <div class="row"><span class="k">Blocks</span><span>P2 definition-of-done (full class-by-class covered/blocked/future inventory) and scoping of every later phase; the FFN/SwiGLU fused-region residency boundary is a separate WSR/streaming problem.</span></div>
+      <div class="row"><span class="k">Next</span><span><span class="owner codex">codex</span> produce the complete before/after SDSC classification table + reproduction runbook.</span></div>
+    </div>
+  </div>
+
+  <!-- ============ 9. HONESTY LEDGER ============ -->
+  <div class="sec">
+    <h2><span class="num">09</span> Honesty ledger</h2>
+    <div class="honesty">
+      <p style="margin-bottom:4px">Every claim above is tagged by evidence kind. No speedup is claimed from wall-time alone (an epic guardrail); wall time is reported flat-to-noise and only kernel-time-from-archived-traces counts.</p>
+      <div class="grid">
+        <div class="hi"><span class="h"><span class="sw" style="background:var(--measured);width:12px;height:12px;border-radius:3px;display:inline-block"></span>MEASURED</span><div style="color:var(--muted);margin-top:4px">Device / trace. Scatter 1.065&times; and the +backend2162 1.053&times; kernel deltas; the ring bandwidth ladder (36 vs 130 GB/s); the F=7.3&micro;s execute cost; the burst-is-not-the-lever null; and the BLOCKED value-mismatch counts (949/1024, 232/26, 31.5%).</div></div>
+        <div class="hi"><span class="h"><span class="sw" style="background:var(--structural);width:12px;height:12px;border-radius:3px;display:inline-block"></span>STRUCTURAL</span><div style="color:var(--muted);margin-top:4px">Compile-artifact delta, value NOT verified. Flash 32 HBM&#8594;32 LX; the sizing/plumbing/DDL scaffolding; the frontend contracts and backend plan artifacts. A representable move, not a proven-correct one.</div></div>
+        <div class="hi"><span class="h"><span class="sw" style="background:var(--validated);width:12px;height:12px;border-radius:3px;display:inline-block"></span>VALIDATED</span><div style="color:var(--muted);margin-top:4px">Device-free reference / unit. The DLDSC classifier (15/18), the 26-gtest deeptools suite, the comm_cost model (20/36), the LSE fold oracle (13/13 + 16/16), the tree-fold pricing, the Bet-2 term (7/153). Correct by construction, not yet on-device.</div></div>
+        <div class="hi"><span class="h"><span class="sw" style="background:var(--inprogress);width:12px;height:12px;border-radius:3px;display:inline-block"></span>MODELED / BLOCKED</span><div style="color:var(--muted);margin-top:4px">Analytic (the ~5.2 MiB crossover, the F-dominated reduce, the fold bandwidth arithmetic) and BLOCKED (the KERNEL-operand all-gather, the DDC fold crash, the LX-capacity e2e blocker, Bet-1's inert guard, the missing SFP primitive). The mechanism half is blocked upstream; the cost model prices the move correctly but cannot yet be device-validated end-to-end.</div></div>
+      </div>
+      <p style="margin-top:14px;margin-bottom:0;color:var(--muted);font-size:13px">
+        <b>Two hoped links honestly refuted:</b> codex's flash-restickify-on does NOT unblock claude's Bet-1
+        flash-in-a-loop (dense layout-form vs sparse amax reduction gather), and flash value-correctness is not a clean
+        signal for either lane (an independent zero-stride baseline bug). The one banked win &mdash; the realized
+        attention broadcast &mdash; runs at occ=16/link (worse than the 36 GB/s floor), so its 1.053&times; is attributed
+        entirely to HBM-round-trip elimination, not ring transport efficiency.
+      </p>
+    </div>
+    <div class="foot">Epic #3049 &middot; Comms-Collectives master ledger &middot; one ring substrate, two halves converging at the DLDSC coordinate-metadata contract.</div>
+  </div>
+
+</div>
+</div>
+</body>
+</html>
