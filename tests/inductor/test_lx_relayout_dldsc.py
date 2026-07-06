@@ -185,6 +185,15 @@ def test_matmul_operand_contract_is_preferred_for_matmul_operands(monkeypatch):
 
     assert _prefer_matmul_operand_contract(1, topology)
     assert _prefer_matmul_operand_contract(0, topology)
+    gather_topology = LXRelayoutTopology(
+        "gather",
+        "many_to_one",
+        max_fanout=1,
+        max_fanin=4,
+        transfer_count=128,
+    )
+    assert _prefer_matmul_operand_contract(1, gather_topology)
+    assert _prefer_matmul_operand_contract(0, gather_topology)
     multicast_topology = LXRelayoutTopology(
         "multicast",
         "one_to_many",
@@ -259,6 +268,22 @@ def test_matmul_operand_contract_marks_tensor0_lhs_all_gather():
         "operand_read_index": 0,
         "scope": "matmul_transfer_loop",
     }
+
+
+def test_matmul_operand_contract_maps_gather_to_all_gather_replicate():
+    contract = make_matmul_operand_allgather_contract(
+        producer_op="mul",
+        consumer_op="batchmatmul",
+        read_index=0,
+        producer_work_slice_dims={"0": 32},
+        consumer_tensor_work_slice_dims={"0": 8},
+        consumer_compute_work_slice_dims={"0": 8, "1": 4},
+        communication_class="gather",
+    )
+
+    assert contract["communication_class"] == "gather"
+    assert contract["communication_pattern"] == MATMUL_OPERAND_ALLGATHER_REPLICATE
+    assert contract["operand_role"] == "lhs"
 
 
 def test_matmul_operand_contract_marks_broadcast_pattern():

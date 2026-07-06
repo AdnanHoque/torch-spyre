@@ -196,6 +196,7 @@ def _prefer_matmul_operand_contract(
 ) -> bool:
     supported_matmul_operand_classes = (
         COMM_CLASS_ALL_GATHER,
+        "gather",
         "broadcast",
         "multicast",
     )
@@ -321,6 +322,21 @@ def _restickify_reads_computed_input(graph: GraphLowering, op: Operation) -> boo
         isinstance(graph.name_to_buffer.get(dep.name), ComputedBuffer)
         for dep in op.get_read_writes().reads
         if isinstance(dep, MemoryDep)
+    )
+
+
+def _matmul_operand_source_good_for_lx_relayout(
+    graph: GraphLowering, op: Operation
+) -> bool:
+    """Return whether a matmul operand producer belongs to this relayout lane.
+
+    Graph-input/weight restickifies are handled by weight prelayout/preload work.
+    This lane only stages computed activation operands and restickifies whose
+    input is another computed buffer.
+    """
+
+    return _op_name(op) != "restickify" or _restickify_reads_computed_input(
+        graph, op
     )
 
 
@@ -513,6 +529,14 @@ def plan_lx_relayouts(
                 continue
             read_index = _memory_read_index(consumer, dep)
             if is_matmul_consumer and read_index is not None:
+                if not _matmul_operand_source_good_for_lx_relayout(graph, producer):
+                    logger.debug(
+                        "lx relayout skip: %s -> %s is a weight/input restickify",
+                        producer.name,
+                        consumer.name,
+                    )
+                    continue
+
                 if (
                     config.lx_planner_relayout_layout_allgather_restickify
                     and not _prefer_matmul_operand_contract(read_index, topology)
