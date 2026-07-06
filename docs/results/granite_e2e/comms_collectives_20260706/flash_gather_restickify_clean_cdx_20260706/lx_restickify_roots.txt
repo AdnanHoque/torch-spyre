@@ -1,0 +1,9 @@
+run=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_120319_restick_lx_pinned_dt
+torch_root=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/torch-spyre
+torch_sha=b84528d7e32ad0aea5f31d7de107344b35617695
+deeptools_root=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools
+deeptools_sha=393403f8205a089045e364a4e98ab7291e584618
+deeptools_path=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools
+deeptools_install_dir=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/install-deeptools
+dxp=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/build-deeptools/dxp/dxp_standalone
+script=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_120319_restick_lx_pinned_dt/test_flash.py

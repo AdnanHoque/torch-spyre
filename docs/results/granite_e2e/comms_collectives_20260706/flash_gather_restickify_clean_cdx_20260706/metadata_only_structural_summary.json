@@ -1,0 +1,48 @@
+{
+  "run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524",
+  "sdsc_file_count": 550,
+  "op_counts_top": [
+    [
+      "unknown",
+      550
+    ]
+  ],
+  "ReStickifyOpHBM_total": 32,
+  "ReStickifyOpLx_total": 0,
+  "dldsc_metadata_sdsc_count": 32,
+  "classification_key_hits": {
+    "communication_pattern": 32,
+    "classification": 32,
+    "kind": 32
+  },
+  "backend_plan_count": 0,
+  "backend_plan_kinds": {},
+  "backend_plan_strategies": {},
+  "first_hbm_resticks": [
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_478.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_206.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_121.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_342.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_189.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_274.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_138.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_36.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_53.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_70.json"
+  ],
+  "first_lx_resticks": [],
+  "metadata_sdsc_samples": [
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_156.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_20.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_479.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_207.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_343.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_139.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_241.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_224.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_275.json",
+    "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_clean_gather_restickify_20260706_115524/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_pfm8ccq9/sdsc_292.json"
+  ],
+  "plan_files": [],
+  "plan_samples": []
+}
