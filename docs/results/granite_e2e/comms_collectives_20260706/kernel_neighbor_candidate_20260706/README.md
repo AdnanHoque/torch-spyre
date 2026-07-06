@@ -50,6 +50,18 @@ Deeptools changes in this candidate:
 
 16_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json `loop_scoped_input_fetch` `lowered_loop_scoped_kernel_neighbor` transfers=1024 group=1 repl=32<br>8_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json `loop_scoped_input_fetch` `lowered_loop_scoped_kernel_neighbor` transfers=512 group=2 repl=16
 
+
+## Full-Sync Granite Smoke
+
+After the structural compiles, we ran the original Granite block probe with `_sync(value)` enabled. These are execution smokes, not clean performance numbers, because each run used one measured iteration with compile/lazy setup in the same process.
+
+| Run | Return | Notes |
+| --- | --- | --- |
+| `kernel_neighbor_s256_fullsync_pass` | 0 | One-layer Granite prefill S256 returned output and KV cache; two attention operand plans lowered as `loop_scoped_input_fetch`. |
+| `kernel_neighbor_s512_fullsync_pass` | 0 | One-layer Granite prefill S512 returned output and KV cache; plans had 512 and 1024 logical transfers. |
+
+Remaining HBM rows in these full-sync smokes are outside the solved attention matmul operand edge: post-attention/RMS handoff and MLP/SwiGLU handoffs still show `ReStickifyOpHBM`. Those are the next communication/scratchpad targets.
+
 ## Flash Compile Evidence
 
 - Run: `/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_kernel_neighbor_clean_candidate_20260706_134926`

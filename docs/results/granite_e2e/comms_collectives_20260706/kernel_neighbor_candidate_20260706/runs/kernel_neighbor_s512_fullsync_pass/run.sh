@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source /home/adnan-cdx/dt-inductor/.venv/bin/activate
+export TORCH_DEVICE_BACKEND_AUTOLOAD=0
+export PYTHONPATH="/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/torch-spyre:${PYTHONPATH:-}"
+export PATH="/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_kernel_neighbor_fullsync_20260706_140300/tools:${PATH:-}"
+export LD_LIBRARY_PATH="/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/build-deeptools:/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/install-deeptools/lib:/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/lib:/opt/ibm/spyre/runtime/lib:/opt/ibm/spyre/senlib/lib:${LD_LIBRARY_PATH:-}"
+export DEEPTOOLS_PATH="/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools"
+export DEEPTOOLS_INSTALL_DIR="/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/install-deeptools"
+export DXP_LX_FRAC_AVAIL=0
+export DXP_BACKEND_LX_FRAC_AVAIL=1
+export SPYRE_LX_PLANNING=1
+export SPYRE_LX_PLANNER_RELAYOUT=1
+export SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS=1
+export SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES=1
+export SPYRE_LX_PLANNER_RELAYOUT_MATMUL_OPERAND_CONTRACT=1
+export SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY=1
+unset DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY
+unset DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC
+export DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR=1
+export DEEPTOOLS_MATMUL_OPERAND_BROADCAST_PLAN_DIR="/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_kernel_neighbor_fullsync_20260706_140300/backend_plans"
+export DEEPTOOLS_LAYOUT_ALLGATHER_RESTICKIFY_PLAN_DIR="/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_kernel_neighbor_fullsync_20260706_140300/backend_plans"
+"/home/adnan-cdx/dt-inductor/.venv/bin/python3" "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_kernel_neighbor_fullsync_20260706_140300/granite_block_layer_probe.py"   --fms-root "/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/decode_regression_rev_ab_20260610_163300/foundation-model-stack-eager_spyre"   --run-root "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_kernel_neighbor_fullsync_20260706_140300"   --case prefill   --seq-len 512   --iters 1   --warmups 0   --compile-block   --fused-weights
