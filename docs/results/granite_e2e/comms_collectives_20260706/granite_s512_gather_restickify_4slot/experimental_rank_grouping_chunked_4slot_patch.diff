@@ -1,0 +1,420 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 4e8eb9f83..ba327ea0d 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -345,6 +345,50 @@ static void addLxPiece(LdsInfo& dataLds, const std::string& key, int coreId,
+   dataLds.pieces_[key] = piece;
+ }
+ 
++static void addLxPieceWithValidSize(
++    LdsInfo& dataLds, const std::string& key, int coreId, int64_t startAddress,
++    const std::map<std::string, double>& physicalDimToSize,
++    const std::map<std::string, double>& dimToStart,
++    const std::map<std::string, double>& validDimToSize) {
++  PieceInfo piece;
++  piece.key_ = key;
++  piece.dimToSize_ = physicalDimToSize;
++  piece.dimToStartCordinate = dimToStart;
++  for (const auto& dimAndSize : physicalDimToSize) {
++    const auto validIt = validDimToSize.find(dimAndSize.first);
++    const double validSize = validIt == validDimToSize.end()
++                                 ? dimAndSize.second
++                                 : validIt->second;
++    DT_CHECK(validSize <= dimAndSize.second);
++    piece.validGap_[dimAndSize.first].push_back(
++        std::make_pair(validSize, dimAndSize.second - validSize));
++  }
++  piece.placement[SenComponents::LX];
++  piece.placement.at(SenComponents::LX).setType(SenComponents::LX);
++  piece.placement.at(SenComponents::LX).insertMemId(coreId);
++  auto& addrHelper = piece.placement.at(SenComponents::LX).StartAddr();
++  FoldDimProp* addrFoldProp = new FoldDimProp{1, "time"};
++  addrHelper.buildMapDim(addrFoldProp, 0);
++  piece.placement.at(SenComponents::LX).insertStAddr(startAddress, {0});
++  const auto existingBase = dataLds.coreIdTolxStartAddress_.find(coreId);
++  if (existingBase == dataLds.coreIdTolxStartAddress_.end() ||
++      startAddress < existingBase->second) {
++    dataLds.coreIdTolxStartAddress_[coreId] = startAddress;
++  }
++  dataLds.pieces_[key] = piece;
++}
++
++static std::map<std::string, double> expandPieceToStickSize(
++    const LdsInfo& dataLds, std::map<std::string, double> dimToSize) {
++  for (const auto& dimAndStick : dataLds.dimToStickSize_) {
++    const auto sizeIt = dimToSize.find(dimAndStick.first);
++    if (sizeIt != dimToSize.end() && sizeIt->second < dimAndStick.second) {
++      sizeIt->second = dimAndStick.second;
++    }
++  }
++  return dimToSize;
++}
++
+ static void addReplicatedLxPiece(
+     LdsInfo& dataLds, const std::string& key, const std::vector<int>& coreIds,
+     int64_t startAddress, const std::map<std::string, double>& dimToSize,
+@@ -454,18 +498,52 @@ static std::map<int, int64_t> jsonCoreStartAddresses(
+   return result;
+ }
+ 
++static double tensorContractDimExtent(const json11::Json& tensorJson,
++                                      const std::string& dim,
++                                      DesignSpaceConfig& dldsc) {
++  const auto coordInfo = tensorJson["coordinateInfo_"][dim];
++  const auto attrs = coordInfo["folds"]["dim_prop_attr"].array_items();
++  if (!attrs.empty()) {
++    double extent = 1;
++    for (const auto& attr : attrs) {
++      extent *= jsonNumberOrString(attr["factor_"], 1);
++    }
++    return extent;
++  }
++  return dldsc.N_.paramNameToVal(dim);
++}
++
+ static std::map<std::string, std::string> buildDimRenameByPosition(
+     const json11::Json& sourceTensorJson, const json11::Json& targetTensorJson,
+-    std::string* reason) {
++    DesignSpaceConfig& dldsc, std::string* reason) {
+   const auto sourceDims = jsonStringArray(sourceTensorJson, "layoutDimOrder_");
+   const auto targetDims = jsonStringArray(targetTensorJson, "layoutDimOrder_");
+-  if (sourceDims.empty() || sourceDims.size() != targetDims.size()) {
+-    *reason = "source and target layoutDimOrder_ must have the same rank";
++  if (sourceDims.empty() || targetDims.empty()) {
++    *reason = "source and target layoutDimOrder_ must be present";
+     return {};
+   }
++
+   std::map<std::string, std::string> rename;
+-  for (std::size_t idx = 0; idx < sourceDims.size(); ++idx) {
+-    rename[sourceDims.at(idx)] = targetDims.at(idx);
++  std::size_t sourceIdx = 0;
++  for (const auto& targetDim : targetDims) {
++    const double targetExtent = tensorContractDimExtent(targetTensorJson, targetDim, dldsc);
++    double groupedExtent = 1;
++    bool consumed = false;
++    while (sourceIdx < sourceDims.size() && groupedExtent < targetExtent) {
++      const auto& sourceDim = sourceDims.at(sourceIdx++);
++      groupedExtent *= tensorContractDimExtent(sourceTensorJson, sourceDim, dldsc);
++      rename[sourceDim] = targetDim;
++      consumed = true;
++    }
++    if (!consumed || groupedExtent != targetExtent) {
++      *reason = "source layout dimensions cannot be grouped to target dim " +
++                targetDim;
++      return {};
++    }
++  }
++  if (sourceIdx != sourceDims.size()) {
++    *reason = "source layout has trailing dimensions not covered by target layout";
++    return {};
+   }
+   return rename;
+ }
+@@ -514,9 +592,17 @@ static bool fillTensorContractLdsShape(
+ 
+   for (const auto& sourceDim : layoutDims) {
+     const auto dimName = renamedDim(dimRename, sourceDim);
+-    dataLds.layoutDimOrder_.push_back(dimName);
+-    ddsc.primaryDs_.at(pdsName).dimNames.insert(dimName);
+-    dataLds.dimToLayoutSize_[dimName] = dldsc.N_.paramNameToVal(dimName);
++    const auto sourceExtent = tensorContractDimExtent(tensorJson, sourceDim, dldsc);
++    if (std::find(dataLds.layoutDimOrder_.begin(), dataLds.layoutDimOrder_.end(),
++                  dimName) == dataLds.layoutDimOrder_.end()) {
++      dataLds.layoutDimOrder_.push_back(dimName);
++      ddsc.primaryDs_.at(pdsName).dimNames.insert(dimName);
++      dataLds.dimToLayoutSize_[dimName] = sourceExtent;
++    } else {
++      dataLds.dimToLayoutSize_[dimName] *= sourceExtent;
++    }
++  }
++  for (const auto& dimName : dataLds.layoutDimOrder_) {
+     dataLds.validGap_[dimName].push_back(
+         std::make_pair(dataLds.dimToLayoutSize_.at(dimName), 0));
+   }
+@@ -641,7 +727,7 @@ static bool cellIntersection(
+ }
+ 
+ static bool sourceShardCell(
+-    DesignSpaceConfig& dldsc,
++    DesignSpaceConfig& dldsc, const json11::Json& sourceTensorJson,
+     const std::map<std::string, int>& sourceSlice,
+     const std::map<std::string, std::set<int>>& sourceSliceIds,
+     const std::vector<std::string>& sourceLayoutDims,
+@@ -650,6 +736,7 @@ static bool sourceShardCell(
+     std::map<std::string, double>* dimToStart, std::string* reason) {
+   dimToSize->clear();
+   dimToStart->clear();
++  std::map<std::string, double> dimToGroupedExtent;
+   for (const auto& sourceDim : sourceLayoutDims) {
+     const auto targetDim = renamedDim(sourceToTargetDim, sourceDim);
+     const auto splitIt = sourceSliceIds.find(sourceDim);
+@@ -660,16 +747,27 @@ static bool sourceShardCell(
+       *reason = "source shard split must be positive for dim " + sourceDim;
+       return false;
+     }
+-    const double dimExtent = dldsc.N_.paramNameToVal(targetDim);
+-    if (static_cast<int>(dimExtent) % split != 0) {
++    const double sourceExtent = tensorContractDimExtent(sourceTensorJson, sourceDim, dldsc);
++    if (static_cast<int>(sourceExtent) % split != 0) {
+       *reason = "source shard extent is not evenly divisible for dim " +
+                 sourceDim;
+       return false;
+     }
+     const auto slotIt = sourceSlice.find(sourceDim);
+     const int slot = slotIt == sourceSlice.end() ? 0 : slotIt->second;
+-    (*dimToSize)[targetDim] = dimExtent / split;
+-    (*dimToStart)[targetDim] = slot * dimToSize->at(targetDim);
++    const double sourceSize = sourceExtent / split;
++    const double sourceStart = slot * sourceSize;
++    const auto existingSize = dimToSize->find(targetDim);
++    if (existingSize == dimToSize->end()) {
++      (*dimToSize)[targetDim] = sourceSize;
++      (*dimToStart)[targetDim] = sourceStart;
++      dimToGroupedExtent[targetDim] = sourceExtent;
++    } else {
++      (*dimToSize)[targetDim] *= sourceSize;
++      (*dimToStart)[targetDim] =
++          (*dimToStart)[targetDim] * sourceExtent + sourceStart;
++      dimToGroupedExtent[targetDim] *= sourceExtent;
++    }
+   }
+   return true;
+ }
+@@ -687,6 +785,8 @@ static void insertDataOpBeforeDl(SuperDsc* sdsc, int coreId, int dataOpIdx) {
+ }
+ 
+ struct GatheredPieceSpec {
++  std::string sourceKey;
++  int sourceCoreId = -1;
+   std::string key;
+   int coreId = -1;
+   std::map<std::string, double> dimToSize;
+@@ -720,7 +820,7 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     return false;
+   }
+   const auto sourceToTargetDim =
+-      buildDimRenameByPosition(sourceTensor, targetTensor, reason);
++      buildDimRenameByPosition(sourceTensor, targetTensor, dldsc, reason);
+   if (sourceToTargetDim.empty()) return false;
+ 
+   const auto sourceLayoutDims = jsonStringArray(sourceTensor, "layoutDimOrder_");
+@@ -793,7 +893,7 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     }
+     std::map<std::string, double> finalShardSize;
+     std::map<std::string, double> finalShardStart;
+-    if (!sourceShardCell(dldsc, targetSliceIt->second, targetSliceIds,
++    if (!sourceShardCell(dldsc, targetTensor, targetSliceIt->second, targetSliceIds,
+                          targetLayoutDims, {}, &finalShardSize,
+                          &finalShardStart, reason)) {
+       return false;
+@@ -817,6 +917,11 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     finalShardStartByCore[dstCore] = finalShardStart;
+   }
+ 
++  const int maxGatherPiecesPerCorePerChunk = 4;
++  std::map<std::pair<int, int>, int64_t> gatherTempAddrByCoreSlot;
++  std::map<std::pair<int, int>, int64_t> gatherTempBytesByCoreSlot;
++  std::map<int, int> gatherPieceOrdinalByCore;
++
+   std::set<int> gatherCores;
+   std::set<std::string> sourcePiecesAdded;
+   std::vector<GatheredPieceSpec> gatheredPieceSpecs;
+@@ -833,7 +938,7 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     }
+     std::map<std::string, double> sourceDimToSize;
+     std::map<std::string, double> sourceDimToStart;
+-    if (!sourceShardCell(dldsc, sourceSliceIt->second, sourceSliceIds,
++    if (!sourceShardCell(dldsc, sourceTensor, sourceSliceIt->second, sourceSliceIds,
+                          sourceLayoutDims, sourceToTargetDim, &sourceDimToSize,
+                          &sourceDimToStart, reason)) {
+       return false;
+@@ -845,7 +950,7 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     }
+     std::map<std::string, double> targetDimToSize;
+     std::map<std::string, double> targetDimToStart;
+-    if (!sourceShardCell(dldsc, targetSliceIt->second, targetSliceIds,
++    if (!sourceShardCell(dldsc, targetTensor, targetSliceIt->second, targetSliceIds,
+                          targetLayoutDims, {}, &targetDimToSize,
+                          &targetDimToStart, reason)) {
+       return false;
+@@ -861,6 +966,10 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     for (const auto& subCell : subCells) {
+       const auto& subDimToSize = subCell.first;
+       const auto& subDimToStart = subCell.second;
++      auto physicalTransferDimToSize =
++          expandPieceToStickSize(gatherOut, subDimToSize);
++      physicalTransferDimToSize = expandPieceToStickSize(
++          targetShapeForTempReservation, physicalTransferDimToSize);
+       const auto sourcePieceKey =
+           "src" + std::to_string(sourceCore) + "_" +
+           std::to_string(static_cast<int64_t>(
+@@ -869,31 +978,49 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+         int64_t sourcePieceAddr = sourceAddrIt->second;
+         sourcePieceAddr += localDensePieceOffsetBytes(
+             gatherIn, dimToSize, dimToStart, subDimToStart);
+-        addLxPiece(gatherIn, sourcePieceKey, sourceCore, sourcePieceAddr,
+-                   subDimToSize, subDimToStart);
++        addLxPieceWithValidSize(gatherIn, sourcePieceKey, sourceCore,
++                                sourcePieceAddr, physicalTransferDimToSize,
++                                subDimToStart, subDimToSize);
+       }
+       const int pieceIndex = transferPieceIdx++;
+       const std::string gatheredPieceKey =
+           "dst" + std::to_string(sourceCore) + "_" + std::to_string(dstCore) +
+           "_" + std::to_string(pieceIndex);
+-      const auto tempPieceBytes = byteSizeForCell(gatherOut, subDimToSize);
++      const auto tempPieceBytes =
++          byteSizeForCell(gatherOut, physicalTransferDimToSize);
++      const int tempSlot =
++          gatherPieceOrdinalByCore[dstCore]++ % maxGatherPiecesPerCorePerChunk;
++      const auto tempKey = std::make_pair(dstCore, tempSlot);
+       const auto tempName = sdsc->name_ + "-" + lds.dsName_ +
+                             "-MatmulOperandGatherTmp-core" +
+-                            std::to_string(dstCore) + "-piece" +
+-                            std::to_string(pieceIndex);
++                            std::to_string(dstCore) + "-slot" +
++                            std::to_string(tempSlot);
+       auto& tracker = memTrackers->lxTrackPerCore.at(dstCore);
+-      const auto tempAddr =
+-          tracker.checkAndAddDs(tempName, "dynamic", tempPieceBytes, {ps});
+-      if (tempAddr < 0) {
+-        *reason = "no LX room for matmul operand gather temp on core " +
+-                  std::to_string(dstCore) + " piece " +
+-                  std::to_string(pieceIndex);
+-        return false;
++      int64_t tempAddr = -1;
++      const auto existingTempAddr = gatherTempAddrByCoreSlot.find(tempKey);
++      const auto existingTempBytes = gatherTempBytesByCoreSlot.find(tempKey);
++      if (existingTempAddr != gatherTempAddrByCoreSlot.end() &&
++          existingTempBytes != gatherTempBytesByCoreSlot.end() &&
++          existingTempBytes->second >= tempPieceBytes) {
++        tempAddr = existingTempAddr->second;
++      } else {
++        tempAddr =
++            tracker.checkAndAddDs(tempName, "dynamic", tempPieceBytes, {ps});
++        if (tempAddr < 0) {
++          *reason = "no LX room for matmul operand gather temp on core " +
++                    std::to_string(dstCore) + " piece " +
++                    std::to_string(pieceIndex) + " slot " +
++                    std::to_string(tempSlot);
++          return false;
++        }
++        gatherTempAddrByCoreSlot[tempKey] = tempAddr;
++        gatherTempBytesByCoreSlot[tempKey] = tempPieceBytes;
+       }
+-      addLxPiece(gatherOut, gatheredPieceKey, dstCore, tempAddr, subDimToSize,
+-                 subDimToStart);
+-      gatheredPieceSpecs.push_back(
+-          {gatheredPieceKey, dstCore, subDimToSize, subDimToStart});
++      addLxPieceWithValidSize(gatherOut, gatheredPieceKey, dstCore, tempAddr,
++                              physicalTransferDimToSize, subDimToStart,
++                              subDimToSize);
++      gatheredPieceSpecs.push_back({sourcePieceKey, sourceCore, gatheredPieceKey,
++                                     dstCore, subDimToSize, subDimToStart});
+     }
+     gatherCores.insert(sourceCore);
+     gatherCores.insert(dstCore);
+@@ -932,8 +1059,11 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+                                    finalShardSizeByCore.at(piece.coreId),
+                                    finalShardStartByCore.at(piece.coreId),
+                                    piece.dimToStart);
+-    addLxPiece(restickifyOut, piece.key, piece.coreId, finalPieceAddr,
+-               piece.dimToSize, piece.dimToStart);
++    const auto physicalOutDimToSize =
++        expandPieceToStickSize(restickifyOut, piece.dimToSize);
++    addLxPieceWithValidSize(restickifyOut, piece.key, piece.coreId,
++                            finalPieceAddr, physicalOutDimToSize,
++                            piece.dimToStart, piece.dimToSize);
+   }
+   std::set<int> restickifyCores;
+   for (const auto& piece : gatheredPieceSpecs) {
+@@ -953,14 +1083,80 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+       restickifyDdsc.primaryDs_.at("dataOUT").dimNames.begin(),
+       restickifyDdsc.primaryDs_.at("dataOUT").dimNames.end());
+ 
+-  const int gatherIdx = static_cast<int>(sdsc->dataOpdscs_.size());
+-  sdsc->dataOpdscs_.push_back(gatherDdsc);
+-  const int restickifyIdx = static_cast<int>(sdsc->dataOpdscs_.size());
+-  sdsc->dataOpdscs_.push_back(restickifyDdsc);
+-
+-  for (const auto coreId : gatherCores) insertDataOpBeforeDl(sdsc, coreId, gatherIdx);
+-  for (const auto coreId : restickifyCores) {
+-    insertDataOpBeforeDl(sdsc, coreId, restickifyIdx);
++  std::vector<std::vector<GatheredPieceSpec>> chunks;
++  std::vector<GatheredPieceSpec> currentChunk;
++  std::map<int, int> currentChunkDestinationCoreCounts;
++  for (const auto& piece : gatheredPieceSpecs) {
++    if (currentChunkDestinationCoreCounts[piece.coreId] >=
++        maxGatherPiecesPerCorePerChunk) {
++      chunks.push_back(currentChunk);
++      currentChunk.clear();
++      currentChunkDestinationCoreCounts.clear();
++    }
++    currentChunk.push_back(piece);
++    currentChunkDestinationCoreCounts[piece.coreId]++;
++  }
++  if (!currentChunk.empty()) chunks.push_back(currentChunk);
++
++  for (size_t chunkIdx = 0; chunkIdx < chunks.size(); ++chunkIdx) {
++    auto chunkGatherDdsc = gatherDdsc;
++    chunkGatherDdsc.dscName_ += "-chunk" + std::to_string(chunkIdx);
++    chunkGatherDdsc.op = new STCDPOpLx;
++    chunkGatherDdsc.op->name = OpFuncs::STCDPOpLx;
++    chunkGatherDdsc.labeledDs_.at(0).pieces_.clear();
++    chunkGatherDdsc.labeledDs_.at(1).pieces_.clear();
++
++    auto chunkRestickifyDdsc = restickifyDdsc;
++    chunkRestickifyDdsc.dscName_ += "-chunk" + std::to_string(chunkIdx);
++    chunkRestickifyDdsc.op = new ReStickifyOpLx;
++    chunkRestickifyDdsc.op->name = OpFuncs::ReStickifyOpLx;
++    chunkRestickifyDdsc.labeledDs_.at(0).pieces_.clear();
++    chunkRestickifyDdsc.labeledDs_.at(1).pieces_.clear();
++
++    std::set<int> chunkGatherCores;
++    std::set<int> chunkRestickifyCores;
++    for (const auto& piece : chunks.at(chunkIdx)) {
++      const auto gatherInPiece = gatherIn.pieces_.find(piece.sourceKey);
++      const auto gatherOutPiece = gatherOut.pieces_.find(piece.key);
++      const auto restickifyInPiece = restickifyIn.pieces_.find(piece.key);
++      const auto restickifyOutPiece = restickifyOut.pieces_.find(piece.key);
++      if (gatherInPiece == gatherIn.pieces_.end() ||
++          gatherOutPiece == gatherOut.pieces_.end() ||
++          restickifyInPiece == restickifyIn.pieces_.end() ||
++          restickifyOutPiece == restickifyOut.pieces_.end()) {
++        *reason = "chunked gather/restickify missing piece metadata for chunk " +
++                  std::to_string(chunkIdx) + " source " + piece.sourceKey +
++                  " gathered " + piece.key;
++        return false;
++      }
++      chunkGatherDdsc.labeledDs_.at(0).pieces_[piece.sourceKey] =
++          gatherInPiece->second;
++      chunkGatherDdsc.labeledDs_.at(1).pieces_[piece.key] =
++          gatherOutPiece->second;
++      chunkRestickifyDdsc.labeledDs_.at(0).pieces_[piece.key] =
++          restickifyInPiece->second;
++      chunkRestickifyDdsc.labeledDs_.at(1).pieces_[piece.key] =
++          restickifyOutPiece->second;
++      chunkGatherCores.insert(piece.sourceCoreId);
++      chunkGatherCores.insert(piece.coreId);
++      chunkRestickifyCores.insert(piece.coreId);
++    }
++    chunkGatherDdsc.coreIdsUsed_.assign(chunkGatherCores.begin(),
++                                        chunkGatherCores.end());
++    chunkRestickifyDdsc.coreIdsUsed_.assign(chunkRestickifyCores.begin(),
++                                            chunkRestickifyCores.end());
++
++    const int gatherIdx = static_cast<int>(sdsc->dataOpdscs_.size());
++    sdsc->dataOpdscs_.push_back(chunkGatherDdsc);
++    const int restickifyIdx = static_cast<int>(sdsc->dataOpdscs_.size());
++    sdsc->dataOpdscs_.push_back(chunkRestickifyDdsc);
++
++    for (const auto coreId : chunkGatherCores) {
++      insertDataOpBeforeDl(sdsc, coreId, gatherIdx);
++    }
++    for (const auto coreId : chunkRestickifyCores) {
++      insertDataOpBeforeDl(sdsc, coreId, restickifyIdx);
++    }
+   }
+ 
+   allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
