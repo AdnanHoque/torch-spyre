@@ -1,0 +1,180 @@
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[pool=0],
+    start_address=0
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_mul_silu_split_with_sizes_3_j18997d7/sdsc_5.json
+[DEBUG] [spyre.inductor.codegen.superdsc] symbol mapping: c0 -> mb, c1 -> out
+[DEBUG] [spyre.inductor.codegen.superdsc] SDSCSpec(
+  opfunc=mul
+  exec_unit=sfp
+  data_format=SEN169_FP16
+  num_inputs=2
+  iteration_space=[mb=512, out=4096]
+  work_slices=[mb=32, out=1]
+  core_id_to_work_slice=[mb=Mod(core_id, 32), out=0]
+  layouts=[
+    OUTPUT: dim_order=[out, mb], stick_dim_order=out, stick_size=64
+  ]
+  args=[
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[pool=0],
+    start_address=0
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=-2, mb=-1],
+    strides=[out=64, mb=64],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[hbm=51539607552],
+    start_address=51539607552
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[lx=131072],
+    start_address=131072
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_mul_silu_split_with_sizes_3_j18997d7/sdsc_6.json
+[DEBUG] [spyre.inductor.codegen.superdsc] symbol mapping: c0 -> mb, c1 -> out
+[DEBUG] [spyre.inductor.codegen.superdsc] SDSCSpec(
+  opfunc=add
+  exec_unit=sfp
+  data_format=SEN169_FP16
+  num_inputs=2
+  iteration_space=[mb=512, out=4096]
+  work_slices=[mb=32, out=1]
+  core_id_to_work_slice=[mb=Mod(core_id, 32), out=0]
+  layouts=[
+    OUTPUT: dim_order=[out, mb], stick_dim_order=out, stick_size=64
+  ]
+  args=[
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[lx=131072],
+    start_address=131072
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[lx=0],
+    start_address=0
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[hbm=68719476736],
+    start_address=68719476736
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_mul_silu_split_with_sizes_3_j18997d7/sdsc_7.json
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_mul_silu_split_with_sizes_3_j18997d7/bundle.mlir
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused_linear_rms_norm_0 /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_linear_rms_norm_0_klqyezag
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1 /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_ktpznotj
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2 /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2_i5ezr2k6
+Signal Received: 15 (Terminated)
+Signal Received from pid=1152147 
+*** BACKTRACE ***
+/opt/ibm/spyre/senlib/lib/libsenlib-dd2.so(+0x42accf)[0x7fc84c2ffccf]
+/lib64/libc.so.6(+0x411c0)[0x7fc90fd901c0]
+/lib64/libc.so.6(syscall+0x1d)[0x7fc90fe5331d]
+/lib64/libstdc++.so.6(_ZNSt28__atomic_futex_unsigned_base26_M_futex_wait_until_steadyEPjjbNSt6chrono8durationIlSt5ratioILl1ELl1EEEENS2_IlS3_ILl1ELl1000000000EEEE+0xc4)[0x7fc8f813a5d4]
+/home/adnan/opt-newer/runtime/lib/libflex.so(_ZN4flex16RuntimeScheduler12issueBarrierENS_20RuntimeOperationTypeEPNS_13RuntimeStreamE+0x7ff)[0x7fc84e6001bf]
+/home/adnan/opt-newer/runtime/lib/libflex.so(_ZN4flex16RuntimeScheduler8scheduleEPNS_13RuntimeStreamERKNS_19RuntimeOperationH2DE+0x555)[0x7fc84e5fc435]
+/home/adnan/opt-newer/runtime/lib/libflex.so(_ZN4flex13RuntimeStream15launchOperationERKSt6vectorISt10unique_ptrINS_16RuntimeOperationESt14default_deleteIS3_EESaIS6_EE+0x2f)[0x7fc84e5c55bf]
+/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/torch_spyre/_C.so(_ZNK5spyre11SpyreStream6launchERKNS_7JobPlanERKSt6vectorIN2at6TensorESaIS6_EE+0x372)[0x7fc84e8eec82]
+/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/torch_spyre/_C.so(_ZN5spyre13launchJobPlanERKNS_7JobPlanERKSt6vectorIN2at6TensorESaIS5_EE+0x2d)[0x7fc84e8d5ced]
+/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/torch_spyre/_C.so(+0xe9281)[0x7fc84e85c281]
+/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/torch_spyre/_C.so(+0xb064b)[0x7fc84e82364b]
+/lib64/libpython3.12.so.1.0(+0x1a60d0)[0x7fc9100ce0d0]
+/lib64/libpython3.12.so.1.0(_PyObject_MakeTpCall+0x2db)[0x7fc9100a480b]
+/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x786)[0x7fc9100aece6]
+/lib64/libpython3.12.so.1.0(+0x1cfc4a)[0x7fc9100f7c4a]
+/lib64/libpython3.12.so.1.0(_PyEval_EvalFrameDefault+0x5caa)[0x7fc9100b420a]
+/lib64/libpython3.12.so.1.0(PyEval_EvalCode+0xaa)[0x7fc910166d9a]
+/lib64/libpython3.12.so.1.0(+0x27ac61)[0x7fc9101a2c61]
+/lib64/libpython3.12.so.1.0(+0x27560b)[0x7fc91019d60b]
+/lib64/libpython3.12.so.1.0(+0x272522)[0x7fc91019a522]
+/lib64/libpython3.12.so.1.0(_PyRun_SimpleFileObject+0x1cb)[0x7fc910199f4b]
+/lib64/libpython3.12.so.1.0(_PyRun_AnyFileObject+0x48)[0x7fc910199b68]
+/lib64/libpython3.12.so.1.0(PyRun_AnyFileExFlags+0x5c)[0x7fc910087df6]
+/lib64/libpython3.12.so.1.0(+0xc56a4)[0x7fc90ffed6a4]
+/lib64/libpython3.12.so.1.0(Py_BytesMain+0x3b)[0x7fc91015037b]
+/lib64/libc.so.6(+0x2a58e)[0x7fc90fd7958e]
+/lib64/libc.so.6(__libc_start_main+0x89)[0x7fc90fd79649]
+/home/adnan/dt-inductor/.venv/bin/python3(_start+0x25)[0x563bd545b095]
+*****************

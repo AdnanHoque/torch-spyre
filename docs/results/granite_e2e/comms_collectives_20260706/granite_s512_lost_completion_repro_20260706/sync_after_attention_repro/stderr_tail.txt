@@ -1,0 +1,180 @@
+    layout=KERNEL,
+    dim_order=[in, out], 
+    data_format=SEN169_FP16,
+    scales=[in=1, out=1],
+    strides=[in=819200, out=52428800],
+    offsets=[in=0, out=0],
+    max_dim_sizes=[in=-1, out=-1],
+    allocation=[pool=67633152],
+    start_address=67633152
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[pool=0],
+    start_address=0
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_mul_silu_split_with_sizes_3_a61xfhb2/sdsc_5.json
+[DEBUG] [spyre.inductor.codegen.superdsc] symbol mapping: c0 -> mb, c1 -> out
+[DEBUG] [spyre.inductor.codegen.superdsc] SDSCSpec(
+  opfunc=mul
+  exec_unit=sfp
+  data_format=SEN169_FP16
+  num_inputs=2
+  iteration_space=[mb=512, out=4096]
+  work_slices=[mb=32, out=1]
+  core_id_to_work_slice=[mb=Mod(core_id, 32), out=0]
+  layouts=[
+    OUTPUT: dim_order=[out, mb], stick_dim_order=out, stick_size=64
+  ]
+  args=[
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[pool=0],
+    start_address=0
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=-2, mb=-1],
+    strides=[out=64, mb=64],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[hbm=51539607552],
+    start_address=51539607552
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[lx=131072],
+    start_address=131072
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_mul_silu_split_with_sizes_3_a61xfhb2/sdsc_6.json
+[DEBUG] [spyre.inductor.codegen.superdsc] symbol mapping: c0 -> mb, c1 -> out
+[DEBUG] [spyre.inductor.codegen.superdsc] SDSCSpec(
+  opfunc=add
+  exec_unit=sfp
+  data_format=SEN169_FP16
+  num_inputs=2
+  iteration_space=[mb=512, out=4096]
+  work_slices=[mb=32, out=1]
+  core_id_to_work_slice=[mb=Mod(core_id, 32), out=0]
+  layouts=[
+    OUTPUT: dim_order=[out, mb], stick_dim_order=out, stick_size=64
+  ]
+  args=[
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[lx=131072],
+    start_address=131072
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[lx=0],
+    start_address=0
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  SDSCArgs(
+    layout=OUTPUT,
+    dim_order=[out, mb], 
+    data_format=SEN169_FP16,
+    scales=[out=1, mb=1],
+    strides=[out=4096, mb=2097152],
+    offsets=[out=0, mb=0],
+    max_dim_sizes=[out=-1, mb=-1],
+    allocation=[hbm=68719476736],
+    start_address=68719476736
+    backGap={}
+    is_index_tensor=False
+    related_value_tensor_idx=-1
+    lx_residency_core_id_to_wk_slice=None
+  )
+  ]
+)
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_mul_silu_split_with_sizes_3_a61xfhb2/sdsc_7.json
+[INFO] [spyre.inductor.sdsc_compile] Generating /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_add_linear_mul_silu_split_with_sizes_3_a61xfhb2/bundle.mlir
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused_linear_rms_norm_0 /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused_linear_rms_norm_0_q06d24r9
+[INFO] [spyre.inductor.kernel_runner] RUN: sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1 /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_tdtgi48m
+Traceback (most recent call last):
+  File "<stdin>", line 52, in <module>
+  File "/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/uk/cukhcvwecrqvloj3hwysrure5xanfwswuhvubfbpy7zra4eeavwb.py", line 1436, in call
+    sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1.run(_pool, arg3_1, buf6, buf40, arg4_1, buf11)
+  File "<stdin>", line 32, in wrapped
+AttributeError: module 'torch_spyre' has no attribute 'synchronize'
+[31m ERRR 06.07.2026 08:19:24.564494 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 — possible lost completion[0m
+Signal Received: 15 (Terminated)
+Signal Received from pid=1153663 
+*** BACKTRACE ***
+/opt/ibm/spyre/senlib/lib/libsenlib-dd2.so(+0x42accf)[0x7f0721d51ccf]
+/lib64/libc.so.6(+0x411c0)[0x7f07e57dd1c0]
+/lib64/libc.so.6(+0x9293e)[0x7f07e582e93e]
+/lib64/libc.so.6(pthread_cond_clockwait+0x175)[0x7f07e58313e5]
+/home/adnan/opt-newer/runtime/lib/libflex.so(_ZN4flex13RuntimeStream11synchronizeEv+0x3df)[0x7f072401613f]
+/home/adnan/opt-newer/runtime/lib/libflex.so(_ZNSt23_Sp_counted_ptr_inplaceIN4flex14RuntimeContextESaIvELN9__gnu_cxx12_Lock_policyE2EE10_M_disposeEv+0x6a)[0x7f072400f91a]
+/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/torch_spyre/_C.so(_ZNSt16_Sp_counted_baseILN9__gnu_cxx12_Lock_policyE2EE10_M_releaseEv+0x67)[0x7f0724256977]
+/lib64/libc.so.6(+0x437b1)[0x7f07e57df7b1]
+/lib64/libc.so.6(+0x43880)[0x7f07e57df880]
+/lib64/libc.so.6(+0x2a595)[0x7f07e57c6595]
+/lib64/libc.so.6(__libc_start_main+0x89)[0x7f07e57c6649]
+/home/adnan/dt-inductor/.venv/bin/python3(_start+0x25)[0x55f18d8fa095]
+*****************

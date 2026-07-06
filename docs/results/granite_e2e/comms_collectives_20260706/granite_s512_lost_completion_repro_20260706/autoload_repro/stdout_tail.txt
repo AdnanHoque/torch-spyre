@@ -1,0 +1,16 @@
+[repro] torch_spyre autoloaded from /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre/torch_spyre/__init__.py
+[repro] creating runtime context
+[repro] context tensor allocated torch.Size([1])
+[repro] importing /home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/granite_s512_full_aiu_gather_restickify_20260706_072858/block_prefill/cache/uk/cukhcvwecrqvloj3hwysrure5xanfwswuhvubfbpy7zra4eeavwb.py
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+[repro] imported
+[repro] allocating inputs
+[repro] calling compiled module
+[repro] BEFORE sdsc_fused_linear_rms_norm_0 1783325622.377105
+[repro] AFTER  sdsc_fused_linear_rms_norm_0 1783325622.377786 elapsed=0.001
+[repro] BEFORE sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1 1783325622.377818
+[repro] AFTER  sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1 1783325622.379475 elapsed=0.002
+[repro] BEFORE sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2 1783325622.379485
