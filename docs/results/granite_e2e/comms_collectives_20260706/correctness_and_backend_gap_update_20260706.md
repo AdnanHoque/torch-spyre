@@ -89,6 +89,8 @@ The smallest principled backend fix direction is to propagate an explicit `coreI
 A local Deeptools experiment added that map propagation rule in `ddc/ddc_fold.cpp` and rebuilt `dxp_standalone` successfully:
 
 ```text
+Deeptools fork branch: Adnan-Hoque1/deeptools ah/comms-collectives
+Checkpoint commit: 16e9c4f4e
 cmake --build build-deeptools --target dxp_standalone -j8
 ```
 
