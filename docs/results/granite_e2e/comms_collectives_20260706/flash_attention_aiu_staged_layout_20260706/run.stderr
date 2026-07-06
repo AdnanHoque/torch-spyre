@@ -1,0 +1,19 @@
+[31m ERRR 06.07.2026 05:59:44.537873 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 — possible lost completion[0m
+[31m ERRR 06.07.2026 05:59:44.538999 [            runtime_stream.cpp: 150] RuntimeStream::synchronize() device=0 completed after 60001ms (1 timeout warning(s))[0m
+[WARNING] [spyre.inductor.propagate_named_dims] buf1: loop var d0 has no named dim mapping -- using _untracked_32
+[WARNING] [spyre.inductor.propagate_named_dims] buf1: loop var d1 has no named dim mapping -- using _untracked_4096
+[WARNING] [spyre.inductor.propagate_named_dims] buf1: loop var d2 has no named dim mapping -- using _untracked_128
+[WARNING] [spyre.inductor.propagate_named_dims] buf3: loop var d0 has no named dim mapping -- using _untracked_32
+[WARNING] [spyre.inductor.propagate_named_dims] buf3: loop var d1 has no named dim mapping -- using _untracked_4096
+[WARNING] [spyre.inductor.propagate_named_dims] buf3: loop var d2 has no named dim mapping -- using _untracked_64
+[WARNING] [spyre.inductor.propagate_named_dims] _consume_names: no prefix of ['B', 'H', 'Lq', 'Lk'] multiplies to 4096
+[WARNING] [spyre.inductor.propagate_named_dims] buf19: loop var d0 has no named dim mapping -- using _untracked_32
+[WARNING] [spyre.inductor.propagate_named_dims] buf19: loop var d1 has no named dim mapping -- using _untracked_4096
+[WARNING] [spyre.inductor.propagate_named_dims] buf19: loop var d2 has no named dim mapping -- using _untracked_64
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf7 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf8 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf9 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf14 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf15 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf16 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32
+[WARNING] [spyre.inductor.work_division] work_division_hint: buf22 skipping named dim(s) ['Lk'] (split=8) because cores would be 256, exceeding SENCORES=32

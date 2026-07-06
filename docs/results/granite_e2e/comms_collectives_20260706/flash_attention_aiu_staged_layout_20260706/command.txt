@@ -1,0 +1,15 @@
+variant=staged_layout_restickify_aiu
+run_dir=/home/adnan/codex-isolated/flash_attention_devpf_verify_20260705_070129/runs/staged_layout_restickify_aiu_20260706_055818
+torch_root=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/torch-spyre
+torch_sha=b2c20b9cc475ddf66e110e18a094b8e7f8b651a4
+deeptools_root=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools
+deeptools_sha=6eaab6b32fe26bc47e7622cc2bbd05e9a16817d2
+script=/home/adnan/codex-isolated/flash_attention_verify_20260704_022143/repos/test-spyre-scripts/test_flash.py
+python=/home/adnan/dt-inductor/.venv/bin/python3
+patch_mode=no_h2d,skip_cpu_ref
+relayout=1
+backend_lx_frac=1
+restickify_outputs=1
+layout_allgather_restickify=1
+staged_gather_restickify=1
+rc=0
