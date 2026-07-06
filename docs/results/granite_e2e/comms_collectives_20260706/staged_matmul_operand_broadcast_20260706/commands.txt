@@ -1,0 +1,12 @@
+ROOT=/home/adnan/codex-isolated/flash_attention_comms_backend2162_20260706_005751/ddc_abort_minimize_20260706_012508
+DT=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools
+OUT=/home/adnan/codex-isolated/flash_attention_comms_backend2162_20260706_005751/staged_gather_restickify_replay_clean_20260706_054214
+mkdir -p "$OUT/backend_plans"
+export LD_LIBRARY_PATH=$DT/build-deeptools/common:$DT/build-deeptools/dxp:$DT/build-deeptools/dsc:$DT/build-deeptools/dcg:$DT/build-deeptools/dcg/dcg_fe:$DT/build-deeptools/dcg/dcg_fe/scheduler:$DT/build-deeptools/ddc:$DT/build-deeptools/dcc/lib:$DT/build-deeptools/util:$DT/build-deeptools/external/g3log:$DT/build-deeptools/external/json11:${LD_LIBRARY_PATH:-}
+export DEEPTOOLS_LAYOUT_ALLGATHER_RESTICKIFY_PLAN_DIR=$OUT/backend_plans
+export DEEPTOOLS_MATMUL_OPERAND_BROADCAST_PLAN_DIR=$OUT/backend_plans
+export DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1
+unset DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR
+unset DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST
+export DXP_LX_FRAC_AVAIL=1
+$DT/build-deeptools/dxp/dxp_standalone --bundle -d "$ROOT/bundle_full" > "$OUT/replay.stdout" 2> "$OUT/replay.stderr"

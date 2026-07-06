@@ -1,0 +1,21 @@
+{
+  "artifact": "staged_matmul_operand_broadcast_20260706",
+  "counts": {
+    "matmul_operand_broadcast|all_gather_replicate|gather_then_restickify|lowered_gather_then_restickify|True": 32
+  },
+  "dxp_rc": 0,
+  "logical_transfer_total": 8192,
+  "plan_count": 32,
+  "replay_root": "/home/adnan/codex-isolated/flash_attention_comms_backend2162_20260706_005751/staged_gather_restickify_replay_clean_20260706_054214",
+  "sample_plans": [
+    "105_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+    "122_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+    "139_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+    "156_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+    "173_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json"
+  ],
+  "tests": {
+    "dxp_unit_test --gtest_filter=DxpTestFixture.CoreWorkDivIncomptLxRelayout*": "2 passed",
+    "util_unit_test --gtest_filter=LayoutAllgatherRestickify.*": "27 passed"
+  }
+}
