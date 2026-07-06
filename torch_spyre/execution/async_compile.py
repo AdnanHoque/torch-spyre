@@ -20,6 +20,7 @@ import subprocess
 import torch
 
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.op_spec import (
     LoopSpec,
@@ -58,9 +59,22 @@ class SpyreAsyncCompile:
         output_dir = get_output_dir(kernel_name)
         generate_bundle(kernel_name, output_dir, specs)
 
-        # Invoke backend compiler of SDSC Bundle
+        # Invoke backend compiler of SDSC Bundle. When the LX relayout
+        # prototype is enabled, Torch plans with its frontend LX fraction, but
+        # DXP needs backend workspace for inserted relayout materialization.
+        # Pass that split through the subprocess env instead of requiring an
+        # external dxp_standalone wrapper.
+        dxp_env = None
+        if config.lx_planner_relayout:
+            dxp_env = os.environ.copy()
+            dxp_env["DXP_LX_FRAC_AVAIL"] = str(config.dxp_backend_lx_frac_avail)
+
         with torch.profiler.record_function(f"dxp_standalone:{kernel_name}"):
-            subprocess.run(["dxp_standalone", "--bundle", "-d", output_dir], check=True)
+            subprocess.run(
+                ["dxp_standalone", "--bundle", "-d", output_dir],
+                check=True,
+                env=dxp_env,
+            )
 
         return SpyreSDSCKernelRunner(kernel_name, output_dir)
 

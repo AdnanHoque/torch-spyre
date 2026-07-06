@@ -48,14 +48,22 @@ lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == 
 # computed-source synthetic spyre.restickify outputs eligible for LX planning;
 # graph-input/weight restickifies are intentionally left to offline prelayout.
 lx_planner_relayout_restickify_outputs: bool = (
-    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS", "0") == "1"
+    os.environ.get(
+        "SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS",
+        "1" if lx_planner_relayout else "0",
+    )
+    == "1"
 )
 
 # Experimental research lane for non-primary matmul operand relayouts. These
 # are coordinate collectives such as multicast/gather/all-gather, but still keep
 # physical transfer derivation in Deeptools via dl-dsc coordinates.
 lx_planner_relayout_collectives: bool = (
-    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES", "0") == "1"
+    os.environ.get(
+        "SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES",
+        "1" if lx_planner_relayout else "0",
+    )
+    == "1"
 )
 
 # Experimental metadata-only contract for Granite attention-value Tensor1
@@ -63,7 +71,11 @@ lx_planner_relayout_collectives: bool = (
 # non-primary matmul operand as grouped all-gather/broadcast rather than
 # allowing it to look like resident scatter.
 lx_planner_relayout_matmul_operand_contract: bool = (
-    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_MATMUL_OPERAND_CONTRACT", "0") == "1"
+    os.environ.get(
+        "SPYRE_LX_PLANNER_RELAYOUT_MATMUL_OPERAND_CONTRACT",
+        "1" if lx_planner_relayout_collectives else "0",
+    )
+    == "1"
 )
 
 # Experimental metadata lane for flash activation edges of the form
@@ -71,10 +83,29 @@ lx_planner_relayout_matmul_operand_contract: bool = (
 # need a layout-aware grouped all-gather, not the direct scatter class realized
 # by PR1. Keep this opt-in until backend lowering is value-correct.
 lx_planner_relayout_layout_allgather_restickify: bool = (
-    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY", "0") == "1"
+    os.environ.get(
+        "SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY",
+        "1" if lx_planner_relayout_collectives else "0",
+    )
+    == "1"
 )
 
-dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
+# Frontend LX reservation fraction. When LX relayout is enabled, default
+# Torch planning to full frontend LX and give the DXP subprocess backend
+# relayout workspace separately via ``dxp_backend_lx_frac_avail`` below.
+dxp_lx_frac_avail: float = float(
+    os.environ.get("DXP_LX_FRAC_AVAIL", "0" if lx_planner_relayout else "0.2")
+)
+
+# Backend LX fraction used only for the DXP subprocess launched by Torch. This
+# hides the old wrapper trick behind the same top-level relayout flag while
+# preserving explicit overrides for backend debugging.
+dxp_backend_lx_frac_avail: float = float(
+    os.environ.get(
+        "DXP_BACKEND_LX_FRAC_AVAIL",
+        "1" if lx_planner_relayout else str(dxp_lx_frac_avail),
+    )
+)
 
 sencores: int = int(os.getenv("SENCORES", "32"))
 
