@@ -13,7 +13,7 @@ This is a status map for the `ah/comms-collectives` exploration. It separates th
 | Communication class | Lower-level evidence | DLDSC/planner evidence | Workload evidence | Status |
 |---|---|---|---|---|
 | Scatter / permutation | DXP `CoreWorkDivIncomptLxRelayout*` | PR1-style DLDSC tensor-vs-compute mismatch relayout | Granite PR1-style path, not the newly removed Granite spill | Supported for 1:1 ownership reassignment. |
-| Broadcast / multicast | DCG `stcdpLibtest.multicastSimple*` passes | Not yet exposed as a general DLDSC planner class | Not yet proven as a standalone Granite spill removal class | Carrier exists underneath; planner plumbing remains. |
+| Broadcast / multicast | DCG `stcdpLibtest.multicastSimple*` passes | Deeptools accepts explicit `communication_pattern={broadcast,multicast}` for matmul operand relayout contracts | Not yet proven as a standalone Granite spill removal class | Backend contract is explicit; Torch LX planner classification/emission remains. |
 | Gather | Utility gather-index tests pass | Covered only as part of matmul operand gather/restickify paths | Flash compile probe and Granite attention path use gather-like movement | Partial; not a generic many-to-one planner primitive yet. |
 | All-gather / replicate | `LayoutAllgatherRestickify.*` passes | `layout_allgather_restickify` and `matmul_operand_broadcast` contracts exist | Granite S512 attention spill removed; flash compile probe passes with gather carrier | Best-supported non-scatter class today. |
 | Form-changing restickify | DCG STCDP relayout tests pass | `ReStickifyOpLx` used as local layout conversion stage | Granite attention handoff becomes `ReStickifyOpLx`; flash compile probe emits LX restickifies | Supported for current all-gather/restickify path. |
@@ -24,7 +24,7 @@ This is a status map for the `ah/comms-collectives` exploration. It separates th
 
 ```text
 Deeptools branch: Adnan-Hoque1/deeptools:ah/comms-collectives
-Deeptools SHA: 3095cdb33
+Deeptools SHA: b1c93212d
 Pod: adnan-cdx-spyre-dev-pf
 ```
 
@@ -35,7 +35,7 @@ dxp_unit_test --gtest_filter="DxpTestFixture.CoreWorkDivIncomptLxRelayout*"
 2/2 passed
 
 util_unit_test --gtest_filter="LayoutAllgatherRestickify.*"
-27/27 passed
+31/31 passed
 
 dcg_unit_test --gtest_filter="stcdpLibtest.multicast*"
 2/2 passed
@@ -48,6 +48,16 @@ util_unit_test --gtest_filter="*gatherIdx*"
 ```
 
 Logs are archived next to this file.
+
+Additional broadcast/multicast contract checkpoint:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260706/broadcast_multicast_contract_20260706
+
+LayoutAllgatherRestickify.*: 31/31 passed
+DxpTestFixture.CoreWorkDivIncomptLxRelayout*: 2/2 passed
+stcdpLibtest.multicast*: 2/2 passed
+```
 
 ## Workload Evidence
 
@@ -79,9 +89,10 @@ diagnostic: gets past the guard, then fails fold solving for lxlu -> ptrow0
 
 ## Engineering Read
 
-The copy-only communication substrate is moving in the right direction for scatter and all-gather/restickify. The strongest current workload proof is removing the Granite attention activation/layout HBM spill and replacing it with `ReStickifyOpLx`.
+The copy-only communication substrate is moving in the right direction for scatter, all-gather/restickify, and explicit one-to-many broadcast/multicast contracts. The strongest current workload proof is still removing the Granite attention activation/layout HBM spill and replacing it with `ReStickifyOpLx`.
+
+Broadcast/multicast are now explicit on the Deeptools contract side, but this is not yet a workload win by itself. The next frontend step is to classify producer/consumer coordinate maps as `broadcast` or `multicast` rather than overloading all one-to-many movement as `all_gather_replicate`.
 
 The current flash result says carrier selection matters. The `gather_then_restickify` carrier works structurally. The newer kernel-neighbor/input-fetch carrier is promising but not production-safe yet because it collides with double buffering and has a fold-solving failure after the diagnostic guard is bypassed.
 
 Reduce/all-reduce are separate work. Coordinates can describe where partials live and where results should go, but the backend still needs an arithmetic reduction realization; copy-only STCDP/LX relayout is not enough.
-

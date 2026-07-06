@@ -1,0 +1,278 @@
+From b1c93212d31347a2aef435b32c4820a70162a017 Mon Sep 17 00:00:00 2001
+From: Adnan Hoque <adnan.hoque1@ibm.com>
+Date: Mon, 6 Jul 2026 17:16:52 +0000
+Subject: [PATCH] [DXP] classify matmul operand broadcast and multicast
+
+Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp     |   4 +-
+ dxp/SdscRelayoutInsertion.cpp                 |   4 +-
+ util/LayoutAllgatherRestickify.cpp            |  49 +++++-
+ .../LayoutAllgatherRestickify_unit_test.cpp   | 140 ++++++++++++++++++
+ 4 files changed, 188 insertions(+), 9 deletions(-)
+
+diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+index 8bb8f2e67..dd59885fe 100644
+--- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
++++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+@@ -397,7 +397,9 @@ static bool isMatmulOperandBroadcastClassification(
+     return true;
+   const auto patternIt = fields.find("communication_pattern");
+   return patternIt != fields.end() &&
+-         patternIt->second == "all_gather_replicate";
++         (patternIt->second == "all_gather_replicate" ||
++          patternIt->second == "broadcast" ||
++          patternIt->second == "multicast");
+ }
+ 
+ static const std::map<std::string, std::string>*
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 208b0de64..28fccb65e 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -117,7 +117,9 @@ static MatmulOperandBroadcastHookPlan findMatmulOperandBroadcastPlan(
+         (kindIt != fields.end() &&
+          kindIt->second == "matmul_operand_broadcast") ||
+         (patternIt != fields.end() &&
+-         patternIt->second == "all_gather_replicate");
++         (patternIt->second == "all_gather_replicate" ||
++          patternIt->second == "broadcast" ||
++          patternIt->second == "multicast"));
+     if (!isMatmulOperandBroadcast) continue;
+     if (!matmulOperandBroadcastMatchesLds(fields, lds)) continue;
+ 
+diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
+index aee8800ef..cdf0f03c6 100644
+--- a/util/LayoutAllgatherRestickify.cpp
++++ b/util/LayoutAllgatherRestickify.cpp
+@@ -118,6 +118,19 @@ bool isSupportedMatmulOperandBroadcastRealization(
+          realizationStrategy == "gather_then_restickify";
+ }
+ 
++bool isSupportedMatmulOperandCommunicationPattern(
++    const std::string &pattern) {
++  return pattern == "all_gather_replicate" || pattern == "broadcast" ||
++         pattern == "multicast";
++}
++
++std::string stageForMatmulOperandCommunicationPattern(
++    const std::string &pattern) {
++  if (pattern == "broadcast") return "grouped_broadcast";
++  if (pattern == "multicast") return "grouped_multicast";
++  return "grouped_all_gather_replicate";
++}
++
+ Json metadataValueToJson(const std::string &value) {
+   if (value == "true") return Json(true);
+   if (value == "false") return Json(false);
+@@ -722,15 +735,17 @@ synthesizeMatmulOperandBroadcastMovementPlan(const std::string &jsonString) {
+     return matmulMovementFail("contract must be a json object");
+   }
+ 
+-  const std::string kind = json["kind"].string_value();
+-  if (kind != "matmul_operand_broadcast") {
+-    return matmulMovementFail("kind must be matmul_operand_broadcast");
+-  }
+   const std::string pattern = json["communication_pattern"].string_value();
+-  if (pattern != "all_gather_replicate") {
++  if (!isSupportedMatmulOperandCommunicationPattern(pattern)) {
+     return matmulMovementFail(
+-        "communication_pattern must be all_gather_replicate");
++        "communication_pattern must be all_gather_replicate, broadcast, or "
++        "multicast");
++  }
++  const std::string rawKind = json["kind"].string_value();
++  if (!rawKind.empty() && rawKind != "matmul_operand_broadcast") {
++    return matmulMovementFail("kind must be matmul_operand_broadcast");
+   }
++  const std::string kind = rawKind.empty() ? "matmul_operand_broadcast" : rawKind;
+   const std::string materializationPattern =
+       json["materialization_pattern"].string_value();
+   if (!materializationPattern.empty() &&
+@@ -876,11 +891,31 @@ synthesizeMatmulOperandBroadcastMovementPlan(const std::string &jsonString) {
+     plan.replicationFactor = plan.consumerReplicasPerGroup;
+     plan.logicalTransferCount = exactLogicalTransferCount;
+   }
++  if (pattern == "broadcast") {
++    if (plan.groupCount != 1 || plan.producerChunksPerGroup != 1) {
++      return matmulMovementFail(
++          "broadcast requires one source chunk in one destination group");
++    }
++  }
++  if (pattern == "multicast" && plan.producerChunksPerGroup != 1) {
++    return matmulMovementFail(
++        "multicast requires one source chunk per destination group");
++  }
++  if ((pattern == "broadcast" || pattern == "multicast") &&
++      !plan.sourceCoresByGroup.empty()) {
++    for (const auto &sourceCores : plan.sourceCoresByGroup) {
++      if (sourceCores.size() != 1) {
++        return matmulMovementFail(
++            pattern + " requires exactly one source core per group");
++      }
++    }
++  }
+   plan.estimatedTensorBytes =
+       positiveUintFieldForAnyKey(json, {"estimated_tensor_bytes",
+                                         "tensor_bytes",
+                                         "source_bytes"});
+-  plan.stages = {"source_operand_shards", "grouped_all_gather_replicate"};
++  plan.stages = {"source_operand_shards",
++                 stageForMatmulOperandCommunicationPattern(pattern)};
+   if (plan.requiresLayoutConversion ||
+       plan.realizationStrategy == "gather_then_restickify") {
+     plan.stages.push_back("local_layout_conversion");
+diff --git a/util/test/LayoutAllgatherRestickify_unit_test.cpp b/util/test/LayoutAllgatherRestickify_unit_test.cpp
+index edddb39a3..fd0194617 100644
+--- a/util/test/LayoutAllgatherRestickify_unit_test.cpp
++++ b/util/test/LayoutAllgatherRestickify_unit_test.cpp
+@@ -518,6 +518,146 @@ TEST(LayoutAllgatherRestickify,
+   EXPECT_EQ(transfers.back().destinationCore, 3);
+ }
+ 
++TEST(LayoutAllgatherRestickify,
++     expandsMatmulOperandGlobalBroadcastFromExplicitCoordinates) {
++  const auto plan = deeptools::synthesizeMatmulOperandBroadcastMovementPlan(
++      R"json({
++        "kind": "matmul_operand_broadcast",
++        "communication_pattern": "broadcast",
++        "producer_core_count": 1,
++        "consumer_core_count": 4,
++        "producer_work_slice_dims": {"0": 1},
++        "consumer_work_slice_dims": {"0": 4},
++        "producer_core_id_to_device_slice": {
++          "0": {"group": 0}
++        },
++        "consumer_core_id_to_device_slice": {
++          "0": {"group": 0},
++          "1": {"group": 0},
++          "2": {"group": 0},
++          "3": {"group": 0}
++        },
++        "read_index": 1,
++        "realized": true,
++        "realization_strategy": "loop_scoped_input_fetch"
++      })json");
++  ASSERT_TRUE(plan.ok) << plan.reason;
++  EXPECT_EQ(plan.communicationPattern, "broadcast");
++  EXPECT_EQ(plan.groupCount, 1);
++  EXPECT_EQ(plan.producerChunksPerGroup, 1);
++  EXPECT_EQ(plan.consumerReplicasPerGroup, 4);
++  ASSERT_EQ(plan.stages.size(), 4);
++  EXPECT_EQ(plan.stages[1], "grouped_broadcast");
++
++  const auto transfers =
++      deeptools::matmulOperandBroadcastLogicalTransfers(plan);
++
++  ASSERT_EQ(transfers.size(), 4);
++  EXPECT_EQ(transfers.front().sourceCore, 0);
++  EXPECT_EQ(transfers.front().destinationCore, 0);
++  EXPECT_EQ(transfers[1].sourceCore, 0);
++  EXPECT_EQ(transfers[1].destinationCore, 1);
++  EXPECT_EQ(transfers[2].sourceCore, 0);
++  EXPECT_EQ(transfers[2].destinationCore, 2);
++  EXPECT_EQ(transfers.back().sourceCore, 0);
++  EXPECT_EQ(transfers.back().destinationCore, 3);
++}
++
++TEST(LayoutAllgatherRestickify,
++     expandsMatmulOperandMulticastFromExplicitCoordinates) {
++  const auto plan = deeptools::synthesizeMatmulOperandBroadcastMovementPlan(
++      R"json({
++        "kind": "matmul_operand_broadcast",
++        "communication_pattern": "multicast",
++        "producer_core_count": 2,
++        "consumer_core_count": 4,
++        "producer_work_slice_dims": {"0": 2},
++        "consumer_work_slice_dims": {"0": 4},
++        "producer_core_id_to_device_slice": {
++          "0": {"group": 0},
++          "1": {"group": 1}
++        },
++        "consumer_core_id_to_device_slice": {
++          "0": {"group": 0},
++          "1": {"group": 0},
++          "2": {"group": 1},
++          "3": {"group": 1}
++        },
++        "read_index": 1,
++        "realized": true,
++        "realization_strategy": "loop_scoped_input_fetch"
++      })json");
++  ASSERT_TRUE(plan.ok) << plan.reason;
++  EXPECT_EQ(plan.communicationPattern, "multicast");
++  EXPECT_EQ(plan.groupCount, 2);
++  EXPECT_EQ(plan.producerChunksPerGroup, 1);
++  EXPECT_EQ(plan.consumerReplicasPerGroup, 2);
++  ASSERT_EQ(plan.stages.size(), 4);
++  EXPECT_EQ(plan.stages[1], "grouped_multicast");
++
++  const auto transfers =
++      deeptools::matmulOperandBroadcastLogicalTransfers(plan);
++
++  ASSERT_EQ(transfers.size(), 4);
++  EXPECT_EQ(transfers[0].sourceCore, 0);
++  EXPECT_EQ(transfers[0].destinationCore, 0);
++  EXPECT_EQ(transfers[1].sourceCore, 0);
++  EXPECT_EQ(transfers[1].destinationCore, 1);
++  EXPECT_EQ(transfers[2].sourceCore, 1);
++  EXPECT_EQ(transfers[2].destinationCore, 2);
++  EXPECT_EQ(transfers.back().sourceCore, 1);
++  EXPECT_EQ(transfers.back().destinationCore, 3);
++}
++
++TEST(LayoutAllgatherRestickify,
++     acceptsPatternOnlyMatmulOperandMulticastMetadata) {
++  const auto plan = deeptools::synthesizeMatmulOperandBroadcastMovementPlan(
++      R"json({
++        "communication_pattern": "multicast",
++        "producer_core_count": 2,
++        "consumer_core_count": 4,
++        "producer_work_slice_dims": {"0": 2},
++        "consumer_work_slice_dims": {"0": 4},
++        "producer_core_id_to_device_slice": {
++          "0": {"group": 0},
++          "1": {"group": 1}
++        },
++        "consumer_core_id_to_device_slice": {
++          "0": {"group": 0},
++          "1": {"group": 0},
++          "2": {"group": 1},
++          "3": {"group": 1}
++        },
++        "read_index": 1,
++        "realized": true,
++        "realization_strategy": "loop_scoped_input_fetch"
++      })json");
++  ASSERT_TRUE(plan.ok) << plan.reason;
++  EXPECT_EQ(plan.kind, "matmul_operand_broadcast");
++  EXPECT_EQ(plan.communicationPattern, "multicast");
++}
++
++TEST(LayoutAllgatherRestickify,
++     matmulOperandBroadcastRejectsMultipleSourceChunks) {
++  const auto plan = deeptools::synthesizeMatmulOperandBroadcastMovementPlan(
++      R"json({
++        "kind": "matmul_operand_broadcast",
++        "communication_pattern": "broadcast",
++        "producer_core_count": 2,
++        "consumer_core_count": 4,
++        "producer_work_slice_dims": {"0": 2},
++        "consumer_work_slice_dims": {"0": 4},
++        "group_count": 1,
++        "read_index": 1,
++        "realized": true,
++        "realization_strategy": "loop_scoped_input_fetch"
++      })json");
++
++  EXPECT_FALSE(plan.ok);
++  EXPECT_EQ(plan.reason,
++            "broadcast requires one source chunk in one destination group");
++}
++
+ TEST(LayoutAllgatherRestickify,
+      expandsGatherThenRestickifyCorePairsFromExplicitCoordinates) {
+   const auto plan = deeptools::synthesizeMatmulOperandBroadcastMovementPlan(
+-- 
+2.52.0
+

@@ -1,0 +1,6 @@
+b1c93212d [DXP] classify matmul operand broadcast and multicast
+ dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp         |   4 +-
+ dxp/SdscRelayoutInsertion.cpp                     |   4 +-
+ util/LayoutAllgatherRestickify.cpp                |  49 ++++++--
+ util/test/LayoutAllgatherRestickify_unit_test.cpp | 140 ++++++++++++++++++++++
+ 4 files changed, 188 insertions(+), 9 deletions(-)
