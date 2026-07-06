@@ -1,0 +1,81 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 920940b600..003a9a3c02 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -910,6 +910,38 @@ static bool sourceShardCell(
+   return true;
+ }
+ 
++static bool matmulOperandBroadcastUseDataOpAfterSync() {
++  return std::getenv(
++             "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_NO_DATAOP_SYNC") ==
++      nullptr;
++}
++
++static bool matmulOperandBroadcastScheduleAllConsumerCores() {
++  return std::getenv(
++             "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_SCHEDULE_ALL_CORES") !=
++      nullptr;
++}
++
++static bool matmulOperandBroadcastGatherOnlyProbe() {
++  return std::getenv(
++             "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_GATHER_ONLY_PROBE") !=
++      nullptr;
++}
++
++static std::set<int> scheduledConsumerCores(const SuperDsc* sdsc) {
++  std::set<int> cores;
++  for (const auto& item : sdsc->coreIdToDscSchedule) {
++    cores.insert(item.first);
++  }
++  if (!cores.empty()) {
++    return cores;
++  }
++  for (const auto& item : sdsc->coreIdToWkSlice_) {
++    cores.insert(item.first);
++  }
++  return cores;
++}
++
+ static void insertDataOpBeforeDl(SuperDsc* sdsc, int coreId, int dataOpIdx) {
+   auto& schedule = sdsc->coreIdToDscSchedule[coreId];
+   auto insertPos = schedule.begin();
+@@ -919,7 +951,10 @@ static void insertDataOpBeforeDl(SuperDsc* sdsc, int coreId, int dataOpIdx) {
+       break;
+     }
+   }
+-  schedule.insert(insertPos, DscScheduleStep(dataOpIdx, -1, false, true));
++  schedule.insert(
++      insertPos,
++      DscScheduleStep(dataOpIdx, -1, false,
++                      matmulOperandBroadcastUseDataOpAfterSync()));
+ }
+ 
+ struct GatheredPieceSpec {
+@@ -1292,14 +1327,20 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+ 
+     const int gatherIdx = static_cast<int>(sdsc->dataOpdscs_.size());
+     sdsc->dataOpdscs_.push_back(chunkGatherDdsc);
+-    const int restickifyIdx = static_cast<int>(sdsc->dataOpdscs_.size());
+-    sdsc->dataOpdscs_.push_back(chunkRestickifyDdsc);
+ 
+-    for (const auto coreId : chunkGatherCores) {
++    const auto scheduleCores =
++        matmulOperandBroadcastScheduleAllConsumerCores()
++            ? scheduledConsumerCores(sdsc)
++            : chunkGatherCores;
++    for (const auto coreId : scheduleCores) {
+       insertDataOpBeforeDl(sdsc, coreId, gatherIdx);
+     }
+-    for (const auto coreId : chunkRestickifyCores) {
+-      insertDataOpBeforeDl(sdsc, coreId, restickifyIdx);
++    if (!matmulOperandBroadcastGatherOnlyProbe()) {
++      const int restickifyIdx = static_cast<int>(sdsc->dataOpdscs_.size());
++      sdsc->dataOpdscs_.push_back(chunkRestickifyDdsc);
++      for (const auto coreId : scheduleCores) {
++        insertDataOpBeforeDl(sdsc, coreId, restickifyIdx);
++      }
+     }
+   }
+ 
