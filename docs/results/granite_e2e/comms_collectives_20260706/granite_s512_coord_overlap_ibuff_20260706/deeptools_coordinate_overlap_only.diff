@@ -1,0 +1,178 @@
+diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
+index cdf0f03c6..bbe306661 100644
+--- a/util/LayoutAllgatherRestickify.cpp
++++ b/util/LayoutAllgatherRestickify.cpp
+@@ -318,6 +318,55 @@ std::set<std::string> dimsInCoreCoordinateMap(const CoreCoordinateMap &coords) {
+   return dims;
+ }
+ 
++
++std::uint64_t coordinateSplitCount(const CoreCoordinateMap &coords,
++                                   const std::string &dim) {
++  std::int64_t maxCoord = -1;
++  for (const auto &[_, coord] : coords) {
++    const auto it = coord.find(dim);
++    if (it == coord.end()) continue;
++    maxCoord = std::max(maxCoord, it->second);
++  }
++  return maxCoord < 0 ? 0 : static_cast<std::uint64_t>(maxCoord + 1);
++}
++
++bool coordinateIntervalsOverlap(std::int64_t sourceCoord,
++                                std::uint64_t sourceSplit,
++                                std::int64_t destCoord,
++                                std::uint64_t destSplit) {
++  if (sourceCoord < 0 || destCoord < 0 || sourceSplit == 0 ||
++      destSplit == 0) {
++    return false;
++  }
++  // Compare [source/sourceSplit, (source+1)/sourceSplit) with
++  // [dest/destSplit, (dest+1)/destSplit) without floating point.
++  return static_cast<std::uint64_t>(sourceCoord) * destSplit <
++             static_cast<std::uint64_t>(destCoord + 1) * sourceSplit &&
++         static_cast<std::uint64_t>(destCoord) * sourceSplit <
++             static_cast<std::uint64_t>(sourceCoord + 1) * destSplit;
++}
++
++bool coreCoordinateIntervalsOverlap(
++    const std::map<std::string, std::int64_t> &sourceCoord,
++    const std::map<std::string, std::int64_t> &destCoord,
++    const std::vector<std::string> &dims, const CoreCoordinateMap &sourceCoords,
++    const CoreCoordinateMap &destCoords) {
++  for (const auto &dim : dims) {
++    const auto sourceIt = sourceCoord.find(dim);
++    const auto destIt = destCoord.find(dim);
++    if (sourceIt == sourceCoord.end() || destIt == destCoord.end()) {
++      return false;
++    }
++    if (!coordinateIntervalsOverlap(sourceIt->second,
++                                    coordinateSplitCount(sourceCoords, dim),
++                                    destIt->second,
++                                    coordinateSplitCount(destCoords, dim))) {
++      return false;
++    }
++  }
++  return true;
++}
++
+ std::vector<std::string> commonCoordinateDims(const CoreCoordinateMap &lhs,
+                                              const CoreCoordinateMap &rhs) {
+   const auto lhsDims = dimsInCoreCoordinateMap(lhs);
+@@ -375,27 +424,33 @@ ExactGroupedCoreMaps deriveExactGroupedCoreMaps(const Json &json) {
+   const auto commonDims = commonCoordinateDims(producerCoords, consumerCoords);
+   if (commonDims.empty()) return {};
+ 
+-  std::map<std::string, std::vector<std::uint64_t>> sourcesByKey;
+   std::map<std::string, std::vector<std::uint64_t>> destinationsByKey;
+-  for (const auto &[core, coord] : producerCoords) {
+-    const auto key = coordinateGroupKey(coord, commonDims);
+-    if (key.empty()) return {};
+-    sourcesByKey[key].push_back(core);
+-  }
++  std::map<std::string, std::map<std::string, std::int64_t>> destCoordByKey;
+   for (const auto &[core, coord] : consumerCoords) {
+     const auto key = coordinateGroupKey(coord, commonDims);
+     if (key.empty()) return {};
+     destinationsByKey[key].push_back(core);
++    destCoordByKey.emplace(key, coord);
+   }
+ 
+   ExactGroupedCoreMaps grouped;
+-  for (const auto &[key, sources] : sourcesByKey) {
+-    const auto destIt = destinationsByKey.find(key);
+-    if (destIt == destinationsByKey.end() || destIt->second.empty()) return {};
++  for (const auto &[key, destinations] : destinationsByKey) {
++    const auto destCoordIt = destCoordByKey.find(key);
++    if (destinations.empty() || destCoordIt == destCoordByKey.end()) return {};
++
++    std::vector<std::uint64_t> sources;
++    for (const auto &[core, coord] : producerCoords) {
++      if (coreCoordinateIntervalsOverlap(coord, destCoordIt->second, commonDims,
++                                         producerCoords, consumerCoords)) {
++        sources.push_back(core);
++      }
++    }
++    if (sources.empty()) return {};
++
+     grouped.sourceCoresByGroup.push_back(
+         sortCoresByCoordinate(sources, producerCoords));
+     grouped.destinationCoresByGroup.push_back(
+-        sortCoresByCoordinate(destIt->second, consumerCoords));
++        sortCoresByCoordinate(destinations, consumerCoords));
+   }
+   return grouped;
+ }
+diff --git a/util/test/LayoutAllgatherRestickify_unit_test.cpp b/util/test/LayoutAllgatherRestickify_unit_test.cpp
+index fd0194617..9e9063429 100644
+--- a/util/test/LayoutAllgatherRestickify_unit_test.cpp
++++ b/util/test/LayoutAllgatherRestickify_unit_test.cpp
+@@ -795,6 +795,69 @@ TEST(LayoutAllgatherRestickify,
+   EXPECT_EQ(transfers.back().destinationCore, 31);
+ }
+ 
++TEST(LayoutAllgatherRestickify,
++     expandsMatmulOperandBroadcastFromCoordinateOverlapForStridedDestinations) {
++  const auto plan = deeptools::synthesizeMatmulOperandBroadcastMovementPlan(
++      R"json({
++        "kind": "matmul_operand_broadcast",
++        "communication_pattern": "all_gather_replicate",
++        "producer_core_count": 32,
++        "consumer_core_count": 32,
++        "producer_work_slice_dims": {"2": 32},
++        "consumer_work_slice_dims": {"2": 8},
++        "producer_core_id_to_device_slice": {
++          "0": {"2": 0}, "1": {"2": 1}, "2": {"2": 2}, "3": {"2": 3},
++          "4": {"2": 4}, "5": {"2": 5}, "6": {"2": 6}, "7": {"2": 7},
++          "8": {"2": 8}, "9": {"2": 9}, "10": {"2": 10}, "11": {"2": 11},
++          "12": {"2": 12}, "13": {"2": 13}, "14": {"2": 14}, "15": {"2": 15},
++          "16": {"2": 16}, "17": {"2": 17}, "18": {"2": 18}, "19": {"2": 19},
++          "20": {"2": 20}, "21": {"2": 21}, "22": {"2": 22}, "23": {"2": 23},
++          "24": {"2": 24}, "25": {"2": 25}, "26": {"2": 26}, "27": {"2": 27},
++          "28": {"2": 28}, "29": {"2": 29}, "30": {"2": 30}, "31": {"2": 31}
++        },
++        "consumer_core_id_to_device_slice": {
++          "0": {"2": 0}, "1": {"2": 1}, "2": {"2": 2}, "3": {"2": 3},
++          "4": {"2": 4}, "5": {"2": 5}, "6": {"2": 6}, "7": {"2": 7},
++          "8": {"2": 0}, "9": {"2": 1}, "10": {"2": 2}, "11": {"2": 3},
++          "12": {"2": 4}, "13": {"2": 5}, "14": {"2": 6}, "15": {"2": 7},
++          "16": {"2": 0}, "17": {"2": 1}, "18": {"2": 2}, "19": {"2": 3},
++          "20": {"2": 4}, "21": {"2": 5}, "22": {"2": 6}, "23": {"2": 7},
++          "24": {"2": 0}, "25": {"2": 1}, "26": {"2": 2}, "27": {"2": 3},
++          "28": {"2": 4}, "29": {"2": 5}, "30": {"2": 6}, "31": {"2": 7}
++        },
++        "read_index": 0,
++        "realized": true,
++        "realization_strategy": "gather_then_restickify",
++        "requires_layout_conversion": true,
++        "layout_transform": {},
++        "source_lx_tensor": {},
++        "target_kernel_tensor": {},
++        "staged_destination": {}
++      })json");
++  ASSERT_TRUE(plan.ok) << plan.reason;
++  EXPECT_EQ(plan.groupCount, 8);
++  EXPECT_EQ(plan.producerChunksPerGroup, 4);
++  EXPECT_EQ(plan.consumerReplicasPerGroup, 4);
++  EXPECT_EQ(plan.logicalTransferCount, 128);
++
++  const auto transfers =
++      deeptools::matmulOperandBroadcastLogicalTransfers(plan);
++
++  ASSERT_EQ(transfers.size(), 128);
++  EXPECT_EQ(transfers[0].sourceCore, 0);
++  EXPECT_EQ(transfers[0].destinationCore, 0);
++  EXPECT_EQ(transfers[1].sourceCore, 0);
++  EXPECT_EQ(transfers[1].destinationCore, 8);
++  EXPECT_EQ(transfers[2].sourceCore, 0);
++  EXPECT_EQ(transfers[2].destinationCore, 16);
++  EXPECT_EQ(transfers[3].sourceCore, 0);
++  EXPECT_EQ(transfers[3].destinationCore, 24);
++  EXPECT_EQ(transfers[16].sourceCore, 4);
++  EXPECT_EQ(transfers[16].destinationCore, 1);
++  EXPECT_EQ(transfers[17].sourceCore, 4);
++  EXPECT_EQ(transfers[17].destinationCore, 9);
++}
++
+ TEST(LayoutAllgatherRestickify,
+      emitsBuf21MatmulOperandBroadcastPlanArtifact) {
+   const auto plan = deeptools::synthesizeMatmulOperandBroadcastMovementPlan(

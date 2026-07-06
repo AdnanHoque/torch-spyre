@@ -1,0 +1,220 @@
+    (%arg1 -> %991){
+      sentient.sync {dbgName = "SSRF(MSSync #2577, MSSync #2578)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      %1202 = sentient.for %arg2 = %117 iter_args(%arg3 = %1176) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [0 : i32, 1 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+        %1208 = sentient.load_and_send mutable_addr(%arg3), immutable_addr(%7), increment(%7), consumer(%735)  {burst_size = 0 : i32, chunk_size = 1 : i32, chunk_stride = 0 : i32, dbgName = "c31-lxlu0-LE128DT-lx-pe0-231", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode splat2b>, total_elements = 64 : i32} : index, index, index, index : index
+        sentient.yield %1208 : index
+      }
+      sentient.sync {dbgName = "SSRF(MSSync #2579, MSSync #2580)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2581, MSSync #2582)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      %1203 = sentient.for %arg2 = %118 iter_args(%arg3 = %1179) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [0 : i32, 2 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+        %1208 = sentient.load_and_send mutable_addr(%arg3), immutable_addr(%7), increment(%7), consumer(%735)  {burst_size = 0 : i32, chunk_size = 1 : i32, chunk_stride = 0 : i32, dbgName = "c31-lxlu0-LE128DT-lx-pe0-233", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 2 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode splat2b>, total_elements = 64 : i32} : index, index, index, index : index
+        sentient.yield %1208 : index
+      }
+      sentient.sync {dbgName = "SSRF(MSSync #2583, MSSync #2584)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2585, MSSync #2586)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      sentient.for %arg2 = %4 {element_sizes = [-1 : i32], programHeader = [], regIndices = [0 : i32], regLocales = [#sentient<reg_type lccr>]}{
+        %1208 = sentient.if sge, %arg2, %4 : index -> (index) {element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+          sentient.yield %131 : index
+        } else{
+          %1211 = sentient.if sge, %arg2, %128 : index -> (index) {element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+            sentient.yield %132 : index
+          } else{
+            %1212 = sentient.if sge, %arg2, %129 : index -> (index) {element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+              sentient.yield %133 : index
+            } else{
+              sentient.yield %130 : index
+            }
+            sentient.yield %1212 : index
+          }
+          sentient.yield %1211 : index
+        }
+        %1209 = sentient.scalar_add %1208, %160 {element_size = 16 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+        %1210 = sentient.for %arg3 = %116 iter_args(%arg4 = %1209) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [1 : i32, 1 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+          %1211 = sentient.load_and_send mutable_addr(%arg4), immutable_addr(%7), increment(%7), consumer(%735)  {burst_size = 0 : i32, chunk_size = 1 : i32, chunk_stride = 0 : i32, dbgName = "c31-lxlu0-LE128DT-lx-pe0-239", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode splat2b>, total_elements = 64 : i32} : index, index, index, index : index
+          sentient.yield %1211 : index
+        }
+      }
+      sentient.sync {dbgName = "SSRF(MSSync #2587, MSSync #2588)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2589, MSSync #2590)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      sentient.for %arg2 = %128 {element_sizes = [-1 : i32], programHeader = [], regIndices = [0 : i32], regLocales = [#sentient<reg_type lccr>]}{
+        %1208 = sentient.if sge, %arg2, %128 : index -> (index) {element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+          sentient.yield %131 : index
+        } else{
+          %1211 = sentient.if sge, %arg2, %129 : index -> (index) {element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+            sentient.yield %132 : index
+          } else{
+            sentient.yield %133 : index
+          }
+          sentient.yield %1211 : index
+        }
+        %1209 = sentient.scalar_add %1208, %160 {element_size = 16 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+        %1210 = sentient.for %arg3 = %116 iter_args(%arg4 = %1209) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [1 : i32, 1 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+          %1211 = sentient.load_and_send mutable_addr(%arg4), immutable_addr(%7), increment(%7), consumer(%735)  {burst_size = 0 : i32, chunk_size = 1 : i32, chunk_stride = 0 : i32, dbgName = "c31-lxlu0-LE128DT-lx-pe0-241", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode splat2b>, total_elements = 64 : i32} : index, index, index, index : index
+          sentient.yield %1211 : index
+        }
+      }
+      sentient.sync {dbgName = "SSRF(MSSync #2591, MSSync #2592)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2593, MSSync #2594)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      sentient.for %arg2 = %4 {element_sizes = [-1 : i32], programHeader = [], regIndices = [0 : i32], regLocales = [#sentient<reg_type lccr>]}{
+        %1208 = sentient.if sge, %arg2, %4 : index -> (index) {dbgName = "CFGSimpl(c31-lxlu0-LE128DT-lx-pe0-247, case3)", element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+          sentient.yield %130 : index
+        } else{
+          %1211 = sentient.if sge, %arg2, %128 : index -> (index) {element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+            sentient.yield %131 : index
+          } else{
+            %1212 = sentient.if sge, %arg2, %129 : index -> (index) {element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+              sentient.yield %132 : index
+            } else{
+              sentient.yield %133 : index
+            }
+            sentient.yield %1212 : index
+          }
+          sentient.yield %1211 : index
+        }
+        %1209 = sentient.scalar_add %1208, %160 {element_size = 16 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+        %1210 = sentient.for %arg3 = %116 iter_args(%arg4 = %1209) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [1 : i32, 1 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+          %1211 = sentient.load_and_send mutable_addr(%arg4), immutable_addr(%7), increment(%7), consumer(%735)  {burst_size = 0 : i32, chunk_size = 1 : i32, chunk_stride = 0 : i32, dbgName = "c31-lxlu0-LE128DT-lx-pe0-247", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode splat2b>, total_elements = 64 : i32} : index, index, index, index : index
+          sentient.yield %1211 : index
+        }
+      }
+      sentient.sync {dbgName = "SSRF(MSSync #2595, MSSync #2596)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2597, MSSync #2598)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      sentient.for %arg2 = %128 {element_sizes = [-1 : i32], programHeader = [], regIndices = [0 : i32], regLocales = [#sentient<reg_type lccr>]}{
+        %1208 = sentient.if sge, %arg2, %128 : index -> (index) {dbgName = "CFGSimpl(c31-lxlu0-LE128DT-lx-pe0-249, case1)", element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+          sentient.yield %130 : index
+        } else{
+          %1211 = sentient.if sge, %arg2, %129 : index -> (index) {element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+            sentient.yield %131 : index
+          } else{
+            sentient.yield %132 : index
+          }
+          sentient.yield %1211 : index
+        }
+        %1209 = sentient.scalar_add %1208, %160 {element_size = 16 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+        %1210 = sentient.for %arg3 = %116 iter_args(%arg4 = %1209) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [1 : i32, 1 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+          %1211 = sentient.load_and_send mutable_addr(%arg4), immutable_addr(%7), increment(%7), consumer(%735)  {burst_size = 0 : i32, chunk_size = 1 : i32, chunk_stride = 0 : i32, dbgName = "c31-lxlu0-LE128DT-lx-pe0-249", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode splat2b>, total_elements = 64 : i32} : index, index, index, index : index
+          sentient.yield %1211 : index
+        }
+      }
+      sentient.sync {dbgName = "SSRF(MSSync #2599, MSSync #2600)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2601, MSSync #2602)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2603, MSSync #2604)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      %1204 = sentient.for %arg2 = %4 iter_args(%arg3 = %1182) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [0 : i32, 3 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+        %1208 = sentient.load_and_send mutable_addr(%arg3), immutable_addr(%1173), increment(%115), consumer(%735)  {burst_size = 16 : i32, chunk_size = 64 : i32, chunk_stride = 0 : i32, dbgName = "LEVR(c31-lxlu0-ringDT-lx-pe0-0-254)", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 3 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode noshuffle>, total_elements = 64 : i32} : index, index, index, index : index
+        %1209 = sentient.scalar_add %1208, %110 {element_size = 16 : i32, regIndex = 3 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+        sentient.yield %1209 : index
+      }
+      sentient.sync {dbgName = "SSRF(MSSync #2605, MSSync #2606)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      sentient.for %arg2 = %4 {element_sizes = [-1 : i32], programHeader = [], regIndices = [0 : i32], regLocales = [#sentient<reg_type lccr>]}{
+        %1208 = sentient.if sge, %arg2, %4 : index -> (index) {element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+          sentient.yield %133 : index
+        } else{
+          %1211 = sentient.if sge, %arg2, %128 : index -> (index) {element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+            sentient.yield %130 : index
+          } else{
+            %1212 = sentient.if sge, %arg2, %129 : index -> (index) {element_sizes = [16 : i32], regIndices = [1 : i32], regLocales = [#sentient<reg_type lrf>]}{
+              sentient.yield %131 : index
+            } else{
+              sentient.yield %132 : index
+            }
+            sentient.yield %1212 : index
+          }
+          sentient.yield %1211 : index
+        }
+        %1209 = sentient.scalar_add %1208, %160 {element_size = 16 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+        %1210 = sentient.for %arg3 = %116 iter_args(%arg4 = %1209) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [1 : i32, 1 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+          %1211 = sentient.load_and_send mutable_addr(%arg4), immutable_addr(%7), increment(%7), consumer(%735)  {burst_size = 0 : i32, chunk_size = 1 : i32, chunk_stride = 0 : i32, dbgName = "c31-lxlu0-LE128DT-lx-pe0-255", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode splat2b>, total_elements = 64 : i32} : index, index, index, index : index
+          sentient.yield %1211 : index
+        }
+      }
+      sentient.sync {dbgName = "SSRF(MSSync #2607, MSSync #2608)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      %1205 = sentient.for %arg2 = %129 iter_args(%arg3 = %1183) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [0 : i32, 7 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+        %1208 = sentient.scalar_sub %157, %arg3 {element_size = 16 : i32, regIndex = 7 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+        %1209 = sentient.scalar_add %1208, %15 {element_size = 16 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+        %1210 = sentient.load_and_send mutable_addr(%1209), immutable_addr(%1173), increment(%115), consumer(%735)  {burst_size = 16 : i32, chunk_size = 64 : i32, chunk_stride = 0 : i32, dbgName = "LEVR(c31-lxlu0-ringDT-lx-pe0-0-256)", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode noshuffle>, total_elements = 64 : i32} : index, index, index, index : index
+        sentient.yield %1208 : index
+      }
+      %1206 = sentient.load_and_send mutable_addr(%1186), immutable_addr(%1173), increment(%115), consumer(%735)  {burst_size = 16 : i32, chunk_size = 64 : i32, chunk_stride = 0 : i32, dbgName = "LEVR(c31-lxlu0-ringDT-lx-pe0-1-256)", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 4 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode noshuffle>, total_elements = 64 : i32} : index, index, index, index : index
+      sentient.sync {dbgName = "SSRF(MSSync #2609, MSSync #2610)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      %1207 = sentient.for %arg2 = %118 iter_args(%arg3 = %1187) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [0 : i32, 8 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+        %1208 = sentient.load_and_send mutable_addr(%arg3), immutable_addr(%7), increment(%7), consumer(%735)  {burst_size = 0 : i32, chunk_size = 1 : i32, chunk_stride = 0 : i32, dbgName = "c31-lxlu0-LE128DT-lx-pe0-257", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 8 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode splat2b>, total_elements = 64 : i32} : index, index, index, index : index
+        sentient.yield %1208 : index
+      }
+      sentient.sync {dbgName = "SSRF(MSSync #2611, MSSync #2612)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsu>, #sentient<consumer_unit lxsuN>, #sentient<consumer_unit l3lu>]}
+      uniform.yield
+    }
+    (%arg1 -> %992){
+      sentient.sync {dbgName = "SSRF(MSSync #2613, MSSync #2614)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2615, MSSync #2616)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2617, MSSync #2618)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2619, MSSync #2620)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2621, MSSync #2622)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2623, MSSync #2624)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2625, MSSync #2626)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2627, MSSync #2628)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2629, MSSync #2630)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2631, MSSync #2632)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2633, MSSync #2634)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2635, MSSync #2636)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2637, MSSync #2638)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2639, MSSync #2640)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2641, MSSync #2642)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2643, MSSync #2644)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2645, MSSync #2646)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      sentient.sync {dbgName = "SSRF(MSSync #2647, MSSync #2648)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit lxsuN>, #sentient<consumer_unit lxsu>, #sentient<consumer_unit l3lu>]}
+      uniform.yield
+    }
+  } {element_sizes = []}
+  %1191 = uniform.def_immutable_mapping([%929 -> %673], [%930 -> %674], [%931 -> %675], [%932 -> %676], [%933 -> %677], [%934 -> %678], [%935 -> %679], [%936 -> %680], [%937 -> %681], [%938 -> %682], [%939 -> %683], [%940 -> %684], [%941 -> %685], [%942 -> %686], [%943 -> %687], [%944 -> %688], [%945 -> %689], [%946 -> %690], [%947 -> %691], [%948 -> %692], [%949 -> %693], [%950 -> %694], [%951 -> %695], [%952 -> %696], [%953 -> %697], [%954 -> %698], [%955 -> %699], [%956 -> %700], [%957 -> %701], [%958 -> %702], [%959 -> %703], [%960 -> %704], [%961 -> %705], [%962 -> %706], [%963 -> %707], [%964 -> %708], [%965 -> %709], [%966 -> %710], [%967 -> %711], [%968 -> %712], [%969 -> %713], [%970 -> %714], [%971 -> %715], [%972 -> %716], [%973 -> %717], [%974 -> %718], [%975 -> %719], [%976 -> %720], [%977 -> %721], [%978 -> %722], [%979 -> %723], [%980 -> %724], [%981 -> %725], [%982 -> %726], [%983 -> %727], [%984 -> %728], [%985 -> %729], [%986 -> %730], [%987 -> %731], [%988 -> %732], [%989 -> %733], [%990 -> %734], [%991 -> %735], [%992 -> %736]):index
+  %1192 = uniform.query_map(map:%1191, key:%arg0) : index
+  %1193 = uniform.def_immutable_mapping([%929 -> %161], [%930 -> %162], [%931 -> %163], [%932 -> %164], [%933 -> %165], [%934 -> %166], [%935 -> %167], [%936 -> %168], [%937 -> %169], [%938 -> %170], [%939 -> %171], [%940 -> %172], [%941 -> %173], [%942 -> %174], [%943 -> %175], [%944 -> %176], [%945 -> %177], [%946 -> %178], [%947 -> %179], [%948 -> %180], [%949 -> %181], [%950 -> %182], [%951 -> %183], [%952 -> %184], [%953 -> %185], [%954 -> %186], [%955 -> %187], [%956 -> %188], [%957 -> %189], [%958 -> %190], [%959 -> %191], [%960 -> %192], [%961 -> %193], [%962 -> %194], [%963 -> %195], [%964 -> %196], [%965 -> %197], [%966 -> %198], [%967 -> %199], [%968 -> %200], [%969 -> %201], [%970 -> %202], [%971 -> %203], [%972 -> %204], [%973 -> %205], [%974 -> %206], [%975 -> %207], [%976 -> %208], [%977 -> %209], [%978 -> %210], [%979 -> %211], [%980 -> %212], [%981 -> %213], [%982 -> %214], [%983 -> %215], [%984 -> %216], [%985 -> %217], [%986 -> %218], [%987 -> %219], [%988 -> %220], [%989 -> %221], [%990 -> %222], [%991 -> %223], [%992 -> %224]):index
+  %1194 = uniform.query_map(map:%1193, key:%arg0) : index
+  %1195 = uniform.def_immutable_mapping([%929 -> %865], [%930 -> %866], [%931 -> %867], [%932 -> %868], [%933 -> %869], [%934 -> %870], [%935 -> %871], [%936 -> %872], [%937 -> %873], [%938 -> %874], [%939 -> %875], [%940 -> %876], [%941 -> %877], [%942 -> %878], [%943 -> %879], [%944 -> %880], [%945 -> %881], [%946 -> %882], [%947 -> %883], [%948 -> %884], [%949 -> %885], [%950 -> %886], [%951 -> %887], [%952 -> %888], [%953 -> %889], [%954 -> %890], [%955 -> %891], [%956 -> %892], [%957 -> %893], [%958 -> %894], [%959 -> %895], [%960 -> %896], [%961 -> %897], [%962 -> %898], [%963 -> %899], [%964 -> %900], [%965 -> %901], [%966 -> %902], [%967 -> %903], [%968 -> %904], [%969 -> %905], [%970 -> %906], [%971 -> %907], [%972 -> %908], [%973 -> %909], [%974 -> %910], [%975 -> %911], [%976 -> %912], [%977 -> %913], [%978 -> %914], [%979 -> %915], [%980 -> %916], [%981 -> %917], [%982 -> %918], [%983 -> %919], [%984 -> %920], [%985 -> %921], [%986 -> %922], [%987 -> %923], [%988 -> %924], [%989 -> %925], [%990 -> %926], [%991 -> %927], [%992 -> %928]):index
+  %1196 = uniform.query_map(map:%1195, key:%arg0) : index
+  %1197 = uniform.def_immutable_mapping([%929 -> %155], [%930 -> %156], [%931 -> %155], [%932 -> %156], [%933 -> %155], [%934 -> %156], [%935 -> %155], [%936 -> %156], [%937 -> %155], [%938 -> %156], [%939 -> %155], [%940 -> %156], [%941 -> %155], [%942 -> %156], [%943 -> %155], [%944 -> %156], [%945 -> %155], [%946 -> %156], [%947 -> %155], [%948 -> %156], [%949 -> %155], [%950 -> %156], [%951 -> %155], [%952 -> %156], [%953 -> %155], [%954 -> %156], [%955 -> %155], [%956 -> %156], [%957 -> %155], [%958 -> %156], [%959 -> %155], [%960 -> %156], [%961 -> %155], [%962 -> %156], [%963 -> %155], [%964 -> %156], [%965 -> %155], [%966 -> %156], [%967 -> %155], [%968 -> %156], [%969 -> %155], [%970 -> %156], [%971 -> %155], [%972 -> %156], [%973 -> %155], [%974 -> %156], [%975 -> %155], [%976 -> %156], [%977 -> %155], [%978 -> %156], [%979 -> %155], [%980 -> %156], [%981 -> %155], [%982 -> %156], [%983 -> %155], [%984 -> %156], [%985 -> %155], [%986 -> %156], [%987 -> %155], [%988 -> %156], [%989 -> %155], [%990 -> %156], [%991 -> %155], [%992 -> %156]):index
+  %1198 = uniform.query_map(map:%1197, key:%arg0) : index
+  %1199 = uniform.def_immutable_mapping([%929 -> %127], [%930 -> %115], [%931 -> %127], [%932 -> %115], [%933 -> %127], [%934 -> %115], [%935 -> %127], [%936 -> %115], [%937 -> %127], [%938 -> %115], [%939 -> %127], [%940 -> %115], [%941 -> %127], [%942 -> %115], [%943 -> %127], [%944 -> %115], [%945 -> %127], [%946 -> %115], [%947 -> %127], [%948 -> %115], [%949 -> %127], [%950 -> %115], [%951 -> %127], [%952 -> %115], [%953 -> %127], [%954 -> %115], [%955 -> %127], [%956 -> %115], [%957 -> %127], [%958 -> %115], [%959 -> %127], [%960 -> %115], [%961 -> %127], [%962 -> %115], [%963 -> %127], [%964 -> %115], [%965 -> %127], [%966 -> %115], [%967 -> %127], [%968 -> %115], [%969 -> %127], [%970 -> %115], [%971 -> %127], [%972 -> %115], [%973 -> %127], [%974 -> %115], [%975 -> %127], [%976 -> %115], [%977 -> %127], [%978 -> %115], [%979 -> %127], [%980 -> %115], [%981 -> %127], [%982 -> %115], [%983 -> %127], [%984 -> %115], [%985 -> %127], [%986 -> %115], [%987 -> %127], [%988 -> %115], [%989 -> %127], [%990 -> %115], [%991 -> %127], [%992 -> %115]):index
+  %1200 = uniform.query_map(map:%1199, key:%arg0) : index
+  %1201:2 = sentient.for %arg1 = %138 iter_args(%arg2 = %1198, %arg3 = %15) -> (index, index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32, 16 : i32, 16 : i32], programHeader = [true, true], regIndices = [0 : i32, 5 : i32, 10 : i32, -1 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+    %1202 = sentient.scalar_copy %1200 {element_size = 16 : i32, programHeader = true, regIndex = 6 : i32, regLocale = #sentient<reg_type lrf>} : index
+    %1203:2 = sentient.for %arg4 = %122 iter_args(%arg5 = %arg2, %arg6 = %1202) -> (index, index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [1 : i32, 5 : i32, 0 : i32, 5 : i32, -1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+      sentient.sync {dbgName = "SSRF(sync_receive_lxlu_from_l3lu, sync_send_lxlu_to_l3lu)", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode sendrecv>, soft = false, units = [#sentient<consumer_unit l3lu>]}
+      sentient.set_send_dst(%1194)
+      %1205 = sentient.scalar_add %arg5, %15 {element_size = 16 : i32, regIndex = 5 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+      %1206 = sentient.for %arg7 = %40 iter_args(%arg8 = %1205) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [2 : i32, 5 : i32, 5 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+        %1210 = sentient.load_and_send mutable_addr(%arg8), immutable_addr(%115), increment(%115), consumer(%1194)  {burst_size = 0 : i32, chunk_size = 64 : i32, chunk_stride = 0 : i32, dbgName = "transfer_lds1_src:lxlu_dst:ptrow0", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 5 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode noshuffle>, total_elements = 64 : i32} : index, index, index, index : index
+        sentient.yield %1210 : index
+      }
+      sentient.if ne, %138, %arg1 : index {dbgName = "condition", element_sizes = [], regIndices = [], regLocales = []}{
+        sentient.sync {dbgName = "sync_input-lxsu-lxlu-sync_lxlu_receive_cl0", implicit_sync_memory_boundary = -1 : si32, mode = #sentient<sync_mode recv>, soft = false, units = [#sentient<consumer_unit lxsu>]}
+      }
+      sentient.set_send_dst(%1196)
+      %1207:2 = sentient.for %arg7 = %121 iter_args(%arg8 = %arg3, %arg9 = %arg6) -> (index, index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [2 : i32, 1 : i32, 0 : i32, -1 : i32, 0 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+        %1210 = sentient.for %arg10 = %129 iter_args(%arg11 = %arg8) -> (index) {element_sizes = [-1 : i32, 16 : i32, 16 : i32], programHeader = [], regIndices = [3 : i32, 1 : i32, 1 : i32], regLocales = [#sentient<reg_type lccr>, #sentient<reg_type lrf>, #sentient<reg_type lrf>]}{
+          %1213 = sentient.load_and_send mutable_addr(%arg11), immutable_addr(%1190), increment(%115), consumer(%1196)  {burst_size = 4 : i32, chunk_size = 64 : i32, chunk_stride = 0 : i32, dbgName = "LEVR(transfer_lds0_src:lxlu_dst:l0su)", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode noshuffle>, total_elements = 64 : i32} : index, index, index, index : index
+          %1214 = sentient.scalar_add %1213, %14 {element_size = 16 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+          sentient.yield %1214 : index
+        }
+        sentient.if ne, %138, %arg1 : index {dbgName = "condition__2", element_sizes = [], regIndices = [], regLocales = []}{
+          %1213 = sentient.scalar_add %arg9, %109 {element_size = 16 : i32, regIndex = 2 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+          %1214 = sentient.scalar_copy %116 {element_size = 16 : i32, programHeader = true, regIndex = 11 : i32, regLocale = #sentient<reg_type lrf>} : index
+          %1215 = sentient.load_and_send mutable_addr(%1213), immutable_addr(%1214), increment(%116), consumer(%1192)  {burst_size = 4 : i32, chunk_size = 64 : i32, chunk_stride = 0 : i32, dbgName = "LEVR(transfer_lds4_src:lxlu_dst:pe)", element_size = 16 : i32, interleaved_group = 0 : i32, regIndex = 2 : i32, regLocale = #sentient<reg_type lrf>, shuffle_mode = #sentient<shuffle_mode noshuffle>, total_elements = 64 : i32} : index, index, index, index : index
+        }
+        %1211 = sentient.scalar_add %1210, %13 {element_size = 16 : i32, regIndex = 1 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+        %1212 = sentient.scalar_add %arg9, %117 {element_size = 16 : i32, regIndex = 0 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+        sentient.yield %1211, %1212 : index, index
+      }
+      %1208 = sentient.scalar_add %1207#1, %12 {element_size = 16 : i32, regIndex = 0 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+      %1209 = sentient.scalar_sub %1189, %1206 {element_size = 16 : i32, regIndex = 5 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+      sentient.yield %1209, %1208 : index, index
+    }
+    %1204 = sentient.scalar_add %arg3, %158 {element_size = 16 : i32, regIndex = 10 : i32, regLocale = #sentient<reg_type lrf>} : index, index
+    sentient.yield %1203#0, %1204 : index, index
+  }
+}
+Require larger IBUFF
+Max IBUFF(128) Current IBUFF(134) for unit:
+%929 = dataflow.get_unit {core = 0 : i32, corelet = 0 : i32, name = "lxlu-CL0", num_folds = 1 : i32, type = "lxlu"} : index
+error: Unable to lower successfully the module for sdsc: 5_batchmatmul
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: DCC causes the compilation failure, file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcc/src/Driver/dcc.cpp line 563
