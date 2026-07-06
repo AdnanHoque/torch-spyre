@@ -41,10 +41,11 @@ Torch side now only needs:
 export SPYRE_LX_PLANNER_RELAYOUT=1
 ```
 
-Deeptools/backend side still needs:
+With the matching rebased Deeptools patch, Deeptools honors the same flag; no separate Deeptools feature flag is required. The old `DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1` flag remains only as a compatibility alias.
+
+For Granite-style full-LX runs using the split DXP wrapper, keep this runtime capacity setup:
 
 ```bash
-export DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1
 export DXP_LX_FRAC_AVAIL=0
 export DXP_BACKEND_LX_FRAC_AVAIL=1
 ```

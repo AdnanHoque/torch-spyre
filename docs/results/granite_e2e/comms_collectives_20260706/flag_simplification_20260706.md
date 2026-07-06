@@ -19,10 +19,19 @@ With that flag set, the following subfeatures default on:
 
 The old subflags are still accepted as diagnostic overrides. Set a subflag to `0` to disable that slice while keeping the umbrella enabled.
 
-## Backend/runtime flags still required
+## Backend/runtime flags
+
+Deeptools now honors the same umbrella flag, so no separate Deeptools feature flag is required:
 
 ```bash
-export DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1
+export SPYRE_LX_PLANNER_RELAYOUT=1
+```
+
+The old `DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1` flag remains as a compatibility alias only. Do not ask new users to set it.
+
+For Granite-style full-LX experiments, keep the LX capacity split as a separate runtime setup detail, not as a feature flag:
+
+```bash
 export DXP_LX_FRAC_AVAIL=0
 export DXP_BACKEND_LX_FRAC_AVAIL=1
 ```
