@@ -1,0 +1,26 @@
+{
+  "run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_after_coord_start_fix_20260706_154943",
+  "returncode": "0",
+  "source_sha": "afda166e58b23519d0b4ca871350b011b56d91a3",
+  "torch": "c2faa793a91d",
+  "deeptools": "e3e265d22c72",
+  "plan_count": 32,
+  "plan_kind_counts": {
+    "matmul_operand_broadcast": 32
+  },
+  "plan_realization_strategy_counts": {
+    "loop_scoped_input_fetch": 32
+  },
+  "plan_physical_lowering_counts": {
+    "lowered_loop_scoped_kernel_neighbor": 32
+  },
+  "plan_communication_pattern_counts": {
+    "all_gather_replicate": 32
+  },
+  "sdsc_file_count": 550,
+  "ReStickifyOpHBM_total": 0,
+  "ReStickifyOpLx_total": 160,
+  "stdout_tail": "[runtime_patch] no_h2d Tensor.to(device=spyre) compile probe enabled\n[runtime_patch] assert_close skipped for compile probe\nSUCCESS\n",
+  "stderr_tail": "[WARNING] [spyre.inductor.propagate_named_dims] buf1: loop var d0 has no named dim mapping -- using _untracked_32\n[WARNING] [spyre.inductor.propagate_named_dims] buf1: loop var d1 has no named dim mapping -- using _untracked_4096\n[WARNING] [spyre.inductor.propagate_named_dims] buf1: loop var d2 has no named dim mapping -- using _untracked_128\n[WARNING] [spyre.inductor.propagate_named_dims] buf3: loop var d0 has no named dim mapping -- using _untracked_32\n[WARNING] [spyre.inductor.propagate_named_dims] buf3: loop var d1 has no named dim mapping -- using _untracked_4096\n[WARNING] [spyre.inductor.propagate_named_dims] buf3: loop var d2 has no named dim mapping -- using _untracked_64\n[WARNING] [spyre.inductor.propagate_named_dims] _consume_names: no prefix of ['B', 'H', 'Lq', 'Lk'] multiplies to 4096\n[WARNING] [spyre.inductor.propagate_named_dims] buf19: loop var d0 has no named dim mapping -- using _untracked_32\n[WARNING] [spyre.inductor.propagate_named_dims] buf19: loop var d1 has no named dim mapping -- using _untracked_4096\n[WARNING] [spyre.inductor.propagate_named_dims] buf19: loop var d2 has no named dim mapping -- using _untracked_64\n",
+  "sample_plan": "54_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json"
+}

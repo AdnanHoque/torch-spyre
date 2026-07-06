@@ -7,6 +7,55 @@ This note records the current state of the Granite/flash LX communication work a
 - whether Deeptools lowers it to on-chip movement;
 - whether it has been validated on a useful Granite or flash workload.
 
+
+## 2026-07-06 Coordinate-Start Update
+
+New evidence is archived under `dldsc_coordinate_start_fix_20260706/`.
+
+Updated heads for this checkpoint:
+
+- Torch fork branch: `gather-restickify`, head `c2faa793a91d`
+- Deeptools fork branch: `gather-restickify`, head `57c6f040b02f`
+
+The Deeptools relayout insertion path now converts `coreIdToWkSlice_` slice ordinals into `PieceInfo` element start coordinates. This fixed coarser-to-finer fanout, where a producer with two logical slices feeding four consumer slices needs source starts `0` and `2`, not `0` and `1`.
+
+Focused gates after the fix:
+
+```text
+./dxp/dxp_unit_test --gtest_filter="DxpTestFixture.CoreWorkDivIncomptLxRelayout*"
+2 passed
+
+./util/util_unit_test --gtest_filter="LayoutAllgatherRestickify.*"
+27 passed
+
+python3 -m pytest tests/inductor/test_lx_relayout_dldsc.py
+23 passed
+```
+
+Flash structural compile after the fix:
+
+```text
+returncode: 0
+stdout: SUCCESS
+plan_count: 32
+plan_kind_counts: {"matmul_operand_broadcast": 32}
+plan_realization_strategy_counts: {"loop_scoped_input_fetch": 32}
+plan_physical_lowering_counts: {"lowered_loop_scoped_kernel_neighbor": 32}
+plan_communication_pattern_counts: {"all_gather_replicate": 32}
+ReStickifyOpHBM_total: 0
+```
+
+Updated copy-collective readout:
+
+| class | status after coordinate-start fix |
+|---|---|
+| scatter / permutation | covered by generic DLDSC coordinate mismatch lowering |
+| broadcast / fanout | covered by generic relayout cardinality tests and matmul operand loop-scoped lowering |
+| multicast / subset replicate | covered by new subset-replication cardinality test |
+| gather / fan-in | covered by generic relayout cardinality test |
+| all-gather / replicate | covered by generic cardinality test and flash matmul operand structural run |
+| reduce / all-reduce | still future work; these require arithmetic combine, not copy-only relayout |
+
 ## Current Evidence
 
 Branches used for the current candidate:

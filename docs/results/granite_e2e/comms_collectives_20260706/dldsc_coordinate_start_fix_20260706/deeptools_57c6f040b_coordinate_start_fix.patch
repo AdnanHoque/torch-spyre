@@ -1,0 +1,86 @@
+From 57c6f040b02ff592bc6cb207d9783375d2043d78 Mon Sep 17 00:00:00 2001
+From: Adnan Hoque <adnan.hoque1@ibm.com>
+Date: Mon, 6 Jul 2026 15:54:59 +0000
+Subject: [PATCH] [DXP] use element coordinates for LX relayout pieces
+
+Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dxp/SdscRelayoutInsertion.cpp | 21 ++++++++++++++-------
+ dxp/test/dxp_unittest.cpp     | 22 ++++++++++++++++++++++
+ 2 files changed, 36 insertions(+), 7 deletions(-)
+
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index d920829b5..faf06f0c9 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -1860,13 +1860,20 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             if (relayout_tensor_dims.count(kv2.first) == 0) continue;
+             // Fill dimToSize_
+             std::string dimName = dldsc.primaryDimToString.at(kv2.first);
+-            DT_CHECK(wkslices_in_dim.at(kv2.first).size() >= 1);
+-            new_piece.dimToSize_[dimName] =
+-                sdsc->N_.paramNameToVal(dimName) /
+-                wkslices_in_dim.at(kv2.first).size();
+-
+-            // Fill dimToStartCordinate
+-            new_piece.dimToStartCordinate[dimName] = kv2.second;
++            const auto sliceCount = wkslices_in_dim.at(kv2.first).size();
++            const auto dimExtent = sdsc->N_.paramNameToVal(dimName);
++            DT_CHECK(sliceCount >= 1);
++            DT_CHECK(static_cast<int64_t>(dimExtent) %
++                         static_cast<int64_t>(sliceCount) ==
++                     0);
++            DT_CHECK(kv2.second >= 0);
++            DT_CHECK(kv2.second < static_cast<int>(sliceCount));
++            new_piece.dimToSize_[dimName] = dimExtent / sliceCount;
++
++            // coreIdToWkSlice_ stores slice ordinals. PieceInfo start
++            // coordinates are element coordinates.
++            new_piece.dimToStartCordinate[dimName] =
++                static_cast<int>(kv2.second * new_piece.dimToSize_[dimName]);
+ 
+             // Fill validGap_
+             new_piece.validGap_[dimName] = {
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index e9df8bb5e..47b6cf678 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -951,6 +951,14 @@ TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayoutCardinality) {
+       {16, makeSlice({{"out", 0}, {"mb", 0}, {"y", 2}})},
+       {24, makeSlice({{"out", 0}, {"mb", 0}, {"y", 3}})},
+   });
++  const auto halfProducer = makeCoreMap({
++      {7, makeSlice({{"out", 0}, {"mb", 0}, {"y", 0}})},
++      {15, makeSlice({{"out", 0}, {"mb", 0}, {"y", 1}})},
++  });
++  const auto replicatedSubsetConsumers = makeCoreMap({
++      {0, makeSlice({{"out", 0}, {"mb", 0}, {"y", 0}})},
++      {8, makeSlice({{"out", 0}, {"mb", 0}, {"y", 0}})},
++  });
+   const auto fullProducer = makeCoreMap({
+       {7, makeSlice({{"out", 0}, {"mb", 0}, {"y", 0}})},
+   });
+@@ -978,6 +986,20 @@ TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayoutCardinality) {
+       /*expectedOutputMemIds=*/{0});
+   TearDown();
+ 
++  SetUpTestData("test_core_work_div_incompt");
++  runCoreWorkDivRelayoutCase(
++      testDataDir, fullProducer, replicatedSubsetConsumers,
++      /*expectedInputMemIds=*/{7},
++      /*expectedOutputMemIds=*/{0, 8});
++  TearDown();
++
++  SetUpTestData("test_core_work_div_incompt");
++  runCoreWorkDivRelayoutCase(
++      testDataDir, halfProducer, slicedConsumer,
++      /*expectedInputMemIds=*/{7, 15},
++      /*expectedOutputMemIds=*/{0, 8, 16, 24});
++  TearDown();
++
+   SetUpTestData("test_core_work_div_incompt");
+   runCoreWorkDivRelayoutCase(
+       testDataDir, slicedProducer, replicatedFullConsumers,
+-- 
+2.52.0
+
