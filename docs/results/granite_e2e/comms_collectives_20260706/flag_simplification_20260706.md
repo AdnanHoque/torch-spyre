@@ -27,7 +27,7 @@ Deeptools now honors the same umbrella flag, so no separate Deeptools feature fl
 export SPYRE_LX_PLANNER_RELAYOUT=1
 ```
 
-The old `DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1` flag remains as a compatibility alias only. Do not ask new users to set it.
+The old `DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1`, `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR=1`, `DEEPTOOLS_ALLOW_DIRECT_KERNEL_NEIGHBOR_LAYOUT_BYPASS=1`, and `DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1` flags remain as compatibility/debug aliases only. Do not ask new users to set them.
 
 For patched Torch-launched Granite/flash experiments, the old split-LX wrapper is not required. With `SPYRE_LX_PLANNER_RELAYOUT=1`, Torch defaults frontend planning to full LX and passes `DXP_LX_FRAC_AVAIL=1` only to the `dxp_standalone` subprocess.
 

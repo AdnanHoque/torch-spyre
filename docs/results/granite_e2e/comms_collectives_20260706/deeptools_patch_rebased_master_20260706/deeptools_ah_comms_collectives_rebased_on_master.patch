@@ -3,9 +3,9 @@ index 913cc9e6a..3dd55a9c9 100644
 --- a/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp
 +++ b/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp
 @@ -29,6 +29,24 @@ using namespace dcc::sentient::utils;
- 
+
  const int min_ldz_imm_field_bits = 8;
- 
+
 +namespace {
 +
 +constexpr int64_t kLxLrfImmMin = -0x200000;
@@ -29,7 +29,7 @@ index 913cc9e6a..3dd55a9c9 100644
      sentient::ForOp for_op, const SenComponents& comp,
 @@ -723,11 +741,28 @@ SentientToProgIRLoweringPass::ConstructLRFADDInstr(
                      {src0_reg_index, src1_reg_index, tgt_reg_index});
- 
+
    auto imm_field_name = is_any_of(comp, LXLU, LXSU) ? "lrfimm" : "imm";
 -  super_instr.setCommonField("src0", tgt_reg_index);
    if (lhs_locale == "lrf" && rhs_locale == "imm") {
@@ -56,7 +56,7 @@ index 913cc9e6a..3dd55a9c9 100644
 +                   imm_field_name, element_size, scale);
 +      instr_vec = {super_instr};
 +    }
- 
+
      // Create a copy operation and then do Add operation
      // This is because LRFMOD target requires to be one of its operand registers
 @@ -738,15 +773,33 @@ SentientToProgIRLoweringPass::ConstructLRFADDInstr(
@@ -95,7 +95,7 @@ index 913cc9e6a..3dd55a9c9 100644
 +                   imm_field_name, element_size, scale);
 +      instr_vec = {super_instr};
 +    }
- 
+
      // Create a copy operation and then do Add operation
      // This is because LRFMOD target requires to be one of its operand registers
 @@ -757,9 +810,10 @@ SentientToProgIRLoweringPass::ConstructLRFADDInstr(
@@ -138,25 +138,41 @@ index 72d9c5ae8..4f0bc52fb 100644
 -  void checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain);
 +  void checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
 +                                         const DataOpDsc* ddsc = nullptr);
- 
+
    void createPcfgForInputFetchNeighbor(
        SuperDsc& mySDscMain, DataOpDsc& ddsc, int uniqueId = 0,
 diff --git a/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp b/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
-index 5d4447973..ff2dfbc8b 100644
+index 5d4447973..d3f2311fd 100644
 --- a/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
 +++ b/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
-@@ -11,6 +11,7 @@
+@@ -11,10 +11,23 @@
  #include <dcg/dcg_fe/dcg_frontend.h>
- 
+
  #include <atomic>
 +#include <cstdlib>
- 
+
  static const int dataStageCoreIndex = 0;
  static const int dataStageChunkIndex = 1;
-@@ -548,21 +549,27 @@ int DcgFE::createPcfgForUnitPerCoreNew(SuperDsc& sdsc, SenPcfg& pcfg,
+
++static bool envFlagEnabled(const char* name) {
++  const char* value = std::getenv(name);
++  return value != nullptr && value[0] != '\0' && value[0] != '0' &&
++         value[0] != 'f' && value[0] != 'F' && value[0] != 'n' &&
++         value[0] != 'N';
++}
++
++static bool directKernelNeighborRelayoutEnabled() {
++  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT") ||
++         envFlagEnabled("DEEPTOOLS_ALLOW_DIRECT_KERNEL_NEIGHBOR_LAYOUT_BYPASS");
++}
++
+ static LoopNames getDBLoopNames(PrimaryDimTypes dim) {
+   switch (dim) {
+     case PrimaryDimTypes::IN:
+@@ -548,21 +561,27 @@ int DcgFE::createPcfgForUnitPerCoreNew(SuperDsc& sdsc, SenPcfg& pcfg,
      const dsc2::TransferNode* transNode =
          dynamic_cast<const dsc2::TransferNode*>(node);
- 
+
 -    // We only look at L3 units that have transfers between HBM and LX.
 +    // We only look at L3 units that have transfers between HBM and LX, plus
 +    // explicit LX-neighbor transfers that the scheduler tagged with ring
@@ -169,7 +185,7 @@ index 5d4447973..ff2dfbc8b 100644
 +        !transNode->lxNeighborRingTransfers_.empty())
        l3TransferNodes.push_back(transNode);
    }
- 
+
    std::vector<const dsc2::TransferNode*> l3UnitTransferNodes;
 +  std::vector<const dsc2::TransferNode*> lxNeighborTransferNodes;
    for (const auto node : l3TransferNodes) {
@@ -181,26 +197,24 @@ index 5d4447973..ff2dfbc8b 100644
 +    if (!node->lxNeighborRingTransfers_.empty())
 +      lxNeighborTransferNodes.push_back(node);
    }
- 
+
    // Function to get the most inner L3 transfer nodes, by iterating the chunk
-@@ -2636,6 +2643,84 @@ int DcgFE::createPcfgForUnitPerCoreNew(SuperDsc& sdsc, SenPcfg& pcfg,
+@@ -2636,6 +2655,82 @@ int DcgFE::createPcfgForUnitPerCoreNew(SuperDsc& sdsc, SenPcfg& pcfg,
      }
    }
- 
+
 +  for (const auto transNode : lxNeighborTransferNodes) {
 +    DT_CHECK_MSG(transNode->isDstLabeledDs(),
 +                 "Expect LX-neighbor transfer to target a labeled DS.");
 +    DT_CHECK_MSG(
 +        !transNode->stagedLayoutConversion_.enabled_ ||
-+            std::getenv(
-+                "DEEPTOOLS_ALLOW_DIRECT_KERNEL_NEIGHBOR_LAYOUT_BYPASS") !=
-+                nullptr,
++            directKernelNeighborRelayoutEnabled(),
 +        "matmul_operand_broadcast requires staged local layout conversion: "
 +        "direct LX-neighbor ring movement into the final KERNEL operand is "
 +        "disabled because it is value-unsafe. Lower into a source-layout LX "
 +        "staging buffer and then run local ReStickifyOpLx/layout conversion, "
-+        "or set DEEPTOOLS_ALLOW_DIRECT_KERNEL_NEIGHBOR_LAYOUT_BYPASS only for "
-+        "diagnostic replay.");
++        "or set SPYRE_LX_PLANNER_RELAYOUT=1 for the LX relayout "
++        "prototype.");
 +    const int dstLdsIdx = transNode->dstLdsAndLoopOffsets_.front().myLdsIdx_;
 +    DT_CHECK_MSG(dstLdsIdx >= 0 && dstLdsIdx < myDsc->labeledDs_.size(),
 +                 "Invalid LX-neighbor destination labeled DS.");
@@ -269,15 +283,28 @@ index 5d4447973..ff2dfbc8b 100644
    // ZQ: Write code to insert sync node in PCFG
    // For L3LU or L3SU <- get the list of sync that needs to be added from
 diff --git a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
-index baa1181dd..2623f113b 100644
+index baa1181dd..1e0fe6b76 100644
 --- a/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
 +++ b/dcg/dcg_fe/pcfg_gen/inputNeighFetchOp.cpp
-@@ -10,6 +10,35 @@
- 
+@@ -10,6 +10,48 @@
+
  #include <dcg/dcg_fe/dcg_frontend.h>
- 
+
 +
 +namespace {
++
++static bool envFlagEnabled(const char* name) {
++  const char* value = std::getenv(name);
++  return value != nullptr && value[0] != '\0' && value[0] != '0' &&
++         value[0] != 'f' && value[0] != 'F' && value[0] != 'n' &&
++         value[0] != 'N';
++}
++
++static bool mixedHbmIfnRelayoutEnabled() {
++  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT") ||
++         envFlagEnabled("DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC");
++}
++
 +DsTypes inferInputFetchMainDsType(const SuperDsc& mySDscMain,
 +                                  const DataOpDsc* ddsc) {
 +  const auto& dsc = mySDscMain.dscs_.at(0);
@@ -308,10 +335,10 @@ index baa1181dd..2623f113b 100644
  void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
                                                const SuperDsc& mySDscPre) {
    DT_CHECK(mySDscMain.dscs_.size() > 0);
-@@ -68,28 +97,36 @@ void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
+@@ -68,28 +110,35 @@ void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
    }
  }
- 
+
 -void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain) {
 +void DcgFE::checkDLDSCForInputFetchNeighborOp(const SuperDsc& mySDscMain,
 +                                              const DataOpDsc* ddsc) {
@@ -321,7 +348,7 @@ index baa1181dd..2623f113b 100644
 +      inferInputFetchMainDsType(mySDscMain, ddsc);
 +  DT_CHECK(mySDscMain.dscs_.at(0).primaryDsInfo_.count(
 +      myIFNInfo_.inputFetchMainDsType));
- 
+
    // check if all data-structures are lx pinned
 -  const auto& pDsInp = mySDscMain.dscs_.at(0).primaryDsInfo_.at(DsTypes::INPUT);
 +  const auto& pDsInp = mySDscMain.dscs_.at(0).primaryDsInfo_.at(
@@ -332,8 +359,7 @@ index baa1181dd..2623f113b 100644
      const auto& dscMain_ = mySDscMain.dscs_.at(0);
 -    for (auto& lds : dscMain_.labeledDs_)
 -      DT_CHECK(!is_any_of(lds.pinnedComponent(), HBM, NO_COMPONENT));  // FIXME
-+    const bool allowMixedHbmIfnDiagnostic =
-+        std::getenv("DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC") != nullptr;
++    const bool allowMixedHbmIfnDiagnostic = mixedHbmIfnRelayoutEnabled();
 +    for (auto& lds : dscMain_.labeledDs_) {
 +      if (!allowMixedHbmIfnDiagnostic) {
 +        DT_CHECK(!is_any_of(lds.pinnedComponent(), HBM, NO_COMPONENT));
@@ -355,10 +381,10 @@ index baa1181dd..2623f113b 100644
 +      DT_CHECK(pDsInp.stickDimOrder_ == dscPDsInfo.stickDimOrder_);
 +      DT_CHECK(pDsInp.stickSize_ == dscPDsInfo.stickSize_);
 +      DT_CHECK(pDsInp.stickRepl_ == dscPDsInfo.stickRepl_);
- 
+
        // support same looporder across multiple dscs
        DT_CHECK(mySDscMain.dscs_.at(0).loopOrder_ == dscMain_.loopOrder_);
-@@ -484,7 +521,7 @@ void DcgFE::createPcfgForInputFetchNeighbor(
+@@ -484,7 +533,7 @@ void DcgFE::createPcfgForInputFetchNeighbor(
    for (PrimaryDimAndKind it : loopOrder) {
      PrimaryDimTypes dim = it.dim_;
      if (DCGUtils::isValPresent(mySDscMain.dscs_.at(mainDscIdx)
@@ -367,16 +393,16 @@ index baa1181dd..2623f113b 100644
                                     .layoutDimOrder_,
                                 dim)) {
        myIFNInfo_.DBloopOrderForInput.push_back(dim);
-@@ -628,7 +665,7 @@ void DcgFE::createSubPieces(STCDPOpLx* op, SuperDsc& mySDscMain) {
- 
+@@ -628,7 +677,7 @@ void DcgFE::createSubPieces(STCDPOpLx* op, SuperDsc& mySDscMain) {
+
      // dsc specific params
      auto& B_ = myIFNInfo_.dscIdxToB_.at(dsc_idx);
 -    auto& dlPDsInfo = currdsc.primaryDsInfo_.at(DsTypes::INPUT);
 +    auto& dlPDsInfo = currdsc.primaryDsInfo_.at(myIFNInfo_.inputFetchMainDsType);
- 
+
      int corei_div_Bi = currdsc.CoreD_.i_ / B_.i_;
      int corej_div_Bj = currdsc.CoreD_.j_ / B_.j_;
-@@ -852,8 +889,10 @@ void DcgFE::insertL3LUSortedCoordinateInpFetch(STCDPOpLx* op, int cMemID,
+@@ -852,8 +901,10 @@ void DcgFE::insertL3LUSortedCoordinateInpFetch(STCDPOpLx* op, int cMemID,
    bool inserted = false;
    int mainOutSPIdx = getIdxForMatchingCMenID(
        op->outSP_, op->dtTable_.at(inpSPIDx).cIDXs, cMemID);
@@ -386,12 +412,12 @@ index baa1181dd..2623f113b 100644
 +    op->coreIDtoDtKey_L3LU[cMemID].push_back(inpSPIDx);
 +    return;
 +  }
- 
+
    if (op->coreIDtoDtKey_L3LU[cMemID].size()) {
      for (auto it = op->coreIDtoDtKey_L3LU[cMemID].begin();
-@@ -862,8 +901,7 @@ void DcgFE::insertL3LUSortedCoordinateInpFetch(STCDPOpLx* op, int cMemID,
+@@ -862,8 +913,7 @@ void DcgFE::insertL3LUSortedCoordinateInpFetch(STCDPOpLx* op, int cMemID,
            op->outSP_, op->dtTable_.at(*it).cIDXs, cMemID);
- 
+
        // check coordinates
 -      DT_CHECK(op->outSP_.at(currOutSPIdx).dimToStartCordinate.count("i"));
 -      DT_CHECK(op->outSP_.at(currOutSPIdx).dimToStartCordinate.count("j"));
@@ -399,7 +425,7 @@ index baa1181dd..2623f113b 100644
        inserted = isLTCoordinateInputFetch(
            op->outSP_.at(mainOutSPIdx).dimToStartCordinate,
            op->outSP_.at(currOutSPIdx).dimToStartCordinate, cMemID);
-@@ -883,8 +921,10 @@ void DcgFE::insertL3SUSortedCoordinateInpFetch(STCDPOpLx* op, int pMemID,
+@@ -883,8 +933,10 @@ void DcgFE::insertL3SUSortedCoordinateInpFetch(STCDPOpLx* op, int pMemID,
                                                 int inpSPIDx) {
    bool inserted = false;
    DT_CHECK(isInpFetchNeigh_);
@@ -409,12 +435,12 @@ index baa1181dd..2623f113b 100644
 +    op->coreIDtoDtKey_L3SU[pMemID].push_back(inpSPIDx);
 +    return;
 +  }
- 
+
    if (op->coreIDtoDtKey_L3SU[pMemID].size()) {
      for (auto it = op->coreIDtoDtKey_L3SU[pMemID].begin();
-@@ -892,8 +932,7 @@ void DcgFE::insertL3SUSortedCoordinateInpFetch(STCDPOpLx* op, int pMemID,
+@@ -892,8 +944,7 @@ void DcgFE::insertL3SUSortedCoordinateInpFetch(STCDPOpLx* op, int pMemID,
        int currInpSPIdx = op->dtTable_.at(*it).pIDX;
- 
+
        // check coordinates
 -      DT_CHECK(op->inpSP_.at(currInpSPIdx).dimToStartCordinate.count("i"));
 -      DT_CHECK(op->inpSP_.at(currInpSPIdx).dimToStartCordinate.count("j"));
@@ -422,10 +448,10 @@ index baa1181dd..2623f113b 100644
        inserted = isLTCoordinateInputFetch(
            op->outSP_.at(inpSPIDx).dimToStartCordinate,
            op->outSP_.at(currInpSPIdx).dimToStartCordinate);
-@@ -1197,8 +1236,9 @@ void DcgFE::findL3LUtoLXLUSyncDtIdx(STCDPOpLx* op) {
+@@ -1197,8 +1248,9 @@ void DcgFE::findL3LUtoLXLUSyncDtIdx(STCDPOpLx* op) {
        }
      }
- 
+
 -    // inserting remaining syncs
 -    DT_CHECK(totalSyncs <= myIFNInfo_.coreIdTototal_wkSlices.at(coreId));
 +    // Insert remaining padding syncs. Collective-style input fetches can require
@@ -434,8 +460,8 @@ index baa1181dd..2623f113b 100644
      if (myIFNInfo_.coreIdTototal_wkSlices.at(coreId) > totalSyncs) {
        auto key_last = std::make_pair(coreId, last);
        int diff = myIFNInfo_.coreIdTototal_wkSlices.at(coreId) - totalSyncs;
-@@ -1604,7 +1644,10 @@ void DcgFE::computerGTRInfoInpFetchNeighbor(baseSTCDPOp* op) {
- 
+@@ -1604,7 +1656,10 @@ void DcgFE::computerGTRInfoInpFetchNeighbor(baseSTCDPOp* op) {
+
    firstAvailGlobalGrpId_ += maxGrpId;
    firstAvailGlobalGrpId_ = firstAvailGlobalGrpId_ % sysDef.maxGroupID;
 -  DT_CHECK(maxGrpId <= sysDef.maxGroupID);
@@ -444,9 +470,9 @@ index baa1181dd..2623f113b 100644
 +  // modulo maxGroupID; let codegen proceed so the collective lowering can be
 +  // validated instead of failing on the conservative logical-transfer count.
  }
- 
+
  void DcgFE::fillGTRSharingInfoInpFetchNeighbor(baseSTCDPOp* op) {
-@@ -1641,8 +1684,10 @@ void DcgFE::inputNeighborFetchL3LUSubpieceOrder(const STCDPOpLx* op) {
+@@ -1641,8 +1696,10 @@ void DcgFE::inputNeighborFetchL3LUSubpieceOrder(const STCDPOpLx* op) {
          bool inserted = false;
          int mainOutSPIdx = getIdxForMatchingCMenID(
              op->outSP_, op->dtTable_.at(inpSPIDx).cIDXs, cMemID);
@@ -456,28 +482,28 @@ index baa1181dd..2623f113b 100644
 +          myIFNInfo_.coreIdtoOrderedSP[cMemID].push_back(inpSPIDx);
 +          continue;
 +        }
- 
+
          if (myIFNInfo_.coreIdtoOrderedSP[cMemID].size()) {
            for (auto it = myIFNInfo_.coreIdtoOrderedSP.at(cMemID).begin();
-@@ -1928,7 +1973,7 @@ void DcgFE::fillUnrelatedChunkSplitFactor(SuperDsc& sDsc) {
+@@ -1928,7 +1985,7 @@ void DcgFE::fillUnrelatedChunkSplitFactor(SuperDsc& sDsc) {
                     myIFNInfo_.dscIdxToB_.at(dsc_idx).paramNameToVal(dimName));
- 
+
        if (DCGUtils::isValPresent(
 -              currdsc.primaryDsInfo_.at(DsTypes::INPUT).layoutDimOrder_, dim)) {
 +              currdsc.primaryDsInfo_.at(myIFNInfo_.inputFetchMainDsType).layoutDimOrder_, dim)) {
          if (DB_ratio > 1) foundRelatedDims = true;
        } else if (unrelatedDims.count(dim)) {
          if (foundRelatedDims)
-@@ -1954,7 +1999,7 @@ void DcgFE::fillChunkSplitFactor(SuperDsc& sDsc) {
- 
+@@ -1954,7 +2011,7 @@ void DcgFE::fillChunkSplitFactor(SuperDsc& sDsc) {
+
      int ratio = 1;
      auto& currdsc = sDsc.dscs_.at(dsc_idx);
 -    auto& dlPDsInfo = currdsc.primaryDsInfo_.at(DsTypes::INPUT);
 +    auto& dlPDsInfo = currdsc.primaryDsInfo_.at(myIFNInfo_.inputFetchMainDsType);
      for (auto& pDim : dlPDsInfo.layoutDimOrder_) {
        auto dimName = currdsc.primaryDimToString.at(pDim);
- 
-@@ -2029,13 +2074,39 @@ void DcgFE::fillAdjustBParams(SuperDsc& sDsc) {
+
+@@ -2029,13 +2086,39 @@ void DcgFE::fillAdjustBParams(SuperDsc& sDsc) {
    DT_CHECK(isInpFetchNeigh_);
    for (int dsc_idx = 0; dsc_idx < sDsc.dscs_.size(); dsc_idx++) {
      auto& currdsc = sDsc.dscs_.at(dsc_idx);
@@ -544,9 +570,9 @@ index f0640651f..d1840495c 100644
 --- a/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
 +++ b/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp
 @@ -4604,7 +4604,7 @@ void DcgFE::computeMulticastOptMetadata(STCDPOpLx* op,
- 
+
        numBeforeTransactions += dtEntry.numTransactions_;
- 
+
 -      if (numBeforeTransactions >= SRQ_HW_BUG_THRES) {
 +      if (!isInpFetchNeigh_ && numBeforeTransactions >= SRQ_HW_BUG_THRES) {
          op->is_SRQ_HW_Bug_prone_ = true;
@@ -560,7 +586,7 @@ index f0640651f..d1840495c 100644
 \ No newline at end of file
 +}
 diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
-index 83ce529b2..dd59885fe 100644
+index 83ce529b2..7cd523ff2 100644
 --- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
 +++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
 @@ -14,10 +14,13 @@
@@ -571,16 +597,44 @@ index 83ce529b2..dd59885fe 100644
  #include <sharedtools/mem_track.h>
  #include <util/sendefs.h>
 +#include <util/LayoutAllgatherRestickify.h>
- 
+
  #include <algorithm>
 +#include <cstdlib>
  #include <deque>
  #include <iostream>
  #include <iterator>
-@@ -372,14 +375,409 @@ void L3DlOpsScheduler::getLabeledDsWithDsType(std::vector<int> &indices,
+@@ -39,6 +42,27 @@
+ // debugging purpose.
+ static bool enableChunkExplore = true;
+
++static bool envFlagEnabled(const char* name) {
++  const char* value = std::getenv(name);
++  return value != nullptr && value[0] != '\0' && value[0] != '0' &&
++         value[0] != 'f' && value[0] != 'F' && value[0] != 'n' &&
++         value[0] != 'N';
++}
++
++static bool lxPlannerRelayoutEnabled() {
++  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT");
++}
++
++static bool matmulOperandKernelNeighborRelayoutEnabled() {
++  return lxPlannerRelayoutEnabled() ||
++         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++}
++
++static bool mixedHbmIfnRelayoutEnabled() {
++  return lxPlannerRelayoutEnabled() ||
++         envFlagEnabled("DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC");
++}
++
+ // A temporary option to carry the unneededPad_ from core
+ // to chunk data stage due to the limitation of the current L3 PCFG generation.
+ // We must remove this option when the DSC2ToPCFG translator is available.
+@@ -372,14 +396,408 @@ void L3DlOpsScheduler::getLabeledDsWithDsType(std::vector<int> &indices,
    }
  }
- 
+
 +static bool relayoutClassificationMatchesLds(
 +    const std::map<std::string, std::string> &fields,
 +    const LabeledDsInfo &lds) {
@@ -971,12 +1025,11 @@ index 83ce529b2..dd59885fe 100644
                                               const int dscIndex,
                                               const LabeledDsInfo &lds) const {
    if (!lds.isLxPinned()) return false;
- 
+
 -  // LX-neighbor (input neighbor fetch) only applies to the input tensor with
 -  // DsType INPUT.
 -  if (lds.dsType_ != DsTypes::INPUT) return false;
-+  if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
-+      nullptr) {
++  if (matmulOperandKernelNeighborRelayoutEnabled()) {
 +    for (const auto &entry : mySDsc.lxRelayoutClassifications_) {
 +      const auto &fields = entry.second;
 +      if (isMatmulOperandBroadcastClassification(fields) &&
@@ -987,13 +1040,13 @@ index 83ce529b2..dd59885fe 100644
 +      }
 +    }
 +  }
- 
+
    // Look at coreIdToDscSchedule.
    // Each DscScheduleStep has four fields as below:
-@@ -393,9 +791,16 @@ bool L3DlOpsScheduler::isLabeledDsLXNeighbor(const SuperDsc &mySDsc,
+@@ -393,9 +811,16 @@ bool L3DlOpsScheduler::isLabeledDsLXNeighbor(const SuperDsc &mySDsc,
    const std::vector<DscScheduleStep> &dscSchedule =
        mySDsc.coreIdToDscSchedule.at(coreId);
- 
+
 -  // Note: A DSC can only be used in one schedule step.
 +  // Note: A DSC can only be used in one schedule step. Match the scheduled
 +  // data-op to this labeled DS by name so KERNEL operands are not confused with
@@ -1007,9 +1060,9 @@ index 83ce529b2..dd59885fe 100644
 +      if (dataLds.ldsName_ == lds.dsName_) return true;
 +    }
    }
- 
+
    return false;
-@@ -1268,6 +1673,7 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
+@@ -1268,6 +1693,7 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
    const DesignSpaceConfig &dscMain = mySDsc.dscs_.at(dscMainIndex);
    const bool isReuse = hasDimensionReuse(dscMain);
    bool isDoubleBuffering = false, isInputNeighborFetch = false;
@@ -1017,9 +1070,9 @@ index 83ce529b2..dd59885fe 100644
    std::unordered_set<PrimaryDimTypes> chunkDims;
    for (auto &lds : dscMain.labeledDs_) {
      if (lds.isHbmPinned() || isLabeledDsLXNeighbor(mySDsc, dscMainIndex, lds)) {
-@@ -1279,14 +1685,26 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
+@@ -1279,14 +1705,24 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
        }
- 
+
        if (lds.isHbmPinned()) isDoubleBuffering = true;
 -      if (isLabeledDsLXNeighbor(mySDsc, dscMainIndex, lds))
 +      if (isLabeledDsLXNeighbor(mySDsc, dscMainIndex, lds)) {
@@ -1029,48 +1082,45 @@ index 83ce529b2..dd59885fe 100644
      }
    }
 +  const bool isMatmulOperandBroadcastKernelNeighbor =
-+      std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
-+      nullptr;
++      matmulOperandKernelNeighborRelayoutEnabled();
 +  const bool skipNeighborAllocFitChecks =
 +      isInputNeighborFetch &&
 +      (!isKernelNeighborFetch || isMatmulOperandBroadcastKernelNeighbor);
-+  const bool allowMixedHbmIfnDiagnostic =
-+      std::getenv("DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC") != nullptr;
++  const bool allowMixedHbmIfnDiagnostic = mixedHbmIfnRelayoutEnabled();
    DT_CHECK_MSG(
 -      !(isDoubleBuffering && isInputNeighborFetch),
 +      allowMixedHbmIfnDiagnostic ||
 +          !(isDoubleBuffering && isInputNeighborFetch),
        "Do not support double buffering and input-neighbor fetch coexisting "
 -      "in the same DSC.");
-+      "in the same DSC. Set DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1 "
-+      "only for diagnostic probes.");
- 
++      "in the same DSC. Set SPYRE_LX_PLANNER_RELAYOUT=1 for the LX "
++      "relayout prototype.");
+
    // When all tensors are LX-local, the chunk parameters are the same as the
    // core parameters. Set the chunk dataStageParam_ and return.
-@@ -1352,7 +1770,12 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
+@@ -1352,7 +1788,11 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
                                            primaryDims);
- 
+
        if (isDoubleBuffering) {
 -        if (!allocAllMem(mySDsc, &dsc, dscIdx, false)) {
 +        const bool deferMixedKernelNeighborFitCheck =
 +            skipNeighborAllocFitChecks &&
-+            std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
-+                nullptr;
++            matmulOperandKernelNeighborRelayoutEnabled();
 +        if (!deferMixedKernelNeighborFitCheck &&
 +            !allocAllMem(mySDsc, &dsc, dscIdx, false)) {
            DT_ERROR_FMT(
                "Unable to map graph within architecture constraints: The "
                "initial chunk parameters must fit in LX for SuperDSC: %s",
-@@ -1365,7 +1788,7 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
+@@ -1365,7 +1805,7 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
        // Find the best set of parameters for memory bandwidth.
        findBestParamsForMemoryBandwidth(dscCandidateIndices, dscCandidates,
                                         mySDsc, primaryDims, coreSplitDims,
 -                                       isInputNeighborFetch);
 +                                       skipNeighborAllocFitChecks);
- 
+
        // Find the best set of parameters for the Flop/Byte arithmetic intensity
        // in the case of tensor reuse and HBM transfers.
-@@ -1601,6 +2024,12 @@ double L3DlOpsScheduler::calculateBurstEfficiency(
+@@ -1601,6 +2041,12 @@ double L3DlOpsScheduler::calculateBurstEfficiency(
    //   2) Burst size of each request
    //   3) Multicast degree of each request
    for (const int ldsIdx : labeledDsIndices) {
@@ -1083,15 +1133,15 @@ index 83ce529b2..dd59885fe 100644
      // Use dscMain to check if this labeledDs has core split dimensions.
      bool ldsHasCoreSplitDim = false;
      for (PrimaryDimTypes dim : dscMain.getLayoutDims(ldsIdx)) {
-@@ -1823,6 +2252,7 @@ double L3DlOpsScheduler::calculateBurstEfficiency(
+@@ -1823,6 +2269,7 @@ double L3DlOpsScheduler::calculateBurstEfficiency(
      }
    }
- 
+
 +  if (totalNumRequests == 0) return 1.0;
    return efficiency / totalNumRequests;
  }
- 
-@@ -3099,11 +3529,13 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
+
+@@ -3099,16 +3546,20 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
                                            transSiblingLoopNode);
          }
        } else if (isLabeledDsLXNeighbor(mySDsc, dscIdx, lds)) {
@@ -1109,7 +1159,15 @@ index 83ce529b2..dd59885fe 100644
          const int numBufferForNoBuffer = 1;
          DT_CHECK_MSG(lds.memOrg_.count(SenComponents::LX),
                       "Expect memOrg_ LX entry.");
-@@ -3116,14 +3548,27 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
+         auto& allocNode = lds.memOrg_.at(SenComponents::LX).allocateNode_;
+-        if (allocNode == nullptr) {
++        const bool needsDedicatedMatmulNeighborDestination =
++            findMatmulOperandBroadcastClassification(mySDsc, lds) != nullptr;
++        if (allocNode == nullptr || needsDedicatedMatmulNeighborDestination) {
+           const SenComponents allocStorage = SenComponents::LX;
+           const std::string allocNodeName =
+               "allocate_lds" + std::to_string(lds.ldsIdx_) + "_" +
+@@ -3116,14 +3567,27 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
            allocNode =
                createAllocateNode(dsc, ldsIdx, allocStorage,
                                   numBufferForNoBuffer, allocNodeName, dscIdx);
@@ -1143,9 +1201,9 @@ index 83ce529b2..dd59885fe 100644
 +          allocParentNode->addChildNode(allocNode, /*addBefore*/ true,
 +                                        allocSiblingNode);
          }
- 
+
          std::string transInNodeName = "transfer_lds" +
-@@ -3165,6 +3610,16 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
+@@ -3165,6 +3629,16 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
            allocNode =
                createAllocateNode(dsc, ldsIdx, allocStorage,
                                   numBufferForNoBuffer, allocNodeName, dscIdx);
@@ -1162,25 +1220,24 @@ index 83ce529b2..dd59885fe 100644
            // Insert allocate node at root level before the ref node.
            parentNode->addChildNode(allocNode, /*addBefore*/ true, refNode);
          }
-@@ -3331,10 +3786,14 @@ void L3DlOpsScheduler::createSynchronization(SuperDsc &mySDsc) {
+@@ -3331,10 +3805,13 @@ void L3DlOpsScheduler::createSynchronization(SuperDsc &mySDsc) {
      const bool hasLxNeighborTensor = !lxNeighborLdsIndexSet.empty();
      const bool hasAllLxPinnedTensors =
          !hasHbmPinnedTensor && !hasLxNeighborTensor;
 -    DT_CHECK_MSG(!(hasHbmPinnedTensor && hasLxNeighborTensor),
-+    const bool allowMixedHbmIfnDiagnostic =
-+        std::getenv("DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC") != nullptr;
++    const bool allowMixedHbmIfnDiagnostic = mixedHbmIfnRelayoutEnabled();
 +    DT_CHECK_MSG(allowMixedHbmIfnDiagnostic ||
 +                     !(hasHbmPinnedTensor && hasLxNeighborTensor),
                   "Do not support both HBM pinned tensor and input-neighbor "
 -                 "fetch tensor existing "
 -                 "in the same DSC.");
 +                 "fetch tensor existing in the same DSC. Set "
-+                 "DEEPTOOLS_ALLOW_MIXED_HBM_IFN_DIAGNOSTIC=1 only for "
-+                 "diagnostic probes.");
- 
++                 "SPYRE_LX_PLANNER_RELAYOUT=1 for the LX relayout "
++                 "prototype.");
+
      bool syncL3LUAndLXLUInserted = false;
      // Start to add sync nodes.
-@@ -4815,6 +5274,9 @@ void L3DlOpsScheduler::fillFinalStartAddressAndOffset(
+@@ -4815,6 +5292,9 @@ void L3DlOpsScheduler::fillFinalStartAddressAndOffset(
    auto coordinates =
        allocNode->startAddressCoreCorelet_.getFlattenedCoordinates(
            {{0, 0}, {1, 0}});
@@ -1190,7 +1247,7 @@ index 83ce529b2..dd59885fe 100644
    DT_CHECK(coordinates.begin()->size() >= 2);
    for (auto &coord : coordinates) {
      for (auto coreId : dsc.coreIdsUsed_) {
-@@ -7467,7 +7929,6 @@ void L3DlOpsScheduler::sliceCoordinateForCorelet(
+@@ -7467,7 +7947,6 @@ void L3DlOpsScheduler::sliceCoordinateForCorelet(
    for (int i = foldParams.size() - 1; i > temporalFoldEnds; --i) {
      elemArr.push_back(foldParams.at(i));
    }
@@ -1198,16 +1255,15 @@ index 83ce529b2..dd59885fe 100644
    // Temporarily make the allocNode a child of the new loop. The original
    // scheduleTree will be restored after the distribution. For computing custom
    // dataStage, the distribution process requires that the loop has a childNode.
-@@ -7840,6 +8301,11 @@ void L3DlOpsScheduler::run(SuperDsc &mySDsc) {
- 
+@@ -7840,6 +8319,10 @@ void L3DlOpsScheduler::run(SuperDsc &mySDsc) {
+
    // Set start address, offset in allocations.
    fillAllocationStartAddrAndOffset(mySDsc);
-+  if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
-+      nullptr) {
++  if (matmulOperandKernelNeighborRelayoutEnabled()) {
 +    populateMatmulOperandBroadcastRingTransfersAfterAllocation(
 +        mySDsc, dscGlobal.sysDef.bytesPerStick);
 +  }
- 
+
    // Finalize the schedule tree by filling the loop address and offset in the
    // transfer nodes.
 diff --git a/dcg/dcg_manager/dcg_common.h b/dcg/dcg_manager/dcg_common.h
@@ -1217,7 +1273,7 @@ index 6eb25e5f5..e8b8abccb 100644
 @@ -62,6 +62,9 @@ struct InputFetchNeigh {
    // Chunk (D/B) loop order for the input tensor.
    std::vector<PrimaryDimTypes> DBloopOrderForInput;
- 
+
 +  // DL operand fetched into the consumer. Legacy IFN uses INPUT.
 +  DsTypes inputFetchMainDsType = DsTypes::INPUT;
 +
@@ -1225,7 +1281,7 @@ index 6eb25e5f5..e8b8abccb 100644
    std::map<std::pair<int, std::vector<int>>, int>
        pIdCIDsToMainSisDtidx;  // used for filling sister dt node info
 diff --git a/ddc/ddc.h b/ddc/ddc.h
-index 97b1efe6c..24e17df64 100644
+index 97b1efe6c..cb7347ae5 100644
 --- a/ddc/ddc.h
 +++ b/ddc/ddc.h
 @@ -51,6 +51,11 @@ class Ddc {
@@ -1243,19 +1299,48 @@ index 97b1efe6c..24e17df64 100644
 @@ -67,7 +72,6 @@ class Ddc {
        coordPropReportLevel_ = 3;
      }
- 
+
 -    auto ddcCoordEnvOption = dtGetEnv<std::string>("DDCCOORD");
      if (ddcCoordEnvOption &&
          ddcCoordEnvOption->find("verify_loopelemoff") != std::string::npos) {
        verifyCoordinateBasedLoopElemOff = true;
+@@ -433,7 +437,8 @@ class Ddc {
+       itemsToProcess_.push_back(dsc2::CoordPropInfoType{
+           propInfo.refNode, propInfo.nodeToFold, propInfo.dataConnect,
+           propInfo.refIsProducer,
+-          dsc2::CoordPropInfoType::PropStateType::NOT_PROCESSED, dims});
++          dsc2::CoordPropInfoType::PropStateType::NOT_PROCESSED, dims,
++          propInfo.scaleDown});
+       for (auto& dim : dims) {
+         int retryCount = 0;
+         if (refsAdded_[propInfo.nodeToFold].count(propInfo.refNode) &&
 diff --git a/ddc/ddc_fold.cpp b/ddc/ddc_fold.cpp
-index 4df32c50c..f7e18aa7f 100644
+index 4df32c50c..f89a1d770 100644
 --- a/ddc/ddc_fold.cpp
 +++ b/ddc/ddc_fold.cpp
-@@ -15,6 +15,83 @@ namespace ddc {
- 
+@@ -8,6 +8,18 @@
+
+ namespace ddc {
+
++static bool envFlagEnabled(const char* name) {
++  const char* value = std::getenv(name);
++  return value != nullptr && value[0] != '\0' && value[0] != '0' &&
++         value[0] != 'f' && value[0] != 'F' && value[0] != 'n' &&
++         value[0] != 'N';
++}
++
++static bool matmulOperandKernelNeighborRelayoutEnabled() {
++  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT") ||
++         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++}
++
+ #define FOLD_POS_CORE static_cast<int>(dsc2::CoordinateFoldPosition::Core)
+ #define FOLD_POS_CORELET static_cast<int>(dsc2::CoordinateFoldPosition::Corelet)
+ #define FOLD_POS_ROWSPLIT \
+@@ -15,6 +27,107 @@ namespace ddc {
+
  using dsc2::LoopDistributionInfo;
- 
+
 +bool isFoldedLxNeighborAllocation(const dsc2::AllocateNode *allocNode) {
 +  if (allocNode == nullptr || allocNode->component_ != SenComponents::LX ||
 +      !allocNode->allocateCoordinates_.foldConstructed()) {
@@ -1269,6 +1354,30 @@ index 4df32c50c..f7e18aa7f 100644
 +    }
 +  }
 +  return false;
++}
++
++bool isMatmulOperandKernelNeighborAllocation(
++    const DesignSpaceConfig *currDsc, const dsc2::AllocateNode *allocNode) {
++  if (!matmulOperandKernelNeighborRelayoutEnabled()) {
++    return false;
++  }
++  if (currDsc == nullptr || allocNode == nullptr ||
++      allocNode->component_ != SenComponents::LX || allocNode->ldsIdx_ < 0 ||
++      static_cast<size_t>(allocNode->ldsIdx_) >= currDsc->labeledDs_.size()) {
++    return false;
++  }
++  const auto &allocLds = currDsc->labeledDs_.at(allocNode->ldsIdx_);
++  if (allocLds.dsType_ != DsTypes::KERNEL) {
++    return false;
++  }
++  return std::any_of(
++      allocNode->allocUsers_.begin(), allocNode->allocUsers_.end(),
++      [](const auto &userAndCount) {
++        const auto *user = userAndCount.first;
++        return user != nullptr &&
++               user->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
++               user->name_.find("_lx_neighbor") != std::string::npos;
++      });
 +}
 +
 +bool seedLxNeighborAllocationFromFoldedPeer(DesignSpaceConfig *currDsc,
@@ -1336,8 +1445,8 @@ index 4df32c50c..f7e18aa7f 100644
  void dbgPrint(const dsc2::ComputeNode *computeNode) {
    std::cout << " ComputeNode: " << computeNode->name_ << "(" << computeNode
              << ") "
-@@ -1345,18 +1422,32 @@ bool Ddc::sameCoordinateRange(
- 
+@@ -1345,18 +1458,32 @@ bool Ddc::sameCoordinateRange(
+
          // Check if need to fix corelets.
          int fixedLhsCorelet = -1, fixedRhsCorelet = -1;
 -        if (lhsCoreletInfo.size() <
@@ -1377,9 +1486,9 @@ index 4df32c50c..f7e18aa7f 100644
 +            return false;
 +          }
          }
- 
+
          // Fix corelet workslice.
-@@ -1391,10 +1482,18 @@ bool Ddc::sameCoordinateRange(
+@@ -1391,10 +1518,18 @@ bool Ddc::sameCoordinateRange(
            if (fixedRhsCorelet != -1) {
              rhsPosToFixCoord[FOLD_POS_CORELET] = fixedRhsCorelet;
            }
@@ -1400,44 +1509,45 @@ index 4df32c50c..f7e18aa7f 100644
            if (lhsStartCoord != rhsStartCoord) {
              std::cerr << "\n    Mismatch in starting coordinate("
                        << EnumsConversion::primaryDimToString.at(coordDim)
-@@ -1848,7 +1947,8 @@ void Ddc::buildAndPropagateFold() {
-             allocNode,
-             loopDistributionParamInfo.at(coordPropInfo.refNode).at(allocNode),
-             coordPropInfo.dimsToPropagate, coordPropReportLevel_);
+@@ -1841,14 +1976,17 @@ void Ddc::buildAndPropagateFold() {
+                     static_cast<dsc2::ComputeNode *>(coordPropInfo.refNode),
+                     reverseCoordPropInfo, inputCoords, outputCoords, ldsIdx);
+       if (buildFoldForAllocation(coordPropInfo, refCoordinate, allocNode)) {
+-        dsc2::computeLoopElemOffsetsFromCoordinates(
+-            currDsc, coordPropInfo.refNode,
+-            const_cast<dsc2::CoordinateType<CoordinateBaseType> &>(
+-                refCoordinate),
+-            allocNode,
+-            loopDistributionParamInfo.at(coordPropInfo.refNode).at(allocNode),
+-            coordPropInfo.dimsToPropagate, coordPropReportLevel_);
 -        if (allocNode->allocateCoordinates_.coreIdToWkSlice_.empty()) {
++        if (!isFoldedLxNeighborAllocation(allocNode)) {
++          dsc2::computeLoopElemOffsetsFromCoordinates(
++              currDsc, coordPropInfo.refNode,
++              const_cast<dsc2::CoordinateType<CoordinateBaseType> &>(
++                  refCoordinate),
++              allocNode,
++              loopDistributionParamInfo.at(coordPropInfo.refNode).at(allocNode),
++              coordPropInfo.dimsToPropagate, coordPropReportLevel_);
++        }
 +        if (!isFoldedLxNeighborAllocation(allocNode) &&
 +            allocNode->allocateCoordinates_.coreIdToWkSlice_.empty()) {
            for (auto &[userNode, refCount] : allocNode->allocUsers_) {
              if (!is_any_of(userNode->nodeType_, dsc2::ScheduleNode::COMPUTE,
                             dsc2::ScheduleNode::TRANSFER)) {
-@@ -2012,19 +2112,41 @@ void Ddc::buildSpatialFold(
+@@ -2012,19 +2150,26 @@ void Ddc::buildSpatialFold(
      dsc2::ScheduleNode *node, const PrimaryDimTypes &currDim,
      const PadType &currPadType,
      dsc2::CoordinateType<CoordinateBaseType> &nodeCoordinates) {
 -  auto &coreDataStage = currDsc->dataStageParam_.at(metadata.core_dstgid).ss_;
-+  auto isKernelNeighborAllocation = [&]() {
-+    if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") ==
-+        nullptr)
-+      return false;
-+    if (node == nullptr || node->nodeType_ != dsc2::ScheduleNode::ALLOCATE)
-+      return false;
-+    auto *allocNode = static_cast<dsc2::AllocateNode *>(node);
-+    if (allocNode->component_ != SenComponents::LX || allocNode->ldsIdx_ < 0 ||
-+        allocNode->ldsIdx_ >= currDsc->labeledDs_.size())
-+      return false;
-+    const auto &allocLds = currDsc->labeledDs_.at(allocNode->ldsIdx_);
-+    if (allocLds.dsType_ != DsTypes::KERNEL) return false;
-+    return std::any_of(allocNode->allocUsers_.begin(),
-+                       allocNode->allocUsers_.end(), [](const auto &userAndCount) {
-+                         const auto *user = userAndCount.first;
-+                         return user != nullptr &&
-+                                user->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
-+                                user->name_.find("_lx_neighbor") !=
-+                                    std::string::npos;
-+                       });
-+  };
++  const auto *spatialAllocNode =
++      (node != nullptr && node->nodeType_ == dsc2::ScheduleNode::ALLOCATE)
++          ? static_cast<const dsc2::AllocateNode *>(node)
++          : nullptr;
 +  const int spatialDstgid =
-+      isKernelNeighborAllocation() ? metadata.chunk_dstgid : metadata.core_dstgid;
++      isMatmulOperandKernelNeighborAllocation(currDsc, spatialAllocNode)
++          ? metadata.chunk_dstgid
++          : metadata.core_dstgid;
 +  auto &spatialDataStage = currDsc->dataStageParam_.at(spatialDstgid).ss_;
    CoordinateBaseType coreletAlpha, coreletBeta;
    int64_t stride = 1;
@@ -1449,7 +1559,7 @@ index 4df32c50c..f7e18aa7f 100644
 +      stride = spatialDataStage.paddingSizes_.at(currDim).stride_;
      }
    }
- 
+
 -  if (currDsc->dataStageParam_.at(metadata.core_dstgid)
 -          .ss_.coreletSplit_.count(currDim)) {
 -    int64_t firstCoreletSize = coreDataStage.coreletSplit_.at(currDim).at(0);
@@ -1458,7 +1568,7 @@ index 4df32c50c..f7e18aa7f 100644
      coreletAlpha = firstCoreletSize * stride;
      coreletBeta = 0;
    } else {
-@@ -2040,9 +2162,8 @@ void Ddc::buildSpatialFold(
+@@ -2040,9 +2185,8 @@ void Ddc::buildSpatialFold(
    // Core workslice fold
    // Assumption: Each core is assigned the same number of elements.
    CoordinateBaseType coreAlpha =
@@ -1468,25 +1578,14 @@ index 4df32c50c..f7e18aa7f 100644
 +      spatialDataStage.dataStageDimToVal_compView_st(
 +          currDim, SenComponents::NO_COMPONENT, -1, {});
    coreAlpha *= stride;
- 
+
    CoordinateBaseType coreBeta = 0;
-@@ -2190,9 +2311,24 @@ void Ddc::buildFoldForExternalAllocation(dsc2::AllocateNode *allocNode) {
+@@ -2190,9 +2334,13 @@ void Ddc::buildFoldForExternalAllocation(dsc2::AllocateNode *allocNode) {
      // the actual element arrangement layout.
      // Future work: The following datastructure should be part of dsc.
      std::vector<dsc2::FoldParamInfoType> elemArr;
 +    const bool isKernelNeighborAllocation =
-+        std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
-+            nullptr &&
-+        allocNode->component_ == SenComponents::LX &&
-+        allocLds.dsType_ == DsTypes::KERNEL &&
-+        std::any_of(allocNode->allocUsers_.begin(), allocNode->allocUsers_.end(),
-+                    [](const auto &userAndCount) {
-+                      const auto *user = userAndCount.first;
-+                      return user != nullptr &&
-+                             user->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
-+                             user->name_.find("_lx_neighbor") !=
-+                                 std::string::npos;
-+                    });
++        isMatmulOperandKernelNeighborAllocation(currDsc, allocNode);
 +    const int targetCoreletId = isKernelNeighborAllocation ? -1 : 0;
      int64_t coreDDimSize = currDsc->dataStageParam_.at(metadata.core_dstgid)
                                 .ss_.dataStageDimToVal_compView_st(
@@ -1495,17 +1594,17 @@ index 4df32c50c..f7e18aa7f 100644
 +                                   targetCoreletId,
                                     {currDim.dim_, allocPaddingForCurrDim});
      elemArr.push_back({/*stride*/ 1, /*beta*/ 0, /*card*/ coreDDimSize, ""});
- 
-@@ -2221,7 +2357,7 @@ void Ddc::buildFoldForExternalAllocation(dsc2::AllocateNode *allocNode) {
+
+@@ -2221,7 +2369,7 @@ void Ddc::buildFoldForExternalAllocation(dsc2::AllocateNode *allocNode) {
          currDsc, currDim, allocNode, allocNode->ldsIdx_, allocPaddingForCurrDim,
          allocPaddingForCurrDim, allocNode->component_, allocNode->component_,
          relatedLoops, elemArr, loopParamsAfterDistribution,
 -        elemArrParamsAfterDistribution, 0 /* for one corelet */,
 +        elemArrParamsAfterDistribution, targetCoreletId,
          coordPropReportLevel_);
- 
+
      // Add the element arrangement folds
-@@ -2300,6 +2436,13 @@ bool Ddc::buildFoldForAllocation(
+@@ -2300,6 +2448,13 @@ bool Ddc::buildFoldForAllocation(
      const dsc2::CoordinateType<CoordinateBaseType> &inputRefCoord,
      dsc2::AllocateNode *allocNode) {
    dsc2::ScheduleNode *refNode = coordPropInfo.refNode;
@@ -1519,7 +1618,7 @@ index 4df32c50c..f7e18aa7f 100644
    dsc2::CoordinateType<CoordinateBaseType> refNodeCoordinates;
    refNodeCoordinates = inputRefCoord;
    if (coordPropInfo.scaleDown) {
-@@ -2308,6 +2451,15 @@ bool Ddc::buildFoldForAllocation(
+@@ -2308,6 +2463,15 @@ bool Ddc::buildFoldForAllocation(
          const_cast<dsc2::CoordinateType<CoordinateBaseType> &>(inputRefCoord),
          allocNode->ldsIdx_);
    }
@@ -1535,7 +1634,7 @@ index 4df32c50c..f7e18aa7f 100644
    if (coordPropReportLevel_ > 0) {
      std::cout << "\n\n>>> buildFoldForAllocation:"
                << "\n  allocNode= ";
-@@ -2582,6 +2734,30 @@ bool Ddc::buildFoldForAllocation(
+@@ -2582,6 +2746,30 @@ bool Ddc::buildFoldForAllocation(
            //      (inner to outer) of related enclosing loops
            int relatedLoopIndex = relatedLoopsForRefNode.size() -
                                   (i - numSpatialFoldsOfRefNode) - 1;
@@ -1566,7 +1665,7 @@ index 4df32c50c..f7e18aa7f 100644
            auto &currLoopParam =
                loopParamInfo[relatedLoopsForRefNode.at(relatedLoopIndex)
                                  .loopNode][dim];
-@@ -2723,7 +2899,8 @@ bool Ddc::buildFoldForAllocation(
+@@ -2723,7 +2911,8 @@ bool Ddc::buildFoldForAllocation(
        }
      } else {
        // Verification.
@@ -1576,7 +1675,7 @@ index 4df32c50c..f7e18aa7f 100644
            refNode->nodeType_ == dsc2::ScheduleNode::TRANSFER) {
          dsc2::TransferNode *transferNode =
              static_cast<dsc2::TransferNode *>(refNode);
-@@ -2981,8 +3158,62 @@ void Ddc::buildFoldFromAllocation(
+@@ -2981,8 +3170,62 @@ void Ddc::buildFoldFromAllocation(
    DT_CHECK_MSG(refAllocNode->ldsIdx_ >= 0,
                 "Reference allocateNode " + refAllocNode->name_ +
                     " does not have a valid labeledDs index.");
@@ -1641,7 +1740,7 @@ index 4df32c50c..f7e18aa7f 100644
      DT_ERROR(
          "[buildFoldFromAllocation] Can not propagate coordinates for "
          "coreletSplit dimension" +
-@@ -3007,6 +3238,10 @@ void Ddc::buildFoldFromAllocation(
+@@ -3007,6 +3250,10 @@ void Ddc::buildFoldFromAllocation(
        (ptRowId != -1 && refAllocNode->sliceViewCoordinates_.foldConstructed()
             ? refAllocNode->sliceViewCoordinates_
             : refAllocNode->allocateCoordinates_);
@@ -1649,10 +1748,10 @@ index 4df32c50c..f7e18aa7f 100644
 +      !effectiveRefCoord.coreIdToWkSlice_.empty()) {
 +    coordinate.coreIdToWkSlice_ = effectiveRefCoord.coreIdToWkSlice_;
 +  }
- 
+
    const auto &allocLds = currDsc->labeledDs_.at(refAllocNode->ldsIdx_);
- 
-@@ -3218,6 +3453,10 @@ bool Ddc::buildFoldFromNonAllocRef(
+
+@@ -3218,6 +3465,10 @@ bool Ddc::buildFoldFromNonAllocRef(
      // Construct fold only of the specified dimension.
      dimList = {foldSingleDim};
    }
@@ -1660,34 +1759,89 @@ index 4df32c50c..f7e18aa7f 100644
 +      !refCoordinate.coreIdToWkSlice_.empty()) {
 +    coordinate.coreIdToWkSlice_ = refCoordinate.coreIdToWkSlice_;
 +  }
- 
+
    const auto &refLds = currDsc->labeledDs_.at(refLdsIdx);
- 
+
+@@ -4390,8 +4641,35 @@ bool Ddc::buildFoldForTransfer(dsc2::TransferNode *transferNode,
+              ? refAllocNode->sliceViewCoordinates_
+              : refAllocNode->allocateCoordinates_);
+     RowGroupInfo refRowGroup;
+-    if (needToConsiderRowBundling(coreDs, refAllocNode->allocateCoordinates_,
+-                                  coordPropInfo.dimsToPropagate) &&
++    const bool needsRowBundling = needToConsiderRowBundling(
++        coreDs, refAllocNode->allocateCoordinates_, coordPropInfo.dimsToPropagate);
++    const bool isKernelLxToPtRowTransfer =
++        matmulOperandKernelNeighborRelayoutEnabled() &&
++        refAllocNode->component_ == SenComponents::LX && refAllocNode->ldsIdx_ >= 0 &&
++        static_cast<size_t>(refAllocNode->ldsIdx_) < currDsc->labeledDs_.size() &&
++        currDsc->labeledDs_.at(refAllocNode->ldsIdx_).dsType_ ==
++            DsTypes::KERNEL &&
++        transferNode->src_.unit_ == SenComponents::LXLU &&
++        !transferNode->dstVias_.empty() &&
++        getCompRowId(transferNode->dstVias_.at(0).loc_.unit_) != -1;
++    bool seededSingleRowForKernelNeighbor = false;
++    if (needsRowBundling && refIsSrc && isKernelLxToPtRowTransfer &&
++        getCompRowId(sizeRefComp) != -1 && !coreDs.ss_.rowSplit_.empty()) {
++      const PrimaryDimTypes rowSplitDim = coreDs.ss_.rowSplit_.begin()->first;
++      if (effectiveRefCoord.coordinates_.count(rowSplitDim)) {
++        const int refRowId = getCompRowId(sizeRefComp);
++        const auto &rowCoord = effectiveRefCoord.coordinates_.at(rowSplitDim);
++        const CoordinateBaseType beta =
++            rowCoord.getFoldDimSize(FOLD_POS_ROWSPLIT) > 1
++                ? rowCoord.getAlpha(FOLD_POS_ROWSPLIT) * refRowId
++                : rowCoord.getBeta(FOLD_POS_ROWSPLIT);
++        refRowGroup.cat = RowGroupInfo::Category::ROW_TO_SAME_ROW;
++        refRowGroup.activeRow = refRowId;
++        refRowGroup.nodeInfo.push_back({transferNode, refRowId, beta});
++        seededSingleRowForKernelNeighbor = true;
++      }
++    }
++    if (needsRowBundling && !seededSingleRowForKernelNeighbor &&
+         !gatherRelatedPTRows(refRowGroup, coordPropInfo, effectiveRefCoord)) {
+       if (coordPropReportLevel_ > 2) {
+         std::cout
 diff --git a/ddc/ddcv1.cpp b/ddc/ddcv1.cpp
-index 3c418973e..346e4a5f9 100644
+index 3c418973e..7d9bf48be 100644
 --- a/ddc/ddcv1.cpp
 +++ b/ddc/ddcv1.cpp
-@@ -8,6 +8,7 @@
+@@ -8,12 +8,25 @@
  #include <util/utils.h>
- 
+
  #include <climits>
 +#include <exception>
- 
+
  #include "ddc.h"
  #include "util/dt_exception.hpp"
-@@ -2242,6 +2243,11 @@ void Ddc::attachToPrefilledSchedule() {
+ #include "util/dtgetenv.hpp"
+ namespace ddc {
+
++static bool envFlagEnabled(const char* name) {
++  const char* value = std::getenv(name);
++  return value != nullptr && value[0] != '\0' && value[0] != '0' &&
++         value[0] != 'f' && value[0] != 'F' && value[0] != 'n' &&
++         value[0] != 'N';
++}
++
++static bool matmulOperandKernelNeighborRelayoutEnabled() {
++  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT") ||
++         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++}
++
+ const std::unordered_set<SenComponents> Ddc::registerComponents = {
+     PELRF, SFPLRF, PTARF, PTXRF, PESTATE, SFPSTATE};
+
+@@ -2242,6 +2255,10 @@ void Ddc::attachToPrefilledSchedule() {
          DT_ERROR("Missing memorg for external allocate node: " + an->name_);
        }
        if (memorgIt->second.allocateNode_ != an) {
 +        const bool allowMatmulOperandBroadcastSourceAlloc =
-+            std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
-+                nullptr &&
++            matmulOperandKernelNeighborRelayoutEnabled() &&
 +            an->component_ == SenComponents::LX;
 +        if (allowMatmulOperandBroadcastSourceAlloc) continue;
          DT_ERROR("External allocate node not connected to memorg: " +
                   an->name_);
        }
-@@ -2302,6 +2308,9 @@ void Ddc::fillLoopOffsetsAndAddresses(
+@@ -2302,6 +2319,9 @@ void Ddc::fillLoopOffsetsAndAddresses(
                            dsc2::ScheduleNode* processorNode, bool isProducer,
                            const dsc2::CoordinateType<CoordinateBaseType>&
                                coordinates) {
@@ -1697,10 +1851,10 @@ index 3c418973e..346e4a5f9 100644
      if (di.myLdsIdx_ < 0 && di.constantId_ < 0) return;
      if (dsc2::memories.count(loc.storage_) == 0) return;
      // fill start address here
-@@ -2320,14 +2329,19 @@ void Ddc::fillLoopOffsetsAndAddresses(
+@@ -2320,14 +2340,19 @@ void Ddc::fillLoopOffsetsAndAddresses(
                 EnumsConversion::senComponentsToString.at(loc.storage_));
      }
- 
+
 +    debugPhase = "allocation_lookup";
      const auto& allocation = di.myLdsIdx_ >= 0
                                   ? currDsc->labeledDs_.at(di.myLdsIdx_)
@@ -1717,7 +1871,7 @@ index 3c418973e..346e4a5f9 100644
      auto addrScale = dscGlobal.sysDef.addressGranularityScalePerUnit.at(
          {genericUnit, loc.storage_});
      if (genericUnit == L0LU) {
-@@ -2351,6 +2365,7 @@ void Ddc::fillLoopOffsetsAndAddresses(
+@@ -2351,11 +2376,13 @@ void Ddc::fillLoopOffsetsAndAddresses(
      if (di.myLdsIdx_ < 0) return;  // no offsets for constants
      DT_CHECK(di.loopEleOffsets_.empty());
      const auto& myLds = currDsc->labeledDs_.at(di.myLdsIdx_);
@@ -1725,15 +1879,76 @@ index 3c418973e..346e4a5f9 100644
      auto loopPtr = loopLocation;
      const bool nonCoreletMemory =
          dsc2::nonCoreletMemories.count(allocation->component_);
-@@ -2628,6 +2643,7 @@ void Ddc::fillLoopOffsetsAndAddresses(
-     if (!datastageBasedElemOff) {
+     bool considerBothCorelets =
+         nonCoreletMemory && !loopsBelowChunkBoundary.count(loopPtr);
++    bool usedDatastageElemOffFallback = false;
+     // const auto& dataConnectLoops =
+     //     isProducer ? metadata.dataConnects_.at(di.dataConnect_).consumers_
+     //                : metadata.dataConnects_.at(di.dataConnect_).producers_;
+@@ -2391,8 +2418,24 @@ void Ddc::fillLoopOffsetsAndAddresses(
+           int dimIdx = currDsc->getDimIndexInLayoutOrder(myLds.dsType_, dim);
+           int scale = dimIdx < 0 ? 1 : myLds.scale_.at(dimIdx);
+           if (scale > 0) {
++            const bool hasLoopDistributionParam =
++                loopDistributionParamInfo.count(processorNode) &&
++                loopDistributionParamInfo.at(processorNode).count(allocation) &&
++                loopDistributionParamInfo.at(processorNode)
++                    .at(allocation)
++                    .count(loopPtr) &&
++                loopDistributionParamInfo.at(processorNode)
++                    .at(allocation)
++                    .at(loopPtr)
++                    .count(dim);
++            const bool useDatastageElemOffForThisDim =
++                datastageBasedElemOff ||
++                (std::getenv("SPYRE_LX_PLANNER_RELAYOUT") != nullptr &&
++                 !hasLoopDistributionParam);
++            usedDatastageElemOffFallback |=
++                useDatastageElemOffForThisDim && !datastageBasedElemOff;
+             for (int clId = 0; clId < currDsc->numCoreletsUsed_DSC2_; clId++) {
+-              if (!datastageBasedElemOff) {
++              if (!useDatastageElemOffForThisDim) {
+                 di.loopEleOffsets_[clId][loopPtr][dim] =
+                     loopDistributionParamInfo.at(processorNode)
+                         .at(allocation)
+@@ -2403,7 +2446,8 @@ void Ddc::fillLoopOffsetsAndAddresses(
+                 di.loopEleOffsets_[clId][loopPtr][dim] = 0;
+               }
+
+-              if (verifyCoordinateBasedLoopElemOff || datastageBasedElemOff) {
++              if (verifyCoordinateBasedLoopElemOff ||
++                  useDatastageElemOffForThisDim) {
+                 int loopEleOffs = -1;
+                 if (loopPtr->isParametricLoop()) {
+                   loopEleOffs = loopPtr->parametricStride(currDsc);
+@@ -2535,7 +2579,7 @@ void Ddc::fillLoopOffsetsAndAddresses(
+                   //   Offset: index(dim) * size(dim)
+                   // No update is needed to loopEleOffs that was computed above.
+                 }
+-                if (datastageBasedElemOff) {
++                if (useDatastageElemOffForThisDim) {
+                   di.loopEleOffsets_[clId][loopPtr][dim] = loopEleOffs;
+                 }
+                 if (iterCount > 1 &&
+@@ -2625,9 +2669,16 @@ void Ddc::fillLoopOffsetsAndAddresses(
+       loopPtr = loopPtr->getOwnerLoop();
+     }
+
+-    if (!datastageBasedElemOff) {
++    const bool skipCoordinateOffsetsForRelayoutTransfer =
++        std::getenv("SPYRE_LX_PLANNER_RELAYOUT") != nullptr &&
++        processorNode != nullptr &&
++        processorNode->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
++        coordinates.coreIdToWkSlice_.empty();
++    if (!datastageBasedElemOff && !usedDatastageElemOffFallback &&
++        !skipCoordinateOffsetsForRelayoutTransfer) {
        // use coordinates for constant offset
        bool anyConstOffset = !di.constEleOffsets_.empty();
 +      debugPhase = "coordinate_offsets";
        const auto& coreIdToWkSliceNode = coordinates.coreIdToWkSlice_.empty()
                                              ? sdsc_->coreIdToWkSlice_
                                              : coordinates.coreIdToWkSlice_;
-@@ -2689,6 +2705,14 @@ void Ddc::fillLoopOffsetsAndAddresses(
+@@ -2689,6 +2740,14 @@ void Ddc::fillLoopOffsetsAndAddresses(
                  !coreIdToWkSliceAlloc.count(coreId)) {
                continue;
              }
@@ -1748,7 +1963,7 @@ index 3c418973e..346e4a5f9 100644
              if (!useCoreIdNode && !useCoreIdAlloc &&
                  coreId != currDsc->coreIdsUsed_[0]) {
                constOffsetField =
-@@ -2699,25 +2723,61 @@ void Ddc::fillLoopOffsetsAndAddresses(
+@@ -2699,25 +2758,61 @@ void Ddc::fillLoopOffsetsAndAddresses(
                constOffsetField = di.constEleOffsets_[coreId][0][dim];
                continue;
              }
@@ -1813,7 +2028,7 @@ index 3c418973e..346e4a5f9 100644
 +                                           useCoreIdAlloc ? sliceIdAlloc : 0);
 +            fixCoordAlloc.insert_or_assign(coreletFoldPos,
 +                                           useClIdAlloc ? clId : 0);
- 
+
              const auto myOffset =
 -                FoldInfraUtils::lexiAffineSolveDistanceInSteps(
 -                    allocDimCoord, nodeBeta, fixCoordAlloc);
@@ -1827,7 +2042,7 @@ index 3c418973e..346e4a5f9 100644
              if (myOffset != 0) {
                anyConstOffset = true;
                DT_CHECK_MSG(
-@@ -2746,6 +2806,25 @@ void Ddc::fillLoopOffsetsAndAddresses(
+@@ -2746,6 +2841,25 @@ void Ddc::fillLoopOffsetsAndAddresses(
          }
        }
      }
@@ -1851,9 +2066,9 @@ index 3c418973e..346e4a5f9 100644
 +      throw;
 +    }
    };
- 
+
    for (auto* node : scheduleTreeTraverse) {
-@@ -2754,6 +2833,10 @@ void Ddc::fillLoopOffsetsAndAddresses(
+@@ -2754,6 +2868,10 @@ void Ddc::fillLoopOffsetsAndAddresses(
      auto* ownerLoop = node->getOwnerLoop();
      if (node->nodeType_ == dsc2::ScheduleNode::TRANSFER) {
        auto* transfer = static_cast<dsc2::TransferNode*>(node);
@@ -1869,13 +2084,13 @@ index 19a3de5e5..e3bbc1252 100644
 --- a/ddc/ddl/ddl_conversion.cpp
 +++ b/ddc/ddl/ddl_conversion.cpp
 @@ -2277,7 +2277,6 @@ bool DdlConversion::matchDdl2Dsc() {
- 
+
    if (is_any_of(false, computeOpMapped)) failed = true;
    if (failed) {
 -    // std::cout << "Template not suitable for DSC " << dsc.name_ << std::endl;
      return false;
    }
- 
+
 diff --git a/ddc/ddl/ddl_conversion.h b/ddc/ddl/ddl_conversion.h
 index 3a85ad1d6..b148a25dc 100644
 --- a/ddc/ddl/ddl_conversion.h
@@ -1905,24 +2120,24 @@ index 124b95a4f..815cff307 100644
      restickify_sen1p5.ddl
 +    restickify_lx_sen1p5.ddl
      )
- 
+
  add_custom_target(obfuscate_ddl_templates)
 diff --git a/ddc/ddl_templates/restickify.ddl b/ddc/ddl_templates/restickify.ddl
 index 8c794432f..bbea28177 100644
 --- a/ddc/ddl_templates/restickify.ddl
 +++ b/ddc/ddl_templates/restickify.ddl
 @@ -29,10 +29,11 @@ module {
- 
+
  // operations
  %rst_fp16_op = ddl.operation_bind([%type_fp16], [%inptensor_fp16, %intermediatetensor_fp16], [%outtensor_fp16], []) {opFuncName="ReStickifyOpHBM", required=false}
 +%rst_lx_fp16_op = ddl.operation_bind([%type_fp16], [%inptensor_fp16, %intermediatetensor_fp16], [%outtensor_fp16], []) {opFuncName="ReStickifyOpLx", required=false}
- 
+
  //constraint
  // ddl.constraint(%ist_fp16_op,%ist_fp8_op){min_num_valid = 1, max_num_valid = 1}
 -ddl.constraint(%rst_fp16_op){min_num_valid = 1, max_num_valid = 1}
 +ddl.constraint(%rst_fp16_op, %rst_lx_fp16_op){min_num_valid = 1, max_num_valid = 1}
  ddl.constraint() {min_num_cores = 1}
- 
+
  // const
 diff --git a/ddc/ddl_templates/restickify_lx.ddl b/ddc/ddl_templates/restickify_lx.ddl
 new file mode 100644
@@ -1940,8 +2155,8 @@ index 000000000..f345ee24e
 +%asdout = ddl.dimension {}: index//, index stick dimension in output
 +
 +// layouts..
-+%slice_layout_input = ddl.layout(%asdin){is_order_fixed=false}   
-+%stick_layout_input = ddl.layout(%asdin){is_order_fixed=false} 
++%slice_layout_input = ddl.layout(%asdin){is_order_fixed=false}
++%stick_layout_input = ddl.layout(%asdin){is_order_fixed=false}
 +%global_layout_input = ddl.layout(%d#0, %d#1, %d#2, %d#3, %asdin, %asdout) {}  //layout constraints, add all dimensions
 +
 +%slice_layout_intermediate = ddl.layout(%asdout){is_order_fixed=false}
@@ -1954,7 +2169,7 @@ index 000000000..f345ee24e
 +
 +%type_fp16 = ddl.type {data_type="SEN169_FP16"}
 +
-+// tensors.. 
++// tensors..
 +%inptensor_fp16 = ddl.tensor(%slice_layout_input, %stick_layout_input, %global_layout_input, [%type_fp16]) : index
 +%intermediatetensor_fp16 = ddl.tensor(%slice_layout_intermediate, %stick_layout_intermediate, %global_layout_intermediate, [%type_fp16]) : index
 +%outtensor_fp16 = ddl.tensor(%slice_layout_output, %stick_layout_output, %global_layout_output, [%type_fp16]) : index
@@ -1972,9 +2187,9 @@ index 000000000..f345ee24e
 +%one_const = ddl.operand_constant{name="1.0"}
 +
 +// alias input, kernel, ptsum tensor
-+%inptensor = ddl.alias_one_tensor_of(%inptensor_fp16) 
++%inptensor = ddl.alias_one_tensor_of(%inptensor_fp16)
 +%internaltensor = ddl.alias_one_tensor_of(%intermediatetensor_fp16)
-+%outtensor = ddl.alias_one_tensor_of(%outtensor_fp16) 
++%outtensor = ddl.alias_one_tensor_of(%outtensor_fp16)
 +
 +// lx space allocation --// allocate space: lx
 +%inptensor_lx_allocation = ddl.get_external_data_transfer_allocation (%inptensor) {memory="lx", data_connect="lxlu_input"}
@@ -1988,13 +2203,13 @@ index 000000000..f345ee24e
 +   %intrasliceblock_datastage = ddl.datastage {strategy="minimize"}
 +   %rowcombine_datastage = ddl.datastage {strategy = "minimize"}
 +   %singlesliceblock_datastage = ddl.datastage {strategy = "minimize"}
-+   
++
 +   ddl.datastage_constraint(%intrasliceblock_datastage, %internaltensor, %asdout) {values=["1"]}
 +   ddl.datastage_constraint(%singlesliceblock_datastage, %internaltensor, %asdout) {values=["1"]}
 +   ddl.datastage_constraint(%singlesliceblock_datastage, %internaltensor, %asdin) {values=["0.125"]}
 +   ddl.datastage_constraint(%rowcombine_datastage, %internaltensor, %asdin) {values=["1"]}
 +
-+   ddl.loop (%core_datastage, %chunk_datastage, %d#0, %d#1, %d#2, %d#3, %asdin, %asdout){label="chunk_loop"} { 
++   ddl.loop (%core_datastage, %chunk_datastage, %d#0, %d#1, %d#2, %d#3, %asdin, %asdout){label="chunk_loop"} {
 +         ddl.loop (%chunk_datastage, %restickifyblock_datastage, %d#0, %d#1, %d#2, %d#3, %asdin, %asdout){label="subchunk_loop"} {
 +            %outtensor_xrf_allocation = ddl.allocate(%outtensor) {memory="ptxrf"}
 +            ddl.loop (%restickifyblock_datastage, %intrasliceblock_datastage, %asdout){label="intraslice_loop"} {
@@ -2002,7 +2217,7 @@ index 000000000..f345ee24e
 +                %inptensor_sfplrf_allocation = ddl.allocate(%inptensor) {memory="sfplrf"}
 +                %dst_inp_lxsfp = ddl.unit(%inptensor, %inptensor_sfplrf_allocation) {unit="sfp", data_connect="sfp_input"}
 +                ddl.data_transfer(%src_inp_lxsfp, [%dst_inp_lxsfp]) {}
-+                
++
 +                %internaltensor_sfplrf_allocation = ddl.allocate(%internaltensor) {memory="sfplrf"}
 +                %dst_internal_lxsfp = ddl.unit(%internaltensor, %internaltensor_sfplrf_allocation) {unit="sfp", data_connect="sfp_internal"}
 +                ddl.compute([%dst_inp_lxsfp], [%dst_internal_lxsfp]) {computetype="assign", unit="sfp", repetition=8}
@@ -2015,17 +2230,17 @@ index 000000000..f345ee24e
 +                ddl.loop (%restickifyblock_datastage, %rowcombine_datastage, %asdin){label="singleslice_loop"} {
 +                    ddl.loop (%rowcombine_datastage, %singlesliceblock_datastage, %asdin){label="combinerow_loop"} {
 +                        %src_internal_l0fifo = ddl.unit(%internaltensor, %internaltensor_l0_allocation) {unit="l0lu", data_connect="sfp_output"}
-+                        %dst_internal_l0fifo = ddl.unit(%internaltensor) {unit="pt", data_connect="pt_fifo"} 
++                        %dst_internal_l0fifo = ddl.unit(%internaltensor) {unit="pt", data_connect="pt_fifo"}
 +                        ddl.data_transfer(%src_internal_l0fifo, [%dst_internal_l0fifo]) {}
 +
-+                        %dst_out_compute = ddl.unit(%outtensor, %outtensor_xrf_allocation) {unit="pt", data_connect="compute_out"} 
-+                        %dst_internal_fifo = ddl.unit(%internaltensor) {unit="l0lu", data_connect="pt_fifo"} 
++                        %dst_out_compute = ddl.unit(%outtensor, %outtensor_xrf_allocation) {unit="pt", data_connect="compute_out"}
++                        %dst_internal_fifo = ddl.unit(%internaltensor) {unit="l0lu", data_connect="pt_fifo"}
 +                        ddl.compute([%zero_const, %one_const, %dst_internal_fifo], [%dst_out_compute]) {computetype="MACC", unit="pt"}
 +                    }
 +                }
 +            }
 +            %src_out_xrflx = ddl.unit(%outtensor, %outtensor_xrf_allocation) {unit="pt", data_connect="compute_out"}
-+            %dst_out_xrflx = ddl.unit(%outtensor, %outtensor_lx_allocation) {unit="lxsu", vias=["pe"], data_connect="lxsu_input"} 
++            %dst_out_xrflx = ddl.unit(%outtensor, %outtensor_lx_allocation) {unit="lxsu", vias=["pe"], data_connect="lxsu_input"}
 +            ddl.data_transfer(%src_out_xrflx, [%dst_out_xrflx]) {}
 +        }
 +   }
@@ -2051,8 +2266,8 @@ index 000000000..559b5d7f9
 +%asdout = ddl.dimension {}: index//, index stick dimension in output
 +
 +// layouts..
-+%slice_layout_input = ddl.layout(%asdin){is_order_fixed=false}   
-+%stick_layout_input = ddl.layout(%asdin){is_order_fixed=false} 
++%slice_layout_input = ddl.layout(%asdin){is_order_fixed=false}
++%stick_layout_input = ddl.layout(%asdin){is_order_fixed=false}
 +%global_layout_input = ddl.layout(%d#0, %d#1, %d#2, %asdin, %asdout) {}  //layout constraints, add all dimensions
 +
 +%slice_layout_intermediate = ddl.layout(%asdout){is_order_fixed=false}
@@ -2066,7 +2281,7 @@ index 000000000..559b5d7f9
 +%type_fp16 = ddl.type {data_type="SEN169_FP16"}
 +%type_bfp16 = ddl.type {data_type="BFLOAT16"}
 +
-+// tensors.. 
++// tensors..
 +%inptensor_fp16 = ddl.tensor(%slice_layout_input, %stick_layout_input, %global_layout_input, [%type_fp16]) : index
 +%intermediatetensor_fp16 = ddl.tensor(%slice_layout_intermediate, %stick_layout_intermediate, %global_layout_intermediate, [%type_fp16]) : index
 +%outtensor_fp16 = ddl.tensor(%slice_layout_output, %stick_layout_output, %global_layout_output, [%type_fp16]) : index
@@ -2085,9 +2300,9 @@ index 000000000..559b5d7f9
 +%one_const = ddl.operand_constant{name="1.0"}
 +
 +// alias input, kernel, ptsum tensor
-+%inptensor = ddl.alias_one_tensor_of(%inptensor_fp16) 
++%inptensor = ddl.alias_one_tensor_of(%inptensor_fp16)
 +%internaltensor = ddl.alias_one_tensor_of(%intermediatetensor_fp16)
-+%outtensor = ddl.alias_one_tensor_of(%outtensor_fp16) 
++%outtensor = ddl.alias_one_tensor_of(%outtensor_fp16)
 +
 +// lx space allocation --// allocate space: lx
 +%inptensor_lx_allocation = ddl.get_external_data_transfer_allocation (%inptensor) {memory="lx", data_connect="lxlu_input"}
@@ -2103,7 +2318,7 @@ index 000000000..559b5d7f9
 +   %rowcombine_datastage = ddl.datastage {strategy = "minimize"}
 +   %singlesliceblock_datastage = ddl.datastage {strategy = "minimize"}
 +   %peforward_datastage = ddl.datastage {strategy = "minimize"}
-+   
++
 +   ddl.datastage_constraint(%intrasliceblock_datastage, %internaltensor, %asdout) {values=["1"]}
 +   ddl.datastage_constraint(%singlesliceblock_datastage, %internaltensor, %asdout) {values=["1"]}
 +   ddl.datastage_constraint(%singlesliceblock_datastage, %internaltensor, %asdin) {values=["0.125"]}
@@ -2119,13 +2334,13 @@ index 000000000..559b5d7f9
 +    %cond_first_dims = ddl.condition_and(%cond_first_d0, %cond_first_d1, %cond_first_d2, %cond_first_asdin, %cond_first_asdout)
 +    ddl.if (%cond_first_dims) {
 +      ddl.loop (%restickifyblock_datastage, %onexrf_datastage, %d#0, %d#1, %d#2, %asdin, %asdout){label="onexrf_loop"} {
-+        %dst_xrf_initial = ddl.unit(%internal_outtensor, %outtensor_xrf_allocation) {unit="pt", data_connect="xrf_initial"} 
++        %dst_xrf_initial = ddl.unit(%internal_outtensor, %outtensor_xrf_allocation) {unit="pt", data_connect="xrf_initial"}
 +        ddl.compute([%zero_const, %one_const, %zero_const], [%dst_xrf_initial]) {computetype="MACC", unit="pt"}
 +      }
 +    }
 +  }
 +
-+  ddl.loop (%core_datastage, %chunk_datastage, %d#0, %d#1, %d#2, %asdin, %asdout){label="chunk_loop"} { 
++  ddl.loop (%core_datastage, %chunk_datastage, %d#0, %d#1, %d#2, %asdin, %asdout){label="chunk_loop"} {
 +        ddl.loop (%chunk_datastage, %restickifyblock_datastage, %d#0, %d#1, %d#2, %asdin, %asdout){label="subchunk_loop"} {
 +            %outtensor_xrf_allocation = ddl.allocate(%outtensor) {memory="ptxrf"}
 +            ddl.loop (%restickifyblock_datastage, %intrasliceblock_datastage, %asdout){label="intraslice_loop"} {
@@ -2146,27 +2361,27 @@ index 000000000..559b5d7f9
 +                ddl.loop (%restickifyblock_datastage, %rowcombine_datastage, %asdin){label="combinerow_loop"} {
 +                    ddl.loop (%rowcombine_datastage, %singlesliceblock_datastage, %asdin){label="singleslice_loop"} {
 +                        %src_internal_l0fifo = ddl.unit(%internaltensor, %internaltensor_l0_allocation) {unit="l0lu", data_connect="sfp_output"}
-+                        %dst_internal_l0fifo = ddl.unit(%internaltensor) {unit="pt", data_connect="pt_fifo"} 
++                        %dst_internal_l0fifo = ddl.unit(%internaltensor) {unit="pt", data_connect="pt_fifo"}
 +                        ddl.data_transfer(%src_internal_l0fifo, [%dst_internal_l0fifo]) {}
 +
-+                        %dst_out_compute = ddl.unit(%outtensor, %outtensor_xrf_allocation) {unit="pt", data_connect="compute_out"} 
-+                        %dst_internal_fifo = ddl.unit(%internaltensor) {unit="l0lu", data_connect="pt_fifo"} 
++                        %dst_out_compute = ddl.unit(%outtensor, %outtensor_xrf_allocation) {unit="pt", data_connect="compute_out"}
++                        %dst_internal_fifo = ddl.unit(%internaltensor) {unit="l0lu", data_connect="pt_fifo"}
 +                        ddl.compute([%zero_const, %one_const, %dst_internal_fifo], [%dst_out_compute]) {computetype="MACC", unit="pt"}
 +                    }
 +                }
 +            }
 +            %src_out_xrflx = ddl.unit(%outtensor, %outtensor_xrf_allocation) {unit="pt", data_connect="compute_out"}
-+            %dst_out_xrfpe = ddl.unit(%outtensor) {unit="pe", data_connect="pe_input"} 
++            %dst_out_xrfpe = ddl.unit(%outtensor) {unit="pe", data_connect="pe_input"}
 +            ddl.data_transfer(%src_out_xrflx, [%dst_out_xrfpe]) {}
 +
 +            ddl.loop (%restickifyblock_datastage, %peforward_datastage, %asdin){label="pe_loop"} {
-+              %src_out_xrfpt = ddl.unit(%outtensor) {unit="pt", data_connect="pe_input"} 
-+              %dst_out_xrfpelx = ddl.unit(%internal_outtensor_bf16) {unit="lxsu", data_connect="pe_output"} 
++              %src_out_xrfpt = ddl.unit(%outtensor) {unit="pt", data_connect="pe_input"}
++              %dst_out_xrfpelx = ddl.unit(%internal_outtensor_bf16) {unit="lxsu", data_connect="pe_output"}
 +              ddl.compute([%src_out_xrfpt, %one_const, %zero_const], [%dst_out_xrfpelx]) {computetype="FMA32", unit="pe"}
 +            }
 +
-+            %src_out_xrfpelx = ddl.unit(%outtensor) {unit="pe", data_connect="pe_output"} 
-+            %dst_out_xrflx = ddl.unit(%outtensor, %outtensor_lx_allocation) {unit="lxsu", data_connect="lxsu_input"} 
++            %src_out_xrfpelx = ddl.unit(%outtensor) {unit="pe", data_connect="pe_output"}
++            %dst_out_xrflx = ddl.unit(%outtensor, %outtensor_lx_allocation) {unit="lxsu", data_connect="lxsu_input"}
 +            ddl.data_transfer(%src_out_xrfpelx, [%dst_out_xrflx]) {}
 +        }
 +  }
@@ -2214,7 +2429,7 @@ index a50eac1bf..2d64ebc1c 100644
 @@ -3996,6 +4006,17 @@ std::vector<PrimaryDimTypes> DesignSpaceConfig::getLayoutDims(
      ldsIdx = lds.referenceLdsIdx_;
    }
- 
+
 +  if (!allocNode &&
 +      std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
 +          nullptr) {
@@ -2236,7 +2451,7 @@ index d84445e76..e7110d152 100644
 @@ -19,6 +19,8 @@
  #include "util/dt_exception.hpp"
  #include "util/utils.h"
- 
+
 +#include <cstdint>
 +
  class DesignSpaceConfig;
@@ -2245,7 +2460,7 @@ index d84445e76..e7110d152 100644
 @@ -849,6 +851,30 @@ struct TransferNode : public InheritWithClone<ScheduleNode, TransferNode> {
    std::map<int, CoreletView> coreletViews_;
    CoordinateType<CoordinateBaseType> transferCoordinates_;
- 
+
 +  struct LxNeighborRingTransfer {
 +    int sourceCoreId_ = -1;
 +    int destinationCoreId_ = -1;
@@ -2363,11 +2578,11 @@ index 2e4482af1..a7def4703 100644
    std::set<OpFuncs> opFuncsUsed_;
 +  std::map<std::string, std::map<std::string, std::string>>
 +      lxRelayoutClassifications_;
- 
+
    // DataDsc related fields..
    std::map<int, std::set<int>> prodConsList;  // key: prod, val: set of cons..
 diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
-index f09891ab9..0d5dd45ce 100644
+index f09891ab9..227eff02a 100644
 --- a/dxp/SdscRelayoutInsertion.cpp
 +++ b/dxp/SdscRelayoutInsertion.cpp
 @@ -1,8 +1,22 @@
@@ -2375,7 +2590,7 @@ index f09891ab9..0d5dd45ce 100644
  #include <dsc/superdsc.h>
 +#include <external/json11/json11.hpp>
  #include <sharedtools/mem_track_bundle.h>
- 
+
 +#include <algorithm>
 +#include <cctype>
 +#include <cmath>
@@ -2390,13 +2605,13 @@ index f09891ab9..0d5dd45ce 100644
 +
  #include "dxp.h"
 +#include "util/LayoutAllgatherRestickify.h"
- 
+
  // #define DEBUG_RELAYOUT 1
- 
-@@ -17,6 +31,1681 @@ static DataFormats getDsFormat(double wl) {
+
+@@ -17,6 +31,1686 @@ static DataFormats getDsFormat(double wl) {
    return DataFormats::INVALID;
  }
- 
+
 +static double getRelayoutPieceSize(
 +    double form_size,
 +    const std::map<int, std::map<PrimaryDimTypes, int>>& coreIdToWkSlice,
@@ -2576,6 +2791,11 @@ index f09891ab9..0d5dd45ce 100644
 +static bool layoutAllgatherRestickifyEnabled() {
 +  return lxPlannerRelayoutEnabled() ||
 +         envFlagEnabled("DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY");
++}
++
++static bool matmulOperandBroadcastKernelNeighborEnabled() {
++  return lxPlannerRelayoutEnabled() ||
++         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
 +}
 +
 +static bool matmulOperandBroadcastDebugMatchesSdsc(const SuperDsc* sdsc) {
@@ -3818,8 +4038,9 @@ index f09891ab9..0d5dd45ce 100644
 +
 +static bool markMatmulOperandBroadcastKernelNeighbor(
 +    DesignSpaceConfig& dldsc, LabeledDsInfo& lds, std::string* reason) {
-+  if (lds.dsType_ != DsTypes::KERNEL) {
-+    *reason = "matmul_operand_broadcast kernel-neighbor path requires KERNEL LDS";
++  if (lds.dsType_ != DsTypes::KERNEL && lds.dsType_ != DsTypes::INPUT) {
++    *reason =
++        "matmul_operand_broadcast neighbor path requires INPUT or KERNEL LDS";
 +    return false;
 +  }
 +  if (!lds.memOrg_.count(SenComponents::LX)) {
@@ -3836,7 +4057,6 @@ index f09891ab9..0d5dd45ce 100644
 +  // Keep the producer allocation in the schedule tree.  The DL scheduler uses
 +  // it as the source coordinate anchor when it creates the consumer allocation
 +  // for the loop-scoped KERNEL-neighbor operand.
-+  lds.memOrg_.at(SenComponents::LX).allocateNode_ = nullptr;
 +  return true;
 +}
 +
@@ -4075,10 +4295,10 @@ index f09891ab9..0d5dd45ce 100644
  void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
                               MemTrackBundle* memTrackers,
                               std::vector<SuperDsc*>& relayout_sdscs) {
-@@ -37,6 +1726,154 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -37,6 +1731,148 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          allocCoords.coreIdToWkSlice_ == sdsc->coreIdToWkSlice_)
        continue;
- 
+
 +    const auto layoutAllgatherHook = findLayoutAllgatherRestickifyPlan(sdsc, lds);
 +    if (!layoutAllgatherHook.classificationKey.empty()) {
 +      if (!layoutAllgatherHook.plan.ok) {
@@ -4100,9 +4320,7 @@ index f09891ab9..0d5dd45ce 100644
 +            "physical lowering is blocked: dense resident all-gather "
 +            "materialization is unsafe on Granite attention shapes. Use "
 +            "matmul_operand_broadcast for loop-scoped matmul operands, or set "
-+            "SPYRE_LX_PLANNER_RELAYOUT=1 for the relayout prototype. "
-+            "DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY=1 remains "
-+            "available for direct diagnostic replay experiments.");
++            "SPYRE_LX_PLANNER_RELAYOUT=1 for the relayout prototype.");
 +      }
 +      emitLayoutAllgatherRestickifyPlanArtifact(sdsc, lds, ps,
 +                                                layoutAllgatherHook);
@@ -4147,8 +4365,7 @@ index f09891ab9..0d5dd45ce 100644
 +            /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
 +        continue;
 +      }
-+      if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
-+          nullptr) {
++      if (matmulOperandBroadcastKernelNeighborEnabled()) {
 +        std::string markerReason;
 +        if (!markMatmulOperandBroadcastKernelNeighbor(dldsc, lds,
 +                                                      &markerReason)) {
@@ -4199,11 +4416,8 @@ index f09891ab9..0d5dd45ce 100644
 +            "matmul_operand_broadcast metadata was classified, but physical "
 +            "lowering is blocked: current DL matmul lowering still consumes "
 +            "one resident LDS operand pointer and cannot bind staged RHS "
-+            "chunks from IFN/STCDP. Set SPYRE_LX_PLANNER_RELAYOUT=1 or "
-+            "DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY=1 for the "
-+            "two-stage gather/restickify prototype, or set "
-+            "DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST=1 only for "
-+            "diagnostic small-shape experiments.");
++            "chunks from IFN/STCDP. Set SPYRE_LX_PLANNER_RELAYOUT=1 for "
++            "the two-stage gather/restickify prototype.");
 +      }
 +      std::string materializationReason;
 +      if (!attachMatmulOperandBroadcastInputFetch(
@@ -4230,10 +4444,10 @@ index f09891ab9..0d5dd45ce 100644
  #ifdef DEBUG_RELAYOUT
      std::cout << "Inserting relayout for: " << lds.dsName_ << std::endl;
  #endif
-@@ -56,23 +1893,37 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -56,23 +1892,37 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
      relayout_sdsc->N_ = sdsc->N_;
      relayout_sdsc->target_ = sdsc->target_;
- 
+
 -    // Step 2b: Check if there is sufficient space in lx for post-relayout form
 +    // Step 2b: Insert the relayout program step and check if there is
 +    // sufficient contiguous space in LX for the post-relayout form. This must
@@ -4257,7 +4471,7 @@ index f09891ab9..0d5dd45ce 100644
 +    auto out_piece_size =
 +        getRelayoutPieceSize(out_form_size, sdsc->coreIdToWkSlice_,
 +                             relayout_tensor_dims);
- 
+
      bool lx_space_found = true;
      for (const auto& mapkv : sdsc->coreIdToWkSlice_) {
        auto& memTracker = lxTrackPerCore.at(mapkv.first);
@@ -4270,17 +4484,17 @@ index f09891ab9..0d5dd45ce 100644
          lx_space_found = false;
          break;
        }
-@@ -133,8 +1984,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -133,8 +1983,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          myLds.pdsName_ = "activation";
          myLds.wordLength = lds.wordLength;
          myLds.df = getDsFormat(lds.wordLength);
 -        auto& refDsInfo =
 -            dldsc.primaryDsInfo_.at(DsTypes::OUTPUT);  // check this
 +        auto& refDsInfo = dldsc.primaryDsInfo_.at(lds.dsType_);
- 
+
          // Fill dimNames, layoutDimOrder_, dimToLayoutSize_ and validGap_
          auto& N_ = dldsc.N_;
-@@ -244,6 +2094,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -244,6 +2093,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          for (auto kv :
               (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
            for (auto kv2 : kv.second) {
@@ -4288,7 +4502,7 @@ index f09891ab9..0d5dd45ce 100644
              wkslices_in_dim[kv2.first].insert(kv2.second);
            }
          }
-@@ -252,15 +2103,28 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -252,15 +2102,28 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
               (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
            PieceInfo new_piece;
            for (auto kv2 : kv.second) {
@@ -4307,7 +4521,7 @@ index f09891ab9..0d5dd45ce 100644
 +                             dimName);
 +            DT_CHECK(kv2.second >= 0);
 +            DT_CHECK(kv2.second < static_cast<int>(sliceCount));
- 
+
 -            // Fill dimToStartCordinate
 -            new_piece.dimToStartCordinate[dimName] = kv2.second;
 +            // coreIdToWkSlice_ stores slice ordinals. PieceInfo uses logical
@@ -4320,10 +4534,10 @@ index f09891ab9..0d5dd45ce 100644
 +                dimExtent * static_cast<double>(kv2.second + 1) / sliceCount;
 +            new_piece.dimToSize_[dimName] = pieceEnd - pieceStart;
 +            new_piece.dimToStartCordinate[dimName] = pieceStart;
- 
+
              // Fill validGap_
              new_piece.validGap_[dimName] = {
-@@ -302,13 +2166,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -302,13 +2165,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
              } else {
                // For the output piece, find an empty space in the lx
                auto& memTracker = lxTrackPerCore.at(kv.first);
@@ -4338,7 +4552,7 @@ index f09891ab9..0d5dd45ce 100644
                DT_CHECK_MSG(stAddr >= 0, "Must find space in LX\n");
                new_piece.placement.at(SenComponents::LX)
                    .insertStAddr(stAddr, {0});
-@@ -345,6 +2204,24 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -345,6 +2203,24 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
            }
          }
        }
@@ -4363,15 +4577,15 @@ index f09891ab9..0d5dd45ce 100644
      } else {
  #ifdef DEBUG_RELAYOUT
        std::cout << "Lx space not found, inserting stcdpHBM" << std::endl;
-@@ -476,7 +2353,6 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -476,7 +2352,6 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          out_allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
- 
+
          // find space in HBM for the output of relayout
 -        memTrackers->insertPsBefore(ps);
          auto hbm_stAddr = hbmTrack.checkAndAddDs(outLds.dsName_, "dynamic",
                                                   out_form_size, {ps});
          DT_CHECK_MSG(hbm_stAddr >= 0, "Must find space in HBM\n");
-@@ -516,6 +2392,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -516,6 +2391,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
              auto offset_addr = hbm_stAddr;
              for (auto kv : sdsc->coreIdToWkSlice_.at(coreid)) {
                if (sdsc->numWkSlicesPerDim_.at(kv.first) == 1) continue;
@@ -4379,7 +4593,7 @@ index f09891ab9..0d5dd45ce 100644
                offset_addr += (kv.second *
                                (N_.primaryDimToVal_st(kv.first) /
                                 sdsc->numWkSlicesPerDim_.at(kv.first)) *
-@@ -563,4 +2440,4 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -563,4 +2439,4 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
    std::string filename = "origsdsc_debug_out.json";
    sdsc->exportJson(filename);
  #endif
@@ -4393,7 +4607,7 @@ index fb507f4c3..ee0af2032 100644
 @@ -49,6 +49,37 @@
  #include "util/dt_exception.hpp"
  #include "util/utils.h"
- 
+
 +namespace {
 +
 +bool hasScheduledDataAndDlOp(const SuperDsc& sdsc) {
@@ -4430,7 +4644,7 @@ index fb507f4c3..ee0af2032 100644
    // set segment for backend controlled tensors
 @@ -276,7 +307,9 @@ void Dxp::runCodegen(SuperDsc* sdsc) {
    dcg.createSenProg = false;
- 
+
    // DCG to generate L3 programs
 -  if (sdsc->dscs_.size() == 0 && sdsc->dataOpdscs_.size() > 0) {
 +  if (hasScheduledDataAndDlOp(*sdsc)) {
@@ -4446,7 +4660,7 @@ index db94b4e58..6aa35ba42 100644
 @@ -69,6 +69,198 @@ class DxpTestFixture : public ::testing::Test {
    }
  };
- 
+
 +namespace {
 +json11::Json::object makeSlice(std::initializer_list<std::pair<const char*, int>> dims) {
 +  json11::Json::object slice;
@@ -4645,7 +4859,7 @@ index db94b4e58..6aa35ba42 100644
 @@ -770,6 +962,61 @@ TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayout) {
    // Cleanup is handled by TearDown()
  }
- 
+
 +TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayoutCardinality) {
 +  const auto slicedProducer = makeCoreMap({
 +      {7, makeSlice({{"out", 0}, {"mb", 0}, {"y", 0}})},
@@ -4715,7 +4929,7 @@ index d269f445e..87854c641 100644
 +        "LayoutAllgatherRestickify.cpp"
          "spyrecode.cpp"
          )
- 
+
 @@ -44,6 +45,7 @@ set(UTIL_PUBLIC_HEADERS
          "DataConvertInfoGenerate.h"
          "VariableDefinition.h"
@@ -4734,7 +4948,7 @@ index d269f445e..87854c641 100644
          )
 diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
 new file mode 100644
-index 000000000..bbe306661
+index 000000000..012d375f6
 --- /dev/null
 +++ b/util/LayoutAllgatherRestickify.cpp
 @@ -0,0 +1,1133 @@
@@ -5595,9 +5809,9 @@ index 000000000..bbe306661
 +  const std::string dsType = json["consumer_operand_ds_type"].is_string()
 +                                 ? json["consumer_operand_ds_type"].string_value()
 +                                 : "KERNEL";
-+  if (dsType != "KERNEL") {
++  if (dsType != "KERNEL" && dsType != "INPUT") {
 +    return matmulMovementFail(
-+        "consumer_operand_ds_type must be KERNEL for matmul operand broadcast");
++        "consumer_operand_ds_type must be INPUT or KERNEL for matmul operand broadcast");
 +  }
 +
 +  const bool realized = json["realized"].bool_value();
