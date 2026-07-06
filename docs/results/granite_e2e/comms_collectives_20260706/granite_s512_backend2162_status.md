@@ -56,7 +56,12 @@ The remaining `ReStickifyOpHBM` rows in this run are weight-format restickifies 
 | `sdsc_fused_add_linear_mul_silu_split_with_sizes_3_*` | `sdsc_0.json` | `25600 x 4096` | fused SwiGLU gate/up projection weight layout |
 | `sdsc_fused_add_linear_mul_silu_split_with_sizes_3_*` | `sdsc_4.json` | `4096 x 12800` | SwiGLU down projection weight layout |
 
-No remaining explicit `ReStickifyOpHBM` row in this run is currently classified as an in-scope non-weight activation spill.
+No remaining explicit `ReStickifyOpHBM` row in this run is currently classified as an in-scope non-weight activation spill. A separate residency scan still shows many compute tensors with `hbm+lx` metadata, so this should not be read as proof that every intermediate avoids every HBM-backed allocation/write. The strong claim here is narrower: the explicit HBM restickify round trips left in the Granite S512 bundle are weight-format rows.
+
+
+## Residency Caveat
+
+The SDSC `labeledDs_` metadata can show `hbm+lx` for compute tensors even when the explicit HBM restickify has been removed. That can mean a graph boundary, a weight/input backing allocation, or dual residency metadata. It is not by itself the same as an HBM relayout round trip. Before making a stronger claim than the table above, inspect generated senprog/DXP transfer artifacts or profiler memory events for the specific tensor edge.
 
 ## Flash Attention Cross-Check
 

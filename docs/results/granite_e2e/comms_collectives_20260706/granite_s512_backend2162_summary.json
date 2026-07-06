@@ -24,8 +24,8 @@
   "memory_ms_per_iter": 0.4227786,
   "pod": "adnan-clc-spyre-dev-pf",
   "previous_enabled_kernel_ms_per_iter": 12.103801799999998,
-  "remaining_in_scope_non_weight_hbm_spills": 0,
-  "remaining_restickify_hbm": [
+  "remaining_explicit_non_weight_restickify_hbm_rows": 0,
+  "remaining_explicit_restickify_hbm": [
     {
       "classification": "weight: qkv projection",
       "file": "sdsc_6.json",
