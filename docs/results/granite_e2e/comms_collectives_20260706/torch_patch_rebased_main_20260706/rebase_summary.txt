@@ -1,0 +1,5 @@
+root=/home/adnan-cdx/codex-isolated/torch_gather_patch_20260706_181045
+upstream_main=7e45168f1d56ca1cec4889a3e19b14719dcdd23f
+rebased_head=c80af0d688a477c4d67b62d3090c2258cfd9adbe
+ahead_behind=0	6
+branch=gather-restickify-main
