@@ -1,0 +1,20 @@
+{
+  "run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_current_ah_comms_collectives_diag_20260706_165024",
+  "returncode": 1,
+  "counts": {
+    "ReStickifyOpHBM": 0,
+    "ReStickifyOpLx": 160,
+    "sdsc_files": 549,
+    "backend_plans": 0
+  },
+  "stdout_tail": "[runtime_patch] no_h2d Tensor.to(device=spyre) compile probe enabled",
+  "stderr_key_lines": [
+    "[fillDataInfo diagnostic] exception=DtException: Solution cannot be found, file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dsc/foldManager/foldInfrastructure.h line 2983 processor=transfer_lds1_src:lxlu_dst:ptrow0 allocation=allocate_lds1_ptxrf loop=loop_ds2_ds3_in myLdsIdx=1 constantId=-1 dataConnect=xrf_kernel locUnit=48 locStorage=45 isProducer=1 phase=coordinate_offsets coordDims=3 coordCoreMap=32",
+    "terminate called after throwing an instance of 'DtException'",
+    "  what():  DtException: Solution cannot be found, file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dsc/foldManager/foldInfrastructure.h line 2983",
+    "    raise CalledProcessError(retcode, process.args,",
+    "torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '-d', '/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_current_ah_comms_collectives_diag_20260706_165024/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_te97ksgk']' died with <Signals.SIGABRT: 6>.",
+    "    raise CalledProcessError(retcode, process.args,",
+    "torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '-d', '/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_current_ah_comms_collectives_diag_20260706_165024/cache/inductor-spyre/sdsc_fused_add_amax_exp_maximum_mul_sub_sum_transpose_unsqueeze_1_te97ksgk']' died with <Signals.SIGABRT: 6>."
+  ]
+}
