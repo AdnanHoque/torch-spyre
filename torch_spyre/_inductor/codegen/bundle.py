@@ -151,10 +151,12 @@ def _enrich_lx_relayout_classifications(
     if not isinstance(classifications, list):
         return
 
+    finalized_classifications = []
     for classification in classifications:
         if not isinstance(classification, dict):
             continue
         if classification.get("kind") != "matmul_operand_broadcast":
+            finalized_classifications.append(classification)
             continue
 
         source_name = (
@@ -188,6 +190,21 @@ def _enrich_lx_relayout_classifications(
             "carrier_hint", "lx_all_gather_then_local_restickify"
         )
         classification["layout_transform"] = layout_transform
+
+        if classification.get("requires_layout_conversion"):
+            source = classification.get("source_lx_tensor") or {}
+            target = classification.get("target_kernel_tensor") or {}
+            if source.get("component_") != "lx" or target.get("component_") != "lx":
+                logger.debug(
+                    "lx relayout skip: incomplete matmul operand contract for %s -> %s",
+                    classification.get("producer_name"),
+                    classification.get("consumer_name"),
+                )
+                continue
+
+        finalized_classifications.append(classification)
+
+    root["lxRelayoutClassifications_"] = finalized_classifications
 
 
 # ---------------------------------------------------------------------------

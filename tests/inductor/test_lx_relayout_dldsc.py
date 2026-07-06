@@ -530,6 +530,72 @@ def test_bundle_enriches_matmul_operand_contract_with_source_target_layouts(
     )
 
 
+def test_bundle_drops_matmul_operand_contract_without_source_lx_tensor(tmp_path):
+    mb = Symbol("c0")
+    out = Symbol("c1")
+    in_dim = Symbol("c2")
+    contract = make_matmul_operand_allgather_contract(
+        producer_op="clone",
+        consumer_op="batchmatmul",
+        read_index=0,
+        producer_work_slice_dims={"0": 4},
+        consumer_tensor_work_slice_dims={"0": 1},
+        consumer_compute_work_slice_dims={"0": 4},
+        communication_class=COMM_CLASS_ALL_GATHER,
+    )
+    contract.update(
+        {
+            "source_name": "missing_source",
+            "producer_name": "missing_source",
+            "consumer_name": "matmul",
+        }
+    )
+    consumer = OpSpec(
+        op="batchmatmul",
+        is_reduction=True,
+        iteration_space={
+            mb: (Integer(64), 4),
+            out: (Integer(512), 1),
+            in_dim: (Integer(64), 1),
+        },
+        op_info={"lx_relayout_classifications": [contract]},
+        args=[
+            TensorArg(
+                is_input=True,
+                arg_index=-1,
+                device_dtype=DataFormats.SEN169_FP16,
+                device_size=[1, 64, 64],
+                device_coordinates=[floor(in_dim / 64), mb, Mod(in_dim, 64)],
+                allocation={"lx": 0},
+                name="missing_source",
+            ),
+            TensorArg(
+                is_input=True,
+                arg_index=2,
+                device_dtype=DataFormats.SEN169_FP16,
+                device_size=[8, 64, 64],
+                device_coordinates=[floor(out / 64), in_dim, Mod(out, 64)],
+                allocation={"hbm": 0x2000},
+                name="arg1",
+            ),
+            TensorArg(
+                is_input=False,
+                arg_index=3,
+                device_dtype=DataFormats.SEN169_FP16,
+                device_size=[8, 64, 64],
+                device_coordinates=[floor(out / 64), mb, Mod(out, 64)],
+                allocation={"hbm": 0x3000},
+                name="buf1",
+            ),
+        ],
+    )
+
+    generate_bundle("missing_source_contract", str(tmp_path), [consumer])
+
+    sdsc_0 = json.loads((tmp_path / "sdsc_0.json").read_text())
+    root = next(iter(sdsc_0.values()))
+    assert root["lxRelayoutClassifications_"] == []
+
 def test_lx_input_allocation_coordinates_describe_producer_residency():
     mb = Symbol("x0")
     out = Symbol("x1")
