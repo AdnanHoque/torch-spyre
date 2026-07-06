@@ -28,6 +28,7 @@ from torch_spyre._inductor.constants import (
     MATMUL_DIM_LABELS,
     MATMUL_LAYOUT_LABELS,
     RESTICKIFY_OP,
+    RESTICKIFY_OPS,
     TOPK_OPS,
 )
 from torch_spyre._inductor import config as _spyre_config
@@ -64,6 +65,7 @@ class SDSCArgs:
     arg_index: int = -1
     is_index_tensor: bool = False
     related_value_tensor_idx: int = -1
+    lx_residency_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
 
     def __str__(self) -> str:
         scales = ", ".join(f"{k}={v}" for k, v in self.scales.items())
@@ -85,6 +87,7 @@ class SDSCArgs:
             f"  backGap={self.backGap}\n"
             f"  is_index_tensor={self.is_index_tensor}\n"
             f"  related_value_tensor_idx={self.related_value_tensor_idx}\n"
+            f"  lx_residency_core_id_to_wk_slice={self.lx_residency_core_id_to_wk_slice}\n"
             f")"
         )
 
@@ -109,6 +112,9 @@ class SDSCSpec:
         default_factory=dict
     )
     indirect_access_indices: list[int] = dataclasses.field(default_factory=list)
+    lx_relayout_classifications: list[dict[str, Any]] = dataclasses.field(
+        default_factory=list
+    )
 
     def __str__(self) -> str:
         iter_space = ", ".join(f"{k}={v}" for k, v in self.iteration_space.items())
@@ -262,6 +268,56 @@ def _get_device_dim_order(
             if sym not in dim_order:
                 dim_order.append(sym)
     return dim_order, stick_dim
+
+
+def _device_dim_to_symbol(
+    arg: TensorArg,
+    symbol_mapping: dict,
+    dim_order: list[Symbol],
+    stick_dim: Symbol | None,
+) -> dict[str, Symbol]:
+    """Map TensorArg device-dim indices to SDSC primary-dim symbols."""
+
+    dim_set = set(dim_order)
+    result: dict[str, Symbol] = {}
+    for dev_dim, coord in enumerate(arg.device_coordinates):
+        expr = coord.subs(symbol_mapping)
+        free = sorted((sym for sym in expr.free_symbols if sym in dim_set), key=str)
+        if len(free) == 1:
+            result[str(dev_dim)] = free[0]
+        elif expr == 0 and stick_dim is not None and stick_dim in dim_set:
+            result[str(dev_dim)] = stick_dim
+    return result
+
+
+def _map_lx_residency_to_sdsc_dims(
+    arg: TensorArg,
+    symbol_mapping: dict,
+    dim_order: list[Symbol],
+    stick_dim: Symbol | None,
+) -> dict[str, dict[str, int]] | None:
+    """Translate producer residency from device-dim keys to SDSC dim labels."""
+
+    if arg.lx_residency_core_id_to_wk_slice is None:
+        return None
+
+    device_dim_to_symbol = _device_dim_to_symbol(
+        arg, symbol_mapping, dim_order, stick_dim
+    )
+    layout_dim_labels = [str(dim) for dim in dim_order]
+    result: dict[str, dict[str, int]] = {}
+    for core, per_device_dim in arg.lx_residency_core_id_to_wk_slice.items():
+        per_dim = {dim: 0 for dim in layout_dim_labels}
+        for device_dim, slot in per_device_dim.items():
+            dim = device_dim_to_symbol.get(str(device_dim))
+            slot_int = int(slot)
+            if dim is None:
+                if slot_int != 0:
+                    return None
+                continue
+            per_dim[str(dim)] = slot_int
+        result[str(core)] = per_dim
+    return result
 
 
 def _get_layout_label(
@@ -558,6 +614,12 @@ def _create_sdsc_tensors(
                 arg_index=arg.arg_index,
                 is_index_tensor=is_idx_tensor,
                 related_value_tensor_idx=related_val_idx,
+                lx_residency_core_id_to_wk_slice=_map_lx_residency_to_sdsc_dims(
+                    arg,
+                    symbol_mapping,
+                    dim_order,
+                    effective_stick,
+                ),
             )
         )
 
@@ -790,7 +852,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
             [args[0]],
             [args[0].dim_order],
         )
-    elif op_spec.op == RESTICKIFY_OP:
+    elif op_spec.op in RESTICKIFY_OPS:
         # Pad iteration space using all args so both the old stick (input) and
         # new stick (output) are rounded up to the nearest stick boundary.
         pad_args, pad_sdsc_args, dim_order = (
@@ -810,7 +872,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
 
     # For restickify, update backGaps based on the padded iteration space,
     # since non-stick dimensions may now have it_dim_size > dev_dim_size.
-    if op_spec.op == RESTICKIFY_OP:
+    if op_spec.op in RESTICKIFY_OPS:
         for sdsc_arg, op_spec_arg in zip(args, op_spec.args):
             layout = layouts[sdsc_arg.layout]
             stick_dim = layout["stick_dim_order"]
@@ -878,6 +940,11 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
             coordinate_masking=coordinate_masking,
             symbolic_dims=symbolic_dims,
             indirect_access_indices=indirect_access_indices,
+            lx_relayout_classifications=(
+                list(op_spec.op_info.get("lx_relayout_classifications", []))
+                if op_spec.op_info
+                else []
+            ),
         ),
         symbol_mapping,
     )

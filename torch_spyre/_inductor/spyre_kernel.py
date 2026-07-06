@@ -36,6 +36,7 @@ from .constants import (
     BATCH_MATMUL_OP,
     BATCH_MATMUL_FP8_OP,
     IDENTITY_OP,
+    RESTICKIFY_LX_OP,
     RESTICKIFY_OP,
     SEGMENT_OFFSETS,
     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
@@ -43,6 +44,11 @@ from .constants import (
 from . import config as _spyre_config
 from .errors import Unsupported
 from .ir import FixedTiledLayout
+from .lx_relayout import LX_RELAYOUT_ATTR
+from .layout_allgather_restickify import (
+    LAYOUT_ALLGATHER_RESTICKIFY,
+    MATMUL_OPERAND_ALLGATHER_REPLICATE,
+)
 from .pass_utils import (
     concretize_expr,
     concretize_index,
@@ -65,6 +71,56 @@ import logging
 
 logger = get_inductor_logger("spyre_kernel")
 
+DLDSC_CLASSIFICATION_PATTERNS = {
+    LAYOUT_ALLGATHER_RESTICKIFY,
+    MATMUL_OPERAND_ALLGATHER_REPLICATE,
+}
+
+
+def _current_node_op_info(current_node) -> dict[str, Any]:
+    op_info: dict[str, Any] = {}
+    node = getattr(current_node, "node", None)
+    data = getattr(node, "data", None)
+    data_op_info = getattr(data, "op_info", None)
+    if isinstance(data_op_info, dict):
+        op_info.update(data_op_info)
+    return op_info
+
+
+def _iter_current_ir_nodes(current_node):
+    seen: set[int] = set()
+    stack = [current_node]
+    while stack:
+        item = stack.pop()
+        ident = id(item)
+        if ident in seen:
+            continue
+        seen.add(ident)
+
+        node = getattr(item, "node", None)
+        if node is not None:
+            yield node
+
+        get_nodes = getattr(item, "get_nodes", None)
+        if not callable(get_nodes):
+            continue
+        try:
+            subnodes = list(get_nodes())
+        except Exception:
+            continue
+        for subnode in reversed(subnodes):
+            if subnode is not item:
+                stack.append(subnode)
+
+
+def _current_node_lx_relayout_inputs(current_node) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    for node in _iter_current_ir_nodes(current_node):
+        plans = getattr(node, LX_RELAYOUT_ATTR, None)
+        if isinstance(plans, dict):
+            merged.update(plans)
+    return merged
+
 
 class RValue(ABC):
     """
@@ -77,6 +133,15 @@ class TensorAccess(RValue):
     name: str
     index: sympy.Expr
     layout: FixedTiledLayout
+
+
+def _restickify_op_for_args(input_tensor: TensorAccess, output_tensor: TensorAccess) -> str:
+    if (
+        "lx" in input_tensor.layout.allocation
+        and "lx" in output_tensor.layout.allocation
+    ):
+        return RESTICKIFY_LX_OP
+    return RESTICKIFY_OP
 
 
 def _preserve_shared_weight_unit_bmm_dim(
@@ -522,6 +587,14 @@ class SpyreKernel(Kernel[CSEVariable]):
             per_tile_fixed=getattr(tensor.layout, "per_tile_fixed", False),
             name=opspec_name,
         )
+        if is_input and "lx" in tensor.layout.allocation:
+            relayout_plan = _current_node_lx_relayout_inputs(self.current_node).get(
+                name
+            )
+            if isinstance(relayout_plan, dict):
+                tensor_arg.lx_residency_core_id_to_wk_slice = relayout_plan.get(
+                    "producer_core_id_to_device_slice"
+                )
         if (
             "lx" not in tensor.layout.allocation
             and "pool" not in tensor.layout.allocation
@@ -665,6 +738,17 @@ class SpyreKernel(Kernel[CSEVariable]):
             if bounds is not None:
                 symbolic_dim_bounds[str(size_expr)] = bounds
 
+        relayout_inputs = _current_node_lx_relayout_inputs(self.current_node)
+        classifications = [
+            dict(plan)
+            for plan in relayout_inputs.values()
+            if isinstance(plan, dict)
+            and plan.get("communication_pattern") in DLDSC_CLASSIFICATION_PATTERNS
+        ]
+        if classifications:
+            op_info = dict(op_info)
+            op_info["lx_relayout_classifications"] = classifications
+
         return OpSpec(
             op,
             is_reduction,
@@ -734,7 +818,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             _ = self.args.output(name)
         index = sympy_subs(index, V.graph.sizevars.precomputed_replacements)
         dst = TensorAccess(real_dst_name, index, layout)
-        op_info: dict[str, Any] = {}
+        op_info = _current_node_op_info(self.current_node)
         if logger.isEnabledFor(logging.DEBUG):
             value_type = type(value).__name__
             logger.debug(
@@ -764,7 +848,11 @@ class SpyreKernel(Kernel[CSEVariable]):
                     args.append(self.create_tensor_arg(True, input.name, input))
                 else:
                     raise Unsupported(f"unexpected argument {input} to {value.op}")
-            args.append(self.create_tensor_arg(False, real_dst_name, dst))
+            args.append(
+                self.create_tensor_arg(
+                    False, real_dst_name, dst, opspec_name=real_dst_name
+                )
+            )
             op_info.update(value.op_info)
             self.op_specs.append(
                 self.create_op_spec(
@@ -791,12 +879,16 @@ class SpyreKernel(Kernel[CSEVariable]):
                 ]
                 args += [
                     self.create_tensor_arg(True, value.name, value),
-                    self.create_tensor_arg(False, real_dst_name, dst),
+                    self.create_tensor_arg(
+                        False, real_dst_name, dst, opspec_name=real_dst_name
+                    ),
                 ]
             else:
                 args = [
                     self.create_tensor_arg(True, value.name, value),
-                    self.create_tensor_arg(False, real_dst_name, dst),
+                    self.create_tensor_arg(
+                        False, real_dst_name, dst, opspec_name=real_dst_name
+                    ),
                 ]
             in_coords = args[-2].device_coordinates
             out_coords = args[-1].device_coordinates
@@ -804,7 +896,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                 # Broadcast: scalar input expanding to non-scalar output.
                 op = IDENTITY_OP
             elif in_coords[-1].free_symbols != out_coords[-1].free_symbols:
-                op = RESTICKIFY_OP
+                op = _restickify_op_for_args(value, dst)
             else:
                 op = IDENTITY_OP
             op_spec = self.create_op_spec(
@@ -837,9 +929,7 @@ class SpyreKernel(Kernel[CSEVariable]):
             self.op_specs.append(value)
             return
 
-        op_info = {}
-        if hasattr(self.current_node.node.data, "op_info"):  # type: ignore[union-attr]
-            op_info.update(self.current_node.node.data.op_info)  # type: ignore[union-attr]
+        op_info = _current_node_op_info(self.current_node)
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -859,7 +949,9 @@ class SpyreKernel(Kernel[CSEVariable]):
             args = [
                 self.create_tensor_arg(True, x.name, x),
                 self.create_tensor_arg(True, y.name, y),
-                self.create_tensor_arg(False, real_dst_name, dst),
+                self.create_tensor_arg(
+                    False, real_dst_name, dst, opspec_name=real_dst_name
+                ),
             ]
             self.op_specs.append(self.create_op_spec(value.op, True, args, op_info))
         else:
@@ -871,7 +963,9 @@ class SpyreKernel(Kernel[CSEVariable]):
             x = value.arguments[0]
             args = [
                 self.create_tensor_arg(True, x.name, x),
-                self.create_tensor_arg(False, real_dst_name, dst),
+                self.create_tensor_arg(
+                    False, real_dst_name, dst, opspec_name=real_dst_name
+                ),
             ]
             self.op_specs.append(self.create_op_spec(value.op, True, args, op_info))
 
@@ -1082,6 +1176,11 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                                 buf.writeline("per_tile_fixed=True,")
                             if arg.name is not None:
                                 buf.writeline(f"name={arg.name!r},")
+                            if arg.lx_residency_core_id_to_wk_slice is not None:
+                                buf.writeline(
+                                    "lx_residency_core_id_to_wk_slice="
+                                    f"{arg.lx_residency_core_id_to_wk_slice!r},"
+                                )
                         buf.writeline("),")
                 buf.writeline("]")
             buf.writeline("),")

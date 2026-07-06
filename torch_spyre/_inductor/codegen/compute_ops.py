@@ -758,6 +758,7 @@ def generate_sdsc(
                 "coreIdToDscSchedule": {
                     str(c): [[-1, 0, 0, 0]] for c in range(sdsc_spec.num_cores)
                 },
+                "lxRelayoutClassifications_": sdsc_spec.lx_relayout_classifications,
                 "dscs_": [
                     {
                         sdsc_spec.opfunc: {
@@ -933,7 +934,8 @@ def generate_sdsc(
                                                 "dim_order"
                                             ]
                                         },
-                                        "coreIdToWkSlice_": {},
+                                        "coreIdToWkSlice_": tensor.lx_residency_core_id_to_wk_slice
+                                        or {},
                                     },
                                 }
                                 for i, tensor in enumerate(sdsc_spec.args)

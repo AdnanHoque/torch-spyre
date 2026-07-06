@@ -65,6 +65,14 @@ from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
+from torch_spyre._inductor.lx_relayout import (
+    clear_lx_relayout_metadata,
+    get_lx_relayout_inputs,
+    is_lx_relayout_reservation,
+    make_lx_relayout_reservation_name,
+    plan_lx_relayouts,
+    relayout_source_names,
+)
 from torch_spyre._inductor.pass_utils import _is_matmul_op
 
 logger = get_inductor_logger("scratchpad.allocator")
@@ -140,15 +148,57 @@ class ScratchpadAllocator(ABC):
         )
         return org_op_name
 
-    def _op_output_good_for_lx_reuse(self, op: Any) -> bool:
+    def _computed_source_unary_output(self, graph: GraphLowering, op: Any) -> bool:
+        if not isinstance(op, ComputedBuffer):
+            return False
+        return any(
+            isinstance(graph.name_to_buffer.get(dep.name), ComputedBuffer)
+            for dep in op.get_read_writes().reads
+        )
+
+    def _restickify_output_good_for_lx_relayout(
+        self, graph: GraphLowering, op: Any
+    ) -> bool:
+        """Allow only computed-source restickify outputs into this research lane.
+
+        Graph-input/weight restickifies are a prelayout/preload problem. Pulling
+        them into the relayout experiment can create large backend reservations
+        and clear otherwise useful computed-activation relayout metadata.
+        """
+        if (
+            not config.lx_planner_relayout_restickify_outputs
+            or self._get_op_name(op) != "restickify"
+        ):
+            return False
+        return self._computed_source_unary_output(graph, op)
+
+    def _clone_output_good_for_lx_relayout(
+        self, graph: GraphLowering, op: Any
+    ) -> bool:
+        """Allow computed activation clones to serve as LX relayout sources.
+
+        Boundary/input clones are still controlled by ``LX_BOUNDARY_CLONES``.
+        This path only covers clone-like layout steps whose input is another
+        computed buffer, such as the attention value-side layout handoff before
+        the second batchmatmul.
+        """
+        return (
+            config.lx_planner_relayout_collectives
+            and self._get_op_name(op) == "clone"
+            and self._computed_source_unary_output(graph, op)
+        )
+
+    def _op_output_good_for_lx_reuse(self, graph: GraphLowering, op: Any) -> bool:
         return (
             isinstance(op, ComputedBuffer)
             and not isinstance(op.layout, MutationLayoutSHOULDREMOVE)
             and (
                 config.allow_all_ops_in_lx_planning
                 or (self._get_op_name(op) in OP_OUTPUT_GOOD_FOR_LX_REUSE)
+                or self._restickify_output_good_for_lx_relayout(graph, op)
+                or self._clone_output_good_for_lx_relayout(graph, op)
                 # Clones are only pinned when the boundary-clone path is on; they
-                # are never in the whitelist, so without this they'd be ineligible
+                # are never in the whitelist, so without this they would be ineligible
                 # and the inserted clones would not land in LX.
                 or (config.lx_boundary_clones and self._get_op_name(op) == "clone")
             )
@@ -176,13 +226,14 @@ class ScratchpadAllocator(ABC):
 
         # filter out by permitted operations
         for op in graph.operations:
-            if not self._op_output_good_for_lx_reuse(op):
+            if not self._op_output_good_for_lx_reuse(graph, op):
                 drop_list.add(op.name)
                 self.reject_reasons[op.name] = "op not allowed"
 
         # filter out core division mismatches
+        relayout_sources = relayout_source_names(graph)
         for key, mismatch in core_div_mismatch.items():
-            if mismatch == -1:
+            if mismatch == -1 and key not in relayout_sources:
                 drop_list.add(key)
                 self.reject_reasons[key] = "core div mismatch"
 
@@ -367,6 +418,84 @@ class ScratchpadAllocator(ABC):
         )
         return buffers
 
+    def _build_relayout_reservations(
+        self,
+        graph: GraphLowering,
+        buffers: list[LifetimeBoundBuffer],
+        lifetimes: dict[str, list[int]],
+    ) -> list[LifetimeBoundBuffer]:
+        """Reserve LX space needed by backend dl-dsc relayout insertion.
+
+        Deeptools materializes a post-relayout LX view before the consumer op.
+        Torch does not emit that tensor, but the scratchpad planner still needs
+        to account for it; otherwise we can generate a valid dl-dsc contract
+        that DXP later rejects because there is no room for the inserted copy.
+        """
+        if not config.lx_planner_relayout:
+            return []
+
+        op_index = {op.name: idx for idx, op in enumerate(graph.operations)}
+        reservations: list[LifetimeBoundBuffer] = []
+
+        for consumer in graph.operations:
+            consumer_idx = op_index.get(consumer.name)
+            if consumer_idx is None:
+                continue
+            for source_name, plan in get_lx_relayout_inputs(consumer).items():
+                if (
+                    plan.get("realized") is False
+                    or plan.get("requires_staged_realization") is True
+                ):
+                    continue
+                source = graph.name_to_buffer.get(source_name)
+                if source is None:
+                    continue
+                consumer_core_count = int(plan.get("consumer_core_count", 0))
+                if consumer_core_count <= 0:
+                    continue
+
+                dev_layout = source.layout.device_layout
+                source_bytes = math.prod(dev_layout.device_size[:-1]) * 128
+                consumer_slices = math.prod(
+                    int(split)
+                    for split in (plan.get("consumer_work_slice_dims") or {}).values()
+                )
+                if consumer_slices <= 0:
+                    consumer_slices = consumer_core_count
+                # Deeptools materializes one post-relayout resident piece per
+                # participating consumer core. Reserve the consumer piece size,
+                # rounded to whole sticks, so Torch does not clear a relayout
+                # plan that the backend can fit.
+                reserved_bytes = math.ceil((source_bytes / consumer_slices) / 128) * 128
+                if reserved_bytes <= 0:
+                    continue
+
+                reservations.append(
+                    LifetimeBoundBuffer(
+                        make_lx_relayout_reservation_name(consumer.name, source_name),
+                        reserved_bytes,
+                        [consumer_idx],
+                        first_use_is_read=False,
+                    )
+                )
+
+        return reservations
+
+    def _add_lx_relayout_reservations(
+        self,
+        graph: GraphLowering,
+        buffers: list[LifetimeBoundBuffer],
+        lifetimes: dict[str, list[int]],
+    ) -> list[LifetimeBoundBuffer]:
+        return buffers + self._build_relayout_reservations(graph, buffers, lifetimes)
+
+    def _relayout_reservation_failed(
+        self, allocation: list[LifetimeBoundBuffer]
+    ) -> bool:
+        return any(
+            is_lx_relayout_reservation(b.name) and b.address is None for b in allocation
+        )
+
     def _log_lx_pinning(self, graph: GraphLowering) -> None:
         """Log the final LX pinning decision for every op in the graph."""
         # Skip the per-op getattr walk unless DEBUG is on.
@@ -404,6 +533,8 @@ class ScratchpadAllocator(ABC):
         graph_editor = GraphEditor(graph)
 
         for b in buffers:
+            if is_lx_relayout_reservation(b.name):
+                continue
             if b.address is None:
                 continue
 
@@ -478,9 +609,24 @@ class DefaultAllocator(ScratchpadAllocator):
         self.reject_reasons = {}
         for p in self.pre_optimization_passes:
             p.apply_pass(graph)
-        buffers = self._generate_buffers(graph)
+        plan_lx_relayouts(graph)
+        lifetimes = calculate_liveness(graph)
+        buffers = self._generate_buffers(graph, lifetimes=lifetimes)
+        buffers = self._add_lx_relayout_reservations(graph, buffers, lifetimes)
         allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
+        if self._relayout_reservation_failed(allocation):
+            logger.info(
+                "clearing LX relayout metadata: backend relayout reservation "
+                "does not fit in scratchpad"
+            )
+            clear_lx_relayout_metadata(graph, preserve_unrealized=True)
+            self.reject_reasons = {}
+            lifetimes = calculate_liveness(graph)
+            buffers = self._generate_buffers(graph, lifetimes=lifetimes)
+            allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
         for b in allocation:
+            if is_lx_relayout_reservation(b.name):
+                continue
             if b.address is None:
                 self.reject_reasons[b.name] = "no room on scratchpad"
         self._push_allocation(graph, allocation)
@@ -933,6 +1079,8 @@ class StrategyBCoOptimizingAllocator(DefaultAllocator):
         for p in self.pre_optimization_passes:
             p.apply_pass(graph)
 
+        plan_lx_relayouts(graph)
+
         # Standard downstream flow on the now-fixed winning splits. Mirrors
         # DefaultAllocator.plan_allocation past the pre-passes. Reuse the search's
         # per-core-view cache + liveness only if the clone pass left the graph
@@ -941,13 +1089,29 @@ class StrategyBCoOptimizingAllocator(DefaultAllocator):
         # the clone (changes the (op, splits, dep) cache key), so on any op-count
         # change both are stale and we rebuild from scratch (cache=lifetimes=None).
         clone_inserted = len(graph.operations) != n_ops_before_clone
+        lifetimes = None if clone_inserted else search_lifetimes
+        if lifetimes is None:
+            lifetimes = calculate_liveness(graph)
         buffers = self._generate_buffers(
             graph,
             cache=None if clone_inserted else search_cache,
-            lifetimes=None if clone_inserted else search_lifetimes,
+            lifetimes=lifetimes,
         )
+        buffers = self._add_lx_relayout_reservations(graph, buffers, lifetimes)
         allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
+        if self._relayout_reservation_failed(allocation):
+            logger.info(
+                "clearing LX relayout metadata: backend relayout reservation "
+                "does not fit in scratchpad"
+            )
+            clear_lx_relayout_metadata(graph, preserve_unrealized=True)
+            self.reject_reasons = {}
+            lifetimes = calculate_liveness(graph)
+            buffers = self._generate_buffers(graph, lifetimes=lifetimes)
+            allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
         for b in allocation:
+            if is_lx_relayout_reservation(b.name):
+                continue
             if b.address is None:
                 self.reject_reasons[b.name] = "no room on scratchpad"
         self._push_allocation(graph, allocation)
@@ -1087,6 +1251,7 @@ def scratchpad_planning(
         graph: Lowered graph to plan scratchpad memory for.
         allocator: Allocator strategy to use. Defaults to DefaultAllocator.
     """
+    plan_lx_relayouts(graph)
     if allocator is None:
         allocator = DefaultAllocator()
     allocator.plan_allocation(graph)
