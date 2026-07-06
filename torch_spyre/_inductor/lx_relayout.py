@@ -43,7 +43,6 @@ from torch_spyre._inductor.pass_utils import (
 from torch_spyre._inductor.layout_allgather_restickify import (
     COMM_CLASS_ALL_GATHER,
     LAYOUT_ALLGATHER_RESTICKIFY,
-    MATMUL_OPERAND_ALLGATHER_REPLICATE,
     MATMUL_OPERAND_BROADCAST,
     RESTICKIFY_LX_OP,
     make_layout_allgather_restickify_contract,
@@ -580,7 +579,9 @@ def plan_lx_relayouts(
                         read_index=read_index,
                         realized=False,
                         communication_class=topology.communication_class,
-                        communication_pattern=MATMUL_OPERAND_ALLGATHER_REPLICATE,
+                        communication_pattern=layout_contract[
+                            "communication_pattern"
+                        ],
                         max_fanout=topology.max_fanout,
                         max_fanin=topology.max_fanin,
                         transfer_count=topology.transfer_count,

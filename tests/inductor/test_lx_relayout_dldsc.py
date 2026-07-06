@@ -27,6 +27,8 @@ from torch_spyre._inductor.layout_allgather_restickify import (
     COMM_CLASS_ALL_GATHER,
     MATMUL_OPERAND_ALLGATHER_REPLICATE,
     MATMUL_OPERAND_BROADCAST,
+    MATMUL_OPERAND_BROADCAST_PATTERN,
+    MATMUL_OPERAND_MULTICAST_PATTERN,
     make_matmul_operand_allgather_contract,
 )
 from torch_spyre._inductor.lx_relayout import (
@@ -233,6 +235,38 @@ def test_matmul_operand_contract_marks_tensor1_all_gather_not_scatter():
         "operand_read_index": 1,
         "scope": "matmul_transfer_loop",
     }
+
+
+def test_matmul_operand_contract_marks_broadcast_pattern():
+    contract = make_matmul_operand_allgather_contract(
+        producer_op="full",
+        consumer_op="batchmatmul",
+        read_index=1,
+        producer_work_slice_dims={"0": 1},
+        consumer_tensor_work_slice_dims={"0": 4},
+        consumer_compute_work_slice_dims={"0": 4},
+        communication_class="broadcast",
+    )
+
+    assert contract["kind"] == MATMUL_OPERAND_BROADCAST
+    assert contract["communication_class"] == "broadcast"
+    assert contract["communication_pattern"] == MATMUL_OPERAND_BROADCAST_PATTERN
+
+
+def test_matmul_operand_contract_marks_multicast_pattern():
+    contract = make_matmul_operand_allgather_contract(
+        producer_op="expand",
+        consumer_op="batchmatmul",
+        read_index=1,
+        producer_work_slice_dims={"0": 2},
+        consumer_tensor_work_slice_dims={"0": 2, "1": 2},
+        consumer_compute_work_slice_dims={"0": 2, "1": 2},
+        communication_class="multicast",
+    )
+
+    assert contract["kind"] == MATMUL_OPERAND_BROADCAST
+    assert contract["communication_class"] == "multicast"
+    assert contract["communication_pattern"] == MATMUL_OPERAND_MULTICAST_PATTERN
 
 
 def test_lx_relayout_reservation_names_are_identifiable():

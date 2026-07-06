@@ -21,6 +21,8 @@ from typing import Any
 LAYOUT_ALLGATHER_RESTICKIFY = "layout_allgather_restickify"
 MATMUL_OPERAND_BROADCAST = "matmul_operand_broadcast"
 MATMUL_OPERAND_ALLGATHER_REPLICATE = "all_gather_replicate"
+MATMUL_OPERAND_BROADCAST_PATTERN = "broadcast"
+MATMUL_OPERAND_MULTICAST_PATTERN = "multicast"
 COMM_CLASS_ALL_GATHER = "all_gather"
 RESTICKIFY_HBM_OP = "ReStickifyOpHBM"
 RESTICKIFY_LX_OP = "ReStickifyOpLx"
@@ -76,6 +78,14 @@ def make_layout_allgather_restickify_contract(
     }
 
 
+def _matmul_operand_communication_pattern(communication_class: str) -> str:
+    if communication_class == "broadcast":
+        return MATMUL_OPERAND_BROADCAST_PATTERN
+    if communication_class == "multicast":
+        return MATMUL_OPERAND_MULTICAST_PATTERN
+    return MATMUL_OPERAND_ALLGATHER_REPLICATE
+
+
 def make_matmul_operand_allgather_contract(
     *,
     producer_op: str,
@@ -110,7 +120,9 @@ def make_matmul_operand_allgather_contract(
             "stickDimOrder_": ["out"],
         },
         "communication_class": communication_class,
-        "communication_pattern": MATMUL_OPERAND_ALLGATHER_REPLICATE,
+        "communication_pattern": _matmul_operand_communication_pattern(
+            communication_class
+        ),
         "materialization_pattern": "all_gather_replicate_with_layout_conversion",
         "requires_layout_conversion": True,
         "layout_transform": {
