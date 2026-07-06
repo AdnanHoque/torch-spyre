@@ -1,0 +1,11 @@
+{
+  "run": "/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/runs/attention_bundle_standalone_relayout_replay_20260706_100346",
+  "bundle": "/tmp/torchinductor_adnan/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_i_o96qt1",
+  "returncode": "134",
+  "plans": [
+    "16_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+    "8_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json"
+  ],
+  "stdout_tail": "[WARN] dxp_standalone --bundle option is deprecated (always on)\n",
+  "stderr_tail": "terminate called after throwing an instance of 'std::out_of_range'\n  what():  vector::_M_range_check: __n (which is 1073741830) >= this->size() (which is 8)\n"
+}
