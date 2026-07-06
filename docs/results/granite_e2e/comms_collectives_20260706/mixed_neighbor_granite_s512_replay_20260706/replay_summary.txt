@@ -1,0 +1,3 @@
+rc=0
+out=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_clean_mixed_neighbor_pass_20260706_223805
+plan_count=1

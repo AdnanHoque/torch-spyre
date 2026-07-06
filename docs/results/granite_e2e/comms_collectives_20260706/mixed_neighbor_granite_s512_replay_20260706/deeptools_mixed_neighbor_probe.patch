@@ -1,0 +1,296 @@
+diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+index dd59885fe..ea8d804a2 100644
+--- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
++++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+@@ -3540,7 +3540,9 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
+         DT_CHECK_MSG(lds.memOrg_.count(SenComponents::LX),
+                      "Expect memOrg_ LX entry.");
+         auto& allocNode = lds.memOrg_.at(SenComponents::LX).allocateNode_;
+-        if (allocNode == nullptr) {
++        const bool needsDedicatedMatmulNeighborDestination =
++            findMatmulOperandBroadcastClassification(mySDsc, lds) != nullptr;
++        if (allocNode == nullptr || needsDedicatedMatmulNeighborDestination) {
+           const SenComponents allocStorage = SenComponents::LX;
+           const std::string allocNodeName =
+               "allocate_lds" + std::to_string(lds.ldsIdx_) + "_" +
+diff --git a/ddc/ddc.h b/ddc/ddc.h
+index 24e17df64..cb7347ae5 100644
+--- a/ddc/ddc.h
++++ b/ddc/ddc.h
+@@ -437,7 +437,8 @@ class Ddc {
+       itemsToProcess_.push_back(dsc2::CoordPropInfoType{
+           propInfo.refNode, propInfo.nodeToFold, propInfo.dataConnect,
+           propInfo.refIsProducer,
+-          dsc2::CoordPropInfoType::PropStateType::NOT_PROCESSED, dims});
++          dsc2::CoordPropInfoType::PropStateType::NOT_PROCESSED, dims,
++          propInfo.scaleDown});
+       for (auto& dim : dims) {
+         int retryCount = 0;
+         if (refsAdded_[propInfo.nodeToFold].count(propInfo.refNode) &&
+diff --git a/ddc/ddc_fold.cpp b/ddc/ddc_fold.cpp
+index f7e18aa7f..361961d0e 100644
+--- a/ddc/ddc_fold.cpp
++++ b/ddc/ddc_fold.cpp
+@@ -30,6 +30,31 @@ bool isFoldedLxNeighborAllocation(const dsc2::AllocateNode *allocNode) {
+   return false;
+ }
+ 
++bool isMatmulOperandKernelNeighborAllocation(
++    const DesignSpaceConfig *currDsc, const dsc2::AllocateNode *allocNode) {
++  if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") ==
++      nullptr) {
++    return false;
++  }
++  if (currDsc == nullptr || allocNode == nullptr ||
++      allocNode->component_ != SenComponents::LX || allocNode->ldsIdx_ < 0 ||
++      static_cast<size_t>(allocNode->ldsIdx_) >= currDsc->labeledDs_.size()) {
++    return false;
++  }
++  const auto &allocLds = currDsc->labeledDs_.at(allocNode->ldsIdx_);
++  if (allocLds.dsType_ != DsTypes::KERNEL) {
++    return false;
++  }
++  return std::any_of(
++      allocNode->allocUsers_.begin(), allocNode->allocUsers_.end(),
++      [](const auto &userAndCount) {
++        const auto *user = userAndCount.first;
++        return user != nullptr &&
++               user->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
++               user->name_.find("_lx_neighbor") != std::string::npos;
++      });
++}
++
+ bool seedLxNeighborAllocationFromFoldedPeer(DesignSpaceConfig *currDsc,
+                                             dsc2::AllocateNode *allocNode) {
+   return false;
+@@ -1940,13 +1965,15 @@ void Ddc::buildAndPropagateFold() {
+                     static_cast<dsc2::ComputeNode *>(coordPropInfo.refNode),
+                     reverseCoordPropInfo, inputCoords, outputCoords, ldsIdx);
+       if (buildFoldForAllocation(coordPropInfo, refCoordinate, allocNode)) {
+-        dsc2::computeLoopElemOffsetsFromCoordinates(
+-            currDsc, coordPropInfo.refNode,
+-            const_cast<dsc2::CoordinateType<CoordinateBaseType> &>(
+-                refCoordinate),
+-            allocNode,
+-            loopDistributionParamInfo.at(coordPropInfo.refNode).at(allocNode),
+-            coordPropInfo.dimsToPropagate, coordPropReportLevel_);
++        if (!isFoldedLxNeighborAllocation(allocNode)) {
++          dsc2::computeLoopElemOffsetsFromCoordinates(
++              currDsc, coordPropInfo.refNode,
++              const_cast<dsc2::CoordinateType<CoordinateBaseType> &>(
++                  refCoordinate),
++              allocNode,
++              loopDistributionParamInfo.at(coordPropInfo.refNode).at(allocNode),
++              coordPropInfo.dimsToPropagate, coordPropReportLevel_);
++        }
+         if (!isFoldedLxNeighborAllocation(allocNode) &&
+             allocNode->allocateCoordinates_.coreIdToWkSlice_.empty()) {
+           for (auto &[userNode, refCount] : allocNode->allocUsers_) {
+@@ -2112,29 +2139,14 @@ void Ddc::buildSpatialFold(
+     dsc2::ScheduleNode *node, const PrimaryDimTypes &currDim,
+     const PadType &currPadType,
+     dsc2::CoordinateType<CoordinateBaseType> &nodeCoordinates) {
+-  auto isKernelNeighborAllocation = [&]() {
+-    if (std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") ==
+-        nullptr)
+-      return false;
+-    if (node == nullptr || node->nodeType_ != dsc2::ScheduleNode::ALLOCATE)
+-      return false;
+-    auto *allocNode = static_cast<dsc2::AllocateNode *>(node);
+-    if (allocNode->component_ != SenComponents::LX || allocNode->ldsIdx_ < 0 ||
+-        allocNode->ldsIdx_ >= currDsc->labeledDs_.size())
+-      return false;
+-    const auto &allocLds = currDsc->labeledDs_.at(allocNode->ldsIdx_);
+-    if (allocLds.dsType_ != DsTypes::KERNEL) return false;
+-    return std::any_of(allocNode->allocUsers_.begin(),
+-                       allocNode->allocUsers_.end(), [](const auto &userAndCount) {
+-                         const auto *user = userAndCount.first;
+-                         return user != nullptr &&
+-                                user->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
+-                                user->name_.find("_lx_neighbor") !=
+-                                    std::string::npos;
+-                       });
+-  };
++  const auto *spatialAllocNode =
++      (node != nullptr && node->nodeType_ == dsc2::ScheduleNode::ALLOCATE)
++          ? static_cast<const dsc2::AllocateNode *>(node)
++          : nullptr;
+   const int spatialDstgid =
+-      isKernelNeighborAllocation() ? metadata.chunk_dstgid : metadata.core_dstgid;
++      isMatmulOperandKernelNeighborAllocation(currDsc, spatialAllocNode)
++          ? metadata.chunk_dstgid
++          : metadata.core_dstgid;
+   auto &spatialDataStage = currDsc->dataStageParam_.at(spatialDstgid).ss_;
+   CoordinateBaseType coreletAlpha, coreletBeta;
+   int64_t stride = 1;
+@@ -2312,18 +2324,7 @@ void Ddc::buildFoldForExternalAllocation(dsc2::AllocateNode *allocNode) {
+     // Future work: The following datastructure should be part of dsc.
+     std::vector<dsc2::FoldParamInfoType> elemArr;
+     const bool isKernelNeighborAllocation =
+-        std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
+-            nullptr &&
+-        allocNode->component_ == SenComponents::LX &&
+-        allocLds.dsType_ == DsTypes::KERNEL &&
+-        std::any_of(allocNode->allocUsers_.begin(), allocNode->allocUsers_.end(),
+-                    [](const auto &userAndCount) {
+-                      const auto *user = userAndCount.first;
+-                      return user != nullptr &&
+-                             user->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
+-                             user->name_.find("_lx_neighbor") !=
+-                                 std::string::npos;
+-                    });
++        isMatmulOperandKernelNeighborAllocation(currDsc, allocNode);
+     const int targetCoreletId = isKernelNeighborAllocation ? -1 : 0;
+     int64_t coreDDimSize = currDsc->dataStageParam_.at(metadata.core_dstgid)
+                                .ss_.dataStageDimToVal_compView_st(
+@@ -4629,8 +4630,36 @@ bool Ddc::buildFoldForTransfer(dsc2::TransferNode *transferNode,
+              ? refAllocNode->sliceViewCoordinates_
+              : refAllocNode->allocateCoordinates_);
+     RowGroupInfo refRowGroup;
+-    if (needToConsiderRowBundling(coreDs, refAllocNode->allocateCoordinates_,
+-                                  coordPropInfo.dimsToPropagate) &&
++    const bool needsRowBundling = needToConsiderRowBundling(
++        coreDs, refAllocNode->allocateCoordinates_, coordPropInfo.dimsToPropagate);
++    const bool isKernelLxToPtRowTransfer =
++        std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
++            nullptr &&
++        refAllocNode->component_ == SenComponents::LX && refAllocNode->ldsIdx_ >= 0 &&
++        static_cast<size_t>(refAllocNode->ldsIdx_) < currDsc->labeledDs_.size() &&
++        currDsc->labeledDs_.at(refAllocNode->ldsIdx_).dsType_ ==
++            DsTypes::KERNEL &&
++        transferNode->src_.unit_ == SenComponents::LXLU &&
++        !transferNode->dstVias_.empty() &&
++        getCompRowId(transferNode->dstVias_.at(0).loc_.unit_) != -1;
++    bool seededSingleRowForKernelNeighbor = false;
++    if (needsRowBundling && refIsSrc && isKernelLxToPtRowTransfer &&
++        getCompRowId(sizeRefComp) != -1 && !coreDs.ss_.rowSplit_.empty()) {
++      const PrimaryDimTypes rowSplitDim = coreDs.ss_.rowSplit_.begin()->first;
++      if (effectiveRefCoord.coordinates_.count(rowSplitDim)) {
++        const int refRowId = getCompRowId(sizeRefComp);
++        const auto &rowCoord = effectiveRefCoord.coordinates_.at(rowSplitDim);
++        const CoordinateBaseType beta =
++            rowCoord.getFoldDimSize(FOLD_POS_ROWSPLIT) > 1
++                ? rowCoord.getAlpha(FOLD_POS_ROWSPLIT) * refRowId
++                : rowCoord.getBeta(FOLD_POS_ROWSPLIT);
++        refRowGroup.cat = RowGroupInfo::Category::ROW_TO_SAME_ROW;
++        refRowGroup.activeRow = refRowId;
++        refRowGroup.nodeInfo.push_back({transferNode, refRowId, beta});
++        seededSingleRowForKernelNeighbor = true;
++      }
++    }
++    if (needsRowBundling && !seededSingleRowForKernelNeighbor &&
+         !gatherRelatedPTRows(refRowGroup, coordPropInfo, effectiveRefCoord)) {
+       if (coordPropReportLevel_ > 2) {
+         std::cout
+diff --git a/ddc/ddcv1.cpp b/ddc/ddcv1.cpp
+index 346e4a5f9..fb2ae9468 100644
+--- a/ddc/ddcv1.cpp
++++ b/ddc/ddcv1.cpp
+@@ -2371,6 +2371,7 @@ void Ddc::fillLoopOffsetsAndAddresses(
+         dsc2::nonCoreletMemories.count(allocation->component_);
+     bool considerBothCorelets =
+         nonCoreletMemory && !loopsBelowChunkBoundary.count(loopPtr);
++    bool usedDatastageElemOffFallback = false;
+     // const auto& dataConnectLoops =
+     //     isProducer ? metadata.dataConnects_.at(di.dataConnect_).consumers_
+     //                : metadata.dataConnects_.at(di.dataConnect_).producers_;
+@@ -2406,8 +2407,24 @@ void Ddc::fillLoopOffsetsAndAddresses(
+           int dimIdx = currDsc->getDimIndexInLayoutOrder(myLds.dsType_, dim);
+           int scale = dimIdx < 0 ? 1 : myLds.scale_.at(dimIdx);
+           if (scale > 0) {
++            const bool hasLoopDistributionParam =
++                loopDistributionParamInfo.count(processorNode) &&
++                loopDistributionParamInfo.at(processorNode).count(allocation) &&
++                loopDistributionParamInfo.at(processorNode)
++                    .at(allocation)
++                    .count(loopPtr) &&
++                loopDistributionParamInfo.at(processorNode)
++                    .at(allocation)
++                    .at(loopPtr)
++                    .count(dim);
++            const bool useDatastageElemOffForThisDim =
++                datastageBasedElemOff ||
++                (std::getenv("SPYRE_LX_PLANNER_RELAYOUT") != nullptr &&
++                 !hasLoopDistributionParam);
++            usedDatastageElemOffFallback |=
++                useDatastageElemOffForThisDim && !datastageBasedElemOff;
+             for (int clId = 0; clId < currDsc->numCoreletsUsed_DSC2_; clId++) {
+-              if (!datastageBasedElemOff) {
++              if (!useDatastageElemOffForThisDim) {
+                 di.loopEleOffsets_[clId][loopPtr][dim] =
+                     loopDistributionParamInfo.at(processorNode)
+                         .at(allocation)
+@@ -2418,7 +2435,8 @@ void Ddc::fillLoopOffsetsAndAddresses(
+                 di.loopEleOffsets_[clId][loopPtr][dim] = 0;
+               }
+ 
+-              if (verifyCoordinateBasedLoopElemOff || datastageBasedElemOff) {
++              if (verifyCoordinateBasedLoopElemOff ||
++                  useDatastageElemOffForThisDim) {
+                 int loopEleOffs = -1;
+                 if (loopPtr->isParametricLoop()) {
+                   loopEleOffs = loopPtr->parametricStride(currDsc);
+@@ -2550,7 +2568,7 @@ void Ddc::fillLoopOffsetsAndAddresses(
+                   //   Offset: index(dim) * size(dim)
+                   // No update is needed to loopEleOffs that was computed above.
+                 }
+-                if (datastageBasedElemOff) {
++                if (useDatastageElemOffForThisDim) {
+                   di.loopEleOffsets_[clId][loopPtr][dim] = loopEleOffs;
+                 }
+                 if (iterCount > 1 &&
+@@ -2640,7 +2658,13 @@ void Ddc::fillLoopOffsetsAndAddresses(
+       loopPtr = loopPtr->getOwnerLoop();
+     }
+ 
+-    if (!datastageBasedElemOff) {
++    const bool skipCoordinateOffsetsForRelayoutTransfer =
++        std::getenv("SPYRE_LX_PLANNER_RELAYOUT") != nullptr &&
++        processorNode != nullptr &&
++        processorNode->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
++        coordinates.coreIdToWkSlice_.empty();
++    if (!datastageBasedElemOff && !usedDatastageElemOffFallback &&
++        !skipCoordinateOffsetsForRelayoutTransfer) {
+       // use coordinates for constant offset
+       bool anyConstOffset = !di.constEleOffsets_.empty();
+       debugPhase = "coordinate_offsets";
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 0d5dd45ce..42bf82e55 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -1452,8 +1452,9 @@ static bool tensorSliceIntersectionCell(
+ 
+ static bool markMatmulOperandBroadcastKernelNeighbor(
+     DesignSpaceConfig& dldsc, LabeledDsInfo& lds, std::string* reason) {
+-  if (lds.dsType_ != DsTypes::KERNEL) {
+-    *reason = "matmul_operand_broadcast kernel-neighbor path requires KERNEL LDS";
++  if (lds.dsType_ != DsTypes::KERNEL && lds.dsType_ != DsTypes::INPUT) {
++    *reason =
++        "matmul_operand_broadcast neighbor path requires INPUT or KERNEL LDS";
+     return false;
+   }
+   if (!lds.memOrg_.count(SenComponents::LX)) {
+@@ -1470,7 +1471,6 @@ static bool markMatmulOperandBroadcastKernelNeighbor(
+   // Keep the producer allocation in the schedule tree.  The DL scheduler uses
+   // it as the source coordinate anchor when it creates the consumer allocation
+   // for the loop-scoped KERNEL-neighbor operand.
+-  lds.memOrg_.at(SenComponents::LX).allocateNode_ = nullptr;
+   return true;
+ }
+ 
+diff --git a/util/LayoutAllgatherRestickify.cpp b/util/LayoutAllgatherRestickify.cpp
+index bbe306661..012d375f6 100644
+--- a/util/LayoutAllgatherRestickify.cpp
++++ b/util/LayoutAllgatherRestickify.cpp
+@@ -855,9 +855,9 @@ synthesizeMatmulOperandBroadcastMovementPlan(const std::string &jsonString) {
+   const std::string dsType = json["consumer_operand_ds_type"].is_string()
+                                  ? json["consumer_operand_ds_type"].string_value()
+                                  : "KERNEL";
+-  if (dsType != "KERNEL") {
++  if (dsType != "KERNEL" && dsType != "INPUT") {
+     return matmulMovementFail(
+-        "consumer_operand_ds_type must be KERNEL for matmul operand broadcast");
++        "consumer_operand_ds_type must be INPUT or KERNEL for matmul operand broadcast");
+   }
+ 
+   const bool realized = json["realized"].bool_value();

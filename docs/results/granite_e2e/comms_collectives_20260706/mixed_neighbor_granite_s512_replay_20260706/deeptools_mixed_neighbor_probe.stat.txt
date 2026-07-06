@@ -1,0 +1,7 @@
+ dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp |   4 +-
+ ddc/ddc.h                                 |   3 +-
+ ddc/ddc_fold.cpp                          | 115 +++++++++++++++++++-----------
+ ddc/ddcv1.cpp                             |  32 +++++++--
+ dxp/SdscRelayoutInsertion.cpp             |   6 +-
+ util/LayoutAllgatherRestickify.cpp        |   4 +-
+ 6 files changed, 110 insertions(+), 54 deletions(-)
