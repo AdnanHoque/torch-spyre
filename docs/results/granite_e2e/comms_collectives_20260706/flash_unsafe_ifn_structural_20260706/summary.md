@@ -1,0 +1,29 @@
+# Flash attention comms backend2162 unsafe IFN materialization summary
+
+root=/home/adnan/codex-isolated/flash_attention_comms_backend2162_20260706_005751/flash_unsafe_ifn_structural_20260706_021346
+created_utc=2026-07-06T02:13:46Z
+torch=b68b2d7863b39e7c5cd3e5930c96ff16e4ac132c ah/comms-collectives
+deeptools=16e9c4f4eba637293c36d534d444d15eb11b325e ah/comms-collectives
+test_flash=afda166e58b23519d0b4ca871350b011b56d91a3 main
+dxp_real=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools/build-deeptools/dxp/dxp_standalone
+dxp_wrapper=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/tools/dxp-split-wrapper/dxp_standalone
+
+## /home/adnan/codex-isolated/flash_attention_comms_backend2162_20260706_005751/flash_unsafe_ifn_structural_20260706_021346/runs/relayout_on_unsafe_ifn_materialization_20260706_021346/run_summary.txt
+run_dir=/home/adnan/codex-isolated/flash_attention_comms_backend2162_20260706_005751/flash_unsafe_ifn_structural_20260706_021346/runs/relayout_on_unsafe_ifn_materialization_20260706_021346
+rc=0
+DXP_LX_FRAC_AVAIL=0
+DXP_BACKEND_LX_FRAC_AVAIL=1
+sdsc_files=550
+backend_plan_files=32
+matmul_operand_plan_files=0
+ReStickifyOpHBM_files=0
+ReStickifyOpHBM_occurrences=0
+ReStickifyOpLx_files=97
+ReStickifyOpLx_occurrences=193
+value_correctness=[runtime_patch] assert_close skipped for compile probe|SUCCESS|
+
+kind_counts
+matmul_operand_broadcast 32
+communication_pattern_counts
+all_gather_replicate 32
+

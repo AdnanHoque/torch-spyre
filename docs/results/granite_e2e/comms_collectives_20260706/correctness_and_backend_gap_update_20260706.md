@@ -94,6 +94,16 @@ Checkpoint commit: 16e9c4f4e
 cmake --build build-deeptools --target dxp_standalone -j8
 ```
 
+Focused tests after the patch:
+
+```text
+./build-deeptools/dxp/dxp_unit_test --gtest_filter="DxpTestFixture.CoreWorkDivIncomptLxRelayout*"
+  PASSED: 2 tests
+
+./build-deeptools/util/util_unit_test --gtest_filter="LayoutAllgatherRestickify.*"
+  PASSED: 25 tests
+```
+
 Replaying the minimized flash bundle moved the failure:
 
 ```text
@@ -128,6 +138,30 @@ full flash bundle:
 ```
 
 That does not make the unsafe IFN/full materialization path production-ready. It proves a useful intermediate point: Deeptools can accept and schedule the metadata when it avoids the direct KERNEL-neighbor shortcut. The remaining production work is to make that staged strategy loop/tile-scoped and capacity-safe rather than dense resident materialization.
+
+A full `test_flash.py` compile-probe run also completed with the same backend shape:
+
+```text
+run root:
+  /home/adnan/codex-isolated/flash_attention_comms_backend2162_20260706_005751/flash_unsafe_ifn_structural_20260706_021346
+
+result:
+  rc=0
+  sdsc_files=550
+  backend_plan_files=32
+  ReStickifyOpHBM_occurrences=0
+  ReStickifyOpLx_occurrences=193
+  backend plan kinds: matmul_operand_broadcast x 32
+  communication pattern: all_gather_replicate x 32
+```
+
+This run used the compile-probe runtime patch (`no_h2d,skip_cpu_ref`), so it intentionally skipped flash value comparison. It is structural evidence only: the full flash bundle gets past DXP/runtime setup with the non-direct IFN materialization route, while preserving the zero-HBM-restickify SDSC shape.
+
+Archived summary files:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260706/flash_unsafe_ifn_structural_20260706/
+```
 
 ## Current Architecture Takeaway
 

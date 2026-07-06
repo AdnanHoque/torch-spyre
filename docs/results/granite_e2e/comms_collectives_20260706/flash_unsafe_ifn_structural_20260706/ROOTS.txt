@@ -1,0 +1,7 @@
+root=/home/adnan/codex-isolated/flash_attention_comms_backend2162_20260706_005751/flash_unsafe_ifn_structural_20260706_021346
+created_utc=2026-07-06T02:13:46Z
+torch=b68b2d7863b39e7c5cd3e5930c96ff16e4ac132c ah/comms-collectives
+deeptools=16e9c4f4eba637293c36d534d444d15eb11b325e ah/comms-collectives
+test_flash=afda166e58b23519d0b4ca871350b011b56d91a3 main
+dxp_real=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/deeptools/build-deeptools/dxp/dxp_standalone
+dxp_wrapper=/home/adnan/codex-isolated/granite_s512_comms_collectives_20260704_033404/tools/dxp-split-wrapper/dxp_standalone

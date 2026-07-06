@@ -1,0 +1,4 @@
+kind_counts
+matmul_operand_broadcast 32
+communication_pattern_counts
+all_gather_replicate 32
