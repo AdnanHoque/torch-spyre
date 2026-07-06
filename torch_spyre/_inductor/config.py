@@ -51,17 +51,17 @@ lx_planner_relayout_restickify_outputs: bool = _get_env_bool(
     "SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS", lx_planner_relayout
 )
 
-# Experimental research lane for non-primary matmul operand relayouts. These
-# are coordinate collectives such as multicast/gather/all-gather, but still keep
-# physical transfer derivation in Deeptools via dl-dsc coordinates.
+# Experimental research lane for matmul operand relayouts. These are coordinate
+# collectives such as multicast/gather/all-gather, but still keep physical
+# transfer derivation in Deeptools via dl-dsc coordinates.
 lx_planner_relayout_collectives: bool = _get_env_bool(
     "SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES", lx_planner_relayout
 )
 
-# Experimental metadata-only contract for Granite attention-value Tensor1
+# Experimental metadata-only contract for Granite/attention matmul operand
 # materialization. Requires lx_planner_relayout_collectives and records the
-# non-primary matmul operand as grouped all-gather/broadcast rather than
-# allowing it to look like resident scatter.
+# matmul operand as grouped all-gather/broadcast rather than allowing it to look
+# like resident scatter.
 lx_planner_relayout_matmul_operand_contract: bool = _get_env_bool(
     "SPYRE_LX_PLANNER_RELAYOUT_MATMUL_OPERAND_CONTRACT", lx_planner_relayout
 )

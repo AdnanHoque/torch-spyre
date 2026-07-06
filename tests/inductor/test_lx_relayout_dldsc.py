@@ -172,7 +172,7 @@ def test_coordinate_topology_classifies_all_gather():
     assert topology.transfer_count == 4
 
 
-def test_matmul_operand_contract_is_preferred_for_rhs_all_gather(monkeypatch):
+def test_matmul_operand_contract_is_preferred_for_matmul_operands(monkeypatch):
     monkeypatch.setattr(config, "lx_planner_relayout_collectives", True)
     monkeypatch.setattr(config, "lx_planner_relayout_matmul_operand_contract", True)
     topology = LXRelayoutTopology(
@@ -184,6 +184,7 @@ def test_matmul_operand_contract_is_preferred_for_rhs_all_gather(monkeypatch):
     )
 
     assert _prefer_matmul_operand_contract(1, topology)
+    assert _prefer_matmul_operand_contract(0, topology)
     multicast_topology = LXRelayoutTopology(
         "multicast",
         "one_to_many",
@@ -192,7 +193,7 @@ def test_matmul_operand_contract_is_preferred_for_rhs_all_gather(monkeypatch):
         transfer_count=32,
     )
     assert _prefer_matmul_operand_contract(1, multicast_topology)
-    assert not _prefer_matmul_operand_contract(0, topology)
+    assert _prefer_matmul_operand_contract(0, multicast_topology)
     assert not _prefer_matmul_operand_contract(None, topology)
 
 
@@ -233,6 +234,29 @@ def test_matmul_operand_contract_marks_tensor1_all_gather_not_scatter():
     assert contract["staged_destination"] == {
         "component_": "KERNEL",
         "operand_read_index": 1,
+        "scope": "matmul_transfer_loop",
+    }
+
+
+def test_matmul_operand_contract_marks_tensor0_lhs_all_gather():
+    contract = make_matmul_operand_allgather_contract(
+        producer_op="mul",
+        consumer_op="batchmatmul",
+        read_index=0,
+        producer_work_slice_dims={"0": 32},
+        consumer_tensor_work_slice_dims={"0": 8},
+        consumer_compute_work_slice_dims={"0": 8, "1": 4},
+        communication_class=COMM_CLASS_ALL_GATHER,
+    )
+
+    assert contract["kind"] == MATMUL_OPERAND_BROADCAST
+    assert contract["communication_class"] == COMM_CLASS_ALL_GATHER
+    assert contract["communication_pattern"] == MATMUL_OPERAND_ALLGATHER_REPLICATE
+    assert contract["operand_read_index"] == 0
+    assert contract["operand_role"] == "lhs"
+    assert contract["staged_destination"] == {
+        "component_": "KERNEL",
+        "operand_read_index": 0,
         "scope": "matmul_transfer_loop",
     }
 
