@@ -115,6 +115,20 @@ This strengthens the design conclusion:
 - Do not rely on direct ring writes into the KERNEL operand as the production path.
 - Implement a loop/tile-scoped staged path: source-layout gather/all-gather into LX, then local `ReStickifyOpLx` or equivalent KERNEL layout conversion, then matmul consumption.
 
+The non-direct IFN/materialization path also compiles structurally with the map-propagation patch:
+
+```text
+minimized flash subset:
+  /home/adnan/codex-isolated/flash_attention_comms_backend2162_20260706_005751/ddc_replay_unsafe_ifn_after_map_20260706_020215.log
+  RC=0
+
+full flash bundle:
+  /home/adnan/codex-isolated/flash_attention_comms_backend2162_20260706_005751/dxp_full_flash_unsafe_ifn_after_map_20260706_020311.log
+  RC=0
+```
+
+That does not make the unsafe IFN/full materialization path production-ready. It proves a useful intermediate point: Deeptools can accept and schedule the metadata when it avoids the direct KERNEL-neighbor shortcut. The remaining production work is to make that staged strategy loop/tile-scoped and capacity-safe rather than dense resident materialization.
+
 ## Current Architecture Takeaway
 
 The useful distinction is:
