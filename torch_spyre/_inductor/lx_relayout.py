@@ -51,6 +51,11 @@ LAYOUT_TRANSFORM_THEN_OPERAND_BROADCAST = "layout_transform_then_operand_broadca
 STAGED_LAYOUT_TRANSFORM_OPERAND_BROADCAST = (
     "staged_lx_restickify_then_loop_scoped_input_fetch"
 )
+# The realization pattern for a classified REDUCE / ALL_REDUCE edge realized as
+# an LSE ring-fold (G2 reduce lane).  The fold operator is owned by the frontend
+# (see lse_fold_ref.py); the backend owns the SFP lse_combine lowering.  The
+# priced schedule is F-DOMINATED -> reduce_tree_fold (ceil(log2 P) hops).
+LSE_RING_FOLD = "lse_ring_fold"
 
 COMM_CLASS_SCATTER = "scatter"
 COMM_CLASS_BROADCAST = "broadcast"
@@ -613,6 +618,51 @@ def plan_lx_relayouts(
             )
 
             if producer_has_partial:
+                # A partial-reduction producer (an op carrying a reduction-axis
+                # / Lk split) is ALREADY classified COMM_CLASS_REDUCE /
+                # COMM_CLASS_ALL_REDUCE above.  By default the plan is recorded
+                # UNREALIZED (a partial-reduction output needs a backend
+                # reduction-collective lowering, not pure LX relayout).  When
+                # the G2 reduce-lane knob is on AND the class is reduce-like,
+                # REALIZE it as an LSE ring-fold so G3 can price it as an
+                # F-dominated tree fold (comm_edge_from_plan already maps a
+                # reduce-like class -> a CommEdge with is_reduction=True).
+                is_reduce_like = communication_class in (
+                    COMM_CLASS_REDUCE,
+                    COMM_CLASS_ALL_REDUCE,
+                )
+                realize_reduce = (
+                    config.lx_planner_relayout_reduce and is_reduce_like
+                )
+                if realize_reduce:
+                    # The folded payload is the tiny, L-INDEPENDENT (m, l, A)
+                    # partial triple.  When a static tensor size is available we
+                    # attach it so comm_edge_from_plan prices a nonzero per-hop
+                    # payload; otherwise operand_bytes=0 (still correct — the
+                    # reduce is F-DOMINATED, see comm_cost._reduce_schedules).
+                    reduce_tensor_bytes = _static_buffer_nbytes(graph, dep.name)
+                    plan = LXRelayoutPlan(
+                        source_name=dep.name,
+                        producer_name=producer.get_name(),
+                        consumer_name=consumer.get_name(),
+                        kind=LSE_RING_FOLD,
+                        producer_core_count=producer_core_count,
+                        consumer_core_count=consumer_core_count,
+                        producer_core_id_to_device_slice=producer_core_slices,
+                        producer_work_slice_dims=producer_work_slice_dims,
+                        consumer_work_slice_dims=consumer_work_slice_dims,
+                        read_index=read_index,
+                        estimated_tensor_bytes=reduce_tensor_bytes,
+                        realized=True,
+                        communication_class=communication_class,
+                        communication_pattern=LSE_RING_FOLD,
+                        realization_strategy=LSE_RING_FOLD,
+                    )
+                    _record_plan(consumer, plan)
+                    setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
+                    planned.append(plan)
+                    continue
+
                 logger.debug(
                     "lx relayout skip: %s -> %s has partial reduction output",
                     producer.name,

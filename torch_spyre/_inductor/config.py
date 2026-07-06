@@ -64,6 +64,22 @@ lx_planner_relayout_collective_realization: Literal["resident", "loop_scoped"] =
     else "resident"
 )
 
+# Experimental research lane for the LSE ring-fold REDUCE collective (G2).
+# A partial-reduction producer (an op carrying a reduction-axis / Lk split) is
+# ALREADY classified COMM_CLASS_REDUCE / COMM_CLASS_ALL_REDUCE by the LX
+# relayout classifier, but its plan is recorded UNREALIZED by default
+# (partial reduction outputs need a backend reduction-collective lowering, not
+# pure LX relayout).  When this knob is on, the planner instead REALIZES the
+# classified reduce edge as an 'lse_ring_fold' plan carrying the LSE-combine
+# fold semantics (see lse_fold_ref.py) so G3 (comm_cost._reduce_schedules) can
+# price it as an F-dominated tree fold.  The BACKEND SFP lse_combine primitive
+# that lowers the fold is still gated (deeptools) — this only wires the
+# frontend classification/routing/pricing, so it is off by default until the
+# device primitive lands.
+lx_planner_relayout_reduce: bool = (
+    os.environ.get("SPYRE_LX_PLANNER_RELAYOUT_REDUCE", "0") == "1"
+)
+
 # Experimental research lane for layout-restickify spills.  This only makes
 # computed-source synthetic spyre.restickify outputs eligible for LX planning;
 # graph-input/weight restickifies are intentionally left to offline prelayout.
