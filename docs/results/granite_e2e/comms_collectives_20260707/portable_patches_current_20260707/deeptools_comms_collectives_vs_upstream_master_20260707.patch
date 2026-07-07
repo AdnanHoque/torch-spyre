@@ -3400,7 +3400,7 @@ index 2e4482af1..a7def4703 100644
    // DataDsc related fields..
    std::map<int, std::set<int>> prodConsList;  // key: prod, val: set of cons..
 diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
-index f09891ab9..102c5b855 100644
+index f09891ab9..75b3fade3 100644
 --- a/dxp/SdscRelayoutInsertion.cpp
 +++ b/dxp/SdscRelayoutInsertion.cpp
 @@ -1,8 +1,22 @@
@@ -3426,7 +3426,7 @@ index f09891ab9..102c5b855 100644
  
  // #define DEBUG_RELAYOUT 1
  
-@@ -17,6 +31,1893 @@ static DataFormats getDsFormat(double wl) {
+@@ -17,6 +31,1898 @@ static DataFormats getDsFormat(double wl) {
    return DataFormats::INVALID;
  }
  
@@ -4867,16 +4867,21 @@ index f09891ab9..102c5b855 100644
 +  std::vector<std::vector<GatheredPieceSpec>> chunks;
 +  std::vector<GatheredPieceSpec> currentChunk;
 +  std::map<int, int> currentChunkDestinationCoreCounts;
++  std::map<int, int> currentChunkSourceCoreCounts;
 +  for (const auto& piece : gatheredPieceSpecs) {
 +    if (!currentChunk.empty() &&
 +        (static_cast<int>(currentChunk.size()) >= maxGatherPiecesPerChunk ||
++         currentChunkSourceCoreCounts[piece.sourceCoreId] >=
++             maxGatherPiecesPerCorePerChunk ||
 +         currentChunkDestinationCoreCounts[piece.coreId] >=
 +             maxGatherPiecesPerCorePerChunk)) {
 +      chunks.push_back(currentChunk);
 +      currentChunk.clear();
 +      currentChunkDestinationCoreCounts.clear();
++      currentChunkSourceCoreCounts.clear();
 +    }
 +    currentChunk.push_back(piece);
++    currentChunkSourceCoreCounts[piece.sourceCoreId]++;
 +    currentChunkDestinationCoreCounts[piece.coreId]++;
 +  }
 +  if (!currentChunk.empty()) chunks.push_back(currentChunk);
@@ -5320,7 +5325,7 @@ index f09891ab9..102c5b855 100644
  void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
                               MemTrackBundle* memTrackers,
                               std::vector<SuperDsc*>& relayout_sdscs) {
-@@ -37,6 +1938,169 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -37,6 +1943,169 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          allocCoords.coreIdToWkSlice_ == sdsc->coreIdToWkSlice_)
        continue;
  
@@ -5490,7 +5495,7 @@ index f09891ab9..102c5b855 100644
  #ifdef DEBUG_RELAYOUT
      std::cout << "Inserting relayout for: " << lds.dsName_ << std::endl;
  #endif
-@@ -56,28 +2120,52 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -56,28 +2125,52 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
      relayout_sdsc->N_ = sdsc->N_;
      relayout_sdsc->target_ = sdsc->target_;
  
@@ -5545,7 +5550,7 @@ index f09891ab9..102c5b855 100644
      if (lx_space_found ||
          dldsc.computeOp_.at(0).opFuncName == OpFuncs::IDENTITY) {
  #ifdef DEBUG_RELAYOUT
-@@ -133,8 +2221,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -133,8 +2226,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          myLds.pdsName_ = "activation";
          myLds.wordLength = lds.wordLength;
          myLds.df = getDsFormat(lds.wordLength);
@@ -5555,7 +5560,7 @@ index f09891ab9..102c5b855 100644
  
          // Fill dimNames, layoutDimOrder_, dimToLayoutSize_ and validGap_
          auto& N_ = dldsc.N_;
-@@ -244,6 +2331,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -244,6 +2336,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          for (auto kv :
               (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
            for (auto kv2 : kv.second) {
@@ -5563,7 +5568,7 @@ index f09891ab9..102c5b855 100644
              wkslices_in_dim[kv2.first].insert(kv2.second);
            }
          }
-@@ -252,15 +2340,28 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -252,15 +2345,28 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
               (i == 0) ? sdsc->coreIdToWkSlice_ : allocCoords.coreIdToWkSlice_) {
            PieceInfo new_piece;
            for (auto kv2 : kv.second) {
@@ -5598,7 +5603,7 @@ index f09891ab9..102c5b855 100644
  
              // Fill validGap_
              new_piece.validGap_[dimName] = {
-@@ -276,16 +2377,14 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -276,16 +2382,14 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
            FoldDimProp* addr_fold_prop = new FoldDimProp{1, "time"};
            AddrHelper.buildMapDim(addr_fold_prop, 0);
            if (i == 1) {
@@ -5622,7 +5627,7 @@ index f09891ab9..102c5b855 100644
            } else {
              if (dldsc.computeOp_.at(0).opFuncName == OpFuncs::IDENTITY) {
                // If the op with incompatibility is an identity, no need to find
-@@ -302,13 +2401,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -302,13 +2406,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
              } else {
                // For the output piece, find an empty space in the lx
                auto& memTracker = lxTrackPerCore.at(kv.first);
@@ -5637,7 +5642,7 @@ index f09891ab9..102c5b855 100644
                DT_CHECK_MSG(stAddr >= 0, "Must find space in LX\n");
                new_piece.placement.at(SenComponents::LX)
                    .insertStAddr(stAddr, {0});
-@@ -345,6 +2439,24 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -345,6 +2444,24 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
            }
          }
        }
@@ -5662,7 +5667,7 @@ index f09891ab9..102c5b855 100644
      } else {
  #ifdef DEBUG_RELAYOUT
        std::cout << "Lx space not found, inserting stcdpHBM" << std::endl;
-@@ -476,7 +2588,6 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -476,7 +2593,6 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
          out_allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
  
          // find space in HBM for the output of relayout
@@ -5670,7 +5675,7 @@ index f09891ab9..102c5b855 100644
          auto hbm_stAddr = hbmTrack.checkAndAddDs(outLds.dsName_, "dynamic",
                                                   out_form_size, {ps});
          DT_CHECK_MSG(hbm_stAddr >= 0, "Must find space in HBM\n");
-@@ -516,6 +2627,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -516,6 +2632,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
              auto offset_addr = hbm_stAddr;
              for (auto kv : sdsc->coreIdToWkSlice_.at(coreid)) {
                if (sdsc->numWkSlicesPerDim_.at(kv.first) == 1) continue;
@@ -5678,7 +5683,7 @@ index f09891ab9..102c5b855 100644
                offset_addr += (kv.second *
                                (N_.primaryDimToVal_st(kv.first) /
                                 sdsc->numWkSlicesPerDim_.at(kv.first)) *
-@@ -563,4 +2675,4 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+@@ -563,4 +2680,4 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
    std::string filename = "origsdsc_debug_out.json";
    sdsc->exportJson(filename);
  #endif

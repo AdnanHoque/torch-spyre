@@ -1,6 +1,6 @@
 diff --git a/tests/configs/torch_spyre_tests/inductor/test_lx_relayout_dldsc_config.yaml b/tests/configs/torch_spyre_tests/inductor/test_lx_relayout_dldsc_config.yaml
 new file mode 100644
-index 0000000..768ed94
+index 00000000..768ed941
 --- /dev/null
 +++ b/tests/configs/torch_spyre_tests/inductor/test_lx_relayout_dldsc_config.yaml
 @@ -0,0 +1,4 @@
@@ -10,7 +10,7 @@ index 0000000..768ed94
 +      unlisted_test_mode: mandatory_success
 diff --git a/tests/inductor/test_layout_allgather_restickify_import_light.py b/tests/inductor/test_layout_allgather_restickify_import_light.py
 new file mode 100644
-index 0000000..1285154
+index 00000000..12851543
 --- /dev/null
 +++ b/tests/inductor/test_layout_allgather_restickify_import_light.py
 @@ -0,0 +1,91 @@
@@ -107,7 +107,7 @@ index 0000000..1285154
 +    assert classify_layout_allgather_restickify_sdsc_triplet(triplet) is None
 diff --git a/tests/inductor/test_lx_relayout_dldsc.py b/tests/inductor/test_lx_relayout_dldsc.py
 new file mode 100644
-index 0000000..b5d8795
+index 00000000..b5d87950
 --- /dev/null
 +++ b/tests/inductor/test_lx_relayout_dldsc.py
 @@ -0,0 +1,1348 @@
@@ -1461,7 +1461,7 @@ index 0000000..b5d8795
 +    assert not allocator._clone_output_good_for_lx_relayout(FakeGraph(), op)
 diff --git a/tests/inductor/test_scratchpad_graph_editor.py b/tests/inductor/test_scratchpad_graph_editor.py
 new file mode 100644
-index 0000000..7a126d6
+index 00000000..7a126d61
 --- /dev/null
 +++ b/tests/inductor/test_scratchpad_graph_editor.py
 @@ -0,0 +1,100 @@
@@ -1566,7 +1566,7 @@ index 0000000..7a126d6
 +if __name__ == "__main__":
 +    unittest.main()
 diff --git a/torch_spyre/_inductor/codegen/bundle.py b/torch_spyre/_inductor/codegen/bundle.py
-index c0e27aa..e999cf4 100644
+index c0e27aaa..e999cf4e 100644
 --- a/torch_spyre/_inductor/codegen/bundle.py
 +++ b/torch_spyre/_inductor/codegen/bundle.py
 @@ -48,6 +48,182 @@ logger = get_inductor_logger("sdsc_compile")
@@ -1796,7 +1796,7 @@ index c0e27aa..e999cf4 100644
              with open(os.path.join(output_dir, file_name), "w") as f:
                  logger.info(f"Generating {f.name}")
 diff --git a/torch_spyre/_inductor/codegen/compute_ops.py b/torch_spyre/_inductor/codegen/compute_ops.py
-index e3f1d9c..2f44f9b 100644
+index e3f1d9c1..2f44f9bc 100644
 --- a/torch_spyre/_inductor/codegen/compute_ops.py
 +++ b/torch_spyre/_inductor/codegen/compute_ops.py
 @@ -758,6 +758,7 @@ def generate_sdsc(
@@ -1818,7 +1818,7 @@ index e3f1d9c..2f44f9b 100644
                                  }
                                  for i, tensor in enumerate(sdsc_spec.args)
 diff --git a/torch_spyre/_inductor/codegen/superdsc.py b/torch_spyre/_inductor/codegen/superdsc.py
-index 3206680..d498292 100644
+index 32066800..d498292d 100644
 --- a/torch_spyre/_inductor/codegen/superdsc.py
 +++ b/torch_spyre/_inductor/codegen/superdsc.py
 @@ -28,6 +28,7 @@ from torch_spyre._inductor.constants import (
@@ -1960,7 +1960,7 @@ index 3206680..d498292 100644
          symbol_mapping,
      )
 diff --git a/torch_spyre/_inductor/config.py b/torch_spyre/_inductor/config.py
-index c945e76..c89d13b 100644
+index c945e760..67218e31 100644
 --- a/torch_spyre/_inductor/config.py
 +++ b/torch_spyre/_inductor/config.py
 @@ -38,7 +38,68 @@ allow_all_ops_in_lx_planning: bool = False
@@ -2010,7 +2010,7 @@ index c945e76..c89d13b 100644
 +lx_planner_relayout_max_matmul_operand_bytes: int = int(
 +    os.environ.get(
 +        "SPYRE_LX_PLANNER_RELAYOUT_MAX_MATMUL_OPERAND_BYTES",
-+        "4194304" if lx_planner_relayout else "0",
++        "1048576" if lx_planner_relayout else "0",
 +    )
 +)
 +
@@ -2034,7 +2034,7 @@ index c945e76..c89d13b 100644
  sencores: int = int(os.getenv("SENCORES", "32"))
  
 diff --git a/torch_spyre/_inductor/constants.py b/torch_spyre/_inductor/constants.py
-index 4dacb06..cdd595f 100644
+index 4dacb06a..cdd595f0 100644
 --- a/torch_spyre/_inductor/constants.py
 +++ b/torch_spyre/_inductor/constants.py
 @@ -15,6 +15,8 @@
@@ -2048,7 +2048,7 @@ index 4dacb06..cdd595f 100644
  # Reduction ops that cannot reduce along the stick dimension.
 diff --git a/torch_spyre/_inductor/layout_allgather_restickify.py b/torch_spyre/_inductor/layout_allgather_restickify.py
 new file mode 100644
-index 0000000..9139e32
+index 00000000..9139e328
 --- /dev/null
 +++ b/torch_spyre/_inductor/layout_allgather_restickify.py
 @@ -0,0 +1,260 @@
@@ -2314,7 +2314,7 @@ index 0000000..9139e32
 +    }
 diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
 new file mode 100644
-index 0000000..9927c86
+index 00000000..9927c86c
 --- /dev/null
 +++ b/torch_spyre/_inductor/lx_relayout.py
 @@ -0,0 +1,728 @@
@@ -3047,7 +3047,7 @@ index 0000000..9927c86
 +        logger.debug("planned %d LX relayout edge(s)", len(planned))
 +    return planned
 diff --git a/torch_spyre/_inductor/op_spec.py b/torch_spyre/_inductor/op_spec.py
-index 784f880..314009d 100644
+index 784f8807..314009d6 100644
 --- a/torch_spyre/_inductor/op_spec.py
 +++ b/torch_spyre/_inductor/op_spec.py
 @@ -50,6 +50,15 @@ class TensorArg:
@@ -3077,7 +3077,7 @@ index 784f880..314009d 100644
  
  @dataclasses.dataclass
 diff --git a/torch_spyre/_inductor/propagate_layouts.py b/torch_spyre/_inductor/propagate_layouts.py
-index 47531b7..d2d37ec 100644
+index 47531b7f..d2d37ec9 100644
 --- a/torch_spyre/_inductor/propagate_layouts.py
 +++ b/torch_spyre/_inductor/propagate_layouts.py
 @@ -681,8 +681,16 @@ def _multi_arg_pointwise_layouts(
@@ -3098,7 +3098,7 @@ index 47531b7..d2d37ec 100644
  
      # Try alternative layouts if no valid layouts found
 diff --git a/torch_spyre/_inductor/scratchpad/allocator.py b/torch_spyre/_inductor/scratchpad/allocator.py
-index d39c69c..ecf4e92 100644
+index d39c69c2..ecf4e92f 100644
 --- a/torch_spyre/_inductor/scratchpad/allocator.py
 +++ b/torch_spyre/_inductor/scratchpad/allocator.py
 @@ -65,6 +65,14 @@ from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
@@ -3373,7 +3373,7 @@ index d39c69c..ecf4e92 100644
          allocator = DefaultAllocator()
      allocator.plan_allocation(graph)
 diff --git a/torch_spyre/_inductor/scratchpad/graph_editor.py b/torch_spyre/_inductor/scratchpad/graph_editor.py
-index c8d6f50..d0e6f7c 100644
+index c8d6f50f..d0e6f7cf 100644
 --- a/torch_spyre/_inductor/scratchpad/graph_editor.py
 +++ b/torch_spyre/_inductor/scratchpad/graph_editor.py
 @@ -30,6 +30,7 @@ from torch._inductor.ir import (
@@ -3407,7 +3407,7 @@ index c8d6f50..d0e6f7c 100644
  
          if buffer.name == old_name:
 diff --git a/torch_spyre/_inductor/scratchpad/utils.py b/torch_spyre/_inductor/scratchpad/utils.py
-index 425e7f3..29d4333 100644
+index 425e7f31..29d43339 100644
 --- a/torch_spyre/_inductor/scratchpad/utils.py
 +++ b/torch_spyre/_inductor/scratchpad/utils.py
 @@ -25,6 +25,7 @@ import sympy
@@ -3442,7 +3442,7 @@ index 425e7f3..29d4333 100644
                  num_cores = writer_cores
              else:
 diff --git a/torch_spyre/_inductor/spyre_kernel.py b/torch_spyre/_inductor/spyre_kernel.py
-index bf1cbc6..f18d6bf 100644
+index bf1cbc6d..f18d6bf5 100644
 --- a/torch_spyre/_inductor/spyre_kernel.py
 +++ b/torch_spyre/_inductor/spyre_kernel.py
 @@ -36,6 +36,7 @@ from .constants import (
@@ -3776,7 +3776,7 @@ index bf1cbc6..f18d6bf 100644
                  buf.writeline("]")
              buf.writeline("),")
 diff --git a/torch_spyre/execution/async_compile.py b/torch_spyre/execution/async_compile.py
-index 964073e..8118c14 100644
+index 964073eb..8118c14f 100644
 --- a/torch_spyre/execution/async_compile.py
 +++ b/torch_spyre/execution/async_compile.py
 @@ -20,6 +20,7 @@ import subprocess

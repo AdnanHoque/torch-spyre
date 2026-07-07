@@ -1,87 +1,66 @@
-# Current Portable Prototype Patches - 2026-07-07
+# Portable gather/restickify patch bundle - 2026-07-07
 
-These patches are for applying the current communication-collectives prototype
-onto another engineer's local checkouts. They are not lean PR diffs.
+This directory contains portable patches for the current gather/restickify
+prototype.  These are intended for another developer to apply onto their own
+Torch/Deeptools checkouts for experimentation.  They are not PR-sized patches.
 
-## Torch Patch
+## Bases And Heads
 
-File:
+- Torch base: `665d0a6ca2cfd30d5cfb90dc98c9508273251483`
+- Torch head: `0c8ead7e12695e972c8f83a995c2ecd672dc2e4c`
+- Deeptools base: `ff1c7c676cdc8f319f90fe7baa666db2a1103327`
+- Deeptools head: `2afc2015bbf1138a045fad7d9ea222a85a0b4ed3`
 
-```text
-torch_spyre_gather_restickify_vs_upstream_main_20260707.patch
+## Apply
+
+From a Torch checkout based on current upstream main:
+
+```bash
+git apply /path/to/torch_spyre_gather_restickify_vs_upstream_main_20260707.patch
 ```
 
-Generated from:
+From a Deeptools checkout based on current upstream master:
 
-```text
-repo:   https://github.com/AdnanHoque/torch-spyre
-branch: gather-restickify
-head:   7a188395295947e7cfe51619f958df712e676c6f
-base:   upstream/main merge-base 7e45168f1d56ca1cec4889a3e19b14719dcdd23f
+```bash
+git apply /path/to/deeptools_comms_collectives_vs_upstream_master_20260707.patch
 ```
 
-Patch size:
+## Runtime Flag
 
-```text
-18 files changed, 3308 insertions(+), 26 deletions(-)
-```
-
-## Deeptools Patch
-
-File:
-
-```text
-deeptools_comms_collectives_vs_upstream_master_20260707.patch
-```
-
-Generated from:
-
-```text
-repo:   https://github.ibm.com/Adnan-Hoque1/deeptools
-branch: ah/comms-collectives
-head:   320630da56beb2bb12e6c96ae5b016127962353c
-base:   upstream/master merge-base 0a9da5eb19d08712383312bb7dec18fbd7caf711
-```
-
-Patch size:
-
-```text
-38 files changed, 11135 insertions(+), 219 deletions(-)
-```
-
-## Feature Flag
-
-For normal Torch-launched runs, the intended single public gate is:
+The public feature flag is:
 
 ```bash
 export SPYRE_LX_PLANNER_RELAYOUT=1
 ```
 
-For manual DXP replay that bypasses Torch, also set:
+For full Granite/full-LX local reproduction, keep using the split LX wrapper
+setup:
 
 ```bash
-export DXP_LX_FRAC_AVAIL=1
-```
-
-For historical full Granite/full-LX reproduction, the split-capacity setup is:
-
-```bash
-export SPYRE_LX_PLANNER_RELAYOUT=1
 export DXP_LX_FRAC_AVAIL=0
 export DXP_BACKEND_LX_FRAC_AVAIL=1
 ```
 
-Treat the LX fraction variables as runtime capacity setup, not feature gates.
+`DXP_BACKEND_LX_FRAC_AVAIL` must be translated to `DXP_LX_FRAC_AVAIL` inside the
+DXP subprocess wrapper.  This is a capacity/workaround setting, not a separate
+feature flag.
 
-## Status
+## Included Late Updates
 
-Use these patches to reproduce or extend the prototype, especially for flash
-attention structural spill removal and bounded communication-class tests.
+- Torch now defaults full-tensor matmul operand collectives to a 1 MiB bounded
+  cap under `SPYRE_LX_PLANNER_RELAYOUT=1`; larger full activations preserve the
+  HBM fallback until WSR/tile-scoping can make the movement bounded.
+- Deeptools gather/restickify chunking now also bounds source-core pressure, not
+  only destination-core pressure.
 
-Do not use these as the proposed final PR shape. The expected production path
-still needs:
+## Validation Snapshot
 
-- a refreshed latest-head full-flash replay artifact;
-- a clean regenerated bounded broadcast artifact;
-- fresh Granite S512 validation at current Torch/Deeptools heads;
-- explicit WSR boundary notes for oversized activations.
+- Torch focused tests:
+  `tests/inductor/test_lx_relayout_dldsc.py -k "matmul_operand_contract_budget or coordinate_topology"`
+  passed: 7/7.
+- Deeptools focused tests:
+  `DxpTestFixture.MatmulOperandBroadcast*:DxpTestFixture.CoreWorkDivIncomptLxRelayout*`
+  passed: 7/7.
+
+See `../granite_failclosed_checkpoint_20260707/` for the Granite fail-closed
+checkpoint that motivated the bounded default.
