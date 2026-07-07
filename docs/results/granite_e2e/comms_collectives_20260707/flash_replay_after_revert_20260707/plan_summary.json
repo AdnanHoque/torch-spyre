@@ -1,0 +1,12 @@
+{
+  "communication_pattern": {
+    "all_gather_replicate": 64
+  },
+  "count": 64,
+  "physical_lowering_status": {
+    "lowered_gather_then_restickify": 64
+  },
+  "realization_strategy": {
+    "gather_then_restickify": 64
+  }
+}
