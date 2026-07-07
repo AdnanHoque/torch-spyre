@@ -6,15 +6,17 @@ Date: 2026-07-07
 
 See `overnight_status_20260707_late.md`,
 `fanout_physical_fixture_probe_20260707/README.md`, and
-`bounded_broadcast_gather_restickify_20260707/README.md` for the latest state.
+`bounded_broadcast_gather_restickify_20260707/README.md`, and
+`bounded_multicast_gather_restickify_20260707/README.md` for the latest state.
 
-The current Deeptools branch is green at `071e293cf` for the focused bounded
+The current Deeptools branch is green at `3a4349e62` for the focused bounded
 cases:
 
 - `DxpTestFixture.CoreWorkDivIncomptLxRelayout*`
 - `DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed`
 - `DxpTestFixture.MatmulOperandBroadcastPattern*FailsClosed`
 - `DxpTestFixture.MatmulOperandBroadcastPatternBroadcastGatherRestickifyCompiles`
+- `DxpTestFixture.MatmulOperandBroadcastPatternMulticastGatherRestickifyCompiles`
 - `DxpTestFixture.PartialViewGather*`
 - `LayoutAllgatherRestickify.*`
 
@@ -25,10 +27,8 @@ The important clarification from the late probe is:
   full consumer;
 - flash/attention all-gather plus layout conversion is green through the staged
   `STCDPOpLx + ReStickifyOpLx` path;
-- bounded broadcast plus layout conversion before BMM now has a positive
-  Deeptools test using the same staged carrier;
-- multicast is still only fail-closed plus utility-plan covered. It needs a
-  positive physical fixture before we can call it proven end to end.
+- bounded broadcast and multicast plus layout conversion before BMM now have
+  positive Deeptools tests using the same staged carrier;
 
 This note records the current state of the Granite non-weight HBM spill removal work. The goal is to build the DLDSC LX communication substrate for Granite without duplicating WSR: classify communication edges in Torch, emit a compact DLDSC coordinate contract, and let Deeptools realize bounded LX-resident movement. Large full-tensor streaming remains WSR-owned.
 
@@ -37,8 +37,9 @@ This note records the current state of the Granite non-weight HBM spill removal 
 - **Scatter / permutation**: PR1 class is effectively done. Torch emits the tensor-vs-compute coordinate contract and Deeptools can realize bounded scatter/permutation relayout.
 - **Flash structural all-gather/gather-restickify**: the larger CDX prototype reaches the desired structural result on the flash probe: `ReStickifyOpHBM: 0`, `ReStickifyOpLx: 64`, `matmul_operand_broadcast: 32`, backend plans all `gather_then_restickify`.
 - **Bounded correctness**: old green bounded M16 probe previously passed with `ALLCLOSE True`, `MAX_DIFF 0.001953125`, `MISMATCH 0 / 4096`.
-- **Current blocker**: multicast still needs a physically valid positive
-  fixture. Full Granite spill removal still needs WSR/tile-scoping for oversized
+- **Current blocker**: real generated Torch/Granite SDSC validation is still
+  needed for the new fanout fixtures. Full Granite spill removal still needs
+  WSR/tile-scoping for oversized
   live activations, and reduce/all-reduce remain separate arithmetic
   communication classes.
 
@@ -81,14 +82,18 @@ for the staged `STCDPOpLx + ReStickifyOpLx` carrier. The old `wrong locale`
 failure is still useful history, but it is no longer the latest status for the
 bounded broadcast fixture.
 
+At `3a4349e62`, the same branch adds a bounded multicast positive test for the
+same carrier. That commit is test-only relative to the broadcast production
+gate.
+
 The old green backend patch stack contains two families of changes:
 
 1. **Materialized gather/restickify path**: emit `STCDPOpLx` gather into a temporary LX tensor, then `ReStickifyOpLx` into the consumer KERNEL layout before compute.
 2. **DL transfer-node/local-stage path**: represent ring transfers and local restickify stages directly in the schedule tree so DCC can lower L3 ring movement plus local LXLU/LXSU copies.
 
 The first path has prior bounded value correctness and now has a bounded
-broadcast compiler-positive test. The second path is a better long-term
-architecture, but still needs careful slimming and validation.
+broadcast and multicast compiler-positive tests. The second path is a better
+long-term architecture, but still needs careful slimming and validation.
 
 ## Runs And Logs Archived Here
 
@@ -100,6 +105,8 @@ architecture, but still needs careful slimming and validation.
 - `current_backend_working_tree_patch_20260707.patch`: current diagnostic backend working tree patch stack.
 - `bounded_broadcast_gather_restickify_20260707/`: latest positive bounded
   broadcast checkpoint at Deeptools `071e293cf`.
+- `bounded_multicast_gather_restickify_20260707/`: latest positive bounded
+  multicast checkpoint at Deeptools `3a4349e62`.
 
 ## Next Steps
 
@@ -108,7 +115,8 @@ architecture, but still needs careful slimming and validation.
    gather/restickify:
    - short-term: continue validating the materialized `STCDPOpLx +
      ReStickifyOpLx` path because it has bounded correctness evidence;
-   - next: add a physically valid multicast positive fixture;
+   - next: validate the fanout classes against real Torch/Granite-generated
+     SDSC bundles;
    - long-term: move toward the DL transfer-node/local-stage path so backend
      owns physical lowering without a deprecated data-op surface.
 3. Reproduce bounded M16/M32 value correctness after each backend change using the same `stable_matmul_operand_broadcast.py` probe.

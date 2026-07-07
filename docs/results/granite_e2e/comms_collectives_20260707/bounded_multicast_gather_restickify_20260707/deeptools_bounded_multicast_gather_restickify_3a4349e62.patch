@@ -1,0 +1,292 @@
+From 3a4349e62baff978faa21b8cbad376a524658398 Mon Sep 17 00:00:00 2001
+From: Adnan Hoque <adnan.hoque1@ibm.com>
+Date: Tue, 7 Jul 2026 17:23:13 +0000
+Subject: [PATCH] [DXP] test bounded multicast gather restickify
+
+Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dxp/test/dxp_unittest.cpp | 152 ++++++++++++++++++++++++++++----------
+ 1 file changed, 114 insertions(+), 38 deletions(-)
+
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index ea5d9df61..db0770d65 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -252,29 +252,77 @@ json11::Json::object filterCoreMap(const json11::Json& value,
+   return result;
+ }
+ 
+-json11::Json::object makeConsumerComputeMap(int coreCount) {
++int groupedCoreId(int core, int coreCount, int groupCount) {
++  return core * groupCount / coreCount;
++}
++
++json11::Json::object makeConsumerComputeMap(int coreCount,
++                                            int groupCount = 1) {
++  json11::Json::object result;
++  for (int core = 0; core < coreCount; ++core) {
++    result[std::to_string(core)] = json11::Json::object{
++        {"x", groupedCoreId(core, coreCount, groupCount)},
++        {"mb", 0},
++        {"out", 0},
++        {"in", 0}};
++  }
++  return result;
++}
++
++json11::Json::object makeTargetKernelMap(int coreCount, int groupCount = 1) {
++  json11::Json::object result;
++  for (int core = 0; core < coreCount; ++core) {
++    result[std::to_string(core)] = json11::Json::object{
++        {"out", 0},
++        {"in", 0},
++        {"x", groupedCoreId(core, coreCount, groupCount)}};
++  }
++  return result;
++}
++
++json11::Json::object makeSourceLxMap(int coreCount, int groupCount = 1) {
+   json11::Json::object result;
+   for (int core = 0; core < coreCount; ++core) {
+     result[std::to_string(core)] = json11::Json::object{
+-        {"x", 0}, {"mb", 0}, {"out", 0}, {"in", 0}};
++        {"mb", groupedCoreId(core, coreCount, groupCount)},
++        {"x", 0},
++        {"out", 0}};
+   }
+   return result;
+ }
+ 
+-json11::Json::object makeTargetKernelMap(int coreCount) {
++json11::Json::object makeMulticastConsumerComputeMap(int coreCount,
++                                                     int groupCount) {
+   json11::Json::object result;
+   for (int core = 0; core < coreCount; ++core) {
+     result[std::to_string(core)] = json11::Json::object{
+-        {"out", 0}, {"in", 0}, {"x", 0}};
++        {"x", 0},
++        {"mb", 0},
++        {"out", groupedCoreId(core, coreCount, groupCount)},
++        {"in", 0}};
+   }
+   return result;
+ }
+ 
+-json11::Json::object makeSourceLxMap(int coreCount) {
++json11::Json::object makeMulticastTargetKernelMap(int coreCount,
++                                                  int groupCount) {
+   json11::Json::object result;
+   for (int core = 0; core < coreCount; ++core) {
+     result[std::to_string(core)] = json11::Json::object{
+-        {"mb", 0}, {"x", 0}, {"out", 0}};
++        {"out", groupedCoreId(core, coreCount, groupCount)},
++        {"in", 0},
++        {"x", 0}};
++  }
++  return result;
++}
++
++json11::Json::object makeMulticastSourceLxMap(int coreCount, int groupCount) {
++  json11::Json::object result;
++  for (int core = 0; core < coreCount; ++core) {
++    result[std::to_string(core)] = json11::Json::object{
++        {"mb", 0},
++        {"x", groupedCoreId(core, coreCount, groupCount)},
++        {"out", 0}};
+   }
+   return result;
+ }
+@@ -324,23 +372,27 @@ json11::Json::object trimStartAddressCoreCorelet(const json11::Json& value,
+   return object;
+ }
+ 
+-json11::Json shrinkBatchMatmulShape(const json11::Json& value) {
++json11::Json shrinkBatchMatmulShape(const json11::Json& value,
++                                    int xExtent = 1, int outExtent = 64) {
+   auto object = value.object_items();
+-  object["x_"] = 1;
++  object["x_"] = xExtent;
+   object["mb_"] = 1;
+-  object["out_"] = 64;
++  object["out_"] = outExtent;
+   object["in_"] = 64;
+   return object;
+ }
+ 
+-json11::Json shrinkBatchMatmulDataStageParam(const json11::Json& value) {
++json11::Json shrinkBatchMatmulDataStageParam(const json11::Json& value,
++                                             int xExtent = 1,
++                                             int outExtent = 64) {
+   auto object = value.object_items();
+   for (auto& [_key, stage] : object) {
+     auto stageObject = stage.object_items();
+     for (const auto& field : {"ss_", "el_"}) {
+       const auto it = stageObject.find(field);
+       if (it != stageObject.end() && it->second.is_object()) {
+-        stageObject[field] = shrinkBatchMatmulShape(it->second);
++        stageObject[field] =
++            shrinkBatchMatmulShape(it->second, xExtent, outExtent);
+       }
+     }
+     stage = stageObject;
+@@ -448,7 +500,7 @@ void rewriteMatmulOperandBroadcastFixture(const std::string& testDataDir,
+ 
+ void rewriteMatmulOperandBroadcastGatherRestickifyFixture(
+     const std::string& testDataDir, const std::string& pattern) {
+-  ASSERT_EQ(pattern, "broadcast");
++  ASSERT_TRUE(pattern == "broadcast" || pattern == "multicast");
+ 
+   const auto path = std::filesystem::path(testDataDir) / "sdsc_20.json";
+   std::ifstream jsonIn(path);
+@@ -460,12 +512,23 @@ void rewriteMatmulOperandBroadcastGatherRestickifyFixture(
+   ASSERT_TRUE(json.is_object());
+   ASSERT_EQ(json.object_items().size(), 1);
+ 
+-  constexpr int producerCoreCount = 1;
+-  constexpr int consumerCoreCount = 2;
+-  constexpr int groupCount = 1;
+-  const auto consumerComputeMap = makeConsumerComputeMap(consumerCoreCount);
+-  const auto targetKernelMap = makeTargetKernelMap(consumerCoreCount);
+-  const auto sourceLxMap = makeSourceLxMap(producerCoreCount);
++  const bool isMulticast = pattern == "multicast";
++  const int producerCoreCount = isMulticast ? 2 : 1;
++  const int consumerCoreCount = isMulticast ? 4 : 2;
++  const int groupCount = isMulticast ? 2 : 1;
++  const int replicasPerGroup = consumerCoreCount / groupCount;
++  const int xExtent = 1;
++  const int outExtent = isMulticast ? 64 * groupCount : 64;
++  const auto consumerComputeMap =
++      isMulticast ? makeMulticastConsumerComputeMap(consumerCoreCount,
++                                                    groupCount)
++                  : makeConsumerComputeMap(consumerCoreCount, groupCount);
++  const auto targetKernelMap =
++      isMulticast ? makeMulticastTargetKernelMap(consumerCoreCount, groupCount)
++                  : makeTargetKernelMap(consumerCoreCount, groupCount);
++  const auto sourceLxMap =
++      isMulticast ? makeMulticastSourceLxMap(producerCoreCount, groupCount)
++                  : makeSourceLxMap(producerCoreCount, groupCount);
+ 
+   auto top = json.object_items();
+   const auto sdscName = top.begin()->first;
+@@ -473,10 +536,11 @@ void rewriteMatmulOperandBroadcastGatherRestickifyFixture(
+   sdsc["numCoresUsed_"] = consumerCoreCount;
+   sdsc["coreFoldProp_"] =
+       json11::Json::object{{"factor_", consumerCoreCount}, {"label_", "core"}};
+-  sdsc["N_"] = shrinkBatchMatmulShape(sdsc["N_"]);
+-  sdsc["unpadN_"] = shrinkBatchMatmulShape(sdsc["unpadN_"]);
++  sdsc["N_"] = shrinkBatchMatmulShape(sdsc["N_"], xExtent, outExtent);
++  sdsc["unpadN_"] =
++      shrinkBatchMatmulShape(sdsc["unpadN_"], xExtent, outExtent);
+   sdsc["numWkSlicesPerDim_"] = json11::Json::object{
+-      {"x", 1}, {"mb", 1}, {"out", 1}, {"in", 1}};
++      {"x", 1}, {"mb", 1}, {"out", groupCount}, {"in", 1}};
+   sdsc["coreIdToWkSlice_"] = consumerComputeMap;
+   sdsc["coreIdToDsc_"] = makeCoreIdToDscMap(consumerCoreCount);
+   sdsc["coreIdToDscSchedule"] = makeSingleDscSchedule(consumerCoreCount);
+@@ -488,10 +552,11 @@ void rewriteMatmulOperandBroadcastGatherRestickifyFixture(
+   const auto dscName = dscEntry.begin()->first;
+   auto dsc = dscEntry.begin()->second.object_items();
+   dsc["numCoresUsed_"] = consumerCoreCount;
+-  dsc["N_"] = shrinkBatchMatmulShape(dsc["N_"]);
+-  dsc["unpadN_"] = shrinkBatchMatmulShape(dsc["unpadN_"]);
++  dsc["N_"] = shrinkBatchMatmulShape(dsc["N_"], xExtent, outExtent);
++  dsc["unpadN_"] = shrinkBatchMatmulShape(dsc["unpadN_"], xExtent, outExtent);
+   dsc["dataStageParam_"] =
+-      shrinkBatchMatmulDataStageParam(dsc["dataStageParam_"]);
++      shrinkBatchMatmulDataStageParam(dsc["dataStageParam_"], xExtent,
++                                      outExtent);
+   dsc["coreIdsUsed_"] = makeCoreIds(consumerCoreCount);
+   auto scheduleTree = dsc["scheduleTree_"].array_items();
+   for (auto& node : scheduleTree) {
+@@ -531,8 +596,8 @@ void rewriteMatmulOperandBroadcastGatherRestickifyFixture(
+       json11::Json::object{{"group", consumerCoreCount}};
+   classification["group_count"] = groupCount;
+   classification["broadcast_group_count"] = groupCount;
+-  classification["replication_factor"] = consumerCoreCount;
+-  classification["max_fanout"] = consumerCoreCount;
++  classification["replication_factor"] = replicasPerGroup;
++  classification["max_fanout"] = replicasPerGroup;
+   classification["max_fanin"] = 1;
+   classification["transfer_count"] = consumerCoreCount;
+   classification["producer_core_id_to_device_slice"] =
+@@ -547,12 +612,12 @@ void rewriteMatmulOperandBroadcastGatherRestickifyFixture(
+   auto sourceTensor = classification["source_lx_tensor"].object_items();
+   ASSERT_FALSE(sourceTensor.empty());
+   sourceTensor["numWkSlicesPerDim_"] =
+-      json11::Json::object{{"mb", 1}, {"x", 1}, {"out", 1}};
++      json11::Json::object{{"mb", 1}, {"x", groupCount}, {"out", 1}};
+   sourceTensor["coreIdToWkSlice_"] = sourceLxMap;
+   sourceTensor["computeCoreIdToWkSlice_"] = sourceLxMap;
+   sourceTensor["coordinateInfo_"] = shrinkCoordinateInfoExtents(
+       sourceTensor["coordinateInfo_"],
+-      {{"x", 64}, {"out", 64}, {"mb", 1}});
++      {{"x", outExtent}, {"out", 64}, {"mb", 1}});
+   sourceTensor["startAddressCoreCorelet_"] = trimStartAddressCoreCorelet(
+       sourceTensor["startAddressCoreCorelet_"], producerCoreCount);
+   classification["source_lx_tensor"] = sourceTensor;
+@@ -560,12 +625,12 @@ void rewriteMatmulOperandBroadcastGatherRestickifyFixture(
+   auto targetTensor = classification["target_kernel_tensor"].object_items();
+   ASSERT_FALSE(targetTensor.empty());
+   targetTensor["numWkSlicesPerDim_"] = json11::Json::object{
+-      {"x", 1}, {"mb", 1}, {"out", 1}, {"in", 1}};
++      {"x", 1}, {"mb", 1}, {"out", groupCount}, {"in", 1}};
+   targetTensor["coreIdToWkSlice_"] = targetKernelMap;
+   targetTensor["computeCoreIdToWkSlice_"] = consumerComputeMap;
+   targetTensor["coordinateInfo_"] = shrinkCoordinateInfoExtents(
+       targetTensor["coordinateInfo_"],
+-      {{"out", 64}, {"in", 64}, {"x", 1}});
++      {{"out", outExtent}, {"in", 64}, {"x", 1}});
+   targetTensor["startAddressCoreCorelet_"] = trimStartAddressCoreCorelet(
+       targetTensor["startAddressCoreCorelet_"], consumerCoreCount);
+   classification["target_kernel_tensor"] = targetTensor;
+@@ -1351,11 +1416,9 @@ TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternMulticastFailsClosed) {
+   expectMatmulOperandBroadcastPatternFailsClosed(testDataDir, "multicast");
+ }
+ 
+-TEST_F(DxpTestFixture,
+-       MatmulOperandBroadcastPatternBroadcastGatherRestickifyCompiles) {
+-  SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
+-  rewriteMatmulOperandBroadcastGatherRestickifyFixture(testDataDir,
+-                                                       "broadcast");
++void expectMatmulOperandBroadcastGatherRestickifyCompiles(
++    const std::string& testDataDir, const std::string& pattern) {
++  rewriteMatmulOperandBroadcastGatherRestickifyFixture(testDataDir, pattern);
+ 
+   ScopedEnvVar restoreEnable(
+       "DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY");
+@@ -1398,9 +1461,8 @@ TEST_F(DxpTestFixture,
+     const std::string text = jsonBuf.str();
+     EXPECT_NE(text.find("matmul_operand_broadcast_backend_plan"),
+               std::string::npos);
+-    EXPECT_NE(text.find("broadcast"), std::string::npos);
+-    EXPECT_NE(text.find("lowered_gather_then_restickify"),
+-              std::string::npos);
++    EXPECT_NE(text.find(pattern), std::string::npos);
++    EXPECT_NE(text.find("lowered_gather_then_restickify"), std::string::npos);
+   }
+ 
+   bool sawGather = false;
+@@ -1424,6 +1486,20 @@ TEST_F(DxpTestFixture,
+       << "Expected staged ReStickifyOpLx in debug SDSC output";
+ }
+ 
++TEST_F(DxpTestFixture,
++       MatmulOperandBroadcastPatternBroadcastGatherRestickifyCompiles) {
++  SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
++  expectMatmulOperandBroadcastGatherRestickifyCompiles(testDataDir,
++                                                       "broadcast");
++}
++
++TEST_F(DxpTestFixture,
++       MatmulOperandBroadcastPatternMulticastGatherRestickifyCompiles) {
++  SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
++  expectMatmulOperandBroadcastGatherRestickifyCompiles(testDataDir,
++                                                       "multicast");
++}
++
+ TEST_F(DxpTestFixture, PartialViewGatherBoundedOffsetRelayoutCompiles) {
+   SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
+   rewritePartialViewGatherFixture(testDataDir);
+-- 
+2.52.0
+

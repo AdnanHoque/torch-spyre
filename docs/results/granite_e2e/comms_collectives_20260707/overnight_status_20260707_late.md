@@ -11,11 +11,12 @@ Green today:
 - partial-view gather;
 - flash/attention all-gather plus layout conversion through staged `STCDPOpLx + ReStickifyOpLx`;
 - bounded BMM-operand broadcast plus layout conversion through staged `STCDPOpLx + ReStickifyOpLx`;
+- bounded BMM-operand multicast plus layout conversion through staged `STCDPOpLx + ReStickifyOpLx`;
 - saved full flash DXP replay after the default chunk-policy and tensor-contract split guard fixes.
 
 Not done:
 
-- multicast with layout conversion before BMM;
+- real generated Torch/Granite SDSC validation for the new fanout fixtures;
 - reduce/all-reduce;
 - full Granite spill removal across oversized activations without WSR.
 
@@ -23,7 +24,7 @@ Not done:
 
 - Torch artifact branch: `ah/comms-collectives`
 - Deeptools implementation branch: `ah/comms-collectives`
-- Deeptools clean head: `071e293cf39dc58bd3b07bcda369a68520be62dd`
+- Deeptools clean head: `3a4349e62baff978faa21b8cbad376a524658398`
 - Torch prototype head on CDX: `bced14b49acf4fae92ef4df07d2f5229806c672b`
 
 ## Validation Run
@@ -34,14 +35,14 @@ Clean focused run on `adnan-cdx-spyre-dev-pf`:
 cd /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools
 ninja -C build-deeptools dxp_unit_test util_unit_test -j 16
 build-deeptools/dxp/dxp_unit_test \
-  --gtest_filter="DxpTestFixture.MatmulOperandBroadcastPatternBroadcastGatherRestickifyCompiles:DxpTestFixture.MatmulOperandBroadcastPattern*FailsClosed:DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed:DxpTestFixture.PartialViewGather*:DxpTestFixture.CoreWorkDivIncomptLxRelayout*"
+  --gtest_filter="DxpTestFixture.MatmulOperandBroadcastPattern*GatherRestickifyCompiles:DxpTestFixture.MatmulOperandBroadcastPattern*FailsClosed:DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed:DxpTestFixture.PartialViewGather*:DxpTestFixture.CoreWorkDivIncomptLxRelayout*"
 build-deeptools/util/util_unit_test \
   --gtest_filter="LayoutAllgatherRestickify.*"
 ```
 
 Result:
 
-- DXP focused tests: `9/9` passed.
+- DXP focused tests: `10/10` passed.
 - Utility tests: `32/32` passed.
 
 Artifacts:
@@ -52,6 +53,9 @@ Artifacts:
 - `bounded_broadcast_gather_restickify_20260707/focused_dxp_tests_071e293cf.log`
 - `bounded_broadcast_gather_restickify_20260707/focused_util_tests_071e293cf.log`
 - `bounded_broadcast_gather_restickify_20260707/bounded_broadcast_plan_071e293cf.json`
+- `bounded_multicast_gather_restickify_20260707/focused_dxp_tests_3a4349e62.log`
+- `bounded_multicast_gather_restickify_20260707/focused_util_tests_3a4349e62.log`
+- `bounded_multicast_gather_restickify_20260707/bounded_multicast_plan_3a4349e62.json`
 
 ## Fanout Finding
 
@@ -103,6 +107,14 @@ Follow-up completed later on 2026-07-07:
 - Added a unit-dim layout grouping fix so a size-1 source dimension can map to
   a size-1 target dimension.
 - Re-ran focused DXP/util tests green at Deeptools `071e293cf`.
+
+Second follow-up completed later on 2026-07-07:
+
+- Added a physically coherent bounded multicast fixture.
+- Kept the production path unchanged relative to `071e293cf`; this is a
+  test-only proof that the same staged carrier handles a coherent multicast
+  contract.
+- Re-ran focused DXP/util tests green at Deeptools `3a4349e62`.
 
 ## Current Architecture Read
 

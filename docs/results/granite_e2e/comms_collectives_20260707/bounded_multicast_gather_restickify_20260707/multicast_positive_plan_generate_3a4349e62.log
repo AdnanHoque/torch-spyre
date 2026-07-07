@@ -1,0 +1,11 @@
+Note: Google Test filter = DxpTestFixture.MatmulOperandBroadcastPatternMulticastGatherRestickifyCompiles
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from DxpTestFixture
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastGatherRestickifyCompiles
+[       OK ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastGatherRestickifyCompiles (250 ms)
+[----------] 1 test from DxpTestFixture (250 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (251 ms total)
+[  PASSED  ] 1 test.
