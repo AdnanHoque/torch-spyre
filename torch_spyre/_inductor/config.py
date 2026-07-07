@@ -80,7 +80,7 @@ lx_planner_relayout_layout_allgather_restickify: bool = _get_env_bool(
 lx_planner_relayout_max_matmul_operand_bytes: int = int(
     os.environ.get(
         "SPYRE_LX_PLANNER_RELAYOUT_MAX_MATMUL_OPERAND_BYTES",
-        "4194304" if lx_planner_relayout else "0",
+        "1048576" if lx_planner_relayout else "0",
     )
 )
 
