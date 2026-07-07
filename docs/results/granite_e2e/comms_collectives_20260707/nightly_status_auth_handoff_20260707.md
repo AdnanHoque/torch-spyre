@@ -194,6 +194,48 @@ If the latest replay hangs or times out, compare `23010446e`, `071e293cf`, and
 `3a4349e62` on the same saved bundle to isolate whether the slowdown comes from
 the bounded broadcast production change or unrelated build/runtime drift.
 
+## Local Source Sanity Check
+
+After pod auth expired, the exact remote branches were shallow-cloned locally
+and inspected.
+
+Torch `gather-restickify` at `bced14b4` matches the one-gate artifact:
+
+- `SPYRE_LX_PLANNER_RELAYOUT=1` enables the experimental subfeatures;
+- the older `SPYRE_LX_PLANNER_RELAYOUT_*` flags are compatibility/debug
+  overrides, not required user-facing gates;
+- Torch defaults frontend `DXP_LX_FRAC_AVAIL` to `0` when the relayout flag is
+  on;
+- Torch defaults backend `DXP_BACKEND_LX_FRAC_AVAIL` to `1` for the DXP
+  subprocess when the relayout flag is on.
+
+Deeptools `ah/comms-collectives` at `3a4349e62` matches the latest artifact
+claims:
+
+- `SPYRE_LX_PLANNER_RELAYOUT=1` enables the staged gather/restickify path;
+- `shouldUseMatmulOperandGatherRestickify(...)` selects
+  `gather_then_restickify` before the loop-scoped/kernel-neighbor path;
+- `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR` is not implicitly enabled
+  by `SPYRE_LX_PLANNER_RELAYOUT`;
+- latest commit `3a4349e62` is test-only;
+- the production changes after the last green full-flash replay are
+  `071e293` and `2301044`.
+
+Recent Deeptools commits:
+
+```text
+3a4349e [DXP] test bounded multicast gather restickify
+071e293 [DXP] enable bounded broadcast gather restickify
+2301044 [DXP] honor tensor split contract for relayout cells
+262b28c [DXP] tune matmul operand relayout chunking
+cd30c2a [DXP] add bounded gather restickify relayout path
+```
+
+This makes the latest saved full-flash replay failure mode more likely to be a
+run-completion/runtime issue than a classifier regression, because plan emission
+had already produced the expected `64` artifacts and the unsafe loop-scoped path
+is no longer selected by the public flag.
+
 ## Remaining Goal Gaps
 
 This work has not yet removed all non-weight Granite HBM spills.
