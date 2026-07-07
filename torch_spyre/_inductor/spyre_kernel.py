@@ -97,8 +97,6 @@ def _partial_view_gather_classifications(
             if has_plan
             else arg.lx_residency_core_id_to_wk_slice
         )
-        if producer_core_id_to_device_slice is None:
-            continue
         classification = dict(plan) if has_plan else {}
         classification.update(
             {
@@ -108,7 +106,6 @@ def _partial_view_gather_classifications(
                 "read_index": read_index,
                 "source_name": arg.source_name,
                 "source_offset_elems": str(arg.source_offset_elems),
-                "producer_core_id_to_device_slice": producer_core_id_to_device_slice,
                 "requires_staged_realization": True,
                 "materialization_pattern": "partial_view_gather_to_lx",
                 "layout_transform": {
@@ -127,6 +124,10 @@ def _partial_view_gather_classifications(
                 },
             }
         )
+        if producer_core_id_to_device_slice is not None:
+            classification[
+                "producer_core_id_to_device_slice"
+            ] = producer_core_id_to_device_slice
         if has_plan:
             classification["base_communication_pattern"] = plan.get(
                 "communication_pattern"
@@ -655,6 +656,16 @@ class SpyreKernel(Kernel[CSEVariable]):
             else None
         )
         has_relayout_plan = isinstance(relayout_plan, dict)
+        source_offset_elems = (
+            _constant_index_offset(index, it_space) if is_input else None
+        )
+        has_lx_partial_view_source = (
+            is_input
+            and "lx" in tensor.layout.allocation
+            and source_offset_elems is not None
+            and sympy.simplify(source_offset_elems) != 0
+        )
+        has_lx_relayout_source = has_relayout_plan or has_lx_partial_view_source
         tensor_arg = TensorArg(
             is_input,
             -1,
@@ -664,9 +675,9 @@ class SpyreKernel(Kernel[CSEVariable]):
             tensor.layout.allocation,
             per_tile_fixed=getattr(tensor.layout, "per_tile_fixed", False),
             name=opspec_name,
-            source_name=name if has_relayout_plan else None,
-            source_offset_elems=_constant_index_offset(index, it_space)
-            if has_relayout_plan
+            source_name=name if has_lx_relayout_source else None,
+            source_offset_elems=source_offset_elems
+            if has_lx_relayout_source
             else None,
         )
         if has_relayout_plan and "lx" in tensor.layout.allocation:
