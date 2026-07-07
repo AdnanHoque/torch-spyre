@@ -74,6 +74,16 @@ lx_planner_relayout_layout_allgather_restickify: bool = _get_env_bool(
     "SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY", lx_planner_relayout
 )
 
+# Bound full-tensor matmul operand collectives to the communication-substrate
+# lane. Larger activations require WSR/tile-scoping; preserving the HBM fallback
+# is safer than asking Deeptools to materialize a full dense gather in LX.
+lx_planner_relayout_max_matmul_operand_bytes: int = int(
+    os.environ.get(
+        "SPYRE_LX_PLANNER_RELAYOUT_MAX_MATMUL_OPERAND_BYTES",
+        "4194304" if lx_planner_relayout else "0",
+    )
+)
+
 # Frontend LX reservation fraction.  When LX relayout is enabled, default
 # Torch planning to full frontend LX and give the DXP subprocess its backend
 # relayout workspace separately via ``dxp_backend_lx_frac_avail`` below.

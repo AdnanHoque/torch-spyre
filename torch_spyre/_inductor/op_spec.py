@@ -50,6 +50,11 @@ class TensorArg:
         device_coordinates: The sympy Exprs that describe how elements in the Tensor are accessed.
                 Free variables in device_coordinates refer to entries in the OpSpec's iteration_space.
         allocation: If present, the offset in scratchpad memory assigned to the Tensor.
+        source_name: Optional producer buffer name for view inputs. Split/getitem
+                aliases are often folded away before OpSpec emission, but the
+                load still knows the base buffer.
+        source_offset_elems: Optional constant element offset from ``source_name``
+                for partial views such as fused SwiGLU gate/up halves.
         lx_residency_core_id_to_wk_slice: Optional producer tensor distribution
                 for an LX input whose physical ownership differs from this op's
                 compute distribution. Keys are device-dim indices at this stage;
@@ -64,6 +69,8 @@ class TensorArg:
     allocation: Any
     per_tile_fixed: bool = False
     name: str | None = None
+    source_name: str | None = None
+    source_offset_elems: Expr | None = None
     lx_residency_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
 
 
