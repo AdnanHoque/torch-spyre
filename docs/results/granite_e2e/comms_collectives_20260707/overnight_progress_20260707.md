@@ -163,3 +163,22 @@ Keep the narrow all-gather priority patch. Then decide the broadcast/multicast b
 2. Mark broadcast/multicast full-resident materialization as unsupported without WSR and add fail-closed diagnostics, while leaving smaller/tiled cases for WSR integration.
 
 Given the project scope, option 2 is cleaner unless a compact loop form is already available in Deeptools.
+
+## Latest Handoff
+
+The later checkpoint for the current branch head and the current pod-auth state is:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260707/nightly_status_auth_handoff_20260707.md
+```
+
+Short version:
+
+- bounded all-gather/replicate remains proven by the saved full-flash replay at
+  Deeptools `23010446e`;
+- bounded broadcast and multicast unit fixtures are green at Deeptools
+  `3a4349e62`;
+- latest-head full-flash replay at `3a4349e62` emitted `64` backend plans but
+  was interrupted before DXP completion;
+- local OpenShift auth expired and the browser login is waiting at the w3id
+  passkey step.
