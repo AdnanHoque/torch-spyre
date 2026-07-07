@@ -8,6 +8,8 @@ See `overnight_status_20260707_late.md`,
 `fanout_physical_fixture_probe_20260707/README.md`, and
 `bounded_broadcast_gather_restickify_20260707/README.md`, and
 `bounded_multicast_gather_restickify_20260707/README.md` for the latest state.
+The latest full saved-flash replay attempt is recorded in
+`full_flash_replay_latest_3a4349e62_attempt_20260707.md`.
 
 The current Deeptools branch is green at `3a4349e62` for the focused bounded
 cases:
@@ -107,6 +109,10 @@ long-term architecture, but still needs careful slimming and validation.
   broadcast checkpoint at Deeptools `071e293cf`.
 - `bounded_multicast_gather_restickify_20260707/`: latest positive bounded
   multicast checkpoint at Deeptools `3a4349e62`.
+- `full_flash_replay_latest_3a4349e62_attempt_20260707.md`: latest saved full
+  flash replay attempt. It emitted `64` backend plan artifacts but was
+  interrupted after a long silent DXP/DCC run, so full replay completion remains
+  unverified at `3a4349e62`.
 
 ## Next Steps
 
