@@ -20,7 +20,8 @@ Torch branch:
 
 ```text
 AdnanHoque/torch-spyre:gather-restickify
-commit de76531b inductor: bound matmul operand relayout contracts
+commit 99f95650 test: cover bounded matmul operand relayout budget
+base behavior commit de76531b inductor: bound matmul operand relayout contracts
 ```
 
 Deeptools branch:
@@ -33,6 +34,7 @@ commit c8c259061 [DXP] fail closed for oversized matmul operand relayout
 Patch files archived here:
 
 - `patches/torch_gather_restickify_bounded_operand_guard_de76531b.patch`
+- `patches/torch_bounded_operand_budget_tests_99f95650.patch`
 - `patches/deeptools_fail_closed_oversized_matmul_relayout_c8c259061.patch`
 
 ## Validation
@@ -41,6 +43,7 @@ Focused checks run on `adnan-cdx-spyre-dev-pf`:
 
 ```text
 Torch py_compile: passed
+Torch tests/inductor/test_lx_relayout_dldsc.py: 30/30 passed
 Deeptools LayoutAllgatherRestickify.*: 32/32 passed
 Deeptools CoreWorkDivIncomptLxRelayout*: 2/2 passed
 ```

@@ -1,12 +1,13 @@
 {
-  "torch_commit": "de76531b",
+  "torch_commit": "99f95650",
   "deeptools_commit": "c8c259061",
   "granite_run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_bounded_substrate_default4m_20260707_050254",
   "flash_run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_one_flag_gather_restickify_20260706_175419",
   "focused_checks": {
     "torch_py_compile": "passed",
     "deeptools_LayoutAllgatherRestickify": "32/32 passed",
-    "deeptools_CoreWorkDivIncomptLxRelayout": "2/2 passed"
+    "deeptools_CoreWorkDivIncomptLxRelayout": "2/2 passed",
+    "torch_lx_relayout_dldsc_pytest": "30/30 passed"
   },
   "granite_plan_rows": [
     {
@@ -109,5 +110,6 @@
     },
     "run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_one_flag_gather_restickify_20260706_175419",
     "sdsc_json_files": 550
-  }
+  },
+  "torch_behavior_commit": "de76531b"
 }
