@@ -1,0 +1,4 @@
+torch_branch=gather-restickify
+torch_head=102520820da890d6a62f781e86573f38dcc6f244
+date=2026-07-07T20:41:43+00:00
+Python 3.12.13

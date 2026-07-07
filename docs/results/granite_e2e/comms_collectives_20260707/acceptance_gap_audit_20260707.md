@@ -16,6 +16,25 @@ for a useful Granite/flash path.
 
 ## Current Test Evidence
 
+Latest acceptance validation at the current pushed heads is archived here:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260707/latest_acceptance_validation_20260707/
+```
+
+Results:
+
+```text
+Torch tests/inductor/test_lx_relayout_dldsc.py: 38 passed in 6.70s
+Deeptools LayoutAllgatherRestickify.*: 32 passed
+Deeptools DXP focused comms tests: 10 passed
+```
+
+The focused DXP set includes bounded broadcast, bounded multicast,
+partial-view gather, malformed partial-view gather fail-closed guards,
+oversized matmul-operand relayout fail-closed guards, and core-work-division
+LX relayout.
+
 The full Torch relayout test file now passes on the CDX pod at the current
 `gather-restickify` head:
 
@@ -49,7 +68,7 @@ docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260
 | Classify scatter/permutation | PR1 scatter branches and earlier scatter artifacts. | Complete for PR1 class. |
 | Classify all-gather/replicate | `flash_allgather_failclosed_checkpoint_20260707.md` records `all_gather_replicate` plans; Granite S512 checkpoint records two attention RHS all-gather/replicate handoffs; latest-head-equivalent saved full-flash DXP replay emits 64 all-gather/replicate plans. | Complete structurally for the current flash/attention class. |
 | Classify broadcast/multicast | Latest Deeptools fixtures generate bounded broadcast/multicast test coverage; Torch full relayout test file now passes planner-level and bundle/codegen DLDSC tests for both classes; regenerated bounded broadcast/multicast artifacts show gather-then-restickify lowering. | Complete for bounded fixtures and generic graph/planner/codegen metadata. No current Granite/flash useful-workload edge naturally classifies as bounded broadcast/multicast; current useful workload evidence is all-gather/replicate. |
-| Classify gather | `tests/inductor/test_lx_relayout_dldsc.py` now passes full-file validation including topology classification, generic DLDSC emission, and partial-view gather bundle enrichment; partial-view gather artifacts and offset guards exist under `partial_view_gather_*` and `fanout_physical_fixture_probe_20260707`. | Complete for bounded metadata/codegen and partial-view bundle enrichment; useful-workload value proof remains separate. |
+| Classify gather | `tests/inductor/test_lx_relayout_dldsc.py` now passes full-file validation including topology classification, generic DLDSC emission, and partial-view gather bundle enrichment; latest Deeptools focused DXP tests compile bounded partial-view gather and fail closed for missing/invalid offsets. | Complete for bounded metadata/codegen and bounded DXP compile. Useful-workload value proof remains separate from this substrate checkpoint. |
 | Torch emits DLDSC metadata for scatter | PR1 branch emits tensor-vs-compute distribution metadata consumed by Deeptools scatter relayout. | Complete for scatter. |
 | Torch emits DLDSC metadata for all-gather/replicate | Torch `gather-restickify` emits `matmul_operand_broadcast`/`all_gather_replicate` metadata for flash and Granite attention RHS handoffs. | Complete for current attention/flash class. |
 | Torch emits DLDSC metadata for broadcast/multicast | `tests/inductor/test_lx_relayout_dldsc.py` passes planner-level fake-graph tests and generic broadcast/multicast DLDSC emission tests through `compile_op_spec`. | Complete for generic planner/codegen metadata emission. |
@@ -57,6 +76,7 @@ docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260
 | Deeptools realizes bounded all-gather/replicate | Saved full-flash DXP replay passes at current Deeptools head `a5ff55eee` with `rc=0`, 64 backend plans, all `all_gather_replicate -> gather_then_restickify`. | Complete for bounded saved flash replay. |
 | Deeptools realizes bounded broadcast | Focused DXP/util tests pass, Deeptools `2ccd5ce` fixes one diagnostic cause of stale `stages`, `320630da` adds a guard test, and regenerated plan artifact cleanly shows `broadcast -> gather_then_restickify`. | Complete for bounded fixture. |
 | Deeptools realizes bounded multicast | Focused DXP/util tests pass at `3a4349e62`; bounded plan artifact archived. | Complete for bounded fixture. |
+| Deeptools realizes bounded gather | Latest focused DXP tests pass `PartialViewGatherBoundedOffsetRelayoutCompiles` and the missing/invalid source-offset fail-closed guards. | Complete for bounded partial-view gather. |
 | Unsupported or oversized cases fail closed/fallback | Fail-closed docs record direct broadcast/multicast wrong-locale avoidance, IBUFF boundary, chunk/cap behavior, and the Granite full-activation 1 MiB Torch fallback policy. Focused Deeptools negative tests pass in `MatmulOperandBroadcast*FailsClosed`. | Complete for current bounded-substrate scope. |
 | Artifacts identify removed Granite HBM spills | Granite S512 checkpoint records disabled/enabled SDSC counts and maps `sdsc_7` and `sdsc_15 -> sdsc_16` activation handoffs to on-chip movement. | Complete for the profiled `backend2162` run; needs refresh at latest branches. |
 | Artifacts identify remaining Granite HBM spills | Granite S512 checkpoint classifies remaining explicit `ReStickifyOpHBM` rows as weight-format rows. | Complete for that run. Keep weight restickifies out of comms scope. |
@@ -76,9 +96,12 @@ docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260
    passes the full `tests/inductor/test_lx_relayout_dldsc.py` file, including
    scatter, gather, broadcast, multicast, all-gather, matmul operand contracts,
    and partial-view gather bundle enrichment.
-5. **One public feature gate**: `SPYRE_LX_PLANNER_RELAYOUT=1` is the intended
+5. **Bounded partial-view gather**: latest Deeptools DXP focused tests compile
+   the bounded partial-view gather fixture and verify missing/invalid
+   source-offset metadata fails closed.
+6. **One public feature gate**: `SPYRE_LX_PLANNER_RELAYOUT=1` is the intended
    user-facing flag. Capacity knobs are runtime setup, not feature gates.
-6. **Plan artifact stage consistency**: Deeptools `2ccd5ce` refreshes emitted
+7. **Plan artifact stage consistency**: Deeptools `2ccd5ce` refreshes emitted
    `matmul_operand_broadcast` artifact stages after selecting the physical
    carrier, and `320630da` adds a focused test guard. This is observability
    cleanup, not new lowering functionality.
@@ -93,22 +116,16 @@ docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260
      broadcast/multicast. If a later Granite/WSR tile exposes natural bounded
      broadcast/multicast, reuse this substrate and add that workload artifact.
 
-2. **Gather useful workload/value boundary**:
-   - Generic gather metadata/codegen tests and partial-view gather guards exist,
-     and full Torch relayout tests now pass.
-   - Add a bounded patterned value test or point to a Granite edge where a
-     gather-like copy is actually realized.
-
-3. **Fresh Granite run at latest heads**:
+2. **Fresh Granite run at latest heads**:
    - The strongest Granite speed/SDSc proof is the `backend2162` S512 run.
-   - Current comms head has moved since then. Once auth is back, rerun Granite
-     S512 with one-gate setup and compare:
+   - Current comms head has moved since then. Rerun Granite S512 with one-gate
+     setup and compare:
      - explicit `ReStickifyOpHBM`;
      - `ReStickifyOpLx`;
      - backend plan count and plan classes;
      - kernel time and wall time.
 
-4. **WSR boundary**:
+3. **WSR boundary**:
    - Oversized full-tensor activation materialization should fail closed or fall
      back to HBM.
    - The comms branch should not build private streaming. It should identify
@@ -116,7 +133,7 @@ docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260
 
 ## Next Device Validation Order
 
-When OpenShift auth is restored, use this order:
+Use this order for the next device validation pass:
 
 1. **Flash Python compile probe**
    - Structural validation only.
@@ -138,13 +155,14 @@ When OpenShift auth is restored, use this order:
 
 ## Completion Bar
 
-Do not mark the goal complete until:
-
-- gather has either a useful-workload proof or a bounded value-oriented proof;
-- latest Granite artifacts identify every remaining non-weight HBM spill as
-  either removed, comm-substrate gap, or WSR/tile-scoping gap.
+Do not mark the goal complete until latest Granite artifacts identify every
+remaining non-weight HBM spill as either removed, a communication-substrate gap,
+or a WSR/tile-scoping gap.
 
 Broadcast/multicast are no longer the strict blocker for this checkpoint:
 generic Torch planner/codegen coverage is green, Deeptools bounded fixtures are
-green, and current Granite/flash useful edges observed so far are
-all-gather/replicate rather than bounded broadcast/multicast.
+green. Gather is also no longer a strict blocker for the bounded substrate:
+Torch generic/partial-view metadata is green, and Deeptools has a bounded
+partial-view gather DXP compile proof plus fail-closed guards. Current
+Granite/flash useful edges observed so far are all-gather/replicate or
+oversized all-gather/replicate rather than bounded broadcast/multicast.
