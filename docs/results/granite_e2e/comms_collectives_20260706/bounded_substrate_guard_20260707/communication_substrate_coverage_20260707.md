@@ -34,7 +34,8 @@ Deeptools:
 ```text
 repo: Adnan-Hoque1/deeptools
 branch: ah/comms-collectives
-head: 2fa9220a6 [DXP] realize bounded partial-view gather relayout
+head: 53ee16264 [DXP] assert partial-view gather source offset
+previous realization checkpoint: 2fa9220a6 [DXP] realize bounded partial-view gather relayout
 previous partial-view guard checkpoint: faa78233e [DXP] fail closed for partial-view gather relayout
 previous bounded-broadcast checkpoint: 9e9b20b42 [DXP] test bounded matmul operand broadcast patterns
 ```
@@ -52,9 +53,9 @@ Deeptools MatmulOperandBroadcastPattern*: 2/2 passed
 Deeptools CoreWorkDivIncomptLxRelayout*: 2/2 passed
 Deeptools MatmulOperandBroadcastChunkCapFailsClosed: passed
 Deeptools PartialViewGatherFailsClosedBeforeGenericLxRelayout at faa78233e: passed
-Deeptools PartialViewGatherBoundedOffsetRelayoutCompiles at 2fa9220a6: passed
-Combined DXP focused regression at 2fa9220a6: 6/6 passed
-LayoutAllgatherRestickify.* at 2fa9220a6: 32/32 passed
+Deeptools PartialViewGatherBoundedOffsetRelayoutCompiles at 53ee16264: passed and asserts offset-adjusted source LX address 156672
+Combined DXP focused regression at 53ee16264: 6/6 passed
+LayoutAllgatherRestickify.* at 53ee16264: 32/32 passed
 ```
 
 The partial-view Torch pytest could not be run in that exact CDX worktree
@@ -94,7 +95,7 @@ attention-side communication. It does not prove end-to-end Granite timing.
 | Scatter / permutation | N to N ownership reassignment, no duplication, no arithmetic | Covered by `LXRelayoutTopology` and `test_coordinate_topology_classifies_one_to_one_scatter`; generic relayout metadata records `kind=scatter` | Covered by generic core-work-division relayout tests `CoreWorkDivIncomptLxRelayout*` | PR1 scatter path and unit tests; not the main flash evidence path | Supported for bounded same-stick relayout, but current Granite/flash artifact set is not primarily exercising this class |
 | Broadcast | One source piece copied to all consumer cores, no arithmetic | Covered by topology classification and generic contract tests; matmul-operand path maps to `communication_pattern=broadcast` | Utility planner supports `grouped_broadcast`; DXP compile-positive fixture mutates the compact generated SDSC to a bounded 1-source / 32-consumer broadcast | `DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles` | Supported for bounded named matmul-operand broadcast |
 | Multicast | One source piece copied to a subset/cohort of consumer cores, no arithmetic | Covered by topology classification and generic contract tests; matmul-operand path maps to `communication_pattern=multicast` | Utility planner supports `grouped_multicast`; DXP compile-positive fixture mutates the compact generated SDSC to a bounded 4-source / 32-consumer grouped multicast | `DxpTestFixture.MatmulOperandBroadcastPatternMulticastCompiles` plus earlier synthetic value grouped fanout artifact | Supported for bounded named matmul-operand multicast |
-| Gather | Many distinct source pieces assembled onto one consumer core or compact set, no arithmetic | Covered by topology classification; `partial_view_gather` metadata now uses TensorArg source provenance and `source_offset_elems` | Generic fan-in cardinality is covered by `CoreWorkDivIncomptLxRelayoutCardinality`; named `partial_view_gather` now adjusts the source LX base by the producer subview offset for bounded same-layout relayout | `DxpTestFixture.PartialViewGatherBoundedOffsetRelayoutCompiles`; Torch helper smoke for `buf33 + 12800`; `partial_view_gather_bounded_relayout_20260707` | Generic bounded fan-in is covered; bounded offset-aware `partial_view_gather` now compiles through DXP. AIU value proof is still next |
+| Gather | Many distinct source pieces assembled onto one consumer core or compact set, no arithmetic | Covered by topology classification; `partial_view_gather` metadata now uses TensorArg source provenance and `source_offset_elems` | Generic fan-in cardinality is covered by `CoreWorkDivIncomptLxRelayoutCardinality`; named `partial_view_gather` now adjusts the source LX base by the producer subview offset for bounded same-layout relayout | `DxpTestFixture.PartialViewGatherBoundedOffsetRelayoutCompiles`; Torch helper smoke for `buf33 + 12800`; relayout SDSC assertion for source LX address `156672`; `partial_view_gather_bounded_relayout_20260707` | Generic bounded fan-in is covered; bounded offset-aware `partial_view_gather` now compiles through DXP. AIU value proof is still next |
 | All-gather / replicate | N source pieces replicated so each consumer cohort can see the needed pieces, no arithmetic | Covered by topology classification and matmul operand contracts using `matmul_operand_broadcast` plus `communication_pattern=all_gather_replicate` | Generic replicated cardinality is covered by `CoreWorkDivIncomptLxRelayoutCardinality`; staged matmul operand all-gather is covered by `LayoutAllgatherRestickify.*`, the DXP chunk-cap fail-closed fixture, flash structural run, and Granite bounded plan artifacts | Flash probe removes HBM restickify structurally; Granite bounded plans emit 64/256/1024 transfer cases | Strongest currently proven class |
 | Reduce / all-reduce | Many inputs combined arithmetically | Not in PR1 substrate scope | Needs an arithmetic reduction primitive, not just copy movement | None | Future work |
 

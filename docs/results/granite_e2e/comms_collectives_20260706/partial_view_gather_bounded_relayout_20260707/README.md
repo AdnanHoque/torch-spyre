@@ -34,13 +34,15 @@ Deeptools:
 ```text
 repo: Adnan-Hoque1/deeptools
 branch: ah/comms-collectives
-commit: 2fa9220a6 [DXP] realize bounded partial-view gather relayout
+commit: 53ee16264 [DXP] assert partial-view gather source offset
+previous realization commit: 2fa9220a6 [DXP] realize bounded partial-view gather relayout
 ```
 
 ## Archived Patches
 
 - `patches/torch_partial_view_gather_contract_enrichment_bced14b4.patch`
 - `patches/deeptools_bounded_partial_view_gather_2fa9220a6.patch`
+- `patches/deeptools_partial_view_gather_source_offset_assert_53ee16264.patch`
 
 ## Validation
 
@@ -76,11 +78,16 @@ Logs:
 
 - `logs/dxp_focused_regression_20260707.log`
 - `logs/layout_allgather_restickify_20260707.log`
+- `logs/dxp_focused_regression_after_offset_assert_20260707.log`
+- `logs/layout_allgather_restickify_after_offset_assert_20260707.log`
 
 ## What This Proves
 
 This proves the descriptor/DXP side can realize a bounded partial-view gather
-without dropping the producer subview offset.
+without dropping the producer subview offset. The latest DXP unit test also
+asserts that the generated relayout SDSC contains the offset-adjusted LX source
+address `156672` for the fixture source base `131072` plus
+`12800 * 2` bytes.
 
 Concretely, the backend no longer treats a producer view such as `buf33 +
 12800` as if it began at the base of `buf33`. The source base address used for

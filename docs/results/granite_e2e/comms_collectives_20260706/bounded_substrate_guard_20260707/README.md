@@ -30,7 +30,8 @@ Deeptools branch:
 
 ```text
 Adnan-Hoque1/deeptools:ah/comms-collectives
-commit 2fa9220a6 [DXP] realize bounded partial-view gather relayout
+commit 53ee16264 [DXP] assert partial-view gather source offset
+previous realization checkpoint 2fa9220a6 [DXP] realize bounded partial-view gather relayout
 previous partial-view guard checkpoint faa78233e [DXP] fail closed for partial-view gather relayout
 previous bounded-broadcast checkpoint 9e9b20b42 [DXP] test bounded matmul operand broadcast patterns
 base behavior commit c8c259061 [DXP] fail closed for oversized matmul operand relayout
@@ -53,6 +54,7 @@ The bounded offset-aware realization is archived in:
 
 - `../partial_view_gather_bounded_relayout_20260707/patches/torch_partial_view_gather_contract_enrichment_bced14b4.patch`
 - `../partial_view_gather_bounded_relayout_20260707/patches/deeptools_bounded_partial_view_gather_2fa9220a6.patch`
+- `../partial_view_gather_bounded_relayout_20260707/patches/deeptools_partial_view_gather_source_offset_assert_53ee16264.patch`
 
 ## Validation
 
@@ -68,9 +70,9 @@ Deeptools CoreWorkDivIncomptLxRelayout*: 2/2 passed
 Deeptools MatmulOperandBroadcastChunkCapFailsClosed: passed
 Deeptools MatmulOperandBroadcastPattern*: 2/2 passed
 Deeptools PartialViewGatherFailsClosedBeforeGenericLxRelayout: passed
-Deeptools PartialViewGatherBoundedOffsetRelayoutCompiles at 2fa9220a6: passed
-Combined DXP focused regression at 2fa9220a6: 6/6 passed
-LayoutAllgatherRestickify.* at 2fa9220a6: 32/32 passed
+Deeptools PartialViewGatherBoundedOffsetRelayoutCompiles at 53ee16264: passed and asserts source LX address 156672
+Combined DXP focused regression at 53ee16264: 6/6 passed
+LayoutAllgatherRestickify.* at 53ee16264: 32/32 passed
 ```
 
 Flash compile probe:

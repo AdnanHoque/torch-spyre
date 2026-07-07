@@ -1,0 +1,44 @@
+From 53ee16264194cc90a3f8e426c90eed4925b4c70b Mon Sep 17 00:00:00 2001
+From: Adnan Hoque <adnan.hoque1@ibm.com>
+Date: Tue, 7 Jul 2026 07:25:03 +0000
+Subject: [PATCH] [DXP] assert partial-view gather source offset
+
+Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dxp/test/dxp_unittest.cpp | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index 1e9c0973c..2eec78332 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -1076,6 +1076,26 @@ TEST_F(DxpTestFixture, PartialViewGatherBoundedOffsetRelayoutCompiles) {
+       "sdsc_20.out.json";
+   EXPECT_TRUE(std::filesystem::exists(debugJson))
+       << "Expected debug SDSC output at " << debugJson;
++
++  const auto relayoutJson =
++      std::filesystem::path(testDataDir) / "debug" /
++      "20_batchmatmul-Relayout0" / "20_batchmatmul-Relayout0.out.json";
++  EXPECT_TRUE(std::filesystem::exists(relayoutJson))
++      << "Expected relayout debug SDSC output at " << relayoutJson;
++  std::ifstream relayoutIn(relayoutJson);
++  std::ostringstream relayoutBuf;
++  relayoutBuf << relayoutIn.rdbuf();
++  const std::string relayoutText = relayoutBuf.str();
++  // The fixture source LX base is 131072 and the partial view starts at
++  // source_offset_elems=12800 with 2-byte elements, so the relayout source
++  // descriptor must read from 156672 instead of the producer allocation base.
++  EXPECT_NE(relayoutText.find("Tensor1-LxRelayout-inp"), std::string::npos)
++      << "Expected relayout input descriptor in " << relayoutJson;
++  EXPECT_NE(relayoutText.find("STCDPOpLx"), std::string::npos)
++      << "Expected LX transfer op in " << relayoutJson;
++  EXPECT_NE(relayoutText.find("156672"), std::string::npos)
++      << "Expected partial_view_gather relayout to use offset-adjusted source "
++         "LX address 156672";
+ }
+ 
+ TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayout) {
+-- 
+2.52.0
+
