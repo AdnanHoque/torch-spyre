@@ -9,7 +9,7 @@ for a useful Granite/flash path.
 | Component | Branch | SHA |
 | --- | --- | --- |
 | Torch artifacts | `AdnanHoque/torch-spyre:ah/comms-collectives` | current artifact branch |
-| Torch prototype | `AdnanHoque/torch-spyre:gather-restickify` | `bced14b49acf4fae92ef4df07d2f5229806c672b` |
+| Torch prototype | `AdnanHoque/torch-spyre:gather-restickify` | `7a18839f83d74d2c576f4c85585e11638d30c20b` |
 | Torch PR1 scatter | `AdnanHoque/torch-spyre:pr-lx-relayout-scatter` | `ba365fe6234527e17558520ab41e21d8c6c696e2` |
 | Deeptools collectives | `Adnan-Hoque1/deeptools:ah/comms-collectives` | `3a4349e62baff978faa21b8cbad376a524658398` |
 | Deeptools PR1 scatter | `Adnan-Hoque1/deeptools:pr-lx-relayout-dldsc-scatter` | `b8c09743c46505b4cac46b434b9eb3243ae0b685` |
@@ -39,14 +39,14 @@ test evidence, not a fresh local pytest result.
 | --- | --- | --- |
 | Classify scatter/permutation | PR1 scatter branches and earlier scatter artifacts. | Complete for PR1 class. |
 | Classify all-gather/replicate | `flash_allgather_failclosed_checkpoint_20260707.md` records `all_gather_replicate` plans; Granite S512 checkpoint records two attention RHS all-gather/replicate handoffs. | Complete structurally; latest-head full replay still needs re-run. |
-| Classify broadcast/multicast | Latest Deeptools fixtures generate `broadcast` and `multicast` plans under `bounded_broadcast_gather_restickify_20260707` and `bounded_multicast_gather_restickify_20260707`. | Complete for bounded synthetic fixtures; not yet proven on a real Granite/flash edge. |
+| Classify broadcast/multicast | Latest Deeptools fixtures generate bounded broadcast/multicast test coverage, and Torch now has planner-level metadata tests for both classes. One archived broadcast plan JSON is not a clean proof because it appears to carry stale/mislabeled plan fields. | Mostly complete structurally; regenerate clean broadcast artifact and still prove a real Granite/flash edge or mark it out of current workload scope. |
 | Classify gather | `tests/inductor/test_lx_relayout_dldsc.py` covers topology classification and generic DLDSC emission; partial-view gather artifacts and offset guards exist under `partial_view_gather_*` and `fanout_physical_fixture_probe_20260707`. | Complete for metadata/classification; useful-workload/value proof still partial. |
 | Torch emits DLDSC metadata for scatter | PR1 branch emits tensor-vs-compute distribution metadata consumed by Deeptools scatter relayout. | Complete for scatter. |
 | Torch emits DLDSC metadata for all-gather/replicate | Torch `gather-restickify` emits `matmul_operand_broadcast`/`all_gather_replicate` metadata for flash and Granite attention RHS handoffs. | Complete for current attention/flash class. |
-| Torch emits DLDSC metadata for broadcast/multicast | `tests/inductor/test_lx_relayout_dldsc.py` has generic broadcast and multicast DLDSC emission tests through `compile_op_spec`. | Complete for generic metadata emission; not yet proven from a full Torch graph/useful workload SDSC. |
+| Torch emits DLDSC metadata for broadcast/multicast | `tests/inductor/test_lx_relayout_dldsc.py` has generic broadcast and multicast DLDSC emission tests through `compile_op_spec`, plus planner-level fake-graph tests added in `7a18839f`. | Complete for generic planner/codegen metadata emission; not yet proven from a useful workload SDSC. |
 | Deeptools realizes bounded scatter | PR1 Deeptools branch and unit/device evidence. | Complete for bounded scatter. |
 | Deeptools realizes bounded all-gather/replicate | Saved full-flash DXP replay passed at `23010446e`; bounded M16 all-gather replay passed; chunk policy fixed IBUFF. | Complete at `23010446e`; latest head `3a4349e62` needs replay completion. |
-| Deeptools realizes bounded broadcast | Focused DXP/util tests pass at `071e293cf`; bounded plan artifact archived. | Complete for bounded fixture. |
+| Deeptools realizes bounded broadcast | Focused DXP/util tests pass at `071e293cf`; however the archived `bounded_broadcast_plan_071e293cf.json` should be regenerated because its plan fields do not cleanly read as broadcast/gather-then-restickify. | Test evidence exists; artifact proof needs refresh. |
 | Deeptools realizes bounded multicast | Focused DXP/util tests pass at `3a4349e62`; bounded plan artifact archived. | Complete for bounded fixture. |
 | Unsupported or oversized cases fail closed/fallback | Fail-closed docs record direct broadcast/multicast wrong-locale avoidance, IBUFF boundary, and chunk/cap behavior. | Mostly complete; needs a single current-head negative test summary after latest broadcast/multicast changes. |
 | Artifacts identify removed Granite HBM spills | Granite S512 checkpoint records disabled/enabled SDSC counts and maps `sdsc_7` and `sdsc_15 -> sdsc_16` activation handoffs to on-chip movement. | Complete for the profiled `backend2162` run; needs refresh at latest branches. |
@@ -60,7 +60,9 @@ test evidence, not a fresh local pytest result.
 2. **All-gather/replicate with layout restickify**: bounded and saved full-flash
    DXP evidence exists, with the old IBUFF failure addressed by chunk policy.
 3. **Bounded broadcast/multicast backend fixtures**: latest Deeptools branch has
-   green focused tests and archived plan artifacts.
+   green focused tests. The multicast artifact is clean; the broadcast artifact
+   should be regenerated because the archived JSON does not cleanly show the
+   expected broadcast/gather-then-restickify fields.
 4. **One public feature gate**: `SPYRE_LX_PLANNER_RELAYOUT=1` is the intended
    user-facing flag. Capacity knobs are runtime setup, not feature gates.
 
@@ -74,6 +76,8 @@ test evidence, not a fresh local pytest result.
 
 2. **Graph-produced broadcast/multicast useful workload**:
    - Generic Torch metadata/codegen tests already cover broadcast and multicast.
+   - Planner-level fake-graph tests for both classes were added in Torch
+     `gather-restickify` commit `7a18839f`.
    - Deeptools bounded fixtures are green.
    - We still need a full Torch graph/SDSC edge that naturally classifies as
      bounded broadcast or bounded multicast, or an explicit note that the
@@ -125,6 +129,10 @@ When OpenShift auth is restored, use this order:
    - If no real Granite edge appears, add a small full-graph bounded synthetic
      fixture so planner-produced SDSC metadata is proven, not only hand-built
      `OpSpec` metadata and backend fixtures.
+   - Regenerate the bounded broadcast backend plan artifact so it explicitly
+     shows `communication_pattern=broadcast` and
+     `realization_strategy=gather_then_restickify`, or document why the backend
+     canonicalizes this class differently.
 
 ## Completion Bar
 

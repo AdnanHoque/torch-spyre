@@ -17,8 +17,8 @@ As of this handoff:
 
 | Repo | Branch | SHA | Role |
 | --- | --- | --- | --- |
-| `AdnanHoque/torch-spyre` | `ah/comms-collectives` | current branch head; at least `1bc1db7b0e8087fd069fe09a80a61c88fd85b16d` | Artifact branch with docs, patches, run payloads, and handoffs. |
-| `AdnanHoque/torch-spyre` | `gather-restickify` | `bced14b49acf4fae92ef4df07d2f5229806c672b` | Torch prototype branch for flash/gather-restickify experiments. |
+| `AdnanHoque/torch-spyre` | `ah/comms-collectives` | current branch head; at least `3532cf0426b7d32a353a0a8e65d7eaa6a53a17df` | Artifact branch with docs, patches, run payloads, and handoffs. |
+| `AdnanHoque/torch-spyre` | `gather-restickify` | `7a18839f83d74d2c576f4c85585e11638d30c20b` | Torch prototype branch for flash/gather-restickify experiments. Adds planner-level tests for generic gather, broadcast, multicast, and all-gather relayout metadata. |
 | `AdnanHoque/torch-spyre` | `pr-lx-relayout-scatter` | `ba365fe6234527e17558520ab41e21d8c6c696e2` | PR1 scatter/permutation Torch branch. |
 | `AdnanHoque/torch-spyre` | `pr-lx-relayout-dldsc` | `a9a3bb505b966a3716d48854d1ecc22e46624476` | Older DLDSC/scatter exploration branch. |
 | `Adnan-Hoque1/deeptools` | `ah/comms-collectives` | `3a4349e62baff978faa21b8cbad376a524658398` | Current Deeptools communication-collectives branch. |
@@ -201,7 +201,7 @@ the bounded broadcast production change or unrelated build/runtime drift.
 After pod auth expired, the exact remote branches were shallow-cloned locally
 and inspected.
 
-Torch `gather-restickify` at `bced14b4` matches the one-gate artifact:
+Torch `gather-restickify` at `7a18839f` matches the one-gate artifact:
 
 - `SPYRE_LX_PLANNER_RELAYOUT=1` enables the experimental subfeatures;
 - the older `SPYRE_LX_PLANNER_RELAYOUT_*` flags are compatibility/debug
@@ -237,6 +237,52 @@ This makes the latest saved full-flash replay failure mode more likely to be a
 run-completion/runtime issue than a classifier regression, because plan emission
 had already produced the expected `64` artifacts and the unsafe loop-scoped path
 is no longer selected by the public flag.
+
+## Torch Planner-Level Test Update
+
+After the source sanity check, the Torch `gather-restickify` branch was updated
+to:
+
+```text
+7a18839f83d74d2c576f4c85585e11638d30c20b
+```
+
+The commit adds focused planner-level tests for generic copy collectives:
+
+- `test_planner_records_generic_gather_relayout`
+- `test_planner_records_generic_broadcast_relayout`
+- `test_planner_records_generic_multicast_relayout`
+- `test_planner_records_generic_all_gather_relayout`
+
+These tests call `plan_lx_relayouts(...)` directly on fake computed-buffer
+producer/consumer edges and assert that the recorded relayout payload contains
+the expected communication class, pattern, fan-in/fan-out counts, transfer
+count, and producer/consumer coordinate maps.
+
+Local Mac checks:
+
+```bash
+python3 -m py_compile tests/inductor/test_lx_relayout_dldsc.py
+python3 -m ruff check tests/inductor/test_lx_relayout_dldsc.py
+git diff --check
+```
+
+all passed. A local pytest run still cannot execute on the Mac because this
+shell does not have `torch` installed:
+
+```text
+ModuleNotFoundError: No module named 'torch'
+```
+
+Once pod auth is refreshed, run:
+
+```bash
+cd <torch-spyre-gather-restickify-checkout>
+git fetch origin gather-restickify
+git checkout gather-restickify
+git reset --hard origin/gather-restickify
+python -m pytest tests/inductor/test_lx_relayout_dldsc.py -q
+```
 
 ## Remaining Goal Gaps
 
