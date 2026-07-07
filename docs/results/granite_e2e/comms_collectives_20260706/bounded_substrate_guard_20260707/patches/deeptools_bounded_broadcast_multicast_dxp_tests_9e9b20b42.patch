@@ -1,0 +1,217 @@
+From 9e9b20b4299f2127956ba893b9b8b5db6eaf2541 Mon Sep 17 00:00:00 2001
+From: Adnan Hoque <adnan.hoque1@ibm.com>
+Date: Tue, 7 Jul 2026 06:13:02 +0000
+Subject: [PATCH] [DXP] test bounded matmul operand broadcast patterns
+
+Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dxp/test/dxp_unittest.cpp | 178 ++++++++++++++++++++++++++++++++------
+ 1 file changed, 153 insertions(+), 25 deletions(-)
+
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index 48822eab6..00b975c00 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -209,6 +209,144 @@ void makeOuterSdscDimDynamic(const std::string& testDataDir,
+   jsonOut << json11::Json(top).dump() << std::endl;
+ }
+ 
++struct ScopedEnvVar {
++  explicit ScopedEnvVar(const char* name) : name(name) {
++    const char* value = getenv(name);
++    if (value != nullptr) {
++      hadValue = true;
++      oldValue = value;
++    }
++  }
++
++  ~ScopedEnvVar() {
++    if (hadValue) {
++      setenv(name.c_str(), oldValue.c_str(), 1);
++    } else {
++      unsetenv(name.c_str());
++    }
++  }
++
++  std::string name;
++  bool hadValue = false;
++  std::string oldValue;
++};
++
++json11::Json::object makeGroupedMap(int coreCount, int groupCount) {
++  json11::Json::object result;
++  for (int core = 0; core < coreCount; ++core) {
++    result[std::to_string(core)] = json11::Json::object{
++        {"group", core * groupCount / coreCount}};
++  }
++  return result;
++}
++
++json11::Json::object filterCoreMap(const json11::Json& value,
++                                   int keepCoreCount) {
++  json11::Json::object result;
++  if (!value.is_object()) return result;
++  const auto object = value.object_items();
++  for (int core = 0; core < keepCoreCount; ++core) {
++    const auto it = object.find(std::to_string(core));
++    if (it != object.end()) result[it->first] = it->second;
++  }
++  return result;
++}
++
++void rewriteMatmulOperandBroadcastFixture(const std::string& testDataDir,
++                                          const std::string& pattern) {
++  const auto path = std::filesystem::path(testDataDir) / "sdsc_20.json";
++  std::ifstream jsonIn(path);
++  std::ostringstream jsonBuf;
++  jsonBuf << jsonIn.rdbuf();
++  std::string err;
++  auto json = json11::Json::parse(jsonBuf.str(), err);
++  ASSERT_TRUE(err.empty()) << "Failed to parse " << path << ": " << err;
++  ASSERT_TRUE(json.is_object());
++  ASSERT_EQ(json.object_items().size(), 1);
++
++  auto top = json.object_items();
++  const auto sdscName = top.begin()->first;
++  auto sdsc = top.begin()->second.object_items();
++  auto classifications = sdsc["lxRelayoutClassifications_"].array_items();
++  ASSERT_FALSE(classifications.empty());
++  auto classification = classifications.at(0).object_items();
++
++  int producerCoreCount = 0;
++  int groupCount = 0;
++  int fanout = 0;
++  if (pattern == "broadcast") {
++    producerCoreCount = 1;
++    groupCount = 1;
++    fanout = 32;
++  } else if (pattern == "multicast") {
++    producerCoreCount = 4;
++    groupCount = 4;
++    fanout = 8;
++  } else {
++    FAIL() << "Unsupported test pattern: " << pattern;
++  }
++
++  classification["communication_class"] = pattern;
++  classification["communication_pattern"] = pattern;
++  classification["producer_core_count"] = producerCoreCount;
++  classification["consumer_core_count"] = 32;
++  classification["producer_work_slice_dims"] = json11::Json::object{
++      {"group", producerCoreCount}};
++  classification["consumer_work_slice_dims"] = json11::Json::object{
++      {"group", 32}};
++  classification["consumer_tensor_work_slice_dims"] = json11::Json::object{
++      {"group", groupCount}};
++  classification["consumer_compute_work_slice_dims"] = json11::Json::object{
++      {"group", 32}};
++  classification["group_count"] = groupCount;
++  classification["broadcast_group_count"] = groupCount;
++  classification["replication_factor"] = fanout;
++  classification["max_fanout"] = fanout;
++  classification["max_fanin"] = 1;
++  classification["transfer_count"] = 32;
++  classification["producer_core_id_to_device_slice"] =
++      makeGroupedMap(producerCoreCount, groupCount);
++  classification["consumer_core_id_to_device_slice"] =
++      makeGroupedMap(32, groupCount);
++
++  auto sourceTensor = classification["source_lx_tensor"].object_items();
++  if (!sourceTensor.empty()) {
++    const auto sourceCoreMap =
++        filterCoreMap(sourceTensor["coreIdToWkSlice_"], producerCoreCount);
++    if (!sourceCoreMap.empty()) {
++      sourceTensor["coreIdToWkSlice_"] = sourceCoreMap;
++      classification["source_lx_tensor"] = sourceTensor;
++    }
++  }
++
++  classifications.at(0) = classification;
++  sdsc["lxRelayoutClassifications_"] = classifications;
++  top[sdscName] = sdsc;
++
++  std::ofstream jsonOut(path);
++  jsonOut << json11::Json(top).dump() << std::endl;
++}
++
++void runMatmulOperandBroadcastPatternCase(const std::string& testDataDir,
++                                          const std::string& pattern) {
++  rewriteMatmulOperandBroadcastFixture(testDataDir, pattern);
++
++  ScopedEnvVar restoreRelayout("SPYRE_LX_PLANNER_RELAYOUT");
++  ScopedEnvVar restoreCap("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS");
++  ScopedEnvVar restoreFrac("DXP_LX_FRAC_AVAIL");
++
++  setenv("SPYRE_LX_PLANNER_RELAYOUT", "1", 1);
++  setenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS", "4", 1);
++  setenv("DXP_LX_FRAC_AVAIL", "1", 1);
++
++  SenTargets target = SenTargets::SENTIENT;
++  DesignSpaceConfigGlobal dscGlobal(target);
++  Dxp dxp(dscGlobal);
++  dxp.standalone = true;
++  dxp.debug = true;
++  dxp.runDxp(testDataDir);
++}
++
+ void runCoreWorkDivRelayoutCase(
+     const std::string& testDataDir,
+     const json11::Json::object& producerCoreIdToWkSlice,
+@@ -838,32 +976,10 @@ TEST_F(DxpTestFixture, LoopExecSencore1Bundle) {
+ TEST_F(DxpTestFixture, MatmulOperandBroadcastChunkCapFailsClosed) {
+   SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
+ 
+-  struct ScopedEnv {
+-    explicit ScopedEnv(const char* name) : name(name) {
+-      const char* value = getenv(name);
+-      if (value != nullptr) {
+-        hadValue = true;
+-        oldValue = value;
+-      }
+-    }
+-
+-    ~ScopedEnv() {
+-      if (hadValue) {
+-        setenv(name.c_str(), oldValue.c_str(), 1);
+-      } else {
+-        unsetenv(name.c_str());
+-      }
+-    }
+-
+-    std::string name;
+-    bool hadValue = false;
+-    std::string oldValue;
+-  };
+-
+-  ScopedEnv restoreEnable(
++  ScopedEnvVar restoreEnable(
+       "DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY");
+-  ScopedEnv restoreCap("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS");
+-  ScopedEnv restoreFrac("DXP_LX_FRAC_AVAIL");
++  ScopedEnvVar restoreCap("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS");
++  ScopedEnvVar restoreFrac("DXP_LX_FRAC_AVAIL");
+ 
+   setenv("DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY", "1", 1);
+   setenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS", "1", 1);
+@@ -894,6 +1010,18 @@ TEST_F(DxpTestFixture, MatmulOperandBroadcastChunkCapFailsClosed) {
+   }
+ }
+ 
++TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternBroadcastCompiles) {
++  SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
++
++  runMatmulOperandBroadcastPatternCase(testDataDir, "broadcast");
++}
++
++TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternMulticastCompiles) {
++  SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
++
++  runMatmulOperandBroadcastPatternCase(testDataDir, "multicast");
++}
++
+ TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayout) {
+   // The test should be launched with env var DEEPTOOLS_PATH set correctly.
+   // Verifies that running dxp in bundle mode with debug + dumpSpyreCode on
+-- 
+2.52.0
+

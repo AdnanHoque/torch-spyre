@@ -28,7 +28,7 @@ Deeptools branch:
 
 ```text
 Adnan-Hoque1/deeptools:ah/comms-collectives
-commit 61ffb6b3a [DXP] test matmul operand relayout chunk cap
+commit 9e9b20b42 [DXP] test bounded matmul operand broadcast patterns
 base behavior commit c8c259061 [DXP] fail closed for oversized matmul operand relayout
 ```
 
@@ -38,6 +38,7 @@ Patch files archived here:
 - `patches/torch_bounded_operand_budget_tests_99f95650.patch`
 - `patches/deeptools_fail_closed_oversized_matmul_relayout_c8c259061.patch`
 - `patches/deeptools_dxp_chunk_cap_fixture_61ffb6b3a.patch`
+- `patches/deeptools_bounded_broadcast_multicast_dxp_tests_9e9b20b42.patch`
 
 ## Validation
 
@@ -49,6 +50,7 @@ Torch tests/inductor/test_lx_relayout_dldsc.py: 30/30 passed
 Deeptools LayoutAllgatherRestickify.*: 32/32 passed
 Deeptools CoreWorkDivIncomptLxRelayout*: 2/2 passed
 Deeptools MatmulOperandBroadcastChunkCapFailsClosed: passed
+Deeptools MatmulOperandBroadcastPattern*: 2/2 passed
 ```
 
 Flash compile probe:
@@ -134,7 +136,11 @@ High-level readout:
 
 That matters for the MLP down-projection case: it should not be made to pass by keeping only the first few chunks. It should fall back or wait for WSR tile-scoping.
 
-Backend regression coverage now includes `DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed`, which replays a compact generated `matmul_operand_broadcast` SDSC fixture with `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS=1` and verifies that DXP rejects the case with the explicit fail-closed message instead of truncating movement.
+Backend regression coverage now includes:
+
+- `DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed`, which replays a compact generated `matmul_operand_broadcast` SDSC fixture with `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS=1` and verifies that DXP rejects the case with the explicit fail-closed message instead of truncating movement.
+- `DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles`, which rewrites the same compact SDSC fixture into a bounded one-source / 32-consumer `communication_pattern=broadcast` case and verifies DXP accepts it.
+- `DxpTestFixture.MatmulOperandBroadcastPatternMulticastCompiles`, which rewrites the fixture into a bounded four-source / 32-consumer grouped `communication_pattern=multicast` case and verifies DXP accepts it.
 
 ## Reproduction Notes
 
@@ -204,4 +210,3 @@ The next substrate work is not full-tensor streaming. The next useful steps are:
 2. Add value-oriented bounded synthetic tests for each class where possible.
 3. For any full Granite edge that still spills because the live tensor is too large, label it as WSR/tile-scoping unless the bounded-tile version itself fails.
 4. After WSR provides smaller live tiles, rerun the same communication substrate against the tile-scoped Granite graph.
-

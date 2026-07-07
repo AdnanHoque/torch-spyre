@@ -1,6 +1,6 @@
 {
   "torch_commit": "99f95650",
-  "deeptools_commit": "61ffb6b3a",
+  "deeptools_commit": "9e9b20b42",
   "granite_run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_bounded_substrate_default4m_20260707_050254",
   "flash_run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_one_flag_gather_restickify_20260706_175419",
   "focused_checks": {
@@ -9,7 +9,8 @@
     "deeptools_CoreWorkDivIncomptLxRelayout": "2/2 passed",
     "torch_lx_relayout_dldsc_pytest": "30/30 passed",
     "deeptools_MatmulOperandBroadcastChunkCapFailsClosed": "passed",
-    "deeptools_dxp_relayout_tests": "3/3 passed"
+    "deeptools_dxp_relayout_tests": "5/5 passed",
+    "deeptools_MatmulOperandBroadcastPattern": "2/2 passed"
   },
   "granite_plan_rows": [
     {
@@ -114,5 +115,6 @@
     "sdsc_json_files": 550
   },
   "torch_behavior_commit": "de76531b",
-  "deeptools_behavior_commit": "c8c259061"
+  "deeptools_behavior_commit": "c8c259061",
+  "deeptools_positive_broadcast_multicast_commit": "9e9b20b42"
 }
