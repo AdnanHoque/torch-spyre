@@ -1,0 +1,534 @@
+diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+index 0d4601b87..b024c9785 100644
+--- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
++++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+@@ -54,7 +54,8 @@ static bool lxPlannerRelayoutEnabled() {
+ }
+ 
+ static bool matmulOperandKernelNeighborRelayoutEnabled() {
+-  return envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++  return lxPlannerRelayoutEnabled() ||
++         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
+ }
+ 
+ static bool mixedHbmIfnRelayoutEnabled() {
+@@ -496,6 +497,99 @@ static dsc2::AllocateNode* findFoldedLxAllocationForLds(
+   return nullptr;
+ }
+ 
++static bool parseCoreIdFromFoldKey(const std::string& key, int* coreId) {
++  const auto begin = key.find('[');
++  if (begin == std::string::npos) return false;
++  const char* start = key.c_str() + begin + 1;
++  char* end = nullptr;
++  const long parsed = std::strtol(start, &end, 10);
++  if (end == start || parsed < 0) return false;
++  *coreId = static_cast<int>(parsed);
++  return true;
++}
++
++static bool jsonNumberOrStringToInt64(const json11::Json& value,
++                                      int64_t* parsed) {
++  if (value.is_number()) {
++    *parsed = static_cast<int64_t>(value.number_value());
++    return true;
++  }
++  if (!value.is_string()) return false;
++  char* end = nullptr;
++  const long long result = std::strtoll(value.string_value().c_str(), &end, 10);
++  if (end == value.string_value().c_str() || *end != 0) return false;
++  *parsed = static_cast<int64_t>(result);
++  return true;
++}
++
++static bool parseEmbeddedSourceLxTensorMetadata(
++    const std::map<std::string, std::string>& fields,
++    std::map<int, std::map<PrimaryDimTypes, int>>* coreIdToWkSlice,
++    std::map<int, int64_t>* startAddressByCore, std::string* reason) {
++  coreIdToWkSlice->clear();
++  startAddressByCore->clear();
++
++  const auto tensorIt = fields.find("source_lx_tensor");
++  if (tensorIt == fields.end()) {
++    *reason = "missing source_lx_tensor metadata";
++    return false;
++  }
++
++  std::string parseError;
++  const auto tensor = json11::Json::parse(tensorIt->second, parseError);
++  if (!parseError.empty() || !tensor.is_object()) {
++    *reason = "invalid source_lx_tensor JSON";
++    return false;
++  }
++
++  const auto slices = tensor["coreIdToWkSlice_"];
++  if (!slices.is_object()) {
++    *reason = "source_lx_tensor missing coreIdToWkSlice_";
++    return false;
++  }
++  for (const auto& [coreString, coordJson] : slices.object_items()) {
++    char* end = nullptr;
++    const long core = std::strtol(coreString.c_str(), &end, 10);
++    if (end == coreString.c_str() || *end != 0 || core < 0 ||
++        !coordJson.is_object()) {
++      *reason = "invalid source_lx_tensor coreIdToWkSlice_ entry";
++      return false;
++    }
++    auto& coord = (*coreIdToWkSlice)[static_cast<int>(core)];
++    for (const auto& [dimString, value] : coordJson.object_items()) {
++      const auto dimIt = EnumsConversion::stringToPrimaryDim.find(dimString);
++      if (dimIt == EnumsConversion::stringToPrimaryDim.end() ||
++          !value.is_number()) {
++        *reason = "invalid source_lx_tensor coordinate dim";
++        return false;
++      }
++      coord[dimIt->second] = static_cast<int>(value.number_value());
++    }
++  }
++
++  const auto addressData = tensor["startAddressCoreCorelet_"]["data_"];
++  if (!addressData.is_object()) {
++    *reason = "source_lx_tensor missing startAddressCoreCorelet_ data";
++    return false;
++  }
++  for (const auto& [foldKey, addressJson] : addressData.object_items()) {
++    int core = -1;
++    int64_t address = -1;
++    if (!parseCoreIdFromFoldKey(foldKey, &core) ||
++        !jsonNumberOrStringToInt64(addressJson, &address)) {
++      *reason = "invalid source_lx_tensor start address entry";
++      return false;
++    }
++    (*startAddressByCore)[core] = address;
++  }
++
++  if (coreIdToWkSlice->empty() || startAddressByCore->empty()) {
++    *reason = "empty source_lx_tensor metadata";
++    return false;
++  }
++  return true;
++}
++
+ static bool valuesMatchForAllCommonCores(
+     const CoreDeviceSliceMap& deviceSlices,
+     const std::map<int, std::map<PrimaryDimTypes, int>>& wkSlices,
+@@ -572,15 +666,21 @@ static bool seedMatmulOperandBroadcastDestinationCoordinates(
+     return false;
+   }
+ 
++  std::map<int, std::map<PrimaryDimTypes, int>> embeddedSourceWkSlices;
++  std::map<int, int64_t> unusedEmbeddedSourceAddresses;
+   const auto* sourceAlloc =
+       findFoldedLxAllocationForLds(dsc, lds.ldsIdx_, destinationAlloc);
+-  if (sourceAlloc == nullptr) {
+-    *reason = "missing folded source LX allocation";
+-    return false;
++  const auto* sourceWkSlices =
++      sourceAlloc != nullptr ? &sourceAlloc->allocateCoordinates_.coreIdToWkSlice_
++                             : nullptr;
++  if (sourceWkSlices == nullptr) {
++    if (!parseEmbeddedSourceLxTensorMetadata(
++            *fields, &embeddedSourceWkSlices, &unusedEmbeddedSourceAddresses,
++            reason)) {
++      return false;
++    }
++    sourceWkSlices = &embeddedSourceWkSlices;
+   }
+-
+-  const auto& sourceWkSlices =
+-      sourceAlloc->allocateCoordinates_.coreIdToWkSlice_;
+   auto producerSlices =
+       parseCoreDeviceSliceMap(*fields, "producer_core_id_to_device_slice",
+                               reason);
+@@ -599,10 +699,10 @@ static bool seedMatmulOperandBroadcastDestinationCoordinates(
+         usedDims.insert(deviceDimToWkDim.at(deviceDim));
+         continue;
+       }
+-      for (const auto& [___, wkCoord] : sourceWkSlices) {
++      for (const auto& [___, wkCoord] : *sourceWkSlices) {
+         for (const auto& [candidateDim, ____] : wkCoord) {
+           if (usedDims.count(candidateDim)) continue;
+-          if (valuesMatchForAllCommonCores(producerSlices, sourceWkSlices,
++          if (valuesMatchForAllCommonCores(producerSlices, *sourceWkSlices,
+                                            deviceDim, candidateDim)) {
+             deviceDimToWkDim[deviceDim] = candidateDim;
+             usedDims.insert(candidateDim);
+@@ -622,8 +722,8 @@ static bool seedMatmulOperandBroadcastDestinationCoordinates(
+ 
+   std::map<int, std::map<PrimaryDimTypes, int>> destinationWkSlices;
+   for (const auto& [coreId, consumerCoord] : consumerSlices) {
+-    const auto sourceCoreIt = sourceWkSlices.find(coreId);
+-    if (sourceCoreIt != sourceWkSlices.end()) {
++    const auto sourceCoreIt = sourceWkSlices->find(coreId);
++    if (sourceCoreIt != sourceWkSlices->end()) {
+       destinationWkSlices[coreId] = sourceCoreIt->second;
+     }
+     for (const auto& [deviceDim, value] : consumerCoord) {
+@@ -691,8 +791,11 @@ static bool populateMatmulOperandBroadcastRingTransfers(
+   }
+   const auto* sourceAlloc =
+       findFoldedLxAllocationForLds(dsc, lds.ldsIdx_, &destinationAlloc);
+-  if (sourceAlloc == nullptr) {
+-    *reason = "missing source LX allocation";
++  std::map<int, std::map<PrimaryDimTypes, int>> unusedEmbeddedSourceWkSlices;
++  std::map<int, int64_t> embeddedSourceAddresses;
++  if (sourceAlloc == nullptr &&
++      !parseEmbeddedSourceLxTensorMetadata(*fields, &unusedEmbeddedSourceWkSlices,
++                                           &embeddedSourceAddresses, reason)) {
+     return false;
+   }
+ 
+@@ -712,8 +815,15 @@ static bool populateMatmulOperandBroadcastRingTransfers(
+     const int sourceCore = static_cast<int>(logicalTransfer.sourceCore);
+     const int destinationCore =
+         static_cast<int>(logicalTransfer.destinationCore);
+-    const int64_t sourceBase =
+-        sourceAlloc->startAddressCoreCorelet_.getData(sourceCore, 0, 0);
++    int64_t sourceBase = -1;
++    if (sourceAlloc != nullptr) {
++      sourceBase = sourceAlloc->startAddressCoreCorelet_.getData(sourceCore, 0, 0);
++    } else {
++      const auto sourceAddressIt = embeddedSourceAddresses.find(sourceCore);
++      if (sourceAddressIt != embeddedSourceAddresses.end()) {
++        sourceBase = sourceAddressIt->second;
++      }
++    }
+     if (sourceBase < 0) {
+       *reason = "missing source LX address";
+       return false;
+@@ -787,13 +897,21 @@ bool L3DlOpsScheduler::isLabeledDsLXNeighbor(const SuperDsc &mySDsc,
+   if (!lds.isLxPinned()) return false;
+ 
+   if (matmulOperandKernelNeighborRelayoutEnabled()) {
+-    for (const auto &entry : mySDsc.lxRelayoutClassifications_) {
+-      const auto &fields = entry.second;
+-      if (isMatmulOperandBroadcastClassification(fields) &&
+-          relayoutClassificationMatchesLds(fields, lds)) {
+-        const auto plan =
+-            deeptools::synthesizeMatmulOperandBroadcastMovementPlan(fields);
+-        return plan.ok && plan.producerChunksPerGroup != 0;
++    const auto memOrgIt = lds.memOrg_.find(SenComponents::LX);
++    const auto* allocNode =
++        memOrgIt == lds.memOrg_.end() ? nullptr : memOrgIt->second.allocateNode_;
++    const bool isExplicitKernelNeighbor =
++        allocNode != nullptr &&
++        allocNode->name_.find("_lx_neighbor") != std::string::npos;
++    if (isExplicitKernelNeighbor) {
++      for (const auto &entry : mySDsc.lxRelayoutClassifications_) {
++        const auto &fields = entry.second;
++        if (isMatmulOperandBroadcastClassification(fields) &&
++            relayoutClassificationMatchesLds(fields, lds)) {
++          const auto plan =
++              deeptools::synthesizeMatmulOperandBroadcastMovementPlan(fields);
++          return plan.ok && plan.producerChunksPerGroup != 0;
++        }
+       }
+     }
+   }
+@@ -3560,9 +3678,13 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
+             findMatmulOperandBroadcastClassification(mySDsc, lds) != nullptr;
+         if (allocNode == nullptr || needsDedicatedMatmulNeighborDestination) {
+           const SenComponents allocStorage = SenComponents::LX;
+-          const std::string allocNodeName =
++          std::string allocNodeName =
+               "allocate_lds" + std::to_string(lds.ldsIdx_) + "_" +
+               EnumsConversion::senComponentsToString.at(allocStorage);
++          if (needsDedicatedMatmulNeighborDestination &&
++              allocNodeName.find("_lx_neighbor") == std::string::npos) {
++            allocNodeName += "_lx_neighbor";
++          }
+           allocNode =
+               createAllocateNode(dsc, ldsIdx, allocStorage,
+                                  numBufferForNoBuffer, allocNodeName, dscIdx);
+@@ -5886,12 +6008,40 @@ bool L3DlOpsScheduler::allocAllMem(const SuperDsc &mySDsc,
+               int numBuffers = allocNode->numBuffers_;
+               if (numBuffers == -1)
+                 numBuffers = 2;  // reserve at least 2 buffers
+-              nodeAndSize.emplace_back(
+-                  allocNode,
+-                  numBuffers * currDsc->getBufferCapacityForNode(
+-                                   allocNode, ldsIdx, allocNode->component_,
+-                                   corelet, row, dscGlobal.sysDef.bytesPerStick,
+-                                   /*forceEvenNumSticks*/ true));
++              int64_t allocBytes = currDsc->getBufferCapacityForNode(
++                  allocNode, ldsIdx, allocNode->component_, corelet, row,
++                  dscGlobal.sysDef.bytesPerStick,
++                  /*forceEvenNumSticks*/ true);
++              if (matmulOperandKernelNeighborRelayoutEnabled() &&
++                  allocNode->name_.find("_lx_neighbor") != std::string::npos &&
++                  ldsIdx >= 0 &&
++                  static_cast<size_t>(ldsIdx) < currDsc->labeledDs_.size()) {
++                const auto &neighborLds = currDsc->labeledDs_.at(ldsIdx);
++                if (const auto *fields =
++                        findMatmulOperandBroadcastClassification(mySDsc,
++                                                                  neighborLds)) {
++                  const auto plan =
++                      deeptools::synthesizeMatmulOperandBroadcastMovementPlan(
++                          *fields);
++                  int64_t operandBytes = neighborLds.lxSize_;
++                  if (operandBytes <= 0) operandBytes = allocBytes;
++                  if (plan.ok && plan.producerChunksPerGroup > 0 &&
++                      operandBytes %
++                              static_cast<int64_t>(plan.producerChunksPerGroup) ==
++                          0) {
++                    int64_t chunkBytes =
++                        operandBytes /
++                        static_cast<int64_t>(plan.producerChunksPerGroup);
++                    const int64_t bytesPerStick = dscGlobal.sysDef.bytesPerStick;
++                    if (bytesPerStick > 0 &&
++                        ((chunkBytes / bytesPerStick) % 2) != 0) {
++                      chunkBytes += bytesPerStick;
++                    }
++                    allocBytes = chunkBytes;
++                  }
++                }
++              }
++              nodeAndSize.emplace_back(allocNode, numBuffers * allocBytes);
+             }
+             for (auto &acand : allocMetadata.consIdAndAllocNode) {
+               DT_ERROR("No support");
+diff --git a/ddc/ddc_fold.cpp b/ddc/ddc_fold.cpp
+index 9ded9b1f8..dacbb0858 100644
+--- a/ddc/ddc_fold.cpp
++++ b/ddc/ddc_fold.cpp
+@@ -16,7 +16,8 @@ static bool envFlagEnabled(const char* name) {
+ }
+ 
+ static bool matmulOperandKernelNeighborRelayoutEnabled() {
+-  return envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT") ||
++         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
+ }
+ 
+ #define FOLD_POS_CORE static_cast<int>(dsc2::CoordinateFoldPosition::Core)
+@@ -2911,6 +2912,7 @@ bool Ddc::buildFoldForAllocation(
+     } else {
+       // Verification.
+       if (!isFoldedLxNeighborAllocation(allocNode) &&
++          !isMatmulOperandKernelNeighborAllocation(currDsc, allocNode) &&
+           !allocNode->allocateCoordinates_.coreIdToWkSlice_.empty() &&
+           refNode->nodeType_ == dsc2::ScheduleNode::TRANSFER) {
+         dsc2::TransferNode *transferNode =
+diff --git a/ddc/ddcv1.cpp b/ddc/ddcv1.cpp
+index 04aaf4a79..7d9bf48be 100644
+--- a/ddc/ddcv1.cpp
++++ b/ddc/ddcv1.cpp
+@@ -23,7 +23,8 @@ static bool envFlagEnabled(const char* name) {
+ }
+ 
+ static bool matmulOperandKernelNeighborRelayoutEnabled() {
+-  return envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++  return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT") ||
++         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
+ }
+ 
+ const std::unordered_set<SenComponents> Ddc::registerComponents = {
+diff --git a/dsc/dsc2.cpp b/dsc/dsc2.cpp
+index 2d64ebc1c..87da86cae 100644
+--- a/dsc/dsc2.cpp
++++ b/dsc/dsc2.cpp
+@@ -4006,9 +4006,15 @@ std::vector<PrimaryDimTypes> DesignSpaceConfig::getLayoutDims(
+     ldsIdx = lds.referenceLdsIdx_;
+   }
+ 
++  auto relayoutEnvEnabled = [](const char* name) {
++    const char* value = std::getenv(name);
++    return value != nullptr && value[0] != '\0' && value[0] != '0' &&
++           value[0] != 'f' && value[0] != 'F' && value[0] != 'n' &&
++           value[0] != 'N';
++  };
+   if (!allocNode &&
+-      std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") !=
+-          nullptr) {
++      (relayoutEnvEnabled("SPYRE_LX_PLANNER_RELAYOUT") ||
++       relayoutEnvEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR"))) {
+     const auto dsType = labeledDs_.at(originalLdsIdx).dsType_;
+     const auto primaryDsIt = primaryDsInfo_.find(dsType);
+     if (primaryDsIt != primaryDsInfo_.end() &&
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index d5c8d5fbf..6ed2b262e 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -213,7 +213,47 @@ static bool layoutAllgatherRestickifyEnabled() {
+ }
+ 
+ static bool matmulOperandBroadcastKernelNeighborEnabled() {
+-  return envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++  return lxPlannerRelayoutEnabled() ||
++         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++}
++
++static bool hasLargeMatmulOperandAllGather(const SuperDsc* sdsc) {
++  if (sdsc == nullptr) return false;
++  constexpr std::uint64_t kMinLoopScopedProducerChunksPerGroup = 64;
++
++  for (const auto& entry : sdsc->lxRelayoutClassifications_) {
++    const auto& fields = entry.second;
++    const auto kindIt = fields.find("kind");
++    const auto patternIt = fields.find("communication_pattern");
++    const bool isMatmulOperandBroadcast =
++        (kindIt != fields.end() &&
++         kindIt->second == "matmul_operand_broadcast") ||
++        (patternIt != fields.end() &&
++         (patternIt->second == "all_gather_replicate" ||
++          patternIt->second == "broadcast" ||
++          patternIt->second == "multicast"));
++    if (!isMatmulOperandBroadcast) continue;
++
++    const auto plan =
++        deeptools::synthesizeMatmulOperandBroadcastMovementPlan(fields);
++    if (plan.ok && plan.communicationPattern == "all_gather_replicate" &&
++        plan.producerChunksPerGroup >= kMinLoopScopedProducerChunksPerGroup) {
++      return true;
++    }
++  }
++  return false;
++}
++
++static bool shouldUseLoopScopedMatmulOperandFetch(
++    const SuperDsc* sdsc, const MatmulOperandBroadcastHookPlan& hook) {
++  if (matmulOperandBroadcastKernelNeighborEnabled()) return true;
++  if (!lxPlannerRelayoutEnabled()) return false;
++  if (hook.plan.communicationPattern != "all_gather_replicate") return false;
++
++  constexpr std::uint64_t kMinLoopScopedProducerChunksPerGroup = 64;
++  return hook.plan.producerChunksPerGroup >=
++             kMinLoopScopedProducerChunksPerGroup ||
++         hasLargeMatmulOperandAllGather(sdsc);
+ }
+ 
+ static bool matmulOperandBroadcastDebugMatchesSdsc(const SuperDsc* sdsc) {
+@@ -687,11 +727,10 @@ static int parseCoreIdKey(const std::string& key) {
+   return std::stoi(key.substr(pos, end - pos));
+ }
+ 
+-static std::map<int, std::map<std::string, int>> jsonCoreIdToSlice(
+-    const json11::Json& tensorJson) {
++static std::map<int, std::map<std::string, int>> jsonCoreIdToSliceForKey(
++    const json11::Json& tensorJson, const std::string& key) {
+   std::map<int, std::map<std::string, int>> result;
+-  for (const auto& coreAndSlice :
+-       tensorJson["coreIdToWkSlice_"].object_items()) {
++  for (const auto& coreAndSlice : tensorJson[key].object_items()) {
+     const int coreId = std::stoi(coreAndSlice.first);
+     if (!coreAndSlice.second.is_object()) return {};
+     for (const auto& dimAndSlice : coreAndSlice.second.object_items()) {
+@@ -702,6 +741,11 @@ static std::map<int, std::map<std::string, int>> jsonCoreIdToSlice(
+   return result;
+ }
+ 
++static std::map<int, std::map<std::string, int>> jsonCoreIdToSlice(
++    const json11::Json& tensorJson) {
++  return jsonCoreIdToSliceForKey(tensorJson, "coreIdToWkSlice_");
++}
++
+ static std::map<int, int64_t> jsonCoreStartAddresses(
+     const json11::Json& tensorJson) {
+   std::map<int, int64_t> result;
+@@ -1134,6 +1178,10 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+   }
+ 
+   const int maxGatherPiecesPerCorePerChunk = 4;
++  const int debugMaxGatherPiecesPerChunk = getPositiveDebugEnvInt(
++      "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_PIECES_PER_CHUNK");
++  const int maxGatherPiecesPerChunk =
++      debugMaxGatherPiecesPerChunk > 0 ? debugMaxGatherPiecesPerChunk : 32;
+   std::map<std::pair<int, int>, int64_t> gatherTempAddrByCoreSlot;
+   std::map<std::pair<int, int>, int64_t> gatherTempBytesByCoreSlot;
+   std::map<int, int> gatherPieceOrdinalByCore;
+@@ -1303,8 +1351,10 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+   std::vector<GatheredPieceSpec> currentChunk;
+   std::map<int, int> currentChunkDestinationCoreCounts;
+   for (const auto& piece : gatheredPieceSpecs) {
+-    if (currentChunkDestinationCoreCounts[piece.coreId] >=
+-        maxGatherPiecesPerCorePerChunk) {
++    if (!currentChunk.empty() &&
++        (static_cast<int>(currentChunk.size()) >= maxGatherPiecesPerChunk ||
++         currentChunkDestinationCoreCounts[piece.coreId] >=
++             maxGatherPiecesPerCorePerChunk)) {
+       chunks.push_back(currentChunk);
+       currentChunk.clear();
+       currentChunkDestinationCoreCounts.clear();
+@@ -1381,7 +1431,22 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     }
+   }
+ 
++  auto targetAllocateCoreIdToSlice =
++      jsonCoreIdToSliceForKey(targetTensor, "computeCoreIdToWkSlice_");
++  if (targetAllocateCoreIdToSlice.empty()) {
++    targetAllocateCoreIdToSlice = targetCoreIdToSlice;
++  }
+   allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
++  for (const auto& coreAndSlice : targetAllocateCoreIdToSlice) {
++    auto& dstSlice =
++        allocNode->allocateCoordinates_.coreIdToWkSlice_[coreAndSlice.first];
++    for (const auto& dimAndSlice : coreAndSlice.second) {
++      const auto dimIt =
++          DesignSpaceConfig::stringToPrimaryDim.find(dimAndSlice.first);
++      if (dimIt == DesignSpaceConfig::stringToPrimaryDim.end()) continue;
++      dstSlice[dimIt->second] = dimAndSlice.second;
++    }
++  }
+   auto& stAddr = allocNode->startAddressCoreCorelet_;
+   for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
+     const auto finalIt = finalAddressByCore.find(coreId);
+@@ -1461,20 +1526,39 @@ static bool markMatmulOperandBroadcastKernelNeighbor(
+         "matmul_operand_broadcast neighbor path requires INPUT or KERNEL LDS";
+     return false;
+   }
+-  if (!lds.memOrg_.count(SenComponents::LX)) {
++  const auto memOrgIt = lds.memOrg_.find(SenComponents::LX);
++  if (memOrgIt == lds.memOrg_.end() ||
++      memOrgIt->second.allocateNode_ == nullptr) {
+     *reason = "matmul_operand_broadcast kernel-neighbor input is not LX pinned";
+     return false;
+   }
+ 
+-  // The producer allocation describes where the source shard currently lives.
+-  // The loop-scoped KERNEL-neighbor path needs the DL scheduler to allocate the
+-  // consumer KERNEL chunk instead of reusing that producer allocation as a
+-  // resident replicated destination. Remove the old external allocate node from
+-  // the prefilled schedule tree, otherwise DDC will still expect memOrg_ to point
+-  // at the stale resident allocation.
+-  // Keep the producer allocation in the schedule tree.  The DL scheduler uses
+-  // it as the source coordinate anchor when it creates the consumer allocation
+-  // for the loop-scoped KERNEL-neighbor operand.
++  // Mark only the loop-scoped path as an LX-neighbor operand.  Staged
++  // gather/restickify materializes a normal LX shard before compute and must not
++  // be rediscovered later as a neighbor fetch just because it has relayout
++  // classification metadata.
++  auto* allocNode = memOrgIt->second.allocateNode_;
++  const std::string originalName = allocNode->name_;
++  auto markNode = [](dsc2::AllocateNode* node) {
++    if (node != nullptr && node->name_.find("_lx_neighbor") == std::string::npos) {
++      node->name_ += "_lx_neighbor";
++    }
++  };
++  markNode(allocNode);
++
++  // The LabeledDsInfo memOrg pointer is not always the same object that DDC later
++  // folds in the schedule tree. Mark the schedule-tree allocation as well so the
++  // backend treats the operand as a loop-scoped neighbor all the way through DDC.
++  auto allocNodes = dldsc.scheduleTree_.traverseTreeDFSMutable(
++      nullptr, {dsc2::ScheduleNode::ALLOCATE});
++  for (auto* node : allocNodes) {
++    auto* scheduleAlloc = dynamic_cast<dsc2::AllocateNode*>(node);
++    if (scheduleAlloc == nullptr) continue;
++    if (scheduleAlloc->ldsIdx_ == lds.ldsIdx_ ||
++        scheduleAlloc->name_ == originalName) {
++      markNode(scheduleAlloc);
++    }
++  }
+   return true;
+ }
+ 
+@@ -1796,7 +1880,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+         continue;
+       }
+-      if (matmulOperandBroadcastKernelNeighborEnabled()) {
++      if (shouldUseLoopScopedMatmulOperandFetch(
++              sdsc, effectiveMatmulBroadcastHook)) {
+         std::string markerReason;
+         if (!markMatmulOperandBroadcastKernelNeighbor(dldsc, lds,
+                                                       &markerReason)) {
