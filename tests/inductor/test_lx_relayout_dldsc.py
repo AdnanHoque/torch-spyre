@@ -29,6 +29,7 @@ from torch_spyre._inductor.layout_allgather_restickify import (
     MATMUL_OPERAND_BROADCAST,
     MATMUL_OPERAND_BROADCAST_PATTERN,
     MATMUL_OPERAND_MULTICAST_PATTERN,
+    PARTIAL_VIEW_GATHER,
     make_matmul_operand_allgather_contract,
 )
 from torch_spyre._inductor.lx_relayout import (
@@ -48,6 +49,7 @@ from torch_spyre._inductor.lx_relayout import (
 )
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
 from torch_spyre._inductor.pass_utils import PerCoreView
+from torch_spyre._inductor.spyre_kernel import _partial_view_gather_classifications
 
 
 def _fixed_tile_arg(
@@ -453,6 +455,59 @@ def test_lx_relayout_plan_records_matmul_operand_all_gather_contract():
     assert plan["requires_layout_conversion"]
     assert plan["layout_transform"]["kind"] == "activation_lx_to_matmul_kernel_operand"
     assert plan["staging_scope"] == "matmul_transfer_loop"
+
+
+def test_partial_view_gather_classification_uses_tensor_arg_provenance():
+    producer_residency = {
+        "0": {"0": 0, "1": 0},
+        "1": {"0": 1, "1": 0},
+        "2": {"0": 0, "1": 1},
+        "3": {"0": 1, "1": 1},
+    }
+    arg = _fixed_tile_arg(
+        is_input=True,
+        allocation={"lx": 0},
+        lx_residency_core_id_to_wk_slice=producer_residency,
+    )
+    arg.source_name = "buf33"
+    arg.source_offset_elems = Integer(12800)
+
+    classifications = _partial_view_gather_classifications(
+        args=[arg],
+        relayout_inputs={},
+    )
+
+    assert len(classifications) == 1
+    classification = classifications[0]
+    assert classification["kind"] == PARTIAL_VIEW_GATHER
+    assert classification["communication_pattern"] == PARTIAL_VIEW_GATHER
+    assert classification["source_name"] == "buf33"
+    assert classification["source_offset_elems"] == "12800"
+    assert classification["producer_core_id_to_device_slice"] == producer_residency
+    assert classification["requires_staged_realization"]
+    assert classification["materialization_pattern"] == "partial_view_gather_to_lx"
+    assert classification["layout_transform"]["carrier_hint"] == (
+        "lx_partial_view_gather"
+    )
+
+
+def test_partial_view_gather_does_not_duplicate_staged_matmul_contract():
+    arg = _fixed_tile_arg(is_input=True, allocation={"lx": 0})
+    arg.source_name = "buf21"
+    arg.source_offset_elems = Integer(0)
+
+    classifications = _partial_view_gather_classifications(
+        args=[arg],
+        relayout_inputs={
+            "buf21": {
+                "kind": MATMUL_OPERAND_BROADCAST,
+                "communication_pattern": MATMUL_OPERAND_ALLGATHER_REPLICATE,
+                "requires_staged_realization": True,
+            }
+        },
+    )
+
+    assert classifications == []
 
 
 def test_bundle_enriches_matmul_operand_contract_with_source_target_layouts(

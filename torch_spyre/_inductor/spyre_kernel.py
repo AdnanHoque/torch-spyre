@@ -88,21 +88,27 @@ def _partial_view_gather_classifications(
         if arg.source_name is None or arg.source_offset_elems is None:
             continue
         plan = relayout_inputs.get(arg.source_name)
-        if not isinstance(plan, dict):
-            continue
-        if plan.get("requires_staged_realization") is True:
+        has_plan = isinstance(plan, dict)
+        if has_plan and plan.get("requires_staged_realization") is True:
             # Specialized staged contracts already carry their own backend schema.
             continue
-        classification = dict(plan)
+        producer_core_id_to_device_slice = (
+            plan.get("producer_core_id_to_device_slice")
+            if has_plan
+            else arg.lx_residency_core_id_to_wk_slice
+        )
+        if producer_core_id_to_device_slice is None:
+            continue
+        classification = dict(plan) if has_plan else {}
         classification.update(
             {
                 "kind": PARTIAL_VIEW_GATHER,
                 "classification": PARTIAL_VIEW_GATHER,
                 "communication_pattern": PARTIAL_VIEW_GATHER,
-                "base_communication_pattern": plan.get("communication_pattern"),
                 "read_index": read_index,
                 "source_name": arg.source_name,
                 "source_offset_elems": str(arg.source_offset_elems),
+                "producer_core_id_to_device_slice": producer_core_id_to_device_slice,
                 "requires_staged_realization": True,
                 "materialization_pattern": "partial_view_gather_to_lx",
                 "layout_transform": {
@@ -121,6 +127,10 @@ def _partial_view_gather_classifications(
                 },
             }
         )
+        if has_plan:
+            classification["base_communication_pattern"] = plan.get(
+                "communication_pattern"
+            )
         classifications.append(classification)
     return classifications
 
