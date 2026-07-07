@@ -1,0 +1,83 @@
+Current dirty files:
+ M dxp/SdscRelayoutInsertion.cpp
+ M dxp/test/dxp_unittest.cpp
+?? 20_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json
+
+L3 scheduler failure site:
+  1995	        if (!deferMixedKernelNeighborFitCheck &&
+  1996	            !allocAllMem(mySDsc, &dsc, dscIdx, false)) {
+  1997	          DT_ERROR_FMT(
+  1998	              "Unable to map graph within architecture constraints: The "
+  1999	              "initial chunk parameters must fit in LX for SuperDSC: %s",
+  2000	              mySDsc.name_.c_str());
+  2001	        }
+  2002	      }
+  2003	    }
+  2004	
+  2005	    if (enableChunkExplore) {
+  2006	      // Find the best set of parameters for memory bandwidth.
+  2007	      findBestParamsForMemoryBandwidth(dscCandidateIndices, dscCandidates,
+  2008	                                       mySDsc, primaryDims, coreSplitDims,
+  2009	                                       skipNeighborAllocFitChecks);
+  2010	
+  2011	      // Find the best set of parameters for the Flop/Byte arithmetic intensity
+  2012	      // in the case of tensor reuse and HBM transfers.
+  2013	      if (isReuse && !isInputNeighborFetch)
+  2014	        findBestParamsForArithmeticIntensity(dscCandidateIndices, dscCandidates,
+  2015	                                             mySDsc, primaryDims,
+  2016	                                             coreSplitDims);
+  2017	    }
+  2018	
+  2019	    // Set the best set of chunk parameters to dataStageParam_ for each DSC.
+  2020	    for (unsigned dscIdx = 0; dscIdx < mySDsc.dscs_.size(); ++dscIdx) {
+  2021	      DesignSpaceConfig &dsc = mySDsc.dscs_.at(dscIdx);
+  2022	      updateChunkDataStagesFromCandidates(dscChunkParams[dscIdx], dsc, dscIdx,
+  2023	                                          dscCandidateIndices, dscCandidates,
+  2024	                                          primaryDims);
+  2025	
+  2026	      DT_CHECK_MSG(allocAllMem(mySDsc, &dsc, dscIdx, false),
+  2027	                   "Memory allocation must be valid to commit.");
+  2028	    }
+  2029	  }
+  2030	}
+  2031	
+  2032	// Get all L3 transfer nodes with specified src and dst storages in the schedule
+  2033	// tree.
+  2034	std::vector<const dsc2::TransferNode *> L3DlOpsScheduler::getLdsL3TransferNodes(
+  2035	    const SuperDsc &mySDsc, const int dscIdx, const int ldsIdx,
+  2036	    const std::vector<SenComponents> &srcStorages,
+  2037	    const std::vector<SenComponents> &dstStorages) const {
+  2038	  auto &dsc = mySDsc.dscs_.at(dscIdx);
+  2039	  const auto &lds = dsc.labeledDs_.at(ldsIdx);
+  2040	
+
+DDC coordinate check site:
+  2910	            dim, allocNode->allocateCoordinates_.getPadding(dim));
+  2911	      }
+  2912	    } else {
+  2913	      // Verification.
+  2914	      if (!isFoldedLxNeighborAllocation(allocNode) &&
+  2915	          !isMatmulOperandKernelNeighborAllocation(currDsc, allocNode) &&
+  2916	          !allocNode->allocateCoordinates_.coreIdToWkSlice_.empty() &&
+  2917	          refNode->nodeType_ == dsc2::ScheduleNode::TRANSFER) {
+  2918	        dsc2::TransferNode *transferNode =
+  2919	            static_cast<dsc2::TransferNode *>(refNode);
+  2920	        if (transferNode->transferCoordinates_.foldConstructed() &&
+  2921	            !sameCoordinateRange(allocNode, allocNode->allocateCoordinates_,
+  2922	                                 transferNode,
+  2923	                                 transferNode->transferCoordinates_,
+  2924	                                 (coordPropInfo.refIsProducer
+  2925	                                      ? transferNode->dstVias_.at(0).loc_.unit_
+  2926	                                      : transferNode->src_.unit_),
+  2927	                                 allocNode->ldsIdx_)) {
+  2928	          std::cerr << "\nCoordinate of allocateNode " << allocNode->name_
+  2929	                    << ":\n";
+  2930	          allocNode->allocateCoordinates_.debugPrint(std::cerr, false, "  ");
+  2931	          std::cerr << "\nCoordinate of transferNode " << refNode->name_
+  2932	                    << ":\n";
+  2933	          transferNode->transferCoordinates_.debugPrint(std::cerr, false, "  ");
+  2934	          DT_ERROR("Coordinates of transfer " + refNode->name_ +
+  2935	                   " and allocateNode " + allocNode->name_ +
+  2936	                   " are not consistent.");
+  2937	        }
+  2938	      }

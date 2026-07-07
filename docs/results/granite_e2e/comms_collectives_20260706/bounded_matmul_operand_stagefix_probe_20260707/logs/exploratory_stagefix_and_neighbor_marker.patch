@@ -1,0 +1,87 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index c4086c7fa..a36e65cdc 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -270,8 +270,7 @@ static bool layoutAllgatherRestickifyEnabled() {
+ }
+ 
+ static bool matmulOperandBroadcastKernelNeighborEnabled() {
+-  return lxPlannerRelayoutEnabled() ||
+-         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++  return envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
+ }
+ 
+ static bool hasLargeMatmulOperandAllGather(const SuperDsc* sdsc) {
+@@ -1503,24 +1502,44 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+   if (targetAllocateCoreIdToSlice.empty()) {
+     targetAllocateCoreIdToSlice = targetCoreIdToSlice;
+   }
+-  allocNode->allocateCoordinates_.coreIdToWkSlice_.clear();
+-  for (const auto& coreAndSlice : targetAllocateCoreIdToSlice) {
+-    auto& dstSlice =
+-        allocNode->allocateCoordinates_.coreIdToWkSlice_[coreAndSlice.first];
+-    for (const auto& dimAndSlice : coreAndSlice.second) {
+-      const auto dimIt =
+-          DesignSpaceConfig::stringToPrimaryDim.find(dimAndSlice.first);
+-      if (dimIt == DesignSpaceConfig::stringToPrimaryDim.end()) continue;
+-      dstSlice[dimIt->second] = dimAndSlice.second;
++  const std::string originalAllocName = allocNode->name_;
++  auto applyFinalAllocation = [&](dsc2::AllocateNode* node) {
++    if (node == nullptr) return;
++    if (node->name_.find("_lx_neighbor") == std::string::npos) {
++      node->name_ += "_lx_neighbor";
++    }
++    node->allocateCoordinates_.coreIdToWkSlice_.clear();
++    for (const auto& coreAndSlice : targetAllocateCoreIdToSlice) {
++      auto& dstSlice =
++          node->allocateCoordinates_.coreIdToWkSlice_[coreAndSlice.first];
++      for (const auto& dimAndSlice : coreAndSlice.second) {
++        const auto dimIt =
++            DesignSpaceConfig::stringToPrimaryDim.find(dimAndSlice.first);
++        if (dimIt == DesignSpaceConfig::stringToPrimaryDim.end()) continue;
++        dstSlice[dimIt->second] = dimAndSlice.second;
++      }
++    }
++    auto& stAddr = node->startAddressCoreCorelet_;
++    for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
++      const auto finalIt = finalAddressByCore.find(coreId);
++      stAddr.insertData(finalIt == finalAddressByCore.end() ? -1
++                                                            : finalIt->second,
++                        coreId, 0, 0);
++    }
++  };
++  applyFinalAllocation(allocNode);
++  auto allocNodes = dldsc.scheduleTree_.traverseTreeDFSMutable(
++      nullptr, {dsc2::ScheduleNode::ALLOCATE});
++  for (auto* node : allocNodes) {
++    auto* scheduleAlloc = dynamic_cast<dsc2::AllocateNode*>(node);
++    if (scheduleAlloc == nullptr) continue;
++    if (scheduleAlloc->ldsIdx_ == lds.ldsIdx_ ||
++        scheduleAlloc->name_ == originalAllocName) {
++      applyFinalAllocation(scheduleAlloc);
+     }
+-  }
+-  auto& stAddr = allocNode->startAddressCoreCorelet_;
+-  for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
+-    const auto finalIt = finalAddressByCore.find(coreId);
+-    stAddr.insertData(finalIt == finalAddressByCore.end() ? -1 : finalIt->second,
+-                      coreId, 0, 0);
+   }
+   if (!lds.coreStateInit_.empty()) {
++    auto& stAddr = allocNode->startAddressCoreCorelet_;
+     for (int coreId = 0; coreId < stAddr.getFoldSpaceSize().at(0); ++coreId) {
+       if (static_cast<size_t>(coreId) >= lds.coreStateInit_.size()) continue;
+       auto& coreState = lds.coreStateInit_.at(coreId);
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index 279992a5c..6eaf03175 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -402,7 +402,7 @@ void runMatmulOperandBroadcastPatternCase(const std::string& testDataDir,
+   ScopedEnvVar restoreFrac("DXP_LX_FRAC_AVAIL");
+ 
+   setenv("SPYRE_LX_PLANNER_RELAYOUT", "1", 1);
+-  setenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS", "4", 1);
++  setenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS", "512", 1);
+   setenv("DXP_LX_FRAC_AVAIL", "1", 1);
+ 
+   SenTargets target = SenTargets::SENTIENT;
