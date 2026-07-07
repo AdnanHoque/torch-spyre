@@ -17,11 +17,11 @@ As of this handoff:
 
 | Repo | Branch | SHA | Role |
 | --- | --- | --- | --- |
-| `AdnanHoque/torch-spyre` | `ah/comms-collectives` | current branch head; at least `3532cf0426b7d32a353a0a8e65d7eaa6a53a17df` | Artifact branch with docs, patches, run payloads, and handoffs. |
+| `AdnanHoque/torch-spyre` | `ah/comms-collectives` | current branch head; at least `968faf5ee71397a079b4dcb38b0723bd8b5fe789` | Artifact branch with docs, patches, run payloads, and handoffs. |
 | `AdnanHoque/torch-spyre` | `gather-restickify` | `7a18839f83d74d2c576f4c85585e11638d30c20b` | Torch prototype branch for flash/gather-restickify experiments. Adds planner-level tests for generic gather, broadcast, multicast, and all-gather relayout metadata. |
 | `AdnanHoque/torch-spyre` | `pr-lx-relayout-scatter` | `ba365fe6234527e17558520ab41e21d8c6c696e2` | PR1 scatter/permutation Torch branch. |
 | `AdnanHoque/torch-spyre` | `pr-lx-relayout-dldsc` | `a9a3bb505b966a3716d48854d1ecc22e46624476` | Older DLDSC/scatter exploration branch. |
-| `Adnan-Hoque1/deeptools` | `ah/comms-collectives` | `3a4349e62baff978faa21b8cbad376a524658398` | Current Deeptools communication-collectives branch. |
+| `Adnan-Hoque1/deeptools` | `ah/comms-collectives` | `2ccd5ce05e7e724f832bdaf7a4f0f5f402aee3f6` | Current Deeptools communication-collectives branch. Adds a diagnostic-only plan-artifact stage refresh after selecting the lowered relayout carrier. |
 | `Adnan-Hoque1/deeptools` | `gather-restickify` | `57c6f040b02ff592bc6cb207d9783375d2043d78` | Clean gather/restickify split branch. |
 | `Adnan-Hoque1/deeptools` | `pr-lx-relayout-dldsc-scatter` | `b8c09743c46505b4cac46b434b9eb3243ae0b685` | PR1 scatter Deeptools branch. |
 
@@ -92,7 +92,7 @@ docs/results/granite_e2e/comms_collectives_20260707/bounded_multicast_gather_res
 
 ## What Is Still Unverified
 
-The latest Deeptools head is:
+The latest Deeptools head used for the interrupted full-flash replay was:
 
 ```text
 3a4349e62baff978faa21b8cbad376a524658398
@@ -117,6 +117,22 @@ The note for that attempt is:
 
 ```text
 docs/results/granite_e2e/comms_collectives_20260707/full_flash_replay_latest_3a4349e62_attempt_20260707.md
+```
+
+After that attempt, the Deeptools branch was advanced to:
+
+```text
+2ccd5ce05e7e724f832bdaf7a4f0f5f402aee3f6
+```
+
+This follow-up is diagnostic-only. It refreshes the emitted
+`matmul_operand_broadcast` plan JSON `stages` field after the emitter records a
+plan as lowered through `gather_then_restickify` or
+`loop_scoped_input_fetch`. It does not change transfer planning or lowering.
+The patch is archived here:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260707/patches/deeptools_relayout_plan_artifact_stages_20260707.patch
 ```
 
 ## Current Operational Blocker
@@ -211,7 +227,7 @@ Torch `gather-restickify` at `7a18839f` matches the one-gate artifact:
 - Torch defaults backend `DXP_BACKEND_LX_FRAC_AVAIL` to `1` for the DXP
   subprocess when the relayout flag is on.
 
-Deeptools `ah/comms-collectives` at `3a4349e62` matches the latest artifact
+Deeptools `ah/comms-collectives` at `2ccd5ce` matches the latest artifact
 claims:
 
 - `SPYRE_LX_PLANNER_RELAYOUT=1` enables the staged gather/restickify path;
@@ -226,6 +242,7 @@ claims:
 Recent Deeptools commits:
 
 ```text
+2ccd5ce [DXP] refresh relayout plan artifact stages
 3a4349e [DXP] test bounded multicast gather restickify
 071e293 [DXP] enable bounded broadcast gather restickify
 2301044 [DXP] honor tensor split contract for relayout cells
@@ -233,7 +250,7 @@ Recent Deeptools commits:
 cd30c2a [DXP] add bounded gather restickify relayout path
 ```
 
-This makes the latest saved full-flash replay failure mode more likely to be a
+This makes the interrupted saved full-flash replay more likely to be a
 run-completion/runtime issue than a classifier regression, because plan emission
 had already produced the expected `64` artifacts and the unsafe loop-scoped path
 is no longer selected by the public flag.
@@ -302,3 +319,9 @@ Remaining gaps:
 - reduce/all-reduce remain future arithmetic collectives, not copy relayout;
 - flash numeric correctness is not a valid oracle because the baseline flash
   kernel currently has an independent broadcast/zero-stride correctness issue.
+
+The bounded broadcast artifact issue is recorded separately in:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260707/broadcast_artifact_audit_20260707.md
+```

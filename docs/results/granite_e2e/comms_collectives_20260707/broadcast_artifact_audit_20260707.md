@@ -16,6 +16,10 @@ The safest interpretation is:
 - archived multicast JSON: clean proof;
 - archived broadcast JSON: stale or captured from the older loop-scoped path,
   so regenerate before sharing it as evidence.
+- Deeptools `2ccd5ce05e7e724f832bdaf7a4f0f5f402aee3f6` fixes one
+  diagnostic-only issue where emitted plan JSON could report the selected
+  `realization_strategy` correctly but retain a stale `stages` entry from the
+  pre-lowering plan.
 
 ## Archived Broadcast JSON
 
@@ -96,10 +100,32 @@ Relevant source behavior:
 This points to an artifact-capture problem rather than immediate evidence of a
 broken code path.
 
+## Diagnostic Fix
+
+Committed on:
+
+```text
+Adnan-Hoque1/deeptools:ah/comms-collectives
+2ccd5ce05e7e724f832bdaf7a4f0f5f402aee3f6
+```
+
+Patch archive:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260707/patches/deeptools_relayout_plan_artifact_stages_20260707.patch
+```
+
+The change refreshes `matmul_operand_broadcast` plan artifact `stages` after
+`emitMatmulOperandBroadcastPlanArtifact(...)` marks a plan as lowered through
+either `gather_then_restickify` or `loop_scoped_input_fetch`.
+
+This does not change physical lowering. It only keeps the JSON artifact
+internally consistent.
+
 ## Required Follow-Up
 
-When pod auth is restored, regenerate the bounded broadcast artifact at latest
-Deeptools head and archive:
+When pod auth is restored, regenerate the bounded broadcast artifact at
+Deeptools `2ccd5ce` or newer and archive:
 
 ```text
 communication_pattern      = broadcast

@@ -1,0 +1,51 @@
+From 2ccd5cefbf638e4d7fb04c88ed56a26c93a4459c Mon Sep 17 00:00:00 2001
+From: Adnan Hoque <adnan.hoque1@ibm.com>
+Date: Tue, 7 Jul 2026 14:19:14 -0400
+Subject: [PATCH] [DXP] refresh relayout plan artifact stages
+
+Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dxp/SdscRelayoutInsertion.cpp | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index f6622d4..102c5b8 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -506,6 +506,23 @@ static void emitLayoutAllgatherRestickifyPlanArtifact(
+       << std::endl;
+ }
+ 
++static void refreshMatmulOperandBroadcastArtifactStages(
++    deeptools::MatmulOperandBroadcastMovementPlan& plan) {
++  if (plan.realizationStrategy.empty()) return;
++
++  for (auto& stage : plan.stages) {
++    if (stage == "loop_scoped_input_fetch" ||
++        stage == "gather_then_restickify") {
++      stage = plan.realizationStrategy;
++      return;
++    }
++  }
++
++  auto bindStage = std::find(plan.stages.begin(), plan.stages.end(),
++                             "bind_matmul_kernel_operand");
++  plan.stages.insert(bindStage, plan.realizationStrategy);
++}
++
+ static void emitMatmulOperandBroadcastPlanArtifact(
+     const SuperDsc* sdsc, const LabeledDsInfo& lds, int ps,
+     const MatmulOperandBroadcastHookPlan& hook,
+@@ -520,6 +537,9 @@ static void emitMatmulOperandBroadcastPlanArtifact(
+     plan.realized = true;
+     plan.realizationStrategy = "gather_then_restickify";
+   }
++  if (kernelNeighborLowered || gatherRestickifyLowered) {
++    refreshMatmulOperandBroadcastArtifactStages(plan);
++  }
+   const char* outputDirEnv =
+       std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_PLAN_DIR");
+   const std::filesystem::path outputDir =
+-- 
+2.39.3 (Apple Git-146)
+

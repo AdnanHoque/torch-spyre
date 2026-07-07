@@ -11,7 +11,7 @@ for a useful Granite/flash path.
 | Torch artifacts | `AdnanHoque/torch-spyre:ah/comms-collectives` | current artifact branch |
 | Torch prototype | `AdnanHoque/torch-spyre:gather-restickify` | `7a18839f83d74d2c576f4c85585e11638d30c20b` |
 | Torch PR1 scatter | `AdnanHoque/torch-spyre:pr-lx-relayout-scatter` | `ba365fe6234527e17558520ab41e21d8c6c696e2` |
-| Deeptools collectives | `Adnan-Hoque1/deeptools:ah/comms-collectives` | `3a4349e62baff978faa21b8cbad376a524658398` |
+| Deeptools collectives | `Adnan-Hoque1/deeptools:ah/comms-collectives` | `2ccd5ce05e7e724f832bdaf7a4f0f5f402aee3f6` |
 | Deeptools PR1 scatter | `Adnan-Hoque1/deeptools:pr-lx-relayout-dldsc-scatter` | `b8c09743c46505b4cac46b434b9eb3243ae0b685` |
 
 ## Local Test Attempt
@@ -46,7 +46,7 @@ test evidence, not a fresh local pytest result.
 | Torch emits DLDSC metadata for broadcast/multicast | `tests/inductor/test_lx_relayout_dldsc.py` has generic broadcast and multicast DLDSC emission tests through `compile_op_spec`, plus planner-level fake-graph tests added in `7a18839f`. | Complete for generic planner/codegen metadata emission; not yet proven from a useful workload SDSC. |
 | Deeptools realizes bounded scatter | PR1 Deeptools branch and unit/device evidence. | Complete for bounded scatter. |
 | Deeptools realizes bounded all-gather/replicate | Saved full-flash DXP replay passed at `23010446e`; bounded M16 all-gather replay passed; chunk policy fixed IBUFF. | Complete at `23010446e`; latest head `3a4349e62` needs replay completion. |
-| Deeptools realizes bounded broadcast | Focused DXP/util tests pass at `071e293cf`; however the archived `bounded_broadcast_plan_071e293cf.json` should be regenerated because its plan fields do not cleanly read as broadcast/gather-then-restickify. | Test evidence exists; artifact proof needs refresh. |
+| Deeptools realizes bounded broadcast | Focused DXP/util tests pass at `071e293cf`; however the archived `bounded_broadcast_plan_071e293cf.json` should be regenerated because its plan fields do not cleanly read as broadcast/gather-then-restickify. Deeptools `2ccd5ce` fixes one diagnostic cause of stale `stages` fields in emitted plan JSON. | Test evidence exists; artifact proof needs refresh at current head. |
 | Deeptools realizes bounded multicast | Focused DXP/util tests pass at `3a4349e62`; bounded plan artifact archived. | Complete for bounded fixture. |
 | Unsupported or oversized cases fail closed/fallback | Fail-closed docs record direct broadcast/multicast wrong-locale avoidance, IBUFF boundary, and chunk/cap behavior. | Mostly complete; needs a single current-head negative test summary after latest broadcast/multicast changes. |
 | Artifacts identify removed Granite HBM spills | Granite S512 checkpoint records disabled/enabled SDSC counts and maps `sdsc_7` and `sdsc_15 -> sdsc_16` activation handoffs to on-chip movement. | Complete for the profiled `backend2162` run; needs refresh at latest branches. |
@@ -65,14 +65,18 @@ test evidence, not a fresh local pytest result.
    expected broadcast/gather-then-restickify fields.
 4. **One public feature gate**: `SPYRE_LX_PLANNER_RELAYOUT=1` is the intended
    user-facing flag. Capacity knobs are runtime setup, not feature gates.
+5. **Plan artifact stage consistency**: Deeptools `2ccd5ce` refreshes emitted
+   `matmul_operand_broadcast` artifact stages after selecting the physical
+   carrier. This is observability cleanup, not new lowering functionality.
 
 ## What Is Not Yet Closed
 
 1. **Latest-head full-flash replay**:
    - Last green full replay is at Deeptools `23010446e`.
-   - Latest Deeptools head `3a4349e62` emitted the expected `64` plans but was
+   - Deeptools head `3a4349e62` emitted the expected `64` plans but was
      interrupted before DXP completion.
-   - This needs one timed replay after pod auth is refreshed.
+   - Current Deeptools head is `2ccd5ce`; this needs one timed replay after pod
+     auth is refreshed.
 
 2. **Graph-produced broadcast/multicast useful workload**:
    - Generic Torch metadata/codegen tests already cover broadcast and multicast.
@@ -133,6 +137,9 @@ When OpenShift auth is restored, use this order:
      shows `communication_pattern=broadcast` and
      `realization_strategy=gather_then_restickify`, or document why the backend
      canonicalizes this class differently.
+   - Deeptools `2ccd5ce` should prevent the regenerated artifact from carrying
+     stale `loop_scoped_input_fetch` in `stages` after
+     `gather_then_restickify` has been selected.
 
 ## Completion Bar
 
