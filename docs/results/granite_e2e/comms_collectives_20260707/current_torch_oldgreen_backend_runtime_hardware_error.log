@@ -1,0 +1,22 @@
+
+[LX-neighbor diagnostic] allocate_lds1_lx foldConstructed=true coordDims=2 coreIdToWkSlice=0 users=2 seededFromCache=false
+[31m ERRR 07.07.2026 13:01:01.765235 [                  ras_base.hpp:  74] {"action":"information","category":"hardware","code":"0x7b1b","description":"A hardware error was detected in the compute control block response.","message":"Compute CB hardware error detected","name":"RAS::RUNTIMESCHEDULER::ComputeHardwareError","severity":"ERROR","step":"Open ticket","type":"runtime_error"}[0m
+[31m ERRR 07.07.2026 13:01:01.765566 [                  ras_base.hpp:  74] {"OpType":"D2H","action":"information","category":"software","code":"0x8758","description":"An operation was submitted to a stream that has been marked for shutdown due to a prior hardware error.","message":"Cannot schedule operation on stream in error state","name":"RAS::RUNTIMESCHEDULER::StreamInErrorState","severity":"ERROR","step":"Open ticket","type":"runtime_error"}[0m
+Traceback (most recent call last):
+  File "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/min_stable_matmul_operand_broadcast_20260704_100506/stable_matmul_operand_broadcast.py", line 92, in <module>
+    main()
+  File "/home/adnan-cdx/codex-isolated/flash_attention_verify_comms_20260704_033507/runs/min_stable_matmul_operand_broadcast_20260704_100506/stable_matmul_operand_broadcast.py", line 68, in main
+    out = compiled(x_dev, v_dev, aux_dev).cpu()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_compile.py", line 54, in inner
+    return disable_fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1263, in _fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/.venv/lib64/python3.12/site-packages/torch/library.py", line 751, in func_no_dynamo
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/torch-spyre/torch_spyre/ops/eager.py", line 212, in spyre__copy_from
+    torch_spyre._C.copy_tensor(self, dst, non_blocking)
+RuntimeError: {"OpType":"D2H","action":"information","category":"software","code":"0x8758","description":"An operation was submitted to a stream that has been marked for shutdown due to a prior hardware error.","message":"Cannot schedule operation on stream in error state","name":"RAS::RUNTIMESCHEDULER::StreamInErrorState","severity":"ERROR","step":"Open ticket","type":"runtime_error"}
