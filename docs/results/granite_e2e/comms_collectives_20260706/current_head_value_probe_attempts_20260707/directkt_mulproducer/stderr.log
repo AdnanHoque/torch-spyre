@@ -1,0 +1,52 @@
+[31m ERRR 07.07.2026 08:05:59.920877 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 — possible lost completion[0m
+[31m ERRR 07.07.2026 08:05:59.921930 [            runtime_stream.cpp: 150] RuntimeStream::synchronize() device=0 completed after 60001ms (1 timeout warning(s))[0m
+W0707 08:06:06.711000 329021 torch/_inductor/codecache.py:662] [0/0] Failed to pickle cache key
+W0707 08:06:06.711000 329021 torch/_inductor/codecache.py:662] [0/0] Traceback (most recent call last):
+W0707 08:06:06.711000 329021 torch/_inductor/codecache.py:662] [0/0]   File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/codecache.py", line 658, in dumps
+W0707 08:06:06.711000 329021 torch/_inductor/codecache.py:662] [0/0]     self.dump(obj)
+W0707 08:06:06.711000 329021 torch/_inductor/codecache.py:662] [0/0] AttributeError: Can't get local object 'compile_fx.<locals>.get_decomp_fn'
+terminate called after throwing an instance of 'DtException'
+  what():  DtException: op->inpSP_.at(inpSPIdx).dimToSize_.at(dimNameOuter) >= stickDim, file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp line 4342
+Traceback (most recent call last):
+  File "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/synthetic_value_matmul_operand_current_heads_directkt_20260707_080442/synthetic_value_matmul_directkt.py", line 36, in <module>
+    out = compiled(qs, kts, vs).cpu()
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1062, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1038, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1030, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1836, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/compile_fx.py", line 1597, in codegen_and_compile
+    compiled_module = graph.compile_to_module()
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2613, in compile_to_module
+    return self._compile_to_module()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2623, in _compile_to_module
+    mod = self._compile_to_module_lines(wrapper_code)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/graph.py", line 2698, in _compile_to_module_lines
+    mod = PyCodeCache.load_by_key_path(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/codecache.py", line 3976, in load_by_key_path
+    mod = _reload_python_module(key, path, set_sys_modules=in_toplevel)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/runtime/compile_tasks.py", line 35, in _reload_python_module
+    exec(code, mod.__dict__, mod.__dict__)
+  File "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/synthetic_value_matmul_operand_current_heads_directkt_20260707_080442/cache/oa/coaghzkzlkgnrm3ywrnh5spvqs7ty4fc76qupfckgdazo4bpyp64.py", line 56, in <module>
+    sdsc_fused_mul_0 = async_compile.sdsc('sdsc_fused_mul_0',
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/torch-spyre/torch_spyre/execution/async_compile.py", line 73, in sdsc
+    subprocess.run(
+  File "/usr/lib64/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+torch._inductor.exc.InductorError: CalledProcessError: Command '['dxp_standalone', '-d', '/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/synthetic_value_matmul_operand_current_heads_directkt_20260707_080442/cache/inductor-spyre/sdsc_fused_mul_0_rhp3y8qt']' died with <Signals.SIGABRT: 6>.
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+
