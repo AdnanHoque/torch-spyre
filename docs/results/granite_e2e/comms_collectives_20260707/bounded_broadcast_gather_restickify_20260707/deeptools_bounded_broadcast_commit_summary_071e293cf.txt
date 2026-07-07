@@ -1,0 +1,11 @@
+commit 071e293cf39dc58bd3b07bcda369a68520be62dd
+Author: Adnan Hoque <adnan.hoque1@ibm.com>
+Date:   Tue Jul 7 17:06:45 2026 +0000
+
+    [DXP] enable bounded broadcast gather restickify
+    
+    Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+
+ dxp/SdscRelayoutInsertion.cpp |  28 +++-
+ dxp/test/dxp_unittest.cpp     | 324 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 348 insertions(+), 4 deletions(-)

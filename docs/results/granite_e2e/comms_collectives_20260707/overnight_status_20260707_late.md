@@ -10,11 +10,12 @@ Green today:
 - bounded generic DLDSC core-work-div relayout, including copy-cardinality cases that look like broadcast and gather;
 - partial-view gather;
 - flash/attention all-gather plus layout conversion through staged `STCDPOpLx + ReStickifyOpLx`;
+- bounded BMM-operand broadcast plus layout conversion through staged `STCDPOpLx + ReStickifyOpLx`;
 - saved full flash DXP replay after the default chunk-policy and tensor-contract split guard fixes.
 
 Not done:
 
-- broadcast/multicast with layout conversion before BMM;
+- multicast with layout conversion before BMM;
 - reduce/all-reduce;
 - full Granite spill removal across oversized activations without WSR.
 
@@ -22,7 +23,7 @@ Not done:
 
 - Torch artifact branch: `ah/comms-collectives`
 - Deeptools implementation branch: `ah/comms-collectives`
-- Deeptools clean head: `23010446ed4cc91c80288cc1047f6c50c47d6c88`
+- Deeptools clean head: `071e293cf39dc58bd3b07bcda369a68520be62dd`
 - Torch prototype head on CDX: `bced14b49acf4fae92ef4df07d2f5229806c672b`
 
 ## Validation Run
@@ -33,14 +34,14 @@ Clean focused run on `adnan-cdx-spyre-dev-pf`:
 cd /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools
 ninja -C build-deeptools dxp_unit_test util_unit_test -j 16
 build-deeptools/dxp/dxp_unit_test \
-  --gtest_filter="DxpTestFixture.CoreWorkDivIncomptLxRelayout*:DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed:DxpTestFixture.PartialViewGather*"
+  --gtest_filter="DxpTestFixture.MatmulOperandBroadcastPatternBroadcastGatherRestickifyCompiles:DxpTestFixture.MatmulOperandBroadcastPattern*FailsClosed:DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed:DxpTestFixture.PartialViewGather*:DxpTestFixture.CoreWorkDivIncomptLxRelayout*"
 build-deeptools/util/util_unit_test \
   --gtest_filter="LayoutAllgatherRestickify.*"
 ```
 
 Result:
 
-- DXP focused tests: `6/6` passed.
+- DXP focused tests: `9/9` passed.
 - Utility tests: `32/32` passed.
 
 Artifacts:
@@ -48,6 +49,9 @@ Artifacts:
 - `fanout_physical_fixture_probe_20260707/clean_focused_after_fanout_probe/rc.txt`
 - `fanout_physical_fixture_probe_20260707/clean_focused_after_fanout_probe/dxp_focused.log`
 - `fanout_physical_fixture_probe_20260707/clean_focused_after_fanout_probe/util_focused.log`
+- `bounded_broadcast_gather_restickify_20260707/focused_dxp_tests_071e293cf.log`
+- `bounded_broadcast_gather_restickify_20260707/focused_util_tests_071e293cf.log`
+- `bounded_broadcast_gather_restickify_20260707/bounded_broadcast_plan_071e293cf.json`
 
 ## Fanout Finding
 
@@ -64,7 +68,7 @@ This is evidence that the DLDSC contract can express these copy-cardinality
 classes and Deeptools can realize them when the physical source and destination
 contracts are internally consistent.
 
-## Failed Experiment
+## Failed Experiment And Follow-Up
 
 I attempted to enable staged BMM-operand broadcast/multicast by reusing the
 32-core `test_matmul_operand_broadcast_chunk_cap` all-gather fixture.
@@ -89,6 +93,16 @@ DtException: Invalid start address or buffer offset.
 
 The key lesson is that broadcast/multicast need a physically valid fanout
 fixture, not a relabeled all-gather fixture.
+
+Follow-up completed later on 2026-07-07:
+
+- Added a physically coherent bounded two-consumer broadcast fixture.
+- Enabled the staged gather/restickify path for `broadcast`/`multicast` only
+  when the frontend explicitly marks the plan as
+  `realization_strategy = gather_then_restickify`.
+- Added a unit-dim layout grouping fix so a size-1 source dimension can map to
+  a size-1 target dimension.
+- Re-ran focused DXP/util tests green at Deeptools `071e293cf`.
 
 ## Current Architecture Read
 
@@ -125,4 +139,3 @@ Next useful implementation step:
 Do not build a custom full-tensor streaming system here. If a valid bounded
 tile works but the full Granite activation is too large, that is a WSR/tile
 scoping handoff, not a communication-substrate problem.
-
