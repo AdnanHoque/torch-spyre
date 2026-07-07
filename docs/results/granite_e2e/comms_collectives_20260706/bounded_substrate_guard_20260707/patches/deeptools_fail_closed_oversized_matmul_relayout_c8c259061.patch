@@ -1,0 +1,48 @@
+From c8c259061af3ba23cb45a631faae04e0e63331f7 Mon Sep 17 00:00:00 2001
+From: Adnan Hoque <adnan.hoque1@ibm.com>
+Date: Tue, 7 Jul 2026 05:22:06 +0000
+Subject: [PATCH] [DXP] fail closed for oversized matmul operand relayout
+
+Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dxp/SdscRelayoutInsertion.cpp | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 6ed2b262e..7b53fb392 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -1136,9 +1136,13 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     return false;
+   }
+   const auto targetLayoutDims = jsonStringArray(targetTensor, "layoutDimOrder_");
+-  const auto targetCoreIdToSlice = jsonCoreIdToSlice(targetTensor);
++  auto targetCoreIdToSlice =
++      jsonCoreIdToSliceForKey(targetTensor, "computeCoreIdToWkSlice_");
++  if (targetCoreIdToSlice.empty()) {
++    targetCoreIdToSlice = jsonCoreIdToSlice(targetTensor);
++  }
+   if (targetCoreIdToSlice.empty()) {
+-    *reason = "target_kernel_tensor must contain coreIdToWkSlice_";
++    *reason = "target_kernel_tensor must contain computeCoreIdToWkSlice_ or coreIdToWkSlice_";
+     return false;
+   }
+   const auto targetSliceIds =
+@@ -1367,7 +1371,13 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+       "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS");
+   if (maxDebugChunks > 0 &&
+       chunks.size() > static_cast<size_t>(maxDebugChunks)) {
+-    chunks.resize(static_cast<size_t>(maxDebugChunks));
++    *reason = "matmul operand gather/restickify requires " +
++              std::to_string(chunks.size()) + " chunk(s), exceeding " +
++              "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS=" +
++              std::to_string(maxDebugChunks) +
++              ". Refusing to truncate movement; use WSR/tile-scoping or "
++              "raise the diagnostic cap for a bounded correctness test";
++    return false;
+   }
+ 
+   for (size_t chunkIdx = 0; chunkIdx < chunks.size(); ++chunkIdx) {
+-- 
+2.52.0
+

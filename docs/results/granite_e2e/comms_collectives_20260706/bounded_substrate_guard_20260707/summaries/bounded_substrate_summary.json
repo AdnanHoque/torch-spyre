@@ -1,0 +1,113 @@
+{
+  "torch_commit": "de76531b",
+  "deeptools_commit": "c8c259061",
+  "granite_run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_bounded_substrate_default4m_20260707_050254",
+  "flash_run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_one_flag_gather_restickify_20260706_175419",
+  "focused_checks": {
+    "torch_py_compile": "passed",
+    "deeptools_LayoutAllgatherRestickify": "32/32 passed",
+    "deeptools_CoreWorkDivIncomptLxRelayout": "2/2 passed"
+  },
+  "granite_plan_rows": [
+    {
+      "name": "16_batchmatmul_Tensor1_0_matmul_operand_broadcast_plan.json",
+      "kind": "matmul_operand_broadcast",
+      "status": "lowered_loop_scoped_kernel_neighbor",
+      "pattern": "all_gather_replicate",
+      "strategy": "loop_scoped_input_fetch",
+      "logical_transfer_count": 1024
+    },
+    {
+      "name": "7_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "kind": "matmul_operand_broadcast",
+      "status": "lowered_loop_scoped_kernel_neighbor",
+      "pattern": "all_gather_replicate",
+      "strategy": "loop_scoped_input_fetch",
+      "logical_transfer_count": 256
+    },
+    {
+      "name": "8_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "kind": "matmul_operand_broadcast",
+      "status": "lowered_loop_scoped_kernel_neighbor",
+      "pattern": "all_gather_replicate",
+      "strategy": "loop_scoped_input_fetch",
+      "logical_transfer_count": 64
+    },
+    {
+      "name": "8_batchmatmul_Tensor1_1_matmul_operand_broadcast_plan.json",
+      "kind": "matmul_operand_broadcast",
+      "status": "lowered_loop_scoped_kernel_neighbor",
+      "pattern": "all_gather_replicate",
+      "strategy": "loop_scoped_input_fetch",
+      "logical_transfer_count": 1024
+    }
+  ],
+  "granite_sdsc_counts": [
+    {
+      "bundle": "sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_fyi23rj2",
+      "files": 18,
+      "counts": {
+        "matmul_operand_broadcast": 2,
+        "partial_view_gather": 5,
+        "ReStickifyOpLx": 2
+      }
+    },
+    {
+      "bundle": "sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2_3msut6u3",
+      "files": 10,
+      "counts": {
+        "ReStickifyOpHBM": 1,
+        "partial_view_gather": 1
+      }
+    },
+    {
+      "bundle": "sdsc_fused_add_linear_mul_silu_split_with_sizes_3_tlbtxh0e",
+      "files": 8,
+      "counts": {
+        "ReStickifyOpHBM": 2,
+        "partial_view_gather": 3
+      }
+    },
+    {
+      "bundle": "sdsc_fused_linear_rms_norm_0_nbpukdj7",
+      "files": 8,
+      "counts": {
+        "matmul_operand_broadcast": 1,
+        "ReStickifyOpHBM": 1
+      }
+    }
+  ],
+  "explicit_wsr_fallback_lines": [
+    "[DEBUG] [spyre.inductor.lx_relayout] lx relayout skip: buf35 -> buf36 matmul operand is 13107200 bytes, exceeding bounded relayout budget 4194304 bytes; preserving HBM fallback until WSR/tile-scoping handles this edge",
+    "[DEBUG] [spyre.inductor.lx_relayout] lx relayout skip: buf35 -> buf36 matmul operand is 13107200 bytes, exceeding bounded relayout budget 4194304 bytes; preserving HBM fallback until WSR/tile-scoping handles this edge"
+  ],
+  "granite_runtime_failure_lines": [
+    "RESULT {\"attn_name\": \"sdpa_causal\", \"cache_extra\": [\"sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1\", \"sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2\", \"sdsc_fused_add_linear_mul_silu_split_with_sizes_3\", \"sdsc_fused_linear_rms_norm_0\"], \"cache_match\": false, \"cache_missing\": [\"sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_clone_expand_linear_mul_rms_norm_transpose_unsqueeze_view_2\", \"sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_add_clone_expand_linear_mul_rms_norm_unsqueeze_view_3\", \"sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_cat_clone_expand_linear_transpose_unsqueeze_view_4\", \"sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_cat_clone_expand_transpose_unsqueeze_view_2\", \"sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_linear_mul_sum_transpose_unsqueeze_view_1\", \"sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_linear_mul_sum_transpose_unsqueeze_view_2\", \"sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_mul_sum_transpose_unsqueeze_view_1\", \"sdsc_fused__scaled_dot_product_fused_attention_overrideable_linear_unsqueeze_3\", \"sdsc_fused_add_linear_mul_4\", \"sdsc_fused_add_linear_mul_rms_norm_silu_5\", \"sdsc_fused_add_linear_mul_silu_6\", \"sdsc_fused_add_mean_mul_rsqrt_0\", \"sdsc_fused_add_mul_5\", \"sdsc_fused_bmm_transpose_unsqueeze_0\", \"sdsc_fused_div_0\", \"sdsc_fused_linear_mul_rms_norm_silu_3\", \"sdsc_fused_linear_mul_rms_norm_silu_4\", \"sdsc_fused_linear_mul_rms_norm_sum_unsqueeze_view_0\", \"sdsc_fused_linear_overwrite_slice_transpose_view_1\", \"sdsc_fused_mul_0\"], \"cache_overlap\": [], \"cache_summary\": [{\"kernel_dir\": \"sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1_fyi23rj2\", \"normalized\": \"sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1\", \"splits\": [{\"file\": \"sdsc_0.json\", \"op\": \"0_mul\", \"split\": {\"i\": 1, \"mb\": 32, \"out\": 1, \"x\": 1, \"y\": 1}}, {\"file\": \"sdsc_1.json\", \"op\": \"1_sumnonstick\", \"split\": {\"i\": 1, \"mb\": 32, \"out\": 1, \"x\": 1, \"y\": 1}}, {\"file\": \"sdsc_10.json\", \"op\": \"10_max\", \"split\": {\"mb\": 1, \"out\": 1, \"x\": 32}}, {\"file\": \"sdsc_11.json\", \"op\": \"11_sub\", \"split\": {\"mb\": 1, \"out\": 1, \"x\": 32}}, {\"file\": \"sdsc_12.json\", \"op\": \"12_exp\", \"split\": {\"mb\": 1, \"out\": 1, \"x\": 32}}, {\"file\": \"sdsc_13.json\", \"op\": \"13_sum\", \"split\": {\"mb\": 1, \"out\": 1, \"x\": 32}}, {\"file\": \"sdsc_14.json\", \"op\": \"14_realdiv\", \"split\": {\"mb\": 1, \"out\": 1, \"x\": 32}}, {\"file\": \"sdsc_15.json\", \"op\": \"15_identity\", \"split\": {\"mb\": 1, \"out\": 1, \"x\": 1, \"y\": 32}}, {\"file\": \"sdsc_16.json\", \"op\": \"16_batchmatmul\", \"split\": {\"in\": 1, \"mb\": 32, \"out\": 1, \"x\": 1}}, {\"file\": \"sdsc_17.json\", \"op\": \"17_identity\", \"split\": {\"mb\": 1, \"out\": 1, \"x\": 32}}, {\"file\": \"sdsc_2.json\", \"op\": \"2_mul\", \"split\": {\"mb\": 32, \"out\": 1, \"x\": 1}}, {\"file\": \"sdsc_3.json\", \"op\": \"3_mul\", \"split\": {\"i\": 1, \"mb\": 32, \"out\": 1, \"x\": 1, \"y\": 1}}, {\"file\": \"sdsc_4.json\", \"op\": \"4_sumnonstick\", \"split\": {\"i\": 1, \"mb\": 32, \"out\": 1, \"x\": 1, \"y\": 1}}, {\"file\": \"sdsc_5.json\", \"op\": \"5_identity\", \"split\": {\"mb\": 1, \"out\": 1, \"x\": 1, \"y\": 32}}, {\"file\": \"sdsc_6.json\", \"op\": \"6_mul\", \"split\": {\"mb\": 1, \"out\": 1, \"x\": 32}}, {\"file\": \"sdsc_7.json\", \"op\": \"7_ReStickifyOpLx\", \"split\": {\"mb\": 32, \"out\": 1, \"x\": 1}}, {\"file\": \"sdsc_8.json\", \"op\": \"8_batchmatmul\", \"split\": {\"in\": 1, \"mb\": 1, \"out\": 2, \"x\": 16}}, {\"file\": \"sdsc_9.json\", \"op\": \"9_add\", \"split\": {\"mb\": 1, \"out\": 1, \"x\": 32}}]}, {\"kernel_dir\": \"sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2_3msut6u3\", \"normalized\": \"sdsc_fused__scaled_dot_product_fused_attention_overrideable_add_linear_mul_rms_norm_transpose_view_2\", \"splits\": [{\"file\": \"sdsc_0.json\", \"op\": \"0_ReStickifyOpHBM\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_1.json\", \"op\": \"1_batchmatmul\", \"split\": {\"in\": 1, \"mb\": 4, \"out\": 8}}, {\"file\": \"sdsc_2.json\", \"op\": \"2_mul\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_3.json\", \"op\": \"3_add\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_4.json\", \"op\": \"4_mul\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_5.json\", \"op\": \"5_mean\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_6.json\", \"op\": \"6_add\", \"split\": {\"out\": 32, \"x\": 1}}, {\"file\": \"sdsc_7.json\", \"op\": \"7_rsqrt\", \"split\": {\"out\": 32, \"x\": 1}}, {\"file\": \"sdsc_8.json\", \"op\": \"8_mul\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_9.json\", \"op\": \"9_mul\", \"split\": {\"mb\": 32, \"out\": 1}}]}, {\"kernel_dir\": \"sdsc_fused_add_linear_mul_silu_split_with_sizes_3_tlbtxh0e\", \"normalized\": \"sdsc_fused_add_linear_mul_silu_split_with_sizes_3\", \"splits\": [{\"file\": \"sdsc_0.json\", \"op\": \"0_ReStickifyOpHBM\", \"split\": {\"mb\": 25, \"out\": 1}}, {\"file\": \"sdsc_1.json\", \"op\": \"1_batchmatmul\", \"split\": {\"in\": 1, \"mb\": 4, \"out\": 8}}, {\"file\": \"sdsc_2.json\", \"op\": \"2_silu\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_3.json\", \"op\": \"3_mul\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_4.json\", \"op\": \"4_ReStickifyOpHBM\", \"split\": {\"mb\": 1, \"out\": 25}}, {\"file\": \"sdsc_5.json\", \"op\": \"5_batchmatmul\", \"split\": {\"in\": 1, \"mb\": 8, \"out\": 4}}, {\"file\": \"sdsc_6.json\", \"op\": \"6_mul\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_7.json\", \"op\": \"7_add\", \"split\": {\"mb\": 32, \"out\": 1}}]}, {\"kernel_dir\": \"sdsc_fused_linear_rms_norm_0_nbpukdj7\", \"normalized\": \"sdsc_fused_linear_rms_norm_0\", \"splits\": [{\"file\": \"sdsc_0.json\", \"op\": \"0_mul\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_1.json\", \"op\": \"1_mean\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_2.json\", \"op\": \"2_add\", \"split\": {\"out\": 32, \"x\": 1}}, {\"file\": \"sdsc_3.json\", \"op\": \"3_rsqrt\", \"split\": {\"out\": 32, \"x\": 1}}, {\"file\": \"sdsc_4.json\", \"op\": \"4_mul\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_5.json\", \"op\": \"5_mul\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_6.json\", \"op\": \"6_ReStickifyOpHBM\", \"split\": {\"mb\": 32, \"out\": 1}}, {\"file\": \"sdsc_7.json\", \"op\": \"7_batchmatmul\", \"split\": {\"in\": 1, \"mb\": 4, \"out\": 8}}]}], \"case\": \"prefill\", \"compile_block\": true, \"error\": \"Traceback (most recent call last):\\n  File \\\"/home/adnan-cdx/spyre-granite-e2e-bench/benchmarks/granite_block_layer_probe.py\\\", line 365, in run_case\\n    out, elapsed_ms = call_block(args.warmups + index + 1, total)\\n                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \\\"/home/adnan-cdx/spyre-granite-e2e-bench/benchmarks/granite_block_layer_probe.py\\\", line 322, in call_block\\n    value = block(x=x, **kwargs)\\n            ^^^^^^^^^^^^^^^^^^^^\\n  File \\\"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/nn/modules/module.py\\\", line 1776, in _wrapped_call_impl\\n    return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]\\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \\\"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py\\\", line 1047, in compile_wrapper\\n    result = fn(*args, **kwargs)\\n             ^^^^^^^^^^^^^^^^^^^\\n  File \\\"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/nn/modules/module.py\\\", line 1789, in _call_impl\\n    return forward_call(*args, **kwargs)\\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \\\"/home/adnan-cdx/dt-inductor-codex-clean/profiler_runs/decode_regression_rev_ab_20260610_163300/foundation-model-stack-eager_spyre/fms/models/granite.py\\\", line 109, in forward\\n    def forward(\\n  File \\\"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py\\\", line 1298, in _fn\\n    return fn(*args, **kwargs)\\n           ^^^^^^^^^^^^^^^^^^^\\n  File \\\"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_functorch/aot_autograd.py\\\", line 1273, in forward\\n    return compiled_fn(full_args)\\n           ^^^^^^^^^^^^^^^^^^^^^^\\n  File \\\"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py\\\", line 777, in runtime_wrapper\\n    all_outs = compiled_invoker.run(args, on_before_call=exit_prologue)\\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \\\"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py\\\", line 523, in run\\n    return call_func_at_runtime_with_args(\\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \\\"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/utils.py\\\", line 126, in call_func_at_runtime_with_args\\n    out = normalize_as_list(f(args))\\n                            ^^^^^^^\\n  File \\\"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py\\\", line 850, in wrapper\\n    return compiled_fn(runtime_args)\\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \\\"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py\\\", line 1055, in inner_fn\\n    outs = compiled_fn(args)\\n           ^^^^^^^^^^^^^^^^^\\n  File \\\"/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/output_code.py\\\", line 725, in __call__\\n    return self.current_callable(inputs)\\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\n  File \\\"/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_bounded_substrate_default4m_20260707_050254/block_prefill/cache/3p/c3p2grl3j3xodtq56tqi4mtbwe32ma3k7y6e53bmyvpbmc2sfpqm.py\\\", line 1461, in call\\n    sdsc_fused_linear_rms_norm_0.run(_pool, arg1_1, buf39, arg0_1, arg2_1, buf6)\\n  File \\\"/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/torch-spyre/torch_spyre/execution/kernel_runner.py\\\", line 43, in run\\n    launch_jobplan(self.jobplan, args)\\nRuntimeError: convert_address not yet implemented - waiting for flex support\\n\", \"fused_weights\": true, \"input_shape\": [1, 512, 4096], \"iters\": 1, \"mask_shape\": [1, 512, 512], \"past_key_value_shape\": null, \"position_ids_shape\": [1, 512], \"profile_dir\": \"/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_bounded_substrate_default4m_20260707_050254/block_prefill/trace\", \"profile_enabled\": false, \"profile_memory\": true, \"record_shapes\": false, \"returncode\": 1, \"trace_path\": null, \"trace_summary\": null, \"trace_summary_path\": null, \"warmups\": 0}"
+  ],
+  "flash_structural_summary": {
+    "files_mentioning_restickify": {
+      "ReStickifyOpLx": 64
+    },
+    "logical_transfer_count_total": 8192,
+    "plan_communication_counts": {
+      "all_gather_replicate": 32
+    },
+    "plan_files": 32,
+    "plan_kind_counts": {
+      "matmul_operand_broadcast": 32
+    },
+    "plan_realization_strategy_counts": {
+      "gather_then_restickify": 32
+    },
+    "plan_realized_counts": {
+      "True": 32
+    },
+    "returncode": "0",
+    "root_op_counts_subset": {
+      "ReStickifyOpLx": 32,
+      "batchmatmul": 64
+    },
+    "run": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/test_flash_one_flag_gather_restickify_20260706_175419",
+    "sdsc_json_files": 550
+  }
+}
