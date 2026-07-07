@@ -482,6 +482,24 @@ def test_partial_view_gather_classification_uses_tensor_arg_provenance():
     )
 
 
+def test_partial_view_gather_classification_without_prior_plan_keeps_offset():
+    arg = _fixed_tile_arg(is_input=True, allocation={"lx": 0})
+    arg.source_name = "buf33"
+    arg.source_offset_elems = Integer(12800)
+
+    classifications = _partial_view_gather_classifications(
+        args=[arg],
+        relayout_inputs={},
+    )
+
+    assert len(classifications) == 1
+    classification = classifications[0]
+    assert classification["kind"] == PARTIAL_VIEW_GATHER
+    assert classification["source_name"] == "buf33"
+    assert classification["source_offset_elems"] == "12800"
+    assert "producer_core_id_to_device_slice" not in classification
+
+
 def test_partial_view_gather_does_not_duplicate_staged_matmul_contract():
     arg = _fixed_tile_arg(is_input=True, allocation={"lx": 0})
     arg.source_name = "buf21"
@@ -499,6 +517,69 @@ def test_partial_view_gather_does_not_duplicate_staged_matmul_contract():
     )
 
     assert classifications == []
+
+
+def test_bundle_enriches_partial_view_gather_with_source_target_layouts(tmp_path):
+    mb = Symbol("c0")
+    out = Symbol("c1")
+
+    producer_output = _fixed_tile_arg(is_input=False, allocation={"lx": 0})
+    producer_output.name = "buf33"
+    producer = OpSpec(
+        op="neg",
+        is_reduction=False,
+        iteration_space={mb: (Integer(512), 4), out: (Integer(12800), 1)},
+        op_info={},
+        args=[
+            _fixed_tile_arg(is_input=True, allocation={"hbm": 0x1000}),
+            producer_output,
+        ],
+    )
+
+    consumer_input = _fixed_tile_arg(is_input=True, allocation={"lx": 0})
+    consumer_input.name = "buf33"
+    consumer_input.source_name = "buf33"
+    consumer_input.source_offset_elems = Integer(12800)
+    classification = {
+        "kind": PARTIAL_VIEW_GATHER,
+        "classification": PARTIAL_VIEW_GATHER,
+        "communication_pattern": PARTIAL_VIEW_GATHER,
+        "source_name": "buf33",
+        "read_index": 0,
+        "source_offset_elems": "12800",
+        "requires_staged_realization": True,
+        "materialization_pattern": "partial_view_gather_to_lx",
+        "layout_transform": {"kind": "partial_view_lx_to_consumer_lx"},
+    }
+    consumer = OpSpec(
+        op="exp",
+        is_reduction=False,
+        iteration_space={mb: (Integer(512), 32), out: (Integer(12800), 1)},
+        op_info={"lx_relayout_classifications": [classification]},
+        args=[
+            consumer_input,
+            _fixed_tile_arg(is_input=False, allocation={"hbm": 0x2000}),
+        ],
+    )
+
+    generate_bundle("partial_view_gather_contract", str(tmp_path), [producer, consumer])
+
+    sdsc_1 = json.loads((tmp_path / "sdsc_1.json").read_text())
+    root = next(iter(sdsc_1.values()))
+    enriched = root["lxRelayoutClassifications_"][0]
+
+    assert enriched["source_lx_tensor"]["buffer_name"] == "buf33"
+    assert enriched["source_lx_tensor"]["component_"] == "lx"
+    assert enriched["target_lx_tensor"]["dsName_"] == "Tensor0"
+    assert enriched["target_lx_tensor"]["component_"] == "lx"
+    assert enriched["source_offset_elems"] == "12800"
+    assert enriched["producer_core_id_to_device_slice"] == enriched[
+        "source_lx_tensor"
+    ]["coreIdToWkSlice_"]
+    assert enriched["layout_transform"]["source_component"] == "lx"
+    assert enriched["layout_transform"]["target_component"] == "lx"
+    assert enriched["layout_transform"]["movement_stage"] == "partial_view_gather"
+    assert enriched["layout_transform"]["carrier_hint"] == "lx_partial_view_gather"
 
 
 def test_bundle_enriches_matmul_operand_contract_with_source_target_layouts(

@@ -155,7 +155,8 @@ def _enrich_lx_relayout_classifications(
     for classification in classifications:
         if not isinstance(classification, dict):
             continue
-        if classification.get("kind") != "matmul_operand_broadcast":
+        kind = classification.get("kind")
+        if kind not in {"matmul_operand_broadcast", "partial_view_gather"}:
             finalized_classifications.append(classification)
             continue
 
@@ -165,6 +166,10 @@ def _enrich_lx_relayout_classifications(
         source_layout = producer_lx_outputs.get(str(source_name))
         if source_layout is not None:
             classification.setdefault("source_lx_tensor", source_layout)
+            classification.setdefault(
+                "producer_core_id_to_device_slice",
+                source_layout.get("coreIdToWkSlice_", {}),
+            )
 
         read_index = classification.get("operand_read_index")
         if read_index is None:
@@ -178,6 +183,18 @@ def _enrich_lx_relayout_classifications(
             sdsc_json=sdsc_json,
             tensor_idx=target_tensor_idx,
         )
+        if kind == "partial_view_gather":
+            if target_layout is not None:
+                classification.setdefault("target_lx_tensor", target_layout)
+            layout_transform = dict(classification.get("layout_transform") or {})
+            layout_transform.setdefault("source_component", "lx")
+            layout_transform.setdefault("target_component", "lx")
+            layout_transform.setdefault("movement_stage", "partial_view_gather")
+            layout_transform.setdefault("carrier_hint", "lx_partial_view_gather")
+            classification["layout_transform"] = layout_transform
+            finalized_classifications.append(classification)
+            continue
+
         if target_layout is not None:
             classification.setdefault("target_kernel_tensor", target_layout)
 
