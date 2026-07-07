@@ -9,7 +9,7 @@ Torch/Deeptools checkouts for experimentation.  They are not PR-sized patches.
 - Torch base: `665d0a6ca2cfd30d5cfb90dc98c9508273251483`
 - Torch head: `0c8ead7e12695e972c8f83a995c2ecd672dc2e4c`
 - Deeptools base: `ff1c7c676cdc8f319f90fe7baa666db2a1103327`
-- Deeptools head: `2afc2015bbf1138a045fad7d9ea222a85a0b4ed3`
+- Deeptools head: `a5ff55eee627c5c2bd4b7b0518bb0cbaad385952`
 
 ## Apply
 
@@ -47,11 +47,12 @@ feature flag.
 
 ## Included Late Updates
 
-- Torch now defaults full-tensor matmul operand collectives to a 1 MiB bounded
-  cap under `SPYRE_LX_PLANNER_RELAYOUT=1`; larger full activations preserve the
-  HBM fallback until WSR/tile-scoping can make the movement bounded.
-- Deeptools gather/restickify chunking now also bounds source-core pressure, not
-  only destination-core pressure.
+- Torch defaults full-tensor matmul operand collectives to a 1 MiB bounded cap
+  under `SPYRE_LX_PLANNER_RELAYOUT=1`; larger full activations preserve the HBM
+  fallback until WSR/tile-scoping can make the movement bounded.
+- The attempted source-core-aware Deeptools chunking patch is intentionally not
+  in this portable patch bundle.  It helped diagnose Granite full-activation
+  pressure, but it regressed the saved flash replay into an IBuff failure.
 
 ## Validation Snapshot
 

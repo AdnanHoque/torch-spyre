@@ -26,14 +26,17 @@ Two local deltas were tested:
 - `deeptools_source_core_chunk.diff`: makes gather/restickify chunking consider
   source-core pressure as well as destination-core pressure.
 
-These were diagnostic deltas.  The important result is not the exact cap value;
-it is the boundary: full Granite activation relayouts must fail closed until WSR
-can make the communication tile-scoped.
+These were diagnostic deltas.  The Torch cap was promoted to the prototype
+branch.  The Deeptools source-core chunking patch was not promoted because it
+regressed the saved flash replay into an IBuff failure; it remains archived here
+only as evidence from the full-activation investigation.  The important result
+is not the exact cap value; it is the boundary: full Granite activation relayouts
+must fail closed until WSR can make the communication tile-scoped.
 
 ## Main Findings
 
 1. Bounded substrate validation still holds.
-   The focused Deeptools tests passed after the source-core chunking patch:
+   The focused Deeptools tests passed with the current branch:
    `MatmulOperandBroadcast*` and `CoreWorkDivIncomptLxRelayout*`.
 
 2. The full Granite first-projection activation is too large for the current
