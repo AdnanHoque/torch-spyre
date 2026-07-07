@@ -14,6 +14,25 @@ for a useful Granite/flash path.
 | Deeptools collectives | `Adnan-Hoque1/deeptools:ah/comms-collectives` | `3a4349e62baff978faa21b8cbad376a524658398` |
 | Deeptools PR1 scatter | `Adnan-Hoque1/deeptools:pr-lx-relayout-dldsc-scatter` | `b8c09743c46505b4cac46b434b9eb3243ae0b685` |
 
+## Local Test Attempt
+
+A focused local pytest attempt was made from a shallow clone of
+`AdnanHoque/torch-spyre:gather-restickify`:
+
+```bash
+python3 -m pytest tests/inductor/test_lx_relayout_dldsc.py -q
+```
+
+The local Mac environment does not currently have `torch` installed, so this
+did not run:
+
+```text
+ModuleNotFoundError: No module named 'torch'
+```
+
+The code inspection below is therefore source-level evidence plus archived pod
+test evidence, not a fresh local pytest result.
+
 ## Acceptance Matrix
 
 | Requirement | Current Evidence | Status |
@@ -21,10 +40,10 @@ for a useful Granite/flash path.
 | Classify scatter/permutation | PR1 scatter branches and earlier scatter artifacts. | Complete for PR1 class. |
 | Classify all-gather/replicate | `flash_allgather_failclosed_checkpoint_20260707.md` records `all_gather_replicate` plans; Granite S512 checkpoint records two attention RHS all-gather/replicate handoffs. | Complete structurally; latest-head full replay still needs re-run. |
 | Classify broadcast/multicast | Latest Deeptools fixtures generate `broadcast` and `multicast` plans under `bounded_broadcast_gather_restickify_20260707` and `bounded_multicast_gather_restickify_20260707`. | Complete for bounded synthetic fixtures; not yet proven on a real Granite/flash edge. |
-| Classify gather | Partial-view gather artifacts and offset guards exist under `partial_view_gather_*` and `fanout_physical_fixture_probe_20260707`. | Partial. Needs clearer useful-workload edge or a focused bounded value test. |
+| Classify gather | `tests/inductor/test_lx_relayout_dldsc.py` covers topology classification and generic DLDSC emission; partial-view gather artifacts and offset guards exist under `partial_view_gather_*` and `fanout_physical_fixture_probe_20260707`. | Complete for metadata/classification; useful-workload/value proof still partial. |
 | Torch emits DLDSC metadata for scatter | PR1 branch emits tensor-vs-compute distribution metadata consumed by Deeptools scatter relayout. | Complete for scatter. |
 | Torch emits DLDSC metadata for all-gather/replicate | Torch `gather-restickify` emits `matmul_operand_broadcast`/`all_gather_replicate` metadata for flash and Granite attention RHS handoffs. | Complete for current attention/flash class. |
-| Torch emits DLDSC metadata for broadcast/multicast | The current evidence is mostly backend synthetic fixtures, not Torch-emitted useful workload SDSCs. | Incomplete. Need a Torch-side bounded real/synthetic producer of broadcast/multicast metadata. |
+| Torch emits DLDSC metadata for broadcast/multicast | `tests/inductor/test_lx_relayout_dldsc.py` has generic broadcast and multicast DLDSC emission tests through `compile_op_spec`. | Complete for generic metadata emission; not yet proven from a full Torch graph/useful workload SDSC. |
 | Deeptools realizes bounded scatter | PR1 Deeptools branch and unit/device evidence. | Complete for bounded scatter. |
 | Deeptools realizes bounded all-gather/replicate | Saved full-flash DXP replay passed at `23010446e`; bounded M16 all-gather replay passed; chunk policy fixed IBUFF. | Complete at `23010446e`; latest head `3a4349e62` needs replay completion. |
 | Deeptools realizes bounded broadcast | Focused DXP/util tests pass at `071e293cf`; bounded plan artifact archived. | Complete for bounded fixture. |
@@ -53,16 +72,17 @@ for a useful Granite/flash path.
      interrupted before DXP completion.
    - This needs one timed replay after pod auth is refreshed.
 
-2. **Torch-emitted broadcast/multicast useful workload**:
+2. **Graph-produced broadcast/multicast useful workload**:
+   - Generic Torch metadata/codegen tests already cover broadcast and multicast.
    - Deeptools bounded fixtures are green.
-   - We still need a Torch-emitted SDSC edge that naturally classifies as
+   - We still need a full Torch graph/SDSC edge that naturally classifies as
      bounded broadcast or bounded multicast, or an explicit note that the
      current Granite/flash in-scope edges are all-gather/replicate rather than
      broadcast/multicast.
 
 3. **Gather useful workload/value boundary**:
-   - Partial-view gather metadata and guards exist, but the evidence is less
-     strong than all-gather/replicate.
+   - Generic gather metadata/codegen tests and partial-view gather guards exist,
+     but the evidence is less strong than all-gather/replicate.
    - Add a bounded patterned value test or point to a Granite edge where a
      gather-like copy is actually realized.
 
@@ -101,10 +121,10 @@ When OpenShift auth is restored, use this order:
    - Expected: non-weight attention handoffs on LX; remaining explicit HBM rows
      should be weight-format rows or WSR-scoped oversize cases.
 
-4. **Broadcast/multicast Torch fixture**
-   - If no real Granite edge appears, add a small Torch-generated bounded
-     synthetic fixture so the frontend metadata path is proven, not only the
-     Deeptools backend path.
+4. **Broadcast/multicast graph fixture**
+   - If no real Granite edge appears, add a small full-graph bounded synthetic
+     fixture so planner-produced SDSC metadata is proven, not only hand-built
+     `OpSpec` metadata and backend fixtures.
 
 ## Completion Bar
 
@@ -112,9 +132,8 @@ Do not mark the goal complete until:
 
 - latest-head all-gather/replicate replay is green or its failure is classified
   as an explicit fail-closed capacity/WSR boundary;
-- bounded broadcast/multicast have both backend and Torch-emitted metadata
+- bounded broadcast/multicast have both backend and graph-produced Torch SDSC
   evidence, or are explicitly downgraded out of required Granite scope;
 - gather has either a useful-workload proof or a bounded value-oriented proof;
 - latest Granite artifacts identify every remaining non-weight HBM spill as
   either removed, comm-substrate gap, or WSR/tile-scoping gap.
-
