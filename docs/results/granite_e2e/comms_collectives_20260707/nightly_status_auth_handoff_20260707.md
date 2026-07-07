@@ -17,7 +17,7 @@ As of this handoff:
 
 | Repo | Branch | SHA | Role |
 | --- | --- | --- | --- |
-| `AdnanHoque/torch-spyre` | `ah/comms-collectives` | `092e14d82e7ea4aedce67d209152eb5b4d835039` | Artifact branch with docs, patches, run payloads, and handoffs. |
+| `AdnanHoque/torch-spyre` | `ah/comms-collectives` | current branch head; at least `1bc1db7b0e8087fd069fe09a80a61c88fd85b16d` | Artifact branch with docs, patches, run payloads, and handoffs. |
 | `AdnanHoque/torch-spyre` | `gather-restickify` | `bced14b49acf4fae92ef4df07d2f5229806c672b` | Torch prototype branch for flash/gather-restickify experiments. |
 | `AdnanHoque/torch-spyre` | `pr-lx-relayout-scatter` | `ba365fe6234527e17558520ab41e21d8c6c696e2` | PR1 scatter/permutation Torch branch. |
 | `AdnanHoque/torch-spyre` | `pr-lx-relayout-dldsc` | `a9a3bb505b966a3716d48854d1ecc22e46624476` | Older DLDSC/scatter exploration branch. |
@@ -130,14 +130,16 @@ error: You must be logged in to the server (Unauthorized)
 
 An `oc login --web` flow was started, but Chrome is currently parked at the IBM
 w3id passkey page. The alternate-sign-in link did not move the page forward.
+The waiting local `oc login` shell was stopped after the browser tabs were left
+open.
 
 Two Chrome tabs were left open as handoff tabs:
 
 1. w3id passkey login page for the active `oc login --web` attempt;
 2. OpenShift OAuth token page, which also needs a fresh login.
 
-Once the user completes the passkey/login, poll the waiting `oc login` shell if
-it is still alive, then verify:
+Once the user completes the passkey/login, start a fresh `oc login --web` or use
+the OpenShift token page, then verify:
 
 ```bash
 kubectl get pods -n a6-quantization
