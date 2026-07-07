@@ -58,7 +58,7 @@ Deeptools PartialViewGather* at 9cd9c79c3: 3/3 passed; positive case asserts off
 Combined DXP focused regression at 9cd9c79c3: 8/8 passed
 LayoutAllgatherRestickify.* at 9cd9c79c3: 32/32 passed
 Current-head archive current_head_validation_20260707: DXP relayout insertion 8/8 passed; util LayoutAllgatherRestickify 32/32 passed; first Python value probe blocked before SDSC emission by Spyre fake-tensor/copy setup
-Current-head value-probe attempts current_head_value_probe_attempts_20260707: disabling joint graph passes reaches DXP, but synthetic pointwise producer SDSCs (fused_mul_transpose, fused_mul, fused_add) fail before relayout plan emission; AIU value proof remains open
+Current-head value-probe attempts current_head_value_probe_attempts_20260707: disabling joint graph passes reaches DXP, but synthetic producer SDSCs (fused_mul_transpose, fused_mul, fused_add, and matmulproducer fused_0) fail before relayout plan emission; AIU value proof remains open
 ```
 
 The partial-view Torch pytest could not be run in that exact CDX worktree
@@ -131,7 +131,7 @@ large activation needs performance -> wait for WSR to tile the live region
 ## Current Gaps
 
 1. Add value-oriented bounded synthetic/AIU validation for offset-aware
-   `partial_view_gather`. Descriptor/DXP compilation is now covered, and current-head host-side relayout tests are green. Python value execution is still missing. Disabling joint graph passes gets the probe past fake-tensor setup and into DXP, but current synthetic pointwise producer SDSCs fail before relayout plan emission; see current_head_value_probe_attempts_20260707.
+   `partial_view_gather`. Descriptor/DXP compilation is now covered, and current-head host-side relayout tests are green. Python value execution is still missing. Disabling joint graph passes gets the probe past fake-tensor setup and into DXP, but current synthetic producer SDSCs fail before relayout plan emission; see current_head_value_probe_attempts_20260707.
 2. Keep all oversized Granite activation cases classified as WSR/tile-scoping until WSR provides bounded live tiles.
 3. Keep reduce/all-reduce separate because those require arithmetic, not just movement.
 

@@ -73,3 +73,18 @@ The current verified evidence for the bounded communication substrate remains:
 ## Next useful validation step
 
 A value probe should avoid unsupported pointwise producer SDSCs. The cleanest next route is a purpose-built lower-level fixture or a Torch graph that starts from an already LX-resident producer without requiring a separate pointwise SDSC before the target matmul operand relayout.
+
+### `matmulproducer/`
+
+Producer changed from a pointwise op to `v2 = matmul(v_src, w)` so the value operand is produced by another matmul before the target value-side matmul.
+
+Result: still fails in DXP before relayout plan emission.
+
+Failure:
+
+```text
+DtException: op->inpSP_.at(inpSPIdx).dimToSize_.at(dimNameOuter) >= stickDim
+... sdsc_fused_0 ... died with SIGABRT
+```
+
+The generated SDSC contains three `batchmatmul` rows and the first producer matmul fails before any backend relayout plan is emitted. This keeps the current-head Python value proof open and points toward a lower-level fixture rather than more synthetic Python graph churn.
