@@ -21,7 +21,7 @@ As of this handoff:
 | `AdnanHoque/torch-spyre` | `gather-restickify` | `7a18839f83d74d2c576f4c85585e11638d30c20b` | Torch prototype branch for flash/gather-restickify experiments. Adds planner-level tests for generic gather, broadcast, multicast, and all-gather relayout metadata. |
 | `AdnanHoque/torch-spyre` | `pr-lx-relayout-scatter` | `ba365fe6234527e17558520ab41e21d8c6c696e2` | PR1 scatter/permutation Torch branch. |
 | `AdnanHoque/torch-spyre` | `pr-lx-relayout-dldsc` | `a9a3bb505b966a3716d48854d1ecc22e46624476` | Older DLDSC/scatter exploration branch. |
-| `Adnan-Hoque1/deeptools` | `ah/comms-collectives` | `2ccd5ce05e7e724f832bdaf7a4f0f5f402aee3f6` | Current Deeptools communication-collectives branch. Adds a diagnostic-only plan-artifact stage refresh after selecting the lowered relayout carrier. |
+| `Adnan-Hoque1/deeptools` | `ah/comms-collectives` | `2ccd5cefbf638e4d7fb04c88ed56a26c93a4459c` | Current Deeptools communication-collectives branch. Adds a diagnostic-only plan-artifact stage refresh after selecting the lowered relayout carrier. |
 | `Adnan-Hoque1/deeptools` | `gather-restickify` | `57c6f040b02ff592bc6cb207d9783375d2043d78` | Clean gather/restickify split branch. |
 | `Adnan-Hoque1/deeptools` | `pr-lx-relayout-dldsc-scatter` | `b8c09743c46505b4cac46b434b9eb3243ae0b685` | PR1 scatter Deeptools branch. |
 
@@ -122,7 +122,7 @@ docs/results/granite_e2e/comms_collectives_20260707/full_flash_replay_latest_3a4
 After that attempt, the Deeptools branch was advanced to:
 
 ```text
-2ccd5ce05e7e724f832bdaf7a4f0f5f402aee3f6
+2ccd5cefbf638e4d7fb04c88ed56a26c93a4459c
 ```
 
 This follow-up is diagnostic-only. It refreshes the emitted

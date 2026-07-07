@@ -16,7 +16,7 @@ The safest interpretation is:
 - archived multicast JSON: clean proof;
 - archived broadcast JSON: stale or captured from the older loop-scoped path,
   so regenerate before sharing it as evidence.
-- Deeptools `2ccd5ce05e7e724f832bdaf7a4f0f5f402aee3f6` fixes one
+- Deeptools `2ccd5cefbf638e4d7fb04c88ed56a26c93a4459c` fixes one
   diagnostic-only issue where emitted plan JSON could report the selected
   `realization_strategy` correctly but retain a stale `stages` entry from the
   pre-lowering plan.
@@ -106,7 +106,7 @@ Committed on:
 
 ```text
 Adnan-Hoque1/deeptools:ah/comms-collectives
-2ccd5ce05e7e724f832bdaf7a4f0f5f402aee3f6
+2ccd5cefbf638e4d7fb04c88ed56a26c93a4459c
 ```
 
 Patch archive:

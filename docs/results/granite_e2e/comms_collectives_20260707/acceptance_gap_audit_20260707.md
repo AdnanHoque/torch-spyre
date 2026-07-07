@@ -11,7 +11,7 @@ for a useful Granite/flash path.
 | Torch artifacts | `AdnanHoque/torch-spyre:ah/comms-collectives` | current artifact branch |
 | Torch prototype | `AdnanHoque/torch-spyre:gather-restickify` | `7a18839f83d74d2c576f4c85585e11638d30c20b` |
 | Torch PR1 scatter | `AdnanHoque/torch-spyre:pr-lx-relayout-scatter` | `ba365fe6234527e17558520ab41e21d8c6c696e2` |
-| Deeptools collectives | `Adnan-Hoque1/deeptools:ah/comms-collectives` | `2ccd5ce05e7e724f832bdaf7a4f0f5f402aee3f6` |
+| Deeptools collectives | `Adnan-Hoque1/deeptools:ah/comms-collectives` | `2ccd5cefbf638e4d7fb04c88ed56a26c93a4459c` |
 | Deeptools PR1 scatter | `Adnan-Hoque1/deeptools:pr-lx-relayout-dldsc-scatter` | `b8c09743c46505b4cac46b434b9eb3243ae0b685` |
 
 ## Local Test Attempt
