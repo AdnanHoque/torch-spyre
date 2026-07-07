@@ -207,6 +207,46 @@ def _prefer_matmul_operand_contract(
         and topology.communication_class in supported_matmul_operand_classes
     )
 
+
+def _op_nbytes(graph: GraphLowering, op: Operation) -> int | None:
+    get_size = getattr(op, "get_size", None)
+    get_dtype = getattr(op, "get_dtype", None)
+    if get_size is None or get_dtype is None:
+        return None
+
+    try:
+        sizes = list(get_size())
+        dtype = get_dtype()
+    except Exception:
+        return None
+
+    numel = 1
+    for dim in sizes:
+        try:
+            dim_size = int(dim)
+        except (TypeError, ValueError):
+            try:
+                dim_size = int(graph.sizevars.size_hint(dim))
+            except Exception:
+                return None
+        numel *= dim_size
+
+    itemsize = getattr(dtype, "itemsize", None)
+    if itemsize is None:
+        return None
+    return int(numel * itemsize)
+
+
+def _matmul_operand_contract_exceeds_budget(
+    graph: GraphLowering, producer: Operation
+) -> tuple[bool, int | None, int]:
+    max_bytes = int(config.lx_planner_relayout_max_matmul_operand_bytes)
+    if max_bytes <= 0:
+        return False, None, max_bytes
+    nbytes = _op_nbytes(graph, producer)
+    return nbytes is not None and nbytes > max_bytes, nbytes, max_bytes
+
+
 def _op_num_cores(op: Operation) -> int:
     splits: tuple[dict, dict] = getattr(op, "op_it_space_splits", ({}, {}))
     factors = [int(factor) for per_dim in splits for factor in per_dim.values()]
@@ -577,9 +617,22 @@ def plan_lx_relayouts(
                     planned.append(plan)
                     continue
 
-                if (
-                    _prefer_matmul_operand_contract(read_index, topology)
-                ):
+                if _prefer_matmul_operand_contract(read_index, topology):
+                    exceeds_budget, operand_nbytes, max_operand_bytes = (
+                        _matmul_operand_contract_exceeds_budget(graph, producer)
+                    )
+                    if exceeds_budget:
+                        logger.debug(
+                            "lx relayout skip: %s -> %s matmul operand is %s bytes, "
+                            "exceeding bounded relayout budget %s bytes; preserving HBM "
+                            "fallback until WSR/tile-scoping handles this edge",
+                            producer.name,
+                            consumer.name,
+                            operand_nbytes,
+                            max_operand_bytes,
+                        )
+                        continue
+
                     layout_contract = make_matmul_operand_allgather_contract(
                         producer_op=_op_name(producer),
                         consumer_op="batchmatmul",

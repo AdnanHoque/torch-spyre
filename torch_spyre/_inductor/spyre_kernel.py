@@ -48,6 +48,7 @@ from .lx_relayout import LX_RELAYOUT_ATTR
 from .layout_allgather_restickify import (
     LAYOUT_ALLGATHER_RESTICKIFY,
     MATMUL_OPERAND_ALLGATHER_REPLICATE,
+    PARTIAL_VIEW_GATHER,
 )
 from .pass_utils import (
     concretize_expr,
@@ -74,8 +75,54 @@ logger = get_inductor_logger("spyre_kernel")
 DLDSC_CLASSIFICATION_PATTERNS = {
     LAYOUT_ALLGATHER_RESTICKIFY,
     MATMUL_OPERAND_ALLGATHER_REPLICATE,
+    PARTIAL_VIEW_GATHER,
 }
 
+
+
+def _partial_view_gather_classifications(
+    *, args: Sequence[TensorArg], relayout_inputs: dict[str, Any]
+) -> list[dict[str, Any]]:
+    classifications: list[dict[str, Any]] = []
+    for read_index, arg in enumerate(a for a in args if a.is_input):
+        if arg.source_name is None or arg.source_offset_elems is None:
+            continue
+        plan = relayout_inputs.get(arg.source_name)
+        if not isinstance(plan, dict):
+            continue
+        if plan.get("requires_staged_realization") is True:
+            # Specialized staged contracts already carry their own backend schema.
+            continue
+        classification = dict(plan)
+        classification.update(
+            {
+                "kind": PARTIAL_VIEW_GATHER,
+                "classification": PARTIAL_VIEW_GATHER,
+                "communication_pattern": PARTIAL_VIEW_GATHER,
+                "base_communication_pattern": plan.get("communication_pattern"),
+                "read_index": read_index,
+                "source_name": arg.source_name,
+                "source_offset_elems": str(arg.source_offset_elems),
+                "requires_staged_realization": True,
+                "materialization_pattern": "partial_view_gather_to_lx",
+                "layout_transform": {
+                    "kind": "partial_view_lx_to_consumer_lx",
+                    "source": "producer_lx_residency",
+                    "target": "consumer_input_view",
+                    "source_coordinates": (
+                        "producer_tensor_distribution_plus_source_offset"
+                    ),
+                    "target_coordinates": "consumer_compute_distribution",
+                    "carrier_hint": "lx_partial_view_gather",
+                },
+                "staged_destination": {
+                    "component_": "lx",
+                    "scope": "before_consumer_compute",
+                },
+            }
+        )
+        classifications.append(classification)
+    return classifications
 
 def _current_node_op_info(current_node) -> dict[str, Any]:
     op_info: dict[str, Any] = {}
@@ -120,6 +167,21 @@ def _current_node_lx_relayout_inputs(current_node) -> dict[str, Any]:
         if isinstance(plans, dict):
             merged.update(plans)
     return merged
+
+
+def _constant_index_offset(index: sympy.Expr, it_space: dict) -> sympy.Expr | None:
+    """Return the constant element offset in a folded view index, if provable."""
+
+    try:
+        zeroed = sympy.simplify(
+            index.subs({sym: 0 for sym in it_space if isinstance(sym, sympy.Symbol)})
+        )
+    except Exception:
+        return None
+    free_symbols = getattr(zeroed, "free_symbols", set())
+    if free_symbols:
+        return None
+    return zeroed
 
 
 class RValue(ABC):
@@ -577,6 +639,12 @@ class SpyreKernel(Kernel[CSEVariable]):
             index,
             self.indirect_sizes,
         )
+        relayout_plan = (
+            _current_node_lx_relayout_inputs(self.current_node).get(name)
+            if is_input
+            else None
+        )
+        has_relayout_plan = isinstance(relayout_plan, dict)
         tensor_arg = TensorArg(
             is_input,
             -1,
@@ -586,15 +654,15 @@ class SpyreKernel(Kernel[CSEVariable]):
             tensor.layout.allocation,
             per_tile_fixed=getattr(tensor.layout, "per_tile_fixed", False),
             name=opspec_name,
+            source_name=name if has_relayout_plan else None,
+            source_offset_elems=_constant_index_offset(index, it_space)
+            if has_relayout_plan
+            else None,
         )
-        if is_input and "lx" in tensor.layout.allocation:
-            relayout_plan = _current_node_lx_relayout_inputs(self.current_node).get(
-                name
+        if has_relayout_plan and "lx" in tensor.layout.allocation:
+            tensor_arg.lx_residency_core_id_to_wk_slice = relayout_plan.get(
+                "producer_core_id_to_device_slice"
             )
-            if isinstance(relayout_plan, dict):
-                tensor_arg.lx_residency_core_id_to_wk_slice = relayout_plan.get(
-                    "producer_core_id_to_device_slice"
-                )
         if (
             "lx" not in tensor.layout.allocation
             and "pool" not in tensor.layout.allocation
@@ -745,6 +813,11 @@ class SpyreKernel(Kernel[CSEVariable]):
             if isinstance(plan, dict)
             and plan.get("communication_pattern") in DLDSC_CLASSIFICATION_PATTERNS
         ]
+        classifications.extend(
+            _partial_view_gather_classifications(
+                args=args, relayout_inputs=relayout_inputs
+            )
+        )
         if classifications:
             op_info = dict(op_info)
             op_info["lx_relayout_classifications"] = classifications
@@ -1176,6 +1249,13 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                                 buf.writeline("per_tile_fixed=True,")
                             if arg.name is not None:
                                 buf.writeline(f"name={arg.name!r},")
+                            if arg.source_name is not None:
+                                buf.writeline(f"source_name={arg.source_name!r},")
+                            if arg.source_offset_elems is not None:
+                                buf.writeline(
+                                    "source_offset_elems="
+                                    f"{sympy_str(arg.source_offset_elems)},"
+                                )
                             if arg.lx_residency_core_id_to_wk_slice is not None:
                                 buf.writeline(
                                     "lx_residency_core_id_to_wk_slice="
