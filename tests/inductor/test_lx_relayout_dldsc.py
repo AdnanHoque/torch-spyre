@@ -448,6 +448,198 @@ def test_lx_relayout_plan_records_matmul_operand_all_gather_contract():
     assert plan["staging_scope"] == "matmul_transfer_loop"
 
 
+class _FakeReadWrites:
+    def __init__(self, *, reads=(), writes=()):
+        self.reads = list(reads)
+        self.writes = list(writes)
+
+
+class _FakeGraph:
+    def __init__(self, operations):
+        self.operations = list(operations)
+
+
+def _fake_computed_buffer(name, *, reads=(), writes=(), splits=()):
+    op = ComputedBuffer.__new__(ComputedBuffer)
+    op.name = name
+    op.data = object()
+    op.get_name = lambda: name
+    op.get_read_writes = lambda: _FakeReadWrites(reads=reads, writes=writes)
+    op.op_it_space_splits = (dict(splits), {})
+    return op
+
+
+def _run_planner_topology_case(
+    monkeypatch,
+    *,
+    producer_view,
+    producer_splits,
+    consumer_view,
+    consumer_splits,
+):
+    dep = MemoryDep("buf0", Symbol("i"), (Symbol("i"),), (Integer(4),))
+    producer = _fake_computed_buffer(
+        "buf0", writes=(dep,), splits=producer_splits
+    )
+    consumer = _fake_computed_buffer(
+        "consumer", reads=(dep,), splits=consumer_splits
+    )
+
+    def fake_per_core_view(op, _dep, _buf_name, _cache):
+        if op is producer:
+            return producer_view, False
+        assert op is consumer
+        return consumer_view, False
+
+    monkeypatch.setattr(config, "lx_planner_relayout", True)
+    monkeypatch.setattr(config, "lx_planner_relayout_collectives", True)
+    monkeypatch.setattr(
+        "torch_spyre._inductor.lx_relayout._per_core_view_on_buf",
+        fake_per_core_view,
+    )
+
+    plans = plan_lx_relayouts(_FakeGraph([producer, consumer]))
+    assert len(plans) == 1
+    plan = plans[0]
+    recorded = get_lx_relayout_inputs(consumer)["buf0"]
+    assert recorded["kind"] == plan.kind
+    assert recorded["communication_class"] == plan.communication_class
+    assert recorded["communication_pattern"] == plan.communication_pattern
+    return plan, recorded
+
+
+def test_planner_records_generic_gather_relayout(monkeypatch):
+    core_id = Symbol("core_id")
+
+    plan, recorded = _run_planner_topology_case(
+        monkeypatch,
+        producer_view=PerCoreView(
+            work_slice_dims=((0, 4),),
+            core_to_slot=((0, core_id),),
+        ),
+        producer_splits=((0, 4),),
+        consumer_view=PerCoreView(
+            work_slice_dims=((0, 1),),
+            core_to_slot=(),
+        ),
+        consumer_splits=(),
+    )
+
+    assert plan.kind == "gather"
+    assert plan.communication_class == "gather"
+    assert plan.communication_pattern == "many_to_one"
+    assert plan.max_fanout == 1
+    assert plan.max_fanin == 4
+    assert plan.transfer_count == 4
+    assert recorded["producer_core_id_to_device_slice"] == {
+        "0": {"0": 0},
+        "1": {"0": 1},
+        "2": {"0": 2},
+        "3": {"0": 3},
+    }
+    assert recorded["consumer_core_id_to_device_slice"] == {"0": {"0": 0}}
+
+
+def test_planner_records_generic_broadcast_relayout(monkeypatch):
+    core_id = Symbol("core_id")
+
+    plan, recorded = _run_planner_topology_case(
+        monkeypatch,
+        producer_view=PerCoreView(
+            work_slice_dims=((0, 1),),
+            core_to_slot=(),
+        ),
+        producer_splits=(),
+        consumer_view=PerCoreView(
+            work_slice_dims=((0, 4),),
+            core_to_slot=((0, core_id),),
+        ),
+        consumer_splits=((0, 4),),
+    )
+
+    assert plan.kind == "broadcast"
+    assert plan.communication_class == "broadcast"
+    assert plan.communication_pattern == "one_to_many"
+    assert plan.max_fanout == 4
+    assert plan.max_fanin == 1
+    assert plan.transfer_count == 4
+    assert recorded["producer_core_id_to_device_slice"] == {"0": {"0": 0}}
+    assert recorded["consumer_core_id_to_device_slice"] == {
+        "0": {"0": 0},
+        "1": {"0": 1},
+        "2": {"0": 2},
+        "3": {"0": 3},
+    }
+
+
+def test_planner_records_generic_multicast_relayout(monkeypatch):
+    core_id = Symbol("core_id")
+
+    plan, recorded = _run_planner_topology_case(
+        monkeypatch,
+        producer_view=PerCoreView(
+            work_slice_dims=((0, 2),),
+            core_to_slot=((0, core_id),),
+        ),
+        producer_splits=((0, 2),),
+        consumer_view=PerCoreView(
+            work_slice_dims=((0, 2), (1, 2)),
+            core_to_slot=((0, floor(core_id / 2)), (1, Mod(core_id, 2))),
+        ),
+        consumer_splits=((0, 2), (1, 2)),
+    )
+
+    assert plan.kind == "multicast"
+    assert plan.communication_class == "multicast"
+    assert plan.communication_pattern == "one_to_many"
+    assert plan.max_fanout == 2
+    assert plan.max_fanin == 1
+    assert plan.transfer_count == 4
+    assert recorded["producer_core_id_to_device_slice"] == {
+        "0": {"0": 0, "1": 0},
+        "1": {"0": 1, "1": 0},
+    }
+    assert recorded["consumer_core_id_to_device_slice"] == {
+        "0": {"0": 0, "1": 0},
+        "1": {"0": 0, "1": 1},
+        "2": {"0": 1, "1": 0},
+        "3": {"0": 1, "1": 1},
+    }
+
+
+def test_planner_records_generic_all_gather_relayout(monkeypatch):
+    core_id = Symbol("core_id")
+
+    plan, recorded = _run_planner_topology_case(
+        monkeypatch,
+        producer_view=PerCoreView(
+            work_slice_dims=((0, 2),),
+            core_to_slot=((0, core_id),),
+        ),
+        producer_splits=((0, 2),),
+        consumer_view=PerCoreView(
+            work_slice_dims=((1, 2),),
+            core_to_slot=((1, core_id),),
+        ),
+        consumer_splits=((1, 2),),
+    )
+
+    assert plan.kind == COMM_CLASS_ALL_GATHER
+    assert plan.communication_class == COMM_CLASS_ALL_GATHER
+    assert plan.communication_pattern == "many_to_many"
+    assert plan.max_fanout == 2
+    assert plan.max_fanin == 2
+    assert plan.transfer_count == 4
+    assert recorded["producer_core_id_to_device_slice"] == {
+        "0": {"0": 0, "1": 0},
+        "1": {"0": 1, "1": 0},
+    }
+    assert recorded["consumer_core_id_to_device_slice"] == {
+        "0": {"0": 0, "1": 0},
+        "1": {"0": 0, "1": 1},
+    }
+
+
 def test_partial_view_gather_classification_uses_tensor_arg_provenance():
     producer_residency = {
         "0": {"0": 0, "1": 0},
