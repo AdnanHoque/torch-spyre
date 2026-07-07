@@ -1,0 +1,7 @@
+[31m ERRR 07.07.2026 20:51:24.654521 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 — possible lost completion[0m
+[31m ERRR 07.07.2026 20:51:24.655631 [            runtime_stream.cpp: 150] RuntimeStream::synchronize() device=0 completed after 60001ms (1 timeout warning(s))[0m
+W0707 20:51:30.747000 44067 torch/_inductor/codecache.py:662] [0/0_1] Failed to pickle cache key
+W0707 20:51:30.747000 44067 torch/_inductor/codecache.py:662] [0/0_1] Traceback (most recent call last):
+W0707 20:51:30.747000 44067 torch/_inductor/codecache.py:662] [0/0_1]   File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/codecache.py", line 658, in dumps
+W0707 20:51:30.747000 44067 torch/_inductor/codecache.py:662] [0/0_1]     self.dump(obj)
+W0707 20:51:30.747000 44067 torch/_inductor/codecache.py:662] [0/0_1] AttributeError: Can't get local object 'compile_fx.<locals>.get_decomp_fn'

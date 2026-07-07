@@ -1,0 +1,47 @@
+Traceback (most recent call last):
+  File "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_latest_acceptance_20260707_204801/spyre-granite-e2e-bench/benchmarks/granite_block_layer_probe.py", line 364, in run_case
+    out, elapsed_ms = call_block(args.warmups + index + 1, total)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_latest_acceptance_20260707_204801/spyre-granite-e2e-bench/benchmarks/granite_block_layer_probe.py", line 322, in call_block
+    value = block(x=x, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._compiled_call_impl(*args, **kwargs)  # type: ignore[misc]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1047, in compile_wrapper
+    result = fn(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/nn/modules/module.py", line 1789, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor/foundation-model-stack/fms/models/granite.py", line 109, in forward
+    def forward(
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1298, in _fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_functorch/aot_autograd.py", line 1273, in forward
+    return compiled_fn(full_args)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 777, in runtime_wrapper
+    all_outs = compiled_invoker.run(args, on_before_call=exit_prologue)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 523, in run
+    return call_func_at_runtime_with_args(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/utils.py", line 126, in call_func_at_runtime_with_args
+    out = normalize_as_list(f(args))
+                            ^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 850, in wrapper
+    return compiled_fn(runtime_args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 1055, in inner_fn
+    outs = compiled_fn(args)
+           ^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/dt-inductor-codex-clean/.venv-py212/lib64/python3.12/site-packages/torch/_inductor/output_code.py", line 725, in __call__
+    return self.current_callable(inputs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_latest_acceptance_20260707_204801/relayout_enabled_pinned_fms/block_prefill/cache/iv/civqfqtpjkpouqqx5kttje6u7dz72dix2k5j4425i4vv4dqljorv.py", line 1443, in call
+    sdsc_fused_linear_rms_norm_0.run(_pool, arg1_1, buf39, arg0_1, arg2_1, buf6)
+  File "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/torch-spyre/torch_spyre/execution/kernel_runner.py", line 43, in run
+    launch_jobplan(self.jobplan, args)
+RuntimeError: convert_address not yet implemented - waiting for flex support

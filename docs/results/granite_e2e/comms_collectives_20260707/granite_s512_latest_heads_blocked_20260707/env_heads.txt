@@ -1,0 +1,5 @@
+runroot=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_latest_acceptance_20260707_204801
+torch=102520820da890d6a62f781e86573f38dcc6f244
+deeptools=a5ff55eee627c5c2bd4b7b0518bb0cbaad385952
+bench=76cd51426ba1de6e99dd8fbf613cb0f32b71e87f
+wrapper=/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/runs/granite_s512_latest_acceptance_20260707_204801/tools/dxp-split-wrapper/dxp_standalone

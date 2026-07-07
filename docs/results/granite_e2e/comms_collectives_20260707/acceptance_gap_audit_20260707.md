@@ -82,6 +82,7 @@ docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260
 | Artifacts identify remaining Granite HBM spills | Granite S512 checkpoint classifies remaining explicit `ReStickifyOpHBM` rows as weight-format rows. | Complete for that run. Keep weight restickifies out of comms scope. |
 | Flash attention used as validation | Flash structural runs show zero `ReStickifyOpHBM` and 32/64 backend plans depending on fixture. | Complete structurally. Flash value correctness remains out of scope because baseline is independently value-wrong. |
 | Reduce/all-reduce scoped separately | Docs consistently classify reduce/all-reduce as future arithmetic collectives. | Complete as a scope decision, not implementation. |
+| Latest current-head Granite spill classification | Current-head Granite S512 was rerun on CDX. Clean FMS blocked before SDSC on element-arrangement mismatch. Pinned FMS emitted SDSCs, then stopped at runtime on `convert_address not yet implemented`; no backend relayout plans were emitted. The generated SDSC table has five explicit `ReStickifyOpHBM` ops: four weight/kernel prelayout rows and one non-weight attention value-side activation handoff. | Partially complete. Bounded comms substrate is green, but current-head full Granite still has one non-weight activation HBM handoff, classified as WSR/loop-scoped collectives boundary. |
 
 ## What Is Actually Closed
 
@@ -105,6 +106,10 @@ docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260
    `matmul_operand_broadcast` artifact stages after selecting the physical
    carrier, and `320630da` adds a focused test guard. This is observability
    cleanup, not new lowering functionality.
+8. **Latest bounded-substrate unit evidence**: current pushed heads pass the
+   full Torch relayout test file and the focused Deeptools comms fixtures:
+   `38/38` Torch tests, `32/32` util all-gather/restickify tests, and `10/10`
+   focused DXP comms tests.
 
 ## What Is Not Yet Closed
 
@@ -117,19 +122,28 @@ docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260
      broadcast/multicast, reuse this substrate and add that workload artifact.
 
 2. **Fresh Granite run at latest heads**:
-   - The strongest Granite speed/SDSc proof is the `backend2162` S512 run.
-   - Current comms head has moved since then. Rerun Granite S512 with one-gate
-     setup and compare:
-     - explicit `ReStickifyOpHBM`;
-     - `ReStickifyOpLx`;
-     - backend plan count and plan classes;
-     - kernel time and wall time.
+   - Current-head Granite S512 has now been rerun structurally on CDX.
+   - With the clean Codex FMS checkout, both disabled/enabled variants fail
+     before SDSC generation on an element-arrangement mismatch in `mul`.
+   - With the older known-good pinned FMS checkout, SDSCs are generated, then
+     execution stops on `convert_address not yet implemented`.
+   - The pinned-FMS SDSC evidence shows no backend plans at the current bounded
+     head and one remaining non-weight activation `ReStickifyOpHBM`:
+     attention value-side activation handoff into the value-side BMM operand.
+   - The other explicit `ReStickifyOpHBM` ops in that run are weight/kernel
+     prelayout rows and remain out of scope.
+   - The strongest Granite speed proof remains the older `backend2162` S512
+     run. It should not be presented as current-head completion evidence.
 
 3. **WSR boundary**:
    - Oversized full-tensor activation materialization should fail closed or fall
      back to HBM.
    - The comms branch should not build private streaming. It should identify
      the communication class and prove bounded resident tiles.
+   - The latest Granite structural run confirms this boundary: bounded
+     collectives are green, but full Granite still needs WSR or loop-scoped
+     tile execution to remove the remaining large attention activation handoff
+     at current heads.
 
 ## Next Device Validation Order
 
@@ -166,3 +180,9 @@ Torch generic/partial-view metadata is green, and Deeptools has a bounded
 partial-view gather DXP compile proof plus fail-closed guards. Current
 Granite/flash useful edges observed so far are all-gather/replicate or
 oversized all-gather/replicate rather than bounded broadcast/multicast.
+
+Latest Granite status: current-head bounded substrate is not enough by itself to
+remove all Granite non-weight HBM spills. The pinned-FMS current-head SDSCs leave
+one non-weight attention activation handoff in HBM. That handoff is classified
+as a WSR/loop-scoped all-gather/restickify gap, not a missing bounded
+scatter/broadcast/gather primitive.
