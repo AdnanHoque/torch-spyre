@@ -38,6 +38,7 @@ from torch_spyre._inductor.lx_relayout import (
     _core_id_to_device_slice,
     _dense_core_id_to_device_slice,
     _dense_work_slice_dims,
+    _matmul_operand_contract_exceeds_budget,
     _prefer_matmul_operand_contract,
     _record_plan,
     get_lx_relayout_inputs,
@@ -171,6 +172,52 @@ def test_coordinate_topology_classifies_all_gather():
     assert topology.max_fanin == 2
     assert topology.transfer_count == 4
 
+
+
+def test_matmul_operand_contract_budget_classifies_oversized_tensors(monkeypatch):
+    class FakeDType:
+        itemsize = 2
+
+    class FakeProducer:
+        def __init__(self, size):
+            self._size = size
+
+        def get_size(self):
+            return self._size
+
+        def get_dtype(self):
+            return FakeDType()
+
+    class FakeGraph:
+        pass
+
+    monkeypatch.setattr(
+        config, "lx_planner_relayout_max_matmul_operand_bytes", 1024
+    )
+
+    assert _matmul_operand_contract_exceeds_budget(
+        FakeGraph(), FakeProducer([33, 16])
+    ) == (True, 1056, 1024)
+    assert _matmul_operand_contract_exceeds_budget(
+        FakeGraph(), FakeProducer([32, 16])
+    ) == (False, 1024, 1024)
+
+
+def test_matmul_operand_contract_budget_disabled_when_zero(monkeypatch):
+    class FakeProducer:
+        def get_size(self):
+            raise AssertionError("size should not be queried when budget is disabled")
+
+    class FakeGraph:
+        pass
+
+    monkeypatch.setattr(config, "lx_planner_relayout_max_matmul_operand_bytes", 0)
+
+    assert _matmul_operand_contract_exceeds_budget(FakeGraph(), FakeProducer()) == (
+        False,
+        None,
+        0,
+    )
 
 def test_matmul_operand_contract_is_preferred_for_matmul_operands(monkeypatch):
     monkeypatch.setattr(config, "lx_planner_relayout_collectives", True)
