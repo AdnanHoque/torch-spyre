@@ -2,6 +2,31 @@
 
 Date: 2026-07-07
 
+## Latest checkpoint
+
+See `overnight_status_20260707_late.md` and
+`fanout_physical_fixture_probe_20260707/README.md` for the latest state.
+
+The current clean Deeptools branch is green at `23010446e` for the focused
+bounded cases:
+
+- `DxpTestFixture.CoreWorkDivIncomptLxRelayout*`
+- `DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed`
+- `DxpTestFixture.PartialViewGather*`
+- `LayoutAllgatherRestickify.*`
+
+The important clarification from the late probe is:
+
+- generic DLDSC core-work-div relayout already covers bounded copy-cardinality
+  changes such as full producer to sliced consumers and sliced producers to one
+  full consumer;
+- flash/attention all-gather plus layout conversion is green through the staged
+  `STCDPOpLx + ReStickifyOpLx` path;
+- broadcast/multicast plus layout conversion before BMM are not enabled yet.
+  The attempted 32-core fixture was physically invalid because it relabeled an
+  all-gather source distribution as fanout without creating matching source LX
+  residency.
+
 This note records the current state of the Granite non-weight HBM spill removal work. The goal is to build the DLDSC LX communication substrate for Granite without duplicating WSR: classify communication edges in Torch, emit a compact DLDSC coordinate contract, and let Deeptools realize bounded LX-resident movement. Large full-tensor streaming remains WSR-owned.
 
 ## Current progress

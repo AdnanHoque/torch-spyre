@@ -1,0 +1,202 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 8ed6c5e2a..6f0ec740a 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -264,6 +264,14 @@ static bool matmulOperandGatherRestickifyEnabled() {
+          envFlagEnabled("DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY");
+ }
+ 
++static bool matmulOperandBroadcastGatherRestickifySupported(
++    const MatmulOperandBroadcastHookPlan& hook) {
++  const auto& pattern = hook.plan.communicationPattern;
++  return hook.plan.requiresLayoutConversion &&
++         (pattern == "all_gather_replicate" || pattern == "broadcast" ||
++          pattern == "multicast");
++}
++
+ static bool layoutAllgatherRestickifyEnabled() {
+   return lxPlannerRelayoutEnabled() ||
+          envFlagEnabled("DEEPTOOLS_ENABLE_UNSAFE_LAYOUT_ALLGATHER_RESTICKIFY");
+@@ -1317,7 +1325,7 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+       if (sourcePiecesAdded.insert(sourcePieceKey).second) {
+         int64_t sourcePieceAddr = sourceAddrIt->second;
+         sourcePieceAddr += localDensePieceOffsetBytes(
+-            gatherIn, dimToSize, dimToStart, subDimToStart);
++            gatherIn, sourceDimToSize, sourceDimToStart, subDimToStart);
+         addLxPieceWithValidSize(gatherIn, sourcePieceKey, sourceCore,
+                                 sourcePieceAddr, physicalTransferDimToSize,
+                                 subDimToStart, subDimToSize);
+@@ -1982,9 +1990,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         continue;
+       }
+       if (matmulOperandGatherRestickifyEnabled() &&
+-          effectiveMatmulBroadcastHook.plan.communicationPattern ==
+-              "all_gather_replicate" &&
+-          effectiveMatmulBroadcastHook.plan.requiresLayoutConversion) {
++          matmulOperandBroadcastGatherRestickifySupported(
++              effectiveMatmulBroadcastHook)) {
+         std::string materializationReason;
+         if (!attachMatmulOperandBroadcastGatherThenRestickify(
+                 sdsc, lds, effectiveMatmulBroadcastHook, memTrackers, ps,
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index 2256f01cf..421b9fa42 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -240,18 +240,58 @@ json11::Json::object makeGroupedMap(int coreCount, int groupCount) {
+   return result;
+ }
+ 
+-json11::Json::object filterCoreMap(const json11::Json& value,
+-                                   int keepCoreCount) {
++json11::Json::object consumerGroupsFromTargetCompute(
++    const json11::Json::object& targetTensor, const std::string& groupDim) {
+   json11::Json::object result;
+-  if (!value.is_object()) return result;
+-  const auto object = value.object_items();
+-  for (int core = 0; core < keepCoreCount; ++core) {
+-    const auto it = object.find(std::to_string(core));
+-    if (it != object.end()) result[it->first] = it->second;
++  const auto computeIt = targetTensor.find("computeCoreIdToWkSlice_");
++  if (computeIt == targetTensor.end() || !computeIt->second.is_object()) {
++    return result;
++  }
++  for (const auto& coreAndSlice : computeIt->second.object_items()) {
++    const auto slice = coreAndSlice.second.object_items();
++    const auto groupIt = slice.find(groupDim);
++    if (groupIt == slice.end()) continue;
++    result[coreAndSlice.first] = json11::Json::object{
++        {"group", groupIt->second.int_value()}};
+   }
+   return result;
+ }
+ 
++json11::Json::object sourceCoreMapForFanoutPattern(
++    const std::string& pattern, int groupCount) {
++  json11::Json::object result;
++  if (pattern == "broadcast") {
++    result["0"] =
++        json11::Json::object{{"x", 0}, {"out", 0}, {"mb", 0}};
++    return result;
++  }
++  for (int core = 0; core < groupCount; ++core) {
++    result[std::to_string(core)] =
++        json11::Json::object{{"x", 0}, {"out", 0}, {"mb", core}};
++  }
++  return result;
++}
++
++json11::Json::object sourceSplitsForFanoutPattern(
++    const std::string& pattern, int groupCount) {
++  return json11::Json::object{
++      {"x", 1}, {"out", 1}, {"mb", pattern == "broadcast" ? 1 : groupCount}};
++}
++
++void updateSourceTensorForFanoutPattern(json11::Json::object* classification,
++                                        const std::string& pattern,
++                                        int groupCount) {
++  auto sourceTensor = (*classification)["source_lx_tensor"].object_items();
++  ASSERT_FALSE(sourceTensor.empty());
++
++  const auto sourceCoreMap = sourceCoreMapForFanoutPattern(pattern, groupCount);
++  sourceTensor["coreIdToWkSlice_"] = sourceCoreMap;
++  sourceTensor["computeCoreIdToWkSlice_"] = sourceCoreMap;
++  sourceTensor["numWkSlicesPerDim_"] =
++      sourceSplitsForFanoutPattern(pattern, groupCount);
++  (*classification)["source_lx_tensor"] = sourceTensor;
++}
++
+ void rewriteMatmulOperandBroadcastFixture(const std::string& testDataDir,
+                                           const std::string& pattern) {
+   const auto path = std::filesystem::path(testDataDir) / "sdsc_20.json";
+@@ -306,19 +346,20 @@ void rewriteMatmulOperandBroadcastFixture(const std::string& testDataDir,
+   classification["transfer_count"] = 32;
+   classification["producer_core_id_to_device_slice"] =
+       makeGroupedMap(producerCoreCount, groupCount);
+-  classification["consumer_core_id_to_device_slice"] =
+-      makeGroupedMap(32, groupCount);
+-
+-  auto sourceTensor = classification["source_lx_tensor"].object_items();
+-  if (!sourceTensor.empty()) {
+-    const auto sourceCoreMap =
+-        filterCoreMap(sourceTensor["coreIdToWkSlice_"], producerCoreCount);
+-    if (!sourceCoreMap.empty()) {
+-      sourceTensor["coreIdToWkSlice_"] = sourceCoreMap;
+-      classification["source_lx_tensor"] = sourceTensor;
+-    }
++  if (pattern == "broadcast") {
++    classification["consumer_core_id_to_device_slice"] =
++        makeGroupedMap(32, groupCount);
++  } else {
++    const auto targetTensor =
++        classification["target_kernel_tensor"].object_items();
++    const auto consumerGroupMap =
++        consumerGroupsFromTargetCompute(targetTensor, "x");
++    ASSERT_FALSE(consumerGroupMap.empty());
++    classification["consumer_core_id_to_device_slice"] = consumerGroupMap;
+   }
+ 
++  updateSourceTensorForFanoutPattern(&classification, pattern, groupCount);
++
+   classifications.at(0) = classification;
+   sdsc["lxRelayoutClassifications_"] = classifications;
+   top[sdscName] = sdsc;
+@@ -393,7 +434,7 @@ void expectPartialViewGatherOffsetFailure(const std::string& testDataDir,
+   }
+ }
+ 
+-void expectMatmulOperandBroadcastPatternFailsClosed(
++void expectMatmulOperandBroadcastPatternCompiles(
+     const std::string& testDataDir, const std::string& pattern) {
+   rewriteMatmulOperandBroadcastFixture(testDataDir, pattern);
+ 
+@@ -402,7 +443,7 @@ void expectMatmulOperandBroadcastPatternFailsClosed(
+   ScopedEnvVar restoreFrac("DXP_LX_FRAC_AVAIL");
+ 
+   setenv("SPYRE_LX_PLANNER_RELAYOUT", "1", 1);
+-  setenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS", "4", 1);
++  setenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS", "64", 1);
+   setenv("DXP_LX_FRAC_AVAIL", "1", 1);
+ 
+   SenTargets target = SenTargets::SENTIENT;
+@@ -410,19 +451,7 @@ void expectMatmulOperandBroadcastPatternFailsClosed(
+   Dxp dxp(dscGlobal);
+   dxp.standalone = true;
+   dxp.debug = true;
+-  try {
+-    dxp.runDxp(testDataDir);
+-    FAIL() << "Expected matmul_operand_broadcast " << pattern
+-           << " to fail closed until a safe lowering is available";
+-  } catch (const DtException& ex) {
+-    const std::string message = ex.what();
+-    EXPECT_NE(
+-        message.find(
+-            "matmul_operand_broadcast metadata was classified, but physical "
+-            "lowering is blocked"),
+-        std::string::npos)
+-        << message;
+-  }
++  dxp.runDxp(testDataDir);
+ }
+ 
+ void runCoreWorkDivRelayoutCase(
+@@ -1088,16 +1117,16 @@ TEST_F(DxpTestFixture, MatmulOperandBroadcastChunkCapFailsClosed) {
+   }
+ }
+ 
+-TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternBroadcastFailsClosed) {
++TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternBroadcastCompiles) {
+   SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
+ 
+-  expectMatmulOperandBroadcastPatternFailsClosed(testDataDir, "broadcast");
++  expectMatmulOperandBroadcastPatternCompiles(testDataDir, "broadcast");
+ }
+ 
+-TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternMulticastFailsClosed) {
++TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternMulticastCompiles) {
+   SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
+ 
+-  expectMatmulOperandBroadcastPatternFailsClosed(testDataDir, "multicast");
++  expectMatmulOperandBroadcastPatternCompiles(testDataDir, "multicast");
+ }
+ 
+ TEST_F(DxpTestFixture, PartialViewGatherBoundedOffsetRelayoutCompiles) {
