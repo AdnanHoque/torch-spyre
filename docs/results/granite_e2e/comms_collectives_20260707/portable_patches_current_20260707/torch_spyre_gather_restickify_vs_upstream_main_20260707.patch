@@ -1,0 +1,3814 @@
+diff --git a/tests/configs/torch_spyre_tests/inductor/test_lx_relayout_dldsc_config.yaml b/tests/configs/torch_spyre_tests/inductor/test_lx_relayout_dldsc_config.yaml
+new file mode 100644
+index 0000000..768ed94
+--- /dev/null
++++ b/tests/configs/torch_spyre_tests/inductor/test_lx_relayout_dldsc_config.yaml
+@@ -0,0 +1,4 @@
++test_suite_config:
++  files:
++    - path: ${TORCH_DEVICE_ROOT}/tests/inductor/test_lx_relayout_dldsc.py
++      unlisted_test_mode: mandatory_success
+diff --git a/tests/inductor/test_layout_allgather_restickify_import_light.py b/tests/inductor/test_layout_allgather_restickify_import_light.py
+new file mode 100644
+index 0000000..1285154
+--- /dev/null
++++ b/tests/inductor/test_layout_allgather_restickify_import_light.py
+@@ -0,0 +1,91 @@
++# Copyright 2026 The Torch-Spyre Authors.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++from torch_spyre._inductor.layout_allgather_restickify import (
++    COMM_CLASS_ALL_GATHER,
++    LAYOUT_ALLGATHER_RESTICKIFY,
++    classify_layout_allgather_restickify_sdsc_triplet,
++)
++
++
++def _flash_triplet():
++    return {
++        "sdsc_1_mul": {
++            "op": "mul",
++            "numCoresUsed_": 32,
++            "numWkSlicesPerDim_": {"mb": 4, "x": 8, "out": 1},
++            "primaryDsInfo_": {
++                "OUTPUT": {
++                    "layoutDimOrder_": ["out", "x", "mb"],
++                    "stickDimOrder_": ["out"],
++                }
++            },
++            "allocates": [
++                {"component_": "lx", "layoutDimOrder_": ["out", "x", "mb"]}
++            ],
++        },
++        "sdsc_2_restickify": {
++            "op": "ReStickifyOpHBM",
++            "numCoresUsed_": 32,
++            "numWkSlicesPerDim_": {"mb": 4, "x": 8, "out": 1},
++            "primaryDsInfo_": {
++                "OUTPUT": {
++                    "layoutDimOrder_": ["out", "x", "mb"],
++                    "stickDimOrder_": ["out"],
++                },
++                "KERNEL": {
++                    "layoutDimOrder_": ["x", "out", "mb"],
++                    "stickDimOrder_": ["x"],
++                },
++            },
++        },
++        "sdsc_3_batchmatmul": {
++            "op": "batchmatmul",
++            "numCoresUsed_": 32,
++            "numWkSlicesPerDim_": {"x": 4, "mb": 8, "out": 1, "in": 1},
++            "primaryDsInfo_": {
++                "KERNEL": {
++                    "layoutDimOrder_": ["out", "in", "x"],
++                    "stickDimOrder_": ["out"],
++                }
++            },
++        },
++    }
++
++
++def test_import_light_classifier_marks_flash_layout_allgather_restickify():
++    classification = classify_layout_allgather_restickify_sdsc_triplet(_flash_triplet())
++
++    assert classification is not None
++    assert classification["classification"] == LAYOUT_ALLGATHER_RESTICKIFY
++    assert classification["kind"] == LAYOUT_ALLGATHER_RESTICKIFY
++    assert classification["communication_pattern"] == LAYOUT_ALLGATHER_RESTICKIFY
++    assert classification["communication_class"] == COMM_CLASS_ALL_GATHER
++    assert classification["dimension_rename"] == {
++        "restickify.x": "batchmatmul.out",
++        "restickify.out": "batchmatmul.in",
++        "restickify.mb": "batchmatmul.x",
++    }
++    assert classification["requires_staged_realization"]
++    assert not classification["realized"]
++    assert "backend lowering is not implemented" in classification["unsupported_reason"]
++
++
++def test_import_light_classifier_rejects_non_lx_producer():
++    triplet = _flash_triplet()
++    triplet["sdsc_1_mul"]["allocates"] = [
++        {"component_": "hbm", "layoutDimOrder_": ["out", "x", "mb"]}
++    ]
++
++    assert classify_layout_allgather_restickify_sdsc_triplet(triplet) is None
+diff --git a/tests/inductor/test_lx_relayout_dldsc.py b/tests/inductor/test_lx_relayout_dldsc.py
+new file mode 100644
+index 0000000..b5d8795
+--- /dev/null
++++ b/tests/inductor/test_lx_relayout_dldsc.py
+@@ -0,0 +1,1348 @@
++# Copyright 2026 The Torch-Spyre Authors.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++import json
++
++from sympy import Integer, Mod, Symbol, floor
++
++from torch._inductor.dependencies import MemoryDep
++from torch._inductor.ir import ComputedBuffer
++
++from torch_spyre._inductor import config
++from torch_spyre._C import DataFormats
++from torch_spyre._inductor.codegen.bundle import generate_bundle
++from torch_spyre._inductor.codegen.superdsc import compile_op_spec
++from torch_spyre._inductor.layout_allgather_restickify import (
++    COMM_CLASS_ALL_GATHER,
++    MATMUL_OPERAND_ALLGATHER_REPLICATE,
++    MATMUL_OPERAND_BROADCAST,
++    MATMUL_OPERAND_BROADCAST_PATTERN,
++    MATMUL_OPERAND_MULTICAST_PATTERN,
++    PARTIAL_VIEW_GATHER,
++    make_matmul_operand_allgather_contract,
++)
++from torch_spyre._inductor.lx_relayout import (
++    LXRelayoutPlan,
++    LXRelayoutTopology,
++    _classify_coordinate_topology,
++    _core_id_to_device_slice,
++    _dense_core_id_to_device_slice,
++    _dense_work_slice_dims,
++    _matmul_operand_contract_exceeds_budget,
++    _prefer_matmul_operand_contract,
++    _record_plan,
++    get_lx_relayout_inputs,
++    is_lx_relayout_reservation,
++    make_lx_relayout_reservation_name,
++    plan_lx_relayouts,
++)
++from torch_spyre._inductor.op_spec import OpSpec, TensorArg
++from torch_spyre._inductor.pass_utils import PerCoreView
++from torch_spyre._inductor.spyre_kernel import _partial_view_gather_classifications
++
++
++def _fixed_tile_arg(
++    *,
++    is_input: bool,
++    allocation: dict,
++    lx_residency_core_id_to_wk_slice=None,
++) -> TensorArg:
++    mb = Symbol("x0")
++    out = Symbol("x1")
++    return TensorArg(
++        is_input=is_input,
++        arg_index=0 if is_input else 1,
++        device_dtype=DataFormats.SEN169_FP16,
++        device_size=[512, 200, 64],
++        device_coordinates=[mb, floor(out / 64), Mod(out, 64)],
++        allocation=allocation,
++        lx_residency_core_id_to_wk_slice=lx_residency_core_id_to_wk_slice,
++    )
++
++
++def test_core_view_residency_payload_is_static_per_core():
++    core_id = Symbol("core_id")
++    view = PerCoreView(
++        work_slice_dims=((0, 2), (1, 2)),
++        core_to_slot=((0, Mod(core_id, 2)), (1, floor(core_id / 2))),
++    )
++
++    assert _core_id_to_device_slice(view, 4) == {
++        "0": {"0": 0, "1": 0},
++        "1": {"0": 1, "1": 0},
++        "2": {"0": 0, "1": 1},
++        "3": {"0": 1, "1": 1},
++    }
++
++
++def test_coordinate_topology_classifies_one_to_one_scatter():
++    topology = _classify_coordinate_topology(
++        {"0": {"0": 0}, "1": {"0": 1}},
++        {"0": 2},
++        {"1": {"0": 0}, "0": {"0": 1}},
++        {"0": 2},
++    )
++
++    assert topology.communication_class == "scatter"
++    assert topology.communication_pattern == "one_to_one"
++    assert topology.max_fanout == 1
++    assert topology.max_fanin == 1
++    assert topology.transfer_count == 2
++
++
++def test_dense_coordinate_payload_expands_unsplit_dims():
++    dims = {"0", "1"}
++
++    assert _dense_work_slice_dims({"1": 4}, dims) == {"0": 1, "1": 4}
++    assert _dense_core_id_to_device_slice(
++        {"7": {"1": 2}, "15": {}}, dims
++    ) == {"7": {"0": 0, "1": 2}, "15": {"0": 0, "1": 0}}
++
++
++def test_coordinate_topology_classifies_broadcast():
++    topology = _classify_coordinate_topology(
++        {"0": {"0": 0}},
++        {"0": 1},
++        {"0": {"0": 0}, "1": {"0": 1}, "2": {"0": 2}, "3": {"0": 3}},
++        {"0": 4},
++    )
++
++    assert topology.communication_class == "broadcast"
++    assert topology.communication_pattern == "one_to_many"
++    assert topology.max_fanout == 4
++    assert topology.max_fanin == 1
++    assert topology.transfer_count == 4
++
++
++def test_coordinate_topology_classifies_multicast():
++    topology = _classify_coordinate_topology(
++        {"0": {"0": 0}, "1": {"0": 1}},
++        {"0": 2},
++        {
++            "0": {"0": 0, "1": 0},
++            "1": {"0": 0, "1": 1},
++            "2": {"0": 1, "1": 0},
++            "3": {"0": 1, "1": 1},
++        },
++        {"0": 2, "1": 2},
++    )
++
++    assert topology.communication_class == "multicast"
++    assert topology.communication_pattern == "one_to_many"
++    assert topology.max_fanout == 2
++    assert topology.max_fanin == 1
++    assert topology.transfer_count == 4
++
++
++def test_coordinate_topology_classifies_gather():
++    topology = _classify_coordinate_topology(
++        {"0": {"0": 0}, "1": {"0": 1}, "2": {"0": 2}, "3": {"0": 3}},
++        {"0": 4},
++        {"0": {"0": 0}},
++        {"0": 1},
++    )
++
++    assert topology.communication_class == "gather"
++    assert topology.communication_pattern == "many_to_one"
++    assert topology.max_fanout == 1
++    assert topology.max_fanin == 4
++    assert topology.transfer_count == 4
++
++
++def test_coordinate_topology_classifies_all_gather():
++    topology = _classify_coordinate_topology(
++        {"0": {"0": 0}, "1": {"0": 1}},
++        {"0": 2},
++        {"0": {"1": 0}, "1": {"1": 1}},
++        {"1": 2},
++    )
++
++    assert topology.communication_class == "all_gather"
++    assert topology.communication_pattern == "many_to_many"
++    assert topology.max_fanout == 2
++    assert topology.max_fanin == 2
++    assert topology.transfer_count == 4
++
++
++
++def test_matmul_operand_contract_budget_classifies_oversized_tensors(monkeypatch):
++    class FakeDType:
++        itemsize = 2
++
++    class FakeProducer:
++        def __init__(self, size):
++            self._size = size
++
++        def get_size(self):
++            return self._size
++
++        def get_dtype(self):
++            return FakeDType()
++
++    class FakeGraph:
++        pass
++
++    monkeypatch.setattr(
++        config, "lx_planner_relayout_max_matmul_operand_bytes", 1024
++    )
++
++    assert _matmul_operand_contract_exceeds_budget(
++        FakeGraph(), FakeProducer([33, 16])
++    ) == (True, 1056, 1024)
++    assert _matmul_operand_contract_exceeds_budget(
++        FakeGraph(), FakeProducer([32, 16])
++    ) == (False, 1024, 1024)
++
++
++def test_matmul_operand_contract_budget_disabled_when_zero(monkeypatch):
++    class FakeProducer:
++        def get_size(self):
++            raise AssertionError("size should not be queried when budget is disabled")
++
++    class FakeGraph:
++        pass
++
++    monkeypatch.setattr(config, "lx_planner_relayout_max_matmul_operand_bytes", 0)
++
++    assert _matmul_operand_contract_exceeds_budget(FakeGraph(), FakeProducer()) == (
++        False,
++        None,
++        0,
++    )
++
++def test_matmul_operand_contract_is_preferred_for_matmul_operands(monkeypatch):
++    monkeypatch.setattr(config, "lx_planner_relayout_collectives", True)
++    monkeypatch.setattr(config, "lx_planner_relayout_matmul_operand_contract", True)
++    topology = LXRelayoutTopology(
++        COMM_CLASS_ALL_GATHER,
++        "many_to_many",
++        max_fanout=32,
++        max_fanin=32,
++        transfer_count=1024,
++    )
++
++    assert _prefer_matmul_operand_contract(1, topology)
++    assert _prefer_matmul_operand_contract(0, topology)
++    gather_topology = LXRelayoutTopology(
++        "gather",
++        "many_to_one",
++        max_fanout=1,
++        max_fanin=4,
++        transfer_count=128,
++    )
++    assert _prefer_matmul_operand_contract(1, gather_topology)
++    assert _prefer_matmul_operand_contract(0, gather_topology)
++    multicast_topology = LXRelayoutTopology(
++        "multicast",
++        "one_to_many",
++        max_fanout=4,
++        max_fanin=1,
++        transfer_count=32,
++    )
++    assert _prefer_matmul_operand_contract(1, multicast_topology)
++    assert _prefer_matmul_operand_contract(0, multicast_topology)
++    assert not _prefer_matmul_operand_contract(None, topology)
++
++
++def test_matmul_operand_contract_marks_tensor1_all_gather_not_scatter():
++    contract = make_matmul_operand_allgather_contract(
++        producer_op="transpose",
++        consumer_op="batchmatmul",
++        read_index=1,
++        producer_work_slice_dims={"2": 32},
++        consumer_tensor_work_slice_dims={},
++        consumer_compute_work_slice_dims={"mb": 32},
++        communication_class=COMM_CLASS_ALL_GATHER,
++    )
++
++    assert contract["kind"] == MATMUL_OPERAND_BROADCAST
++    assert contract["classification"] == MATMUL_OPERAND_BROADCAST
++    assert contract["communication_class"] == COMM_CLASS_ALL_GATHER
++    assert contract["communication_pattern"] == MATMUL_OPERAND_ALLGATHER_REPLICATE
++    assert (
++        contract["materialization_pattern"]
++        == "all_gather_replicate_with_layout_conversion"
++    )
++    assert contract["requires_layout_conversion"]
++    assert contract["requires_staged_realization"]
++    assert contract["operand_role"] == "rhs"
++    assert contract["operand_kernel_layout"] == {
++        "layoutDimOrder_": ["out", "in", "x"],
++        "stickDimOrder_": ["out"],
++    }
++    assert contract["layout_transform"] == {
++        "kind": "activation_lx_to_matmul_kernel_operand",
++        "source": "producer_lx_residency",
++        "target": "consumer_matmul_kernel_operand",
++        "source_coordinates": "producer_tensor_distribution",
++        "target_coordinates": "consumer_compute_distribution",
++        "carrier_hint": "lx_all_gather_then_local_restickify",
++    }
++    assert contract["staged_destination"] == {
++        "component_": "KERNEL",
++        "operand_read_index": 1,
++        "scope": "matmul_transfer_loop",
++    }
++
++
++def test_matmul_operand_contract_marks_tensor0_lhs_all_gather():
++    contract = make_matmul_operand_allgather_contract(
++        producer_op="mul",
++        consumer_op="batchmatmul",
++        read_index=0,
++        producer_work_slice_dims={"0": 32},
++        consumer_tensor_work_slice_dims={"0": 8},
++        consumer_compute_work_slice_dims={"0": 8, "1": 4},
++        communication_class=COMM_CLASS_ALL_GATHER,
++    )
++
++    assert contract["kind"] == MATMUL_OPERAND_BROADCAST
++    assert contract["communication_class"] == COMM_CLASS_ALL_GATHER
++    assert contract["communication_pattern"] == MATMUL_OPERAND_ALLGATHER_REPLICATE
++    assert contract["operand_read_index"] == 0
++    assert contract["operand_role"] == "lhs"
++    assert contract["staged_destination"] == {
++        "component_": "KERNEL",
++        "operand_read_index": 0,
++        "scope": "matmul_transfer_loop",
++    }
++
++
++def test_matmul_operand_contract_maps_gather_to_all_gather_replicate():
++    contract = make_matmul_operand_allgather_contract(
++        producer_op="mul",
++        consumer_op="batchmatmul",
++        read_index=0,
++        producer_work_slice_dims={"0": 32},
++        consumer_tensor_work_slice_dims={"0": 8},
++        consumer_compute_work_slice_dims={"0": 8, "1": 4},
++        communication_class="gather",
++    )
++
++    assert contract["communication_class"] == "gather"
++    assert contract["communication_pattern"] == MATMUL_OPERAND_ALLGATHER_REPLICATE
++    assert contract["operand_role"] == "lhs"
++
++
++def test_matmul_operand_contract_marks_broadcast_pattern():
++    contract = make_matmul_operand_allgather_contract(
++        producer_op="full",
++        consumer_op="batchmatmul",
++        read_index=1,
++        producer_work_slice_dims={"0": 1},
++        consumer_tensor_work_slice_dims={"0": 4},
++        consumer_compute_work_slice_dims={"0": 4},
++        communication_class="broadcast",
++    )
++
++    assert contract["kind"] == MATMUL_OPERAND_BROADCAST
++    assert contract["communication_class"] == "broadcast"
++    assert contract["communication_pattern"] == MATMUL_OPERAND_BROADCAST_PATTERN
++
++
++def test_matmul_operand_contract_marks_multicast_pattern():
++    contract = make_matmul_operand_allgather_contract(
++        producer_op="expand",
++        consumer_op="batchmatmul",
++        read_index=1,
++        producer_work_slice_dims={"0": 2},
++        consumer_tensor_work_slice_dims={"0": 2, "1": 2},
++        consumer_compute_work_slice_dims={"0": 2, "1": 2},
++        communication_class="multicast",
++    )
++
++    assert contract["kind"] == MATMUL_OPERAND_BROADCAST
++    assert contract["communication_class"] == "multicast"
++    assert contract["communication_pattern"] == MATMUL_OPERAND_MULTICAST_PATTERN
++
++
++def test_lx_relayout_reservation_names_are_identifiable():
++    name = make_lx_relayout_reservation_name("consumer", "producer")
++
++    assert is_lx_relayout_reservation(name)
++    assert not is_lx_relayout_reservation("producer")
++
++
++def test_lx_relayout_plan_records_scatter_kind():
++    class DummyOp:
++        pass
++
++    consumer = DummyOp()
++    _record_plan(
++        consumer,
++        LXRelayoutPlan(
++            source_name="buf0",
++            producer_name="producer",
++            consumer_name="consumer",
++            kind="scatter",
++            producer_core_count=32,
++            consumer_core_count=32,
++            producer_core_id_to_device_slice={
++                "0": {"0": 0},
++                "1": {"0": 1},
++            },
++            producer_work_slice_dims={"0": 32},
++            consumer_work_slice_dims={"0": 32},
++        ),
++    )
++
++    assert get_lx_relayout_inputs(consumer)["buf0"]["kind"] == "scatter"
++
++
++def test_lx_relayout_plan_records_matmul_operand_all_gather_contract():
++    class DummyOp:
++        pass
++
++    consumer = DummyOp()
++    contract = make_matmul_operand_allgather_contract(
++        producer_op="transpose",
++        consumer_op="batchmatmul",
++        read_index=1,
++        producer_work_slice_dims={"2": 32},
++        consumer_tensor_work_slice_dims={},
++        consumer_compute_work_slice_dims={"mb": 32},
++        communication_class=COMM_CLASS_ALL_GATHER,
++    )
++    _record_plan(
++        consumer,
++        LXRelayoutPlan(
++            source_name="buf21",
++            producer_name="buf21",
++            consumer_name="buf22",
++            kind=MATMUL_OPERAND_BROADCAST,
++            producer_core_count=32,
++            consumer_core_count=32,
++            producer_core_id_to_device_slice={
++                str(core): {"2": core} for core in range(32)
++            },
++            producer_work_slice_dims={"2": 32},
++            consumer_work_slice_dims={},
++            consumer_core_id_to_device_slice={str(core): {} for core in range(32)},
++            read_index=1,
++            realized=False,
++            communication_class=COMM_CLASS_ALL_GATHER,
++            communication_pattern=MATMUL_OPERAND_ALLGATHER_REPLICATE,
++            max_fanout=32,
++            max_fanin=32,
++            transfer_count=1024,
++            requires_staged_realization=True,
++            layout_contract=contract,
++            unsupported_reason="metadata only",
++        ),
++    )
++
++    plan = get_lx_relayout_inputs(consumer)["buf21"]
++    assert plan["kind"] == MATMUL_OPERAND_BROADCAST
++    assert plan["communication_class"] == COMM_CLASS_ALL_GATHER
++    assert plan["communication_pattern"] == MATMUL_OPERAND_ALLGATHER_REPLICATE
++    assert plan["transfer_count"] == 1024
++    assert plan["consumer_tensor_work_slice_dims"] == {}
++    assert plan["consumer_compute_work_slice_dims"] == {"mb": 32}
++    assert plan["materialization_pattern"] == (
++        "all_gather_replicate_with_layout_conversion"
++    )
++    assert plan["requires_layout_conversion"]
++    assert plan["layout_transform"]["kind"] == "activation_lx_to_matmul_kernel_operand"
++    assert plan["staging_scope"] == "matmul_transfer_loop"
++
++
++class _FakeReadWrites:
++    def __init__(self, *, reads=(), writes=()):
++        self.reads = list(reads)
++        self.writes = list(writes)
++
++
++class _FakeGraph:
++    def __init__(self, operations):
++        self.operations = list(operations)
++
++
++def _fake_computed_buffer(name, *, reads=(), writes=(), splits=()):
++    op = ComputedBuffer.__new__(ComputedBuffer)
++    op.name = name
++    op.data = object()
++    op.get_name = lambda: name
++    op.get_read_writes = lambda: _FakeReadWrites(reads=reads, writes=writes)
++    op.op_it_space_splits = (dict(splits), {})
++    return op
++
++
++def _run_planner_topology_case(
++    monkeypatch,
++    *,
++    producer_view,
++    producer_splits,
++    consumer_view,
++    consumer_splits,
++):
++    dep = MemoryDep("buf0", Symbol("i"), (Symbol("i"),), (Integer(4),))
++    producer = _fake_computed_buffer(
++        "buf0", writes=(dep,), splits=producer_splits
++    )
++    consumer = _fake_computed_buffer(
++        "consumer", reads=(dep,), splits=consumer_splits
++    )
++
++    def fake_per_core_view(op, _dep, _buf_name, _cache):
++        if op is producer:
++            return producer_view, False
++        assert op is consumer
++        return consumer_view, False
++
++    monkeypatch.setattr(config, "lx_planner_relayout", True)
++    monkeypatch.setattr(config, "lx_planner_relayout_collectives", True)
++    monkeypatch.setattr(
++        "torch_spyre._inductor.lx_relayout._per_core_view_on_buf",
++        fake_per_core_view,
++    )
++
++    plans = plan_lx_relayouts(_FakeGraph([producer, consumer]))
++    assert len(plans) == 1
++    plan = plans[0]
++    recorded = get_lx_relayout_inputs(consumer)["buf0"]
++    assert recorded["kind"] == plan.kind
++    assert recorded["communication_class"] == plan.communication_class
++    assert recorded["communication_pattern"] == plan.communication_pattern
++    return plan, recorded
++
++
++def test_planner_records_generic_gather_relayout(monkeypatch):
++    core_id = Symbol("core_id")
++
++    plan, recorded = _run_planner_topology_case(
++        monkeypatch,
++        producer_view=PerCoreView(
++            work_slice_dims=((0, 4),),
++            core_to_slot=((0, core_id),),
++        ),
++        producer_splits=((0, 4),),
++        consumer_view=PerCoreView(
++            work_slice_dims=((0, 1),),
++            core_to_slot=(),
++        ),
++        consumer_splits=(),
++    )
++
++    assert plan.kind == "gather"
++    assert plan.communication_class == "gather"
++    assert plan.communication_pattern == "many_to_one"
++    assert plan.max_fanout == 1
++    assert plan.max_fanin == 4
++    assert plan.transfer_count == 4
++    assert recorded["producer_core_id_to_device_slice"] == {
++        "0": {"0": 0},
++        "1": {"0": 1},
++        "2": {"0": 2},
++        "3": {"0": 3},
++    }
++    assert recorded["consumer_core_id_to_device_slice"] == {"0": {"0": 0}}
++
++
++def test_planner_records_generic_broadcast_relayout(monkeypatch):
++    core_id = Symbol("core_id")
++
++    plan, recorded = _run_planner_topology_case(
++        monkeypatch,
++        producer_view=PerCoreView(
++            work_slice_dims=((0, 1),),
++            core_to_slot=(),
++        ),
++        producer_splits=(),
++        consumer_view=PerCoreView(
++            work_slice_dims=((0, 4),),
++            core_to_slot=((0, core_id),),
++        ),
++        consumer_splits=((0, 4),),
++    )
++
++    assert plan.kind == "broadcast"
++    assert plan.communication_class == "broadcast"
++    assert plan.communication_pattern == "one_to_many"
++    assert plan.max_fanout == 4
++    assert plan.max_fanin == 1
++    assert plan.transfer_count == 4
++    assert recorded["producer_core_id_to_device_slice"] == {"0": {"0": 0}}
++    assert recorded["consumer_core_id_to_device_slice"] == {
++        "0": {"0": 0},
++        "1": {"0": 1},
++        "2": {"0": 2},
++        "3": {"0": 3},
++    }
++
++
++def test_planner_records_generic_multicast_relayout(monkeypatch):
++    core_id = Symbol("core_id")
++
++    plan, recorded = _run_planner_topology_case(
++        monkeypatch,
++        producer_view=PerCoreView(
++            work_slice_dims=((0, 2),),
++            core_to_slot=((0, core_id),),
++        ),
++        producer_splits=((0, 2),),
++        consumer_view=PerCoreView(
++            work_slice_dims=((0, 2), (1, 2)),
++            core_to_slot=((0, floor(core_id / 2)), (1, Mod(core_id, 2))),
++        ),
++        consumer_splits=((0, 2), (1, 2)),
++    )
++
++    assert plan.kind == "multicast"
++    assert plan.communication_class == "multicast"
++    assert plan.communication_pattern == "one_to_many"
++    assert plan.max_fanout == 2
++    assert plan.max_fanin == 1
++    assert plan.transfer_count == 4
++    assert recorded["producer_core_id_to_device_slice"] == {
++        "0": {"0": 0, "1": 0},
++        "1": {"0": 1, "1": 0},
++    }
++    assert recorded["consumer_core_id_to_device_slice"] == {
++        "0": {"0": 0, "1": 0},
++        "1": {"0": 0, "1": 1},
++        "2": {"0": 1, "1": 0},
++        "3": {"0": 1, "1": 1},
++    }
++
++
++def test_planner_records_generic_all_gather_relayout(monkeypatch):
++    core_id = Symbol("core_id")
++
++    plan, recorded = _run_planner_topology_case(
++        monkeypatch,
++        producer_view=PerCoreView(
++            work_slice_dims=((0, 2),),
++            core_to_slot=((0, core_id),),
++        ),
++        producer_splits=((0, 2),),
++        consumer_view=PerCoreView(
++            work_slice_dims=((1, 2),),
++            core_to_slot=((1, core_id),),
++        ),
++        consumer_splits=((1, 2),),
++    )
++
++    assert plan.kind == COMM_CLASS_ALL_GATHER
++    assert plan.communication_class == COMM_CLASS_ALL_GATHER
++    assert plan.communication_pattern == "many_to_many"
++    assert plan.max_fanout == 2
++    assert plan.max_fanin == 2
++    assert plan.transfer_count == 4
++    assert recorded["producer_core_id_to_device_slice"] == {
++        "0": {"0": 0, "1": 0},
++        "1": {"0": 1, "1": 0},
++    }
++    assert recorded["consumer_core_id_to_device_slice"] == {
++        "0": {"0": 0, "1": 0},
++        "1": {"0": 0, "1": 1},
++    }
++
++
++def test_partial_view_gather_classification_uses_tensor_arg_provenance():
++    producer_residency = {
++        "0": {"0": 0, "1": 0},
++        "1": {"0": 1, "1": 0},
++        "2": {"0": 0, "1": 1},
++        "3": {"0": 1, "1": 1},
++    }
++    arg = _fixed_tile_arg(
++        is_input=True,
++        allocation={"lx": 0},
++        lx_residency_core_id_to_wk_slice=producer_residency,
++    )
++    arg.source_name = "buf33"
++    arg.source_offset_elems = Integer(12800)
++
++    classifications = _partial_view_gather_classifications(
++        args=[arg],
++        relayout_inputs={},
++    )
++
++    assert len(classifications) == 1
++    classification = classifications[0]
++    assert classification["kind"] == PARTIAL_VIEW_GATHER
++    assert classification["communication_pattern"] == PARTIAL_VIEW_GATHER
++    assert classification["source_name"] == "buf33"
++    assert classification["source_offset_elems"] == "12800"
++    assert classification["producer_core_id_to_device_slice"] == producer_residency
++    assert classification["requires_staged_realization"]
++    assert classification["materialization_pattern"] == "partial_view_gather_to_lx"
++    assert classification["layout_transform"]["carrier_hint"] == (
++        "lx_partial_view_gather"
++    )
++
++
++def test_partial_view_gather_classification_without_prior_plan_keeps_offset():
++    arg = _fixed_tile_arg(is_input=True, allocation={"lx": 0})
++    arg.source_name = "buf33"
++    arg.source_offset_elems = Integer(12800)
++
++    classifications = _partial_view_gather_classifications(
++        args=[arg],
++        relayout_inputs={},
++    )
++
++    assert len(classifications) == 1
++    classification = classifications[0]
++    assert classification["kind"] == PARTIAL_VIEW_GATHER
++    assert classification["source_name"] == "buf33"
++    assert classification["source_offset_elems"] == "12800"
++    assert "producer_core_id_to_device_slice" not in classification
++
++
++def test_partial_view_gather_does_not_duplicate_staged_matmul_contract():
++    arg = _fixed_tile_arg(is_input=True, allocation={"lx": 0})
++    arg.source_name = "buf21"
++    arg.source_offset_elems = Integer(0)
++
++    classifications = _partial_view_gather_classifications(
++        args=[arg],
++        relayout_inputs={
++            "buf21": {
++                "kind": MATMUL_OPERAND_BROADCAST,
++                "communication_pattern": MATMUL_OPERAND_ALLGATHER_REPLICATE,
++                "requires_staged_realization": True,
++            }
++        },
++    )
++
++    assert classifications == []
++
++
++def test_bundle_enriches_partial_view_gather_with_source_target_layouts(tmp_path):
++    mb = Symbol("c0")
++    out = Symbol("c1")
++
++    producer_output = _fixed_tile_arg(is_input=False, allocation={"lx": 0})
++    producer_output.name = "buf33"
++    producer = OpSpec(
++        op="neg",
++        is_reduction=False,
++        iteration_space={mb: (Integer(512), 4), out: (Integer(12800), 1)},
++        op_info={},
++        args=[
++            _fixed_tile_arg(is_input=True, allocation={"hbm": 0x1000}),
++            producer_output,
++        ],
++    )
++
++    consumer_input = _fixed_tile_arg(is_input=True, allocation={"lx": 0})
++    consumer_input.name = "buf33"
++    consumer_input.source_name = "buf33"
++    consumer_input.source_offset_elems = Integer(12800)
++    classification = {
++        "kind": PARTIAL_VIEW_GATHER,
++        "classification": PARTIAL_VIEW_GATHER,
++        "communication_pattern": PARTIAL_VIEW_GATHER,
++        "source_name": "buf33",
++        "read_index": 0,
++        "source_offset_elems": "12800",
++        "requires_staged_realization": True,
++        "materialization_pattern": "partial_view_gather_to_lx",
++        "layout_transform": {"kind": "partial_view_lx_to_consumer_lx"},
++    }
++    consumer = OpSpec(
++        op="exp",
++        is_reduction=False,
++        iteration_space={mb: (Integer(512), 32), out: (Integer(12800), 1)},
++        op_info={"lx_relayout_classifications": [classification]},
++        args=[
++            consumer_input,
++            _fixed_tile_arg(is_input=False, allocation={"hbm": 0x2000}),
++        ],
++    )
++
++    generate_bundle("partial_view_gather_contract", str(tmp_path), [producer, consumer])
++
++    sdsc_1 = json.loads((tmp_path / "sdsc_1.json").read_text())
++    root = next(iter(sdsc_1.values()))
++    enriched = root["lxRelayoutClassifications_"][0]
++
++    assert enriched["source_lx_tensor"]["buffer_name"] == "buf33"
++    assert enriched["source_lx_tensor"]["component_"] == "lx"
++    assert enriched["target_lx_tensor"]["dsName_"] == "Tensor0"
++    assert enriched["target_lx_tensor"]["component_"] == "lx"
++    assert enriched["source_offset_elems"] == "12800"
++    assert enriched["producer_core_id_to_device_slice"] == enriched[
++        "source_lx_tensor"
++    ]["coreIdToWkSlice_"]
++    assert enriched["layout_transform"]["source_component"] == "lx"
++    assert enriched["layout_transform"]["target_component"] == "lx"
++    assert enriched["layout_transform"]["movement_stage"] == "partial_view_gather"
++    assert enriched["layout_transform"]["carrier_hint"] == "lx_partial_view_gather"
++
++
++def test_bundle_enriches_matmul_operand_contract_with_source_target_layouts(
++    tmp_path,
++):
++    mb = Symbol("c0")
++    out = Symbol("c1")
++    in_dim = Symbol("c2")
++    producer_residency = {
++        "0": {"0": 0},
++        "1": {"0": 1},
++        "2": {"0": 2},
++        "3": {"0": 3},
++    }
++    contract = make_matmul_operand_allgather_contract(
++        producer_op="mul",
++        consumer_op="batchmatmul",
++        read_index=1,
++        producer_work_slice_dims={"0": 4},
++        consumer_tensor_work_slice_dims={"0": 1},
++        consumer_compute_work_slice_dims={"0": 4},
++        communication_class=COMM_CLASS_ALL_GATHER,
++    )
++    contract.update(
++        {
++            "source_name": "buf0",
++            "producer_name": "buf0",
++            "consumer_name": "buf1",
++            "producer_core_id_to_device_slice": producer_residency,
++            "consumer_core_id_to_device_slice": {
++                str(core): {"0": 0} for core in range(4)
++            },
++        }
++    )
++
++    producer = OpSpec(
++        op="mul",
++        is_reduction=False,
++        iteration_space={mb: (Integer(64), 1), out: (Integer(512), 4)},
++        op_info={},
++        args=[
++            TensorArg(
++                is_input=True,
++                arg_index=0,
++                device_dtype=DataFormats.SEN169_FP16,
++                device_size=[8, 64, 64],
++                device_coordinates=[floor(out / 64), mb, Mod(out, 64)],
++                allocation={"hbm": 0},
++                name="arg0",
++            ),
++            TensorArg(
++                is_input=True,
++                arg_index=1,
++                device_dtype=DataFormats.SEN169_FP16,
++                device_size=[8, 64, 64],
++                device_coordinates=[floor(out / 64), mb, Mod(out, 64)],
++                allocation={"hbm": 0x1000},
++                name="arg1",
++            ),
++            TensorArg(
++                is_input=False,
++                arg_index=-1,
++                device_dtype=DataFormats.SEN169_FP16,
++                device_size=[8, 64, 64],
++                device_coordinates=[floor(out / 64), mb, Mod(out, 64)],
++                allocation={"lx": 0},
++                name="buf0",
++            ),
++        ],
++    )
++    consumer = OpSpec(
++        op="batchmatmul",
++        is_reduction=True,
++        iteration_space={
++            mb: (Integer(64), 4),
++            out: (Integer(512), 1),
++            in_dim: (Integer(64), 1),
++        },
++        op_info={"lx_relayout_classifications": [contract]},
++        args=[
++            TensorArg(
++                is_input=True,
++                arg_index=2,
++                device_dtype=DataFormats.SEN169_FP16,
++                device_size=[1, 64, 64],
++                device_coordinates=[floor(in_dim / 64), mb, Mod(in_dim, 64)],
++                allocation={"hbm": 0x2000},
++                name="arg2",
++            ),
++            TensorArg(
++                is_input=True,
++                arg_index=-1,
++                device_dtype=DataFormats.SEN169_FP16,
++                device_size=[8, 64, 64],
++                device_coordinates=[floor(out / 64), in_dim, Mod(out, 64)],
++                allocation={"lx": 0},
++                name="buf0",
++                lx_residency_core_id_to_wk_slice=producer_residency,
++            ),
++            TensorArg(
++                is_input=False,
++                arg_index=3,
++                device_dtype=DataFormats.SEN169_FP16,
++                device_size=[8, 64, 64],
++                device_coordinates=[floor(out / 64), mb, Mod(out, 64)],
++                allocation={"hbm": 0x3000},
++                name="buf1",
++            ),
++        ],
++    )
++
++    generate_bundle("lx_relayout_contract", str(tmp_path), [producer, consumer])
++
++    sdsc_1 = json.loads((tmp_path / "sdsc_1.json").read_text())
++    root = next(iter(sdsc_1.values()))
++    classification = root["lxRelayoutClassifications_"][0]
++
++    assert classification["source_lx_tensor"]["buffer_name"] == "buf0"
++    assert classification["source_lx_tensor"]["dsName_"] == "Tensor2"
++    assert classification["source_lx_tensor"]["dsType_"] == "OUTPUT"
++    assert classification["source_lx_tensor"]["layoutDimOrder_"] == ["mb", "out"]
++    assert classification["source_lx_tensor"]["stickDimOrder_"] == ["out"]
++    assert classification["source_lx_tensor"]["dataFormat_"] == "SEN169_FP16"
++    assert classification["source_lx_tensor"]["wordLength"] == 2
++    assert classification["source_lx_tensor"]["startAddressCoreCorelet_"]
++    assert classification["source_lx_tensor"]["coordinateInfo_"]
++    assert classification["source_lx_tensor"]["coreIdToWkSlice_"] == {
++        "0": {"mb": 0, "out": 0},
++        "1": {"mb": 0, "out": 1},
++        "2": {"mb": 0, "out": 2},
++        "3": {"mb": 0, "out": 3},
++    }
++    assert classification["target_kernel_tensor"]["dsName_"] == "Tensor1"
++    assert classification["target_kernel_tensor"]["dsType_"] == "KERNEL"
++    assert classification["target_kernel_tensor"]["layoutDimOrder_"] == [
++        "in",
++        "out",
++    ]
++    assert classification["target_kernel_tensor"]["stickDimOrder_"] == ["out"]
++    assert classification["target_kernel_tensor"]["dataFormat_"] == "SEN169_FP16"
++    assert classification["target_kernel_tensor"]["wordLength"] == 2
++    assert classification["target_kernel_tensor"]["startAddressCoreCorelet_"]
++    assert classification["target_kernel_tensor"]["coordinateInfo_"]
++    assert (
++        classification["layout_transform"]["conversion_stage"]
++        == "local_restickify_to_kernel"
++    )
++
++
++def test_bundle_drops_matmul_operand_contract_without_source_lx_tensor(tmp_path):
++    mb = Symbol("c0")
++    out = Symbol("c1")
++    in_dim = Symbol("c2")
++    contract = make_matmul_operand_allgather_contract(
++        producer_op="clone",
++        consumer_op="batchmatmul",
++        read_index=0,
++        producer_work_slice_dims={"0": 4},
++        consumer_tensor_work_slice_dims={"0": 1},
++        consumer_compute_work_slice_dims={"0": 4},
++        communication_class=COMM_CLASS_ALL_GATHER,
++    )
++    contract.update(
++        {
++            "source_name": "missing_source",
++            "producer_name": "missing_source",
++            "consumer_name": "matmul",
++        }
++    )
++    consumer = OpSpec(
++        op="batchmatmul",
++        is_reduction=True,
++        iteration_space={
++            mb: (Integer(64), 4),
++            out: (Integer(512), 1),
++            in_dim: (Integer(64), 1),
++        },
++        op_info={"lx_relayout_classifications": [contract]},
++        args=[
++            TensorArg(
++                is_input=True,
++                arg_index=-1,
++                device_dtype=DataFormats.SEN169_FP16,
++                device_size=[1, 64, 64],
++                device_coordinates=[floor(in_dim / 64), mb, Mod(in_dim, 64)],
++                allocation={"lx": 0},
++                name="missing_source",
++            ),
++            TensorArg(
++                is_input=True,
++                arg_index=2,
++                device_dtype=DataFormats.SEN169_FP16,
++                device_size=[8, 64, 64],
++                device_coordinates=[floor(out / 64), in_dim, Mod(out, 64)],
++                allocation={"hbm": 0x2000},
++                name="arg1",
++            ),
++            TensorArg(
++                is_input=False,
++                arg_index=3,
++                device_dtype=DataFormats.SEN169_FP16,
++                device_size=[8, 64, 64],
++                device_coordinates=[floor(out / 64), mb, Mod(out, 64)],
++                allocation={"hbm": 0x3000},
++                name="buf1",
++            ),
++        ],
++    )
++
++    generate_bundle("missing_source_contract", str(tmp_path), [consumer])
++
++    sdsc_0 = json.loads((tmp_path / "sdsc_0.json").read_text())
++    root = next(iter(sdsc_0.values()))
++    assert root["lxRelayoutClassifications_"] == []
++
++def test_lx_input_allocation_coordinates_describe_producer_residency():
++    mb = Symbol("x0")
++    out = Symbol("x1")
++    producer_residency = {
++        "0": {"0": 0, "1": 0},
++        "1": {"0": 1, "1": 0},
++        "2": {"0": 0, "1": 1},
++        "3": {"0": 1, "1": 1},
++    }
++    op_spec = OpSpec(
++        op="neg",
++        is_reduction=False,
++        iteration_space={mb: (Integer(512), 4), out: (Integer(12800), 1)},
++        args=[
++            _fixed_tile_arg(
++                is_input=True,
++                allocation={"lx": 0},
++                lx_residency_core_id_to_wk_slice=producer_residency,
++            ),
++            _fixed_tile_arg(is_input=False, allocation={"hbm": 0x1000}),
++        ],
++        op_info={},
++    )
++
++    sdsc, _symbols, _affine_strides, _symbol_kinds = compile_op_spec(0, op_spec, [])
++
++    root = next(iter(sdsc.values()))
++    compute_dsc = next(iter(root["dscs_"][0].values()))
++    input_alloc = compute_dsc["scheduleTree_"][0]
++
++    assert "dataOpdscs_" not in root
++    assert input_alloc["component_"] == "lx"
++    assert input_alloc["coordinates_"]["coreIdToWkSlice_"] == {
++        "0": {"mb": 0, "out": 0},
++        "1": {"mb": 1, "out": 0},
++        "2": {"mb": 0, "out": 1},
++        "3": {"mb": 1, "out": 1},
++    }
++
++
++def test_regular_lx_input_keeps_empty_allocation_coordinates():
++    mb = Symbol("x0")
++    out = Symbol("x1")
++    op_spec = OpSpec(
++        op="neg",
++        is_reduction=False,
++        iteration_space={mb: (Integer(512), 4), out: (Integer(12800), 1)},
++        args=[
++            _fixed_tile_arg(is_input=True, allocation={"lx": 0}),
++            _fixed_tile_arg(is_input=False, allocation={"hbm": 0x1000}),
++        ],
++        op_info={},
++    )
++
++    sdsc, _symbols, _affine_strides, _symbol_kinds = compile_op_spec(0, op_spec, [])
++
++    root = next(iter(sdsc.values()))
++    compute_dsc = next(iter(root["dscs_"][0].values()))
++    input_alloc = compute_dsc["scheduleTree_"][0]
++
++    assert input_alloc["coordinates_"]["coreIdToWkSlice_"] == {}
++
++
++def test_matmul_operand_classification_metadata_is_emitted_top_level():
++    mb = Symbol("x0")
++    out = Symbol("x1")
++    classification = [
++        {
++            "kind": MATMUL_OPERAND_BROADCAST,
++            "communication_class": COMM_CLASS_ALL_GATHER,
++            "communication_pattern": MATMUL_OPERAND_ALLGATHER_REPLICATE,
++            "requires_staged_realization": True,
++        }
++    ]
++    op_spec = OpSpec(
++        op="neg",
++        is_reduction=False,
++        iteration_space={mb: (Integer(512), 4), out: (Integer(12800), 1)},
++        args=[
++            _fixed_tile_arg(is_input=True, allocation={"lx": 0}),
++            _fixed_tile_arg(is_input=False, allocation={"hbm": 0x1000}),
++        ],
++        op_info={"lx_relayout_classifications": classification},
++    )
++
++    sdsc, _symbols, _affine_strides, _symbol_kinds = compile_op_spec(0, op_spec, [])
++
++    root = next(iter(sdsc.values()))
++    assert root["lxRelayoutClassifications_"] == classification
++
++
++def _compile_lx_relayout_contract(classification, producer_residency):
++    mb = Symbol("x0")
++    out = Symbol("x1")
++    op_spec = OpSpec(
++        op="neg",
++        is_reduction=False,
++        iteration_space={mb: (Integer(512), 1), out: (Integer(12800), 1)},
++        args=[
++            _fixed_tile_arg(
++                is_input=True,
++                allocation={"lx": 0},
++                lx_residency_core_id_to_wk_slice=producer_residency,
++            ),
++            _fixed_tile_arg(is_input=False, allocation={"hbm": 0x1000}),
++        ],
++        op_info={"lx_relayout_classifications": [classification]},
++    )
++
++    sdsc, _symbols, _affine_strides, _symbol_kinds = compile_op_spec(0, op_spec, [])
++    root = next(iter(sdsc.values()))
++    compute_dsc = next(iter(root["dscs_"][0].values()))
++    input_alloc = compute_dsc["scheduleTree_"][0]
++    return root, input_alloc
++
++
++def test_generic_gather_classification_and_producer_residency_emit_dldsc_contract():
++    producer_residency = {
++        "0": {"0": 0},
++        "1": {"0": 1},
++        "2": {"0": 2},
++        "3": {"0": 3},
++    }
++    classification = {
++        "kind": "gather",
++        "source_name": "buf0",
++        "producer_name": "producer",
++        "consumer_name": "consumer",
++        "producer_core_count": 4,
++        "consumer_core_count": 1,
++        "producer_core_id_to_device_slice": producer_residency,
++        "producer_work_slice_dims": {"0": 4},
++        "consumer_work_slice_dims": {"0": 1},
++        "consumer_core_id_to_device_slice": {"0": {"0": 0}},
++        "communication_class": "gather",
++        "communication_pattern": "many_to_one",
++        "max_fanout": 1,
++        "max_fanin": 4,
++        "transfer_count": 4,
++    }
++
++    root, input_alloc = _compile_lx_relayout_contract(
++        classification, producer_residency
++    )
++
++    assert root["lxRelayoutClassifications_"] == [classification]
++    assert input_alloc["component_"] == "lx"
++    assert input_alloc["coordinates_"]["coreIdToWkSlice_"] == {
++        "0": {"mb": 0, "out": 0},
++        "1": {"mb": 1, "out": 0},
++        "2": {"mb": 2, "out": 0},
++        "3": {"mb": 3, "out": 0},
++    }
++
++
++def test_generic_broadcast_classification_and_producer_residency_emit_dldsc_contract():
++    producer_residency = {"0": {"0": 0}}
++    classification = {
++        "kind": "broadcast",
++        "source_name": "buf0",
++        "producer_name": "producer",
++        "consumer_name": "consumer",
++        "producer_core_count": 1,
++        "consumer_core_count": 4,
++        "producer_core_id_to_device_slice": producer_residency,
++        "producer_work_slice_dims": {"0": 1},
++        "consumer_work_slice_dims": {"0": 4},
++        "consumer_core_id_to_device_slice": {
++            "0": {"0": 0},
++            "1": {"0": 1},
++            "2": {"0": 2},
++            "3": {"0": 3},
++        },
++        "communication_class": "broadcast",
++        "communication_pattern": "one_to_many",
++        "max_fanout": 4,
++        "max_fanin": 1,
++        "transfer_count": 4,
++    }
++
++    root, input_alloc = _compile_lx_relayout_contract(
++        classification, producer_residency
++    )
++
++    assert root["lxRelayoutClassifications_"] == [classification]
++    assert input_alloc["coordinates_"]["coreIdToWkSlice_"] == {
++        "0": {"mb": 0, "out": 0},
++    }
++
++
++def test_generic_multicast_classification_and_producer_residency_emit_dldsc_contract():
++    producer_residency = {"0": {"0": 0}, "1": {"0": 1}}
++    classification = {
++        "kind": "multicast",
++        "source_name": "buf0",
++        "producer_name": "producer",
++        "consumer_name": "consumer",
++        "producer_core_count": 2,
++        "consumer_core_count": 4,
++        "producer_core_id_to_device_slice": producer_residency,
++        "producer_work_slice_dims": {"0": 2},
++        "consumer_work_slice_dims": {"0": 2, "1": 2},
++        "consumer_core_id_to_device_slice": {
++            "0": {"0": 0, "1": 0},
++            "1": {"0": 0, "1": 1},
++            "2": {"0": 1, "1": 0},
++            "3": {"0": 1, "1": 1},
++        },
++        "communication_class": "multicast",
++        "communication_pattern": "one_to_many",
++        "max_fanout": 2,
++        "max_fanin": 1,
++        "transfer_count": 4,
++    }
++
++    root, input_alloc = _compile_lx_relayout_contract(
++        classification, producer_residency
++    )
++
++    assert root["lxRelayoutClassifications_"] == [classification]
++    assert input_alloc["coordinates_"]["coreIdToWkSlice_"] == {
++        "0": {"mb": 0, "out": 0},
++        "1": {"mb": 1, "out": 0},
++    }
++
++
++def test_generic_all_gather_classification_and_producer_residency_emit_dldsc_contract():
++    producer_residency = {"0": {"0": 0}, "1": {"0": 1}}
++    classification = {
++        "kind": COMM_CLASS_ALL_GATHER,
++        "source_name": "buf0",
++        "producer_name": "producer",
++        "consumer_name": "consumer",
++        "producer_core_count": 2,
++        "consumer_core_count": 2,
++        "producer_core_id_to_device_slice": producer_residency,
++        "producer_work_slice_dims": {"0": 2},
++        "consumer_work_slice_dims": {"1": 2},
++        "consumer_core_id_to_device_slice": {
++            "0": {"1": 0},
++            "1": {"1": 1},
++        },
++        "communication_class": COMM_CLASS_ALL_GATHER,
++        "communication_pattern": "many_to_many",
++        "max_fanout": 2,
++        "max_fanin": 2,
++        "transfer_count": 4,
++    }
++
++    root, input_alloc = _compile_lx_relayout_contract(
++        classification, producer_residency
++    )
++
++    assert root["lxRelayoutClassifications_"] == [classification]
++    assert input_alloc["coordinates_"]["coreIdToWkSlice_"] == {
++        "0": {"mb": 0, "out": 0},
++        "1": {"mb": 1, "out": 0},
++    }
++
++
++def test_partial_reduction_outputs_are_not_copy_relayout_candidates(monkeypatch):
++    dep = MemoryDep("buf0", Symbol("i"), (Symbol("i"),), (Integer(4),))
++
++    class FakeReadWrites:
++        def __init__(self, *, reads=(), writes=()):
++            self.reads = list(reads)
++            self.writes = list(writes)
++
++    producer = ComputedBuffer.__new__(ComputedBuffer)
++    producer.name = "buf0"
++    producer.data = object()
++    producer.get_name = lambda: "buf0"
++    producer.get_read_writes = lambda: FakeReadWrites(writes=(dep,))
++
++    consumer = ComputedBuffer.__new__(ComputedBuffer)
++    consumer.name = "consumer"
++    consumer.data = object()
++    consumer.get_name = lambda: "consumer"
++    consumer.get_read_writes = lambda: FakeReadWrites(reads=(dep,))
++
++    class FakeGraph:
++        operations = [producer, consumer]
++
++    def fake_per_core_view(op, _dep, _buf_name, _cache):
++        assert op is producer
++        view = PerCoreView(work_slice_dims=((0, 4),), core_to_slot=())
++        return view, True
++
++    monkeypatch.setattr(config, "lx_planner_relayout", True)
++    monkeypatch.setattr(
++        "torch_spyre._inductor.lx_relayout._per_core_view_on_buf",
++        fake_per_core_view,
++    )
++
++    assert plan_lx_relayouts(FakeGraph()) == []
++
++def _make_test_scratchpad_allocator():
++    from torch_spyre._inductor.scratchpad.allocator import ScratchpadAllocator
++
++    class _TestScratchpadAllocator(ScratchpadAllocator):
++        def plan_allocation(self, graph):
++            return None
++
++    return _TestScratchpadAllocator()
++
++
++class _FakeDep:
++    def __init__(self, name):
++        self.name = name
++
++
++def test_computed_source_clone_is_lx_relayout_eligible(monkeypatch):
++    class FakeReadWrites:
++        reads = [_FakeDep("producer")]
++
++    class FakeComputedBuffer(ComputedBuffer):
++        pass
++
++    class FakeGraph:
++        name_to_buffer = {"producer": FakeComputedBuffer.__new__(FakeComputedBuffer)}
++
++    class FakeTarget:
++        __name__ = "clone"
++
++    op = FakeComputedBuffer.__new__(FakeComputedBuffer)
++    op.origin_node = type("Origin", (), {"target": FakeTarget()})()
++    op.get_read_writes = lambda: FakeReadWrites()
++
++    monkeypatch.setattr(config, "lx_planner_relayout_collectives", True)
++    allocator = _make_test_scratchpad_allocator()
++    assert allocator._clone_output_good_for_lx_relayout(FakeGraph(), op)
++
++
++def test_graph_input_clone_is_not_lx_relayout_eligible(monkeypatch):
++    class FakeReadWrites:
++        reads = [_FakeDep("arg0")]
++
++    class FakeGraph:
++        name_to_buffer = {}
++
++    class FakeTarget:
++        __name__ = "clone"
++
++    op = ComputedBuffer.__new__(ComputedBuffer)
++    op.origin_node = type("Origin", (), {"target": FakeTarget()})()
++    op.get_read_writes = lambda: FakeReadWrites()
++
++    monkeypatch.setattr(config, "lx_planner_relayout_collectives", True)
++    allocator = _make_test_scratchpad_allocator()
++    assert not allocator._clone_output_good_for_lx_relayout(FakeGraph(), op)
+diff --git a/tests/inductor/test_scratchpad_graph_editor.py b/tests/inductor/test_scratchpad_graph_editor.py
+new file mode 100644
+index 0000000..7a126d6
+--- /dev/null
++++ b/tests/inductor/test_scratchpad_graph_editor.py
+@@ -0,0 +1,100 @@
++# Copyright 2026 The Torch-Spyre Authors.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++import importlib.util
++import pathlib
++import types
++import sys
++import unittest
++
++import torch
++from torch._inductor.ir import FixedLayout, InputBuffer, ReinterpretView, StorageBox
++
++
++def _load_graph_editor():
++    """Load GraphEditor without importing extension-backed helper modules."""
++    module_path = (
++        pathlib.Path(__file__).parents[2]
++        / "torch_spyre"
++        / "_inductor"
++        / "scratchpad"
++        / "graph_editor.py"
++    )
++    stub_names = (
++        "torch_spyre._inductor.pass_utils",
++        "torch_spyre._inductor.ir",
++    )
++    old_modules = {name: sys.modules.get(name) for name in stub_names}
++    parent_attrs = {}
++    for name in stub_names:
++        parent_name, attr = name.rsplit(".", 1)
++        parent = sys.modules.get(parent_name)
++        if parent is not None:
++            parent_attrs[name] = (parent, hasattr(parent, attr), getattr(parent, attr, None))
++
++    pass_utils = types.ModuleType("torch_spyre._inductor.pass_utils")
++    pass_utils.copy_op_metadata = lambda *, src, dst: None
++    spyre_ir = types.ModuleType("torch_spyre._inductor.ir")
++    spyre_ir.FixedTiledLayout = type("FixedTiledLayout", (), {})
++
++    try:
++        sys.modules["torch_spyre._inductor.pass_utils"] = pass_utils
++        sys.modules["torch_spyre._inductor.ir"] = spyre_ir
++        spec = importlib.util.spec_from_file_location(
++            "_test_scratchpad_graph_editor", module_path
++        )
++        assert spec is not None and spec.loader is not None
++        module = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(module)
++        return module.GraphEditor
++    finally:
++        for name, old_module in old_modules.items():
++            if old_module is None:
++                sys.modules.pop(name, None)
++            else:
++                sys.modules[name] = old_module
++        for name, (parent, had_attr, value) in parent_attrs.items():
++            _, attr = name.rsplit(".", 1)
++            if had_attr:
++                setattr(parent, attr, value)
++            elif hasattr(parent, attr):
++                delattr(parent, attr)
++
++
++class TestGraphEditor(unittest.TestCase):
++    def test_change_graph_output_preserves_reinterpret_view(self):
++        GraphEditor = _load_graph_editor()
++        storage_layout = FixedLayout(torch.device("cpu"), torch.float16, [2, 3], [3, 1])
++        view_layout = FixedLayout(torch.device("cpu"), torch.float16, [3, 2], [1, 3])
++        old_buffer = InputBuffer(name="buf11", layout=storage_layout)
++        new_buffer = InputBuffer(name="buf11_clone", layout=storage_layout)
++
++        graph_output = ReinterpretView(
++            data=StorageBox(old_buffer),
++            layout=view_layout,
++        )
++        editor = GraphEditor.__new__(GraphEditor)
++        editor.lowering = types.SimpleNamespace(graph_outputs=[graph_output])
++
++        editor.change_graph_output(old_buffer, new_buffer)  # type: ignore[arg-type]
++
++        replacement = editor.lowering.graph_outputs[0]
++        self.assertIsInstance(replacement, ReinterpretView)
++        self.assertIs(replacement.layout, view_layout)
++        self.assertIsInstance(replacement.data, StorageBox)
++        self.assertIs(replacement.data.data, new_buffer)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/torch_spyre/_inductor/codegen/bundle.py b/torch_spyre/_inductor/codegen/bundle.py
+index c0e27aa..e999cf4 100644
+--- a/torch_spyre/_inductor/codegen/bundle.py
++++ b/torch_spyre/_inductor/codegen/bundle.py
+@@ -48,6 +48,182 @@ logger = get_inductor_logger("sdsc_compile")
+ _CompiledEntry = tuple[Any, list[int], list[list[dict]], list[SymbolKind]]
+ 
+ 
++def _first_sdsc_dsc(sdsc_json: dict) -> tuple[str, dict, str, dict]:
++    if not sdsc_json:
++        return "", {}, "", {}
++    top_key, root = next(iter(sdsc_json.items()))
++    dscs = root.get("dscs_", [])
++    dsc_map = dscs[0] if dscs else {}
++    if not dsc_map:
++        return top_key, root, "", {}
++    dsc_name, dsc = next(iter(dsc_map.items()))
++    return top_key, root, dsc_name, dsc
++
++
++def _labeled_ds_for_tensor(dsc: dict, tensor_idx: int) -> dict:
++    for lds in dsc.get("labeledDs_", []):
++        if int(lds.get("ldsIdx_", -1)) == tensor_idx:
++            return lds
++    return {}
++
++
++def _tensor_layout_contract(
++    *,
++    sdsc_idx: int,
++    sdsc_json: dict,
++    tensor_idx: int,
++    buffer_name: str | None = None,
++    core_id_to_wk_slice: dict | None = None,
++) -> dict[str, Any] | None:
++    top_key, root, dsc_name, dsc = _first_sdsc_dsc(sdsc_json)
++    schedule_tree = dsc.get("scheduleTree_", [])
++    if tensor_idx < 0 or tensor_idx >= len(schedule_tree):
++        return None
++    alloc = schedule_tree[tensor_idx]
++    lds = _labeled_ds_for_tensor(dsc, tensor_idx)
++    ds_type = lds.get("dsType_", "")
++    primary_info = dsc.get("primaryDsInfo_", {}).get(ds_type, {})
++    tensor_core_map = (
++        alloc.get("coordinates_", {}).get("coreIdToWkSlice_", {}) or {}
++    )
++
++    result: dict[str, Any] = {
++        "sdsc_file": f"sdsc_{sdsc_idx}.json",
++        "top_key": top_key,
++        "op": dsc_name,
++        "ldsIdx_": tensor_idx,
++        "dsName_": lds.get("dsName_", f"Tensor{tensor_idx}"),
++        "dsType_": ds_type,
++        "allocation_name": alloc.get("name_", ""),
++        "component_": alloc.get("component_", ""),
++        "layoutDimOrder_": list(
++            alloc.get("layoutDimOrder_", primary_info.get("layoutDimOrder_", []))
++        ),
++        "maxDimSizes_": list(alloc.get("maxDimSizes_", [])),
++        "stickDimOrder_": list(primary_info.get("stickDimOrder_", [])),
++        "stickSize_": list(primary_info.get("stickSize_", [])),
++        "dataFormat_": lds.get("dataFormat_", ""),
++        "wordLength": lds.get("wordLength"),
++        "startAddressCoreCorelet_": alloc.get("startAddressCoreCorelet_", {}),
++        "coordinateInfo_": alloc.get("coordinates_", {}).get("coordInfo", {}),
++        "numWkSlicesPerDim_": dict(root.get("numWkSlicesPerDim_", {})),
++        "coreIdToWkSlice_": dict(core_id_to_wk_slice or tensor_core_map),
++        "computeCoreIdToWkSlice_": dict(root.get("coreIdToWkSlice_", {})),
++    }
++    if buffer_name is not None:
++        result["buffer_name"] = buffer_name
++    return result
++
++
++def _record_lx_output_layout(
++    *,
++    op_spec: OpSpec,
++    sdsc_idx: int,
++    sdsc_json: dict,
++    producer_lx_outputs: dict[str, dict[str, Any]],
++) -> None:
++    if not op_spec.args:
++        return
++    output_arg = op_spec.args[-1]
++    if not output_arg.name or "lx" not in output_arg.allocation:
++        return
++    _top_key, root, _dsc_name, _dsc = _first_sdsc_dsc(sdsc_json)
++    contract = _tensor_layout_contract(
++        sdsc_idx=sdsc_idx,
++        sdsc_json=sdsc_json,
++        tensor_idx=len(op_spec.args) - 1,
++        buffer_name=output_arg.name,
++        core_id_to_wk_slice=root.get("coreIdToWkSlice_", {}),
++    )
++    if contract is not None:
++        producer_lx_outputs[output_arg.name] = contract
++
++
++def _enrich_lx_relayout_classifications(
++    *,
++    op_spec: OpSpec,
++    sdsc_idx: int,
++    sdsc_json: dict,
++    producer_lx_outputs: dict[str, dict[str, Any]],
++) -> None:
++    _top_key, root, _dsc_name, _dsc = _first_sdsc_dsc(sdsc_json)
++    classifications = root.get("lxRelayoutClassifications_", [])
++    if not isinstance(classifications, list):
++        return
++
++    finalized_classifications = []
++    for classification in classifications:
++        if not isinstance(classification, dict):
++            continue
++        kind = classification.get("kind")
++        if kind not in {"matmul_operand_broadcast", "partial_view_gather"}:
++            finalized_classifications.append(classification)
++            continue
++
++        source_name = (
++            classification.get("source_name") or classification.get("producer_name")
++        )
++        source_layout = producer_lx_outputs.get(str(source_name))
++        if source_layout is not None:
++            classification.setdefault("source_lx_tensor", source_layout)
++            classification.setdefault(
++                "producer_core_id_to_device_slice",
++                source_layout.get("coreIdToWkSlice_", {}),
++            )
++
++        read_index = classification.get("operand_read_index")
++        if read_index is None:
++            read_index = classification.get("read_index")
++        try:
++            target_tensor_idx = int(read_index)
++        except (TypeError, ValueError):
++            target_tensor_idx = -1
++        target_layout = _tensor_layout_contract(
++            sdsc_idx=sdsc_idx,
++            sdsc_json=sdsc_json,
++            tensor_idx=target_tensor_idx,
++        )
++        if kind == "partial_view_gather":
++            if target_layout is not None:
++                classification.setdefault("target_lx_tensor", target_layout)
++            layout_transform = dict(classification.get("layout_transform") or {})
++            layout_transform.setdefault("source_component", "lx")
++            layout_transform.setdefault("target_component", "lx")
++            layout_transform.setdefault("movement_stage", "partial_view_gather")
++            layout_transform.setdefault("carrier_hint", "lx_partial_view_gather")
++            classification["layout_transform"] = layout_transform
++            finalized_classifications.append(classification)
++            continue
++
++        if target_layout is not None:
++            classification.setdefault("target_kernel_tensor", target_layout)
++
++        layout_transform = dict(classification.get("layout_transform") or {})
++        layout_transform.setdefault("source_component", "lx")
++        layout_transform.setdefault("target_component", "KERNEL")
++        layout_transform.setdefault("movement_stage", "all_gather_replicate")
++        layout_transform.setdefault("conversion_stage", "local_restickify_to_kernel")
++        layout_transform.setdefault(
++            "carrier_hint", "lx_all_gather_then_local_restickify"
++        )
++        classification["layout_transform"] = layout_transform
++
++        if classification.get("requires_layout_conversion"):
++            source = classification.get("source_lx_tensor") or {}
++            target = classification.get("target_kernel_tensor") or {}
++            if source.get("component_") != "lx" or target.get("component_") != "lx":
++                logger.debug(
++                    "lx relayout skip: incomplete matmul operand contract for %s -> %s",
++                    classification.get("producer_name"),
++                    classification.get("consumer_name"),
++                )
++                continue
++
++        finalized_classifications.append(classification)
++
++    root["lxRelayoutClassifications_"] = finalized_classifications
++
++
+ # ---------------------------------------------------------------------------
+ # Public entry point
+ # ---------------------------------------------------------------------------
+@@ -373,8 +549,11 @@ def _compile_specs(
+     symbol_id_offset_counter: list,
+     output_dir: str,
+     use_symbols: bool = False,
++    producer_lx_outputs: dict[str, dict[str, Any]] | None = None,
+ ) -> None:
+     """Recursively compile all OpSpecs in specs depth-first."""
++    if producer_lx_outputs is None:
++        producer_lx_outputs = {}
+     for entry in specs:
+         if isinstance(entry, LoopSpec):
+             _compile_specs(
+@@ -385,6 +564,7 @@ def _compile_specs(
+                 symbol_id_offset_counter,
+                 output_dir,
+                 use_symbols=use_symbols,
++                producer_lx_outputs=producer_lx_outputs,
+             )
+         elif isinstance(entry, OpSpec):
+             idx = sdsc_counter[0]
+@@ -398,10 +578,22 @@ def _compile_specs(
+                     use_symbols=use_symbols,
+                 )
+             )
++            _enrich_lx_relayout_classifications(
++                op_spec=entry,
++                sdsc_idx=idx,
++                sdsc_json=sdsc_json,
++                producer_lx_outputs=producer_lx_outputs,
++            )
+             symbol_id_offset_counter[0] += len(local_sym_values)
+             compiled.append(
+                 (sdsc_json, local_sym_values, affine_strides, local_symbol_kinds)
+             )
++            _record_lx_output_layout(
++                op_spec=entry,
++                sdsc_idx=idx,
++                sdsc_json=sdsc_json,
++                producer_lx_outputs=producer_lx_outputs,
++            )
+             file_name = f"sdsc_{idx}.json"
+             with open(os.path.join(output_dir, file_name), "w") as f:
+                 logger.info(f"Generating {f.name}")
+diff --git a/torch_spyre/_inductor/codegen/compute_ops.py b/torch_spyre/_inductor/codegen/compute_ops.py
+index e3f1d9c..2f44f9b 100644
+--- a/torch_spyre/_inductor/codegen/compute_ops.py
++++ b/torch_spyre/_inductor/codegen/compute_ops.py
+@@ -758,6 +758,7 @@ def generate_sdsc(
+                 "coreIdToDscSchedule": {
+                     str(c): [[-1, 0, 0, 0]] for c in range(sdsc_spec.num_cores)
+                 },
++                "lxRelayoutClassifications_": sdsc_spec.lx_relayout_classifications,
+                 "dscs_": [
+                     {
+                         sdsc_spec.opfunc: {
+@@ -933,7 +934,8 @@ def generate_sdsc(
+                                                 "dim_order"
+                                             ]
+                                         },
+-                                        "coreIdToWkSlice_": {},
++                                        "coreIdToWkSlice_": tensor.lx_residency_core_id_to_wk_slice
++                                        or {},
+                                     },
+                                 }
+                                 for i, tensor in enumerate(sdsc_spec.args)
+diff --git a/torch_spyre/_inductor/codegen/superdsc.py b/torch_spyre/_inductor/codegen/superdsc.py
+index 3206680..d498292 100644
+--- a/torch_spyre/_inductor/codegen/superdsc.py
++++ b/torch_spyre/_inductor/codegen/superdsc.py
+@@ -28,6 +28,7 @@ from torch_spyre._inductor.constants import (
+     MATMUL_DIM_LABELS,
+     MATMUL_LAYOUT_LABELS,
+     RESTICKIFY_OP,
++    RESTICKIFY_OPS,
+     TOPK_OPS,
+ )
+ from torch_spyre._inductor import config as _spyre_config
+@@ -64,6 +65,9 @@ class SDSCArgs:
+     arg_index: int = -1
+     is_index_tensor: bool = False
+     related_value_tensor_idx: int = -1
++    source_name: str | None = None
++    source_offset_elems: Expr | None = None
++    lx_residency_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
+ 
+     def __str__(self) -> str:
+         scales = ", ".join(f"{k}={v}" for k, v in self.scales.items())
+@@ -85,6 +89,7 @@ class SDSCArgs:
+             f"  backGap={self.backGap}\n"
+             f"  is_index_tensor={self.is_index_tensor}\n"
+             f"  related_value_tensor_idx={self.related_value_tensor_idx}\n"
++            f"  lx_residency_core_id_to_wk_slice={self.lx_residency_core_id_to_wk_slice}\n"
+             f")"
+         )
+ 
+@@ -109,6 +114,9 @@ class SDSCSpec:
+         default_factory=dict
+     )
+     indirect_access_indices: list[int] = dataclasses.field(default_factory=list)
++    lx_relayout_classifications: list[dict[str, Any]] = dataclasses.field(
++        default_factory=list
++    )
+ 
+     def __str__(self) -> str:
+         iter_space = ", ".join(f"{k}={v}" for k, v in self.iteration_space.items())
+@@ -264,6 +272,56 @@ def _get_device_dim_order(
+     return dim_order, stick_dim
+ 
+ 
++def _device_dim_to_symbol(
++    arg: TensorArg,
++    symbol_mapping: dict,
++    dim_order: list[Symbol],
++    stick_dim: Symbol | None,
++) -> dict[str, Symbol]:
++    """Map TensorArg device-dim indices to SDSC primary-dim symbols."""
++
++    dim_set = set(dim_order)
++    result: dict[str, Symbol] = {}
++    for dev_dim, coord in enumerate(arg.device_coordinates):
++        expr = coord.subs(symbol_mapping)
++        free = sorted((sym for sym in expr.free_symbols if sym in dim_set), key=str)
++        if len(free) == 1:
++            result[str(dev_dim)] = free[0]
++        elif expr == 0 and stick_dim is not None and stick_dim in dim_set:
++            result[str(dev_dim)] = stick_dim
++    return result
++
++
++def _map_lx_residency_to_sdsc_dims(
++    arg: TensorArg,
++    symbol_mapping: dict,
++    dim_order: list[Symbol],
++    stick_dim: Symbol | None,
++) -> dict[str, dict[str, int]] | None:
++    """Translate producer residency from device-dim keys to SDSC dim labels."""
++
++    if arg.lx_residency_core_id_to_wk_slice is None:
++        return None
++
++    device_dim_to_symbol = _device_dim_to_symbol(
++        arg, symbol_mapping, dim_order, stick_dim
++    )
++    layout_dim_labels = [str(dim) for dim in dim_order]
++    result: dict[str, dict[str, int]] = {}
++    for core, per_device_dim in arg.lx_residency_core_id_to_wk_slice.items():
++        per_dim = {dim: 0 for dim in layout_dim_labels}
++        for device_dim, slot in per_device_dim.items():
++            dim = device_dim_to_symbol.get(str(device_dim))
++            slot_int = int(slot)
++            if dim is None:
++                if slot_int != 0:
++                    return None
++                continue
++            per_dim[str(dim)] = slot_int
++        result[str(core)] = per_dim
++    return result
++
++
+ def _get_layout_label(
+     layouts: dict,
+     dim_order: list,
+@@ -558,6 +616,14 @@ def _create_sdsc_tensors(
+                 arg_index=arg.arg_index,
+                 is_index_tensor=is_idx_tensor,
+                 related_value_tensor_idx=related_val_idx,
++                source_name=arg.source_name,
++                source_offset_elems=arg.source_offset_elems,
++                lx_residency_core_id_to_wk_slice=_map_lx_residency_to_sdsc_dims(
++                    arg,
++                    symbol_mapping,
++                    dim_order,
++                    effective_stick,
++                ),
+             )
+         )
+ 
+@@ -790,7 +856,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
+             [args[0]],
+             [args[0].dim_order],
+         )
+-    elif op_spec.op == RESTICKIFY_OP:
++    elif op_spec.op in RESTICKIFY_OPS:
+         # Pad iteration space using all args so both the old stick (input) and
+         # new stick (output) are rounded up to the nearest stick boundary.
+         pad_args, pad_sdsc_args, dim_order = (
+@@ -810,7 +876,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
+ 
+     # For restickify, update backGaps based on the padded iteration space,
+     # since non-stick dimensions may now have it_dim_size > dev_dim_size.
+-    if op_spec.op == RESTICKIFY_OP:
++    if op_spec.op in RESTICKIFY_OPS:
+         for sdsc_arg, op_spec_arg in zip(args, op_spec.args):
+             layout = layouts[sdsc_arg.layout]
+             stick_dim = layout["stick_dim_order"]
+@@ -878,6 +944,11 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
+             coordinate_masking=coordinate_masking,
+             symbolic_dims=symbolic_dims,
+             indirect_access_indices=indirect_access_indices,
++            lx_relayout_classifications=(
++                list(op_spec.op_info.get("lx_relayout_classifications", []))
++                if op_spec.op_info
++                else []
++            ),
+         ),
+         symbol_mapping,
+     )
+diff --git a/torch_spyre/_inductor/config.py b/torch_spyre/_inductor/config.py
+index c945e76..c89d13b 100644
+--- a/torch_spyre/_inductor/config.py
++++ b/torch_spyre/_inductor/config.py
+@@ -38,7 +38,68 @@ allow_all_ops_in_lx_planning: bool = False
+ # eligibility and must not, on its own, enable boundary clone insertion.
+ lx_boundary_clones: bool = os.environ.get("LX_BOUNDARY_CLONES", "0") == "1"
+ 
+-dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
++# Experimental extension to LX planning: keep producer-owned LX tensors resident
++# across producer/consumer core-division mismatches and describe the producer
++# tensor distribution in dl-dsc allocation coordinates. Deeptools may then
++# synthesize the on-chip relayout from the coordinate mismatch.
++lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
++
++# Experimental research lane for layout-restickify spills. This only makes
++# computed-source synthetic spyre.restickify outputs eligible for LX planning;
++# graph-input/weight restickifies are intentionally left to offline prelayout.
++lx_planner_relayout_restickify_outputs: bool = _get_env_bool(
++    "SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS", lx_planner_relayout
++)
++
++# Experimental research lane for matmul operand relayouts. These are coordinate
++# collectives such as multicast/gather/all-gather, but still keep physical
++# transfer derivation in Deeptools via dl-dsc coordinates.
++lx_planner_relayout_collectives: bool = _get_env_bool(
++    "SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES", lx_planner_relayout
++)
++
++# Experimental metadata-only contract for Granite/attention matmul operand
++# materialization. Requires lx_planner_relayout_collectives and records the
++# matmul operand as grouped all-gather/broadcast rather than allowing it to look
++# like resident scatter.
++lx_planner_relayout_matmul_operand_contract: bool = _get_env_bool(
++    "SPYRE_LX_PLANNER_RELAYOUT_MATMUL_OPERAND_CONTRACT", lx_planner_relayout
++)
++
++# Experimental metadata lane for flash activation edges of the form
++# pointwise -> ReStickifyOpHBM -> batchmatmul KERNEL. The producer and consumer
++# need a layout-aware grouped all-gather, not the direct scatter class realized
++# by PR1. Keep this opt-in until backend lowering is value-correct.
++lx_planner_relayout_layout_allgather_restickify: bool = _get_env_bool(
++    "SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY", lx_planner_relayout
++)
++
++# Bound full-tensor matmul operand collectives to the communication-substrate
++# lane. Larger activations require WSR/tile-scoping; preserving the HBM fallback
++# is safer than asking Deeptools to materialize a full dense gather in LX.
++lx_planner_relayout_max_matmul_operand_bytes: int = int(
++    os.environ.get(
++        "SPYRE_LX_PLANNER_RELAYOUT_MAX_MATMUL_OPERAND_BYTES",
++        "4194304" if lx_planner_relayout else "0",
++    )
++)
++
++# Frontend LX reservation fraction.  When LX relayout is enabled, default
++# Torch planning to full frontend LX and give the DXP subprocess its backend
++# relayout workspace separately via ``dxp_backend_lx_frac_avail`` below.
++dxp_lx_frac_avail: float = float(
++    os.environ.get("DXP_LX_FRAC_AVAIL", "0" if lx_planner_relayout else "0.2")
++)
++
++# Backend LX fraction used only for the DXP subprocess launched by Torch. This
++# hides the old wrapper trick behind the same top-level relayout flag while
++# preserving explicit overrides for backend debugging.
++dxp_backend_lx_frac_avail: float = float(
++    os.environ.get(
++        "DXP_BACKEND_LX_FRAC_AVAIL",
++        "1" if lx_planner_relayout else str(dxp_lx_frac_avail),
++    )
++)
+ 
+ sencores: int = int(os.getenv("SENCORES", "32"))
+ 
+diff --git a/torch_spyre/_inductor/constants.py b/torch_spyre/_inductor/constants.py
+index 4dacb06..cdd595f 100644
+--- a/torch_spyre/_inductor/constants.py
++++ b/torch_spyre/_inductor/constants.py
+@@ -15,6 +15,8 @@
+ BATCH_MATMUL_OP = "batchmatmul"
+ IDENTITY_OP = "identity"
+ RESTICKIFY_OP = "ReStickifyOpHBM"
++RESTICKIFY_LX_OP = "ReStickifyOpLx"
++RESTICKIFY_OPS = {RESTICKIFY_OP, RESTICKIFY_LX_OP}
+ BATCH_MATMUL_FP8_OP = "batchmatmulfp8"
+ 
+ # Reduction ops that cannot reduce along the stick dimension.
+diff --git a/torch_spyre/_inductor/layout_allgather_restickify.py b/torch_spyre/_inductor/layout_allgather_restickify.py
+new file mode 100644
+index 0000000..9139e32
+--- /dev/null
++++ b/torch_spyre/_inductor/layout_allgather_restickify.py
+@@ -0,0 +1,260 @@
++# Copyright 2026 The Torch-Spyre Authors.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""Import-light classifier for flash layout all-gather restickify SDSCs."""
++
++from __future__ import annotations
++
++from typing import Any
++
++LAYOUT_ALLGATHER_RESTICKIFY = "layout_allgather_restickify"
++MATMUL_OPERAND_BROADCAST = "matmul_operand_broadcast"
++MATMUL_OPERAND_ALLGATHER_REPLICATE = "all_gather_replicate"
++MATMUL_OPERAND_BROADCAST_PATTERN = "broadcast"
++MATMUL_OPERAND_MULTICAST_PATTERN = "multicast"
++PARTIAL_VIEW_GATHER = "partial_view_gather"
++COMM_CLASS_ALL_GATHER = "all_gather"
++RESTICKIFY_HBM_OP = "ReStickifyOpHBM"
++RESTICKIFY_LX_OP = "ReStickifyOpLx"
++RESTICKIFY_OPS = {RESTICKIFY_HBM_OP, RESTICKIFY_LX_OP}
++
++
++def make_layout_allgather_restickify_contract(
++    *,
++    producer_op: str,
++    restickify_op: str,
++    consumer_op: str,
++    producer_work_slice_dims: dict[str, int],
++    restickify_work_slice_dims: dict[str, int],
++    consumer_work_slice_dims: dict[str, int],
++) -> dict[str, Any]:
++    """Return the logical contract needed to lower the flash restickify edge.
++
++    This is intentionally a logical contract, not a physical movement list. The
++    backend still owns route selection and transfer synthesis, but it must see
++    the layout/stick transform and dimension rename to avoid treating the edge
++    as a direct scatter.
++    """
++
++    return {
++        "kind": LAYOUT_ALLGATHER_RESTICKIFY,
++        "classification": LAYOUT_ALLGATHER_RESTICKIFY,
++        "producer_op": producer_op,
++        "restickify_op": restickify_op,
++        "consumer_op": consumer_op,
++        "producer_work_slice_dims": dict(producer_work_slice_dims),
++        "restickify_work_slice_dims": dict(restickify_work_slice_dims),
++        "consumer_work_slice_dims": dict(consumer_work_slice_dims),
++        "producer_layout": {
++            "layoutDimOrder_": ["out", "x", "mb"],
++            "stickDimOrder_": ["out"],
++        },
++        "restickify_kernel_layout": {
++            "layoutDimOrder_": ["x", "out", "mb"],
++            "stickDimOrder_": ["x"],
++        },
++        "consumer_kernel_layout": {
++            "layoutDimOrder_": ["out", "in", "x"],
++            "stickDimOrder_": ["out"],
++        },
++        "dimension_rename": {
++            "restickify.x": "batchmatmul.out",
++            "restickify.out": "batchmatmul.in",
++            "restickify.mb": "batchmatmul.x",
++        },
++        "communication_class": COMM_CLASS_ALL_GATHER,
++        "communication_pattern": LAYOUT_ALLGATHER_RESTICKIFY,
++        "requires_staged_realization": True,
++    }
++
++
++def _matmul_operand_communication_pattern(communication_class: str) -> str:
++    if communication_class == "broadcast":
++        return MATMUL_OPERAND_BROADCAST_PATTERN
++    if communication_class == "multicast":
++        return MATMUL_OPERAND_MULTICAST_PATTERN
++    return MATMUL_OPERAND_ALLGATHER_REPLICATE
++
++
++def make_matmul_operand_allgather_contract(
++    *,
++    producer_op: str,
++    consumer_op: str,
++    read_index: int,
++    producer_work_slice_dims: dict[str, int],
++    consumer_tensor_work_slice_dims: dict[str, int],
++    consumer_compute_work_slice_dims: dict[str, int],
++    communication_class: str,
++) -> dict[str, Any]:
++    """Return the logical contract for staged matmul operand materialization.
++
++    The operand tensor is resident across producer-owned slices while each
++    consumer core may need a different compute slice.  That edge is a grouped
++    all-gather/broadcast/multicast into the matmul transfer loop, not a
++    one-to-one resident scatter relayout.
++    """
++
++    operand_role = {0: "lhs", 1: "rhs"}.get(int(read_index), f"input_{read_index}")
++
++    return {
++        "kind": MATMUL_OPERAND_BROADCAST,
++        "classification": MATMUL_OPERAND_BROADCAST,
++        "producer_op": producer_op,
++        "consumer_op": consumer_op,
++        "operand_read_index": int(read_index),
++        "operand_role": operand_role,
++        "producer_work_slice_dims": dict(producer_work_slice_dims),
++        "consumer_tensor_work_slice_dims": dict(consumer_tensor_work_slice_dims),
++        "consumer_compute_work_slice_dims": dict(consumer_compute_work_slice_dims),
++        "operand_kernel_layout": {
++            "layoutDimOrder_": ["out", "in", "x"],
++            "stickDimOrder_": ["out"],
++        },
++        "communication_class": communication_class,
++        "communication_pattern": _matmul_operand_communication_pattern(
++            communication_class
++        ),
++        "materialization_pattern": "all_gather_replicate_with_layout_conversion",
++        "requires_layout_conversion": True,
++        "layout_transform": {
++            "kind": "activation_lx_to_matmul_kernel_operand",
++            "source": "producer_lx_residency",
++            "target": "consumer_matmul_kernel_operand",
++            "source_coordinates": "producer_tensor_distribution",
++            "target_coordinates": "consumer_compute_distribution",
++            "carrier_hint": "lx_all_gather_then_local_restickify",
++        },
++        "staged_destination": {
++            "component_": "KERNEL",
++            "operand_read_index": int(read_index),
++            "scope": "matmul_transfer_loop",
++        },
++        "requires_staged_realization": True,
++        "staging_scope": "matmul_transfer_loop",
++    }
++
++
++def _sdsc_op_name(sdsc: dict[str, Any]) -> str:
++    return str(sdsc.get("op") or sdsc.get("top_key", "").split("_", 1)[-1])
++
++
++def _sdsc_work_slices(sdsc: dict[str, Any]) -> dict[str, int]:
++    return {
++        str(dim): int(split)
++        for dim, split in sdsc.get("numWkSlicesPerDim_", {}).items()
++    }
++
++
++def _sdsc_layout(
++    sdsc: dict[str, Any], label: str
++) -> tuple[tuple[str, ...], tuple[str, ...]]:
++    info = (sdsc.get("primaryDsInfo_") or {}).get(label) or {}
++    return (
++        tuple(str(dim) for dim in info.get("layoutDimOrder_", ())),
++        tuple(str(dim) for dim in info.get("stickDimOrder_", ())),
++    )
++
++
++def _sdsc_has_allocation(
++    sdsc: dict[str, Any], *, component: str, layout_dim_order: tuple[str, ...]
++) -> bool:
++    for allocation in sdsc.get("allocates", ()):
++        if allocation.get("component_") != component:
++            continue
++        if tuple(allocation.get("layoutDimOrder_", ())) == layout_dim_order:
++            return True
++    return False
++
++
++def classify_layout_allgather_restickify_sdsc_triplet(
++    producer: dict[str, Any],
++    restickify: dict[str, Any] | None = None,
++    consumer: dict[str, Any] | None = None,
++) -> dict[str, Any] | None:
++    """Classify the flash pointwise -> HBM restickify -> BMM KERNEL edge.
++
++    This SDSC-snippet classifier is metadata-only. A returned record describes
++    the frontend planning gap but intentionally does not claim backend lowering
++    support. The accepted shape is narrow and mirrors the representative flash
++    edge captured in flash_layout_restickify_gap_20260701.
++    """
++
++    if restickify is None and consumer is None:
++        triplet = producer
++        producer = triplet.get("sdsc_1_mul") or triplet.get("producer") or {}
++        restickify = (
++            triplet.get("sdsc_2_restickify") or triplet.get("restickify") or {}
++        )
++        consumer = triplet.get("sdsc_3_batchmatmul") or triplet.get("consumer") or {}
++    if restickify is None or consumer is None:
++        return None
++
++    producer_op = _sdsc_op_name(producer)
++    restickify_op = _sdsc_op_name(restickify)
++    consumer_op = _sdsc_op_name(consumer)
++    if producer_op != "mul":
++        return None
++    if restickify_op not in RESTICKIFY_OPS:
++        return None
++    if consumer_op != "batchmatmul":
++        return None
++
++    producer_output_layout = _sdsc_layout(producer, "OUTPUT")
++    restickify_input_layout = _sdsc_layout(restickify, "OUTPUT")
++    restickify_kernel_layout = _sdsc_layout(restickify, "KERNEL")
++    consumer_kernel_layout = _sdsc_layout(consumer, "KERNEL")
++    if producer_output_layout != (("out", "x", "mb"), ("out",)):
++        return None
++    if restickify_input_layout != producer_output_layout:
++        return None
++    if restickify_kernel_layout != (("x", "out", "mb"), ("x",)):
++        return None
++    if consumer_kernel_layout != (("out", "in", "x"), ("out",)):
++        return None
++    if not _sdsc_has_allocation(
++        producer, component="lx", layout_dim_order=producer_output_layout[0]
++    ):
++        return None
++
++    producer_splits = _sdsc_work_slices(producer)
++    restickify_splits = _sdsc_work_slices(restickify)
++    consumer_splits = _sdsc_work_slices(consumer)
++    if producer_splits != restickify_splits:
++        return None
++    if producer_splits.get("mb") != consumer_splits.get("x"):
++        return None
++    if producer_splits.get("x") != consumer_splits.get("mb"):
++        return None
++    if producer_splits.get("out", 1) != 1 or consumer_splits.get("out", 1) != 1:
++        return None
++    if consumer_splits.get("in", 1) != 1:
++        return None
++    if int(producer.get("numCoresUsed_", 0)) != int(consumer.get("numCoresUsed_", -1)):
++        return None
++
++    return {
++        **make_layout_allgather_restickify_contract(
++            producer_op=producer_op,
++            restickify_op=restickify_op,
++            consumer_op=consumer_op,
++            producer_work_slice_dims=producer_splits,
++            restickify_work_slice_dims=restickify_splits,
++            consumer_work_slice_dims=consumer_splits,
++        ),
++        "realized": False,
++        "unsupported_reason": (
++            "layout_allgather_restickify is metadata-only; "
++            "backend lowering is not implemented"
++        ),
++    }
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+new file mode 100644
+index 0000000..9927c86
+--- /dev/null
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -0,0 +1,728 @@
++# Copyright 2026 The Torch-Spyre Authors.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++"""LX relayout planning metadata for Deeptools dl-dsc relayout insertion.
++
++The regular LX planner handles same-core scratchpad persistence.  This module
++classifies edges where a producer and consumer use different per-core views of
++the same LX-resident tensor.  It does not emit movement operations.  Instead,
++it records the producer tensor distribution so SDSC codegen can populate
++``allocateCoordinates_.coreIdToWkSlice_`` on the consumer input; Deeptools then
++derives and lowers the physical movement.
++"""
++
++from __future__ import annotations
++
++import dataclasses
++import math
++from typing import Any
++
++import sympy
++from torch._inductor.dependencies import MemoryDep
++from torch._inductor.graph import GraphLowering
++from torch._inductor.ir import ComputedBuffer, Operation
++
++from torch_spyre._inductor import config
++from torch_spyre._inductor.logging_utils import get_inductor_logger
++from torch_spyre._inductor.pass_utils import (
++    PerCoreView,
++    _is_matmul_op,
++    _per_core_view_on_buf,
++)
++from torch_spyre._inductor.layout_allgather_restickify import (
++    COMM_CLASS_ALL_GATHER,
++    LAYOUT_ALLGATHER_RESTICKIFY,
++    MATMUL_OPERAND_BROADCAST,
++    RESTICKIFY_LX_OP,
++    make_layout_allgather_restickify_contract,
++    make_matmul_operand_allgather_contract,
++)
++
++logger = get_inductor_logger("lx_relayout")
++
++LX_RELAYOUT_ATTR = "_spyre_lx_relayout_inputs"
++LX_RELAYOUT_SOURCE_ATTR = "_spyre_lx_relayout_source"
++LX_RELAYOUT_RESERVE_PREFIX = "__spyre_lx_relayout_reserve__"
++
++
++@dataclasses.dataclass(frozen=True)
++class LXRelayoutPlan:
++    """A logical producer-to-consumer LX relayout edge."""
++
++    source_name: str
++    producer_name: str
++    consumer_name: str
++    kind: str
++    producer_core_count: int
++    consumer_core_count: int
++    producer_core_id_to_device_slice: dict[str, dict[str, int]]
++    producer_work_slice_dims: dict[str, int]
++    consumer_work_slice_dims: dict[str, int]
++    consumer_core_id_to_device_slice: dict[str, dict[str, int]] | None = None
++    read_index: int | None = None
++    realized: bool = True
++    communication_class: str = "scatter"
++    communication_pattern: str = "scatter"
++    max_fanout: int = 0
++    max_fanin: int = 0
++    transfer_count: int = 0
++    requires_staged_realization: bool = False
++    layout_contract: dict[str, Any] | None = None
++    unsupported_reason: str = ""
++
++
++@dataclasses.dataclass(frozen=True)
++class LXRelayoutTopology:
++    """Coordinate-overlap communication class for a producer/consumer edge."""
++
++    communication_class: str
++    communication_pattern: str
++    max_fanout: int
++    max_fanin: int
++    transfer_count: int
++
++
++def _int_keyed_map(
++    value: dict[str, dict[str, int]] | dict[int, dict[int, int]],
++) -> dict[int, dict[int, int]]:
++    return {
++        int(core): {int(dim): int(slot) for dim, slot in per_core.items()}
++        for core, per_core in value.items()
++    }
++
++
++def _int_keyed_dims(value: dict[str, int] | dict[int, int]) -> dict[int, int]:
++    return {int(dim): int(split) for dim, split in value.items()}
++
++
++def _intervals_overlap(
++    a_slot: int, a_split: int, b_slot: int, b_split: int
++) -> bool:
++    # Compare [slot/split, (slot+1)/split) without floating point.
++    return a_slot * b_split < (b_slot + 1) * a_split and b_slot * a_split < (
++        a_slot + 1
++    ) * b_split
++
++
++def _core_slices_overlap(
++    producer_slice: dict[int, int],
++    producer_splits: dict[int, int],
++    consumer_slice: dict[int, int],
++    consumer_splits: dict[int, int],
++) -> bool:
++    for dim in set(producer_splits) | set(consumer_splits):
++        producer_split = producer_splits.get(dim, 1)
++        consumer_split = consumer_splits.get(dim, 1)
++        producer_slot = producer_slice.get(dim, 0)
++        consumer_slot = consumer_slice.get(dim, 0)
++        if not _intervals_overlap(
++            producer_slot, producer_split, consumer_slot, consumer_split
++        ):
++            return False
++    return True
++
++
++def _classify_coordinate_topology(
++    producer_core_id_to_device_slice: dict[str, dict[str, int]],
++    producer_work_slice_dims: dict[str, int],
++    consumer_core_id_to_device_slice: dict[str, dict[str, int]],
++    consumer_work_slice_dims: dict[str, int],
++) -> LXRelayoutTopology:
++    """Classify movement cardinality from producer/consumer coordinate maps.
++
++    The backend owns physical realization. This helper only names the logical
++    overlap class so artifacts distinguish one-to-one scatter from multicast,
++    gather, and all-gather shaped coordinate mismatches.
++    """
++
++    producer_map = _int_keyed_map(producer_core_id_to_device_slice)
++    consumer_map = _int_keyed_map(consumer_core_id_to_device_slice)
++    producer_splits = _int_keyed_dims(producer_work_slice_dims)
++    consumer_splits = _int_keyed_dims(consumer_work_slice_dims)
++
++    fanout = {core: 0 for core in producer_map}
++    fanin = {core: 0 for core in consumer_map}
++    transfer_count = 0
++    for producer_core, producer_slice in producer_map.items():
++        for consumer_core, consumer_slice in consumer_map.items():
++            if _core_slices_overlap(
++                producer_slice, producer_splits, consumer_slice, consumer_splits
++            ):
++                fanout[producer_core] += 1
++                fanin[consumer_core] += 1
++                transfer_count += 1
++
++    max_fanout = max(fanout.values(), default=0)
++    max_fanin = max(fanin.values(), default=0)
++    if transfer_count == 0:
++        return LXRelayoutTopology("unsupported", "no_coordinate_overlap", 0, 0, 0)
++    if max_fanout <= 1 and max_fanin <= 1:
++        return LXRelayoutTopology(
++            "scatter", "one_to_one", max_fanout, max_fanin, transfer_count
++        )
++    if max_fanout > 1 and max_fanin <= 1:
++        communication_class = (
++            "broadcast" if max_fanout == len(consumer_map) else "multicast"
++        )
++        return LXRelayoutTopology(
++            communication_class,
++            "one_to_many",
++            max_fanout,
++            max_fanin,
++            transfer_count,
++        )
++    if max_fanout <= 1 and max_fanin > 1:
++        return LXRelayoutTopology(
++            "gather", "many_to_one", max_fanout, max_fanin, transfer_count
++        )
++    return LXRelayoutTopology(
++        COMM_CLASS_ALL_GATHER, "many_to_many", max_fanout, max_fanin, transfer_count
++    )
++
++
++def _prefer_matmul_operand_contract(
++    read_index: int | None, topology: LXRelayoutTopology
++) -> bool:
++    supported_matmul_operand_classes = (
++        COMM_CLASS_ALL_GATHER,
++        "gather",
++        "broadcast",
++        "multicast",
++    )
++    return (
++        config.lx_planner_relayout_collectives
++        and config.lx_planner_relayout_matmul_operand_contract
++        and read_index in (0, 1)
++        and topology.communication_class in supported_matmul_operand_classes
++    )
++
++
++def _op_nbytes(graph: GraphLowering, op: Operation) -> int | None:
++    get_size = getattr(op, "get_size", None)
++    get_dtype = getattr(op, "get_dtype", None)
++    if get_size is None or get_dtype is None:
++        return None
++
++    try:
++        sizes = list(get_size())
++        dtype = get_dtype()
++    except Exception:
++        return None
++
++    numel = 1
++    for dim in sizes:
++        try:
++            dim_size = int(dim)
++        except (TypeError, ValueError):
++            try:
++                dim_size = int(graph.sizevars.size_hint(dim))
++            except Exception:
++                return None
++        numel *= dim_size
++
++    itemsize = getattr(dtype, "itemsize", None)
++    if itemsize is None:
++        return None
++    return int(numel * itemsize)
++
++
++def _matmul_operand_contract_exceeds_budget(
++    graph: GraphLowering, producer: Operation
++) -> tuple[bool, int | None, int]:
++    max_bytes = int(config.lx_planner_relayout_max_matmul_operand_bytes)
++    if max_bytes <= 0:
++        return False, None, max_bytes
++    nbytes = _op_nbytes(graph, producer)
++    return nbytes is not None and nbytes > max_bytes, nbytes, max_bytes
++
++
++def _op_num_cores(op: Operation) -> int:
++    splits: tuple[dict, dict] = getattr(op, "op_it_space_splits", ({}, {}))
++    factors = [int(factor) for per_dim in splits for factor in per_dim.values()]
++    return math.prod(factors) if factors else 1
++
++
++def _op_name(op: Operation) -> str:
++    target = getattr(getattr(op, "origin_node", None), "target", None)
++    return (
++        getattr(target, "_opname", None)
++        or getattr(target, "__name__", None)
++        or getattr(target, "name", None)
++        or str(target)
++    )
++
++
++def _single_write_dep(op: ComputedBuffer, buf_name: str) -> MemoryDep | None:
++    matches = [
++        dep
++        for dep in op.get_read_writes().writes
++        if isinstance(dep, MemoryDep) and dep.name == buf_name
++    ]
++    return matches[0] if len(matches) == 1 else None
++
++
++def _core_id_to_device_slice(
++    view: PerCoreView,
++    core_count: int,
++) -> dict[str, dict[str, int]] | None:
++    """Return producer ownership as ``core -> device-dim -> slice-index``."""
++
++    core_id = sympy.Symbol("core_id")
++    expr_by_dim = {int(dim): expr for dim, expr in view.core_to_slot}
++    split_dims = {int(dim): int(split) for dim, split in view.work_slice_dims}
++    result: dict[str, dict[str, int]] = {}
++
++    for core in range(core_count):
++        per_core: dict[str, int] = {}
++        for dim, split in split_dims.items():
++            expr = sympy.sympify(expr_by_dim.get(dim, 0))
++            slot = sympy.simplify(expr.subs(core_id, core))
++            if getattr(slot, "free_symbols", None):
++                return None
++            try:
++                slot_int = int(slot)
++            except TypeError:
++                return None
++            if slot_int < 0 or slot_int >= split:
++                return None
++            per_core[str(dim)] = slot_int
++        result[str(core)] = per_core
++
++    return result
++
++
++def _work_slice_dims(view: PerCoreView) -> dict[str, int]:
++    return {str(int(dim)): int(split) for dim, split in view.work_slice_dims}
++
++
++def _sorted_dim_keys(dims: set[str]) -> list[str]:
++    return sorted(
++        dims, key=lambda dim: (0, int(dim)) if dim.isdigit() else (1, dim)
++    )
++
++
++def _dense_work_slice_dims(
++    work_slice_dims: dict[str, int], dims: set[str]
++) -> dict[str, int]:
++    return {dim: int(work_slice_dims.get(dim, 1)) for dim in _sorted_dim_keys(dims)}
++
++
++def _dense_core_id_to_device_slice(
++    core_id_to_device_slice: dict[str, dict[str, int]], dims: set[str]
++) -> dict[str, dict[str, int]]:
++    return {
++        str(core): {dim: int(per_core.get(dim, 0)) for dim in _sorted_dim_keys(dims)}
++        for core, per_core in core_id_to_device_slice.items()
++    }
++
++
++def _op_work_slice_dims(op: Operation) -> dict[str, int]:
++    splits: tuple[dict, dict] = getattr(op, "op_it_space_splits", ({}, {}))
++    result: dict[str, int] = {}
++    for per_dim in splits:
++        for dim, split in per_dim.items():
++            try:
++                key = str(int(dim))
++            except (TypeError, ValueError):
++                key = str(dim)
++            result[key] = int(split)
++    return result
++
++
++def _memory_read_index(op: ComputedBuffer, dep: MemoryDep) -> int | None:
++    """Return the zero-based MemoryDep read position for ``dep``."""
++
++    for idx, read_dep in enumerate(
++        read_dep
++        for read_dep in op.get_read_writes().reads
++        if isinstance(read_dep, MemoryDep)
++    ):
++        if read_dep is dep:
++            return idx
++        if read_dep.name == dep.name:
++            return idx
++    return None
++
++
++def _restickify_reads_computed_input(graph: GraphLowering, op: Operation) -> bool:
++    if _op_name(op) != "restickify":
++        return False
++    return any(
++        isinstance(graph.name_to_buffer.get(dep.name), ComputedBuffer)
++        for dep in op.get_read_writes().reads
++        if isinstance(dep, MemoryDep)
++    )
++
++
++def _matmul_operand_source_good_for_lx_relayout(
++    graph: GraphLowering, op: Operation
++) -> bool:
++    """Return whether a matmul operand producer belongs to this relayout lane.
++
++    Graph-input/weight restickifies are handled by weight prelayout/preload work.
++    This lane only stages computed activation operands and restickifies whose
++    input is another computed buffer.
++    """
++
++    return _op_name(op) != "restickify" or _restickify_reads_computed_input(
++        graph, op
++    )
++
++
++def _producer_ops(graph: GraphLowering) -> dict[str, ComputedBuffer]:
++    return {
++        op.get_name(): op for op in graph.operations if isinstance(op, ComputedBuffer)
++    }
++
++
++def _plan_payload(plan: LXRelayoutPlan) -> dict[str, Any]:
++    payload = dataclasses.asdict(plan)
++    contract = payload.pop("layout_contract", None)
++    if isinstance(contract, dict):
++        payload.update(contract)
++    return {key: value for key, value in payload.items() if value not in (None, "")}
++
++
++def _record_plan(consumer: Operation, plan: LXRelayoutPlan) -> None:
++    plans = getattr(consumer, LX_RELAYOUT_ATTR, None)
++    if not isinstance(plans, dict):
++        plans = {}
++        setattr(consumer, LX_RELAYOUT_ATTR, plans)
++    plans[plan.source_name] = _plan_payload(plan)
++
++
++def clear_lx_relayout_metadata(
++    graph: GraphLowering, *, preserve_unrealized: bool = False
++) -> None:
++    kept_sources: set[str] = set()
++    for op in graph.operations:
++        if hasattr(op, LX_RELAYOUT_SOURCE_ATTR):
++            delattr(op, LX_RELAYOUT_SOURCE_ATTR)
++
++        plans = getattr(op, LX_RELAYOUT_ATTR, None)
++        if not isinstance(plans, dict):
++            continue
++        if not preserve_unrealized:
++            delattr(op, LX_RELAYOUT_ATTR)
++            continue
++
++        kept = {
++            name: plan
++            for name, plan in plans.items()
++            if isinstance(plan, dict)
++            and (
++                plan.get("realized") is False
++                or plan.get("requires_staged_realization") is True
++            )
++        }
++        if kept:
++            setattr(op, LX_RELAYOUT_ATTR, kept)
++            kept_sources.update(kept)
++        else:
++            delattr(op, LX_RELAYOUT_ATTR)
++
++    if preserve_unrealized and kept_sources:
++        for op in graph.operations:
++            if op.get_name() in kept_sources:
++                setattr(op, LX_RELAYOUT_SOURCE_ATTR, True)
++
++
++def make_lx_relayout_reservation_name(consumer_name: str, source_name: str) -> str:
++    return f"{LX_RELAYOUT_RESERVE_PREFIX}:{consumer_name}:{source_name}"
++
++
++def is_lx_relayout_reservation(name: str) -> bool:
++    return name.startswith(f"{LX_RELAYOUT_RESERVE_PREFIX}:")
++
++
++def relayout_source_names(graph: GraphLowering) -> set[str]:
++    if not config.lx_planner_relayout:
++        return set()
++    return {
++        op.name
++        for op in graph.operations
++        if getattr(op, LX_RELAYOUT_SOURCE_ATTR, False)
++    }
++
++
++def get_lx_relayout_inputs(op: Operation) -> dict[str, Any]:
++    plans = getattr(op, LX_RELAYOUT_ATTR, None)
++    return plans if isinstance(plans, dict) else {}
++
++
++def plan_lx_relayouts(
++    graph: GraphLowering, cache: dict | None = None
++) -> list[LXRelayoutPlan]:
++    """Classify scatter-capable producer/consumer LX relayout edges.
++
++    V1 only records movement for single-writer intermediate tensors whose
++    producer output is final (not K-split partials) and whose producer and
++    consumer PerCoreViews differ.  Same-view edges remain owned by the existing
++    LX planner.
++    """
++
++    if not config.lx_planner_relayout:
++        return []
++
++    clear_lx_relayout_metadata(graph)
++    producers = _producer_ops(graph)
++    planned: list[LXRelayoutPlan] = []
++
++    for consumer in graph.operations:
++        if not isinstance(consumer, ComputedBuffer):
++            continue
++        is_matmul_consumer = _is_matmul_op(consumer)
++        for dep in consumer.get_read_writes().reads:
++            if not isinstance(dep, MemoryDep):
++                continue
++            producer = producers.get(dep.name)
++            if producer is None or producer is consumer:
++                continue
++
++            write_dep = _single_write_dep(producer, dep.name)
++            if write_dep is None:
++                continue
++
++            producer_view, producer_has_partial = _per_core_view_on_buf(
++                producer, write_dep, dep.name, cache
++            )
++            if producer_has_partial:
++                logger.debug(
++                    "lx relayout skip: %s -> %s has partial reduction output",
++                    producer.name,
++                    consumer.name,
++                )
++                continue
++
++            consumer_view, _consumer_has_partial = _per_core_view_on_buf(
++                consumer, dep, dep.name, cache
++            )
++            if producer_view == consumer_view:
++                continue
++
++            producer_core_count = _op_num_cores(producer)
++            consumer_core_count = _op_num_cores(consumer)
++            producer_core_slices = _core_id_to_device_slice(
++                producer_view, producer_core_count
++            )
++            if producer_core_slices is None:
++                logger.debug(
++                    "lx relayout skip: %s -> %s has non-static producer slices",
++                    producer.name,
++                    consumer.name,
++                )
++                continue
++
++            producer_work_slice_dims = _work_slice_dims(producer_view)
++            consumer_work_slice_dims = _work_slice_dims(consumer_view)
++            consumer_core_slices = _core_id_to_device_slice(
++                consumer_view, consumer_core_count
++            )
++            if consumer_core_slices is None:
++                logger.debug(
++                    "lx relayout skip: %s -> %s has non-static consumer slices",
++                    producer.name,
++                    consumer.name,
++                )
++                continue
++
++            relayout_dims = set(producer_work_slice_dims) | set(
++                consumer_work_slice_dims
++            )
++            producer_work_slice_dims = _dense_work_slice_dims(
++                producer_work_slice_dims, relayout_dims
++            )
++            consumer_work_slice_dims = _dense_work_slice_dims(
++                consumer_work_slice_dims, relayout_dims
++            )
++            producer_core_slices = _dense_core_id_to_device_slice(
++                producer_core_slices, relayout_dims
++            )
++            consumer_core_slices = _dense_core_id_to_device_slice(
++                consumer_core_slices, relayout_dims
++            )
++
++            topology = _classify_coordinate_topology(
++                producer_core_slices,
++                producer_work_slice_dims,
++                consumer_core_slices,
++                consumer_work_slice_dims,
++            )
++            if topology.communication_class == "unsupported":
++                logger.debug(
++                    "lx relayout skip: %s -> %s has unsupported coordinate topology: %s",
++                    producer.name,
++                    consumer.name,
++                    topology.communication_pattern,
++                )
++                continue
++            read_index = _memory_read_index(consumer, dep)
++            if is_matmul_consumer and read_index is not None:
++                if not _matmul_operand_source_good_for_lx_relayout(graph, producer):
++                    logger.debug(
++                        "lx relayout skip: %s -> %s is a weight/input restickify",
++                        producer.name,
++                        consumer.name,
++                    )
++                    continue
++
++                if (
++                    config.lx_planner_relayout_layout_allgather_restickify
++                    and not _prefer_matmul_operand_contract(read_index, topology)
++                    and _restickify_reads_computed_input(graph, producer)
++                ):
++                    layout_contract = make_layout_allgather_restickify_contract(
++                        producer_op="mul",
++                        restickify_op=RESTICKIFY_LX_OP,
++                        consumer_op="batchmatmul",
++                        producer_work_slice_dims=producer_work_slice_dims,
++                        restickify_work_slice_dims=producer_work_slice_dims,
++                        consumer_work_slice_dims=consumer_work_slice_dims,
++                    )
++                    plan = LXRelayoutPlan(
++                        source_name=dep.name,
++                        producer_name=producer.get_name(),
++                        consumer_name=consumer.get_name(),
++                        kind=LAYOUT_ALLGATHER_RESTICKIFY,
++                        producer_core_count=producer_core_count,
++                        consumer_core_count=consumer_core_count,
++                        producer_core_id_to_device_slice=producer_core_slices,
++                        producer_work_slice_dims=producer_work_slice_dims,
++                        consumer_work_slice_dims=consumer_work_slice_dims,
++                        consumer_core_id_to_device_slice=consumer_core_slices,
++                        read_index=read_index,
++                        realized=False,
++                        communication_class=COMM_CLASS_ALL_GATHER,
++                        communication_pattern=LAYOUT_ALLGATHER_RESTICKIFY,
++                        max_fanout=topology.max_fanout,
++                        max_fanin=topology.max_fanin,
++                        transfer_count=topology.transfer_count,
++                        requires_staged_realization=True,
++                        layout_contract=layout_contract,
++                        unsupported_reason="staged layout all-gather restickify metadata only",
++                    )
++                    _record_plan(consumer, plan)
++                    setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
++                    planned.append(plan)
++                    continue
++
++                if _prefer_matmul_operand_contract(read_index, topology):
++                    exceeds_budget, operand_nbytes, max_operand_bytes = (
++                        _matmul_operand_contract_exceeds_budget(graph, producer)
++                    )
++                    if exceeds_budget:
++                        logger.debug(
++                            "lx relayout skip: %s -> %s matmul operand is %s bytes, "
++                            "exceeding bounded relayout budget %s bytes; preserving HBM "
++                            "fallback until WSR/tile-scoping handles this edge",
++                            producer.name,
++                            consumer.name,
++                            operand_nbytes,
++                            max_operand_bytes,
++                        )
++                        continue
++
++                    layout_contract = make_matmul_operand_allgather_contract(
++                        producer_op=_op_name(producer),
++                        consumer_op="batchmatmul",
++                        read_index=read_index,
++                        producer_work_slice_dims=producer_work_slice_dims,
++                        consumer_tensor_work_slice_dims=consumer_work_slice_dims,
++                        consumer_compute_work_slice_dims=_op_work_slice_dims(consumer),
++                        communication_class=topology.communication_class,
++                    )
++                    plan = LXRelayoutPlan(
++                        source_name=dep.name,
++                        producer_name=producer.get_name(),
++                        consumer_name=consumer.get_name(),
++                        kind=MATMUL_OPERAND_BROADCAST,
++                        producer_core_count=producer_core_count,
++                        consumer_core_count=consumer_core_count,
++                        producer_core_id_to_device_slice=producer_core_slices,
++                        producer_work_slice_dims=producer_work_slice_dims,
++                        consumer_work_slice_dims=consumer_work_slice_dims,
++                        consumer_core_id_to_device_slice=consumer_core_slices,
++                        read_index=read_index,
++                        realized=False,
++                        communication_class=topology.communication_class,
++                        communication_pattern=layout_contract[
++                            "communication_pattern"
++                        ],
++                        max_fanout=topology.max_fanout,
++                        max_fanin=topology.max_fanin,
++                        transfer_count=topology.transfer_count,
++                        requires_staged_realization=True,
++                        layout_contract=layout_contract,
++                        unsupported_reason=(
++                            "matmul operand all-gather/broadcast metadata only; "
++                            "backend must stage materialization through the "
++                            "matmul transfer loop"
++                        ),
++                    )
++                    _record_plan(consumer, plan)
++                    setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
++                    planned.append(plan)
++                    continue
++
++                if not config.lx_planner_relayout_collectives:
++                    continue
++
++                plan = LXRelayoutPlan(
++                    source_name=dep.name,
++                    producer_name=producer.get_name(),
++                    consumer_name=consumer.get_name(),
++                    kind=topology.communication_class,
++                    producer_core_count=producer_core_count,
++                    consumer_core_count=consumer_core_count,
++                    producer_core_id_to_device_slice=producer_core_slices,
++                    producer_work_slice_dims=producer_work_slice_dims,
++                    consumer_work_slice_dims=consumer_work_slice_dims,
++                    consumer_core_id_to_device_slice=consumer_core_slices,
++                    read_index=read_index,
++                    communication_class=topology.communication_class,
++                    communication_pattern=topology.communication_pattern,
++                    max_fanout=topology.max_fanout,
++                    max_fanin=topology.max_fanin,
++                    transfer_count=topology.transfer_count,
++                )
++                _record_plan(consumer, plan)
++                setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
++                planned.append(plan)
++                continue
++
++            plan = LXRelayoutPlan(
++                source_name=dep.name,
++                producer_name=producer.get_name(),
++                consumer_name=consumer.get_name(),
++                kind=topology.communication_class,
++                producer_core_count=producer_core_count,
++                consumer_core_count=consumer_core_count,
++                producer_core_id_to_device_slice=producer_core_slices,
++                producer_work_slice_dims=producer_work_slice_dims,
++                consumer_work_slice_dims=consumer_work_slice_dims,
++                consumer_core_id_to_device_slice=consumer_core_slices,
++                read_index=read_index,
++                communication_class=topology.communication_class,
++                communication_pattern=topology.communication_pattern,
++                max_fanout=topology.max_fanout,
++                max_fanin=topology.max_fanin,
++                transfer_count=topology.transfer_count,
++            )
++            _record_plan(consumer, plan)
++            setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
++            planned.append(plan)
++
++    if planned:
++        logger.debug("planned %d LX relayout edge(s)", len(planned))
++    return planned
+diff --git a/torch_spyre/_inductor/op_spec.py b/torch_spyre/_inductor/op_spec.py
+index 784f880..314009d 100644
+--- a/torch_spyre/_inductor/op_spec.py
++++ b/torch_spyre/_inductor/op_spec.py
+@@ -50,6 +50,15 @@ class TensorArg:
+         device_coordinates: The sympy Exprs that describe how elements in the Tensor are accessed.
+                 Free variables in device_coordinates refer to entries in the OpSpec's iteration_space.
+         allocation: If present, the offset in scratchpad memory assigned to the Tensor.
++        source_name: Optional producer buffer name for view inputs. Split/getitem
++                aliases are often folded away before OpSpec emission, but the
++                load still knows the base buffer.
++        source_offset_elems: Optional constant element offset from ``source_name``
++                for partial views such as fused SwiGLU gate/up halves.
++        lx_residency_core_id_to_wk_slice: Optional producer tensor distribution
++                for an LX input whose physical ownership differs from this op's
++                compute distribution. Keys are device-dim indices at this stage;
++                SDSC codegen maps them to primary-dimension labels.
+     """
+ 
+     is_input: bool
+@@ -60,6 +69,9 @@ class TensorArg:
+     allocation: Any
+     per_tile_fixed: bool = False
+     name: str | None = None
++    source_name: str | None = None
++    source_offset_elems: Expr | None = None
++    lx_residency_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
+ 
+ 
+ @dataclasses.dataclass
+diff --git a/torch_spyre/_inductor/propagate_layouts.py b/torch_spyre/_inductor/propagate_layouts.py
+index 47531b7..d2d37ec 100644
+--- a/torch_spyre/_inductor/propagate_layouts.py
++++ b/torch_spyre/_inductor/propagate_layouts.py
+@@ -681,8 +681,16 @@ def _multi_arg_pointwise_layouts(
+         offset_free_stick_exprs = {
+             e for e in stick_exprs if is_stick_expr_offset_free(e, stick_size)
+         }
++        if any(expr == 0 for expr in offset_free_stick_exprs):
++            # Multi-arg joins may have both stickified and unsticked input
++            # candidates. Keep the zero-stick output candidate available so the
++            # cost model can avoid forcing a gather from zero-stick inputs into
++            # a stickified output layout.
++            _try_stick_dim(-1)
+         # Sort stick exprs for determinism
+         for stick_expr in sorted(offset_free_stick_exprs, key=iter_var_id):
++            if stick_expr == 0:
++                continue
+             _try_stick_dim(_pick_stick_dim(stick_expr, out_coords))
+ 
+     # Try alternative layouts if no valid layouts found
+diff --git a/torch_spyre/_inductor/scratchpad/allocator.py b/torch_spyre/_inductor/scratchpad/allocator.py
+index d39c69c..ecf4e92 100644
+--- a/torch_spyre/_inductor/scratchpad/allocator.py
++++ b/torch_spyre/_inductor/scratchpad/allocator.py
+@@ -65,6 +65,14 @@ from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
+ 
+ from torch_spyre._inductor import config
+ from torch_spyre._inductor.logging_utils import get_inductor_logger
++from torch_spyre._inductor.lx_relayout import (
++    clear_lx_relayout_metadata,
++    get_lx_relayout_inputs,
++    is_lx_relayout_reservation,
++    make_lx_relayout_reservation_name,
++    plan_lx_relayouts,
++    relayout_source_names,
++)
+ from torch_spyre._inductor.pass_utils import _is_matmul_op
+ 
+ logger = get_inductor_logger("scratchpad.allocator")
+@@ -140,15 +148,57 @@ class ScratchpadAllocator(ABC):
+         )
+         return org_op_name
+ 
+-    def _op_output_good_for_lx_reuse(self, op: Any) -> bool:
++    def _computed_source_unary_output(self, graph: GraphLowering, op: Any) -> bool:
++        if not isinstance(op, ComputedBuffer):
++            return False
++        return any(
++            isinstance(graph.name_to_buffer.get(dep.name), ComputedBuffer)
++            for dep in op.get_read_writes().reads
++        )
++
++    def _restickify_output_good_for_lx_relayout(
++        self, graph: GraphLowering, op: Any
++    ) -> bool:
++        """Allow only computed-source restickify outputs into this research lane.
++
++        Graph-input/weight restickifies are a prelayout/preload problem. Pulling
++        them into the relayout experiment can create large backend reservations
++        and clear otherwise useful computed-activation relayout metadata.
++        """
++        if (
++            not config.lx_planner_relayout_restickify_outputs
++            or self._get_op_name(op) != "restickify"
++        ):
++            return False
++        return self._computed_source_unary_output(graph, op)
++
++    def _clone_output_good_for_lx_relayout(
++        self, graph: GraphLowering, op: Any
++    ) -> bool:
++        """Allow computed activation clones to serve as LX relayout sources.
++
++        Boundary/input clones are still controlled by ``LX_BOUNDARY_CLONES``.
++        This path only covers clone-like layout steps whose input is another
++        computed buffer, such as the attention value-side layout handoff before
++        the second batchmatmul.
++        """
++        return (
++            config.lx_planner_relayout_collectives
++            and self._get_op_name(op) == "clone"
++            and self._computed_source_unary_output(graph, op)
++        )
++
++    def _op_output_good_for_lx_reuse(self, graph: GraphLowering, op: Any) -> bool:
+         return (
+             isinstance(op, ComputedBuffer)
+             and not isinstance(op.layout, MutationLayoutSHOULDREMOVE)
+             and (
+                 config.allow_all_ops_in_lx_planning
+                 or (self._get_op_name(op) in OP_OUTPUT_GOOD_FOR_LX_REUSE)
++                or self._restickify_output_good_for_lx_relayout(graph, op)
++                or self._clone_output_good_for_lx_relayout(graph, op)
+                 # Clones are only pinned when the boundary-clone path is on; they
+-                # are never in the whitelist, so without this they'd be ineligible
++                # are never in the whitelist, so without this they would be ineligible
+                 # and the inserted clones would not land in LX.
+                 or (config.lx_boundary_clones and self._get_op_name(op) == "clone")
+             )
+@@ -173,16 +223,24 @@ class ScratchpadAllocator(ABC):
+     ) -> list[Operation]:
+         core_div_mismatch = get_ncores_for_buffers(graph, cache, rw_cache)
+         drop_list = set()
++        relayout_sources = relayout_source_names(graph)
+ 
+-        # filter out by permitted operations
++        # filter out by permitted operations.  Relayout-planned producers are
++        # already vetted by the LX relayout planner, and some of them appear as
++        # layout/view ops at IR level even though codegen fuses them into an
++        # allowed compute op. Keep them eligible so their dl-dsc residency can
++        # be described to Deeptools.
+         for op in graph.operations:
+-            if not self._op_output_good_for_lx_reuse(op):
++            if (
++                op.name not in relayout_sources
++                and not self._op_output_good_for_lx_reuse(graph, op)
++            ):
+                 drop_list.add(op.name)
+                 self.reject_reasons[op.name] = "op not allowed"
+ 
+         # filter out core division mismatches
+         for key, mismatch in core_div_mismatch.items():
+-            if mismatch == -1:
++            if mismatch == -1 and key not in relayout_sources:
+                 drop_list.add(key)
+                 self.reject_reasons[key] = "core div mismatch"
+ 
+@@ -367,6 +425,84 @@ class ScratchpadAllocator(ABC):
+         )
+         return buffers
+ 
++    def _build_relayout_reservations(
++        self,
++        graph: GraphLowering,
++        buffers: list[LifetimeBoundBuffer],
++        lifetimes: dict[str, list[int]],
++    ) -> list[LifetimeBoundBuffer]:
++        """Reserve LX space needed by backend dl-dsc relayout insertion.
++
++        Deeptools materializes a post-relayout LX view before the consumer op.
++        Torch does not emit that tensor, but the scratchpad planner still needs
++        to account for it; otherwise we can generate a valid dl-dsc contract
++        that DXP later rejects because there is no room for the inserted copy.
++        """
++        if not config.lx_planner_relayout:
++            return []
++
++        op_index = {op.name: idx for idx, op in enumerate(graph.operations)}
++        reservations: list[LifetimeBoundBuffer] = []
++
++        for consumer in graph.operations:
++            consumer_idx = op_index.get(consumer.name)
++            if consumer_idx is None:
++                continue
++            for source_name, plan in get_lx_relayout_inputs(consumer).items():
++                if (
++                    plan.get("realized") is False
++                    or plan.get("requires_staged_realization") is True
++                ):
++                    continue
++                source = graph.name_to_buffer.get(source_name)
++                if source is None:
++                    continue
++                consumer_core_count = int(plan.get("consumer_core_count", 0))
++                if consumer_core_count <= 0:
++                    continue
++
++                dev_layout = source.layout.device_layout
++                source_bytes = math.prod(dev_layout.device_size[:-1]) * 128
++                consumer_slices = math.prod(
++                    int(split)
++                    for split in (plan.get("consumer_work_slice_dims") or {}).values()
++                )
++                if consumer_slices <= 0:
++                    consumer_slices = consumer_core_count
++                # Deeptools materializes one post-relayout resident piece per
++                # participating consumer core. Reserve the consumer piece size,
++                # rounded to whole sticks, so Torch does not clear a relayout
++                # plan that the backend can fit.
++                reserved_bytes = math.ceil((source_bytes / consumer_slices) / 128) * 128
++                if reserved_bytes <= 0:
++                    continue
++
++                reservations.append(
++                    LifetimeBoundBuffer(
++                        make_lx_relayout_reservation_name(consumer.name, source_name),
++                        reserved_bytes,
++                        [consumer_idx],
++                        first_use_is_read=False,
++                    )
++                )
++
++        return reservations
++
++    def _add_lx_relayout_reservations(
++        self,
++        graph: GraphLowering,
++        buffers: list[LifetimeBoundBuffer],
++        lifetimes: dict[str, list[int]],
++    ) -> list[LifetimeBoundBuffer]:
++        return buffers + self._build_relayout_reservations(graph, buffers, lifetimes)
++
++    def _relayout_reservation_failed(
++        self, allocation: list[LifetimeBoundBuffer]
++    ) -> bool:
++        return any(
++            is_lx_relayout_reservation(b.name) and b.address is None for b in allocation
++        )
++
+     def _log_lx_pinning(self, graph: GraphLowering) -> None:
+         """Log the final LX pinning decision for every op in the graph."""
+         # Skip the per-op getattr walk unless DEBUG is on.
+@@ -404,6 +540,8 @@ class ScratchpadAllocator(ABC):
+         graph_editor = GraphEditor(graph)
+ 
+         for b in buffers:
++            if is_lx_relayout_reservation(b.name):
++                continue
+             if b.address is None:
+                 continue
+ 
+@@ -478,9 +616,24 @@ class DefaultAllocator(ScratchpadAllocator):
+         self.reject_reasons = {}
+         for p in self.pre_optimization_passes:
+             p.apply_pass(graph)
+-        buffers = self._generate_buffers(graph)
++        plan_lx_relayouts(graph)
++        lifetimes = calculate_liveness(graph)
++        buffers = self._generate_buffers(graph, lifetimes=lifetimes)
++        buffers = self._add_lx_relayout_reservations(graph, buffers, lifetimes)
+         allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
++        if self._relayout_reservation_failed(allocation):
++            logger.info(
++                "clearing LX relayout metadata: backend relayout reservation "
++                "does not fit in scratchpad"
++            )
++            clear_lx_relayout_metadata(graph, preserve_unrealized=True)
++            self.reject_reasons = {}
++            lifetimes = calculate_liveness(graph)
++            buffers = self._generate_buffers(graph, lifetimes=lifetimes)
++            allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
+         for b in allocation:
++            if is_lx_relayout_reservation(b.name):
++                continue
+             if b.address is None:
+                 self.reject_reasons[b.name] = "no room on scratchpad"
+         self._push_allocation(graph, allocation)
+@@ -933,6 +1086,8 @@ class StrategyBCoOptimizingAllocator(DefaultAllocator):
+         for p in self.pre_optimization_passes:
+             p.apply_pass(graph)
+ 
++        plan_lx_relayouts(graph)
++
+         # Standard downstream flow on the now-fixed winning splits. Mirrors
+         # DefaultAllocator.plan_allocation past the pre-passes. Reuse the search's
+         # per-core-view cache + liveness only if the clone pass left the graph
+@@ -941,13 +1096,29 @@ class StrategyBCoOptimizingAllocator(DefaultAllocator):
+         # the clone (changes the (op, splits, dep) cache key), so on any op-count
+         # change both are stale and we rebuild from scratch (cache=lifetimes=None).
+         clone_inserted = len(graph.operations) != n_ops_before_clone
++        lifetimes = None if clone_inserted else search_lifetimes
++        if lifetimes is None:
++            lifetimes = calculate_liveness(graph)
+         buffers = self._generate_buffers(
+             graph,
+             cache=None if clone_inserted else search_cache,
+-            lifetimes=None if clone_inserted else search_lifetimes,
++            lifetimes=lifetimes,
+         )
++        buffers = self._add_lx_relayout_reservations(graph, buffers, lifetimes)
+         allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
++        if self._relayout_reservation_failed(allocation):
++            logger.info(
++                "clearing LX relayout metadata: backend relayout reservation "
++                "does not fit in scratchpad"
++            )
++            clear_lx_relayout_metadata(graph, preserve_unrealized=True)
++            self.reject_reasons = {}
++            lifetimes = calculate_liveness(graph)
++            buffers = self._generate_buffers(graph, lifetimes=lifetimes)
++            allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
+         for b in allocation:
++            if is_lx_relayout_reservation(b.name):
++                continue
+             if b.address is None:
+                 self.reject_reasons[b.name] = "no room on scratchpad"
+         self._push_allocation(graph, allocation)
+@@ -1087,6 +1258,7 @@ def scratchpad_planning(
+         graph: Lowered graph to plan scratchpad memory for.
+         allocator: Allocator strategy to use. Defaults to DefaultAllocator.
+     """
++    plan_lx_relayouts(graph)
+     if allocator is None:
+         allocator = DefaultAllocator()
+     allocator.plan_allocation(graph)
+diff --git a/torch_spyre/_inductor/scratchpad/graph_editor.py b/torch_spyre/_inductor/scratchpad/graph_editor.py
+index c8d6f50..d0e6f7c 100644
+--- a/torch_spyre/_inductor/scratchpad/graph_editor.py
++++ b/torch_spyre/_inductor/scratchpad/graph_editor.py
+@@ -30,6 +30,7 @@ from torch._inductor.ir import (
+     Operation,
+     Pointwise,
+     Reduction,
++    ReinterpretView,
+ )
+ from torch._inductor.lowering import clone as clone_lowering, lowerings
+ 
+@@ -72,11 +73,19 @@ class GraphEditor:
+         while not isinstance(buffer, Buffer):
+             if isinstance(buffer, TensorBox):
+                 fs.append(TensorBox)
++            elif isinstance(buffer, StorageBox):
++                fs.append(StorageBox)
++            elif isinstance(buffer, ReinterpretView):
++                layout = buffer.layout
++                fs.append(
++                    lambda data, layout=layout: ReinterpretView(
++                        data=data, layout=layout
++                    )
++                )
+             else:
+-                assert isinstance(buffer, StorageBox), (
++                raise AssertionError(
+                     f"unexpected buffer type {type(buffer)} while replacing '{old_name}' ({buffer})"
+                 )
+-                fs.append(StorageBox)
+             buffer = buffer.data
+ 
+         if buffer.name == old_name:
+diff --git a/torch_spyre/_inductor/scratchpad/utils.py b/torch_spyre/_inductor/scratchpad/utils.py
+index 425e7f3..29d4333 100644
+--- a/torch_spyre/_inductor/scratchpad/utils.py
++++ b/torch_spyre/_inductor/scratchpad/utils.py
+@@ -25,6 +25,7 @@ import sympy
+ 
+ from torch_spyre._inductor import config
+ from torch_spyre._inductor.pass_utils import _per_core_view_on_buf, concretize_expr
++from torch_spyre._inductor.lx_relayout import relayout_source_names
+ 
+ # Op outputs eligible for LX-pinning. `amax` is the lowered form of
+ # `max`; both names are listed to match whichever the IR shows.
+@@ -257,6 +258,7 @@ def get_ncores_for_buffers(
+     result: dict[str, int] = {}
+     using_multicore = config.sencores > 1
+     buf_user_deps = _get_buffer_user_deps(graph, rw_cache)
++    planned_relayout_sources = relayout_source_names(graph)
+     for buf_name, users in buf_user_deps.items():
+         # this dict includes graph input and output
+         if using_multicore and len(users) > 1:
+@@ -291,7 +293,13 @@ def get_ncores_for_buffers(
+                     mismatch = True
+                     break
+             if mismatch:
+-                num_cores = -1
++                if buf_name in planned_relayout_sources and writer_cores is not None:
++                    # This producer/consumer mismatch is intentional: the
++                    # relayout planner will describe producer tensor residency
++                    # in the consumer dl-dsc allocation coordinates.
++                    num_cores = writer_cores
++                else:
++                    num_cores = -1
+             elif writer_cores is not None:
+                 num_cores = writer_cores
+             else:
+diff --git a/torch_spyre/_inductor/spyre_kernel.py b/torch_spyre/_inductor/spyre_kernel.py
+index bf1cbc6..f18d6bf 100644
+--- a/torch_spyre/_inductor/spyre_kernel.py
++++ b/torch_spyre/_inductor/spyre_kernel.py
+@@ -36,6 +36,7 @@ from .constants import (
+     BATCH_MATMUL_OP,
+     BATCH_MATMUL_FP8_OP,
+     IDENTITY_OP,
++    RESTICKIFY_LX_OP,
+     RESTICKIFY_OP,
+     SEGMENT_OFFSETS,
+     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
+@@ -43,6 +44,12 @@ from .constants import (
+ from . import config as _spyre_config
+ from .errors import Unsupported
+ from .ir import FixedTiledLayout
++from .lx_relayout import LX_RELAYOUT_ATTR
++from .layout_allgather_restickify import (
++    LAYOUT_ALLGATHER_RESTICKIFY,
++    MATMUL_OPERAND_ALLGATHER_REPLICATE,
++    PARTIAL_VIEW_GATHER,
++)
+ from .pass_utils import (
+     concretize_expr,
+     concretize_index,
+@@ -65,6 +72,128 @@ import logging
+ 
+ logger = get_inductor_logger("spyre_kernel")
+ 
++DLDSC_CLASSIFICATION_PATTERNS = {
++    LAYOUT_ALLGATHER_RESTICKIFY,
++    MATMUL_OPERAND_ALLGATHER_REPLICATE,
++    PARTIAL_VIEW_GATHER,
++}
++
++
++
++def _partial_view_gather_classifications(
++    *, args: Sequence[TensorArg], relayout_inputs: dict[str, Any]
++) -> list[dict[str, Any]]:
++    classifications: list[dict[str, Any]] = []
++    for read_index, arg in enumerate(a for a in args if a.is_input):
++        if arg.source_name is None or arg.source_offset_elems is None:
++            continue
++        plan = relayout_inputs.get(arg.source_name)
++        has_plan = isinstance(plan, dict)
++        if has_plan and plan.get("requires_staged_realization") is True:
++            # Specialized staged contracts already carry their own backend schema.
++            continue
++        producer_core_id_to_device_slice = (
++            plan.get("producer_core_id_to_device_slice")
++            if has_plan
++            else arg.lx_residency_core_id_to_wk_slice
++        )
++        classification = dict(plan) if has_plan else {}
++        classification.update(
++            {
++                "kind": PARTIAL_VIEW_GATHER,
++                "classification": PARTIAL_VIEW_GATHER,
++                "communication_pattern": PARTIAL_VIEW_GATHER,
++                "read_index": read_index,
++                "source_name": arg.source_name,
++                "source_offset_elems": str(arg.source_offset_elems),
++                "requires_staged_realization": True,
++                "materialization_pattern": "partial_view_gather_to_lx",
++                "layout_transform": {
++                    "kind": "partial_view_lx_to_consumer_lx",
++                    "source": "producer_lx_residency",
++                    "target": "consumer_input_view",
++                    "source_coordinates": (
++                        "producer_tensor_distribution_plus_source_offset"
++                    ),
++                    "target_coordinates": "consumer_compute_distribution",
++                    "carrier_hint": "lx_partial_view_gather",
++                },
++                "staged_destination": {
++                    "component_": "lx",
++                    "scope": "before_consumer_compute",
++                },
++            }
++        )
++        if producer_core_id_to_device_slice is not None:
++            classification[
++                "producer_core_id_to_device_slice"
++            ] = producer_core_id_to_device_slice
++        if has_plan:
++            classification["base_communication_pattern"] = plan.get(
++                "communication_pattern"
++            )
++        classifications.append(classification)
++    return classifications
++
++def _current_node_op_info(current_node) -> dict[str, Any]:
++    op_info: dict[str, Any] = {}
++    node = getattr(current_node, "node", None)
++    data = getattr(node, "data", None)
++    data_op_info = getattr(data, "op_info", None)
++    if isinstance(data_op_info, dict):
++        op_info.update(data_op_info)
++    return op_info
++
++
++def _iter_current_ir_nodes(current_node):
++    seen: set[int] = set()
++    stack = [current_node]
++    while stack:
++        item = stack.pop()
++        ident = id(item)
++        if ident in seen:
++            continue
++        seen.add(ident)
++
++        node = getattr(item, "node", None)
++        if node is not None:
++            yield node
++
++        get_nodes = getattr(item, "get_nodes", None)
++        if not callable(get_nodes):
++            continue
++        try:
++            subnodes = list(get_nodes())
++        except Exception:
++            continue
++        for subnode in reversed(subnodes):
++            if subnode is not item:
++                stack.append(subnode)
++
++
++def _current_node_lx_relayout_inputs(current_node) -> dict[str, Any]:
++    merged: dict[str, Any] = {}
++    for node in _iter_current_ir_nodes(current_node):
++        plans = getattr(node, LX_RELAYOUT_ATTR, None)
++        if isinstance(plans, dict):
++            merged.update(plans)
++    return merged
++
++
++def _constant_index_offset(index: sympy.Expr, it_space: dict) -> sympy.Expr | None:
++    """Return the constant element offset in a folded view index, if provable."""
++
++    try:
++        zeroed = sympy.simplify(
++            index.subs({sym: 0 for sym in it_space if isinstance(sym, sympy.Symbol)})
++        )
++    except Exception:
++        return None
++    free_symbols = getattr(zeroed, "free_symbols", set())
++    if free_symbols:
++        return None
++    return zeroed
++
+ 
+ class RValue(ABC):
+     """
+@@ -79,6 +208,15 @@ class TensorAccess(RValue):
+     layout: FixedTiledLayout
+ 
+ 
++def _restickify_op_for_args(input_tensor: TensorAccess, output_tensor: TensorAccess) -> str:
++    if (
++        "lx" in input_tensor.layout.allocation
++        and "lx" in output_tensor.layout.allocation
++    ):
++        return RESTICKIFY_LX_OP
++    return RESTICKIFY_OP
++
++
+ def _preserve_shared_weight_unit_bmm_dim(
+     op: str,
+     it_space: dict[sympy.Symbol, tuple[sympy.Expr, int]],
+@@ -512,6 +650,22 @@ class SpyreKernel(Kernel[CSEVariable]):
+             index,
+             self.indirect_sizes,
+         )
++        relayout_plan = (
++            _current_node_lx_relayout_inputs(self.current_node).get(name)
++            if is_input
++            else None
++        )
++        has_relayout_plan = isinstance(relayout_plan, dict)
++        source_offset_elems = (
++            _constant_index_offset(index, it_space) if is_input else None
++        )
++        has_lx_partial_view_source = (
++            is_input
++            and "lx" in tensor.layout.allocation
++            and source_offset_elems is not None
++            and sympy.simplify(source_offset_elems) != 0
++        )
++        has_lx_relayout_source = has_relayout_plan or has_lx_partial_view_source
+         tensor_arg = TensorArg(
+             is_input,
+             -1,
+@@ -521,7 +675,15 @@ class SpyreKernel(Kernel[CSEVariable]):
+             tensor.layout.allocation,
+             per_tile_fixed=getattr(tensor.layout, "per_tile_fixed", False),
+             name=opspec_name,
++            source_name=name if has_lx_relayout_source else None,
++            source_offset_elems=source_offset_elems
++            if has_lx_relayout_source
++            else None,
+         )
++        if has_relayout_plan and "lx" in tensor.layout.allocation:
++            tensor_arg.lx_residency_core_id_to_wk_slice = relayout_plan.get(
++                "producer_core_id_to_device_slice"
++            )
+         if (
+             "lx" not in tensor.layout.allocation
+             and "pool" not in tensor.layout.allocation
+@@ -665,6 +827,22 @@ class SpyreKernel(Kernel[CSEVariable]):
+             if bounds is not None:
+                 symbolic_dim_bounds[str(size_expr)] = bounds
+ 
++        relayout_inputs = _current_node_lx_relayout_inputs(self.current_node)
++        classifications = [
++            dict(plan)
++            for plan in relayout_inputs.values()
++            if isinstance(plan, dict)
++            and plan.get("communication_pattern") in DLDSC_CLASSIFICATION_PATTERNS
++        ]
++        classifications.extend(
++            _partial_view_gather_classifications(
++                args=args, relayout_inputs=relayout_inputs
++            )
++        )
++        if classifications:
++            op_info = dict(op_info)
++            op_info["lx_relayout_classifications"] = classifications
++
+         return OpSpec(
+             op,
+             is_reduction,
+@@ -734,7 +912,7 @@ class SpyreKernel(Kernel[CSEVariable]):
+             _ = self.args.output(name)
+         index = sympy_subs(index, V.graph.sizevars.precomputed_replacements)
+         dst = TensorAccess(real_dst_name, index, layout)
+-        op_info: dict[str, Any] = {}
++        op_info = _current_node_op_info(self.current_node)
+         if logger.isEnabledFor(logging.DEBUG):
+             value_type = type(value).__name__
+             logger.debug(
+@@ -764,7 +942,11 @@ class SpyreKernel(Kernel[CSEVariable]):
+                     args.append(self.create_tensor_arg(True, input.name, input))
+                 else:
+                     raise Unsupported(f"unexpected argument {input} to {value.op}")
+-            args.append(self.create_tensor_arg(False, real_dst_name, dst))
++            args.append(
++                self.create_tensor_arg(
++                    False, real_dst_name, dst, opspec_name=real_dst_name
++                )
++            )
+             op_info.update(value.op_info)
+             self.op_specs.append(
+                 self.create_op_spec(
+@@ -791,12 +973,16 @@ class SpyreKernel(Kernel[CSEVariable]):
+                 ]
+                 args += [
+                     self.create_tensor_arg(True, value.name, value),
+-                    self.create_tensor_arg(False, real_dst_name, dst),
++                    self.create_tensor_arg(
++                        False, real_dst_name, dst, opspec_name=real_dst_name
++                    ),
+                 ]
+             else:
+                 args = [
+                     self.create_tensor_arg(True, value.name, value),
+-                    self.create_tensor_arg(False, real_dst_name, dst),
++                    self.create_tensor_arg(
++                        False, real_dst_name, dst, opspec_name=real_dst_name
++                    ),
+                 ]
+             in_coords = args[-2].device_coordinates
+             out_coords = args[-1].device_coordinates
+@@ -804,7 +990,7 @@ class SpyreKernel(Kernel[CSEVariable]):
+                 # Broadcast: scalar input expanding to non-scalar output.
+                 op = IDENTITY_OP
+             elif in_coords[-1].free_symbols != out_coords[-1].free_symbols:
+-                op = RESTICKIFY_OP
++                op = _restickify_op_for_args(value, dst)
+             else:
+                 op = IDENTITY_OP
+             op_spec = self.create_op_spec(
+@@ -837,9 +1023,7 @@ class SpyreKernel(Kernel[CSEVariable]):
+             self.op_specs.append(value)
+             return
+ 
+-        op_info = {}
+-        if hasattr(self.current_node.node.data, "op_info"):  # type: ignore[union-attr]
+-            op_info.update(self.current_node.node.data.op_info)  # type: ignore[union-attr]
++        op_info = _current_node_op_info(self.current_node)
+ 
+         if logger.isEnabledFor(logging.DEBUG):
+             logger.debug(
+@@ -859,7 +1043,9 @@ class SpyreKernel(Kernel[CSEVariable]):
+             args = [
+                 self.create_tensor_arg(True, x.name, x),
+                 self.create_tensor_arg(True, y.name, y),
+-                self.create_tensor_arg(False, real_dst_name, dst),
++                self.create_tensor_arg(
++                    False, real_dst_name, dst, opspec_name=real_dst_name
++                ),
+             ]
+             self.op_specs.append(self.create_op_spec(value.op, True, args, op_info))
+         else:
+@@ -871,7 +1057,9 @@ class SpyreKernel(Kernel[CSEVariable]):
+             x = value.arguments[0]
+             args = [
+                 self.create_tensor_arg(True, x.name, x),
+-                self.create_tensor_arg(False, real_dst_name, dst),
++                self.create_tensor_arg(
++                    False, real_dst_name, dst, opspec_name=real_dst_name
++                ),
+             ]
+             self.op_specs.append(self.create_op_spec(value.op, True, args, op_info))
+ 
+@@ -1082,6 +1270,18 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
+                                 buf.writeline("per_tile_fixed=True,")
+                             if arg.name is not None:
+                                 buf.writeline(f"name={arg.name!r},")
++                            if arg.source_name is not None:
++                                buf.writeline(f"source_name={arg.source_name!r},")
++                            if arg.source_offset_elems is not None:
++                                buf.writeline(
++                                    "source_offset_elems="
++                                    f"{sympy_str(arg.source_offset_elems)},"
++                                )
++                            if arg.lx_residency_core_id_to_wk_slice is not None:
++                                buf.writeline(
++                                    "lx_residency_core_id_to_wk_slice="
++                                    f"{arg.lx_residency_core_id_to_wk_slice!r},"
++                                )
+                         buf.writeline("),")
+                 buf.writeline("]")
+             buf.writeline("),")
+diff --git a/torch_spyre/execution/async_compile.py b/torch_spyre/execution/async_compile.py
+index 964073e..8118c14 100644
+--- a/torch_spyre/execution/async_compile.py
++++ b/torch_spyre/execution/async_compile.py
+@@ -20,6 +20,7 @@ import subprocess
+ import torch
+ 
+ from torch._inductor.runtime.runtime_utils import cache_dir
++from torch_spyre._inductor import config
+ from torch_spyre._inductor.logging_utils import get_inductor_logger
+ from torch_spyre._inductor.op_spec import (
+     LoopSpec,
+@@ -58,9 +59,22 @@ class SpyreAsyncCompile:
+         output_dir = get_output_dir(kernel_name)
+         generate_bundle(kernel_name, output_dir, specs)
+ 
+-        # Invoke backend compiler of SDSC Bundle
++        # Invoke backend compiler of SDSC Bundle. When the LX relayout
++        # prototype is enabled, Torch plans with its frontend LX fraction, but
++        # DXP needs backend workspace for inserted relayout materialization.
++        # Pass that split through the subprocess env instead of requiring an
++        # external dxp_standalone wrapper.
++        dxp_env = None
++        if config.lx_planner_relayout:
++            dxp_env = os.environ.copy()
++            dxp_env["DXP_LX_FRAC_AVAIL"] = str(config.dxp_backend_lx_frac_avail)
++
+         with torch.profiler.record_function(f"dxp_standalone:{kernel_name}"):
+-            subprocess.run(["dxp_standalone", "-d", output_dir], check=True)
++            subprocess.run(
++                ["dxp_standalone", "-d", output_dir],
++                check=True,
++                env=dxp_env,
++            )
+ 
+         return SpyreSDSCKernelRunner(kernel_name, output_dir)
+ 

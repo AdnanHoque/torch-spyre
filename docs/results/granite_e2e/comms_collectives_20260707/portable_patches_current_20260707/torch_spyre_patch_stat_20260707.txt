@@ -1,0 +1,19 @@
+ .../inductor/test_lx_relayout_dldsc_config.yaml    |    4 +
+ ...est_layout_allgather_restickify_import_light.py |   91 ++
+ tests/inductor/test_lx_relayout_dldsc.py           | 1348 ++++++++++++++++++++
+ tests/inductor/test_scratchpad_graph_editor.py     |  100 ++
+ torch_spyre/_inductor/codegen/bundle.py            |  192 +++
+ torch_spyre/_inductor/codegen/compute_ops.py       |    4 +-
+ torch_spyre/_inductor/codegen/superdsc.py          |   75 +-
+ torch_spyre/_inductor/config.py                    |   63 +-
+ torch_spyre/_inductor/constants.py                 |    2 +
+ .../_inductor/layout_allgather_restickify.py       |  260 ++++
+ torch_spyre/_inductor/lx_relayout.py               |  728 +++++++++++
+ torch_spyre/_inductor/op_spec.py                   |   12 +
+ torch_spyre/_inductor/propagate_layouts.py         |    8 +
+ torch_spyre/_inductor/scratchpad/allocator.py      |  186 ++-
+ torch_spyre/_inductor/scratchpad/graph_editor.py   |   13 +-
+ torch_spyre/_inductor/scratchpad/utils.py          |   10 +-
+ torch_spyre/_inductor/spyre_kernel.py              |  220 +++-
+ torch_spyre/execution/async_compile.py             |   18 +-
+ 18 files changed, 3308 insertions(+), 26 deletions(-)
