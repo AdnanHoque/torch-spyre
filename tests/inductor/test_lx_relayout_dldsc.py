@@ -721,8 +721,8 @@ def test_partial_view_gather_does_not_duplicate_staged_matmul_contract():
 
 
 def test_bundle_enriches_partial_view_gather_with_source_target_layouts(tmp_path):
-    mb = Symbol("c0")
-    out = Symbol("c1")
+    mb = Symbol("x0")
+    out = Symbol("x1")
 
     producer_output = _fixed_tile_arg(is_input=False, allocation={"lx": 0})
     producer_output.name = "buf33"
