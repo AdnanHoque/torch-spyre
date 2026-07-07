@@ -586,7 +586,7 @@ index f0640651f..d1840495c 100644
 \ No newline at end of file
 +}
 diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
-index 83ce529b2..b024c9785 100644
+index 83ce529b2..e460eb015 100644
 --- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
 +++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
 @@ -14,10 +14,13 @@
@@ -631,7 +631,7 @@ index 83ce529b2..b024c9785 100644
  // A temporary option to carry the unneededPad_ from core
  // to chunk data stage due to the limitation of the current L3 PCFG generation.
  // We must remove this option when the DSC2ToPCFG translator is available.
-@@ -372,14 +396,525 @@ void L3DlOpsScheduler::getLabeledDsWithDsType(std::vector<int> &indices,
+@@ -372,14 +396,609 @@ void L3DlOpsScheduler::getLabeledDsWithDsType(std::vector<int> &indices,
    }
  }
  
@@ -759,6 +759,75 @@ index 83ce529b2..b024c9785 100644
 +  if (end == value.string_value().c_str() || *end != 0) return false;
 +  *parsed = static_cast<int64_t>(result);
 +  return true;
++}
++
++
++static bool parseEmbeddedTensorWkSlices(
++    const std::map<std::string, std::string>& fields,
++    const std::string& tensorKey,
++    std::map<int, std::map<PrimaryDimTypes, int>>* coreIdToWkSlice,
++    std::string* reason) {
++  coreIdToWkSlice->clear();
++  const auto tensorIt = fields.find(tensorKey);
++  if (tensorIt == fields.end()) {
++    *reason = "missing " + tensorKey + " metadata";
++    return false;
++  }
++
++  std::string parseError;
++  const auto tensor = json11::Json::parse(tensorIt->second, parseError);
++  if (!parseError.empty() || !tensor.is_object()) {
++    *reason = "invalid " + tensorKey + " JSON";
++    return false;
++  }
++
++  const auto slices = tensor["coreIdToWkSlice_"];
++  if (!slices.is_object()) {
++    *reason = tensorKey + " missing coreIdToWkSlice_";
++    return false;
++  }
++  for (const auto& [coreString, coordJson] : slices.object_items()) {
++    char* end = nullptr;
++    const long core = std::strtol(coreString.c_str(), &end, 10);
++    if (end == coreString.c_str() || *end != 0 || core < 0 ||
++        !coordJson.is_object()) {
++      *reason = "invalid " + tensorKey + " coreIdToWkSlice_ entry";
++      return false;
++    }
++    auto& coord = (*coreIdToWkSlice)[static_cast<int>(core)];
++    for (const auto& [dimString, value] : coordJson.object_items()) {
++      const auto dimIt = EnumsConversion::stringToPrimaryDim.find(dimString);
++      if (dimIt == EnumsConversion::stringToPrimaryDim.end() ||
++          !value.is_number()) {
++        *reason = "invalid " + tensorKey + " coordinate dim";
++        return false;
++      }
++      coord[dimIt->second] = static_cast<int>(value.number_value());
++    }
++  }
++
++  if (coreIdToWkSlice->empty()) {
++    *reason = "empty " + tensorKey + " coreIdToWkSlice_";
++    return false;
++  }
++  return true;
++}
++
++
++static bool embeddedTensorLayoutStartsWith(
++    const std::map<std::string, std::string>& fields,
++    const std::string& tensorKey, const std::string& expectedFirstDim) {
++  const auto tensorIt = fields.find(tensorKey);
++  if (tensorIt == fields.end()) return false;
++  std::string parseError;
++  const auto tensor = json11::Json::parse(tensorIt->second, parseError);
++  if (!parseError.empty() || !tensor.is_object()) return false;
++  const auto layoutDimOrder = tensor["layoutDimOrder_"];
++  if (!layoutDimOrder.is_array() || layoutDimOrder.array_items().empty()) {
++    return false;
++  }
++  const auto& first = layoutDimOrder.array_items().front();
++  return first.is_string() && first.string_value() == expectedFirstDim;
 +}
 +
 +static bool parseEmbeddedSourceLxTensorMetadata(
@@ -920,6 +989,21 @@ index 83ce529b2..b024c9785 100644
 +    }
 +    sourceWkSlices = &embeddedSourceWkSlices;
 +  }
++  const bool useEmbeddedTargetKernelCoordinates =
++      lds.dsType_ == KERNEL &&
++      embeddedTensorLayoutStartsWith(*fields, "source_lx_tensor", "x");
++  if (useEmbeddedTargetKernelCoordinates &&
++      fields->count("target_kernel_tensor")) {
++    std::map<int, std::map<PrimaryDimTypes, int>> targetWkSlices;
++    if (!parseEmbeddedTensorWkSlices(*fields, "target_kernel_tensor",
++                                     &targetWkSlices, reason)) {
++      return false;
++    }
++    destinationAlloc->allocateCoordinates_.coreIdToWkSlice_ =
++        std::move(targetWkSlices);
++    return true;
++  }
++
 +  auto producerSlices =
 +      parseCoreDeviceSliceMap(*fields, "producer_core_id_to_device_slice",
 +                              reason);
@@ -1160,7 +1244,7 @@ index 83ce529b2..b024c9785 100644
  
    // Look at coreIdToDscSchedule.
    // Each DscScheduleStep has four fields as below:
-@@ -393,9 +928,16 @@ bool L3DlOpsScheduler::isLabeledDsLXNeighbor(const SuperDsc &mySDsc,
+@@ -393,9 +1012,16 @@ bool L3DlOpsScheduler::isLabeledDsLXNeighbor(const SuperDsc &mySDsc,
    const std::vector<DscScheduleStep> &dscSchedule =
        mySDsc.coreIdToDscSchedule.at(coreId);
  
@@ -1179,7 +1263,7 @@ index 83ce529b2..b024c9785 100644
    }
  
    return false;
-@@ -1268,6 +1810,7 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
+@@ -1268,6 +1894,7 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
    const DesignSpaceConfig &dscMain = mySDsc.dscs_.at(dscMainIndex);
    const bool isReuse = hasDimensionReuse(dscMain);
    bool isDoubleBuffering = false, isInputNeighborFetch = false;
@@ -1187,7 +1271,7 @@ index 83ce529b2..b024c9785 100644
    std::unordered_set<PrimaryDimTypes> chunkDims;
    for (auto &lds : dscMain.labeledDs_) {
      if (lds.isHbmPinned() || isLabeledDsLXNeighbor(mySDsc, dscMainIndex, lds)) {
-@@ -1279,14 +1822,24 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
+@@ -1279,14 +1906,24 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
        }
  
        if (lds.isHbmPinned()) isDoubleBuffering = true;
@@ -1215,7 +1299,7 @@ index 83ce529b2..b024c9785 100644
  
    // When all tensors are LX-local, the chunk parameters are the same as the
    // core parameters. Set the chunk dataStageParam_ and return.
-@@ -1352,7 +1905,11 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
+@@ -1352,7 +1989,11 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
                                            primaryDims);
  
        if (isDoubleBuffering) {
@@ -1228,7 +1312,7 @@ index 83ce529b2..b024c9785 100644
            DT_ERROR_FMT(
                "Unable to map graph within architecture constraints: The "
                "initial chunk parameters must fit in LX for SuperDSC: %s",
-@@ -1365,7 +1922,7 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
+@@ -1365,7 +2006,7 @@ void L3DlOpsScheduler::setChunkDataStageParams(SuperDsc &mySDsc) {
        // Find the best set of parameters for memory bandwidth.
        findBestParamsForMemoryBandwidth(dscCandidateIndices, dscCandidates,
                                         mySDsc, primaryDims, coreSplitDims,
@@ -1237,7 +1321,7 @@ index 83ce529b2..b024c9785 100644
  
        // Find the best set of parameters for the Flop/Byte arithmetic intensity
        // in the case of tensor reuse and HBM transfers.
-@@ -1601,6 +2158,12 @@ double L3DlOpsScheduler::calculateBurstEfficiency(
+@@ -1601,6 +2242,12 @@ double L3DlOpsScheduler::calculateBurstEfficiency(
    //   2) Burst size of each request
    //   3) Multicast degree of each request
    for (const int ldsIdx : labeledDsIndices) {
@@ -1250,7 +1334,7 @@ index 83ce529b2..b024c9785 100644
      // Use dscMain to check if this labeledDs has core split dimensions.
      bool ldsHasCoreSplitDim = false;
      for (PrimaryDimTypes dim : dscMain.getLayoutDims(ldsIdx)) {
-@@ -1823,6 +2386,7 @@ double L3DlOpsScheduler::calculateBurstEfficiency(
+@@ -1823,6 +2470,7 @@ double L3DlOpsScheduler::calculateBurstEfficiency(
      }
    }
  
@@ -1258,7 +1342,7 @@ index 83ce529b2..b024c9785 100644
    return efficiency / totalNumRequests;
  }
  
-@@ -3099,31 +3663,52 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
+@@ -3099,31 +3747,52 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
                                            transSiblingLoopNode);
          }
        } else if (isLabeledDsLXNeighbor(mySDsc, dscIdx, lds)) {
@@ -1325,7 +1409,7 @@ index 83ce529b2..b024c9785 100644
          }
  
          std::string transInNodeName = "transfer_lds" +
-@@ -3165,6 +3750,16 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
+@@ -3165,6 +3834,16 @@ void L3DlOpsScheduler::createAllocationAndTransfer(SuperDsc &mySDsc) {
            allocNode =
                createAllocateNode(dsc, ldsIdx, allocStorage,
                                   numBufferForNoBuffer, allocNodeName, dscIdx);
@@ -1342,7 +1426,7 @@ index 83ce529b2..b024c9785 100644
            // Insert allocate node at root level before the ref node.
            parentNode->addChildNode(allocNode, /*addBefore*/ true, refNode);
          }
-@@ -3331,44 +3926,53 @@ void L3DlOpsScheduler::createSynchronization(SuperDsc &mySDsc) {
+@@ -3331,44 +4010,53 @@ void L3DlOpsScheduler::createSynchronization(SuperDsc &mySDsc) {
      const bool hasLxNeighborTensor = !lxNeighborLdsIndexSet.empty();
      const bool hasAllLxPinnedTensors =
          !hasHbmPinnedTensor && !hasLxNeighborTensor;
@@ -1424,7 +1508,7 @@ index 83ce529b2..b024c9785 100644
      } else if (hasHbmPinnedTensor) {
        auto getHbmToLxTransNodes = [&hbmPinnedLdsIndexSet, &dsc]() {
          std::vector<dsc2::TransferNode *> hbmToLxTransNodes;
-@@ -3811,20 +4415,23 @@ void L3DlOpsScheduler::addL3LUAndLXLUSyncNodeSequence(
+@@ -3811,20 +4499,23 @@ void L3DlOpsScheduler::addL3LUAndLXLUSyncNodeSequence(
  }
  
  void L3DlOpsScheduler::addL3LUAndLXLUSoftSyncNodeSequence(
@@ -1451,7 +1535,7 @@ index 83ce529b2..b024c9785 100644
        true, true);
  
    l3luToLxluSend->otherEndOfTheSignals_.push_back(l3luToLxluReceive);
-@@ -4815,6 +5422,9 @@ void L3DlOpsScheduler::fillFinalStartAddressAndOffset(
+@@ -4815,6 +5506,9 @@ void L3DlOpsScheduler::fillFinalStartAddressAndOffset(
    auto coordinates =
        allocNode->startAddressCoreCorelet_.getFlattenedCoordinates(
            {{0, 0}, {1, 0}});
@@ -1461,7 +1545,7 @@ index 83ce529b2..b024c9785 100644
    DT_CHECK(coordinates.begin()->size() >= 2);
    for (auto &coord : coordinates) {
      for (auto coreId : dsc.coreIdsUsed_) {
-@@ -5398,12 +6008,40 @@ bool L3DlOpsScheduler::allocAllMem(const SuperDsc &mySDsc,
+@@ -5398,12 +6092,40 @@ bool L3DlOpsScheduler::allocAllMem(const SuperDsc &mySDsc,
                int numBuffers = allocNode->numBuffers_;
                if (numBuffers == -1)
                  numBuffers = 2;  // reserve at least 2 buffers
@@ -1508,7 +1592,7 @@ index 83ce529b2..b024c9785 100644
              }
              for (auto &acand : allocMetadata.consIdAndAllocNode) {
                DT_ERROR("No support");
-@@ -7467,7 +8105,6 @@ void L3DlOpsScheduler::sliceCoordinateForCorelet(
+@@ -7467,7 +8189,6 @@ void L3DlOpsScheduler::sliceCoordinateForCorelet(
    for (int i = foldParams.size() - 1; i > temporalFoldEnds; --i) {
      elemArr.push_back(foldParams.at(i));
    }
@@ -1516,7 +1600,7 @@ index 83ce529b2..b024c9785 100644
    // Temporarily make the allocNode a child of the new loop. The original
    // scheduleTree will be restored after the distribution. For computing custom
    // dataStage, the distribution process requires that the loop has a childNode.
-@@ -7840,6 +8477,10 @@ void L3DlOpsScheduler::run(SuperDsc &mySDsc) {
+@@ -7840,6 +8561,10 @@ void L3DlOpsScheduler::run(SuperDsc &mySDsc) {
  
    // Set start address, offset in allocations.
    fillAllocationStartAddrAndOffset(mySDsc);
@@ -2077,7 +2161,7 @@ index 4df32c50c..dacbb0858 100644
        if (coordPropReportLevel_ > 2) {
          std::cout
 diff --git a/ddc/ddcv1.cpp b/ddc/ddcv1.cpp
-index 3c418973e..7d9bf48be 100644
+index 3c418973e..0bc39a88c 100644
 --- a/ddc/ddcv1.cpp
 +++ b/ddc/ddcv1.cpp
 @@ -8,12 +8,25 @@
@@ -2239,7 +2323,7 @@ index 3c418973e..7d9bf48be 100644
              if (!useCoreIdNode && !useCoreIdAlloc &&
                  coreId != currDsc->coreIdsUsed_[0]) {
                constOffsetField =
-@@ -2699,25 +2758,61 @@ void Ddc::fillLoopOffsetsAndAddresses(
+@@ -2699,25 +2758,70 @@ void Ddc::fillLoopOffsetsAndAddresses(
                constOffsetField = di.constEleOffsets_[coreId][0][dim];
                continue;
              }
@@ -2258,6 +2342,9 @@ index 3c418973e..7d9bf48be 100644
 -            fixCoordAlloc.insert_or_assign(
 -                static_cast<int>(dsc2::CoordinateFoldPosition::Corelet),
 -                useClIdAlloc ? clId : 0);
+-
+-            const auto myOffset =
+-                FoldInfraUtils::lexiAffineSolveDistanceInSteps(
 +            const auto& sliceIdNode = nodeDimSliceIt->second;
 +            const auto& sliceIdAlloc = allocDimSliceIt->second;
 +            const auto coreFoldPos =
@@ -2304,21 +2391,28 @@ index 3c418973e..7d9bf48be 100644
 +                                           useCoreIdAlloc ? sliceIdAlloc : 0);
 +            fixCoordAlloc.insert_or_assign(coreletFoldPos,
 +                                           useClIdAlloc ? clId : 0);
- 
-             const auto myOffset =
--                FoldInfraUtils::lexiAffineSolveDistanceInSteps(
--                    allocDimCoord, nodeBeta, fixCoordAlloc);
-+                useAffineLogicalOffset
-+                    ? nodeBeta -
-+                          affineCoordAtLogicalSlice(
-+                              allocDimCoord, useCoreIdAlloc, sliceIdAlloc,
-+                              useClIdAlloc, clId, rowIdAlloc)
-+                    : FoldInfraUtils::lexiAffineSolveDistanceInSteps(
-+                          allocDimCoord, nodeBeta, fixCoordAlloc);
++
++            CoordinateBaseType myOffset = 0;
++            if (useAffineLogicalOffset) {
++              myOffset = nodeBeta -
++                         affineCoordAtLogicalSlice(
++                             allocDimCoord, useCoreIdAlloc, sliceIdAlloc,
++                             useClIdAlloc, clId, rowIdAlloc);
++            } else {
++              try {
++                myOffset = FoldInfraUtils::lexiAffineSolveDistanceInSteps(
+                     allocDimCoord, nodeBeta, fixCoordAlloc);
++              } catch (const std::exception&) {
++                myOffset = nodeBeta -
++                           affineCoordAtLogicalSlice(
++                               allocDimCoord, useCoreIdAlloc, sliceIdAlloc,
++                               useClIdAlloc, clId, rowIdAlloc);
++              }
++            }
              if (myOffset != 0) {
                anyConstOffset = true;
                DT_CHECK_MSG(
-@@ -2746,6 +2841,25 @@ void Ddc::fillLoopOffsetsAndAddresses(
+@@ -2746,6 +2850,25 @@ void Ddc::fillLoopOffsetsAndAddresses(
          }
        }
      }
@@ -2344,7 +2438,7 @@ index 3c418973e..7d9bf48be 100644
    };
  
    for (auto* node : scheduleTreeTraverse) {
-@@ -2754,6 +2868,10 @@ void Ddc::fillLoopOffsetsAndAddresses(
+@@ -2754,6 +2877,10 @@ void Ddc::fillLoopOffsetsAndAddresses(
      auto* ownerLoop = node->getOwnerLoop();
      if (node->nodeType_ == dsc2::ScheduleNode::TRANSFER) {
        auto* transfer = static_cast<dsc2::TransferNode*>(node);

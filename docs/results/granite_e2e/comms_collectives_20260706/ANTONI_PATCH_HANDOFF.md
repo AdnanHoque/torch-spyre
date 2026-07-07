@@ -23,3 +23,6 @@ export SPYRE_LX_PLANNER_RELAYOUT=1
 export DXP_LX_FRAC_AVAIL=0
 export DXP_BACKEND_LX_FRAC_AVAIL=1
 ```
+
+
+The refreshed Deeptools patch includes the staged matmul operand coordinate fix verified against flash and Granite DXP replay.
