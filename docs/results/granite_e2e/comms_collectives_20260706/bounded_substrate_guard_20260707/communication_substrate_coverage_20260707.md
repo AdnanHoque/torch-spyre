@@ -34,7 +34,8 @@ Deeptools:
 ```text
 repo: Adnan-Hoque1/deeptools
 branch: ah/comms-collectives
-head: 53ee16264 [DXP] assert partial-view gather source offset
+head: 9cd9c79c3 [DXP] test partial-view gather offset validation
+previous source-offset assertion checkpoint: 53ee16264 [DXP] assert partial-view gather source offset
 previous realization checkpoint: 2fa9220a6 [DXP] realize bounded partial-view gather relayout
 previous partial-view guard checkpoint: faa78233e [DXP] fail closed for partial-view gather relayout
 previous bounded-broadcast checkpoint: 9e9b20b42 [DXP] test bounded matmul operand broadcast patterns
@@ -53,9 +54,9 @@ Deeptools MatmulOperandBroadcastPattern*: 2/2 passed
 Deeptools CoreWorkDivIncomptLxRelayout*: 2/2 passed
 Deeptools MatmulOperandBroadcastChunkCapFailsClosed: passed
 Deeptools PartialViewGatherFailsClosedBeforeGenericLxRelayout at faa78233e: passed
-Deeptools PartialViewGatherBoundedOffsetRelayoutCompiles at 53ee16264: passed and asserts offset-adjusted source LX address 156672
-Combined DXP focused regression at 53ee16264: 6/6 passed
-LayoutAllgatherRestickify.* at 53ee16264: 32/32 passed
+Deeptools PartialViewGather* at 9cd9c79c3: 3/3 passed; positive case asserts offset-adjusted source LX address 156672 and negative cases fail closed for missing/invalid source_offset_elems
+Combined DXP focused regression at 9cd9c79c3: 8/8 passed
+LayoutAllgatherRestickify.* at 9cd9c79c3: 32/32 passed
 ```
 
 The partial-view Torch pytest could not be run in that exact CDX worktree

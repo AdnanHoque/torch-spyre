@@ -1,0 +1,98 @@
+From 9cd9c79c3961224920b8d55710bc15501e9fa3f3 Mon Sep 17 00:00:00 2001
+From: Adnan Hoque <adnan.hoque1@ibm.com>
+Date: Tue, 7 Jul 2026 07:31:03 +0000
+Subject: [PATCH] [DXP] test partial-view gather offset validation
+
+Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dxp/test/dxp_unittest.cpp | 53 +++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 51 insertions(+), 2 deletions(-)
+
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index 2eec78332..279992a5c 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -327,7 +327,10 @@ void rewriteMatmulOperandBroadcastFixture(const std::string& testDataDir,
+   jsonOut << json11::Json(top).dump() << std::endl;
+ }
+ 
+-void rewritePartialViewGatherFixture(const std::string& testDataDir) {
++void rewritePartialViewGatherFixture(const std::string& testDataDir,
++                                     const std::string& sourceOffsetElems =
++                                         "12800",
++                                     bool includeSourceOffset = true) {
+   const auto path = std::filesystem::path(testDataDir) / "sdsc_20.json";
+   std::ifstream jsonIn(path);
+   std::ostringstream jsonBuf;
+@@ -349,7 +352,11 @@ void rewritePartialViewGatherFixture(const std::string& testDataDir) {
+   classification["classification"] = "partial_view_gather";
+   classification["communication_pattern"] = "partial_view_gather";
+   classification["materialization_pattern"] = "partial_view_gather_to_lx";
+-  classification["source_offset_elems"] = "12800";
++  if (includeSourceOffset) {
++    classification["source_offset_elems"] = sourceOffsetElems;
++  } else {
++    classification.erase("source_offset_elems");
++  }
+   classification["requires_staged_realization"] = true;
+   classification["read_index"] = 1;
+ 
+@@ -361,6 +368,31 @@ void rewritePartialViewGatherFixture(const std::string& testDataDir) {
+   jsonOut << json11::Json(top).dump() << std::endl;
+ }
+ 
++void expectPartialViewGatherOffsetFailure(const std::string& testDataDir,
++                                          const std::string& sourceOffsetElems,
++                                          bool includeSourceOffset,
++                                          const std::string& expectedMessage) {
++  rewritePartialViewGatherFixture(testDataDir, sourceOffsetElems,
++                                  includeSourceOffset);
++
++  ScopedEnvVar restoreFrac("DXP_LX_FRAC_AVAIL");
++  setenv("DXP_LX_FRAC_AVAIL", "1", 1);
++
++  SenTargets target = SenTargets::SENTIENT;
++  DesignSpaceConfigGlobal dscGlobal(target);
++  Dxp dxp(dscGlobal);
++  dxp.standalone = true;
++  dxp.debug = true;
++
++  try {
++    dxp.runDxp(testDataDir);
++    FAIL() << "Expected partial_view_gather offset validation to fail closed";
++  } catch (const DtException& ex) {
++    const std::string message = ex.what();
++    EXPECT_NE(message.find(expectedMessage), std::string::npos) << message;
++  }
++}
++
+ void runMatmulOperandBroadcastPatternCase(const std::string& testDataDir,
+                                           const std::string& pattern) {
+   rewriteMatmulOperandBroadcastFixture(testDataDir, pattern);
+@@ -1098,6 +1130,23 @@ TEST_F(DxpTestFixture, PartialViewGatherBoundedOffsetRelayoutCompiles) {
+          "LX address 156672";
+ }
+ 
++TEST_F(DxpTestFixture, PartialViewGatherMissingSourceOffsetFailsClosed) {
++  SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
++
++  expectPartialViewGatherOffsetFailure(
++      testDataDir, /*sourceOffsetElems=*/"", /*includeSourceOffset=*/false,
++      "partial_view_gather is missing source_offset_elems");
++}
++
++TEST_F(DxpTestFixture, PartialViewGatherInvalidSourceOffsetFailsClosed) {
++  SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
++
++  expectPartialViewGatherOffsetFailure(
++      testDataDir, /*sourceOffsetElems=*/"not_an_int",
++      /*includeSourceOffset=*/true,
++      "partial_view_gather has invalid source_offset_elems=not_an_int");
++}
++
+ TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayout) {
+   // The test should be launched with env var DEEPTOOLS_PATH set correctly.
+   // Verifies that running dxp in bundle mode with debug + dumpSpyreCode on
+-- 
+2.52.0
+

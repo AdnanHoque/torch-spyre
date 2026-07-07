@@ -2,10 +2,11 @@
   "date": "2026-07-07",
   "deeptools": {
     "branch": "ah/comms-collectives",
-    "commit": "53ee16264",
-    "commit_subject": "[DXP] assert partial-view gather source offset",
-    "patch": "patches/deeptools_partial_view_gather_source_offset_assert_53ee16264.patch",
+    "commit": "9cd9c79c3",
+    "commit_subject": "[DXP] test partial-view gather offset validation",
+    "patch": "patches/deeptools_partial_view_gather_offset_validation_tests_9cd9c79c3.patch",
     "previous_realization_commit": "2fa9220a6",
+    "previous_source_offset_assert_commit": "53ee16264",
     "repo": "Adnan-Hoque1/deeptools"
   },
   "does_not_prove_yet": [
@@ -17,7 +18,8 @@
     "Torch can preserve partial-view source offset metadata in the DLDSC contract.",
     "Deeptools can compile a bounded partial-view gather by applying the source offset to the LX source base before STCDPOpLx relayout.",
     "The existing scatter and matmul operand broadcast/all-gather regression set remains green.",
-    "The generated relayout SDSC contains the offset-adjusted LX source address 156672 for the bounded partial-view gather fixture."
+    "The generated relayout SDSC contains the offset-adjusted LX source address 156672 for the bounded partial-view gather fixture.",
+    "Malformed partial_view_gather metadata fails closed when source_offset_elems is missing or invalid."
   ],
   "scope": "bounded partial-view gather descriptor/DXP realization",
   "torch": {
@@ -29,14 +31,14 @@
   },
   "validation": {
     "dxp_focused_regression": {
-      "command": "./build-deeptools/dxp/dxp_unit_test --gtest_filter=\"DxpTestFixture.MatmulOperandBroadcastPattern*:DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed:DxpTestFixture.CoreWorkDivIncomptLxRelayout*:DxpTestFixture.PartialViewGatherBoundedOffsetRelayoutCompiles\"",
-      "log": "logs/dxp_focused_regression_after_offset_assert_20260707.log",
+      "command": "./build-deeptools/dxp/dxp_unit_test --gtest_filter=\"DxpTestFixture.MatmulOperandBroadcastPattern*:DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed:DxpTestFixture.CoreWorkDivIncomptLxRelayout*:DxpTestFixture.PartialViewGather*\"",
+      "log": "logs/dxp_focused_regression_after_offset_validation_20260707.log",
       "result": "passed",
-      "tests_passed": 6
+      "tests_passed": 8
     },
     "layout_allgather_restickify": {
       "command": "./build-deeptools/util/util_unit_test --gtest_filter=\"LayoutAllgatherRestickify.*\"",
-      "log": "logs/layout_allgather_restickify_after_offset_assert_20260707.log",
+      "log": "logs/layout_allgather_restickify_after_offset_validation_20260707.log",
       "result": "passed",
       "tests_passed": 32
     },
