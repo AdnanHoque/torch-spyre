@@ -32,6 +32,8 @@ The communication substrate is now behaving in the intended staged way:
 | Trimmed single-SDSC flash replay, larger chunks | Passes | `logs/sdsc3_chunk_sweep/percore32_total256_20260707_144635.rc` |
 | Focused tests after making larger chunking the default | Pass | `logs/default_chunk_policy/dxp_unit_focused.log` and `util_layout_allgather.log` |
 | Full flash replay with only `SPYRE_LX_PLANNER_RELAYOUT=1` after default-policy fix | Pass | `logs/default_chunk_policy/full_flash_default_chunk_policy.rc` |
+| Fresh full flash replay with default-policy fix | Pass | `replay_payloads/artifact_payload_20260707_overnight/full_flash_dxp_replay_default_chunk_policy_20260707.tgz` |
+| Bounded broadcast/multicast staged-carrier experiment | Fails; recorded as gap | `replay_payloads/artifact_payload_20260707_overnight/broadcast_multicast_bounded_experiment_20260707.tgz` |
 | Direct kernel-neighbor broadcast path | Fails wrong-locale | `logs/current_failclosed_broadcast_multicast/direct_*.summary` |
 | Broadcast/multicast high-cap gather/restickify | Classifies and plans, but DCC IBUFF fails | `logs/current_failclosed_broadcast_multicast/*_high_cap_plan.json` and `*_error_excerpt.txt` |
 
@@ -113,14 +115,24 @@ This is exactly the boundary we wanted to expose for the Granite communication s
 | --- | --- | --- |
 | Scatter/permutation | Production-shaped in PR1 | DLDSC tensor-vs-compute mismatch metadata; backend relayout insertion handles the bounded scatter case. |
 | Partial gather | Bounded tests pass | Offset-aware source metadata added; invalid/missing offsets fail closed. |
-| All-gather/replicate | Bounded replay passes | Full flash routes correctly but currently hits DCC IBUFF. |
-| Broadcast | Classified, not production-lowered | Direct path wrong-locale; gather/restickify high-cap path overflows IBUFF. |
-| Multicast | Classified, not production-lowered | Same as broadcast, with multiple source cores. |
+| All-gather/replicate | Bounded replay passes; full saved flash replay passes | The default chunk policy unblocks the previous DCC IBUFF failure. |
+| Broadcast | Classified, not production-lowered | Direct path wrong-locale; gather/restickify high-cap path overflows IBUFF. A bounded staged-carrier experiment found that the current synthetic fixture rewrites the pattern without a valid broadcast source allocation/target tensor contract. |
+| Multicast | Classified, not production-lowered | Same as broadcast, with multiple source groups. Needs a valid redundant tensor-distribution fixture or a real Torch-emitted edge before enabling the carrier. |
 | Reduce/all-reduce | Not implemented | Arithmetic communication class, separate from copy-only relayout. |
 
 ## Next Work
 
 1. Run the full flash Python compile probe with the updated Deeptools head, not just saved-bundle DXP replay.
 2. Run AIU compile/smoke if the device is healthy, while keeping flash value correctness out of scope.
-3. Keep broadcast/multicast fail-closed until either direct kernel-neighbor is corrected or gather/restickify gets a compact bounded lowering for those fan-out classes.
-4. If any remaining failure requires full-tensor streaming/tile-scoping rather than one bounded tile, document it as WSR-owned instead of building a private streaming system in this branch.
+3. Add a valid broadcast/multicast proof fixture: the source tensor must actually be resident for the fanout coordinates being requested, and target tensor distribution must represent redundancy separately from consumer compute coordinates.
+4. Keep broadcast/multicast fail-closed until either a valid bounded staged-carrier fixture passes or direct kernel-neighbor is corrected.
+5. If any remaining failure requires full-tensor streaming/tile-scoping rather than one bounded tile, document it as WSR-owned instead of building a private streaming system in this branch.
+
+## Self-Contained Replay Payload
+
+The source SuperDSC bundle and the successful full replay output are archived in:
+
+`replay_payloads/artifact_payload_20260707_overnight`
+
+See `replay_payloads/README.md` for the exact replay command, expected return
+code, expected plan count, and tarball checksums.
