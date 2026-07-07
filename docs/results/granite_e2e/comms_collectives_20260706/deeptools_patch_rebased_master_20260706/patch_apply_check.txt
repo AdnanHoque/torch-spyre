@@ -1,1 +1,1 @@
-Deeptools patch apply-check: PASS
+git apply --check: PASS
