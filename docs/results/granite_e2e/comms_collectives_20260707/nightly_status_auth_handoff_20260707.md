@@ -17,7 +17,7 @@ As of this handoff:
 
 | Repo | Branch | SHA | Role |
 | --- | --- | --- | --- |
-| `AdnanHoque/torch-spyre` | `ah/comms-collectives` | current branch head; at least `968faf5ee71397a079b4dcb38b0723bd8b5fe789` | Artifact branch with docs, patches, run payloads, and handoffs. |
+| `AdnanHoque/torch-spyre` | `ah/comms-collectives` | current branch head; at least `a647535bea55b8db308c0da8ae57818f1ba83c79` | Artifact branch with docs, patches, run payloads, and handoffs. |
 | `AdnanHoque/torch-spyre` | `gather-restickify` | `7a18839f83d74d2c576f4c85585e11638d30c20b` | Torch prototype branch for flash/gather-restickify experiments. Adds planner-level tests for generic gather, broadcast, multicast, and all-gather relayout metadata. |
 | `AdnanHoque/torch-spyre` | `pr-lx-relayout-scatter` | `ba365fe6234527e17558520ab41e21d8c6c696e2` | PR1 scatter/permutation Torch branch. |
 | `AdnanHoque/torch-spyre` | `pr-lx-relayout-dldsc` | `a9a3bb505b966a3716d48854d1ecc22e46624476` | Older DLDSC/scatter exploration branch. |
@@ -325,3 +325,12 @@ The bounded broadcast artifact issue is recorded separately in:
 ```text
 docs/results/granite_e2e/comms_collectives_20260707/broadcast_artifact_audit_20260707.md
 ```
+
+Current portable prototype patches are archived in:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260707/portable_patches_current_20260707
+```
+
+These patches are for applying the current prototype onto another checkout.
+They are intentionally marked as prototype artifacts, not lean PR diffs.
