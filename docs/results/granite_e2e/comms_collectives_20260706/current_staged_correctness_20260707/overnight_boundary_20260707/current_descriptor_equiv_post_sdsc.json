@@ -1,0 +1,1671 @@
+{
+  "1_batchmatmul" : {
+    "sdscFoldProps_" : [
+      {"factor_" : 1, "label_" : "time"}
+    ],
+    "sdscFolds_" :  {
+      "dim_prop_func" : [
+        { "Affine" : {"alpha_" : 1, "beta_" : 0} }
+      ],
+      "dim_prop_attr" : [
+        { "factor_" : 1, "label_" : "time" }
+      ],
+      "data_" : {
+        "[0]" :"0"
+      }
+    },
+    "coreFoldProp_" : {"factor_" : 4, "label_" : "core"},
+    "coreletFoldProp_" : {"factor_" : 1, "label_" : "corelet"},
+    "folded_sdsc_name_" : "",
+    "fold_coord_" : [  ],
+    "numCoresUsed_" : 4,
+    "unpadN_" : {"name_" : "unpadn", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+    "N_" : {"name_" : "n", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+    "coreIdToDsc_" : { 
+      "0" : 0, "1" : 0, "2" : 0, "3" : 0
+    }, 
+    "numWkSlicesPerDim_" : { "in" : 1, "out" : 1, "mb" : 4 },
+    "coreIdToWkSlice_" : { 
+      "0" : { "in" : 0, "out" : 0, "mb" : 0 }, 
+      "1" : { "in" : 0, "out" : 0, "mb" : 1 }, 
+      "2" : { "in" : 0, "out" : 0, "mb" : 2 }, 
+      "3" : { "in" : 0, "out" : 0, "mb" : 3 }
+    }, 
+    "opFuncsUsed_" : [  ], 
+    "lxRelayoutClassifications_" : { 
+      "0" : { "classification" : "matmul_operand_broadcast", "communication_class" : "all_gather", "communication_pattern" : "all_gather_replicate", "consumer_compute_work_slice_dims" : "{\"256\": 4}", "consumer_core_count" : "4", "consumer_core_id_to_device_slice" : "{\"0\": {\"0\": 0}, \"1\": {\"0\": 0}, \"2\": {\"0\": 0}, \"3\": {\"0\": 0}}", "consumer_name" : "buf1", "consumer_op" : "batchmatmul", "consumer_tensor_work_slice_dims" : "{\"0\": 1}", "consumer_work_slice_dims" : "{\"0\": 1}", "kind" : "matmul_operand_broadcast", "layout_transform" : "{\"carrier_hint\": \"lx_all_gather_then_local_restickify\", \"conversion_stage\": \"local_restickify_to_kernel\", \"kind\": \"activation_lx_to_matmul_kernel_operand\", \"movement_stage\": \"all_gather_replicate\", \"source\": \"producer_lx_residency\", \"source_component\": \"lx\", \"source_coordinates\": \"producer_tensor_distribution\", \"target\": \"consumer_matmul_kernel_operand\", \"target_component\": \"KERNEL\", \"target_coordinates\": \"consumer_compute_distribution\"}", "materialization_pattern" : "all_gather_replicate_with_layout_conversion", "max_fanin" : "4", "max_fanout" : "4", "operand_kernel_layout" : "{\"layoutDimOrder_\": [\"out\", \"in\", \"x\"], \"stickDimOrder_\": [\"out\"]}", "operand_read_index" : "1", "operand_role" : "rhs", "producer_core_count" : "4", "producer_core_id_to_device_slice" : "{\"0\": {\"0\": 0}, \"1\": {\"0\": 1}, \"2\": {\"0\": 2}, \"3\": {\"0\": 3}}", "producer_name" : "buf0", "producer_op" : "mul", "producer_work_slice_dims" : "{\"0\": 4}", "read_index" : "1", "realized" : "false", "requires_layout_conversion" : "true", "requires_staged_realization" : "true", "source_lx_tensor" : "{\"allocation_name\": \"allocate-Tensor2_lx\", \"buffer_name\": \"buf0\", \"component_\": \"lx\", \"computeCoreIdToWkSlice_\": {\"0\": {\"mb\": 0, \"out\": 0}, \"1\": {\"mb\": 0, \"out\": 1}, \"2\": {\"mb\": 0, \"out\": 2}, \"3\": {\"mb\": 0, \"out\": 3}}, \"coordinateInfo_\": {\"mb\": {\"elemArr\": 1, \"folds\": {\"dim_prop_attr\": [{\"factor_\": 1, \"label_\": \"core_fold\"}, {\"factor_\": 1, \"label_\": \"corelet_fold\"}, {\"factor_\": 1, \"label_\": \"row_fold\"}, {\"factor_\": 64, \"label_\": \"elem_arr_0\"}], \"dim_prop_func\": [{\"Affine\": {\"alpha_\": 64, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 0, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 0, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 1, \"beta_\": 0}}]}, \"padding\": \"nopad\", \"spatial\": 3, \"temporal\": 0}, \"out\": {\"elemArr\": 2, \"folds\": {\"dim_prop_attr\": [{\"factor_\": 4, \"label_\": \"core_fold\"}, {\"factor_\": 1, \"label_\": \"corelet_fold\"}, {\"factor_\": 1, \"label_\": \"row_fold\"}, {\"factor_\": 1, \"label_\": \"elem_arr_1\"}, {\"factor_\": 64, \"label_\": \"elem_arr_0\"}], \"dim_prop_func\": [{\"Affine\": {\"alpha_\": 64, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 0, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 0, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 64, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 1, \"beta_\": 0}}]}, \"padding\": \"nopad\", \"spatial\": 3, \"temporal\": 0}}, \"coreIdToWkSlice_\": {\"0\": {\"mb\": 0, \"out\": 0}, \"1\": {\"mb\": 0, \"out\": 1}, \"2\": {\"mb\": 0, \"out\": 2}, \"3\": {\"mb\": 0, \"out\": 3}}, \"dataFormat_\": \"SEN169_FP16\", \"dsName_\": \"Tensor2\", \"dsType_\": \"OUTPUT\", \"layoutDimOrder_\": [\"mb\", \"out\"], \"ldsIdx_\": 2, \"maxDimSizes_\": [-1, -1], \"numWkSlicesPerDim_\": {\"mb\": 1, \"out\": 4}, \"op\": \"mul\", \"sdsc_file\": \"sdsc_0.json\", \"startAddressCoreCorelet_\": {\"data_\": {\"[0, 0, 0]\": \"0\", \"[1, 0, 0]\": \"0\", \"[2, 0, 0]\": \"0\", \"[3, 0, 0]\": \"0\"}, \"dim_prop_attr\": [{\"factor_\": 4, \"label_\": \"core\"}, {\"factor_\": 1, \"label_\": \"corelet\"}, {\"factor_\": 1, \"label_\": \"time\"}], \"dim_prop_func\": [{\"Map\": {}}, {\"Const\": {}}, {\"Const\": {}}]}, \"stickDimOrder_\": [\"out\"], \"stickSize_\": [64], \"top_key\": \"0_mul\", \"wordLength\": 2}", "source_name" : "buf0", "staged_destination" : "{\"component_\": \"KERNEL\", \"operand_read_index\": 1, \"scope\": \"matmul_transfer_loop\"}", "staging_scope" : "matmul_transfer_loop", "target_kernel_tensor" : "{\"allocation_name\": \"allocate-Tensor1_lx\", \"component_\": \"lx\", \"computeCoreIdToWkSlice_\": {\"0\": {\"in\": 0, \"mb\": 0, \"out\": 0}, \"1\": {\"in\": 0, \"mb\": 1, \"out\": 0}, \"2\": {\"in\": 0, \"mb\": 2, \"out\": 0}, \"3\": {\"in\": 0, \"mb\": 3, \"out\": 0}}, \"coordinateInfo_\": {\"in\": {\"elemArr\": 1, \"folds\": {\"dim_prop_attr\": [{\"factor_\": 1, \"label_\": \"core_fold\"}, {\"factor_\": 1, \"label_\": \"corelet_fold\"}, {\"factor_\": 1, \"label_\": \"row_fold\"}, {\"factor_\": 64, \"label_\": \"elem_arr_0\"}], \"dim_prop_func\": [{\"Affine\": {\"alpha_\": 64, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 0, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 0, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 1, \"beta_\": 0}}]}, \"padding\": \"nopad\", \"spatial\": 3, \"temporal\": 0}, \"out\": {\"elemArr\": 2, \"folds\": {\"dim_prop_attr\": [{\"factor_\": 1, \"label_\": \"core_fold\"}, {\"factor_\": 1, \"label_\": \"corelet_fold\"}, {\"factor_\": 1, \"label_\": \"row_fold\"}, {\"factor_\": 4, \"label_\": \"elem_arr_1\"}, {\"factor_\": 64, \"label_\": \"elem_arr_0\"}], \"dim_prop_func\": [{\"Affine\": {\"alpha_\": 256, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 0, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 0, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 64, \"beta_\": 0}}, {\"Affine\": {\"alpha_\": 1, \"beta_\": 0}}]}, \"padding\": \"nopad\", \"spatial\": 3, \"temporal\": 0}}, \"coreIdToWkSlice_\": {\"0\": {\"in\": 0, \"out\": 0}, \"1\": {\"in\": 0, \"out\": 1}, \"2\": {\"in\": 0, \"out\": 2}, \"3\": {\"in\": 0, \"out\": 3}}, \"dataFormat_\": \"SEN169_FP16\", \"dsName_\": \"Tensor1\", \"dsType_\": \"KERNEL\", \"layoutDimOrder_\": [\"in\", \"out\"], \"ldsIdx_\": 1, \"maxDimSizes_\": [-1, -1], \"numWkSlicesPerDim_\": {\"in\": 1, \"mb\": 4, \"out\": 1}, \"op\": \"batchmatmul\", \"sdsc_file\": \"sdsc_1.json\", \"startAddressCoreCorelet_\": {\"data_\": {\"[0, 0, 0]\": \"0\", \"[1, 0, 0]\": \"0\", \"[2, 0, 0]\": \"0\", \"[3, 0, 0]\": \"0\"}, \"dim_prop_attr\": [{\"factor_\": 4, \"label_\": \"core\"}, {\"factor_\": 1, \"label_\": \"corelet\"}, {\"factor_\": 1, \"label_\": \"time\"}], \"dim_prop_func\": [{\"Map\": {}}, {\"Const\": {}}, {\"Const\": {}}]}, \"stickDimOrder_\": [\"out\"], \"stickSize_\": [64], \"top_key\": \"1_batchmatmul\", \"wordLength\": 2}", "transfer_count" : "16", "unsupported_reason" : "matmul operand all-gather/broadcast metadata only; backend must stage materialization through the matmul transfer loop" }
+    }, 
+    "ldsShareInfo_" : [
+    ],
+    "prodConsList" : {
+    },
+    "coreIdToDscSchedule" : {
+      "0" : [[0 ,-1 ,0 ,1], [1 ,-1 ,0 ,1], [-1 ,0 ,0 ,0] ],
+      "1" : [[0 ,-1 ,0 ,1], [1 ,-1 ,0 ,1], [-1 ,0 ,0 ,0] ],
+      "2" : [[0 ,-1 ,0 ,1], [1 ,-1 ,0 ,1], [-1 ,0 ,0 ,0] ],
+      "3" : [[0 ,-1 ,0 ,1], [1 ,-1 ,0 ,1], [-1 ,0 ,0 ,0] ]
+    },
+    "target_" : "sentient",
+    "dynamicExecutionAddr_" : "0",
+    "dscs_" : [ 
+      {
+        "batchmatmul" : {
+          "numCoresUsed_" : 4,
+          "numCoreletsUsed_" : 1,
+          "coreIdsUsed_" : [ 0, 1, 2, 3 ],
+          "unpadN_" : {"name_" : "unpadn", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+          "N_" : {"name_" : "n", "in_" : 64, "out_" : 256, "mb_" : 16, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+          "dscN_" : {"name_" : "dscn", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+          "ChipD_" : {"name_" : "chipd", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+          "ChipletD_" : {"name_" : "chipletd", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+          "CoreD_" : {"name_" : "d", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+          "CoreletD_" : {"name_" : "coreletd", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+          "B_" : {"name_" : "b", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+          "T_" : {"name_" : "t", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+          "Tel_" : {"name_" : "tel", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+          "P_" : {"name_" : "p", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+          "Pel_" : {"name_" : "pel", "in_" : -1, "out_" : -1, "mb_" : -1, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "r_" : -1, "c_" : -1, "ij_" : -1, "rc_" : -1, "kij_" : -1, "sij_" : -1, "zij_" : -1, "si_" : -1, "sj_" : -1, "zi_" : -1, "zj_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+          "loopOrder_" : [],
+          "loopProperties_" : {
+          },
+          "auxLoopOrder_" : {
+          },
+          "coordinateMasking_" : {  },
+          "maskingConstId_" : -1,
+          "dimToSymbolMapping_" : {},
+          "numCoreletsUsed_DSC2_" : -1,
+          "dataStageParam_" : {
+            "0" : {
+              "ss_" : {"name_" : "core", "in_" : 64, "out_" : 256, "mb_" : 4, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}},
+              "el_" : {"name_" : "core", "in_" : 64, "out_" : 256, "mb_" : 4, "i_" : -1, "j_" : -1, "ki_" : -1, "kj_" : -1, "x_" : -1, "x1_" : -1, "y_" : -1, "symbolicDimInfo_" : {}, "maxSymbolicVolume_" : {}, "coreletSplit_" : {}, "rowSplit_" : {}, "peSfpSplit_" : {}, "paddingSizes_" : {}}
+            }
+          },
+          "constantInfo_" : {
+          },
+          "gtrIdsUsed_" : [],
+          "l0TetheredMode_" : false,
+          "scheduleTreeHeadDenId_" : 0,
+          "scheduleTree_" : [
+            {
+              "nodeType_" : "allocate",
+              "name_" : "allocate-Tensor0_hbm",
+              "prev_" : "",
+              "relevantComps_" : {
+              },
+              "ldsIdx_" : 0,
+              "constIdx_" : -1,
+              "tempStorageForCompute_" : "",
+              "component_" : "hbm",
+              "padding_" : {},
+              "layoutDimOrder_" : ["mb", "in"],
+              "maxDimSizes_" : [-1, -1],
+              "numBuffers_" : 1,
+              "startAddressCoreCorelet_" :  {
+                "dim_prop_func" : [
+                  { "Map" : {} },
+                  { "Const" : {} },
+                  { "Const" : {} }
+                ],
+                "dim_prop_attr" : [
+                  { "factor_" : 4, "label_" : "core" },
+                  { "factor_" : 1, "label_" : "corelet" },
+                  { "factor_" : 1, "label_" : "time" }
+                ],
+                "data_" : {
+                  "[0, 0, 0]" :"-9",
+                  "[1, 0, 0]" :"-10",
+                  "[2, 0, 0]" :"-11",
+                  "[3, 0, 0]" :"-12"
+                }
+              },
+              "isStartAddrSymbolic_" : 1,
+              "bufferOffsetCoreCorelet_" : {},
+              "backGapCore_" : {},
+              "indirectAllocType_" : "no_indirection",
+              "ignoreSymbolicVolumeLimits_" : 0,
+              "nonUnifiedAllocInHBM_" : 0,
+              "gapStickSpread_" : {},
+              "allocUsers_" : {  },
+              "coordinates_" : {
+                "coordInfo" : {
+                  "in" : {
+                    "spatial" : 3,
+                    "temporal" : 0,
+                    "elemArr" : 2,
+                    "padding" : "nopad",
+                    "folds" :  {
+                      "dim_prop_func" : [
+                        { "Affine" : {"alpha_" : 64, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 0, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 0, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 64, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 1, "beta_" : 0} }
+                      ],
+                      "dim_prop_attr" : [
+                        { "factor_" : 1, "label_" : "core_fold" },
+                        { "factor_" : 1, "label_" : "corelet_fold" },
+                        { "factor_" : 1, "label_" : "row_fold" },
+                        { "factor_" : 1, "label_" : "elem_arr_1" },
+                        { "factor_" : 64, "label_" : "elem_arr_0" }
+                      ]
+                    }
+                  }, 
+                  "mb" : {
+                    "spatial" : 3,
+                    "temporal" : 0,
+                    "elemArr" : 1,
+                    "padding" : "nopad",
+                    "folds" :  {
+                      "dim_prop_func" : [
+                        { "Affine" : {"alpha_" : 4, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 0, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 0, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 1, "beta_" : 0} }
+                      ],
+                      "dim_prop_attr" : [
+                        { "factor_" : 4, "label_" : "core_fold" },
+                        { "factor_" : 1, "label_" : "corelet_fold" },
+                        { "factor_" : 1, "label_" : "row_fold" },
+                        { "factor_" : 4, "label_" : "elem_arr_0" }
+                      ]
+                    }
+                  }
+                },
+                "coreIdToWkSlice_" : { 
+                } 
+              }
+            },
+            {
+              "nodeType_" : "allocate",
+              "name_" : "allocate-Tensor1_lx",
+              "prev_" : "",
+              "relevantComps_" : {
+              },
+              "ldsIdx_" : 1,
+              "constIdx_" : -1,
+              "tempStorageForCompute_" : "",
+              "component_" : "lx",
+              "padding_" : {},
+              "layoutDimOrder_" : ["in", "out"],
+              "maxDimSizes_" : [-1, -1],
+              "numBuffers_" : 1,
+              "startAddressCoreCorelet_" :  {
+                "dim_prop_func" : [
+                  { "Map" : {} },
+                  { "Const" : {} },
+                  { "Const" : {} }
+                ],
+                "dim_prop_attr" : [
+                  { "factor_" : 4, "label_" : "core" },
+                  { "factor_" : 1, "label_" : "corelet" },
+                  { "factor_" : 1, "label_" : "time" }
+                ],
+                "data_" : {
+                  "[0, 0, 0]" :"0",
+                  "[1, 0, 0]" :"0",
+                  "[2, 0, 0]" :"0",
+                  "[3, 0, 0]" :"0"
+                }
+              },
+              "isStartAddrSymbolic_" : 0,
+              "bufferOffsetCoreCorelet_" : {},
+              "backGapCore_" : {},
+              "indirectAllocType_" : "no_indirection",
+              "ignoreSymbolicVolumeLimits_" : 0,
+              "nonUnifiedAllocInHBM_" : 0,
+              "gapStickSpread_" : {},
+              "allocUsers_" : {  },
+              "coordinates_" : {
+                "coordInfo" : {
+                  "in" : {
+                    "spatial" : 3,
+                    "temporal" : 0,
+                    "elemArr" : 1,
+                    "padding" : "nopad",
+                    "folds" :  {
+                      "dim_prop_func" : [
+                        { "Affine" : {"alpha_" : 64, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 0, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 0, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 1, "beta_" : 0} }
+                      ],
+                      "dim_prop_attr" : [
+                        { "factor_" : 1, "label_" : "core_fold" },
+                        { "factor_" : 1, "label_" : "corelet_fold" },
+                        { "factor_" : 1, "label_" : "row_fold" },
+                        { "factor_" : 64, "label_" : "elem_arr_0" }
+                      ]
+                    }
+                  }, 
+                  "out" : {
+                    "spatial" : 3,
+                    "temporal" : 0,
+                    "elemArr" : 2,
+                    "padding" : "nopad",
+                    "folds" :  {
+                      "dim_prop_func" : [
+                        { "Affine" : {"alpha_" : 256, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 0, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 0, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 64, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 1, "beta_" : 0} }
+                      ],
+                      "dim_prop_attr" : [
+                        { "factor_" : 1, "label_" : "core_fold" },
+                        { "factor_" : 1, "label_" : "corelet_fold" },
+                        { "factor_" : 1, "label_" : "row_fold" },
+                        { "factor_" : 4, "label_" : "elem_arr_1" },
+                        { "factor_" : 64, "label_" : "elem_arr_0" }
+                      ]
+                    }
+                  }
+                },
+                "coreIdToWkSlice_" : { 
+                  "0" : { "in" : 0, "out" : 0 }, 
+                  "1" : { "in" : 0, "out" : 1 }, 
+                  "2" : { "in" : 0, "out" : 2 }, 
+                  "3" : { "in" : 0, "out" : 3 }
+                } 
+              }
+            },
+            {
+              "nodeType_" : "allocate",
+              "name_" : "allocate-Tensor2_hbm",
+              "prev_" : "",
+              "relevantComps_" : {
+              },
+              "ldsIdx_" : 2,
+              "constIdx_" : -1,
+              "tempStorageForCompute_" : "",
+              "component_" : "hbm",
+              "padding_" : {},
+              "layoutDimOrder_" : ["mb", "out"],
+              "maxDimSizes_" : [-1, -1],
+              "numBuffers_" : 1,
+              "startAddressCoreCorelet_" :  {
+                "dim_prop_func" : [
+                  { "Map" : {} },
+                  { "Const" : {} },
+                  { "Const" : {} }
+                ],
+                "dim_prop_attr" : [
+                  { "factor_" : 4, "label_" : "core" },
+                  { "factor_" : 1, "label_" : "corelet" },
+                  { "factor_" : 1, "label_" : "time" }
+                ],
+                "data_" : {
+                  "[0, 0, 0]" :"-13",
+                  "[1, 0, 0]" :"-14",
+                  "[2, 0, 0]" :"-15",
+                  "[3, 0, 0]" :"-16"
+                }
+              },
+              "isStartAddrSymbolic_" : 1,
+              "bufferOffsetCoreCorelet_" : {},
+              "backGapCore_" : {},
+              "indirectAllocType_" : "no_indirection",
+              "ignoreSymbolicVolumeLimits_" : 0,
+              "nonUnifiedAllocInHBM_" : 0,
+              "gapStickSpread_" : {},
+              "allocUsers_" : {  },
+              "coordinates_" : {
+                "coordInfo" : {
+                  "out" : {
+                    "spatial" : 3,
+                    "temporal" : 0,
+                    "elemArr" : 2,
+                    "padding" : "nopad",
+                    "folds" :  {
+                      "dim_prop_func" : [
+                        { "Affine" : {"alpha_" : 256, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 0, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 0, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 64, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 1, "beta_" : 0} }
+                      ],
+                      "dim_prop_attr" : [
+                        { "factor_" : 1, "label_" : "core_fold" },
+                        { "factor_" : 1, "label_" : "corelet_fold" },
+                        { "factor_" : 1, "label_" : "row_fold" },
+                        { "factor_" : 4, "label_" : "elem_arr_1" },
+                        { "factor_" : 64, "label_" : "elem_arr_0" }
+                      ]
+                    }
+                  }, 
+                  "mb" : {
+                    "spatial" : 3,
+                    "temporal" : 0,
+                    "elemArr" : 1,
+                    "padding" : "nopad",
+                    "folds" :  {
+                      "dim_prop_func" : [
+                        { "Affine" : {"alpha_" : 4, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 0, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 0, "beta_" : 0} },
+                        { "Affine" : {"alpha_" : 1, "beta_" : 0} }
+                      ],
+                      "dim_prop_attr" : [
+                        { "factor_" : 4, "label_" : "core_fold" },
+                        { "factor_" : 1, "label_" : "corelet_fold" },
+                        { "factor_" : 1, "label_" : "row_fold" },
+                        { "factor_" : 4, "label_" : "elem_arr_0" }
+                      ]
+                    }
+                  }
+                },
+                "coreIdToWkSlice_" : { 
+                } 
+              }
+            }
+          ],
+          "primaryDsInfo_" : {
+            "INPUT" : {
+              "layoutDimOrder_" : ["mb", "in"],
+              "stickDimOrder_" : ["in"],
+              "stickSize_" : [64],
+              "stickRepl_" : [1]
+            },
+            "OUTPUT" : {
+              "layoutDimOrder_" : ["mb", "out"],
+              "stickDimOrder_" : ["out"],
+              "stickSize_" : [64],
+              "stickRepl_" : [1]
+            },
+            "KERNEL" : {
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "stickSize_" : [64],
+              "stickRepl_" : [1]
+            }
+          },
+          "pdsRelation_" : { "isPdsReuse" : 1 },
+          "labeledDs_" : [
+            {
+              "ldsIdx_" : 0,
+              "dsName_" : "Tensor0",
+              "dsType_" : "INPUT",
+              "segment_" : "output",
+              "isStatic_" : 0,
+              "isFirstUse_" : 1,
+              "isExternal_" : 0,
+              "scale_" : [1, 1],
+              "density_" : [1, 1],
+              "wordLength" : 2,
+              "dataFormat_" : "SEN169_FP16",
+              "level" : 0,
+              "scaledLdsCategory_" : "regular_tensor",
+              "mxInfo_" : { "dim" : "undefined", "blkSize" : 0, "relatedLdsIdx" : -1 },
+              "memOrg_" : {
+                  "hbm" : { "isPresent" : 1, "isPadded" : 0, "isZeroPadded" : 0, "zpadGapFront" : [ 0, 0 ], "gapPerDim" : {  }, "dsOffset" : 0, "allocateNode_" : "allocate-Tensor0_hbm" },
+                  "lx" : { "isPresent" : 1, "isPadded" : 0, "isZeroPadded" : 0, "zpadGapFront" : [ 0, 0 ], "gapPerDim" : {  }, "dsOffset" : 0, "allocateNode_" : "" }
+              },
+              "dataTransfers_" : [
+              ],
+              "hbmStartAddress_" : -1,
+              "lxStartAddress_" : -1,
+              "hbmSize_" : 18446744073709551615,
+              "lxSize_" : 18446744073709551615,
+              "lxBufferSize_" : 18446744073709551615,
+              "totSlicesPerDim_" : {  },
+              "coreStateInit_" : [
+              ]
+            },
+            {
+              "ldsIdx_" : 1,
+              "dsName_" : "Tensor1",
+              "dsType_" : "KERNEL",
+              "segment_" : "output",
+              "isStatic_" : 0,
+              "isFirstUse_" : 1,
+              "isExternal_" : 0,
+              "scale_" : [1, 1],
+              "density_" : [1, 1],
+              "wordLength" : 2,
+              "dataFormat_" : "SEN169_FP16",
+              "level" : 0,
+              "scaledLdsCategory_" : "regular_tensor",
+              "mxInfo_" : { "dim" : "undefined", "blkSize" : 0, "relatedLdsIdx" : -1 },
+              "memOrg_" : {
+                  "lx" : { "isPresent" : 1, "isPadded" : 0, "isZeroPadded" : 0, "zpadGapFront" : [ 0, 0 ], "gapPerDim" : {  }, "dsOffset" : 0, "allocateNode_" : "allocate-Tensor1_lx" }
+              },
+              "dataTransfers_" : [
+              ],
+              "hbmStartAddress_" : -1,
+              "lxStartAddress_" : -1,
+              "hbmSize_" : 18446744073709551615,
+              "lxSize_" : 18446744073709551615,
+              "lxBufferSize_" : 18446744073709551615,
+              "totSlicesPerDim_" : {  },
+              "coreStateInit_" : [
+              ]
+            },
+            {
+              "ldsIdx_" : 2,
+              "dsName_" : "Tensor2",
+              "dsType_" : "OUTPUT",
+              "segment_" : "output",
+              "isStatic_" : 0,
+              "isFirstUse_" : 1,
+              "isExternal_" : 0,
+              "scale_" : [1, 1],
+              "density_" : [1, 1],
+              "wordLength" : 2,
+              "dataFormat_" : "SEN169_FP16",
+              "level" : 0,
+              "scaledLdsCategory_" : "regular_tensor",
+              "mxInfo_" : { "dim" : "undefined", "blkSize" : 0, "relatedLdsIdx" : -1 },
+              "memOrg_" : {
+                  "hbm" : { "isPresent" : 1, "isPadded" : 0, "isZeroPadded" : 0, "zpadGapFront" : [ 0, 0 ], "gapPerDim" : {  }, "dsOffset" : 0, "allocateNode_" : "allocate-Tensor2_hbm" },
+                  "lx" : { "isPresent" : 1, "isPadded" : 0, "isZeroPadded" : 0, "zpadGapFront" : [ 0, 0 ], "gapPerDim" : {  }, "dsOffset" : 0, "allocateNode_" : "" }
+              },
+              "dataTransfers_" : [
+              ],
+              "hbmStartAddress_" : -1,
+              "lxStartAddress_" : -1,
+              "hbmSize_" : 18446744073709551615,
+              "lxSize_" : 18446744073709551615,
+              "lxBufferSize_" : 18446744073709551615,
+              "totSlicesPerDim_" : {  },
+              "coreStateInit_" : [
+              ]
+            }
+          ],
+          "computeOp_" : [
+            {
+              "exUnit" : "pt",
+              "opFuncName" : "batchmatmul",
+              "attributes_" : {
+                "dataFormat_" : "SEN169_FP16",
+                "fidelity_" : "regular"
+              },
+              "location" : "Inner",
+              "auxLoopName" : "",
+              "isAtMainLoop" : 1,
+              "isAtTop" : 1,
+              "level" : 0,
+              "coreExclude" : [  ],
+              "coreClExclude" : [  ],
+              "opConsts" : { },
+              "inputLabeledDs" : ["Tensor0-idx0", "Tensor1-idx1"],
+              "interimLabeledDs" : [],
+              "outputLabeledDs" : ["Tensor2-idx2"],
+              "indirectAccessIndexLabeledDs" : []
+            }
+          ],
+          "pcfg_" : [
+          ],
+          "target_" : "undefined"
+        }
+      }
+    ],
+    "datadscs_" : [ 
+      {
+        "1_batchmatmul-Tensor1-MatmulOperandGather-chunk0" : {
+          "foldProps_" : [
+            {"factor_" : 1, "label_" : "time"}
+          ],
+          "coreIdsUsed_": [ 0, 1, 2, 3 ],
+          "dimPool_": ["in", "out"],
+          "primaryDs_": [
+            {
+              "name_" : "activation",
+              "dimNames" : ["in", "out"]
+            }
+          ],
+          "labeledDs_": [
+            {
+              "ldsName_" : "Tensor1-MatmulOperandGather-inp",
+              "pdsName_" : "activation",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 64, "out" : 256},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [64,0] ], "out" : [ [256,0] ]},
+              "totElements" : 16384,
+              "PieceInfo": [
+                {
+                  "key_" : "src0_0",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["0"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "src1_8192",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["0"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "src2_16384",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["0"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "src3_24576",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["0"]
+                        }
+                      } }
+                  ]
+                }
+              ],
+              "hbmSize_" : -1,
+              "hbmStartAddress_" : "-1",
+              "lxSize_" : 0,
+              "lxStartAddress_" : {"0" : 0, "1" : 0, "2" : 0, "3" : 0}
+            },
+            {
+              "ldsName_" : "Tensor1-MatmulOperandGather-tmp",
+              "pdsName_" : "activation",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 64, "out" : 256},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [64,0] ], "out" : [ [256,0] ]},
+              "totElements" : 16384,
+              "PieceInfo": [
+                {
+                  "key_" : "dst0_0_0",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["32768"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst0_1_1",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["32768"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst0_2_2",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["32768"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst0_3_3",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["32768"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst1_0_4",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["40960"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst1_1_5",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["40960"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst1_2_6",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["40960"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst1_3_7",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["40960"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst2_0_8",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["49152"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst2_1_9",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["49152"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst2_2_10",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["49152"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst2_3_11",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["49152"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst3_0_12",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["57344"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst3_1_13",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["57344"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst3_2_14",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["57344"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst3_3_15",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["57344"]
+                        }
+                      } }
+                  ]
+                }
+              ],
+              "hbmSize_" : -1,
+              "hbmStartAddress_" : "-1",
+              "lxSize_" : 0,
+              "lxStartAddress_" : {"0" : 32768, "1" : 32768, "2" : 32768, "3" : 32768}
+            }
+          ],
+          "op" : {
+            "name" : "STCDPOpLx",
+            "gtrIdsUsed" : [],
+            "useUnicast" : 0,
+            "enOptMC" : 0,
+            "is_SRQ_HW_Bug_prone_" : 0,
+            "maxBeforeTransactions_" : 0,
+            "split_factor_per_dim" : {},
+            "forceModeMC" : {"force" : 0, "val" : 0},
+            "prodConsList" : {
+            },
+            "idealStWindowToDtKey" : {
+            },
+            "idealStWindowToContention" : {
+            },
+            "coreIDtoTrRank" : {},
+            "segCoreGroups" : [],
+            "inferredSegGroups" : [],
+            "gateLXCodeGen" : 0,
+            "enSubPieceReuse" : 0,
+            "prodCoreGpList" : {
+            },
+            "interLeaveDtTableIdx" : [],
+            "pSubPiece" : [
+            ],
+            "cSubPiece" : [
+            ],
+            "dtTable_" : [
+            ],
+            "coreIDtoDtKey_L3SU" : [
+            ],
+            "coreIDtoDtKey_L3LU" : [
+            ],
+            "coreIDtoDtKey_LX" : [
+            ]
+          },
+          "pcfg_" : [
+          ],
+          "target_" : "sentient"
+        }
+      },
+      {
+        "1_batchmatmul-Tensor1-MatmulOperandRestickify-chunk0" : {
+          "foldProps_" : [
+            {"factor_" : 1, "label_" : "time"}
+          ],
+          "coreIdsUsed_": [ 0, 1, 2, 3 ],
+          "dimPool_": ["in", "out"],
+          "primaryDs_": [
+            {
+              "name_" : "dataIN",
+              "dimNames" : ["in", "out"]
+            },
+            {
+              "name_" : "dataOUT",
+              "dimNames" : ["in", "out"]
+            }
+          ],
+          "labeledDs_": [
+            {
+              "ldsName_" : "Tensor1-MatmulOperandRestickify-inp",
+              "pdsName_" : "dataIN",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 64, "out" : 256},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [64,0] ], "out" : [ [256,0] ]},
+              "totElements" : 16384,
+              "PieceInfo": [
+                {
+                  "key_" : "dst0_0_0",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["32768"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst0_1_1",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["32768"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst0_2_2",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["32768"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst0_3_3",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["32768"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst1_0_4",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["40960"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst1_1_5",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["40960"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst1_2_6",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["40960"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst1_3_7",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["40960"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst2_0_8",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["49152"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst2_1_9",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["49152"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst2_2_10",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["49152"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst2_3_11",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["49152"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst3_0_12",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["57344"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst3_1_13",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["57344"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst3_2_14",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["57344"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst3_3_15",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["57344"]
+                        }
+                      } }
+                  ]
+                }
+              ],
+              "hbmSize_" : -1,
+              "hbmStartAddress_" : "-1",
+              "lxSize_" : 0,
+              "lxStartAddress_" : {"0" : 32768, "1" : 32768, "2" : 32768, "3" : 32768}
+            },
+            {
+              "ldsName_" : "Tensor1",
+              "pdsName_" : "dataOUT",
+              "wordLength" : 2,
+              "dataformat" : "SEN169_FP16",
+              "isExternal_" : 0,
+              "segment_" : "output",
+              "layoutDimOrder_" : ["in", "out"],
+              "stickDimOrder_" : ["out"],
+              "dimToLayoutSize_" : {"in" : 64, "out" : 256},
+              "dimToStickSize_" : {"out" : 64},
+              "validGap_" : {"in" : [ [64,0] ], "out" : [ [256,0] ]},
+              "totElements" : 16384,
+              "PieceInfo": [
+                {
+                  "key_" : "dst0_0_0",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["0"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst0_1_1",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["0"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst0_2_2",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["0"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst0_3_3",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 0},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["0"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst1_0_4",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["8192"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst1_1_5",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["8192"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst1_2_6",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["8192"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst1_3_7",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 64},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["8192"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst2_0_8",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["16384"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst2_1_9",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["16384"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst2_2_10",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["16384"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst2_3_11",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 128},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["16384"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst3_0_12",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [0], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["24576"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst3_1_13",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [1], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["24576"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst3_2_14",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [2], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["24576"]
+                        }
+                      } }
+                  ]
+                },
+                {
+                  "key_" : "dst3_3_15",
+                  "dimToStartCordinate" : {"in" : 0, "out" : 192},
+                  "dimToSize_" : {"in" : 64, "out" : 64},
+                  "validGap_" : {"in" : [ [64,0] ], "out" : [ [64,0] ]},
+                  "PlacementInfo" : [
+                    { "type":"lx", "memId": [3], "startAddr":  {
+                        "dim_prop_func" : [
+                          { "Map" : {} }
+                        ],
+                        "dim_prop_attr" : [
+                          { "factor_" : 1, "label_" : "time" }
+                        ],
+                        "data_" : {
+                          "[0]" :["24576"]
+                        }
+                      } }
+                  ]
+                }
+              ],
+              "hbmSize_" : -1,
+              "hbmStartAddress_" : "-1",
+              "lxSize_" : 0,
+              "lxStartAddress_" : {"0" : 0, "1" : 0, "2" : 0, "3" : 0}
+            }
+          ],
+          "op" : {
+            "name" : "ReStickifyOpLx",
+            "gtrIdsUsed" : [],
+            "stickTransfers" : [
+            ],
+            "genConstIntr" : 0,
+            "useImm16" : 0,
+            "OpConsts" : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            "lxAddrOpConsts" : {},
+            "reqGapInsertion" : 0,
+            "iStickDimToOffset" : {
+            },
+            "oStickDimToOffset" : {
+            }
+          },
+          "pcfg_" : [
+          ],
+          "target_" : "sentient"
+        }
+      }
+    ],
+    "dimToSymbolMappingOpcodeCorrection_" : {  },
+    "inputSymbolsAndTags_" : {  },
+    "symbolDefinitions_" : {
+    }
+  }
+}

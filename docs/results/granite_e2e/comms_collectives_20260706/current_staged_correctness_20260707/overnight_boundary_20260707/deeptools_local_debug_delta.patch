@@ -1,0 +1,231 @@
+diff --git a/dcc/src/Conversion/PCFGToDataflowIR/PCFGToDataflowIR.cpp b/dcc/src/Conversion/PCFGToDataflowIR/PCFGToDataflowIR.cpp
+index 134d3a69e..1bcb37b2b 100644
+--- a/dcc/src/Conversion/PCFGToDataflowIR/PCFGToDataflowIR.cpp
++++ b/dcc/src/Conversion/PCFGToDataflowIR/PCFGToDataflowIR.cpp
+@@ -7,6 +7,9 @@
+ 
+ #include <util/utils.h>
+ 
++#include <cstdlib>
++#include <iostream>
++
+ #include "SenPcfgUtils.hpp"
+ #include "dialects/Uniform/UniformOps.hpp"
+ #include "dialects/VectorChain/VectorChainOps.hpp"
+@@ -3647,6 +3650,44 @@ void PCFGToDataflowIR::createRingTransferOp(
+   int num_memref_indices = stride_map_operands.size();
+   for (auto val : time_operands) stride_map_operands.push_back(val);
+ 
++  if (pcfg_node->srcDest.src_ == SenComponents::LX &&
++      pcfg_node->srcDest.dst_ == SenComponents::LX) {
++    auto src_addr = createAddrCondOps(
++        ls_meta_builder, pcfgir, pcfg_node->SrcStartCondAndVal(),
++        pcfg_node->SrcStartAddr(), IterArgsInfo::AddrType::SRC,
++        pcfg_node->name, static_cast<const SenPcfgNode*>(pcfg_node),
++        1.0 / word_length);
++    auto dst_addr = createAddrCondOps(
++        ls_meta_builder, pcfgir, pcfg_node->DestStartCondAndVal(),
++        pcfg_node->DestStartAddr(), IterArgsInfo::AddrType::DEST,
++        pcfg_node->name, static_cast<const SenPcfgNode*>(pcfg_node),
++        1.0 / word_length);
++    auto src_mem_view = createMemoryView1D(
++        ls_meta_builder, pcfgir, pcfgir.localUnit().at(SenComponents::LX),
++        stick_type, src_addr);
++    auto dst_mem_view = createMemoryView1D(
++        ls_meta_builder, pcfgir, pcfgir.localUnit().at(SenComponents::LX),
++        stick_type, dst_addr);
++
++    llvm::SmallVector<mlir::Value, 4> local_stride_operands;
++    for (int i = 0; i < num_memref_indices; ++i)
++      local_stride_operands.push_back(stride_map_operands[i]);
++    for (int i = 0; i < num_memref_indices; ++i)
++      local_stride_operands.push_back(stride_map_operands[i]);
++    for (auto val : time_operands) local_stride_operands.push_back(val);
++
++    auto dir = mlir::agen::AgenRoutingDirectionAttr::get(
++        get_context(), mlir::agen::AgenRoutingDirection::PseudoRandom);
++    load_store_builder.create<mlir::agen::CompositeLoadAndStoreOp>(
++        loc(), src_mem_view, dst_mem_view,
++        load_store_builder.getStringAttr(pcfg_node->name), stride_map,
++        stride_map, local_stride_operands, vec_type, ld_constraint,
++        identity_map, ld_constraint, identity_map, time_set, time_order,
++        time_addr_map, time_addr_map, num_memref_indices,
++        num_memref_indices, 0, dir);
++    return;
++  }
++
+   if (pcfg_node->srcDest.dst_ == SenComponents::LX) {
+     // L3LU
+     DT_CHECK(pcfg_node->coreIdForRing.size() == 1);
+diff --git a/dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp b/dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp
+index 50e108cb5..db89cbd04 100644
+--- a/dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp
++++ b/dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp
+@@ -854,14 +854,17 @@ void RegisterTypeAssignmentPass::initializeAssignmentForAnOperation(
+ 
+     if (!gather_scatter.isValid())
+       DT_CHECK(((src_unit_type == LX && dst_unit_type == HBM) ||
+-                (src_unit_type == HBM && dst_unit_type == LX)) &&
+-               "expected transfers between LX and HBM");
++                (src_unit_type == HBM && dst_unit_type == LX) ||
++                (src_unit_type == LX && dst_unit_type == LX)) &&
++               "expected transfers between LX/HBM or local LX copies");
+     if (gather_scatter.isGather())
+       DT_CHECK(current_unit_type_ == L3LU);
+     else if (gather_scatter.isScatter())
+       DT_CHECK(current_unit_type_ == L3SU);
+     else
+-      DT_CHECK(((src_unit_type == LX && current_unit_type_ == L3SU) ||
++      DT_CHECK(((src_unit_type == LX && dst_unit_type == LX &&
++                 current_unit_type_ == L3LU) ||
++                (src_unit_type == LX && current_unit_type_ == L3SU) ||
+                 (src_unit_type == HBM && current_unit_type_ == L3LU)) &&
+                "unexpected producer/consumer unit");
+     RegisterLocales src_locale = Unknown, dst_locale = Unknown;
+diff --git a/ddc/ddc_fold.cpp b/ddc/ddc_fold.cpp
+index dacbb0858..752835c09 100644
+--- a/ddc/ddc_fold.cpp
++++ b/ddc/ddc_fold.cpp
+@@ -17,7 +17,8 @@ static bool envFlagEnabled(const char* name) {
+ 
+ static bool matmulOperandKernelNeighborRelayoutEnabled() {
+   return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT") ||
+-         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") ||
++         envFlagEnabled("DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY");
+ }
+ 
+ #define FOLD_POS_CORE static_cast<int>(dsc2::CoordinateFoldPosition::Core)
+@@ -27,15 +28,53 @@ static bool matmulOperandKernelNeighborRelayoutEnabled() {
+ 
+ using dsc2::LoopDistributionInfo;
+ 
++bool isLxNeighborTransfer(const dsc2::ScheduleNode *node) {
++  if (node == nullptr || node->nodeType_ != dsc2::ScheduleNode::TRANSFER) {
++    return false;
++  }
++  const auto *transferNode = static_cast<const dsc2::TransferNode *>(node);
++  return transferNode->name_.find("_lx_neighbor") != std::string::npos ||
++         !transferNode->lxNeighborRingTransfers_.empty();
++}
++
++bool isMatmulKernelNeighborLxToPtRowTransfer(
++    const DesignSpaceConfig *currDsc, const dsc2::ScheduleNode *node) {
++  if (!matmulOperandKernelNeighborRelayoutEnabled()) {
++    return false;
++  }
++  if (currDsc == nullptr || node == nullptr ||
++      node->nodeType_ != dsc2::ScheduleNode::TRANSFER) {
++    return false;
++  }
++  const auto *transferNode = static_cast<const dsc2::TransferNode *>(node);
++  if (transferNode->name_.find("transfer_lds") == std::string::npos ||
++      transferNode->name_.find("src:lxlu") == std::string::npos ||
++      transferNode->name_.find("dst:ptrow") == std::string::npos) {
++    return false;
++  }
++  const int srcLds = transferNode->srcLdsAndLoopOffsets_.myLdsIdx_;
++  if (std::getenv("DEEPTOOLS_LX_NEIGHBOR_FOLD_DIAGNOSTIC") != nullptr) {
++    std::cerr << "[matmul_kernel_neighbor_lx_to_ptrow] node="
++              << transferNode->name_ << " srcLds=" << srcLds
++              << " labeledDsSize=" << currDsc->labeledDs_.size();
++    if (srcLds >= 0 && static_cast<size_t>(srcLds) < currDsc->labeledDs_.size()) {
++      std::cerr << " srcDsType="
++                << DesignSpaceConfig::dsTypeToString.at(
++                       currDsc->labeledDs_.at(srcLds).dsType_);
++    }
++    std::cerr << "\n";
++  }
++  return srcLds >= 0 && static_cast<size_t>(srcLds) < currDsc->labeledDs_.size() &&
++         currDsc->labeledDs_.at(srcLds).dsType_ == DsTypes::KERNEL;
++}
++
+ bool isFoldedLxNeighborAllocation(const dsc2::AllocateNode *allocNode) {
+   if (allocNode == nullptr || allocNode->component_ != SenComponents::LX ||
+       !allocNode->allocateCoordinates_.foldConstructed()) {
+     return false;
+   }
+   for (const auto &[userNode, _] : allocNode->allocUsers_) {
+-    if (userNode != nullptr &&
+-        userNode->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
+-        userNode->name_.find("_lx_neighbor") != std::string::npos) {
++    if (isLxNeighborTransfer(userNode)) {
+       return true;
+     }
+   }
+@@ -59,10 +98,7 @@ bool isMatmulOperandKernelNeighborAllocation(
+   return std::any_of(
+       allocNode->allocUsers_.begin(), allocNode->allocUsers_.end(),
+       [](const auto &userAndCount) {
+-        const auto *user = userAndCount.first;
+-        return user != nullptr &&
+-               user->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
+-               user->name_.find("_lx_neighbor") != std::string::npos;
++        return isLxNeighborTransfer(userAndCount.first);
+       });
+ }
+ 
+@@ -2913,6 +2949,8 @@ bool Ddc::buildFoldForAllocation(
+       // Verification.
+       if (!isFoldedLxNeighborAllocation(allocNode) &&
+           !isMatmulOperandKernelNeighborAllocation(currDsc, allocNode) &&
++          !isLxNeighborTransfer(refNode) &&
++          !isMatmulKernelNeighborLxToPtRowTransfer(currDsc, refNode) &&
+           !allocNode->allocateCoordinates_.coreIdToWkSlice_.empty() &&
+           refNode->nodeType_ == dsc2::ScheduleNode::TRANSFER) {
+         dsc2::TransferNode *transferNode =
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index c4086c7fa..471353f78 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -1161,6 +1161,7 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+   gatherDdsc.opName = OpFuncs::STCDPOpLx;
+   gatherDdsc.op = new STCDPOpLx;
+   gatherDdsc.op->name = OpFuncs::STCDPOpLx;
++  static_cast<STCDPOpLx*>(gatherDdsc.op)->enSubPieceReuse = false;
+   gatherDdsc.primaryDs_["activation"].name_ = "activation";
+   gatherDdsc.target_ = sdsc->target_;
+   gatherDdsc.foldProps_.push_back(
+@@ -1380,10 +1381,8 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+   for (const auto& piece : gatheredPieceSpecs) {
+     const auto finalPieceAddr =
+         finalAddressByCore.at(piece.coreId) +
+-        localDensePieceOffsetBytes(restickifyOut,
+-                                   finalShardSizeByCore.at(piece.coreId),
+-                                   finalShardStartByCore.at(piece.coreId),
+-                                   piece.dimToStart);
++        densePieceOffsetBytes(restickifyOut, piece.dimToSize,
++                              piece.dimToStart);
+     const auto physicalOutDimToSize =
+         expandPieceToStickSize(restickifyOut, piece.dimToSize);
+     addLxPieceWithValidSize(restickifyOut, piece.key, piece.coreId,
+@@ -1442,6 +1441,7 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     chunkGatherDdsc.dscName_ += "-chunk" + std::to_string(chunkIdx);
+     chunkGatherDdsc.op = new STCDPOpLx;
+     chunkGatherDdsc.op->name = OpFuncs::STCDPOpLx;
++    static_cast<STCDPOpLx*>(chunkGatherDdsc.op)->enSubPieceReuse = false;
+     chunkGatherDdsc.labeledDs_.at(0).pieces_.clear();
+     chunkGatherDdsc.labeledDs_.at(1).pieces_.clear();
+ 
+@@ -1499,7 +1499,7 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+   }
+ 
+   auto targetAllocateCoreIdToSlice =
+-      jsonCoreIdToSliceForKey(targetTensor, "computeCoreIdToWkSlice_");
++      jsonCoreIdToSliceForKey(targetTensor, "coreIdToWkSlice_");
+   if (targetAllocateCoreIdToSlice.empty()) {
+     targetAllocateCoreIdToSlice = targetCoreIdToSlice;
+   }
+@@ -1535,6 +1535,12 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+       for (auto& lbr : coreState.lbrInit_) lbr += delta;
+     }
+   }
++  if (const char* dumpDir =
++          std::getenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_POST_SDSC_DIR")) {
++    const std::string outputPath =
++        std::string(dumpDir) + "/" + sdsc->name_ + "_post_gather_restickify.json";
++    sdsc->exportJson(outputPath, /*verbosity=*/4);
++  }
+   return true;
+ }
+ 
