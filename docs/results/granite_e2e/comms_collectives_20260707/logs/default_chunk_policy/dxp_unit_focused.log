@@ -1,0 +1,25 @@
+Note: Google Test filter = *CoreWorkDivIncomptLxRelayout*:*MatmulOperandBroadcast*:*PartialViewGather*
+[==========] Running 8 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 8 tests from DxpTestFixture
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed
+[       OK ] DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed (57 ms)
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastFailsClosed
+[       OK ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastFailsClosed (11 ms)
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastFailsClosed
+[       OK ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastFailsClosed (11 ms)
+[ RUN      ] DxpTestFixture.PartialViewGatherBoundedOffsetRelayoutCompiles
+[       OK ] DxpTestFixture.PartialViewGatherBoundedOffsetRelayoutCompiles (1756 ms)
+[ RUN      ] DxpTestFixture.PartialViewGatherMissingSourceOffsetFailsClosed
+[       OK ] DxpTestFixture.PartialViewGatherMissingSourceOffsetFailsClosed (9 ms)
+[ RUN      ] DxpTestFixture.PartialViewGatherInvalidSourceOffsetFailsClosed
+[       OK ] DxpTestFixture.PartialViewGatherInvalidSourceOffsetFailsClosed (8 ms)
+[ RUN      ] DxpTestFixture.CoreWorkDivIncomptLxRelayout
+[       OK ] DxpTestFixture.CoreWorkDivIncomptLxRelayout (37 ms)
+[ RUN      ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality
+[       OK ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality (128 ms)
+[----------] 8 tests from DxpTestFixture (2020 ms total)
+
+[----------] Global test environment tear-down
+[==========] 8 tests from 1 test suite ran. (2020 ms total)
+[  PASSED  ] 8 tests.

@@ -1,0 +1,2 @@
+1:terminate called after throwing an instance of 'DtException'
+2:  what():  DtException: Program verification failed for core 0 node 3_batchmatmul

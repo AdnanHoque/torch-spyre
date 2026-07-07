@@ -1,0 +1,23 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 358e0c804..03d8a41f3 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -1237,11 +1237,16 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+     finalShardStartByCore[dstCore] = finalShardStart;
+   }
+ 
+-  const int maxGatherPiecesPerCorePerChunk = 4;
++  const int debugMaxGatherPiecesPerCorePerChunk = getPositiveDebugEnvInt(
++      "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_PIECES_PER_CORE_PER_CHUNK");
++  const int maxGatherPiecesPerCorePerChunk =
++      debugMaxGatherPiecesPerCorePerChunk > 0
++          ? debugMaxGatherPiecesPerCorePerChunk
++          : 32;
+   const int debugMaxGatherPiecesPerChunk = getPositiveDebugEnvInt(
+       "DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_PIECES_PER_CHUNK");
+   const int maxGatherPiecesPerChunk =
+-      debugMaxGatherPiecesPerChunk > 0 ? debugMaxGatherPiecesPerChunk : 32;
++      debugMaxGatherPiecesPerChunk > 0 ? debugMaxGatherPiecesPerChunk : 256;
+   std::map<std::pair<int, int>, int64_t> gatherTempAddrByCoreSlot;
+   std::map<std::pair<int, int>, int64_t> gatherTempBytesByCoreSlot;
+   std::map<int, int> gatherPieceOrdinalByCore;

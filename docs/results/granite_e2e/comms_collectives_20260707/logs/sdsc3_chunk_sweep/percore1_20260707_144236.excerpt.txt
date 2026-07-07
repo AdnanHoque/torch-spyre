@@ -1,0 +1,7 @@
+21178:Max IBUFF(128) Current IBUFF(443) for unit:
+42313:Max IBUFF(128) Current IBUFF(403) for unit:
+55385:Max IBUFF(256) Current IBUFF(334) for unit:
+68975:Max IBUFF(256) Current IBUFF(346) for unit:
+68977:error: Unable to lower successfully the module for sdsc: 3_batchmatmul
+68978:terminate called after throwing an instance of 'DtException'
+68979:  what():  DtException: DCC causes the compilation failure, file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcc/src/Driver/dcc.cpp line 563
