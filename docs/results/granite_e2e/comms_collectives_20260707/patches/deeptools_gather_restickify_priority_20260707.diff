@@ -1,0 +1,63 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index c4086c7fa..0d395bc18 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -1966,27 +1966,10 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+         continue;
+       }
+-      if (shouldUseLoopScopedMatmulOperandFetch(
+-              sdsc, effectiveMatmulBroadcastHook)) {
+-        std::string markerReason;
+-        if (!markMatmulOperandBroadcastKernelNeighbor(dldsc, lds,
+-                                                      &markerReason)) {
+-          emitMatmulOperandBroadcastPlanArtifact(
+-              sdsc, lds, ps, effectiveMatmulBroadcastHook,
+-              /*kernelNeighborLowered=*/false,
+-              /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+-          DT_CHECK_MSG(false,
+-                       "matmul_operand_broadcast kernel-neighbor marker "
+-                       "failed: " +
+-                           markerReason);
+-        }
+-        emitMatmulOperandBroadcastPlanArtifact(
+-            sdsc, lds, ps, effectiveMatmulBroadcastHook,
+-            /*kernelNeighborLowered=*/true,
+-            /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+-        continue;
+-      }
+-      if (matmulOperandGatherRestickifyEnabled()) {
++      if (matmulOperandGatherRestickifyEnabled() &&
++          effectiveMatmulBroadcastHook.plan.communicationPattern ==
++              "all_gather_replicate" &&
++          effectiveMatmulBroadcastHook.plan.requiresLayoutConversion) {
+         std::string materializationReason;
+         if (!attachMatmulOperandBroadcastGatherThenRestickify(
+                 sdsc, lds, effectiveMatmulBroadcastHook, memTrackers, ps,
+@@ -2007,6 +1990,26 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             /*gatherRestickifyLowered=*/true, matmulBroadcastDebugContext);
+         continue;
+       }
++      if (shouldUseLoopScopedMatmulOperandFetch(
++              sdsc, effectiveMatmulBroadcastHook)) {
++        std::string markerReason;
++        if (!markMatmulOperandBroadcastKernelNeighbor(dldsc, lds,
++                                                      &markerReason)) {
++          emitMatmulOperandBroadcastPlanArtifact(
++              sdsc, lds, ps, effectiveMatmulBroadcastHook,
++              /*kernelNeighborLowered=*/false,
++              /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
++          DT_CHECK_MSG(false,
++                       "matmul_operand_broadcast kernel-neighbor marker "
++                       "failed: " +
++                           markerReason);
++        }
++        emitMatmulOperandBroadcastPlanArtifact(
++            sdsc, lds, ps, effectiveMatmulBroadcastHook,
++            /*kernelNeighborLowered=*/true,
++            /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
++        continue;
++      }
+       if (std::getenv("DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST") ==
+           nullptr) {
+         emitMatmulOperandBroadcastPlanArtifact(

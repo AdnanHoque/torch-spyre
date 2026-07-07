@@ -1,0 +1,28 @@
+Note: Google Test filter = *CoreWorkDivIncomptLxRelayout*:*MatmulOperandBroadcast*
+[==========] Running 5 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 5 tests from DxpTestFixture
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed
+[       OK ] DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed (79 ms)
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles
+unknown file: Failure
+C++ exception with description "DtException: wrong locale for dst operand, file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp line 2992" thrown in the test body.
+[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles (717 ms)
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastCompiles
+unknown file: Failure
+C++ exception with description "DtException: wrong locale for dst operand, file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp line 2992" thrown in the test body.
+[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastCompiles (721 ms)
+[ RUN      ] DxpTestFixture.CoreWorkDivIncomptLxRelayout
+[       OK ] DxpTestFixture.CoreWorkDivIncomptLxRelayout (38 ms)
+[ RUN      ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality
+[       OK ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality (165 ms)
+[----------] 5 tests from DxpTestFixture (1722 ms total)
+
+[----------] Global test environment tear-down
+[==========] 5 tests from 1 test suite ran. (1722 ms total)
+[  PASSED  ] 3 tests.
+[  FAILED  ] 2 tests, listed below:
+[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles
+[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastCompiles
+
+ 2 FAILED TESTS
