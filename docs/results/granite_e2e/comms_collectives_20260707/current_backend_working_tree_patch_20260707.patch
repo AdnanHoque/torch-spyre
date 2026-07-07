@@ -1,0 +1,587 @@
+diff --git a/dcc/src/Conversion/PCFGToDataflowIR/PCFGToDFManager.cpp b/dcc/src/Conversion/PCFGToDataflowIR/PCFGToDFManager.cpp
+index b683e8f70..5c1171dc0 100644
+--- a/dcc/src/Conversion/PCFGToDataflowIR/PCFGToDFManager.cpp
++++ b/dcc/src/Conversion/PCFGToDataflowIR/PCFGToDFManager.cpp
+@@ -80,8 +80,17 @@ void PCFGToDFManager::run(
+             builder.create<mlir::func::ReturnOp>(builder.getUnknownLoc());
+           }
+         }
+-        coreid_to_module_idx.at(coreid).push_back(
+-            ddscidx_to_moduleidx.at(schedule_step.datadsc_idx));
++        if (schedule_step.datadsc_idx != -1 &&
++            schedule_step.dldsc_idx != -1 &&
++            ddscidx_to_moduleidx.count(-1) != 0) {
++          coreid_to_module_idx.at(coreid).push_back(
++              ddscidx_to_moduleidx.at(schedule_step.datadsc_idx));
++          coreid_to_module_idx.at(coreid).push_back(
++              ddscidx_to_moduleidx.at(-1));
++        } else {
++          coreid_to_module_idx.at(coreid).push_back(
++              ddscidx_to_moduleidx.at(schedule_step.datadsc_idx));
++        }
+       }
+     }
+   } else {
+diff --git a/dcc/src/Conversion/PCFGToDataflowIR/PCFGToDataflowIR.cpp b/dcc/src/Conversion/PCFGToDataflowIR/PCFGToDataflowIR.cpp
+index 134d3a69e..fbec7f745 100644
+--- a/dcc/src/Conversion/PCFGToDataflowIR/PCFGToDataflowIR.cpp
++++ b/dcc/src/Conversion/PCFGToDataflowIR/PCFGToDataflowIR.cpp
+@@ -7,6 +7,9 @@
+ 
+ #include <util/utils.h>
+ 
++#include <cstdlib>
++#include <iostream>
++
+ #include "SenPcfgUtils.hpp"
+ #include "dialects/Uniform/UniformOps.hpp"
+ #include "dialects/VectorChain/VectorChainOps.hpp"
+@@ -765,6 +768,7 @@ mlir::Value PCFGToDataflowIR::createScfIfTree(
+     mlir::Value& default_val, const std::string name,
+     mlir::OpBuilder op_builder,
+     DynLoopMode dyn_type /*= DynLoopMode::SINGLE*/) {
++  if (cond_vec.empty()) return default_val;
+   DT_CHECK(cond_vec.size());
+   auto scf_ifop = op_builder.create<mlir::scf::IfOp>(
+       loc(), builder_.getIndexType(), cond_vec.front().first,
+@@ -1803,6 +1807,25 @@ void PCFGToDataflowIR::createSimpleDataTransferOp(
+ 
+   DT_CHECK(pcfg_node->dtFormat != DataFormats::INVALID);
+ 
++  auto mapLocalFifoPeer = [&](SenComponents endpoint) {
++    if (endpoint != SenComponents::LXLUSUFIFO) {
++      return endpoint;
++    }
++    if (pcfgir.unit_type_ == SenComponents::LXSU0) {
++      return SenComponents::LXLU0;
++    }
++    if (pcfgir.unit_type_ == SenComponents::LXSU1) {
++      return SenComponents::LXLU1;
++    }
++    if (pcfgir.unit_type_ == SenComponents::LXLU0) {
++      return SenComponents::LXSU0;
++    }
++    if (pcfgir.unit_type_ == SenComponents::LXLU1) {
++      return SenComponents::LXSU1;
++    }
++    llvm_unreachable("LXLUSUFIFO endpoint is only valid for LX units");
++  };
++
+   double word_length = (double)stickSize() / elem_stick;
+ 
+   // handle conditional dest and start address, in elements
+@@ -1871,7 +1894,8 @@ void PCFGToDataflowIR::createSimpleDataTransferOp(
+     mlir::VectorType vec_type =
+         mlir::VectorType::get(getNumElementsInStick(stick_type), stick_type);
+     auto recv_unit = createUnitMapQuery(builder_, pcfgir, pcfgir.coreid_,
+-                                        pcfg_node->srcDest.src_);
++                                        mapLocalFifoPeer(
++                                            pcfg_node->srcDest.src_));
+     auto receive_op =
+         builder_.create<mlir::dataflow::ReceiveOp>(loc(), vec_type, recv_unit);
+ 
+@@ -1889,7 +1913,8 @@ void PCFGToDataflowIR::createSimpleDataTransferOp(
+         stride_map, stride_map_operands, ld_constraint, identity_map);
+ 
+     auto send_unit = createUnitMapQuery(builder_, pcfgir, pcfgir.coreid_,
+-                                        pcfg_node->srcDest.dst_);
++                                        mapLocalFifoPeer(
++                                            pcfg_node->srcDest.dst_));
+     auto send_op = builder_.create<mlir::dataflow::SendOp>(
+         loc(), send_unit, vc_load, /*dir*/ nullptr,
+         builder_.getStringAttr(pcfg_node->name));
+@@ -3647,6 +3672,44 @@ void PCFGToDataflowIR::createRingTransferOp(
+   int num_memref_indices = stride_map_operands.size();
+   for (auto val : time_operands) stride_map_operands.push_back(val);
+ 
++  if (pcfg_node->srcDest.src_ == SenComponents::LX &&
++      pcfg_node->srcDest.dst_ == SenComponents::LX) {
++    auto src_addr = createAddrCondOps(
++        ls_meta_builder, pcfgir, pcfg_node->SrcStartCondAndVal(),
++        pcfg_node->SrcStartAddr(), IterArgsInfo::AddrType::SRC,
++        pcfg_node->name, static_cast<const SenPcfgNode*>(pcfg_node),
++        1.0 / word_length);
++    auto dst_addr = createAddrCondOps(
++        ls_meta_builder, pcfgir, pcfg_node->DestStartCondAndVal(),
++        pcfg_node->DestStartAddr(), IterArgsInfo::AddrType::DEST,
++        pcfg_node->name, static_cast<const SenPcfgNode*>(pcfg_node),
++        1.0 / word_length);
++    auto src_mem_view = createMemoryView1D(
++        ls_meta_builder, pcfgir, pcfgir.localUnit().at(SenComponents::LX),
++        stick_type, src_addr);
++    auto dst_mem_view = createMemoryView1D(
++        ls_meta_builder, pcfgir, pcfgir.localUnit().at(SenComponents::LX),
++        stick_type, dst_addr);
++
++    llvm::SmallVector<mlir::Value, 4> local_stride_operands;
++    for (int i = 0; i < num_memref_indices; ++i)
++      local_stride_operands.push_back(stride_map_operands[i]);
++    for (int i = 0; i < num_memref_indices; ++i)
++      local_stride_operands.push_back(stride_map_operands[i]);
++    for (auto val : time_operands) local_stride_operands.push_back(val);
++
++    auto dir = mlir::agen::AgenRoutingDirectionAttr::get(
++        get_context(), mlir::agen::AgenRoutingDirection::PseudoRandom);
++    load_store_builder.create<mlir::agen::CompositeLoadAndStoreOp>(
++        loc(), src_mem_view, dst_mem_view,
++        load_store_builder.getStringAttr(pcfg_node->name), stride_map,
++        stride_map, local_stride_operands, vec_type, ld_constraint,
++        identity_map, ld_constraint, identity_map, time_set, time_order,
++        time_addr_map, time_addr_map, num_memref_indices,
++        num_memref_indices, 0, dir);
++    return;
++  }
++
+   if (pcfg_node->srcDest.dst_ == SenComponents::LX) {
+     // L3LU
+     DT_CHECK(pcfg_node->coreIdForRing.size() == 1);
+diff --git a/dcc/src/Conversion/SentientToProgIR/Utils.cpp b/dcc/src/Conversion/SentientToProgIR/Utils.cpp
+index c73915d87..5692c5c5b 100644
+--- a/dcc/src/Conversion/SentientToProgIR/Utils.cpp
++++ b/dcc/src/Conversion/SentientToProgIR/Utils.cpp
+@@ -90,7 +90,7 @@ OperandAttr getProperConsumer(const dcc::DccExtContext& dcc_ext_ctx,
+         (dcc_ext_ctx.getArch() == SEN1P5_ISA && consumer == CROSSPTNLINK)) {
+       return OperandAttr("sfp", OperandAttr::Type::DESCRIPTIVE);
+     } else {
+-      DT_CHECK(is_any_of(consumer, PE, SFP));
++      DT_CHECK(is_any_of(consumer, PE, SFP, LXSU));
+       return OperandAttr(name, OperandAttr::Type::DESCRIPTIVE);
+     }
+   } else {
+diff --git a/dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp b/dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp
+index 50e108cb5..db89cbd04 100644
+--- a/dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp
++++ b/dcc/src/Transform/Sentient/RegisterTypeAssignment.cpp
+@@ -854,14 +854,17 @@ void RegisterTypeAssignmentPass::initializeAssignmentForAnOperation(
+ 
+     if (!gather_scatter.isValid())
+       DT_CHECK(((src_unit_type == LX && dst_unit_type == HBM) ||
+-                (src_unit_type == HBM && dst_unit_type == LX)) &&
+-               "expected transfers between LX and HBM");
++                (src_unit_type == HBM && dst_unit_type == LX) ||
++                (src_unit_type == LX && dst_unit_type == LX)) &&
++               "expected transfers between LX/HBM or local LX copies");
+     if (gather_scatter.isGather())
+       DT_CHECK(current_unit_type_ == L3LU);
+     else if (gather_scatter.isScatter())
+       DT_CHECK(current_unit_type_ == L3SU);
+     else
+-      DT_CHECK(((src_unit_type == LX && current_unit_type_ == L3SU) ||
++      DT_CHECK(((src_unit_type == LX && dst_unit_type == LX &&
++                 current_unit_type_ == L3LU) ||
++                (src_unit_type == LX && current_unit_type_ == L3SU) ||
+                 (src_unit_type == HBM && current_unit_type_ == L3LU)) &&
+                "unexpected producer/consumer unit");
+     RegisterLocales src_locale = Unknown, dst_locale = Unknown;
+diff --git a/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp b/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
+index d3f2311fd..4edf06724 100644
+--- a/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
++++ b/dcg/dcg_fe/pcfg_gen/dlOpsNew.cpp
+@@ -2677,11 +2677,15 @@ int DcgFE::createPcfgForUnitPerCoreNew(SuperDsc& sdsc, SenPcfg& pcfg,
+ 
+     constexpr int64_t kBytesPerStick = 128;
+     for (const auto& transfer : transNode->lxNeighborRingTransfers_) {
+-      const bool isSend = unit == SenComponents::L3SU &&
++      const bool isLocalCopy =
++          transfer.sourceCoreId_ == transfer.destinationCoreId_;
++      const bool isSend = !isLocalCopy && unit == SenComponents::L3SU &&
+                           transfer.sourceCoreId_ == coreid;
+-      const bool isReceive = unit == SenComponents::L3LU &&
++      const bool isReceive = !isLocalCopy && unit == SenComponents::L3LU &&
+                              transfer.destinationCoreId_ == coreid;
+-      if (!isSend && !isReceive) continue;
++      const bool isLocal = isLocalCopy && unit == SenComponents::L3LU &&
++                           transfer.destinationCoreId_ == coreid;
++      if (!isSend && !isReceive && !isLocal) continue;
+       DT_CHECK_MSG(transfer.byteCount_ > 0,
+                    "Invalid LX-neighbor ring transfer byte count.");
+       DT_CHECK_MSG(transfer.byteCount_ % kBytesPerStick == 0,
+@@ -2693,9 +2697,10 @@ int DcgFE::createPcfgForUnitPerCoreNew(SuperDsc& sdsc, SenPcfg& pcfg,
+             static_cast<SenPcfgRingDtNode*>(pcfg.createPcfgNode(
+                 SenPcfgNode::Type::RINGDATATRANSFER));
+         newRingDtNode->name =
+-            nodeNamePrefix + myLabeledDs->dsName_ + "-lx_neighbor_ring_" +
+-            (isSend ? "send" : "recv") + "_src" +
+-            std::to_string(transfer.sourceCoreId_) + "_dst" +
++            nodeNamePrefix + myLabeledDs->dsName_ + "-lx_neighbor_" +
++            (isLocal ? "local_copy"
++                     : (isSend ? "ring_send" : "ring_recv")) +
++            "_src" + std::to_string(transfer.sourceCoreId_) + "_dst" +
+             std::to_string(transfer.destinationCoreId_) + "_chunk" +
+             std::to_string(transfer.producerChunk_) + "_stick" +
+             std::to_string(byteOffset / kBytesPerStick);
+@@ -2704,13 +2709,16 @@ int DcgFE::createPcfgForUnitPerCoreNew(SuperDsc& sdsc, SenPcfg& pcfg,
+         newRingDtNode->dsInfo = nullptr;
+         newRingDtNode->dtFormat = myLabeledDs->dataFormat_;
+         newRingDtNode->srcDest.src_ =
+-            isSend ? SenComponents::LX : SenComponents::RING;
++            isLocal ? SenComponents::LX
++                    : (isSend ? SenComponents::LX : SenComponents::RING);
+         newRingDtNode->srcDest.dst_ =
+-            isSend ? SenComponents::RING : SenComponents::LX;
++            isLocal ? SenComponents::LX
++                    : (isSend ? SenComponents::RING : SenComponents::LX);
+         newRingDtNode->dimLayoutOrder = dimLayoutOrder;
+         newRingDtNode->coreIdForRing = {
+-            static_cast<int64_t>(isSend ? transfer.destinationCoreId_
+-                                        : transfer.sourceCoreId_)};
++            static_cast<int64_t>(isLocal ? transfer.destinationCoreId_
++                                        : (isSend ? transfer.destinationCoreId_
++                                                  : transfer.sourceCoreId_))};
+         newRingDtNode->useBurst = false;
+         newRingDtNode->gtr_imm_opt_en = false;
+ 
+@@ -2719,10 +2727,27 @@ int DcgFE::createPcfgForUnitPerCoreNew(SuperDsc& sdsc, SenPcfg& pcfg,
+           newRingDtNode->myLitDimSize[dimStr] = 1;
+         }
+ 
+-        if (isSend) {
++        newRingDtNode->addrSpan = kBytesPerStick;
++
++        if (isLocal) {
++          newRingDtNode->setSrcStAddr(transfer.sourceStartAddress_ +
++                                      byteOffset);
++          newRingDtNode->setDestStAddr(transfer.destinationStartAddress_ +
++                                       byteOffset);
++          newRingDtNode->SrcStartAddr().insertData(
++              transfer.sourceStartAddress_ + byteOffset);
++          newRingDtNode->DestStartAddr().insertData(
++              transfer.destinationStartAddress_ + byteOffset);
++        } else if (isSend) {
++          newRingDtNode->setSrcStAddr(transfer.sourceStartAddress_ +
++                                      byteOffset);
++          newRingDtNode->setDestStAddr(-1);
+           newRingDtNode->SrcStartAddr().insertData(
+               transfer.sourceStartAddress_ + byteOffset);
+         } else {
++          newRingDtNode->setSrcStAddr(-1);
++          newRingDtNode->setDestStAddr(transfer.destinationStartAddress_ +
++                                       byteOffset);
+           newRingDtNode->DestStartAddr().insertData(
+               transfer.destinationStartAddress_ + byteOffset);
+         }
+diff --git a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+index e460eb015..e3bd3222f 100644
+--- a/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
++++ b/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp
+@@ -971,6 +971,12 @@ static void populateMatmulOperandBroadcastRingTransfersAfterAllocation(
+                        mySDsc, dsc, lds, *allocNode, transNode,
+                        bytesPerStick, &reason),
+                    reason);
++      transNode->src_.unit_ = SenComponents::NO_COMPONENT;
++      transNode->src_.storage_ = SenComponents::NO_COMPONENT;
++      transNode->dstVias_.front().loc_.unit_ = SenComponents::L3LU;
++      transNode->dstVias_.front().loc_.storage_ = SenComponents::LX;
++      transNode->dstVias_.front().via_.push_back(SenComponents::L3SU);
++      dsc.setRelevantCompCoreCl();
+     }
+   }
+ }
+@@ -4050,13 +4056,43 @@ void L3DlOpsScheduler::createSynchronization(SuperDsc &mySDsc) {
+       DT_CHECK_MSG(!lxNeighborTransNodes.empty(),
+                    "Expect at least one valid LX input-neighbor transfer node.");
+ 
+-      // Create L3LU->LXLU soft sync nodes after every LX input-neighbor
+-      // transfer. A DSC can have multiple LX neighbor operands after relayout
++      // Ring-backed LX-neighbor transfers use L3SU for sends and L3LU for
++      // receives. Order L3LU behind L3SU before exposing the received LX data
++      // to LXLU. A DSC can have multiple LX neighbor operands after relayout
+       // insertion, and each transfer must publish data before compute consumes
+       // its corresponding LX view.
+-      for (size_t idx = 0; idx < lxNeighborTransNodes.size(); ++idx)
+-        addL3LUAndLXLUSoftSyncNodeSequence(
+-            lxNeighborTransNodes.at(idx), "_lx_neighbor_" + std::to_string(idx));
++      for (size_t idx = 0; idx < lxNeighborTransNodes.size(); ++idx) {
++        auto* transNode = lxNeighborTransNodes.at(idx);
++        const std::string nameSuffix =
++            "_lx_neighbor_" + std::to_string(idx);
++        dsc2::SyncNode* l3suToL3luSend = createSyncNode(
++            {SenComponents::L3SU},
++            "sync_send_" +
++                EnumsConversion::senComponentsToString.at(
++                    SenComponents::L3SU) +
++                "_to_" +
++                EnumsConversion::senComponentsToString.at(
++                    SenComponents::L3LU) +
++                nameSuffix);
++        dsc2::SyncNode* l3suToL3luReceive = createSyncNode(
++            {SenComponents::L3LU},
++            "sync_receive_" +
++                EnumsConversion::senComponentsToString.at(
++                    SenComponents::L3LU) +
++                "_from_" +
++                EnumsConversion::senComponentsToString.at(
++                    SenComponents::L3SU) +
++                nameSuffix,
++            true);
++        l3suToL3luSend->otherEndOfTheSignals_.push_back(l3suToL3luReceive);
++        l3suToL3luReceive->otherEndOfTheSignals_.push_back(l3suToL3luSend);
++        auto* transParentNode = transNode->getMutableParent();
++        transParentNode->addChildNode(l3suToL3luSend, /*addBefore*/ false,
++                                      transNode);
++        transParentNode->addChildNode(l3suToL3luReceive, /*addBefore*/ false,
++                                      l3suToL3luSend);
++        addL3LUAndLXLUSoftSyncNodeSequence(l3suToL3luReceive, nameSuffix);
++      }
+     } else if (hasHbmPinnedTensor) {
+       auto getHbmToLxTransNodes = [&hbmPinnedLdsIndexSet, &dsc]() {
+         std::vector<dsc2::TransferNode *> hbmToLxTransNodes;
+diff --git a/dcg/dcg_manager/dcg_manager.cpp b/dcg/dcg_manager/dcg_manager.cpp
+index 26c1bcb20..276241092 100644
+--- a/dcg/dcg_manager/dcg_manager.cpp
++++ b/dcg/dcg_manager/dcg_manager.cpp
+@@ -14,6 +14,9 @@
+ 
+ #include "util/dt_exception.hpp"
+ 
++#include <filesystem>
++#include <fstream>
++
+ void DcgManager::runDcg(SuperDsc& mySDsc) {
+   if (verbose > 0)
+     std::cout << "Running DCG for DataOp: Node-name:" << mySDsc.name_
+@@ -456,6 +459,13 @@ void DcgManager::runDcgForDataOpsDlOps(SuperDsc& mySDsc) {
+     }
+   }
+ 
++  if (const char* dumpDir = std::getenv("DEEPTOOLS_DEBUG_MIXED_DCG_SDSC_DIR")) {
++    std::filesystem::create_directories(dumpDir);
++    std::filesystem::path dumpPath =
++        std::filesystem::path(dumpDir) / (mySDsc.name_ + "_after_dcg.json");
++    mySDsc.exportJson(dumpPath.string(), 4);
++  }
++
+   // Keep only pool
+   if (dscGlobal->dtVersion > 1 && progIRcodeGen != DCGProgIRGen::DCC) {
+     mySDsc.pcfg_.clear();
+diff --git a/ddc/ddc_fold.cpp b/ddc/ddc_fold.cpp
+index dacbb0858..752835c09 100644
+--- a/ddc/ddc_fold.cpp
++++ b/ddc/ddc_fold.cpp
+@@ -17,7 +17,8 @@ static bool envFlagEnabled(const char* name) {
+ 
+ static bool matmulOperandKernelNeighborRelayoutEnabled() {
+   return envFlagEnabled("SPYRE_LX_PLANNER_RELAYOUT") ||
+-         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR") ||
++         envFlagEnabled("DEEPTOOLS_ENABLE_MATMUL_OPERAND_GATHER_RESTICKIFY");
+ }
+ 
+ #define FOLD_POS_CORE static_cast<int>(dsc2::CoordinateFoldPosition::Core)
+@@ -27,15 +28,53 @@ static bool matmulOperandKernelNeighborRelayoutEnabled() {
+ 
+ using dsc2::LoopDistributionInfo;
+ 
++bool isLxNeighborTransfer(const dsc2::ScheduleNode *node) {
++  if (node == nullptr || node->nodeType_ != dsc2::ScheduleNode::TRANSFER) {
++    return false;
++  }
++  const auto *transferNode = static_cast<const dsc2::TransferNode *>(node);
++  return transferNode->name_.find("_lx_neighbor") != std::string::npos ||
++         !transferNode->lxNeighborRingTransfers_.empty();
++}
++
++bool isMatmulKernelNeighborLxToPtRowTransfer(
++    const DesignSpaceConfig *currDsc, const dsc2::ScheduleNode *node) {
++  if (!matmulOperandKernelNeighborRelayoutEnabled()) {
++    return false;
++  }
++  if (currDsc == nullptr || node == nullptr ||
++      node->nodeType_ != dsc2::ScheduleNode::TRANSFER) {
++    return false;
++  }
++  const auto *transferNode = static_cast<const dsc2::TransferNode *>(node);
++  if (transferNode->name_.find("transfer_lds") == std::string::npos ||
++      transferNode->name_.find("src:lxlu") == std::string::npos ||
++      transferNode->name_.find("dst:ptrow") == std::string::npos) {
++    return false;
++  }
++  const int srcLds = transferNode->srcLdsAndLoopOffsets_.myLdsIdx_;
++  if (std::getenv("DEEPTOOLS_LX_NEIGHBOR_FOLD_DIAGNOSTIC") != nullptr) {
++    std::cerr << "[matmul_kernel_neighbor_lx_to_ptrow] node="
++              << transferNode->name_ << " srcLds=" << srcLds
++              << " labeledDsSize=" << currDsc->labeledDs_.size();
++    if (srcLds >= 0 && static_cast<size_t>(srcLds) < currDsc->labeledDs_.size()) {
++      std::cerr << " srcDsType="
++                << DesignSpaceConfig::dsTypeToString.at(
++                       currDsc->labeledDs_.at(srcLds).dsType_);
++    }
++    std::cerr << "\n";
++  }
++  return srcLds >= 0 && static_cast<size_t>(srcLds) < currDsc->labeledDs_.size() &&
++         currDsc->labeledDs_.at(srcLds).dsType_ == DsTypes::KERNEL;
++}
++
+ bool isFoldedLxNeighborAllocation(const dsc2::AllocateNode *allocNode) {
+   if (allocNode == nullptr || allocNode->component_ != SenComponents::LX ||
+       !allocNode->allocateCoordinates_.foldConstructed()) {
+     return false;
+   }
+   for (const auto &[userNode, _] : allocNode->allocUsers_) {
+-    if (userNode != nullptr &&
+-        userNode->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
+-        userNode->name_.find("_lx_neighbor") != std::string::npos) {
++    if (isLxNeighborTransfer(userNode)) {
+       return true;
+     }
+   }
+@@ -59,10 +98,7 @@ bool isMatmulOperandKernelNeighborAllocation(
+   return std::any_of(
+       allocNode->allocUsers_.begin(), allocNode->allocUsers_.end(),
+       [](const auto &userAndCount) {
+-        const auto *user = userAndCount.first;
+-        return user != nullptr &&
+-               user->nodeType_ == dsc2::ScheduleNode::TRANSFER &&
+-               user->name_.find("_lx_neighbor") != std::string::npos;
++        return isLxNeighborTransfer(userAndCount.first);
+       });
+ }
+ 
+@@ -2913,6 +2949,8 @@ bool Ddc::buildFoldForAllocation(
+       // Verification.
+       if (!isFoldedLxNeighborAllocation(allocNode) &&
+           !isMatmulOperandKernelNeighborAllocation(currDsc, allocNode) &&
++          !isLxNeighborTransfer(refNode) &&
++          !isMatmulKernelNeighborLxToPtRowTransfer(currDsc, refNode) &&
+           !allocNode->allocateCoordinates_.coreIdToWkSlice_.empty() &&
+           refNode->nodeType_ == dsc2::ScheduleNode::TRANSFER) {
+         dsc2::TransferNode *transferNode =
+diff --git a/dsc/dsc2Pcfg.cpp b/dsc/dsc2Pcfg.cpp
+index ab1f53d4c..d9f3d2cea 100644
+--- a/dsc/dsc2Pcfg.cpp
++++ b/dsc/dsc2Pcfg.cpp
+@@ -7,6 +7,8 @@
+ 
+ #include <dataType.h>
+ 
++#include <cstdlib>
++
+ // =========================================================
+ // Entry points
+ // =========================================================
+@@ -319,6 +321,125 @@ void DscPcfgTranslator::translateDscDataTransfer(
+   auto& scopeStack = globals.scopeStack;
+   auto& dtMap = globals.dtMap;
+ 
++  if (!treeNode->lxNeighborRingTransfers_.empty()) {
++    DT_CHECK_MSG(!treeNode->dstLdsAndLoopOffsets_.empty(),
++                 "LX-neighbor transfer expects a destination tensor.");
++    const dsc2::DataInfo& dstInfo = treeNode->dstLdsAndLoopOffsets_.front();
++    DT_CHECK_MSG(dstInfo.isLabeledDs(),
++                 "LX-neighbor transfer expects labeled destination DS.");
++    const LabeledDsInfo& dstLds = globals.dsc.labeledDs_.at(dstInfo.myLdsIdx_);
++
++    std::vector<std::string> dimLayoutOrder;
++    for (PrimaryDimTypes dim :
++         globals.dsc.primaryDsInfo_.at(dstLds.dsType_).layoutDimOrder_) {
++      dimLayoutOrder.push_back(EnumsConversion::primaryDimToString.at(dim));
++    }
++    DT_CHECK_MSG(!dimLayoutOrder.empty(),
++                 "LX-neighbor transfer expects a non-empty layout order.");
++
++    constexpr int64_t kBytesPerStick = 128;
++    int createdCount = 0;
++    for (const auto& transfer : treeNode->lxNeighborRingTransfers_) {
++      const bool isLocalCopy =
++          transfer.sourceCoreId_ == transfer.destinationCoreId_;
++      const bool isSend = !isLocalCopy && genComp == SenComponents::L3SU &&
++                          transfer.sourceCoreId_ == pcfgInfo.c;
++      const bool isReceive = !isLocalCopy && genComp == SenComponents::L3LU &&
++                             transfer.destinationCoreId_ == pcfgInfo.c;
++      const bool isLocal = isLocalCopy && genComp == SenComponents::L3LU &&
++                           transfer.destinationCoreId_ == pcfgInfo.c;
++      if (!isSend && !isReceive && !isLocal) continue;
++      DT_CHECK_MSG(transfer.byteCount_ > 0,
++                   "Invalid LX-neighbor ring transfer byte count.");
++      DT_CHECK_MSG(transfer.byteCount_ % kBytesPerStick == 0,
++                   "LX-neighbor ring transfers must be stick aligned.");
++
++      const int64_t stickCount = transfer.byteCount_ / kBytesPerStick;
++      const std::string loopName = createPcfgNodeName(
++          globals.nameMap, pcfgInfo.c, pcfgInfo.clComp,
++          "-lx-neighbor-ring-loop-" +
++              std::string(isLocal ? "local-copy"
++                                  : (isSend ? "send" : "recv")) +
++              "-src" + std::to_string(transfer.sourceCoreId_) + "-dst" +
++              std::to_string(transfer.destinationCoreId_) + "-chunk" +
++              std::to_string(transfer.producerChunk_));
++      auto [loopNode, loopBranch] = SenPcfg::createLoopAndBranchEnd(
++          pcfg, loopName, static_cast<int>(stickCount), {}, -1);
++
++      auto* ringNode = static_cast<SenPcfgRingDtNode*>(
++          pcfg.createPcfgNode(SenPcfgNode::Type::RINGDATATRANSFER));
++      ringNode->name = createPcfgNodeName(
++          globals.nameMap, pcfgInfo.c, pcfgInfo.clComp,
++          "-lx-neighbor-" +
++              std::string(isLocal ? "local-copy"
++                                  : (isSend ? "ring-send" : "ring-recv")) +
++              "-src" + std::to_string(transfer.sourceCoreId_) + "-dst" +
++              std::to_string(transfer.destinationCoreId_) + "-chunk" +
++              std::to_string(transfer.producerChunk_));
++      ringNode->coreletId = -1;
++      ringNode->dtInfo = nullptr;
++      ringNode->dsInfo = nullptr;
++      ringNode->dtFormat = dstLds.dataFormat_;
++      ringNode->srcDest.src_ =
++          isLocal ? SenComponents::LX
++                  : (isSend ? SenComponents::LX : SenComponents::RING);
++      ringNode->srcDest.dst_ =
++          isLocal ? SenComponents::LX
++                  : (isSend ? SenComponents::RING : SenComponents::LX);
++      ringNode->dimLayoutOrder = dimLayoutOrder;
++      ringNode->coreIdForRing = {
++          static_cast<int64_t>(isLocal ? transfer.destinationCoreId_
++                                      : (isSend ? transfer.destinationCoreId_
++                                                : transfer.sourceCoreId_))};
++      ringNode->coreIDForRingCondAndVal.clear();
++      ringNode->GTRAndBurstCondAndVal.clear();
++      ringNode->useBurst = false;
++      ringNode->gtr_imm_opt_en = false;
++      ringNode->addrSpan = transfer.byteCount_;
++
++      for (const auto& dimStr : ringNode->dimLayoutOrder) {
++        ringNode->myBigDimSize[dimStr] = 1;
++        ringNode->myLitDimSize[dimStr] = 1;
++      }
++      PcfgDtOffsets stickOffset;
++      stickOffset.dimOffset = 1;
++      stickOffset.subDimOffset = 0;
++      stickOffset.uniDimOffset = 0;
++      stickOffset.freq = 1;
++      stickOffset.clSkipOffset = 0;
++      stickOffset.clSkipFreq = 1;
++      ringNode->bigStAddrOffsets[loopName] = stickOffset;
++
++      if (isLocal) {
++        ringNode->setSrcStAddr(transfer.sourceStartAddress_);
++        ringNode->setDestStAddr(transfer.destinationStartAddress_);
++      } else if (isSend) {
++        ringNode->setSrcStAddr(transfer.sourceStartAddress_);
++        ringNode->setDestStAddr(-1);
++      } else {
++        ringNode->setSrcStAddr(-1);
++        ringNode->setDestStAddr(transfer.destinationStartAddress_);
++      }
++
++      SenPcfg::pcfgInsertBelow(loopNode, scopeStack.getPos());
++      SenPcfg::pcfgInsertBelow(ringNode, loopNode);
++      SenPcfg::pcfgInsertBelow(loopBranch, ringNode);
++      scopeStack.updatePos(loopBranch);
++      ++createdCount;
++    }
++
++    if (std::getenv("DEEPTOOLS_LX_NEIGHBOR_RING_TRANSLATOR_DEBUG") !=
++        nullptr) {
++      std::cerr << "[LX-neighbor translator] unit="
++                << (genComp == SenComponents::L3SU ? "L3SU" : "L3LU")
++                << " core=" << pcfgInfo.c
++                << " logicalTransfers="
++                << treeNode->lxNeighborRingTransfers_.size()
++                << " pcfgRingNodes=" << createdCount << std::endl;
++    }
++    return;
++  }
++
+   // Special DT conditions for current PCFG
+   const bool isSrc = genComp == treeNode->src_.unit_;
+   const bool isConstant = treeNode->src_.unit_ == SenComponents::CONSTANT;
