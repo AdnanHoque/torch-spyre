@@ -1,0 +1,43 @@
+{
+  "date": "2026-07-07",
+  "scope": "bounded partial-view gather descriptor/DXP realization",
+  "torch": {
+    "repo": "AdnanHoque/torch-spyre",
+    "branch": "gather-restickify",
+    "commit": "bced14b4",
+    "commit_subject": "inductor: enrich partial-view gather contracts",
+    "patch": "patches/torch_partial_view_gather_contract_enrichment_bced14b4.patch"
+  },
+  "deeptools": {
+    "repo": "Adnan-Hoque1/deeptools",
+    "branch": "ah/comms-collectives",
+    "commit": "2fa9220a6",
+    "commit_subject": "[DXP] realize bounded partial-view gather relayout",
+    "patch": "patches/deeptools_bounded_partial_view_gather_2fa9220a6.patch"
+  },
+  "validation": {
+    "pod": "adnan-cdx-spyre-dev-pf",
+    "dxp_focused_regression": {
+      "command": "./build-deeptools/dxp/dxp_unit_test --gtest_filter=\"DxpTestFixture.MatmulOperandBroadcastPattern*:DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed:DxpTestFixture.CoreWorkDivIncomptLxRelayout*:DxpTestFixture.PartialViewGatherBoundedOffsetRelayoutCompiles\"",
+      "result": "passed",
+      "tests_passed": 6,
+      "log": "logs/dxp_focused_regression_20260707.log"
+    },
+    "layout_allgather_restickify": {
+      "command": "./build-deeptools/util/util_unit_test --gtest_filter=\"LayoutAllgatherRestickify.*\"",
+      "result": "passed",
+      "tests_passed": 32,
+      "log": "logs/layout_allgather_restickify_20260707.log"
+    }
+  },
+  "proves": [
+    "Torch can preserve partial-view source offset metadata in the DLDSC contract.",
+    "Deeptools can compile a bounded partial-view gather by applying the source offset to the LX source base before STCDPOpLx relayout.",
+    "The existing scatter and matmul operand broadcast/all-gather regression set remains green."
+  ],
+  "does_not_prove_yet": [
+    "AIU value correctness for every Granite partial-view gather edge.",
+    "Full Granite activation streaming.",
+    "WSR/tile-scoped execution for oversized MLP down-projection activations."
+  ]
+}

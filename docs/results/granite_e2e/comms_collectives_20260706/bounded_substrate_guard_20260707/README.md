@@ -20,7 +20,8 @@ Torch branch:
 
 ```text
 AdnanHoque/torch-spyre:gather-restickify
-commit 6bc8b00d inductor: emit partial-view gather relayout metadata
+commit bced14b4 inductor: enrich partial-view gather contracts
+previous partial-view metadata checkpoint 6bc8b00d inductor: emit partial-view gather relayout metadata
 previous bounded-budget checkpoint 99f95650 test: cover bounded matmul operand relayout budget
 base behavior commit de76531b inductor: bound matmul operand relayout contracts
 ```
@@ -29,7 +30,8 @@ Deeptools branch:
 
 ```text
 Adnan-Hoque1/deeptools:ah/comms-collectives
-commit faa78233e [DXP] fail closed for partial-view gather relayout
+commit 2fa9220a6 [DXP] realize bounded partial-view gather relayout
+previous partial-view guard checkpoint faa78233e [DXP] fail closed for partial-view gather relayout
 previous bounded-broadcast checkpoint 9e9b20b42 [DXP] test bounded matmul operand broadcast patterns
 base behavior commit c8c259061 [DXP] fail closed for oversized matmul operand relayout
 ```
@@ -47,6 +49,11 @@ The follow-on partial-view gather guard is archived in:
 - `../partial_view_gather_guard_20260707/patches/torch_partial_view_gather_metadata_6bc8b00d.patch`
 - `../partial_view_gather_guard_20260707/patches/deeptools_partial_view_gather_fail_closed_faa78233e.patch`
 
+The bounded offset-aware realization is archived in:
+
+- `../partial_view_gather_bounded_relayout_20260707/patches/torch_partial_view_gather_contract_enrichment_bced14b4.patch`
+- `../partial_view_gather_bounded_relayout_20260707/patches/deeptools_bounded_partial_view_gather_2fa9220a6.patch`
+
 ## Validation
 
 Focused checks run on `adnan-cdx-spyre-dev-pf`:
@@ -61,6 +68,9 @@ Deeptools CoreWorkDivIncomptLxRelayout*: 2/2 passed
 Deeptools MatmulOperandBroadcastChunkCapFailsClosed: passed
 Deeptools MatmulOperandBroadcastPattern*: 2/2 passed
 Deeptools PartialViewGatherFailsClosedBeforeGenericLxRelayout: passed
+Deeptools PartialViewGatherBoundedOffsetRelayoutCompiles at 2fa9220a6: passed
+Combined DXP focused regression at 2fa9220a6: 6/6 passed
+LayoutAllgatherRestickify.* at 2fa9220a6: 32/32 passed
 ```
 
 Flash compile probe:

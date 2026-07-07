@@ -1,0 +1,167 @@
+From 2fa9220a6245c835ff741ad0b256a88eed9b3876 Mon Sep 17 00:00:00 2001
+From: Adnan Hoque <adnan.hoque1@ibm.com>
+Date: Tue, 7 Jul 2026 07:06:44 +0000
+Subject: [PATCH] [DXP] realize bounded partial-view gather relayout
+
+Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dxp/SdscRelayoutInsertion.cpp | 78 ++++++++++++++++++++++++-----------
+ dxp/test/dxp_unittest.cpp     | 23 ++++-------
+ 2 files changed, 62 insertions(+), 39 deletions(-)
+
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 975f79fbd..c4086c7fa 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -128,6 +128,28 @@ static PartialViewGatherHook findPartialViewGatherHook(
+   return {};
+ }
+ 
++static bool partialViewGatherSourceOffsetBytes(
++    const PartialViewGatherHook& hook, const LabeledDsInfo& lds,
++    int64_t* offsetBytes, std::string* reason) {
++  *offsetBytes = 0;
++  const auto offsetIt = hook.fields.find("source_offset_elems");
++  if (offsetIt == hook.fields.end()) {
++    *reason = "partial_view_gather is missing source_offset_elems";
++    return false;
++  }
++  char* end = nullptr;
++  errno = 0;
++  const auto offsetElems = std::strtoll(offsetIt->second.c_str(), &end, 10);
++  if (errno != 0 || end == nullptr || *end != '\0' || offsetElems < 0) {
++    *reason = "partial_view_gather has invalid source_offset_elems=" +
++              offsetIt->second;
++    return false;
++  }
++  *offsetBytes =
++      static_cast<int64_t>(std::ceil(offsetElems * lds.wordLength));
++  return true;
++}
++
+ static bool matmulOperandBroadcastMatchesLds(
+     const std::map<std::string, std::string>& fields,
+     const LabeledDsInfo& lds) {
+@@ -1860,22 +1882,22 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       continue;
+ 
+     const auto partialViewGatherHook = findPartialViewGatherHook(sdsc, lds);
++    const bool hasPartialViewGather =
++        !partialViewGatherHook.classificationKey.empty();
++    int64_t partialViewSourceOffsetBytes = 0;
++    if (hasPartialViewGather) {
++      std::string partialViewReason;
++      if (!partialViewGatherSourceOffsetBytes(
++              partialViewGatherHook, lds, &partialViewSourceOffsetBytes,
++              &partialViewReason)) {
++        DT_CHECK_MSG(false, partialViewReason);
++      }
++    }
+     if (!partialViewGatherHook.classificationKey.empty()) {
+-      const auto sourceOffsetIt =
+-          partialViewGatherHook.fields.find("source_offset_elems");
+-      const auto sourceOffset =
+-          sourceOffsetIt == partialViewGatherHook.fields.end()
+-              ? std::string("<missing>")
+-              : sourceOffsetIt->second;
+-      DT_CHECK_MSG(false,
+-                   "partial_view_gather metadata was classified for " +
+-                       lds.dsName_ +
+-                       ", but generic LX relayout cannot safely materialize "
+-                       "a producer subview with source_offset_elems=" +
+-                       sourceOffset +
+-                       ". Preserve HBM fallback or use WSR/tile-scoped "
+-                       "lowering until offset-aware partial-view gather is "
+-                       "implemented.");
++      // Keep using the generic STCDPOpLx relayout mechanics for bounded
++      // same-layout views, but adjust the source LX base below by the view's
++      // constant source offset.  The HBM relayout fallback is not safe for this
++      // named class because it would discard the producer subview offset.
+     }
+ 
+     const auto layoutAllgatherHook = findLayoutAllgatherRestickifyPlan(sdsc, lds);
+@@ -2076,6 +2098,16 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+       }
+     }
+ 
++    if (hasPartialViewGather && !lx_space_found &&
++        dldsc.computeOp_.at(0).opFuncName != OpFuncs::IDENTITY) {
++      DT_CHECK_MSG(false,
++                   "partial_view_gather metadata was classified for " +
++                       lds.dsName_ +
++                       ", but bounded offset-aware LX relayout has no "
++                       "available destination LX space. Preserve HBM fallback "
++                       "or use WSR/tile-scoped lowering.");
++    }
++
+     if (lx_space_found ||
+         dldsc.computeOp_.at(0).opFuncName == OpFuncs::IDENTITY) {
+ #ifdef DEBUG_RELAYOUT
+@@ -2287,16 +2319,14 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+           FoldDimProp* addr_fold_prop = new FoldDimProp{1, "time"};
+           AddrHelper.buildMapDim(addr_fold_prop, 0);
+           if (i == 1) {
+-            new_piece.placement.at(SenComponents::LX)
+-                .insertStAddr(
+-                    lds.memOrg_.at(LX)
+-                        .allocateNode_->startAddressCoreCorelet_.getData(
+-                            kv.first, 0, 0),
+-                    {0});
+-            myLds.coreIdTolxStartAddress_[kv.first] =
++            const auto sourceBase =
+                 lds.memOrg_.at(LX)
+-                    .allocateNode_->startAddressCoreCorelet_.getData(kv.first,
+-                                                                     0, 0);
++                    .allocateNode_->startAddressCoreCorelet_.getData(
++                        kv.first, 0, 0) +
++                partialViewSourceOffsetBytes;
++            new_piece.placement.at(SenComponents::LX)
++                .insertStAddr(sourceBase, {0});
++            myLds.coreIdTolxStartAddress_[kv.first] = sourceBase;
+           } else {
+             if (dldsc.computeOp_.at(0).opFuncName == OpFuncs::IDENTITY) {
+               // If the op with incompatibility is an identity, no need to find
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index e93555b1e..1e9c0973c 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -1056,7 +1056,7 @@ TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternMulticastCompiles) {
+   runMatmulOperandBroadcastPatternCase(testDataDir, "multicast");
+ }
+ 
+-TEST_F(DxpTestFixture, PartialViewGatherFailsClosedBeforeGenericLxRelayout) {
++TEST_F(DxpTestFixture, PartialViewGatherBoundedOffsetRelayoutCompiles) {
+   SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
+   rewritePartialViewGatherFixture(testDataDir);
+ 
+@@ -1069,20 +1069,13 @@ TEST_F(DxpTestFixture, PartialViewGatherFailsClosedBeforeGenericLxRelayout) {
+   dxp.standalone = true;
+   dxp.debug = true;
+ 
+-  try {
+-    dxp.runDxp(testDataDir);
+-    FAIL() << "Expected partial_view_gather to fail closed";
+-  } catch (const DtException& ex) {
+-    const std::string message = ex.what();
+-    EXPECT_NE(message.find("partial_view_gather metadata was classified"),
+-              std::string::npos)
+-        << message;
+-    EXPECT_NE(message.find("source_offset_elems=12800"), std::string::npos)
+-        << message;
+-    EXPECT_NE(message.find("generic LX relayout cannot safely materialize"),
+-              std::string::npos)
+-        << message;
+-  }
++  dxp.runDxp(testDataDir);
++
++  const auto debugJson =
++      std::filesystem::path(testDataDir) / "debug" / "sdsc_20" /
++      "sdsc_20.out.json";
++  EXPECT_TRUE(std::filesystem::exists(debugJson))
++      << "Expected debug SDSC output at " << debugJson;
+ }
+ 
+ TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayout) {
+-- 
+2.52.0
+
