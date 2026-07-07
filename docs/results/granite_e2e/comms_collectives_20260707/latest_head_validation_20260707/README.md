@@ -9,43 +9,38 @@ Torch prototype:
 
 ```text
 AdnanHoque/torch-spyre:gather-restickify
-7a188395295947e7cfe51619f958df712e676c6f
+102520820da890d6a62f781e86573f38dcc6f244
 ```
 
 Deeptools source:
 
 ```text
 Adnan-Hoque1/deeptools:ah/comms-collectives
-320630da56beb2bb12e6c96ae5b016127962353c
+a5ff55eee627c5c2bd4b7b0518bb0cbaad385952
 ```
 
-The CDX pod did not have private-key auth for `github.ibm.com`, so the two
-diagnostic commits from `320630da` were applied as patches on top of the local
-`3a4349e62` checkout. The resulting local head was:
-
-```text
-9c191c4ae9f273f5e0dcdf98413176c644f5fbb0
-```
-
-The patch content is the same as:
-
-```text
-2ccd5cefbf638e4d7fb04c88ed56a26c93a4459c
-320630da56beb2bb12e6c96ae5b016127962353c
-```
-
-Both commits are diagnostic/test-only for plan artifact consistency. They do
-not change the physical transfer lowering.
+The later Torch head fixes a partial-view gather fixture symbol mismatch so the
+full relayout test file can run cleanly.  The later Deeptools head reverts a
+diagnostic source-core chunking experiment that regressed the saved flash replay
+into an IBuff failure.
 
 ## Torch Validation
 
-Artifact:
+Artifacts:
 
 ```text
 torch_gather_restickify_validation_summary_devpf.md
+torch_full_lx_relayout_test_20260707.txt
+torch_full_lx_relayout_test_20260707.rc
 ```
 
-Result:
+Current result on CDX:
+
+```text
+38 passed in 3.82s
+```
+
+Older DEV result:
 
 - branch reset to `7a188395295947e7cfe51619f958df712e676c6f`;
 - `py_compile` passed;
@@ -63,7 +58,7 @@ Artifact:
 dxp_unit_focused_320630da_equiv.log
 ```
 
-Result:
+Current focused result:
 
 ```text
 7 focused DXP tests passed.
@@ -127,4 +122,3 @@ stages = source_operand_shards, grouped_broadcast, local_layout_conversion, gath
 
 This supersedes the older stale/mislabeled broadcast JSON that showed a
 multicast/loop-scoped path.
-

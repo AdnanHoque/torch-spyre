@@ -9,31 +9,34 @@ for a useful Granite/flash path.
 | Component | Branch | SHA |
 | --- | --- | --- |
 | Torch artifacts | `AdnanHoque/torch-spyre:ah/comms-collectives` | current artifact branch |
-| Torch prototype | `AdnanHoque/torch-spyre:gather-restickify` | `7a18839f83d74d2c576f4c85585e11638d30c20b` |
+| Torch prototype | `AdnanHoque/torch-spyre:gather-restickify` | `102520820da890d6a62f781e86573f38dcc6f244` |
 | Torch PR1 scatter | `AdnanHoque/torch-spyre:pr-lx-relayout-scatter` | `ba365fe6234527e17558520ab41e21d8c6c696e2` |
-| Deeptools collectives | `Adnan-Hoque1/deeptools:ah/comms-collectives` | `320630da56beb2bb12e6c96ae5b016127962353c` |
+| Deeptools collectives | `Adnan-Hoque1/deeptools:ah/comms-collectives` | `a5ff55eee627c5c2bd4b7b0518bb0cbaad385952` |
 | Deeptools PR1 scatter | `Adnan-Hoque1/deeptools:pr-lx-relayout-dldsc-scatter` | `b8c09743c46505b4cac46b434b9eb3243ae0b685` |
 
-## Local Test Attempt
+## Current Test Evidence
 
-A focused local pytest attempt was made from a shallow clone of
-`AdnanHoque/torch-spyre:gather-restickify`:
+The full Torch relayout test file now passes on the CDX pod at the current
+`gather-restickify` head:
 
 ```bash
-python3 -m pytest tests/inductor/test_lx_relayout_dldsc.py -q
+python3 -m pytest -q tests/inductor/test_lx_relayout_dldsc.py
 ```
 
-The local Mac environment does not currently have `torch` installed, so this
-did not run:
+Result:
 
 ```text
-ModuleNotFoundError: No module named 'torch'
+38 passed in 3.82s
 ```
 
-The code inspection below is source-level evidence plus archived pod test
-evidence. A fresh DEV pod validation was also run after auth returned; full
-collection is blocked by a local `_C.so` / `libspyre_comms.so.1` ABI mismatch,
-but static/import-light checks pass. See:
+Archived output:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260707/torch_full_lx_relayout_test_20260707.txt
+```
+
+Older DEV-pod validation still documents static/import-light checks and the
+local DEV `_C.so` / `libspyre_comms.so.1` ABI mismatch:
 
 ```text
 docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260707/torch_gather_restickify_validation_summary_devpf.md
@@ -45,16 +48,16 @@ docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260
 | --- | --- | --- |
 | Classify scatter/permutation | PR1 scatter branches and earlier scatter artifacts. | Complete for PR1 class. |
 | Classify all-gather/replicate | `flash_allgather_failclosed_checkpoint_20260707.md` records `all_gather_replicate` plans; Granite S512 checkpoint records two attention RHS all-gather/replicate handoffs; latest-head-equivalent saved full-flash DXP replay emits 64 all-gather/replicate plans. | Complete structurally for the current flash/attention class. |
-| Classify broadcast/multicast | Latest Deeptools fixtures generate bounded broadcast/multicast test coverage, Torch has planner-level metadata tests for both classes, and the regenerated bounded broadcast artifact now cleanly shows broadcast/gather-then-restickify. | Complete for bounded fixtures and generic metadata; still need a real useful-workload SDSC edge or explicit out-of-current-workload scope note. |
-| Classify gather | `tests/inductor/test_lx_relayout_dldsc.py` covers topology classification and generic DLDSC emission; partial-view gather artifacts and offset guards exist under `partial_view_gather_*` and `fanout_physical_fixture_probe_20260707`. | Complete for metadata/classification; useful-workload/value proof still partial. |
+| Classify broadcast/multicast | Latest Deeptools fixtures generate bounded broadcast/multicast test coverage; Torch full relayout test file now passes planner-level and bundle/codegen DLDSC tests for both classes; regenerated bounded broadcast/multicast artifacts show gather-then-restickify lowering. | Complete for bounded fixtures and generic graph/planner/codegen metadata. No current Granite/flash useful-workload edge naturally classifies as bounded broadcast/multicast; current useful workload evidence is all-gather/replicate. |
+| Classify gather | `tests/inductor/test_lx_relayout_dldsc.py` now passes full-file validation including topology classification, generic DLDSC emission, and partial-view gather bundle enrichment; partial-view gather artifacts and offset guards exist under `partial_view_gather_*` and `fanout_physical_fixture_probe_20260707`. | Complete for bounded metadata/codegen and partial-view bundle enrichment; useful-workload value proof remains separate. |
 | Torch emits DLDSC metadata for scatter | PR1 branch emits tensor-vs-compute distribution metadata consumed by Deeptools scatter relayout. | Complete for scatter. |
 | Torch emits DLDSC metadata for all-gather/replicate | Torch `gather-restickify` emits `matmul_operand_broadcast`/`all_gather_replicate` metadata for flash and Granite attention RHS handoffs. | Complete for current attention/flash class. |
-| Torch emits DLDSC metadata for broadcast/multicast | `tests/inductor/test_lx_relayout_dldsc.py` has generic broadcast and multicast DLDSC emission tests through `compile_op_spec`, plus planner-level fake-graph tests added in `7a18839f`. | Complete for generic planner/codegen metadata emission; not yet proven from a useful workload SDSC. |
+| Torch emits DLDSC metadata for broadcast/multicast | `tests/inductor/test_lx_relayout_dldsc.py` passes planner-level fake-graph tests and generic broadcast/multicast DLDSC emission tests through `compile_op_spec`. | Complete for generic planner/codegen metadata emission. |
 | Deeptools realizes bounded scatter | PR1 Deeptools branch and unit/device evidence. | Complete for bounded scatter. |
-| Deeptools realizes bounded all-gather/replicate | Saved full-flash DXP replay passed at `23010446e`; latest-head-equivalent replay at `320630da`/local `9c191c4` passed with `rc=0`, 64 backend plans, all `all_gather_replicate -> gather_then_restickify`. | Complete for bounded saved flash replay. |
+| Deeptools realizes bounded all-gather/replicate | Saved full-flash DXP replay passes at current Deeptools head `a5ff55eee` with `rc=0`, 64 backend plans, all `all_gather_replicate -> gather_then_restickify`. | Complete for bounded saved flash replay. |
 | Deeptools realizes bounded broadcast | Focused DXP/util tests pass, Deeptools `2ccd5ce` fixes one diagnostic cause of stale `stages`, `320630da` adds a guard test, and regenerated plan artifact cleanly shows `broadcast -> gather_then_restickify`. | Complete for bounded fixture. |
 | Deeptools realizes bounded multicast | Focused DXP/util tests pass at `3a4349e62`; bounded plan artifact archived. | Complete for bounded fixture. |
-| Unsupported or oversized cases fail closed/fallback | Fail-closed docs record direct broadcast/multicast wrong-locale avoidance, IBUFF boundary, and chunk/cap behavior. | Mostly complete; needs a single current-head negative test summary after latest broadcast/multicast changes. |
+| Unsupported or oversized cases fail closed/fallback | Fail-closed docs record direct broadcast/multicast wrong-locale avoidance, IBUFF boundary, chunk/cap behavior, and the Granite full-activation 1 MiB Torch fallback policy. Focused Deeptools negative tests pass in `MatmulOperandBroadcast*FailsClosed`. | Complete for current bounded-substrate scope. |
 | Artifacts identify removed Granite HBM spills | Granite S512 checkpoint records disabled/enabled SDSC counts and maps `sdsc_7` and `sdsc_15 -> sdsc_16` activation handoffs to on-chip movement. | Complete for the profiled `backend2162` run; needs refresh at latest branches. |
 | Artifacts identify remaining Granite HBM spills | Granite S512 checkpoint classifies remaining explicit `ReStickifyOpHBM` rows as weight-format rows. | Complete for that run. Keep weight restickifies out of comms scope. |
 | Flash attention used as validation | Flash structural runs show zero `ReStickifyOpHBM` and 32/64 backend plans depending on fixture. | Complete structurally. Flash value correctness remains out of scope because baseline is independently value-wrong. |
@@ -69,28 +72,30 @@ docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260
    green focused tests. The multicast artifact is clean, and the regenerated
    broadcast artifact at `320630da`-equivalent head now cleanly shows
    `broadcast -> gather_then_restickify`.
-4. **One public feature gate**: `SPYRE_LX_PLANNER_RELAYOUT=1` is the intended
+4. **Torch generic collectives metadata/codegen**: current `gather-restickify`
+   passes the full `tests/inductor/test_lx_relayout_dldsc.py` file, including
+   scatter, gather, broadcast, multicast, all-gather, matmul operand contracts,
+   and partial-view gather bundle enrichment.
+5. **One public feature gate**: `SPYRE_LX_PLANNER_RELAYOUT=1` is the intended
    user-facing flag. Capacity knobs are runtime setup, not feature gates.
-5. **Plan artifact stage consistency**: Deeptools `2ccd5ce` refreshes emitted
+6. **Plan artifact stage consistency**: Deeptools `2ccd5ce` refreshes emitted
    `matmul_operand_broadcast` artifact stages after selecting the physical
    carrier, and `320630da` adds a focused test guard. This is observability
    cleanup, not new lowering functionality.
 
 ## What Is Not Yet Closed
 
-1. **Graph-produced broadcast/multicast useful workload**:
-   - Generic Torch metadata/codegen tests already cover broadcast and multicast.
-   - Planner-level fake-graph tests for both classes were added in Torch
-     `gather-restickify` commit `7a18839f`.
+1. **Useful-workload broadcast/multicast**:
+   - Generic Torch planner/codegen tests cover broadcast and multicast.
    - Deeptools bounded fixtures are green.
-   - We still need a full Torch graph/SDSC edge that naturally classifies as
-     bounded broadcast or bounded multicast, or an explicit note that the
-     current Granite/flash in-scope edges are all-gather/replicate rather than
-     broadcast/multicast.
+   - Current useful Granite/flash in-scope edges observed so far classify as
+     all-gather/replicate or oversized all-gather/replicate, not bounded
+     broadcast/multicast. If a later Granite/WSR tile exposes natural bounded
+     broadcast/multicast, reuse this substrate and add that workload artifact.
 
 2. **Gather useful workload/value boundary**:
    - Generic gather metadata/codegen tests and partial-view gather guards exist,
-     but the evidence is less strong than all-gather/replicate.
+     and full Torch relayout tests now pass.
    - Add a bounded patterned value test or point to a Granite edge where a
      gather-like copy is actually realized.
 
@@ -135,8 +140,11 @@ When OpenShift auth is restored, use this order:
 
 Do not mark the goal complete until:
 
-- bounded broadcast/multicast have both backend and graph-produced Torch SDSC
-  evidence, or are explicitly downgraded out of required Granite scope;
 - gather has either a useful-workload proof or a bounded value-oriented proof;
 - latest Granite artifacts identify every remaining non-weight HBM spill as
   either removed, comm-substrate gap, or WSR/tile-scoping gap.
+
+Broadcast/multicast are no longer the strict blocker for this checkpoint:
+generic Torch planner/codegen coverage is green, Deeptools bounded fixtures are
+green, and current Granite/flash useful edges observed so far are
+all-gather/replicate rather than bounded broadcast/multicast.

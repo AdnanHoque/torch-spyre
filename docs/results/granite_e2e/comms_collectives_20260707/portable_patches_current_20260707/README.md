@@ -7,7 +7,7 @@ Torch/Deeptools checkouts for experimentation.  They are not PR-sized patches.
 ## Bases And Heads
 
 - Torch base: `665d0a6ca2cfd30d5cfb90dc98c9508273251483`
-- Torch head: `0c8ead7e12695e972c8f83a995c2ecd672dc2e4c`
+- Torch head: `102520820da890d6a62f781e86573f38dcc6f244`
 - Deeptools base: `ff1c7c676cdc8f319f90fe7baa666db2a1103327`
 - Deeptools head: `a5ff55eee627c5c2bd4b7b0518bb0cbaad385952`
 
@@ -50,18 +50,22 @@ feature flag.
 - Torch defaults full-tensor matmul operand collectives to a 1 MiB bounded cap
   under `SPYRE_LX_PLANNER_RELAYOUT=1`; larger full activations preserve the HBM
   fallback until WSR/tile-scoping can make the movement bounded.
+- Torch `10252082` fixes the partial-view gather bundle test fixture so the
+  full relayout test file passes cleanly.
 - The attempted source-core-aware Deeptools chunking patch is intentionally not
   in this portable patch bundle.  It helped diagnose Granite full-activation
   pressure, but it regressed the saved flash replay into an IBuff failure.
 
 ## Validation Snapshot
 
-- Torch focused tests:
-  `tests/inductor/test_lx_relayout_dldsc.py -k "matmul_operand_contract_budget or coordinate_topology"`
-  passed: 7/7.
+- Torch full relayout tests:
+  `python3 -m pytest -q tests/inductor/test_lx_relayout_dldsc.py`
+  passed: 38/38.
 - Deeptools focused tests:
   `DxpTestFixture.MatmulOperandBroadcast*:DxpTestFixture.CoreWorkDivIncomptLxRelayout*`
   passed: 7/7.
+- Saved flash SuperDSC replay at Deeptools `a5ff55eee` passed with 64 lowered
+  `all_gather_replicate -> gather_then_restickify` plans.
 
 See `../granite_failclosed_checkpoint_20260707/` for the Granite fail-closed
 checkpoint that motivated the bounded default.
