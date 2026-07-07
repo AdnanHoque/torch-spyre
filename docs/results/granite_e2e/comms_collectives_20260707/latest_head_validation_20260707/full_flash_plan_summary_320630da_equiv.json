@@ -1,0 +1,275 @@
+{
+  "communication_pattern": {
+    "all_gather_replicate": 64
+  },
+  "count": 64,
+  "files": [
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/20_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/173_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/445_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/428_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/275_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/513_batchmatmul_Tensor1_1_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/88_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/496_batchmatmul_Tensor1_1_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/428_batchmatmul_Tensor1_1_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/275_batchmatmul_Tensor1_1_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/207_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/190_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/326_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/54_batchmatmul_Tensor1_1_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/139_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/292_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/37_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/292_batchmatmul_Tensor1_1_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/20_batchmatmul_Tensor1_1_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    },
+    {
+      "communication_pattern": "all_gather_replicate",
+      "file": "/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/full_flash_replay_320630da_equiv_fixed_20260707_184815/backend_plans/343_batchmatmul_Tensor0_0_matmul_operand_broadcast_plan.json",
+      "physical_lowering_status": "lowered_gather_then_restickify",
+      "realization_strategy": "gather_then_restickify",
+      "stages": [
+        "source_operand_shards",
+        "grouped_all_gather_replicate",
+        "local_layout_conversion",
+        "gather_then_restickify",
+        "bind_matmul_kernel_operand"
+      ]
+    }
+  ],
+  "physical_lowering_status": {
+    "lowered_gather_then_restickify": 64
+  },
+  "realization_strategy": {
+    "gather_then_restickify": 64
+  },
+  "stale_loop_stage_with_gather": 0
+}

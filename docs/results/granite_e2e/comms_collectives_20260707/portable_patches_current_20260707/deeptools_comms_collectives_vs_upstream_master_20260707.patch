@@ -5739,7 +5739,7 @@ index fb507f4c3..ee0af2032 100644
    } else {
      dcg.runDcgForDlOpsStandalone(*sdsc);
 diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
-index db94b4e58..db0770d65 100644
+index db94b4e58..3d710c32d 100644
 --- a/dxp/test/dxp_unittest.cpp
 +++ b/dxp/test/dxp_unittest.cpp
 @@ -18,6 +18,7 @@
@@ -6481,7 +6481,7 @@ index db94b4e58..db0770d65 100644
  namespace {
  int64_t calculateCorrectionPaddingSize(const DesignSpaceConfigGlobal& dscGlobal,
                                         const Hcm& hcm) {
-@@ -641,6 +1366,199 @@ TEST_F(DxpTestFixture, LoopExecSencore1Bundle) {
+@@ -641,6 +1366,201 @@ TEST_F(DxpTestFixture, LoopExecSencore1Bundle) {
    // Cleanup is handled by TearDown()
  }
  
@@ -6582,6 +6582,8 @@ index db94b4e58..db0770d65 100644
 +              std::string::npos);
 +    EXPECT_NE(text.find(pattern), std::string::npos);
 +    EXPECT_NE(text.find("lowered_gather_then_restickify"), std::string::npos);
++    EXPECT_NE(text.find("gather_then_restickify"), std::string::npos);
++    EXPECT_EQ(text.find("loop_scoped_input_fetch"), std::string::npos);
 +  }
 +
 +  bool sawGather = false;
@@ -6681,7 +6683,7 @@ index db94b4e58..db0770d65 100644
  TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayout) {
    // The test should be launched with env var DEEPTOOLS_PATH set correctly.
    // Verifies that running dxp in bundle mode with debug + dumpSpyreCode on
-@@ -770,6 +1688,61 @@ TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayout) {
+@@ -770,6 +1690,61 @@ TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayout) {
    // Cleanup is handled by TearDown()
  }
  

@@ -1,0 +1,9 @@
+communication_pattern = broadcast
+source_core_count = 1
+consumer_core_count = 2
+group_count = 1
+consumer_replicas_per_group = 2
+logical_transfer_count = 2
+realization_strategy = gather_then_restickify
+physical_lowering_status = lowered_gather_then_restickify
+stages = ['source_operand_shards', 'grouped_broadcast', 'local_layout_conversion', 'gather_then_restickify', 'bind_matmul_kernel_operand']

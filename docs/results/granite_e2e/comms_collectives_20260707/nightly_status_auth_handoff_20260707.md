@@ -17,11 +17,11 @@ As of this handoff:
 
 | Repo | Branch | SHA | Role |
 | --- | --- | --- | --- |
-| `AdnanHoque/torch-spyre` | `ah/comms-collectives` | current branch head; at least `a647535bea55b8db308c0da8ae57818f1ba83c79` | Artifact branch with docs, patches, run payloads, and handoffs. |
+| `AdnanHoque/torch-spyre` | `ah/comms-collectives` | current branch head; at least `77aeabf470f507b849b164ed7e5dd01524f0db73` | Artifact branch with docs, patches, run payloads, and handoffs. |
 | `AdnanHoque/torch-spyre` | `gather-restickify` | `7a18839f83d74d2c576f4c85585e11638d30c20b` | Torch prototype branch for flash/gather-restickify experiments. Adds planner-level tests for generic gather, broadcast, multicast, and all-gather relayout metadata. |
 | `AdnanHoque/torch-spyre` | `pr-lx-relayout-scatter` | `ba365fe6234527e17558520ab41e21d8c6c696e2` | PR1 scatter/permutation Torch branch. |
 | `AdnanHoque/torch-spyre` | `pr-lx-relayout-dldsc` | `a9a3bb505b966a3716d48854d1ecc22e46624476` | Older DLDSC/scatter exploration branch. |
-| `Adnan-Hoque1/deeptools` | `ah/comms-collectives` | `2ccd5cefbf638e4d7fb04c88ed56a26c93a4459c` | Current Deeptools communication-collectives branch. Adds a diagnostic-only plan-artifact stage refresh after selecting the lowered relayout carrier. |
+| `Adnan-Hoque1/deeptools` | `ah/comms-collectives` | `320630da56beb2bb12e6c96ae5b016127962353c` | Current Deeptools communication-collectives branch. Adds diagnostic-only plan-artifact stage refresh and a focused test guard after selecting the lowered relayout carrier. |
 | `Adnan-Hoque1/deeptools` | `gather-restickify` | `57c6f040b02ff592bc6cb207d9783375d2043d78` | Clean gather/restickify split branch. |
 | `Adnan-Hoque1/deeptools` | `pr-lx-relayout-dldsc-scatter` | `b8c09743c46505b4cac46b434b9eb3243ae0b685` | PR1 scatter Deeptools branch. |
 
@@ -122,22 +122,25 @@ docs/results/granite_e2e/comms_collectives_20260707/full_flash_replay_latest_3a4
 After that attempt, the Deeptools branch was advanced to:
 
 ```text
-2ccd5cefbf638e4d7fb04c88ed56a26c93a4459c
+320630da56beb2bb12e6c96ae5b016127962353c
 ```
 
-This follow-up is diagnostic-only. It refreshes the emitted
+This follow-up is diagnostic-only. Commit `2ccd5ce` refreshes the emitted
 `matmul_operand_broadcast` plan JSON `stages` field after the emitter records a
 plan as lowered through `gather_then_restickify` or
-`loop_scoped_input_fetch`. It does not change transfer planning or lowering.
-The patch is archived here:
+`loop_scoped_input_fetch`. Commit `320630da` adds a focused test guard that
+fails if a gather-restickify artifact still advertises
+`loop_scoped_input_fetch`. Neither commit changes transfer planning or lowering.
+The patches are archived here:
 
 ```text
 docs/results/granite_e2e/comms_collectives_20260707/patches/deeptools_relayout_plan_artifact_stages_20260707.patch
+docs/results/granite_e2e/comms_collectives_20260707/patches/deeptools_relayout_plan_artifact_stage_test_20260707.patch
 ```
 
 ## Current Operational Blocker
 
-Local Kubernetes/OpenShift auth expired:
+This blocker is historical. Local Kubernetes/OpenShift auth had expired:
 
 ```text
 kubectl get pods -n a6-quantization
@@ -161,6 +164,70 @@ the OpenShift token page, then verify:
 kubectl get pods -n a6-quantization
 ```
 
+Auth was restored later on 2026-07-07. The replay and focused validation below
+were then completed.
+
+## Post-Auth Validation Result
+
+Artifacts:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260707/
+```
+
+Torch `gather-restickify` was validated on DEV at:
+
+```text
+7a188395295947e7cfe51619f958df712e676c6f
+```
+
+The pod environment has a local `_C.so` / `libspyre_comms.so.1` ABI mismatch
+that prevents full `test_lx_relayout_dldsc.py` collection, but these checks
+passed:
+
+```text
+py_compile tests/inductor/test_lx_relayout_dldsc.py
+compileall torch_spyre/_inductor tests/inductor/test_lx_relayout_dldsc.py
+tests/inductor/test_layout_allgather_restickify_import_light.py: 2 passed
+```
+
+Deeptools was validated on CDX against a `320630da`-equivalent local head. CDX
+did not have private-key auth for `github.ibm.com`, so the two diagnostic
+commits from `320630da` were applied as patches on top of local `3a4349e62`,
+producing local head:
+
+```text
+9c191c4ae9f273f5e0dcdf98413176c644f5fbb0
+```
+
+Focused DXP tests passed:
+
+```text
+7/7 focused tests passed
+```
+
+The saved full-flash SuperDSC replay also passed:
+
+```text
+rc = 0
+backend plans = 64
+communication_pattern = all_gather_replicate: 64
+realization_strategy = gather_then_restickify: 64
+physical_lowering_status = lowered_gather_then_restickify: 64
+stale_loop_stage_with_gather = 0
+```
+
+The regenerated bounded broadcast artifact is now clean:
+
+```text
+communication_pattern = broadcast
+source_core_count = 1
+consumer_core_count = 2
+realization_strategy = gather_then_restickify
+physical_lowering_status = lowered_gather_then_restickify
+stages = source_operand_shards, grouped_broadcast, local_layout_conversion, gather_then_restickify, bind_matmul_kernel_operand
+```
+
 ## Resume Command For Latest Full-Flash Replay
 
 On CDX, the relevant checkouts were:
@@ -176,7 +243,7 @@ The archived bundle was copied to:
 /tmp/flash_saved_superdsc_bundle_20260707.tgz
 ```
 
-After auth is refreshed, rerun with a timeout and archive the whole run:
+This replay has now been rerun successfully. The exact command pattern was:
 
 ```bash
 cd /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools
@@ -201,16 +268,14 @@ find "$RUN/post_sdsc" -type f | wc -l > "$RUN/post_sdsc_count"
 tar -czf "${RUN}.tgz" -C "$(dirname "$RUN")" "$(basename "$RUN")"
 ```
 
-Expected baseline for comparison:
+Observed result:
 
-- at `23010446e`, this saved replay passed with return code `0`;
-- at `3a4349e62`, it should ideally also pass, because the latest multicast
-  commit is test-only and the bounded broadcast production change should not
-  alter the all-gather/replicate carrier.
+- return code `0`;
+- `64` backend plan artifacts;
+- all plans use `all_gather_replicate -> gather_then_restickify`.
 
-If the latest replay hangs or times out, compare `23010446e`, `071e293cf`, and
-`3a4349e62` on the same saved bundle to isolate whether the slowdown comes from
-the bounded broadcast production change or unrelated build/runtime drift.
+The earlier interrupted `3a4349e62` run should be treated as an operational
+interruption, not a replay regression.
 
 ## Local Source Sanity Check
 
@@ -227,7 +292,7 @@ Torch `gather-restickify` at `7a18839f` matches the one-gate artifact:
 - Torch defaults backend `DXP_BACKEND_LX_FRAC_AVAIL` to `1` for the DXP
   subprocess when the relayout flag is on.
 
-Deeptools `ah/comms-collectives` at `2ccd5ce` matches the latest artifact
+Deeptools `ah/comms-collectives` at `320630da` matches the latest artifact
 claims:
 
 - `SPYRE_LX_PLANNER_RELAYOUT=1` enables the staged gather/restickify path;
@@ -242,6 +307,7 @@ claims:
 Recent Deeptools commits:
 
 ```text
+320630da [DXP] test relayout plan artifact stages
 2ccd5ce [DXP] refresh relayout plan artifact stages
 3a4349e [DXP] test bounded multicast gather restickify
 071e293 [DXP] enable bounded broadcast gather restickify

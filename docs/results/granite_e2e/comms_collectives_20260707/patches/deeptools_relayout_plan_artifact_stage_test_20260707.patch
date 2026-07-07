@@ -1,0 +1,26 @@
+From 320630da56beb2bb12e6c96ae5b016127962353c Mon Sep 17 00:00:00 2001
+From: Adnan Hoque <adnan.hoque1@ibm.com>
+Date: Tue, 7 Jul 2026 14:28:45 -0400
+Subject: [PATCH] [DXP] test relayout plan artifact stages
+
+Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dxp/test/dxp_unittest.cpp | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index db0770d65..3d710c32d 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -1463,6 +1463,8 @@ void expectMatmulOperandBroadcastGatherRestickifyCompiles(
+               std::string::npos);
+     EXPECT_NE(text.find(pattern), std::string::npos);
+     EXPECT_NE(text.find("lowered_gather_then_restickify"), std::string::npos);
++    EXPECT_NE(text.find("gather_then_restickify"), std::string::npos);
++    EXPECT_EQ(text.find("loop_scoped_input_fetch"), std::string::npos);
+   }
+ 
+   bool sawGather = false;
+-- 
+2.39.3 (Apple Git-146)
+

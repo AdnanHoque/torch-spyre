@@ -9,7 +9,7 @@ intended bounded broadcast/multicast gather-restickify path, but the archived
 bounded broadcast JSON in this artifact branch is not a clean proof of that
 path.
 
-The safest interpretation is:
+The original safest interpretation was:
 
 - current code/test intent: bounded broadcast and multicast can use
   `gather_then_restickify`;
@@ -20,6 +20,12 @@ The safest interpretation is:
   diagnostic-only issue where emitted plan JSON could report the selected
   `realization_strategy` correctly but retain a stale `stages` entry from the
   pre-lowering plan.
+- Deeptools `320630da56beb2bb12e6c96ae5b016127962353c` adds a focused test
+  guard for that diagnostic behavior.
+
+Post-auth update: the bounded broadcast artifact has now been regenerated at a
+`320630da`-equivalent local CDX head and is clean. Use the new artifact below
+instead of the older `bounded_broadcast_plan_071e293cf.json`.
 
 ## Archived Broadcast JSON
 
@@ -46,6 +52,30 @@ stages                     = [..., grouped_multicast, ..., loop_scoped_input_fet
 That is not a bounded broadcast gather-restickify artifact. It is a grouped
 multicast/kernel-neighbor artifact. It should not be used as proof that
 broadcast lowers through the final gather-restickify carrier.
+
+## Regenerated Broadcast JSON
+
+File:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260707/latest_head_validation_20260707/bounded_broadcast_plan_320630da_equiv.json
+```
+
+Key fields read:
+
+```text
+communication_pattern      = broadcast
+source_core_count          = 1
+consumer_core_count        = 2
+group_count                = 1
+consumer_replicas_per_group = 2
+logical_transfer_count     = 2
+realization_strategy       = gather_then_restickify
+physical_lowering_status   = lowered_gather_then_restickify
+stages                     = [..., grouped_broadcast, ..., gather_then_restickify, ...]
+```
+
+This is the clean bounded broadcast gather-restickify proof.
 
 ## Archived Multicast JSON
 
@@ -102,7 +132,7 @@ broken code path.
 
 ## Diagnostic Fix
 
-Committed on:
+Fix committed on:
 
 ```text
 Adnan-Hoque1/deeptools:ah/comms-collectives
@@ -119,20 +149,30 @@ The change refreshes `matmul_operand_broadcast` plan artifact `stages` after
 `emitMatmulOperandBroadcastPlanArtifact(...)` marks a plan as lowered through
 either `gather_then_restickify` or `loop_scoped_input_fetch`.
 
+Test guard committed on:
+
+```text
+Adnan-Hoque1/deeptools:ah/comms-collectives
+320630da56beb2bb12e6c96ae5b016127962353c
+```
+
+Patch archive:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260707/patches/deeptools_relayout_plan_artifact_stage_test_20260707.patch
+```
+
+The test asserts that the bounded broadcast/multicast gather-restickify compile
+path emits a plan artifact containing `gather_then_restickify` and not
+`loop_scoped_input_fetch`.
+
 This does not change physical lowering. It only keeps the JSON artifact
 internally consistent.
 
-## Required Follow-Up
+## Remaining Follow-Up
 
-When pod auth is restored, regenerate the bounded broadcast artifact at
-Deeptools `2ccd5ce` or newer and archive:
-
-```text
-communication_pattern      = broadcast
-realization_strategy       = gather_then_restickify
-physical_lowering_status   = lowered_gather_then_restickify
-```
-
-If the regenerated artifact instead still shows `multicast` or
-`loop_scoped_input_fetch`, treat that as a code bug and inspect the test fixture
-rewrite path before relying on broadcast support.
+The bounded backend artifact is now regenerated. The remaining question is
+whether Granite or flash naturally produces a bounded broadcast/multicast edge
+in the current useful workloads. If not, record broadcast/multicast as
+backend-supported communication classes that are not exercised by the current
+Granite/flash path.
