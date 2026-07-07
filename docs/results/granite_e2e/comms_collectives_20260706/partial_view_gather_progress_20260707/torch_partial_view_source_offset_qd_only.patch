@@ -1,0 +1,123 @@
+diff --git a/torch_spyre/_inductor/codegen/superdsc.py b/torch_spyre/_inductor/codegen/superdsc.py
+index 911b73fb..d498292d 100644
+--- a/torch_spyre/_inductor/codegen/superdsc.py
++++ b/torch_spyre/_inductor/codegen/superdsc.py
+@@ -65,6 +65,8 @@ class SDSCArgs:
+     arg_index: int = -1
+     is_index_tensor: bool = False
+     related_value_tensor_idx: int = -1
++    source_name: str | None = None
++    source_offset_elems: Expr | None = None
+     lx_residency_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
+ 
+     def __str__(self) -> str:
+@@ -614,6 +616,8 @@ def _create_sdsc_tensors(
+                 arg_index=arg.arg_index,
+                 is_index_tensor=is_idx_tensor,
+                 related_value_tensor_idx=related_val_idx,
++                source_name=arg.source_name,
++                source_offset_elems=arg.source_offset_elems,
+                 lx_residency_core_id_to_wk_slice=_map_lx_residency_to_sdsc_dims(
+                     arg,
+                     symbol_mapping,
+diff --git a/torch_spyre/_inductor/op_spec.py b/torch_spyre/_inductor/op_spec.py
+index 1a9dc424..314009d6 100644
+--- a/torch_spyre/_inductor/op_spec.py
++++ b/torch_spyre/_inductor/op_spec.py
+@@ -50,6 +50,11 @@ class TensorArg:
+         device_coordinates: The sympy Exprs that describe how elements in the Tensor are accessed.
+                 Free variables in device_coordinates refer to entries in the OpSpec's iteration_space.
+         allocation: If present, the offset in scratchpad memory assigned to the Tensor.
++        source_name: Optional producer buffer name for view inputs. Split/getitem
++                aliases are often folded away before OpSpec emission, but the
++                load still knows the base buffer.
++        source_offset_elems: Optional constant element offset from ``source_name``
++                for partial views such as fused SwiGLU gate/up halves.
+         lx_residency_core_id_to_wk_slice: Optional producer tensor distribution
+                 for an LX input whose physical ownership differs from this op's
+                 compute distribution. Keys are device-dim indices at this stage;
+@@ -64,6 +69,8 @@ class TensorArg:
+     allocation: Any
+     per_tile_fixed: bool = False
+     name: str | None = None
++    source_name: str | None = None
++    source_offset_elems: Expr | None = None
+     lx_residency_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
+ 
+ 
+diff --git a/torch_spyre/_inductor/spyre_kernel.py b/torch_spyre/_inductor/spyre_kernel.py
+index c32ff212..d032b7cc 100644
+--- a/torch_spyre/_inductor/spyre_kernel.py
++++ b/torch_spyre/_inductor/spyre_kernel.py
+@@ -122,6 +122,21 @@ def _current_node_lx_relayout_inputs(current_node) -> dict[str, Any]:
+     return merged
+ 
+ 
++def _constant_index_offset(index: sympy.Expr, it_space: dict) -> sympy.Expr | None:
++    """Return the constant element offset in a folded view index, if provable."""
++
++    try:
++        zeroed = sympy.simplify(
++            index.subs({sym: 0 for sym in it_space if isinstance(sym, sympy.Symbol)})
++        )
++    except Exception:
++        return None
++    free_symbols = getattr(zeroed, "free_symbols", set())
++    if free_symbols:
++        return None
++    return zeroed
++
++
+ class RValue(ABC):
+     """
+     An RValue is an expression that can appear on the right hand side of an assignment.
+@@ -577,6 +592,12 @@ class SpyreKernel(Kernel[CSEVariable]):
+             index,
+             self.indirect_sizes,
+         )
++        relayout_plan = (
++            _current_node_lx_relayout_inputs(self.current_node).get(name)
++            if is_input
++            else None
++        )
++        has_relayout_plan = isinstance(relayout_plan, dict)
+         tensor_arg = TensorArg(
+             is_input,
+             -1,
+@@ -586,15 +607,15 @@ class SpyreKernel(Kernel[CSEVariable]):
+             tensor.layout.allocation,
+             per_tile_fixed=getattr(tensor.layout, "per_tile_fixed", False),
+             name=opspec_name,
++            source_name=name if has_relayout_plan else None,
++            source_offset_elems=_constant_index_offset(index, it_space)
++            if has_relayout_plan
++            else None,
+         )
+-        if is_input and "lx" in tensor.layout.allocation:
+-            relayout_plan = _current_node_lx_relayout_inputs(self.current_node).get(
+-                name
++        if has_relayout_plan:
++            tensor_arg.lx_residency_core_id_to_wk_slice = relayout_plan.get(
++                "producer_core_id_to_device_slice"
+             )
+-            if isinstance(relayout_plan, dict):
+-                tensor_arg.lx_residency_core_id_to_wk_slice = relayout_plan.get(
+-                    "producer_core_id_to_device_slice"
+-                )
+         if (
+             "lx" not in tensor.layout.allocation
+             and "pool" not in tensor.layout.allocation
+@@ -1176,6 +1197,13 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
+                                 buf.writeline("per_tile_fixed=True,")
+                             if arg.name is not None:
+                                 buf.writeline(f"name={arg.name!r},")
++                            if arg.source_name is not None:
++                                buf.writeline(f"source_name={arg.source_name!r},")
++                            if arg.source_offset_elems is not None:
++                                buf.writeline(
++                                    "source_offset_elems="
++                                    f"{sympy_str(arg.source_offset_elems)},"
++                                )
+                             if arg.lx_residency_core_id_to_wk_slice is not None:
+                                 buf.writeline(
+                                     "lx_residency_core_id_to_wk_slice="
