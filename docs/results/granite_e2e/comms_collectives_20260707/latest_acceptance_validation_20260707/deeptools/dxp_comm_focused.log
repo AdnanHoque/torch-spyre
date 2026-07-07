@@ -1,0 +1,29 @@
+Note: Google Test filter = DxpTestFixture.MatmulOperandBroadcast*:DxpTestFixture.PartialViewGather*:DxpTestFixture.CoreWorkDivIncomptLxRelayout*
+[==========] Running 10 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 10 tests from DxpTestFixture
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed
+[       OK ] DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed (46 ms)
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastFailsClosed
+[       OK ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastFailsClosed (12 ms)
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastFailsClosed
+[       OK ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastFailsClosed (12 ms)
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastGatherRestickifyCompiles
+[       OK ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastGatherRestickifyCompiles (215 ms)
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastGatherRestickifyCompiles
+[       OK ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastGatherRestickifyCompiles (238 ms)
+[ RUN      ] DxpTestFixture.PartialViewGatherBoundedOffsetRelayoutCompiles
+[       OK ] DxpTestFixture.PartialViewGatherBoundedOffsetRelayoutCompiles (1767 ms)
+[ RUN      ] DxpTestFixture.PartialViewGatherMissingSourceOffsetFailsClosed
+[       OK ] DxpTestFixture.PartialViewGatherMissingSourceOffsetFailsClosed (9 ms)
+[ RUN      ] DxpTestFixture.PartialViewGatherInvalidSourceOffsetFailsClosed
+[       OK ] DxpTestFixture.PartialViewGatherInvalidSourceOffsetFailsClosed (9 ms)
+[ RUN      ] DxpTestFixture.CoreWorkDivIncomptLxRelayout
+[       OK ] DxpTestFixture.CoreWorkDivIncomptLxRelayout (37 ms)
+[ RUN      ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality
+[       OK ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality (133 ms)
+[----------] 10 tests from DxpTestFixture (2482 ms total)
+
+[----------] Global test environment tear-down
+[==========] 10 tests from 1 test suite ran. (2482 ms total)
+[  PASSED  ] 10 tests.
