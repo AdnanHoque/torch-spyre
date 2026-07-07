@@ -1,0 +1,141 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index c4086c7fa..326846612 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -270,8 +270,7 @@ static bool layoutAllgatherRestickifyEnabled() {
+ }
+ 
+ static bool matmulOperandBroadcastKernelNeighborEnabled() {
+-  return lxPlannerRelayoutEnabled() ||
+-         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++  return envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
+ }
+ 
+ static bool hasLargeMatmulOperandAllGather(const SuperDsc* sdsc) {
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index 279992a5c..79595f53f 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -231,6 +231,17 @@ struct ScopedEnvVar {
+   std::string oldValue;
+ };
+ 
++json11::Json readJsonFile(const std::filesystem::path& path) {
++  std::ifstream jsonIn(path);
++  EXPECT_TRUE(jsonIn.good()) << "Failed to open JSON file: " << path;
++  std::ostringstream jsonBuf;
++  jsonBuf << jsonIn.rdbuf();
++  std::string err;
++  auto json = json11::Json::parse(jsonBuf.str(), err);
++  EXPECT_TRUE(err.empty()) << "Failed to parse " << path << ": " << err;
++  return json;
++}
++
+ json11::Json::object makeGroupedMap(int coreCount, int groupCount) {
+   json11::Json::object result;
+   for (int core = 0; core < coreCount; ++core) {
+@@ -399,10 +410,20 @@ void runMatmulOperandBroadcastPatternCase(const std::string& testDataDir,
+ 
+   ScopedEnvVar restoreRelayout("SPYRE_LX_PLANNER_RELAYOUT");
+   ScopedEnvVar restoreCap("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS");
++  ScopedEnvVar restorePlanDir("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_PLAN_DIR");
+   ScopedEnvVar restoreFrac("DXP_LX_FRAC_AVAIL");
+ 
++  const auto planDir =
++      std::filesystem::path(testDataDir) / "matmul_operand_broadcast_plans";
++
+   setenv("SPYRE_LX_PLANNER_RELAYOUT", "1", 1);
+-  setenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS", "4", 1);
++  // This fixture intentionally exercises bounded gather/restickify
++  // materialization.  The separate cap test keeps oversized movement
++  // fail-closed; here the cap is raised above the fixture's required chunk
++  // count so we can verify the concrete emitted data-op carrier.
++  setenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS", "512", 1);
++  setenv("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_PLAN_DIR",
++         planDir.string().c_str(), 1);
+   setenv("DXP_LX_FRAC_AVAIL", "1", 1);
+ 
+   SenTargets target = SenTargets::SENTIENT;
+@@ -411,6 +432,82 @@ void runMatmulOperandBroadcastPatternCase(const std::string& testDataDir,
+   dxp.standalone = true;
+   dxp.debug = true;
+   dxp.runDxp(testDataDir);
++
++  ASSERT_TRUE(std::filesystem::exists(planDir))
++      << "Expected matmul operand broadcast plan artifacts under " << planDir;
++
++  std::vector<std::filesystem::path> planPaths;
++  for (const auto& entry : std::filesystem::directory_iterator(planDir)) {
++    if (entry.is_regular_file() &&
++        entry.path().filename().string().find(
++            "_matmul_operand_broadcast_plan.json") != std::string::npos) {
++      planPaths.push_back(entry.path());
++    }
++  }
++  ASSERT_EQ(planPaths.size(), 1u)
++      << "Expected one matmul operand broadcast plan artifact under "
++      << planDir;
++
++  const auto artifact = readJsonFile(planPaths.at(0));
++  EXPECT_EQ(artifact["artifact_kind"].string_value(),
++            "matmul_operand_broadcast_backend_plan");
++  EXPECT_EQ(artifact["communication_pattern"].string_value(), pattern);
++  EXPECT_TRUE(artifact["realized"].bool_value());
++  EXPECT_EQ(artifact["realization_strategy"].string_value(),
++            "gather_then_restickify");
++  EXPECT_EQ(artifact["physical_lowering_status"].string_value(),
++            "lowered_gather_then_restickify");
++  EXPECT_EQ(artifact["logical_transfer_count"].string_value(), "32");
++  EXPECT_EQ(artifact["producer_chunks_per_group"].string_value(), "1");
++  if (pattern == "broadcast") {
++    EXPECT_EQ(artifact["group_count"].string_value(), "1");
++    EXPECT_EQ(artifact["consumer_replicas_per_group"].string_value(), "32");
++    ASSERT_TRUE(artifact["logical_transfers"].is_array());
++    ASSERT_EQ(artifact["logical_transfers"].array_items().size(), 32u);
++    EXPECT_EQ(artifact["logical_transfers"].array_items().front()
++                  ["source_core"]
++                      .string_value(),
++              "0");
++    EXPECT_EQ(artifact["logical_transfers"].array_items().back()
++                  ["destination_core"]
++                      .string_value(),
++              "31");
++  } else if (pattern == "multicast") {
++    EXPECT_EQ(artifact["group_count"].string_value(), "4");
++    EXPECT_EQ(artifact["consumer_replicas_per_group"].string_value(), "8");
++    ASSERT_TRUE(artifact["logical_transfers"].is_array());
++    ASSERT_EQ(artifact["logical_transfers"].array_items().size(), 32u);
++    EXPECT_EQ(artifact["logical_transfers"].array_items().front()
++                  ["source_core"]
++                      .string_value(),
++              "0");
++    EXPECT_EQ(artifact["logical_transfers"].array_items().at(7)
++                  ["destination_core"]
++                      .string_value(),
++              "7");
++    EXPECT_EQ(artifact["logical_transfers"].array_items().at(8)
++                  ["source_core"]
++                      .string_value(),
++              "1");
++    EXPECT_EQ(artifact["logical_transfers"].array_items().back()
++                  ["destination_core"]
++                      .string_value(),
++              "31");
++  }
++
++  const auto debugJson =
++      std::filesystem::path(testDataDir) / "debug" / "sdsc_20" /
++      "sdsc_20.out.json";
++  ASSERT_TRUE(std::filesystem::exists(debugJson))
++      << "Expected debug SDSC output at " << debugJson;
++  std::ifstream debugIn(debugJson);
++  std::ostringstream debugBuf;
++  debugBuf << debugIn.rdbuf();
++  const std::string debugText = debugBuf.str();
++  EXPECT_NE(debugText.find("STCDPOpLx"), std::string::npos)
++      << "Expected generated SDSC to contain LX gather data ops";
++  EXPECT_NE(debugText.find("ReStickifyOpLx"), std::string::npos)
++      << "Expected generated SDSC to contain local LX restickify data ops";
+ }
+ 
+ void runCoreWorkDivRelayoutCase(
