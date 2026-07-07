@@ -1,0 +1,5 @@
+5418:Max IBUFF(128) Current IBUFF(649) for unit:
+10795:Max IBUFF(128) Current IBUFF(607) for unit:
+20732:Max IBUFF(256) Current IBUFF(506) for unit:
+30797:Max IBUFF(256) Current IBUFF(6446) for unit:
+30799:error: Unable to lower successfully the module for sdsc: 20_batchmatmul

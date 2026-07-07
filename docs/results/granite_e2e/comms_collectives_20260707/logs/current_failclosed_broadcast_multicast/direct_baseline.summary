@@ -1,0 +1,11 @@
+=== baseline ===
+rc=1
+7:C++ exception with description "DtException: wrong locale for dst operand, file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp line 2992" thrown in the test body.
+8:[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles (710 ms)
+11:C++ exception with description "DtException: wrong locale for dst operand, file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcc/src/Conversion/SentientToProgIR/ConstructProgIRHelper.cpp line 2992" thrown in the test body.
+12:[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastCompiles (690 ms)
+17:[  PASSED  ] 0 tests.
+18:[  FAILED  ] 2 tests, listed below:
+19:[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles
+20:[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastCompiles
+22: 2 FAILED TESTS
