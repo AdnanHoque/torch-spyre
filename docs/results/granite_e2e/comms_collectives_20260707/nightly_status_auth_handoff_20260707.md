@@ -11,6 +11,20 @@ The active goal is still the DLDSC LX communication substrate for Granite:
 
 This branch has made real progress toward that goal, but it is not complete.
 
+## Remote Branch Map
+
+As of this handoff:
+
+| Repo | Branch | SHA | Role |
+| --- | --- | --- | --- |
+| `AdnanHoque/torch-spyre` | `ah/comms-collectives` | `092e14d82e7ea4aedce67d209152eb5b4d835039` | Artifact branch with docs, patches, run payloads, and handoffs. |
+| `AdnanHoque/torch-spyre` | `gather-restickify` | `bced14b49acf4fae92ef4df07d2f5229806c672b` | Torch prototype branch for flash/gather-restickify experiments. |
+| `AdnanHoque/torch-spyre` | `pr-lx-relayout-scatter` | `ba365fe6234527e17558520ab41e21d8c6c696e2` | PR1 scatter/permutation Torch branch. |
+| `AdnanHoque/torch-spyre` | `pr-lx-relayout-dldsc` | `a9a3bb505b966a3716d48854d1ecc22e46624476` | Older DLDSC/scatter exploration branch. |
+| `Adnan-Hoque1/deeptools` | `ah/comms-collectives` | `3a4349e62baff978faa21b8cbad376a524658398` | Current Deeptools communication-collectives branch. |
+| `Adnan-Hoque1/deeptools` | `gather-restickify` | `57c6f040b02ff592bc6cb207d9783375d2043d78` | Clean gather/restickify split branch. |
+| `Adnan-Hoque1/deeptools` | `pr-lx-relayout-dldsc-scatter` | `b8c09743c46505b4cac46b434b9eb3243ae0b685` | PR1 scatter Deeptools branch. |
+
 ## What Is Solid
 
 Scatter/permutation is the production PR1 baseline.
@@ -165,4 +179,3 @@ Remaining gaps:
 - reduce/all-reduce remain future arithmetic collectives, not copy relayout;
 - flash numeric correctness is not a valid oracle because the baseline flash
   kernel currently has an independent broadcast/zero-stride correctness issue.
-
