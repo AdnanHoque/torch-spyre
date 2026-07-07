@@ -131,6 +131,8 @@ High-level readout:
 
 That matters for the MLP down-projection case: it should not be made to pass by keeping only the first few chunks. It should fall back or wait for WSR tile-scoping.
 
+Current backend test gap: the existing Deeptools unit fixtures cover the pure `LayoutAllgatherRestickify` planner and the generic core-work-div relayout path, but they do not yet contain a small `matmul_operand_broadcast` DXP fixture that reaches this materialization cap. The cap behavior is therefore covered by code inspection plus Granite/flash structural runs in this snapshot; a dedicated DXP fixture should be added before treating this as production test coverage.
+
 ## Reproduction Notes
 
 Use the one-feature gate:
