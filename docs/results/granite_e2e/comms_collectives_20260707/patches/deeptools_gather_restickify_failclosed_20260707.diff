@@ -1,0 +1,130 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index c4086c7fa..358e0c804 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -270,8 +270,7 @@ static bool layoutAllgatherRestickifyEnabled() {
+ }
+ 
+ static bool matmulOperandBroadcastKernelNeighborEnabled() {
+-  return lxPlannerRelayoutEnabled() ||
+-         envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
++  return envFlagEnabled("DEEPTOOLS_MATMUL_OPERAND_BROADCAST_KERNEL_NEIGHBOR");
+ }
+ 
+ static bool hasLargeMatmulOperandAllGather(const SuperDsc* sdsc) {
+@@ -1966,27 +1965,10 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+         continue;
+       }
+-      if (shouldUseLoopScopedMatmulOperandFetch(
+-              sdsc, effectiveMatmulBroadcastHook)) {
+-        std::string markerReason;
+-        if (!markMatmulOperandBroadcastKernelNeighbor(dldsc, lds,
+-                                                      &markerReason)) {
+-          emitMatmulOperandBroadcastPlanArtifact(
+-              sdsc, lds, ps, effectiveMatmulBroadcastHook,
+-              /*kernelNeighborLowered=*/false,
+-              /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+-          DT_CHECK_MSG(false,
+-                       "matmul_operand_broadcast kernel-neighbor marker "
+-                       "failed: " +
+-                           markerReason);
+-        }
+-        emitMatmulOperandBroadcastPlanArtifact(
+-            sdsc, lds, ps, effectiveMatmulBroadcastHook,
+-            /*kernelNeighborLowered=*/true,
+-            /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
+-        continue;
+-      }
+-      if (matmulOperandGatherRestickifyEnabled()) {
++      if (matmulOperandGatherRestickifyEnabled() &&
++          effectiveMatmulBroadcastHook.plan.communicationPattern ==
++              "all_gather_replicate" &&
++          effectiveMatmulBroadcastHook.plan.requiresLayoutConversion) {
+         std::string materializationReason;
+         if (!attachMatmulOperandBroadcastGatherThenRestickify(
+                 sdsc, lds, effectiveMatmulBroadcastHook, memTrackers, ps,
+@@ -2007,6 +1989,26 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             /*gatherRestickifyLowered=*/true, matmulBroadcastDebugContext);
+         continue;
+       }
++      if (shouldUseLoopScopedMatmulOperandFetch(
++              sdsc, effectiveMatmulBroadcastHook)) {
++        std::string markerReason;
++        if (!markMatmulOperandBroadcastKernelNeighbor(dldsc, lds,
++                                                      &markerReason)) {
++          emitMatmulOperandBroadcastPlanArtifact(
++              sdsc, lds, ps, effectiveMatmulBroadcastHook,
++              /*kernelNeighborLowered=*/false,
++              /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
++          DT_CHECK_MSG(false,
++                       "matmul_operand_broadcast kernel-neighbor marker "
++                       "failed: " +
++                           markerReason);
++        }
++        emitMatmulOperandBroadcastPlanArtifact(
++            sdsc, lds, ps, effectiveMatmulBroadcastHook,
++            /*kernelNeighborLowered=*/true,
++            /*gatherRestickifyLowered=*/false, matmulBroadcastDebugContext);
++        continue;
++      }
+       if (std::getenv("DEEPTOOLS_ENABLE_UNSAFE_MATMUL_OPERAND_BROADCAST") ==
+           nullptr) {
+         emitMatmulOperandBroadcastPlanArtifact(
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index 279992a5c..2256f01cf 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -393,8 +393,8 @@ void expectPartialViewGatherOffsetFailure(const std::string& testDataDir,
+   }
+ }
+ 
+-void runMatmulOperandBroadcastPatternCase(const std::string& testDataDir,
+-                                          const std::string& pattern) {
++void expectMatmulOperandBroadcastPatternFailsClosed(
++    const std::string& testDataDir, const std::string& pattern) {
+   rewriteMatmulOperandBroadcastFixture(testDataDir, pattern);
+ 
+   ScopedEnvVar restoreRelayout("SPYRE_LX_PLANNER_RELAYOUT");
+@@ -410,7 +410,19 @@ void runMatmulOperandBroadcastPatternCase(const std::string& testDataDir,
+   Dxp dxp(dscGlobal);
+   dxp.standalone = true;
+   dxp.debug = true;
+-  dxp.runDxp(testDataDir);
++  try {
++    dxp.runDxp(testDataDir);
++    FAIL() << "Expected matmul_operand_broadcast " << pattern
++           << " to fail closed until a safe lowering is available";
++  } catch (const DtException& ex) {
++    const std::string message = ex.what();
++    EXPECT_NE(
++        message.find(
++            "matmul_operand_broadcast metadata was classified, but physical "
++            "lowering is blocked"),
++        std::string::npos)
++        << message;
++  }
+ }
+ 
+ void runCoreWorkDivRelayoutCase(
+@@ -1076,16 +1088,16 @@ TEST_F(DxpTestFixture, MatmulOperandBroadcastChunkCapFailsClosed) {
+   }
+ }
+ 
+-TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternBroadcastCompiles) {
++TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternBroadcastFailsClosed) {
+   SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
+ 
+-  runMatmulOperandBroadcastPatternCase(testDataDir, "broadcast");
++  expectMatmulOperandBroadcastPatternFailsClosed(testDataDir, "broadcast");
+ }
+ 
+-TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternMulticastCompiles) {
++TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternMulticastFailsClosed) {
+   SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
+ 
+-  runMatmulOperandBroadcastPatternCase(testDataDir, "multicast");
++  expectMatmulOperandBroadcastPatternFailsClosed(testDataDir, "multicast");
+ }
+ 
+ TEST_F(DxpTestFixture, PartialViewGatherBoundedOffsetRelayoutCompiles) {
