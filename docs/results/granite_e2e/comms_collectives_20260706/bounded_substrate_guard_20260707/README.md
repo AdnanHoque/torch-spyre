@@ -28,7 +28,8 @@ Deeptools branch:
 
 ```text
 Adnan-Hoque1/deeptools:ah/comms-collectives
-commit c8c259061 [DXP] fail closed for oversized matmul operand relayout
+commit 61ffb6b3a [DXP] test matmul operand relayout chunk cap
+base behavior commit c8c259061 [DXP] fail closed for oversized matmul operand relayout
 ```
 
 Patch files archived here:
@@ -36,6 +37,7 @@ Patch files archived here:
 - `patches/torch_gather_restickify_bounded_operand_guard_de76531b.patch`
 - `patches/torch_bounded_operand_budget_tests_99f95650.patch`
 - `patches/deeptools_fail_closed_oversized_matmul_relayout_c8c259061.patch`
+- `patches/deeptools_dxp_chunk_cap_fixture_61ffb6b3a.patch`
 
 ## Validation
 
@@ -46,6 +48,7 @@ Torch py_compile: passed
 Torch tests/inductor/test_lx_relayout_dldsc.py: 30/30 passed
 Deeptools LayoutAllgatherRestickify.*: 32/32 passed
 Deeptools CoreWorkDivIncomptLxRelayout*: 2/2 passed
+Deeptools MatmulOperandBroadcastChunkCapFailsClosed: passed
 ```
 
 Flash compile probe:
@@ -131,7 +134,7 @@ High-level readout:
 
 That matters for the MLP down-projection case: it should not be made to pass by keeping only the first few chunks. It should fall back or wait for WSR tile-scoping.
 
-Current backend test gap: the existing Deeptools unit fixtures cover the pure `LayoutAllgatherRestickify` planner and the generic core-work-div relayout path, but they do not yet contain a small `matmul_operand_broadcast` DXP fixture that reaches this materialization cap. The cap behavior is therefore covered by code inspection plus Granite/flash structural runs in this snapshot; a dedicated DXP fixture should be added before treating this as production test coverage.
+Backend regression coverage now includes `DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed`, which replays a compact generated `matmul_operand_broadcast` SDSC fixture with `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_CHUNKS=1` and verifies that DXP rejects the case with the explicit fail-closed message instead of truncating movement.
 
 ## Reproduction Notes
 
