@@ -25,6 +25,39 @@ As of this handoff:
 | `Adnan-Hoque1/deeptools` | `gather-restickify` | `57c6f040b02ff592bc6cb207d9783375d2043d78` | Clean gather/restickify split branch. |
 | `Adnan-Hoque1/deeptools` | `pr-lx-relayout-dldsc-scatter` | `b8c09743c46505b4cac46b434b9eb3243ae0b685` | PR1 scatter Deeptools branch. |
 
+## Feature Flag State
+
+The intended user-facing gate for the prototype is one flag:
+
+```bash
+export SPYRE_LX_PLANNER_RELAYOUT=1
+```
+
+That flag is documented in:
+
+```text
+docs/results/granite_e2e/comms_collectives_20260706/antoni_minimal_flags_20260706.md
+docs/results/granite_e2e/comms_collectives_20260706/portable_onegate_patches_20260707/README.md
+```
+
+For normal Torch-launched runs with the portable one-gate patches, do not ask
+users to set the older per-feature flags. They remain debug/compatibility knobs.
+
+For manual DXP replay that bypasses Torch, `DXP_LX_FRAC_AVAIL=1` is still needed
+because Torch is not launching the DXP subprocess and cannot pass the backend
+workspace setting.
+
+For full Granite/full-LX benchmarking, the historical split setting is:
+
+```bash
+export SPYRE_LX_PLANNER_RELAYOUT=1
+export DXP_LX_FRAC_AVAIL=0
+export DXP_BACKEND_LX_FRAC_AVAIL=1
+```
+
+Treat that as a capacity/runtime setup for reproducing large Granite runs, not
+as a second feature flag.
+
 ## What Is Solid
 
 Scatter/permutation is the production PR1 baseline.
