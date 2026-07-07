@@ -1,0 +1,32 @@
+{
+  "date": "2026-07-07",
+  "class": "partial_view_gather",
+  "scope": "communication_substrate_guard",
+  "torch": {
+    "repo": "AdnanHoque/torch-spyre",
+    "branch": "gather-restickify",
+    "commit": "6bc8b00dcc034f1b8f568d8484e2c2c6791f0dfb",
+    "change": "emit partial-view gather metadata from TensorArg provenance"
+  },
+  "deeptools": {
+    "repo": "Adnan-Hoque1/deeptools",
+    "branch": "ah/comms-collectives",
+    "commit": "faa78233e724247e347065544c55b3212dccead8",
+    "change": "fail closed before generic relayout can ignore source_offset_elems"
+  },
+  "validation": {
+    "torch_py_compile": "passed",
+    "torch_helper_smoke": "passed_with_C_stub",
+    "torch_pytest": "not_run_in_this_worktree_due_to_C_so_flex_abi_mismatch",
+    "deeptools_partial_view_unit": "passed",
+    "deeptools_existing_relayout_gates": "passed",
+    "util_layout_allgather_restickify": "passed"
+  },
+  "status": {
+    "metadata_classification": "implemented",
+    "backend_safety_guard": "implemented",
+    "physical_lowering": "not_implemented",
+    "granite_hbm_spill_removed": "not_yet"
+  },
+  "next_step": "implement bounded offset-aware physical lowering for legal partial_view_gather tiles"
+}

@@ -1,0 +1,174 @@
+commit faa78233e724247e347065544c55b3212dccead8
+Author:     Adnan Hoque <adnan.hoque1@ibm.com>
+AuthorDate: Tue Jul 7 06:40:02 2026 +0000
+Commit:     Adnan Hoque <adnan.hoque1@ibm.com>
+CommitDate: Tue Jul 7 06:40:02 2026 +0000
+
+    [DXP] fail closed for partial-view gather relayout
+    
+    Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dxp/SdscRelayoutInsertion.cpp | 54 +++++++++++++++++++++++++++++++++++++
+ dxp/test/dxp_unittest.cpp     | 63 +++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 117 insertions(+)
+
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 7b53fb392..975f79fbd 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -60,6 +60,11 @@ struct MatmulOperandBroadcastHookPlan {
+   int classificationOperandIndex = -1;
+ };
+ 
++struct PartialViewGatherHook {
++  std::string classificationKey;
++  std::map<std::string, std::string> fields;
++};
++
+ static bool layoutAllgatherRestickifyMatchesLds(
+     const std::map<std::string, std::string>& fields,
+     const LabeledDsInfo& lds) {
+@@ -93,6 +98,36 @@ static LayoutAllgatherRestickifyHookPlan findLayoutAllgatherRestickifyPlan(
+   return {};
+ }
+ 
++static bool partialViewGatherMatchesLds(
++    const std::map<std::string, std::string>& fields,
++    const LabeledDsInfo& lds) {
++  const auto readIndexIt = fields.find("read_index");
++  if (readIndexIt != fields.end()) return std::stoi(readIndexIt->second) == lds.ldsIdx_;
++
++  const auto ldsIt = fields.find("input_labeled_ds");
++  if (ldsIt != fields.end()) return ldsIt->second == lds.dsName_;
++
++  return true;
++}
++
++static PartialViewGatherHook findPartialViewGatherHook(
++    const SuperDsc* sdsc, const LabeledDsInfo& lds) {
++  for (const auto& entry : sdsc->lxRelayoutClassifications_) {
++    const auto& fields = entry.second;
++    const auto kindIt = fields.find("kind");
++    const auto patternIt = fields.find("communication_pattern");
++    const bool isPartialViewGather =
++        (kindIt != fields.end() && kindIt->second == "partial_view_gather") ||
++        (patternIt != fields.end() &&
++         patternIt->second == "partial_view_gather");
++    if (!isPartialViewGather) continue;
++    if (!partialViewGatherMatchesLds(fields, lds)) continue;
++    return {entry.first, fields};
++  }
++
++  return {};
++}
++
+ static bool matmulOperandBroadcastMatchesLds(
+     const std::map<std::string, std::string>& fields,
+     const LabeledDsInfo& lds) {
+@@ -1824,6 +1859,25 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         allocCoords.coreIdToWkSlice_ == sdsc->coreIdToWkSlice_)
+       continue;
+ 
++    const auto partialViewGatherHook = findPartialViewGatherHook(sdsc, lds);
++    if (!partialViewGatherHook.classificationKey.empty()) {
++      const auto sourceOffsetIt =
++          partialViewGatherHook.fields.find("source_offset_elems");
++      const auto sourceOffset =
++          sourceOffsetIt == partialViewGatherHook.fields.end()
++              ? std::string("<missing>")
++              : sourceOffsetIt->second;
++      DT_CHECK_MSG(false,
++                   "partial_view_gather metadata was classified for " +
++                       lds.dsName_ +
++                       ", but generic LX relayout cannot safely materialize "
++                       "a producer subview with source_offset_elems=" +
++                       sourceOffset +
++                       ". Preserve HBM fallback or use WSR/tile-scoped "
++                       "lowering until offset-aware partial-view gather is "
++                       "implemented.");
++    }
++
+     const auto layoutAllgatherHook = findLayoutAllgatherRestickifyPlan(sdsc, lds);
+     if (!layoutAllgatherHook.classificationKey.empty()) {
+       if (!layoutAllgatherHook.plan.ok) {
+diff --git a/dxp/test/dxp_unittest.cpp b/dxp/test/dxp_unittest.cpp
+index 00b975c00..e93555b1e 100644
+--- a/dxp/test/dxp_unittest.cpp
++++ b/dxp/test/dxp_unittest.cpp
+@@ -327,6 +327,40 @@ void rewriteMatmulOperandBroadcastFixture(const std::string& testDataDir,
+   jsonOut << json11::Json(top).dump() << std::endl;
+ }
+ 
++void rewritePartialViewGatherFixture(const std::string& testDataDir) {
++  const auto path = std::filesystem::path(testDataDir) / "sdsc_20.json";
++  std::ifstream jsonIn(path);
++  std::ostringstream jsonBuf;
++  jsonBuf << jsonIn.rdbuf();
++  std::string err;
++  auto json = json11::Json::parse(jsonBuf.str(), err);
++  ASSERT_TRUE(err.empty()) << "Failed to parse " << path << ": " << err;
++  ASSERT_TRUE(json.is_object());
++  ASSERT_EQ(json.object_items().size(), 1);
++
++  auto top = json.object_items();
++  const auto sdscName = top.begin()->first;
++  auto sdsc = top.begin()->second.object_items();
++  auto classifications = sdsc["lxRelayoutClassifications_"].array_items();
++  ASSERT_FALSE(classifications.empty());
++  auto classification = classifications.at(0).object_items();
++
++  classification["kind"] = "partial_view_gather";
++  classification["classification"] = "partial_view_gather";
++  classification["communication_pattern"] = "partial_view_gather";
++  classification["materialization_pattern"] = "partial_view_gather_to_lx";
++  classification["source_offset_elems"] = "12800";
++  classification["requires_staged_realization"] = true;
++  classification["read_index"] = 1;
++
++  classifications.at(0) = classification;
++  sdsc["lxRelayoutClassifications_"] = classifications;
++  top[sdscName] = sdsc;
++
++  std::ofstream jsonOut(path);
++  jsonOut << json11::Json(top).dump() << std::endl;
++}
++
+ void runMatmulOperandBroadcastPatternCase(const std::string& testDataDir,
+                                           const std::string& pattern) {
+   rewriteMatmulOperandBroadcastFixture(testDataDir, pattern);
+@@ -1022,6 +1056,35 @@ TEST_F(DxpTestFixture, MatmulOperandBroadcastPatternMulticastCompiles) {
+   runMatmulOperandBroadcastPatternCase(testDataDir, "multicast");
+ }
+ 
++TEST_F(DxpTestFixture, PartialViewGatherFailsClosedBeforeGenericLxRelayout) {
++  SetUpTestData("test_matmul_operand_broadcast_chunk_cap");
++  rewritePartialViewGatherFixture(testDataDir);
++
++  ScopedEnvVar restoreFrac("DXP_LX_FRAC_AVAIL");
++  setenv("DXP_LX_FRAC_AVAIL", "1", 1);
++
++  SenTargets target = SenTargets::SENTIENT;
++  DesignSpaceConfigGlobal dscGlobal(target);
++  Dxp dxp(dscGlobal);
++  dxp.standalone = true;
++  dxp.debug = true;
++
++  try {
++    dxp.runDxp(testDataDir);
++    FAIL() << "Expected partial_view_gather to fail closed";
++  } catch (const DtException& ex) {
++    const std::string message = ex.what();
++    EXPECT_NE(message.find("partial_view_gather metadata was classified"),
++              std::string::npos)
++        << message;
++    EXPECT_NE(message.find("source_offset_elems=12800"), std::string::npos)
++        << message;
++    EXPECT_NE(message.find("generic LX relayout cannot safely materialize"),
++              std::string::npos)
++        << message;
++  }
++}
++
+ TEST_F(DxpTestFixture, CoreWorkDivIncomptLxRelayout) {
+   // The test should be launched with env var DEEPTOOLS_PATH set correctly.
+   // Verifies that running dxp in bundle mode with debug + dumpSpyreCode on
