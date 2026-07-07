@@ -1,0 +1,26 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 102c5b855..75b3fade3 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -1468,16 +1468,21 @@ static bool attachMatmulOperandBroadcastGatherThenRestickify(
+   std::vector<std::vector<GatheredPieceSpec>> chunks;
+   std::vector<GatheredPieceSpec> currentChunk;
+   std::map<int, int> currentChunkDestinationCoreCounts;
++  std::map<int, int> currentChunkSourceCoreCounts;
+   for (const auto& piece : gatheredPieceSpecs) {
+     if (!currentChunk.empty() &&
+         (static_cast<int>(currentChunk.size()) >= maxGatherPiecesPerChunk ||
++         currentChunkSourceCoreCounts[piece.sourceCoreId] >=
++             maxGatherPiecesPerCorePerChunk ||
+          currentChunkDestinationCoreCounts[piece.coreId] >=
+              maxGatherPiecesPerCorePerChunk)) {
+       chunks.push_back(currentChunk);
+       currentChunk.clear();
+       currentChunkDestinationCoreCounts.clear();
++      currentChunkSourceCoreCounts.clear();
+     }
+     currentChunk.push_back(piece);
++    currentChunkSourceCoreCounts[piece.sourceCoreId]++;
+     currentChunkDestinationCoreCounts[piece.coreId]++;
+   }
+   if (!currentChunk.empty()) chunks.push_back(currentChunk);
