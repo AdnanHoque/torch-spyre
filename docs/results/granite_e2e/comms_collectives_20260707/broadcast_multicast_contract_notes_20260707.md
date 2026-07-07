@@ -79,10 +79,13 @@ A valid bounded multicast fixture should have:
 Before enabling broadcast/multicast through the staged carrier, Deeptools should
 reject inconsistent contracts before DCC lowering.
 
-The likely guard:
+Implemented guard in Deeptools commit `23010446e`:
 
 - when deriving a source shard cell, use the tensor contract's declared
   `numWkSlicesPerDim_` when present, not only the filtered source core map;
+
+Remaining guard work:
+
 - verify that every required fanout destination has a concrete overlapping
   source cell;
 - fail closed with an explicit message if a communication pattern asks a source

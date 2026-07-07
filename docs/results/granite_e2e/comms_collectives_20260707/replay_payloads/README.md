@@ -21,7 +21,7 @@ Files:
 - Torch branch: `gather-restickify`
 - Torch SHA: `bced14b49acf4fae92ef4df07d2f5229806c672b`
 - Deeptools branch: `ah/comms-collectives`
-- Deeptools SHA: `262b28c05`
+- Deeptools SHA: `23010446e`
 
 ## Replay Command
 
@@ -95,3 +95,20 @@ Broadcast/multicast remain in the gap list until we add a fixture whose source
 tensor is actually resident for the fanout coordinates being requested, or until
 Torch emits a real Granite/flash broadcast edge with the correct redundant
 tensor distribution metadata.
+
+## Tensor Split Contract Guard
+
+Additional payload:
+
+`tensor_contract_split_guard_artifact_20260707`
+
+This records Deeptools commit `23010446e`, which makes relayout cell derivation
+honor `numWkSlicesPerDim_` when the tensor contract provides it. The purpose is
+to prevent filtered/debug core maps from making a source shard look larger than
+the physical tensor split declares.
+
+Validation:
+
+- focused DXP tests: `8/8` pass;
+- util all-gather/restickify tests: `32/32` pass;
+- full saved flash replay: return code `0`, backend plan count `64`.

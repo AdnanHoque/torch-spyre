@@ -1,0 +1,50 @@
+commit 23010446ed4cc91c80288cc1047f6c50c47d6c88
+Author:     Adnan Hoque <adnan.hoque1@ibm.com>
+AuthorDate: Tue Jul 7 15:56:49 2026 +0000
+Commit:     Adnan Hoque <adnan.hoque1@ibm.com>
+CommitDate: Tue Jul 7 15:56:49 2026 +0000
+
+    [DXP] honor tensor split contract for relayout cells
+    
+    Signed-off-by: Adnan Hoque <adnan.hoque1@ibm.com>
+---
+ dxp/SdscRelayoutInsertion.cpp | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 03d8a41f3..8ed6c5e2a 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -829,6 +829,19 @@ static double tensorContractDimExtent(const json11::Json& tensorJson,
+   return dldsc.N_.paramNameToVal(dim);
+ }
+ 
++static int tensorContractSplitForDim(
++    const json11::Json& tensorJson, const std::string& dim,
++    const std::map<std::string, std::set<int>>& sliceIds) {
++  const auto splitJson = tensorJson["numWkSlicesPerDim_"][dim];
++  if (!splitJson.is_null()) {
++    return static_cast<int>(jsonNumberOrString(splitJson, 1));
++  }
++  const auto splitIt = sliceIds.find(dim);
++  return splitIt == sliceIds.end()
++             ? 1
++             : static_cast<int>(splitIt->second.size());
++}
++
+ static std::map<std::string, std::string> buildDimRenameByPosition(
+     const json11::Json& sourceTensorJson, const json11::Json& targetTensorJson,
+     DesignSpaceConfig& dldsc, std::string* reason) {
+@@ -1055,10 +1068,8 @@ static bool sourceShardCell(
+   std::map<std::string, double> dimToGroupedExtent;
+   for (const auto& sourceDim : sourceLayoutDims) {
+     const auto targetDim = renamedDim(sourceToTargetDim, sourceDim);
+-    const auto splitIt = sourceSliceIds.find(sourceDim);
+-    const int split = splitIt == sourceSliceIds.end()
+-                          ? 1
+-                          : static_cast<int>(splitIt->second.size());
++    const int split =
++        tensorContractSplitForDim(sourceTensorJson, sourceDim, sourceSliceIds);
+     if (split <= 0) {
+       *reason = "source shard split must be positive for dim " + sourceDim;
+       return false;

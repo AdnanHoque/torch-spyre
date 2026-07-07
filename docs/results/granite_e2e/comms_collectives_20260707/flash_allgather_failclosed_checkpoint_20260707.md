@@ -5,7 +5,7 @@ This checkpoint records the state after the Deeptools fail-closed update at:
 - Torch branch: `gather-restickify`
 - Torch SHA: `bced14b49acf4fae92ef4df07d2f5229806c672b`
 - Deeptools branch: `ah/comms-collectives`
-- Deeptools SHA: `262b28c05`
+- Deeptools SHA: `23010446e`
 - Artifact branch: `ah/comms-collectives`
 
 ## Summary
@@ -16,7 +16,8 @@ The communication substrate is now behaving in the intended staged way:
 2. The full flash replay routes all matmul operand all-gather edges to the same `gather_then_restickify` carrier, which proves the DLDSC classification and routing are working.
 3. The full flash replay initially failed in DCC due to instruction-buffer pressure (`Max IBUFF(128) Current IBUFF(155)`).
 4. A less-fragmented gather/restickify chunk policy (`32` pieces per destination core, `256` total pieces per chunk) fixes that IBUFF failure for the trimmed `sdsc_3` reproducer and for the full saved flash bundle.
-5. Broadcast and multicast are representable in the same metadata, but the current full-resident gather/restickify realization is too large, and the older direct kernel-neighbor path still fails with `wrong locale for dst operand`. These remain fail-closed.
+5. Deeptools now derives source/target shard cells from the tensor contract's declared `numWkSlicesPerDim_` when present, instead of relying only on a possibly filtered core map.
+6. Broadcast and multicast are representable in the same metadata, but the current full-resident gather/restickify realization is too large, and the older direct kernel-neighbor path still fails with `wrong locale for dst operand`. These remain fail-closed.
 
 ## Validation Matrix
 
@@ -34,6 +35,7 @@ The communication substrate is now behaving in the intended staged way:
 | Full flash replay with only `SPYRE_LX_PLANNER_RELAYOUT=1` after default-policy fix | Pass | `logs/default_chunk_policy/full_flash_default_chunk_policy.rc` |
 | Fresh full flash replay with default-policy fix | Pass | `replay_payloads/artifact_payload_20260707_overnight/full_flash_dxp_replay_default_chunk_policy_20260707.tgz` |
 | Bounded broadcast/multicast staged-carrier experiment | Fails; recorded as gap | `replay_payloads/artifact_payload_20260707_overnight/broadcast_multicast_bounded_experiment_20260707.tgz` |
+| Tensor split contract guard | Pass | `replay_payloads/tensor_contract_split_guard_artifact_20260707` |
 | Direct kernel-neighbor broadcast path | Fails wrong-locale | `logs/current_failclosed_broadcast_multicast/direct_*.summary` |
 | Broadcast/multicast high-cap gather/restickify | Classifies and plans, but DCC IBUFF fails | `logs/current_failclosed_broadcast_multicast/*_high_cap_plan.json` and `*_error_excerpt.txt` |
 
@@ -71,10 +73,12 @@ Trimmed single-SDSC replay:
   - `DEEPTOOLS_MATMUL_OPERAND_BROADCAST_MAX_PIECES_PER_CHUNK=256`
   - return code `0`
 
-Default-policy fix:
+Default-policy and contract-guard fixes:
 
-- Commit: `262b28c05`
-- Code change: make the larger chunk grouping the default and keep both chunk knobs as diagnostics.
+- Default chunk-policy commit: `262b28c05`
+- Tensor split contract guard commit: `23010446e`
+- Chunk-policy code change: make the larger chunk grouping the default and keep both chunk knobs as diagnostics.
+- Guard code change: derive relayout source/target cells from `numWkSlicesPerDim_` when present, so filtered/debug source maps cannot silently claim a larger physical source shard than the tensor contract declares.
 - Focused DXP tests: `8/8` pass.
 - Layout all-gather/restickify tests: `32/32` pass.
 - Full saved flash bundle replay: return code `0`, `64` backend plan artifacts, no IBUFF/wrong-locale/error excerpt.
@@ -136,3 +140,7 @@ The source SuperDSC bundle and the successful full replay output are archived in
 
 See `replay_payloads/README.md` for the exact replay command, expected return
 code, expected plan count, and tarball checksums.
+
+The tensor split contract guard patch and replay output are archived in:
+
+`replay_payloads/tensor_contract_split_guard_artifact_20260707`
