@@ -57,6 +57,7 @@ Deeptools PartialViewGatherFailsClosedBeforeGenericLxRelayout at faa78233e: pass
 Deeptools PartialViewGather* at 9cd9c79c3: 3/3 passed; positive case asserts offset-adjusted source LX address 156672 and negative cases fail closed for missing/invalid source_offset_elems
 Combined DXP focused regression at 9cd9c79c3: 8/8 passed
 LayoutAllgatherRestickify.* at 9cd9c79c3: 32/32 passed
+Current-head archive current_head_validation_20260707: DXP relayout insertion 8/8 passed; util LayoutAllgatherRestickify 32/32 passed; Python value probe blocked before SDSC emission by Spyre fake-tensor/copy setup
 ```
 
 The partial-view Torch pytest could not be run in that exact CDX worktree
@@ -129,8 +130,7 @@ large activation needs performance -> wait for WSR to tile the live region
 ## Current Gaps
 
 1. Add value-oriented bounded synthetic/AIU validation for offset-aware
-   `partial_view_gather`. Descriptor/DXP compilation is now covered, but value
-   proof is still missing.
+   `partial_view_gather`. Descriptor/DXP compilation is now covered, and current-head host-side relayout tests are green. Python value execution is currently blocked before SDSC emission by unrelated Spyre fake-tensor/copy setup, so AIU value proof is still missing.
 2. Keep all oversized Granite activation cases classified as WSR/tile-scoping until WSR provides bounded live tiles.
 3. Keep reduce/all-reduce separate because those require arithmetic, not just movement.
 
