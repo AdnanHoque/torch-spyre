@@ -1,0 +1,11 @@
+Note: Google Test filter = DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from DxpTestFixture
+[ RUN      ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality
+[       OK ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality (131 ms)
+[----------] 1 test from DxpTestFixture (131 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (132 ms total)
+[  PASSED  ] 1 test.

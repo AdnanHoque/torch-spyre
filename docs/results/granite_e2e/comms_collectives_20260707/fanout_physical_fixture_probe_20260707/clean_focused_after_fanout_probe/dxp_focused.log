@@ -1,0 +1,21 @@
+Note: Google Test filter = DxpTestFixture.CoreWorkDivIncomptLxRelayout*:DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed:DxpTestFixture.PartialViewGather*
+[==========] Running 6 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 6 tests from DxpTestFixture
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed
+[       OK ] DxpTestFixture.MatmulOperandBroadcastChunkCapFailsClosed (44 ms)
+[ RUN      ] DxpTestFixture.PartialViewGatherBoundedOffsetRelayoutCompiles
+[       OK ] DxpTestFixture.PartialViewGatherBoundedOffsetRelayoutCompiles (1761 ms)
+[ RUN      ] DxpTestFixture.PartialViewGatherMissingSourceOffsetFailsClosed
+[       OK ] DxpTestFixture.PartialViewGatherMissingSourceOffsetFailsClosed (9 ms)
+[ RUN      ] DxpTestFixture.PartialViewGatherInvalidSourceOffsetFailsClosed
+[       OK ] DxpTestFixture.PartialViewGatherInvalidSourceOffsetFailsClosed (9 ms)
+[ RUN      ] DxpTestFixture.CoreWorkDivIncomptLxRelayout
+[       OK ] DxpTestFixture.CoreWorkDivIncomptLxRelayout (40 ms)
+[ RUN      ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality
+[       OK ] DxpTestFixture.CoreWorkDivIncomptLxRelayoutCardinality (135 ms)
+[----------] 6 tests from DxpTestFixture (2001 ms total)
+
+[----------] Global test environment tear-down
+[==========] 6 tests from 1 test suite ran. (2001 ms total)
+[  PASSED  ] 6 tests.

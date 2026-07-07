@@ -1,0 +1,73 @@
+Note: Google Test filter = LayoutAllgatherRestickify.*
+[==========] Running 32 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 32 tests from LayoutAllgatherRestickify
+[ RUN      ] LayoutAllgatherRestickify.acceptsCompleteFlashContract
+[       OK ] LayoutAllgatherRestickify.acceptsCompleteFlashContract (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.rejectsScatterMetadata
+[       OK ] LayoutAllgatherRestickify.rejectsScatterMetadata (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.rejectsMissingLayoutRename
+[       OK ] LayoutAllgatherRestickify.rejectsMissingLayoutRename (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.rejectsZeroWidthSplit
+[       OK ] LayoutAllgatherRestickify.rejectsZeroWidthSplit (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.synthesizesFlashMovementPlan
+[       OK ] LayoutAllgatherRestickify.synthesizesFlashMovementPlan (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.synthesizesMovementPlanFromStagedTorchMetadata
+[       OK ] LayoutAllgatherRestickify.synthesizesMovementPlanFromStagedTorchMetadata (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.expandsLogicalTransferCorePairs
+[       OK ] LayoutAllgatherRestickify.expandsLogicalTransferCorePairs (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.synthesizesFlashMovementPlanFromLxRestickify
+[       OK ] LayoutAllgatherRestickify.synthesizesFlashMovementPlanFromLxRestickify (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.synthesizesFlashMovementPlanFromSuperDscMetadata
+[       OK ] LayoutAllgatherRestickify.synthesizesFlashMovementPlanFromSuperDscMetadata (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.synthesizesFlashMovementPlanFromStringCountMetadata
+[       OK ] LayoutAllgatherRestickify.synthesizesFlashMovementPlanFromStringCountMetadata (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.emitsDeterministicBackendPlanArtifact
+[       OK ] LayoutAllgatherRestickify.emitsDeterministicBackendPlanArtifact (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.synthesizesBuf21MatmulOperandBroadcastPlan
+[       OK ] LayoutAllgatherRestickify.synthesizesBuf21MatmulOperandBroadcastPlan (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.synthesizesGroupedMatmulOperandBroadcastFromTensorDistribution
+[       OK ] LayoutAllgatherRestickify.synthesizesGroupedMatmulOperandBroadcastFromTensorDistribution (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.synthesizesGroupedMatmulOperandBroadcastFromGroupedFanoutMetadata
+[       OK ] LayoutAllgatherRestickify.synthesizesGroupedMatmulOperandBroadcastFromGroupedFanoutMetadata (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.expandsGroupedMatmulOperandBroadcastCorePairs
+[       OK ] LayoutAllgatherRestickify.expandsGroupedMatmulOperandBroadcastCorePairs (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.expandsMatmulOperandBroadcastCorePairsFromExplicitCoordinates
+[       OK ] LayoutAllgatherRestickify.expandsMatmulOperandBroadcastCorePairsFromExplicitCoordinates (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.expandsMatmulOperandGlobalBroadcastFromExplicitCoordinates
+[       OK ] LayoutAllgatherRestickify.expandsMatmulOperandGlobalBroadcastFromExplicitCoordinates (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.expandsMatmulOperandMulticastFromExplicitCoordinates
+[       OK ] LayoutAllgatherRestickify.expandsMatmulOperandMulticastFromExplicitCoordinates (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.acceptsPatternOnlyMatmulOperandMulticastMetadata
+[       OK ] LayoutAllgatherRestickify.acceptsPatternOnlyMatmulOperandMulticastMetadata (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.matmulOperandBroadcastRejectsMultipleSourceChunks
+[       OK ] LayoutAllgatherRestickify.matmulOperandBroadcastRejectsMultipleSourceChunks (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.expandsGatherThenRestickifyCorePairsFromExplicitCoordinates
+[       OK ] LayoutAllgatherRestickify.expandsGatherThenRestickifyCorePairsFromExplicitCoordinates (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.synthesizesBuf21MatmulOperandBroadcastFromSuperDscMetadata
+[       OK ] LayoutAllgatherRestickify.synthesizesBuf21MatmulOperandBroadcastFromSuperDscMetadata (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.expandsBuf21MatmulOperandBroadcastCorePairs
+[       OK ] LayoutAllgatherRestickify.expandsBuf21MatmulOperandBroadcastCorePairs (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.expandsMatmulOperandBroadcastFromCoordinateOverlapForStridedDestinations
+[       OK ] LayoutAllgatherRestickify.expandsMatmulOperandBroadcastFromCoordinateOverlapForStridedDestinations (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.emitsBuf21MatmulOperandBroadcastPlanArtifact
+[       OK ] LayoutAllgatherRestickify.emitsBuf21MatmulOperandBroadcastPlanArtifact (1 ms)
+[ RUN      ] LayoutAllgatherRestickify.matmulOperandBroadcastRecordsLayoutConversionContract
+[       OK ] LayoutAllgatherRestickify.matmulOperandBroadcastRecordsLayoutConversionContract (1 ms)
+[ RUN      ] LayoutAllgatherRestickify.matmulOperandBroadcastAcceptsGatherThenRestickifyRealization
+[       OK ] LayoutAllgatherRestickify.matmulOperandBroadcastAcceptsGatherThenRestickifyRealization (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.matmulOperandBroadcastRejectsResidentReplication
+[       OK ] LayoutAllgatherRestickify.matmulOperandBroadcastRejectsResidentReplication (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.movementPlanRejectsNonFlashProducer
+[       OK ] LayoutAllgatherRestickify.movementPlanRejectsNonFlashProducer (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.movementPlanRejectsIncompleteRename
+[       OK ] LayoutAllgatherRestickify.movementPlanRejectsIncompleteRename (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.mismatchedGroupsUseCoordinateRepartition
+[       OK ] LayoutAllgatherRestickify.mismatchedGroupsUseCoordinateRepartition (0 ms)
+[ RUN      ] LayoutAllgatherRestickify.synthesizesRenamedOneDToTwoDRepartitionPlan
+[       OK ] LayoutAllgatherRestickify.synthesizesRenamedOneDToTwoDRepartitionPlan (0 ms)
+[----------] 32 tests from LayoutAllgatherRestickify (4 ms total)
+
+[----------] Global test environment tear-down
+[==========] 32 tests from 1 test suite ran. (4 ms total)
+[  PASSED  ] 32 tests.

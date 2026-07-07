@@ -1,0 +1,17 @@
+Note: Google Test filter = *MatmulOperandBroadcastPatternBroadcastCompiles
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from DxpTestFixture
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles
+unknown file: Failure
+C++ exception with description "DtException: Invalid start address or buffer offset., file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcg/dcg_fe/scheduler/L3DlOpsScheduler.cpp line 5526" thrown in the test body.
+[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles (34 ms)
+[----------] 1 test from DxpTestFixture (34 ms total)
+
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (34 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles
+
+ 1 FAILED TEST

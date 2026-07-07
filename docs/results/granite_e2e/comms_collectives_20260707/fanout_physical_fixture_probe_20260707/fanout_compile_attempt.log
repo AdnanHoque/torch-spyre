@@ -1,0 +1,22 @@
+Note: Google Test filter = *MatmulOperandBroadcastPatternBroadcastCompiles:*MatmulOperandBroadcastPatternMulticastCompiles
+[==========] Running 2 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 2 tests from DxpTestFixture
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles
+unknown file: Failure
+C++ exception with description "DtException: maxGrpId <= sysDef.maxGroupID, file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp line 2664" thrown in the test body.
+[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles (519 ms)
+[ RUN      ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastCompiles
+unknown file: Failure
+C++ exception with description "DtException: maxGrpId <= sysDef.maxGroupID, file /home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools/dcg/dcg_fe/pcfg_gen/stcdpOp.cpp line 2664" thrown in the test body.
+[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastCompiles (557 ms)
+[----------] 2 tests from DxpTestFixture (1077 ms total)
+
+[----------] Global test environment tear-down
+[==========] 2 tests from 1 test suite ran. (1077 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 2 tests, listed below:
+[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternBroadcastCompiles
+[  FAILED  ] DxpTestFixture.MatmulOperandBroadcastPatternMulticastCompiles
+
+ 2 FAILED TESTS
