@@ -45,16 +45,27 @@ The fork `master` was fast-forwarded to official `master`:
 Mirrored fork experiment branches:
 
 1. `adnan/lx-relayout-allgather-restickify`
-   - Fork SHA: `3558acd1423a6d20eabadcb4d8148d0c66a34c6c`
-   - Base: PR 4408 head (`pr4408-head` locally).
-   - Contains the cleanly cherry-picked contract/utility part:
-     - LX relayout classification preservation.
-     - `LayoutAllgatherRestickify` utility and focused unit-test source.
-     - LX restickify DDL mapping/templates.
-     - Flash layout-allgather contract parsing and backend-plan artifact path.
-     - Matmul operand broadcast/all-gather contract parsing and fail-closed planning.
-   - Hygiene: `git diff --check pr4408-head..HEAD` passes.
-   - Important caveat: this is an extraction checkpoint, not the final PR2 backend materializer. The later bounded `gather_then_restickify` physical lowering commit is entangled with partial-view and broadcast/multicast work in the prototype history and needs a manual hand-slice before opening a PR.
+   - Fork SHA: `4db376918d589f78c46fa36dcfe189a31fa6ac3e`
+   - Base: PR 4408 head / PR1 scatter base `611687dc34e53fd7be0ceb37e74cfbf85010abf1`.
+   - This branch was force-updated from the old broad prototype pointer to a clean one-commit PR2 slice.
+   - Contains the hand-sliced bounded all-gather/restickify materializer:
+     - LX relayout classification preservation and `LayoutAllgatherRestickify` utility.
+     - Matmul operand broadcast/all-gather contract parsing for `kind=matmul_operand_broadcast` and `communication_pattern=all_gather_replicate`.
+     - Bounded DXP materialization that emits `STCDPOpLx` gather chunks followed by local `ReStickifyOpLx` chunks before the consumer compute.
+     - Chunk-cap and malformed/missing metadata fail-closed behavior.
+     - Focused utility tests and a bounded SuperDSC fixture under `dxp/test/test_matmul_operand_broadcast_chunk_cap`.
+   - Explicitly excluded from this PR2 slice:
+     - `partial_view_gather` and source-offset gather.
+     - Generic broadcast/multicast enablement.
+     - Full Granite streaming / WSR behavior.
+   - Hygiene:
+     - `git diff --check origin/adnan/lx-relayout-scatter-sizing..HEAD` passes.
+     - `git clang-format --diff origin/adnan/lx-relayout-scatter-sizing -- <touched C++ files>` reports no further modifications.
+     - Scope grep over touched files found no `partial_view`, `PartialView`, broadcast/multicast enablement, source-offset gather, or WSR/streaming code.
+   - Validation caveat:
+     - I attempted to compile `dxp_unit_test` and `util_unit_test` using two existing DEV pod Deeptools build roots.
+     - Both attempts failed during unrelated MLIR tablegen regeneration before compiling the PR2 files, with LLVM/tablegen schema errors such as `Record Uniform_Dialect does not have a field named usePropertiesForAttributes`.
+     - The branch is source-clean and pushed, but focused C++ test execution still needs a fresh healthy Deeptools build environment.
 
 2. `adnan/lx-relayout-broadcast-multicast`
    - Fork SHA: `3558acd1423a6d20eabadcb4d8148d0c66a34c6c`
@@ -83,14 +94,14 @@ Cleanup performed:
 - Retargeted the local Deeptools checkout so `adnan/lx-relayout-allgather-restickify`
   tracks the fork remote branch instead of the now-deleted official branch.
 
-## Why Deeptools needs hand-slicing
+## Why Deeptools needed hand-slicing
 
 The broad Deeptools prototype history was not authored in clean PR-order. The useful bounded materialization commit, `[DXP] add bounded gather restickify relayout path`, was created after partial-view gather experiments. As a result, direct cherry-pick brings partial-view helpers/tests into PR2 context. I stopped instead of letting PR2 become a disguised mega-PR.
 
-The next Deeptools extraction step is to manually lift only the bounded `gather_then_restickify` pieces:
+The Deeptools PR2 branch now manually lifts only the bounded `gather_then_restickify` pieces:
 
 - DXP: create bounded gather/restickify rows from `matmul_operand_broadcast` / `all_gather_replicate` metadata.
-- DCG/DDC/DCC: minimal ring/local LX copy realization and sync support for the bounded inserted rows.
+- DCG/DDC/DCC: reuse existing `STCDPOpLx` and `ReStickifyOpLx` lowering; no new public data-op kind.
 - Tests: keep the bounded all-gather/restickify fixture and chunk-cap/fail-closed tests.
 - Exclude: partial-view source offsets, generic broadcast/multicast enablement, full Granite streaming, and WSR behavior.
 
