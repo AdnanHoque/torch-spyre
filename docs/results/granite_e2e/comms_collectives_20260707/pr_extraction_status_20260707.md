@@ -45,9 +45,9 @@ The fork `master` was fast-forwarded to official `master`:
 Mirrored fork experiment branches:
 
 1. `adnan/lx-relayout-allgather-restickify`
-   - Fork SHA: `4db376918d589f78c46fa36dcfe189a31fa6ac3e`
+   - Fork SHA: `d6ac31ea82b445f6a65e3bb9ee314a1cf0e63fc9`
    - Base: PR 4408 head / PR1 scatter base `611687dc34e53fd7be0ceb37e74cfbf85010abf1`.
-   - This branch was force-updated from the old broad prototype pointer to a clean one-commit PR2 slice.
+   - This branch was force-updated from the old broad prototype pointer to a clean PR2 slice.
    - Contains the hand-sliced bounded all-gather/restickify materializer:
      - LX relayout classification preservation and `LayoutAllgatherRestickify` utility.
      - Matmul operand broadcast/all-gather contract parsing for `kind=matmul_operand_broadcast` and `communication_pattern=all_gather_replicate`.
@@ -62,10 +62,17 @@ Mirrored fork experiment branches:
      - `git diff --check origin/adnan/lx-relayout-scatter-sizing..HEAD` passes.
      - `git clang-format --diff origin/adnan/lx-relayout-scatter-sizing -- <touched C++ files>` reports no further modifications.
      - Scope grep over touched files found no `partial_view`, `PartialView`, broadcast/multicast enablement, source-offset gather, or WSR/streaming code.
-   - Validation caveat:
-     - I attempted to compile `dxp_unit_test` and `util_unit_test` using two existing DEV pod Deeptools build roots.
-     - Both attempts failed during unrelated MLIR tablegen regeneration before compiling the PR2 files, with LLVM/tablegen schema errors such as `Record Uniform_Dialect does not have a field named usePropertiesForAttributes`.
-     - The branch is source-clean and pushed, but focused C++ test execution still needs a fresh healthy Deeptools build environment.
+   - Validation on CDX pod:
+     - Pod: `adnan-cdx-spyre-dev-pf`.
+     - Checkout: `/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/deeptools`.
+     - Log directory: `/home/adnan-cdx/codex-isolated/gather_restickify_clean_20260706_113236/logs_pr2_clean_d6ac31ea82_20260708_024845`.
+     - Build command: `ninja-build util/util_unit_test dxp/dxp_unit_test`.
+     - `SPYRE_LX_PLANNER_RELAYOUT=1 util/util_unit_test --gtest_filter=LayoutAllgatherRestickify.*`: 19/19 passed.
+     - `SPYRE_LX_PLANNER_RELAYOUT=1 dxp/dxp_unit_test --gtest_filter="DxpTestFixture.CoreWorkDivIncomptLxRelayout*:DxpTestFixture.MatmulOperandAllGatherRestickify*"`: 3/3 passed.
+   - Debugging notes from this slice:
+     - The first hand-slice build missed `TransferNode::lxNeighborRingTransfers_`; this was fixed by adding the narrow transfer payload to `dsc/dsc2.h`.
+     - The next DXP run reached DCC but failed because inserted data-op descriptors had no PCFGs. The root cause was DXP routing scheduled mixed DL+data SDSCs through `runDcgForDlOpsStandalone`; the branch now routes them through `runDcgForDataOpsDlOps`.
+     - After routing was fixed, the remaining failure was only the test's stale plan-artifact filename; the emitted artifact name is derived from `sdsc name + lds name + classification key`.
 
 2. `adnan/lx-relayout-broadcast-multicast`
    - Fork SHA: `3558acd1423a6d20eabadcb4d8148d0c66a34c6c`
