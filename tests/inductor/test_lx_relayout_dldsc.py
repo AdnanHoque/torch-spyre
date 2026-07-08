@@ -26,9 +26,12 @@ from torch_spyre._inductor.lx_relayout import (
     _prefer_matmul_operand_contract,
 )
 from torch_spyre._inductor.lx_relayout_contracts import (
+    COMM_CLASS_ALL_TO_ALL_SHUFFLE,
     COMM_CLASS_ALL_GATHER,
-    MATMUL_OPERAND_ALLGATHER_REPLICATE,
-    MATMUL_OPERAND_BROADCAST,
+    COMM_PATTERN_ALL_GATHER,
+    LAYOUT_MODIFIER_OPERAND_STAGED,
+    LAYOUT_TRANSFORM_STICK_RELAYOUT,
+    REALIZATION_GATHER_THEN_RESTICKIFY,
     make_matmul_operand_allgather_contract,
 )
 from torch_spyre._inductor.op_spec import OpSpec, TensorArg
@@ -64,16 +67,16 @@ def test_matmul_operand_contract_is_all_gather_only(monkeypatch):
         max_fanin=32,
         transfer_count=1024,
     )
-    scatter = LXRelayoutTopology(
-        "scatter",
-        "one_to_one",
+    all_to_all_shuffle = LXRelayoutTopology(
+        COMM_CLASS_ALL_TO_ALL_SHUFFLE,
+        COMM_CLASS_ALL_TO_ALL_SHUFFLE,
         max_fanout=1,
         max_fanin=1,
         transfer_count=32,
     )
 
     assert _prefer_matmul_operand_contract(1, all_gather)
-    assert not _prefer_matmul_operand_contract(1, scatter)
+    assert not _prefer_matmul_operand_contract(1, all_to_all_shuffle)
     assert not _prefer_matmul_operand_contract(None, all_gather)
 
     contract = make_matmul_operand_allgather_contract(
@@ -85,10 +88,13 @@ def test_matmul_operand_contract_is_all_gather_only(monkeypatch):
         consumer_compute_work_slice_dims={"0": 32},
     )
 
-    assert contract["kind"] == MATMUL_OPERAND_BROADCAST
-    assert contract["classification"] == MATMUL_OPERAND_BROADCAST
+    assert contract["kind"] == COMM_CLASS_ALL_GATHER
+    assert contract["classification"] == COMM_CLASS_ALL_GATHER
     assert contract["communication_class"] == COMM_CLASS_ALL_GATHER
-    assert contract["communication_pattern"] == MATMUL_OPERAND_ALLGATHER_REPLICATE
+    assert contract["communication_pattern"] == COMM_PATTERN_ALL_GATHER
+    assert contract["layout_transform"] == LAYOUT_TRANSFORM_STICK_RELAYOUT
+    assert contract["layout_modifier"] == LAYOUT_MODIFIER_OPERAND_STAGED
+    assert contract["realization_strategy"] == REALIZATION_GATHER_THEN_RESTICKIFY
     assert contract["operand_role"] == "rhs"
     assert contract["requires_staged_realization"]
 

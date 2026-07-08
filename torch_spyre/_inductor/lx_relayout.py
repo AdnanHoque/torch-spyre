@@ -41,8 +41,9 @@ from torch_spyre._inductor.pass_utils import (
     _per_core_view_on_buf,
 )
 from torch_spyre._inductor.lx_relayout_contracts import (
+    COMM_CLASS_ALL_TO_ALL_SHUFFLE,
     COMM_CLASS_ALL_GATHER,
-    MATMUL_OPERAND_BROADCAST,
+    COMM_PATTERN_ALL_GATHER,
     make_matmul_operand_allgather_contract,
 )
 
@@ -69,8 +70,8 @@ class LXRelayoutPlan:
     consumer_core_id_to_device_slice: dict[str, dict[str, int]] | None = None
     read_index: int | None = None
     realized: bool = True
-    communication_class: str = "scatter"
-    communication_pattern: str = "scatter"
+    communication_class: str = COMM_CLASS_ALL_TO_ALL_SHUFFLE
+    communication_pattern: str = COMM_CLASS_ALL_TO_ALL_SHUFFLE
     max_fanout: int = 0
     max_fanin: int = 0
     transfer_count: int = 0
@@ -160,7 +161,11 @@ def _classify_coordinate_topology(
         return LXRelayoutTopology("unsupported", "no_coordinate_overlap", 0, 0, 0)
     if max_fanout <= 1 and max_fanin <= 1:
         return LXRelayoutTopology(
-            "scatter", "one_to_one", max_fanout, max_fanin, transfer_count
+            COMM_CLASS_ALL_TO_ALL_SHUFFLE,
+            COMM_CLASS_ALL_TO_ALL_SHUFFLE,
+            max_fanout,
+            max_fanin,
+            transfer_count,
         )
     if max_fanout > 1 and max_fanin <= 1:
         communication_class = (
@@ -178,7 +183,11 @@ def _classify_coordinate_topology(
             "gather", "many_to_one", max_fanout, max_fanin, transfer_count
         )
     return LXRelayoutTopology(
-        COMM_CLASS_ALL_GATHER, "many_to_many", max_fanout, max_fanin, transfer_count
+        COMM_CLASS_ALL_GATHER,
+        COMM_PATTERN_ALL_GATHER,
+        max_fanout,
+        max_fanin,
+        transfer_count,
     )
 
 
@@ -448,7 +457,7 @@ def get_lx_relayout_inputs(op: Operation) -> dict[str, Any]:
 def plan_lx_relayouts(
     graph: GraphLowering, cache: dict | None = None
 ) -> list[LXRelayoutPlan]:
-    """Classify scatter-capable producer/consumer LX relayout edges.
+    """Classify all-to-all-shuffle-capable producer/consumer LX relayout edges.
 
     V1 only records movement for single-writer intermediate tensors whose
     producer output is final (not K-split partials) and whose producer and
@@ -589,7 +598,7 @@ def plan_lx_relayouts(
                         source_name=dep.name,
                         producer_name=producer.get_name(),
                         consumer_name=consumer.get_name(),
-                        kind=MATMUL_OPERAND_BROADCAST,
+                        kind=layout_contract["kind"],
                         producer_core_count=producer_core_count,
                         consumer_core_count=consumer_core_count,
                         producer_core_id_to_device_slice=producer_core_slices,
@@ -613,7 +622,7 @@ def plan_lx_relayouts(
                     planned.append(plan)
                     continue
 
-                if topology.communication_class != "scatter":
+                if topology.communication_class != COMM_CLASS_ALL_TO_ALL_SHUFFLE:
                     continue
 
                 plan = LXRelayoutPlan(

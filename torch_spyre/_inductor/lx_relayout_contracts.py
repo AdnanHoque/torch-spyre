@@ -18,9 +18,15 @@ from __future__ import annotations
 
 from typing import Any
 
+COMM_CLASS_ALL_TO_ALL_SHUFFLE = "all_to_all_shuffle"
 COMM_CLASS_ALL_GATHER = "all_gather"
-MATMUL_OPERAND_BROADCAST = "matmul_operand_broadcast"
-MATMUL_OPERAND_ALLGATHER_REPLICATE = "all_gather_replicate"
+COMM_PATTERN_ALL_GATHER = "all_gather"
+LAYOUT_TRANSFORM_STICK_RELAYOUT = "stick_relayout"
+LAYOUT_MODIFIER_OPERAND_STAGED = "operand_staged"
+REALIZATION_GATHER_THEN_RESTICKIFY = "gather_then_restickify"
+
+LEGACY_MATMUL_OPERAND_BROADCAST = "matmul_operand_broadcast"
+LEGACY_ALL_GATHER_REPLICATE = "all_gather_replicate"
 
 
 def make_matmul_operand_allgather_contract(
@@ -37,8 +43,8 @@ def make_matmul_operand_allgather_contract(
     operand_role = {0: "lhs", 1: "rhs"}.get(int(read_index), f"input_{read_index}")
 
     return {
-        "kind": MATMUL_OPERAND_BROADCAST,
-        "classification": MATMUL_OPERAND_BROADCAST,
+        "kind": COMM_CLASS_ALL_GATHER,
+        "classification": COMM_CLASS_ALL_GATHER,
         "producer_op": producer_op,
         "consumer_op": consumer_op,
         "operand_read_index": int(read_index),
@@ -51,7 +57,10 @@ def make_matmul_operand_allgather_contract(
             "stickDimOrder_": ["out"],
         },
         "communication_class": COMM_CLASS_ALL_GATHER,
-        "communication_pattern": MATMUL_OPERAND_ALLGATHER_REPLICATE,
+        "communication_pattern": COMM_PATTERN_ALL_GATHER,
+        "layout_transform": LAYOUT_TRANSFORM_STICK_RELAYOUT,
+        "layout_modifier": LAYOUT_MODIFIER_OPERAND_STAGED,
+        "realization_strategy": REALIZATION_GATHER_THEN_RESTICKIFY,
         "requires_layout_conversion": True,
         "requires_staged_realization": True,
     }

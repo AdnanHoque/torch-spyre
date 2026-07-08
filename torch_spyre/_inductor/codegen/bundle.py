@@ -23,6 +23,12 @@ from torch_spyre._inductor import config as _spyre_config
 from torch_spyre._inductor.codegen.compute_ops import SymbolKind
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.codegen.unroll import unroll_loop_specs
+from torch_spyre._inductor.lx_relayout_contracts import (
+    COMM_CLASS_ALL_GATHER,
+    LAYOUT_MODIFIER_OPERAND_STAGED,
+    LAYOUT_TRANSFORM_STICK_RELAYOUT,
+    LEGACY_MATMUL_OPERAND_BROADCAST,
+)
 from torch_spyre._inductor.op_spec import LoopSpec, OpSpec
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 
@@ -155,7 +161,20 @@ def _enrich_lx_relayout_classifications(
     for classification in classifications:
         if not isinstance(classification, dict):
             continue
-        if classification.get("kind") != "matmul_operand_broadcast":
+        kind = classification.get("kind")
+        is_operand_staged_all_gather = (
+            (
+                kind == COMM_CLASS_ALL_GATHER
+                or classification.get("communication_class") == COMM_CLASS_ALL_GATHER
+            )
+            and classification.get("layout_transform")
+            == LAYOUT_TRANSFORM_STICK_RELAYOUT
+            and classification.get("layout_modifier") == LAYOUT_MODIFIER_OPERAND_STAGED
+        )
+        if (
+            kind != LEGACY_MATMUL_OPERAND_BROADCAST
+            and not is_operand_staged_all_gather
+        ):
             finalized_classifications.append(classification)
             continue
 

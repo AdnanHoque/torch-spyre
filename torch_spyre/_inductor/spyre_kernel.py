@@ -46,7 +46,8 @@ from .errors import Unsupported
 from .ir import FixedTiledLayout
 from .lx_relayout import LX_RELAYOUT_ATTR
 from .lx_relayout_contracts import (
-    MATMUL_OPERAND_ALLGATHER_REPLICATE,
+    COMM_PATTERN_ALL_GATHER,
+    LEGACY_ALL_GATHER_REPLICATE,
 )
 from .pass_utils import (
     concretize_expr,
@@ -70,7 +71,10 @@ import logging
 
 logger = get_inductor_logger("spyre_kernel")
 
-DLDSC_CLASSIFICATION_PATTERNS = {MATMUL_OPERAND_ALLGATHER_REPLICATE}
+DLDSC_CLASSIFICATION_PATTERNS = {
+    COMM_PATTERN_ALL_GATHER,
+    LEGACY_ALL_GATHER_REPLICATE,
+}
 
 def _current_node_op_info(current_node) -> dict[str, Any]:
     op_info: dict[str, Any] = {}
