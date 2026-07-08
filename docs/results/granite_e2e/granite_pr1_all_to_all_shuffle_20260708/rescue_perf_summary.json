@@ -1,0 +1,25 @@
+{
+  "run_root": "/home/adnan/codex-isolated/pr1_rescue_compare_20260708/runs/granite_rescue_device_20260708_200414",
+  "rows": [
+    {
+      "variant": "baseline_off",
+      "median_wall_ms": 28.084874153137207,
+      "kernel_ms_per_iter": 14.700179199999996,
+      "memory_ms_per_iter": 0.3081238500000001,
+      "trace": "/home/adnan/codex-isolated/pr1_rescue_compare_20260708/runs/granite_rescue_device_20260708_200414/baseline_off/block_prefill/trace/adnan-spyre-dev-pf_1590268.1783541166713567205.pt.trace.json",
+      "result": "/home/adnan/codex-isolated/pr1_rescue_compare_20260708/runs/granite_rescue_device_20260708_200414/baseline_off/block_prefill/result.json"
+    },
+    {
+      "variant": "rescue_full_torch_lx_backend1",
+      "median_wall_ms": 24.93762969970703,
+      "kernel_ms_per_iter": 12.035273850000001,
+      "memory_ms_per_iter": 0.36609160000000024,
+      "trace": "/home/adnan/codex-isolated/pr1_rescue_compare_20260708/runs/granite_rescue_device_20260708_200414/rescue_full_torch_lx_backend1/block_prefill/trace/adnan-spyre-dev-pf_1590664.1783541280670875144.pt.trace.json",
+      "result": "/home/adnan/codex-isolated/pr1_rescue_compare_20260708/runs/granite_rescue_device_20260708_200414/rescue_full_torch_lx_backend1/block_prefill/result.json"
+    }
+  ],
+  "speedups": {
+    "kernel": 1.2214245710744667,
+    "wall_median": 1.126204634976481
+  }
+}

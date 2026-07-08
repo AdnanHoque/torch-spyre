@@ -1,0 +1,7 @@
+
+SDSC Operations Summary - Batch Report
+Directory: /home/adnan/codex-isolated/pr1_rescue_compare_20260708/runs/granite_rescue_device_20260708_200414/baseline_off/block_prefill/cache/inductor-spyre/sdsc_fused__scaled_dot_product_fused_attention_overrideable__unsafe_view_clone_expand_mul_split_with_sizes_sum_transpose_unsqueeze_view_1__tq1btul/spyreCodeDir
+Total sdsc.json files found: 1
+
+No operations found in any sdsc.json files.
+

@@ -1,0 +1,19 @@
+{
+  "run_root": "/home/adnan/codex-isolated/pr1_rescue_compare_20260708/runs/granite_rescue_device_20260708_200414",
+  "rows": [
+    {
+      "variant": "baseline_off",
+      "ok": false,
+      "json": "block_prefill/trace_summary.json",
+      "kernel_ms_per_iter": 14.700179199999996,
+      "kernel_ms_total": 294.00358399999993
+    },
+    {
+      "variant": "rescue_full_torch_lx_backend1",
+      "ok": false,
+      "json": "block_prefill/trace_summary.json",
+      "kernel_ms_per_iter": 12.035273850000001,
+      "kernel_ms_total": 240.70547700000003
+    }
+  ]
+}
