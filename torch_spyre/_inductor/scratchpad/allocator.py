@@ -28,7 +28,7 @@ from torch._inductor.ir import (
     ExternKernel,
 )
 from torch._inductor.graph import GraphLowering
-from torch._inductor.dependencies import ReadWrites
+from torch._inductor.dependencies import MemoryDep, ReadWrites
 
 from torch_spyre._inductor.pass_utils import (
     apply_splits_from_index_coeff,
@@ -64,6 +64,12 @@ from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
+from torch_spyre._inductor.lx_relayout import (
+    LXRelayoutPlan,
+    clear_lx_relayout_metadata,
+    collect_lx_relayout_plans,
+    record_lx_relayout_plan,
+)
 from torch_spyre._inductor.pass_utils import _is_matmul_op
 
 logger = get_inductor_logger("scratchpad.allocator")
@@ -152,6 +158,8 @@ class ScratchpadAllocator:
         self.pre_optimization_passes = pre_optimization_passes
         self.post_optimization_passes = post_optimization_passes
         self.layout_planning = layout_planning
+        self._lx_relayout_plans_by_source: dict[str, list[LXRelayoutPlan]] = {}
+        self._lx_relayout_consumer_slices_by_source: dict[str, int] = {}
 
     def plan_allocation(self, graph: GraphLowering):
         """Run pre-passes, assign LX addresses to eligible buffers, then run post-passes.
@@ -161,10 +169,12 @@ class ScratchpadAllocator:
                 addresses where viable.
         """
         self.reject_reasons = {}
+        clear_lx_relayout_metadata(graph)
         for p in self.pre_optimization_passes:
             p.apply_pass(graph)
         buffers = self._generate_buffers(graph)
         allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
+        self._record_successful_lx_relayouts(graph, allocation)
         for b in allocation:
             if b.address is None:
                 self.reject_reasons[b.name] = (
@@ -194,6 +204,63 @@ class ScratchpadAllocator:
             if name is not None:
                 break
         return name if name is not None else "None"
+
+    def _consumer_slice_count(self, plan: LXRelayoutPlan) -> int:
+        return math.prod(int(split) for split in plan.consumer_work_slice_dims.values())
+
+    def _read_count_by_buffer(self, graph: GraphLowering) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for op in graph.operations:
+            for dep in op.get_read_writes().reads:
+                if isinstance(dep, MemoryDep):
+                    counts[dep.name] = counts.get(dep.name, 0) + 1
+        return counts
+
+    def _prepare_lx_relayout_candidates(
+        self,
+        graph: GraphLowering,
+        cache: Optional[dict] = None,
+    ) -> None:
+        self._lx_relayout_plans_by_source = {}
+        self._lx_relayout_consumer_slices_by_source = {}
+        if not config.lx_planner_relayout:
+            return
+
+        grouped: dict[str, list[LXRelayoutPlan]] = {}
+        for plan in collect_lx_relayout_plans(graph, cache):
+            grouped.setdefault(plan.source_name, []).append(plan)
+
+        read_counts = self._read_count_by_buffer(graph)
+        for source_name, plans in grouped.items():
+            if len(plans) != read_counts.get(source_name, 0):
+                continue
+            consumer_shapes = {
+                (
+                    plan.consumer_core_count,
+                    tuple(sorted(plan.consumer_work_slice_dims.items())),
+                )
+                for plan in plans
+            }
+            if len(consumer_shapes) != 1:
+                continue
+
+            consumer_slices = self._consumer_slice_count(plans[0])
+            if consumer_slices <= 0:
+                continue
+            self._lx_relayout_plans_by_source[source_name] = plans
+            self._lx_relayout_consumer_slices_by_source[source_name] = consumer_slices
+
+    def _record_successful_lx_relayouts(
+        self,
+        graph: GraphLowering,
+        allocation: list[LifetimeBoundBuffer],
+    ) -> None:
+        clear_lx_relayout_metadata(graph)
+        for buffer in allocation:
+            if buffer.address is None:
+                continue
+            for plan in buffer.lx_relayout_plans:
+                record_lx_relayout_plan(graph, plan)
 
     def _op_output_good_for_lx_reuse(self, op: Any) -> bool:
         if not isinstance(op, ComputedBuffer):
@@ -228,7 +295,11 @@ class ScratchpadAllocator:
     ) -> list[Operation]:
         core_div_reasons: dict[str, str] = {}
         core_div_mismatch = get_ncores_for_buffers(
-            graph, cache, rw_cache, core_div_reasons
+            graph,
+            cache,
+            rw_cache,
+            core_div_reasons,
+            planned_relayout_sources=set(self._lx_relayout_plans_by_source),
         )
         drop_list = set()
 
@@ -311,6 +382,9 @@ class ScratchpadAllocator:
                     uses,
                     first_use_is_read=False,
                     in_place_parents=in_place.get(output_name, []),
+                    lx_relayout_plans=self._lx_relayout_plans_by_source.get(
+                        output_name, []
+                    ),
                 )
             )
 
@@ -414,9 +488,18 @@ class ScratchpadAllocator:
         #   split-dependent part is the (cached) core-div check, so the rest
         #   could be hoisted out of the per-leaf path too.
         t0 = time.perf_counter()
+        self._prepare_lx_relayout_candidates(graph, cache)
         graph_view = GraphView(graph, lambda g: self._filter_ops(g, cache, rw_cache))
         t1 = time.perf_counter()
-        mem_usage = mem_usage_by_buf(graph_view, cache, rw_cache)
+        mem_usage = mem_usage_by_buf(
+            graph_view,
+            cache,
+            rw_cache,
+            relayout_consumer_slices_by_buf=(
+                self._lx_relayout_consumer_slices_by_source
+            ),
+            planned_relayout_sources=set(self._lx_relayout_plans_by_source),
+        )
         t2 = time.perf_counter()
         if timings is not None:
             timings["graph_view"] += t1 - t0
@@ -888,6 +971,7 @@ class StrategyBCoOptimizingAllocator(ScratchpadAllocator):
 
     def plan_allocation(self, graph: GraphLowering):
         self.reject_reasons = {}
+        clear_lx_relayout_metadata(graph)
         for p in self.pre_optimization_passes:
             p.apply_pass(graph)
 
@@ -945,12 +1029,16 @@ class StrategyBCoOptimizingAllocator(ScratchpadAllocator):
         # the clone (changes the (op, splits, dep) cache key), so on any op-count
         # change both are stale and we rebuild from scratch (cache=lifetimes=None).
         clone_inserted = len(graph.operations) != n_ops_before_clone
+        lifetimes = None if clone_inserted else search_lifetimes
+        if lifetimes is None:
+            lifetimes = calculate_liveness(graph)
         buffers = self._generate_buffers(
             graph,
             cache=None if clone_inserted else search_cache,
-            lifetimes=None if clone_inserted else search_lifetimes,
+            lifetimes=lifetimes,
         )
         allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
+        self._record_successful_lx_relayouts(graph, allocation)
         for b in allocation:
             if b.address is None:
                 self.reject_reasons[b.name] = (
