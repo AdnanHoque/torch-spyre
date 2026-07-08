@@ -181,16 +181,6 @@ def _enrich_lx_relayout_classifications(
         if target_layout is not None:
             classification.setdefault("target_kernel_tensor", target_layout)
 
-        layout_transform = dict(classification.get("layout_transform") or {})
-        layout_transform.setdefault("source_component", "lx")
-        layout_transform.setdefault("target_component", "KERNEL")
-        layout_transform.setdefault("movement_stage", "all_gather_replicate")
-        layout_transform.setdefault("conversion_stage", "local_restickify_to_kernel")
-        layout_transform.setdefault(
-            "carrier_hint", "lx_all_gather_then_local_restickify"
-        )
-        classification["layout_transform"] = layout_transform
-
         if classification.get("requires_layout_conversion"):
             source = classification.get("source_lx_tensor") or {}
             target = classification.get("target_kernel_tensor") or {}

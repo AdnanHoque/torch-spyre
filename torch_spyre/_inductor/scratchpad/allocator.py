@@ -166,7 +166,7 @@ class ScratchpadAllocator(ABC):
         and clear otherwise useful computed-activation relayout metadata.
         """
         if (
-            not config.lx_planner_relayout_restickify_outputs
+            not config.lx_planner_relayout
             or self._get_op_name(op) != "restickify"
         ):
             return False
@@ -183,7 +183,7 @@ class ScratchpadAllocator(ABC):
         the second batchmatmul.
         """
         return (
-            config.lx_planner_relayout_collectives
+            config.lx_planner_relayout
             and self._get_op_name(op) == "clone"
             and self._computed_source_unary_output(graph, op)
         )

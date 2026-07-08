@@ -44,44 +44,10 @@ lx_boundary_clones: bool = os.environ.get("LX_BOUNDARY_CLONES", "0") == "1"
 # synthesize the on-chip relayout from the coordinate mismatch.
 lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
 
-# Experimental research lane for layout-restickify spills. This only makes
-# computed-source synthetic spyre.restickify outputs eligible for LX planning;
-# graph-input/weight restickifies are intentionally left to offline prelayout.
-lx_planner_relayout_restickify_outputs: bool = _get_env_bool(
-    "SPYRE_LX_PLANNER_RELAYOUT_RESTICKIFY_OUTPUTS", lx_planner_relayout
-)
-
-# Experimental research lane for matmul operand relayouts. These are coordinate
-# collectives such as multicast/gather/all-gather, but still keep physical
-# transfer derivation in Deeptools via dl-dsc coordinates.
-lx_planner_relayout_collectives: bool = _get_env_bool(
-    "SPYRE_LX_PLANNER_RELAYOUT_COLLECTIVES", lx_planner_relayout
-)
-
-# Experimental metadata-only contract for Granite/attention matmul operand
-# materialization. Requires lx_planner_relayout_collectives and records the
-# matmul operand as grouped all-gather/broadcast rather than allowing it to look
-# like resident scatter.
-lx_planner_relayout_matmul_operand_contract: bool = _get_env_bool(
-    "SPYRE_LX_PLANNER_RELAYOUT_MATMUL_OPERAND_CONTRACT", lx_planner_relayout
-)
-
-# Experimental metadata lane for flash activation edges of the form
-# pointwise -> ReStickifyOpHBM -> batchmatmul KERNEL. The producer and consumer
-# need a layout-aware grouped all-gather, not the direct scatter class realized
-# by PR1. Keep this opt-in until backend lowering is value-correct.
-lx_planner_relayout_layout_allgather_restickify: bool = _get_env_bool(
-    "SPYRE_LX_PLANNER_RELAYOUT_LAYOUT_ALLGATHER_RESTICKIFY", lx_planner_relayout
-)
-
-# Bound full-tensor matmul operand collectives to the communication-substrate
-# lane. Larger activations require WSR/tile-scoping; preserving the HBM fallback
-# is safer than asking Deeptools to materialize a full dense gather in LX.
+# Bound PR2 matmul-operand all-gather metadata to small LX-resident operands.
+# Larger activations keep the existing HBM fallback.
 lx_planner_relayout_max_matmul_operand_bytes: int = int(
-    os.environ.get(
-        "SPYRE_LX_PLANNER_RELAYOUT_MAX_MATMUL_OPERAND_BYTES",
-        "1048576" if lx_planner_relayout else "0",
-    )
+    1048576 if lx_planner_relayout else 0
 )
 
 # Frontend LX reservation fraction.  When LX relayout is enabled, default
@@ -95,10 +61,7 @@ dxp_lx_frac_avail: float = float(
 # hides the old wrapper trick behind the same top-level relayout flag while
 # preserving explicit overrides for backend debugging.
 dxp_backend_lx_frac_avail: float = float(
-    os.environ.get(
-        "DXP_BACKEND_LX_FRAC_AVAIL",
-        "1" if lx_planner_relayout else str(dxp_lx_frac_avail),
-    )
+    1 if lx_planner_relayout else dxp_lx_frac_avail
 )
 
 sencores: int = int(os.getenv("SENCORES", "32"))

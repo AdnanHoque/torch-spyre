@@ -40,12 +40,9 @@ from torch_spyre._inductor.pass_utils import (
     _is_matmul_op,
     _per_core_view_on_buf,
 )
-from torch_spyre._inductor.layout_allgather_restickify import (
+from torch_spyre._inductor.lx_relayout_contracts import (
     COMM_CLASS_ALL_GATHER,
-    LAYOUT_ALLGATHER_RESTICKIFY,
     MATMUL_OPERAND_BROADCAST,
-    RESTICKIFY_LX_OP,
-    make_layout_allgather_restickify_contract,
     make_matmul_operand_allgather_contract,
 )
 
@@ -79,7 +76,6 @@ class LXRelayoutPlan:
     transfer_count: int = 0
     requires_staged_realization: bool = False
     layout_contract: dict[str, Any] | None = None
-    unsupported_reason: str = ""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -139,12 +135,7 @@ def _classify_coordinate_topology(
     consumer_core_id_to_device_slice: dict[str, dict[str, int]],
     consumer_work_slice_dims: dict[str, int],
 ) -> LXRelayoutTopology:
-    """Classify movement cardinality from producer/consumer coordinate maps.
-
-    The backend owns physical realization. This helper only names the logical
-    overlap class so artifacts distinguish one-to-one scatter from multicast,
-    gather, and all-gather shaped coordinate mismatches.
-    """
+    """Classify movement cardinality from producer/consumer coordinate maps."""
 
     producer_map = _int_keyed_map(producer_core_id_to_device_slice)
     consumer_map = _int_keyed_map(consumer_core_id_to_device_slice)
@@ -194,16 +185,10 @@ def _classify_coordinate_topology(
 def _prefer_matmul_operand_contract(
     read_index: int | None, topology: LXRelayoutTopology
 ) -> bool:
-    supported_matmul_operand_classes = (
-        COMM_CLASS_ALL_GATHER,
-        "gather",
-        "broadcast",
-    )
     return (
-        config.lx_planner_relayout_collectives
-        and config.lx_planner_relayout_matmul_operand_contract
+        config.lx_planner_relayout
         and read_index in (0, 1)
-        and topology.communication_class in supported_matmul_operand_classes
+        and topology.communication_class == COMM_CLASS_ALL_GATHER
     )
 
 
@@ -576,46 +561,6 @@ def plan_lx_relayouts(
                     )
                     continue
 
-                if (
-                    config.lx_planner_relayout_layout_allgather_restickify
-                    and not _prefer_matmul_operand_contract(read_index, topology)
-                    and _restickify_reads_computed_input(graph, producer)
-                ):
-                    layout_contract = make_layout_allgather_restickify_contract(
-                        producer_op="mul",
-                        restickify_op=RESTICKIFY_LX_OP,
-                        consumer_op="batchmatmul",
-                        producer_work_slice_dims=producer_work_slice_dims,
-                        restickify_work_slice_dims=producer_work_slice_dims,
-                        consumer_work_slice_dims=consumer_work_slice_dims,
-                    )
-                    plan = LXRelayoutPlan(
-                        source_name=dep.name,
-                        producer_name=producer.get_name(),
-                        consumer_name=consumer.get_name(),
-                        kind=LAYOUT_ALLGATHER_RESTICKIFY,
-                        producer_core_count=producer_core_count,
-                        consumer_core_count=consumer_core_count,
-                        producer_core_id_to_device_slice=producer_core_slices,
-                        producer_work_slice_dims=producer_work_slice_dims,
-                        consumer_work_slice_dims=consumer_work_slice_dims,
-                        consumer_core_id_to_device_slice=consumer_core_slices,
-                        read_index=read_index,
-                        realized=False,
-                        communication_class=COMM_CLASS_ALL_GATHER,
-                        communication_pattern=LAYOUT_ALLGATHER_RESTICKIFY,
-                        max_fanout=topology.max_fanout,
-                        max_fanin=topology.max_fanin,
-                        transfer_count=topology.transfer_count,
-                        requires_staged_realization=True,
-                        layout_contract=layout_contract,
-                        unsupported_reason="staged layout all-gather restickify metadata only",
-                    )
-                    _record_plan(consumer, plan)
-                    setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
-                    planned.append(plan)
-                    continue
-
                 if _prefer_matmul_operand_contract(read_index, topology):
                     exceeds_budget, operand_nbytes, max_operand_bytes = (
                         _matmul_operand_contract_exceeds_budget(graph, producer)
@@ -624,7 +569,7 @@ def plan_lx_relayouts(
                         logger.debug(
                             "lx relayout skip: %s -> %s matmul operand is %s bytes, "
                             "exceeding bounded relayout budget %s bytes; preserving HBM "
-                            "fallback until WSR/tile-scoping handles this edge",
+                            "fallback",
                             producer.name,
                             consumer.name,
                             operand_nbytes,
@@ -639,7 +584,6 @@ def plan_lx_relayouts(
                         producer_work_slice_dims=producer_work_slice_dims,
                         consumer_tensor_work_slice_dims=consumer_work_slice_dims,
                         consumer_compute_work_slice_dims=_op_work_slice_dims(consumer),
-                        communication_class=topology.communication_class,
                     )
                     plan = LXRelayoutPlan(
                         source_name=dep.name,
@@ -663,18 +607,13 @@ def plan_lx_relayouts(
                         transfer_count=topology.transfer_count,
                         requires_staged_realization=True,
                         layout_contract=layout_contract,
-                        unsupported_reason=(
-                            "matmul operand all-gather/broadcast metadata only; "
-                            "backend must stage materialization through the "
-                            "matmul transfer loop"
-                        ),
                     )
                     _record_plan(consumer, plan)
                     setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
                     planned.append(plan)
                     continue
 
-                if not config.lx_planner_relayout_collectives:
+                if topology.communication_class != "scatter":
                     continue
 
                 plan = LXRelayoutPlan(

@@ -65,8 +65,6 @@ class SDSCArgs:
     arg_index: int = -1
     is_index_tensor: bool = False
     related_value_tensor_idx: int = -1
-    source_name: str | None = None
-    source_offset_elems: Expr | None = None
     lx_residency_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
 
     def __str__(self) -> str:
@@ -616,8 +614,6 @@ def _create_sdsc_tensors(
                 arg_index=arg.arg_index,
                 is_index_tensor=is_idx_tensor,
                 related_value_tensor_idx=related_val_idx,
-                source_name=arg.source_name,
-                source_offset_elems=arg.source_offset_elems,
                 lx_residency_core_id_to_wk_slice=_map_lx_residency_to_sdsc_dims(
                     arg,
                     symbol_mapping,
