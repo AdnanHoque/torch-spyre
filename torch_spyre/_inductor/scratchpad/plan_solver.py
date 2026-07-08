@@ -14,7 +14,7 @@
 
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 from abc import ABC, abstractmethod
 import math
 
@@ -46,6 +46,7 @@ class LifetimeBoundBuffer:
     first_use_is_read: bool = False
     address: Optional[int] = None
     in_place_parents: list[str] = field(default_factory=list)
+    lx_relayout_plans: list[Any] = field(default_factory=list)
 
     @property
     def start_time(self) -> int:

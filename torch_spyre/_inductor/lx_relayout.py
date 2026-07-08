@@ -45,7 +45,6 @@ logger = get_inductor_logger("lx_relayout")
 
 LX_RELAYOUT_ATTR = "_spyre_lx_relayout_inputs"
 LX_RELAYOUT_SOURCE_ATTR = "_spyre_lx_relayout_source"
-LX_RELAYOUT_RESERVE_PREFIX = "__spyre_lx_relayout_reserve__"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -147,14 +146,6 @@ def clear_lx_relayout_metadata(graph: GraphLowering) -> None:
             delattr(op, LX_RELAYOUT_SOURCE_ATTR)
 
 
-def make_lx_relayout_reservation_name(consumer_name: str, source_name: str) -> str:
-    return f"{LX_RELAYOUT_RESERVE_PREFIX}:{consumer_name}:{source_name}"
-
-
-def is_lx_relayout_reservation(name: str) -> bool:
-    return name.startswith(f"{LX_RELAYOUT_RESERVE_PREFIX}:")
-
-
 def relayout_source_names(graph: GraphLowering) -> set[str]:
     if not config.lx_planner_relayout:
         return set()
@@ -170,7 +161,7 @@ def get_lx_relayout_inputs(op: Operation) -> dict[str, Any]:
     return plans if isinstance(plans, dict) else {}
 
 
-def plan_lx_relayouts(
+def collect_lx_relayout_plans(
     graph: GraphLowering, cache: dict | None = None
 ) -> list[LXRelayoutPlan]:
     """Classify all-to-all-shuffle-capable LX relayout edges.
@@ -184,7 +175,6 @@ def plan_lx_relayouts(
     if not config.lx_planner_relayout:
         return []
 
-    clear_lx_relayout_metadata(graph)
     producers = _producer_ops(graph)
     planned: list[LXRelayoutPlan] = []
 
@@ -252,10 +242,34 @@ def plan_lx_relayouts(
                 producer_work_slice_dims=producer_work_slice_dims,
                 consumer_work_slice_dims=consumer_work_slice_dims,
             )
-            _record_plan(consumer, plan)
-            setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
             planned.append(plan)
 
+    if planned:
+        logger.debug("found %d LX relayout edge candidate(s)", len(planned))
+    return planned
+
+
+def record_lx_relayout_plan(graph: GraphLowering, plan: LXRelayoutPlan) -> None:
+    """Stamp a relayout plan after the source buffer is placed in LX."""
+
+    ops = {op.get_name(): op for op in graph.operations}
+    consumer = ops.get(plan.consumer_name)
+    producer = ops.get(plan.producer_name)
+    if consumer is None or producer is None:
+        return
+    _record_plan(consumer, plan)
+    setattr(producer, LX_RELAYOUT_SOURCE_ATTR, True)
+
+
+def plan_lx_relayouts(
+    graph: GraphLowering, cache: dict | None = None
+) -> list[LXRelayoutPlan]:
+    """Compatibility wrapper: classify and immediately stamp all plans."""
+
+    clear_lx_relayout_metadata(graph)
+    planned = collect_lx_relayout_plans(graph, cache)
+    for plan in planned:
+        record_lx_relayout_plan(graph, plan)
     if planned:
         logger.debug("planned %d LX relayout edge(s)", len(planned))
     return planned

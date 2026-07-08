@@ -105,6 +105,8 @@ def mem_usage_by_buf(
     graph: GraphLowering | GraphView,
     cache: Optional[dict] = None,
     rw_cache: Optional[dict] = None,
+    relayout_consumer_slices_by_buf: Optional[dict[str, int]] = None,
+    planned_relayout_sources: Optional[set[str]] = None,
 ) -> dict:
     """
     Get a summary of memory usage of each operation.
@@ -116,7 +118,10 @@ def mem_usage_by_buf(
     `rw_cache` ({op name: ReadWrites}) memoizes get_read_writes() across
     co-opt search leaves; None recomputes it.
     """
-    num_cores_per_op = get_ncores_for_buffers(graph, cache, rw_cache)
+    relayout_consumer_slices_by_buf = relayout_consumer_slices_by_buf or {}
+    num_cores_per_op = get_ncores_for_buffers(
+        graph, cache, rw_cache, planned_relayout_sources
+    )
     mem_usage: dict = {}
 
     buf_names = {op.name for op in graph.operations}
@@ -129,10 +134,17 @@ def mem_usage_by_buf(
             math.prod(dev_layout.device_size[:-1]) * 128
         )  # num_sticks * bytes_per_stick
         rw = rw_cache[op.get_name()] if rw_cache is not None else op.get_read_writes()
+        if buf_name in relayout_consumer_slices_by_buf:
+            consumer_slices = relayout_consumer_slices_by_buf[buf_name]
+            size_per_core = math.ceil((dev_size / consumer_slices) / 128) * 128
+            core_div_mismatch = True
+        else:
+            size_per_core = dev_size // num_cores
+            core_div_mismatch = num_cores < 0
         mem_usage[buf_name] = {
             "size": dev_size,
-            "size_per_core": dev_size // num_cores,
-            "core_div_mismatch": num_cores < 0,
+            "size_per_core": size_per_core,
+            "core_div_mismatch": core_div_mismatch,
             "op_inputs": [dep.name for dep in rw.reads if dep.name in buf_names],
         }
 
@@ -242,6 +254,7 @@ def get_ncores_for_buffers(
     graph: GraphLowering | GraphView,
     cache: Optional[dict] = None,
     rw_cache: Optional[dict] = None,
+    planned_relayout_sources: Optional[set[str]] = None,
 ) -> dict[str, int]:
     """
     Return a dictionary mapping buffer names to the number of cores
@@ -258,7 +271,8 @@ def get_ncores_for_buffers(
     result: dict[str, int] = {}
     using_multicore = config.sencores > 1
     buf_user_deps = _get_buffer_user_deps(graph, rw_cache)
-    planned_relayout_sources = relayout_source_names(graph)
+    if planned_relayout_sources is None:
+        planned_relayout_sources = relayout_source_names(graph)
     for buf_name, users in buf_user_deps.items():
         # this dict includes graph input and output
         if using_multicore and len(users) > 1:
