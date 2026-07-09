@@ -68,6 +68,8 @@ RuntimeError: convert_address not yet implemented - waiting for flex support
 
 That failure is not specific to the PR2 relayout: it happens in both variants. The result here should therefore be treated as structural SDSC/DXP evidence, not a performance measurement.
 
+I also tried adapting the older flash `no_h2d` compile-probe trick to `spyre-perf-suite` by intercepting `Tensor.to(device="spyre")` and creating empty Spyre tensors directly. That still hit the same `convert_address` runtime path in the perf-suite runner, so it did not produce a timing result.
+
 ## Artifacts
 
 - `sdpa_4h_l512_relayout_off_summarize_sdsc.md`: Jamie-style SDSC summary for relayout off.
