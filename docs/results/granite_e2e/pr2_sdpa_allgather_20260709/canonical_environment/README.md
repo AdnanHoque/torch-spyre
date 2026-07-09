@@ -135,6 +135,18 @@ had already reproduced the narrower relayout result at `0.672 ms`, so its
 research but is not proposed as the PR2 production default: globally allowing
 all intermediate op outputs into LX bypasses the normal safety whitelist.
 
+The isolated research environment is installed on all three pods:
+
+```bash
+# DEV / CLC
+source /home/adnan/spyre-envs/pr2-aggressive/activate.sh
+
+# CDX
+source /home/adnan-cdx/spyre-envs/pr2-aggressive/activate.sh
+
+export SPYRE_LX_PLANNER_RELAYOUT=1
+```
+
 ### SDSC evidence
 
 Jamie-style first-iteration summaries, raw summarizer logs, and the
