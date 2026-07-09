@@ -32,6 +32,29 @@ LX and expose the expected layout operation. Torch's explicit PR2 metadata uses
 | `C -> identity` | HBM -> HBM | `all_to_all_shuffle` through the PR1 DLDSC tensor-vs-compute distribution contract | Same-stick ownership reassignment | **Yes**, encoded in allocation vs compute coordinates rather than a PR2 classification row | **Yes** | `sdsc_9` output and `sdsc_10` input change from HBM to LX |
 | `identity(C) -> graph output` | HBM output | Required graph-boundary store, not an intermediate relayout | N/A | N/A | Intentionally remains HBM | `sdsc_10` output is HBM in both variants |
 
+## Aggressive LX eligibility
+
+The isolated `allow_all_ops_in_lx_planning=True` variant preserves the PR2
+all-gather behavior and additionally keeps the score tensor resident:
+
+| Edge | Narrow relayout variant | Aggressive variant | Additional mechanism | Fired? |
+|---|---|---|---|---|
+| `K_scaled -> S` | `ReStickifyOpLx`, matmul RHS in LX | Same | PR2 `all_gather + stick_relayout` | Yes in both |
+| `S -> max` | score output/input in HBM | score output/input in LX | Expanded LX output eligibility | **Yes** |
+| `S -> sub` | score input in HBM | score input in LX | Existing same-view LX persistence after pinning `S` | **Yes** |
+| `P -> C` | LX | LX | Existing LX persistence | Already active |
+| `C -> identity` | LX | LX | PR1 tensor-vs-compute distribution contract | Yes in both |
+
+The additional HBM round trip removed is:
+
+```text
+before: score matmul -> S(HBM) -> max/sub
+after:  score matmul -> S(LX)  -> max/sub
+```
+
+This changes kernel time from `0.672 ms` to `0.301 ms`. It is a separate
+residency optimization, not another communication collective.
+
 ## Explicit PR2 contract
 
 The `K_scaled -> S` row is the PR2 all-gather case. The enabled `sdsc_3.json`
@@ -63,3 +86,5 @@ after:  K_scaled(LX) -> ReStickifyOpLx  -> K_operand(LX)  -> score matmul
 - `baseline_first_iteration_summarize_sdsc.log`: baseline summarizer stdout.
 - `relayout_first_iteration_summarize_sdsc.md`: Jamie-style enabled table.
 - `relayout_first_iteration_summarize_sdsc.log`: enabled summarizer stdout.
+- `aggressive_first_iteration_summarize_sdsc.md`: aggressive-LX table.
+- `aggressive_first_iteration_summarize_sdsc.log`: aggressive-LX summarizer stdout.

@@ -118,10 +118,22 @@ changed:
 |---|---:|---:|---:|---:|---:|---:|
 | Baseline | 0 | 0.826 | 1.368 | 0.542 | 1.932 | 1.000x |
 | All-gather + stick relayout | 1 | 0.672 | 1.063 | 0.392 | 1.464 | 1.229x |
+| Relayout + experimental aggressive LX eligibility | 1 | 0.301 | 0.752 | 0.451 | 1.149 | 2.744x |
 
 Baseline run root:
 
 - `/home/adnan/spyre-benchmark-runs/fms-sdpa-canonical-clc-baseline-20260709`
+
+Aggressive run root:
+
+- `/home/adnan-cdx/spyre-benchmark-runs/fms-sdpa-aggressive-lx-cdx-20260709`
+
+The aggressive variant changes only
+`allow_all_ops_in_lx_planning: False -> True` in an isolated Torch tree. CDX
+had already reproduced the narrower relayout result at `0.672 ms`, so its
+`0.301 ms` result is comparable to the CLC pair. This setting is useful for
+research but is not proposed as the PR2 production default: globally allowing
+all intermediate op outputs into LX bypasses the normal safety whitelist.
 
 ### SDSC evidence
 
@@ -132,6 +144,8 @@ communication classification table are under `canonical_environment/sdsc/`:
 - `baseline_first_iteration_summarize_sdsc.log`
 - `relayout_first_iteration_summarize_sdsc.md`
 - `relayout_first_iteration_summarize_sdsc.log`
+- `aggressive_first_iteration_summarize_sdsc.md`
+- `aggressive_first_iteration_summarize_sdsc.log`
 - `edge_classification.md`
 
 ## Perf-suite process fix
