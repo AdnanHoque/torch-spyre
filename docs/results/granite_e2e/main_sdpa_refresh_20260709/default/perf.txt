@@ -1,0 +1,92 @@
+metric                      max_ms       mean_ms     median_ms        min_ms
+----------------------------------------------------------------------------
+wall_clock_ms             5750.149      1827.733       522.522       515.738
+spyre_ms                     1.508         1.508         1.508         1.508
+kernel_ms                    0.521         0.521         0.521         0.521
+memory_transfer_ms           0.987         0.987         0.987         0.987
+runtime_ms                      --            --            --            --
+compiler_ms               4714.021      4714.021      4714.021      4714.021
+pt_util%                    11.430
+
+Spyre-kernel_times:                                                            mean_ms      PT-Util%
+-----------------------------------------------------------------------------------------------------
+Memset-(Device)                                                                  0.052         0.000
+Memcpy-(HtoD)                                                                    0.073         0.000
+sdsc_fused__scaled_dot_product_fused_attention_overrideable_0__pszrkex           0.521        11.430
+Memcpy-(DtoH)                                                                    0.026         0.000
+Total                                                                            0.672        11.430
+
+CPU-kernel_times:                                                                       mean_ms
+------------------------------------------------------------------------------------------------
+aten::to                                                                                 51.577
+aten::_to_copy                                                                           66.573
+aten::empty_strided                                                                       0.014
+aten::copy_                                                                              73.649
+aten::_copy_from                                                                         73.644
+aiuLaunchDMIControlBlocks                                                                 0.002
+TorchDynamo-Cache-Lookup                                                                  0.085
+dynamo                                                                                 5225.589
+dynamo_data:-compile_id=0/1                                                               0.033
+entire_frame_compile                                                                   5223.641
+entire_frame_compile_data:-fn_name=_compile.compile_inner,-compile_id=0/1                 0.006
+_compile.compile_inner-(dynamo_timed)                                                  5223.599
+compile_attempt_0                                                                      5211.392
+compile_attempt_0_data:-compile_id=0/1                                                    0.009
+compile_attempt_0-(dynamo_timed)                                                       5211.355
+bytecode_tracing                                                                          7.097
+bytecode_tracing_data:-compile_id=0/1                                                     0.018
+bytecode_tracing-(dynamo_timed)                                                           7.034
+aten::detach                                                                              0.002
+detach                                                                                    0.002
+aten::scaled_dot_product_attention                                                        0.474
+aten::_scaled_dot_product_fused_attention_overrideable                                    0.373
+PythonDispatchMode                                                                        0.162
+insert_deferred_runtime_asserts                                                           0.796
+insert_deferred_runtime_asserts_data:-compile_id=0/1                                      0.021
+insert_deferred_runtime_asserts-(dynamo_timed)                                            0.738
+backend_compile                                                                        5198.318
+backend_compile_data:-fn_name=OutputGraph.call_user_compiler,-compile_id=0/1              0.015
+OutputGraph.call_user_compiler-(dynamo_timed)                                          5198.257
+_recursive_pre_grad_passes                                                                0.572
+_recursive_pre_grad_passes_data:-compile_id=0/1                                           0.013
+_recursive_pre_grad_passes-(dynamo_timed)                                                 0.525
+pass.pre_grad_passes.group_batch_fusion_passes                                            0.054
+pass.pre_grad_passes.group_batch_fusion_passes_data:-compile_id=0/1                       0.012
+pass.pre_grad_passes.group_batch_fusion_passes-(dynamo_timed)                             0.016
+pass.pre_grad_passes.efficient_conv_bn_eval_pass                                          0.087
+pass.pre_grad_passes.efficient_conv_bn_eval_pass_data:-compile_id=0/1                     0.008
+pass.pre_grad_passes.efficient_conv_bn_eval_pass-(dynamo_timed)                           0.060
+pass.pre_grad_passes.apply_gumbel_max_trick_pass                                          0.041
+pass.pre_grad_passes.apply_gumbel_max_trick_pass_data:-compile_id=0/1                     0.009
+pass.pre_grad_passes.apply_gumbel_max_trick_pass-(dynamo_timed)                           0.016
+pass.pre_grad_passes.pre_grad_custom_pass                                                 0.036
+pass.pre_grad_passes.pre_grad_custom_pass_data:-compile_id=0/1                            0.007
+pass.pre_grad_passes.pre_grad_custom_pass-(dynamo_timed)                                  0.012
+AOTAutogradCache.inductor_load                                                         5169.770
+AOTAutogradCache.inductor_load_data:-compile_id=0/1                                       0.021
+AOTAutogradCache.inductor_load-(dynamo_timed)                                          5169.696
+TritonBundler.read_and_emit                                                               0.075
+TritonBundler.read_and_emit_data:-compile_id=0/1                                          0.017
+TritonBundler.read_and_emit-(dynamo_timed)                                                0.020
+PyCodeCache.load_by_key_path                                                           5165.877
+PyCodeCache.load_by_key_path_data:-compile_id=0/1                                         0.011
+PyCodeCache.load_by_key_path-(dynamo_timed)                                            5165.796
+dxp_standalone:sdsc_fused__scaled_dot_product_fused_attention_overrideable_0           4623.716
+aiuClockCalibration                                                                       5.084
+build_guards                                                                             11.040
+build_guards_data:-compile_id=0/1                                                         0.029
+build_guards-(dynamo_timed)                                                              10.948
+gc                                                                                        0.163
+gc_data:-compile_id=0/1                                                                   0.022
+gc-(dynamo_timed)                                                                         0.099
+Torch-Compiled-Region:-0/1                                                                5.109
+Pregraph-bytecode                                                                         0.005
+AOTDispatcher-Runtime-Wrapper-Prologue                                                    0.021
+##-Call-CompiledFxGraph-fcjzttbcsehkdl3vwviyjhylyocjt3nwbwkl355wjc2armrmswvo-##           4.995
+aten::empty                                                                               0.006
+aten::lift_fresh                                                                          0.010
+aten::detach_                                                                             0.003
+detach_                                                                                   0.001
+launch_jobplan:sdsc_fused__scaled_dot_product_fused_attention_overrideable_0              4.156
+aiuLaunchControlBlocks                                                                    0.002
+aiuLaunchDMOControlBlocks                                                                 0.001

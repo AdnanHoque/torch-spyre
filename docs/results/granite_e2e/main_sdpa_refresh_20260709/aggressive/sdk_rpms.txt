@@ -1,0 +1,11 @@
+ibm-deeptools-2.0.0-0.main.1+1390.122919f_0.el10.x86_64
+ibm-deeptools-devel-2.0.0-0.main.1+1390.122919f_0.el10.x86_64
+ibm-flex-2.0.0-0.main.1+375.4d42718_0.el10.x86_64
+ibm-flex-devel-2.0.0-0.main.1+375.4d42718_0.el10.x86_64
+ibm-libaiupti-2.0.0-0.main.1+14.9695403_0.el10.x86_64
+ibm-senlib-core-2.0.0-0.main.1+190.348d7be_0.el10.x86_64
+ibm-senlib-dd2-2.0.0-0.main.1+190.348d7be_0.el10.x86_64
+ibm-senlib-headers-2.0.0-0.main.1+190.348d7be_0.el10.x86_64
+ibm-spyre-comms-1.0.0-0.main.1+76.11582bc_0.el10.x86_64
+ibm-spyre-comms-devel-1.0.0-0.main.1+76.11582bc_0.el10.x86_64
+ibm-spyre-comms-test-1.0.0-0.main.1+76.11582bc_0.el10.x86_64

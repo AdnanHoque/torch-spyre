@@ -1,0 +1,19 @@
+============ Version Info ============
+torch-spyre:      1025208 (branch: HEAD)
+flex:             N/A (path not found: ../flex)
+deeptools:        a4930be14b (branch: adnan/canonical-pr2-environment)
+spyre-comms:      N/A (path not found: ../spyre-comms)
+spyre-perf-suite: 5640b68 (branch: adnan/canonical-run-benchmark)
+======================================
+
+Op: mha_4h_workdiv_h4_lq8  Shape: [[1, 4, 512, 128], [1, 4, 4096, 128], [1, 4, 4096, 128]]
+Stack                     Kernel_name                                                                          duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                                                               0.073           0.000
+                          Memcpy-(DtoH)                                                                               0.026           0.000
+                          Memset-(Device)                                                                             0.052           0.000
+                          sdsc_fused__scaled_dot_product_fused_attention_overrideable_0__pszrkex                      0.521          11.430
+                          Total                                                                                       0.672          11.430
+sendnn:
+                          N/A                                                                                           N/A             N/A

@@ -1,0 +1,86 @@
+============ Version Info ============
+torch-spyre:      1025208 (branch: HEAD)
+flex:             N/A (path not found: ../flex)
+deeptools:        a4930be14b (branch: adnan/canonical-pr2-environment)
+spyre-comms:      N/A (path not found: ../spyre-comms)
+spyre-perf-suite: 5640b68 (branch: adnan/canonical-run-benchmark)
+======================================
+
+Op: mha_4h_workdiv_h4_lq8  Shape: [[1, 4, 512, 128], [1, 4, 4096, 128], [1, 4, 4096, 128]]
+Stack                     Kernel_name                                                                                   duration(ms)      PT-Util(%)
+----------------------------------------------------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          ##-Call-CompiledFxGraph-fgkbnfyxpint43hb3brf6ozmqpu5pcuwvv3ws4puxk4ax6sjngb5-##                      3.156           0.000
+                          AOTAutogradCache.inductor_load-(dynamo_timed)                                                     4561.047           0.000
+                          AOTAutogradCache.inductor_load                                                                    4561.123           0.000
+                          AOTAutogradCache.inductor_load_data:-compile_id=0/1                                                  0.022          11.733
+                          AOTDispatcher-Runtime-Wrapper-Prologue                                                               0.022          11.733
+                          OutputGraph.call_user_compiler-(dynamo_timed)                                                     4587.069            0.00
+                          Pregraph-bytecode                                                                                    0.005            0.00
+                          PyCodeCache.load_by_key_path-(dynamo_timed)                                                       4557.491            0.00
+                          PyCodeCache.load_by_key_path                                                                      4557.576            0.00
+                          PyCodeCache.load_by_key_path_data:-compile_id=0/1                                                    0.010            0.00
+                          PythonDispatchMode                                                                                   0.155            0.00
+                          Torch-Compiled-Region:-0/1                                                                           3.272            0.00
+                          TorchDynamo-Cache-Lookup                                                                             0.083            0.00
+                          TritonBundler.read_and_emit-(dynamo_timed)                                                           0.020            0.00
+                          TritonBundler.read_and_emit                                                                          0.083            0.00
+                          TritonBundler.read_and_emit_data:-compile_id=0/1                                                     0.018            0.00
+                          _compile.compile_inner-(dynamo_timed)                                                             4611.925            0.00
+                          _recursive_pre_grad_passes-(dynamo_timed)                                                            0.515            0.00
+                          _recursive_pre_grad_passes                                                                           0.562            0.00
+                          _recursive_pre_grad_passes_data:-compile_id=0/1                                                      0.015            0.00
+                          aiuClockCalibration                                                                                  4.917            0.00
+                          aiuLaunchControlBlocks                                                                               0.001            0.00
+                          aiuLaunchDMIControlBlocks                                                                            0.002            0.00
+                          aiuLaunchDMOControlBlocks                                                                            0.002            0.00
+                          aten::_copy_from                                                                                    73.389            0.00
+                          aten::_scaled_dot_product_fused_attention_overrideable                                               0.364            0.00
+                          aten::_to_copy                                                                                      66.341            0.00
+                          aten::copy_                                                                                         73.394            0.00
+                          aten::detach                                                                                         0.002            0.00
+                          aten::detach_                                                                                        0.003            0.00
+                          aten::empty                                                                                          0.006            0.00
+                          aten::empty_strided                                                                                  0.014            0.00
+                          aten::lift_fresh                                                                                     0.010            0.00
+                          aten::scaled_dot_product_attention                                                                   0.453            0.00
+                          aten::to                                                                                            51.398            0.00
+                          backend_compile                                                                                   4587.130            0.00
+                          backend_compile_data:-fn_name=OutputGraph.call_user_compiler,-compile_id=0/1                         0.016            0.00
+                          build_guards-(dynamo_timed)                                                                         10.600            0.00
+                          build_guards                                                                                        10.699            0.00
+                          build_guards_data:-compile_id=0/1                                                                    0.034            0.00
+                          bytecode_tracing-(dynamo_timed)                                                                      6.907            0.00
+                          bytecode_tracing                                                                                     6.969            0.00
+                          bytecode_tracing_data:-compile_id=0/1                                                                0.021            0.00
+                          compile_attempt_0-(dynamo_timed)                                                                  4600.059            0.00
+                          compile_attempt_0                                                                                 4600.099            0.00
+                          compile_attempt_0_data:-compile_id=0/1                                                               0.010            0.00
+                          detach                                                                                               0.002            0.00
+                          detach_                                                                                              0.001            0.00
+                          dxp_standalone:sdsc_fused__scaled_dot_product_fused_attention_overrideable_0                      4015.343            0.00
+                          dynamo                                                                                            4613.885            0.00
+                          dynamo_data:-compile_id=0/1                                                                          0.031            0.00
+                          entire_frame_compile                                                                              4611.968            0.00
+                          entire_frame_compile_data:-fn_name=_compile.compile_inner,-compile_id=0/1                            0.009            0.00
+                          gc-(dynamo_timed)                                                                                    0.093            0.00
+                          gc                                                                                                   0.155            0.00
+                          gc_data:-compile_id=0/1                                                                              0.022            0.00
+                          insert_deferred_runtime_asserts-(dynamo_timed)                                                       0.712            0.00
+                          insert_deferred_runtime_asserts                                                                      0.765            0.00
+                          insert_deferred_runtime_asserts_data:-compile_id=0/1                                                 0.018            0.00
+                          launch_jobplan:sdsc_fused__scaled_dot_product_fused_attention_overrideable_0                         2.404            0.00
+                          pass.pre_grad_passes.apply_gumbel_max_trick_pass-(dynamo_timed)                                      0.015            0.00
+                          pass.pre_grad_passes.apply_gumbel_max_trick_pass                                                     0.039            0.00
+                          pass.pre_grad_passes.apply_gumbel_max_trick_pass_data:-compile_id=0/1                                0.007            0.00
+                          pass.pre_grad_passes.efficient_conv_bn_eval_pass-(dynamo_timed)                                      0.061            0.00
+                          pass.pre_grad_passes.efficient_conv_bn_eval_pass                                                     0.087            0.00
+                          pass.pre_grad_passes.efficient_conv_bn_eval_pass_data:-compile_id=0/1                                0.008            0.00
+                          pass.pre_grad_passes.group_batch_fusion_passes-(dynamo_timed)                                        0.015            0.00
+                          pass.pre_grad_passes.group_batch_fusion_passes                                                       0.050            0.00
+                          pass.pre_grad_passes.group_batch_fusion_passes_data:-compile_id=0/1                                  0.010            0.00
+                          pass.pre_grad_passes.pre_grad_custom_pass-(dynamo_timed)                                             0.012            0.00
+                          pass.pre_grad_passes.pre_grad_custom_pass                                                            0.035            0.00
+                          pass.pre_grad_passes.pre_grad_custom_pass_data:-compile_id=0/1                                       0.006            0.00
+sendnn:
+                          N/A                                                                                                    N/A             N/A

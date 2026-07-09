@@ -1,0 +1,17 @@
+============ Version Info ============
+torch-spyre:      1025208 (branch: HEAD)
+flex:             N/A (path not found: ../flex)
+deeptools:        a4930be14b (branch: adnan/canonical-pr2-environment)
+spyre-comms:      N/A (path not found: ../spyre-comms)
+spyre-perf-suite: 5640b68 (branch: adnan/canonical-run-benchmark)
+======================================
+
+Op: mha_4h_workdiv_h4_lq8  Shape: [[1, 4, 512, 128], [1, 4, 4096, 128], [1, 4, 4096, 128]]
+Metric                             torch-spyre          sendnn tsp/sendnn    z_score          status
+------------------------------------------------------------------------------------------------
+wall_clock_ms.mean_ms               1827.733             N/A        N/A         -- insufficient_data
+spyre_ms.mean_ms                       1.508             N/A        N/A         --              --
+kernel_ms.mean_ms                      0.521             N/A        N/A         -- insufficient_data
+memory_transfer_ms.mean_ms             0.987             N/A        N/A         --              --
+compiler_ms.mean_ms                 4714.021             N/A        N/A         --              --
+pt_util%                              11.430             N/A        N/A         --              --
