@@ -109,6 +109,20 @@ The report's wall-clock metric includes compilation and is not a steady-state
 kernel metric. The matching `0.672 ms` kernel result across all three devices is
 the environment equivalence check.
 
+### Matched CLC control
+
+The same CLC environment and shape were run with only the public feature flag
+changed:
+
+| Variant | `SPYRE_LX_PLANNER_RELAYOUT` | Kernel ms | Spyre ms | Transfer ms | Runtime ms | Kernel speedup |
+|---|---:|---:|---:|---:|---:|---:|
+| Baseline | 0 | 0.826 | 1.368 | 0.542 | 1.932 | 1.000x |
+| All-gather + stick relayout | 1 | 0.672 | 1.063 | 0.392 | 1.464 | 1.229x |
+
+Baseline run root:
+
+- `/home/adnan/spyre-benchmark-runs/fms-sdpa-canonical-clc-baseline-20260709`
+
 ## Perf-suite process fix
 
 The canonical perf-suite worktree changes three files:
