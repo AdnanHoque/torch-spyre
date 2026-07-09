@@ -123,6 +123,17 @@ Baseline run root:
 
 - `/home/adnan/spyre-benchmark-runs/fms-sdpa-canonical-clc-baseline-20260709`
 
+### SDSC evidence
+
+Jamie-style first-iteration summaries, raw summarizer logs, and the
+communication classification table are under `canonical_environment/sdsc/`:
+
+- `baseline_first_iteration_summarize_sdsc.md`
+- `baseline_first_iteration_summarize_sdsc.log`
+- `relayout_first_iteration_summarize_sdsc.md`
+- `relayout_first_iteration_summarize_sdsc.log`
+- `edge_classification.md`
+
 ## Perf-suite process fix
 
 The canonical perf-suite worktree changes three files:
