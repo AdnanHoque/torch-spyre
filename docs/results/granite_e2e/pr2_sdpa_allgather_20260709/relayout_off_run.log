@@ -1,0 +1,65 @@
+[31m ERRR 09.07.2026 04:27:17.368320 [            runtime_stream.cpp: 141] RuntimeStream::synchronize() still waiting after 60000ms: in_flight_=1 device=0 — possible lost completion[0m
+[31m ERRR 09.07.2026 04:27:17.369489 [            runtime_stream.cpp: 150] RuntimeStream::synchronize() device=0 completed after 60001ms (1 timeout warning(s))[0m
+[WARN] dxp_standalone --bundle option is deprecated (always on)
+Traceback (most recent call last):
+  File "/home/adnan/codex-isolated/sdpa_pr2_allgather_20260709_035348/spyre-perf-suite/benchmark.py", line 88, in <module>
+    run_tsp_stack(args.op, input_shapes, **kwargs)
+  File "/home/adnan/codex-isolated/sdpa_pr2_allgather_20260709_035348/spyre-perf-suite/core/op_runner.py", line 324, in run_tsp_stack
+    compiled(*device_tensors)
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 472, in __call__
+    return super().__call__(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1024, in compile_wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/nn/modules/module.py", line 1779, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/nn/modules/module.py", line 1790, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/codex-isolated/sdpa_pr2_allgather_20260709_035348/spyre-perf-suite/ops/fms_granite_micro/__init__.py", line 291, in forward
+    def forward(self, query, key, value):
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_dynamo/eval_frame.py", line 1263, in _fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_functorch/aot_autograd.py", line 1200, in forward
+    return compiled_fn(full_args)
+           ^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 580, in runtime_wrapper
+    all_outs = call_func_at_runtime_with_args(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/utils.py", line 138, in call_func_at_runtime_with_args
+    out = normalize_as_list(f(args))
+                            ^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 2298, in __call__
+    return self.compiled_fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 783, in wrapper
+    return compiled_fn(runtime_args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 1011, in inner_fn
+    outs = compiled_fn(args)
+           ^^^^^^^^^^^^^^^^^
+  File "/home/adnan/dt-inductor/.venv/lib64/python3.12/site-packages/torch/_inductor/output_code.py", line 656, in __call__
+    return self.current_callable(inputs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/adnan/codex-isolated/sdpa_pr2_allgather_20260709_035348/runs/granite_collectives_backend_l512_20260709_042551/relayout_off/cache/2e/c2efyh2gu47j6apczvbxgsk7kedqoaoz4xd5blll6kn63vv4arwo.py", line 380, in call
+    sdsc_fused__scaled_dot_product_fused_attention_overrideable_0.run(_pool, arg0_1, buf10, arg1_1, arg2_1, buf9)
+  File "/home/adnan/codex-isolated/sdpa_pr2_allgather_20260709_035348/torch-spyre-pr2/torch_spyre/execution/kernel_runner.py", line 43, in run
+    launch_jobplan(self.jobplan, args)
+RuntimeError: convert_address not yet implemented - waiting for flex support
+Command failed with exit code 1
+======================================================================
+Running CUSTOM benchmark: op=fms_granite_micro.mha_4h_workdiv_h4_lq8
+  shapes: [[1, 4, 512, 128], [1, 4, 512, 128], [1, 4, 512, 128]]
+  stacks: ['torch-spyre']
+  perf-dir: /home/adnan/codex-isolated/sdpa_pr2_allgather_20260709_035348/runs/granite_collectives_backend_l512_20260709_042551/relayout_off/perf
+======================================================================
+Running: python /home/adnan/codex-isolated/sdpa_pr2_allgather_20260709_035348/spyre-perf-suite/benchmark.py --op fms_granite_micro.mha_4h_workdiv_h4_lq8 --stack torch-spyre --with-profiling --runs 10 --shape 1 4 512 128 --shape 1 4 512 128 --shape 1 4 512 128 --output /home/adnan/codex-isolated/sdpa_pr2_allgather_20260709_035348/runs/granite_collectives_backend_l512_20260709_042551/relayout_off/perf/mha_4h_workdiv_h4_lq8_torch-spyre_shape_1_4_512_128__1_4_512_128__1_4_512_128_.txt
