@@ -16,6 +16,7 @@ from oot_framework.oot_test_constants import (
     _DYNAMIC_TAG_PREFIXES,
     DEFAULT_FLOATING_PRECISION,
     ENV_TEST_CONFIG,
+    ENV_TEST_TYPE,
     MODE_MANDATORY_SUCCESS,
     MODE_SKIP,
     MODE_XFAIL,
@@ -86,7 +87,7 @@ def remove_builtin_privateuse1_test_base():
     """
     Remove built-in PrivateUse1TestBase from device_type_test_bases.
 
-    This ensures only TorchTestBase handles the privateuse1 device type,
+    This ensures only OOTTestBase handles the privateuse1 device type,
     preventing nondeterministic overwrites when list(set(...)) randomizes order.
 
     Side effect: Modifies the global device_type_test_bases list in-place.
@@ -106,12 +107,12 @@ remove_builtin_privateuse1_test_base()
 
 
 # ---------------------------------------------------------------------------
-# TorchTestBase
+# OOTTestBase
 # ---------------------------------------------------------------------------
 
 
 # PrivateUse1TestBase injected via globals() by runpy
-class TorchTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F821
+class OOTTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa: F821
     """Base class for OOT Device PyTorch test overrides.
 
     All configuration is loaded lazily from the YAML file pointed to by
@@ -154,9 +155,9 @@ class TorchTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa:
         # causing subsequent instantiate_device_type_tests calls to generate class
         # names like TestOldViewOpsSPYRE instead of TestOldViewOpsPRIVATEUSE1,
         # which then get filtered out by PYTORCH_TESTING_DEVICE_ONLY_FOR=privateuse1.
-        # Reset TorchTestBase.device_type to "privateuse1" so subsequent
+        # Reset OOTTestBase.device_type to "privateuse1" so subsequent
         # calls generate the correct class name.
-        TorchTestBase.device_type = "privateuse1"
+        OOTTestBase.device_type = "privateuse1"
 
     # ------------------------------------------------------------------
     # Config loading  (called once per test run via instantiate_test)
@@ -276,12 +277,25 @@ class TorchTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa:
 
             # Create ModuleInfo and add to module_db
             try:
+                # The dtype actually exercised is whatever each tensor spec in
+                # the YAML declares (e.g. bfloat16), not whichever dtype this
+                # tuple lists -- module_inputs_func ignores the dtype it's
+                # called with (see create_module_inputs_func_from_yaml).
+                # Derive the tuple from the YAML so no dtype used there is
+                # silently skipped; fall back to the historical default only
+                # when no tensor spec can be found (e.g. a no-input module).
+                resolved_dtypes = module_item.resolved_input_dtypes()
+                dtypes = (
+                    tuple(sorted(resolved_dtypes, key=str))
+                    if resolved_dtypes
+                    else (torch.float32, torch.float16, torch.bfloat16)
+                )
                 module_info = ModuleInfo(
                     module_cls,
                     module_inputs_func=create_module_inputs_func_from_yaml(module_item),
                     skips=(),
                     decorators=None,
-                    dtypes=(torch.float32, torch.float16),
+                    dtypes=dtypes,
                 )
                 module_db.append(module_info)
                 existing_names.add(module_name)
@@ -370,6 +384,21 @@ class TorchTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa:
         else:
             effective_mode = cls.UNLISTED_TEST_MODE  # only for truly unlisted tests
 
+        # per-test label filter — skip if this entry's labels don't include the
+        # active TEST_TYPE.  Empty labels means "no restriction; run whenever the
+        # suite runs" so the check is a no-op for unlabelled entries.
+        # suite_<group> values are structural (handled by filter_configs.py at the
+        # config-file level) and are ignored here.
+        if entry is not None and entry.labels:
+            test_type = os.environ.get(ENV_TEST_TYPE, "full")
+            if (
+                test_type
+                and test_type != "full"
+                and not test_type.startswith("suite_")
+                and test_type not in entry.labels
+            ):
+                return False, f"Excluded by TEST_TYPE={test_type!r}", False, False
+
         # dtype filtering — extract dtype from method_name and check against supported
         dtype_str = extract_dtype_from_name(method_name)
 
@@ -403,6 +432,19 @@ class TorchTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa:
         op_name = _extract_op_name_from_method(
             method_name, base_test_name, _OOT_DEVICE_TYPE
         )
+
+        # Op exclusion check (edits.ops.exclude).
+        # op_name may include a variant suffix (e.g. "addmm_decomposed" for the
+        # "addmm" OpInfo with variant_test_name="decomposed"), so we check both
+        # an exact match and a "<excluded>_" prefix match to catch all variants
+        # of an excluded op with a single exclude entry.
+        if op_name and entry is not None:
+            excluded_ops = entry.edits.ops.excluded_op_names()
+            if op_name in excluded_ops or any(
+                op_name.startswith(exc + "_") for exc in excluded_ops
+            ):
+                return False, f"Excluded op: {op_name}", False, False
+
         if effective_mode == MODE_MANDATORY_SUCCESS:
             op_cfg = cls.SUPPORTED_OPS_CONFIG.get(op_name) if op_name else None
             if op_cfg is not None and op_cfg.force_xfail:
@@ -599,11 +641,17 @@ class TorchTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa:
             _OOTOpDtypeExpander(test, all_extra_dtypes).patch()
 
         # Collect precision overrides: merge global + union across all entries.
-        # Per-variant selection happens below in new_methods loop.
+        # precision_overrides/tolerance_overrides are dtype-keyed only (an
+        # upstream limitation), so -- like the dtype injection above -- these
+        # can only vary per dtype, not per op within a shared test method.
+        include_dtype_precision: Dict[torch.dtype, Precision] = {}
+        for _e in all_entries_for_name:
+            include_dtype_precision.update(_e.edits.dtypes.resolved_include_precision())
+
         _OOTPrecisionOverridePatcher(
             test,
             global_dtype_precision=cls.GLOBAL_DTYPE_PRECISION,
-            include_dtype_precision={},  # handled per-variant below
+            include_dtype_precision=include_dtype_precision,
         ).patch()
 
         # Dynamically adds pytest marker to each of ops and dtype passed to @ops
@@ -812,4 +860,4 @@ class TorchTestBase(PrivateUse1TestBase):  # type: ignore[name-defined]  # noqa:
                     pass
 
 
-TEST_CLASS = TorchTestBase
+TEST_CLASS = OOTTestBase
