@@ -44,7 +44,16 @@ lx_boundary_clones: bool = os.environ.get("LX_BOUNDARY_CLONES", "0") == "1"
 # synthesize the on-chip relayout from the coordinate mismatch.
 lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
 
-dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
+# Bound all-gather relayout to operands that fit as one resident tile. Larger
+# activations keep the existing HBM path until WSR provides tile scoping.
+lx_planner_relayout_max_matmul_operand_bytes: int = 4 * 1024 * 1024
+
+# With relayout enabled, Torch plans the full LX while DXP receives its own
+# insertion workspace through the same public feature flag.
+dxp_lx_frac_avail: float = float(
+    os.environ.get("DXP_LX_FRAC_AVAIL", "0" if lx_planner_relayout else "0.2")
+)
+dxp_backend_lx_frac_avail: float = 1.0 if lx_planner_relayout else dxp_lx_frac_avail
 
 sencores: int = int(os.getenv("SENCORES", "32"))
 

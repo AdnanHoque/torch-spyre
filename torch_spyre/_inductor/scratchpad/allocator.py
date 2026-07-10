@@ -305,7 +305,12 @@ class ScratchpadAllocator:
 
         # filter out by permitted operations
         for op in graph.operations:
-            if not self._op_output_good_for_lx_reuse(op):
+            relayout_source = (
+                op.name in self._lx_relayout_plans_by_source
+                and isinstance(op, ComputedBuffer)
+                and not isinstance(op.layout, MutationLayoutSHOULDREMOVE)
+            )
+            if not self._op_output_good_for_lx_reuse(op) and not relayout_source:
                 drop_list.add(op.name)
                 self.reject_reasons[op.name] = "op not allowed"
 

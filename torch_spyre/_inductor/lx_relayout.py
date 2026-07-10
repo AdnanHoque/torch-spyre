@@ -44,6 +44,8 @@ from torch_spyre._inductor.pass_utils import (
 logger = get_inductor_logger("lx_relayout")
 
 LX_RELAYOUT_ATTR = "_spyre_lx_relayout_inputs"
+ALL_TO_ALL_SHUFFLE = "all_to_all_shuffle"
+ALL_GATHER = "all_gather"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,6 +59,62 @@ class LXRelayoutPlan:
     consumer_core_count: int
     producer_core_id_to_device_slice: dict[str, dict[str, int]]
     consumer_work_slice_dims: dict[str, int]
+
+
+@dataclasses.dataclass(frozen=True)
+class LXRelayoutTopology:
+    """Communication cardinality implied by two per-core coordinate maps."""
+
+    kind: str
+    max_fanout: int
+    max_fanin: int
+    transfer_count: int
+
+
+def _intervals_overlap(
+    lhs_slot: int, lhs_split: int, rhs_slot: int, rhs_split: int
+) -> bool:
+    return lhs_slot * rhs_split < (rhs_slot + 1) * lhs_split and (
+        rhs_slot * lhs_split < (lhs_slot + 1) * rhs_split
+    )
+
+
+def _classify_coordinate_topology(
+    producer_map: dict[str, dict[str, int]],
+    producer_splits: dict[str, int],
+    consumer_map: dict[str, dict[str, int]],
+    consumer_splits: dict[str, int],
+) -> LXRelayoutTopology:
+    fanout = {core: 0 for core in producer_map}
+    fanin = {core: 0 for core in consumer_map}
+    transfer_count = 0
+    dims = set(producer_splits) | set(consumer_splits)
+    for producer_core, producer_slice in producer_map.items():
+        for consumer_core, consumer_slice in consumer_map.items():
+            if all(
+                _intervals_overlap(
+                    int(producer_slice.get(dim, 0)),
+                    int(producer_splits.get(dim, 1)),
+                    int(consumer_slice.get(dim, 0)),
+                    int(consumer_splits.get(dim, 1)),
+                )
+                for dim in dims
+            ):
+                fanout[producer_core] += 1
+                fanin[consumer_core] += 1
+                transfer_count += 1
+
+    max_fanout = max(fanout.values(), default=0)
+    max_fanin = max(fanin.values(), default=0)
+    if transfer_count == 0:
+        kind = "unsupported"
+    elif max_fanout <= 1 and max_fanin <= 1:
+        kind = ALL_TO_ALL_SHUFFLE
+    elif max_fanout > 1 and max_fanin > 1:
+        kind = ALL_GATHER
+    else:
+        kind = "unsupported"
+    return LXRelayoutTopology(kind, max_fanout, max_fanin, transfer_count)
 
 
 def _op_num_cores(op: Operation) -> int:
@@ -74,6 +132,59 @@ def _single_write_dep(op: ComputedBuffer, buf_name: str) -> MemoryDep | None:
     return matches[0] if len(matches) == 1 else None
 
 
+def _op_name(op: Operation) -> str:
+    for fx_node in (getattr(op, "origin_node", None), *getattr(op, "origins", ())):
+        target = getattr(fx_node, "target", None)
+        name = (
+            getattr(target, "_opname", None)
+            or getattr(target, "__name__", None)
+            or getattr(target, "name", None)
+        )
+        if name is not None:
+            return str(name)
+    return "None"
+
+
+def _restickify_reads_computed_input(graph: GraphLowering, op: Operation) -> bool:
+    if _op_name(op) != "restickify":
+        return False
+    return any(
+        isinstance(graph.name_to_buffer.get(dep.name), ComputedBuffer)
+        for dep in op.get_read_writes().reads
+        if isinstance(dep, MemoryDep)
+    )
+
+
+def _matmul_operand_source_good_for_lx_relayout(
+    graph: GraphLowering, op: Operation
+) -> bool:
+    """Exclude graph-input and weight restickifies from activation relayout."""
+
+    return _op_name(op) != "restickify" or _restickify_reads_computed_input(graph, op)
+
+
+def _op_nbytes(graph: GraphLowering, op: Operation) -> int | None:
+    try:
+        sizes = list(op.get_size())
+        dtype = op.get_dtype()
+    except Exception:
+        return None
+
+    numel = 1
+    for dim in sizes:
+        try:
+            extent = int(dim)
+        except (TypeError, ValueError):
+            try:
+                extent = int(graph.sizevars.size_hint(dim))
+            except Exception:
+                return None
+        numel *= extent
+
+    itemsize = getattr(dtype, "itemsize", None)
+    return None if itemsize is None else numel * int(itemsize)
+
+
 def _core_id_to_device_slice(
     view: PerCoreView,
     core_count: int,
@@ -82,7 +193,9 @@ def _core_id_to_device_slice(
 
     core_id = sympy.Symbol("core_id")
     expr_by_dim = {int(dim): expr for dim, expr in view.core_to_slot}
-    split_dims = {int(dim): int(split) for dim, split in view.work_slice_dims}
+    split_dims = {
+        int(dim): _work_div_factor(split) for dim, split in view.work_slice_dims
+    }
     result: dict[str, dict[str, int]] = {}
 
     for core in range(core_count):
@@ -104,8 +217,28 @@ def _core_id_to_device_slice(
     return result
 
 
+def _work_div_factor(split: int | tuple[int, int]) -> int:
+    return int(split[0] if isinstance(split, tuple) else split)
+
+
 def _work_slice_dims(view: PerCoreView) -> dict[str, int]:
-    return {str(int(dim)): int(split) for dim, split in view.work_slice_dims}
+    return {
+        str(int(dim)): _work_div_factor(split) for dim, split in view.work_slice_dims
+    }
+
+
+def _dense_view(
+    core_map: dict[str, dict[str, int]],
+    splits: dict[str, int],
+    dims: set[str],
+) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
+    ordered_dims = sorted(dims, key=int)
+    dense_map = {
+        core: {dim: int(per_core.get(dim, 0)) for dim in ordered_dims}
+        for core, per_core in core_map.items()
+    }
+    dense_splits = {dim: int(splits.get(dim, 1)) for dim in ordered_dims}
+    return dense_map, dense_splits
 
 
 def _memory_read_index(op: ComputedBuffer, dep: MemoryDep) -> int | None:
@@ -149,7 +282,7 @@ def get_lx_relayout_inputs(op: Operation) -> dict[str, Any]:
 def collect_lx_relayout_plans(
     graph: GraphLowering, cache: dict | None = None
 ) -> list[LXRelayoutPlan]:
-    """Classify all-to-all-shuffle-capable LX relayout edges.
+    """Classify bounded LX all-to-all-shuffle and all-gather edges.
 
     V1 only records movement for single-writer intermediate tensors whose
     producer output is final (not K-split partials) and whose producer and
@@ -189,7 +322,7 @@ def collect_lx_relayout_plans(
                 )
                 continue
 
-            consumer_view, _consumer_has_partial = _per_core_view_on_buf(
+            consumer_view, consumer_has_partial = _per_core_view_on_buf(
                 consumer, dep, dep.name, cache
             )
             if producer_view == consumer_view:
@@ -209,17 +342,68 @@ def collect_lx_relayout_plans(
                 continue
 
             consumer_work_slice_dims = _work_slice_dims(consumer_view)
+            consumer_core_slices = _core_id_to_device_slice(
+                consumer_view, consumer_core_count
+            )
+            if consumer_core_slices is None:
+                logger.debug(
+                    "lx relayout skip: %s -> %s has non-static consumer slices",
+                    producer.name,
+                    consumer.name,
+                )
+                continue
+
+            producer_work_slice_dims = _work_slice_dims(producer_view)
+            relayout_dims = set(producer_work_slice_dims) | set(
+                consumer_work_slice_dims
+            )
+            producer_core_slices, producer_work_slice_dims = _dense_view(
+                producer_core_slices, producer_work_slice_dims, relayout_dims
+            )
+            consumer_core_slices, consumer_work_slice_dims = _dense_view(
+                consumer_core_slices, consumer_work_slice_dims, relayout_dims
+            )
+            topology = _classify_coordinate_topology(
+                producer_core_slices,
+                producer_work_slice_dims,
+                consumer_core_slices,
+                consumer_work_slice_dims,
+            )
+
             read_index = _memory_read_index(consumer, dep)
-            if is_matmul_consumer and read_index not in (0, None):
-                # PR1 only materializes all-to-all shuffle for primary values.
-                # Non-primary matmul operands need a collective/broadcast class.
+            if is_matmul_consumer and topology.kind == ALL_TO_ALL_SHUFFLE:
+                if read_index not in (0, None):
+                    continue
+            elif is_matmul_consumer and topology.kind == ALL_GATHER:
+                if (
+                    read_index not in (0, 1)
+                    or consumer_has_partial
+                    or not _matmul_operand_source_good_for_lx_relayout(graph, producer)
+                ):
+                    continue
+                operand_nbytes = _op_nbytes(graph, producer)
+                if (
+                    operand_nbytes is None
+                    or operand_nbytes
+                    > config.lx_planner_relayout_max_matmul_operand_bytes
+                ):
+                    logger.debug(
+                        "lx relayout skip: %s -> %s all-gather operand is %s "
+                        "bytes (limit %s)",
+                        producer.name,
+                        consumer.name,
+                        operand_nbytes,
+                        config.lx_planner_relayout_max_matmul_operand_bytes,
+                    )
+                    continue
+            elif topology.kind != ALL_TO_ALL_SHUFFLE:
                 continue
 
             plan = LXRelayoutPlan(
                 source_name=dep.name,
                 producer_name=producer.get_name(),
                 consumer_name=consumer.get_name(),
-                kind="all_to_all_shuffle",
+                kind=topology.kind,
                 consumer_core_count=consumer_core_count,
                 producer_core_id_to_device_slice=producer_core_slices,
                 consumer_work_slice_dims=consumer_work_slice_dims,

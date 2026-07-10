@@ -124,7 +124,10 @@ def mem_usage_by_buf(
     """
     relayout_consumer_slices_by_buf = relayout_consumer_slices_by_buf or {}
     num_cores_per_op = get_ncores_for_buffers(
-        graph, cache, rw_cache, planned_relayout_sources
+        graph,
+        cache,
+        rw_cache,
+        planned_relayout_sources=planned_relayout_sources,
     )
     mem_usage: dict = {}
 

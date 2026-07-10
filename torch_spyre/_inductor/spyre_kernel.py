@@ -36,6 +36,7 @@ from .constants import (
     BATCH_MATMUL_OP,
     BATCH_MATMUL_FP8_OP,
     IDENTITY_OP,
+    RESTICKIFY_LX_OP,
     RESTICKIFY_OP,
     SEGMENT_OFFSETS,
     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
@@ -78,9 +79,25 @@ def _current_node_op_info(current_node) -> dict[str, Any]:
 
 
 def _current_node_lx_relayout_inputs(current_node) -> dict[str, Any]:
-    node = getattr(current_node, "node", None)
-    plans = getattr(node, LX_RELAYOUT_ATTR, None)
-    return plans if isinstance(plans, dict) else {}
+    plans: dict[str, Any] = {}
+    pending = [current_node]
+    seen: set[int] = set()
+    while pending:
+        item = pending.pop()
+        if id(item) in seen:
+            continue
+        seen.add(id(item))
+        node = getattr(item, "node", None)
+        node_plans = getattr(node, LX_RELAYOUT_ATTR, None)
+        if isinstance(node_plans, dict):
+            plans.update(node_plans)
+        get_nodes = getattr(item, "get_nodes", None)
+        if callable(get_nodes):
+            try:
+                pending.extend(child for child in get_nodes() if child is not item)
+            except Exception:
+                pass
+    return plans
 
 
 class RValue(ABC):
@@ -94,6 +111,17 @@ class TensorAccess(RValue):
     name: str
     index: sympy.Expr
     layout: FixedTiledLayout
+
+
+def _restickify_op_for_args(
+    input_tensor: TensorAccess, output_tensor: TensorAccess
+) -> str:
+    if (
+        "lx" in input_tensor.layout.allocation
+        and "lx" in output_tensor.layout.allocation
+    ):
+        return RESTICKIFY_LX_OP
+    return RESTICKIFY_OP
 
 
 def _preserve_shared_weight_unit_bmm_dim(
@@ -840,7 +868,7 @@ class SpyreKernel(Kernel[CSEVariable]):
                 # Broadcast: scalar input expanding to non-scalar output.
                 op = IDENTITY_OP
             elif in_coords[-1].free_symbols != out_coords[-1].free_symbols:
-                op = RESTICKIFY_OP
+                op = _restickify_op_for_args(value, dst)
             else:
                 op = IDENTITY_OP
             op_spec = self.create_op_spec(

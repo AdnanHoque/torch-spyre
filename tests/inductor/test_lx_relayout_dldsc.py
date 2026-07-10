@@ -17,7 +17,10 @@ from sympy import Integer, Mod, Symbol, floor
 from torch_spyre._C import DataFormats
 from torch_spyre._inductor.codegen.superdsc import compile_op_spec
 from torch_spyre._inductor.lx_relayout import (
+    ALL_GATHER,
+    ALL_TO_ALL_SHUFFLE,
     LXRelayoutPlan,
+    _classify_coordinate_topology,
     _core_id_to_device_slice,
     _record_plan,
     get_lx_relayout_inputs,
@@ -60,6 +63,41 @@ def test_core_view_residency_payload_is_static_per_core():
         "2": {"0": 0, "1": 1},
         "3": {"0": 1, "1": 1},
     }
+
+
+def test_core_view_accepts_tiled_work_division_entries():
+    core_id = Symbol("core_id")
+    view = PerCoreView(
+        work_slice_dims=((0, (4, 1)),),
+        core_to_slot=((0, Mod(core_id, 4)),),
+    )
+
+    assert _core_id_to_device_slice(view, 4) == {
+        "0": {"0": 0},
+        "1": {"0": 1},
+        "2": {"0": 2},
+        "3": {"0": 3},
+    }
+
+
+def test_coordinate_topology_distinguishes_shuffle_and_all_gather():
+    shuffle = _classify_coordinate_topology(
+        {"0": {"0": 0}, "1": {"0": 1}},
+        {"0": 2},
+        {"0": {"0": 1}, "1": {"0": 0}},
+        {"0": 2},
+    )
+    all_gather = _classify_coordinate_topology(
+        {"0": {"0": 0}, "1": {"0": 1}},
+        {"0": 2},
+        {"0": {"0": 0}, "1": {"0": 0}},
+        {"0": 1},
+    )
+
+    assert shuffle.kind == ALL_TO_ALL_SHUFFLE
+    assert (shuffle.max_fanout, shuffle.max_fanin) == (1, 1)
+    assert all_gather.kind == ALL_GATHER
+    assert (all_gather.max_fanout, all_gather.max_fanin) == (2, 2)
 
 
 def test_lx_relayout_plan_records_all_to_all_shuffle_kind():
