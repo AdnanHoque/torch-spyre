@@ -1,0 +1,32 @@
+============ Version Info ============
+torch-spyre:      832aa67a (branch: pr-lx-relayout-scatter)
+flex:             N/A (path not found: ../flex)
+deeptools:        704c19f8fb (branch: adnan/lx-relayout-scatter-sizing)
+spyre-comms:      N/A (path not found: ../spyre-comms)
+spyre-perf-suite: 6f4e541 (branch: jamie/flash_attn)
+======================================
+
+Op: flash_attn_online_softmax  Shape: [[1, 4, 1024, 128], [1, 4, 4096, 128], [1, 4, 4096, 128]]
+Stack                     Kernel_name                                                                                                              duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          ##-Call-CompiledFxGraph-fllorkruciqwv5d3sauj6nrxtldieo2p6yhmbvakrynok4s54det-##                                                 1.278           0.000
+                          AOTDispatcher-Runtime-Wrapper-Prologue                                                                                          0.012           0.000
+                          Pregraph-bytecode                                                                                                               0.003           0.000
+                          Torch-Compiled-Region:-0/0                                                                                                      1.352           4.252
+                          TorchDynamo-Cache-Lookup                                                                                                        0.060           4.252
+                          aiuLaunchControlBlocks                                                                                                          0.001            0.00
+                          aiuLaunchDMIControlBlocks                                                                                                       0.001            0.00
+                          aiuLaunchDMOControlBlocks                                                                                                       0.001            0.00
+                          aten::_copy_from                                                                                                                2.028            0.00
+                          aten::_to_copy                                                                                                                  2.043            0.00
+                          aten::copy_                                                                                                                     2.030            0.00
+                          aten::detach_                                                                                                                   0.002            0.00
+                          aten::empty                                                                                                                     0.003            0.00
+                          aten::empty_strided                                                                                                             0.008            0.00
+                          aten::lift_fresh                                                                                                                0.000            0.00
+                          aten::to                                                                                                                        1.432            0.00
+                          detach_                                                                                                                         0.001            0.00
+                          launch_jobplan:sdsc_fused_add_amax_div_exp_full_maximum_mul_sub_sum_transpose_unsqueeze_zeros_zeros_like_0                      0.987            0.00
+sendnn:
+                          N/A                                                                                                                               N/A             N/A

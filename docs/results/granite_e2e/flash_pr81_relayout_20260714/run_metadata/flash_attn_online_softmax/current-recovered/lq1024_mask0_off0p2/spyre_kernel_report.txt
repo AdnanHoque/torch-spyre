@@ -1,0 +1,19 @@
+============ Version Info ============
+torch-spyre:      832aa67a (branch: pr-lx-relayout-scatter)
+flex:             N/A (path not found: ../flex)
+deeptools:        704c19f8fb (branch: adnan/lx-relayout-scatter-sizing)
+spyre-comms:      N/A (path not found: ../spyre-comms)
+spyre-perf-suite: 6f4e541 (branch: jamie/flash_attn)
+======================================
+
+Op: flash_attn_online_softmax  Shape: [[1, 4, 1024, 128], [1, 4, 4096, 128], [1, 4, 4096, 128]]
+Stack                     Kernel_name                                                                                                        duration(ms)      PT-Util(%)
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          Memcpy-(HtoD)                                                                                                             0.055           0.000
+                          Memcpy-(DtoH)                                                                                                             0.109           0.000
+                          Memset-(Device)                                                                                                           0.036           0.000
+                          sdsc_fused_add_amax_div_exp_full_maximum_mul_sub_sum_transpose_unsqueeze_zeros_zeros_like_0_k0ycy5ys                      0.439          27.139
+                          Total                                                                                                                     0.639          27.139
+sendnn:
+                          N/A                                                                                                                         N/A             N/A

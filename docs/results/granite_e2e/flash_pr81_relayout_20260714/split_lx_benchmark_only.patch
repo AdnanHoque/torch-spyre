@@ -1,0 +1,31 @@
+diff --git a/torch_spyre/_inductor/config.py b/torch_spyre/_inductor/config.py
+index a9d8d7d3..0542681c 100644
+--- a/torch_spyre/_inductor/config.py
++++ b/torch_spyre/_inductor/config.py
+@@ -49,6 +49,13 @@ lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") ==
+ lx_capacity_bytes: int = 2 << 20
+ dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
+
++# Benchmark-only split used to isolate backend relayout workspace from the
++# frontend allocation limit. Production must replace this overcommit with
++# allocator-accounted staging.
++dxp_backend_lx_frac_avail: float = float(
++    os.environ.get("DXP_BACKEND_LX_FRAC_AVAIL", str(dxp_lx_frac_avail))
++)
++
+ sencores: int = int(os.getenv("SENCORES", "32"))
+
+ # Symbolic-dim knobs consumed by compute_granularity in pass_utils.py.
+diff --git a/torch_spyre/_inductor/lx_relayout.py b/torch_spyre/_inductor/lx_relayout.py
+index 8905fc34..657952f6 100644
+--- a/torch_spyre/_inductor/lx_relayout.py
++++ b/torch_spyre/_inductor/lx_relayout.py
+@@ -430,7 +430,7 @@ def collect_lx_relayout_plans(
+
+             operand_nbytes = _op_nbytes(graph, producer)
+             backend_workspace_bytes = int(
+-                config.lx_capacity_bytes * config.dxp_lx_frac_avail
++                config.lx_capacity_bytes * config.dxp_backend_lx_frac_avail
+             )
+             required_workspace_bytes = (
+                 None

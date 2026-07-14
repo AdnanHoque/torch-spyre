@@ -1,0 +1,32 @@
+============ Version Info ============
+torch-spyre:      832aa67a (branch: pr-lx-relayout-scatter)
+flex:             N/A (path not found: ../flex)
+deeptools:        704c19f8fb (branch: adnan/lx-relayout-scatter-sizing)
+spyre-comms:      N/A (path not found: ../spyre-comms)
+spyre-perf-suite: 6f4e541 (branch: jamie/flash_attn)
+======================================
+
+Op: flash_attn_stable_softmax  Shape: [[1, 4, 1024, 128], [1, 4, 4096, 128], [1, 4, 4096, 128]]
+Stack                     Kernel_name                                                                                   duration(ms)      PT-Util(%)
+----------------------------------------------------------------------------------------------------------------------------------------------------
+torch-spyre:
+                          ##-Call-CompiledFxGraph-fkqxyk5ierdyyyum2ccvpoo5cjcdhc2zm3b426wa24xn3wu4jwkd-##                      0.796           0.000
+                          AOTDispatcher-Runtime-Wrapper-Prologue                                                               0.010           0.000
+                          Pregraph-bytecode                                                                                    0.003           0.000
+                          Torch-Compiled-Region:-0/0                                                                           0.859           3.726
+                          TorchDynamo-Cache-Lookup                                                                             0.042           3.726
+                          aiuLaunchControlBlocks                                                                               0.001            0.00
+                          aiuLaunchDMIControlBlocks                                                                            0.002            0.00
+                          aiuLaunchDMOControlBlocks                                                                            0.001            0.00
+                          aten::_copy_from                                                                                     3.321            0.00
+                          aten::_to_copy                                                                                       3.343            0.00
+                          aten::copy_                                                                                          3.325            0.00
+                          aten::detach_                                                                                        0.003            0.00
+                          aten::empty                                                                                          0.005            0.00
+                          aten::empty_strided                                                                                  0.012            0.00
+                          aten::lift_fresh                                                                                     0.001            0.00
+                          aten::to                                                                                             2.788            0.00
+                          detach_                                                                                              0.001            0.00
+                          launch_jobplan:sdsc_fused_amax_exp_mul_reciprocal_sub_sum_transpose_0                                0.622            0.00
+sendnn:
+                          N/A                                                                                                    N/A             N/A
