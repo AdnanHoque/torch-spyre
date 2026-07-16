@@ -1,0 +1,17 @@
+============ Version Info ============
+torch-spyre:      832aa67a (branch: pr-lx-relayout-scatter)
+flex:             N/A (path not found: ../flex)
+deeptools:        704c19f8fb (branch: adnan/lx-relayout-scatter-sizing)
+spyre-comms:      N/A (path not found: ../spyre-comms)
+spyre-perf-suite: 3d33ca0 (branch: HEAD)
+======================================
+
+Op: flash_attn_online_softmax  Shape: [[1, 4, 512, 128], [1, 4, 4096, 128], [1, 4, 4096, 128]]
+Metric                             torch-spyre          sendnn tsp/sendnn    z_score          status
+------------------------------------------------------------------------------------------------
+wall_clock_ms.mean_ms               4974.726             N/A        N/A         -- insufficient_data
+spyre_ms.mean_ms                       1.460             N/A        N/A         --              --
+kernel_ms.mean_ms                      0.326             N/A        N/A         -- insufficient_data
+memory_transfer_ms.mean_ms             1.134             N/A        N/A         --              --
+compiler_ms.mean_ms                 4714.129             N/A        N/A         --              --
+pt_util%                              18.261             N/A        N/A         --              --

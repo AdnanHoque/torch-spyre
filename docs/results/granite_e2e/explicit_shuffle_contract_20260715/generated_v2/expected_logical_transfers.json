@@ -1,0 +1,7938 @@
+[
+  {
+    "head": 0,
+    "shard": 0,
+    "replica": 0,
+    "source_core": 0,
+    "destination_core": 0,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 0,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 0,
+    "shard": 0,
+    "replica": 1,
+    "source_core": 0,
+    "destination_core": 4,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 0,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 0,
+    "shard": 0,
+    "replica": 2,
+    "source_core": 0,
+    "destination_core": 8,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 0,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 0,
+    "shard": 0,
+    "replica": 3,
+    "source_core": 0,
+    "destination_core": 12,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 0,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 0,
+    "shard": 0,
+    "replica": 4,
+    "source_core": 0,
+    "destination_core": 16,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 0,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 0,
+    "shard": 0,
+    "replica": 5,
+    "source_core": 0,
+    "destination_core": 20,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 0,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 0,
+    "shard": 0,
+    "replica": 6,
+    "source_core": 0,
+    "destination_core": 24,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 0,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 0,
+    "shard": 0,
+    "replica": 7,
+    "source_core": 0,
+    "destination_core": 28,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 0,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 0,
+    "shard": 1,
+    "replica": 0,
+    "source_core": 4,
+    "destination_core": 0,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 4,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 0,
+    "shard": 1,
+    "replica": 1,
+    "source_core": 4,
+    "destination_core": 4,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 4,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 0,
+    "shard": 1,
+    "replica": 2,
+    "source_core": 4,
+    "destination_core": 8,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 4,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 0,
+    "shard": 1,
+    "replica": 3,
+    "source_core": 4,
+    "destination_core": 12,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 4,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 0,
+    "shard": 1,
+    "replica": 4,
+    "source_core": 4,
+    "destination_core": 16,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 4,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 0,
+    "shard": 1,
+    "replica": 5,
+    "source_core": 4,
+    "destination_core": 20,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 4,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 0,
+    "shard": 1,
+    "replica": 6,
+    "source_core": 4,
+    "destination_core": 24,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 4,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 0,
+    "shard": 1,
+    "replica": 7,
+    "source_core": 4,
+    "destination_core": 28,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 4,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 0,
+    "shard": 2,
+    "replica": 0,
+    "source_core": 8,
+    "destination_core": 0,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 8,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 0,
+    "shard": 2,
+    "replica": 1,
+    "source_core": 8,
+    "destination_core": 4,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 8,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 0,
+    "shard": 2,
+    "replica": 2,
+    "source_core": 8,
+    "destination_core": 8,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 8,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 0,
+    "shard": 2,
+    "replica": 3,
+    "source_core": 8,
+    "destination_core": 12,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 8,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 0,
+    "shard": 2,
+    "replica": 4,
+    "source_core": 8,
+    "destination_core": 16,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 8,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 0,
+    "shard": 2,
+    "replica": 5,
+    "source_core": 8,
+    "destination_core": 20,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 8,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 0,
+    "shard": 2,
+    "replica": 6,
+    "source_core": 8,
+    "destination_core": 24,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 8,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 0,
+    "shard": 2,
+    "replica": 7,
+    "source_core": 8,
+    "destination_core": 28,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 8,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 0,
+    "shard": 3,
+    "replica": 0,
+    "source_core": 12,
+    "destination_core": 0,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 12,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 0,
+    "shard": 3,
+    "replica": 1,
+    "source_core": 12,
+    "destination_core": 4,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 12,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 0,
+    "shard": 3,
+    "replica": 2,
+    "source_core": 12,
+    "destination_core": 8,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 12,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 0,
+    "shard": 3,
+    "replica": 3,
+    "source_core": 12,
+    "destination_core": 12,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 12,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 0,
+    "shard": 3,
+    "replica": 4,
+    "source_core": 12,
+    "destination_core": 16,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 12,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 0,
+    "shard": 3,
+    "replica": 5,
+    "source_core": 12,
+    "destination_core": 20,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 12,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 0,
+    "shard": 3,
+    "replica": 6,
+    "source_core": 12,
+    "destination_core": 24,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 12,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 0,
+    "shard": 3,
+    "replica": 7,
+    "source_core": 12,
+    "destination_core": 28,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 12,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 0,
+    "shard": 4,
+    "replica": 0,
+    "source_core": 16,
+    "destination_core": 0,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 16,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 0,
+    "shard": 4,
+    "replica": 1,
+    "source_core": 16,
+    "destination_core": 4,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 16,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 0,
+    "shard": 4,
+    "replica": 2,
+    "source_core": 16,
+    "destination_core": 8,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 16,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 0,
+    "shard": 4,
+    "replica": 3,
+    "source_core": 16,
+    "destination_core": 12,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 16,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 0,
+    "shard": 4,
+    "replica": 4,
+    "source_core": 16,
+    "destination_core": 16,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 16,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 0,
+    "shard": 4,
+    "replica": 5,
+    "source_core": 16,
+    "destination_core": 20,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 16,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 0,
+    "shard": 4,
+    "replica": 6,
+    "source_core": 16,
+    "destination_core": 24,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 16,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 0,
+    "shard": 4,
+    "replica": 7,
+    "source_core": 16,
+    "destination_core": 28,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 16,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 0,
+    "shard": 5,
+    "replica": 0,
+    "source_core": 20,
+    "destination_core": 0,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 20,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 0,
+    "shard": 5,
+    "replica": 1,
+    "source_core": 20,
+    "destination_core": 4,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 20,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 0,
+    "shard": 5,
+    "replica": 2,
+    "source_core": 20,
+    "destination_core": 8,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 20,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 0,
+    "shard": 5,
+    "replica": 3,
+    "source_core": 20,
+    "destination_core": 12,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 20,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 0,
+    "shard": 5,
+    "replica": 4,
+    "source_core": 20,
+    "destination_core": 16,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 20,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 0,
+    "shard": 5,
+    "replica": 5,
+    "source_core": 20,
+    "destination_core": 20,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 20,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 0,
+    "shard": 5,
+    "replica": 6,
+    "source_core": 20,
+    "destination_core": 24,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 20,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 0,
+    "shard": 5,
+    "replica": 7,
+    "source_core": 20,
+    "destination_core": 28,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 20,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 0,
+    "shard": 6,
+    "replica": 0,
+    "source_core": 24,
+    "destination_core": 0,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 24,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 0,
+    "shard": 6,
+    "replica": 1,
+    "source_core": 24,
+    "destination_core": 4,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 24,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 0,
+    "shard": 6,
+    "replica": 2,
+    "source_core": 24,
+    "destination_core": 8,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 24,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 0,
+    "shard": 6,
+    "replica": 3,
+    "source_core": 24,
+    "destination_core": 12,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 24,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 0,
+    "shard": 6,
+    "replica": 4,
+    "source_core": 24,
+    "destination_core": 16,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 24,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 0,
+    "shard": 6,
+    "replica": 5,
+    "source_core": 24,
+    "destination_core": 20,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 24,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 0,
+    "shard": 6,
+    "replica": 6,
+    "source_core": 24,
+    "destination_core": 24,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 24,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 0,
+    "shard": 6,
+    "replica": 7,
+    "source_core": 24,
+    "destination_core": 28,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 24,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 0,
+    "shard": 7,
+    "replica": 0,
+    "source_core": 28,
+    "destination_core": 0,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 28,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 0,
+    "shard": 7,
+    "replica": 1,
+    "source_core": 28,
+    "destination_core": 4,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 28,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 0,
+    "shard": 7,
+    "replica": 2,
+    "source_core": 28,
+    "destination_core": 8,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 28,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 0,
+    "shard": 7,
+    "replica": 3,
+    "source_core": 28,
+    "destination_core": 12,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 28,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 0,
+    "shard": 7,
+    "replica": 4,
+    "source_core": 28,
+    "destination_core": 16,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 28,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 0,
+    "shard": 7,
+    "replica": 5,
+    "source_core": 28,
+    "destination_core": 20,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 28,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 0,
+    "shard": 7,
+    "replica": 6,
+    "source_core": 28,
+    "destination_core": 24,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 28,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 0,
+    "shard": 7,
+    "replica": 7,
+    "source_core": 28,
+    "destination_core": 28,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 0,
+      "source_core_id": 28,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 1,
+    "shard": 0,
+    "replica": 0,
+    "source_core": 1,
+    "destination_core": 1,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 1,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 1,
+    "shard": 0,
+    "replica": 1,
+    "source_core": 1,
+    "destination_core": 5,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 1,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 1,
+    "shard": 0,
+    "replica": 2,
+    "source_core": 1,
+    "destination_core": 9,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 1,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 1,
+    "shard": 0,
+    "replica": 3,
+    "source_core": 1,
+    "destination_core": 13,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 1,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 1,
+    "shard": 0,
+    "replica": 4,
+    "source_core": 1,
+    "destination_core": 17,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 1,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 1,
+    "shard": 0,
+    "replica": 5,
+    "source_core": 1,
+    "destination_core": 21,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 1,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 1,
+    "shard": 0,
+    "replica": 6,
+    "source_core": 1,
+    "destination_core": 25,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 1,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 1,
+    "shard": 0,
+    "replica": 7,
+    "source_core": 1,
+    "destination_core": 29,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 1,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 1,
+    "shard": 1,
+    "replica": 0,
+    "source_core": 5,
+    "destination_core": 1,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 5,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 1,
+    "shard": 1,
+    "replica": 1,
+    "source_core": 5,
+    "destination_core": 5,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 5,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 1,
+    "shard": 1,
+    "replica": 2,
+    "source_core": 5,
+    "destination_core": 9,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 5,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 1,
+    "shard": 1,
+    "replica": 3,
+    "source_core": 5,
+    "destination_core": 13,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 5,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 1,
+    "shard": 1,
+    "replica": 4,
+    "source_core": 5,
+    "destination_core": 17,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 5,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 1,
+    "shard": 1,
+    "replica": 5,
+    "source_core": 5,
+    "destination_core": 21,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 5,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 1,
+    "shard": 1,
+    "replica": 6,
+    "source_core": 5,
+    "destination_core": 25,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 5,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 1,
+    "shard": 1,
+    "replica": 7,
+    "source_core": 5,
+    "destination_core": 29,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 5,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 1,
+    "shard": 2,
+    "replica": 0,
+    "source_core": 9,
+    "destination_core": 1,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 9,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 1,
+    "shard": 2,
+    "replica": 1,
+    "source_core": 9,
+    "destination_core": 5,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 9,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 1,
+    "shard": 2,
+    "replica": 2,
+    "source_core": 9,
+    "destination_core": 9,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 9,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 1,
+    "shard": 2,
+    "replica": 3,
+    "source_core": 9,
+    "destination_core": 13,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 9,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 1,
+    "shard": 2,
+    "replica": 4,
+    "source_core": 9,
+    "destination_core": 17,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 9,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 1,
+    "shard": 2,
+    "replica": 5,
+    "source_core": 9,
+    "destination_core": 21,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 9,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 1,
+    "shard": 2,
+    "replica": 6,
+    "source_core": 9,
+    "destination_core": 25,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 9,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 1,
+    "shard": 2,
+    "replica": 7,
+    "source_core": 9,
+    "destination_core": 29,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 9,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 1,
+    "shard": 3,
+    "replica": 0,
+    "source_core": 13,
+    "destination_core": 1,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 13,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 1,
+    "shard": 3,
+    "replica": 1,
+    "source_core": 13,
+    "destination_core": 5,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 13,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 1,
+    "shard": 3,
+    "replica": 2,
+    "source_core": 13,
+    "destination_core": 9,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 13,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 1,
+    "shard": 3,
+    "replica": 3,
+    "source_core": 13,
+    "destination_core": 13,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 13,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 1,
+    "shard": 3,
+    "replica": 4,
+    "source_core": 13,
+    "destination_core": 17,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 13,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 1,
+    "shard": 3,
+    "replica": 5,
+    "source_core": 13,
+    "destination_core": 21,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 13,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 1,
+    "shard": 3,
+    "replica": 6,
+    "source_core": 13,
+    "destination_core": 25,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 13,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 1,
+    "shard": 3,
+    "replica": 7,
+    "source_core": 13,
+    "destination_core": 29,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 13,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 1,
+    "shard": 4,
+    "replica": 0,
+    "source_core": 17,
+    "destination_core": 1,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 17,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 1,
+    "shard": 4,
+    "replica": 1,
+    "source_core": 17,
+    "destination_core": 5,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 17,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 1,
+    "shard": 4,
+    "replica": 2,
+    "source_core": 17,
+    "destination_core": 9,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 17,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 1,
+    "shard": 4,
+    "replica": 3,
+    "source_core": 17,
+    "destination_core": 13,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 17,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 1,
+    "shard": 4,
+    "replica": 4,
+    "source_core": 17,
+    "destination_core": 17,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 17,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 1,
+    "shard": 4,
+    "replica": 5,
+    "source_core": 17,
+    "destination_core": 21,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 17,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 1,
+    "shard": 4,
+    "replica": 6,
+    "source_core": 17,
+    "destination_core": 25,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 17,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 1,
+    "shard": 4,
+    "replica": 7,
+    "source_core": 17,
+    "destination_core": 29,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 17,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 1,
+    "shard": 5,
+    "replica": 0,
+    "source_core": 21,
+    "destination_core": 1,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 21,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 1,
+    "shard": 5,
+    "replica": 1,
+    "source_core": 21,
+    "destination_core": 5,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 21,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 1,
+    "shard": 5,
+    "replica": 2,
+    "source_core": 21,
+    "destination_core": 9,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 21,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 1,
+    "shard": 5,
+    "replica": 3,
+    "source_core": 21,
+    "destination_core": 13,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 21,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 1,
+    "shard": 5,
+    "replica": 4,
+    "source_core": 21,
+    "destination_core": 17,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 21,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 1,
+    "shard": 5,
+    "replica": 5,
+    "source_core": 21,
+    "destination_core": 21,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 21,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 1,
+    "shard": 5,
+    "replica": 6,
+    "source_core": 21,
+    "destination_core": 25,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 21,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 1,
+    "shard": 5,
+    "replica": 7,
+    "source_core": 21,
+    "destination_core": 29,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 21,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 1,
+    "shard": 6,
+    "replica": 0,
+    "source_core": 25,
+    "destination_core": 1,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 25,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 1,
+    "shard": 6,
+    "replica": 1,
+    "source_core": 25,
+    "destination_core": 5,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 25,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 1,
+    "shard": 6,
+    "replica": 2,
+    "source_core": 25,
+    "destination_core": 9,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 25,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 1,
+    "shard": 6,
+    "replica": 3,
+    "source_core": 25,
+    "destination_core": 13,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 25,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 1,
+    "shard": 6,
+    "replica": 4,
+    "source_core": 25,
+    "destination_core": 17,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 25,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 1,
+    "shard": 6,
+    "replica": 5,
+    "source_core": 25,
+    "destination_core": 21,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 25,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 1,
+    "shard": 6,
+    "replica": 6,
+    "source_core": 25,
+    "destination_core": 25,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 25,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 1,
+    "shard": 6,
+    "replica": 7,
+    "source_core": 25,
+    "destination_core": 29,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 25,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 1,
+    "shard": 7,
+    "replica": 0,
+    "source_core": 29,
+    "destination_core": 1,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 29,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 1,
+    "shard": 7,
+    "replica": 1,
+    "source_core": 29,
+    "destination_core": 5,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 29,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 1,
+    "shard": 7,
+    "replica": 2,
+    "source_core": 29,
+    "destination_core": 9,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 29,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 1,
+    "shard": 7,
+    "replica": 3,
+    "source_core": 29,
+    "destination_core": 13,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 29,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 1,
+    "shard": 7,
+    "replica": 4,
+    "source_core": 29,
+    "destination_core": 17,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 29,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 1,
+    "shard": 7,
+    "replica": 5,
+    "source_core": 29,
+    "destination_core": 21,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 29,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 1,
+    "shard": 7,
+    "replica": 6,
+    "source_core": 29,
+    "destination_core": 25,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 29,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 1,
+    "shard": 7,
+    "replica": 7,
+    "source_core": 29,
+    "destination_core": 29,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 1,
+      "source_core_id": 29,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 2,
+    "shard": 0,
+    "replica": 0,
+    "source_core": 2,
+    "destination_core": 2,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 2,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 2,
+    "shard": 0,
+    "replica": 1,
+    "source_core": 2,
+    "destination_core": 6,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 2,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 2,
+    "shard": 0,
+    "replica": 2,
+    "source_core": 2,
+    "destination_core": 10,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 2,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 2,
+    "shard": 0,
+    "replica": 3,
+    "source_core": 2,
+    "destination_core": 14,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 2,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 2,
+    "shard": 0,
+    "replica": 4,
+    "source_core": 2,
+    "destination_core": 18,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 2,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 2,
+    "shard": 0,
+    "replica": 5,
+    "source_core": 2,
+    "destination_core": 22,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 2,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 2,
+    "shard": 0,
+    "replica": 6,
+    "source_core": 2,
+    "destination_core": 26,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 2,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 2,
+    "shard": 0,
+    "replica": 7,
+    "source_core": 2,
+    "destination_core": 30,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 2,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 2,
+    "shard": 1,
+    "replica": 0,
+    "source_core": 6,
+    "destination_core": 2,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 6,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 2,
+    "shard": 1,
+    "replica": 1,
+    "source_core": 6,
+    "destination_core": 6,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 6,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 2,
+    "shard": 1,
+    "replica": 2,
+    "source_core": 6,
+    "destination_core": 10,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 6,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 2,
+    "shard": 1,
+    "replica": 3,
+    "source_core": 6,
+    "destination_core": 14,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 6,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 2,
+    "shard": 1,
+    "replica": 4,
+    "source_core": 6,
+    "destination_core": 18,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 6,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 2,
+    "shard": 1,
+    "replica": 5,
+    "source_core": 6,
+    "destination_core": 22,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 6,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 2,
+    "shard": 1,
+    "replica": 6,
+    "source_core": 6,
+    "destination_core": 26,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 6,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 2,
+    "shard": 1,
+    "replica": 7,
+    "source_core": 6,
+    "destination_core": 30,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 6,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 2,
+    "shard": 2,
+    "replica": 0,
+    "source_core": 10,
+    "destination_core": 2,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 10,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 2,
+    "shard": 2,
+    "replica": 1,
+    "source_core": 10,
+    "destination_core": 6,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 10,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 2,
+    "shard": 2,
+    "replica": 2,
+    "source_core": 10,
+    "destination_core": 10,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 10,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 2,
+    "shard": 2,
+    "replica": 3,
+    "source_core": 10,
+    "destination_core": 14,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 10,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 2,
+    "shard": 2,
+    "replica": 4,
+    "source_core": 10,
+    "destination_core": 18,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 10,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 2,
+    "shard": 2,
+    "replica": 5,
+    "source_core": 10,
+    "destination_core": 22,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 10,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 2,
+    "shard": 2,
+    "replica": 6,
+    "source_core": 10,
+    "destination_core": 26,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 10,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 2,
+    "shard": 2,
+    "replica": 7,
+    "source_core": 10,
+    "destination_core": 30,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 10,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 2,
+    "shard": 3,
+    "replica": 0,
+    "source_core": 14,
+    "destination_core": 2,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 14,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 2,
+    "shard": 3,
+    "replica": 1,
+    "source_core": 14,
+    "destination_core": 6,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 14,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 2,
+    "shard": 3,
+    "replica": 2,
+    "source_core": 14,
+    "destination_core": 10,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 14,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 2,
+    "shard": 3,
+    "replica": 3,
+    "source_core": 14,
+    "destination_core": 14,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 14,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 2,
+    "shard": 3,
+    "replica": 4,
+    "source_core": 14,
+    "destination_core": 18,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 14,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 2,
+    "shard": 3,
+    "replica": 5,
+    "source_core": 14,
+    "destination_core": 22,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 14,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 2,
+    "shard": 3,
+    "replica": 6,
+    "source_core": 14,
+    "destination_core": 26,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 14,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 2,
+    "shard": 3,
+    "replica": 7,
+    "source_core": 14,
+    "destination_core": 30,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 14,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 2,
+    "shard": 4,
+    "replica": 0,
+    "source_core": 18,
+    "destination_core": 2,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 18,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 2,
+    "shard": 4,
+    "replica": 1,
+    "source_core": 18,
+    "destination_core": 6,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 18,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 2,
+    "shard": 4,
+    "replica": 2,
+    "source_core": 18,
+    "destination_core": 10,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 18,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 2,
+    "shard": 4,
+    "replica": 3,
+    "source_core": 18,
+    "destination_core": 14,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 18,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 2,
+    "shard": 4,
+    "replica": 4,
+    "source_core": 18,
+    "destination_core": 18,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 18,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 2,
+    "shard": 4,
+    "replica": 5,
+    "source_core": 18,
+    "destination_core": 22,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 18,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 2,
+    "shard": 4,
+    "replica": 6,
+    "source_core": 18,
+    "destination_core": 26,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 18,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 2,
+    "shard": 4,
+    "replica": 7,
+    "source_core": 18,
+    "destination_core": 30,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 18,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 2,
+    "shard": 5,
+    "replica": 0,
+    "source_core": 22,
+    "destination_core": 2,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 22,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 2,
+    "shard": 5,
+    "replica": 1,
+    "source_core": 22,
+    "destination_core": 6,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 22,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 2,
+    "shard": 5,
+    "replica": 2,
+    "source_core": 22,
+    "destination_core": 10,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 22,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 2,
+    "shard": 5,
+    "replica": 3,
+    "source_core": 22,
+    "destination_core": 14,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 22,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 2,
+    "shard": 5,
+    "replica": 4,
+    "source_core": 22,
+    "destination_core": 18,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 22,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 2,
+    "shard": 5,
+    "replica": 5,
+    "source_core": 22,
+    "destination_core": 22,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 22,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 2,
+    "shard": 5,
+    "replica": 6,
+    "source_core": 22,
+    "destination_core": 26,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 22,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 2,
+    "shard": 5,
+    "replica": 7,
+    "source_core": 22,
+    "destination_core": 30,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 22,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 2,
+    "shard": 6,
+    "replica": 0,
+    "source_core": 26,
+    "destination_core": 2,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 26,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 2,
+    "shard": 6,
+    "replica": 1,
+    "source_core": 26,
+    "destination_core": 6,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 26,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 2,
+    "shard": 6,
+    "replica": 2,
+    "source_core": 26,
+    "destination_core": 10,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 26,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 2,
+    "shard": 6,
+    "replica": 3,
+    "source_core": 26,
+    "destination_core": 14,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 26,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 2,
+    "shard": 6,
+    "replica": 4,
+    "source_core": 26,
+    "destination_core": 18,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 26,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 2,
+    "shard": 6,
+    "replica": 5,
+    "source_core": 26,
+    "destination_core": 22,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 26,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 2,
+    "shard": 6,
+    "replica": 6,
+    "source_core": 26,
+    "destination_core": 26,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 26,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 2,
+    "shard": 6,
+    "replica": 7,
+    "source_core": 26,
+    "destination_core": 30,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 26,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 2,
+    "shard": 7,
+    "replica": 0,
+    "source_core": 30,
+    "destination_core": 2,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 30,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 2,
+    "shard": 7,
+    "replica": 1,
+    "source_core": 30,
+    "destination_core": 6,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 30,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 2,
+    "shard": 7,
+    "replica": 2,
+    "source_core": 30,
+    "destination_core": 10,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 30,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 2,
+    "shard": 7,
+    "replica": 3,
+    "source_core": 30,
+    "destination_core": 14,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 30,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 2,
+    "shard": 7,
+    "replica": 4,
+    "source_core": 30,
+    "destination_core": 18,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 30,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 2,
+    "shard": 7,
+    "replica": 5,
+    "source_core": 30,
+    "destination_core": 22,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 30,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 2,
+    "shard": 7,
+    "replica": 6,
+    "source_core": 30,
+    "destination_core": 26,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 30,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 2,
+    "shard": 7,
+    "replica": 7,
+    "source_core": 30,
+    "destination_core": 30,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 2,
+      "source_core_id": 30,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 3,
+    "shard": 0,
+    "replica": 0,
+    "source_core": 3,
+    "destination_core": 3,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 3,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 3,
+    "shard": 0,
+    "replica": 1,
+    "source_core": 3,
+    "destination_core": 7,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 3,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 3,
+    "shard": 0,
+    "replica": 2,
+    "source_core": 3,
+    "destination_core": 11,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 3,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 3,
+    "shard": 0,
+    "replica": 3,
+    "source_core": 3,
+    "destination_core": 15,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 3,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 3,
+    "shard": 0,
+    "replica": 4,
+    "source_core": 3,
+    "destination_core": 19,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 3,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 3,
+    "shard": 0,
+    "replica": 5,
+    "source_core": 3,
+    "destination_core": 23,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 3,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 3,
+    "shard": 0,
+    "replica": 6,
+    "source_core": 3,
+    "destination_core": 27,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 3,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 3,
+    "shard": 0,
+    "replica": 7,
+    "source_core": 3,
+    "destination_core": 31,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 278528,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      0,
+      512
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 3,
+      "lk_shard_id": 0
+    }
+  },
+  {
+    "head": 3,
+    "shard": 1,
+    "replica": 0,
+    "source_core": 7,
+    "destination_core": 3,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 7,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 3,
+    "shard": 1,
+    "replica": 1,
+    "source_core": 7,
+    "destination_core": 7,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 7,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 3,
+    "shard": 1,
+    "replica": 2,
+    "source_core": 7,
+    "destination_core": 11,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 7,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 3,
+    "shard": 1,
+    "replica": 3,
+    "source_core": 7,
+    "destination_core": 15,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 7,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 3,
+    "shard": 1,
+    "replica": 4,
+    "source_core": 7,
+    "destination_core": 19,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 7,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 3,
+    "shard": 1,
+    "replica": 5,
+    "source_core": 7,
+    "destination_core": 23,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 7,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 3,
+    "shard": 1,
+    "replica": 6,
+    "source_core": 7,
+    "destination_core": 27,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 7,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 3,
+    "shard": 1,
+    "replica": 7,
+    "source_core": 7,
+    "destination_core": 31,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 279552,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      512,
+      1024
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 7,
+      "lk_shard_id": 1
+    }
+  },
+  {
+    "head": 3,
+    "shard": 2,
+    "replica": 0,
+    "source_core": 11,
+    "destination_core": 3,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 11,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 3,
+    "shard": 2,
+    "replica": 1,
+    "source_core": 11,
+    "destination_core": 7,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 11,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 3,
+    "shard": 2,
+    "replica": 2,
+    "source_core": 11,
+    "destination_core": 11,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 11,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 3,
+    "shard": 2,
+    "replica": 3,
+    "source_core": 11,
+    "destination_core": 15,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 11,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 3,
+    "shard": 2,
+    "replica": 4,
+    "source_core": 11,
+    "destination_core": 19,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 11,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 3,
+    "shard": 2,
+    "replica": 5,
+    "source_core": 11,
+    "destination_core": 23,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 11,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 3,
+    "shard": 2,
+    "replica": 6,
+    "source_core": 11,
+    "destination_core": 27,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 11,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 3,
+    "shard": 2,
+    "replica": 7,
+    "source_core": 11,
+    "destination_core": 31,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 280576,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1024,
+      1536
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 11,
+      "lk_shard_id": 2
+    }
+  },
+  {
+    "head": 3,
+    "shard": 3,
+    "replica": 0,
+    "source_core": 15,
+    "destination_core": 3,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 15,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 3,
+    "shard": 3,
+    "replica": 1,
+    "source_core": 15,
+    "destination_core": 7,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 15,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 3,
+    "shard": 3,
+    "replica": 2,
+    "source_core": 15,
+    "destination_core": 11,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 15,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 3,
+    "shard": 3,
+    "replica": 3,
+    "source_core": 15,
+    "destination_core": 15,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 15,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 3,
+    "shard": 3,
+    "replica": 4,
+    "source_core": 15,
+    "destination_core": 19,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 15,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 3,
+    "shard": 3,
+    "replica": 5,
+    "source_core": 15,
+    "destination_core": 23,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 15,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 3,
+    "shard": 3,
+    "replica": 6,
+    "source_core": 15,
+    "destination_core": 27,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 15,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 3,
+    "shard": 3,
+    "replica": 7,
+    "source_core": 15,
+    "destination_core": 31,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 281600,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      1536,
+      2048
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 15,
+      "lk_shard_id": 3
+    }
+  },
+  {
+    "head": 3,
+    "shard": 4,
+    "replica": 0,
+    "source_core": 19,
+    "destination_core": 3,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 19,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 3,
+    "shard": 4,
+    "replica": 1,
+    "source_core": 19,
+    "destination_core": 7,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 19,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 3,
+    "shard": 4,
+    "replica": 2,
+    "source_core": 19,
+    "destination_core": 11,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 19,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 3,
+    "shard": 4,
+    "replica": 3,
+    "source_core": 19,
+    "destination_core": 15,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 19,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 3,
+    "shard": 4,
+    "replica": 4,
+    "source_core": 19,
+    "destination_core": 19,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 19,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 3,
+    "shard": 4,
+    "replica": 5,
+    "source_core": 19,
+    "destination_core": 23,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 19,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 3,
+    "shard": 4,
+    "replica": 6,
+    "source_core": 19,
+    "destination_core": 27,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 19,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 3,
+    "shard": 4,
+    "replica": 7,
+    "source_core": 19,
+    "destination_core": 31,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 282624,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2048,
+      2560
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 19,
+      "lk_shard_id": 4
+    }
+  },
+  {
+    "head": 3,
+    "shard": 5,
+    "replica": 0,
+    "source_core": 23,
+    "destination_core": 3,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 23,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 3,
+    "shard": 5,
+    "replica": 1,
+    "source_core": 23,
+    "destination_core": 7,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 23,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 3,
+    "shard": 5,
+    "replica": 2,
+    "source_core": 23,
+    "destination_core": 11,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 23,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 3,
+    "shard": 5,
+    "replica": 3,
+    "source_core": 23,
+    "destination_core": 15,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 23,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 3,
+    "shard": 5,
+    "replica": 4,
+    "source_core": 23,
+    "destination_core": 19,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 23,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 3,
+    "shard": 5,
+    "replica": 5,
+    "source_core": 23,
+    "destination_core": 23,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 23,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 3,
+    "shard": 5,
+    "replica": 6,
+    "source_core": 23,
+    "destination_core": 27,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 23,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 3,
+    "shard": 5,
+    "replica": 7,
+    "source_core": 23,
+    "destination_core": 31,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 283648,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      2560,
+      3072
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 23,
+      "lk_shard_id": 5
+    }
+  },
+  {
+    "head": 3,
+    "shard": 6,
+    "replica": 0,
+    "source_core": 27,
+    "destination_core": 3,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 27,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 3,
+    "shard": 6,
+    "replica": 1,
+    "source_core": 27,
+    "destination_core": 7,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 27,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 3,
+    "shard": 6,
+    "replica": 2,
+    "source_core": 27,
+    "destination_core": 11,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 27,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 3,
+    "shard": 6,
+    "replica": 3,
+    "source_core": 27,
+    "destination_core": 15,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 27,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 3,
+    "shard": 6,
+    "replica": 4,
+    "source_core": 27,
+    "destination_core": 19,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 27,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 3,
+    "shard": 6,
+    "replica": 5,
+    "source_core": 27,
+    "destination_core": 23,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 27,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 3,
+    "shard": 6,
+    "replica": 6,
+    "source_core": 27,
+    "destination_core": 27,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 27,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 3,
+    "shard": 6,
+    "replica": 7,
+    "source_core": 27,
+    "destination_core": 31,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 284672,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3072,
+      3584
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 27,
+      "lk_shard_id": 6
+    }
+  },
+  {
+    "head": 3,
+    "shard": 7,
+    "replica": 0,
+    "source_core": 31,
+    "destination_core": 3,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 31,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 3,
+    "shard": 7,
+    "replica": 1,
+    "source_core": 31,
+    "destination_core": 7,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 31,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 3,
+    "shard": 7,
+    "replica": 2,
+    "source_core": 31,
+    "destination_core": 11,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 31,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 3,
+    "shard": 7,
+    "replica": 3,
+    "source_core": 31,
+    "destination_core": 15,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 31,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 3,
+    "shard": 7,
+    "replica": 4,
+    "source_core": 31,
+    "destination_core": 19,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 31,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 3,
+    "shard": 7,
+    "replica": 5,
+    "source_core": 31,
+    "destination_core": 23,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 31,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 3,
+    "shard": 7,
+    "replica": 6,
+    "source_core": 31,
+    "destination_core": 27,
+    "local_copy": false,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 31,
+      "lk_shard_id": 7
+    }
+  },
+  {
+    "head": 3,
+    "shard": 7,
+    "replica": 7,
+    "source_core": 31,
+    "destination_core": 31,
+    "local_copy": true,
+    "source_base": 147456,
+    "source_row_stride_bytes": 1024,
+    "destination_base": 278528,
+    "destination_first_row_address": 285696,
+    "destination_row_stride_bytes": 8192,
+    "rows": 128,
+    "bytes_per_row": 1024,
+    "bytes": 131072,
+    "logical_out_range": [
+      3584,
+      4096
+    ],
+    "pattern": {
+      "fields": [
+        "head_id",
+        "source_core_id",
+        "lk_shard_id",
+        "element_offset"
+      ],
+      "head_id": 3,
+      "source_core_id": 31,
+      "lk_shard_id": 7
+    }
+  }
+]

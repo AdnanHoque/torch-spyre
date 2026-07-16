@@ -1,0 +1,26 @@
+{
+  "JobExecPlan" : [
+    {
+      "command" : "ComputeOnDevice",
+      "properties" :       {
+        "job_bin_ptr" : "120259084288"
+      }
+    }
+  ],
+  "JobPreparationPlan" : [
+    {
+      "command" : "Allocate",
+      "properties" :       {
+        "size" : "1152"
+      }
+    },
+    {
+      "command" : "InitTransfer",
+      "properties" :       {
+        "init_bin_file" : "init_binary.bin",
+        "size" : "1152",
+        "dev_ptr" : "120259084288"
+      }
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+timestamp_utc=2026-07-16T02:20:12Z
+source_fixture=/home/adnan-cdx/codex-isolated/explicit-shuffle-contract-20260715-exact/fixtures-v5/scaled
+copied_fixture=/home/adnan-cdx/codex-isolated/explicit-shuffle-contract-20260715-exact/replay/v5-scaled-redundant/fixture
+backend=sentient
+DEEPTOOLS_PATH=/home/adnan-cdx/codex-isolated/explicit-shuffle-contract-20260715-exact/deeptools
+dxp=/home/adnan-cdx/codex-isolated/explicit-shuffle-contract-20260715-exact/bin/dxp_standalone
+dxp_sha256=895cd4344b5fa6bd7f1df178bd58a3e5bce48b2654cd07facbb38242f5f1e7f1
+DXP_VERBOSE=0
+DXP_DEBUG=1
+DUMP_SPYRE_CODE=1
+SENPERFORMANCE=<unset>
+DXP_LX_FRAC_AVAIL=<unset; Deeptools default 0.2>
+FLEX_COMPUTE=<sanitized by harness from explicit backend argument>

@@ -1,0 +1,66 @@
+{
+  "s1_address": 147456,
+  "s2_address": 278528,
+  "s1_bytes_per_core": 131072,
+  "s2_bytes_per_core": 1048576,
+  "addresses_overlap": false,
+  "groups": [
+    [
+      0,
+      4,
+      8,
+      12,
+      16,
+      20,
+      24,
+      28
+    ],
+    [
+      1,
+      5,
+      9,
+      13,
+      17,
+      21,
+      25,
+      29
+    ],
+    [
+      2,
+      6,
+      10,
+      14,
+      18,
+      22,
+      26,
+      30
+    ],
+    [
+      3,
+      7,
+      11,
+      15,
+      19,
+      23,
+      27,
+      31
+    ]
+  ],
+  "expected_logical_transfers": 256,
+  "semantic_dimension_alias": {
+    "x": "out",
+    "out": "in",
+    "mb": "x"
+  },
+  "stick_dimension_alias_matches": true,
+  "source_is_compact_per_core": true,
+  "destination_uses_full_4096_stride": true,
+  "shuffle_input_out_fold_extent": 512,
+  "shuffle_output_out_fold_extent": 4096,
+  "separate_restickify_required": null,
+  "stride_question": "The dimension and stick aliases match, but the source is a compact 512-wide per-core allocation while S2 has a 4096-wide row stride. DXP replay and patterned values must prove whether SHUFFLE represents the two physical strides correctly.",
+  "source_sha256": {
+    "producer": "a1033a7867164fdb9a3c83d4eaa60e17bb0e1c4c7121943f0d608d5796fbac43",
+    "consumer": "ea3c287e348a2a18d9e6aebb0c1bc3504768f436e3f971e2edd15810c8a6a38e"
+  }
+}

@@ -1,0 +1,2048 @@
+/// @core:0
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:1
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:2
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:3
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:4
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:5
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:6
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:7
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:8
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:9
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:10
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:11
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:12
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:13
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:14
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:15
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:16
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:17
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:18
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:19
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:20
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:21
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:22
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:23
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:24
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:25
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:26
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:27
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:28
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:29
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:30
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+
+/// @core:31
+
+
+/// @unit:l3lu
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:l3su
+/// @regInit:SPR:R0:1535:R1:255
+L3_RETURN
+L3_RETURN
+L3_RETURN
+L3_RETURN
+
+/// @unit:lxlu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu0
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:lxlu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_SETDSTMASK mode=sfp
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 consumertag=sfp ldtype=128b src0=0 src1=1
+LX_RETURN
+
+/// @unit:lxsu1
+/// @regInit:R0:278400:R1:128
+/// @regInit:SPR:R0:1535
+LX_MVLOOPCNT imm=64
+LX_LDSTU be=be burst=1 burstsize=0 producertag=sfp src0=0 src1=1 sttype=128b
+LX_RETURN
+LX_RETURN
+
+/// @unit:sfp0
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+/// @unit:sfp1
+/// @regInit:SPR:R0:511:R1:7423:R4:2048
+SFP_MVLOOPCNT imm=4096
+SFP_LOGICAL be=be imm=1 mask=255 src0=lxlu src2=0.0 tgtlx=result tgtrf=no unrlfldsrc0=0 unrlfldsrc2=0 unrlfldtgt=0 unroll=x1
+SFP_RETURN
+SFP_RETURN
+
+

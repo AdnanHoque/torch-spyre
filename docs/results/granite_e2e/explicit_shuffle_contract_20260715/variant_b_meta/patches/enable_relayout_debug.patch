@@ -1,0 +1,13 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index d69951d..b943828 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -11,7 +11,7 @@
+ 
+ #include "dxp.h"
+ 
+-// #define DEBUG_RELAYOUT 1
++#define DEBUG_RELAYOUT 1
+ 
+ static double getRelayoutPieceSize(
+     double form_size,

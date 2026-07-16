@@ -1,0 +1,13 @@
+Source: artifacts/value_correct_allgather_pr81_20260715/pinning_default_0p2/pinning_on_debug.log
+Source lines: 15786-15793, 15817-15818
+
+[DEBUG] [spyre.inductor.lx_relayout] found 1 LX relayout edge candidate(s)
+[DEBUG] [spyre.inductor.scratchpad.allocator] lx relayout candidate: source=buf26 destination=__spyre_lx_relayout_destination__:buf26 fanin=8 fanout=8 groups=((0, 4, 8, 12, 16, 20, 24, 28), (1, 5, 9, 13, 17, 21, 25, 29), (2, 6, 10, 14, 18, 22, 26, 30), (3, 7, 11, 15, 19, 23, 27, 31))
+[DEBUG] [spyre.inductor.scratchpad.allocator] lx relayout destination request: source=buf26 shard_bytes=131072 fanin=8 destination=__spyre_lx_relayout_destination__:buf26 destination_bytes=1048576 uses=[9]
+[DEBUG] [spyre.inductor.scratchpad.plan_solver] scratchpad limit: 1638 KB
+[DEBUG] [spyre.inductor.scratchpad.plan_solver] t=6: 16 KB  [buf5_16KB@0x0]
+[DEBUG] [spyre.inductor.scratchpad.plan_solver] t=7: 144 KB  [buf5_16KB@0x0, buf6_128KB@0x4000]
+[DEBUG] [spyre.inductor.scratchpad.plan_solver] t=8: 272 KB  [buf5_16KB@0x0, buf6_128KB@0x4000, buf26_128KB@0x24000]
+[DEBUG] [spyre.inductor.scratchpad.plan_solver] t=9: 656 KB  [buf5_16KB@0x0, buf26_128KB@0x24000, buf7_512KB@0x44000]
+[DEBUG] [spyre.inductor.scratchpad.allocator] lx_pinning: buf26 (restickify) -> no room on scratchpad
+[DEBUG] [spyre.inductor.scratchpad.allocator] lx_pinning: buf7 (batched_matmul) -> lx

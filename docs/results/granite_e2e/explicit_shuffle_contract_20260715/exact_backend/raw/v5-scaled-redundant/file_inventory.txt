@@ -1,0 +1,13 @@
+command.txt	235 bytes
+environment.txt	731 bytes
+file_inventory.txt	0 bytes
+fixture/._.	163 bytes
+fixture/._bundle.mlir	163 bytes
+fixture/._sdsc_0.json	163 bytes
+fixture/bundle.mlir	137 bytes
+fixture/debug/sdsc_0/sdsc_0.out.json	38977 bytes
+fixture/sdsc_0.json	35192 bytes
+input.sha256	396 bytes
+return_code.txt	4 bytes
+stderr.log	1078 bytes
+stdout.log	123 bytes

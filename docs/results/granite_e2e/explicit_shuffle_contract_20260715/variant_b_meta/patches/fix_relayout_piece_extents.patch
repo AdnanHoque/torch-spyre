@@ -1,0 +1,13 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index d69951d..0000000 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -297,7 +297,7 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             std::string dimName = dldsc.primaryDimToString.at(kv2.first);
+             DT_CHECK(wkslices_in_dim.at(kv2.first).size() >= 1);
+             new_piece.dimToSize_[dimName] =
+-                sdsc->N_.paramNameToVal(dimName) /
++                dldsc.N_.paramNameToVal(dimName) /
+                 wkslices_in_dim.at(kv2.first).size();
+
+             // Fill dimToStartCordinate

@@ -1,0 +1,370 @@
+[
+  {
+    "generated_endpoints": [
+      {
+        "addresses": [
+          147456
+        ],
+        "layout_order": [
+          "out",
+          "in",
+          "x"
+        ],
+        "layout_sizes": {
+          "in": 128,
+          "out": 4096,
+          "x": 4
+        },
+        "name": "Tensor0-LxRelayout-inp",
+        "out_layout_extent": 4096,
+        "piece_count": 32,
+        "piece_out_sizes": [
+          0
+        ],
+        "piece_out_starts": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "row_stride_bytes": 8192
+      },
+      {
+        "addresses": [
+          278528
+        ],
+        "layout_order": [
+          "out",
+          "in",
+          "x"
+        ],
+        "layout_sizes": {
+          "in": 128,
+          "out": 4096,
+          "x": 4
+        },
+        "name": "Tensor0-LxRelayout-out",
+        "out_layout_extent": 4096,
+        "piece_count": 32,
+        "piece_out_sizes": [
+          -1
+        ],
+        "piece_out_starts": [
+          0
+        ],
+        "row_stride_bytes": 8192
+      }
+    ],
+    "generated_path": "artifacts/explicit_shuffle_contract_20260715/exact_backend/raw/v6-honest-a-shuffle-only/fixture/debug/0_shuffle-Relayout0/0_shuffle-Relayout0.out.out.out.json",
+    "generated_transfer_state": {
+      "dt_count": 0,
+      "l3lu_key_count": 0,
+      "l3su_key_count": 0,
+      "lx_key_count": 0,
+      "pcfg_node_count": 32,
+      "pcfg_type_counts": {
+        "nop": 32
+      }
+    },
+    "normalized_generated_descriptor_sha256": "437b38b65e073227010e8e0207195945d0ffe48337cc99b76a1fab3eacd466c4",
+    "return_code": 0,
+    "run": "v6-honest-a-shuffle-only",
+    "source_endpoints": [
+      {
+        "address": 147456,
+        "core_mapping_sample": {
+          "0": {
+            "in": 0,
+            "out": 0,
+            "x": 0
+          },
+          "1": {
+            "in": 0,
+            "out": 0,
+            "x": 1
+          },
+          "2": {
+            "in": 0,
+            "out": 0,
+            "x": 2
+          },
+          "3": {
+            "in": 0,
+            "out": 0,
+            "x": 3
+          },
+          "4": {
+            "in": 0,
+            "out": 1,
+            "x": 0
+          },
+          "5": {
+            "in": 0,
+            "out": 1,
+            "x": 1
+          },
+          "6": {
+            "in": 0,
+            "out": 1,
+            "x": 2
+          },
+          "7": {
+            "in": 0,
+            "out": 1,
+            "x": 3
+          }
+        },
+        "layout_order": [
+          "out",
+          "in",
+          "x"
+        ],
+        "name": "allocate-Tensor0_lx",
+        "out_core_fold": 512,
+        "row_stride_bytes": 1024
+      },
+      {
+        "address": 278528,
+        "core_mapping_sample": {
+          "0": {
+            "in": 0,
+            "out": 0,
+            "x": 0
+          },
+          "1": {
+            "in": 0,
+            "out": 0,
+            "x": 1
+          },
+          "2": {
+            "in": 0,
+            "out": 0,
+            "x": 2
+          },
+          "3": {
+            "in": 0,
+            "out": 0,
+            "x": 3
+          },
+          "4": {
+            "in": 0,
+            "out": 0,
+            "x": 0
+          },
+          "5": {
+            "in": 0,
+            "out": 0,
+            "x": 1
+          },
+          "6": {
+            "in": 0,
+            "out": 0,
+            "x": 2
+          },
+          "7": {
+            "in": 0,
+            "out": 0,
+            "x": 3
+          }
+        },
+        "layout_order": [
+          "out",
+          "in",
+          "x"
+        ],
+        "name": "allocate-Tensor1_lx",
+        "out_core_fold": 4096,
+        "row_stride_bytes": 8192
+      }
+    ],
+    "source_path": "artifacts/explicit_shuffle_contract_20260715/exact_backend/raw/v6-honest-a-shuffle-only/fixture/sdsc_0.json"
+  },
+  {
+    "generated_endpoints": [
+      {
+        "addresses": [
+          147456
+        ],
+        "layout_order": [
+          "out",
+          "in",
+          "x"
+        ],
+        "layout_sizes": {
+          "in": 128,
+          "out": 4096,
+          "x": 4
+        },
+        "name": "Tensor0-LxRelayout-inp",
+        "out_layout_extent": 4096,
+        "piece_count": 32,
+        "piece_out_sizes": [
+          0
+        ],
+        "piece_out_starts": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7
+        ],
+        "row_stride_bytes": 8192
+      },
+      {
+        "addresses": [
+          278528
+        ],
+        "layout_order": [
+          "out",
+          "in",
+          "x"
+        ],
+        "layout_sizes": {
+          "in": 128,
+          "out": 4096,
+          "x": 4
+        },
+        "name": "Tensor0-LxRelayout-out",
+        "out_layout_extent": 4096,
+        "piece_count": 32,
+        "piece_out_sizes": [
+          -1
+        ],
+        "piece_out_starts": [
+          0
+        ],
+        "row_stride_bytes": 8192
+      }
+    ],
+    "generated_path": "artifacts/explicit_shuffle_contract_20260715/exact_backend/raw/v6-full-stride/fixture/debug/0_shuffle_full_stride_diagnostic-Relayout0/0_shuffle_full_stride_diagnostic-Relayout0.out.out.out.json",
+    "generated_transfer_state": {
+      "dt_count": 0,
+      "l3lu_key_count": 0,
+      "l3su_key_count": 0,
+      "lx_key_count": 0,
+      "pcfg_node_count": 32,
+      "pcfg_type_counts": {
+        "nop": 32
+      }
+    },
+    "normalized_generated_descriptor_sha256": "437b38b65e073227010e8e0207195945d0ffe48337cc99b76a1fab3eacd466c4",
+    "return_code": 0,
+    "run": "v6-full-stride",
+    "source_endpoints": [
+      {
+        "address": 147456,
+        "core_mapping_sample": {
+          "0": {
+            "in": 0,
+            "out": 0,
+            "x": 0
+          },
+          "1": {
+            "in": 0,
+            "out": 0,
+            "x": 1
+          },
+          "2": {
+            "in": 0,
+            "out": 0,
+            "x": 2
+          },
+          "3": {
+            "in": 0,
+            "out": 0,
+            "x": 3
+          },
+          "4": {
+            "in": 0,
+            "out": 1,
+            "x": 0
+          },
+          "5": {
+            "in": 0,
+            "out": 1,
+            "x": 1
+          },
+          "6": {
+            "in": 0,
+            "out": 1,
+            "x": 2
+          },
+          "7": {
+            "in": 0,
+            "out": 1,
+            "x": 3
+          }
+        },
+        "layout_order": [
+          "out",
+          "in",
+          "x"
+        ],
+        "name": "allocate-Tensor0_lx",
+        "out_core_fold": 4096,
+        "row_stride_bytes": 8192
+      },
+      {
+        "address": 278528,
+        "core_mapping_sample": {
+          "0": {
+            "in": 0,
+            "out": 0,
+            "x": 0
+          },
+          "1": {
+            "in": 0,
+            "out": 0,
+            "x": 1
+          },
+          "2": {
+            "in": 0,
+            "out": 0,
+            "x": 2
+          },
+          "3": {
+            "in": 0,
+            "out": 0,
+            "x": 3
+          },
+          "4": {
+            "in": 0,
+            "out": 0,
+            "x": 0
+          },
+          "5": {
+            "in": 0,
+            "out": 0,
+            "x": 1
+          },
+          "6": {
+            "in": 0,
+            "out": 0,
+            "x": 2
+          },
+          "7": {
+            "in": 0,
+            "out": 0,
+            "x": 3
+          }
+        },
+        "layout_order": [
+          "out",
+          "in",
+          "x"
+        ],
+        "name": "allocate-Tensor1_lx",
+        "out_core_fold": 4096,
+        "row_stride_bytes": 8192
+      }
+    ],
+    "source_path": "artifacts/explicit_shuffle_contract_20260715/exact_backend/raw/v6-full-stride/fixture/sdsc_0.json"
+  }
+]

@@ -1,0 +1,59 @@
+{
+  "groups": [
+    [
+      0,
+      4,
+      8,
+      12,
+      16,
+      20,
+      24,
+      28
+    ],
+    [
+      1,
+      5,
+      9,
+      13,
+      17,
+      21,
+      25,
+      29
+    ],
+    [
+      2,
+      6,
+      10,
+      14,
+      18,
+      22,
+      26,
+      30
+    ],
+    [
+      3,
+      7,
+      11,
+      15,
+      19,
+      23,
+      27,
+      31
+    ]
+  ],
+  "logical_transfer_count": 256,
+  "remote_ring_transfer_count": 224,
+  "local_copy_count": 32,
+  "bytes_per_transfer": 131072,
+  "logical_bytes": 33554432,
+  "remote_ring_bytes": 29360128,
+  "local_copy_bytes": 4194304,
+  "sticks_per_row": 8,
+  "physical_stick_copy_count": 262144,
+  "remote_ring_stick_copy_count": 229376,
+  "local_stick_copy_count": 32768,
+  "source_row_stride_bytes": 1024,
+  "destination_row_stride_bytes": 8192,
+  "critical_backend_check": "Each source row is compact (1024-byte stride), while each destination row is embedded in the complete K tensor (8192-byte stride).",
+  "descriptor_note": "A backend may represent one 128-KiB shard replication as one strided descriptor or as 1024 individual 128-byte stick copies. Logical shard count alone does not prove correct addressing."
+}
