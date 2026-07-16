@@ -1,0 +1,10 @@
+pod=adnan-cdx-spyre-dev-pf
+namespace=a6-quantization
+repo=/home/adnan-cdx/codex-isolated/explicit-shuffle-contract-20260715-fix/deeptools
+branch=spike/explicit-shuffle-endpoint-layout
+base_sha=704c19f8fb7f0cc972f20404f9dd0010895a35e2
+binary=/home/adnan-cdx/codex-isolated/explicit-shuffle-contract-20260715-fix/build/dxp/dxp_standalone
+binary_sha256=120e7564b5b74defbdcde9b08f62a65e710fed11a0d783e8eeddb8ee76eeea34
+fixture_sha256=89fbba9f699fc2fdae6b189a04464990ce85f560fa49c8db19a97a8e7b5bec51
+replay_rc=0
+verification_status=pass

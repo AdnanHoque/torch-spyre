@@ -125,7 +125,7 @@ python3 build_expected_transfer_plan.py \
   --output generated_v2
 ```
 
-## Current Coordinate-Only Result
+## Stock And Patched Backend Result
 
 On the clean SHUFFLE-capable Deeptools base `704c19f8fb`, both the preferred
 redundant-coordinate fixture and the explicit meta-dimension fixture fail with:
@@ -141,6 +141,25 @@ the expected 256 shard-level placements (224 remote and 32 local). Therefore,
 the ring carrier can represent the traffic, while current coordinate-only
 SHUFFLE materialization cannot yet realize the expanding replicated output.
 
+An isolated 141-line patch to `dxp/SdscRelayoutInsertion.cpp` closes that
+structural backend gap for Variant A. With the same redundant-coordinate
+contract, the patched backend:
+
+- lowers through DXP, DCG, and DCC;
+- emits eight bounded `STCDPOpLx` rows;
+- realizes all 256 placements, including 224 remote and 32 local placements;
+- preserves the compact 1024-byte S1 row stride and expanded 8192-byte S2 row
+  stride; and
+- uses the explicit LX endpoints without HBM, dynamic LX allocation, or
+  `ReStickifyOpLx`.
+
+The proof and exact patch are under `variant_a_exact_backend/`. This establishes
+that coordinates plus explicit S1/S2 storage are structurally sufficient for
+this affine grouped all-gather. It does not establish that the unmodified
+backend supports the contract, nor does the diagnostic `S2=0x44000` fixture
+prove full-workload allocation safety. Patterned AIU correctness and performance
+remain separate gates.
+
 This is a statement about current compiler behavior, not a proof that the
 coordinate representation is mathematically incapable of describing the
 distribution. See `COORDINATE_ONLY_STATUS.md` for the precise distinction.
@@ -149,7 +168,7 @@ distribution. See `COORDINATE_ONLY_STATUS.md` for the precise distinction.
 
 | Pod | Track | Status |
 |---|---|---|
-| `adnan-cdx-spyre-dev-pf` | Variant A exact-backend materialization | in progress |
+| `adnan-cdx-spyre-dev-pf` | Variant A exact-backend materialization | structural DXP/DCG/DCC proof complete; AIU value/performance pending |
 | `adnan-clc-spyre-dev-pf` | Variant B meta-dimension encoding | coordinate-only scheduler rejection reproduced |
 | `adnan-spyre-dev-pf` | direct SHUFFLE versus staged layout patterned values | in progress |
 | `adnan-spyre-current-pf` | HBM/custom controls and workload allocation evidence | controls archived |

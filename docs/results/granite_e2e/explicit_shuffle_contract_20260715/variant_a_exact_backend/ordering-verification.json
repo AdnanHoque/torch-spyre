@@ -1,0 +1,33 @@
+{
+  "authoritative_shuffle_sha256": "89fbba9f699fc2fdae6b189a04464990ce85f560fa49c8db19a97a8e7b5bec51",
+  "bounded_rows_per_core": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "bundle_sequence": [
+    {
+      "filename": "sdsc_0.json",
+      "index": 0,
+      "operation": "ReStickifyOpHBM"
+    },
+    {
+      "filename": "sdsc_1.json",
+      "index": 1,
+      "operation": "shuffle"
+    },
+    {
+      "filename": "sdsc_2.json",
+      "index": 2,
+      "operation": "batchmatmul"
+    }
+  ],
+  "integration_shuffle_sha256": "89fbba9f699fc2fdae6b189a04464990ce85f560fa49c8db19a97a8e7b5bec51",
+  "ordering": "producer -> eight bounded SHUFFLE rows -> consumer batchmatmul",
+  "status": "pass"
+}

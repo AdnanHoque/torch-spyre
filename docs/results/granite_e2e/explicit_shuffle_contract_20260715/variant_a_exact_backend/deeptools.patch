@@ -1,0 +1,174 @@
+diff --git a/dxp/SdscRelayoutInsertion.cpp b/dxp/SdscRelayoutInsertion.cpp
+index 84d189c3fc..9cbda0b3af 100644
+--- a/dxp/SdscRelayoutInsertion.cpp
++++ b/dxp/SdscRelayoutInsertion.cpp
+@@ -153,6 +153,57 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+ #ifdef DEBUG_RELAYOUT
+       std::cout << "Lx space found, inserting stcdpLx" << std::endl;
+ #endif
++      // A direct SHUFFLE can expand one compact source shard into a window of
++      // a larger, explicitly allocated destination.  One monolithic STCDP
++      // cannot represent the different endpoint row extents, so identify the
++      // single expanded dimension and lower one bounded row per source shard.
++      bool use_bounded_direct_shuffle = false;
++      PrimaryDimTypes bounded_dim = PrimaryDimTypesCount;
++      int bounded_shards = 1;
++      int bounded_shard_size = 0;
++      if (isDirectOutCopyEligible &&
++          dldsc.computeOp_.front().opFuncName == OpFuncs::SHUFFLE) {
++        int expanded_dims = 0;
++        for (auto dim : relayout_tensor_dims) {
++          std::set<int> source_slices;
++          std::set<int> destination_slices;
++          for (const auto& core_to_slice : allocCoords.coreIdToWkSlice_) {
++            if (core_to_slice.second.count(dim))
++              source_slices.insert(core_to_slice.second.at(dim));
++          }
++          for (const auto& core_to_slice : sdsc->coreIdToWkSlice_) {
++            if (core_to_slice.second.count(dim))
++              destination_slices.insert(core_to_slice.second.at(dim));
++          }
++          if (source_slices.size() > 1 && destination_slices.size() == 1) {
++            expanded_dims++;
++            bounded_dim = dim;
++            bounded_shards = source_slices.size();
++            bool contiguous = *destination_slices.begin() == 0;
++            for (int shard = 0; shard < bounded_shards; shard++)
++              contiguous &= source_slices.count(shard) == 1;
++            auto dim_size = dldsc.N_.primaryDimToVal_st(dim);
++            contiguous &= dim_size % bounded_shards == 0;
++            if (contiguous) bounded_shard_size = dim_size / bounded_shards;
++          }
++        }
++
++        auto& outDs = dldsc.labeledDs_.back();
++        auto& outAllocNode = outDs.memOrg_.at(SenComponents::LX).allocateNode_;
++        auto& refDsInfo = dldsc.primaryDsInfo_.at(lds.dsType_);
++        use_bounded_direct_shuffle =
++            expanded_dims == 1 && bounded_shard_size > 0 &&
++            !pre_relayout_allocNode->layoutDimOrder_.empty() &&
++            !outAllocNode->layoutDimOrder_.empty() &&
++            pre_relayout_allocNode->layoutDimOrder_.front() == bounded_dim &&
++            outAllocNode->layoutDimOrder_.front() == bounded_dim &&
++            refDsInfo.stickDimOrder_.size() == 1 &&
++            refDsInfo.stickDimOrder_.front() == bounded_dim;
++      }
++
++      relayout_sdsc->dataOpdscs_.reserve(
++          use_bounded_direct_shuffle ? bounded_shards : 1);
++
+       // Step 3-lx: Lx space has been found for the post-relayout form, so
+       // relayout will be achieved through stcdpLx. Create a new datadsc for the
+       // relayout node
+@@ -296,7 +347,8 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+             std::string dimName = dldsc.primaryDimToString.at(kv2.first);
+             DT_CHECK(wkslices_in_dim.at(kv2.first).size() >= 1);
+             new_piece.dimToSize_[dimName] =
+-                sdsc->N_.paramNameToVal(dimName) /
++                (use_bounded_direct_shuffle ? dldsc.N_ : sdsc->N_)
++                    .paramNameToVal(dimName) /
+                 wkslices_in_dim.at(kv2.first).size();
+
+             // Fill dimToStartCordinate
+@@ -336,6 +388,80 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+         }
+       }
+
++      if (use_bounded_direct_shuffle) {
++        // Clone the descriptor before pruning it so every row retains the
++        // endpoint layout and explicit frontend-planned LX addresses.
++        for (int shard = 1; shard < bounded_shards; shard++) {
++          auto& row = relayout_sdsc->dataOpdscs_.emplace_back();
++          row.copyDataOpDsc(ddsc);
++        }
++
++        auto dim_name = dldsc.primaryDimToString.at(bounded_dim);
++        auto destination_dim_size = dldsc.N_.paramNameToVal(dim_name);
++        for (int shard = 0; shard < bounded_shards; shard++) {
++          auto& row = relayout_sdsc->dataOpdscs_.at(shard);
++          row.dscName_ = sdsc->name_ + "-LxRelayout-shard" +
++                         std::to_string(shard);
++          auto& row_inp = row.labeledDs_.at(0);
++          auto& row_out = row.labeledDs_.at(1);
++          auto shard_start = shard * bounded_shard_size;
++
++          // The source shard is physically compact even though its logical
++          // coordinate identifies a window in the full destination tensor.
++          row_inp.dimToLayoutSize_[dim_name] = bounded_shard_size;
++          row_inp.validGap_[dim_name] = {{bounded_shard_size, 0}};
++          row_inp.totElements /= bounded_shards;
++
++          for (auto piece = row_inp.pieces_.begin();
++               piece != row_inp.pieces_.end();) {
++            const auto& placement =
++                piece->second.placement.at(SenComponents::LX);
++            auto source_core = placement.getMemId().at(0);
++            auto source_shard =
++                allocCoords.coreIdToWkSlice_.at(source_core).at(bounded_dim);
++            if (source_shard != shard) {
++              piece = row_inp.pieces_.erase(piece);
++            } else {
++              piece->second.dimToStartCordinate[dim_name] = shard_start;
++              piece->second.dimToSize_[dim_name] = bounded_shard_size;
++              piece->second.validGap_[dim_name] = {
++                  {bounded_shard_size, 0}};
++              piece++;
++            }
++          }
++
++          const int64_t destination_byte_offset =
++              shard_start * row_out.wordLength;
++          for (auto& piece_entry : row_out.pieces_) {
++            auto& piece = piece_entry.second;
++            piece.dimToStartCordinate[dim_name] = shard_start;
++            piece.dimToSize_[dim_name] = destination_dim_size;
++            piece.validGap_[dim_name] = {
++                {bounded_shard_size,
++                 destination_dim_size - bounded_shard_size}};
++            auto& placement = piece.placement.at(SenComponents::LX);
++            auto destination_core = placement.getMemId().at(0);
++            auto destination_base = placement.getStartAddr({0}).at(0);
++            placement.updateStAddr(destination_base + destination_byte_offset,
++                                   0, {0});
++            row_out.coreIdTolxStartAddress_[destination_core] =
++                destination_base + destination_byte_offset;
++          }
++
++          DT_CHECK(!row_inp.pieces_.empty());
++          DT_CHECK(row_out.pieces_.size() ==
++                   sdsc->coreIdToWkSlice_.size());
++        }
++
++        for (auto coreid : cores_seen) {
++          auto& schedule = relayout_sdsc->coreIdToDscSchedule.at(coreid);
++          schedule.clear();
++          for (int shard = 0; shard < bounded_shards; shard++) {
++            schedule.emplace_back(shard, -1, 0, 1);
++          }
++        }
++      }
++
+       // Step 3c-lx: Modify the coreId_ to workslice map and addresses of the
+       // lds that required relayout in the orig sdsc to match with post-relayout
+       // form
+@@ -363,6 +489,20 @@ void Dxp::insertRelayoutSdsc(SuperDsc* sdsc, int ps,
+           }
+         }
+       }
++
++      if (use_bounded_direct_shuffle) {
++        // The explicit SHUFFLE is a movement marker.  Its bounded data rows
++        // fully materialize the output, so retain this bundle position as a
++        // data-only program rather than compiling a redundant compute row.
++        sdsc->dataOpdscs_.swap(relayout_sdsc->dataOpdscs_);
++        sdsc->coreIdToDscSchedule.swap(
++            relayout_sdsc->coreIdToDscSchedule);
++        sdsc->coreIdToDsc_.clear();
++        sdsc->dscs_.clear();
++        sdsc->opFuncsUsed_.clear();
++        delete relayout_sdsc;
++        return;
++      }
+     } else {
+ #ifdef DEBUG_RELAYOUT
+       std::cout << "Lx space not found, inserting stcdpHBM" << std::endl;
