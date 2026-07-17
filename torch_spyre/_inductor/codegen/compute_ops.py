@@ -164,13 +164,23 @@ def add_constant(kwargs, name, value) -> int:
     return index
 
 
+def _per_core_coord_size(sdsc_spec, tensor, dim) -> int:
+    if tensor.scales[dim] != 1:
+        return 1
+    splits = tensor.core_splits.get(dim, sdsc_spec.work_slices[dim])
+    return sdsc_spec.iteration_space[dim] // splits
+
+
 def gen_coord_info_value(
     size: int,
     nsplits: int,
     elems_per_stick: int,
     is_stick_dim: bool,
     is_stick_reduction: bool = False,
+    split_shuffle_corelets: bool = False,
 ):
+    corelet_splits = 2 if split_shuffle_corelets else 1
+    corelet_stride = size // corelet_splits if split_shuffle_corelets else 0
     return (
         {
             "spatial": 3,
@@ -187,7 +197,7 @@ def gen_coord_info_value(
                     },
                     {
                         "Affine": {
-                            "alpha_": 0,
+                            "alpha_": corelet_stride,
                             "beta_": 0,
                         }
                     },
@@ -210,7 +220,7 @@ def gen_coord_info_value(
                         "label_": "core_fold",
                     },
                     {
-                        "factor_": 1,
+                        "factor_": corelet_splits,
                         "label_": "corelet_fold",
                     },
                     {
@@ -240,7 +250,7 @@ def gen_coord_info_value(
                     },
                     {
                         "Affine": {
-                            "alpha_": 0,
+                            "alpha_": corelet_stride,
                             "beta_": 0,
                         }
                     },
@@ -269,7 +279,7 @@ def gen_coord_info_value(
                         "label_": "core_fold",
                     },
                     {
-                        "factor_": 1,
+                        "factor_": corelet_splits,
                         "label_": "corelet_fold",
                     },
                     {
@@ -947,11 +957,14 @@ def generate_sdsc(
                                     "coordinates_": {
                                         "coordInfo": {
                                             str(dim): gen_coord_info_value(
-                                                size=sdsc_spec.iteration_space[dim]
-                                                // sdsc_spec.work_slices[dim]
-                                                if (tensor.scales[dim] == 1)
-                                                else 1,
-                                                nsplits=sdsc_spec.work_slices[dim]
+                                                size=_per_core_coord_size(
+                                                    sdsc_spec, tensor, dim
+                                                ),
+                                                nsplits=(
+                                                    tensor.core_splits.get(
+                                                        dim, sdsc_spec.work_slices[dim]
+                                                    )
+                                                )
                                                 if (tensor.scales[dim] == 1)
                                                 else 1,
                                                 elems_per_stick=tensor.data_format.elems_per_stick(),
@@ -963,12 +976,25 @@ def generate_sdsc(
                                                 is_stick_reduction=(
                                                     tensor.scales[dim] == -2
                                                 ),
+                                                # SHUFFLE's unary DDL splits a
+                                                # two-stick SFP input across the
+                                                # two corelets.
+                                                split_shuffle_corelets=(
+                                                    sdsc_spec.opfunc == "shuffle"
+                                                    and str(dim) == "in"
+                                                    and _per_core_coord_size(
+                                                        sdsc_spec, tensor, dim
+                                                    )
+                                                    >= 2
+                                                    * tensor.data_format.elems_per_stick()
+                                                ),
                                             )
                                             for dim in sdsc_spec.layouts[tensor.layout][
                                                 "dim_order"
                                             ]
                                         },
-                                        "coreIdToWkSlice_": {},
+                                        "coreIdToWkSlice_": tensor.allocation_core_id_to_wk_slice
+                                        or {},
                                     },
                                 }
                                 for i, tensor in enumerate(sdsc_spec.args)

@@ -115,6 +115,7 @@ def calculate_liveness(graph: GraphLowering) -> dict[str, list[int]]:
 def mem_usage_by_buf(
     graph: GraphLowering | GraphView,
     cache: Optional[dict] = None,
+    planned_relayout_sources: Optional[set[str]] = None,
 ) -> dict:
     """
     Get a summary of memory usage of each operation.
@@ -123,7 +124,11 @@ def mem_usage_by_buf(
     NOTE:
     if a buf is not in core_div_mismatch => it has no users => graph output
     """
-    num_cores_per_op = get_ncores_for_buffers(graph, cache)
+    num_cores_per_op = get_ncores_for_buffers(
+        graph,
+        cache,
+        planned_relayout_sources=planned_relayout_sources,
+    )
     mem_usage: dict = {}
 
     for op in graph.operations:
@@ -308,6 +313,21 @@ def get_buffer_users(graph: GraphLowering | GraphView) -> dict[str, list[Operati
     return buf_users_read_and_write
 
 
+def _op_short_name(op: Any) -> str:
+    """Resolve an operation name, including fused operations."""
+
+    for fx_node in (getattr(op, "origin_node", None), *getattr(op, "origins", ())):
+        target = getattr(fx_node, "target", None)
+        name = (
+            getattr(target, "_opname", None)
+            or getattr(target, "__name__", None)
+            or getattr(target, "name", None)
+        )
+        if name is not None:
+            return str(name)
+    return "None"
+
+
 def _get_buffer_user_deps(
     graph: GraphLowering | GraphView,
 ) -> dict[str, list[tuple[Operation, MemoryDep]]]:
@@ -343,6 +363,7 @@ def get_ncores_for_buffers(
     graph: GraphLowering | GraphView,
     cache: Optional[dict] = None,
     reject_reasons_out: Optional[dict[str, str]] = None,
+    planned_relayout_sources: Optional[set[str]] = None,
 ) -> dict[str, int]:
     """
     Return a dictionary mapping buffer names to the number of cores
@@ -361,6 +382,7 @@ def get_ncores_for_buffers(
     result: dict[str, int] = {}
     using_multicore = config.sencores > 1
     buf_user_deps = _get_buffer_user_deps(graph)
+    planned_relayout_sources = planned_relayout_sources or set()
     for buf_name, users in buf_user_deps.items():
         # this dict includes graph input and output
         if using_multicore and len(users) > 1:
@@ -420,9 +442,14 @@ def get_ncores_for_buffers(
                     )
                     break
             if mismatch_reason is not None:
-                num_cores = -1
-                if reject_reasons_out is not None:
-                    reject_reasons_out[buf_name] = mismatch_reason
+                if buf_name in planned_relayout_sources and writer_cores is not None:
+                    # The allocator has accepted this mismatch as an explicit
+                    # relayout edge, so size the source from its writer view.
+                    num_cores = writer_cores
+                else:
+                    num_cores = -1
+                    if reject_reasons_out is not None:
+                        reject_reasons_out[buf_name] = mismatch_reason
             elif writer_cores is not None:
                 num_cores = writer_cores
             else:

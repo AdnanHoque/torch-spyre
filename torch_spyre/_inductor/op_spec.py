@@ -116,6 +116,11 @@ class TensorArg:
         device_coordinates: The sympy Exprs that describe how elements in the Tensor are accessed.
                 Free variables in device_coordinates refer to entries in the OpSpec's iteration_space.
         allocation: If present, the offset in scratchpad memory assigned to the Tensor.
+        allocation_core_id_to_device_slice: Optional physical ownership of an
+                LX allocation. Keys are device-dimension indices; SuperDSC
+                codegen maps them to SDSC dimensions using the tensor layout.
+        allocation_device_dim_splits: Optional allocation fold geometry keyed
+                by the same device-dimension indices.
     """
 
     is_input: bool
@@ -126,6 +131,8 @@ class TensorArg:
     allocation: Any
     per_tile_fixed: bool = False
     name: str | None = None
+    allocation_core_id_to_device_slice: dict[str, dict[str, int]] | None = None
+    allocation_device_dim_splits: dict[str, int] | None = None
 
 
 @dataclasses.dataclass
@@ -167,6 +174,11 @@ class OpSpec:
     symbolic_dim_bounds: dict[str, tuple[int, int]] = dataclasses.field(
         default_factory=dict
     )
+    # Explicit communication ops can repeat a logical work slice across more
+    # participating cores than the op's logical work split implies.
+    num_cores_override: int | None = None
+    dim_labels_override: list[str] | None = None
+    layout_labels_override: list[str] | None = None
     debug_handle: DebugHandle | None = None
 
 

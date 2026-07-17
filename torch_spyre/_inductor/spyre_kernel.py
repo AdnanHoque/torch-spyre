@@ -12,9 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, Self, Sequence, Tuple, Union
 from abc import ABC
+from dataclasses import dataclass, field, replace
+import logging
+import math
+from typing import Any, Callable, Self, Sequence, Tuple, Union
 
 import torch
 import sympy
@@ -35,7 +37,11 @@ from .constants import (
     SPYRE_FP32_OPS,
     BATCH_MATMUL_OP,
     BATCH_MATMUL_FP8_OP,
+    INPUT_DIM_LABELS,
     IDENTITY_OP,
+    LAYOUT_LABELS,
+    MATMUL_DIM_LABELS,
+    OUTPUT_DIM_LABELS,
     RESTICKIFY_OP,
     SEGMENT_OFFSETS,
     SHARED_WEIGHT_UNIT_BMM_INFO_KEY,
@@ -43,6 +49,7 @@ from .constants import (
 from . import config as _spyre_config
 from .errors import Unsupported
 from .ir import FixedTiledLayout
+from .lx_relayout import LX_RELAYOUT_ATTR, LXRelayoutPlan
 from .pass_utils import (
     concretize_expr,
     concretize_index,
@@ -62,9 +69,183 @@ from .op_spec import (
     UnimplementedOp as OpSpecUnimplementedOp,
 )
 from torch_spyre._inductor.provenance import build_debug_handle
-import logging
 
 logger = get_inductor_logger("spyre_kernel")
+
+
+def _current_node_lx_relayout_inputs(
+    current_node,
+) -> dict[str, LXRelayoutPlan]:
+    plans: dict[str, LXRelayoutPlan] = {}
+    pending = [current_node]
+    seen: set[int] = set()
+    while pending:
+        item = pending.pop()
+        if id(item) in seen:
+            continue
+        seen.add(id(item))
+        node = getattr(item, "node", None)
+        node_plans = getattr(node, LX_RELAYOUT_ATTR, None)
+        if isinstance(node_plans, dict):
+            for source_name, plan in node_plans.items():
+                if not isinstance(plan, LXRelayoutPlan):
+                    continue
+                previous = plans.get(source_name)
+                if previous is not None and previous != plan:
+                    raise Unsupported(
+                        f"conflicting LX relayout plans for {source_name}"
+                    )
+                plans[source_name] = plan
+        get_nodes = getattr(item, "get_nodes", None)
+        if callable(get_nodes):
+            pending.extend(child for child in get_nodes() if child is not item)
+    return plans
+
+
+def _materialize_explicit_lx_shuffle(
+    source_arg: TensorArg,
+    consumer_spec: OpSpec,
+    plan: LXRelayoutPlan,
+) -> tuple[OpSpec, TensorArg] | None:
+    """Build one standard bounded S1 -> SHUFFLE -> S2 operation."""
+    destination_address = plan.destination_lx_address
+    destination_name = plan.destination_name
+    producer_map = plan.source_core_id_to_device_slice
+    consumer_map = plan.destination_core_id_to_device_slice
+    participant_count = len(consumer_map)
+    if (
+        "lx" not in source_arg.allocation
+        or not isinstance(destination_address, int)
+        or not isinstance(producer_map, dict)
+        or participant_count <= 0
+    ):
+        return None
+
+    used_symbols = {
+        symbol
+        for coordinate in source_arg.device_coordinates
+        for symbol in coordinate.free_symbols
+    }
+    consumer_is_matmul = consumer_spec.op in (
+        BATCH_MATMUL_OP,
+        BATCH_MATMUL_FP8_OP,
+    )
+    consumer_symbols = list(consumer_spec.iteration_space)
+    consumer_labels = (
+        MATMUL_DIM_LABELS[-len(consumer_symbols) :]
+        if consumer_is_matmul
+        else INPUT_DIM_LABELS[: len(consumer_symbols) - 1] + OUTPUT_DIM_LABELS[:1]
+    )
+    symbol_to_label = dict(zip(consumer_symbols, consumer_labels))
+    shuffle_iteration_space = {
+        symbol: value
+        for symbol, value in consumer_spec.iteration_space.items()
+        if symbol in used_symbols
+    }
+    if not shuffle_iteration_space:
+        return None
+
+    def splits_by_symbol(
+        device_dim_splits: dict[str, int],
+    ) -> dict[sympy.Symbol, int] | None:
+        splits_by_symbol: dict[sympy.Symbol, int] = {}
+        for device_dim, split in device_dim_splits.items():
+            index = int(device_dim)
+            if index < 0 or index >= len(source_arg.device_coordinates):
+                return None
+            symbols = [
+                symbol
+                for symbol in source_arg.device_coordinates[index].free_symbols
+                if symbol in symbol_to_label
+            ]
+            if len(symbols) != 1:
+                if split == 1:
+                    continue
+                return None
+            symbol = symbols[0]
+            if symbol in splits_by_symbol and splits_by_symbol[symbol] != split:
+                return None
+            splits_by_symbol[symbol] = split
+        return splits_by_symbol
+
+    source_splits = splits_by_symbol(plan.source_device_dim_splits)
+    destination_splits = splits_by_symbol(plan.destination_device_dim_splits)
+    if source_splits is None or destination_splits is None:
+        return None
+
+    shuffle_iteration_space = {
+        symbol: (extent, destination_splits.get(symbol, 1))
+        for symbol, (extent, _) in shuffle_iteration_space.items()
+    }
+    logical_cores = math.prod(split for _, split in shuffle_iteration_space.values())
+    if logical_cores <= 0 or participant_count % logical_cores != 0:
+        return None
+
+    source = replace(
+        source_arg,
+        is_input=True,
+        name=plan.source_name,
+        allocation=dict(source_arg.allocation),
+        allocation_core_id_to_device_slice=producer_map,
+        allocation_device_dim_splits=dict(plan.source_device_dim_splits),
+    )
+    destination_input = replace(
+        source_arg,
+        is_input=True,
+        name=destination_name,
+        allocation={"lx": destination_address},
+        allocation_core_id_to_device_slice=None,
+        allocation_device_dim_splits=None,
+    )
+    destination_output = replace(
+        destination_input,
+        is_input=False,
+        allocation_core_id_to_device_slice=consumer_map,
+        allocation_device_dim_splits=dict(plan.destination_device_dim_splits),
+    )
+    shuffle = OpSpec(
+        op="shuffle",
+        is_reduction=False,
+        iteration_space=shuffle_iteration_space,
+        args=[source, destination_output],
+        op_info={},
+        symbolic_dim_bounds=dict(consumer_spec.symbolic_dim_bounds),
+        num_cores_override=participant_count,
+        dim_labels_override=[
+            symbol_to_label[symbol] for symbol in shuffle_iteration_space
+        ],
+        layout_labels_override=(
+            ["KERNEL", *LAYOUT_LABELS] if consumer_is_matmul else LAYOUT_LABELS
+        ),
+    )
+    return shuffle, destination_input
+
+
+def _materialize_lx_relayout_inputs(
+    current_node,
+    args: list[TensorArg],
+    tensor_args: Sequence[tuple[int, Any]],
+    consumer_spec: OpSpec,
+) -> list[OpSpec]:
+    """Materialize every planned consumer input before its compute row."""
+
+    plans = _current_node_lx_relayout_inputs(current_node)
+    prefix_specs: list[OpSpec] = []
+    for arg_index, tensor in tensor_args:
+        plan = plans.get(tensor.name)
+        if not isinstance(plan, LXRelayoutPlan):
+            continue
+        materialized = _materialize_explicit_lx_shuffle(
+            args[arg_index],
+            consumer_spec,
+            plan,
+        )
+        if materialized is None:
+            raise Unsupported(f"cannot materialize LX shuffle for {plan.source_name}")
+        shuffle_spec, destination_arg = materialized
+        prefix_specs.append(shuffle_spec)
+        args[arg_index] = destination_arg
+    return prefix_specs
 
 
 class RValue(ABC):
@@ -777,6 +958,7 @@ class SpyreKernel(Kernel[CSEVariable]):
         elif isinstance(value, PointwiseOp):
             # Pointwise compute ops
             args: list[TensorArg] = []
+            tensor_args: list[tuple[int, TensorAccess]] = []
             indirect_syms = _indirect_syms_used(value, self.indirect_vars)
             if indirect_syms:
                 args += [
@@ -791,16 +973,24 @@ class SpyreKernel(Kernel[CSEVariable]):
                 ]
             for input in value.arguments:
                 if isinstance(input, TensorAccess):
+                    tensor_args.append((len(args), input))
                     args.append(self.create_tensor_arg(True, input.name, input))
                 else:
                     raise Unsupported(f"unexpected argument {input} to {value.op}")
             args.append(self.create_tensor_arg(False, real_dst_name, dst))
             op_info.update(value.op_info)
-            self.op_specs.append(
-                self.create_op_spec(
-                    value.op, False, args, op_info, self.indirect_var_names()
+            consumer_spec = self.create_op_spec(
+                value.op, False, args, op_info, self.indirect_var_names()
+            )
+            self.op_specs.extend(
+                _materialize_lx_relayout_inputs(
+                    self.current_node,
+                    args,
+                    tensor_args,
+                    consumer_spec,
                 )
             )
+            self.op_specs.append(consumer_spec)
         elif isinstance(value, TensorAccess):
             # Reshapes, transposes, and other dataops.
             if self.indirect_vars:
@@ -891,7 +1081,16 @@ class SpyreKernel(Kernel[CSEVariable]):
                 self.create_tensor_arg(True, y.name, y),
                 self.create_tensor_arg(False, real_dst_name, dst),
             ]
-            self.op_specs.append(self.create_op_spec(value.op, True, args, op_info))
+            consumer_spec = self.create_op_spec(value.op, True, args, op_info)
+            self.op_specs.extend(
+                _materialize_lx_relayout_inputs(
+                    self.current_node,
+                    args,
+                    [(0, x), (1, y)],
+                    consumer_spec,
+                )
+            )
+            self.op_specs.append(consumer_spec)
         else:
             # All other reductions have exactly one input which is a tensor
             if (not len(value.arguments) == 1) or (
@@ -1091,6 +1290,16 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                 buf.writeline(
                     f"symbolic_dim_bounds={_serialize_value(op_spec.symbolic_dim_bounds)},"
                 )
+                if op_spec.num_cores_override is not None:
+                    buf.writeline(f"num_cores_override={op_spec.num_cores_override},")
+                if op_spec.dim_labels_override is not None:
+                    buf.writeline(
+                        f"dim_labels_override={op_spec.dim_labels_override!r},"
+                    )
+                if op_spec.layout_labels_override is not None:
+                    buf.writeline(
+                        f"layout_labels_override={op_spec.layout_labels_override!r},"
+                    )
                 if op_spec.debug_handle is not None:
                     # Source-to-kernel provenance must survive the OpSpec ->
                     # generated-source -> exec round-trip. DebugHandle/SourceLoc
@@ -1118,6 +1327,16 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                                 buf.writeline("per_tile_fixed=True,")
                             if arg.name is not None:
                                 buf.writeline(f"name={arg.name!r},")
+                            if arg.allocation_core_id_to_device_slice is not None:
+                                buf.writeline(
+                                    "allocation_core_id_to_device_slice="
+                                    f"{arg.allocation_core_id_to_device_slice!r},"
+                                )
+                            if arg.allocation_device_dim_splits is not None:
+                                buf.writeline(
+                                    "allocation_device_dim_splits="
+                                    f"{arg.allocation_device_dim_splits!r},"
+                                )
                         buf.writeline("),")
                 buf.writeline("]")
             buf.writeline("),")
