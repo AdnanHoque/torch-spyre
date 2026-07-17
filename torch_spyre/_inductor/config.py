@@ -34,6 +34,10 @@ allow_all_ops_in_lx_planning: bool = False
 # Torch forwards the configured value to DXP so their reservations cannot drift.
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
+# Opt-in extension to LX planning: materialize compatible producer and
+# consumer per-core views as an explicit S1 -> SHUFFLE -> S2 sequence in LX.
+lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
+
 sencores: int = int(os.getenv("SENCORES", "32"))
 
 # Symbolic-dim knobs consumed by compute_granularity in pass_utils.py.

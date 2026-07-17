@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, Self, Sequence, Tuple, Union
 from abc import ABC
+from dataclasses import dataclass, field
+import logging
+from typing import Any, Callable, Self, Sequence, Tuple, Union
 
 import torch
 import sympy
@@ -43,6 +44,7 @@ from .constants import (
 from . import config as _spyre_config
 from .errors import Unsupported
 from .ir import FixedTiledLayout
+from .lx_relayout_codegen import materialize_lx_relayout_inputs
 from .pass_utils import (
     concretize_expr,
     concretize_index,
@@ -62,7 +64,6 @@ from .op_spec import (
     UnimplementedOp as OpSpecUnimplementedOp,
 )
 from torch_spyre._inductor.provenance import build_debug_handle
-import logging
 
 logger = get_inductor_logger("spyre_kernel")
 
@@ -891,7 +892,16 @@ class SpyreKernel(Kernel[CSEVariable]):
                 self.create_tensor_arg(True, y.name, y),
                 self.create_tensor_arg(False, real_dst_name, dst),
             ]
-            self.op_specs.append(self.create_op_spec(value.op, True, args, op_info))
+            consumer_spec = self.create_op_spec(value.op, True, args, op_info)
+            self.op_specs.extend(
+                materialize_lx_relayout_inputs(
+                    self.current_node,
+                    args,
+                    (x, y),
+                    consumer_spec,
+                )
+            )
+            self.op_specs.append(consumer_spec)
         else:
             # All other reductions have exactly one input which is a tensor
             if (not len(value.arguments) == 1) or (
@@ -1091,6 +1101,16 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                 buf.writeline(
                     f"symbolic_dim_bounds={_serialize_value(op_spec.symbolic_dim_bounds)},"
                 )
+                if op_spec.num_cores_override is not None:
+                    buf.writeline(f"num_cores_override={op_spec.num_cores_override},")
+                if op_spec.dim_labels_override is not None:
+                    buf.writeline(
+                        f"dim_labels_override={op_spec.dim_labels_override!r},"
+                    )
+                if op_spec.layout_labels_override is not None:
+                    buf.writeline(
+                        f"layout_labels_override={op_spec.layout_labels_override!r},"
+                    )
                 if op_spec.debug_handle is not None:
                     # Source-to-kernel provenance must survive the OpSpec ->
                     # generated-source -> exec round-trip. DebugHandle/SourceLoc
@@ -1118,6 +1138,16 @@ def _codegen_op_spec_list(specs, buf: IndentedBuffer, sympy_str) -> None:
                                 buf.writeline("per_tile_fixed=True,")
                             if arg.name is not None:
                                 buf.writeline(f"name={arg.name!r},")
+                            if arg.allocation_core_id_to_axis_slice is not None:
+                                buf.writeline(
+                                    "allocation_core_id_to_axis_slice="
+                                    f"{arg.allocation_core_id_to_axis_slice!r},"
+                                )
+                            if arg.allocation_axis_splits is not None:
+                                buf.writeline(
+                                    "allocation_axis_splits="
+                                    f"{arg.allocation_axis_splits!r},"
+                                )
                         buf.writeline("),")
                 buf.writeline("]")
             buf.writeline("),")
@@ -1127,6 +1157,31 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
     # Both parameters must be provided together for gather kernels — indirect_sizes
     # decomposes symbols in align_tensors; indirect_access_subs replaces them with IndirectAccess.
     it_space = op_spec.iteration_space
+    original_axis_order = tuple(it_space)
+    allocation_axis_contracts: list[tuple[int, str, sympy.Symbol, sympy.Expr, int]] = []
+    for arg_index, arg in enumerate(op_spec.args):
+        core_map = arg.allocation_core_id_to_axis_slice
+        axis_splits = arg.allocation_axis_splits
+        if (core_map is None) != (axis_splits is None):
+            raise Unsupported("incomplete explicit allocation distribution")
+        if core_map is None or axis_splits is None:
+            continue
+        expected_axes = set(axis_splits)
+        if any(set(per_axis) != expected_axes for per_axis in core_map.values()):
+            raise Unsupported("inconsistent explicit allocation distribution")
+        for axis_name, allocation_split in axis_splits.items():
+            if int(allocation_split) <= 0:
+                raise Unsupported(
+                    f"explicit allocation axis {axis_name} has an invalid split"
+                )
+            matches = [symbol for symbol in it_space if str(symbol) == axis_name]
+            if len(matches) != 1:
+                raise Unsupported(f"explicit allocation axis {axis_name} is not unique")
+            symbol = matches[0]
+            extent, work_split = it_space[symbol]
+            allocation_axis_contracts.append(
+                (arg_index, axis_name, symbol, extent, int(work_split))
+            )
 
     new_op_space_splits, new_tensors = align_tensors(
         it_space,
@@ -1137,6 +1192,33 @@ def simplify_op_spec(op_spec, indirect_sizes=None, indirect_access_subs=None):
         indirect_sizes,
     )
     op_spec.iteration_space = new_op_space_splits
+
+    if (
+        op_spec.dim_labels_override is not None
+        and tuple(new_op_space_splits) != original_axis_order
+    ):
+        raise Unsupported("explicit dimension labels changed during alignment")
+
+    for (
+        _,
+        axis_name,
+        original_symbol,
+        original_extent,
+        original_split,
+    ) in allocation_axis_contracts:
+        matches = [symbol for symbol in new_op_space_splits if str(symbol) == axis_name]
+        if len(matches) != 1 or matches[0] != original_symbol:
+            raise Unsupported(
+                f"explicit allocation axis {axis_name} changed during alignment"
+            )
+        new_extent, new_split = new_op_space_splits[matches[0]]
+        if (
+            sympy.simplify(new_extent - original_extent) != 0
+            or int(new_split) != original_split
+        ):
+            raise Unsupported(
+                f"explicit allocation axis {axis_name} changed during alignment"
+            )
 
     for arg, t in zip(op_spec.args, new_tensors):
         arg.device_size = t["size"]

@@ -77,6 +77,8 @@ class SDSCArgs:
     is_index_tensor: bool = False
     related_value_tensor_idx: int = -1
     per_tile_fixed: bool = False
+    allocation_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
+    core_splits: dict[Symbol, int] = dataclasses.field(default_factory=dict)
 
     def __str__(self) -> str:
         scales = ", ".join(f"{k}={v}" for k, v in self.scales.items())
@@ -215,6 +217,80 @@ def _get_device_dim_order(
     return dim_order, stick_dim
 
 
+def _map_allocation_axis_distribution(
+    arg: TensorArg,
+    op_spec: OpSpec,
+    symbol_mapping: dict[Symbol, Symbol],
+    dim_order: list[Symbol],
+    scales: dict[Symbol, int],
+    iteration_space: dict[Symbol, int],
+    num_cores: int,
+) -> tuple[dict[str, dict[str, int]] | None, dict[Symbol, int]]:
+    """Resolve alignment-stable OpSpec-axis ownership to SDSC dimensions."""
+
+    core_map = arg.allocation_core_id_to_axis_slice
+    axis_splits = arg.allocation_axis_splits
+    if core_map is None and axis_splits is None:
+        return None, {}
+    if core_map is None or axis_splits is None:
+        raise ValueError("incomplete explicit allocation distribution")
+    if "lx" not in arg.allocation:
+        raise ValueError("explicit allocation distribution requires LX storage")
+
+    expected_cores = {str(core) for core in range(num_cores)}
+    expected_axes = set(axis_splits)
+    if not expected_axes or set(core_map) != expected_cores:
+        raise ValueError("explicit allocation distribution has invalid coverage")
+    if any(set(per_axis) != expected_axes for per_axis in core_map.values()):
+        raise ValueError("explicit allocation distribution has inconsistent axes")
+
+    symbols_by_name: dict[str, list[Symbol]] = {}
+    for symbol in op_spec.iteration_space:
+        symbols_by_name.setdefault(str(symbol), []).append(symbol)
+
+    axis_to_dim: dict[str, Symbol] = {}
+    core_splits: dict[Symbol, int] = {}
+    for axis_name, split_value in axis_splits.items():
+        matches = symbols_by_name.get(axis_name, [])
+        if len(matches) != 1:
+            raise ValueError(f"allocation axis {axis_name} is not unique")
+        dim = symbol_mapping[matches[0]]
+        split = int(split_value)
+        if (
+            split <= 0
+            or dim not in dim_order
+            or scales.get(dim) != 1
+            or int(iteration_space[dim]) % split != 0
+        ):
+            raise ValueError(f"invalid allocation split for axis {axis_name}")
+        axis_to_dim[axis_name] = dim
+        core_splits[dim] = split
+
+    layout_dim_labels = [str(dim) for dim in dim_order]
+    result: dict[str, dict[str, int]] = {}
+    occupied_slices: Counter[tuple[int, ...]] = Counter()
+    ordered_axes = tuple(sorted(expected_axes))
+    for core, per_axis in core_map.items():
+        per_dim = {dim: 0 for dim in layout_dim_labels}
+        slots: list[int] = []
+        for axis_name in ordered_axes:
+            slot = int(per_axis[axis_name])
+            split = int(axis_splits[axis_name])
+            if slot < 0 or slot >= split:
+                raise ValueError(f"invalid allocation slot for axis {axis_name}")
+            per_dim[str(axis_to_dim[axis_name])] = slot
+            slots.append(slot)
+        result[str(core)] = per_dim
+        occupied_slices[tuple(slots)] += 1
+
+    if (
+        len(occupied_slices) != math.prod(int(axis_splits[a]) for a in ordered_axes)
+        or len(set(occupied_slices.values())) != 1
+    ):
+        raise ValueError("explicit allocation distribution is not uniform")
+    return result, core_splits
+
+
 def _get_layout_label(
     layouts: dict,
     dim_order: list,
@@ -334,6 +410,7 @@ def _create_sdsc_tensors(
     iteration_space: dict,
     op_dim_order: list[Symbol],
     op_stick_dim: Symbol | None,
+    num_cores: int,
     mb_sym: Symbol | None = None,
 ) -> tuple[list[SDSCArgs], dict, Symbol | None]:
     dims = list(iteration_space.keys())
@@ -393,7 +470,6 @@ def _create_sdsc_tensors(
         stride_dim_order = [
             d for d in dim_order if d not in reduced_dims
         ] + reduced_dims
-
         for dim in dim_order:
             stride_idx = stride_dim_order.index(dim)
 
@@ -402,6 +478,8 @@ def _create_sdsc_tensors(
             ):
                 scales[dim] = 1
             elif dim in reduced_dims and op_spec.op != "layernormscale":
+                # ``-2`` is the reduced stick-axis sentinel. Like every scaled
+                # dimension, it cannot carry explicit allocation ownership.
                 scales[dim] = -2 if (stick_dim is None and dim is op_stick_dim) else -1
             elif dim in reduced_dims and op_spec.op == "layernormscale":
                 scales[dim] = -2 if (dim is stick_dim) else -1
@@ -449,8 +527,24 @@ def _create_sdsc_tensors(
             offsets[mb_sym] = 0
             max_dim_sizes[mb_sym] = -1
 
+        allocation_core_id_to_wk_slice, allocation_core_splits = (
+            _map_allocation_axis_distribution(
+                arg,
+                op_spec,
+                symbol_mapping,
+                dim_order,
+                scales,
+                iteration_space,
+                num_cores,
+            )
+        )
+
         effective_stick = op_stick_dim if stick_dim is None else stick_dim
-        layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
+        layout_labels = (
+            (MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS)
+            if op_spec.layout_labels_override is None
+            else op_spec.layout_labels_override
+        )
 
         if has_indirect_access:
             label = get_indirect_layout_label(
@@ -510,6 +604,8 @@ def _create_sdsc_tensors(
                 is_index_tensor=is_idx_tensor,
                 related_value_tensor_idx=related_val_idx,
                 per_tile_fixed=arg.per_tile_fixed,
+                allocation_core_id_to_wk_slice=allocation_core_id_to_wk_slice,
+                core_splits=allocation_core_splits,
             )
         )
 
@@ -656,7 +752,16 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     }
     has_indirect_access = bool(index_tensor_indices)
 
-    dim_labels = _get_op_dim_labels(ndim, is_matmul)
+    dim_labels = (
+        _get_op_dim_labels(ndim, is_matmul)
+        if op_spec.dim_labels_override is None
+        else op_spec.dim_labels_override
+    )
+    if op_spec.dim_labels_override is not None and len(dim_labels) != ndim:
+        raise ValueError(
+            "dim_labels_override must have one label per iteration-space "
+            f"dimension, got {len(dim_labels)} labels for rank {ndim}"
+        )
     symbol_mapping = {
         sym: Symbol(dim_labels[i]) for i, sym in enumerate(op_spec.iteration_space)
     }
@@ -687,7 +792,17 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         symbol_mapping[dim]: value[-1] if not has_indirect_access else 1
         for dim, value in op_spec.iteration_space.items()
     }
-    num_cores = math.prod(dim_splits.values())
+    logical_core_count = math.prod(dim_splits.values())
+    num_cores = (
+        logical_core_count
+        if op_spec.num_cores_override is None
+        else op_spec.num_cores_override
+    )
+    if num_cores < logical_core_count or num_cores % logical_core_count != 0:
+        raise ValueError(
+            "num_cores_override must be a positive multiple of the logical "
+            f"work split ({logical_core_count}), got {num_cores}"
+        )
 
     work_slices = {
         symbol_mapping[sym]: wk_slice if not has_indirect_access else 1
@@ -728,6 +843,7 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         sdsc_iteration_space,
         op_dim_order,
         op_stick_dim,
+        num_cores,
         mb_sym,
     )
     if missing_dim is not None:
