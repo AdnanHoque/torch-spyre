@@ -114,6 +114,19 @@ def get_op_hints(op: Operation) -> dict[int, dict[str, Any]]:
     return hints
 
 
+def get_gather_dim(op: Operation) -> sympy.Symbol | None:
+    """Resolve an op's named gather dimension to its loop symbol."""
+
+    loop_dims = getattr(op, "work_div_loop_info", {})
+    for _, hint in sorted(get_op_hints(op).items(), reverse=True):
+        name = hint.get("gather_dim")
+        if name is not None:
+            return next(
+                (sym for sym, names in loop_dims.items() if name in names), None
+            )
+    return None
+
+
 def log_new_nodes(node: torch.fx.Node):
     if (
         node.graph.owning_module is not None

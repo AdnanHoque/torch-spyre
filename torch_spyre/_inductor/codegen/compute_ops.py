@@ -221,6 +221,13 @@ def add_constant(kwargs, name, value) -> int:
     return index
 
 
+def _per_core_coord_size(sdsc_spec, tensor, dim) -> int:
+    if tensor.scales[dim] != 1:
+        return 1
+    splits = tensor.core_splits.get(dim, sdsc_spec.work_slices[dim])
+    return sdsc_spec.iteration_space[dim] // splits
+
+
 def gen_coord_info_value(
     size: int,
     nsplits: int,
@@ -1135,11 +1142,14 @@ def generate_sdsc(
                                     "coordinates_": {
                                         "coordInfo": {
                                             str(dim): gen_coord_info_value(
-                                                size=sdsc_spec.iteration_space[dim]
-                                                // sdsc_spec.work_slices[dim]
-                                                if (tensor.scales[dim] == 1)
-                                                else 1,
-                                                nsplits=sdsc_spec.work_slices[dim]
+                                                size=_per_core_coord_size(
+                                                    sdsc_spec, tensor, dim
+                                                ),
+                                                nsplits=(
+                                                    tensor.core_splits.get(
+                                                        dim, sdsc_spec.work_slices[dim]
+                                                    )
+                                                )
                                                 if (tensor.scales[dim] == 1)
                                                 else 1,
                                                 elems_per_stick=tensor.data_format.elems_per_stick(),
@@ -1156,7 +1166,8 @@ def generate_sdsc(
                                                 "dim_order"
                                             ]
                                         },
-                                        "coreIdToWkSlice_": {},
+                                        "coreIdToWkSlice_": tensor.allocation_core_id_to_wk_slice
+                                        or {},
                                     },
                                 }
                                 for i, tensor in enumerate(sdsc_spec.args)

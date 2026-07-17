@@ -610,14 +610,21 @@ def spyre__sdpa_overrideable(
                     tiles={"max_seqlen_kv": max(1, max_seqlen_kv // kv_block_size)}
                 ):
                     with spyre_hint(
-                        work_div={"num_heads": 4, "max_seqlen_q": 8, "max_seqlen_kv": 8}
+                        work_div={
+                            "num_heads": 4,
+                            "max_seqlen_q": 8,
+                            "max_seqlen_kv": 8,
+                        },
+                        gather_dim="max_seqlen_q",
                     ):
-                        scaled_keys = (
-                            key * scaling_factor
-                        )  # batch_size, num_heads, max_seqlen_kv, head_dim
-                        keys_T = scaled_keys.transpose(
-                            -1, -2
-                        )  # batch_size, num_heads, head_dim, max_seqlen_kv
+                        with spyre_hint(gather_dim="max_seqlen_kv"):
+                            scaled_keys = (
+                                key * scaling_factor
+                            )  # batch_size, num_heads, max_seqlen_kv, head_dim
+                            keys_T = scaled_keys.transpose(
+                                -1, -2
+                            )  # batch_size, num_heads, head_dim, max_seqlen_kv
+
                         scores = torch.matmul(
                             query * scaling_factor, keys_T
                         )  # batch_size, num_heads, max_seqlen_q, max_seqlen_kv

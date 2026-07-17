@@ -15,7 +15,9 @@
 import logging
 import math
 import time
-from collections.abc import Sequence
+from bisect import bisect_right
+from collections.abc import Iterator, Sequence
+from dataclasses import replace
 from typing import Any, Optional
 
 import sympy
@@ -70,6 +72,7 @@ from torch_spyre._inductor.scratchpad.utils import (
     calculate_liveness,
     get_buffer_users,
     ops_in_offset_mutation_component,
+    _op_short_name,
     get_op_pointwise_inputs,
     buffer_not_read_in_full,
     get_ncores_for_buffers,
@@ -81,6 +84,13 @@ from torch_spyre._inductor.scratchpad.graph_editor import GraphEditor
 
 from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
+from torch_spyre._inductor.lx_relayout import (
+    LXRelayoutPlan,
+    clear_lx_relayout_metadata,
+    collect_lx_relayout_plans,
+    is_lx_relayout_destination,
+    record_lx_relayout_plan,
+)
 from torch_spyre._inductor.pass_utils import _is_matmul_op
 
 logger = get_inductor_logger("scratchpad.allocator")
@@ -137,6 +147,8 @@ class ScratchpadAllocator:
         self.pre_optimization_passes = pre_optimization_passes
         self.post_optimization_passes = post_optimization_passes
         self.layout_planning: Optional[MemoryPlanSolver] = layout_planning
+        self._last_layout_planning: MemoryPlanSolver = layout_planning
+        self._lx_relayout_plans_by_source: dict[str, LXRelayoutPlan] = {}
 
     def plan_allocation(self, graph: GraphLowering):
         """Run pre-passes, assign LX addresses to eligible buffers, then run post-passes.
@@ -171,15 +183,113 @@ class ScratchpadAllocator:
 
     def _prepare_buffers(self, graph: GraphLowering) -> Sequence[Any]:
         """Buffers to hand the solver. Base: fixed-division LifetimeBoundBuffers."""
-        return self._generate_buffers(graph)
+        return self._prepare_lifetime_buffers(graph)
+
+    def _prepare_lifetime_buffers(
+        self,
+        graph: GraphLowering,
+        cache: Optional[dict] = None,
+        timings: Optional[dict[str, float]] = None,
+        lifetimes: Optional[dict[str, list[int]]] = None,
+    ) -> list[LifetimeBoundBuffer]:
+        """Build fixed-division buffers plus any valid relayout destinations."""
+        self._lx_relayout_plans_by_source = {
+            plan.source_name: plan for plan in collect_lx_relayout_plans(graph, cache)
+        }
+        buffers = self._generate_buffers(graph, cache, timings, lifetimes)
+        self._append_lx_relayout_destinations(graph, buffers)
+        return buffers
 
     def _solve(self, buffers: Sequence[Any]) -> Sequence[Any]:
         """Assign LX addresses. Base: placement-only ``plan_layout``."""
-        assert self.layout_planning is not None
-        return self.layout_planning.plan_layout(buffers, log_lx_usage=True)
+        layout_planning = self._layout_planner_for_buffers(buffers)
+        return self._plan_layout_with_atomic_relayouts(
+            layout_planning, buffers, log_lx_usage=True
+        )
 
     def _post_solve(self, graph: GraphLowering, allocation: Sequence[Any]) -> None:
-        """Hook run after the solve, before reasons/push. Base: nothing to commit."""
+        """Record only relayouts whose source and destination both landed in LX."""
+        self._record_successful_lx_relayouts(graph, allocation)
+
+    def _layout_planner_for_buffers(
+        self, buffers: Sequence[LifetimeBoundBuffer]
+    ) -> MemoryPlanSolver:
+        assert self.layout_planning is not None
+        if isinstance(self.layout_planning, GreedyLayoutSolver) and any(
+            is_lx_relayout_destination(buffer.name) for buffer in buffers
+        ):
+            # Greedy cannot repack earlier allocations when the larger S2 view
+            # becomes live. Use a whole-lifetime solver only when S2 exists.
+            return FirstFitLayoutSolver(
+                self.layout_planning.limit, self.layout_planning.alignment
+            )
+        return self.layout_planning
+
+    def _plan_layout_with_atomic_relayouts(
+        self,
+        layout_planning: MemoryPlanSolver,
+        buffers: Sequence[LifetimeBoundBuffer],
+        *,
+        log_lx_usage: bool = False,
+    ) -> list[LifetimeBoundBuffer]:
+        """Place complete S1/S2 pairs or fall back without reserving either."""
+        allocation = layout_planning.plan_layout(buffers, log_lx_usage=log_lx_usage)
+        self._last_layout_planning = layout_planning
+        if not self._lx_relayout_plans_by_source:
+            return allocation
+
+        complete_relayouts = list(self._iter_complete_lx_relayouts(allocation))
+        if len(complete_relayouts) == len(self._lx_relayout_plans_by_source):
+            return allocation
+
+        # Replanning can move every buffer, so fall back every relayout pair
+        # atomically rather than retaining a partially allocated pair.
+        removed_names = set(self._lx_relayout_plans_by_source)
+        removed_names.update(
+            plan.destination_name for plan in self._lx_relayout_plans_by_source.values()
+        )
+        remaining = [buffer for buffer in buffers if buffer.name not in removed_names]
+        for buffer in remaining:
+            buffer.address = None
+            buffer.in_place_parents = [
+                parent
+                for parent in buffer.in_place_parents
+                if parent not in removed_names
+            ]
+
+        assert self.layout_planning is not None
+        replanned = self.layout_planning.plan_layout(
+            remaining, log_lx_usage=log_lx_usage
+        )
+        self._last_layout_planning = self.layout_planning
+        replanned_by_name = {buffer.name: buffer for buffer in replanned}
+        for buffer in allocation:
+            if buffer.name in removed_names:
+                buffer.address = None
+        return [replanned_by_name.get(buffer.name, buffer) for buffer in allocation]
+
+    def _iter_complete_lx_relayouts(
+        self, allocation: Sequence[LifetimeBoundBuffer]
+    ) -> Iterator[tuple[LXRelayoutPlan, int]]:
+        """Yield relayouts whose source and destination are allocated disjointly."""
+        by_name = {buffer.name: buffer for buffer in allocation}
+        for source_name, plan in self._lx_relayout_plans_by_source.items():
+            source = by_name.get(source_name)
+            destination = by_name.get(plan.destination_name)
+            if (
+                source is None
+                or source.address is None
+                or destination is None
+                or destination.address is None
+            ):
+                continue
+            source_address = source.address
+            destination_address = destination.address
+            if source_address < destination_address + destination.size and (
+                destination_address < source_address + source.size
+            ):
+                continue
+            yield plan, destination_address
 
     def _record_reject_reasons(self, allocation: Sequence[Any]) -> None:
         """Stamp ``reject_reasons`` for spilled buffers. Base: from the solver's
@@ -194,8 +304,7 @@ class ScratchpadAllocator:
         spilled without a reason there simply did not fit once the higher-value
         buffers were placed.
         """
-        assert self.layout_planning is not None
-        solver_reasons = self.layout_planning.spill_reasons
+        solver_reasons = self._last_layout_planning.spill_reasons
         for b in allocation:
             if b.address is None:
                 self.reject_reasons[b.name] = solver_reasons.get(
@@ -206,6 +315,19 @@ class ScratchpadAllocator:
 
     def _get_op_name(self, op: Any) -> str:
         return _op_short_name(op)
+
+    def _record_successful_lx_relayouts(
+        self,
+        graph: GraphLowering,
+        allocation: Sequence[LifetimeBoundBuffer],
+    ) -> None:
+        """Commit relayout metadata only after all required LX storage exists."""
+        clear_lx_relayout_metadata(graph)
+        for plan, destination_address in self._iter_complete_lx_relayouts(allocation):
+            record_lx_relayout_plan(
+                graph,
+                replace(plan, destination_lx_address=destination_address),
+            )
 
     def _op_output_good_for_lx_reuse(self, op: Any) -> bool:
         if not isinstance(op, ComputedBuffer):
@@ -586,9 +708,18 @@ class ScratchpadAllocator:
         t0 = time.perf_counter()
         if lifetimes is None:
             lifetimes = calculate_liveness(graph)
-        ncores, ncores_reasons = get_ncores_for_buffers(graph)
+        planned_sources = set(self._lx_relayout_plans_by_source)
+        ncores, ncores_reasons = get_ncores_for_buffers(
+            graph,
+            cache,
+            planned_relayout_sources=planned_sources,
+        )
         t1 = time.perf_counter()
-        mem_usage = mem_usage_by_buf(graph, cache)
+        mem_usage = mem_usage_by_buf(
+            graph,
+            cache,
+            planned_relayout_sources=planned_sources,
+        )
         t2 = time.perf_counter()
         if timings is not None:
             timings["residency"] += t1 - t0
@@ -614,6 +745,110 @@ class ScratchpadAllocator:
             ncores=ncores,
             ncores_reasons=ncores_reasons,
         )
+
+    def _append_lx_relayout_destinations(
+        self,
+        graph: GraphLowering,
+        buffers: list[LifetimeBoundBuffer],
+    ) -> None:
+        """Add post-shuffle views and their transfer steps to LX liveness."""
+        by_name = {buffer.name: buffer for buffer in buffers}
+        op_index = {op.get_name(): index for index, op in enumerate(graph.operations)}
+        entries: list[tuple[LifetimeBoundBuffer, LXRelayoutPlan, int]] = []
+        invalid_sources: set[str] = set()
+        for source_name, plan in self._lx_relayout_plans_by_source.items():
+            source = by_name.get(source_name)
+            consumer_use = op_index.get(plan.consumer_name)
+            if source is None or source.residency_reason is not None:
+                invalid_sources.add(source_name)
+                continue
+            if (
+                consumer_use is None
+                or consumer_use not in source.uses
+                or not any(use < consumer_use for use in source.uses)
+            ):
+                source.residency_reason = (
+                    "core div mismatch: relayout transfer could not be scheduled"
+                )
+                invalid_sources.add(source_name)
+                continue
+            entries.append((source, plan, consumer_use))
+
+        if invalid_sources:
+            # Keep every declarative buffer and its residency reason. Only drop
+            # the synthetic relayout plan when its source cannot be placed or
+            # its transfer lifetime cannot be modeled.
+            for source_name in invalid_sources:
+                self._lx_relayout_plans_by_source.pop(source_name, None)
+
+        if not entries:
+            return
+
+        # Insert one synthetic lifetime step immediately before each consumer
+        # that needs a SHUFFLE. Existing solvers then see S1 and S2 live together
+        # during the transfer and keep their addresses disjoint without any
+        # relayout-specific placement rules.
+        boundaries = sorted({consumer_use for _, _, consumer_use in entries})
+        transfer_time = {
+            consumer_use: consumer_use + rank
+            for rank, consumer_use in enumerate(boundaries)
+        }
+        for buffer in buffers:
+            buffer.uses = [use + bisect_right(boundaries, use) for use in buffer.uses]
+
+        for source, plan, original_consumer_use in entries:
+            consumer_use = original_consumer_use + bisect_right(
+                boundaries, original_consumer_use
+            )
+            shuffle_use = transfer_time[original_consumer_use]
+
+            # The backend may execute the final producer data movement and the
+            # inserted SHUFFLE in one bundle. Keep any LX-resident producer
+            # inputs live through the transfer boundary so S2 cannot reuse
+            # their storage before S1 is fully materialized.
+            producer = graph.try_get_buffer(source.name)
+            if producer is not None:
+                for dep in op_read_writes(producer).reads:
+                    producer_input = by_name.get(dep.name)
+                    if producer_input is not None:
+                        producer_input.uses = sorted(
+                            {*producer_input.uses, shuffle_use}
+                        )
+
+            # The original graph models the consumer as reading S1 directly,
+            # so S1's liveness extends through the consumer compute. The
+            # materialized schedule is instead:
+            #
+            #     produce S1 -> SHUFFLE S1 into S2 -> compute from S2
+            #
+            # Both views are accessed at the synthetic SHUFFLE step. S1 can be
+            # released before consumer compute while S2 remains live through it.
+            source_uses = [use for use in source.uses if use != consumer_use]
+            source.uses = sorted({*source_uses, shuffle_use})
+            destination_size = round_up_to_alignment(
+                source.size * plan.destination_size_ratio,
+                _LX_ALLOCATION_GRANULARITY_BYTES,
+            )
+            destination = LifetimeBoundBuffer(
+                plan.destination_name,
+                destination_size,
+                [shuffle_use, consumer_use],
+                first_use_is_read=False,
+            )
+            for child in buffers:
+                if source.name in child.in_place_parents:
+                    # This relation was validated against S1's layout and size;
+                    # it is not valid for the materialized S2 view. Normal
+                    # liveness can still reuse S1 after the SHUFFLE boundary.
+                    child.in_place_parents = [
+                        parent
+                        for parent in child.in_place_parents
+                        if parent != source.name
+                    ]
+            # Keep the synthetic destination adjacent to its source for readable
+            # plans. Placement order does not affect correctness because their
+            # lifetimes overlap at ``shuffle_use``.
+            buffers.insert(buffers.index(source), destination)
 
     def _log_lx_pinning(self, graph: GraphLowering) -> None:
         """Log the final LX pinning decision for every op in the graph."""
@@ -652,7 +887,7 @@ class ScratchpadAllocator:
         graph_editor = GraphEditor(graph)
 
         for b in buffers:
-            if b.address is None:
+            if b.address is None or is_lx_relayout_destination(b.name):
                 continue
 
             buf = graph.get_buffer(b.name)
@@ -703,30 +938,6 @@ def _fixed_core_division(op: Operation) -> CoreDivision:
     """
     seed: tuple[dict, dict] = getattr(op, "op_it_space_splits", None) or ({}, {})
     return CoreDivision(output_splits=dict(seed[0]), reduction_splits=dict(seed[1]))
-
-
-def _op_short_name(op: Any) -> str:
-    """Resolve an op's short name from its ``origin_node`` target, falling back
-    to each fused fx node in ``op.origins``; ``"None"`` when unresolvable.
-
-    ``origin_node`` is tried first (independent of ``origins``, which may be
-    empty), so a plain op still resolves; the ``origins`` fallback recovers a
-    fused op like bmm+permute, whose ``origin_node`` target has no resolvable
-    name and would otherwise resolve to ``"None"`` and be wrongly rejected as
-    "op not allowed". Module-level so ``ScratchpadAllocator._get_op_name``
-    delegates to one implementation.
-    """
-    name = None
-    for fx_node in (getattr(op, "origin_node", None), *getattr(op, "origins", ())):
-        target = getattr(fx_node, "target", None)
-        name = (
-            getattr(target, "_opname", None)
-            or getattr(target, "__name__", None)
-            or getattr(target, "name", None)
-        )
-        if name is not None:
-            break
-    return name if name is not None else "None"
 
 
 DEFAULT_VARIANT_CAP = 6
@@ -1181,14 +1392,14 @@ class StrategyBCoOptimizingAllocator(ScratchpadAllocator):
         # the clone (changes the (op, splits, dep) cache key), so on any op-count
         # change both are stale and we rebuild from scratch (cache=lifetimes=None).
         clone_inserted = len(graph.operations) != n_ops_before_clone
-        buffers = self._generate_buffers(
+        buffers = self._prepare_lifetime_buffers(
             graph,
             cache=None if clone_inserted else search_cache,
             lifetimes=None if clone_inserted else search_lifetimes,
         )
-        assert self.layout_planning is not None
-        allocation = self.layout_planning.plan_layout(buffers, log_lx_usage=True)
-        self._record_spill_reasons(allocation)
+        allocation = self._solve(buffers)
+        self._post_solve(graph, allocation)
+        self._record_reject_reasons(allocation)
         self._push_allocation(graph, allocation)
         self._log_lx_pinning(graph)
         for p in self.post_optimization_passes:
@@ -1297,9 +1508,9 @@ class StrategyBCoOptimizingAllocator(ScratchpadAllocator):
         `residency` / `mem_usage` sub-step seconds into it. `lifetimes`
         (split-invariant) is forwarded to avoid recomputing it per leaf.
         """
-        buffers = self._generate_buffers(graph, cache, timings, lifetimes)
-        assert self.layout_planning is not None
-        allocation = self.layout_planning.plan_layout(buffers)
+        buffers = self._prepare_lifetime_buffers(graph, cache, timings, lifetimes)
+        layout_planning = self._layout_planner_for_buffers(buffers)
+        allocation = self._plan_layout_with_atomic_relayouts(layout_planning, buffers)
         pinned_names = {b.name for b in allocation if b.address is not None}
 
         return sum(
@@ -1336,6 +1547,15 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         self.layout_planning: Optional[CoreDivisionLayoutSolver] = layout_planning
 
     def _prepare_buffers(self, graph: GraphLowering) -> Sequence[Any]:
+        if config.lx_planner_relayout:
+            relayout_buffers = self._prepare_lifetime_buffers(graph)
+            if self._lx_relayout_plans_by_source:
+                # Relayout geometry is derived from the committed divisions, so
+                # keep those divisions fixed for this placement-only solve.
+                return relayout_buffers
+        else:
+            self._lx_relayout_plans_by_source = {}
+
         in_place = self._determine_in_place_division_invariant(graph)
         buffers = self._build_cd_bound_buffers(
             graph, in_place, self._division_map(graph)
@@ -1343,16 +1563,26 @@ class CoOptimizingAllocator(ScratchpadAllocator):
         return buffers
 
     def _solve(self, buffers: Sequence[Any]) -> Sequence[Any]:
+        if self._lx_relayout_plans_by_source:
+            return super()._solve(buffers)
         assert self.layout_planning is not None
         return self.layout_planning.plan_layout_and_core_divisions(buffers)
 
     def _post_solve(self, graph: GraphLowering, allocation: Sequence[Any]) -> None:
+        if self._lx_relayout_plans_by_source:
+            super()._post_solve(graph, allocation)
+            return
+
+        clear_lx_relayout_metadata(graph)
         # The divisions must be committed such that any buffer clones can correctly
         # pull the selected core division from the dependent buffers when the graph
         # is updated with clones in ``_push_allocation``.
         self._commit_divisions(graph, allocation)
 
     def _record_reject_reasons(self, allocation: Sequence[Any]) -> None:
+        if self._lx_relayout_plans_by_source:
+            super()._record_reject_reasons(allocation)
+            return
         # Surface the solver's per-buffer spill causes so the LX-pinning debug
         # log reports why each buffer landed in HBM, on par with the other
         # allocators. ``getattr`` because only ``CpSatLayoutSolver`` exposes it.
@@ -1923,13 +2153,13 @@ def select_allocator() -> ScratchpadAllocator:
     the allocators themselves take an explicit solver and never inspect config:
 
     * ``layout_solver == "cpsat"`` with ``co_optimizing_lx_planning`` -> joint
-      core-division + LX placement via :class:`CoOptimizingAllocator`. Falls back
-      to placement-only greedy :class:`ScratchpadAllocator` when ortools is absent.
+      core-division + LX placement via :class:`CoOptimizingAllocator`. Graphs with
+      an actual relayout candidate use placement-only CP-SAT on their committed
+      divisions. Falls back to placement-only greedy when ortools is absent.
     * ``layout_solver == "cpsat"`` without co-optimization -> placement-only
       :class:`ScratchpadAllocator` driven by the CP-SAT solver, placing buffers on
-      each op's pre-determined core division (the buffers are converted to
-      trivial ``CoreDivisionBuffer``s). Falls back to greedy when ortools is
-      absent.
+      each op's pre-determined core division. Falls back to greedy when ortools
+      is absent.
     * ``co_optimizing_lx_planning`` (non-cpsat solver) -> gap-based
       co-optimization via :class:`StrategyBCoOptimizingAllocator`.
     * otherwise -> placement-only :class:`ScratchpadAllocator` with the configured

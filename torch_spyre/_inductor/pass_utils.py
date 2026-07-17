@@ -43,6 +43,7 @@ from .constants import ELIDED_COPY_BACK_ATTR, MATMUL_REDUCTION_OPS
 from .ir import FixedTiledLayout, SpyreConstantFallback
 from .logging_utils import get_inductor_logger
 from .loop_info import copy_op_metadata
+from .propagate_hints import get_gather_dim
 from .views import compute_coordinates, matching_dim
 
 # PyTorch's default lower bound for size symbols (sizes 0/1 are specialised).
@@ -1072,7 +1073,9 @@ def copy_fx_custom_meta(src: "torch.fx.Node", dst: "torch.fx.Node") -> None:
     so that custom metadata (including spyre hints) is not silently dropped.
     """
     if "custom" in src.meta:
-        dst.meta["custom"] = src.meta["custom"]
+        custom = dict(dst.meta.get("custom") or {})
+        custom.update(src.meta["custom"])
+        dst.meta["custom"] = custom
 
 
 def replace_computed_buffer_body(
@@ -1389,6 +1392,7 @@ class _ViewPrep(NamedTuple):
     num_stick: int
     num_stick_stride: int
     is_matmul: bool
+    gather_dim: "sympy.Symbol | None"
 
 
 def _prepare_per_core_view(
@@ -1455,6 +1459,7 @@ def _prepare_per_core_view(
         num_stick=num_stick,
         num_stick_stride=num_stick_stride,
         is_matmul=_is_matmul_op(op),
+        gather_dim=get_gather_dim(op),
     )
 
 
@@ -1580,11 +1585,16 @@ def _per_core_view_from_prep(
     num_cores = int(math.prod(per_sym.values()))
     iter_symbols = tuple(iter_space)
     dim_splits = tuple(int(per_sym[sym]) for sym in iter_symbols)
-    contiguous_dim = (
-        len(dim_splits) - 1
-        if prep.is_matmul and config.core_id_k_fast_emission
-        else None
-    )
+    gather_dim = prep.gather_dim
+    contiguous_dim: int | None
+    if gather_dim is not None and per_sym.get(gather_dim, 1) > 1:
+        contiguous_dim = iter_symbols.index(gather_dim)
+    else:
+        contiguous_dim = (
+            len(dim_splits) - 1
+            if prep.is_matmul and config.core_id_k_fast_emission
+            else None
+        )
     core_to_slot_by_name = core_to_slice_mapping(
         iter_symbols,
         dim_splits,

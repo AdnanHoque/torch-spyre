@@ -72,6 +72,8 @@ class SDSCArgs:
     is_index_tensor: bool = False
     related_value_tensor_idx: int = -1
     per_tile_fixed: bool = False
+    allocation_core_id_to_wk_slice: dict[str, dict[str, int]] | None = None
+    core_splits: dict[Symbol, int] = dataclasses.field(default_factory=dict)
 
     def __str__(self) -> str:
         scales = ", ".join(f"{k}={v}" for k, v in self.scales.items())
@@ -269,6 +271,68 @@ def _get_device_dim_order(
     return dim_order, stick_dim
 
 
+def _device_dim_to_sdsc_dim(
+    arg: TensorArg,
+    dim_order: list[Symbol],
+    stride_dim_order: list[Symbol],
+    mb_sym: Symbol | None,
+) -> dict[str, Symbol]:
+    result: dict[str, Symbol] = {}
+    for dim in dim_order:
+        if dim is mb_sym:
+            continue
+        stride_idx = stride_dim_order.index(dim)
+        device_dim = len(arg.device_coordinates) - stride_idx - 2
+        if device_dim >= 0:
+            result[str(device_dim)] = dim
+    return result
+
+
+def _map_core_id_to_wk_slice_dims(
+    core_id_to_device_slice: dict[str, dict[str, int]] | None,
+    device_dim_to_sdsc_dim: dict[str, Symbol],
+    dim_order: list[Symbol],
+) -> dict[str, dict[str, int]] | None:
+    if core_id_to_device_slice is None:
+        return None
+
+    layout_dim_labels = [str(dim) for dim in dim_order]
+    result: dict[str, dict[str, int]] = {}
+    for core, per_device_dim in core_id_to_device_slice.items():
+        per_dim = {dim: 0 for dim in layout_dim_labels}
+        for device_dim, slot in per_device_dim.items():
+            dim = device_dim_to_sdsc_dim.get(str(device_dim))
+            if dim is None:
+                if int(slot) != 0:
+                    raise ValueError(
+                        f"allocation uses unmapped device dimension {device_dim}"
+                    )
+                continue
+            per_dim[str(dim)] = int(slot)
+        result[str(core)] = per_dim
+    return result
+
+
+def _map_device_dim_splits(
+    device_dim_splits: dict[str, int] | None,
+    device_dim_to_sdsc_dim: dict[str, Symbol],
+) -> dict[Symbol, int]:
+    if device_dim_splits is None:
+        return {}
+
+    result: dict[Symbol, int] = {}
+    for device_dim, split in device_dim_splits.items():
+        dim = device_dim_to_sdsc_dim.get(str(device_dim))
+        if dim is None:
+            if int(split) != 1:
+                raise ValueError(
+                    f"allocation split uses unmapped device dimension {device_dim}"
+                )
+            continue
+        result[dim] = int(split)
+    return result
+
+
 def _get_layout_label(
     layouts: dict,
     dim_order: list,
@@ -447,6 +511,9 @@ def _create_sdsc_tensors(
         stride_dim_order = [
             d for d in dim_order if d not in reduced_dims
         ] + reduced_dims
+        device_dim_to_sdsc_dim = _device_dim_to_sdsc_dim(
+            arg, dim_order, stride_dim_order, mb_sym
+        )
 
         for dim in dim_order:
             stride_idx = stride_dim_order.index(dim)
@@ -503,8 +570,18 @@ def _create_sdsc_tensors(
             offsets[mb_sym] = 0
             max_dim_sizes[mb_sym] = -1
 
+        if (
+            arg.allocation_core_id_to_device_slice is not None
+            or arg.allocation_device_dim_splits is not None
+        ) and "lx" not in arg.allocation:
+            raise ValueError("explicit allocation distribution requires LX storage")
+
         effective_stick = op_stick_dim if stick_dim is None else stick_dim
-        layout_labels = MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS
+        layout_labels = (
+            (MATMUL_LAYOUT_LABELS if not use_op_dims else LAYOUT_LABELS)
+            if op_spec.layout_labels_override is None
+            else op_spec.layout_labels_override
+        )
 
         if has_indirect_access:
             label = get_indirect_layout_label(
@@ -564,6 +641,15 @@ def _create_sdsc_tensors(
                 is_index_tensor=is_idx_tensor,
                 related_value_tensor_idx=related_val_idx,
                 per_tile_fixed=arg.per_tile_fixed,
+                allocation_core_id_to_wk_slice=_map_core_id_to_wk_slice_dims(
+                    arg.allocation_core_id_to_device_slice,
+                    device_dim_to_sdsc_dim,
+                    dim_order,
+                ),
+                core_splits=_map_device_dim_splits(
+                    arg.allocation_device_dim_splits,
+                    device_dim_to_sdsc_dim,
+                ),
             )
         )
 
@@ -710,7 +796,11 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     }
     has_indirect_access = bool(index_tensor_indices)
 
-    dim_labels = _get_op_dim_labels(ndim, is_matmul)
+    dim_labels = (
+        _get_op_dim_labels(ndim, is_matmul)
+        if op_spec.dim_labels_override is None
+        else op_spec.dim_labels_override
+    )
     symbol_mapping = {
         sym: Symbol(dim_labels[i]) for i, sym in enumerate(op_spec.iteration_space)
     }
@@ -741,7 +831,12 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
         symbol_mapping[dim]: value[-1] if not has_indirect_access else 1
         for dim, value in op_spec.iteration_space.items()
     }
-    num_cores = math.prod(dim_splits.values())
+    logical_core_count = math.prod(dim_splits.values())
+    num_cores = (
+        logical_core_count
+        if op_spec.num_cores_override is None
+        else op_spec.num_cores_override
+    )
 
     work_slices = {
         symbol_mapping[sym]: wk_slice if not has_indirect_access else 1
@@ -865,19 +960,29 @@ def parse_op_spec(op_spec: OpSpec) -> tuple["SDSCSpec", "dict"]:
     # can add unit axes to either mapping independently.
     mapping_dims = tuple(sdsc_iteration_space)
     mapping_splits = tuple(int(dim_splits[dim]) for dim in mapping_dims)
-    # Generic reductions do not yet define the same physical cohort contract as
-    # matmul partial sums.
-    contiguous_dim = (
-        len(mapping_splits) - 1
-        if is_matmul and _spyre_config.core_id_k_fast_emission
-        else None
-    )
+    gather_dim = symbol_mapping.get(op_spec.gather_dim)
+    contiguous_dim: int | None
+    if (
+        gather_dim is not None
+        and gather_dim in mapping_dims
+        and dim_splits[gather_dim] > 1
+    ):
+        contiguous_dim = mapping_dims.index(gather_dim)
+    else:
+        # Generic reductions do not yet define the same physical cohort contract
+        # as matmul partial sums.
+        contiguous_dim = (
+            len(mapping_splits) - 1
+            if is_matmul and _spyre_config.core_id_k_fast_emission
+            else None
+        )
     # TODO: Choose the mapping before LX planning and pass it through to codegen.
     core_id_to_work_slice = core_to_slice_mapping(
         mapping_dims,
         mapping_splits,
         num_cores,
         contiguous_dim=contiguous_dim,
+        replicas_contiguous=op_spec.replicas_contiguous,
     )
 
     # Collect index tensor indices for indirect access
