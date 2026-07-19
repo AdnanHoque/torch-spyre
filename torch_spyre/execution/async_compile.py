@@ -20,6 +20,7 @@ import torch
 
 from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch_spyre._inductor import config
 from torch_spyre._inductor.logging_utils import get_inductor_logger
 from torch_spyre._inductor.op_spec import (
     LoopSpec,
@@ -78,6 +79,15 @@ class SpyreAsyncCompile(AsyncCompile):
 
         # Invoke backend compiler of SDSC Bundle
         with torch.profiler.record_function(f"dxp_standalone:{kernel_name}"):
-            subprocess.run(["dxp_standalone", "-d", output_dir], check=True)
+            backend_env = os.environ.copy()
+            # Scratchpad planning and DXP must partition the same post-reserved
+            # LX capacity. Forward the value Torch actually planned with instead
+            # of relying on a possibly stale process environment.
+            backend_env["DXP_LX_FRAC_AVAIL"] = str(config.dxp_lx_frac_avail)
+            subprocess.run(
+                ["dxp_standalone", "-d", output_dir],
+                check=True,
+                env=backend_env,
+            )
 
         return SpyreSDSCKernelRunner(kernel_name, output_dir)

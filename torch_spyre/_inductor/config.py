@@ -33,6 +33,9 @@ allow_all_ops_in_lx_planning: bool = False
 # consumer per-core views as an explicit S1 -> SHUFFLE -> S2 sequence in LX.
 lx_planner_relayout: bool = os.environ.get("SPYRE_LX_PLANNER_RELAYOUT", "0") == "1"
 
+# Fraction of Deeptools' post-program/debug LX capacity reserved for the DXP
+# backend. The Torch frontend owns ``1 - dxp_lx_frac_avail`` from address zero.
+# Torch forwards the configured value to DXP so their reservations cannot drift.
 dxp_lx_frac_avail: float = float(os.environ.get("DXP_LX_FRAC_AVAIL", "0.2"))
 
 sencores: int = int(os.getenv("SENCORES", "32"))
